@@ -30,9 +30,14 @@ jobs:
 
       - name: Copy generated docs
         run: |
-          rm -rf carina-main/docs/src/content/docs/reference/providers/aws/
-          mkdir -p carina-main/docs/src/content/docs/reference/providers/aws/
-          cp -r generated-docs/aws/* carina-main/docs/src/content/docs/reference/providers/aws/
+          DEST=carina-main/docs/src/content/docs/reference/providers/aws
+          mkdir -p "$DEST"
+          # Remove only codegen-generated service directories, preserve index.md
+          for dir in generated-docs/aws/*/; do
+            service=$(basename "$dir")
+            rm -rf "$DEST/$service"
+          done
+          cp -r generated-docs/aws/* "$DEST/"
 
       - name: Create PR
         id: create-pr
