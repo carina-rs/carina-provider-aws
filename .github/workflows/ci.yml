@@ -44,3 +44,13 @@ jobs:
         with:
           components: rustfmt
       - run: cargo fmt --check
+
+  wasm-build:
+    name: WASM Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-wasip2
+      - run: cargo build -p carina-provider-aws --target wasm32-wasip2 --release
