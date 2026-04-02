@@ -37,10 +37,7 @@ pub struct AwsProvider {
 impl AwsProvider {
     /// Create a new AWS Provider
     pub async fn new(region: &str) -> Self {
-        let config = aws_config::defaults(aws_config::BehaviorVersion::latest())
-            .region(Region::new(region.to_string()))
-            .load()
-            .await;
+        let config = Self::build_config(region).await;
 
         Self {
             s3_client: S3Client::new(&config),
@@ -50,6 +47,24 @@ impl AwsProvider {
             sts_client: StsClient::new(&config),
             region: region.to_string(),
         }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    async fn build_config(region: &str) -> aws_config::SdkConfig {
+        aws_config::defaults(aws_config::BehaviorVersion::latest())
+            .region(Region::new(region.to_string()))
+            .load()
+            .await
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    async fn build_config(region: &str) -> aws_config::SdkConfig {
+        use carina_plugin_sdk::wasi_http::WasiHttpClient;
+        aws_config::defaults(aws_config::BehaviorVersion::latest())
+            .region(Region::new(region.to_string()))
+            .http_client(WasiHttpClient::new())
+            .load()
+            .await
     }
 
     /// Create with specific clients (for testing)
