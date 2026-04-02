@@ -12,7 +12,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 DOCS_DIR="$PROJECT_ROOT/generated-docs/aws"
-EXAMPLES_DIR="$PROJECT_ROOT/carina-provider-aws/examples"
+EXAMPLES_DIR="$PROJECT_ROOT/examples"
 rm -rf "$DOCS_DIR"
 mkdir -p "$DOCS_DIR"
 
