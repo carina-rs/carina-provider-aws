@@ -1,2 +1,3 @@
 /target
 generated-docs/
+carina-provider-aws/tests/fixtures/smithy/
