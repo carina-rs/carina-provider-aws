@@ -26,8 +26,10 @@ if [ -z "$CARINA_BIN" ]; then
 fi
 
 # ── Provider source injection ────────────────────────────────────────
-AWS_PROVIDER_BIN="$PROJECT_ROOT/target/debug/carina-provider-aws"
-AWSCC_PROVIDER_BIN="${AWSCC_PROVIDER_BIN:-$PROJECT_ROOT/target/debug/carina-provider-awscc}"
+# Use WASM provider binaries (carina CLI only supports WASM providers)
+# Build with: cargo build -p carina-provider-aws --target wasm32-wasip2 --release
+AWS_PROVIDER_BIN="${AWS_PROVIDER_BIN:-$PROJECT_ROOT/target/wasm32-wasip2/release/carina-provider-aws.wasm}"
+AWSCC_PROVIDER_BIN="${AWSCC_PROVIDER_BIN:-$PROJECT_ROOT/target/wasm32-wasip2/release/carina-provider-awscc.wasm}"
 
 # inject_provider_source: Create a temp copy of a .crn file with source/version
 # injected into provider blocks. Prints the temp file path.
