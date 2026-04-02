@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # Download AWS Smithy model JSON files for testing.
-# Models are cached in tests/fixtures/smithy/ and gitignored.
+# Models are cached in carina-provider-aws/tests/fixtures/smithy/ and gitignored.
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-FIXTURE_DIR="$SCRIPT_DIR/../tests/fixtures/smithy"
+FIXTURE_DIR="$SCRIPT_DIR/../carina-provider-aws/tests/fixtures/smithy"
 
 mkdir -p "$FIXTURE_DIR"
 

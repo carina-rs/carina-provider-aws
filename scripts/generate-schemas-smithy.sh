@@ -17,7 +17,7 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 # Build and run codegen
 cd "$PROJECT_ROOT"
 cargo run -p carina-codegen-aws --bin smithy-codegen -- \
-  --model-dir "$SCRIPT_DIR/../tests/fixtures/smithy" \
+  --model-dir "$SCRIPT_DIR/../carina-provider-aws/tests/fixtures/smithy" \
   --output-dir "$SCRIPT_DIR/../src/schemas/generated"
 
 # Format
