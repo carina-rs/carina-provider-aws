@@ -1,0 +1,48 @@
+name: Update docs
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "carina-provider-aws/src/**"
+      - "carina-codegen-aws/**"
+      - "carina-smithy/**"
+      - "scripts/**"
+  workflow_dispatch:
+
+jobs:
+  update-docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Generate markdown docs
+        run: ./scripts/generate-docs.sh
+
+      - uses: actions/checkout@v4
+        with:
+          repository: carina-rs/carina
+          token: ${{ secrets.DOCS_PR_TOKEN }}
+          path: carina-main
+
+      - name: Copy generated docs
+        run: |
+          rm -rf carina-main/docs/src/content/docs/reference/providers/aws/
+          mkdir -p carina-main/docs/src/content/docs/reference/providers/aws/
+          cp -r generated-docs/aws/* carina-main/docs/src/content/docs/reference/providers/aws/
+
+      - name: Create PR
+        uses: peter-evans/create-pull-request@v7
+        with:
+          path: carina-main
+          token: ${{ secrets.DOCS_PR_TOKEN }}
+          branch: docs/update-aws-reference
+          title: "docs: update aws provider reference"
+          body: |
+            Auto-generated from carina-provider-aws.
+
+            Triggered by ${{ github.event.head_commit.url }}
+          commit-message: "docs: update aws provider reference"

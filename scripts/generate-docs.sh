@@ -9,10 +9,11 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-DOCS_DIR="docs/src/content/docs/reference/providers/aws"
-EXAMPLES_DIR="carina-provider-aws/examples"
+DOCS_DIR="$PROJECT_ROOT/generated-docs/aws"
+EXAMPLES_DIR="$PROJECT_ROOT/carina-provider-aws/examples"
+rm -rf "$DOCS_DIR"
 mkdir -p "$DOCS_DIR"
 
 # Download models if needed
@@ -24,7 +25,7 @@ echo ""
 
 cd "$PROJECT_ROOT"
 cargo run -p carina-codegen-aws --bin smithy-codegen -- \
-  --model-dir "$SCRIPT_DIR/../tests/fixtures/smithy" \
+  --model-dir "$SCRIPT_DIR/../carina-provider-aws/tests/fixtures/smithy" \
   --output-dir "$DOCS_DIR" \
   --format markdown
 
