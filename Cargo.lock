@@ -550,7 +550,7 @@ dependencies = [
 [[package]]
 name = "carina-aws-types"
 version = "0.1.0"
-source = "git+https://github.com/carina-rs/carina?branch=feat%2Fwasm-phase2-host#3473ddb7bb2bc737c1f2199367d68732eb00ac25"
+source = "git+https://github.com/carina-rs/carina#12bb46241b46db7e90d758b13b090a5955010b80"
 dependencies = [
  "carina-core",
 ]
@@ -568,7 +568,7 @@ dependencies = [
 [[package]]
 name = "carina-core"
 version = "0.1.0"
-source = "git+https://github.com/carina-rs/carina?branch=feat%2Fwasm-phase2-host#3473ddb7bb2bc737c1f2199367d68732eb00ac25"
+source = "git+https://github.com/carina-rs/carina#12bb46241b46db7e90d758b13b090a5955010b80"
 dependencies = [
  "argon2",
  "futures",
@@ -583,7 +583,7 @@ dependencies = [
 [[package]]
 name = "carina-plugin-sdk"
 version = "0.1.0"
-source = "git+https://github.com/carina-rs/carina?branch=feat%2Fwasm-phase2-host#3473ddb7bb2bc737c1f2199367d68732eb00ac25"
+source = "git+https://github.com/carina-rs/carina#12bb46241b46db7e90d758b13b090a5955010b80"
 dependencies = [
  "aws-smithy-runtime-api",
  "aws-smithy-types",
@@ -623,7 +623,7 @@ dependencies = [
 [[package]]
 name = "carina-provider-protocol"
 version = "0.1.0"
-source = "git+https://github.com/carina-rs/carina?branch=feat%2Fwasm-phase2-host#3473ddb7bb2bc737c1f2199367d68732eb00ac25"
+source = "git+https://github.com/carina-rs/carina#12bb46241b46db7e90d758b13b090a5955010b80"
 dependencies = [
  "serde",
  "serde_json",
