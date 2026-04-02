@@ -14,21 +14,31 @@ doctest = false
 name = "carina-provider-aws"
 path = "src/main.rs"
 
+[features]
+default = ["native"]
+native = []
+
 [dependencies]
-carina-core = { git = "https://github.com/carina-rs/carina" }
-carina-aws-types = { git = "https://github.com/carina-rs/carina" }
-carina-plugin-host = { git = "https://github.com/carina-rs/carina" }
-carina-plugin-sdk = { git = "https://github.com/carina-rs/carina" }
-carina-provider-protocol = { git = "https://github.com/carina-rs/carina" }
-aws-config = "1"
-aws-sdk-s3 = "1"
-aws-sdk-cloudwatchlogs = "1"
-aws-sdk-ec2 = "1"
-aws-sdk-iam = "1"
-aws-sdk-sts = "1"
-tokio = { version = "1", features = ["full"] }
+carina-core = { git = "https://github.com/carina-rs/carina", branch = "feat/wasm-phase2-host" }
+carina-aws-types = { git = "https://github.com/carina-rs/carina", branch = "feat/wasm-phase2-host" }
+carina-plugin-sdk = { git = "https://github.com/carina-rs/carina", branch = "feat/wasm-phase2-host" }
+carina-provider-protocol = { git = "https://github.com/carina-rs/carina", branch = "feat/wasm-phase2-host" }
+aws-config = { version = "1", default-features = false, features = ["behavior-version-latest"] }
+aws-sdk-s3 = { version = "1", default-features = false, features = ["behavior-version-latest"] }
+aws-sdk-cloudwatchlogs = { version = "1", default-features = false, features = ["behavior-version-latest"] }
+aws-sdk-ec2 = { version = "1", default-features = false, features = ["behavior-version-latest"] }
+aws-sdk-iam = { version = "1", default-features = false, features = ["behavior-version-latest"] }
+aws-sdk-sts = { version = "1", default-features = false, features = ["behavior-version-latest"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
 heck = "0.5"
 urlencoding = "2"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+tokio = { version = "1", features = ["full"] }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+tokio = { version = "1", default-features = false, features = ["rt", "macros", "time"] }
+wit-bindgen = { version = "0.51", default-features = false, features = ["macros"] }
+wasi = "0.14"
