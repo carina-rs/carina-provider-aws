@@ -9,7 +9,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 # Download models if needed
 "$SCRIPT_DIR/download-smithy-models.sh"
@@ -18,7 +18,7 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 cd "$PROJECT_ROOT"
 cargo run -p carina-codegen-aws --bin smithy-codegen -- \
   --model-dir "$SCRIPT_DIR/../carina-provider-aws/tests/fixtures/smithy" \
-  --output-dir "$SCRIPT_DIR/../src/schemas/generated"
+  --output-dir "$SCRIPT_DIR/../carina-provider-aws/src/schemas/generated"
 
 # Format
 cargo fmt -p carina-provider-aws
