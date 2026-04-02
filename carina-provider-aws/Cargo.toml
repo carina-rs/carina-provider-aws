@@ -23,7 +23,8 @@ carina-core = { git = "https://github.com/carina-rs/carina", branch = "feat/wasm
 carina-aws-types = { git = "https://github.com/carina-rs/carina", branch = "feat/wasm-phase2-host" }
 carina-plugin-sdk = { git = "https://github.com/carina-rs/carina", branch = "feat/wasm-phase2-host" }
 carina-provider-protocol = { git = "https://github.com/carina-rs/carina", branch = "feat/wasm-phase2-host" }
-aws-config = { version = "1", default-features = false, features = ["behavior-version-latest"] }
+aws-config = { version = "1", default-features = false, features = ["behavior-version-latest", "rt-tokio"] }
+aws-smithy-async = { version = "1", features = ["rt-tokio"] }
 aws-sdk-s3 = { version = "1", default-features = false, features = ["behavior-version-latest"] }
 aws-sdk-cloudwatchlogs = { version = "1", default-features = false, features = ["behavior-version-latest"] }
 aws-sdk-ec2 = { version = "1", default-features = false, features = ["behavior-version-latest"] }

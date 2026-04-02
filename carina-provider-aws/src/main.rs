@@ -29,6 +29,7 @@ impl AwsProcessProvider {
         let runtime = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
         #[cfg(target_arch = "wasm32")]
         let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_time()
             .build()
             .expect("Failed to create tokio runtime");
         Self {
