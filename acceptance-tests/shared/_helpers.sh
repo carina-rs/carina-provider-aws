@@ -14,16 +14,20 @@ if [ -z "$SCRIPT_DIR" ]; then
 fi
 PROJECT_ROOT="$(cd "$HELPERS_DIR/../../.." && pwd)"
 
-CARINA_BIN="$PROJECT_ROOT/target/debug/carina"
-if [ ! -f "$CARINA_BIN" ]; then
-    echo "Building carina..."
-    cargo build --manifest-path "$PROJECT_ROOT/Cargo.toml" --quiet 2>/dev/null \
-        || cargo build --manifest-path "$PROJECT_ROOT/Cargo.toml"
+if [ -z "$CARINA_BIN" ]; then
+    if [ -f "$PROJECT_ROOT/../carina/target/debug/carina" ]; then
+        CARINA_BIN="$PROJECT_ROOT/../carina/target/debug/carina"
+    elif command -v carina &>/dev/null; then
+        CARINA_BIN="$(command -v carina)"
+    else
+        echo "ERROR: carina binary not found. Set CARINA_BIN or install carina."
+        exit 1
+    fi
 fi
 
 # ── Provider source injection ────────────────────────────────────────
 AWS_PROVIDER_BIN="$PROJECT_ROOT/target/debug/carina-provider-aws"
-AWSCC_PROVIDER_BIN="$PROJECT_ROOT/target/debug/carina-provider-awscc"
+AWSCC_PROVIDER_BIN="${AWSCC_PROVIDER_BIN:-$PROJECT_ROOT/target/debug/carina-provider-awscc}"
 
 # inject_provider_source: Create a temp copy of a .crn file with source/version
 # injected into provider blocks. Prints the temp file path.

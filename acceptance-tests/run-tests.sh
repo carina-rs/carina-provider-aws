@@ -185,25 +185,31 @@ case "$COMMAND" in
         ;;
 esac
 
-# Build carina and provider binaries
-echo "Building carina..."
-cargo build --quiet 2>/dev/null || cargo build
-echo "Building provider binaries..."
-cargo build -p carina-provider-aws --bin carina-provider-aws --quiet 2>/dev/null || cargo build -p carina-provider-aws --bin carina-provider-aws
-cargo build -p carina-provider-awscc --bin carina-provider-awscc --quiet 2>/dev/null || cargo build -p carina-provider-awscc --bin carina-provider-awscc
+# Build provider binary
+echo "Building provider binary..."
+cargo build --bin carina-provider-aws --quiet 2>/dev/null || cargo build --bin carina-provider-aws
 echo ""
 
-CARINA_BIN="$PROJECT_ROOT/target/debug/carina"
+# CARINA_BIN can be set externally (e.g., when running from the monorepo).
+if [ -z "$CARINA_BIN" ]; then
+    if [ -f "$PROJECT_ROOT/../carina/target/debug/carina" ]; then
+        CARINA_BIN="$PROJECT_ROOT/../carina/target/debug/carina"
+    elif command -v carina &>/dev/null; then
+        CARINA_BIN="$(command -v carina)"
+    else
+        echo "ERROR: carina binary not found. Set CARINA_BIN or install carina."
+        exit 1
+    fi
+fi
+
 if [ ! -f "$CARINA_BIN" ]; then
     echo "ERROR: carina binary not found at $CARINA_BIN"
     exit 1
 fi
 
 # ── Provider source injection ────────────────────────────────────────
-# After Phase 4, provider blocks require source and version attributes.
-# Inject them dynamically so .crn files don't need to hard-code binary paths.
 AWS_PROVIDER_BIN="$PROJECT_ROOT/target/debug/carina-provider-aws"
-AWSCC_PROVIDER_BIN="$PROJECT_ROOT/target/debug/carina-provider-awscc"
+AWSCC_PROVIDER_BIN="${AWSCC_PROVIDER_BIN:-$PROJECT_ROOT/target/debug/carina-provider-awscc}"
 
 # inject_provider_source: Create a temp copy of a .crn file with source/version
 # injected into provider blocks. Prints the temp file path.
