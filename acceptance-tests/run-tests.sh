@@ -187,7 +187,7 @@ esac
 
 # Build provider binary
 echo "Building provider binary..."
-cargo build --bin carina-provider-aws --quiet 2>/dev/null || cargo build --bin carina-provider-aws
+cargo build -p carina-provider-aws --target wasm32-wasip2 --release --quiet 2>/dev/null || cargo build -p carina-provider-aws --target wasm32-wasip2 --release
 echo ""
 
 # CARINA_BIN can be set externally (e.g., when running from the monorepo).
@@ -208,8 +208,8 @@ if [ ! -f "$CARINA_BIN" ]; then
 fi
 
 # ── Provider source injection ────────────────────────────────────────
-AWS_PROVIDER_BIN="$PROJECT_ROOT/target/debug/carina-provider-aws"
-AWSCC_PROVIDER_BIN="${AWSCC_PROVIDER_BIN:-$PROJECT_ROOT/target/debug/carina-provider-awscc}"
+AWS_PROVIDER_BIN="${AWS_PROVIDER_BIN:-$PROJECT_ROOT/target/wasm32-wasip2/release/carina-provider-aws.wasm}"
+AWSCC_PROVIDER_BIN="${AWSCC_PROVIDER_BIN:-$PROJECT_ROOT/target/wasm32-wasip2/release/carina-provider-awscc.wasm}"
 
 # inject_provider_source: Create a temp copy of a .crn file with source/version
 # injected into provider blocks. Prints the temp file path.
@@ -304,13 +304,18 @@ if [ "$COMMAND" = "cleanup" ]; then
             DESTROYED=0
             SKIPPED=0
 
+            TEST_INDEX=0
             for TEST_FILE in "${TESTS[@]}"; do
                 REL_PATH="${TEST_FILE#$SCRIPT_DIR/}"
                 INJECTED_FILE=$(inject_provider_source "$TEST_FILE")
-                echo "RUNNING destroy $REL_PATH"
-                DESTROY_OUTPUT=$(cd "$STATE_DIR" && aws-vault exec "$ACCOUNT" -- "$CARINA_BIN" destroy --auto-approve "$INJECTED_FILE" 2>&1)
-                DESTROY_RC=$?
+                TEST_STATE_DIR="$STATE_DIR/test_${TEST_INDEX}"
+                mkdir -p "$TEST_STATE_DIR"
+                cp "$INJECTED_FILE" "$TEST_STATE_DIR/main.crn"
                 rm -f "$INJECTED_FILE"
+                TEST_INDEX=$((TEST_INDEX + 1))
+                echo "RUNNING destroy $REL_PATH"
+                DESTROY_OUTPUT=$(cd "$TEST_STATE_DIR" && aws-vault exec "$ACCOUNT" -- "$CARINA_BIN" destroy --auto-approve "$TEST_STATE_DIR" 2>&1)
+                DESTROY_RC=$?
                 if [ $DESTROY_RC -eq 0 ]; then
                     if echo "$DESTROY_OUTPUT" | grep -q "No resources to destroy"; then
                         SKIPPED=$((SKIPPED + 1))
@@ -430,17 +435,15 @@ if [ "$COMMAND" = "full" ]; then
             set +e
             PASSED=0
             FAILED=0
-            CURRENT_TEST_FILE=""
             CURRENT_STATE_DIR=""
             INTERRUPTED=0
 
             # Worker trap: attempt destroy for the current test on interruption
             worker_cleanup() {
                 INTERRUPTED=1
-                if [ -n "$CURRENT_TEST_FILE" ] && [ -n "$CURRENT_STATE_DIR" ]; then
-                    REL_PATH="${CURRENT_TEST_FILE#$SCRIPT_DIR/}"
-                    echo "INTERRUPTED - destroying resources for $REL_PATH"
-                    cd "$CURRENT_STATE_DIR" && aws-vault exec "$ACCOUNT" -- "$CARINA_BIN" destroy --auto-approve "$CURRENT_TEST_FILE" 2>&1 || true
+                if [ -n "$CURRENT_STATE_DIR" ]; then
+                    echo "INTERRUPTED - destroying resources for current test"
+                    cd "$CURRENT_STATE_DIR" && aws-vault exec "$ACCOUNT" -- "$CARINA_BIN" destroy --auto-approve "$CURRENT_STATE_DIR" 2>&1 || true
                 fi
             }
             trap worker_cleanup INT TERM
@@ -453,20 +456,20 @@ if [ "$COMMAND" = "full" ]; then
 
                 REL_PATH="${TEST_FILE#$SCRIPT_DIR/}"
                 INJECTED_FILE=$(inject_provider_source "$TEST_FILE")
-                CURRENT_TEST_FILE="$INJECTED_FILE"
 
                 # Use a separate state directory per test to prevent
                 # state file cross-contamination between tests (issue #537)
                 CURRENT_STATE_DIR="$SLOT_DIR/test_${TEST_INDEX}"
                 mkdir -p "$CURRENT_STATE_DIR"
+                cp "$INJECTED_FILE" "$CURRENT_STATE_DIR/main.crn"
+                rm -f "$INJECTED_FILE"
                 TEST_INDEX=$((TEST_INDEX + 1))
 
                 # Apply (run from state dir so each test has its own state file)
                 echo "RUNNING apply $REL_PATH"
-                APPLY_OUTPUT=$(cd "$CURRENT_STATE_DIR" && aws-vault exec "$ACCOUNT" -- "$CARINA_BIN" apply --auto-approve "$INJECTED_FILE" 2>&1)
+                APPLY_OUTPUT=$(cd "$CURRENT_STATE_DIR" && aws-vault exec "$ACCOUNT" -- "$CARINA_BIN" apply --auto-approve "$CURRENT_STATE_DIR" 2>&1)
                 APPLY_RC=$?
                 if [ $INTERRUPTED -eq 1 ]; then
-                    rm -f "$INJECTED_FILE"
                     break
                 fi
                 if [ $APPLY_RC -ne 0 ] || echo "$APPLY_OUTPUT" | grep -q "failed"; then
@@ -474,19 +477,16 @@ if [ "$COMMAND" = "full" ]; then
                     echo "  ERROR: $APPLY_OUTPUT"
                     FAILED=$((FAILED + 1))
                     # Try to destroy whatever was partially created
-                    cd "$CURRENT_STATE_DIR" && aws-vault exec "$ACCOUNT" -- "$CARINA_BIN" destroy --auto-approve "$INJECTED_FILE" 2>&1 || true
-                    rm -f "$INJECTED_FILE"
-                    CURRENT_TEST_FILE=""
+                    cd "$CURRENT_STATE_DIR" && aws-vault exec "$ACCOUNT" -- "$CARINA_BIN" destroy --auto-approve "$CURRENT_STATE_DIR" 2>&1 || true
                     CURRENT_STATE_DIR=""
                     continue
                 fi
 
                 # Post-apply plan verification (idempotency check)
                 echo "RUNNING plan-verify $REL_PATH"
-                PLAN_OUTPUT=$(cd "$CURRENT_STATE_DIR" && aws-vault exec "$ACCOUNT" -- "$CARINA_BIN" plan --detailed-exitcode "$INJECTED_FILE" 2>&1)
+                PLAN_OUTPUT=$(cd "$CURRENT_STATE_DIR" && aws-vault exec "$ACCOUNT" -- "$CARINA_BIN" plan --detailed-exitcode "$CURRENT_STATE_DIR" 2>&1)
                 PLAN_RC=$?
                 if [ $INTERRUPTED -eq 1 ]; then
-                    rm -f "$INJECTED_FILE"
                     break
                 fi
                 if [ $PLAN_RC -eq 2 ]; then
@@ -495,39 +495,32 @@ if [ "$COMMAND" = "full" ]; then
                     echo "  $PLAN_OUTPUT"
                     FAILED=$((FAILED + 1))
                     # Still destroy to clean up
-                    cd "$CURRENT_STATE_DIR" && aws-vault exec "$ACCOUNT" -- "$CARINA_BIN" destroy --auto-approve "$INJECTED_FILE" 2>&1 || true
-                    rm -f "$INJECTED_FILE"
-                    CURRENT_TEST_FILE=""
+                    cd "$CURRENT_STATE_DIR" && aws-vault exec "$ACCOUNT" -- "$CARINA_BIN" destroy --auto-approve "$CURRENT_STATE_DIR" 2>&1 || true
                     CURRENT_STATE_DIR=""
                     continue
                 elif [ $PLAN_RC -ne 0 ]; then
                     echo "FAIL (plan-verify) $REL_PATH"
                     echo "  ERROR: $PLAN_OUTPUT"
                     FAILED=$((FAILED + 1))
-                    cd "$CURRENT_STATE_DIR" && aws-vault exec "$ACCOUNT" -- "$CARINA_BIN" destroy --auto-approve "$INJECTED_FILE" 2>&1 || true
-                    rm -f "$INJECTED_FILE"
-                    CURRENT_TEST_FILE=""
+                    cd "$CURRENT_STATE_DIR" && aws-vault exec "$ACCOUNT" -- "$CARINA_BIN" destroy --auto-approve "$CURRENT_STATE_DIR" 2>&1 || true
                     CURRENT_STATE_DIR=""
                     continue
                 fi
 
                 # Destroy
                 echo "RUNNING destroy $REL_PATH"
-                DESTROY_OUTPUT=$(cd "$CURRENT_STATE_DIR" && aws-vault exec "$ACCOUNT" -- "$CARINA_BIN" destroy --auto-approve "$INJECTED_FILE" 2>&1)
+                DESTROY_OUTPUT=$(cd "$CURRENT_STATE_DIR" && aws-vault exec "$ACCOUNT" -- "$CARINA_BIN" destroy --auto-approve "$CURRENT_STATE_DIR" 2>&1)
                 DESTROY_RC=$?
-                rm -f "$INJECTED_FILE"
                 if [ $DESTROY_RC -ne 0 ] || echo "$DESTROY_OUTPUT" | grep -q "failed"; then
                     echo "FAIL (destroy) $REL_PATH"
                     echo "  ERROR: $DESTROY_OUTPUT"
                     FAILED=$((FAILED + 1))
-                    CURRENT_TEST_FILE=""
                     CURRENT_STATE_DIR=""
                     continue
                 fi
 
                 echo "OK   $REL_PATH"
                 PASSED=$((PASSED + 1))
-                CURRENT_TEST_FILE=""
                 CURRENT_STATE_DIR=""
             done < "$LIST_FILE"
 
@@ -618,31 +611,41 @@ for TEST_FILE in "${TESTS[@]}"; do
     fi
 
     # Run from an isolated state directory for stateful commands
-    RUN_PREFIX=""
     if [ "$COMMAND" != "validate" ]; then
         STATE_DIR="$WORK_DIR/test_${TEST_INDEX}"
         mkdir -p "$STATE_DIR"
-        RUN_PREFIX="cd $STATE_DIR &&"
+        cp "$INJECTED_FILE" "$STATE_DIR/main.crn"
+        rm -f "$INJECTED_FILE"
         TEST_INDEX=$((TEST_INDEX + 1))
+        TARGET_PATH="$STATE_DIR"
+    else
+        # For validate, create a temp directory with the injected file
+        VALIDATE_DIR=$(mktemp -d)
+        cp "$INJECTED_FILE" "$VALIDATE_DIR/main.crn"
+        rm -f "$INJECTED_FILE"
+        TARGET_PATH="$VALIDATE_DIR"
     fi
 
-    if OUTPUT=$(eval "$RUN_PREFIX \"$CARINA_BIN\" \"$COMMAND\" $AUTO_APPROVE \"$INJECTED_FILE\"" 2>&1); then
+    RUN_PREFIX=""
+    if [ "$COMMAND" != "validate" ]; then
+        RUN_PREFIX="cd $STATE_DIR &&"
+    fi
+
+    if OUTPUT=$(eval "$RUN_PREFIX \"$CARINA_BIN\" \"$COMMAND\" $AUTO_APPROVE \"$TARGET_PATH\"" 2>&1); then
         if [ "$COMMAND" = "apply" ]; then
             # Post-apply plan verification (idempotency check)
             # Use || to capture non-zero exit codes without triggering set -e
             PLAN_RC=0
-            PLAN_OUTPUT=$(eval "$RUN_PREFIX \"$CARINA_BIN\" plan --detailed-exitcode \"$INJECTED_FILE\"" 2>&1) || PLAN_RC=$?
+            PLAN_OUTPUT=$(eval "$RUN_PREFIX \"$CARINA_BIN\" plan --detailed-exitcode \"$TARGET_PATH\"" 2>&1) || PLAN_RC=$?
             if [ $PLAN_RC -eq 2 ]; then
                 echo "FAIL (plan-verify)"
                 ERRORS+=("$REL_PATH: Post-apply plan detected changes (not idempotent): $PLAN_OUTPUT")
                 FAILED=$((FAILED + 1))
-                rm -f "$INJECTED_FILE"
                 continue
             elif [ $PLAN_RC -ne 0 ]; then
                 echo "FAIL (plan-verify)"
                 ERRORS+=("$REL_PATH: $PLAN_OUTPUT")
                 FAILED=$((FAILED + 1))
-                rm -f "$INJECTED_FILE"
                 continue
             fi
         fi
@@ -653,7 +656,9 @@ for TEST_FILE in "${TESTS[@]}"; do
         ERRORS+=("$REL_PATH: $OUTPUT")
         FAILED=$((FAILED + 1))
     fi
-    rm -f "$INJECTED_FILE"
+    if [ "$COMMAND" = "validate" ]; then
+        rm -rf "$VALIDATE_DIR"
+    fi
 done
 
 echo ""
