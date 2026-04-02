@@ -12,7 +12,7 @@ HELPERS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [ -z "$SCRIPT_DIR" ]; then
     SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[1]}")/.." && pwd)"
 fi
-PROJECT_ROOT="$(cd "$HELPERS_DIR/../../.." && pwd)"
+PROJECT_ROOT="$(cd "$HELPERS_DIR/../.." && pwd)"
 
 if [ -z "$CARINA_BIN" ]; then
     if [ -f "$PROJECT_ROOT/../carina/target/debug/carina" ]; then
