@@ -15,6 +15,7 @@
 #   destroy    - Destroy resources created by .crn files (single account)
 #   full       - Run apply+plan-verify+destroy per test, accounts in parallel
 #   cleanup    - Run destroy across accounts in parallel (recover from stuck state)
+#   deep-cleanup - Scan and remove orphaned AWS resources across accounts
 #
 # For validate, no AWS credentials are needed.
 # For plan/apply/destroy, wrap with: aws-vault exec <profile> -- ./run-tests.sh ...
@@ -182,14 +183,198 @@ fi
 
 # Validate command
 case "$COMMAND" in
-    validate|plan|apply|destroy|full|cleanup)
+    validate|plan|apply|destroy|full|cleanup|deep-cleanup)
         ;;
     *)
         echo "ERROR: Unknown command '$COMMAND'"
-        echo "Usage: $0 [--accounts START-END] [validate|plan|apply|destroy|full|cleanup] [filter...]"
+        echo "Usage: $0 [--accounts START-END] [validate|plan|apply|destroy|full|cleanup|deep-cleanup] [filter...]"
         exit 1
         ;;
 esac
+
+# ── deep_cleanup_account: scan AWS for orphaned resources ────────────
+# Args: account_profile (e.g., "carina-test-000")
+deep_cleanup_account() {
+    local account="$1"
+    local found=0
+
+    # 1. Delete non-default VPCs and all dependencies
+    local vpcs
+    vpcs=$(aws-vault exec "$account" -- aws ec2 describe-vpcs \
+        --filters "Name=isDefault,Values=false" \
+        --query 'Vpcs[*].VpcId' --output text 2>/dev/null)
+
+    for vpc_id in $vpcs; do
+        [ -z "$vpc_id" ] && continue
+        found=$((found + 1))
+        echo "  Cleaning VPC $vpc_id..."
+
+        # Delete NAT Gateways (must be first, takes time)
+        local nat_gws
+        nat_gws=$(aws-vault exec "$account" -- aws ec2 describe-nat-gateways \
+            --filter "Name=vpc-id,Values=$vpc_id" "Name=state,Values=available,pending" \
+            --query 'NatGateways[*].NatGatewayId' --output text 2>/dev/null)
+        for nat_id in $nat_gws; do
+            [ -z "$nat_id" ] && continue
+            aws-vault exec "$account" -- aws ec2 delete-nat-gateway --nat-gateway-id "$nat_id" 2>/dev/null || true
+        done
+        # Wait for NAT GWs to delete if any were found
+        if [ -n "$nat_gws" ] && [ "$nat_gws" != "None" ]; then
+            sleep 30
+        fi
+
+        # Delete VPC endpoints
+        local endpoints
+        endpoints=$(aws-vault exec "$account" -- aws ec2 describe-vpc-endpoints \
+            --filters "Name=vpc-id,Values=$vpc_id" \
+            --query 'VpcEndpoints[*].VpcEndpointId' --output text 2>/dev/null)
+        for ep_id in $endpoints; do
+            [ -z "$ep_id" ] && continue
+            aws-vault exec "$account" -- aws ec2 delete-vpc-endpoints --vpc-endpoint-ids "$ep_id" 2>/dev/null || true
+        done
+
+        # Detach and delete internet gateways
+        local igws
+        igws=$(aws-vault exec "$account" -- aws ec2 describe-internet-gateways \
+            --filters "Name=attachment.vpc-id,Values=$vpc_id" \
+            --query 'InternetGateways[*].InternetGatewayId' --output text 2>/dev/null)
+        for igw_id in $igws; do
+            [ -z "$igw_id" ] && continue
+            aws-vault exec "$account" -- aws ec2 detach-internet-gateway --internet-gateway-id "$igw_id" --vpc-id "$vpc_id" 2>/dev/null || true
+            aws-vault exec "$account" -- aws ec2 delete-internet-gateway --internet-gateway-id "$igw_id" 2>/dev/null || true
+        done
+
+        # Detach and delete VPN gateways
+        local vpn_gws
+        vpn_gws=$(aws-vault exec "$account" -- aws ec2 describe-vpn-gateways \
+            --filters "Name=attachment.vpc-id,Values=$vpc_id" \
+            --query 'VpnGateways[*].VpnGatewayId' --output text 2>/dev/null)
+        for vpn_id in $vpn_gws; do
+            [ -z "$vpn_id" ] && continue
+            aws-vault exec "$account" -- aws ec2 detach-vpn-gateway --vpn-gateway-id "$vpn_id" --vpc-id "$vpc_id" 2>/dev/null || true
+            aws-vault exec "$account" -- aws ec2 delete-vpn-gateway --vpn-gateway-id "$vpn_id" 2>/dev/null || true
+        done
+
+        # Delete subnets
+        local subnets
+        subnets=$(aws-vault exec "$account" -- aws ec2 describe-subnets \
+            --filters "Name=vpc-id,Values=$vpc_id" \
+            --query 'Subnets[*].SubnetId' --output text 2>/dev/null)
+        for subnet_id in $subnets; do
+            [ -z "$subnet_id" ] && continue
+            aws-vault exec "$account" -- aws ec2 delete-subnet --subnet-id "$subnet_id" 2>/dev/null || true
+        done
+
+        # Delete non-main route tables
+        local rts
+        rts=$(aws-vault exec "$account" -- aws ec2 describe-route-tables \
+            --filters "Name=vpc-id,Values=$vpc_id" \
+            --query 'RouteTables[?Associations[0].Main!=`true`].RouteTableId' --output text 2>/dev/null)
+        for rt_id in $rts; do
+            [ -z "$rt_id" ] && continue
+            aws-vault exec "$account" -- aws ec2 delete-route-table --route-table-id "$rt_id" 2>/dev/null || true
+        done
+
+        # Delete non-default security groups
+        local sgs
+        sgs=$(aws-vault exec "$account" -- aws ec2 describe-security-groups \
+            --filters "Name=vpc-id,Values=$vpc_id" \
+            --query 'SecurityGroups[?GroupName!=`default`].GroupId' --output text 2>/dev/null)
+        for sg_id in $sgs; do
+            [ -z "$sg_id" ] && continue
+            aws-vault exec "$account" -- aws ec2 delete-security-group --group-id "$sg_id" 2>/dev/null || true
+        done
+
+        # Delete VPC peering connections
+        local peerings
+        peerings=$(aws-vault exec "$account" -- aws ec2 describe-vpc-peering-connections \
+            --filters "Name=requester-vpc-info.vpc-id,Values=$vpc_id" \
+            --query 'VpcPeeringConnections[*].VpcPeeringConnectionId' --output text 2>/dev/null)
+        for peer_id in $peerings; do
+            [ -z "$peer_id" ] && continue
+            aws-vault exec "$account" -- aws ec2 delete-vpc-peering-connection --vpc-peering-connection-id "$peer_id" 2>/dev/null || true
+        done
+
+        # Finally delete the VPC
+        aws-vault exec "$account" -- aws ec2 delete-vpc --vpc-id "$vpc_id" 2>/dev/null || true
+    done
+
+    # 2. Delete orphaned S3 buckets matching carina-acc-test*
+    local buckets
+    buckets=$(aws-vault exec "$account" -- aws s3api list-buckets \
+        --query 'Buckets[?starts_with(Name, `carina-acc-test`)].Name' --output text 2>/dev/null)
+    for bucket in $buckets; do
+        [ -z "$bucket" ] && continue
+        found=$((found + 1))
+        echo "  Cleaning S3 bucket $bucket..."
+        aws-vault exec "$account" -- aws s3 rb "s3://$bucket" --force 2>/dev/null || true
+    done
+
+    # 3. Delete orphaned IAM roles
+    local roles
+    roles=$(aws-vault exec "$account" -- aws iam list-roles \
+        --query 'Roles[?contains(RoleName, `acceptance-test`) || contains(RoleName, `carina-acc`)].RoleName' --output text 2>/dev/null)
+    for role in $roles; do
+        [ -z "$role" ] && continue
+        found=$((found + 1))
+        echo "  Cleaning IAM role $role..."
+        # Detach all policies first
+        local policies
+        policies=$(aws-vault exec "$account" -- aws iam list-attached-role-policies --role-name "$role" \
+            --query 'AttachedPolicies[*].PolicyArn' --output text 2>/dev/null)
+        for policy_arn in $policies; do
+            [ -z "$policy_arn" ] && continue
+            aws-vault exec "$account" -- aws iam detach-role-policy --role-name "$role" --policy-arn "$policy_arn" 2>/dev/null || true
+        done
+        aws-vault exec "$account" -- aws iam delete-role --role-name "$role" 2>/dev/null || true
+    done
+
+    # 4. Delete orphaned log groups
+    local log_groups
+    log_groups=$(aws-vault exec "$account" -- aws logs describe-log-groups \
+        --log-group-name-prefix "/acceptance-test/" \
+        --query 'logGroups[*].logGroupName' --output text 2>/dev/null)
+    for lg in $log_groups; do
+        [ -z "$lg" ] && continue
+        found=$((found + 1))
+        echo "  Cleaning log group $lg..."
+        aws-vault exec "$account" -- aws logs delete-log-group --log-group-name "$lg" 2>/dev/null || true
+    done
+
+    # 5. Delete transit gateways
+    local tgws
+    tgws=$(aws-vault exec "$account" -- aws ec2 describe-transit-gateways \
+        --filters "Name=state,Values=available,pending" \
+        --query 'TransitGateways[*].TransitGatewayId' --output text 2>/dev/null)
+    for tgw_id in $tgws; do
+        [ -z "$tgw_id" ] && continue
+        found=$((found + 1))
+        echo "  Cleaning transit gateway $tgw_id..."
+        # Delete attachments first
+        local attachments
+        attachments=$(aws-vault exec "$account" -- aws ec2 describe-transit-gateway-attachments \
+            --filters "Name=transit-gateway-id,Values=$tgw_id" "Name=state,Values=available" \
+            --query 'TransitGatewayAttachments[*].TransitGatewayAttachmentId' --output text 2>/dev/null)
+        for att_id in $attachments; do
+            [ -z "$att_id" ] && continue
+            aws-vault exec "$account" -- aws ec2 delete-transit-gateway-vpc-attachment --transit-gateway-attachment-id "$att_id" 2>/dev/null || true
+        done
+        aws-vault exec "$account" -- aws ec2 delete-transit-gateway --transit-gateway-id "$tgw_id" 2>/dev/null || true
+    done
+
+    # 6. Release Elastic IPs not associated with anything
+    local eips
+    eips=$(aws-vault exec "$account" -- aws ec2 describe-addresses \
+        --query 'Addresses[?AssociationId==null].AllocationId' --output text 2>/dev/null)
+    for eip_id in $eips; do
+        [ -z "$eip_id" ] && continue
+        found=$((found + 1))
+        echo "  Releasing Elastic IP $eip_id..."
+        aws-vault exec "$account" -- aws ec2 release-address --allocation-id "$eip_id" 2>/dev/null || true
+    done
+
+    echo "  $account: $found orphaned resources cleaned"
+}
 
 # Build provider binary
 echo "Building provider binary..."
@@ -276,6 +461,50 @@ if [ ${#TESTS[@]} -eq 0 ]; then
         echo "No test files found"
     fi
     exit 0
+fi
+
+# ── deep-cleanup: scan and remove orphaned AWS resources ─────────────
+if [ "$COMMAND" = "deep-cleanup" ]; then
+    echo "Running deep cleanup to remove orphaned AWS resources across $NUM_ACCOUNTS accounts"
+    echo ""
+
+    # Pre-authenticate accounts
+    echo "Pre-authenticating AWS accounts..."
+    for SLOT in $(seq 0 $((NUM_ACCOUNTS - 1))); do
+        ACCOUNT="${ACCOUNTS[$SLOT]}"
+        echo "  Authenticating $ACCOUNT..."
+        if ! aws-vault exec "$ACCOUNT" -- true 2>&1; then
+            echo "  WARNING: Failed to pre-authenticate $ACCOUNT"
+        fi
+    done
+    echo "Pre-authentication complete."
+    echo ""
+
+    PIDS=()
+    for SLOT in $(seq 0 $((NUM_ACCOUNTS - 1))); do
+        ACCOUNT="${ACCOUNTS[$SLOT]}"
+        (
+            echo "── $ACCOUNT ──"
+            deep_cleanup_account "$ACCOUNT"
+        ) &
+        PIDS+=($!)
+        echo "  [$ACCOUNT] started (PID $!)"
+    done
+
+    echo ""
+    echo "Waiting for all accounts to finish deep cleanup..."
+    echo ""
+
+    OVERALL_EXIT=0
+    for PID in ${PIDS[@]+"${PIDS[@]}"}; do
+        wait "$PID" || OVERALL_EXIT=1
+    done
+
+    echo "════════════════════════════════════════"
+    echo "Deep cleanup complete."
+    echo "════════════════════════════════════════"
+
+    exit $OVERALL_EXIT
 fi
 
 # ── cleanup: destroy across accounts in parallel ─────────────────────
@@ -420,6 +649,15 @@ if [ "$COMMAND" = "full" ]; then
         fi
     done
     echo "Pre-authentication complete."
+    echo ""
+
+    # Deep cleanup: remove orphaned resources before running tests
+    echo "Running deep cleanup to remove orphaned resources..."
+    for SLOT in $(seq 0 $((NUM_ACCOUNTS - 1))); do
+        ACCOUNT="${ACCOUNTS[$SLOT]}"
+        deep_cleanup_account "$ACCOUNT" &
+    done
+    wait
     echo ""
 
     # Distribute tests round-robin across accounts
