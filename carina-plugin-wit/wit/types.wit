@@ -70,6 +70,7 @@ interface types {
         list-type(string),
         /// JSON-encoded attribute-type for the value type
         map-type(string),
+        union-type(string),
         struct-type(struct-def),
     }
 

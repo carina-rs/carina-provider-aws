@@ -403,7 +403,7 @@ fi
 
 # ── Provider source injection ────────────────────────────────────────
 AWS_PROVIDER_BIN="${AWS_PROVIDER_BIN:-$PROJECT_ROOT/target/wasm32-wasip2/release/carina-provider-aws.wasm}"
-AWSCC_PROVIDER_BIN="${AWSCC_PROVIDER_BIN:-$PROJECT_ROOT/target/wasm32-wasip2/release/carina-provider-awscc.wasm}"
+AWSCC_PROVIDER_BIN="${AWSCC_PROVIDER_BIN:-$PROJECT_ROOT/../carina-provider-awscc/target/wasm32-wasip2/release/carina-provider-awscc.wasm}"
 
 # inject_provider_source: Create a temp copy of a .crn file with source/version
 # injected into provider blocks. Prints the temp file path.
