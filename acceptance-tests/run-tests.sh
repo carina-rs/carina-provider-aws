@@ -33,6 +33,12 @@
 #   ./run-tests.sh full --accounts 0-3 iam_role      # use only accounts 000-003
 #   ./run-tests.sh full --accounts 4-6 ec2_vpc       # concurrent run with accounts 004-006
 #   ./run-tests.sh cleanup                           # destroy all matching tests across 10 accounts
+#
+# Performance:
+#   WASM provider loading with debug builds is slow (JIT compilation ~4s per invocation).
+#   Use release builds for significantly faster test runs:
+#     cd ../carina && cargo build --release
+#     export CARINA_BIN="$PWD/../carina/target/release/carina"
 
 set -euo pipefail
 
@@ -192,7 +198,10 @@ echo ""
 
 # CARINA_BIN can be set externally (e.g., when running from the monorepo).
 if [ -z "$CARINA_BIN" ]; then
-    if [ -f "$PROJECT_ROOT/../carina/target/debug/carina" ]; then
+    # Prefer release build (WASM JIT is much faster with release)
+    if [ -f "$PROJECT_ROOT/../carina/target/release/carina" ]; then
+        CARINA_BIN="$PROJECT_ROOT/../carina/target/release/carina"
+    elif [ -f "$PROJECT_ROOT/../carina/target/debug/carina" ]; then
         CARINA_BIN="$PROJECT_ROOT/../carina/target/debug/carina"
     elif command -v carina &>/dev/null; then
         CARINA_BIN="$(command -v carina)"
