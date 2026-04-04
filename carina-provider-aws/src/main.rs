@@ -152,6 +152,7 @@ impl CarinaProvider for AwsProcessProvider {
         let core_lifecycle = carina_core::resource::LifecycleConfig {
             force_delete: lifecycle.force_delete,
             create_before_destroy: lifecycle.create_before_destroy,
+            prevent_destroy: lifecycle.prevent_destroy,
         };
         let result = self.runtime.block_on(self.provider().delete(
             &core_id,
