@@ -413,6 +413,18 @@ fi
 AWS_PROVIDER_BIN="${AWS_PROVIDER_BIN:-$PROJECT_ROOT/target/wasm32-wasip2/release/carina-provider-aws.wasm}"
 AWSCC_PROVIDER_BIN="${AWSCC_PROVIDER_BIN:-$PROJECT_ROOT/../carina-provider-awscc/target/wasm32-wasip2/release/carina-provider-awscc.wasm}"
 
+# Validate that provider binaries are WASM components, not native binaries.
+# Native binaries are no longer supported and will cause cryptic linker errors.
+for bin_var in AWS_PROVIDER_BIN AWSCC_PROVIDER_BIN; do
+    bin_path="${!bin_var}"
+    if [ -n "$bin_path" ] && [ -f "$bin_path" ] && [[ "$bin_path" != *.wasm ]]; then
+        echo "ERROR: $bin_var points to a non-WASM binary: $bin_path"
+        echo "       Provider binaries must be .wasm components."
+        echo "       Unset $bin_var to use the default WASM build, or point it to a .wasm file."
+        exit 1
+    fi
+done
+
 # inject_provider_source: Create a temp copy of a .crn file with source/version
 # injected into provider blocks. Prints the temp file path.
 # Args: original_crn_file
