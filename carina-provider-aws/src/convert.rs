@@ -122,6 +122,7 @@ pub fn core_to_proto_lifecycle(l: &CoreLifecycle) -> ProtoLifecycle {
     ProtoLifecycle {
         force_delete: l.force_delete,
         create_before_destroy: l.create_before_destroy,
+        prevent_destroy: l.prevent_destroy,
     }
 }
 
@@ -138,6 +139,7 @@ pub fn proto_to_core_resource(r: &ProtoResource) -> CoreResource {
     resource.lifecycle = CoreLifecycle {
         force_delete: r.lifecycle.force_delete,
         create_before_destroy: r.lifecycle.create_before_destroy,
+        prevent_destroy: r.lifecycle.prevent_destroy,
     };
     resource
 }
