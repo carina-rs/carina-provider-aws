@@ -379,6 +379,14 @@ deep_cleanup_account() {
 # Build provider binary
 echo "Building provider binary..."
 cargo build -p carina-provider-aws --target wasm32-wasip2 --release --quiet 2>/dev/null || cargo build -p carina-provider-aws --target wasm32-wasip2 --release
+
+# Optimize WASM with vela (reduces binary size and load time)
+if command -v vela &>/dev/null; then
+    echo "Optimizing WASM with vela..."
+    vela optimize "$PROJECT_ROOT/target/wasm32-wasip2/release/carina-provider-aws.wasm" -o "$PROJECT_ROOT/target/wasm32-wasip2/release/carina-provider-aws.wasm"
+else
+    echo "Note: vela not found, skipping WASM optimization. Install: cargo install --git https://github.com/mizzy/vela vela-cli"
+fi
 echo ""
 
 # CARINA_BIN can be set externally (e.g., when running from the monorepo).
