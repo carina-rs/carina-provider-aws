@@ -550,7 +550,7 @@ dependencies = [
 [[package]]
 name = "carina-aws-types"
 version = "0.1.0"
-source = "git+https://github.com/carina-rs/carina#e127c606c228b3b4a81fa4634c3c9d4f22c56daf"
+source = "git+https://github.com/carina-rs/carina#c1fc9cf65483fb0534234a4696ae1915439aa5bd"
 dependencies = [
  "carina-core",
 ]
@@ -568,7 +568,7 @@ dependencies = [
 [[package]]
 name = "carina-core"
 version = "0.1.0"
-source = "git+https://github.com/carina-rs/carina#e127c606c228b3b4a81fa4634c3c9d4f22c56daf"
+source = "git+https://github.com/carina-rs/carina#c1fc9cf65483fb0534234a4696ae1915439aa5bd"
 dependencies = [
  "argon2",
  "futures",
@@ -583,7 +583,7 @@ dependencies = [
 [[package]]
 name = "carina-plugin-sdk"
 version = "0.1.0"
-source = "git+https://github.com/carina-rs/carina#e127c606c228b3b4a81fa4634c3c9d4f22c56daf"
+source = "git+https://github.com/carina-rs/carina#c1fc9cf65483fb0534234a4696ae1915439aa5bd"
 dependencies = [
  "aws-smithy-runtime-api",
  "aws-smithy-types",
@@ -623,7 +623,7 @@ dependencies = [
 [[package]]
 name = "carina-provider-protocol"
 version = "0.1.0"
-source = "git+https://github.com/carina-rs/carina#e127c606c228b3b4a81fa4634c3c9d4f22c56daf"
+source = "git+https://github.com/carina-rs/carina#c1fc9cf65483fb0534234a4696ae1915439aa5bd"
 dependencies = [
  "serde",
  "serde_json",
@@ -1845,11 +1845,11 @@ dependencies = [
 
 [[package]]
 name = "wasip2"
-version = "1.0.2+wasi-0.2.9"
+version = "1.0.1+wasi-0.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9517f9239f02c069db75e65f174b3da828fe5f5b945c4dd26bd25d89c03ebcf5"
+checksum = "0562428422c63773dad2c345a1882263bbf4d65cf3f42e90921f787ef5ad58e7"
 dependencies = [
- "wit-bindgen 0.51.0",
+ "wit-bindgen 0.46.0",
 ]
 
 [[package]]
@@ -1991,11 +1991,19 @@ dependencies = [
 
 [[package]]
 name = "wit-bindgen"
+version = "0.46.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f17a85883d4e6d00e8a97c586de764dabcc06133f7f1d55dce5cdc070ad7fe59"
+dependencies = [
+ "bitflags",
+]
+
+[[package]]
+name = "wit-bindgen"
 version = "0.51.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d7249219f66ced02969388cf2bb044a09756a083d0fab1e566056b04d9fbcaa5"
 dependencies = [
- "bitflags",
  "wit-bindgen-rust-macro 0.51.0",
 ]
 
@@ -2267,3 +2275,7 @@ name = "zmij"
 version = "1.0.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b8848ee67ecc8aedbaf3e4122217aff892639231befc6a1b58d29fff4c2cabaa"
+
+[[patch.unused]]
+name = "wasip2"
+version = "1.0.2+wasi-0.2.9"
