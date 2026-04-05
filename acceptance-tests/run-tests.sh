@@ -178,7 +178,7 @@ if [ "$COMMAND" != "validate" ]; then
     if ! acquire_all_account_locks; then
         exit 1
     fi
-    trap 'kill 0 2>/dev/null; release_account_locks' EXIT
+    trap 'trap "" TERM; kill 0 2>/dev/null; release_account_locks' EXIT
 fi
 
 # Validate command
@@ -534,7 +534,7 @@ if [ "$COMMAND" = "cleanup" ]; then
     echo ""
 
     WORK_DIR=$(mktemp -d)
-    trap 'kill 0 2>/dev/null; rm -rf '"$WORK_DIR"'; release_account_locks' EXIT
+    trap 'trap "" TERM; kill 0 2>/dev/null; rm -rf '"$WORK_DIR"'; release_account_locks' EXIT
 
     # Pre-authenticate accounts
     echo "Pre-authenticating AWS accounts..."
@@ -656,7 +656,7 @@ if [ "$COMMAND" = "full" ]; then
     trap cleanup_main INT TERM
 
     # Clean up temp dir and release locks on normal exit
-    trap 'kill 0 2>/dev/null; rm -rf '"$WORK_DIR"'; release_account_locks' EXIT
+    trap 'trap "" TERM; kill 0 2>/dev/null; rm -rf '"$WORK_DIR"'; release_account_locks' EXIT
 
     # Pre-authenticate accounts sequentially to avoid opening
     # multiple SSO browser tabs simultaneously
@@ -858,7 +858,7 @@ echo ""
 # (plan/apply/destroy) to prevent cross-contamination between tests (issue #839)
 if [ "$COMMAND" != "validate" ]; then
     WORK_DIR=$(mktemp -d)
-    trap 'kill 0 2>/dev/null; rm -rf '"$WORK_DIR"'; release_account_locks' EXIT
+    trap 'trap "" TERM; kill 0 2>/dev/null; rm -rf '"$WORK_DIR"'; release_account_locks' EXIT
 fi
 
 PASSED=0
