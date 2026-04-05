@@ -63,6 +63,7 @@ impl CarinaProvider for AwsProcessProvider {
             name: "aws".into(),
             display_name: "AWS provider".into(),
             capabilities: self.capabilities(),
+            version: env!("CARGO_PKG_VERSION").into(),
         }
     }
 
