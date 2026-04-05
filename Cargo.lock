@@ -549,15 +549,15 @@ dependencies = [
 
 [[package]]
 name = "carina-aws-types"
-version = "0.1.0"
-source = "git+https://github.com/carina-rs/carina#4a4fcf86d668f3bc7c7124afc684d0a09f08b676"
+version = "0.2.0"
+source = "git+https://github.com/carina-rs/carina#3ca19bd7044f3d94b11b298ab8e1ca37f657721f"
 dependencies = [
  "carina-core",
 ]
 
 [[package]]
 name = "carina-codegen-aws"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "carina-smithy",
@@ -567,13 +567,14 @@ dependencies = [
 
 [[package]]
 name = "carina-core"
-version = "0.1.0"
-source = "git+https://github.com/carina-rs/carina#4a4fcf86d668f3bc7c7124afc684d0a09f08b676"
+version = "0.2.0"
+source = "git+https://github.com/carina-rs/carina#3ca19bd7044f3d94b11b298ab8e1ca37f657721f"
 dependencies = [
  "argon2",
  "futures",
  "pest",
  "pest_derive",
+ "semver",
  "serde",
  "serde_json",
  "thiserror",
@@ -582,8 +583,8 @@ dependencies = [
 
 [[package]]
 name = "carina-plugin-sdk"
-version = "0.1.0"
-source = "git+https://github.com/carina-rs/carina#4a4fcf86d668f3bc7c7124afc684d0a09f08b676"
+version = "0.2.0"
+source = "git+https://github.com/carina-rs/carina#3ca19bd7044f3d94b11b298ab8e1ca37f657721f"
 dependencies = [
  "aws-smithy-runtime-api",
  "aws-smithy-types",
@@ -597,7 +598,7 @@ dependencies = [
 
 [[package]]
 name = "carina-provider-aws"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "aws-config",
  "aws-sdk-cloudwatchlogs",
@@ -622,8 +623,8 @@ dependencies = [
 
 [[package]]
 name = "carina-provider-protocol"
-version = "0.1.0"
-source = "git+https://github.com/carina-rs/carina#4a4fcf86d668f3bc7c7124afc684d0a09f08b676"
+version = "0.2.0"
+source = "git+https://github.com/carina-rs/carina#3ca19bd7044f3d94b11b298ab8e1ca37f657721f"
 dependencies = [
  "serde",
  "serde_json",
@@ -631,7 +632,7 @@ dependencies = [
 
 [[package]]
 name = "carina-smithy"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "serde",
  "serde_json",
