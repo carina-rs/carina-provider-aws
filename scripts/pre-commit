@@ -1,0 +1,61 @@
+#!/bin/bash
+# Pre-commit hook
+# Install: ./scripts/setup-hooks.sh
+# Skip clippy: SKIP_CLIPPY=1 git commit ...
+
+set -e
+
+# Block direct commits to main/master
+current_branch=$(git symbolic-ref --short HEAD 2>/dev/null)
+if [ "$current_branch" = "main" ] || [ "$current_branch" = "master" ]; then
+    echo "ERROR: Direct commits to '$current_branch' are not allowed."
+    exit 1
+fi
+
+echo "Running pre-commit checks..."
+
+# sccache compatibility: cargo clippy sets CARGO_INCREMENTAL internally,
+# which sccache rejects. Override RUSTC_WRAPPER for clippy.
+clippy_env=()
+if [ -f .cargo/config.toml ] && grep -q 'sccache' .cargo/config.toml 2>/dev/null; then
+    clippy_env=(env RUSTC_WRAPPER="")
+fi
+
+# Run fmt and clippy in parallel
+fmt_log=$(mktemp)
+clippy_log=$(mktemp)
+trap 'rm -f "$fmt_log" "$clippy_log"' EXIT
+
+cargo fmt -- --check >"$fmt_log" 2>&1 &
+fmt_pid=$!
+
+if [ "${SKIP_CLIPPY:-0}" = "1" ]; then
+    echo "Skipping clippy (SKIP_CLIPPY=1)"
+    clippy_pid=""
+else
+    "${clippy_env[@]}" cargo clippy --all-targets --no-deps -- -D warnings >"$clippy_log" 2>&1 &
+    clippy_pid=$!
+fi
+
+fmt_exit=0
+clippy_exit=0
+wait $fmt_pid || fmt_exit=$?
+if [ -n "$clippy_pid" ]; then
+    wait $clippy_pid || clippy_exit=$?
+fi
+
+if [ $fmt_exit -ne 0 ]; then
+    echo "Formatting check FAILED:"
+    cat "$fmt_log"
+fi
+
+if [ $clippy_exit -ne 0 ]; then
+    echo "Clippy check FAILED:"
+    cat "$clippy_log"
+fi
+
+if [ $fmt_exit -ne 0 ] || [ $clippy_exit -ne 0 ]; then
+    exit 1
+fi
+
+echo "All pre-commit checks passed!"
