@@ -216,7 +216,7 @@ run_test() {
     if ! run_step "$work_dir" "step1: apply initial" "apply" "$step1" "--auto-approve"; then
         cleanup "$work_dir" "$step2" "$step1"
         rm -rf "$work_dir"
-        rm -f "$step1" "$step2"
+        rm -rf "$step1" "$step2"
         ACTIVE_WORK_DIR=""
         return 1
     fi
@@ -225,7 +225,7 @@ run_test() {
     if ! run_plan_verify "$work_dir" "step1: plan-verify initial" "$step1"; then
         cleanup "$work_dir" "$step2" "$step1"
         rm -rf "$work_dir"
-        rm -f "$step1" "$step2"
+        rm -rf "$step1" "$step2"
         ACTIVE_WORK_DIR=""
         return 1
     fi
@@ -238,7 +238,7 @@ run_test() {
     if ! run_step "$work_dir" "step2: apply in-place update" "apply" "$step2" "--auto-approve"; then
         cleanup "$work_dir" "$step2" "$step1"
         rm -rf "$work_dir"
-        rm -f "$step1" "$step2"
+        rm -rf "$step1" "$step2"
         ACTIVE_WORK_DIR=""
         return 1
     fi
@@ -251,7 +251,7 @@ run_test() {
     if ! assert_identifiers "assert: identifiers preserved after update" "$ids_after_step1" "$ids_after_step2" "equal"; then
         cleanup "$work_dir" "$step2" "$step1"
         rm -rf "$work_dir"
-        rm -f "$step1" "$step2"
+        rm -rf "$step1" "$step2"
         ACTIVE_WORK_DIR=""
         return 1
     fi
@@ -260,7 +260,7 @@ run_test() {
     if ! run_plan_verify "$work_dir" "step3: plan-verify after update" "$step2"; then
         cleanup "$work_dir" "$step2" "$step1"
         rm -rf "$work_dir"
-        rm -f "$step1" "$step2"
+        rm -rf "$step1" "$step2"
         ACTIVE_WORK_DIR=""
         return 1
     fi
@@ -270,14 +270,14 @@ run_test() {
         echo "  WARNING: All destroy attempts failed. Preserving work dir for debugging:"
         echo "    $work_dir"
         TOTAL_FAILED=$((TOTAL_FAILED + 1))
-        rm -f "$step1" "$step2"
+        rm -rf "$step1" "$step2"
         ACTIVE_WORK_DIR=""
         echo ""
         return 1
     fi
 
     rm -rf "$work_dir"
-    rm -f "$step1" "$step2"
+    rm -rf "$step1" "$step2"
     ACTIVE_WORK_DIR=""
     echo ""
 }
