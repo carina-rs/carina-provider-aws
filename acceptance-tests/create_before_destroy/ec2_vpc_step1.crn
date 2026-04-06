@@ -8,12 +8,12 @@ provider aws {
 }
 
 aws.ec2.vpc {
-  cidr_block           = "10.200.0.0/16"
+  cidr_block           = '10.200.0.0/16'
   enable_dns_support   = true
   enable_dns_hostnames = true
 
   tags = {
-    Name        = "carina-acc-test-cbd-vpc"
-    Environment = "acceptance-test"
+    Name        = 'carina-acc-test-cbd-vpc'
+    Environment = 'acceptance-test'
   }
 }

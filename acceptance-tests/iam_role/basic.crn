@@ -7,22 +7,22 @@ provider aws {
 }
 
 aws.iam.role {
-  role_name = "carina-acceptance-test-role"
+  role_name = 'carina-acceptance-test-role'
   assume_role_policy_document = {
-    version = "2012-10-17"
+    version = '2012-10-17'
     statement {
-      effect = "Allow"
+      effect = 'Allow'
       principal = {
-        service = "ec2.amazonaws.com"
+        service = 'ec2.amazonaws.com'
       }
-      action = "sts:AssumeRole"
+      action = 'sts:AssumeRole'
     }
   }
-  description = "Carina acceptance test role"
-  path = "/"
+  description = 'Carina acceptance test role'
+  path = '/'
   max_session_duration = 7200
 
   tags = {
-    Environment = "acceptance-test"
+    Environment = 'acceptance-test'
   }
 }

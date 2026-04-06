@@ -10,10 +10,10 @@ provider aws {
 }
 
 let vpc = aws.ec2.vpc {
-  cidr_block = "10.104.0.0/16"
+  cidr_block = '10.104.0.0/16'
 
   tags = {
-    Environment = "acceptance-test"
+    Environment = 'acceptance-test'
   }
 }
 

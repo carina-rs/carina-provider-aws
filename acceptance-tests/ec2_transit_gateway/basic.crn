@@ -7,9 +7,9 @@ provider aws {
 }
 
 aws.ec2.transit_gateway {
-  description = "Acceptance test Transit Gateway"
+  description = 'Acceptance test Transit Gateway'
 
   tags = {
-    Environment = "acceptance-test"
+    Environment = 'acceptance-test'
   }
 }

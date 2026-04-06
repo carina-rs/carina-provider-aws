@@ -10,11 +10,11 @@ provider aws {
 }
 
 aws.s3.bucket {
-  bucket = "carina-acc-test-aws-tag-del"
+  bucket = 'carina-acc-test-aws-tag-del'
 
   versioning_status = aws.s3.bucket.VersioningStatus.Enabled
 
   tags = {
-    Environment = "acceptance-test"
+    Environment = 'acceptance-test'
   }
 }
