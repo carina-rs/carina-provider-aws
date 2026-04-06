@@ -7,35 +7,35 @@ provider aws {
 }
 
 let vpc = aws.ec2.vpc {
-  cidr_block = "10.0.0.0/16"
+  cidr_block = '10.0.0.0/16'
 
   tags = {
-    Environment = "acceptance-test"
+    Environment = 'acceptance-test'
   }
 }
 
 let sg = aws.ec2.security_group {
-  group_name  = "carina-acc-test-aws-sg-ipv6"
-  description = "Acceptance test - IPv6 rules"
+  group_name  = 'carina-acc-test-aws-sg-ipv6'
+  description = 'Acceptance test - IPv6 rules'
   vpc_id      = vpc.vpc_id
 
   tags = {
-    Environment = "acceptance-test"
+    Environment = 'acceptance-test'
   }
 }
 
 aws.ec2.security_group_ingress {
   group_id    = sg.group_id
-  description = "Allow HTTPS from IPv6"
-  ip_protocol = "tcp"
+  description = 'Allow HTTPS from IPv6'
+  ip_protocol = 'tcp'
   from_port   = 443
   to_port     = 443
-  cidr_ipv6   = "::/0"
+  cidr_ipv6   = '::/0'
 }
 
 aws.ec2.security_group_egress {
   group_id    = sg.group_id
-  description = "Allow all IPv6 outbound"
+  description = 'Allow all IPv6 outbound'
   ip_protocol = all
-  cidr_ipv6   = "::/0"
+  cidr_ipv6   = '::/0'
 }

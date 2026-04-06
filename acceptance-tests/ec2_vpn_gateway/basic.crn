@@ -10,6 +10,6 @@ aws.ec2.vpn_gateway {
   type = aws.ec2.vpn_gateway.Type.ipsec.1
 
   tags = {
-    Environment = "acceptance-test"
+    Environment = 'acceptance-test'
   }
 }

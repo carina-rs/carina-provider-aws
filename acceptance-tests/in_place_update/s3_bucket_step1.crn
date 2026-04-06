@@ -7,11 +7,11 @@ provider aws {
 }
 
 aws.s3.bucket {
-  bucket = "carina-acc-test-aws-s3-update"
+  bucket = 'carina-acc-test-aws-s3-update'
 
   versioning_status = aws.s3.bucket.VersioningStatus.Enabled
 
   tags = {
-    Environment = "acceptance-test"
+    Environment = 'acceptance-test'
   }
 }

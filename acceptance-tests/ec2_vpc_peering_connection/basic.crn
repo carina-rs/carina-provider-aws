@@ -7,11 +7,11 @@ provider aws {
 }
 
 let vpc1 = aws.ec2.vpc {
-  cidr_block = "10.0.0.0/16"
+  cidr_block = '10.0.0.0/16'
 }
 
 let vpc2 = aws.ec2.vpc {
-  cidr_block = "10.1.0.0/16"
+  cidr_block = '10.1.0.0/16'
 }
 
 aws.ec2.vpc_peering_connection {
@@ -19,6 +19,6 @@ aws.ec2.vpc_peering_connection {
   peer_vpc_id = vpc2.vpc_id
 
   tags = {
-    Environment = "acceptance-test"
+    Environment = 'acceptance-test'
   }
 }

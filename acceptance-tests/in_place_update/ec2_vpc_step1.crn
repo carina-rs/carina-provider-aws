@@ -7,11 +7,11 @@ provider aws {
 }
 
 aws.ec2.vpc {
-  cidr_block           = "10.100.0.0/16"
+  cidr_block           = '10.100.0.0/16'
   enable_dns_support   = true
   enable_dns_hostnames = false
 
   tags = {
-    Environment = "acceptance-test"
+    Environment = 'acceptance-test'
   }
 }

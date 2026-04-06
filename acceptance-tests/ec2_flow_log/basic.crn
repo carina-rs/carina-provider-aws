@@ -8,40 +8,40 @@ provider aws {
 }
 
 let vpc = aws.ec2.vpc {
-  cidr_block = "10.0.0.0/16"
+  cidr_block = '10.0.0.0/16'
 
   tags = {
-    Environment = "acceptance-test"
+    Environment = 'acceptance-test'
   }
 }
 
 let log_group = aws.logs.log_group {
-  log_group_name    = "/acceptance-test/vpc-flow-logs"
+  log_group_name    = '/acceptance-test/vpc-flow-logs'
   retention_in_days = 1
 
   tags = {
-    Environment = "acceptance-test"
+    Environment = 'acceptance-test'
   }
 }
 
 let flow_log_role = aws.iam.role {
-  role_name = "acceptance-test-flow-log-role"
+  role_name = 'acceptance-test-flow-log-role'
 
   assume_role_policy_document = {
-    version = "2012-10-17"
+    version = '2012-10-17'
     statement {
-      effect = "Allow"
+      effect = 'Allow'
 
       principal = {
-        service = "vpc-flow-logs.amazonaws.com"
+        service = 'vpc-flow-logs.amazonaws.com'
       }
 
-      action = "sts:AssumeRole"
+      action = 'sts:AssumeRole'
     }
   }
 
   tags = {
-    Environment = "acceptance-test"
+    Environment = 'acceptance-test'
   }
 }
 
@@ -54,6 +54,6 @@ aws.ec2.flow_log {
   deliver_logs_permission_arn = flow_log_role.arn
 
   tags = {
-    Environment = "acceptance-test"
+    Environment = 'acceptance-test'
   }
 }

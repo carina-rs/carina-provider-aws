@@ -7,11 +7,11 @@ provider aws {
 }
 
 aws.s3.bucket {
-  bucket = "carina-acc-test-aws-s3-object-ownership"
+  bucket = 'carina-acc-test-aws-s3-object-ownership'
 
   object_ownership = aws.s3.bucket.ObjectOwnership.BucketOwnerEnforced
 
   tags = {
-    Environment = "acceptance-test"
+    Environment = 'acceptance-test'
   }
 }

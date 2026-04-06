@@ -8,20 +8,20 @@ provider aws {
 }
 
 let vpc = aws.ec2.vpc {
-  cidr_block = "10.105.0.0/16"
+  cidr_block = '10.105.0.0/16'
 
   tags = {
-    Environment = "acceptance-test"
+    Environment = 'acceptance-test'
   }
 }
 
 aws.ec2.subnet {
   vpc_id            = vpc.vpc_id
-  cidr_block        = "10.105.1.0/24"
+  cidr_block        = '10.105.1.0/24'
   availability_zone = aws.AvailabilityZone.ap_northeast_1a
 
   tags = {
-    Environment = "acceptance-test"
-    ToBeRemoved = "this-tag-will-be-deleted"
+    Environment = 'acceptance-test'
+    ToBeRemoved = 'this-tag-will-be-deleted'
   }
 }

@@ -7,17 +7,17 @@ provider aws {
 }
 
 let vpc = aws.ec2.vpc {
-  cidr_block = "10.0.0.0/16"
+  cidr_block = '10.0.0.0/16'
 }
 
 let subnet = aws.ec2.subnet {
   vpc_id            = vpc.vpc_id
-  cidr_block        = "10.0.1.0/24"
+  cidr_block        = '10.0.1.0/24'
   availability_zone = aws.AvailabilityZone.ap_northeast_1a
 }
 
 let tgw = aws.ec2.transit_gateway {
-  description = "Acceptance test Transit Gateway"
+  description = 'Acceptance test Transit Gateway'
 }
 
 aws.ec2.transit_gateway_attachment {
@@ -26,6 +26,6 @@ aws.ec2.transit_gateway_attachment {
   vpc_id             = vpc.vpc_id
 
   tags = {
-    Environment = "acceptance-test"
+    Environment = 'acceptance-test'
   }
 }
