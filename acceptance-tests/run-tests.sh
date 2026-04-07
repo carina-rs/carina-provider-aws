@@ -576,6 +576,11 @@ if [ "$COMMAND" = "cleanup" ]; then
                 cp "$INJECTED_FILE" "$TEST_STATE_DIR/main.crn"
                 rm -f "$INJECTED_FILE"
                 TEST_INDEX=$((TEST_INDEX + 1))
+                # Skip if no state file exists — nothing to destroy
+                if [ ! -f "$TEST_STATE_DIR/carina.state.json" ]; then
+                    SKIPPED=$((SKIPPED + 1))
+                    continue
+                fi
                 echo "RUNNING destroy $REL_PATH"
                 DESTROY_OUTPUT=$(cd "$TEST_STATE_DIR" && aws-vault exec "$ACCOUNT" -- "$CARINA_BIN" destroy --auto-approve "$TEST_STATE_DIR" 2>&1)
                 DESTROY_RC=$?
