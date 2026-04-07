@@ -12,11 +12,13 @@ use carina_core::resource::{
 };
 use carina_core::schema::{
     AttributeSchema as CoreAttributeSchema, AttributeType as CoreAttributeType,
-    ResourceSchema as CoreResourceSchema, StructField as CoreStructField,
+    OperationConfig as CoreOperationConfig, ResourceSchema as CoreResourceSchema,
+    StructField as CoreStructField,
 };
 use carina_provider_protocol::types::{
     AttributeSchema as ProtoAttributeSchema, AttributeType as ProtoAttributeType,
-    LifecycleConfig as ProtoLifecycle, Resource as ProtoResource, ResourceId as ProtoResourceId,
+    LifecycleConfig as ProtoLifecycle, OperationConfig as ProtoOperationConfig,
+    Resource as ProtoResource, ResourceId as ProtoResourceId,
     ResourceSchema as ProtoResourceSchema, State as ProtoState, StructField as ProtoStructField,
     Value as ProtoValue,
 };
@@ -216,6 +218,12 @@ pub fn proto_to_core_schema(s: &ProtoResourceSchema) -> CoreResourceSchema {
         data_source: s.data_source,
         name_attribute: s.name_attribute.clone(),
         force_replace: s.force_replace,
+        operation_config: s.operation_config.as_ref().map(|c| CoreOperationConfig {
+            delete_timeout_secs: c.delete_timeout_secs,
+            delete_max_retries: c.delete_max_retries,
+            create_timeout_secs: c.create_timeout_secs,
+            create_max_retries: c.create_max_retries,
+        }),
     }
 }
 
@@ -286,5 +294,11 @@ pub fn core_to_proto_schema(s: &CoreResourceSchema) -> ProtoResourceSchema {
         data_source: s.data_source,
         name_attribute: s.name_attribute.clone(),
         force_replace: s.force_replace,
+        operation_config: s.operation_config.as_ref().map(|c| ProtoOperationConfig {
+            delete_timeout_secs: c.delete_timeout_secs,
+            delete_max_retries: c.delete_max_retries,
+            create_timeout_secs: c.create_timeout_secs,
+            create_max_retries: c.create_max_retries,
+        }),
     }
 }
