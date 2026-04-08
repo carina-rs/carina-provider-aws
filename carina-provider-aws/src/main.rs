@@ -97,6 +97,23 @@ impl CarinaProvider for AwsProcessProvider {
         Ok(())
     }
 
+    fn config_completions(&self) -> HashMap<String, Vec<proto::CompletionValue>> {
+        HashMap::from([(
+            "region".to_string(),
+            carina_aws_types::region_completions("aws")
+                .into_iter()
+                .map(|c| proto::CompletionValue {
+                    value: c.value,
+                    description: c.description,
+                })
+                .collect(),
+        )])
+    }
+
+    fn identity_attributes(&self) -> Vec<String> {
+        vec!["region".to_string()]
+    }
+
     fn read(
         &self,
         id: &proto::ResourceId,
