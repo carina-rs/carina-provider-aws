@@ -550,7 +550,6 @@ dependencies = [
 [[package]]
 name = "carina-aws-types"
 version = "0.2.0"
-source = "git+https://github.com/carina-rs/carina#5cee672927edee5c2ea7a7801ffd8957ce07962e"
 dependencies = [
  "carina-core",
 ]
