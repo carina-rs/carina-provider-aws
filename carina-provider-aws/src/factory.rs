@@ -65,12 +65,10 @@ impl ProviderFactory for AwsProviderFactory {
     fn config_completions(
         &self,
     ) -> std::collections::HashMap<String, Vec<carina_core::schema::CompletionValue>> {
-        let mut map = std::collections::HashMap::new();
-        map.insert(
+        std::collections::HashMap::from([(
             "region".to_string(),
             carina_aws_types::region_completions("aws"),
-        );
-        map
+        )])
     }
 
     fn get_enum_alias_reverse(
