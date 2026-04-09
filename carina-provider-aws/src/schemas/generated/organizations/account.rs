@@ -17,7 +17,7 @@ const VALID_STATUS: &[&str] = &["ACTIVE", "PENDING_CLOSURE", "SUSPENDED"];
 /// Returns the schema config for organizations.account (Smithy: com.amazonaws.organizations)
 pub fn organizations_account_config() -> AwsSchemaConfig {
     AwsSchemaConfig {
-        aws_type_name: "UNKNOWN",
+        aws_type_name: "AWS::Organizations::Account",
         resource_type_name: "organizations.account",
         has_tags: true,
         schema: ResourceSchema::new("aws.organizations.account")

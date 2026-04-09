@@ -1,11 +1,11 @@
-//! vpc_gateway_attachment schema definition for AWS
+//! vpc_gateway_attachment schema definition for AWS Cloud Control
 //!
 //! Auto-generated from Smithy model: com.amazonaws.ec2
 //!
 //! DO NOT EDIT MANUALLY - regenerate with smithy-codegen
 
 use super::AwsSchemaConfig;
-use carina_core::schema::{AttributeSchema, ResourceSchema, validators};
+use carina_core::schema::{AttributeSchema, ResourceSchema};
 
 /// Returns the schema config for ec2.vpc_gateway_attachment (Smithy: com.amazonaws.ec2)
 pub fn ec2_vpc_gateway_attachment_config() -> AwsSchemaConfig {
@@ -14,10 +14,11 @@ pub fn ec2_vpc_gateway_attachment_config() -> AwsSchemaConfig {
         resource_type_name: "ec2.vpc_gateway_attachment",
         has_tags: false,
         schema: ResourceSchema::new("aws.ec2.vpc_gateway_attachment")
-            .with_description("Attaches an internet gateway or virtual private gateway to a VPC.")
             .attribute(
                 AttributeSchema::new("internet_gateway_id", super::internet_gateway_id())
-                    .with_description("The ID of the internet gateway. Specify either this or vpn_gateway_id, but not both.")
+                    .required()
+                    .create_only()
+                    .with_description("The ID of the internet gateway.")
                     .with_provider_name("InternetGatewayId"),
             )
             .attribute(
@@ -28,17 +29,17 @@ pub fn ec2_vpc_gateway_attachment_config() -> AwsSchemaConfig {
                     .with_provider_name("VpcId"),
             )
             .attribute(
-                AttributeSchema::new("vpn_gateway_id", super::vpn_gateway_id())
-                    .with_description("The ID of the virtual private gateway. Specify either this or internet_gateway_id, but not both.")
-                    .with_provider_name("VpnGatewayId"),
+                AttributeSchema::new("internet_gateway_id", super::internet_gateway_id())
+                    .create_only()
+                    .with_description("The ID of the internet gateway.")
+                    .with_provider_name("InternetGatewayId"),
             )
-            .with_validator(|attrs| {
-                let mut errors = Vec::new();
-                if let Err(mut e) = validators::validate_exclusive_required(attrs, &["internet_gateway_id", "vpn_gateway_id"]) {
-                    errors.append(&mut e);
-                }
-                if errors.is_empty() { Ok(()) } else { Err(errors) }
-            }),
+            .attribute(
+                AttributeSchema::new("vpn_gateway_id", super::vpn_gateway_id())
+                    .create_only()
+                    .with_description("The ID of the VPN gateway.")
+                    .with_provider_name("VpnGatewayId"),
+            ),
     }
 }
 
@@ -51,6 +52,7 @@ pub fn enum_valid_values() -> (
 }
 
 /// Maps DSL alias values back to canonical AWS values for this module.
+/// e.g., ("ip_protocol", "all") -> Some("-1")
 pub fn enum_alias_reverse(attr_name: &str, value: &str) -> Option<&'static str> {
     let _ = (attr_name, value);
     None

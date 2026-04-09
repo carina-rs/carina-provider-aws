@@ -12,7 +12,7 @@ const VALID_FEATURE_SET: &[&str] = &["ALL", "CONSOLIDATED_BILLING"];
 /// Returns the schema config for organizations.organization (Smithy: com.amazonaws.organizations)
 pub fn organizations_organization_config() -> AwsSchemaConfig {
     AwsSchemaConfig {
-        aws_type_name: "UNKNOWN",
+        aws_type_name: "AWS::Organizations::Organization",
         resource_type_name: "organizations.organization",
         has_tags: false,
         schema: ResourceSchema::new("aws.organizations.organization")
