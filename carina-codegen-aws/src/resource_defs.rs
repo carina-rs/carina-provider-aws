@@ -433,6 +433,74 @@ pub fn sts_resources() -> Vec<ResourceDef> {
     ]
 }
 
+/// Returns Organizations resource definitions.
+pub fn organizations_resources() -> Vec<ResourceDef> {
+    vec![
+        // organizations.organization
+        ResourceDef {
+            name: "organizations.organization",
+            service_namespace: "com.amazonaws.organizations",
+            simple_delete: true,
+            noop_update: true,
+            create_op: "CreateOrganization",
+            read_structure: Some("Organization"),
+            read_ops: vec![],
+            delete_op: "DeleteOrganization",
+            update_ops: vec![],
+            identifier: "Id",
+            has_tags: false,
+            type_overrides: vec![],
+            exclude_fields: vec!["AvailablePolicyTypes"],
+            create_only_overrides: vec![],
+            enum_aliases: vec![],
+            to_dsl_overrides: vec![],
+            required_overrides: vec![],
+            extra_read_only: vec![
+                "Arn",
+                "MasterAccountArn",
+                "MasterAccountId",
+                "MasterAccountEmail",
+            ],
+            read_only_overrides: vec![],
+            extra_writable: vec![],
+        },
+        // organizations.account
+        ResourceDef {
+            name: "organizations.account",
+            service_namespace: "com.amazonaws.organizations",
+            simple_delete: false,
+            noop_update: true,
+            create_op: "CreateAccount",
+            read_structure: Some("Account"),
+            read_ops: vec![],
+            delete_op: "CloseAccount",
+            update_ops: vec![],
+            identifier: "Id",
+            has_tags: true,
+            type_overrides: vec![],
+            exclude_fields: vec!["Paths", "State"],
+            create_only_overrides: vec![
+                "AccountName",
+                "Email",
+                "IamUserAccessToBilling",
+                "RoleName",
+            ],
+            enum_aliases: vec![],
+            to_dsl_overrides: vec![],
+            required_overrides: vec!["AccountName", "Email"],
+            extra_read_only: vec![
+                "Arn",
+                "Name",
+                "Status",
+                "JoinedMethod",
+                "JoinedTimestamp",
+            ],
+            read_only_overrides: vec![],
+            extra_writable: vec![],
+        },
+    ]
+}
+
 /// Returns S3 resource definitions.
 pub fn s3_resources() -> Vec<ResourceDef> {
     vec![

@@ -143,7 +143,7 @@ impl AwsProvider {
         &self,
         resource: Resource,
     ) -> ProviderResult<State> {
-        let name = require_string_attr(&resource, "name")?;
+        let name = require_string_attr(&resource, "account_name")?;
         let email = require_string_attr(&resource, "email")?;
 
         let mut req = self

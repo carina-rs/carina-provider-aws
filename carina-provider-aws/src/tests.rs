@@ -1364,12 +1364,12 @@ fn test_organizations_account_schema_attributes() {
     let config = crate::schemas::generated::organizations::account::organizations_account_config();
     let schema = &config.schema;
     // Verify key attributes exist
-    assert!(schema.attributes.contains_key("name"));
+    assert!(schema.attributes.contains_key("account_name"));
     assert!(schema.attributes.contains_key("email"));
     assert!(schema.attributes.contains_key("id"));
     assert!(schema.attributes.contains_key("arn"));
     assert!(schema.attributes.contains_key("status"));
-    assert!(schema.attributes.contains_key("parent_id"));
+    assert!(schema.attributes.contains_key("name"));
     assert!(schema.attributes.contains_key("tags"));
     // Verify has_tags
     assert!(config.has_tags);
