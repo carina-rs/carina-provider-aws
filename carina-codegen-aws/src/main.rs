@@ -549,16 +549,9 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
         .or_else(|| res.name.strip_prefix("sts."))
         .unwrap_or(res.name);
     let mut schema_imports = vec!["AttributeSchema", "ResourceSchema"];
-    let needs_attribute_type = attrs.iter().any(|a| {
-        matches!(
-            a.type_code.as_str(),
-            "AttributeType::String"
-                | "AttributeType::Bool"
-                | "AttributeType::Int"
-                | "AttributeType::Float"
-                | "AttributeType::Map"
-        ) || a.type_code.starts_with("AttributeType::Custom")
-    });
+    let needs_attribute_type = attrs
+        .iter()
+        .any(|a| a.type_code.contains("AttributeType::"));
     if needs_attribute_type {
         schema_imports.insert(1, "AttributeType");
     }

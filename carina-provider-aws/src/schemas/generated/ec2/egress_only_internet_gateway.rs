@@ -1,4 +1,4 @@
-//! egress_only_internet_gateway schema definition for AWS
+//! egress_only_internet_gateway schema definition for AWS Cloud Control
 //!
 //! Auto-generated from Smithy model: com.amazonaws.ec2
 //!
@@ -11,11 +11,20 @@ use carina_core::schema::{AttributeSchema, ResourceSchema};
 /// Returns the schema config for ec2.egress_only_internet_gateway (Smithy: com.amazonaws.ec2)
 pub fn ec2_egress_only_internet_gateway_config() -> AwsSchemaConfig {
     AwsSchemaConfig {
-        aws_type_name: "AWS::EC2::EgressOnlyInternetGateway",
+        aws_type_name: "UNKNOWN",
         resource_type_name: "ec2.egress_only_internet_gateway",
         has_tags: true,
         schema: ResourceSchema::new("aws.ec2.egress_only_internet_gateway")
             .with_description("Describes an egress-only internet gateway.")
+            .attribute(
+                AttributeSchema::new("vpc_id", super::vpc_id())
+                    .required()
+                    .create_only()
+                    .with_description(
+                        "The ID of the VPC for which to create the egress-only internet gateway.",
+                    )
+                    .with_provider_name("VpcId"),
+            )
             .attribute(
                 AttributeSchema::new(
                     "egress_only_internet_gateway_id",
@@ -26,17 +35,8 @@ pub fn ec2_egress_only_internet_gateway_config() -> AwsSchemaConfig {
             )
             .attribute(
                 AttributeSchema::new("tags", tags_type())
-                    .with_description("Any tags assigned to the egress-only internet gateway.")
+                    .with_description("The tags for the resource.")
                     .with_provider_name("Tags"),
-            )
-            .attribute(
-                AttributeSchema::new("vpc_id", super::vpc_id())
-                    .required()
-                    .create_only()
-                    .with_description(
-                        "The ID of the VPC for which to create the egress-only internet gateway.",
-                    )
-                    .with_provider_name("VpcId"),
             ),
     }
 }
@@ -50,6 +50,7 @@ pub fn enum_valid_values() -> (
 }
 
 /// Maps DSL alias values back to canonical AWS values for this module.
+/// e.g., ("ip_protocol", "all") -> Some("-1")
 pub fn enum_alias_reverse(attr_name: &str, value: &str) -> Option<&'static str> {
     let _ = (attr_name, value);
     None
