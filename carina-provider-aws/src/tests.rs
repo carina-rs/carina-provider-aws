@@ -1190,6 +1190,96 @@ fn test_extract_ec2_egress_only_internet_gateway_attributes_minimal() {
     assert_eq!(identifier, None);
 }
 
+// --- extract_organizations_organization_attributes tests ---
+
+#[test]
+fn test_extract_organizations_organization_attributes() {
+    let org = aws_sdk_organizations::types::Organization::builder()
+        .id("o-abc123")
+        .arn("arn:aws:organizations::123456789012:organization/o-abc123")
+        .feature_set(aws_sdk_organizations::types::OrganizationFeatureSet::All)
+        .master_account_id("123456789012")
+        .master_account_arn("arn:aws:organizations::123456789012:account/o-abc123/123456789012")
+        .master_account_email("admin@example.com")
+        .build();
+    let mut attributes = HashMap::new();
+    let identifier =
+        AwsProvider::extract_organizations_organization_attributes(&org, &mut attributes);
+    assert_eq!(identifier, Some("o-abc123".to_string()));
+    assert_eq!(
+        attributes.get("id"),
+        Some(&Value::String("o-abc123".to_string()))
+    );
+    assert_eq!(
+        attributes.get("arn"),
+        Some(&Value::String(
+            "arn:aws:organizations::123456789012:organization/o-abc123".to_string()
+        ))
+    );
+    assert_eq!(
+        attributes.get("feature_set"),
+        Some(&Value::String("ALL".to_string()))
+    );
+    assert_eq!(
+        attributes.get("master_account_id"),
+        Some(&Value::String("123456789012".to_string()))
+    );
+    assert_eq!(
+        attributes.get("master_account_arn"),
+        Some(&Value::String(
+            "arn:aws:organizations::123456789012:account/o-abc123/123456789012".to_string()
+        ))
+    );
+    assert_eq!(
+        attributes.get("master_account_email"),
+        Some(&Value::String("admin@example.com".to_string()))
+    );
+}
+
+#[test]
+fn test_extract_organizations_organization_attributes_consolidated_billing() {
+    let org = aws_sdk_organizations::types::Organization::builder()
+        .id("o-xyz789")
+        .feature_set(aws_sdk_organizations::types::OrganizationFeatureSet::ConsolidatedBilling)
+        .build();
+    let mut attributes = HashMap::new();
+    let identifier =
+        AwsProvider::extract_organizations_organization_attributes(&org, &mut attributes);
+    assert_eq!(identifier, Some("o-xyz789".to_string()));
+    assert_eq!(
+        attributes.get("feature_set"),
+        Some(&Value::String("CONSOLIDATED_BILLING".to_string()))
+    );
+}
+
+#[test]
+fn test_extract_organizations_organization_attributes_minimal() {
+    let org = aws_sdk_organizations::types::Organization::builder().build();
+    let mut attributes = HashMap::new();
+    let identifier =
+        AwsProvider::extract_organizations_organization_attributes(&org, &mut attributes);
+    assert_eq!(identifier, None);
+    assert!(attributes.is_empty());
+}
+
+#[test]
+fn test_organizations_organization_schema_feature_set_enum() {
+    let config =
+        crate::schemas::generated::organizations::organization::organizations_organization_config();
+    let feature_set = config
+        .schema
+        .attributes
+        .get("feature_set")
+        .expect("feature_set attribute not found");
+    if let AttributeType::StringEnum { values, .. } = &feature_set.attr_type {
+        assert!(values.contains(&"ALL".to_string()));
+        assert!(values.contains(&"CONSOLIDATED_BILLING".to_string()));
+        assert_eq!(values.len(), 2);
+    } else {
+        panic!("feature_set should be StringEnum");
+    }
+}
+
 // --- ip_protocol enum "all" variant tests (issue #1428) ---
 
 #[test]
