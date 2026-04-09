@@ -6,6 +6,7 @@
 
 use super::AwsSchemaConfig;
 use super::tags_type;
+use super::validate_tags_map;
 use carina_core::schema::{AttributeSchema, AttributeType, ResourceSchema};
 
 const VALID_TYPE: &[&str] = &["ipsec.1"];
@@ -52,6 +53,7 @@ pub fn ec2_vpn_gateway_config() -> AwsSchemaConfig {
                 .with_description("The tags for the resource.")
                 .with_provider_name("Tags"),
         )
+        .with_validator(validate_tags_map)
     }
 }
 
