@@ -112,6 +112,7 @@ fn main() -> Result<()> {
     let mut all_resources = resource_defs::ec2_resources();
     all_resources.extend(resource_defs::s3_resources());
     all_resources.extend(resource_defs::sts_resources());
+    all_resources.extend(resource_defs::organizations_resources());
 
     // Filter to requested resource if specified
     let resources: Vec<&ResourceDef> = if let Some(ref name) = args.resource {

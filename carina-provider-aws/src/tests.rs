@@ -1280,6 +1280,101 @@ fn test_organizations_organization_schema_feature_set_enum() {
     }
 }
 
+// --- extract_organizations_account_attributes tests ---
+
+#[test]
+fn test_extract_organizations_account_attributes() {
+    let account = aws_sdk_organizations::types::Account::builder()
+        .id("123456789012")
+        .arn("arn:aws:organizations::111111111111:account/o-abc123/123456789012")
+        .name("production")
+        .email("prod@example.com")
+        .status(aws_sdk_organizations::types::AccountStatus::Active)
+        .joined_method(aws_sdk_organizations::types::AccountJoinedMethod::Created)
+        .joined_timestamp(aws_sdk_organizations::primitives::DateTime::from_secs(
+            1700000000,
+        ))
+        .build();
+    let mut attributes = HashMap::new();
+    let identifier =
+        AwsProvider::extract_organizations_account_attributes(&account, &mut attributes);
+    assert_eq!(identifier, Some("123456789012".to_string()));
+    assert_eq!(
+        attributes.get("id"),
+        Some(&Value::String("123456789012".to_string()))
+    );
+    assert_eq!(
+        attributes.get("arn"),
+        Some(&Value::String(
+            "arn:aws:organizations::111111111111:account/o-abc123/123456789012".to_string()
+        ))
+    );
+    assert_eq!(
+        attributes.get("name"),
+        Some(&Value::String("production".to_string()))
+    );
+    assert_eq!(
+        attributes.get("email"),
+        Some(&Value::String("prod@example.com".to_string()))
+    );
+    assert_eq!(
+        attributes.get("status"),
+        Some(&Value::String("ACTIVE".to_string()))
+    );
+    assert_eq!(
+        attributes.get("joined_method"),
+        Some(&Value::String("CREATED".to_string()))
+    );
+    assert!(attributes.contains_key("joined_timestamp"));
+}
+
+#[test]
+fn test_extract_organizations_account_attributes_minimal() {
+    let account = aws_sdk_organizations::types::Account::builder().build();
+    let mut attributes = HashMap::new();
+    let identifier =
+        AwsProvider::extract_organizations_account_attributes(&account, &mut attributes);
+    assert_eq!(identifier, None);
+    assert!(attributes.is_empty());
+}
+
+#[test]
+fn test_extract_organizations_account_attributes_suspended() {
+    let account = aws_sdk_organizations::types::Account::builder()
+        .id("999999999999")
+        .status(aws_sdk_organizations::types::AccountStatus::Suspended)
+        .joined_method(aws_sdk_organizations::types::AccountJoinedMethod::Invited)
+        .build();
+    let mut attributes = HashMap::new();
+    let identifier =
+        AwsProvider::extract_organizations_account_attributes(&account, &mut attributes);
+    assert_eq!(identifier, Some("999999999999".to_string()));
+    assert_eq!(
+        attributes.get("status"),
+        Some(&Value::String("SUSPENDED".to_string()))
+    );
+    assert_eq!(
+        attributes.get("joined_method"),
+        Some(&Value::String("INVITED".to_string()))
+    );
+}
+
+#[test]
+fn test_organizations_account_schema_attributes() {
+    let config = crate::schemas::generated::organizations::account::organizations_account_config();
+    let schema = &config.schema;
+    // Verify key attributes exist
+    assert!(schema.attributes.contains_key("account_name"));
+    assert!(schema.attributes.contains_key("email"));
+    assert!(schema.attributes.contains_key("id"));
+    assert!(schema.attributes.contains_key("arn"));
+    assert!(schema.attributes.contains_key("status"));
+    assert!(schema.attributes.contains_key("name"));
+    assert!(schema.attributes.contains_key("tags"));
+    // Verify has_tags
+    assert!(config.has_tags);
+}
+
 // --- ip_protocol enum "all" variant tests (issue #1428) ---
 
 #[test]
