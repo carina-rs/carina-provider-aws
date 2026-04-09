@@ -58,3 +58,7 @@ jobs:
         run: |
           cargo install --git https://github.com/mizzy/vela vela-cli --quiet
           vela optimize target/wasm32-wasip2/release/carina-provider-aws.wasm -o target/wasm32-wasip2/release/carina-provider-aws.wasm
+      - uses: actions/upload-artifact@v4
+        with:
+          name: carina-provider-aws.wasm
+          path: target/wasm32-wasip2/release/carina-provider-aws.wasm
