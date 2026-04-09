@@ -7,7 +7,7 @@ use crate::AwsProvider;
 use crate::normalizer::normalize_state_enums;
 
 impl Provider for AwsProvider {
-    fn name(&self) -> &'static str {
+    fn name(&self) -> &str {
         "aws"
     }
 
