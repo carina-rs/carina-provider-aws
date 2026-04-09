@@ -6,6 +6,7 @@
 
 use super::AwsSchemaConfig;
 use super::tags_type;
+use super::validate_tags_map;
 use carina_core::schema::{AttributeSchema, AttributeType, ResourceSchema};
 
 const VALID_IAM_USER_ACCESS_TO_BILLING: &[&str] = &["ALLOW", "DENY"];
@@ -98,6 +99,7 @@ pub fn organizations_account_config() -> AwsSchemaConfig {
                 .with_description("The tags for the resource.")
                 .with_provider_name("Tags"),
         )
+        .with_validator(validate_tags_map)
     }
 }
 

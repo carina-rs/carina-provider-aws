@@ -582,6 +582,7 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
 
     if needs_tags_type {
         code.push_str("use super::tags_type;\n");
+        code.push_str("use super::validate_tags_map;\n");
     }
     if has_ranged_ints {
         code.push_str("use carina_core::resource::Value;\n");
@@ -771,6 +772,11 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
              \x20               .with_provider_name(\"Tags\"),\n\
              \x20       )\n",
         );
+    }
+
+    // Tags validator
+    if res.has_tags {
+        code.push_str("\x20       .with_validator(validate_tags_map)\n");
     }
 
     // Close schema and config

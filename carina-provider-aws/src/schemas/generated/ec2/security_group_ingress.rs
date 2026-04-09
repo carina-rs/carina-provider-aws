@@ -8,7 +8,7 @@ use super::AwsSchemaConfig;
 use carina_core::resource::Value;
 use carina_core::schema::{AttributeSchema, AttributeType, ResourceSchema, types};
 
-const VALID_IP_PROTOCOL: &[&str] = &["tcp", "udp", "icmp", "icmpv6", "-1", "all"];
+const VALID_IP_PROTOCOL: &[&str] = &["tcp", "udp", "icmp", "icmpv6", "-1", "all", "all"];
 
 fn validate_from_port_range(value: &Value) -> Result<(), String> {
     if let Value::Int(n) = value {
