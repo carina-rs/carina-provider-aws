@@ -37,6 +37,7 @@ pub fn configs() -> Vec<AwsSchemaConfig> {
         ec2::vpc_peering_connection::ec2_vpc_peering_connection_config(),
         ec2::vpn_gateway::ec2_vpn_gateway_config(),
         iam::role::iam_role_config(),
+        organizations::account::organizations_account_config(),
         organizations::organization::organizations_organization_config(),
         logs::log_group::logs_log_group_config(),
         s3::bucket::s3_bucket_config(),
@@ -74,6 +75,7 @@ pub fn get_enum_valid_values(
         ec2::vpc_peering_connection::enum_valid_values(),
         ec2::vpn_gateway::enum_valid_values(),
         iam::role::enum_valid_values(),
+        organizations::account::enum_valid_values(),
         organizations::organization::enum_valid_values(),
         logs::log_group::enum_valid_values(),
         s3::bucket::enum_valid_values(),
@@ -158,6 +160,9 @@ pub fn get_enum_alias_reverse(
     }
     if resource_type == "iam.role" {
         return iam::role::enum_alias_reverse(attr_name, value);
+    }
+    if resource_type == "organizations.account" {
+        return organizations::account::enum_alias_reverse(attr_name, value);
     }
     if resource_type == "organizations.organization" {
         return organizations::organization::enum_alias_reverse(attr_name, value);
