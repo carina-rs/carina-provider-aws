@@ -13,7 +13,7 @@ const VALID_DOMAIN: &[&str] = &["standard", "vpc"];
 /// Returns the schema config for ec2.eip (Smithy: com.amazonaws.ec2)
 pub fn ec2_eip_config() -> AwsSchemaConfig {
     AwsSchemaConfig {
-        aws_type_name: "UNKNOWN",
+        aws_type_name: "AWS::EC2::EIP",
         resource_type_name: "ec2.eip",
         has_tags: true,
         schema: ResourceSchema::new("aws.ec2.eip")

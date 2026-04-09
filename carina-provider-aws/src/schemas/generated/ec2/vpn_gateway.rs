@@ -13,7 +13,7 @@ const VALID_TYPE: &[&str] = &["ipsec.1"];
 /// Returns the schema config for ec2.vpn_gateway (Smithy: com.amazonaws.ec2)
 pub fn ec2_vpn_gateway_config() -> AwsSchemaConfig {
     AwsSchemaConfig {
-        aws_type_name: "UNKNOWN",
+        aws_type_name: "AWS::EC2::VPNGateway",
         resource_type_name: "ec2.vpn_gateway",
         has_tags: true,
         schema: ResourceSchema::new("aws.ec2.vpn_gateway")

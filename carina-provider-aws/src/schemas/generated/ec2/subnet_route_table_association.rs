@@ -10,7 +10,7 @@ use carina_core::schema::{AttributeSchema, AttributeType, ResourceSchema};
 /// Returns the schema config for ec2.subnet_route_table_association (Smithy: com.amazonaws.ec2)
 pub fn ec2_subnet_route_table_association_config() -> AwsSchemaConfig {
     AwsSchemaConfig {
-        aws_type_name: "UNKNOWN",
+        aws_type_name: "AWS::EC2::SubnetRouteTableAssociation",
         resource_type_name: "ec2.subnet_route_table_association",
         has_tags: false,
         schema: ResourceSchema::new("aws.ec2.subnet_route_table_association")

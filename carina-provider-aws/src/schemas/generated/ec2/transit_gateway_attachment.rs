@@ -19,7 +19,7 @@ const VALID_SECURITY_GROUP_REFERENCING_SUPPORT: &[&str] = &["disable", "enable"]
 /// Returns the schema config for ec2.transit_gateway_attachment (Smithy: com.amazonaws.ec2)
 pub fn ec2_transit_gateway_attachment_config() -> AwsSchemaConfig {
     AwsSchemaConfig {
-        aws_type_name: "UNKNOWN",
+        aws_type_name: "AWS::EC2::TransitGatewayAttachment",
         resource_type_name: "ec2.transit_gateway_attachment",
         has_tags: true,
         schema: ResourceSchema::new("aws.ec2.transit_gateway_attachment")

@@ -11,7 +11,7 @@ use carina_core::schema::{AttributeSchema, ResourceSchema};
 /// Returns the schema config for ec2.egress_only_internet_gateway (Smithy: com.amazonaws.ec2)
 pub fn ec2_egress_only_internet_gateway_config() -> AwsSchemaConfig {
     AwsSchemaConfig {
-        aws_type_name: "UNKNOWN",
+        aws_type_name: "AWS::EC2::EgressOnlyInternetGateway",
         resource_type_name: "ec2.egress_only_internet_gateway",
         has_tags: true,
         schema: ResourceSchema::new("aws.ec2.egress_only_internet_gateway")

@@ -24,7 +24,7 @@ const VALID_TRAFFIC_TYPE: &[&str] = &["ACCEPT", "ALL", "REJECT"];
 /// Returns the schema config for ec2.flow_log (Smithy: com.amazonaws.ec2)
 pub fn ec2_flow_log_config() -> AwsSchemaConfig {
     AwsSchemaConfig {
-        aws_type_name: "UNKNOWN",
+        aws_type_name: "AWS::EC2::FlowLog",
         resource_type_name: "ec2.flow_log",
         has_tags: true,
         schema: ResourceSchema::new("aws.ec2.flow_log")

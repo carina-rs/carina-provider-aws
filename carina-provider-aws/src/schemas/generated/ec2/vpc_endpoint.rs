@@ -19,7 +19,7 @@ const VALID_VPC_ENDPOINT_TYPE: &[&str] = &[
 /// Returns the schema config for ec2.vpc_endpoint (Smithy: com.amazonaws.ec2)
 pub fn ec2_vpc_endpoint_config() -> AwsSchemaConfig {
     AwsSchemaConfig {
-        aws_type_name: "UNKNOWN",
+        aws_type_name: "AWS::EC2::VPCEndpoint",
         resource_type_name: "ec2.vpc_endpoint",
         has_tags: true,
         schema: ResourceSchema::new("aws.ec2.vpc_endpoint")

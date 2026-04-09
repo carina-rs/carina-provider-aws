@@ -25,7 +25,7 @@ const VALID_VPN_ECMP_SUPPORT: &[&str] = &["disable", "enable"];
 /// Returns the schema config for ec2.transit_gateway (Smithy: com.amazonaws.ec2)
 pub fn ec2_transit_gateway_config() -> AwsSchemaConfig {
     AwsSchemaConfig {
-        aws_type_name: "UNKNOWN",
+        aws_type_name: "AWS::EC2::TransitGateway",
         resource_type_name: "ec2.transit_gateway",
         has_tags: true,
         schema: ResourceSchema::new("aws.ec2.transit_gateway")

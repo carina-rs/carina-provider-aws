@@ -15,7 +15,7 @@ const VALID_CONNECTIVITY_TYPE: &[&str] = &["private", "public"];
 /// Returns the schema config for ec2.nat_gateway (Smithy: com.amazonaws.ec2)
 pub fn ec2_nat_gateway_config() -> AwsSchemaConfig {
     AwsSchemaConfig {
-        aws_type_name: "UNKNOWN",
+        aws_type_name: "AWS::EC2::NatGateway",
         resource_type_name: "ec2.nat_gateway",
         has_tags: true,
         schema: ResourceSchema::new("aws.ec2.nat_gateway")

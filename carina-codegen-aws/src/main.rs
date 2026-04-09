@@ -594,11 +594,14 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
             .iter()
             .map(|v| format!("\"{}\"", v))
             .collect();
-        // Add alias values
+        // Add alias values (avoiding duplicates)
         let snake = prop_name.to_snake_case();
         if let Some(aliases) = enum_alias_map.get(snake.as_str()) {
             for (_, alias) in aliases {
-                all_values.push(format!("\"{}\"", alias));
+                let formatted = format!("\"{}\"", alias);
+                if !all_values.contains(&formatted) {
+                    all_values.push(formatted);
+                }
             }
         }
         let values_str = all_values.join(", ");
@@ -2692,9 +2695,25 @@ fn cf_type_name(resource_name: &str) -> &'static str {
         "ec2.security_group" => "AWS::EC2::SecurityGroup",
         "ec2.security_group_ingress" => "AWS::EC2::SecurityGroupIngress",
         "ec2.security_group_egress" => "AWS::EC2::SecurityGroupEgress",
+        "ec2.egress_only_internet_gateway" => "AWS::EC2::EgressOnlyInternetGateway",
+        "ec2.eip" => "AWS::EC2::EIP",
+        "ec2.flow_log" => "AWS::EC2::FlowLog",
+        "ec2.nat_gateway" => "AWS::EC2::NatGateway",
+        "ec2.subnet_route_table_association" => "AWS::EC2::SubnetRouteTableAssociation",
+        "ec2.transit_gateway" => "AWS::EC2::TransitGateway",
+        "ec2.transit_gateway_attachment" => "AWS::EC2::TransitGatewayAttachment",
+        "ec2.vpc_endpoint" => "AWS::EC2::VPCEndpoint",
+        "ec2.vpc_gateway_attachment" => "AWS::EC2::VPCGatewayAttachment",
+        "ec2.vpc_peering_connection" => "AWS::EC2::VPCPeeringConnection",
+        "ec2.vpn_gateway" => "AWS::EC2::VPNGateway",
         "s3.bucket" => "AWS::S3::Bucket",
         "sts.caller_identity" => "AWS::STS::CallerIdentity",
-        _ => "UNKNOWN",
+        "organizations.organization" => "AWS::Organizations::Organization",
+        "organizations.account" => "AWS::Organizations::Account",
+        _ => panic!(
+            "Unknown resource: {}. Add it to cf_type_name().",
+            resource_name
+        ),
     }
 }
 
