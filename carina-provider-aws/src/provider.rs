@@ -70,6 +70,10 @@ impl Provider for AwsProvider {
                     self.read_ec2_egress_only_internet_gateway(&id, identifier.as_deref())
                         .await
                 }
+                "organizations.organization" => {
+                    self.read_organizations_organization(&id, identifier.as_deref())
+                        .await
+                }
                 "iam.role" => self.read_iam_role(&id, identifier.as_deref()).await,
                 "logs.log_group" => self.read_logs_log_group(&id, identifier.as_deref()).await,
                 "sts.caller_identity" => self.read_sts_caller_identity(&id).await,
@@ -127,6 +131,9 @@ impl Provider for AwsProvider {
                 }
                 "ec2.egress_only_internet_gateway" => {
                     self.create_ec2_egress_only_internet_gateway(resource).await
+                }
+                "organizations.organization" => {
+                    self.create_organizations_organization(resource).await
                 }
                 "iam.role" => self.create_iam_role(resource).await,
                 "logs.log_group" => self.create_logs_log_group(resource).await,
@@ -214,6 +221,11 @@ impl Provider for AwsProvider {
                     self.update_ec2_egress_only_internet_gateway(id, &identifier, &from, to)
                         .await
                 }
+                "organizations.organization" => {
+                    // All attributes are read-only or create-only; read back current state
+                    self.read_organizations_organization(&id, Some(&identifier))
+                        .await
+                }
                 "iam.role" => self.update_iam_role(id, &identifier, &from, to).await,
                 "logs.log_group" => self.update_logs_log_group(id, &identifier, &from, to).await,
                 _ => Err(ProviderError::new(format!(
@@ -274,6 +286,10 @@ impl Provider for AwsProvider {
                 }
                 "ec2.egress_only_internet_gateway" => {
                     self.delete_ec2_egress_only_internet_gateway(id, &identifier)
+                        .await
+                }
+                "organizations.organization" => {
+                    self.delete_organizations_organization(id, &identifier)
                         .await
                 }
                 "iam.role" => self.delete_iam_role(id, &identifier).await,
