@@ -6,6 +6,7 @@
 
 use super::AwsSchemaConfig;
 use super::tags_type;
+use super::validate_tags_map;
 use carina_core::schema::{AttributeSchema, AttributeType, ResourceSchema};
 
 const VALID_LOG_DESTINATION_TYPE: &[&str] = &["cloud-watch-logs", "kinesis-data-firehose", "s3"];
@@ -110,6 +111,7 @@ pub fn ec2_flow_log_config() -> AwsSchemaConfig {
                 .with_description("The tags for the resource.")
                 .with_provider_name("Tags"),
         )
+        .with_validator(validate_tags_map)
     }
 }
 

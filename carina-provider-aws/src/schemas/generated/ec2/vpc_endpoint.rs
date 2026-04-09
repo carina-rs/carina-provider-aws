@@ -6,6 +6,7 @@
 
 use super::AwsSchemaConfig;
 use super::tags_type;
+use super::validate_tags_map;
 use carina_core::schema::{AttributeSchema, AttributeType, ResourceSchema};
 
 const VALID_VPC_ENDPOINT_TYPE: &[&str] = &[
@@ -105,6 +106,7 @@ pub fn ec2_vpc_endpoint_config() -> AwsSchemaConfig {
                 .with_description("The tags for the resource.")
                 .with_provider_name("Tags"),
         )
+        .with_validator(validate_tags_map)
     }
 }
 

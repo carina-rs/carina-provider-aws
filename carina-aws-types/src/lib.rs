@@ -132,6 +132,27 @@ pub fn tags_type() -> AttributeType {
     AttributeType::Map(Box::new(AttributeType::String))
 }
 
+/// Validate that a tags map does not use Key/Value pair list structure.
+///
+/// Detects when a tags map contains both `key` and `value` as keys (case-insensitive),
+/// which indicates the user wrote a Key/Value pair list instead of a flat map:
+///   Wrong: `tags = { key = 'Name', value = '...' }`
+///   Right: `tags = { Name = '...' }`
+pub fn validate_tags_map(
+    attributes: &std::collections::HashMap<String, Value>,
+) -> Result<(), Vec<carina_core::schema::TypeError>> {
+    if let Some(Value::Map(map)) = attributes.get("tags") {
+        let has_key = map.keys().any(|k| k.eq_ignore_ascii_case("key"));
+        let has_value = map.keys().any(|k| k.eq_ignore_ascii_case("value"));
+        if has_key && has_value {
+            return Err(vec![carina_core::schema::TypeError::ResourceValidationFailed {
+                message: "tags map contains both 'key' and 'value' as keys, which looks like a Key/Value pair list. Use flat map syntax instead: tags = { Name = '...' }".to_string(),
+            }]);
+        }
+    }
+    Ok(())
+}
+
 // ========== Resource ID validators ==========
 
 /// Validate a generic AWS resource ID format: `{prefix}-{hex}` where hex is 8+ hex digits.

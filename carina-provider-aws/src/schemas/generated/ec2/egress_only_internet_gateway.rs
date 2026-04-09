@@ -6,6 +6,7 @@
 
 use super::AwsSchemaConfig;
 use super::tags_type;
+use super::validate_tags_map;
 use carina_core::schema::{AttributeSchema, ResourceSchema};
 
 /// Returns the schema config for ec2.egress_only_internet_gateway (Smithy: com.amazonaws.ec2)
@@ -37,7 +38,8 @@ pub fn ec2_egress_only_internet_gateway_config() -> AwsSchemaConfig {
                 AttributeSchema::new("tags", tags_type())
                     .with_description("The tags for the resource.")
                     .with_provider_name("Tags"),
-            ),
+            )
+            .with_validator(validate_tags_map),
     }
 }
 

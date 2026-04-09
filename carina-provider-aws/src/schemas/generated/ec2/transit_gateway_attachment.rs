@@ -6,6 +6,7 @@
 
 use super::AwsSchemaConfig;
 use super::tags_type;
+use super::validate_tags_map;
 use carina_core::schema::{AttributeSchema, AttributeType, ResourceSchema, StructField};
 
 const VALID_APPLIANCE_MODE_SUPPORT: &[&str] = &["disable", "enable"];
@@ -89,6 +90,7 @@ pub fn ec2_transit_gateway_attachment_config() -> AwsSchemaConfig {
                 .with_description("The tags for the resource.")
                 .with_provider_name("Tags"),
         )
+        .with_validator(validate_tags_map)
     }
 }
 
