@@ -82,14 +82,26 @@ impl CarinaProvider for AwsProcessProvider {
             .collect()
     }
 
-    fn validate_config(&self, attrs: &HashMap<String, proto::Value>) -> Result<(), String> {
-        let core_attrs = convert::proto_to_core_value_map(attrs);
-        let region_type = carina_provider_aws::schemas::types::aws_region();
-        if let Some(region_value) = core_attrs.get("region") {
-            region_type
-                .validate(region_value)
-                .map_err(|e| e.to_string())?;
-        }
+    fn provider_config_attribute_types(&self) -> HashMap<String, proto::AttributeType> {
+        let mut types = HashMap::new();
+        types.insert(
+            "region".to_string(),
+            proto::AttributeType::StringEnum {
+                name: "Region".to_string(),
+                values: carina_aws_types::REGIONS
+                    .iter()
+                    .map(|(code, _)| code.to_string())
+                    .collect(),
+                namespace: Some("aws".to_string()),
+            },
+        );
+        types
+    }
+
+    fn validate_config(&self, _attrs: &HashMap<String, proto::Value>) -> Result<(), String> {
+        // Region format/value validation is handled by the host via
+        // `provider_config_attribute_types`. No provider-specific semantic
+        // checks are needed beyond that for now.
         Ok(())
     }
 

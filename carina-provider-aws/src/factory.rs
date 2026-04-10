@@ -20,13 +20,29 @@ impl ProviderFactory for AwsProviderFactory {
         "AWS provider"
     }
 
-    fn validate_config(&self, attributes: &HashMap<String, Value>) -> Result<(), String> {
-        let region_type = crate::schemas::types::aws_region();
-        if let Some(region_value) = attributes.get("region") {
-            region_type
-                .validate(region_value)
-                .map_err(|e| e.to_string())?;
-        }
+    fn provider_config_attribute_types(
+        &self,
+    ) -> HashMap<String, carina_core::schema::AttributeType> {
+        let mut types = HashMap::new();
+        types.insert(
+            "region".to_string(),
+            carina_core::schema::AttributeType::StringEnum {
+                name: "Region".to_string(),
+                values: carina_aws_types::REGIONS
+                    .iter()
+                    .map(|(code, _)| code.to_string())
+                    .collect(),
+                namespace: Some("aws".to_string()),
+                to_dsl: Some(|s| s.replace('-', "_")),
+            },
+        );
+        types
+    }
+
+    fn validate_config(&self, _attributes: &HashMap<String, Value>) -> Result<(), String> {
+        // Region format/value validation is handled by the host via
+        // `provider_config_attribute_types`. No provider-specific semantic
+        // checks are needed beyond that for now.
         Ok(())
     }
 
