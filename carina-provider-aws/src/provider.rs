@@ -97,6 +97,45 @@ impl Provider for AwsProvider {
         })
     }
 
+    fn read_data_source(&self, resource: &Resource) -> BoxFuture<'_, ProviderResult<State>> {
+        let resource = resource.clone();
+        Box::pin(async move {
+            let mut state = match resource.id.resource_type.as_str() {
+                "identitystore.user" => self.read_identitystore_user(&resource).await?,
+                _ => {
+                    // Fallback for data sources this provider doesn't dispatch
+                    // explicitly. Route zero-input cases (e.g. `sts.caller_identity`)
+                    // through the regular read path so existing dispatch handles
+                    // them. Refuse to drop user-supplied inputs silently — if a
+                    // future data source has inputs but no override here, fail
+                    // loud instead of calling `read(&id, None)` and losing them
+                    // (matches the trait-default safety rail in `Provider::read_data_source`).
+                    let user_input_count = resource
+                        .attributes
+                        .keys()
+                        .filter(|k| !k.starts_with('_'))
+                        .count();
+                    if user_input_count > 0 {
+                        return Err(ProviderError::new(format!(
+                            "aws provider does not implement read_data_source for '{}' \
+                             but the resource has {user_input_count} user-supplied input \
+                             attribute(s); refusing to drop them",
+                            resource.id.resource_type
+                        ))
+                        .for_resource(resource.id.clone()));
+                    }
+                    self.read(&resource.id, None).await?
+                }
+            };
+
+            if state.exists {
+                normalize_state_enums(&resource.id.resource_type, &mut state.attributes);
+            }
+
+            Ok(state)
+        })
+    }
+
     fn create(&self, resource: &Resource) -> BoxFuture<'_, ProviderResult<State>> {
         let resource = resource.clone();
         Box::pin(async move {

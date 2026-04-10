@@ -223,6 +223,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "aws-sdk-identitystore"
+version = "1.99.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "42ba5baaf9f102f9a65d2670e453eb964df3851269b0458c99d62034d8d84d82"
+dependencies = [
+ "aws-credential-types",
+ "aws-runtime",
+ "aws-smithy-async",
+ "aws-smithy-http",
+ "aws-smithy-json",
+ "aws-smithy-observability",
+ "aws-smithy-runtime",
+ "aws-smithy-runtime-api",
+ "aws-smithy-types",
+ "aws-types",
+ "bytes",
+ "fastrand",
+ "http 0.2.12",
+ "http 1.4.0",
+ "regex-lite",
+ "tracing",
+]
+
+[[package]]
 name = "aws-sdk-organizations"
 version = "1.113.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -592,7 +616,7 @@ dependencies = [
 [[package]]
 name = "carina-core"
 version = "0.3.0"
-source = "git+https://github.com/carina-rs/carina#e70e36f4b1e9bc4052179d92ca287ee6da0bf91f"
+source = "git+https://github.com/carina-rs/carina#896ee8e5ec9c5c55bc8f5f0e92773d863bbb6d2b"
 dependencies = [
  "argon2",
  "futures",
@@ -608,7 +632,7 @@ dependencies = [
 [[package]]
 name = "carina-plugin-sdk"
 version = "0.3.0"
-source = "git+https://github.com/carina-rs/carina#e70e36f4b1e9bc4052179d92ca287ee6da0bf91f"
+source = "git+https://github.com/carina-rs/carina#896ee8e5ec9c5c55bc8f5f0e92773d863bbb6d2b"
 dependencies = [
  "aws-smithy-runtime-api",
  "aws-smithy-types",
@@ -628,10 +652,12 @@ dependencies = [
  "aws-sdk-cloudwatchlogs",
  "aws-sdk-ec2",
  "aws-sdk-iam",
+ "aws-sdk-identitystore",
  "aws-sdk-organizations",
  "aws-sdk-s3",
  "aws-sdk-sts",
  "aws-smithy-async",
+ "aws-smithy-types",
  "carina-aws-types",
  "carina-core",
  "carina-plugin-sdk",
@@ -649,7 +675,7 @@ dependencies = [
 [[package]]
 name = "carina-provider-protocol"
 version = "0.3.0"
-source = "git+https://github.com/carina-rs/carina#e70e36f4b1e9bc4052179d92ca287ee6da0bf91f"
+source = "git+https://github.com/carina-rs/carina#896ee8e5ec9c5c55bc8f5f0e92773d863bbb6d2b"
 dependencies = [
  "serde",
  "serde_json",

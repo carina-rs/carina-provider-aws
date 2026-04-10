@@ -21,6 +21,7 @@ use aws_config::Region;
 use aws_sdk_cloudwatchlogs::Client as CloudWatchLogsClient;
 use aws_sdk_ec2::Client as Ec2Client;
 use aws_sdk_iam::Client as IamClient;
+use aws_sdk_identitystore::Client as IdentityStoreClient;
 use aws_sdk_organizations::Client as OrganizationsClient;
 use aws_sdk_s3::Client as S3Client;
 use aws_sdk_sts::Client as StsClient;
@@ -33,6 +34,7 @@ pub struct AwsProvider {
     logs_client: CloudWatchLogsClient,
     sts_client: StsClient,
     organizations_client: OrganizationsClient,
+    identitystore_client: IdentityStoreClient,
     region: String,
 }
 
@@ -48,6 +50,7 @@ impl AwsProvider {
             logs_client: CloudWatchLogsClient::new(&config),
             sts_client: StsClient::new(&config),
             organizations_client: OrganizationsClient::new(&config),
+            identitystore_client: IdentityStoreClient::new(&config),
             region: region.to_string(),
         }
     }
@@ -71,6 +74,7 @@ impl AwsProvider {
     }
 
     /// Create with specific clients (for testing)
+    #[allow(clippy::too_many_arguments)]
     pub fn with_clients(
         s3_client: S3Client,
         ec2_client: Ec2Client,
@@ -78,6 +82,7 @@ impl AwsProvider {
         logs_client: CloudWatchLogsClient,
         sts_client: StsClient,
         organizations_client: OrganizationsClient,
+        identitystore_client: IdentityStoreClient,
         region: String,
     ) -> Self {
         Self {
@@ -87,6 +92,7 @@ impl AwsProvider {
             logs_client,
             sts_client,
             organizations_client,
+            identitystore_client,
             region,
         }
     }
