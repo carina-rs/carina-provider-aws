@@ -277,4 +277,20 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    fn schemas_include_iam_role_and_logs_log_group() {
+        let provider = AwsProcessProvider::new();
+        let schemas = provider.schemas();
+        assert!(
+            schemas.iter().any(|s| s.resource_type == "aws.iam.role"),
+            "aws.iam.role schema should be registered"
+        );
+        assert!(
+            schemas
+                .iter()
+                .any(|s| s.resource_type == "aws.logs.log_group"),
+            "aws.logs.log_group schema should be registered"
+        );
+    }
 }
