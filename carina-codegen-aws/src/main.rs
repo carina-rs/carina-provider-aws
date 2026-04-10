@@ -194,7 +194,8 @@ fn main() -> Result<()> {
             eprintln!("Generated: {}", mod_path.display());
         }
         "provider" => {
-            let code = generate_provider_code(&all_resources, &models);
+            let manual_methods = scan_manual_methods(&args.output_dir.join("services"));
+            let code = generate_provider_code(&all_resources, &models, &manual_methods);
             let output_path = args.output_dir.join("provider_generated.rs");
             std::fs::write(&output_path, &code)
                 .with_context(|| format!("Failed to write {}", output_path.display()))?;
@@ -1304,11 +1305,57 @@ fn generate_mod_rs(dsl_names: &[&str], output_dir: &std::path::Path) -> String {
 
 // ── Provider boilerplate generation ──
 
+/// Scan `services_dir/**/*.rs` for existing `fn <name>` method definitions.
+///
+/// Returns a set of method names (e.g. `"delete_ec2_vpc"`) that already have
+/// manual implementations. The codegen uses this to skip generating duplicates
+/// when a resource has both a `simple_delete`/`noop_update` flag and a hand-written
+/// service file. Catches both `async fn` and plain `fn`. Returns an empty set
+/// if the directory does not exist.
+fn scan_manual_methods(services_dir: &std::path::Path) -> std::collections::HashSet<String> {
+    use std::collections::HashSet;
+    let mut methods = HashSet::new();
+    if !services_dir.exists() {
+        return methods;
+    }
+    fn visit(dir: &std::path::Path, out: &mut HashSet<String>) {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                visit(&path, out);
+                continue;
+            }
+            if path.extension().and_then(|e| e.to_str()) != Some("rs") {
+                continue;
+            }
+            let Ok(contents) = std::fs::read_to_string(&path) else {
+                continue;
+            };
+            for line in contents.lines() {
+                // Find the `fn ` token. Accepts `async fn`, `pub fn`, `pub(crate) fn`, etc.
+                let Some(after_fn) = line.split(" fn ").nth(1) else {
+                    continue;
+                };
+                let Some((name, _)) = after_fn.split_once(['(', '<']) else {
+                    continue;
+                };
+                out.insert(name.trim().to_string());
+            }
+        }
+    }
+    visit(services_dir, &mut methods);
+    methods
+}
+
 /// Generate the provider_generated.rs file from ResourceDef metadata and Smithy models.
 /// Uses Smithy models to resolve types for read/write helper generation.
 fn generate_provider_code(
     all_resources: &[ResourceDef],
     models: &HashMap<&str, SmithyModel>,
+    manual_methods: &std::collections::HashSet<String>,
 ) -> String {
     let mut code = String::new();
 
@@ -1332,6 +1379,9 @@ fn generate_provider_code(
     // Simple delete methods
     for res in all_resources.iter().filter(|r| r.simple_delete) {
         let method_name = format!("delete_{}", res.name.replace('.', "_"));
+        if manual_methods.contains(&method_name) {
+            continue;
+        }
         let client_field = client_field_name(res.service_namespace);
         let sdk_method = res.delete_op.to_snake_case();
         let id_setter = res.identifier.to_snake_case();
@@ -1365,6 +1415,9 @@ fn generate_provider_code(
     // No-op update methods (with optional tag handling)
     for res in all_resources.iter().filter(|r| r.noop_update) {
         let method_name = format!("update_{}", res.name.replace('.', "_"));
+        if manual_methods.contains(&method_name) {
+            continue;
+        }
         let read_method = format!("read_{}", res.name.replace('.', "_"));
 
         if res.has_tags {
@@ -1417,6 +1470,9 @@ fn generate_provider_code(
         for read_op in &res.read_ops {
             let suffix = op_suffix(read_op.operation, res.identifier);
             let method_name = format!("read_{}_{}", resource_name, suffix);
+            if manual_methods.contains(&method_name) {
+                continue;
+            }
             let sdk_method = read_op.operation.to_snake_case();
 
             // Resolve output structure
@@ -1532,6 +1588,9 @@ fn generate_provider_code(
             };
             let suffix = op_suffix(update_op.operation, res.identifier);
             let method_name = format!("write_{}_{}", resource_name, suffix);
+            if manual_methods.contains(&method_name) {
+                continue;
+            }
             let sdk_method = update_op.operation.to_snake_case();
             let struct_setter = struct_name.to_snake_case();
 
@@ -1671,6 +1730,9 @@ fn generate_provider_code(
         };
 
         let resource_name = res.name.replace('.', "_");
+        if manual_methods.contains(&format!("extract_{}_attributes", resource_name)) {
+            continue;
+        }
         let sdk_crate = sdk_crate_name(ns);
 
         // Build exclude set
@@ -2956,5 +3018,47 @@ mod tests {
         assert_eq!(escape_rust_keyword("vpc_id"), "vpc_id");
         assert_eq!(escape_rust_keyword("type_name"), "type_name");
         assert_eq!(escape_rust_keyword("cidr_block"), "cidr_block");
+    }
+
+    #[test]
+    fn scan_manual_methods_finds_async_and_plain_fn_definitions() {
+        let tmp = tempfile::tempdir().expect("create tempdir");
+        let services_dir = tmp.path();
+
+        // A service file with async delete, async update, and a plain extract fn
+        let ec2_dir = services_dir.join("ec2");
+        std::fs::create_dir_all(&ec2_dir).unwrap();
+        std::fs::write(
+            ec2_dir.join("vpc.rs"),
+            r#"impl AwsProvider {
+    pub(crate) async fn delete_ec2_vpc(&self) -> Result<()> { Ok(()) }
+    pub(crate) async fn update_ec2_vpc(&self) -> Result<()> { Ok(()) }
+    pub(crate) fn extract_ec2_vpc_attributes(obj: &Vpc) -> Option<String> { None }
+}
+"#,
+        )
+        .unwrap();
+
+        // A service file with only a read (no delete/update)
+        std::fs::write(
+            ec2_dir.join("subnet.rs"),
+            "impl AwsProvider {\n    pub(crate) async fn read_ec2_subnet(&self) {}\n}\n",
+        )
+        .unwrap();
+
+        let methods = scan_manual_methods(services_dir);
+        assert!(methods.contains("delete_ec2_vpc"));
+        assert!(methods.contains("update_ec2_vpc"));
+        assert!(methods.contains("extract_ec2_vpc_attributes"));
+        assert!(methods.contains("read_ec2_subnet"));
+        assert!(!methods.contains("delete_ec2_subnet"));
+    }
+
+    #[test]
+    fn scan_manual_methods_returns_empty_for_missing_dir() {
+        let tmp = tempfile::tempdir().expect("create tempdir");
+        let missing = tmp.path().join("does_not_exist");
+        let methods = scan_manual_methods(&missing);
+        assert!(methods.is_empty());
     }
 }
