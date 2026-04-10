@@ -17,3 +17,6 @@ carina-smithy = { path = "../carina-smithy" }
 anyhow = "1.0"
 clap = { version = "4.0", features = ["derive"] }
 heck = "0.5"
+
+[dev-dependencies]
+tempfile = "3"
