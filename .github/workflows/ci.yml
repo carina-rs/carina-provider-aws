@@ -62,3 +62,20 @@ jobs:
         with:
           name: carina-provider-aws.wasm
           path: target/wasm32-wasip2/release/carina-provider-aws.wasm
+
+  codegen-check:
+    name: Codegen Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - name: Run schema codegen
+        run: ./scripts/generate-schemas-smithy.sh
+      - name: Verify no uncommitted changes
+        run: |
+          if ! git diff --exit-code; then
+            echo "::error::Schema codegen produced uncommitted changes. Run './scripts/generate-schemas-smithy.sh' locally and commit the results."
+            exit 1
+          fi
