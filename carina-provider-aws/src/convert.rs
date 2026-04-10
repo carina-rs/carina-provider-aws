@@ -154,8 +154,8 @@ fn proto_to_core_attribute_type(t: &ProtoAttributeType) -> CoreAttributeType {
         ProtoAttributeType::Int => CoreAttributeType::Int,
         ProtoAttributeType::Float => CoreAttributeType::Float,
         ProtoAttributeType::Bool => CoreAttributeType::Bool,
-        ProtoAttributeType::StringEnum { values } => CoreAttributeType::StringEnum {
-            name: String::new(),
+        ProtoAttributeType::StringEnum { values, name } => CoreAttributeType::StringEnum {
+            name: name.clone(),
             values: values.clone(),
             namespace: None,
             to_dsl: None,
@@ -233,8 +233,9 @@ fn core_to_proto_attribute_type(t: &CoreAttributeType) -> ProtoAttributeType {
         CoreAttributeType::Int => ProtoAttributeType::Int,
         CoreAttributeType::Float => ProtoAttributeType::Float,
         CoreAttributeType::Bool => ProtoAttributeType::Bool,
-        CoreAttributeType::StringEnum { values, .. } => ProtoAttributeType::StringEnum {
+        CoreAttributeType::StringEnum { values, name, .. } => ProtoAttributeType::StringEnum {
             values: values.clone(),
+            name: name.clone(),
         },
         CoreAttributeType::List { inner, ordered } => ProtoAttributeType::List {
             inner: Box::new(core_to_proto_attribute_type(inner)),
@@ -300,5 +301,39 @@ pub fn core_to_proto_schema(s: &CoreResourceSchema) -> ProtoResourceSchema {
             create_timeout_secs: c.create_timeout_secs,
             create_max_retries: c.create_max_retries,
         }),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_string_enum_name_roundtrip() {
+        let core_type = CoreAttributeType::StringEnum {
+            name: "VersioningStatus".to_string(),
+            values: vec!["Enabled".to_string(), "Suspended".to_string()],
+            namespace: Some("aws.s3.bucket".to_string()),
+            to_dsl: None,
+        };
+        let proto_type = core_to_proto_attribute_type(&core_type);
+        match &proto_type {
+            ProtoAttributeType::StringEnum { values, name } => {
+                assert_eq!(name, "VersioningStatus");
+                assert_eq!(
+                    values,
+                    &vec!["Enabled".to_string(), "Suspended".to_string()]
+                );
+            }
+            _ => panic!("Expected StringEnum"),
+        }
+        let roundtrip = proto_to_core_attribute_type(&proto_type);
+        match roundtrip {
+            CoreAttributeType::StringEnum { name, values, .. } => {
+                assert_eq!(name, "VersioningStatus");
+                assert_eq!(values, vec!["Enabled", "Suspended"]);
+            }
+            _ => panic!("Expected StringEnum"),
+        }
     }
 }
