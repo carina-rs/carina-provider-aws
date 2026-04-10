@@ -103,6 +103,29 @@ fn split_service_resource(name: &str) -> (&str, &str) {
     name.split_once('.').expect("DSL name must contain '.'")
 }
 
+/// Escape Rust reserved keywords with the raw identifier prefix `r#`.
+///
+/// AWS SDK method names are snake_case and may collide with Rust keywords
+/// (e.g., `type` → `r#type`). This is used when generating method calls
+/// on SDK types in provider_generated.rs.
+///
+/// Note: `crate`, `self`, `Self`, and `super` are excluded because they
+/// cannot be used as raw identifiers.
+fn escape_rust_keyword(name: &str) -> String {
+    // Strict keywords that can be used as raw identifiers (r#keyword).
+    // Source: https://doc.rust-lang.org/reference/keywords.html
+    const KEYWORDS: &[&str] = &[
+        "as", "async", "await", "break", "const", "continue", "dyn", "else", "enum", "extern",
+        "fn", "for", "if", "impl", "in", "let", "loop", "match", "mod", "move", "mut", "pub",
+        "ref", "return", "static", "struct", "trait", "type", "unsafe", "use", "where", "while",
+    ];
+    if KEYWORDS.contains(&name) {
+        format!("r#{name}")
+    } else {
+        name.to_string()
+    }
+}
+
 fn main() -> Result<()> {
     let args = Args::parse();
 
@@ -1431,7 +1454,7 @@ fn generate_provider_code(
             for (field_name, rename) in &read_op.fields {
                 let effective_name = rename.unwrap_or(field_name);
                 let attr_snake = effective_name.to_snake_case();
-                let accessor = field_name.to_snake_case();
+                let accessor = escape_rust_keyword(&field_name.to_snake_case());
 
                 // Determine if field is an enum
                 let is_enum = if let Some(member_ref) = output.members.get(*field_name) {
@@ -1543,7 +1566,7 @@ fn generate_provider_code(
                     .copied()
                     .unwrap_or(effective_name);
                 let attr_snake = effective_name.to_snake_case();
-                let builder_setter = original_name.to_snake_case();
+                let builder_setter = escape_rust_keyword(&original_name.to_snake_case());
 
                 // Look up field in nested struct to resolve enum type
                 let enum_type_name =
@@ -1727,12 +1750,13 @@ fn generate_provider_code(
 
         for (attr_name, accessor_name, member_ref) in &fields_to_extract {
             let kind = model.shape_kind(&member_ref.target);
+            let accessor = escape_rust_keyword(accessor_name);
 
             match kind {
                 Some(ShapeKind::Enum) => {
                     code.push_str(&format!(
                         "\x20       if let Some(v) = obj.{}() {{\n",
-                        accessor_name
+                        accessor
                     ));
                     code.push_str(&format!(
                         "\x20           attributes.insert(\"{}\".to_string(), Value::String(v.as_str().to_string()));\n",
@@ -1743,7 +1767,7 @@ fn generate_provider_code(
                 Some(ShapeKind::Boolean) => {
                     code.push_str(&format!(
                         "\x20       if let Some(v) = obj.{}() {{\n",
-                        accessor_name
+                        accessor
                     ));
                     code.push_str(&format!(
                         "\x20           attributes.insert(\"{}\".to_string(), Value::Bool(v));\n",
@@ -1754,7 +1778,7 @@ fn generate_provider_code(
                 Some(ShapeKind::Integer) | Some(ShapeKind::Long) => {
                     code.push_str(&format!(
                         "\x20       if let Some(v) = obj.{}() {{\n",
-                        accessor_name
+                        accessor
                     ));
                     code.push_str(&format!(
                         "\x20           attributes.insert(\"{}\".to_string(), Value::Int(v as i64));\n",
@@ -1765,7 +1789,7 @@ fn generate_provider_code(
                 Some(ShapeKind::String) => {
                     code.push_str(&format!(
                         "\x20       if let Some(v) = obj.{}() {{\n",
-                        accessor_name
+                        accessor
                     ));
                     code.push_str(&format!(
                         "\x20           attributes.insert(\"{}\".to_string(), Value::String(v.to_string()));\n",
@@ -1782,7 +1806,7 @@ fn generate_provider_code(
 
         // Return identifier value (only if identifier exists in read_structure)
         if !res.identifier.is_empty() && read_struct.members.contains_key(res.identifier) {
-            let id_snake = res.identifier.to_snake_case();
+            let id_snake = escape_rust_keyword(&res.identifier.to_snake_case());
             code.push_str(&format!(
                 "\x20       obj.{}().map(String::from)\n",
                 id_snake
@@ -2913,5 +2937,24 @@ mod tests {
             generated.contains("if resource_type == \"iam.role\""),
             "orphaned iam.role enum_alias_reverse should be included: {generated}"
         );
+    }
+
+    #[test]
+    fn escape_rust_keyword_escapes_type() {
+        assert_eq!(escape_rust_keyword("type"), "r#type");
+    }
+
+    #[test]
+    fn escape_rust_keyword_escapes_other_keywords() {
+        assert_eq!(escape_rust_keyword("match"), "r#match");
+        assert_eq!(escape_rust_keyword("ref"), "r#ref");
+        assert_eq!(escape_rust_keyword("mod"), "r#mod");
+    }
+
+    #[test]
+    fn escape_rust_keyword_leaves_non_keywords_unchanged() {
+        assert_eq!(escape_rust_keyword("vpc_id"), "vpc_id");
+        assert_eq!(escape_rust_keyword("type_name"), "type_name");
+        assert_eq!(escape_rust_keyword("cidr_block"), "cidr_block");
     }
 }
