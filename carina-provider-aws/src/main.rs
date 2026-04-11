@@ -149,6 +149,20 @@ impl CarinaProvider for AwsProcessProvider {
         }
     }
 
+    fn read_data_source(
+        &self,
+        resource: &proto::Resource,
+    ) -> Result<proto::State, proto::ProviderError> {
+        let core_resource = convert::proto_to_core_resource(resource);
+        let result = self
+            .runtime
+            .block_on(self.provider().read_data_source(&core_resource));
+        match result {
+            Ok(state) => Ok(convert::core_to_proto_state(&state)),
+            Err(e) => Err(Self::convert_error(e)),
+        }
+    }
+
     fn create(&self, resource: &proto::Resource) -> Result<proto::State, proto::ProviderError> {
         let core_resource = convert::proto_to_core_resource(resource);
         let result = self
