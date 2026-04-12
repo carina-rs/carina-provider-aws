@@ -98,3 +98,7 @@ pub fn enum_alias_reverse(attr_name: &str, value: &str) -> Option<&'static str> 
     let _ = (attr_name, value);
     None
 }
+
+pub fn enum_alias_entries() -> &'static [(&'static str, &'static str, &'static str)] {
+    &[]
+}

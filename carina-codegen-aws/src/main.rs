@@ -826,29 +826,70 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
     }
     code.push_str("}\n");
 
+    // Collect all alias entries: explicit aliases + to_dsl reverse mappings.
+    let mut alias_entries: Vec<(String, String, String)> = Vec::new();
+    let mut seen: HashSet<(String, String)> = HashSet::new();
+
+    // Add explicit aliases from resource definition
+    for (attr, alias, canonical) in &res.enum_aliases {
+        if seen.insert((attr.to_string(), alias.to_string())) {
+            alias_entries.push((attr.to_string(), alias.to_string(), canonical.to_string()));
+        }
+    }
+
+    // Add to_dsl reverse mappings for values containing hyphens.
+    for (prop_name, enum_info) in &all_enums {
+        let attr_name = prop_name.to_snake_case();
+        for value in &enum_info.values {
+            if value.contains('-') {
+                let dsl_form = value.replace('-', "_");
+                if dsl_form != *value && seen.insert((attr_name.clone(), dsl_form.clone())) {
+                    alias_entries.push((attr_name.clone(), dsl_form, value.clone()));
+                }
+            }
+        }
+    }
+
     // Generate enum_alias_reverse()
     code.push_str(
         "\n/// Maps DSL alias values back to canonical AWS values for this module.\n\
          /// e.g., (\"ip_protocol\", \"all\") -> Some(\"-1\")\n\
          pub fn enum_alias_reverse(attr_name: &str, value: &str) -> Option<&'static str> {\n",
     );
-
-    let mut match_arms: Vec<String> = Vec::new();
-    for (attr, alias, canonical) in &res.enum_aliases {
-        match_arms.push(format!(
-            "        (\"{}\", \"{}\") => Some(\"{}\")",
-            attr, alias, canonical
-        ));
-    }
-
-    if match_arms.is_empty() {
+    if alias_entries.is_empty() {
         code.push_str("    let _ = (attr_name, value);\n    None\n");
     } else {
-        match_arms.push("        _ => None".to_string());
+        let match_arms: Vec<String> = alias_entries
+            .iter()
+            .map(|(attr, alias, canonical)| {
+                format!(
+                    "        (\"{}\", \"{}\") => Some(\"{}\")",
+                    attr, alias, canonical
+                )
+            })
+            .collect();
         code.push_str(&format!(
-            "    match (attr_name, value) {{\n{}\n    }}\n",
+            "    match (attr_name, value) {{\n{},\n        _ => None\n    }}\n",
             match_arms.join(",\n")
         ));
+    }
+    code.push_str("}\n");
+
+    // Generate enum_alias_entries()
+    code.push_str(
+        "\n/// Returns all enum alias entries as (attr_name, alias, canonical) tuples.\n\
+         pub fn enum_alias_entries() -> &'static [(&'static str, &'static str, &'static str)] {\n",
+    );
+    if alias_entries.is_empty() {
+        code.push_str("    &[]\n");
+    } else {
+        let entry_strs: Vec<String> = alias_entries
+            .iter()
+            .map(|(attr, alias, canonical)| {
+                format!("        (\"{}\", \"{}\", \"{}\")", attr, alias, canonical)
+            })
+            .collect();
+        code.push_str(&format!("    &[\n{}\n    ]\n", entry_strs.join(",\n")));
     }
     code.push_str("}\n");
 
@@ -1298,7 +1339,30 @@ fn generate_mod_rs(dsl_names: &[&str], output_dir: &std::path::Path) -> String {
             name, service, resource
         ));
     }
-    code.push_str("    None\n}\n");
+    code.push_str("    None\n}\n\n");
+
+    // build_enum_aliases_map()
+    code.push_str(
+        "/// Build a complete enum aliases map for all resource types.\n\
+         /// Returns: resource_type -> attr_name -> alias -> canonical_value.\n\
+         /// Used by CarinaProvider::enum_aliases() for the WASM host cache.\n\
+         pub fn build_enum_aliases_map() -> std::collections::HashMap<String, std::collections::HashMap<String, std::collections::HashMap<String, String>>> {\n\
+         \x20   let mut map = std::collections::HashMap::new();\n",
+    );
+    for name in &sorted {
+        let (service, resource) = split_service_resource(name);
+        code.push_str(&format!(
+            "\x20   for (attr, alias, canonical) in {}::{}::enum_alias_entries() {{\n\
+             \x20       map.entry(\"{}\".to_string())\n\
+             \x20           .or_insert_with(std::collections::HashMap::new)\n\
+             \x20           .entry(attr.to_string())\n\
+             \x20           .or_insert_with(std::collections::HashMap::new)\n\
+             \x20           .insert(alias.to_string(), canonical.to_string());\n\
+             \x20   }}\n",
+            service, resource, name
+        ));
+    }
+    code.push_str("    map\n}\n");
 
     code
 }

@@ -55,3 +55,8 @@ pub fn enum_alias_reverse(attr_name: &str, value: &str) -> Option<&'static str> 
     let _ = (attr_name, value);
     None
 }
+
+/// Returns all enum alias entries as (attr_name, alias, canonical) tuples.
+pub fn enum_alias_entries() -> &'static [(&'static str, &'static str, &'static str)] {
+    &[]
+}
