@@ -17,6 +17,7 @@ jobs:
         with:
           submodules: recursive
       - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
       - run: cargo check
 
   test:
@@ -27,6 +28,7 @@ jobs:
         with:
           submodules: recursive
       - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
       - run: cargo test
 
   clippy:
@@ -39,6 +41,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
+      - uses: Swatinem/rust-cache@v2
       - run: cargo clippy -- -D warnings
 
   fmt:
@@ -61,11 +64,21 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-wasip2
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: wasm
       - run: cargo build -p carina-provider-aws --target wasm32-wasip2 --release
+      - name: Cache vela-cli
+        id: cache-vela
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/vela
+          key: vela-cli-${{ runner.os }}-v1
+      - name: Install vela-cli
+        if: steps.cache-vela.outputs.cache-hit != 'true'
+        run: cargo install --git https://github.com/mizzy/vela vela-cli --quiet
       - name: Optimize WASM with vela
-        run: |
-          cargo install --git https://github.com/mizzy/vela vela-cli --quiet
-          vela optimize target/wasm32-wasip2/release/carina-provider-aws.wasm -o target/wasm32-wasip2/release/carina-provider-aws.wasm
+        run: vela optimize target/wasm32-wasip2/release/carina-provider-aws.wasm -o target/wasm32-wasip2/release/carina-provider-aws.wasm
       - uses: actions/upload-artifact@v4
         with:
           name: carina-provider-aws.wasm
@@ -81,6 +94,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
+      - uses: Swatinem/rust-cache@v2
       - name: Run schema codegen
         run: ./scripts/generate-schemas-smithy.sh
       - name: Verify no uncommitted changes
