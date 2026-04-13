@@ -138,6 +138,19 @@ impl CarinaProvider for AwsProcessProvider {
         carina_provider_aws::schemas::generated::build_enum_aliases_map()
     }
 
+    fn validate_custom_type(&self, type_name: &str, value: &str) -> Result<(), String> {
+        use carina_provider_aws::schemas::types::aws_validators;
+        use std::sync::OnceLock;
+        type ValidatorMap = HashMap<String, Box<dyn Fn(&str) -> Result<(), String> + Send + Sync>>;
+        static VALIDATORS: OnceLock<ValidatorMap> = OnceLock::new();
+        let validators = VALIDATORS.get_or_init(aws_validators);
+        if let Some(validator) = validators.get(type_name) {
+            validator(value)
+        } else {
+            Ok(())
+        }
+    }
+
     fn read(
         &self,
         id: &proto::ResourceId,
@@ -321,6 +334,72 @@ mod tests {
                 .iter()
                 .any(|s| s.resource_type == "aws.logs.log_group"),
             "aws.logs.log_group schema should be registered"
+        );
+    }
+
+    #[test]
+    fn validate_custom_type_accepts_valid_vpc_id() {
+        let provider = AwsProcessProvider::new();
+        assert!(
+            provider
+                .validate_custom_type("vpc_id", "vpc-12345678")
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn validate_custom_type_rejects_invalid_vpc_id() {
+        let provider = AwsProcessProvider::new();
+        assert!(
+            provider
+                .validate_custom_type("vpc_id", "subnet-12345678")
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn validate_custom_type_accepts_valid_arn() {
+        let provider = AwsProcessProvider::new();
+        assert!(
+            provider
+                .validate_custom_type("arn", "arn:aws:s3:::my-bucket")
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn validate_custom_type_rejects_invalid_arn() {
+        let provider = AwsProcessProvider::new();
+        assert!(provider.validate_custom_type("arn", "not-an-arn").is_err());
+    }
+
+    #[test]
+    fn validate_custom_type_passes_unknown_type() {
+        let provider = AwsProcessProvider::new();
+        assert!(
+            provider
+                .validate_custom_type("unknown_type", "any-value")
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn validate_custom_type_accepts_valid_iam_role_arn() {
+        let provider = AwsProcessProvider::new();
+        assert!(
+            provider
+                .validate_custom_type("iam_role_arn", "arn:aws:iam::123456789012:role/my-role")
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn validate_custom_type_rejects_iam_policy_arn_for_role() {
+        let provider = AwsProcessProvider::new();
+        assert!(
+            provider
+                .validate_custom_type("iam_role_arn", "arn:aws:iam::123456789012:policy/my-policy")
+                .is_err()
         );
     }
 }
