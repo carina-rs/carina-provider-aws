@@ -129,7 +129,7 @@ pub fn region_completions(prefix: &str) -> Vec<CompletionValue> {
 
 /// Tags type for AWS resources (map of string values)
 pub fn tags_type() -> AttributeType {
-    AttributeType::Map(Box::new(AttributeType::String))
+    AttributeType::map(AttributeType::String)
 }
 
 /// Validate that a tags map does not use Key/Value pair list structure.
@@ -1187,9 +1187,7 @@ fn iam_policy_statement() -> AttributeType {
                 .with_provider_name("NotPrincipal"),
             StructField::new(
                 "condition",
-                AttributeType::Map(Box::new(AttributeType::Map(Box::new(
-                    string_or_list_of_strings(),
-                )))),
+                AttributeType::map(AttributeType::map(string_or_list_of_strings())),
             )
             .with_provider_name("Condition"),
         ],
