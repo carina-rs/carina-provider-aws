@@ -86,7 +86,7 @@ impl AwsProvider {
         let region = match resource.get_attr("region") {
             Some(Value::String(s)) => {
                 // Convert from aws.Region.ap_northeast_1 format to ap-northeast-1 format
-                convert_enum_value(s)
+                convert_enum_value(s).to_string()
             }
             _ => self.region.clone(),
         };
@@ -120,7 +120,7 @@ impl AwsProvider {
         if let Some(Value::String(val)) = resource.get_attr("acl") {
             use aws_sdk_s3::types::BucketCannedAcl;
             let normalized = convert_enum_value(val);
-            req = req.acl(BucketCannedAcl::from(normalized.as_str()));
+            req = req.acl(BucketCannedAcl::from(normalized));
         }
         if let Some(Value::String(val)) = resource.get_attr("grant_full_control") {
             req = req.grant_full_control(val);
@@ -571,7 +571,7 @@ impl AwsProvider {
 
         if let Some(val) = acl {
             let normalized = convert_enum_value(val);
-            req = req.acl(BucketCannedAcl::from(normalized.as_str()));
+            req = req.acl(BucketCannedAcl::from(normalized));
         }
         if let Some(val) = grant_full_control {
             req = req.grant_full_control(val);

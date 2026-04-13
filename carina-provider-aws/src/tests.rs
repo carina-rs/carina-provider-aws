@@ -555,17 +555,19 @@ fn test_subnet_hostname_type_dsl_to_aws_sdk() {
     use carina_core::utils::convert_enum_value;
 
     // DSL uses underscores: aws.ec2.subnet.HostnameType.ip_name
-    // convert_enum_value for 5-part identifiers converts underscores to hyphens
+    // convert_enum_value extracts the value, then underscore→hyphen for AWS SDK
     let dsl_value = "aws.ec2.subnet.HostnameType.ip_name";
-    let converted = convert_enum_value(dsl_value);
-    assert_eq!(converted, "ip-name");
-    let hostname_type = HostnameType::from(converted.as_str());
+    let extracted = convert_enum_value(dsl_value);
+    assert_eq!(extracted, "ip_name");
+    let aws_value = extracted.replace('_', "-");
+    let hostname_type = HostnameType::from(aws_value.as_str());
     assert_eq!(hostname_type, HostnameType::IpName);
 
     let dsl_value2 = "aws.ec2.subnet.HostnameType.resource_name";
-    let converted2 = convert_enum_value(dsl_value2);
-    assert_eq!(converted2, "resource-name");
-    let hostname_type2 = HostnameType::from(converted2.as_str());
+    let extracted2 = convert_enum_value(dsl_value2);
+    assert_eq!(extracted2, "resource_name");
+    let aws_value2 = extracted2.replace('_', "-");
+    let hostname_type2 = HostnameType::from(aws_value2.as_str());
     assert_eq!(hostname_type2, HostnameType::ResourceName);
 }
 
@@ -598,7 +600,7 @@ fn test_subnet_dns_options_fields_parsed_separately() {
     // Each field should be independently extractable for separate API calls
     if let Some(Value::String(ht)) = fields.get("hostname_type") {
         let hostname_val = convert_enum_value(ht);
-        assert_eq!(hostname_val, "ip-name");
+        assert_eq!(hostname_val, "ip_name");
     } else {
         panic!("hostname_type should be present and a String");
     }
