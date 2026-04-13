@@ -80,6 +80,10 @@ impl Provider for AwsProvider {
                 }
                 "iam.role" => self.read_iam_role(&id, identifier.as_deref()).await,
                 "logs.log_group" => self.read_logs_log_group(&id, identifier.as_deref()).await,
+                "route53.record_set" => {
+                    self.read_route53_record_set(&id, identifier.as_deref())
+                        .await
+                }
                 "sts.caller_identity" => self.read_sts_caller_identity(&id).await,
                 _ => Err(ProviderError::new(format!(
                     "Unknown resource type: {}",
@@ -181,6 +185,7 @@ impl Provider for AwsProvider {
                 }
                 "iam.role" => self.create_iam_role(resource).await,
                 "logs.log_group" => self.create_logs_log_group(resource).await,
+                "route53.record_set" => self.create_route53_record_set(resource).await,
                 _ => Err(ProviderError::new(format!(
                     "Unknown resource type: {}",
                     resource.id.resource_type
@@ -276,6 +281,7 @@ impl Provider for AwsProvider {
                 }
                 "iam.role" => self.update_iam_role(id, &identifier, &from, to).await,
                 "logs.log_group" => self.update_logs_log_group(id, &identifier, &from, to).await,
+                "route53.record_set" => self.update_route53_record_set(id, &identifier, to).await,
                 _ => Err(ProviderError::new(format!(
                     "Unknown resource type: {}",
                     id.resource_type
@@ -343,6 +349,7 @@ impl Provider for AwsProvider {
                 }
                 "iam.role" => self.delete_iam_role(id, &identifier).await,
                 "logs.log_group" => self.delete_logs_log_group(id, &identifier).await,
+                "route53.record_set" => self.delete_route53_record_set(id, &identifier).await,
                 _ => Err(ProviderError::new(format!(
                     "Unknown resource type: {}",
                     id.resource_type

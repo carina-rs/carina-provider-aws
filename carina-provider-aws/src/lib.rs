@@ -23,6 +23,7 @@ use aws_sdk_ec2::Client as Ec2Client;
 use aws_sdk_iam::Client as IamClient;
 use aws_sdk_identitystore::Client as IdentityStoreClient;
 use aws_sdk_organizations::Client as OrganizationsClient;
+use aws_sdk_route53::Client as Route53Client;
 use aws_sdk_s3::Client as S3Client;
 use aws_sdk_sts::Client as StsClient;
 
@@ -35,6 +36,7 @@ pub struct AwsProvider {
     sts_client: StsClient,
     organizations_client: OrganizationsClient,
     identitystore_client: IdentityStoreClient,
+    route53_client: Route53Client,
     region: String,
 }
 
@@ -51,6 +53,7 @@ impl AwsProvider {
             sts_client: StsClient::new(&config),
             organizations_client: OrganizationsClient::new(&config),
             identitystore_client: IdentityStoreClient::new(&config),
+            route53_client: Route53Client::new(&config),
             region: region.to_string(),
         }
     }
@@ -83,6 +86,7 @@ impl AwsProvider {
         sts_client: StsClient,
         organizations_client: OrganizationsClient,
         identitystore_client: IdentityStoreClient,
+        route53_client: Route53Client,
         region: String,
     ) -> Self {
         Self {
@@ -93,6 +97,7 @@ impl AwsProvider {
             sts_client,
             organizations_client,
             identitystore_client,
+            route53_client,
             region,
         }
     }

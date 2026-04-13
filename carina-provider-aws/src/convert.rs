@@ -218,6 +218,7 @@ fn _proto_to_core_attribute_schema(a: &ProtoAttributeSchema) -> CoreAttributeSch
         removable: a.removable,
         block_name: a.block_name.clone(),
         write_only: a.write_only,
+        identity: a.identity,
     }
 }
 
@@ -311,6 +312,7 @@ fn core_to_proto_attribute_schema(a: &CoreAttributeSchema) -> ProtoAttributeSche
         block_name: a.block_name.clone(),
         provider_name: a.provider_name.clone(),
         removable: a.removable,
+        identity: a.identity,
     }
 }
 
