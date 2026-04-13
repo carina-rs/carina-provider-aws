@@ -78,6 +78,8 @@ struct AttrInfo {
     is_create_only: bool,
     /// Whether the field is read-only
     is_read_only: bool,
+    /// Whether the field contributes to anonymous resource identity hashing
+    is_identity: bool,
     /// Description from Smithy docs
     description: Option<String>,
     /// Enum info if this attribute is an enum
@@ -136,6 +138,7 @@ fn main() -> Result<()> {
     all_resources.extend(resource_defs::s3_resources());
     all_resources.extend(resource_defs::sts_resources());
     all_resources.extend(resource_defs::organizations_resources());
+    all_resources.extend(resource_defs::route53_resources());
 
     // Filter to requested resource if specified
     let resources: Vec<&ResourceDef> = if let Some(ref name) = args.resource {
@@ -257,6 +260,9 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
     // Build read-only override set
     let read_only_overrides: HashSet<&str> = res.read_only_overrides.iter().copied().collect();
 
+    // Build identity override set
+    let identity_overrides: HashSet<&str> = res.identity_overrides.iter().copied().collect();
+
     // Build extra read-only set
     let extra_read_only: HashSet<&str> = res.extra_read_only.iter().copied().collect();
 
@@ -282,6 +288,18 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
             model
                 .operation_input(&create_op_id)
                 .with_context(|| format!("Cannot find create input for {}", create_op_id))?,
+        )
+    } else {
+        None
+    };
+
+    // Resolve schema structure (for resources with non-standard create APIs)
+    let schema_structure = if let Some(schema_struct_name) = res.schema_structure {
+        let schema_structure_id = format!("{}#{}", ns, schema_struct_name);
+        Some(
+            model
+                .get_structure(&schema_structure_id)
+                .with_context(|| format!("Cannot find schema structure {}", schema_structure_id))?,
         )
     } else {
         None
@@ -316,9 +334,21 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
     let mut all_enums: BTreeMap<String, EnumInfo> = BTreeMap::new();
     let mut all_ranged_ints: BTreeMap<String, IntRange> = BTreeMap::new();
 
-    // Collect writable fields from create input (empty for data sources)
+    // Collect writable fields: from schema_structure if set, otherwise from create input
     let mut writable_fields: BTreeMap<String, &carina_smithy::ShapeRef> = BTreeMap::new();
-    if let Some(create_input) = &create_input {
+    if let Some(schema_struct) = &schema_structure {
+        // Use schema_structure members as writable fields.
+        // Unlike create input, don't skip the identifier — it's a user-set attribute.
+        for (name, member_ref) in &schema_struct.members {
+            if exclude.contains(name.as_str()) {
+                continue;
+            }
+            if name == "Tags" {
+                continue;
+            }
+            writable_fields.insert(name.clone(), member_ref);
+        }
+    } else if let Some(create_input) = &create_input {
         for (name, member_ref) in &create_input.members {
             if exclude.contains(name.as_str()) {
                 continue;
@@ -446,6 +476,10 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
             false
         } else if extra_writable_names.contains(name.as_str()) {
             true // Extra writable fields are always create-only
+        } else if schema_structure.is_some() {
+            // For schema_structure resources, only explicit overrides are create-only.
+            // The default is writable since the update operation is hand-coded.
+            create_only_overrides.contains(name.as_str())
         } else {
             create_only_overrides.contains(name.as_str())
                 || !updatable_fields.contains(name.as_str())
@@ -471,6 +505,8 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
             name,
         );
 
+        let is_identity = identity_overrides.contains(name.as_str());
+
         attrs.push(AttrInfo {
             snake_name,
             provider_name: name.clone(),
@@ -478,6 +514,7 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
             is_required,
             is_create_only,
             is_read_only,
+            is_identity,
             description,
             enum_info,
         });
@@ -503,6 +540,7 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
             is_required: false,
             is_create_only: true,
             is_read_only: false,
+            is_identity: identity_overrides.contains(extra.name),
             description: extra.description.map(|s| s.to_string()),
             enum_info: None,
         });
@@ -534,6 +572,7 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
             is_required: false,
             is_create_only: false,
             is_read_only: true,
+            is_identity: false,
             description,
             enum_info,
         });
@@ -756,6 +795,9 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
         }
         if attr.is_create_only {
             attr_code.push_str("\n\x20               .create_only()");
+        }
+        if attr.is_identity {
+            attr_code.push_str("\n\x20               .identity()");
         }
 
         if let Some(ref desc) = attr.description {
@@ -2914,6 +2956,7 @@ fn cf_type_name(resource_name: &str) -> &'static str {
         "sts.caller_identity" => "AWS::STS::CallerIdentity",
         "organizations.organization" => "AWS::Organizations::Organization",
         "organizations.account" => "AWS::Organizations::Account",
+        "route53.record_set" => "AWS::Route53::RecordSet",
         _ => panic!(
             "Unknown resource: {}. Add it to cf_type_name().",
             resource_name

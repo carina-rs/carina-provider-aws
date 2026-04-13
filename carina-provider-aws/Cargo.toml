@@ -33,6 +33,7 @@ aws-sdk-iam = { version = "1", default-features = false, features = ["behavior-v
 aws-sdk-organizations = { version = "1", default-features = false, features = ["behavior-version-latest"] }
 aws-sdk-sts = { version = "1", default-features = false, features = ["behavior-version-latest"] }
 aws-sdk-identitystore = { version = "1", default-features = false, features = ["behavior-version-latest"] }
+aws-sdk-route53 = { version = "1", default-features = false, features = ["behavior-version-latest"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"

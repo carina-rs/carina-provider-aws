@@ -12,6 +12,7 @@ pub mod iam;
 pub mod identitystore;
 pub mod logs;
 pub mod organizations;
+pub mod route53;
 pub mod s3;
 pub mod sts;
 
@@ -42,6 +43,7 @@ pub fn configs() -> Vec<AwsSchemaConfig> {
         logs::log_group::logs_log_group_config(),
         organizations::account::organizations_account_config(),
         organizations::organization::organizations_organization_config(),
+        route53::record_set::route53_record_set_config(),
         s3::bucket::s3_bucket_config(),
         sts::caller_identity::sts_caller_identity_config(),
     ]
@@ -81,6 +83,7 @@ pub fn get_enum_valid_values(
         logs::log_group::enum_valid_values(),
         organizations::account::enum_valid_values(),
         organizations::organization::enum_valid_values(),
+        route53::record_set::enum_valid_values(),
         s3::bucket::enum_valid_values(),
         sts::caller_identity::enum_valid_values(),
     ];
@@ -175,6 +178,9 @@ pub fn get_enum_alias_reverse(
     }
     if resource_type == "organizations.organization" {
         return organizations::organization::enum_alias_reverse(attr_name, value);
+    }
+    if resource_type == "route53.record_set" {
+        return route53::record_set::enum_alias_reverse(attr_name, value);
     }
     if resource_type == "s3.bucket" {
         return s3::bucket::enum_alias_reverse(attr_name, value);
@@ -356,6 +362,13 @@ pub fn build_enum_aliases_map() -> std::collections::HashMap<
     }
     for (attr, alias, canonical) in organizations::organization::enum_alias_entries() {
         map.entry("organizations.organization".to_string())
+            .or_insert_with(std::collections::HashMap::new)
+            .entry(attr.to_string())
+            .or_insert_with(std::collections::HashMap::new)
+            .insert(alias.to_string(), canonical.to_string());
+    }
+    for (attr, alias, canonical) in route53::record_set::enum_alias_entries() {
+        map.entry("route53.record_set".to_string())
             .or_insert_with(std::collections::HashMap::new)
             .entry(attr.to_string())
             .or_insert_with(std::collections::HashMap::new)
