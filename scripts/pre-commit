@@ -1,61 +1,179 @@
 #!/bin/bash
-# Pre-commit hook
+# Pre-commit hook for Carina
 # Install: ./scripts/setup-hooks.sh
-# Skip clippy: SKIP_CLIPPY=1 git commit ...
-
-set -e
+#
+# Environment variables:
+#   SKIP_CLIPPY=1  - Skip clippy check (useful for WIP commits)
 
 # Block direct commits to main/master
 current_branch=$(git symbolic-ref --short HEAD 2>/dev/null)
 if [ "$current_branch" = "main" ] || [ "$current_branch" = "master" ]; then
     echo "ERROR: Direct commits to '$current_branch' are not allowed."
+    echo "Create a feature branch first: git wt <branch-name> main"
     exit 1
 fi
 
-echo "Running pre-commit checks..."
+changed_crates=()
+fmt_scope=()
+clippy_scope=()
+check_mode=""
 
-# sccache compatibility: cargo clippy sets CARGO_INCREMENTAL internally,
-# which sccache rejects. Override RUSTC_WRAPPER for clippy.
-clippy_env=()
-if [ -f .cargo/config.toml ] && grep -q 'sccache' .cargo/config.toml 2>/dev/null; then
+path_requires_workspace_rust_checks() {
+    case "$1" in
+        Cargo.toml | Cargo.lock | rust-toolchain | rust-toolchain.toml | rustfmt.toml | clippy.toml)
+            return 0
+            ;;
+        .cargo/* | scripts/pre-commit | scripts/setup-hooks.sh)
+            return 0
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+collect_changed_crates() {
+    local staged_files="$1"
+    local crate_name
+
+    changed_crates=()
+    for crate_dir in carina-*/; do
+        crate_name="${crate_dir%/}"
+        # Skip directories that are not Cargo crates (e.g., WIT-only packages)
+        [ -f "${crate_dir}Cargo.toml" ] || continue
+        if echo "$staged_files" | grep -q "^${crate_name}/"; then
+            changed_crates+=("-p" "$crate_name")
+        fi
+    done
+}
+
+has_workspace_rust_changes() {
+    local staged_files="$1"
+    local staged_file
+
+    while IFS= read -r staged_file; do
+        [ -z "$staged_file" ] && continue
+        if path_requires_workspace_rust_checks "$staged_file"; then
+            return 0
+        fi
+    done <<<"$staged_files"
+
+    return 1
+}
+
+set_check_scopes() {
+    local staged_files="$1"
+
+    collect_changed_crates "$staged_files"
+
+    if has_workspace_rust_changes "$staged_files"; then
+        check_mode="workspace"
+        fmt_scope=(--all)
+        clippy_scope=(--all-targets --all-features)
+    elif [ ${#changed_crates[@]} -gt 0 ]; then
+        check_mode="crate"
+        fmt_scope=("${changed_crates[@]}")
+        clippy_scope=("${changed_crates[@]}" --all-targets --all-features)
+    else
+        check_mode="skip"
+        fmt_scope=()
+        clippy_scope=()
+    fi
+}
+
+main() {
+    local staged_files
+    local fmt_log
+    local clippy_log
+    local fmt_start
+    local fmt_pid
+    local clippy_start
+    local clippy_pid
+    local fmt_exit
+    local clippy_exit
+    local fmt_end
+    local fmt_elapsed
+    local clippy_end
+    local clippy_elapsed
+
+    set -e
+
+    echo "Running pre-commit checks..."
+
+    staged_files=$(git diff --cached --name-only --diff-filter=ACMR)
+    if [ -z "$staged_files" ]; then
+        echo "No staged files, skipping checks."
+        exit 0
+    fi
+
+    set_check_scopes "$staged_files"
+    if [ "$check_mode" = "skip" ]; then
+        echo "No Rust-affecting changes detected, skipping checks."
+        exit 0
+    fi
+
+    # sccache (configured via .cargo/config.toml) is incompatible with cargo's
+    # incremental compilation. Always disable sccache and enable incremental
+    # compilation for pre-commit checks. We unconditionally clear RUSTC_WRAPPER
+    # because cargo resolves .cargo/config.toml from parent directories, so
+    # sccache may be active even when no config exists in the current worktree.
     clippy_env=(env RUSTC_WRAPPER="")
+    export CARGO_INCREMENTAL=1
+
+    fmt_log=$(mktemp)
+    clippy_log=$(mktemp)
+    trap 'rm -f "$fmt_log" "$clippy_log"' EXIT
+
+    fmt_start=$(date +%s)
+    cargo fmt "${fmt_scope[@]}" -- --check >"$fmt_log" 2>&1 &
+    fmt_pid=$!
+
+    if [ "${SKIP_CLIPPY:-0}" = "1" ]; then
+        echo "Skipping clippy (SKIP_CLIPPY=1)"
+        clippy_pid=""
+    else
+        clippy_start=$(date +%s)
+        "${clippy_env[@]}" cargo clippy "${clippy_scope[@]}" --no-deps -- -D warnings >"$clippy_log" 2>&1 &
+        clippy_pid=$!
+    fi
+
+    fmt_exit=0
+    clippy_exit=0
+    wait $fmt_pid || fmt_exit=$?
+    fmt_end=$(date +%s)
+    fmt_elapsed=$((fmt_end - fmt_start))
+
+    if [ -n "$clippy_pid" ]; then
+        wait $clippy_pid || clippy_exit=$?
+        clippy_end=$(date +%s)
+        clippy_elapsed=$((clippy_end - clippy_start))
+    fi
+
+    if [ $fmt_exit -ne 0 ]; then
+        echo "Formatting check FAILED (${fmt_elapsed}s):"
+        cat "$fmt_log"
+        echo ""
+    else
+        echo "Formatting check passed (${fmt_elapsed}s)"
+    fi
+
+    if [ -n "$clippy_pid" ]; then
+        if [ $clippy_exit -ne 0 ]; then
+            echo "Clippy check FAILED (${clippy_elapsed}s):"
+            cat "$clippy_log"
+            echo ""
+        else
+            echo "Clippy check passed (${clippy_elapsed}s)"
+        fi
+    fi
+
+    if [ $fmt_exit -ne 0 ] || [ $clippy_exit -ne 0 ]; then
+        exit 1
+    fi
+
+    echo "All pre-commit checks passed!"
+}
+
+if [ "${BASH_SOURCE[0]}" = "$0" ]; then
+    main "$@"
 fi
-
-# Run fmt and clippy in parallel
-fmt_log=$(mktemp)
-clippy_log=$(mktemp)
-trap 'rm -f "$fmt_log" "$clippy_log"' EXIT
-
-cargo fmt -- --check >"$fmt_log" 2>&1 &
-fmt_pid=$!
-
-if [ "${SKIP_CLIPPY:-0}" = "1" ]; then
-    echo "Skipping clippy (SKIP_CLIPPY=1)"
-    clippy_pid=""
-else
-    "${clippy_env[@]}" cargo clippy --all-targets --no-deps -- -D warnings >"$clippy_log" 2>&1 &
-    clippy_pid=$!
-fi
-
-fmt_exit=0
-clippy_exit=0
-wait $fmt_pid || fmt_exit=$?
-if [ -n "$clippy_pid" ]; then
-    wait $clippy_pid || clippy_exit=$?
-fi
-
-if [ $fmt_exit -ne 0 ]; then
-    echo "Formatting check FAILED:"
-    cat "$fmt_log"
-fi
-
-if [ $clippy_exit -ne 0 ]; then
-    echo "Clippy check FAILED:"
-    cat "$clippy_log"
-fi
-
-if [ $fmt_exit -ne 0 ] || [ $clippy_exit -ne 0 ]; then
-    exit 1
-fi
-
-echo "All pre-commit checks passed!"
