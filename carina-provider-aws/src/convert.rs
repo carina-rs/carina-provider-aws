@@ -178,6 +178,17 @@ fn proto_to_core_attribute_type(t: &ProtoAttributeType) -> CoreAttributeType {
         ProtoAttributeType::Union { members } => {
             CoreAttributeType::Union(members.iter().map(proto_to_core_attribute_type).collect())
         }
+        ProtoAttributeType::Custom {
+            name,
+            base,
+            namespace,
+        } => CoreAttributeType::Custom {
+            name: name.clone(),
+            base: Box::new(proto_to_core_attribute_type(base)),
+            validate: |_| Ok(()),
+            namespace: namespace.clone(),
+            to_dsl: None,
+        },
     }
 }
 
@@ -258,8 +269,16 @@ fn core_to_proto_attribute_type(t: &CoreAttributeType) -> ProtoAttributeType {
             name: name.clone(),
             fields: fields.iter().map(core_to_proto_struct_field).collect(),
         },
-        // Custom -> base type: function pointers can't cross process boundary
-        CoreAttributeType::Custom { base, .. } => core_to_proto_attribute_type(base),
+        CoreAttributeType::Custom {
+            name,
+            base,
+            namespace,
+            ..
+        } => ProtoAttributeType::Custom {
+            name: name.clone(),
+            base: Box::new(core_to_proto_attribute_type(base)),
+            namespace: namespace.clone(),
+        },
         CoreAttributeType::Union(members) => ProtoAttributeType::Union {
             members: members.iter().map(core_to_proto_attribute_type).collect(),
         },

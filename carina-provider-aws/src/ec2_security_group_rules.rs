@@ -344,7 +344,11 @@ pub(crate) fn convert_protocol_value(value: &str) -> String {
     let raw = convert_enum_value(value);
 
     // Handle special case: "all" means "-1" (all protocols)
-    if raw == "all" { "-1".to_string() } else { raw }
+    if raw == "all" {
+        "-1".to_string()
+    } else {
+        raw.to_string()
+    }
 }
 
 #[cfg(test)]

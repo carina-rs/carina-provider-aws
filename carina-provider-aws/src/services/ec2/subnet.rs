@@ -181,7 +181,7 @@ impl AwsProvider {
         // Each private_dns_name_options_on_launch field must be a separate API call.
         if let Some(Value::Map(fields)) = attributes.get("private_dns_name_options_on_launch") {
             if let Some(Value::String(ht)) = fields.get("hostname_type") {
-                let hostname_val = convert_enum_value(ht);
+                let hostname_val = convert_enum_value(ht).replace('_', "-");
                 self.ec2_client
                     .modify_subnet_attribute()
                     .subnet_id(subnet_id)
