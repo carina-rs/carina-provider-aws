@@ -1009,7 +1009,7 @@ fn resolve_type(
             }
         }
         Some(ShapeKind::Map) => (
-            "AttributeType::Map(Box::new(AttributeType::String))".to_string(),
+            "AttributeType::map(AttributeType::String)".to_string(),
             None,
         ),
         Some(ShapeKind::Structure) => {

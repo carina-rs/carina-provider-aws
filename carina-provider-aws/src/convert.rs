@@ -168,9 +168,10 @@ fn proto_to_core_attribute_type(t: &ProtoAttributeType) -> CoreAttributeType {
             inner: Box::new(proto_to_core_attribute_type(inner)),
             ordered: *ordered,
         },
-        ProtoAttributeType::Map { inner } => {
-            CoreAttributeType::Map(Box::new(proto_to_core_attribute_type(inner)))
-        }
+        ProtoAttributeType::Map { inner, key } => CoreAttributeType::Map {
+            key: Box::new(proto_to_core_attribute_type(key)),
+            value: Box::new(proto_to_core_attribute_type(inner)),
+        },
         ProtoAttributeType::Struct { name, fields } => CoreAttributeType::Struct {
             name: name.clone(),
             fields: fields.iter().map(proto_to_core_struct_field).collect(),
@@ -262,8 +263,9 @@ fn core_to_proto_attribute_type(t: &CoreAttributeType) -> ProtoAttributeType {
             inner: Box::new(core_to_proto_attribute_type(inner)),
             ordered: *ordered,
         },
-        CoreAttributeType::Map(inner) => ProtoAttributeType::Map {
+        CoreAttributeType::Map { key, value: inner } => ProtoAttributeType::Map {
             inner: Box::new(core_to_proto_attribute_type(inner)),
+            key: Box::new(core_to_proto_attribute_type(key)),
         },
         CoreAttributeType::Struct { name, fields } => ProtoAttributeType::Struct {
             name: name.clone(),
