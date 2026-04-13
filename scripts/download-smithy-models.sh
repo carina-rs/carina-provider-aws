@@ -28,5 +28,6 @@ download "ec2"           "ec2/service/2016-11-15/ec2-2016-11-15.json"
 download "s3"            "s3/service/2006-03-01/s3-2006-03-01.json"
 download "sts"           "sts/service/2011-06-15/sts-2011-06-15.json"
 download "organizations" "organizations/service/2016-11-28/organizations-2016-11-28.json"
+download "route53"       "route-53/service/2013-04-01/route-53-2013-04-01.json"
 
 echo "Done."

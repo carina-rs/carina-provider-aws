@@ -32,6 +32,10 @@ pub struct ResourceDef {
     pub name: &'static str,
     /// Smithy service namespace (e.g., "com.amazonaws.ec2")
     pub service_namespace: &'static str,
+    /// Smithy structure to derive writable fields from, instead of the create op input.
+    /// Use for APIs where resource fields are nested (e.g., Route 53 `ResourceRecordSet`
+    /// inside `ChangeResourceRecordSets`). When None, fields come from `create_op` input.
+    pub schema_structure: Option<&'static str>,
     /// Whether delete is a single API call (delete_op + identifier).
     /// true: VPC, Subnet, Route Table, Security Group, S3 Bucket
     /// false: IGW (detach+delete), Route (no-op), SG rules (multi-rule revoke)
@@ -77,6 +81,9 @@ pub struct ResourceDef {
     /// Extra writable fields to add as create-only attributes.
     /// These are fields not present in the create operation input.
     pub extra_writable: Vec<ExtraField>,
+    /// Fields to mark as identity (contribute to anonymous resource identifier hashing).
+    /// Use for attributes that distinguish same-type resources sharing create-only values.
+    pub identity_overrides: Vec<&'static str>,
 }
 
 /// How fields are passed to an update API operation.
@@ -115,6 +122,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
         ResourceDef {
             name: "ec2.vpc",
             service_namespace: "com.amazonaws.ec2",
+            schema_structure: None,
             simple_delete: true,
             noop_update: false,
             create_op: "CreateVpc",
@@ -146,11 +154,13 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             extra_read_only: vec![],
             read_only_overrides: vec![],
             extra_writable: vec![],
+            identity_overrides: vec![],
         },
         // ec2.subnet
         ResourceDef {
             name: "ec2.subnet",
             service_namespace: "com.amazonaws.ec2",
+            schema_structure: None,
             simple_delete: true,
             noop_update: false,
             create_op: "CreateSubnet",
@@ -178,11 +188,13 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             extra_read_only: vec![],
             read_only_overrides: vec![],
             extra_writable: vec![],
+            identity_overrides: vec![],
         },
         // ec2.internet_gateway
         ResourceDef {
             name: "ec2.internet_gateway",
             service_namespace: "com.amazonaws.ec2",
+            schema_structure: None,
             simple_delete: false,
             noop_update: true,
             create_op: "CreateInternetGateway",
@@ -201,11 +213,13 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             extra_read_only: vec![],
             read_only_overrides: vec![],
             extra_writable: vec![],
+            identity_overrides: vec![],
         },
         // ec2.route_table
         ResourceDef {
             name: "ec2.route_table",
             service_namespace: "com.amazonaws.ec2",
+            schema_structure: None,
             simple_delete: true,
             noop_update: true,
             create_op: "CreateRouteTable",
@@ -224,11 +238,13 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             extra_read_only: vec![],
             read_only_overrides: vec![],
             extra_writable: vec![],
+            identity_overrides: vec![],
         },
         // ec2.route
         ResourceDef {
             name: "ec2.route",
             service_namespace: "com.amazonaws.ec2",
+            schema_structure: None,
             simple_delete: false,
             noop_update: false,
             create_op: "CreateRoute",
@@ -265,11 +281,13 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             extra_read_only: vec![],
             read_only_overrides: vec![],
             extra_writable: vec![],
+            identity_overrides: vec![],
         },
         // ec2.security_group
         ResourceDef {
             name: "ec2.security_group",
             service_namespace: "com.amazonaws.ec2",
+            schema_structure: None,
             simple_delete: true,
             noop_update: true,
             create_op: "CreateSecurityGroup",
@@ -288,11 +306,13 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             extra_read_only: vec![],
             read_only_overrides: vec![],
             extra_writable: vec![],
+            identity_overrides: vec![],
         },
         // ec2.security_group_ingress
         ResourceDef {
             name: "ec2.security_group_ingress",
             service_namespace: "com.amazonaws.ec2",
+            schema_structure: None,
             simple_delete: false,
             noop_update: false,
             create_op: "AuthorizeSecurityGroupIngress",
@@ -340,11 +360,13 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
                     description: Some("The ID of the source security group."),
                 },
             ],
+            identity_overrides: vec![],
         },
         // ec2.security_group_egress
         ResourceDef {
             name: "ec2.security_group_egress",
             service_namespace: "com.amazonaws.ec2",
+            schema_structure: None,
             simple_delete: false,
             noop_update: false,
             create_op: "AuthorizeSecurityGroupEgress",
@@ -392,11 +414,13 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
                     description: Some("The ID of the destination security group."),
                 },
             ],
+            identity_overrides: vec![],
         },
         // ec2.egress_only_internet_gateway
         ResourceDef {
             name: "ec2.egress_only_internet_gateway",
             service_namespace: "com.amazonaws.ec2",
+            schema_structure: None,
             simple_delete: true,
             noop_update: true,
             create_op: "CreateEgressOnlyInternetGateway",
@@ -415,11 +439,13 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             extra_read_only: vec![],
             read_only_overrides: vec![],
             extra_writable: vec![],
+            identity_overrides: vec![],
         },
         // ec2.eip
         ResourceDef {
             name: "ec2.eip",
             service_namespace: "com.amazonaws.ec2",
+            schema_structure: None,
             simple_delete: true,
             noop_update: true,
             create_op: "AllocateAddress",
@@ -444,11 +470,13 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             extra_read_only: vec!["PublicIp"],
             read_only_overrides: vec![],
             extra_writable: vec![],
+            identity_overrides: vec![],
         },
         // ec2.flow_log
         ResourceDef {
             name: "ec2.flow_log",
             service_namespace: "com.amazonaws.ec2",
+            schema_structure: None,
             simple_delete: true,
             noop_update: true,
             create_op: "CreateFlowLogs",
@@ -476,11 +504,13 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             extra_read_only: vec![],
             read_only_overrides: vec![],
             extra_writable: vec![],
+            identity_overrides: vec![],
         },
         // ec2.nat_gateway
         ResourceDef {
             name: "ec2.nat_gateway",
             service_namespace: "com.amazonaws.ec2",
+            schema_structure: None,
             simple_delete: true,
             noop_update: true,
             create_op: "CreateNatGateway",
@@ -506,11 +536,13 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             extra_read_only: vec![],
             read_only_overrides: vec![],
             extra_writable: vec![],
+            identity_overrides: vec![],
         },
         // ec2.subnet_route_table_association
         ResourceDef {
             name: "ec2.subnet_route_table_association",
             service_namespace: "com.amazonaws.ec2",
+            schema_structure: None,
             simple_delete: true,
             noop_update: true,
             create_op: "AssociateRouteTable",
@@ -529,11 +561,13 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             extra_read_only: vec![],
             read_only_overrides: vec![],
             extra_writable: vec![],
+            identity_overrides: vec![],
         },
         // ec2.transit_gateway
         ResourceDef {
             name: "ec2.transit_gateway",
             service_namespace: "com.amazonaws.ec2",
+            schema_structure: None,
             simple_delete: true,
             noop_update: false,
             create_op: "CreateTransitGateway",
@@ -555,11 +589,13 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             extra_read_only: vec![],
             read_only_overrides: vec![],
             extra_writable: vec![],
+            identity_overrides: vec![],
         },
         // ec2.transit_gateway_attachment
         ResourceDef {
             name: "ec2.transit_gateway_attachment",
             service_namespace: "com.amazonaws.ec2",
+            schema_structure: None,
             simple_delete: true,
             noop_update: true,
             create_op: "CreateTransitGatewayVpcAttachment",
@@ -578,11 +614,13 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             extra_read_only: vec![],
             read_only_overrides: vec![],
             extra_writable: vec![],
+            identity_overrides: vec![],
         },
         // ec2.vpc_endpoint
         ResourceDef {
             name: "ec2.vpc_endpoint",
             service_namespace: "com.amazonaws.ec2",
+            schema_structure: None,
             simple_delete: true,
             noop_update: false,
             create_op: "CreateVpcEndpoint",
@@ -611,11 +649,13 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             extra_read_only: vec![],
             read_only_overrides: vec![],
             extra_writable: vec![],
+            identity_overrides: vec![],
         },
         // ec2.vpc_gateway_attachment
         ResourceDef {
             name: "ec2.vpc_gateway_attachment",
             service_namespace: "com.amazonaws.ec2",
+            schema_structure: None,
             simple_delete: false,
             noop_update: true,
             create_op: "AttachInternetGateway",
@@ -645,11 +685,13 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
                     description: Some("The ID of the VPN gateway."),
                 },
             ],
+            identity_overrides: vec![],
         },
         // ec2.vpc_peering_connection
         ResourceDef {
             name: "ec2.vpc_peering_connection",
             service_namespace: "com.amazonaws.ec2",
+            schema_structure: None,
             simple_delete: true,
             noop_update: true,
             create_op: "CreateVpcPeeringConnection",
@@ -668,11 +710,13 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             extra_read_only: vec![],
             read_only_overrides: vec![],
             extra_writable: vec![],
+            identity_overrides: vec![],
         },
         // ec2.vpn_gateway
         ResourceDef {
             name: "ec2.vpn_gateway",
             service_namespace: "com.amazonaws.ec2",
+            schema_structure: None,
             simple_delete: true,
             noop_update: true,
             create_op: "CreateVpnGateway",
@@ -691,6 +735,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             extra_read_only: vec![],
             read_only_overrides: vec![],
             extra_writable: vec![],
+            identity_overrides: vec![],
         },
     ]
 }
@@ -702,6 +747,7 @@ pub fn sts_resources() -> Vec<ResourceDef> {
         ResourceDef {
             name: "sts.caller_identity",
             service_namespace: "com.amazonaws.sts",
+            schema_structure: None,
             simple_delete: false,
             noop_update: false,
             create_op: "",
@@ -728,6 +774,7 @@ pub fn sts_resources() -> Vec<ResourceDef> {
             extra_read_only: vec![],
             read_only_overrides: vec![],
             extra_writable: vec![],
+            identity_overrides: vec![],
         },
     ]
 }
@@ -739,6 +786,7 @@ pub fn organizations_resources() -> Vec<ResourceDef> {
         ResourceDef {
             name: "organizations.organization",
             service_namespace: "com.amazonaws.organizations",
+            schema_structure: None,
             simple_delete: true,
             noop_update: true,
             create_op: "CreateOrganization",
@@ -762,11 +810,13 @@ pub fn organizations_resources() -> Vec<ResourceDef> {
             ],
             read_only_overrides: vec![],
             extra_writable: vec![],
+            identity_overrides: vec![],
         },
         // organizations.account
         ResourceDef {
             name: "organizations.account",
             service_namespace: "com.amazonaws.organizations",
+            schema_structure: None,
             simple_delete: false,
             noop_update: true,
             create_op: "CreateAccount",
@@ -790,6 +840,7 @@ pub fn organizations_resources() -> Vec<ResourceDef> {
             extra_read_only: vec!["Arn", "Name", "Status", "JoinedMethod", "JoinedTimestamp"],
             read_only_overrides: vec![],
             extra_writable: vec![],
+            identity_overrides: vec![],
         },
     ]
 }
@@ -801,6 +852,7 @@ pub fn s3_resources() -> Vec<ResourceDef> {
         ResourceDef {
             name: "s3.bucket",
             service_namespace: "com.amazonaws.s3",
+            schema_structure: None,
             simple_delete: false, // manually implemented to support lifecycle.force_delete
             noop_update: false,
             create_op: "CreateBucket",
@@ -853,6 +905,64 @@ pub fn s3_resources() -> Vec<ResourceDef> {
             extra_read_only: vec![],
             read_only_overrides: vec![],
             extra_writable: vec![],
+            identity_overrides: vec![],
+        },
+    ]
+}
+
+/// Returns Route 53 resource definitions.
+pub fn route53_resources() -> Vec<ResourceDef> {
+    vec![
+        // route53.record_set
+        // Uses schema_structure because ChangeResourceRecordSets wraps fields
+        // in a nested ChangeBatch, not as top-level input parameters.
+        ResourceDef {
+            name: "route53.record_set",
+            service_namespace: "com.amazonaws.route53",
+            schema_structure: Some("ResourceRecordSet"),
+            simple_delete: false,
+            noop_update: false,
+            create_op: "ChangeResourceRecordSets",
+            read_structure: Some("ResourceRecordSet"),
+            read_ops: vec![],
+            delete_op: "ChangeResourceRecordSets",
+            update_ops: vec![],
+            identifier: "Name",
+            has_tags: false,
+            type_overrides: vec![
+                // Smithy has ResourceRecords as List<Struct{Value}>, but for DSL
+                // simplicity we flatten to List<String> since each record is a
+                // single value string.
+                (
+                    "ResourceRecords",
+                    "AttributeType::list(AttributeType::String)",
+                ),
+            ],
+            exclude_fields: vec![
+                // Routing policy fields — out of scope for initial version
+                "SetIdentifier",
+                "Weight",
+                "Region",
+                "Failover",
+                "MultiValueAnswer",
+                "GeoLocation",
+                "GeoProximityLocation",
+                "HealthCheckId",
+                "TrafficPolicyInstanceId",
+                "CidrRoutingConfig",
+            ],
+            create_only_overrides: vec!["Name"],
+            enum_aliases: vec![],
+            to_dsl_overrides: vec![],
+            required_overrides: vec!["Name", "Type"],
+            extra_read_only: vec![],
+            read_only_overrides: vec![],
+            extra_writable: vec![ExtraField {
+                name: "HostedZoneId",
+                read_source: None,
+                description: Some("The ID of the hosted zone that contains this record set."),
+            }],
+            identity_overrides: vec!["Type"],
         },
     ]
 }
