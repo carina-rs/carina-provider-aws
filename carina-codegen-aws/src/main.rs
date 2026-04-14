@@ -2061,6 +2061,18 @@ fn generate_markdown_resource(res: &ResourceDef, model: &SmithyModel) -> Result<
         None
     };
 
+    // Resolve schema_structure (overrides create input for field discovery)
+    let schema_structure = if let Some(schema_struct_name) = res.schema_structure {
+        let schema_structure_id = format!("{}#{}", ns, schema_struct_name);
+        Some(
+            model
+                .get_structure(&schema_structure_id)
+                .with_context(|| format!("Cannot find schema structure {}", schema_structure_id))?,
+        )
+    } else {
+        None
+    };
+
     // Resolve read structure
     let read_structure = if let Some(read_struct_name) = res.read_structure {
         let read_structure_id = format!("{}#{}", ns, read_struct_name);
@@ -2081,9 +2093,16 @@ fn generate_markdown_resource(res: &ResourceDef, model: &SmithyModel) -> Result<
         }
     }
 
-    // Collect writable fields (empty for data sources)
+    // Collect writable fields: from schema_structure if set, otherwise from create input
     let mut writable_fields: BTreeMap<String, &carina_smithy::ShapeRef> = BTreeMap::new();
-    if let Some(create_input) = &create_input {
+    if let Some(schema_struct) = &schema_structure {
+        for (name, member_ref) in &schema_struct.members {
+            if exclude.contains(name.as_str()) || name == "Tags" {
+                continue;
+            }
+            writable_fields.insert(name.clone(), member_ref);
+        }
+    } else if let Some(create_input) = &create_input {
         for (name, member_ref) in &create_input.members {
             if exclude.contains(name.as_str()) || name == "Tags" {
                 continue;
