@@ -1475,7 +1475,8 @@ fn generate_provider_code(
          use carina_core::provider::{ProviderError, ProviderResult};\n\
          use carina_core::resource::{Resource, ResourceId, State, Value};\n\
          use carina_core::utils::extract_enum_value;\n\n\
-         use crate::AwsProvider;\n\n",
+         use crate::AwsProvider;\n\
+         use crate::helpers::sdk_error_message;\n\n",
     );
 
     // Generate methods on AwsProvider
@@ -1508,8 +1509,7 @@ fn generate_provider_code(
              \x20       identifier: &str,\n\
              \x20   ) -> ProviderResult<()> {{\n\
              \x20       self.{}.{}().{}(identifier).send().await.map_err(|e| {{\n\
-             \x20           ProviderError::new(\"Failed to delete {}\")\n\
-             \x20               .with_cause(e)\n\
+             \x20           ProviderError::new(sdk_error_message(\"Failed to delete {}\", &e))\n\
              \x20               .for_resource(id.clone())\n\
              \x20       }})?;\n\
              \x20       Ok(())\n\
@@ -1605,10 +1605,9 @@ fn generate_provider_code(
                 client_field, sdk_method, id_setter
             ));
             code.push_str(&format!(
-                "\x20           ProviderError::new(\"Failed to read {}\")\n",
+                "\x20           ProviderError::new(sdk_error_message(\"Failed to read {}\", &e))\n",
                 op_desc
             ));
-            code.push_str("\x20               .with_cause(e)\n");
             code.push_str("\x20               .for_resource(id.clone())\n");
             code.push_str("\x20       })?;\n");
 
@@ -1809,10 +1808,9 @@ fn generate_provider_code(
                 client_field, sdk_method, id_setter, struct_setter
             ));
             code.push_str(&format!(
-                "\x20               ProviderError::new(\"Failed to {}\")\n",
+                "\x20               ProviderError::new(sdk_error_message(\"Failed to {}\", &e))\n",
                 op_desc
             ));
-            code.push_str("\x20                   .with_cause(e)\n");
             code.push_str("\x20                   .for_resource(id.clone())\n");
             code.push_str("\x20           })?;\n");
             code.push_str("\x20       }\n");
