@@ -796,7 +796,10 @@ pub fn sts_data_sources() -> Vec<DataSourceDef> {
             ],
             defaults: vec![],
         }],
-        type_overrides: vec![],
+        type_overrides: vec![
+            ("AccountId", "super::aws_account_id()"),
+            ("Arn", "super::arn()"),
+        ],
         exclude_fields: vec![],
     }]
 }

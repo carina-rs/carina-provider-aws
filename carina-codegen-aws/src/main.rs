@@ -142,6 +142,9 @@ fn main() -> Result<()> {
     all_resources.extend(resource_defs::iam_resources());
     all_resources.extend(resource_defs::logs_resources());
 
+    // Collect all data source definitions
+    let all_data_sources = resource_defs::sts_data_sources();
+
     // Filter to requested resource if specified
     let resources: Vec<&ResourceDef> = if let Some(ref name) = args.resource {
         all_resources
@@ -152,7 +155,16 @@ fn main() -> Result<()> {
         all_resources.iter().collect()
     };
 
-    if resources.is_empty() {
+    let data_sources: Vec<&resource_defs::DataSourceDef> = if let Some(ref name) = args.resource {
+        all_data_sources
+            .iter()
+            .filter(|d| d.name == name.as_str())
+            .collect()
+    } else {
+        all_data_sources.iter().collect()
+    };
+
+    if resources.is_empty() && data_sources.is_empty() {
         if let Some(ref name) = args.resource {
             anyhow::bail!("Unknown resource: {}", name);
         }
@@ -167,6 +179,13 @@ fn main() -> Result<()> {
         }
         let model = load_model(&args.model_dir, res.service_namespace)?;
         models.insert(res.service_namespace, model);
+    }
+    for ds in &data_sources {
+        if models.contains_key(ds.service_namespace) {
+            continue;
+        }
+        let model = load_model(&args.model_dir, ds.service_namespace)?;
+        models.insert(ds.service_namespace, model);
     }
 
     match args.format.as_str() {
@@ -186,6 +205,22 @@ fn main() -> Result<()> {
                     .with_context(|| format!("Failed to write {}", output_path.display()))?;
                 eprintln!("Generated: {}", output_path.display());
                 generated_modules.push(res.name);
+            }
+
+            // Generate data source schemas
+            for ds in &data_sources {
+                let model = models.get(ds.service_namespace).unwrap();
+                let code = generate_data_source(ds, model)?;
+
+                let (service, resource) = split_service_resource(ds.name);
+                let service_dir = args.output_dir.join(service);
+                std::fs::create_dir_all(&service_dir)?;
+
+                let output_path = service_dir.join(format!("{}.rs", resource));
+                std::fs::write(&output_path, &code)
+                    .with_context(|| format!("Failed to write {}", output_path.display()))?;
+                eprintln!("Generated: {}", output_path.display());
+                generated_modules.push(ds.name);
             }
 
             // Generate per-service mod.rs files
@@ -212,6 +247,18 @@ fn main() -> Result<()> {
                 let md = generate_markdown_resource(res, model)?;
 
                 let (service, resource) = split_service_resource(res.name);
+                let service_dir = args.output_dir.join(service);
+                std::fs::create_dir_all(&service_dir)?;
+                let output_path = service_dir.join(format!("{}.md", resource));
+                std::fs::write(&output_path, &md)
+                    .with_context(|| format!("Failed to write {}", output_path.display()))?;
+                eprintln!("Generated: {}", output_path.display());
+            }
+            for ds in &data_sources {
+                let model = models.get(ds.service_namespace).unwrap();
+                let md = generate_markdown_data_source(ds, model)?;
+
+                let (service, resource) = split_service_resource(ds.name);
                 let service_dir = args.output_dir.join(service);
                 std::fs::create_dir_all(&service_dir)?;
                 let output_path = service_dir.join(format!("{}.md", resource));
@@ -2431,6 +2478,179 @@ fn generate_markdown_resource(res: &ResourceDef, model: &SmithyModel) -> Result<
         for attr in &read_only_attrs {
             md.push_str(&format!("### `{}`\n\n", attr.snake_name));
             md.push_str(&format!("- **Type:** {}\n\n", attr.type_display));
+        }
+    }
+
+    Ok(md)
+}
+
+/// Generate Rust schema code for a data source.
+fn generate_data_source(ds: &resource_defs::DataSourceDef, model: &SmithyModel) -> Result<String> {
+    let ns = ds.service_namespace;
+    let namespace = format!("aws.{}", ds.name);
+    let config_fn = format!("{}_config", ds.name.replace('.', "_"));
+    let cf_type = cf_type_name(ds.name);
+
+    let type_overrides: HashMap<&str, &str> = ds.type_overrides.iter().copied().collect();
+    let exclude: HashSet<&str> = ds.exclude_fields.iter().copied().collect();
+
+    let mut code = String::new();
+    code.push_str(&format!(
+        "//! {} schema definition for AWS Cloud Control\n\
+         //!\n\
+         //! Auto-generated from Smithy model: {}\n\
+         //!\n\
+         //! DO NOT EDIT MANUALLY - regenerate with smithy-codegen\n\n\
+         use super::AwsSchemaConfig;\n\
+         use carina_core::schema::{{AttributeSchema, AttributeType, ResourceSchema}};\n\n\
+         /// Returns the schema config for {} (Smithy: {})\n\
+         pub fn {}() -> AwsSchemaConfig {{\n\
+         \x20   AwsSchemaConfig {{\n\
+         \x20       aws_type_name: \"{}\",\n\
+         \x20       resource_type_name: \"{}\",\n\
+         \x20       has_tags: false,\n\
+         \x20       schema: ResourceSchema::new(\"{}\")\n\
+         \x20       .as_data_source()\n",
+        ds.name.split('.').next_back().unwrap_or(ds.name),
+        ns,
+        ds.name,
+        ns,
+        config_fn,
+        cf_type,
+        ds.name,
+        namespace,
+    ));
+
+    // Add input attributes (writable)
+    for input in &ds.inputs {
+        let type_str = if let Some(t) = input.type_override {
+            t.to_string()
+        } else {
+            "AttributeType::String".to_string()
+        };
+        let required = if input.required {
+            "\n            .required()"
+        } else {
+            ""
+        };
+        code.push_str(&format!(
+            "\x20       .attribute(\n\
+             \x20           AttributeSchema::new(\"{}\", {}){}\n\
+             \x20               .with_description(\"{}\")\n\
+             \x20               .with_provider_name(\"{}\"),\n\
+             \x20       )\n",
+            input.name, type_str, required, input.description, input.provider_name,
+        ));
+    }
+
+    // Add output attributes from read_ops (read-only)
+    for read_op in &ds.read_ops {
+        let op_id = format!("{}#{}", ns, read_op.operation);
+        let output = model
+            .operation_output(&op_id)
+            .with_context(|| format!("Cannot find output for {}", op_id))?;
+        for (field_name, rename) in &read_op.fields {
+            let effective_name = rename.unwrap_or(field_name);
+            let dsl_name = effective_name.to_snake_case();
+            if exclude.contains(dsl_name.as_str()) {
+                continue;
+            }
+            let type_str = if let Some(t) = type_overrides.get(effective_name) {
+                t.to_string()
+            } else {
+                // Default to String for data source outputs; use type_overrides for non-string types
+                "AttributeType::String".to_string()
+            };
+            let desc = output
+                .members
+                .get(*field_name)
+                .and_then(|mr| mr.traits.get("smithy.api#documentation"))
+                .and_then(|v| v.as_str())
+                .map(|d| {
+                    let truncated = if d.len() > 200 { &d[..200] } else { d };
+                    truncated.replace('"', "\\\"").replace('\n', " ")
+                })
+                .unwrap_or_default();
+            code.push_str(&format!(
+                "\x20       .attribute(\n\
+                 \x20           AttributeSchema::new(\"{}\", {})\n\
+                 \x20               .with_description(\"{} (read-only)\")\n\
+                 \x20               .with_provider_name(\"{}\"),\n\
+                 \x20       )\n",
+                dsl_name, type_str, desc, effective_name,
+            ));
+        }
+    }
+
+    code.push_str("    }\n}\n\n");
+
+    // Enum stubs
+    code.push_str(&format!(
+        "/// Returns the resource type name and all enum valid values for this module\n\
+         pub fn enum_valid_values() -> (&'static str, &'static [(&'static str, &'static [&'static str])]) {{\n\
+         \x20   (\"{}\", &[])\n\
+         }}\n\n\
+         /// Maps DSL alias values back to canonical AWS values for this module.\n\
+         /// e.g., (\"ip_protocol\", \"all\") -> Some(\"-1\")\n\
+         pub fn enum_alias_reverse(attr_name: &str, value: &str) -> Option<&'static str> {{\n\
+         \x20   let _ = (attr_name, value);\n\
+         \x20   None\n\
+         }}\n\n\
+         /// Returns all enum alias entries as (attr_name, alias, canonical) tuples.\n\
+         pub fn enum_alias_entries() -> &'static [(&'static str, &'static str, &'static str)] {{\n\
+         \x20   &[]\n\
+         }}\n",
+        ds.name,
+    ));
+
+    Ok(code)
+}
+
+/// Generate markdown documentation for a data source.
+fn generate_markdown_data_source(
+    ds: &resource_defs::DataSourceDef,
+    model: &SmithyModel,
+) -> Result<String> {
+    let ns = ds.service_namespace;
+    let cf_type = cf_type_name(ds.name);
+
+    let mut md = String::new();
+    md.push_str(&format!("# aws.{}\n\n", ds.name));
+    md.push_str(&format!("CloudFormation Type: `{}`\n\n", cf_type));
+    md.push_str("This is a **data source** (read-only). Use with the `read` keyword.\n\n");
+
+    // Lookup inputs section
+    if !ds.inputs.is_empty() {
+        md.push_str("## Lookup Inputs\n\n");
+        for input in &ds.inputs {
+            md.push_str(&format!("### `{}`\n\n", input.name));
+            let required = if input.required { "Yes" } else { "No" };
+            md.push_str(&format!("- **Required:** {}\n\n", required));
+            if !input.description.is_empty() {
+                md.push_str(&format!("{}\n\n", input.description));
+            }
+        }
+    }
+
+    // Output attributes section
+    md.push_str("## Attributes\n\n");
+    for read_op in &ds.read_ops {
+        let op_id = format!("{}#{}", ns, read_op.operation);
+        if let Some(output) = model.operation_output(&op_id) {
+            for (field_name, rename) in &read_op.fields {
+                let effective_name = rename.unwrap_or(field_name);
+                let dsl_name = effective_name.to_snake_case();
+                md.push_str(&format!("### `{}`\n\n", dsl_name));
+                md.push_str("- **Type:** String\n");
+                md.push_str("- **Read-only**\n\n");
+                if let Some(member_ref) = output.members.get(*field_name)
+                    && let Some(doc_val) = member_ref.traits.get("smithy.api#documentation")
+                    && let Some(d) = doc_val.as_str()
+                {
+                    let truncated = if d.len() > 500 { &d[..500] } else { d };
+                    md.push_str(&format!("{}\n\n", truncated));
+                }
+            }
         }
     }
 
