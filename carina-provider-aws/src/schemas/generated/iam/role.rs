@@ -1,4 +1,4 @@
-//! role schema definition for AWS
+//! iam.role schema definition for AWS Cloud Control
 //!
 //! Auto-generated from Smithy model: com.amazonaws.iam
 //!
@@ -6,6 +6,7 @@
 
 use super::AwsSchemaConfig;
 use super::tags_type;
+use super::validate_tags_map;
 use carina_core::resource::Value;
 use carina_core::schema::{AttributeSchema, AttributeType, ResourceSchema};
 
@@ -28,60 +29,61 @@ pub fn iam_role_config() -> AwsSchemaConfig {
         resource_type_name: "iam.role",
         has_tags: true,
         schema: ResourceSchema::new("aws.iam.role")
-            .with_description("An IAM role for delegating permissions to AWS services or other accounts.")
-            .attribute(
-                AttributeSchema::new("arn", super::iam_role_arn())
-                    .read_only()
-                    .with_description("The ARN of the role. (read-only)")
-                    .with_provider_name("Arn"),
-            )
-            .attribute(
-                AttributeSchema::new("assume_role_policy_document", super::iam_policy_document())
-                    .required()
-                    .with_description("The trust policy that defines which entities can assume the role.")
-                    .with_provider_name("AssumeRolePolicyDocument"),
-            )
-            .attribute(
-                AttributeSchema::new("description", AttributeType::String)
-                    .with_description("A description of the role.")
-                    .with_provider_name("Description"),
-            )
-            .attribute(
-                AttributeSchema::new("max_session_duration", AttributeType::Custom {
-                    name: "Int(3600..=43200)".to_string(),
-                    base: Box::new(AttributeType::Int),
-                    validate: validate_max_session_duration_range,
-                    namespace: None,
-                    to_dsl: None,
-                })
-                    .with_description("The maximum session duration (in seconds) for the role. Valid values: 3600-43200.")
-                    .with_provider_name("MaxSessionDuration"),
-            )
-            .attribute(
-                AttributeSchema::new("path", AttributeType::String)
-                    .create_only()
-                    .with_description("The path to the role. Defaults to /.")
-                    .with_provider_name("Path")
-                    .with_default(Value::String("/".to_string())),
-            )
-            .attribute(
-                AttributeSchema::new("role_id", super::iam_role_id())
-                    .read_only()
-                    .with_description("The stable and unique string identifying the role. (read-only)")
-                    .with_provider_name("RoleId"),
-            )
-            .attribute(
-                AttributeSchema::new("role_name", AttributeType::String)
-                    .create_only()
-                    .with_description("A name for the IAM role, up to 64 characters in length.")
-                    .with_provider_name("RoleName"),
-            )
-            .attribute(
-                AttributeSchema::new("tags", tags_type())
-                    .with_description("The tags for the role.")
-                    .with_provider_name("Tags"),
-            )
-            .with_name_attribute("role_name"),
+        .with_description("Contains information about an IAM role. This structure is returned as a response element in several API operations that interact with roles.")
+        .attribute(
+            AttributeSchema::new("assume_role_policy_document", super::iam_policy_document())
+                .required()
+                .create_only()
+                .with_description("The trust relationship policy document that grants an entity permission to assume the role. In IAM, you must provide a JSON policy that has been conve...")
+                .with_provider_name("AssumeRolePolicyDocument"),
+        )
+        .attribute(
+            AttributeSchema::new("description", AttributeType::String)
+                .create_only()
+                .with_description("A description of the role.")
+                .with_provider_name("Description"),
+        )
+        .attribute(
+            AttributeSchema::new("max_session_duration", AttributeType::Custom {
+                name: "Int(3600..=43200)".to_string(),
+                base: Box::new(AttributeType::Int),
+                validate: validate_max_session_duration_range,
+                namespace: None,
+                to_dsl: None,
+            })
+                .create_only()
+                .with_description("The maximum session duration (in seconds) that you want to set for the specified role. If you do not specify a value for this setting, the default val...")
+                .with_provider_name("MaxSessionDuration"),
+        )
+        .attribute(
+            AttributeSchema::new("path", AttributeType::String)
+                .create_only()
+                .with_description("The path to the role. For more information about paths, see IAM Identifiers in the IAM User Guide. This parameter is optional. If it is not included, ...")
+                .with_provider_name("Path"),
+        )
+        .attribute(
+            AttributeSchema::new("role_name", AttributeType::String)
+                .required()
+                .create_only()
+                .with_description("The name of the role to create. IAM user, group, role, and policy names must be unique within the account. Names are not distinguished by case. For ex...")
+                .with_provider_name("RoleName"),
+        )
+        .attribute(
+            AttributeSchema::new("arn", super::iam_role_arn())
+                .with_description("The Amazon Resource Name (ARN) specifying the role. For more information about ARNs and how to use them in policies, see IAM identifiers in the IAM Us... (read-only)")
+                .with_provider_name("Arn"),
+        )
+        .attribute(
+            AttributeSchema::new("role_id", super::iam_role_id())
+                .with_description("The stable and unique string identifying the role. For more information about IDs, see IAM identifiers in the IAM User Guide. (read-only)")
+                .with_provider_name("RoleId"),
+        )
+        .attribute(
+            AttributeSchema::new("tags", tags_type())
+                .with_description("The tags for the resource.")
+                .with_provider_name("Tags"),
+        )
+        .with_validator(validate_tags_map)
     }
 }
 
@@ -94,11 +96,13 @@ pub fn enum_valid_values() -> (
 }
 
 /// Maps DSL alias values back to canonical AWS values for this module.
+/// e.g., ("ip_protocol", "all") -> Some("-1")
 pub fn enum_alias_reverse(attr_name: &str, value: &str) -> Option<&'static str> {
     let _ = (attr_name, value);
     None
 }
 
+/// Returns all enum alias entries as (attr_name, alias, canonical) tuples.
 pub fn enum_alias_entries() -> &'static [(&'static str, &'static str, &'static str)] {
     &[]
 }
