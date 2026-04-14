@@ -5,7 +5,7 @@ use carina_core::resource::{Resource, ResourceId, State, Value};
 use carina_core::utils::extract_enum_value;
 
 use crate::AwsProvider;
-use crate::helpers::require_string_attr;
+use crate::helpers::{require_string_attr, sdk_error_message};
 
 impl AwsProvider {
     /// Read a CloudWatch Logs Log Group
@@ -25,8 +25,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::new("Failed to describe log groups")
-                    .with_cause(e)
+                ProviderError::new(sdk_error_message("Failed to describe log groups", &e))
                     .for_resource(id.clone())
             })?;
 
@@ -126,8 +125,7 @@ impl AwsProvider {
         }
 
         req.send().await.map_err(|e| {
-            ProviderError::new("Failed to create log group")
-                .with_cause(e)
+            ProviderError::new(sdk_error_message("Failed to create log group", &e))
                 .for_resource(resource.id.clone())
         })?;
 
@@ -140,8 +138,7 @@ impl AwsProvider {
                 .send()
                 .await
                 .map_err(|e| {
-                    ProviderError::new("Failed to set retention policy")
-                        .with_cause(e)
+                    ProviderError::new(sdk_error_message("Failed to set retention policy", &e))
                         .for_resource(resource.id.clone())
                 })?;
         }
@@ -168,8 +165,7 @@ impl AwsProvider {
                     .send()
                     .await
                     .map_err(|e| {
-                        ProviderError::new("Failed to set retention policy")
-                            .with_cause(e)
+                        ProviderError::new(sdk_error_message("Failed to set retention policy", &e))
                             .for_resource(id.clone())
                     })?;
             }
@@ -182,9 +178,11 @@ impl AwsProvider {
                         .send()
                         .await
                         .map_err(|e| {
-                            ProviderError::new("Failed to delete retention policy")
-                                .with_cause(e)
-                                .for_resource(id.clone())
+                            ProviderError::new(sdk_error_message(
+                                "Failed to delete retention policy",
+                                &e,
+                            ))
+                            .for_resource(id.clone())
                         })?;
                 }
             }
@@ -200,8 +198,7 @@ impl AwsProvider {
                 .send()
                 .await
                 .map_err(|e| {
-                    ProviderError::new("Failed to associate KMS key")
-                        .with_cause(e)
+                    ProviderError::new(sdk_error_message("Failed to associate KMS key", &e))
                         .for_resource(id.clone())
                 })?;
         } else if from.attributes.contains_key("kms_key_id") {
@@ -211,8 +208,7 @@ impl AwsProvider {
                 .send()
                 .await
                 .map_err(|e| {
-                    ProviderError::new("Failed to disassociate KMS key")
-                        .with_cause(e)
+                    ProviderError::new(sdk_error_message("Failed to disassociate KMS key", &e))
                         .for_resource(id.clone())
                 })?;
         }
@@ -241,8 +237,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::new("Failed to delete log group")
-                    .with_cause(e)
+                ProviderError::new(sdk_error_message("Failed to delete log group", &e))
                     .for_resource(id.clone())
             })?;
         Ok(())
@@ -282,8 +277,7 @@ impl AwsProvider {
                 req = req.tags(key);
             }
             req.send().await.map_err(|e| {
-                ProviderError::new("Failed to untag log group")
-                    .with_cause(e)
+                ProviderError::new(sdk_error_message("Failed to untag log group", &e))
                     .for_resource(id.clone())
             })?;
         }
@@ -311,8 +305,7 @@ impl AwsProvider {
                 .send()
                 .await
                 .map_err(|e| {
-                    ProviderError::new("Failed to tag log group")
-                        .with_cause(e)
+                    ProviderError::new(sdk_error_message("Failed to tag log group", &e))
                         .for_resource(id.clone())
                 })?;
         }

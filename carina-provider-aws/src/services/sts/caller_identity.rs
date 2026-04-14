@@ -4,6 +4,7 @@ use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{ResourceId, State, Value};
 
 use crate::AwsProvider;
+use crate::helpers::sdk_error_message;
 
 impl AwsProvider {
     /// Read STS caller identity (data source)
@@ -17,8 +18,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::new("Failed to get STS caller identity")
-                    .with_cause(e)
+                ProviderError::new(sdk_error_message("Failed to get STS caller identity", &e))
                     .for_resource(id.clone())
             })?;
 

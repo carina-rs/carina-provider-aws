@@ -6,6 +6,7 @@ use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{ResourceId, Value};
 
 use crate::AwsProvider;
+use crate::helpers::sdk_error_message;
 
 impl AwsProvider {
     /// Extract tags from EC2 tag list into a Value::Map
@@ -68,8 +69,7 @@ impl AwsProvider {
                     req = req.tags(aws_sdk_ec2::types::Tag::builder().key(key.as_str()).build());
                 }
                 req.send().await.map_err(|e| {
-                    ProviderError::new("Failed to delete tags")
-                        .with_cause(e)
+                    ProviderError::new(sdk_error_message("Failed to delete tags", &e))
                         .for_resource(resource_id.clone())
                 })?;
             }
@@ -84,8 +84,7 @@ impl AwsProvider {
                     req = req.tags(tag);
                 }
                 req.send().await.map_err(|e| {
-                    ProviderError::new("Failed to tag resource")
-                        .with_cause(e)
+                    ProviderError::new(sdk_error_message("Failed to tag resource", &e))
                         .for_resource(resource_id.clone())
                 })?;
             }

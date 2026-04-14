@@ -5,6 +5,7 @@ use carina_core::resource::{Resource, ResourceId, State, Value};
 use carina_core::utils::extract_enum_value;
 
 use crate::AwsProvider;
+use crate::helpers::sdk_error_message;
 
 impl AwsProvider {
     /// Extract attributes from an Organizations Organization object
@@ -87,9 +88,10 @@ impl AwsProvider {
                 {
                     return Ok(State::not_found(id.clone()));
                 }
-                Err(ProviderError::new("Failed to describe organization")
-                    .with_cause(e)
-                    .for_resource(id.clone()))
+                Err(
+                    ProviderError::new(sdk_error_message("Failed to describe organization", &e))
+                        .for_resource(id.clone()),
+                )
             }
         }
     }
@@ -109,8 +111,7 @@ impl AwsProvider {
         }
 
         let response = req.send().await.map_err(|e| {
-            ProviderError::new("Failed to create organization")
-                .with_cause(e)
+            ProviderError::new(sdk_error_message("Failed to create organization", &e))
                 .for_resource(resource.id.clone())
         })?;
 
@@ -142,8 +143,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::new("Failed to delete organization")
-                    .with_cause(e)
+                ProviderError::new(sdk_error_message("Failed to delete organization", &e))
                     .for_resource(id.clone())
             })?;
         Ok(())

@@ -10,6 +10,7 @@ use carina_core::resource::{Resource, ResourceId, State, Value};
 use carina_core::utils::extract_enum_value;
 
 use crate::AwsProvider;
+use crate::helpers::sdk_error_message;
 
 // ===== Generated Methods on AwsProvider =====
 
@@ -26,8 +27,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::new("Failed to delete vpc")
-                    .with_cause(e)
+                ProviderError::new(sdk_error_message("Failed to delete vpc", &e))
                     .for_resource(id.clone())
             })?;
         Ok(())
@@ -45,8 +45,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::new("Failed to delete subnet")
-                    .with_cause(e)
+                ProviderError::new(sdk_error_message("Failed to delete subnet", &e))
                     .for_resource(id.clone())
             })?;
         Ok(())
@@ -64,8 +63,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::new("Failed to delete route table")
-                    .with_cause(e)
+                ProviderError::new(sdk_error_message("Failed to delete route table", &e))
                     .for_resource(id.clone())
             })?;
         Ok(())
@@ -83,8 +81,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::new("Failed to delete security group")
-                    .with_cause(e)
+                ProviderError::new(sdk_error_message("Failed to delete security group", &e))
                     .for_resource(id.clone())
             })?;
         Ok(())
@@ -161,9 +158,11 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::new("Failed to read s3.bucket GetBucketVersioning")
-                    .with_cause(e)
-                    .for_resource(id.clone())
+                ProviderError::new(sdk_error_message(
+                    "Failed to read s3.bucket GetBucketVersioning",
+                    &e,
+                ))
+                .for_resource(id.clone())
             })?;
         let value = output
             .status()
@@ -197,8 +196,7 @@ impl AwsProvider {
                 .send()
                 .await
                 .map_err(|e| {
-                    ProviderError::new("Failed to put bucket versioning")
-                        .with_cause(e)
+                    ProviderError::new(sdk_error_message("Failed to put bucket versioning", &e))
                         .for_resource(id.clone())
                 })?;
         }

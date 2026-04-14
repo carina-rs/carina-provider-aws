@@ -5,6 +5,7 @@ use carina_core::resource::{Resource, ResourceId, State, Value};
 use carina_core::utils::extract_enum_value_with_values;
 
 use crate::AwsProvider;
+use crate::helpers::sdk_error_message;
 
 impl AwsProvider {
     /// Read an EC2 VPN Gateway
@@ -31,8 +32,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::new("Failed to describe VPN gateways")
-                    .with_cause(e)
+                ProviderError::new(sdk_error_message("Failed to describe VPN gateways", &e))
                     .for_resource(id.clone())
             })?;
 
@@ -83,8 +83,7 @@ impl AwsProvider {
         }
 
         let result = req.send().await.map_err(|e| {
-            ProviderError::new("Failed to create VPN gateway")
-                .with_cause(e)
+            ProviderError::new(sdk_error_message("Failed to create VPN gateway", &e))
                 .for_resource(resource.id.clone())
         })?;
 
@@ -134,8 +133,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::new("Failed to delete VPN gateway")
-                    .with_cause(e)
+                ProviderError::new(sdk_error_message("Failed to delete VPN gateway", &e))
                     .for_resource(id.clone())
             })?;
         Ok(())

@@ -5,7 +5,7 @@ use carina_core::resource::{Resource, ResourceId, State, Value};
 use carina_core::utils::extract_enum_value;
 
 use crate::AwsProvider;
-use crate::helpers::{require_string_attr, retry_aws_operation};
+use crate::helpers::{require_string_attr, retry_aws_operation, sdk_error_message};
 
 impl AwsProvider {
     /// Read an EC2 VPC Endpoint
@@ -25,8 +25,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::new("Failed to describe VPC endpoints")
-                    .with_cause(e)
+                ProviderError::new(sdk_error_message("Failed to describe VPC endpoints", &e))
                     .for_resource(id.clone())
             })?;
 
@@ -124,8 +123,7 @@ impl AwsProvider {
             let rid = rid.clone();
             async move {
                 req.send().await.map_err(|e| {
-                    ProviderError::new("Failed to create VPC endpoint")
-                        .with_cause(e)
+                    ProviderError::new(sdk_error_message("Failed to create VPC endpoint", &e))
                         .for_resource(rid)
                 })
             }
@@ -315,8 +313,7 @@ impl AwsProvider {
 
         if has_modifications {
             req.send().await.map_err(|e| {
-                ProviderError::new("Failed to modify VPC endpoint")
-                    .with_cause(e)
+                ProviderError::new(sdk_error_message("Failed to modify VPC endpoint", &e))
                     .for_resource(id.clone())
             })?;
         }
@@ -346,8 +343,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::new("Failed to delete VPC endpoint")
-                    .with_cause(e)
+                ProviderError::new(sdk_error_message("Failed to delete VPC endpoint", &e))
                     .for_resource(id.clone())
             })?;
 

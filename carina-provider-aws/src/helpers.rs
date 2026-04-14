@@ -7,6 +7,7 @@ use std::future::Future;
 use std::time::Duration;
 
 use aws_sdk_ec2::types::{ResourceType, Tag, TagSpecification};
+use aws_smithy_types::error::display::DisplayErrorContext;
 use tokio::time::sleep;
 
 use carina_core::provider::{ProviderError, ProviderResult};
@@ -61,6 +62,15 @@ pub enum PollState {
     Gone,
     /// The resource is still transitioning.
     Pending,
+}
+
+/// Format an AWS SDK error with the full error chain.
+///
+/// Uses `DisplayErrorContext` to walk the source chain, producing messages like:
+/// `ChangeResourceRecordSets failed: service error: InvalidChangeBatch: ...`
+/// instead of the unhelpful `ChangeResourceRecordSets failed: service error`.
+pub fn sdk_error_message(context: &str, err: &(impl std::error::Error + 'static)) -> String {
+    format!("{}: {}", context, DisplayErrorContext(err))
 }
 
 /// Retry an AWS SDK operation with exponential backoff on transient errors.
@@ -153,6 +163,65 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_sdk_error_message_includes_full_chain() {
+        // Simulate a chained error: outer wraps inner
+        #[derive(Debug)]
+        struct InnerError;
+        impl std::fmt::Display for InnerError {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                write!(f, "InvalidChangeBatch: record already exists")
+            }
+        }
+        impl std::error::Error for InnerError {}
+
+        #[derive(Debug)]
+        struct OuterError(InnerError);
+        impl std::fmt::Display for OuterError {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                write!(f, "service error")
+            }
+        }
+        impl std::error::Error for OuterError {
+            fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+                Some(&self.0)
+            }
+        }
+
+        let err = OuterError(InnerError);
+
+        // Without DisplayErrorContext, we'd get "ChangeResourceRecordSets failed: service error"
+        let bad = format!("ChangeResourceRecordSets failed: {}", err);
+        assert_eq!(bad, "ChangeResourceRecordSets failed: service error");
+
+        // With our helper, the full chain is included
+        let good = sdk_error_message("ChangeResourceRecordSets failed", &err);
+        assert!(
+            good.contains("InvalidChangeBatch"),
+            "expected full chain, got: {}",
+            good
+        );
+    }
+
+    #[test]
+    fn test_sdk_error_message_single_error() {
+        #[derive(Debug)]
+        struct SimpleError;
+        impl std::fmt::Display for SimpleError {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                write!(f, "something went wrong")
+            }
+        }
+        impl std::error::Error for SimpleError {}
+
+        let msg = sdk_error_message("CreateBucket failed", &SimpleError);
+        assert!(
+            msg.starts_with("CreateBucket failed: something went wrong"),
+            "expected context + message, got: {}",
+            msg
+        );
+    }
 
     #[test]
     fn test_is_retryable_error_throttling() {
