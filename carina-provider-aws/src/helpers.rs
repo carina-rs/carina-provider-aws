@@ -24,6 +24,17 @@ pub fn require_string_attr(resource: &Resource, attr_name: &str) -> ProviderResu
     }
 }
 
+/// Extract a required enum attribute from a resource, stripping the DSL namespace prefix.
+///
+/// StringEnum attributes arrive as namespaced identifiers
+/// (e.g., `aws.route53.record_set.Type.A`). This extracts just the variant (`A`).
+/// Using `require_string_attr` instead will pass the full namespaced path to
+/// the AWS API, causing failures that are hard to diagnose.
+pub fn require_enum_attr(resource: &Resource, attr_name: &str) -> ProviderResult<String> {
+    let raw = require_string_attr(resource, attr_name)?;
+    Ok(carina_core::utils::extract_enum_value(&raw).to_string())
+}
+
 /// Build an EC2 `TagSpecification` from DSL tags for a given resource type.
 ///
 /// Returns `None` if the resource has no `tags` attribute.
@@ -163,6 +174,35 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn make_test_resource(attrs: Vec<(&str, &str)>) -> Resource {
+        use carina_core::resource::Expr;
+        let mut resource = Resource::new("route53.record_set", "test");
+        for (k, v) in attrs {
+            resource
+                .attributes
+                .insert(k.to_string(), Expr(Value::String(v.to_string())));
+        }
+        resource
+    }
+
+    #[test]
+    fn test_require_enum_attr_strips_namespace() {
+        let resource = make_test_resource(vec![("type", "aws.route53.record_set.Type.A")]);
+        assert_eq!(require_enum_attr(&resource, "type").unwrap(), "A");
+    }
+
+    #[test]
+    fn test_require_enum_attr_plain_value() {
+        let resource = make_test_resource(vec![("type", "AAAA")]);
+        assert_eq!(require_enum_attr(&resource, "type").unwrap(), "AAAA");
+    }
+
+    #[test]
+    fn test_require_enum_attr_missing() {
+        let resource = make_test_resource(vec![]);
+        assert!(require_enum_attr(&resource, "type").is_err());
+    }
 
     #[test]
     fn test_sdk_error_message_includes_full_chain() {

@@ -13,7 +13,7 @@ use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{Resource, ResourceId, State, Value};
 
 use crate::AwsProvider;
-use crate::helpers::{require_string_attr, sdk_error_message};
+use crate::helpers::{require_enum_attr, require_string_attr, sdk_error_message};
 
 /// Composite identifier format: `hosted_zone_id|name|type`
 fn make_identifier(hosted_zone_id: &str, name: &str, record_type: &str) -> String {
@@ -100,7 +100,7 @@ fn build_alias_target_from_map(
 /// Build an AWS SDK ResourceRecordSet from carina resource attributes.
 fn build_record_set(resource: &Resource) -> ProviderResult<ResourceRecordSet> {
     let name = require_string_attr(resource, "name")?;
-    let record_type = require_string_attr(resource, "type")?;
+    let record_type = require_enum_attr(resource, "type")?;
 
     let mut builder = ResourceRecordSet::builder()
         .name(normalize_dns_name(&name))
@@ -265,7 +265,7 @@ impl AwsProvider {
     ) -> ProviderResult<State> {
         let hosted_zone_id = require_string_attr(&resource, "hosted_zone_id")?;
         let name = require_string_attr(&resource, "name")?;
-        let record_type = require_string_attr(&resource, "type")?;
+        let record_type = require_enum_attr(&resource, "type")?;
 
         let record_set = build_record_set(&resource)?;
         change_record_set(
@@ -290,7 +290,7 @@ impl AwsProvider {
     ) -> ProviderResult<State> {
         let hosted_zone_id = require_string_attr(&to, "hosted_zone_id")?;
         let name = require_string_attr(&to, "name")?;
-        let record_type = require_string_attr(&to, "type")?;
+        let record_type = require_enum_attr(&to, "type")?;
 
         let record_set = build_record_set(&to)?;
         change_record_set(
