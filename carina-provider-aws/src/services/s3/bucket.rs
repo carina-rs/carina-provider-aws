@@ -5,6 +5,7 @@ use carina_core::resource::{LifecycleConfig, Resource, ResourceId, State, Value}
 use carina_core::utils::{convert_enum_value, extract_enum_value};
 
 use crate::AwsProvider;
+use crate::helpers::sdk_error_message;
 
 impl AwsProvider {
     /// Read an S3 bucket
@@ -63,9 +64,11 @@ impl AwsProvider {
                         name
                     ))
                     .for_resource(id.clone())),
-                    HeadBucketErrorKind::Other => Err(ProviderError::new("Failed to read bucket")
-                        .with_cause(err)
-                        .for_resource(id.clone())),
+                    HeadBucketErrorKind::Other => Err(ProviderError::new(sdk_error_message(
+                        "Failed to read bucket",
+                        &err,
+                    ))
+                    .for_resource(id.clone())),
                 }
             }
         }
@@ -139,8 +142,7 @@ impl AwsProvider {
         }
 
         req.send().await.map_err(|e| {
-            ProviderError::new("Failed to create bucket")
-                .with_cause(e)
+            ProviderError::new(sdk_error_message("Failed to create bucket", &e))
                 .for_resource(resource.id.clone())
         })?;
 
@@ -187,8 +189,7 @@ impl AwsProvider {
                 .send()
                 .await
                 .map_err(|e| {
-                    ProviderError::new("Failed to delete bucket tags")
-                        .with_cause(e)
+                    ProviderError::new(sdk_error_message("Failed to delete bucket tags", &e))
                         .for_resource(id.clone())
                 })?;
         } else {
@@ -216,8 +217,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::new("Failed to delete bucket")
-                    .with_cause(e)
+                ProviderError::new(sdk_error_message("Failed to delete bucket", &e))
                     .for_resource(id.clone())
             })?;
         Ok(())
@@ -242,8 +242,7 @@ impl AwsProvider {
             }
 
             let response = req.send().await.map_err(|e| {
-                ProviderError::new("Failed to list object versions")
-                    .with_cause(e)
+                ProviderError::new(sdk_error_message("Failed to list object versions", &e))
                     .for_resource(id.clone())
             })?;
 
@@ -257,9 +256,11 @@ impl AwsProvider {
                         oid = oid.version_id(vid);
                     }
                     objects_to_delete.push(oid.build().map_err(|e| {
-                        ProviderError::new("Failed to build ObjectIdentifier")
-                            .with_cause(e)
-                            .for_resource(id.clone())
+                        ProviderError::new(sdk_error_message(
+                            "Failed to build ObjectIdentifier",
+                            &e,
+                        ))
+                        .for_resource(id.clone())
                     })?);
                 }
             }
@@ -272,9 +273,11 @@ impl AwsProvider {
                         oid = oid.version_id(vid);
                     }
                     objects_to_delete.push(oid.build().map_err(|e| {
-                        ProviderError::new("Failed to build ObjectIdentifier")
-                            .with_cause(e)
-                            .for_resource(id.clone())
+                        ProviderError::new(sdk_error_message(
+                            "Failed to build ObjectIdentifier",
+                            &e,
+                        ))
+                        .for_resource(id.clone())
                     })?);
                 }
             }
@@ -286,8 +289,7 @@ impl AwsProvider {
                     .quiet(true)
                     .build()
                     .map_err(|e| {
-                        ProviderError::new("Failed to build Delete request")
-                            .with_cause(e)
+                        ProviderError::new(sdk_error_message("Failed to build Delete request", &e))
                             .for_resource(id.clone())
                     })?;
 
@@ -298,8 +300,7 @@ impl AwsProvider {
                     .send()
                     .await
                     .map_err(|e| {
-                        ProviderError::new("Failed to delete objects")
-                            .with_cause(e)
+                        ProviderError::new(sdk_error_message("Failed to delete objects", &e))
                             .for_resource(id.clone())
                     })?;
             }
@@ -339,11 +340,11 @@ impl AwsProvider {
             }
             Err(err) => {
                 if !is_s3_not_configured_error(&err, "OwnershipControlsNotFoundError") {
-                    return Err(
-                        ProviderError::new("Failed to read bucket ownership controls")
-                            .with_cause(err)
-                            .for_resource(id.clone()),
-                    );
+                    return Err(ProviderError::new(sdk_error_message(
+                        "Failed to read bucket ownership controls",
+                        &err,
+                    ))
+                    .for_resource(id.clone()));
                 }
             }
         }
@@ -364,16 +365,17 @@ impl AwsProvider {
                 .object_ownership(ObjectOwnership::from(normalized))
                 .build()
                 .map_err(|e| {
-                    ProviderError::new("Failed to build ownership controls rule")
-                        .with_cause(e)
-                        .for_resource(id.clone())
+                    ProviderError::new(sdk_error_message(
+                        "Failed to build ownership controls rule",
+                        &e,
+                    ))
+                    .for_resource(id.clone())
                 })?;
             let controls = OwnershipControls::builder()
                 .rules(rule)
                 .build()
                 .map_err(|e| {
-                    ProviderError::new("Failed to build ownership controls")
-                        .with_cause(e)
+                    ProviderError::new(sdk_error_message("Failed to build ownership controls", &e))
                         .for_resource(id.clone())
                 })?;
             self.s3_client
@@ -383,9 +385,11 @@ impl AwsProvider {
                 .send()
                 .await
                 .map_err(|e| {
-                    ProviderError::new("Failed to put bucket ownership controls")
-                        .with_cause(e)
-                        .for_resource(id.clone())
+                    ProviderError::new(sdk_error_message(
+                        "Failed to put bucket ownership controls",
+                        &e,
+                    ))
+                    .for_resource(id.clone())
                 })?;
         }
         Ok(())
@@ -422,11 +426,11 @@ impl AwsProvider {
                         Value::Bool(false),
                     );
                 } else {
-                    return Err(
-                        ProviderError::new("Failed to read object lock configuration")
-                            .with_cause(err)
-                            .for_resource(id.clone()),
-                    );
+                    return Err(ProviderError::new(sdk_error_message(
+                        "Failed to read object lock configuration",
+                        &err,
+                    ))
+                    .for_resource(id.clone()));
                 }
             }
         }
@@ -447,8 +451,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::new("Failed to read bucket ACL")
-                    .with_cause(e)
+                ProviderError::new(sdk_error_message("Failed to read bucket ACL", &e))
                     .for_resource(id.clone())
             })?;
 
@@ -590,8 +593,7 @@ impl AwsProvider {
         }
 
         req.send().await.map_err(|e| {
-            ProviderError::new("Failed to put bucket ACL")
-                .with_cause(e)
+            ProviderError::new(sdk_error_message("Failed to put bucket ACL", &e))
                 .for_resource(id.clone())
         })?;
 
@@ -626,9 +628,11 @@ impl AwsProvider {
             }
             Err(err) => {
                 if !is_s3_not_configured_error(&err, "NoSuchTagSet") {
-                    return Err(ProviderError::new("Failed to read bucket tagging")
-                        .with_cause(err)
-                        .for_resource(id.clone()));
+                    return Err(ProviderError::new(sdk_error_message(
+                        "Failed to read bucket tagging",
+                        &err,
+                    ))
+                    .for_resource(id.clone()));
                 }
             }
         }
@@ -659,8 +663,7 @@ impl AwsProvider {
                 .set_tag_set(Some(tags))
                 .build()
                 .map_err(|e| {
-                    ProviderError::new("Failed to build tagging")
-                        .with_cause(e)
+                    ProviderError::new(sdk_error_message("Failed to build tagging", &e))
                         .for_resource(id.clone())
                 })?;
 
@@ -671,8 +674,7 @@ impl AwsProvider {
                 .send()
                 .await
                 .map_err(|e| {
-                    ProviderError::new("Failed to put bucket tags")
-                        .with_cause(e)
+                    ProviderError::new(sdk_error_message("Failed to put bucket tags", &e))
                         .for_resource(id.clone())
                 })?;
         }

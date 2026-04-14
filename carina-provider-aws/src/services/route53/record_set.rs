@@ -13,7 +13,7 @@ use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{Resource, ResourceId, State, Value};
 
 use crate::AwsProvider;
-use crate::helpers::require_string_attr;
+use crate::helpers::{require_string_attr, sdk_error_message};
 
 /// Composite identifier format: `hosted_zone_id|name|type`
 fn make_identifier(hosted_zone_id: &str, name: &str, record_type: &str) -> String {
@@ -92,7 +92,8 @@ fn build_alias_target_from_map(
         .evaluate_target_health(evaluate)
         .build()
         .map_err(|e| {
-            ProviderError::new(format!("Invalid alias_target: {}", e)).for_resource(id.clone())
+            ProviderError::new(sdk_error_message("Invalid alias_target", &e))
+                .for_resource(id.clone())
         })
 }
 
@@ -118,7 +119,7 @@ fn build_record_set(resource: &Resource) -> ProviderResult<ResourceRecordSet> {
     }
 
     builder.build().map_err(|e| {
-        ProviderError::new(format!("Failed to build ResourceRecordSet: {}", e))
+        ProviderError::new(sdk_error_message("Failed to build ResourceRecordSet", &e))
             .for_resource(resource.id.clone())
     })
 }
@@ -136,14 +137,15 @@ async fn change_record_set(
         .resource_record_set(record_set)
         .build()
         .map_err(|e| {
-            ProviderError::new(format!("Failed to build change: {}", e)).for_resource(id.clone())
+            ProviderError::new(sdk_error_message("Failed to build change", &e))
+                .for_resource(id.clone())
         })?;
 
     let batch = ChangeBatch::builder()
         .changes(change)
         .build()
         .map_err(|e| {
-            ProviderError::new(format!("Failed to build change batch: {}", e))
+            ProviderError::new(sdk_error_message("Failed to build change batch", &e))
                 .for_resource(id.clone())
         })?;
 
@@ -154,7 +156,7 @@ async fn change_record_set(
         .send()
         .await
         .map_err(|e| {
-            ProviderError::new(format!("ChangeResourceRecordSets failed: {}", e))
+            ProviderError::new(sdk_error_message("ChangeResourceRecordSets failed", &e))
                 .for_resource(id.clone())
         })?;
 
@@ -238,7 +240,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::new(format!("Failed to list record sets: {}", e))
+                ProviderError::new(sdk_error_message("Failed to list record sets", &e))
                     .for_resource(id.clone())
             })?;
 
@@ -342,8 +344,11 @@ impl AwsProvider {
         }
 
         let record_set = builder.build().map_err(|e| {
-            ProviderError::new(format!("Failed to build record set for deletion: {}", e))
-                .for_resource(id.clone())
+            ProviderError::new(sdk_error_message(
+                "Failed to build record set for deletion",
+                &e,
+            ))
+            .for_resource(id.clone())
         })?;
 
         change_record_set(

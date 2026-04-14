@@ -11,6 +11,7 @@ use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{Resource, State, Value};
 
 use crate::AwsProvider;
+use crate::helpers::sdk_error_message;
 
 impl AwsProvider {
     /// Read `identitystore.user` given a `Resource` with user-supplied
@@ -38,10 +39,10 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::new(format!(
-                    "Failed to describe identitystore user '{user_id}' in store '{identity_store_id}'"
+                ProviderError::new(sdk_error_message(
+                    &format!("Failed to describe identitystore user '{user_id}' in store '{identity_store_id}'"),
+                    &e,
                 ))
-                .with_cause(e)
                 .for_resource(resource.id.clone())
             })?;
 
@@ -76,9 +77,11 @@ async fn resolve_user_id(
         .attribute_value(aws_smithy_types::Document::String(user_name.to_string()))
         .build()
         .map_err(|e| {
-            ProviderError::new("Failed to build userName lookup request")
-                .with_cause(e)
-                .for_resource(resource.id.clone())
+            ProviderError::new(sdk_error_message(
+                "Failed to build userName lookup request",
+                &e,
+            ))
+            .for_resource(resource.id.clone())
         })?;
 
     let alt = AlternateIdentifier::UniqueAttribute(unique_attribute);
@@ -90,10 +93,10 @@ async fn resolve_user_id(
         .send()
         .await
         .map_err(|e| {
-            ProviderError::new(format!(
-                "Failed to look up user_id for user_name '{user_name}' in store '{identity_store_id}'"
+            ProviderError::new(sdk_error_message(
+                &format!("Failed to look up user_id for user_name '{user_name}' in store '{identity_store_id}'"),
+                &e,
             ))
-            .with_cause(e)
             .for_resource(resource.id.clone())
         })?;
 

@@ -5,7 +5,7 @@ use carina_core::resource::{Resource, ResourceId, State, Value};
 use carina_core::utils::extract_enum_value;
 
 use crate::AwsProvider;
-use crate::helpers::{PollState, require_string_attr, wait_for_ec2_state};
+use crate::helpers::{PollState, require_string_attr, sdk_error_message, wait_for_ec2_state};
 
 impl AwsProvider {
     /// Extract attributes from an Organizations Account object
@@ -131,9 +131,10 @@ impl AwsProvider {
                 {
                     return Ok(State::not_found(id.clone()));
                 }
-                Err(ProviderError::new("Failed to describe account")
-                    .with_cause(e)
-                    .for_resource(id.clone()))
+                Err(
+                    ProviderError::new(sdk_error_message("Failed to describe account", &e))
+                        .for_resource(id.clone()),
+                )
             }
         }
     }
@@ -171,7 +172,7 @@ impl AwsProvider {
                         .value(val)
                         .build()
                         .map_err(|e| {
-                            ProviderError::new(format!("Failed to build tag: {}", e))
+                            ProviderError::new(sdk_error_message("Failed to build tag", &e))
                                 .for_resource(resource.id.clone())
                         })?;
                     req = req.tags(tag);
@@ -180,8 +181,7 @@ impl AwsProvider {
         }
 
         let response = req.send().await.map_err(|e| {
-            ProviderError::new("Failed to create account")
-                .with_cause(e)
+            ProviderError::new(sdk_error_message("Failed to create account", &e))
                 .for_resource(resource.id.clone())
         })?;
 
@@ -207,9 +207,11 @@ impl AwsProvider {
                     .send()
                     .await
                     .map_err(|e| {
-                        ProviderError::new("Failed to describe create account status")
-                            .with_cause(e)
-                            .for_resource(resource_id.clone())
+                        ProviderError::new(sdk_error_message(
+                            "Failed to describe create account status",
+                            &e,
+                        ))
+                        .for_resource(resource_id.clone())
                     })?;
                 if let Some(status) = result.create_account_status() {
                     match status.state() {
@@ -239,9 +241,11 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::new("Failed to get final create account status")
-                    .with_cause(e)
-                    .for_resource(resource.id.clone())
+                ProviderError::new(sdk_error_message(
+                    "Failed to get final create account status",
+                    &e,
+                ))
+                .for_resource(resource.id.clone())
             })?;
 
         let account_id = final_status
@@ -262,9 +266,11 @@ impl AwsProvider {
                 .send()
                 .await
                 .map_err(|e| {
-                    ProviderError::new("Failed to list parents for new account")
-                        .with_cause(e)
-                        .for_resource(resource.id.clone())
+                    ProviderError::new(sdk_error_message(
+                        "Failed to list parents for new account",
+                        &e,
+                    ))
+                    .for_resource(resource.id.clone())
                 })?;
 
             if let Some(current_parent) = parents_response.parents().first()
@@ -279,9 +285,11 @@ impl AwsProvider {
                     .send()
                     .await
                     .map_err(|e| {
-                        ProviderError::new("Failed to move account to parent")
-                            .with_cause(e)
-                            .for_resource(resource.id.clone())
+                        ProviderError::new(sdk_error_message(
+                            "Failed to move account to parent",
+                            &e,
+                        ))
+                        .for_resource(resource.id.clone())
                     })?;
             }
         }
@@ -319,8 +327,7 @@ impl AwsProvider {
                 .send()
                 .await
                 .map_err(|e| {
-                    ProviderError::new("Failed to move account")
-                        .with_cause(e)
+                    ProviderError::new(sdk_error_message("Failed to move account", &e))
                         .for_resource(id.clone())
                 })?;
         }
@@ -349,8 +356,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::new("Failed to close account")
-                    .with_cause(e)
+                ProviderError::new(sdk_error_message("Failed to close account", &e))
                     .for_resource(id.clone())
             })?;
         Ok(())
@@ -388,8 +394,7 @@ impl AwsProvider {
                 .send()
                 .await
                 .map_err(|e| {
-                    ProviderError::new("Failed to untag account")
-                        .with_cause(e)
+                    ProviderError::new(sdk_error_message("Failed to untag account", &e))
                         .for_resource(id.clone())
                 })?;
         }
@@ -408,7 +413,7 @@ impl AwsProvider {
                         .value(val)
                         .build()
                         .map_err(|e| {
-                            ProviderError::new(format!("Failed to build tag: {}", e))
+                            ProviderError::new(sdk_error_message("Failed to build tag", &e))
                                 .for_resource(id.clone())
                         })?;
                     tags_to_add.push(tag);
@@ -424,8 +429,7 @@ impl AwsProvider {
                 .send()
                 .await
                 .map_err(|e| {
-                    ProviderError::new("Failed to tag account")
-                        .with_cause(e)
+                    ProviderError::new(sdk_error_message("Failed to tag account", &e))
                         .for_resource(id.clone())
                 })?;
         }

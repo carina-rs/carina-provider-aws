@@ -5,7 +5,7 @@ use carina_core::resource::{Resource, ResourceId, State, Value};
 use carina_core::utils::convert_enum_value;
 
 use crate::AwsProvider;
-use crate::helpers::require_string_attr;
+use crate::helpers::{require_string_attr, sdk_error_message};
 use aws_sdk_ec2::types::{AttributeBooleanValue, HostnameType};
 
 impl AwsProvider {
@@ -33,8 +33,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::new("Failed to describe subnets")
-                    .with_cause(e)
+                ProviderError::new(sdk_error_message("Failed to describe subnets", &e))
                     .for_resource(id.clone())
             })?;
 
@@ -82,8 +81,7 @@ impl AwsProvider {
         }
 
         let result = req.send().await.map_err(|e| {
-            ProviderError::new("Failed to create subnet")
-                .with_cause(e)
+            ProviderError::new(sdk_error_message("Failed to create subnet", &e))
                 .for_resource(resource.id.clone())
         })?;
 
@@ -141,9 +139,11 @@ impl AwsProvider {
                 .send()
                 .await
                 .map_err(|e| {
-                    ProviderError::new("Failed to set map_public_ip_on_launch")
-                        .with_cause(e)
-                        .for_resource(id.clone())
+                    ProviderError::new(sdk_error_message(
+                        "Failed to set map_public_ip_on_launch",
+                        &e,
+                    ))
+                    .for_resource(id.clone())
                 })?;
         }
 
@@ -157,9 +157,11 @@ impl AwsProvider {
                 .send()
                 .await
                 .map_err(|e| {
-                    ProviderError::new("Failed to set assign_ipv6_address_on_creation")
-                        .with_cause(e)
-                        .for_resource(id.clone())
+                    ProviderError::new(sdk_error_message(
+                        "Failed to set assign_ipv6_address_on_creation",
+                        &e,
+                    ))
+                    .for_resource(id.clone())
                 })?;
         }
 
@@ -171,8 +173,7 @@ impl AwsProvider {
                 .send()
                 .await
                 .map_err(|e| {
-                    ProviderError::new("Failed to set enable_dns64")
-                        .with_cause(e)
+                    ProviderError::new(sdk_error_message("Failed to set enable_dns64", &e))
                         .for_resource(id.clone())
                 })?;
         }
@@ -189,10 +190,10 @@ impl AwsProvider {
                     .send()
                     .await
                     .map_err(|e| {
-                        ProviderError::new(
+                        ProviderError::new(sdk_error_message(
                             "Failed to set private_dns_name_options_on_launch.hostname_type",
-                        )
-                        .with_cause(e)
+                            &e,
+                        ))
                         .for_resource(id.clone())
                     })?;
             }
@@ -206,10 +207,10 @@ impl AwsProvider {
                     .send()
                     .await
                     .map_err(|e| {
-                        ProviderError::new(
+                        ProviderError::new(sdk_error_message(
                             "Failed to set private_dns_name_options_on_launch.enable_resource_name_dns_a_record",
-                        )
-                        .with_cause(e)
+                            &e,
+                        ))
                         .for_resource(id.clone())
                     })?;
             }
@@ -223,10 +224,10 @@ impl AwsProvider {
                     .send()
                     .await
                     .map_err(|e| {
-                        ProviderError::new(
+                        ProviderError::new(sdk_error_message(
                             "Failed to set private_dns_name_options_on_launch.enable_resource_name_dns_aaaa_record",
-                        )
-                        .with_cause(e)
+                            &e,
+                        ))
                         .for_resource(id.clone())
                     })?;
             }

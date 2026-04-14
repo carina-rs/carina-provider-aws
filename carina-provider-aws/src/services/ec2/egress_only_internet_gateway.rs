@@ -4,7 +4,7 @@ use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{Resource, ResourceId, State};
 
 use crate::AwsProvider;
-use crate::helpers::{build_tag_specification, require_string_attr};
+use crate::helpers::{build_tag_specification, require_string_attr, sdk_error_message};
 
 impl AwsProvider {
     /// Read an EC2 Egress-Only Internet Gateway
@@ -24,9 +24,11 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::new("Failed to describe egress-only internet gateways")
-                    .with_cause(e)
-                    .for_resource(id.clone())
+                ProviderError::new(sdk_error_message(
+                    "Failed to describe egress-only internet gateways",
+                    &e,
+                ))
+                .for_resource(id.clone())
             })?;
 
         if let Some(eigw) = result.egress_only_internet_gateways().first() {
@@ -72,9 +74,11 @@ impl AwsProvider {
         }
 
         let result = req.send().await.map_err(|e| {
-            ProviderError::new("Failed to create egress-only internet gateway")
-                .with_cause(e)
-                .for_resource(resource.id.clone())
+            ProviderError::new(sdk_error_message(
+                "Failed to create egress-only internet gateway",
+                &e,
+            ))
+            .for_resource(resource.id.clone())
         })?;
 
         let eigw_id = result
@@ -121,9 +125,11 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::new("Failed to delete egress-only internet gateway")
-                    .with_cause(e)
-                    .for_resource(id.clone())
+                ProviderError::new(sdk_error_message(
+                    "Failed to delete egress-only internet gateway",
+                    &e,
+                ))
+                .for_resource(id.clone())
             })?;
         Ok(())
     }

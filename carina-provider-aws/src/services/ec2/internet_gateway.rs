@@ -4,6 +4,7 @@ use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{Resource, ResourceId, State, Value};
 
 use crate::AwsProvider;
+use crate::helpers::sdk_error_message;
 
 impl AwsProvider {
     /// Read an EC2 Internet Gateway
@@ -30,9 +31,11 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::new("Failed to describe internet gateways")
-                    .with_cause(e)
-                    .for_resource(id.clone())
+                ProviderError::new(sdk_error_message(
+                    "Failed to describe internet gateways",
+                    &e,
+                ))
+                .for_resource(id.clone())
             })?;
 
         if let Some(igw) = result.internet_gateways().first() {
@@ -77,8 +80,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::new("Failed to create internet gateway")
-                    .with_cause(e)
+                ProviderError::new(sdk_error_message("Failed to create internet gateway", &e))
                     .for_resource(resource.id.clone())
             })?;
 
@@ -103,8 +105,7 @@ impl AwsProvider {
                 .send()
                 .await
                 .map_err(|e| {
-                    ProviderError::new("Failed to attach internet gateway")
-                        .with_cause(e)
+                    ProviderError::new(sdk_error_message("Failed to attach internet gateway", &e))
                         .for_resource(resource.id.clone())
                 })?;
         }
@@ -128,8 +129,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::new("Failed to describe internet gateway")
-                    .with_cause(e)
+                ProviderError::new(sdk_error_message("Failed to describe internet gateway", &e))
                     .for_resource(id.clone())
             })?;
 
@@ -145,9 +145,11 @@ impl AwsProvider {
                     .send()
                     .await
                     .map_err(|e| {
-                        ProviderError::new("Failed to detach internet gateway")
-                            .with_cause(e)
-                            .for_resource(id.clone())
+                        ProviderError::new(sdk_error_message(
+                            "Failed to detach internet gateway",
+                            &e,
+                        ))
+                        .for_resource(id.clone())
                     })?;
             }
         }
@@ -159,8 +161,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::new("Failed to delete internet gateway")
-                    .with_cause(e)
+                ProviderError::new(sdk_error_message("Failed to delete internet gateway", &e))
                     .for_resource(id.clone())
             })?;
 

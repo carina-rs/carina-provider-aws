@@ -4,7 +4,9 @@ use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{Resource, ResourceId, State, Value};
 
 use crate::AwsProvider;
-use crate::helpers::{PollState, build_tag_specification, require_string_attr, wait_for_ec2_state};
+use crate::helpers::{
+    PollState, build_tag_specification, require_string_attr, sdk_error_message, wait_for_ec2_state,
+};
 
 impl AwsProvider {
     /// Read an EC2 Transit Gateway VPC Attachment
@@ -24,9 +26,11 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::new("Failed to describe transit gateway VPC attachments")
-                    .with_cause(e)
-                    .for_resource(id.clone())
+                ProviderError::new(sdk_error_message(
+                    "Failed to describe transit gateway VPC attachments",
+                    &e,
+                ))
+                .for_resource(id.clone())
             })?;
 
         if let Some(att) = result.transit_gateway_vpc_attachments().first() {
@@ -104,9 +108,11 @@ impl AwsProvider {
         }
 
         let result = req.send().await.map_err(|e| {
-            ProviderError::new("Failed to create transit gateway VPC attachment")
-                .with_cause(e)
-                .for_resource(resource.id.clone())
+            ProviderError::new(sdk_error_message(
+                "Failed to create transit gateway VPC attachment",
+                &e,
+            ))
+            .for_resource(resource.id.clone())
         })?;
 
         let att_id = result
@@ -157,9 +163,11 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::new("Failed to delete transit gateway VPC attachment")
-                    .with_cause(e)
-                    .for_resource(id.clone())
+                ProviderError::new(sdk_error_message(
+                    "Failed to delete transit gateway VPC attachment",
+                    &e,
+                ))
+                .for_resource(id.clone())
             })?;
 
         // Wait for attachment to be deleted
@@ -186,9 +194,11 @@ impl AwsProvider {
                     .send()
                     .await
                     .map_err(|e| {
-                        ProviderError::new("Failed to describe transit gateway VPC attachment")
-                            .with_cause(e)
-                            .for_resource(rid.clone())
+                        ProviderError::new(sdk_error_message(
+                            "Failed to describe transit gateway VPC attachment",
+                            &e,
+                        ))
+                        .for_resource(rid.clone())
                     })?;
                 Ok(
                     if let Some(att) = result.transit_gateway_vpc_attachments().first()
@@ -228,9 +238,11 @@ impl AwsProvider {
                     .send()
                     .await
                     .map_err(|e| {
-                        ProviderError::new("Failed to describe transit gateway VPC attachment")
-                            .with_cause(e)
-                            .for_resource(rid.clone())
+                        ProviderError::new(sdk_error_message(
+                            "Failed to describe transit gateway VPC attachment",
+                            &e,
+                        ))
+                        .for_resource(rid.clone())
                     })?;
                 Ok(
                     if let Some(att) = result.transit_gateway_vpc_attachments().first() {

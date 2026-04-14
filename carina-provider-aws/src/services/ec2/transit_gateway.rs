@@ -5,7 +5,7 @@ use carina_core::resource::{Resource, ResourceId, State, Value};
 use carina_core::utils::extract_enum_value;
 
 use crate::AwsProvider;
-use crate::helpers::{PollState, build_tag_specification, wait_for_ec2_state};
+use crate::helpers::{PollState, build_tag_specification, sdk_error_message, wait_for_ec2_state};
 
 impl AwsProvider {
     /// Read an EC2 Transit Gateway
@@ -25,8 +25,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::new("Failed to describe transit gateways")
-                    .with_cause(e)
+                ProviderError::new(sdk_error_message("Failed to describe transit gateways", &e))
                     .for_resource(id.clone())
             })?;
 
@@ -125,8 +124,7 @@ impl AwsProvider {
         }
 
         let result = req.send().await.map_err(|e| {
-            ProviderError::new("Failed to create transit gateway")
-                .with_cause(e)
+            ProviderError::new(sdk_error_message("Failed to create transit gateway", &e))
                 .for_resource(resource.id.clone())
         })?;
 
@@ -177,8 +175,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::new("Failed to delete transit gateway")
-                    .with_cause(e)
+                ProviderError::new(sdk_error_message("Failed to delete transit gateway", &e))
                     .for_resource(id.clone())
             })?;
 
@@ -206,9 +203,11 @@ impl AwsProvider {
                     .send()
                     .await
                     .map_err(|e| {
-                        ProviderError::new("Failed to describe transit gateway")
-                            .with_cause(e)
-                            .for_resource(rid.clone())
+                        ProviderError::new(sdk_error_message(
+                            "Failed to describe transit gateway",
+                            &e,
+                        ))
+                        .for_resource(rid.clone())
                     })?;
                 Ok(
                     if let Some(tgw) = result.transit_gateways().first()
@@ -248,9 +247,11 @@ impl AwsProvider {
                     .send()
                     .await
                     .map_err(|e| {
-                        ProviderError::new("Failed to describe transit gateway")
-                            .with_cause(e)
-                            .for_resource(rid.clone())
+                        ProviderError::new(sdk_error_message(
+                            "Failed to describe transit gateway",
+                            &e,
+                        ))
+                        .for_resource(rid.clone())
                     })?;
                 Ok(if let Some(tgw) = result.transit_gateways().first() {
                     if tgw.state().map(|s| s.as_str()) == Some("deleted") {

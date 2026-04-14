@@ -4,7 +4,7 @@ use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{Resource, ResourceId, State, Value};
 
 use crate::AwsProvider;
-use crate::helpers::require_string_attr;
+use crate::helpers::{require_string_attr, sdk_error_message};
 
 impl AwsProvider {
     /// Read an IAM Role
@@ -62,9 +62,10 @@ impl AwsProvider {
                 {
                     return Ok(State::not_found(id.clone()));
                 }
-                Err(ProviderError::new("Failed to get IAM role")
-                    .with_cause(e)
-                    .for_resource(id.clone()))
+                Err(
+                    ProviderError::new(sdk_error_message("Failed to get IAM role", &e))
+                        .for_resource(id.clone()),
+                )
             }
         }
     }
@@ -117,7 +118,7 @@ impl AwsProvider {
                         .value(val)
                         .build()
                         .map_err(|e| {
-                            ProviderError::new(format!("Failed to build tag: {}", e))
+                            ProviderError::new(sdk_error_message("Failed to build tag", &e))
                                 .for_resource(resource.id.clone())
                         })?;
                     req = req.tags(tag);
@@ -126,8 +127,7 @@ impl AwsProvider {
         }
 
         req.send().await.map_err(|e| {
-            ProviderError::new("Failed to create IAM role")
-                .with_cause(e)
+            ProviderError::new(sdk_error_message("Failed to create IAM role", &e))
                 .for_resource(resource.id.clone())
         })?;
 
@@ -167,8 +167,7 @@ impl AwsProvider {
                 .send()
                 .await
                 .map_err(|e| {
-                    ProviderError::new("Failed to update assume role policy")
-                        .with_cause(e)
+                    ProviderError::new(sdk_error_message("Failed to update assume role policy", &e))
                         .for_resource(id.clone())
                 })?;
         }
@@ -189,8 +188,7 @@ impl AwsProvider {
 
         if needs_update {
             req.send().await.map_err(|e| {
-                ProviderError::new("Failed to update IAM role")
-                    .with_cause(e)
+                ProviderError::new(sdk_error_message("Failed to update IAM role", &e))
                     .for_resource(id.clone())
             })?;
         }
@@ -219,8 +217,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::new("Failed to delete IAM role")
-                    .with_cause(e)
+                ProviderError::new(sdk_error_message("Failed to delete IAM role", &e))
                     .for_resource(id.clone())
             })?;
         Ok(())
@@ -256,8 +253,7 @@ impl AwsProvider {
                 req = req.tag_keys(key);
             }
             req.send().await.map_err(|e| {
-                ProviderError::new("Failed to untag IAM role")
-                    .with_cause(e)
+                ProviderError::new(sdk_error_message("Failed to untag IAM role", &e))
                     .for_resource(id.clone())
             })?;
         }
@@ -276,7 +272,7 @@ impl AwsProvider {
                         .value(val)
                         .build()
                         .map_err(|e| {
-                            ProviderError::new(format!("Failed to build tag: {}", e))
+                            ProviderError::new(sdk_error_message("Failed to build tag", &e))
                                 .for_resource(id.clone())
                         })?;
                     tags_to_add.push(tag);
@@ -290,8 +286,7 @@ impl AwsProvider {
                 req = req.tags(tag);
             }
             req.send().await.map_err(|e| {
-                ProviderError::new("Failed to tag IAM role")
-                    .with_cause(e)
+                ProviderError::new(sdk_error_message("Failed to tag IAM role", &e))
                     .for_resource(id.clone())
             })?;
         }

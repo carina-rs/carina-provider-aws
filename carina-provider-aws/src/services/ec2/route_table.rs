@@ -4,7 +4,7 @@ use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{Resource, ResourceId, State, Value};
 
 use crate::AwsProvider;
-use crate::helpers::require_string_attr;
+use crate::helpers::{require_string_attr, sdk_error_message};
 
 impl AwsProvider {
     /// Read an EC2 Route Table
@@ -31,8 +31,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::new("Failed to describe route tables")
-                    .with_cause(e)
+                ProviderError::new(sdk_error_message("Failed to describe route tables", &e))
                     .for_resource(id.clone())
             })?;
 
@@ -88,8 +87,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::new("Failed to create route table")
-                    .with_cause(e)
+                ProviderError::new(sdk_error_message("Failed to create route table", &e))
                     .for_resource(resource.id.clone())
             })?;
 
@@ -133,8 +131,7 @@ impl AwsProvider {
                             .send()
                             .await
                             .map_err(|e| {
-                                ProviderError::new("Failed to create route")
-                                    .with_cause(e)
+                                ProviderError::new(sdk_error_message("Failed to create route", &e))
                                     .for_resource(resource.id.clone())
                             })?;
                     }

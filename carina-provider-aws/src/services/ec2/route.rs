@@ -4,7 +4,7 @@ use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{Resource, ResourceId, State, Value};
 
 use crate::AwsProvider;
-use crate::helpers::require_string_attr;
+use crate::helpers::{require_string_attr, sdk_error_message};
 
 impl AwsProvider {
     /// Read an EC2 Route (routes are identified by route_table_id + destination)
@@ -30,8 +30,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::new("Failed to describe route table")
-                    .with_cause(e)
+                ProviderError::new(sdk_error_message("Failed to describe route table", &e))
                     .for_resource(id.clone())
             })?;
 
@@ -82,8 +81,7 @@ impl AwsProvider {
         }
 
         req.send().await.map_err(|e| {
-            ProviderError::new("Failed to create route")
-                .with_cause(e)
+            ProviderError::new(sdk_error_message("Failed to create route", &e))
                 .for_resource(resource.id.clone())
         })?;
 
@@ -136,8 +134,7 @@ impl AwsProvider {
         }
 
         req.send().await.map_err(|e| {
-            ProviderError::new("Failed to update route")
-                .with_cause(e)
+            ProviderError::new(sdk_error_message("Failed to update route", &e))
                 .for_resource(id.clone())
         })?;
 
@@ -167,9 +164,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::new("Failed to delete route")
-                    .with_cause(e)
-                    .for_resource(id)
+                ProviderError::new(sdk_error_message("Failed to delete route", &e)).for_resource(id)
             })?;
 
         Ok(())

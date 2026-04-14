@@ -5,7 +5,7 @@ use carina_core::resource::{Resource, ResourceId, State, Value};
 use carina_core::utils::extract_enum_value;
 
 use crate::AwsProvider;
-use crate::helpers::{require_string_attr, retry_aws_operation};
+use crate::helpers::{require_string_attr, retry_aws_operation, sdk_error_message};
 
 impl AwsProvider {
     /// Read an EC2 VPC
@@ -29,8 +29,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::new("Failed to describe VPCs")
-                    .with_cause(e)
+                ProviderError::new(sdk_error_message("Failed to describe VPCs", &e))
                     .for_resource(id.clone())
             })?;
 
@@ -115,8 +114,7 @@ impl AwsProvider {
             let rid = rid.clone();
             async move {
                 builder.send().await.map_err(|e| {
-                    ProviderError::new("Failed to create VPC")
-                        .with_cause(e)
+                    ProviderError::new(sdk_error_message("Failed to create VPC", &e))
                         .for_resource(rid)
                 })
             }
@@ -144,8 +142,7 @@ impl AwsProvider {
                 .send()
                 .await
                 .map_err(|e| {
-                    ProviderError::new("Failed to set DNS support")
-                        .with_cause(e)
+                    ProviderError::new(sdk_error_message("Failed to set DNS support", &e))
                         .for_resource(resource.id.clone())
                 })?;
         }
@@ -163,8 +160,7 @@ impl AwsProvider {
                 .send()
                 .await
                 .map_err(|e| {
-                    ProviderError::new("Failed to set DNS hostnames")
-                        .with_cause(e)
+                    ProviderError::new(sdk_error_message("Failed to set DNS hostnames", &e))
                         .for_resource(resource.id.clone())
                 })?;
         }
@@ -197,8 +193,7 @@ impl AwsProvider {
                 .send()
                 .await
                 .map_err(|e| {
-                    ProviderError::new("Failed to update DNS support")
-                        .with_cause(e)
+                    ProviderError::new(sdk_error_message("Failed to update DNS support", &e))
                         .for_resource(id.clone())
                 })?;
         }
@@ -216,8 +211,7 @@ impl AwsProvider {
                 .send()
                 .await
                 .map_err(|e| {
-                    ProviderError::new("Failed to update DNS hostnames")
-                        .with_cause(e)
+                    ProviderError::new(sdk_error_message("Failed to update DNS hostnames", &e))
                         .for_resource(id.clone())
                 })?;
         }

@@ -5,7 +5,7 @@ use carina_core::resource::{Resource, ResourceId, State, Value};
 use carina_core::utils::extract_enum_value;
 
 use crate::AwsProvider;
-use crate::helpers::{build_tag_specification, require_string_attr};
+use crate::helpers::{build_tag_specification, require_string_attr, sdk_error_message};
 
 impl AwsProvider {
     /// Read an EC2 Flow Log
@@ -32,8 +32,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::new("Failed to describe flow logs")
-                    .with_cause(e)
+                ProviderError::new(sdk_error_message("Failed to describe flow logs", &e))
                     .for_resource(id.clone())
             })?;
 
@@ -144,9 +143,11 @@ impl AwsProvider {
                     {
                         continue;
                     }
-                    return Err(ProviderError::new("Failed to create flow logs")
-                        .with_cause(e)
-                        .for_resource(resource.id.clone()));
+                    return Err(ProviderError::new(sdk_error_message(
+                        "Failed to create flow logs",
+                        &e,
+                    ))
+                    .for_resource(resource.id.clone()));
                 }
             };
 
@@ -225,8 +226,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::new("Failed to delete flow logs")
-                    .with_cause(e)
+                ProviderError::new(sdk_error_message("Failed to delete flow logs", &e))
                     .for_resource(id.clone())
             })?;
 
