@@ -17,17 +17,17 @@ pub fn sts_caller_identity_config() -> AwsSchemaConfig {
         .as_data_source()
         .attribute(
             AttributeSchema::new("account_id", super::aws_account_id())
-                .with_description("The Amazon Web Services account ID number of the account that owns or contains the calling entity. (read-only)")
+                .with_description("<p>The Amazon Web Services account ID number of the account that owns or contains the calling          entity.</p> (read-only)")
                 .with_provider_name("AccountId"),
         )
         .attribute(
             AttributeSchema::new("arn", super::arn())
-                .with_description("The Amazon Web Services ARN associated with the calling entity. (read-only)")
+                .with_description("<p>The Amazon Web Services ARN associated with the calling entity.</p> (read-only)")
                 .with_provider_name("Arn"),
         )
         .attribute(
             AttributeSchema::new("user_id", AttributeType::String)
-                .with_description("The unique identifier of the calling entity. The exact value depends on the type of entity that is making the call. The values returned are those list... (read-only)")
+                .with_description("<p>The unique identifier of the calling entity. The exact value depends on the type of          entity that is making the call. The values returned are those listed in the <b>aws:userid</b> column in  (read-only)")
                 .with_provider_name("UserId"),
         )
     }
