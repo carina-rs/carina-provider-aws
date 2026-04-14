@@ -31,6 +31,7 @@ pub enum Shape {
     Double(TraitOnly),
     Blob(TraitOnly),
     Timestamp(TraitOnly),
+    Document(TraitOnly),
     // Resource shape (Smithy resource, not used in AWS API models but part of spec)
     Resource(ResourceShape),
 }

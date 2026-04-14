@@ -804,6 +804,44 @@ pub fn sts_data_sources() -> Vec<DataSourceDef> {
     }]
 }
 
+/// Returns Identity Store data source definitions.
+pub fn identitystore_data_sources() -> Vec<DataSourceDef> {
+    vec![DataSourceDef {
+        name: "identitystore.user",
+        service_namespace: "com.amazonaws.identitystore",
+        inputs: vec![
+            DataSourceInput {
+                name: "identity_store_id",
+                provider_name: "IdentityStoreId",
+                description: "The globally unique identifier for the identity store.",
+                required: true,
+                type_override: None,
+            },
+            DataSourceInput {
+                name: "user_id",
+                provider_name: "UserId",
+                description: "The identifier for the user. Provide either user_id or user_name.",
+                required: false,
+                type_override: None,
+            },
+            DataSourceInput {
+                name: "user_name",
+                provider_name: "UserName",
+                description: "The user's user name. Provide either user_id or user_name.",
+                required: false,
+                type_override: None,
+            },
+        ],
+        read_ops: vec![ReadOp {
+            operation: "DescribeUser",
+            fields: vec![("DisplayName", None), ("Emails", None)],
+            defaults: vec![],
+        }],
+        type_overrides: vec![],
+        exclude_fields: vec![],
+    }]
+}
+
 /// Returns Organizations resource definitions.
 pub fn organizations_resources() -> Vec<ResourceDef> {
     vec![
