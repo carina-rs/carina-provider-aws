@@ -412,15 +412,15 @@ if [ ! -f "$CARINA_BIN" ]; then
 fi
 
 # ── Provider source injection ────────────────────────────────────────
-AWS_PROVIDER_BIN="${AWS_PROVIDER_BIN:-$PROJECT_ROOT/target/wasm32-wasip2/release/carina-provider-aws.wasm}"
-AWSCC_PROVIDER_BIN="${AWSCC_PROVIDER_BIN:-$PROJECT_ROOT/../carina-provider-awscc/target/wasm32-wasip2/release/carina-provider-awscc.wasm}"
+_TEST_AWS_WASM="${_TEST_AWS_WASM:-$PROJECT_ROOT/target/wasm32-wasip2/release/carina-provider-aws.wasm}"
+_TEST_AWSCC_WASM="${_TEST_AWSCC_WASM:-$PROJECT_ROOT/../carina-provider-awscc/target/wasm32-wasip2/release/carina-provider-awscc.wasm}"
 
 # Read provider version from workspace Cargo.toml to avoid hardcoding
 PROVIDER_VERSION=$(grep '^version = ' "$PROJECT_ROOT/Cargo.toml" | head -1 | sed 's/version = "\(.*\)"/\1/')
 
 # Validate that provider binaries are WASM components, not native binaries.
 # Native binaries are no longer supported and will cause cryptic linker errors.
-for bin_var in AWS_PROVIDER_BIN AWSCC_PROVIDER_BIN; do
+for bin_var in _TEST_AWS_WASM _TEST_AWSCC_WASM; do
     bin_path="${!bin_var}"
     if [ -n "$bin_path" ] && [ -f "$bin_path" ] && [[ "$bin_path" != *.wasm ]]; then
         echo "ERROR: $bin_var points to a non-WASM binary: $bin_path"
@@ -440,10 +440,10 @@ inject_provider_source() {
 
     sed \
         -e '/^provider aws {/a\
-  source = "file://'"$AWS_PROVIDER_BIN"'"\
+  source = "file://'"$_TEST_AWS_WASM"'"\
   version = "'"$PROVIDER_VERSION"'"' \
         -e '/^provider awscc {/a\
-  source = "file://'"$AWSCC_PROVIDER_BIN"'"\
+  source = "file://'"$_TEST_AWSCC_WASM"'"\
   version = "'"$PROVIDER_VERSION"'"' \
         "$original" > "$tmp_file"
 
