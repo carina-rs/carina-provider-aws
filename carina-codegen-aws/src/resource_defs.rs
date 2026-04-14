@@ -966,3 +966,73 @@ pub fn route53_resources() -> Vec<ResourceDef> {
         },
     ]
 }
+
+/// Returns IAM resource definitions.
+pub fn iam_resources() -> Vec<ResourceDef> {
+    vec![ResourceDef {
+        name: "iam.role",
+        service_namespace: "com.amazonaws.iam",
+        schema_structure: None,
+        simple_delete: true,
+        noop_update: false,
+        create_op: "CreateRole",
+        read_structure: Some("Role"),
+        read_ops: vec![],
+        delete_op: "DeleteRole",
+        update_ops: vec![],
+        identifier: "RoleName",
+        has_tags: true,
+        type_overrides: vec![
+            ("AssumeRolePolicyDocument", "super::iam_policy_document()"),
+            ("Arn", "super::iam_role_arn()"),
+            ("RoleId", "super::iam_role_id()"),
+        ],
+        exclude_fields: vec![
+            // Managed policies and inline policies are separate resources
+            "PermissionsBoundary",
+            "RoleLastUsed",
+            "CreateDate",
+        ],
+        create_only_overrides: vec!["Path", "RoleName"],
+        enum_aliases: vec![],
+        to_dsl_overrides: vec![],
+        required_overrides: vec!["AssumeRolePolicyDocument"],
+        extra_read_only: vec!["Arn", "RoleId"],
+        read_only_overrides: vec![],
+        extra_writable: vec![],
+        identity_overrides: vec![],
+    }]
+}
+
+/// Returns CloudWatch Logs resource definitions.
+pub fn logs_resources() -> Vec<ResourceDef> {
+    vec![ResourceDef {
+        name: "logs.log_group",
+        service_namespace: "com.amazonaws.cloudwatchlogs",
+        schema_structure: None,
+        simple_delete: true,
+        noop_update: false,
+        create_op: "CreateLogGroup",
+        read_structure: Some("LogGroup"),
+        read_ops: vec![],
+        delete_op: "DeleteLogGroup",
+        update_ops: vec![],
+        identifier: "LogGroupName",
+        has_tags: true,
+        type_overrides: vec![("KmsKeyId", "super::kms_key_id()"), ("Arn", "super::arn()")],
+        exclude_fields: vec![
+            "CreationTime",
+            "StoredBytes",
+            "MetricFilterCount",
+            "DataProtectionStatus",
+        ],
+        create_only_overrides: vec!["LogGroupName", "LogGroupClass"],
+        enum_aliases: vec![],
+        to_dsl_overrides: vec![],
+        required_overrides: vec![],
+        extra_read_only: vec!["Arn"],
+        read_only_overrides: vec![],
+        extra_writable: vec![],
+        identity_overrides: vec![],
+    }]
+}
