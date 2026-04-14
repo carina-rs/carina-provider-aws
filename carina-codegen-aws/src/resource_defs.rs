@@ -1,6 +1,7 @@
 //! Resource definitions for Smithy-based codegen.
 //!
 //! Each `ResourceDef` describes how to map AWS API operations to a Carina resource schema.
+//! Each `DataSourceDef` describes a read-only data source with optional user-supplied lookup inputs.
 //! These definitions are consumed by the `smithy-codegen` binary.
 
 /// An additional writable field not present in the create operation input.
@@ -113,6 +114,41 @@ pub struct UpdateOp {
     pub operation: &'static str,
     /// How fields are passed to the API
     pub fields: FieldLayout,
+}
+
+/// A read-only data source definition.
+///
+/// Data sources have no create/update/delete lifecycle. They look up existing
+/// AWS resources via user-supplied inputs and return their attributes.
+/// Lookup logic is hand-written in `services/{service}/{resource}.rs`;
+/// the codegen generates schema, docs, and dispatch boilerplate.
+pub struct DataSourceDef {
+    /// Carina DSL resource name (e.g., "identitystore.user")
+    pub name: &'static str,
+    /// Smithy service namespace (e.g., "com.amazonaws.identitystore")
+    pub service_namespace: &'static str,
+    /// User-supplied lookup input fields (empty for zero-input data sources)
+    pub inputs: Vec<DataSourceInput>,
+    /// Read operations that retrieve output fields
+    pub read_ops: Vec<ReadOp>,
+    /// Type overrides: (field_name, type_code)
+    pub type_overrides: Vec<(&'static str, &'static str)>,
+    /// Fields to exclude from the schema
+    pub exclude_fields: Vec<&'static str>,
+}
+
+/// A user-supplied input field for a data source lookup.
+pub struct DataSourceInput {
+    /// DSL field name (e.g., "user_name")
+    pub name: &'static str,
+    /// Smithy/AWS field name (e.g., "UserName")
+    pub provider_name: &'static str,
+    /// Human-readable description for docs
+    pub description: &'static str,
+    /// Whether this input is required
+    pub required: bool,
+    /// Type override (e.g., "AttributeType::String"). None = infer from Smithy.
+    pub type_override: Option<&'static str>,
 }
 
 /// Returns EC2 resource definitions.
@@ -742,41 +778,27 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
 
 /// Returns STS resource definitions (data sources).
 pub fn sts_resources() -> Vec<ResourceDef> {
-    vec![
-        // sts.caller_identity (data source: no create/delete)
-        ResourceDef {
-            name: "sts.caller_identity",
-            service_namespace: "com.amazonaws.sts",
-            schema_structure: None,
-            simple_delete: false,
-            noop_update: false,
-            create_op: "",
-            read_structure: None,
-            read_ops: vec![ReadOp {
-                operation: "GetCallerIdentity",
-                fields: vec![
-                    ("Account", Some("AccountId")),
-                    ("Arn", None),
-                    ("UserId", None),
-                ],
-                defaults: vec![],
-            }],
-            delete_op: "",
-            update_ops: vec![],
-            identifier: "",
-            has_tags: false,
-            type_overrides: vec![],
-            exclude_fields: vec![],
-            create_only_overrides: vec![],
-            enum_aliases: vec![],
-            to_dsl_overrides: vec![],
-            required_overrides: vec![],
-            extra_read_only: vec![],
-            read_only_overrides: vec![],
-            extra_writable: vec![],
-            identity_overrides: vec![],
-        },
-    ]
+    vec![]
+}
+
+/// Returns STS data source definitions.
+pub fn sts_data_sources() -> Vec<DataSourceDef> {
+    vec![DataSourceDef {
+        name: "sts.caller_identity",
+        service_namespace: "com.amazonaws.sts",
+        inputs: vec![],
+        read_ops: vec![ReadOp {
+            operation: "GetCallerIdentity",
+            fields: vec![
+                ("Account", Some("AccountId")),
+                ("Arn", None),
+                ("UserId", None),
+            ],
+            defaults: vec![],
+        }],
+        type_overrides: vec![],
+        exclude_fields: vec![],
+    }]
 }
 
 /// Returns Organizations resource definitions.
