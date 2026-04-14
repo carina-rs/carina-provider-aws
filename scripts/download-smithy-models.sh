@@ -31,5 +31,6 @@ download "organizations" "organizations/service/2016-11-28/organizations-2016-11
 download "route53"       "route-53/service/2013-04-01/route-53-2013-04-01.json"
 download "iam"           "iam/service/2010-05-08/iam-2010-05-08.json"
 download "cloudwatchlogs" "cloudwatch-logs/service/2014-03-28/cloudwatch-logs-2014-03-28.json"
+download "identitystore"  "identitystore/service/2020-06-15/identitystore-2020-06-15.json"
 
 echo "Done."

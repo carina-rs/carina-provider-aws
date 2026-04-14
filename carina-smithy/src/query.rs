@@ -180,6 +180,7 @@ impl SmithyModel {
             Shape::Double(_) => Some(ShapeKind::Double),
             Shape::Blob(_) => Some(ShapeKind::Blob),
             Shape::Timestamp(_) => Some(ShapeKind::Timestamp),
+            Shape::Document(_) => Some(ShapeKind::String), // Treat document as string
             Shape::Resource(_) => Some(ShapeKind::Resource),
         }
     }

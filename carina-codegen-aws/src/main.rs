@@ -143,7 +143,8 @@ fn main() -> Result<()> {
     all_resources.extend(resource_defs::logs_resources());
 
     // Collect all data source definitions
-    let all_data_sources = resource_defs::sts_data_sources();
+    let mut all_data_sources = resource_defs::sts_data_sources();
+    all_data_sources.extend(resource_defs::identitystore_data_sources());
 
     // Filter to requested resource if specified
     let resources: Vec<&ResourceDef> = if let Some(ref name) = args.resource {
@@ -3198,6 +3199,7 @@ fn cf_type_name(resource_name: &str) -> &'static str {
         "route53.record_set" => "AWS::Route53::RecordSet",
         "iam.role" => "AWS::IAM::Role",
         "logs.log_group" => "AWS::Logs::LogGroup",
+        "identitystore.user" => "AWS::IdentityStore::User",
         _ => panic!(
             "Unknown resource: {}. Add it to cf_type_name().",
             resource_name
