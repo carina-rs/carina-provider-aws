@@ -139,6 +139,8 @@ fn main() -> Result<()> {
     all_resources.extend(resource_defs::sts_resources());
     all_resources.extend(resource_defs::organizations_resources());
     all_resources.extend(resource_defs::route53_resources());
+    all_resources.extend(resource_defs::iam_resources());
+    all_resources.extend(resource_defs::logs_resources());
 
     // Filter to requested resource if specified
     let resources: Vec<&ResourceDef> = if let Some(ref name) = args.resource {
@@ -2955,6 +2957,8 @@ fn cf_type_name(resource_name: &str) -> &'static str {
         "organizations.organization" => "AWS::Organizations::Organization",
         "organizations.account" => "AWS::Organizations::Account",
         "route53.record_set" => "AWS::Route53::RecordSet",
+        "iam.role" => "AWS::IAM::Role",
+        "logs.log_group" => "AWS::Logs::LogGroup",
         _ => panic!(
             "Unknown resource: {}. Add it to cf_type_name().",
             resource_name

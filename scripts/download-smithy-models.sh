@@ -29,5 +29,7 @@ download "s3"            "s3/service/2006-03-01/s3-2006-03-01.json"
 download "sts"           "sts/service/2011-06-15/sts-2011-06-15.json"
 download "organizations" "organizations/service/2016-11-28/organizations-2016-11-28.json"
 download "route53"       "route-53/service/2013-04-01/route-53-2013-04-01.json"
+download "iam"           "iam/service/2010-05-08/iam-2010-05-08.json"
+download "cloudwatchlogs" "cloudwatch-logs/service/2014-03-28/cloudwatch-logs-2014-03-28.json"
 
 echo "Done."
