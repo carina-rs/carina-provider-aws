@@ -195,8 +195,8 @@ pub fn aws_validators() -> HashMap<String, CustomValidatorFn> {
             egress_only_internet_gateway_id => "eigw",
         }
         service_arn {
-            iam_role_arn => |s: &str| validate_service_arn(s, "iam", Some("role/")),
-            iam_policy_arn => |s: &str| validate_service_arn(s, "iam", Some("policy/")),
+            iam_role_arn => |s: &str| validate_iam_arn(s, "role/"),
+            iam_policy_arn => |s: &str| validate_iam_arn(s, "policy/"),
             kms_key_arn => |s: &str| validate_kms_key_id(s),
         }
     }
