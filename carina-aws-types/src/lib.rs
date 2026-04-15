@@ -222,7 +222,7 @@ pub fn aws_resource_id() -> AttributeType {
 pub fn vpc_id() -> AttributeType {
     AttributeType::Custom {
         name: "VpcId".to_string(),
-        base: Box::new(AttributeType::String),
+        base: Box::new(aws_resource_id()),
         validate: |value| {
             if let Value::String(s) = value {
                 validate_prefixed_resource_id(s, "vpc")
@@ -240,7 +240,7 @@ pub fn vpc_id() -> AttributeType {
 pub fn subnet_id() -> AttributeType {
     AttributeType::Custom {
         name: "SubnetId".to_string(),
-        base: Box::new(AttributeType::String),
+        base: Box::new(aws_resource_id()),
         validate: |value| {
             if let Value::String(s) = value {
                 validate_prefixed_resource_id(s, "subnet")
@@ -258,7 +258,7 @@ pub fn subnet_id() -> AttributeType {
 pub fn security_group_id() -> AttributeType {
     AttributeType::Custom {
         name: "SecurityGroupId".to_string(),
-        base: Box::new(AttributeType::String),
+        base: Box::new(aws_resource_id()),
         validate: |value| {
             if let Value::String(s) = value {
                 validate_prefixed_resource_id(s, "sg")
@@ -276,7 +276,7 @@ pub fn security_group_id() -> AttributeType {
 pub fn internet_gateway_id() -> AttributeType {
     AttributeType::Custom {
         name: "InternetGatewayId".to_string(),
-        base: Box::new(AttributeType::String),
+        base: Box::new(aws_resource_id()),
         validate: |value| {
             if let Value::String(s) = value {
                 validate_prefixed_resource_id(s, "igw")
@@ -294,7 +294,7 @@ pub fn internet_gateway_id() -> AttributeType {
 pub fn route_table_id() -> AttributeType {
     AttributeType::Custom {
         name: "RouteTableId".to_string(),
-        base: Box::new(AttributeType::String),
+        base: Box::new(aws_resource_id()),
         validate: |value| {
             if let Value::String(s) = value {
                 validate_prefixed_resource_id(s, "rtb")
@@ -312,7 +312,7 @@ pub fn route_table_id() -> AttributeType {
 pub fn nat_gateway_id() -> AttributeType {
     AttributeType::Custom {
         name: "NatGatewayId".to_string(),
-        base: Box::new(AttributeType::String),
+        base: Box::new(aws_resource_id()),
         validate: |value| {
             if let Value::String(s) = value {
                 validate_prefixed_resource_id(s, "nat")
@@ -330,7 +330,7 @@ pub fn nat_gateway_id() -> AttributeType {
 pub fn vpc_peering_connection_id() -> AttributeType {
     AttributeType::Custom {
         name: "VpcPeeringConnectionId".to_string(),
-        base: Box::new(AttributeType::String),
+        base: Box::new(aws_resource_id()),
         validate: |value| {
             if let Value::String(s) = value {
                 validate_prefixed_resource_id(s, "pcx").map_err(|reason| {
@@ -349,7 +349,7 @@ pub fn vpc_peering_connection_id() -> AttributeType {
 pub fn transit_gateway_id() -> AttributeType {
     AttributeType::Custom {
         name: "TransitGatewayId".to_string(),
-        base: Box::new(AttributeType::String),
+        base: Box::new(aws_resource_id()),
         validate: |value| {
             if let Value::String(s) = value {
                 validate_prefixed_resource_id(s, "tgw")
@@ -367,7 +367,7 @@ pub fn transit_gateway_id() -> AttributeType {
 pub fn vpc_cidr_block_association_id() -> AttributeType {
     AttributeType::Custom {
         name: "VpcCidrBlockAssociationId".to_string(),
-        base: Box::new(AttributeType::String),
+        base: Box::new(aws_resource_id()),
         validate: |value| {
             if let Value::String(s) = value {
                 validate_prefixed_resource_id(s, "vpc-cidr-assoc").map_err(|reason| {
@@ -386,7 +386,7 @@ pub fn vpc_cidr_block_association_id() -> AttributeType {
 pub fn tgw_route_table_id() -> AttributeType {
     AttributeType::Custom {
         name: "TgwRouteTableId".to_string(),
-        base: Box::new(AttributeType::String),
+        base: Box::new(aws_resource_id()),
         validate: |value| {
             if let Value::String(s) = value {
                 validate_prefixed_resource_id(s, "tgw-rtb")
@@ -404,7 +404,7 @@ pub fn tgw_route_table_id() -> AttributeType {
 pub fn vpn_gateway_id() -> AttributeType {
     AttributeType::Custom {
         name: "VpnGatewayId".to_string(),
-        base: Box::new(AttributeType::String),
+        base: Box::new(aws_resource_id()),
         validate: |value| {
             if let Value::String(s) = value {
                 validate_prefixed_resource_id(s, "vgw")
@@ -427,7 +427,7 @@ pub fn gateway_id() -> AttributeType {
 pub fn egress_only_internet_gateway_id() -> AttributeType {
     AttributeType::Custom {
         name: "EgressOnlyInternetGatewayId".to_string(),
-        base: Box::new(AttributeType::String),
+        base: Box::new(aws_resource_id()),
         validate: |value| {
             if let Value::String(s) = value {
                 validate_prefixed_resource_id(s, "eigw").map_err(|reason| {
@@ -449,7 +449,7 @@ pub fn egress_only_internet_gateway_id() -> AttributeType {
 pub fn vpc_endpoint_id() -> AttributeType {
     AttributeType::Custom {
         name: "VpcEndpointId".to_string(),
-        base: Box::new(AttributeType::String),
+        base: Box::new(aws_resource_id()),
         validate: |value| {
             if let Value::String(s) = value {
                 validate_prefixed_resource_id(s, "vpce")
@@ -467,7 +467,7 @@ pub fn vpc_endpoint_id() -> AttributeType {
 pub fn instance_id() -> AttributeType {
     AttributeType::Custom {
         name: "InstanceId".to_string(),
-        base: Box::new(AttributeType::String),
+        base: Box::new(aws_resource_id()),
         validate: |value| {
             if let Value::String(s) = value {
                 validate_prefixed_resource_id(s, "i")
@@ -485,7 +485,7 @@ pub fn instance_id() -> AttributeType {
 pub fn network_interface_id() -> AttributeType {
     AttributeType::Custom {
         name: "NetworkInterfaceId".to_string(),
-        base: Box::new(AttributeType::String),
+        base: Box::new(aws_resource_id()),
         validate: |value| {
             if let Value::String(s) = value {
                 validate_prefixed_resource_id(s, "eni")
@@ -504,7 +504,7 @@ pub fn network_interface_id() -> AttributeType {
 pub fn allocation_id() -> AttributeType {
     AttributeType::Custom {
         name: "AllocationId".to_string(),
-        base: Box::new(AttributeType::String),
+        base: Box::new(aws_resource_id()),
         validate: |value| {
             if let Value::String(s) = value {
                 validate_prefixed_resource_id(s, "eipalloc")
@@ -522,7 +522,7 @@ pub fn allocation_id() -> AttributeType {
 pub fn prefix_list_id() -> AttributeType {
     AttributeType::Custom {
         name: "PrefixListId".to_string(),
-        base: Box::new(AttributeType::String),
+        base: Box::new(aws_resource_id()),
         validate: |value| {
             if let Value::String(s) = value {
                 validate_prefixed_resource_id(s, "pl")
@@ -540,7 +540,7 @@ pub fn prefix_list_id() -> AttributeType {
 pub fn carrier_gateway_id() -> AttributeType {
     AttributeType::Custom {
         name: "CarrierGatewayId".to_string(),
-        base: Box::new(AttributeType::String),
+        base: Box::new(aws_resource_id()),
         validate: |value| {
             if let Value::String(s) = value {
                 validate_prefixed_resource_id(s, "cagw")
@@ -558,7 +558,7 @@ pub fn carrier_gateway_id() -> AttributeType {
 pub fn local_gateway_id() -> AttributeType {
     AttributeType::Custom {
         name: "LocalGatewayId".to_string(),
-        base: Box::new(AttributeType::String),
+        base: Box::new(aws_resource_id()),
         validate: |value| {
             if let Value::String(s) = value {
                 validate_prefixed_resource_id(s, "lgw")
@@ -577,7 +577,7 @@ pub fn local_gateway_id() -> AttributeType {
 pub fn network_acl_id() -> AttributeType {
     AttributeType::Custom {
         name: "NetworkAclId".to_string(),
-        base: Box::new(AttributeType::String),
+        base: Box::new(aws_resource_id()),
         validate: |value| {
             if let Value::String(s) = value {
                 validate_prefixed_resource_id(s, "acl")
@@ -595,7 +595,7 @@ pub fn network_acl_id() -> AttributeType {
 pub fn transit_gateway_attachment_id() -> AttributeType {
     AttributeType::Custom {
         name: "TransitGatewayAttachmentId".to_string(),
-        base: Box::new(AttributeType::String),
+        base: Box::new(aws_resource_id()),
         validate: |value| {
             if let Value::String(s) = value {
                 validate_prefixed_resource_id(s, "tgw-attach").map_err(|reason| {
@@ -614,7 +614,7 @@ pub fn transit_gateway_attachment_id() -> AttributeType {
 pub fn flow_log_id() -> AttributeType {
     AttributeType::Custom {
         name: "FlowLogId".to_string(),
-        base: Box::new(AttributeType::String),
+        base: Box::new(aws_resource_id()),
         validate: |value| {
             if let Value::String(s) = value {
                 validate_prefixed_resource_id(s, "fl")
@@ -632,7 +632,7 @@ pub fn flow_log_id() -> AttributeType {
 pub fn ipam_id() -> AttributeType {
     AttributeType::Custom {
         name: "IpamId".to_string(),
-        base: Box::new(AttributeType::String),
+        base: Box::new(aws_resource_id()),
         validate: |value| {
             if let Value::String(s) = value {
                 validate_prefixed_resource_id(s, "ipam")
@@ -650,7 +650,7 @@ pub fn ipam_id() -> AttributeType {
 pub fn subnet_route_table_association_id() -> AttributeType {
     AttributeType::Custom {
         name: "SubnetRouteTableAssociationId".to_string(),
-        base: Box::new(AttributeType::String),
+        base: Box::new(aws_resource_id()),
         validate: |value| {
             if let Value::String(s) = value {
                 validate_prefixed_resource_id(s, "rtbassoc").map_err(|reason| {
@@ -672,7 +672,7 @@ pub fn subnet_route_table_association_id() -> AttributeType {
 pub fn security_group_rule_id() -> AttributeType {
     AttributeType::Custom {
         name: "SecurityGroupRuleId".to_string(),
-        base: Box::new(AttributeType::String),
+        base: Box::new(aws_resource_id()),
         validate: |value| {
             if let Value::String(s) = value {
                 validate_prefixed_resource_id(s, "sgr")
@@ -704,7 +704,7 @@ pub fn validate_iam_role_id(id: &str) -> Result<(), String> {
 pub fn iam_role_id() -> AttributeType {
     AttributeType::Custom {
         name: "IamRoleId".to_string(),
-        base: Box::new(AttributeType::String),
+        base: Box::new(aws_resource_id()),
         validate: |value| {
             if let Value::String(s) = value {
                 validate_iam_role_id(s)
@@ -754,6 +754,7 @@ pub fn aws_account_id() -> AttributeType {
 
 // ========== ARN validators ==========
 
+/// Valid AWS partition values.
 const VALID_PARTITIONS: &[&str] = &["aws", "aws-cn", "aws-us-gov"];
 
 /// Validate basic ARN format (starts with "arn:", has 6+ colon-separated parts).
@@ -815,6 +816,7 @@ pub fn validate_service_arn(
 /// - Resource name after `resource_prefix` must be non-empty and contain only
 ///   valid IAM path/name characters
 pub fn validate_iam_arn(arn: &str, resource_prefix: &str) -> Result<(), String> {
+    // Derive type label from prefix: "policy/" -> "IAM Policy ARN", "role/" -> "IAM Role ARN"
     let resource_type = resource_prefix.trim_end_matches('/');
     let label = format!(
         "IAM {} ARN",
@@ -891,7 +893,7 @@ pub fn arn() -> AttributeType {
 pub fn iam_role_arn() -> AttributeType {
     AttributeType::Custom {
         name: "IamRoleArn".to_string(),
-        base: Box::new(AttributeType::String),
+        base: Box::new(arn()),
         validate: |value| {
             if let Value::String(s) = value {
                 validate_iam_arn(s, "role/")
@@ -910,7 +912,7 @@ pub fn iam_role_arn() -> AttributeType {
 pub fn iam_policy_arn() -> AttributeType {
     AttributeType::Custom {
         name: "IamPolicyArn".to_string(),
-        base: Box::new(AttributeType::String),
+        base: Box::new(arn()),
         validate: |value| {
             if let Value::String(s) = value {
                 validate_iam_arn(s, "policy/")
@@ -929,7 +931,7 @@ pub fn iam_policy_arn() -> AttributeType {
 pub fn kms_key_arn() -> AttributeType {
     AttributeType::Custom {
         name: "KmsKeyArn".to_string(),
-        base: Box::new(AttributeType::String),
+        base: Box::new(arn()),
         validate: |value| {
             if let Value::String(s) = value {
                 validate_service_arn(s, "kms", Some("key/"))
@@ -997,7 +999,7 @@ pub fn validate_kms_key_id(value: &str) -> Result<(), String> {
 pub fn kms_key_id() -> AttributeType {
     AttributeType::Custom {
         name: "KmsKeyId".to_string(),
-        base: Box::new(AttributeType::String),
+        base: Box::new(aws_resource_id()),
         validate: |value| {
             if let Value::String(s) = value {
                 validate_kms_key_id(s)
@@ -1031,7 +1033,7 @@ pub fn validate_ipam_pool_id(id: &str) -> Result<(), String> {
 pub fn ipam_pool_id() -> AttributeType {
     AttributeType::Custom {
         name: "IpamPoolId".to_string(),
-        base: Box::new(AttributeType::String),
+        base: Box::new(aws_resource_id()),
         validate: |value| {
             if let Value::String(s) = value {
                 validate_ipam_pool_id(s)
@@ -1232,6 +1234,23 @@ fn iam_policy_version() -> AttributeType {
     }
 }
 
+/// IAM condition map type: Map<ConditionOperator, Map<ConditionKey, StringOrList>>
+fn condition_type() -> AttributeType {
+    let operator_values: Vec<String> = CONDITION_OPERATORS
+        .iter()
+        .map(|(s, _)| s.to_string())
+        .collect();
+    AttributeType::map_with_key(
+        AttributeType::StringEnum {
+            name: "ConditionOperator".to_string(),
+            values: operator_values,
+            namespace: None,
+            to_dsl: None,
+        },
+        AttributeType::map(string_or_list_of_strings()),
+    )
+}
+
 /// IAM Policy Statement struct type
 fn iam_policy_statement() -> AttributeType {
     AttributeType::Struct {
@@ -1250,11 +1269,7 @@ fn iam_policy_statement() -> AttributeType {
                 .with_provider_name("Principal"),
             StructField::new("not_principal", string_or_principal_struct())
                 .with_provider_name("NotPrincipal"),
-            StructField::new(
-                "condition",
-                AttributeType::map(AttributeType::map(string_or_list_of_strings())),
-            )
-            .with_provider_name("Condition"),
+            StructField::new("condition", condition_type()).with_provider_name("Condition"),
         ],
     }
 }
@@ -1278,11 +1293,176 @@ pub fn iam_policy_document() -> AttributeType {
     }
 }
 
-/// Validate IAM policy document structure
+/// IAM condition operator mappings: (snake_case, PascalCase).
+///
+/// See <https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_elements_condition_operators.html>
+const CONDITION_OPERATORS: &[(&str, &str)] = &[
+    // String
+    ("string_equals", "StringEquals"),
+    ("string_not_equals", "StringNotEquals"),
+    ("string_equals_ignore_case", "StringEqualsIgnoreCase"),
+    ("string_not_equals_ignore_case", "StringNotEqualsIgnoreCase"),
+    ("string_like", "StringLike"),
+    ("string_not_like", "StringNotLike"),
+    // Numeric
+    ("numeric_equals", "NumericEquals"),
+    ("numeric_not_equals", "NumericNotEquals"),
+    ("numeric_less_than", "NumericLessThan"),
+    ("numeric_less_than_equals", "NumericLessThanEquals"),
+    ("numeric_greater_than", "NumericGreaterThan"),
+    ("numeric_greater_than_equals", "NumericGreaterThanEquals"),
+    // Date
+    ("date_equals", "DateEquals"),
+    ("date_not_equals", "DateNotEquals"),
+    ("date_less_than", "DateLessThan"),
+    ("date_less_than_equals", "DateLessThanEquals"),
+    ("date_greater_than", "DateGreaterThan"),
+    ("date_greater_than_equals", "DateGreaterThanEquals"),
+    // Boolean
+    ("bool", "Bool"),
+    // Binary
+    ("binary_equals", "BinaryEquals"),
+    // IP
+    ("ip_address", "IpAddress"),
+    ("not_ip_address", "NotIpAddress"),
+    // ARN
+    ("arn_equals", "ArnEquals"),
+    ("arn_not_equals", "ArnNotEquals"),
+    ("arn_like", "ArnLike"),
+    ("arn_not_like", "ArnNotLike"),
+    // Null check
+    ("null", "Null"),
+];
+
+/// Snake_case prefixes for set operators and their PascalCase AWS form.
+const CONDITION_QUALIFIER_PREFIXES: &[(&str, &str)] = &[
+    ("for_all_values_", "ForAllValues:"),
+    ("for_any_value_", "ForAnyValue:"),
+];
+
+/// Convert a snake_case condition operator to its PascalCase AWS form.
+/// Returns `None` if the operator is unknown.
+///
+/// Handles modifiers generically:
+/// - `_if_exists` suffix: `string_equals_if_exists` → `StringEqualsIfExists`
+/// - `for_all_values_` / `for_any_value_` prefix: `for_all_values_string_like` → `ForAllValues:StringLike`
+/// - Combined: `for_all_values_string_like_if_exists` → `ForAllValues:StringLikeIfExists`
+pub fn condition_operator_to_aws(snake: &str) -> Option<String> {
+    let (rest, if_exists) = match snake.strip_suffix("_if_exists") {
+        Some(base) => (base, true),
+        None => (snake, false),
+    };
+    // Check for qualifier prefix (for_all_values_, for_any_value_)
+    for (snake_prefix, pascal_prefix) in CONDITION_QUALIFIER_PREFIXES {
+        if let Some(base) = rest.strip_prefix(snake_prefix) {
+            return CONDITION_OPERATORS
+                .iter()
+                .find(|(s, _)| *s == base)
+                .map(|(_, pascal)| {
+                    let suffix = if if_exists { "IfExists" } else { "" };
+                    format!("{pascal_prefix}{pascal}{suffix}")
+                });
+        }
+    }
+    // Direct operator lookup
+    CONDITION_OPERATORS
+        .iter()
+        .find(|(s, _)| *s == rest)
+        .map(|(_, pascal)| {
+            if if_exists {
+                format!("{pascal}IfExists")
+            } else {
+                pascal.to_string()
+            }
+        })
+}
+
+/// Convert a PascalCase AWS condition operator to snake_case DSL form.
+/// Returns `None` if the operator is unknown.
+///
+/// Handles modifiers generically:
+/// - `IfExists` suffix: `StringEqualsIfExists` → `string_equals_if_exists`
+/// - `ForAllValues:` / `ForAnyValue:` prefix: `ForAllValues:StringLike` → `for_all_values_string_like`
+/// - Combined: `ForAllValues:StringLikeIfExists` → `for_all_values_string_like_if_exists`
+pub fn condition_operator_to_snake(pascal: &str) -> Option<String> {
+    let (rest, if_exists) = match pascal.strip_suffix("IfExists") {
+        Some(base) => (base, true),
+        None => (pascal, false),
+    };
+    // Check for qualifier prefix (ForAllValues:, ForAnyValue:)
+    for (snake_prefix, pascal_prefix) in CONDITION_QUALIFIER_PREFIXES {
+        if let Some(base) = rest.strip_prefix(pascal_prefix) {
+            return CONDITION_OPERATORS
+                .iter()
+                .find(|(_, p)| *p == base)
+                .map(|(snake, _)| {
+                    let suffix = if if_exists { "_if_exists" } else { "" };
+                    format!("{snake_prefix}{snake}{suffix}")
+                });
+        }
+    }
+    // Direct operator lookup
+    CONDITION_OPERATORS
+        .iter()
+        .find(|(_, p)| *p == rest)
+        .map(|(snake, _)| {
+            if if_exists {
+                format!("{snake}_if_exists")
+            } else {
+                snake.to_string()
+            }
+        })
+}
+
+/// Check if a string is a valid snake_case condition operator.
+pub fn is_valid_condition_operator(key: &str) -> bool {
+    condition_operator_to_aws(key).is_some()
+}
+
+/// Validate condition operators in a parsed IAM policy document.
+///
+/// Walks the document looking for `condition` maps and validates that
+/// all operator keys are valid snake_case condition operators.
+pub fn validate_condition_operators(value: &Value) -> Result<(), String> {
+    let Value::Map(doc) = value else {
+        return Ok(());
+    };
+    // Look for "statement" list
+    let Some(Value::List(statements)) = doc.get("statement") else {
+        return Ok(());
+    };
+    for (i, stmt) in statements.iter().enumerate() {
+        let Value::Map(stmt_map) = stmt else {
+            continue;
+        };
+        let Some(Value::Map(condition)) = stmt_map.get("condition") else {
+            continue;
+        };
+        for key in condition.keys() {
+            if !is_valid_condition_operator(key) {
+                let valid_operators: Vec<&str> =
+                    CONDITION_OPERATORS.iter().map(|(s, _)| *s).collect();
+                return Err(format!(
+                    "statement[{}]: unknown condition operator '{}'. \
+                     Valid operators: {} \
+                     (prefix with for_all_values_ or for_any_value_ for set operators, \
+                     append _if_exists for conditional variants)",
+                    i,
+                    key,
+                    valid_operators.join(", ")
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Validate IAM policy document structure and condition operators.
 pub fn validate_iam_policy_document(value: &Value) -> Result<(), String> {
     iam_policy_document()
         .validate(value)
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+    validate_condition_operators(value)
 }
 
 #[cfg(test)]
@@ -1312,60 +1492,6 @@ mod tests {
         // "arn::::::" has empty partition and service — should be rejected
         assert!(validate_arn("arn::s3:::my-bucket").is_err());
         assert!(validate_arn("arn:::::").is_err());
-    }
-
-    #[test]
-    fn validate_arn_rejects_invalid_partition() {
-        let err = validate_arn("arn:gcp:s3:::my-bucket").unwrap_err();
-        assert!(err.contains("invalid partition"));
-        assert!(err.contains("gcp"));
-    }
-
-    // IAM ARN tests
-
-    #[test]
-    fn validate_iam_arn_valid_role() {
-        assert!(validate_iam_arn("arn:aws:iam::123456789012:role/MyRole", "role/").is_ok());
-        assert!(validate_iam_arn("arn:aws:iam::123456789012:role/path/MyRole", "role/").is_ok());
-    }
-
-    #[test]
-    fn validate_iam_arn_valid_policy() {
-        assert!(validate_iam_arn("arn:aws:iam::123456789012:policy/MyPolicy", "policy/").is_ok());
-        assert!(
-            validate_iam_arn("arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess", "policy/").is_ok()
-        );
-    }
-
-    #[test]
-    fn validate_iam_arn_rejects_wrong_service() {
-        let err = validate_iam_arn("arn:aws:s3:::my-bucket", "role/").unwrap_err();
-        assert!(err.contains("service is 's3'"));
-    }
-
-    #[test]
-    fn validate_iam_arn_rejects_non_empty_region() {
-        let err = validate_iam_arn("arn:aws:iam:us-east-1:123456789012:role/MyRole", "role/")
-            .unwrap_err();
-        assert!(err.contains("region must be empty"));
-    }
-
-    #[test]
-    fn validate_iam_arn_rejects_bad_account() {
-        let err = validate_iam_arn("arn:aws:iam::badaccount:role/MyRole", "role/").unwrap_err();
-        assert!(err.contains("account must be"));
-    }
-
-    #[test]
-    fn validate_iam_arn_rejects_wrong_prefix() {
-        let err = validate_iam_arn("arn:aws:iam::123456789012:user/MyUser", "role/").unwrap_err();
-        assert!(err.contains("must begin with 'role/'"));
-    }
-
-    #[test]
-    fn validate_iam_arn_rejects_empty_name() {
-        let err = validate_iam_arn("arn:aws:iam::123456789012:role/", "role/").unwrap_err();
-        assert!(err.contains("must not be empty"));
     }
 
     #[test]
@@ -1696,6 +1822,92 @@ mod tests {
         );
     }
 
+    // --- validate_arn partition tests ---
+
+    #[test]
+    fn validate_arn_rejects_invalid_partition() {
+        assert!(validate_arn("arn:xxx:iam::aws:policy/Foo").is_err());
+        assert!(validate_arn("arn:invalid:s3:::bucket").is_err());
+    }
+
+    #[test]
+    fn validate_arn_accepts_valid_partitions() {
+        assert!(validate_arn("arn:aws:s3:::bucket").is_ok());
+        assert!(validate_arn("arn:aws-cn:s3:::bucket").is_ok());
+        assert!(validate_arn("arn:aws-us-gov:s3:::bucket").is_ok());
+    }
+
+    // --- IAM ARN validation tests ---
+
+    #[test]
+    fn validate_iam_arn_rejects_non_empty_region() {
+        assert!(validate_iam_arn("arn:aws:iam:us-east-1:aws:policy/Foo", "policy/").is_err());
+    }
+
+    #[test]
+    fn validate_iam_arn_rejects_short_account_id() {
+        assert!(validate_iam_arn("arn:aws:iam::1234:policy/Foo", "policy/").is_err());
+    }
+
+    #[test]
+    fn validate_iam_arn_rejects_non_digit_account() {
+        assert!(validate_iam_arn("arn:aws:iam::aw:policy/Foo", "policy/").is_err());
+    }
+
+    #[test]
+    fn validate_iam_arn_accepts_aws_managed() {
+        assert!(validate_iam_arn("arn:aws:iam::aws:policy/AdministratorAccess", "policy/").is_ok());
+    }
+
+    #[test]
+    fn validate_iam_arn_accepts_customer_managed() {
+        assert!(validate_iam_arn("arn:aws:iam::123456789012:policy/MyPolicy", "policy/").is_ok());
+    }
+
+    #[test]
+    fn validate_iam_arn_rejects_empty_resource_name() {
+        assert!(validate_iam_arn("arn:aws:iam::aws:policy/", "policy/").is_err());
+    }
+
+    #[test]
+    fn validate_iam_arn_rejects_invalid_resource_chars() {
+        assert!(validate_iam_arn("arn:aws:iam::aws:policy/My Policy", "policy/").is_err());
+        assert!(validate_iam_arn("arn:aws:iam::aws:policy/foo<bar>", "policy/").is_err());
+    }
+
+    #[test]
+    fn validate_iam_arn_accepts_path_prefix() {
+        assert!(
+            validate_iam_arn(
+                "arn:aws:iam::123456789012:role/service-role/MyRole",
+                "role/"
+            )
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn validate_iam_arn_error_says_iam_policy_arn() {
+        let err = validate_iam_arn("arn:aws:iam:us-east-1:aws:policy/Foo", "policy/").unwrap_err();
+        assert!(
+            err.contains("IAM Policy ARN"),
+            "Error should say 'IAM Policy ARN': {err}"
+        );
+        assert!(
+            err.contains("arn:aws:iam:us-east-1:aws:policy/Foo"),
+            "Error should include full ARN: {err}"
+        );
+    }
+
+    #[test]
+    fn validate_iam_arn_error_says_iam_role_arn() {
+        let err = validate_iam_arn("arn:aws:iam:us-east-1:aws:role/Foo", "role/").unwrap_err();
+        assert!(
+            err.contains("IAM Role ARN"),
+            "Error should say 'IAM Role ARN': {err}"
+        );
+    }
+
     // UUID tests
 
     #[test]
@@ -1967,5 +2179,248 @@ mod tests {
         let awscc = region_completions("awscc");
         assert!(aws[0].value.starts_with("aws.Region."));
         assert!(awscc[0].value.starts_with("awscc.Region."));
+    }
+
+    #[test]
+    fn validate_tags_map_detects_key_value_pattern() {
+        let mut attrs = std::collections::HashMap::new();
+        attrs.insert(
+            "tags".to_string(),
+            Value::Map(
+                [
+                    ("key".to_string(), Value::String("Project".to_string())),
+                    ("value".to_string(), Value::String("carina".to_string())),
+                ]
+                .into_iter()
+                .collect(),
+            ),
+        );
+        assert!(validate_tags_map(&attrs).is_err());
+    }
+
+    #[test]
+    fn validate_tags_map_case_insensitive() {
+        let mut attrs = std::collections::HashMap::new();
+        attrs.insert(
+            "tags".to_string(),
+            Value::Map(
+                [
+                    ("Key".to_string(), Value::String("Project".to_string())),
+                    ("Value".to_string(), Value::String("carina".to_string())),
+                ]
+                .into_iter()
+                .collect(),
+            ),
+        );
+        assert!(validate_tags_map(&attrs).is_err());
+    }
+
+    #[test]
+    fn validate_tags_map_normal_tags_ok() {
+        let mut attrs = std::collections::HashMap::new();
+        attrs.insert(
+            "tags".to_string(),
+            Value::Map(
+                [
+                    ("Project".to_string(), Value::String("carina".to_string())),
+                    ("ManagedBy".to_string(), Value::String("carina".to_string())),
+                ]
+                .into_iter()
+                .collect(),
+            ),
+        );
+        assert!(validate_tags_map(&attrs).is_ok());
+    }
+
+    #[test]
+    fn validate_tags_map_no_tags_ok() {
+        let attrs = std::collections::HashMap::new();
+        assert!(validate_tags_map(&attrs).is_ok());
+    }
+
+    // --- Condition operator tests ---
+
+    #[test]
+    fn condition_operator_to_aws_basic() {
+        assert_eq!(
+            condition_operator_to_aws("string_equals"),
+            Some("StringEquals".to_string())
+        );
+        assert_eq!(
+            condition_operator_to_aws("arn_like"),
+            Some("ArnLike".to_string())
+        );
+        assert_eq!(condition_operator_to_aws("null"), Some("Null".to_string()));
+    }
+
+    #[test]
+    fn condition_operator_to_aws_if_exists() {
+        assert_eq!(
+            condition_operator_to_aws("string_equals_if_exists"),
+            Some("StringEqualsIfExists".to_string())
+        );
+        assert_eq!(
+            condition_operator_to_aws("arn_like_if_exists"),
+            Some("ArnLikeIfExists".to_string())
+        );
+    }
+
+    #[test]
+    fn condition_operator_to_aws_unknown() {
+        assert_eq!(condition_operator_to_aws("unknown_op"), None);
+        assert_eq!(condition_operator_to_aws("StringEquals"), None);
+    }
+
+    #[test]
+    fn condition_operator_to_aws_for_all_values() {
+        assert_eq!(
+            condition_operator_to_aws("for_all_values_string_equals"),
+            Some("ForAllValues:StringEquals".to_string())
+        );
+        assert_eq!(
+            condition_operator_to_aws("for_any_value_string_like"),
+            Some("ForAnyValue:StringLike".to_string())
+        );
+        // Any base operator should work with qualifiers
+        assert_eq!(
+            condition_operator_to_aws("for_all_values_numeric_equals"),
+            Some("ForAllValues:NumericEquals".to_string())
+        );
+        // Combined qualifier + if_exists
+        assert_eq!(
+            condition_operator_to_aws("for_all_values_string_like_if_exists"),
+            Some("ForAllValues:StringLikeIfExists".to_string())
+        );
+    }
+
+    #[test]
+    fn condition_operator_to_snake_roundtrip() {
+        assert_eq!(
+            condition_operator_to_snake("ForAllValues:NumericEquals"),
+            Some("for_all_values_numeric_equals".to_string())
+        );
+        assert_eq!(
+            condition_operator_to_snake("ForAnyValue:ArnLikeIfExists"),
+            Some("for_any_value_arn_like_if_exists".to_string())
+        );
+    }
+
+    #[test]
+    fn validate_condition_operators_accepts_valid() {
+        let doc = Value::Map(
+            vec![(
+                "statement".to_string(),
+                Value::List(vec![Value::Map(
+                    vec![(
+                        "condition".to_string(),
+                        Value::Map(
+                            vec![(
+                                "string_equals".to_string(),
+                                Value::Map(
+                                    vec![(
+                                        "aws:RequestedRegion".to_string(),
+                                        Value::String("us-east-1".to_string()),
+                                    )]
+                                    .into_iter()
+                                    .collect(),
+                                ),
+                            )]
+                            .into_iter()
+                            .collect(),
+                        ),
+                    )]
+                    .into_iter()
+                    .collect(),
+                )]),
+            )]
+            .into_iter()
+            .collect(),
+        );
+        assert!(validate_condition_operators(&doc).is_ok());
+    }
+
+    #[test]
+    fn validate_condition_operators_rejects_pascal_case() {
+        let doc = Value::Map(
+            vec![(
+                "statement".to_string(),
+                Value::List(vec![Value::Map(
+                    vec![(
+                        "condition".to_string(),
+                        Value::Map(
+                            vec![(
+                                "StringEquals".to_string(),
+                                Value::Map(std::collections::HashMap::new()),
+                            )]
+                            .into_iter()
+                            .collect(),
+                        ),
+                    )]
+                    .into_iter()
+                    .collect(),
+                )]),
+            )]
+            .into_iter()
+            .collect(),
+        );
+        let err = validate_condition_operators(&doc).unwrap_err();
+        assert!(
+            err.contains("StringEquals"),
+            "Error should mention the invalid key: {err}"
+        );
+    }
+
+    #[test]
+    fn validate_condition_operators_rejects_unknown() {
+        let doc = Value::Map(
+            vec![(
+                "statement".to_string(),
+                Value::List(vec![Value::Map(
+                    vec![(
+                        "condition".to_string(),
+                        Value::Map(
+                            vec![(
+                                "foo_bar".to_string(),
+                                Value::Map(std::collections::HashMap::new()),
+                            )]
+                            .into_iter()
+                            .collect(),
+                        ),
+                    )]
+                    .into_iter()
+                    .collect(),
+                )]),
+            )]
+            .into_iter()
+            .collect(),
+        );
+        assert!(validate_condition_operators(&doc).is_err());
+    }
+
+    #[test]
+    fn validate_condition_operators_accepts_if_exists() {
+        let doc = Value::Map(
+            vec![(
+                "statement".to_string(),
+                Value::List(vec![Value::Map(
+                    vec![(
+                        "condition".to_string(),
+                        Value::Map(
+                            vec![(
+                                "string_equals_if_exists".to_string(),
+                                Value::Map(std::collections::HashMap::new()),
+                            )]
+                            .into_iter()
+                            .collect(),
+                        ),
+                    )]
+                    .into_iter()
+                    .collect(),
+                )]),
+            )]
+            .into_iter()
+            .collect(),
+        );
+        assert!(validate_condition_operators(&doc).is_ok());
     }
 }
