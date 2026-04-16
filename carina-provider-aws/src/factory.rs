@@ -66,8 +66,8 @@ impl ProviderFactory for AwsProviderFactory {
     fn create_normalizer(
         &self,
         _attributes: &HashMap<String, Value>,
-    ) -> BoxFuture<'_, Option<Box<dyn ProviderNormalizer>>> {
-        Box::pin(async { Some(Box::new(AwsNormalizer) as Box<dyn ProviderNormalizer>) })
+    ) -> BoxFuture<'_, Box<dyn ProviderNormalizer>> {
+        Box::pin(async { Box::new(AwsNormalizer) as Box<dyn ProviderNormalizer> })
     }
 
     fn schemas(&self) -> Vec<carina_core::schema::ResourceSchema> {
