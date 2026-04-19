@@ -621,14 +621,14 @@ dependencies = [
 
 [[package]]
 name = "carina-aws-types"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "carina-core",
 ]
 
 [[package]]
 name = "carina-codegen-aws"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "anyhow",
  "carina-smithy",
@@ -670,7 +670,7 @@ dependencies = [
 
 [[package]]
 name = "carina-provider-aws"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "aws-config",
  "aws-sdk-cloudwatchlogs",
@@ -708,7 +708,7 @@ dependencies = [
 
 [[package]]
 name = "carina-smithy"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "serde",
  "serde_json",
