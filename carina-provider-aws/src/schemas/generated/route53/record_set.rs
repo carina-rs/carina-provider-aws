@@ -59,7 +59,9 @@ pub fn route53_record_set_config() -> AwsSchemaConfig {
         )
         .attribute(
             AttributeSchema::new("ttl", AttributeType::Custom {
-                name: "Int(0..=2147483647)".to_string(),
+                semantic_name: None,
+                pattern: None,
+                length: Some((Some(0), Some(2147483647))),
                 base: Box::new(AttributeType::Int),
                 validate: validate_ttl_range,
                 namespace: None,

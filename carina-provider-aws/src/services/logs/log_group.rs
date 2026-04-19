@@ -169,22 +169,20 @@ impl AwsProvider {
                             .for_resource(id.clone())
                     })?;
             }
-            None => {
+            None if from.attributes.contains_key("retention_in_days") => {
                 // If retention was previously set but now removed, delete the policy
-                if from.attributes.contains_key("retention_in_days") {
-                    self.logs_client
-                        .delete_retention_policy()
-                        .log_group_name(identifier)
-                        .send()
-                        .await
-                        .map_err(|e| {
-                            ProviderError::new(sdk_error_message(
-                                "Failed to delete retention policy",
-                                &e,
-                            ))
-                            .for_resource(id.clone())
-                        })?;
-                }
+                self.logs_client
+                    .delete_retention_policy()
+                    .log_group_name(identifier)
+                    .send()
+                    .await
+                    .map_err(|e| {
+                        ProviderError::new(sdk_error_message(
+                            "Failed to delete retention policy",
+                            &e,
+                        ))
+                        .for_resource(id.clone())
+                    })?;
             }
             _ => {}
         }
