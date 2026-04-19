@@ -1048,17 +1048,26 @@ fn resolve_type(
                     .entry(field_name.to_string())
                     .or_insert(r);
                 let validate_fn = format!("validate_{}_range", field_name.to_snake_case());
-                let display = range_display_string(r.min, r.max);
+                let length_expr = match (r.min, r.max) {
+                    (Some(min), Some(max)) if min >= 0 && max >= 0 => {
+                        format!("Some((Some({}), Some({})))", min, max)
+                    }
+                    (Some(min), None) if min >= 0 => format!("Some((Some({}), None))", min),
+                    (None, Some(max)) if max >= 0 => format!("Some((None, Some({})))", max),
+                    _ => "None".to_string(),
+                };
                 (
                     format!(
                         "AttributeType::Custom {{\n\
-                         \x20               name: \"Int({})\".to_string(),\n\
+                         \x20               semantic_name: None,\n\
+                         \x20               pattern: None,\n\
+                         \x20               length: {},\n\
                          \x20               base: Box::new(AttributeType::Int),\n\
                          \x20               validate: {},\n\
                          \x20               namespace: None,\n\
                          \x20               to_dsl: None,\n\
                          \x20           }}",
-                        display, validate_fn
+                        length_expr, validate_fn
                     ),
                     None,
                 )

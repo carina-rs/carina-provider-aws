@@ -67,7 +67,9 @@ pub fn ec2_vpc_config() -> AwsSchemaConfig {
         )
         .attribute(
             AttributeSchema::new("ipv4_netmask_length", AttributeType::Custom {
-                name: "Int(0..=32)".to_string(),
+                semantic_name: None,
+                pattern: None,
+                length: Some((Some(0), Some(32))),
                 base: Box::new(AttributeType::Int),
                 validate: validate_ipv4_netmask_length_range,
                 namespace: None,

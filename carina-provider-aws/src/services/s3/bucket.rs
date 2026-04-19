@@ -494,11 +494,8 @@ impl AwsProvider {
 
             use aws_sdk_s3::types::Permission;
             match permission {
-                Permission::FullControl => {
-                    if !is_owner {
-                        full_control.push(grantee_str);
-                    }
-                }
+                Permission::FullControl if !is_owner => full_control.push(grantee_str),
+                Permission::FullControl => {}
                 Permission::Read => read.push(grantee_str),
                 Permission::ReadAcp => read_acp.push(grantee_str),
                 Permission::Write => write.push(grantee_str),

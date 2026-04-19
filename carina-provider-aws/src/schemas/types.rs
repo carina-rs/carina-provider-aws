@@ -32,7 +32,9 @@ pub struct AwsSchemaConfig {
 /// - Shorthand: ap_northeast_1
 pub fn aws_region() -> AttributeType {
     AttributeType::Custom {
-        name: "Region".to_string(),
+        semantic_name: Some("Region".to_string()),
+        pattern: None,
+        length: None,
         base: Box::new(AttributeType::String),
         validate: |value| {
             if let Value::String(s) = value {
@@ -65,7 +67,9 @@ pub fn aws_region() -> AttributeType {
 /// - Shorthand: us_east_1a
 pub fn availability_zone() -> AttributeType {
     AttributeType::Custom {
-        name: "AvailabilityZone".to_string(),
+        semantic_name: Some("AvailabilityZone".to_string()),
+        pattern: None,
+        length: None,
         base: Box::new(AttributeType::String),
         validate: |value| {
             if let Value::String(s) = value {
@@ -94,7 +98,9 @@ pub fn availability_zone() -> AttributeType {
 /// Multiple grantees can be comma-separated.
 pub fn s3_grantee() -> AttributeType {
     AttributeType::Custom {
-        name: "S3Grantee".to_string(),
+        semantic_name: Some("S3Grantee".to_string()),
+        pattern: None,
+        length: None,
         base: Box::new(AttributeType::String),
         validate: |value| {
             if let Value::String(s) = value {

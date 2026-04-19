@@ -62,7 +62,9 @@ pub fn ec2_security_group_ingress_config() -> AwsSchemaConfig {
         )
         .attribute(
             AttributeSchema::new("from_port", AttributeType::Custom {
-                name: "Int(-1..=65535)".to_string(),
+                semantic_name: None,
+                pattern: None,
+                length: None,
                 base: Box::new(AttributeType::Int),
                 validate: validate_from_port_range,
                 namespace: None,
@@ -116,7 +118,9 @@ pub fn ec2_security_group_ingress_config() -> AwsSchemaConfig {
         )
         .attribute(
             AttributeSchema::new("to_port", AttributeType::Custom {
-                name: "Int(-1..=65535)".to_string(),
+                semantic_name: None,
+                pattern: None,
+                length: None,
                 base: Box::new(AttributeType::Int),
                 validate: validate_to_port_range,
                 namespace: None,
