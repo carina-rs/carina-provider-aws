@@ -6,7 +6,7 @@ provider aws {
   region = aws.Region.ap_northeast_1
 }
 
-aws.ec2.transit_gateway {
+aws.ec2.TransitGateway {
   description = 'Acceptance test Transit Gateway'
 
   tags = {

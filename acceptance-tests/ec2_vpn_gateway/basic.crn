@@ -6,8 +6,8 @@ provider aws {
   region = aws.Region.ap_northeast_1
 }
 
-aws.ec2.vpn_gateway {
-  type = aws.ec2.vpn_gateway.Type.ipsec.1
+aws.ec2.VpnGateway {
+  type = aws.ec2.VpnGateway.Type.ipsec.1
 
   tags = {
     Environment = 'acceptance-test'

@@ -1,4 +1,4 @@
-//! route_table schema definition for AWS Cloud Control
+//! RouteTable schema definition for AWS Cloud Control
 //!
 //! Auto-generated from Smithy model: com.amazonaws.ec2
 //!
@@ -9,13 +9,13 @@ use super::tags_type;
 use super::validate_tags_map;
 use carina_core::schema::{AttributeSchema, ResourceSchema};
 
-/// Returns the schema config for ec2.route_table (Smithy: com.amazonaws.ec2)
+/// Returns the schema config for ec2.RouteTable (Smithy: com.amazonaws.ec2)
 pub fn ec2_route_table_config() -> AwsSchemaConfig {
     AwsSchemaConfig {
         aws_type_name: "AWS::EC2::RouteTable",
-        resource_type_name: "ec2.route_table",
+        resource_type_name: "ec2.RouteTable",
         has_tags: true,
-        schema: ResourceSchema::new("aws.ec2.route_table")
+        schema: ResourceSchema::new("aws.ec2.RouteTable")
             .with_description("Describes a route table.")
             .attribute(
                 AttributeSchema::new("vpc_id", super::vpc_id())
@@ -43,7 +43,7 @@ pub fn enum_valid_values() -> (
     &'static str,
     &'static [(&'static str, &'static [&'static str])],
 ) {
-    ("ec2.route_table", &[])
+    ("ec2.RouteTable", &[])
 }
 
 /// Maps DSL alias values back to canonical AWS values for this module.

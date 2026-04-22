@@ -1,4 +1,4 @@
-//! organizations.organization schema definition for AWS Cloud Control
+//! organizations.Organization schema definition for AWS Cloud Control
 //!
 //! Auto-generated from Smithy model: com.amazonaws.organizations
 //!
@@ -9,19 +9,19 @@ use carina_core::schema::{AttributeSchema, AttributeType, ResourceSchema};
 
 const VALID_FEATURE_SET: &[&str] = &["ALL", "CONSOLIDATED_BILLING"];
 
-/// Returns the schema config for organizations.organization (Smithy: com.amazonaws.organizations)
+/// Returns the schema config for organizations.Organization (Smithy: com.amazonaws.organizations)
 pub fn organizations_organization_config() -> AwsSchemaConfig {
     AwsSchemaConfig {
         aws_type_name: "AWS::Organizations::Organization",
-        resource_type_name: "organizations.organization",
+        resource_type_name: "organizations.Organization",
         has_tags: false,
-        schema: ResourceSchema::new("aws.organizations.organization")
+        schema: ResourceSchema::new("aws.organizations.Organization")
         .with_description("Contains details about an organization. An organization is a collection of accounts that are centrally managed together using consolidated billing, organized hierarchically with organizational units (...")
         .attribute(
             AttributeSchema::new("feature_set", AttributeType::StringEnum {
                 name: "FeatureSet".to_string(),
                 values: vec!["ALL".to_string(), "CONSOLIDATED_BILLING".to_string()],
-                namespace: Some("aws.organizations.organization".to_string()),
+                namespace: Some("aws.organizations.Organization".to_string()),
                 to_dsl: None,
             })
                 .create_only()
@@ -62,7 +62,7 @@ pub fn enum_valid_values() -> (
     &'static [(&'static str, &'static [&'static str])],
 ) {
     (
-        "organizations.organization",
+        "organizations.Organization",
         &[("feature_set", VALID_FEATURE_SET)],
     )
 }

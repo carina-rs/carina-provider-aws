@@ -1,4 +1,4 @@
-//! vpc_gateway_attachment schema definition for AWS Cloud Control
+//! VpcGatewayAttachment schema definition for AWS Cloud Control
 //!
 //! Auto-generated from Smithy model: com.amazonaws.ec2
 //!
@@ -7,13 +7,13 @@
 use super::AwsSchemaConfig;
 use carina_core::schema::{AttributeSchema, ResourceSchema};
 
-/// Returns the schema config for ec2.vpc_gateway_attachment (Smithy: com.amazonaws.ec2)
+/// Returns the schema config for ec2.VpcGatewayAttachment (Smithy: com.amazonaws.ec2)
 pub fn ec2_vpc_gateway_attachment_config() -> AwsSchemaConfig {
     AwsSchemaConfig {
         aws_type_name: "AWS::EC2::VPCGatewayAttachment",
-        resource_type_name: "ec2.vpc_gateway_attachment",
+        resource_type_name: "ec2.VpcGatewayAttachment",
         has_tags: false,
-        schema: ResourceSchema::new("aws.ec2.vpc_gateway_attachment")
+        schema: ResourceSchema::new("aws.ec2.VpcGatewayAttachment")
             .attribute(
                 AttributeSchema::new("internet_gateway_id", super::internet_gateway_id())
                     .required()
@@ -48,7 +48,7 @@ pub fn enum_valid_values() -> (
     &'static str,
     &'static [(&'static str, &'static [&'static str])],
 ) {
-    ("ec2.vpc_gateway_attachment", &[])
+    ("ec2.VpcGatewayAttachment", &[])
 }
 
 /// Maps DSL alias values back to canonical AWS values for this module.

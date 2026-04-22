@@ -6,11 +6,11 @@ provider aws {
   region = aws.Region.ap_northeast_1
 }
 
-let vpc = aws.ec2.vpc {
+let vpc = aws.ec2.Vpc {
   cidr_block = '10.0.0.0/16'
 }
 
-aws.ec2.egress_only_internet_gateway {
+aws.ec2.EgressOnlyInternetGateway {
   vpc_id = vpc.vpc_id
 
   tags = {

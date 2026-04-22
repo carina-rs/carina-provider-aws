@@ -554,16 +554,16 @@ fn test_subnet_hostname_type_dsl_to_aws_sdk() {
     use aws_sdk_ec2::types::HostnameType;
     use carina_core::utils::convert_enum_value;
 
-    // DSL uses underscores: aws.ec2.subnet.HostnameType.ip_name
+    // DSL uses underscores: aws.ec2.Subnet.HostnameType.ip_name
     // convert_enum_value extracts the value, then underscore→hyphen for AWS SDK
-    let dsl_value = "aws.ec2.subnet.HostnameType.ip_name";
+    let dsl_value = "aws.ec2.Subnet.HostnameType.ip_name";
     let extracted = convert_enum_value(dsl_value);
     assert_eq!(extracted, "ip_name");
     let aws_value = extracted.replace('_', "-");
     let hostname_type = HostnameType::from(aws_value.as_str());
     assert_eq!(hostname_type, HostnameType::IpName);
 
-    let dsl_value2 = "aws.ec2.subnet.HostnameType.resource_name";
+    let dsl_value2 = "aws.ec2.Subnet.HostnameType.resource_name";
     let extracted2 = convert_enum_value(dsl_value2);
     assert_eq!(extracted2, "resource_name");
     let aws_value2 = extracted2.replace('_', "-");
@@ -573,7 +573,7 @@ fn test_subnet_hostname_type_dsl_to_aws_sdk() {
 
 // --- Subnet modify_subnet_attributes: DNS options must be separate API calls ---
 // The AWS ModifySubnetAttribute API only allows modifying one attribute at a time.
-// See: https://docs.aws.amazon.com/AWSEC2/latest/APIReference/API_ModifySubnetAttribute.html
+// See: https://docs.aws.amazon.Com/AWSEC2/latest/APIReference/API_ModifySubnetAttribute.html
 // "You can only modify one attribute at a time."
 // This test verifies that private_dns_name_options_on_launch fields are parsed
 // correctly for separate API calls.
@@ -586,7 +586,7 @@ fn test_subnet_dns_options_fields_parsed_separately() {
     let mut fields = HashMap::new();
     fields.insert(
         "hostname_type".to_string(),
-        Value::String("aws.ec2.subnet.HostnameType.ip_name".to_string()),
+        Value::String("aws.ec2.Subnet.HostnameType.ip_name".to_string()),
     );
     fields.insert(
         "enable_resource_name_dns_a_record".to_string(),

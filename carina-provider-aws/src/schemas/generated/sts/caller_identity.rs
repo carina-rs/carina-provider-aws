@@ -1,4 +1,4 @@
-//! caller_identity schema definition for AWS Cloud Control
+//! CallerIdentity schema definition for AWS Cloud Control
 //!
 //! Auto-generated from Smithy model: com.amazonaws.sts
 //!
@@ -7,13 +7,13 @@
 use super::AwsSchemaConfig;
 use carina_core::schema::{AttributeSchema, AttributeType, ResourceSchema};
 
-/// Returns the schema config for sts.caller_identity (Smithy: com.amazonaws.sts)
+/// Returns the schema config for sts.CallerIdentity (Smithy: com.amazonaws.sts)
 pub fn sts_caller_identity_config() -> AwsSchemaConfig {
     AwsSchemaConfig {
         aws_type_name: "AWS::STS::CallerIdentity",
-        resource_type_name: "sts.caller_identity",
+        resource_type_name: "sts.CallerIdentity",
         has_tags: false,
-        schema: ResourceSchema::new("aws.sts.caller_identity")
+        schema: ResourceSchema::new("aws.sts.CallerIdentity")
         .as_data_source()
         .attribute(
             AttributeSchema::new("account_id", super::aws_account_id())
@@ -38,7 +38,7 @@ pub fn enum_valid_values() -> (
     &'static str,
     &'static [(&'static str, &'static [&'static str])],
 ) {
-    ("sts.caller_identity", &[])
+    ("sts.CallerIdentity", &[])
 }
 
 /// Maps DSL alias values back to canonical AWS values for this module.

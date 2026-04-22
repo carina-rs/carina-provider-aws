@@ -27,7 +27,7 @@ pub fn require_string_attr(resource: &Resource, attr_name: &str) -> ProviderResu
 /// Extract a required enum attribute from a resource, stripping the DSL namespace prefix.
 ///
 /// StringEnum attributes arrive as namespaced identifiers
-/// (e.g., `aws.route53.record_set.Type.A`). This extracts just the variant (`A`).
+/// (e.g., `aws.route53.RecordSet.Type.A`). This extracts just the variant (`A`).
 /// Using `require_string_attr` instead will pass the full namespaced path to
 /// the AWS API, causing failures that are hard to diagnose.
 pub fn require_enum_attr(resource: &Resource, attr_name: &str) -> ProviderResult<String> {
@@ -177,7 +177,7 @@ mod tests {
 
     fn make_test_resource(attrs: Vec<(&str, &str)>) -> Resource {
         use carina_core::resource::Expr;
-        let mut resource = Resource::new("route53.record_set", "test");
+        let mut resource = Resource::new("route53.RecordSet", "test");
         for (k, v) in attrs {
             resource
                 .attributes
@@ -188,7 +188,7 @@ mod tests {
 
     #[test]
     fn test_require_enum_attr_strips_namespace() {
-        let resource = make_test_resource(vec![("type", "aws.route53.record_set.Type.A")]);
+        let resource = make_test_resource(vec![("type", "aws.route53.RecordSet.Type.A")]);
         assert_eq!(require_enum_attr(&resource, "type").unwrap(), "A");
     }
 

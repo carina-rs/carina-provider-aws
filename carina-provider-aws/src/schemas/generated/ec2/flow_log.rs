@@ -1,4 +1,4 @@
-//! flow_log schema definition for AWS Cloud Control
+//! FlowLog schema definition for AWS Cloud Control
 //!
 //! Auto-generated from Smithy model: com.amazonaws.ec2
 //!
@@ -22,13 +22,13 @@ const VALID_RESOURCE_TYPE: &[&str] = &[
 
 const VALID_TRAFFIC_TYPE: &[&str] = &["ACCEPT", "ALL", "REJECT"];
 
-/// Returns the schema config for ec2.flow_log (Smithy: com.amazonaws.ec2)
+/// Returns the schema config for ec2.FlowLog (Smithy: com.amazonaws.ec2)
 pub fn ec2_flow_log_config() -> AwsSchemaConfig {
     AwsSchemaConfig {
         aws_type_name: "AWS::EC2::FlowLog",
-        resource_type_name: "ec2.flow_log",
+        resource_type_name: "ec2.FlowLog",
         has_tags: true,
-        schema: ResourceSchema::new("aws.ec2.flow_log")
+        schema: ResourceSchema::new("aws.ec2.FlowLog")
         .with_description("Describes a flow log.")
         .attribute(
             AttributeSchema::new("deliver_logs_permission_arn", super::iam_role_arn())
@@ -46,7 +46,7 @@ pub fn ec2_flow_log_config() -> AwsSchemaConfig {
             AttributeSchema::new("log_destination_type", AttributeType::StringEnum {
                 name: "LogDestinationType".to_string(),
                 values: vec!["cloud-watch-logs".to_string(), "kinesis-data-firehose".to_string(), "s3".to_string()],
-                namespace: Some("aws.ec2.flow_log".to_string()),
+                namespace: Some("aws.ec2.FlowLog".to_string()),
                 to_dsl: Some(|s: &str| s.replace('-', "_")),
             })
                 .create_only()
@@ -82,7 +82,7 @@ pub fn ec2_flow_log_config() -> AwsSchemaConfig {
             AttributeSchema::new("resource_type", AttributeType::StringEnum {
                 name: "ResourceType".to_string(),
                 values: vec!["NetworkInterface".to_string(), "RegionalNatGateway".to_string(), "Subnet".to_string(), "TransitGateway".to_string(), "TransitGatewayAttachment".to_string(), "VPC".to_string()],
-                namespace: Some("aws.ec2.flow_log".to_string()),
+                namespace: Some("aws.ec2.FlowLog".to_string()),
                 to_dsl: None,
             })
                 .required()
@@ -94,7 +94,7 @@ pub fn ec2_flow_log_config() -> AwsSchemaConfig {
             AttributeSchema::new("traffic_type", AttributeType::StringEnum {
                 name: "TrafficType".to_string(),
                 values: vec!["ACCEPT".to_string(), "ALL".to_string(), "REJECT".to_string()],
-                namespace: Some("aws.ec2.flow_log".to_string()),
+                namespace: Some("aws.ec2.FlowLog".to_string()),
                 to_dsl: None,
             })
                 .create_only()
@@ -121,7 +121,7 @@ pub fn enum_valid_values() -> (
     &'static [(&'static str, &'static [&'static str])],
 ) {
     (
-        "ec2.flow_log",
+        "ec2.FlowLog",
         &[
             ("log_destination_type", VALID_LOG_DESTINATION_TYPE),
             ("resource_type", VALID_RESOURCE_TYPE),

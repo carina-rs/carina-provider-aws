@@ -1,4 +1,4 @@
-//! nat_gateway schema definition for AWS Cloud Control
+//! NatGateway schema definition for AWS Cloud Control
 //!
 //! Auto-generated from Smithy model: com.amazonaws.ec2
 //!
@@ -13,13 +13,13 @@ const VALID_AVAILABILITY_MODE: &[&str] = &["regional", "zonal"];
 
 const VALID_CONNECTIVITY_TYPE: &[&str] = &["private", "public"];
 
-/// Returns the schema config for ec2.nat_gateway (Smithy: com.amazonaws.ec2)
+/// Returns the schema config for ec2.NatGateway (Smithy: com.amazonaws.ec2)
 pub fn ec2_nat_gateway_config() -> AwsSchemaConfig {
     AwsSchemaConfig {
         aws_type_name: "AWS::EC2::NatGateway",
-        resource_type_name: "ec2.nat_gateway",
+        resource_type_name: "ec2.NatGateway",
         has_tags: true,
-        schema: ResourceSchema::new("aws.ec2.nat_gateway")
+        schema: ResourceSchema::new("aws.ec2.NatGateway")
         .with_description("Describes a NAT gateway.")
         .attribute(
             AttributeSchema::new("allocation_id", super::allocation_id())
@@ -31,7 +31,7 @@ pub fn ec2_nat_gateway_config() -> AwsSchemaConfig {
             AttributeSchema::new("availability_mode", AttributeType::StringEnum {
                 name: "AvailabilityMode".to_string(),
                 values: vec!["regional".to_string(), "zonal".to_string()],
-                namespace: Some("aws.ec2.nat_gateway".to_string()),
+                namespace: Some("aws.ec2.NatGateway".to_string()),
                 to_dsl: None,
             })
                 .create_only()
@@ -55,7 +55,7 @@ pub fn ec2_nat_gateway_config() -> AwsSchemaConfig {
             AttributeSchema::new("connectivity_type", AttributeType::StringEnum {
                 name: "ConnectivityType".to_string(),
                 values: vec!["private".to_string(), "public".to_string()],
-                namespace: Some("aws.ec2.nat_gateway".to_string()),
+                namespace: Some("aws.ec2.NatGateway".to_string()),
                 to_dsl: None,
             })
                 .create_only()
@@ -101,7 +101,7 @@ pub fn enum_valid_values() -> (
     &'static [(&'static str, &'static [&'static str])],
 ) {
     (
-        "ec2.nat_gateway",
+        "ec2.NatGateway",
         &[
             ("availability_mode", VALID_AVAILABILITY_MODE),
             ("connectivity_type", VALID_CONNECTIVITY_TYPE),

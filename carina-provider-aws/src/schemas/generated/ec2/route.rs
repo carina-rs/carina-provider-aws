@@ -1,4 +1,4 @@
-//! route schema definition for AWS Cloud Control
+//! Route schema definition for AWS Cloud Control
 //!
 //! Auto-generated from Smithy model: com.amazonaws.ec2
 //!
@@ -7,13 +7,13 @@
 use super::AwsSchemaConfig;
 use carina_core::schema::{AttributeSchema, ResourceSchema, types};
 
-/// Returns the schema config for ec2.route (Smithy: com.amazonaws.ec2)
+/// Returns the schema config for ec2.Route (Smithy: com.amazonaws.ec2)
 pub fn ec2_route_config() -> AwsSchemaConfig {
     AwsSchemaConfig {
         aws_type_name: "AWS::EC2::Route",
-        resource_type_name: "ec2.route",
+        resource_type_name: "ec2.Route",
         has_tags: false,
-        schema: ResourceSchema::new("aws.ec2.route")
+        schema: ResourceSchema::new("aws.ec2.Route")
         .with_description("Describes a route in a route table.")
         .attribute(
             AttributeSchema::new("destination_cidr_block", types::ipv4_cidr())
@@ -46,7 +46,7 @@ pub fn enum_valid_values() -> (
     &'static str,
     &'static [(&'static str, &'static [&'static str])],
 ) {
-    ("ec2.route", &[])
+    ("ec2.Route", &[])
 }
 
 /// Maps DSL alias values back to canonical AWS values for this module.

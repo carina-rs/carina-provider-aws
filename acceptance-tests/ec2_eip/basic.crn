@@ -6,8 +6,8 @@ provider aws {
   region = aws.Region.ap_northeast_1
 }
 
-aws.ec2.eip {
-  domain = aws.ec2.eip.Domain.vpc
+aws.ec2.Eip {
+  domain = aws.ec2.Eip.Domain.vpc
 
   tags = {
     Environment = 'acceptance-test'

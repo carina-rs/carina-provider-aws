@@ -1,4 +1,4 @@
-//! user schema definition for AWS Cloud Control
+//! User schema definition for AWS Cloud Control
 //!
 //! Auto-generated from Smithy model: com.amazonaws.identitystore
 //!
@@ -7,13 +7,13 @@
 use super::AwsSchemaConfig;
 use carina_core::schema::{AttributeSchema, AttributeType, ResourceSchema};
 
-/// Returns the schema config for identitystore.user (Smithy: com.amazonaws.identitystore)
+/// Returns the schema config for identitystore.User (Smithy: com.amazonaws.identitystore)
 pub fn identitystore_user_config() -> AwsSchemaConfig {
     AwsSchemaConfig {
         aws_type_name: "AWS::IdentityStore::User",
-        resource_type_name: "identitystore.user",
+        resource_type_name: "identitystore.User",
         has_tags: false,
-        schema: ResourceSchema::new("aws.identitystore.user")
+        schema: ResourceSchema::new("aws.identitystore.User")
             .as_data_source()
             .attribute(
                 AttributeSchema::new("identity_store_id", AttributeType::String)
@@ -51,7 +51,7 @@ pub fn enum_valid_values() -> (
     &'static str,
     &'static [(&'static str, &'static [&'static str])],
 ) {
-    ("identitystore.user", &[])
+    ("identitystore.User", &[])
 }
 
 /// Maps DSL alias values back to canonical AWS values for this module.

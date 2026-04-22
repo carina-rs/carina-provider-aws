@@ -6,7 +6,7 @@ provider aws {
   region = aws.Region.ap_northeast_1
 }
 
-let vpc = aws.ec2.vpc {
+let vpc = aws.ec2.Vpc {
   cidr_block = '10.0.0.0/16'
 
   tags = {
@@ -14,7 +14,7 @@ let vpc = aws.ec2.vpc {
   }
 }
 
-aws.ec2.internet_gateway {
+aws.ec2.InternetGateway {
   vpc_id = vpc.vpc_id
 
   tags = {
@@ -22,7 +22,7 @@ aws.ec2.internet_gateway {
   }
 }
 
-let subnet = aws.ec2.subnet {
+let subnet = aws.ec2.Subnet {
   vpc_id            = vpc.vpc_id
   cidr_block        = '10.0.1.0/24'
   availability_zone = aws.AvailabilityZone.ap_northeast_1a
@@ -32,18 +32,18 @@ let subnet = aws.ec2.subnet {
   }
 }
 
-let eip = aws.ec2.eip {
-  domain = aws.ec2.eip.Domain.vpc
+let eip = aws.ec2.Eip {
+  domain = aws.ec2.Eip.Domain.vpc
 
   tags = {
     Environment = 'acceptance-test'
   }
 }
 
-aws.ec2.nat_gateway {
+aws.ec2.NatGateway {
   allocation_id     = eip.allocation_id
   subnet_id         = subnet.subnet_id
-  connectivity_type = aws.ec2.nat_gateway.ConnectivityType.public
+  connectivity_type = aws.ec2.NatGateway.ConnectivityType.public
 
   tags = {
     Environment = 'acceptance-test'

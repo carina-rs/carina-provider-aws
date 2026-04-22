@@ -1,4 +1,4 @@
-//! vpc_peering_connection schema definition for AWS Cloud Control
+//! VpcPeeringConnection schema definition for AWS Cloud Control
 //!
 //! Auto-generated from Smithy model: com.amazonaws.ec2
 //!
@@ -9,13 +9,13 @@ use super::tags_type;
 use super::validate_tags_map;
 use carina_core::schema::{AttributeSchema, ResourceSchema};
 
-/// Returns the schema config for ec2.vpc_peering_connection (Smithy: com.amazonaws.ec2)
+/// Returns the schema config for ec2.VpcPeeringConnection (Smithy: com.amazonaws.ec2)
 pub fn ec2_vpc_peering_connection_config() -> AwsSchemaConfig {
     AwsSchemaConfig {
         aws_type_name: "AWS::EC2::VPCPeeringConnection",
-        resource_type_name: "ec2.vpc_peering_connection",
+        resource_type_name: "ec2.VpcPeeringConnection",
         has_tags: true,
-        schema: ResourceSchema::new("aws.ec2.vpc_peering_connection")
+        schema: ResourceSchema::new("aws.ec2.VpcPeeringConnection")
         .with_description("Describes a VPC peering connection.")
         .attribute(
             AttributeSchema::new("peer_owner_id", super::aws_account_id())
@@ -56,7 +56,7 @@ pub fn enum_valid_values() -> (
     &'static str,
     &'static [(&'static str, &'static [&'static str])],
 ) {
-    ("ec2.vpc_peering_connection", &[])
+    ("ec2.VpcPeeringConnection", &[])
 }
 
 /// Maps DSL alias values back to canonical AWS values for this module.

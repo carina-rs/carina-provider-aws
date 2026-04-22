@@ -1,4 +1,4 @@
-//! vpc_endpoint schema definition for AWS Cloud Control
+//! VpcEndpoint schema definition for AWS Cloud Control
 //!
 //! Auto-generated from Smithy model: com.amazonaws.ec2
 //!
@@ -17,13 +17,13 @@ const VALID_VPC_ENDPOINT_TYPE: &[&str] = &[
     "ServiceNetwork",
 ];
 
-/// Returns the schema config for ec2.vpc_endpoint (Smithy: com.amazonaws.ec2)
+/// Returns the schema config for ec2.VpcEndpoint (Smithy: com.amazonaws.ec2)
 pub fn ec2_vpc_endpoint_config() -> AwsSchemaConfig {
     AwsSchemaConfig {
         aws_type_name: "AWS::EC2::VPCEndpoint",
-        resource_type_name: "ec2.vpc_endpoint",
+        resource_type_name: "ec2.VpcEndpoint",
         has_tags: true,
-        schema: ResourceSchema::new("aws.ec2.vpc_endpoint")
+        schema: ResourceSchema::new("aws.ec2.VpcEndpoint")
         .with_description("Describes a VPC endpoint.")
         .attribute(
             AttributeSchema::new("policy_document", AttributeType::String)
@@ -82,7 +82,7 @@ pub fn ec2_vpc_endpoint_config() -> AwsSchemaConfig {
             AttributeSchema::new("vpc_endpoint_type", AttributeType::StringEnum {
                 name: "VpcEndpointType".to_string(),
                 values: vec!["Gateway".to_string(), "GatewayLoadBalancer".to_string(), "Interface".to_string(), "Resource".to_string(), "ServiceNetwork".to_string()],
-                namespace: Some("aws.ec2.vpc_endpoint".to_string()),
+                namespace: Some("aws.ec2.VpcEndpoint".to_string()),
                 to_dsl: None,
             })
                 .create_only()
@@ -116,7 +116,7 @@ pub fn enum_valid_values() -> (
     &'static [(&'static str, &'static [&'static str])],
 ) {
     (
-        "ec2.vpc_endpoint",
+        "ec2.VpcEndpoint",
         &[("vpc_endpoint_type", VALID_VPC_ENDPOINT_TYPE)],
     )
 }

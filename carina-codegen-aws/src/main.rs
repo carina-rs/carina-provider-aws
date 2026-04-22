@@ -29,7 +29,7 @@ struct Args {
     #[arg(long)]
     output_dir: PathBuf,
 
-    /// Generate only the specified resource (e.g., "ec2.vpc")
+    /// Generate only the specified resource (e.g., "ec2.Vpc")
     #[arg(long)]
     resource: Option<String>,
 
@@ -93,16 +93,46 @@ struct IntRange {
     max: Option<i64>,
 }
 
+/// Convert a PascalCase token (e.g., `"SecurityGroupIngress"`) to snake_case
+/// (`"security_group_ingress"`) for use in Rust module names and identifiers.
+fn pascal_to_snake(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 4);
+    for (i, c) in s.chars().enumerate() {
+        if c.is_ascii_uppercase() {
+            if i != 0 {
+                out.push('_');
+            }
+            out.push(c.to_ascii_lowercase());
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
 /// Convert a DSL resource name to a Rust module name.
-/// e.g., "ec2.vpc" -> "ec2_vpc", "ec2.security_group_ingress" -> "ec2_security_group_ingress"
+/// e.g., "ec2.Vpc" -> "ec2_vpc", "ec2.SecurityGroupIngress" -> "ec2_security_group_ingress".
+/// The DSL name uses PascalCase for the final segment per the naming-conventions
+/// rule (design D2); Rust modules stay snake_case.
 fn module_name(name: &str) -> String {
-    name.replace('.', "_")
+    let (service, resource) = split_service_resource(name);
+    format!("{}_{}", service, pascal_to_snake(resource))
 }
 
 /// Split a DSL resource name into (service, resource).
-/// e.g., "ec2.vpc" -> ("ec2", "vpc"), "s3.bucket" -> ("s3", "bucket")
+/// e.g., "ec2.Vpc" -> ("ec2", "Vpc"), "s3.Bucket" -> ("s3", "Bucket").
+/// The final segment is PascalCase per design D2; callers that need a
+/// snake_case form should apply `pascal_to_snake` to the second element.
 fn split_service_resource(name: &str) -> (&str, &str) {
     name.split_once('.').expect("DSL name must contain '.'")
+}
+
+/// Split a DSL resource name and snake_case the final segment.
+/// Returns (service, snake_resource) suitable for Rust module paths,
+/// file names, and identifier generation.
+fn split_service_resource_snake(name: &str) -> (&str, String) {
+    let (service, resource) = split_service_resource(name);
+    (service, pascal_to_snake(resource))
 }
 
 /// Escape Rust reserved keywords with the raw identifier prefix `r#`.
@@ -198,6 +228,7 @@ fn main() -> Result<()> {
                 let code = generate_resource(res, model)?;
 
                 let (service, resource) = split_service_resource(res.name);
+                let resource = pascal_to_snake(resource);
                 let service_dir = args.output_dir.join(service);
                 std::fs::create_dir_all(&service_dir)?;
 
@@ -214,6 +245,7 @@ fn main() -> Result<()> {
                 let code = generate_data_source(ds, model)?;
 
                 let (service, resource) = split_service_resource(ds.name);
+                let resource = pascal_to_snake(resource);
                 let service_dir = args.output_dir.join(service);
                 std::fs::create_dir_all(&service_dir)?;
 
@@ -248,6 +280,7 @@ fn main() -> Result<()> {
                 let md = generate_markdown_resource(res, model)?;
 
                 let (service, resource) = split_service_resource(res.name);
+                let resource = pascal_to_snake(resource);
                 let service_dir = args.output_dir.join(service);
                 std::fs::create_dir_all(&service_dir)?;
                 let output_path = service_dir.join(format!("{}.md", resource));
@@ -260,6 +293,7 @@ fn main() -> Result<()> {
                 let md = generate_markdown_data_source(ds, model)?;
 
                 let (service, resource) = split_service_resource(ds.name);
+                let resource = pascal_to_snake(resource);
                 let service_dir = args.output_dir.join(service);
                 std::fs::create_dir_all(&service_dir)?;
                 let output_path = service_dir.join(format!("{}.md", resource));
@@ -276,7 +310,7 @@ fn main() -> Result<()> {
 
 /// Load a Smithy model from a JSON file in the model directory.
 fn load_model(model_dir: &Path, namespace: &str) -> Result<SmithyModel> {
-    // Map namespace to file name: "com.amazonaws.ec2" -> "ec2.json"
+    // Map namespace to file name: "com.amazonaws.ec2" -> "ec2.Json"
     let service_name = namespace
         .strip_prefix("com.amazonaws.")
         .unwrap_or(namespace);
@@ -1264,11 +1298,12 @@ fn get_int_range(model: &SmithyModel, target: &str, field_name: &str) -> Option<
 
 /// Generate per-service mod.rs files that declare resource modules.
 fn generate_service_mod_files(output_dir: &std::path::Path, dsl_names: &[&str]) -> Result<()> {
-    // Group resources by service
-    let mut services: std::collections::BTreeMap<&str, Vec<&str>> =
+    // Group resources by service. Resource segments are snake_cased because
+    // they become Rust `mod resource;` declarations in the generated code.
+    let mut services: std::collections::BTreeMap<&str, Vec<String>> =
         std::collections::BTreeMap::new();
     for name in dsl_names {
-        let (service, resource) = split_service_resource(name);
+        let (service, resource) = split_service_resource_snake(name);
         services.entry(service).or_default().push(resource);
     }
 
@@ -1283,7 +1318,7 @@ fn generate_service_mod_files(output_dir: &std::path::Path, dsl_names: &[&str]) 
              pub use super::*;\n\n",
         );
 
-        let mut sorted_resources: Vec<&&str> = resources.iter().collect();
+        let mut sorted_resources: Vec<&String> = resources.iter().collect();
         sorted_resources.sort();
         for resource in sorted_resources {
             code.push_str(&format!("pub mod {};\n", resource));
@@ -1300,10 +1335,20 @@ fn generate_service_mod_files(output_dir: &std::path::Path, dsl_names: &[&str]) 
 
 /// Scan `output_dir` for orphaned service/resource modules — files that exist on disk
 /// but are not registered in `resource_defs.rs`. These are typically legacy schemas
-/// generated by an earlier codegen pipeline. Returns DSL names like "iam.role".
+/// generated by an earlier codegen pipeline. Returns DSL names using the
+/// naming-conventions spelling (PascalCase final segment, e.g. `"iam.Role"`).
 fn scan_orphaned_modules(output_dir: &std::path::Path, known_names: &[&str]) -> Vec<String> {
     let mut orphaned = Vec::new();
-    let known_set: std::collections::HashSet<&str> = known_names.iter().copied().collect();
+    // The on-disk filename is snake_case (e.g. `role.rs`), but `known_names`
+    // carries the DSL spelling (`"iam.Role"`). Compare in the snake_case
+    // domain by snake-casing the known set.
+    let known_snake: std::collections::HashSet<String> = known_names
+        .iter()
+        .map(|name| {
+            let (service, resource) = split_service_resource_snake(name);
+            format!("{}.{}", service, resource)
+        })
+        .collect();
 
     let Ok(entries) = std::fs::read_dir(output_dir) else {
         return orphaned;
@@ -1331,9 +1376,26 @@ fn scan_orphaned_modules(output_dir: &std::path::Path, known_names: &[&str]) -> 
             if file_stem == "mod" {
                 continue;
             }
-            let dsl_name = format!("{}.{}", service, file_stem);
-            if !known_set.contains(dsl_name.as_str()) {
-                orphaned.push(dsl_name);
+            let snake_name = format!("{}.{}", service, file_stem);
+            if !known_snake.contains(&snake_name) {
+                // Emit in new-spelling DSL form so callers can compose output
+                // paths with `split_service_resource`.
+                let resource_pascal: String = {
+                    let mut out = String::with_capacity(file_stem.len());
+                    let mut upper = true;
+                    for c in file_stem.chars() {
+                        if c == '_' {
+                            upper = true;
+                        } else if upper {
+                            out.push(c.to_ascii_uppercase());
+                            upper = false;
+                        } else {
+                            out.push(c);
+                        }
+                    }
+                    out
+                };
+                orphaned.push(format!("{}.{}", service, resource_pascal));
             }
         }
     }
@@ -1380,7 +1442,7 @@ fn generate_mod_rs(dsl_names: &[&str], output_dir: &std::path::Path) -> String {
          \x20   vec![\n",
     );
     for name in &sorted {
-        let (service, resource) = split_service_resource(name);
+        let (service, resource) = split_service_resource_snake(name);
         let mn = module_name(name);
         code.push_str(&format!(
             "\x20       {}::{}::{}_config(),\n",
@@ -1403,7 +1465,7 @@ fn generate_mod_rs(dsl_names: &[&str], output_dir: &std::path::Path) -> String {
          \x20   let modules: &[(&str, &[(&str, &[&str])])] = &[\n",
     );
     for name in &sorted {
-        let (service, resource) = split_service_resource(name);
+        let (service, resource) = split_service_resource_snake(name);
         code.push_str(&format!(
             "\x20       {}::{}::enum_valid_values(),\n",
             service, resource
@@ -1432,7 +1494,7 @@ fn generate_mod_rs(dsl_names: &[&str], output_dir: &std::path::Path) -> String {
          pub fn get_enum_alias_reverse(resource_type: &str, attr_name: &str, value: &str) -> Option<&'static str> {\n",
     );
     for name in &sorted {
-        let (service, resource) = split_service_resource(name);
+        let (service, resource) = split_service_resource_snake(name);
         code.push_str(&format!(
             "\x20   if resource_type == \"{}\" {{\n\
              \x20       return {}::{}::enum_alias_reverse(attr_name, value);\n\
@@ -1451,7 +1513,7 @@ fn generate_mod_rs(dsl_names: &[&str], output_dir: &std::path::Path) -> String {
          \x20   let mut map = std::collections::HashMap::new();\n",
     );
     for name in &sorted {
-        let (service, resource) = split_service_resource(name);
+        let (service, resource) = split_service_resource_snake(name);
         code.push_str(&format!(
             "\x20   for (attr, alias, canonical) in {}::{}::enum_alias_entries() {{\n\
              \x20       map.entry(\"{}\".to_string())\n\
@@ -1544,7 +1606,8 @@ fn generate_provider_code(
 
     // Simple delete methods
     for res in all_resources.iter().filter(|r| r.simple_delete) {
-        let method_name = format!("delete_{}", res.name.replace('.', "_"));
+        let (service, resource) = split_service_resource_snake(res.name);
+        let method_name = format!("delete_{}_{}", service, resource);
         if manual_methods.contains(&method_name) {
             continue;
         }
@@ -1552,13 +1615,11 @@ fn generate_provider_code(
         let sdk_method = res.delete_op.to_snake_case();
         let id_setter = res.identifier.to_snake_case();
 
-        // Human-readable resource name for error message
-        let display_name = res
-            .name
-            .split('.')
-            .next_back()
-            .unwrap_or(res.name)
-            .replace('_', " ");
+        // Human-readable resource name for error message. The final segment
+        // is PascalCase under the naming-conventions rule; snake_case it and
+        // convert underscores to spaces for display ("SecurityGroup" -> "security group").
+        let display_name =
+            pascal_to_snake(res.name.split('.').next_back().unwrap_or(res.name)).replace('_', " ");
 
         code.push_str(&format!(
             "\x20   /// Delete {} (generated)\n\
@@ -1579,11 +1640,11 @@ fn generate_provider_code(
 
     // No-op update methods (with optional tag handling)
     for res in all_resources.iter().filter(|r| r.noop_update) {
-        let method_name = format!("update_{}", res.name.replace('.', "_"));
+        let method_name = format!("update_{}", module_name(res.name));
         if manual_methods.contains(&method_name) {
             continue;
         }
-        let read_method = format!("read_{}", res.name.replace('.', "_"));
+        let read_method = format!("read_{}", module_name(res.name));
 
         if res.has_tags {
             // Tag-enabled noop update: apply tags then read back
@@ -1630,7 +1691,7 @@ fn generate_provider_code(
         let ns = res.service_namespace;
         let client_field = client_field_name(ns);
         let id_setter = res.identifier.to_snake_case();
-        let resource_name = res.name.replace('.', "_");
+        let resource_name = module_name(res.name);
 
         for read_op in &res.read_ops {
             let suffix = op_suffix(read_op.operation, res.identifier);
@@ -1729,7 +1790,7 @@ fn generate_provider_code(
         let ns = res.service_namespace;
         let client_field = client_field_name(ns);
         let id_setter = res.identifier.to_snake_case();
-        let resource_name = res.name.replace('.', "_");
+        let resource_name = module_name(res.name);
         let sdk_crate_name = sdk_crate_name(ns);
 
         // Build reverse rename map from read_ops: effective_name -> original_smithy_name
@@ -1892,7 +1953,7 @@ fn generate_provider_code(
             None => continue,
         };
 
-        let resource_name = res.name.replace('.', "_");
+        let resource_name = module_name(res.name);
         if manual_methods.contains(&format!("extract_{}_attributes", resource_name)) {
             continue;
         }
@@ -2498,7 +2559,7 @@ fn generate_markdown_resource(res: &ResourceDef, model: &SmithyModel) -> Result<
 fn generate_data_source(ds: &resource_defs::DataSourceDef, model: &SmithyModel) -> Result<String> {
     let ns = ds.service_namespace;
     let namespace = format!("aws.{}", ds.name);
-    let config_fn = format!("{}_config", ds.name.replace('.', "_"));
+    let config_fn = format!("{}_config", module_name(ds.name));
     let cf_type = cf_type_name(ds.name);
 
     let type_overrides: HashMap<&str, &str> = ds.type_overrides.iter().copied().collect();
@@ -3182,33 +3243,33 @@ fn get_resource_id_type(prop_name: &str) -> &'static str {
 /// Map resource name to CloudFormation type name for backward compatibility.
 fn cf_type_name(resource_name: &str) -> &'static str {
     match resource_name {
-        "ec2.vpc" => "AWS::EC2::VPC",
-        "ec2.subnet" => "AWS::EC2::Subnet",
-        "ec2.internet_gateway" => "AWS::EC2::InternetGateway",
-        "ec2.route_table" => "AWS::EC2::RouteTable",
-        "ec2.route" => "AWS::EC2::Route",
-        "ec2.security_group" => "AWS::EC2::SecurityGroup",
-        "ec2.security_group_ingress" => "AWS::EC2::SecurityGroupIngress",
-        "ec2.security_group_egress" => "AWS::EC2::SecurityGroupEgress",
-        "ec2.egress_only_internet_gateway" => "AWS::EC2::EgressOnlyInternetGateway",
-        "ec2.eip" => "AWS::EC2::EIP",
-        "ec2.flow_log" => "AWS::EC2::FlowLog",
-        "ec2.nat_gateway" => "AWS::EC2::NatGateway",
-        "ec2.subnet_route_table_association" => "AWS::EC2::SubnetRouteTableAssociation",
-        "ec2.transit_gateway" => "AWS::EC2::TransitGateway",
-        "ec2.transit_gateway_attachment" => "AWS::EC2::TransitGatewayAttachment",
-        "ec2.vpc_endpoint" => "AWS::EC2::VPCEndpoint",
-        "ec2.vpc_gateway_attachment" => "AWS::EC2::VPCGatewayAttachment",
-        "ec2.vpc_peering_connection" => "AWS::EC2::VPCPeeringConnection",
-        "ec2.vpn_gateway" => "AWS::EC2::VPNGateway",
-        "s3.bucket" => "AWS::S3::Bucket",
-        "sts.caller_identity" => "AWS::STS::CallerIdentity",
-        "organizations.organization" => "AWS::Organizations::Organization",
-        "organizations.account" => "AWS::Organizations::Account",
-        "route53.record_set" => "AWS::Route53::RecordSet",
-        "iam.role" => "AWS::IAM::Role",
-        "logs.log_group" => "AWS::Logs::LogGroup",
-        "identitystore.user" => "AWS::IdentityStore::User",
+        "ec2.Vpc" => "AWS::EC2::VPC",
+        "ec2.Subnet" => "AWS::EC2::Subnet",
+        "ec2.InternetGateway" => "AWS::EC2::InternetGateway",
+        "ec2.RouteTable" => "AWS::EC2::RouteTable",
+        "ec2.Route" => "AWS::EC2::Route",
+        "ec2.SecurityGroup" => "AWS::EC2::SecurityGroup",
+        "ec2.SecurityGroupIngress" => "AWS::EC2::SecurityGroupIngress",
+        "ec2.SecurityGroupEgress" => "AWS::EC2::SecurityGroupEgress",
+        "ec2.EgressOnlyInternetGateway" => "AWS::EC2::EgressOnlyInternetGateway",
+        "ec2.Eip" => "AWS::EC2::EIP",
+        "ec2.FlowLog" => "AWS::EC2::FlowLog",
+        "ec2.NatGateway" => "AWS::EC2::NatGateway",
+        "ec2.SubnetRouteTableAssociation" => "AWS::EC2::SubnetRouteTableAssociation",
+        "ec2.TransitGateway" => "AWS::EC2::TransitGateway",
+        "ec2.TransitGatewayAttachment" => "AWS::EC2::TransitGatewayAttachment",
+        "ec2.VpcEndpoint" => "AWS::EC2::VPCEndpoint",
+        "ec2.VpcGatewayAttachment" => "AWS::EC2::VPCGatewayAttachment",
+        "ec2.VpcPeeringConnection" => "AWS::EC2::VPCPeeringConnection",
+        "ec2.VpnGateway" => "AWS::EC2::VPNGateway",
+        "s3.Bucket" => "AWS::S3::Bucket",
+        "sts.CallerIdentity" => "AWS::STS::CallerIdentity",
+        "organizations.Organization" => "AWS::Organizations::Organization",
+        "organizations.Account" => "AWS::Organizations::Account",
+        "route53.RecordSet" => "AWS::Route53::RecordSet",
+        "iam.Role" => "AWS::IAM::Role",
+        "logs.LogGroup" => "AWS::Logs::LogGroup",
+        "identitystore.User" => "AWS::IdentityStore::User",
         _ => panic!(
             "Unknown resource: {}. Add it to cf_type_name().",
             resource_name
@@ -3288,8 +3349,8 @@ mod tests {
             .expect("failed to parse Smithy fixture");
         let resource = resource_defs::s3_resources()
             .into_iter()
-            .find(|res| res.name == "s3.bucket")
-            .expect("missing s3.bucket resource def");
+            .find(|res| res.name == "s3.Bucket")
+            .expect("missing s3.Bucket resource def");
 
         let generated = generate_resource(&resource, &model).expect("failed to generate resource");
 
@@ -3326,10 +3387,10 @@ mod tests {
         std::fs::write(logs_dir.join("log_group.rs"), "// orphaned").unwrap();
         std::fs::write(logs_dir.join("mod.rs"), "pub mod log_group;").unwrap();
 
-        let known = vec!["ec2.vpc"];
+        let known = vec!["ec2.Vpc"];
         let orphaned = scan_orphaned_modules(output_dir, &known);
 
-        assert_eq!(orphaned, vec!["iam.role", "logs.log_group"]);
+        assert_eq!(orphaned, vec!["iam.Role", "logs.LogGroup"]);
     }
 
     #[test]
@@ -3342,8 +3403,8 @@ mod tests {
         std::fs::create_dir_all(&iam_dir).unwrap();
         std::fs::write(iam_dir.join("role.rs"), "// orphaned").unwrap();
 
-        // Generate with a different known resource (ec2.vpc)
-        let dsl_names = &["ec2.vpc"];
+        // Generate with a different known resource (ec2.Vpc)
+        let dsl_names = &["ec2.Vpc"];
         let generated = generate_mod_rs(dsl_names, output_dir);
 
         assert!(
@@ -3352,11 +3413,11 @@ mod tests {
         );
         assert!(
             generated.contains("iam::role::iam_role_config()"),
-            "orphaned iam.role config should be included: {generated}"
+            "orphaned iam.Role config should be included: {generated}"
         );
         assert!(
-            generated.contains("if resource_type == \"iam.role\""),
-            "orphaned iam.role enum_alias_reverse should be included: {generated}"
+            generated.contains("if resource_type == \"iam.Role\""),
+            "orphaned iam.Role enum_alias_reverse should be included: {generated}"
         );
     }
 

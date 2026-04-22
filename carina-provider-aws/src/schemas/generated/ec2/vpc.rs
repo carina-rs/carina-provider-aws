@@ -1,4 +1,4 @@
-//! vpc schema definition for AWS Cloud Control
+//! Vpc schema definition for AWS Cloud Control
 //!
 //! Auto-generated from Smithy model: com.amazonaws.ec2
 //!
@@ -24,13 +24,13 @@ fn validate_ipv4_netmask_length_range(value: &Value) -> Result<(), String> {
     }
 }
 
-/// Returns the schema config for ec2.vpc (Smithy: com.amazonaws.ec2)
+/// Returns the schema config for ec2.Vpc (Smithy: com.amazonaws.ec2)
 pub fn ec2_vpc_config() -> AwsSchemaConfig {
     AwsSchemaConfig {
         aws_type_name: "AWS::EC2::VPC",
-        resource_type_name: "ec2.vpc",
+        resource_type_name: "ec2.Vpc",
         has_tags: true,
-        schema: ResourceSchema::new("aws.ec2.vpc")
+        schema: ResourceSchema::new("aws.ec2.Vpc")
         .with_description("Describes a VPC.")
         .attribute(
             AttributeSchema::new("cidr_block", types::ipv4_cidr())
@@ -52,7 +52,7 @@ pub fn ec2_vpc_config() -> AwsSchemaConfig {
             AttributeSchema::new("instance_tenancy", AttributeType::StringEnum {
                 name: "InstanceTenancy".to_string(),
                 values: vec!["dedicated".to_string(), "default".to_string(), "host".to_string()],
-                namespace: Some("aws.ec2.vpc".to_string()),
+                namespace: Some("aws.ec2.Vpc".to_string()),
                 to_dsl: None,
             })
                 .create_only()
@@ -98,7 +98,7 @@ pub fn enum_valid_values() -> (
     &'static str,
     &'static [(&'static str, &'static [&'static str])],
 ) {
-    ("ec2.vpc", &[("instance_tenancy", VALID_INSTANCE_TENANCY)])
+    ("ec2.Vpc", &[("instance_tenancy", VALID_INSTANCE_TENANCY)])
 }
 
 /// Maps DSL alias values back to canonical AWS values for this module.
