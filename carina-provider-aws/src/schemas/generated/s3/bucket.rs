@@ -1,4 +1,4 @@
-//! bucket schema definition for AWS Cloud Control
+//! Bucket schema definition for AWS Cloud Control
 //!
 //! Auto-generated from Smithy model: com.amazonaws.s3
 //!
@@ -26,18 +26,18 @@ const VALID_OBJECT_OWNERSHIP: &[&str] = &[
 
 const VALID_VERSIONING_STATUS: &[&str] = &["Enabled", "Suspended"];
 
-/// Returns the schema config for s3.bucket (Smithy: com.amazonaws.s3)
+/// Returns the schema config for s3.Bucket (Smithy: com.amazonaws.s3)
 pub fn s3_bucket_config() -> AwsSchemaConfig {
     AwsSchemaConfig {
         aws_type_name: "AWS::S3::Bucket",
-        resource_type_name: "s3.bucket",
+        resource_type_name: "s3.Bucket",
         has_tags: true,
-        schema: ResourceSchema::new("aws.s3.bucket")
+        schema: ResourceSchema::new("aws.s3.Bucket")
         .attribute(
             AttributeSchema::new("acl", AttributeType::StringEnum {
                 name: "ACL".to_string(),
                 values: vec!["authenticated-read".to_string(), "private".to_string(), "public-read".to_string(), "public-read-write".to_string()],
-                namespace: Some("aws.s3.bucket".to_string()),
+                namespace: Some("aws.s3.Bucket".to_string()),
                 to_dsl: Some(|s: &str| s.replace('-', "_")),
             })
                 .with_description("The canned ACL to apply to the bucket. This functionality is not supported for directory buckets.")
@@ -54,7 +54,7 @@ pub fn s3_bucket_config() -> AwsSchemaConfig {
             AttributeSchema::new("bucket_namespace", AttributeType::StringEnum {
                 name: "BucketNamespace".to_string(),
                 values: vec!["account-regional".to_string(), "global".to_string()],
-                namespace: Some("aws.s3.bucket".to_string()),
+                namespace: Some("aws.s3.Bucket".to_string()),
                 to_dsl: Some(|s: &str| s.replace('-', "_")),
             })
                 .create_only()
@@ -96,7 +96,7 @@ pub fn s3_bucket_config() -> AwsSchemaConfig {
             AttributeSchema::new("object_ownership", AttributeType::StringEnum {
                 name: "ObjectOwnership".to_string(),
                 values: vec!["BucketOwnerEnforced".to_string(), "BucketOwnerPreferred".to_string(), "ObjectWriter".to_string()],
-                namespace: Some("aws.s3.bucket".to_string()),
+                namespace: Some("aws.s3.Bucket".to_string()),
                 to_dsl: None,
             })
                 .with_provider_name("ObjectOwnership"),
@@ -105,7 +105,7 @@ pub fn s3_bucket_config() -> AwsSchemaConfig {
             AttributeSchema::new("versioning_status", AttributeType::StringEnum {
                 name: "VersioningStatus".to_string(),
                 values: vec!["Enabled".to_string(), "Suspended".to_string()],
-                namespace: Some("aws.s3.bucket".to_string()),
+                namespace: Some("aws.s3.Bucket".to_string()),
                 to_dsl: None,
             })
                 .with_description("The versioning state of the bucket.")
@@ -126,7 +126,7 @@ pub fn enum_valid_values() -> (
     &'static [(&'static str, &'static [&'static str])],
 ) {
     (
-        "s3.bucket",
+        "s3.Bucket",
         &[
             ("acl", VALID_ACL),
             ("bucket_namespace", VALID_BUCKET_NAMESPACE),

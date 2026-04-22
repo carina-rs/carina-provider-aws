@@ -1,4 +1,4 @@
-//! subnet_route_table_association schema definition for AWS Cloud Control
+//! SubnetRouteTableAssociation schema definition for AWS Cloud Control
 //!
 //! Auto-generated from Smithy model: com.amazonaws.ec2
 //!
@@ -7,13 +7,13 @@
 use super::AwsSchemaConfig;
 use carina_core::schema::{AttributeSchema, AttributeType, ResourceSchema};
 
-/// Returns the schema config for ec2.subnet_route_table_association (Smithy: com.amazonaws.ec2)
+/// Returns the schema config for ec2.SubnetRouteTableAssociation (Smithy: com.amazonaws.ec2)
 pub fn ec2_subnet_route_table_association_config() -> AwsSchemaConfig {
     AwsSchemaConfig {
         aws_type_name: "AWS::EC2::SubnetRouteTableAssociation",
-        resource_type_name: "ec2.subnet_route_table_association",
+        resource_type_name: "ec2.SubnetRouteTableAssociation",
         has_tags: false,
-        schema: ResourceSchema::new("aws.ec2.subnet_route_table_association")
+        schema: ResourceSchema::new("aws.ec2.SubnetRouteTableAssociation")
         .with_description("Describes an association between a route table and a subnet or gateway.")
         .attribute(
             AttributeSchema::new("public_ipv4_pool", AttributeType::String)
@@ -43,7 +43,7 @@ pub fn enum_valid_values() -> (
     &'static str,
     &'static [(&'static str, &'static [&'static str])],
 ) {
-    ("ec2.subnet_route_table_association", &[])
+    ("ec2.SubnetRouteTableAssociation", &[])
 }
 
 /// Maps DSL alias values back to canonical AWS values for this module.

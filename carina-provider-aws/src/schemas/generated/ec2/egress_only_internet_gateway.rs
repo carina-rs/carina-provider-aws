@@ -1,4 +1,4 @@
-//! egress_only_internet_gateway schema definition for AWS Cloud Control
+//! EgressOnlyInternetGateway schema definition for AWS Cloud Control
 //!
 //! Auto-generated from Smithy model: com.amazonaws.ec2
 //!
@@ -9,13 +9,13 @@ use super::tags_type;
 use super::validate_tags_map;
 use carina_core::schema::{AttributeSchema, ResourceSchema};
 
-/// Returns the schema config for ec2.egress_only_internet_gateway (Smithy: com.amazonaws.ec2)
+/// Returns the schema config for ec2.EgressOnlyInternetGateway (Smithy: com.amazonaws.ec2)
 pub fn ec2_egress_only_internet_gateway_config() -> AwsSchemaConfig {
     AwsSchemaConfig {
         aws_type_name: "AWS::EC2::EgressOnlyInternetGateway",
-        resource_type_name: "ec2.egress_only_internet_gateway",
+        resource_type_name: "ec2.EgressOnlyInternetGateway",
         has_tags: true,
-        schema: ResourceSchema::new("aws.ec2.egress_only_internet_gateway")
+        schema: ResourceSchema::new("aws.ec2.EgressOnlyInternetGateway")
             .with_description("Describes an egress-only internet gateway.")
             .attribute(
                 AttributeSchema::new("vpc_id", super::vpc_id())
@@ -48,7 +48,7 @@ pub fn enum_valid_values() -> (
     &'static str,
     &'static [(&'static str, &'static [&'static str])],
 ) {
-    ("ec2.egress_only_internet_gateway", &[])
+    ("ec2.EgressOnlyInternetGateway", &[])
 }
 
 /// Maps DSL alias values back to canonical AWS values for this module.

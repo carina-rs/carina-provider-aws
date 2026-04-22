@@ -29,7 +29,7 @@ pub struct ReadOp {
 
 /// Defines how to map an AWS API resource to a Carina schema.
 pub struct ResourceDef {
-    /// Carina DSL resource name (e.g., "ec2.vpc")
+    /// Carina DSL resource name (e.g., "ec2.Vpc")
     pub name: &'static str,
     /// Smithy service namespace (e.g., "com.amazonaws.ec2")
     pub service_namespace: &'static str,
@@ -123,7 +123,7 @@ pub struct UpdateOp {
 /// Lookup logic is hand-written in `services/{service}/{resource}.rs`;
 /// the codegen generates schema, docs, and dispatch boilerplate.
 pub struct DataSourceDef {
-    /// Carina DSL resource name (e.g., "identitystore.user")
+    /// Carina DSL resource name (e.g., "identitystore.User")
     pub name: &'static str,
     /// Smithy service namespace (e.g., "com.amazonaws.identitystore")
     pub service_namespace: &'static str,
@@ -156,7 +156,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
     vec![
         // ec2.vpc
         ResourceDef {
-            name: "ec2.vpc",
+            name: "ec2.Vpc",
             service_namespace: "com.amazonaws.ec2",
             schema_structure: None,
             simple_delete: true,
@@ -194,7 +194,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
         },
         // ec2.subnet
         ResourceDef {
-            name: "ec2.subnet",
+            name: "ec2.Subnet",
             service_namespace: "com.amazonaws.ec2",
             schema_structure: None,
             simple_delete: true,
@@ -228,7 +228,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
         },
         // ec2.internet_gateway
         ResourceDef {
-            name: "ec2.internet_gateway",
+            name: "ec2.InternetGateway",
             service_namespace: "com.amazonaws.ec2",
             schema_structure: None,
             simple_delete: false,
@@ -253,7 +253,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
         },
         // ec2.route_table
         ResourceDef {
-            name: "ec2.route_table",
+            name: "ec2.RouteTable",
             service_namespace: "com.amazonaws.ec2",
             schema_structure: None,
             simple_delete: true,
@@ -278,7 +278,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
         },
         // ec2.route
         ResourceDef {
-            name: "ec2.route",
+            name: "ec2.Route",
             service_namespace: "com.amazonaws.ec2",
             schema_structure: None,
             simple_delete: false,
@@ -321,7 +321,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
         },
         // ec2.security_group
         ResourceDef {
-            name: "ec2.security_group",
+            name: "ec2.SecurityGroup",
             service_namespace: "com.amazonaws.ec2",
             schema_structure: None,
             simple_delete: true,
@@ -346,7 +346,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
         },
         // ec2.security_group_ingress
         ResourceDef {
-            name: "ec2.security_group_ingress",
+            name: "ec2.SecurityGroupIngress",
             service_namespace: "com.amazonaws.ec2",
             schema_structure: None,
             simple_delete: false,
@@ -400,7 +400,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
         },
         // ec2.security_group_egress
         ResourceDef {
-            name: "ec2.security_group_egress",
+            name: "ec2.SecurityGroupEgress",
             service_namespace: "com.amazonaws.ec2",
             schema_structure: None,
             simple_delete: false,
@@ -454,7 +454,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
         },
         // ec2.egress_only_internet_gateway
         ResourceDef {
-            name: "ec2.egress_only_internet_gateway",
+            name: "ec2.EgressOnlyInternetGateway",
             service_namespace: "com.amazonaws.ec2",
             schema_structure: None,
             simple_delete: true,
@@ -479,7 +479,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
         },
         // ec2.eip
         ResourceDef {
-            name: "ec2.eip",
+            name: "ec2.Eip",
             service_namespace: "com.amazonaws.ec2",
             schema_structure: None,
             simple_delete: true,
@@ -510,7 +510,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
         },
         // ec2.flow_log
         ResourceDef {
-            name: "ec2.flow_log",
+            name: "ec2.FlowLog",
             service_namespace: "com.amazonaws.ec2",
             schema_structure: None,
             simple_delete: true,
@@ -544,7 +544,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
         },
         // ec2.nat_gateway
         ResourceDef {
-            name: "ec2.nat_gateway",
+            name: "ec2.NatGateway",
             service_namespace: "com.amazonaws.ec2",
             schema_structure: None,
             simple_delete: true,
@@ -576,7 +576,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
         },
         // ec2.subnet_route_table_association
         ResourceDef {
-            name: "ec2.subnet_route_table_association",
+            name: "ec2.SubnetRouteTableAssociation",
             service_namespace: "com.amazonaws.ec2",
             schema_structure: None,
             simple_delete: true,
@@ -601,7 +601,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
         },
         // ec2.transit_gateway
         ResourceDef {
-            name: "ec2.transit_gateway",
+            name: "ec2.TransitGateway",
             service_namespace: "com.amazonaws.ec2",
             schema_structure: None,
             simple_delete: true,
@@ -629,7 +629,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
         },
         // ec2.transit_gateway_attachment
         ResourceDef {
-            name: "ec2.transit_gateway_attachment",
+            name: "ec2.TransitGatewayAttachment",
             service_namespace: "com.amazonaws.ec2",
             schema_structure: None,
             simple_delete: true,
@@ -654,7 +654,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
         },
         // ec2.vpc_endpoint
         ResourceDef {
-            name: "ec2.vpc_endpoint",
+            name: "ec2.VpcEndpoint",
             service_namespace: "com.amazonaws.ec2",
             schema_structure: None,
             simple_delete: true,
@@ -689,7 +689,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
         },
         // ec2.vpc_gateway_attachment
         ResourceDef {
-            name: "ec2.vpc_gateway_attachment",
+            name: "ec2.VpcGatewayAttachment",
             service_namespace: "com.amazonaws.ec2",
             schema_structure: None,
             simple_delete: false,
@@ -725,7 +725,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
         },
         // ec2.vpc_peering_connection
         ResourceDef {
-            name: "ec2.vpc_peering_connection",
+            name: "ec2.VpcPeeringConnection",
             service_namespace: "com.amazonaws.ec2",
             schema_structure: None,
             simple_delete: true,
@@ -750,7 +750,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
         },
         // ec2.vpn_gateway
         ResourceDef {
-            name: "ec2.vpn_gateway",
+            name: "ec2.VpnGateway",
             service_namespace: "com.amazonaws.ec2",
             schema_structure: None,
             simple_delete: true,
@@ -784,7 +784,7 @@ pub fn sts_resources() -> Vec<ResourceDef> {
 /// Returns STS data source definitions.
 pub fn sts_data_sources() -> Vec<DataSourceDef> {
     vec![DataSourceDef {
-        name: "sts.caller_identity",
+        name: "sts.CallerIdentity",
         service_namespace: "com.amazonaws.sts",
         inputs: vec![],
         read_ops: vec![ReadOp {
@@ -807,7 +807,7 @@ pub fn sts_data_sources() -> Vec<DataSourceDef> {
 /// Returns Identity Store data source definitions.
 pub fn identitystore_data_sources() -> Vec<DataSourceDef> {
     vec![DataSourceDef {
-        name: "identitystore.user",
+        name: "identitystore.User",
         service_namespace: "com.amazonaws.identitystore",
         inputs: vec![
             DataSourceInput {
@@ -847,7 +847,7 @@ pub fn organizations_resources() -> Vec<ResourceDef> {
     vec![
         // organizations.organization
         ResourceDef {
-            name: "organizations.organization",
+            name: "organizations.Organization",
             service_namespace: "com.amazonaws.organizations",
             schema_structure: None,
             simple_delete: true,
@@ -877,7 +877,7 @@ pub fn organizations_resources() -> Vec<ResourceDef> {
         },
         // organizations.account
         ResourceDef {
-            name: "organizations.account",
+            name: "organizations.Account",
             service_namespace: "com.amazonaws.organizations",
             schema_structure: None,
             simple_delete: false,
@@ -913,7 +913,7 @@ pub fn s3_resources() -> Vec<ResourceDef> {
     vec![
         // s3.bucket
         ResourceDef {
-            name: "s3.bucket",
+            name: "s3.Bucket",
             service_namespace: "com.amazonaws.s3",
             schema_structure: None,
             simple_delete: false, // manually implemented to support lifecycle.force_delete
@@ -980,7 +980,7 @@ pub fn route53_resources() -> Vec<ResourceDef> {
         // Uses schema_structure because ChangeResourceRecordSets wraps fields
         // in a nested ChangeBatch, not as top-level input parameters.
         ResourceDef {
-            name: "route53.record_set",
+            name: "route53.RecordSet",
             service_namespace: "com.amazonaws.route53",
             schema_structure: Some("ResourceRecordSet"),
             simple_delete: false,
@@ -1033,7 +1033,7 @@ pub fn route53_resources() -> Vec<ResourceDef> {
 /// Returns IAM resource definitions.
 pub fn iam_resources() -> Vec<ResourceDef> {
     vec![ResourceDef {
-        name: "iam.role",
+        name: "iam.Role",
         service_namespace: "com.amazonaws.iam",
         schema_structure: None,
         simple_delete: true,
@@ -1070,7 +1070,7 @@ pub fn iam_resources() -> Vec<ResourceDef> {
 /// Returns CloudWatch Logs resource definitions.
 pub fn logs_resources() -> Vec<ResourceDef> {
     vec![ResourceDef {
-        name: "logs.log_group",
+        name: "logs.LogGroup",
         service_namespace: "com.amazonaws.cloudwatchlogs",
         schema_structure: None,
         simple_delete: true,

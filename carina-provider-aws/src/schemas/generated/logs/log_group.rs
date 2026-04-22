@@ -1,4 +1,4 @@
-//! logs.log_group schema definition for AWS Cloud Control
+//! logs.LogGroup schema definition for AWS Cloud Control
 //!
 //! Auto-generated from Smithy model: com.amazonaws.cloudwatchlogs
 //!
@@ -11,13 +11,13 @@ use carina_core::schema::{AttributeSchema, AttributeType, ResourceSchema};
 
 const VALID_LOG_GROUP_CLASS: &[&str] = &["DELIVERY", "INFREQUENT_ACCESS", "STANDARD"];
 
-/// Returns the schema config for logs.log_group (Smithy: com.amazonaws.cloudwatchlogs)
+/// Returns the schema config for logs.LogGroup (Smithy: com.amazonaws.cloudwatchlogs)
 pub fn logs_log_group_config() -> AwsSchemaConfig {
     AwsSchemaConfig {
         aws_type_name: "AWS::Logs::LogGroup",
-        resource_type_name: "logs.log_group",
+        resource_type_name: "logs.LogGroup",
         has_tags: true,
-        schema: ResourceSchema::new("aws.logs.log_group")
+        schema: ResourceSchema::new("aws.logs.LogGroup")
         .with_description("Represents a log group.")
         .attribute(
             AttributeSchema::new("deletion_protection_enabled", AttributeType::Bool)
@@ -35,7 +35,7 @@ pub fn logs_log_group_config() -> AwsSchemaConfig {
             AttributeSchema::new("log_group_class", AttributeType::StringEnum {
                 name: "logGroupClass".to_string(),
                 values: vec!["DELIVERY".to_string(), "INFREQUENT_ACCESS".to_string(), "STANDARD".to_string()],
-                namespace: Some("aws.logs.log_group".to_string()),
+                namespace: Some("aws.logs.LogGroup".to_string()),
                 to_dsl: None,
             })
                 .create_only()
@@ -70,7 +70,7 @@ pub fn enum_valid_values() -> (
     &'static [(&'static str, &'static [&'static str])],
 ) {
     (
-        "logs.log_group",
+        "logs.LogGroup",
         &[("log_group_class", VALID_LOG_GROUP_CLASS)],
     )
 }

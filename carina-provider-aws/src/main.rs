@@ -292,7 +292,7 @@ mod tests {
         let schemas = provider.schemas();
         let bucket = schemas
             .iter()
-            .find(|s| s.resource_type == "aws.s3.bucket")
+            .find(|s| s.resource_type == "aws.s3.Bucket")
             .expect("s3.bucket schema should exist");
         assert!(
             bucket
@@ -326,14 +326,14 @@ mod tests {
         let provider = AwsProcessProvider::new();
         let schemas = provider.schemas();
         assert!(
-            schemas.iter().any(|s| s.resource_type == "aws.iam.role"),
-            "aws.iam.role schema should be registered"
+            schemas.iter().any(|s| s.resource_type == "aws.iam.Role"),
+            "aws.iam.Role schema should be registered"
         );
         assert!(
             schemas
                 .iter()
-                .any(|s| s.resource_type == "aws.logs.log_group"),
-            "aws.logs.log_group schema should be registered"
+                .any(|s| s.resource_type == "aws.logs.LogGroup"),
+            "aws.logs.LogGroup schema should be registered"
         );
     }
 

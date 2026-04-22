@@ -1,4 +1,4 @@
-//! subnet schema definition for AWS Cloud Control
+//! Subnet schema definition for AWS Cloud Control
 //!
 //! Auto-generated from Smithy model: com.amazonaws.ec2
 //!
@@ -36,13 +36,13 @@ fn validate_ipv6_netmask_length_range(value: &Value) -> Result<(), String> {
     }
 }
 
-/// Returns the schema config for ec2.subnet (Smithy: com.amazonaws.ec2)
+/// Returns the schema config for ec2.Subnet (Smithy: com.amazonaws.ec2)
 pub fn ec2_subnet_config() -> AwsSchemaConfig {
     AwsSchemaConfig {
         aws_type_name: "AWS::EC2::Subnet",
-        resource_type_name: "ec2.subnet",
+        resource_type_name: "ec2.Subnet",
         has_tags: true,
-        schema: ResourceSchema::new("aws.ec2.subnet")
+        schema: ResourceSchema::new("aws.ec2.Subnet")
         .with_description("Describes a subnet.")
         .attribute(
             AttributeSchema::new("assign_ipv6_address_on_creation", AttributeType::Bool)
@@ -149,7 +149,7 @@ pub fn ec2_subnet_config() -> AwsSchemaConfig {
                     StructField::new("hostname_type", AttributeType::StringEnum {
                 name: "HostnameType".to_string(),
                 values: vec!["ip-name".to_string(), "resource-name".to_string()],
-                namespace: Some("aws.ec2.subnet".to_string()),
+                namespace: Some("aws.ec2.Subnet".to_string()),
                 to_dsl: Some(|s: &str| s.replace('-', "_")),
             }).with_description("The type of hostname for EC2 instances. For IPv4 only subnets, an instance DNS name must be based on the instance IPv4 address. For IPv6 only subnets,...").with_provider_name("HostnameType")
                     ],
@@ -183,7 +183,7 @@ pub fn enum_valid_values() -> (
     &'static str,
     &'static [(&'static str, &'static [&'static str])],
 ) {
-    ("ec2.subnet", &[("hostname_type", VALID_HOSTNAME_TYPE)])
+    ("ec2.Subnet", &[("hostname_type", VALID_HOSTNAME_TYPE)])
 }
 
 /// Maps DSL alias values back to canonical AWS values for this module.

@@ -1,4 +1,4 @@
-//! route53.record_set schema definition for AWS Cloud Control
+//! route53.RecordSet schema definition for AWS Cloud Control
 //!
 //! Auto-generated from Smithy model: com.amazonaws.route53
 //!
@@ -25,13 +25,13 @@ fn validate_ttl_range(value: &Value) -> Result<(), String> {
     }
 }
 
-/// Returns the schema config for route53.record_set (Smithy: com.amazonaws.route53)
+/// Returns the schema config for route53.RecordSet (Smithy: com.amazonaws.route53)
 pub fn route53_record_set_config() -> AwsSchemaConfig {
     AwsSchemaConfig {
         aws_type_name: "AWS::Route53::RecordSet",
-        resource_type_name: "route53.record_set",
+        resource_type_name: "route53.RecordSet",
         has_tags: false,
-        schema: ResourceSchema::new("aws.route53.record_set")
+        schema: ResourceSchema::new("aws.route53.RecordSet")
         .with_description("Information about the resource record set to create or delete.")
         .attribute(
             AttributeSchema::new("alias_target", AttributeType::Struct {
@@ -74,7 +74,7 @@ pub fn route53_record_set_config() -> AwsSchemaConfig {
             AttributeSchema::new("type", AttributeType::StringEnum {
                 name: "Type".to_string(),
                 values: vec!["A".to_string(), "AAAA".to_string(), "CAA".to_string(), "CNAME".to_string(), "DS".to_string(), "HTTPS".to_string(), "MX".to_string(), "NAPTR".to_string(), "NS".to_string(), "PTR".to_string(), "SOA".to_string(), "SPF".to_string(), "SRV".to_string(), "SSHFP".to_string(), "SVCB".to_string(), "TLSA".to_string(), "TXT".to_string()],
-                namespace: Some("aws.route53.record_set".to_string()),
+                namespace: Some("aws.route53.RecordSet".to_string()),
                 to_dsl: None,
             })
                 .required()
@@ -96,7 +96,7 @@ pub fn enum_valid_values() -> (
     &'static str,
     &'static [(&'static str, &'static [&'static str])],
 ) {
-    ("route53.record_set", &[("type", VALID_TYPE)])
+    ("route53.RecordSet", &[("type", VALID_TYPE)])
 }
 
 /// Maps DSL alias values back to canonical AWS values for this module.

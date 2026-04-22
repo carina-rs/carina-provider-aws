@@ -1,4 +1,4 @@
-//! vpn_gateway schema definition for AWS Cloud Control
+//! VpnGateway schema definition for AWS Cloud Control
 //!
 //! Auto-generated from Smithy model: com.amazonaws.ec2
 //!
@@ -11,13 +11,13 @@ use carina_core::schema::{AttributeSchema, AttributeType, ResourceSchema};
 
 const VALID_TYPE: &[&str] = &["ipsec.1"];
 
-/// Returns the schema config for ec2.vpn_gateway (Smithy: com.amazonaws.ec2)
+/// Returns the schema config for ec2.VpnGateway (Smithy: com.amazonaws.ec2)
 pub fn ec2_vpn_gateway_config() -> AwsSchemaConfig {
     AwsSchemaConfig {
         aws_type_name: "AWS::EC2::VPNGateway",
-        resource_type_name: "ec2.vpn_gateway",
+        resource_type_name: "ec2.VpnGateway",
         has_tags: true,
-        schema: ResourceSchema::new("aws.ec2.vpn_gateway")
+        schema: ResourceSchema::new("aws.ec2.VpnGateway")
         .with_description("Describes a virtual private gateway.")
         .attribute(
             AttributeSchema::new("amazon_side_asn", AttributeType::Int)
@@ -35,7 +35,7 @@ pub fn ec2_vpn_gateway_config() -> AwsSchemaConfig {
             AttributeSchema::new("type", AttributeType::StringEnum {
                 name: "Type".to_string(),
                 values: vec!["ipsec.1".to_string()],
-                namespace: Some("aws.ec2.vpn_gateway".to_string()),
+                namespace: Some("aws.ec2.VpnGateway".to_string()),
                 to_dsl: None,
             })
                 .required()
@@ -62,7 +62,7 @@ pub fn enum_valid_values() -> (
     &'static str,
     &'static [(&'static str, &'static [&'static str])],
 ) {
-    ("ec2.vpn_gateway", &[("type", VALID_TYPE)])
+    ("ec2.VpnGateway", &[("type", VALID_TYPE)])
 }
 
 /// Maps DSL alias values back to canonical AWS values for this module.

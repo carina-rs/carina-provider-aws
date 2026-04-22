@@ -6,7 +6,7 @@ provider aws {
   region = aws.Region.ap_northeast_1
 }
 
-let vpc = aws.ec2.vpc {
+let vpc = aws.ec2.Vpc {
   cidr_block = '10.0.0.0/16'
 
   tags = {
@@ -14,13 +14,13 @@ let vpc = aws.ec2.vpc {
   }
 }
 
-let igw = aws.ec2.internet_gateway {
+let igw = aws.ec2.InternetGateway {
   tags = {
     Environment = 'acceptance-test'
   }
 }
 
-aws.ec2.vpc_gateway_attachment {
+aws.ec2.VpcGatewayAttachment {
   vpc_id              = vpc.vpc_id
   internet_gateway_id = igw.internet_gateway_id
 }

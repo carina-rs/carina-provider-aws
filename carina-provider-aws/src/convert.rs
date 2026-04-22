@@ -355,7 +355,7 @@ mod tests {
         let core_type = CoreAttributeType::StringEnum {
             name: "VersioningStatus".to_string(),
             values: vec!["Enabled".to_string(), "Suspended".to_string()],
-            namespace: Some("aws.s3.bucket".to_string()),
+            namespace: Some("aws.s3.Bucket".to_string()),
             to_dsl: None,
         };
         let proto_type = core_to_proto_attribute_type(&core_type);
@@ -370,7 +370,7 @@ mod tests {
                     values,
                     &vec!["Enabled".to_string(), "Suspended".to_string()]
                 );
-                assert_eq!(namespace.as_deref(), Some("aws.s3.bucket"));
+                assert_eq!(namespace.as_deref(), Some("aws.s3.Bucket"));
             }
             _ => panic!("Expected StringEnum"),
         }

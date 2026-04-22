@@ -6,10 +6,10 @@ provider aws {
   region = aws.Region.ap_northeast_1
 }
 
-aws.s3.bucket {
+aws.s3.Bucket {
   bucket = 'carina-acc-test-aws-s3-acl-update'
 
-  object_ownership = aws.s3.bucket.ObjectOwnership.BucketOwnerEnforced
+  object_ownership = aws.s3.Bucket.ObjectOwnership.BucketOwnerEnforced
 
   tags = {
     Environment = 'acceptance-test'

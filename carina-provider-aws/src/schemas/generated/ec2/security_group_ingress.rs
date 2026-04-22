@@ -1,4 +1,4 @@
-//! security_group_ingress schema definition for AWS Cloud Control
+//! SecurityGroupIngress schema definition for AWS Cloud Control
 //!
 //! Auto-generated from Smithy model: com.amazonaws.ec2
 //!
@@ -34,13 +34,13 @@ fn validate_to_port_range(value: &Value) -> Result<(), String> {
     }
 }
 
-/// Returns the schema config for ec2.security_group_ingress (Smithy: com.amazonaws.ec2)
+/// Returns the schema config for ec2.SecurityGroupIngress (Smithy: com.amazonaws.ec2)
 pub fn ec2_security_group_ingress_config() -> AwsSchemaConfig {
     AwsSchemaConfig {
         aws_type_name: "AWS::EC2::SecurityGroupIngress",
-        resource_type_name: "ec2.security_group_ingress",
+        resource_type_name: "ec2.SecurityGroupIngress",
         has_tags: false,
-        schema: ResourceSchema::new("aws.ec2.security_group_ingress")
+        schema: ResourceSchema::new("aws.ec2.SecurityGroupIngress")
         .with_description("Describes a security group rule.")
         .attribute(
             AttributeSchema::new("cidr_ip", types::ipv4_cidr())
@@ -90,7 +90,7 @@ pub fn ec2_security_group_ingress_config() -> AwsSchemaConfig {
             AttributeSchema::new("ip_protocol", AttributeType::StringEnum {
                 name: "IpProtocol".to_string(),
                 values: vec!["tcp".to_string(), "udp".to_string(), "icmp".to_string(), "icmpv6".to_string(), "-1".to_string(), "all".to_string()],
-                namespace: Some("aws.ec2.security_group_ingress".to_string()),
+                namespace: Some("aws.ec2.SecurityGroupIngress".to_string()),
                 to_dsl: Some(|s: &str| match s { "-1" => "all".to_string(), _ => s.replace('-', "_") }),
             })
                 .required()
@@ -150,7 +150,7 @@ pub fn enum_valid_values() -> (
     &'static [(&'static str, &'static [&'static str])],
 ) {
     (
-        "ec2.security_group_ingress",
+        "ec2.SecurityGroupIngress",
         &[("ip_protocol", VALID_IP_PROTOCOL)],
     )
 }

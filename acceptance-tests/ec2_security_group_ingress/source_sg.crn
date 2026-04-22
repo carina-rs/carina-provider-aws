@@ -6,7 +6,7 @@ provider aws {
   region = aws.Region.ap_northeast_1
 }
 
-let vpc = aws.ec2.vpc {
+let vpc = aws.ec2.Vpc {
   cidr_block = '10.0.0.0/16'
 
   tags = {
@@ -14,7 +14,7 @@ let vpc = aws.ec2.vpc {
   }
 }
 
-let source_sg = aws.ec2.security_group {
+let source_sg = aws.ec2.SecurityGroup {
   group_name  = 'carina-acc-test-aws-ingress-src'
   description = 'Source security group'
   vpc_id      = vpc.vpc_id
@@ -24,7 +24,7 @@ let source_sg = aws.ec2.security_group {
   }
 }
 
-let dest_sg = aws.ec2.security_group {
+let dest_sg = aws.ec2.SecurityGroup {
   group_name  = 'carina-acc-test-aws-ingress-dst'
   description = 'Destination security group'
   vpc_id      = vpc.vpc_id
@@ -34,7 +34,7 @@ let dest_sg = aws.ec2.security_group {
   }
 }
 
-aws.ec2.security_group_ingress {
+aws.ec2.SecurityGroupIngress {
   group_id                 = dest_sg.group_id
   description              = 'Allow HTTPS from source SG'
   ip_protocol              = 'tcp'

@@ -1,4 +1,4 @@
-//! eip schema definition for AWS Cloud Control
+//! Eip schema definition for AWS Cloud Control
 //!
 //! Auto-generated from Smithy model: com.amazonaws.ec2
 //!
@@ -11,13 +11,13 @@ use carina_core::schema::{AttributeSchema, AttributeType, ResourceSchema, types}
 
 const VALID_DOMAIN: &[&str] = &["standard", "vpc"];
 
-/// Returns the schema config for ec2.eip (Smithy: com.amazonaws.ec2)
+/// Returns the schema config for ec2.Eip (Smithy: com.amazonaws.ec2)
 pub fn ec2_eip_config() -> AwsSchemaConfig {
     AwsSchemaConfig {
         aws_type_name: "AWS::EC2::EIP",
-        resource_type_name: "ec2.eip",
+        resource_type_name: "ec2.Eip",
         has_tags: true,
-        schema: ResourceSchema::new("aws.ec2.eip")
+        schema: ResourceSchema::new("aws.ec2.Eip")
         .with_description("Describes an Elastic IP address, or a carrier IP address.")
         .attribute(
             AttributeSchema::new("address", AttributeType::String)
@@ -29,7 +29,7 @@ pub fn ec2_eip_config() -> AwsSchemaConfig {
             AttributeSchema::new("domain", AttributeType::StringEnum {
                 name: "Domain".to_string(),
                 values: vec!["standard".to_string(), "vpc".to_string()],
-                namespace: Some("aws.ec2.eip".to_string()),
+                namespace: Some("aws.ec2.Eip".to_string()),
                 to_dsl: None,
             })
                 .create_only()
@@ -66,7 +66,7 @@ pub fn enum_valid_values() -> (
     &'static str,
     &'static [(&'static str, &'static [&'static str])],
 ) {
-    ("ec2.eip", &[("domain", VALID_DOMAIN)])
+    ("ec2.Eip", &[("domain", VALID_DOMAIN)])
 }
 
 /// Maps DSL alias values back to canonical AWS values for this module.

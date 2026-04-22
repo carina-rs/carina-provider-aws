@@ -6,10 +6,10 @@ provider aws {
   region = aws.Region.ap_northeast_1
 }
 
-aws.s3.bucket {
+aws.s3.Bucket {
   bucket = 'carina-acc-test-aws-s3-update'
 
-  versioning_status = aws.s3.bucket.VersioningStatus.Enabled
+  versioning_status = aws.s3.Bucket.VersioningStatus.Enabled
 
   tags = {
     Environment = 'acceptance-test'

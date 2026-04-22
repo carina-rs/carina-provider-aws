@@ -1,4 +1,4 @@
-//! iam.role schema definition for AWS Cloud Control
+//! iam.Role schema definition for AWS Cloud Control
 //!
 //! Auto-generated from Smithy model: com.amazonaws.iam
 //!
@@ -22,13 +22,13 @@ fn validate_max_session_duration_range(value: &Value) -> Result<(), String> {
     }
 }
 
-/// Returns the schema config for iam.role (Smithy: com.amazonaws.iam)
+/// Returns the schema config for iam.Role (Smithy: com.amazonaws.iam)
 pub fn iam_role_config() -> AwsSchemaConfig {
     AwsSchemaConfig {
         aws_type_name: "AWS::IAM::Role",
-        resource_type_name: "iam.role",
+        resource_type_name: "iam.Role",
         has_tags: true,
-        schema: ResourceSchema::new("aws.iam.role")
+        schema: ResourceSchema::new("aws.iam.Role")
         .with_description("Contains information about an IAM role. This structure is returned as a response element in several API operations that interact with roles.")
         .attribute(
             AttributeSchema::new("assume_role_policy_document", super::iam_policy_document())
@@ -94,7 +94,7 @@ pub fn enum_valid_values() -> (
     &'static str,
     &'static [(&'static str, &'static [&'static str])],
 ) {
-    ("iam.role", &[])
+    ("iam.Role", &[])
 }
 
 /// Maps DSL alias values back to canonical AWS values for this module.

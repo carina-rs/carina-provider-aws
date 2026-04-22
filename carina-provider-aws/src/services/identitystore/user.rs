@@ -1,4 +1,4 @@
-//! Data source read for `aws.identitystore.user`.
+//! Data source read for `aws.identitystore.User`.
 //!
 //! Looks a user up by `user_name` (via `GetUserId` → `DescribeUser`) or by
 //! `user_id` (via `DescribeUser` directly). One of the two must be set.

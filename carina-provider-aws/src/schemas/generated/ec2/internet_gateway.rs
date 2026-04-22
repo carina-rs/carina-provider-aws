@@ -1,4 +1,4 @@
-//! internet_gateway schema definition for AWS Cloud Control
+//! InternetGateway schema definition for AWS Cloud Control
 //!
 //! Auto-generated from Smithy model: com.amazonaws.ec2
 //!
@@ -9,13 +9,13 @@ use super::tags_type;
 use super::validate_tags_map;
 use carina_core::schema::{AttributeSchema, ResourceSchema};
 
-/// Returns the schema config for ec2.internet_gateway (Smithy: com.amazonaws.ec2)
+/// Returns the schema config for ec2.InternetGateway (Smithy: com.amazonaws.ec2)
 pub fn ec2_internet_gateway_config() -> AwsSchemaConfig {
     AwsSchemaConfig {
         aws_type_name: "AWS::EC2::InternetGateway",
-        resource_type_name: "ec2.internet_gateway",
+        resource_type_name: "ec2.InternetGateway",
         has_tags: true,
-        schema: ResourceSchema::new("aws.ec2.internet_gateway")
+        schema: ResourceSchema::new("aws.ec2.InternetGateway")
             .with_description("Describes an internet gateway.")
             .attribute(
                 AttributeSchema::new("internet_gateway_id", super::internet_gateway_id())
@@ -36,7 +36,7 @@ pub fn enum_valid_values() -> (
     &'static str,
     &'static [(&'static str, &'static [&'static str])],
 ) {
-    ("ec2.internet_gateway", &[])
+    ("ec2.InternetGateway", &[])
 }
 
 /// Maps DSL alias values back to canonical AWS values for this module.

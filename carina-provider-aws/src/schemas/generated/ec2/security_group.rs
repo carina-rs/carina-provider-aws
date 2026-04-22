@@ -1,4 +1,4 @@
-//! security_group schema definition for AWS Cloud Control
+//! SecurityGroup schema definition for AWS Cloud Control
 //!
 //! Auto-generated from Smithy model: com.amazonaws.ec2
 //!
@@ -9,13 +9,13 @@ use super::tags_type;
 use super::validate_tags_map;
 use carina_core::schema::{AttributeSchema, AttributeType, ResourceSchema};
 
-/// Returns the schema config for ec2.security_group (Smithy: com.amazonaws.ec2)
+/// Returns the schema config for ec2.SecurityGroup (Smithy: com.amazonaws.ec2)
 pub fn ec2_security_group_config() -> AwsSchemaConfig {
     AwsSchemaConfig {
         aws_type_name: "AWS::EC2::SecurityGroup",
-        resource_type_name: "ec2.security_group",
+        resource_type_name: "ec2.SecurityGroup",
         has_tags: true,
-        schema: ResourceSchema::new("aws.ec2.security_group")
+        schema: ResourceSchema::new("aws.ec2.SecurityGroup")
         .with_description("Describes a security group.")
         .attribute(
             AttributeSchema::new("description", AttributeType::String)
@@ -56,7 +56,7 @@ pub fn enum_valid_values() -> (
     &'static str,
     &'static [(&'static str, &'static [&'static str])],
 ) {
-    ("ec2.security_group", &[])
+    ("ec2.SecurityGroup", &[])
 }
 
 /// Maps DSL alias values back to canonical AWS values for this module.

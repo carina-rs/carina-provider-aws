@@ -20,71 +20,71 @@ impl Provider for AwsProvider {
         let identifier = identifier.map(String::from);
         Box::pin(async move {
             let mut state = match id.resource_type.as_str() {
-                "s3.bucket" => self.read_s3_bucket(&id, identifier.as_deref()).await,
-                "ec2.eip" => self.read_ec2_eip(&id, identifier.as_deref()).await,
-                "ec2.vpc" => self.read_ec2_vpc(&id, identifier.as_deref()).await,
-                "ec2.subnet" => self.read_ec2_subnet(&id, identifier.as_deref()).await,
-                "ec2.internet_gateway" => {
+                "s3.Bucket" => self.read_s3_bucket(&id, identifier.as_deref()).await,
+                "ec2.Eip" => self.read_ec2_eip(&id, identifier.as_deref()).await,
+                "ec2.Vpc" => self.read_ec2_vpc(&id, identifier.as_deref()).await,
+                "ec2.Subnet" => self.read_ec2_subnet(&id, identifier.as_deref()).await,
+                "ec2.InternetGateway" => {
                     self.read_ec2_internet_gateway(&id, identifier.as_deref())
                         .await
                 }
-                "ec2.nat_gateway" => self.read_ec2_nat_gateway(&id, identifier.as_deref()).await,
-                "ec2.route_table" => self.read_ec2_route_table(&id, identifier.as_deref()).await,
-                "ec2.route" => self.read_ec2_route(&id, identifier.as_deref()).await,
-                "ec2.security_group" => {
+                "ec2.NatGateway" => self.read_ec2_nat_gateway(&id, identifier.as_deref()).await,
+                "ec2.RouteTable" => self.read_ec2_route_table(&id, identifier.as_deref()).await,
+                "ec2.Route" => self.read_ec2_route(&id, identifier.as_deref()).await,
+                "ec2.SecurityGroup" => {
                     self.read_ec2_security_group(&id, identifier.as_deref())
                         .await
                 }
-                "ec2.security_group_ingress" => {
+                "ec2.SecurityGroupIngress" => {
                     self.read_ec2_security_group_ingress(&id, identifier.as_deref())
                         .await
                 }
-                "ec2.security_group_egress" => {
+                "ec2.SecurityGroupEgress" => {
                     self.read_ec2_security_group_egress(&id, identifier.as_deref())
                         .await
                 }
-                "ec2.subnet_route_table_association" => {
+                "ec2.SubnetRouteTableAssociation" => {
                     self.read_ec2_subnet_route_table_association(&id, identifier.as_deref())
                         .await
                 }
-                "ec2.flow_log" => self.read_ec2_flow_log(&id, identifier.as_deref()).await,
-                "ec2.vpc_endpoint" => self.read_ec2_vpc_endpoint(&id, identifier.as_deref()).await,
-                "ec2.vpc_gateway_attachment" => {
+                "ec2.FlowLog" => self.read_ec2_flow_log(&id, identifier.as_deref()).await,
+                "ec2.VpcEndpoint" => self.read_ec2_vpc_endpoint(&id, identifier.as_deref()).await,
+                "ec2.VpcGatewayAttachment" => {
                     self.read_ec2_vpc_gateway_attachment(&id, identifier.as_deref())
                         .await
                 }
-                "ec2.vpn_gateway" => self.read_ec2_vpn_gateway(&id, identifier.as_deref()).await,
-                "ec2.transit_gateway" => {
+                "ec2.VpnGateway" => self.read_ec2_vpn_gateway(&id, identifier.as_deref()).await,
+                "ec2.TransitGateway" => {
                     self.read_ec2_transit_gateway(&id, identifier.as_deref())
                         .await
                 }
-                "ec2.transit_gateway_attachment" => {
+                "ec2.TransitGatewayAttachment" => {
                     self.read_ec2_transit_gateway_attachment(&id, identifier.as_deref())
                         .await
                 }
-                "ec2.vpc_peering_connection" => {
+                "ec2.VpcPeeringConnection" => {
                     self.read_ec2_vpc_peering_connection(&id, identifier.as_deref())
                         .await
                 }
-                "ec2.egress_only_internet_gateway" => {
+                "ec2.EgressOnlyInternetGateway" => {
                     self.read_ec2_egress_only_internet_gateway(&id, identifier.as_deref())
                         .await
                 }
-                "organizations.account" => {
+                "organizations.Account" => {
                     self.read_organizations_account(&id, identifier.as_deref())
                         .await
                 }
-                "organizations.organization" => {
+                "organizations.Organization" => {
                     self.read_organizations_organization(&id, identifier.as_deref())
                         .await
                 }
-                "iam.role" => self.read_iam_role(&id, identifier.as_deref()).await,
-                "logs.log_group" => self.read_logs_log_group(&id, identifier.as_deref()).await,
-                "route53.record_set" => {
+                "iam.Role" => self.read_iam_role(&id, identifier.as_deref()).await,
+                "logs.LogGroup" => self.read_logs_log_group(&id, identifier.as_deref()).await,
+                "route53.RecordSet" => {
                     self.read_route53_record_set(&id, identifier.as_deref())
                         .await
                 }
-                "sts.caller_identity" => self.read_sts_caller_identity(&id).await,
+                "sts.CallerIdentity" => self.read_sts_caller_identity(&id).await,
                 _ => Err(ProviderError::new(format!(
                     "Unknown resource type: {}",
                     id.resource_type
@@ -105,7 +105,7 @@ impl Provider for AwsProvider {
         let resource = resource.clone();
         Box::pin(async move {
             let mut state = match resource.id.resource_type.as_str() {
-                "identitystore.user" => self.read_identitystore_user(&resource).await?,
+                "identitystore.User" => self.read_identitystore_user(&resource).await?,
                 _ => {
                     // Fallback for data sources this provider doesn't dispatch
                     // explicitly. Route zero-input cases (e.g. `sts.caller_identity`)
@@ -144,48 +144,46 @@ impl Provider for AwsProvider {
         let resource = resource.clone();
         Box::pin(async move {
             match resource.id.resource_type.as_str() {
-                "s3.bucket" => self.create_s3_bucket(resource).await,
-                "ec2.eip" => self.create_ec2_eip(resource).await,
-                "ec2.vpc" => self.create_ec2_vpc(resource).await,
-                "ec2.subnet" => self.create_ec2_subnet(resource).await,
-                "ec2.internet_gateway" => self.create_ec2_internet_gateway(resource).await,
-                "ec2.nat_gateway" => self.create_ec2_nat_gateway(resource).await,
-                "ec2.route_table" => self.create_ec2_route_table(resource).await,
-                "ec2.route" => self.create_ec2_route(resource).await,
-                "ec2.security_group" => self.create_ec2_security_group(resource).await,
-                "ec2.security_group_ingress" => {
+                "s3.Bucket" => self.create_s3_bucket(resource).await,
+                "ec2.Eip" => self.create_ec2_eip(resource).await,
+                "ec2.Vpc" => self.create_ec2_vpc(resource).await,
+                "ec2.Subnet" => self.create_ec2_subnet(resource).await,
+                "ec2.InternetGateway" => self.create_ec2_internet_gateway(resource).await,
+                "ec2.NatGateway" => self.create_ec2_nat_gateway(resource).await,
+                "ec2.RouteTable" => self.create_ec2_route_table(resource).await,
+                "ec2.Route" => self.create_ec2_route(resource).await,
+                "ec2.SecurityGroup" => self.create_ec2_security_group(resource).await,
+                "ec2.SecurityGroupIngress" => {
                     self.create_ec2_security_group_ingress(resource).await
                 }
-                "ec2.security_group_egress" => {
-                    self.create_ec2_security_group_egress(resource).await
-                }
-                "ec2.subnet_route_table_association" => {
+                "ec2.SecurityGroupEgress" => self.create_ec2_security_group_egress(resource).await,
+                "ec2.SubnetRouteTableAssociation" => {
                     self.create_ec2_subnet_route_table_association(resource)
                         .await
                 }
-                "ec2.flow_log" => self.create_ec2_flow_log(resource).await,
-                "ec2.vpc_endpoint" => self.create_ec2_vpc_endpoint(resource).await,
-                "ec2.vpc_gateway_attachment" => {
+                "ec2.FlowLog" => self.create_ec2_flow_log(resource).await,
+                "ec2.VpcEndpoint" => self.create_ec2_vpc_endpoint(resource).await,
+                "ec2.VpcGatewayAttachment" => {
                     self.create_ec2_vpc_gateway_attachment(resource).await
                 }
-                "ec2.vpn_gateway" => self.create_ec2_vpn_gateway(resource).await,
-                "ec2.transit_gateway" => self.create_ec2_transit_gateway(resource).await,
-                "ec2.transit_gateway_attachment" => {
+                "ec2.VpnGateway" => self.create_ec2_vpn_gateway(resource).await,
+                "ec2.TransitGateway" => self.create_ec2_transit_gateway(resource).await,
+                "ec2.TransitGatewayAttachment" => {
                     self.create_ec2_transit_gateway_attachment(resource).await
                 }
-                "ec2.vpc_peering_connection" => {
+                "ec2.VpcPeeringConnection" => {
                     self.create_ec2_vpc_peering_connection(resource).await
                 }
-                "ec2.egress_only_internet_gateway" => {
+                "ec2.EgressOnlyInternetGateway" => {
                     self.create_ec2_egress_only_internet_gateway(resource).await
                 }
-                "organizations.account" => self.create_organizations_account(resource).await,
-                "organizations.organization" => {
+                "organizations.Account" => self.create_organizations_account(resource).await,
+                "organizations.Organization" => {
                     self.create_organizations_organization(resource).await
                 }
-                "iam.role" => self.create_iam_role(resource).await,
-                "logs.log_group" => self.create_logs_log_group(resource).await,
-                "route53.record_set" => self.create_route53_record_set(resource).await,
+                "iam.Role" => self.create_iam_role(resource).await,
+                "logs.LogGroup" => self.create_logs_log_group(resource).await,
+                "route53.RecordSet" => self.create_route53_record_set(resource).await,
                 _ => Err(ProviderError::new(format!(
                     "Unknown resource type: {}",
                     resource.id.resource_type
@@ -208,80 +206,80 @@ impl Provider for AwsProvider {
         let to = to.clone();
         Box::pin(async move {
             match id.resource_type.as_str() {
-                "s3.bucket" => self.update_s3_bucket(id, &identifier, &from, to).await,
-                "ec2.eip" => self.update_ec2_eip(id, &identifier, &from, to).await,
-                "ec2.vpc" => self.update_ec2_vpc(id, &identifier, &from, to).await,
-                "ec2.subnet" => self.update_ec2_subnet(id, &identifier, &from, to).await,
-                "ec2.internet_gateway" => {
+                "s3.Bucket" => self.update_s3_bucket(id, &identifier, &from, to).await,
+                "ec2.Eip" => self.update_ec2_eip(id, &identifier, &from, to).await,
+                "ec2.Vpc" => self.update_ec2_vpc(id, &identifier, &from, to).await,
+                "ec2.Subnet" => self.update_ec2_subnet(id, &identifier, &from, to).await,
+                "ec2.InternetGateway" => {
                     self.update_ec2_internet_gateway(id, &identifier, &from, to)
                         .await
                 }
-                "ec2.nat_gateway" => {
+                "ec2.NatGateway" => {
                     self.update_ec2_nat_gateway(id, &identifier, &from, to)
                         .await
                 }
-                "ec2.route_table" => {
+                "ec2.RouteTable" => {
                     self.update_ec2_route_table(id, &identifier, &from, to)
                         .await
                 }
-                "ec2.route" => self.update_ec2_route(id, &identifier, to).await,
-                "ec2.security_group" => {
+                "ec2.Route" => self.update_ec2_route(id, &identifier, to).await,
+                "ec2.SecurityGroup" => {
                     self.update_ec2_security_group(id, &identifier, &from, to)
                         .await
                 }
-                "ec2.security_group_ingress" => {
+                "ec2.SecurityGroupIngress" => {
                     self.update_ec2_security_group_ingress(id, &identifier, to)
                         .await
                 }
-                "ec2.security_group_egress" => {
+                "ec2.SecurityGroupEgress" => {
                     self.update_ec2_security_group_egress(id, &identifier, to)
                         .await
                 }
-                "ec2.subnet_route_table_association" => {
+                "ec2.SubnetRouteTableAssociation" => {
                     self.update_ec2_subnet_route_table_association(id, &identifier, to)
                         .await
                 }
-                "ec2.flow_log" => self.update_ec2_flow_log(id, &identifier, &from, to).await,
-                "ec2.vpc_endpoint" => {
+                "ec2.FlowLog" => self.update_ec2_flow_log(id, &identifier, &from, to).await,
+                "ec2.VpcEndpoint" => {
                     self.update_ec2_vpc_endpoint(id, &identifier, &from, to)
                         .await
                 }
-                "ec2.vpc_gateway_attachment" => {
+                "ec2.VpcGatewayAttachment" => {
                     self.update_ec2_vpc_gateway_attachment(id, &identifier)
                         .await
                 }
-                "ec2.vpn_gateway" => {
+                "ec2.VpnGateway" => {
                     self.update_ec2_vpn_gateway(id, &identifier, &from, to)
                         .await
                 }
-                "ec2.transit_gateway" => {
+                "ec2.TransitGateway" => {
                     self.update_ec2_transit_gateway(id, &identifier, &from, to)
                         .await
                 }
-                "ec2.transit_gateway_attachment" => {
+                "ec2.TransitGatewayAttachment" => {
                     self.update_ec2_transit_gateway_attachment(id, &identifier, &from, to)
                         .await
                 }
-                "ec2.vpc_peering_connection" => {
+                "ec2.VpcPeeringConnection" => {
                     self.update_ec2_vpc_peering_connection(id, &identifier, &from, to)
                         .await
                 }
-                "ec2.egress_only_internet_gateway" => {
+                "ec2.EgressOnlyInternetGateway" => {
                     self.update_ec2_egress_only_internet_gateway(id, &identifier, &from, to)
                         .await
                 }
-                "organizations.account" => {
+                "organizations.Account" => {
                     self.update_organizations_account(id, &identifier, &from, to)
                         .await
                 }
-                "organizations.organization" => {
+                "organizations.Organization" => {
                     // All attributes are read-only or create-only; read back current state
                     self.read_organizations_organization(&id, Some(&identifier))
                         .await
                 }
-                "iam.role" => self.update_iam_role(id, &identifier, &from, to).await,
-                "logs.log_group" => self.update_logs_log_group(id, &identifier, &from, to).await,
-                "route53.record_set" => self.update_route53_record_set(id, &identifier, to).await,
+                "iam.Role" => self.update_iam_role(id, &identifier, &from, to).await,
+                "logs.LogGroup" => self.update_logs_log_group(id, &identifier, &from, to).await,
+                "route53.RecordSet" => self.update_route53_record_set(id, &identifier, to).await,
                 _ => Err(ProviderError::new(format!(
                     "Unknown resource type: {}",
                     id.resource_type
@@ -302,54 +300,54 @@ impl Provider for AwsProvider {
         let lifecycle = lifecycle.clone();
         Box::pin(async move {
             match id.resource_type.as_str() {
-                "s3.bucket" => self.delete_s3_bucket(id, &identifier, &lifecycle).await,
-                "ec2.eip" => self.delete_ec2_eip(id, &identifier).await,
-                "ec2.vpc" => self.delete_ec2_vpc(id, &identifier).await,
-                "ec2.subnet" => self.delete_ec2_subnet(id, &identifier).await,
-                "ec2.internet_gateway" => self.delete_ec2_internet_gateway(id, &identifier).await,
-                "ec2.nat_gateway" => self.delete_ec2_nat_gateway(id, &identifier).await,
-                "ec2.route_table" => self.delete_ec2_route_table(id, &identifier).await,
-                "ec2.route" => self.delete_ec2_route(id, &identifier).await,
-                "ec2.security_group" => self.delete_ec2_security_group(id, &identifier).await,
-                "ec2.security_group_ingress" => {
+                "s3.Bucket" => self.delete_s3_bucket(id, &identifier, &lifecycle).await,
+                "ec2.Eip" => self.delete_ec2_eip(id, &identifier).await,
+                "ec2.Vpc" => self.delete_ec2_vpc(id, &identifier).await,
+                "ec2.Subnet" => self.delete_ec2_subnet(id, &identifier).await,
+                "ec2.InternetGateway" => self.delete_ec2_internet_gateway(id, &identifier).await,
+                "ec2.NatGateway" => self.delete_ec2_nat_gateway(id, &identifier).await,
+                "ec2.RouteTable" => self.delete_ec2_route_table(id, &identifier).await,
+                "ec2.Route" => self.delete_ec2_route(id, &identifier).await,
+                "ec2.SecurityGroup" => self.delete_ec2_security_group(id, &identifier).await,
+                "ec2.SecurityGroupIngress" => {
                     self.delete_ec2_security_group_ingress(id, &identifier)
                         .await
                 }
-                "ec2.security_group_egress" => {
+                "ec2.SecurityGroupEgress" => {
                     self.delete_ec2_security_group_egress(id, &identifier).await
                 }
-                "ec2.subnet_route_table_association" => {
+                "ec2.SubnetRouteTableAssociation" => {
                     self.delete_ec2_subnet_route_table_association(id, &identifier)
                         .await
                 }
-                "ec2.flow_log" => self.delete_ec2_flow_log(id, &identifier).await,
-                "ec2.vpc_endpoint" => self.delete_ec2_vpc_endpoint(id, &identifier).await,
-                "ec2.vpc_gateway_attachment" => {
+                "ec2.FlowLog" => self.delete_ec2_flow_log(id, &identifier).await,
+                "ec2.VpcEndpoint" => self.delete_ec2_vpc_endpoint(id, &identifier).await,
+                "ec2.VpcGatewayAttachment" => {
                     self.delete_ec2_vpc_gateway_attachment(id, &identifier)
                         .await
                 }
-                "ec2.vpn_gateway" => self.delete_ec2_vpn_gateway(id, &identifier).await,
-                "ec2.transit_gateway" => self.delete_ec2_transit_gateway(id, &identifier).await,
-                "ec2.transit_gateway_attachment" => {
+                "ec2.VpnGateway" => self.delete_ec2_vpn_gateway(id, &identifier).await,
+                "ec2.TransitGateway" => self.delete_ec2_transit_gateway(id, &identifier).await,
+                "ec2.TransitGatewayAttachment" => {
                     self.delete_ec2_transit_gateway_attachment(id, &identifier)
                         .await
                 }
-                "ec2.vpc_peering_connection" => {
+                "ec2.VpcPeeringConnection" => {
                     self.delete_ec2_vpc_peering_connection(id, &identifier)
                         .await
                 }
-                "ec2.egress_only_internet_gateway" => {
+                "ec2.EgressOnlyInternetGateway" => {
                     self.delete_ec2_egress_only_internet_gateway(id, &identifier)
                         .await
                 }
-                "organizations.account" => self.delete_organizations_account(id, &identifier).await,
-                "organizations.organization" => {
+                "organizations.Account" => self.delete_organizations_account(id, &identifier).await,
+                "organizations.Organization" => {
                     self.delete_organizations_organization(id, &identifier)
                         .await
                 }
-                "iam.role" => self.delete_iam_role(id, &identifier).await,
-                "logs.log_group" => self.delete_logs_log_group(id, &identifier).await,
-                "route53.record_set" => self.delete_route53_record_set(id, &identifier).await,
+                "iam.Role" => self.delete_iam_role(id, &identifier).await,
+                "logs.LogGroup" => self.delete_logs_log_group(id, &identifier).await,
+                "route53.RecordSet" => self.delete_route53_record_set(id, &identifier).await,
                 _ => Err(ProviderError::new(format!(
                     "Unknown resource type: {}",
                     id.resource_type

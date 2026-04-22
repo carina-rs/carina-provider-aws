@@ -1,4 +1,4 @@
-//! organizations.account schema definition for AWS Cloud Control
+//! organizations.Account schema definition for AWS Cloud Control
 //!
 //! Auto-generated from Smithy model: com.amazonaws.organizations
 //!
@@ -15,13 +15,13 @@ const VALID_JOINED_METHOD: &[&str] = &["CREATED", "INVITED"];
 
 const VALID_STATUS: &[&str] = &["ACTIVE", "PENDING_CLOSURE", "SUSPENDED"];
 
-/// Returns the schema config for organizations.account (Smithy: com.amazonaws.organizations)
+/// Returns the schema config for organizations.Account (Smithy: com.amazonaws.organizations)
 pub fn organizations_account_config() -> AwsSchemaConfig {
     AwsSchemaConfig {
         aws_type_name: "AWS::Organizations::Account",
-        resource_type_name: "organizations.account",
+        resource_type_name: "organizations.Account",
         has_tags: true,
-        schema: ResourceSchema::new("aws.organizations.account")
+        schema: ResourceSchema::new("aws.organizations.Account")
         .with_description("Contains information about an Amazon Web Services account that is a member of an organization.")
         .attribute(
             AttributeSchema::new("account_name", AttributeType::String)
@@ -41,7 +41,7 @@ pub fn organizations_account_config() -> AwsSchemaConfig {
             AttributeSchema::new("iam_user_access_to_billing", AttributeType::StringEnum {
                 name: "IamUserAccessToBilling".to_string(),
                 values: vec!["ALLOW".to_string(), "DENY".to_string()],
-                namespace: Some("aws.organizations.account".to_string()),
+                namespace: Some("aws.organizations.Account".to_string()),
                 to_dsl: None,
             })
                 .create_only()
@@ -68,7 +68,7 @@ pub fn organizations_account_config() -> AwsSchemaConfig {
             AttributeSchema::new("joined_method", AttributeType::StringEnum {
                 name: "JoinedMethod".to_string(),
                 values: vec!["CREATED".to_string(), "INVITED".to_string()],
-                namespace: Some("aws.organizations.account".to_string()),
+                namespace: Some("aws.organizations.Account".to_string()),
                 to_dsl: None,
             })
                 .with_description("The method by which the account joined the organization. (read-only)")
@@ -88,7 +88,7 @@ pub fn organizations_account_config() -> AwsSchemaConfig {
             AttributeSchema::new("status", AttributeType::StringEnum {
                 name: "Status".to_string(),
                 values: vec!["ACTIVE".to_string(), "PENDING_CLOSURE".to_string(), "SUSPENDED".to_string()],
-                namespace: Some("aws.organizations.account".to_string()),
+                namespace: Some("aws.organizations.Account".to_string()),
                 to_dsl: None,
             })
                 .with_description("The status of the account in the organization. The Status parameter in the Account object will be retired on September 9, 2026. Although both the acco... (read-only)")
@@ -109,7 +109,7 @@ pub fn enum_valid_values() -> (
     &'static [(&'static str, &'static [&'static str])],
 ) {
     (
-        "organizations.account",
+        "organizations.Account",
         &[
             (
                 "iam_user_access_to_billing",

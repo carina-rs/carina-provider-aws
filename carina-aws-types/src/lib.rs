@@ -1369,7 +1369,7 @@ pub fn iam_policy_document() -> AttributeType {
 
 /// IAM condition operator mappings: (snake_case, PascalCase).
 ///
-/// See <https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_elements_condition_operators.html>
+/// See <https://docs.aws.amazon.Com/IAM/latest/UserGuide/reference_policies_elements_condition_operators.html>
 const CONDITION_OPERATORS: &[(&str, &str)] = &[
     // String
     ("string_equals", "StringEquals"),

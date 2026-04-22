@@ -9,7 +9,7 @@ provider aws {
   region = aws.Region.ap_northeast_1
 }
 
-let vpc = aws.ec2.vpc {
+let vpc = aws.ec2.Vpc {
   cidr_block = '10.0.0.0/16'
 
   tags = {
@@ -17,7 +17,7 @@ let vpc = aws.ec2.vpc {
   }
 }
 
-let sg = aws.ec2.security_group {
+let sg = aws.ec2.SecurityGroup {
   group_name  = 'carina-acc-test-aws-sg-egress'
   description = 'SG for egress rule test'
   vpc_id      = vpc.vpc_id
@@ -27,7 +27,7 @@ let sg = aws.ec2.security_group {
   }
 }
 
-aws.ec2.security_group_egress {
+aws.ec2.SecurityGroupEgress {
   group_id    = sg.group_id
   description = 'Allow HTTPS outbound'
   ip_protocol = tcp

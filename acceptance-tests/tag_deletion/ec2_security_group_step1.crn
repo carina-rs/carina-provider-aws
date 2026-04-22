@@ -7,7 +7,7 @@ provider aws {
   region = aws.Region.ap_northeast_1
 }
 
-let vpc = aws.ec2.vpc {
+let vpc = aws.ec2.Vpc {
   cidr_block = '10.106.0.0/16'
 
   tags = {
@@ -15,7 +15,7 @@ let vpc = aws.ec2.vpc {
   }
 }
 
-aws.ec2.security_group {
+aws.ec2.SecurityGroup {
   group_name  = 'carina-tag-deletion-test'
   description = 'Carina acceptance test for tag deletion'
   vpc_id      = vpc.vpc_id
