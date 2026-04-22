@@ -742,6 +742,15 @@ if [ "$COMMAND" = "full" ]; then
                 rm -f "$INJECTED_FILE"
                 TEST_INDEX=$((TEST_INDEX + 1))
 
+                # Initialize backend lock and install providers before apply
+                if ! INIT_OUTPUT=$("$CARINA_BIN" init "$CURRENT_STATE_DIR" 2>&1); then
+                    echo "FAIL (init) $REL_PATH"
+                    echo "  ERROR: $INIT_OUTPUT"
+                    FAILED=$((FAILED + 1))
+                    CURRENT_STATE_DIR=""
+                    continue
+                fi
+
                 # Apply (run from state dir so each test has its own state file)
                 echo "RUNNING apply $REL_PATH"
                 APPLY_OUTPUT=$(cd "$CURRENT_STATE_DIR" && aws-vault exec "$ACCOUNT" -- "$CARINA_BIN" apply --auto-approve "$CURRENT_STATE_DIR" 2>&1)
@@ -895,6 +904,14 @@ for TEST_FILE in "${TESTS[@]}"; do
         rm -f "$INJECTED_FILE"
         TEST_INDEX=$((TEST_INDEX + 1))
         TARGET_PATH="$STATE_DIR"
+
+        # Initialize backend lock and install providers before the stateful command
+        if ! INIT_OUTPUT=$("$CARINA_BIN" init "$STATE_DIR" 2>&1); then
+            echo "FAIL (init)"
+            ERRORS+=("$REL_PATH: $INIT_OUTPUT")
+            FAILED=$((FAILED + 1))
+            continue
+        fi
     else
         # For validate, create a temp directory with the injected file
         VALIDATE_DIR=$(mktemp -d)
