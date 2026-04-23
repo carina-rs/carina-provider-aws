@@ -5,7 +5,7 @@ use carina_core::resource::{Resource, ResourceId, State, Value};
 use carina_core::utils::extract_enum_value;
 
 use crate::AwsProvider;
-use crate::helpers::{build_tag_specification, require_string_attr, sdk_error_message};
+use crate::helpers::{build_tag_specification, sdk_error_message};
 
 impl AwsProvider {
     /// Read an EC2 Flow Log
@@ -41,6 +41,18 @@ impl AwsProvider {
 
             let identifier_value = Self::extract_ec2_flow_log_attributes(fl, &mut attributes);
 
+            // Convert the SDK's singular `resource_id` back into the schema's
+            // `resource_ids` list. AWS's CreateFlowLogs input takes a list; the
+            // describe response exposes one resource_id per FlowLog entity. The
+            // generated extractor inserts the singular key, so replace it here
+            // with a one-element list matching the schema.
+            if let Some(Value::String(rid)) = attributes.remove("resource_id") {
+                attributes.insert(
+                    "resource_ids".to_string(),
+                    Value::List(vec![Value::String(rid)]),
+                );
+            }
+
             // Extract user-defined tags
             if let Some(tags_value) = Self::ec2_tags_to_value(fl.tags()) {
                 attributes.insert("tags".to_string(), tags_value);
@@ -59,7 +71,25 @@ impl AwsProvider {
 
     /// Create an EC2 Flow Log
     pub(crate) async fn create_ec2_flow_log(&self, resource: Resource) -> ProviderResult<State> {
-        let resource_id_val = require_string_attr(&resource, "resource_id")?;
+        let resource_ids_val: Vec<String> = match resource.get_attr("resource_ids") {
+            Some(Value::List(items)) => items
+                .iter()
+                .filter_map(|v| {
+                    if let Value::String(s) = v {
+                        Some(s.clone())
+                    } else {
+                        None
+                    }
+                })
+                .collect(),
+            _ => Vec::new(),
+        };
+        if resource_ids_val.is_empty() {
+            return Err(ProviderError::new(
+                "resource_ids must be a non-empty list of resource identifiers",
+            )
+            .for_resource(resource.id.clone()));
+        }
 
         let resource_type_val = match resource.get_attr("resource_type") {
             Some(Value::String(s)) => extract_enum_value(s).to_string(),
@@ -72,7 +102,7 @@ impl AwsProvider {
         let mut req = self
             .ec2_client
             .create_flow_logs()
-            .resource_ids(&resource_id_val)
+            .set_resource_ids(Some(resource_ids_val.clone()))
             .resource_type(aws_sdk_ec2::types::FlowLogsResourceType::from(
                 resource_type_val.as_str(),
             ));
