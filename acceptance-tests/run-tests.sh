@@ -10,16 +10,25 @@
 #
 # Commands:
 #   validate   - Validate .crn files (default, no AWS credentials needed)
-#   plan       - Run plan on .crn files (single account, needs aws-vault)
-#   apply      - Apply .crn files (single account, needs aws-vault)
+#   plan       - Run plan on .crn files (single account, needs AWS credentials)
+#   apply      - Apply .crn files (single account, needs AWS credentials)
 #   destroy    - Destroy resources created by .crn files (single account)
 #   full       - Run apply+plan-verify+destroy per test, accounts in parallel
 #   cleanup    - Run destroy across accounts in parallel (recover from stuck state)
 #   deep-cleanup - Scan and remove orphaned AWS resources across accounts
 #
+# AWS authentication:
+#   The runner selects credentials via AWS_PROFILE rather than wrapping in
+#   aws-vault. Each carina-test-00X profile shares a single sso-session
+#   (`carina`), so the AWS SDK can refresh the SSO access token on its own
+#   during long-running operations (see carina-rs/carina-provider-awscc#157).
+#
+#   Before the first run in a session, log in once:
+#     aws sso login --sso-session carina
+#
 # For validate, no AWS credentials are needed.
-# For plan/apply/destroy, wrap with: aws-vault exec <profile> -- ./run-tests.sh ...
-# For full, aws-vault is called internally per account (carina-test-000..009).
+# For plan/apply/destroy, wrap with: with_account_creds "<profile>" ./run-tests.sh ...
+# For full, AWS_PROFILE is set internally per account (carina-test-000..009).
 #
 # Filter (optional):
 #   One or more substrings to match against test paths.
@@ -194,6 +203,33 @@ case "$COMMAND" in
         ;;
 esac
 
+# ── with_account_creds: resolve the profile's credentials into env vars ──
+# and exec the given command. Uses `aws configure export-credentials` so the
+# resulting AWS_ACCESS_KEY_ID / AWS_SESSION_TOKEN are fresh STS creds derived
+# from the sso-session; the SSO access token in ~/.aws/sso/cache is refreshed
+# automatically when it is close to expiring. Resolving creds before each
+# carina invocation means every test starts with a new STS session, so a
+# single long-running apply/destroy is not limited by the SSO access-token
+# lifetime (see carina-rs/carina-provider-awscc#157).
+#
+# Usage: with_account_creds <account> <cmd> [args...]
+with_account_creds() {
+    local account="$1"
+    shift
+    local creds
+    if ! creds=$(aws configure export-credentials --profile "$account" --format env-no-export 2>&1); then
+        echo "ERROR: aws configure export-credentials failed for $account: $creds" >&2
+        return 1
+    fi
+    (
+        set -a
+        eval "$creds"
+        set +a
+        unset AWS_PROFILE
+        "$@"
+    )
+}
+
 # ── deep_cleanup_account: scan AWS for orphaned resources ────────────
 # Args: account_profile (e.g., "carina-test-000")
 deep_cleanup_account() {
@@ -202,7 +238,7 @@ deep_cleanup_account() {
 
     # 1. Delete non-default VPCs and all dependencies
     local vpcs
-    vpcs=$(aws-vault exec "$account" -- aws ec2 describe-vpcs \
+    vpcs=$(with_account_creds "$account" aws ec2 describe-vpcs \
         --filters "Name=isDefault,Values=false" \
         --query 'Vpcs[*].VpcId' --output text 2>/dev/null)
 
@@ -213,12 +249,12 @@ deep_cleanup_account() {
 
         # Delete NAT Gateways (must be first, takes time)
         local nat_gws
-        nat_gws=$(aws-vault exec "$account" -- aws ec2 describe-nat-gateways \
+        nat_gws=$(with_account_creds "$account" aws ec2 describe-nat-gateways \
             --filter "Name=vpc-id,Values=$vpc_id" "Name=state,Values=available,pending" \
             --query 'NatGateways[*].NatGatewayId' --output text 2>/dev/null)
         for nat_id in $nat_gws; do
             [ -z "$nat_id" ] && continue
-            aws-vault exec "$account" -- aws ec2 delete-nat-gateway --nat-gateway-id "$nat_id" 2>/dev/null || true
+            with_account_creds "$account" aws ec2 delete-nat-gateway --nat-gateway-id "$nat_id" 2>/dev/null || true
         done
         # Wait for NAT GWs to delete if any were found
         if [ -n "$nat_gws" ] && [ "$nat_gws" != "None" ]; then
@@ -227,94 +263,94 @@ deep_cleanup_account() {
 
         # Delete VPC endpoints
         local endpoints
-        endpoints=$(aws-vault exec "$account" -- aws ec2 describe-vpc-endpoints \
+        endpoints=$(with_account_creds "$account" aws ec2 describe-vpc-endpoints \
             --filters "Name=vpc-id,Values=$vpc_id" \
             --query 'VpcEndpoints[*].VpcEndpointId' --output text 2>/dev/null)
         for ep_id in $endpoints; do
             [ -z "$ep_id" ] && continue
-            aws-vault exec "$account" -- aws ec2 delete-vpc-endpoints --vpc-endpoint-ids "$ep_id" 2>/dev/null || true
+            with_account_creds "$account" aws ec2 delete-vpc-endpoints --vpc-endpoint-ids "$ep_id" 2>/dev/null || true
         done
 
         # Detach and delete internet gateways
         local igws
-        igws=$(aws-vault exec "$account" -- aws ec2 describe-internet-gateways \
+        igws=$(with_account_creds "$account" aws ec2 describe-internet-gateways \
             --filters "Name=attachment.vpc-id,Values=$vpc_id" \
             --query 'InternetGateways[*].InternetGatewayId' --output text 2>/dev/null)
         for igw_id in $igws; do
             [ -z "$igw_id" ] && continue
-            aws-vault exec "$account" -- aws ec2 detach-internet-gateway --internet-gateway-id "$igw_id" --vpc-id "$vpc_id" 2>/dev/null || true
-            aws-vault exec "$account" -- aws ec2 delete-internet-gateway --internet-gateway-id "$igw_id" 2>/dev/null || true
+            with_account_creds "$account" aws ec2 detach-internet-gateway --internet-gateway-id "$igw_id" --vpc-id "$vpc_id" 2>/dev/null || true
+            with_account_creds "$account" aws ec2 delete-internet-gateway --internet-gateway-id "$igw_id" 2>/dev/null || true
         done
 
         # Detach and delete VPN gateways
         local vpn_gws
-        vpn_gws=$(aws-vault exec "$account" -- aws ec2 describe-vpn-gateways \
+        vpn_gws=$(with_account_creds "$account" aws ec2 describe-vpn-gateways \
             --filters "Name=attachment.vpc-id,Values=$vpc_id" \
             --query 'VpnGateways[*].VpnGatewayId' --output text 2>/dev/null)
         for vpn_id in $vpn_gws; do
             [ -z "$vpn_id" ] && continue
-            aws-vault exec "$account" -- aws ec2 detach-vpn-gateway --vpn-gateway-id "$vpn_id" --vpc-id "$vpc_id" 2>/dev/null || true
-            aws-vault exec "$account" -- aws ec2 delete-vpn-gateway --vpn-gateway-id "$vpn_id" 2>/dev/null || true
+            with_account_creds "$account" aws ec2 detach-vpn-gateway --vpn-gateway-id "$vpn_id" --vpc-id "$vpc_id" 2>/dev/null || true
+            with_account_creds "$account" aws ec2 delete-vpn-gateway --vpn-gateway-id "$vpn_id" 2>/dev/null || true
         done
 
         # Delete subnets
         local subnets
-        subnets=$(aws-vault exec "$account" -- aws ec2 describe-subnets \
+        subnets=$(with_account_creds "$account" aws ec2 describe-subnets \
             --filters "Name=vpc-id,Values=$vpc_id" \
             --query 'Subnets[*].SubnetId' --output text 2>/dev/null)
         for subnet_id in $subnets; do
             [ -z "$subnet_id" ] && continue
-            aws-vault exec "$account" -- aws ec2 delete-subnet --subnet-id "$subnet_id" 2>/dev/null || true
+            with_account_creds "$account" aws ec2 delete-subnet --subnet-id "$subnet_id" 2>/dev/null || true
         done
 
         # Delete non-main route tables
         local rts
-        rts=$(aws-vault exec "$account" -- aws ec2 describe-route-tables \
+        rts=$(with_account_creds "$account" aws ec2 describe-route-tables \
             --filters "Name=vpc-id,Values=$vpc_id" \
             --query 'RouteTables[?Associations[0].Main!=`true`].RouteTableId' --output text 2>/dev/null)
         for rt_id in $rts; do
             [ -z "$rt_id" ] && continue
-            aws-vault exec "$account" -- aws ec2 delete-route-table --route-table-id "$rt_id" 2>/dev/null || true
+            with_account_creds "$account" aws ec2 delete-route-table --route-table-id "$rt_id" 2>/dev/null || true
         done
 
         # Delete non-default security groups
         local sgs
-        sgs=$(aws-vault exec "$account" -- aws ec2 describe-security-groups \
+        sgs=$(with_account_creds "$account" aws ec2 describe-security-groups \
             --filters "Name=vpc-id,Values=$vpc_id" \
             --query 'SecurityGroups[?GroupName!=`default`].GroupId' --output text 2>/dev/null)
         for sg_id in $sgs; do
             [ -z "$sg_id" ] && continue
-            aws-vault exec "$account" -- aws ec2 delete-security-group --group-id "$sg_id" 2>/dev/null || true
+            with_account_creds "$account" aws ec2 delete-security-group --group-id "$sg_id" 2>/dev/null || true
         done
 
         # Delete VPC peering connections
         local peerings
-        peerings=$(aws-vault exec "$account" -- aws ec2 describe-vpc-peering-connections \
+        peerings=$(with_account_creds "$account" aws ec2 describe-vpc-peering-connections \
             --filters "Name=requester-vpc-info.vpc-id,Values=$vpc_id" \
             --query 'VpcPeeringConnections[*].VpcPeeringConnectionId' --output text 2>/dev/null)
         for peer_id in $peerings; do
             [ -z "$peer_id" ] && continue
-            aws-vault exec "$account" -- aws ec2 delete-vpc-peering-connection --vpc-peering-connection-id "$peer_id" 2>/dev/null || true
+            with_account_creds "$account" aws ec2 delete-vpc-peering-connection --vpc-peering-connection-id "$peer_id" 2>/dev/null || true
         done
 
         # Finally delete the VPC
-        aws-vault exec "$account" -- aws ec2 delete-vpc --vpc-id "$vpc_id" 2>/dev/null || true
+        with_account_creds "$account" aws ec2 delete-vpc --vpc-id "$vpc_id" 2>/dev/null || true
     done
 
     # 2. Delete orphaned S3 buckets matching carina-acc-test*
     local buckets
-    buckets=$(aws-vault exec "$account" -- aws s3api list-buckets \
+    buckets=$(with_account_creds "$account" aws s3api list-buckets \
         --query 'Buckets[?starts_with(Name, `carina-acc-test`)].Name' --output text 2>/dev/null)
     for bucket in $buckets; do
         [ -z "$bucket" ] && continue
         found=$((found + 1))
         echo "  Cleaning S3 bucket $bucket..."
-        aws-vault exec "$account" -- aws s3 rb "s3://$bucket" --force 2>/dev/null || true
+        with_account_creds "$account" aws s3 rb "s3://$bucket" --force 2>/dev/null || true
     done
 
     # 3. Delete orphaned IAM roles
     local roles
-    roles=$(aws-vault exec "$account" -- aws iam list-roles \
+    roles=$(with_account_creds "$account" aws iam list-roles \
         --query 'Roles[?contains(RoleName, `acceptance-test`) || contains(RoleName, `carina-acc`)].RoleName' --output text 2>/dev/null)
     for role in $roles; do
         [ -z "$role" ] && continue
@@ -322,30 +358,30 @@ deep_cleanup_account() {
         echo "  Cleaning IAM role $role..."
         # Detach all policies first
         local policies
-        policies=$(aws-vault exec "$account" -- aws iam list-attached-role-policies --role-name "$role" \
+        policies=$(with_account_creds "$account" aws iam list-attached-role-policies --role-name "$role" \
             --query 'AttachedPolicies[*].PolicyArn' --output text 2>/dev/null)
         for policy_arn in $policies; do
             [ -z "$policy_arn" ] && continue
-            aws-vault exec "$account" -- aws iam detach-role-policy --role-name "$role" --policy-arn "$policy_arn" 2>/dev/null || true
+            with_account_creds "$account" aws iam detach-role-policy --role-name "$role" --policy-arn "$policy_arn" 2>/dev/null || true
         done
-        aws-vault exec "$account" -- aws iam delete-role --role-name "$role" 2>/dev/null || true
+        with_account_creds "$account" aws iam delete-role --role-name "$role" 2>/dev/null || true
     done
 
     # 4. Delete orphaned log groups
     local log_groups
-    log_groups=$(aws-vault exec "$account" -- aws logs describe-log-groups \
+    log_groups=$(with_account_creds "$account" aws logs describe-log-groups \
         --log-group-name-prefix "/acceptance-test/" \
         --query 'logGroups[*].logGroupName' --output text 2>/dev/null)
     for lg in $log_groups; do
         [ -z "$lg" ] && continue
         found=$((found + 1))
         echo "  Cleaning log group $lg..."
-        aws-vault exec "$account" -- aws logs delete-log-group --log-group-name "$lg" 2>/dev/null || true
+        with_account_creds "$account" aws logs delete-log-group --log-group-name "$lg" 2>/dev/null || true
     done
 
     # 5. Delete transit gateways
     local tgws
-    tgws=$(aws-vault exec "$account" -- aws ec2 describe-transit-gateways \
+    tgws=$(with_account_creds "$account" aws ec2 describe-transit-gateways \
         --filters "Name=state,Values=available,pending" \
         --query 'TransitGateways[*].TransitGatewayId' --output text 2>/dev/null)
     for tgw_id in $tgws; do
@@ -354,25 +390,25 @@ deep_cleanup_account() {
         echo "  Cleaning transit gateway $tgw_id..."
         # Delete attachments first
         local attachments
-        attachments=$(aws-vault exec "$account" -- aws ec2 describe-transit-gateway-attachments \
+        attachments=$(with_account_creds "$account" aws ec2 describe-transit-gateway-attachments \
             --filters "Name=transit-gateway-id,Values=$tgw_id" "Name=state,Values=available" \
             --query 'TransitGatewayAttachments[*].TransitGatewayAttachmentId' --output text 2>/dev/null)
         for att_id in $attachments; do
             [ -z "$att_id" ] && continue
-            aws-vault exec "$account" -- aws ec2 delete-transit-gateway-vpc-attachment --transit-gateway-attachment-id "$att_id" 2>/dev/null || true
+            with_account_creds "$account" aws ec2 delete-transit-gateway-vpc-attachment --transit-gateway-attachment-id "$att_id" 2>/dev/null || true
         done
-        aws-vault exec "$account" -- aws ec2 delete-transit-gateway --transit-gateway-id "$tgw_id" 2>/dev/null || true
+        with_account_creds "$account" aws ec2 delete-transit-gateway --transit-gateway-id "$tgw_id" 2>/dev/null || true
     done
 
     # 6. Release Elastic IPs not associated with anything
     local eips
-    eips=$(aws-vault exec "$account" -- aws ec2 describe-addresses \
+    eips=$(with_account_creds "$account" aws ec2 describe-addresses \
         --query 'Addresses[?AssociationId==null].AllocationId' --output text 2>/dev/null)
     for eip_id in $eips; do
         [ -z "$eip_id" ] && continue
         found=$((found + 1))
         echo "  Releasing Elastic IP $eip_id..."
-        aws-vault exec "$account" -- aws ec2 release-address --allocation-id "$eip_id" 2>/dev/null || true
+        with_account_creds "$account" aws ec2 release-address --allocation-id "$eip_id" 2>/dev/null || true
     done
 
     echo "  $account: $found orphaned resources cleaned"
@@ -498,7 +534,7 @@ if [ "$COMMAND" = "deep-cleanup" ]; then
     for SLOT in $(seq 0 $((NUM_ACCOUNTS - 1))); do
         ACCOUNT="${ACCOUNTS[$SLOT]}"
         echo "  Authenticating $ACCOUNT..."
-        if ! aws-vault exec "$ACCOUNT" -- true 2>&1; then
+        if ! with_account_creds "$ACCOUNT" aws sts get-caller-identity >/dev/null 2>&1; then
             echo "  WARNING: Failed to pre-authenticate $ACCOUNT"
         fi
     done
@@ -546,7 +582,7 @@ if [ "$COMMAND" = "cleanup" ]; then
     for SLOT in $(seq 0 $((NUM_ACCOUNTS - 1))); do
         ACCOUNT="${ACCOUNTS[$SLOT]}"
         echo "  Authenticating $ACCOUNT..."
-        if ! aws-vault exec "$ACCOUNT" -- true 2>&1; then
+        if ! with_account_creds "$ACCOUNT" aws sts get-caller-identity >/dev/null 2>&1; then
             echo "  WARNING: Failed to pre-authenticate $ACCOUNT"
         fi
     done
@@ -582,7 +618,7 @@ if [ "$COMMAND" = "cleanup" ]; then
                     continue
                 fi
                 echo "RUNNING destroy $REL_PATH"
-                DESTROY_OUTPUT=$(cd "$TEST_STATE_DIR" && aws-vault exec "$ACCOUNT" -- "$CARINA_BIN" destroy --auto-approve "$TEST_STATE_DIR" 2>&1)
+                DESTROY_OUTPUT=$(cd "$TEST_STATE_DIR" && with_account_creds "$ACCOUNT" "$CARINA_BIN" destroy --auto-approve "$TEST_STATE_DIR" 2>&1)
                 DESTROY_RC=$?
                 if [ $DESTROY_RC -eq 0 ]; then
                     if echo "$DESTROY_OUTPUT" | grep -q "No resources to destroy"; then
@@ -674,7 +710,7 @@ if [ "$COMMAND" = "full" ]; then
     for SLOT in $(seq 0 $((NUM_ACCOUNTS - 1))); do
         ACCOUNT="${ACCOUNTS[$SLOT]}"
         echo "  Authenticating $ACCOUNT..."
-        if ! aws-vault exec "$ACCOUNT" -- true 2>&1; then
+        if ! with_account_creds "$ACCOUNT" aws sts get-caller-identity >/dev/null 2>&1; then
             echo "  WARNING: Failed to pre-authenticate $ACCOUNT"
         fi
     done
@@ -720,7 +756,7 @@ if [ "$COMMAND" = "full" ]; then
                 INTERRUPTED=1
                 if [ -n "$CURRENT_STATE_DIR" ]; then
                     echo "INTERRUPTED - destroying resources for current test"
-                    cd "$CURRENT_STATE_DIR" && aws-vault exec "$ACCOUNT" -- "$CARINA_BIN" destroy --auto-approve "$CURRENT_STATE_DIR" 2>&1 || true
+                    cd "$CURRENT_STATE_DIR" && with_account_creds "$ACCOUNT" "$CARINA_BIN" destroy --auto-approve "$CURRENT_STATE_DIR" 2>&1 || true
                 fi
             }
             trap worker_cleanup INT TERM
@@ -753,7 +789,7 @@ if [ "$COMMAND" = "full" ]; then
 
                 # Apply (run from state dir so each test has its own state file)
                 echo "RUNNING apply $REL_PATH"
-                APPLY_OUTPUT=$(cd "$CURRENT_STATE_DIR" && aws-vault exec "$ACCOUNT" -- "$CARINA_BIN" apply --auto-approve "$CURRENT_STATE_DIR" 2>&1)
+                APPLY_OUTPUT=$(cd "$CURRENT_STATE_DIR" && with_account_creds "$ACCOUNT" "$CARINA_BIN" apply --auto-approve "$CURRENT_STATE_DIR" 2>&1)
                 APPLY_RC=$?
                 if [ $INTERRUPTED -eq 1 ]; then
                     break
@@ -763,14 +799,14 @@ if [ "$COMMAND" = "full" ]; then
                     echo "  ERROR: $APPLY_OUTPUT"
                     FAILED=$((FAILED + 1))
                     # Try to destroy whatever was partially created
-                    cd "$CURRENT_STATE_DIR" && aws-vault exec "$ACCOUNT" -- "$CARINA_BIN" destroy --auto-approve "$CURRENT_STATE_DIR" 2>&1 || true
+                    cd "$CURRENT_STATE_DIR" && with_account_creds "$ACCOUNT" "$CARINA_BIN" destroy --auto-approve "$CURRENT_STATE_DIR" 2>&1 || true
                     CURRENT_STATE_DIR=""
                     continue
                 fi
 
                 # Post-apply plan verification (idempotency check)
                 echo "RUNNING plan-verify $REL_PATH"
-                PLAN_OUTPUT=$(cd "$CURRENT_STATE_DIR" && aws-vault exec "$ACCOUNT" -- "$CARINA_BIN" plan --detailed-exitcode "$CURRENT_STATE_DIR" 2>&1)
+                PLAN_OUTPUT=$(cd "$CURRENT_STATE_DIR" && with_account_creds "$ACCOUNT" "$CARINA_BIN" plan --detailed-exitcode "$CURRENT_STATE_DIR" 2>&1)
                 PLAN_RC=$?
                 if [ $INTERRUPTED -eq 1 ]; then
                     break
@@ -781,21 +817,21 @@ if [ "$COMMAND" = "full" ]; then
                     echo "  $PLAN_OUTPUT"
                     FAILED=$((FAILED + 1))
                     # Still destroy to clean up
-                    cd "$CURRENT_STATE_DIR" && aws-vault exec "$ACCOUNT" -- "$CARINA_BIN" destroy --auto-approve "$CURRENT_STATE_DIR" 2>&1 || true
+                    cd "$CURRENT_STATE_DIR" && with_account_creds "$ACCOUNT" "$CARINA_BIN" destroy --auto-approve "$CURRENT_STATE_DIR" 2>&1 || true
                     CURRENT_STATE_DIR=""
                     continue
                 elif [ $PLAN_RC -ne 0 ]; then
                     echo "FAIL (plan-verify) $REL_PATH"
                     echo "  ERROR: $PLAN_OUTPUT"
                     FAILED=$((FAILED + 1))
-                    cd "$CURRENT_STATE_DIR" && aws-vault exec "$ACCOUNT" -- "$CARINA_BIN" destroy --auto-approve "$CURRENT_STATE_DIR" 2>&1 || true
+                    cd "$CURRENT_STATE_DIR" && with_account_creds "$ACCOUNT" "$CARINA_BIN" destroy --auto-approve "$CURRENT_STATE_DIR" 2>&1 || true
                     CURRENT_STATE_DIR=""
                     continue
                 fi
 
                 # Destroy
                 echo "RUNNING destroy $REL_PATH"
-                DESTROY_OUTPUT=$(cd "$CURRENT_STATE_DIR" && aws-vault exec "$ACCOUNT" -- "$CARINA_BIN" destroy --auto-approve "$CURRENT_STATE_DIR" 2>&1)
+                DESTROY_OUTPUT=$(cd "$CURRENT_STATE_DIR" && with_account_creds "$ACCOUNT" "$CARINA_BIN" destroy --auto-approve "$CURRENT_STATE_DIR" 2>&1)
                 DESTROY_RC=$?
                 if [ $DESTROY_RC -ne 0 ] || echo "$DESTROY_OUTPUT" | grep -q "failed"; then
                     echo "FAIL (destroy) $REL_PATH"
