@@ -77,7 +77,7 @@ impl AwsProvider {
             .cidr_block(&cidr_block);
 
         if let Some(Value::String(az)) = resource.get_attr("availability_zone") {
-            req = req.availability_zone(convert_enum_value(az));
+            req = req.availability_zone(convert_enum_value(az).replace('_', "-"));
         }
 
         let result = req.send().await.map_err(|e| {

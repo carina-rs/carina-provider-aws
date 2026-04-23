@@ -547,6 +547,20 @@ fn test_subnet_availability_zone_dsl_format_us_east() {
     assert_eq!(az_dsl, "aws.AvailabilityZone.us_east_1b");
 }
 
+#[test]
+fn test_subnet_availability_zone_dsl_to_aws_sdk() {
+    use carina_core::utils::convert_enum_value;
+
+    // DSL namespaced form -> AWS hyphenated form that EC2 CreateSubnet expects.
+    let dsl_value = "aws.AvailabilityZone.ap_northeast_1a";
+    let aws_value = convert_enum_value(dsl_value).replace('_', "-");
+    assert_eq!(aws_value, "ap-northeast-1a");
+
+    let dsl_value2 = "aws.AvailabilityZone.us_east_1b";
+    let aws_value2 = convert_enum_value(dsl_value2).replace('_', "-");
+    assert_eq!(aws_value2, "us-east-1b");
+}
+
 // --- Subnet DNS hostname_type enum conversion ---
 
 #[test]
