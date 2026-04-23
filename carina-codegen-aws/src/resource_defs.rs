@@ -248,7 +248,13 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             required_overrides: vec![],
             extra_read_only: vec![],
             read_only_overrides: vec![],
-            extra_writable: vec![],
+            extra_writable: vec![ExtraField {
+                name: "VpcId",
+                read_source: None,
+                description: Some(
+                    "The ID of the VPC to attach the internet gateway to. The provider attaches the IGW after creation and detaches before deletion.",
+                ),
+            }],
             identity_overrides: vec![],
         },
         // ec2.route_table

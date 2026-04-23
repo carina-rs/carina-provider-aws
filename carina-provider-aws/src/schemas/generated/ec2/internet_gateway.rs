@@ -16,18 +16,24 @@ pub fn ec2_internet_gateway_config() -> AwsSchemaConfig {
         resource_type_name: "ec2.InternetGateway",
         has_tags: true,
         schema: ResourceSchema::new("aws.ec2.InternetGateway")
-            .with_description("Describes an internet gateway.")
-            .attribute(
-                AttributeSchema::new("internet_gateway_id", super::internet_gateway_id())
-                    .with_description("The ID of the internet gateway. (read-only)")
-                    .with_provider_name("InternetGatewayId"),
-            )
-            .attribute(
-                AttributeSchema::new("tags", tags_type())
-                    .with_description("The tags for the resource.")
-                    .with_provider_name("Tags"),
-            )
-            .with_validator(validate_tags_map),
+        .with_description("Describes an internet gateway.")
+        .attribute(
+            AttributeSchema::new("vpc_id", super::vpc_id())
+                .create_only()
+                .with_description("The ID of the VPC to attach the internet gateway to. The provider attaches the IGW after creation and detaches before deletion.")
+                .with_provider_name("VpcId"),
+        )
+        .attribute(
+            AttributeSchema::new("internet_gateway_id", super::internet_gateway_id())
+                .with_description("The ID of the internet gateway. (read-only)")
+                .with_provider_name("InternetGatewayId"),
+        )
+        .attribute(
+            AttributeSchema::new("tags", tags_type())
+                .with_description("The tags for the resource.")
+                .with_provider_name("Tags"),
+        )
+        .with_validator(validate_tags_map)
     }
 }
 
