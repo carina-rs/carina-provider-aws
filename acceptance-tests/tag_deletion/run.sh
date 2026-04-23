@@ -2,7 +2,7 @@
 # Multi-step acceptance tests for tag deletion
 #
 # Usage:
-#   aws-vault exec <profile> -- ./run.sh [filter]
+#   env AWS_PROFILE="<profile>" ./run.sh [filter]
 #
 # Tests:
 #   ec2_vpc                      - Remove a tag from VPC (EC2 delete_tags API)
@@ -17,6 +17,14 @@
 #   ec2_security_group_all_tags  - Remove entire tags block from security group (issue #447)
 #
 # Filter (optional): substring to match test names (e.g. "ec2_vpc", "s3_bucket")
+#
+# AWS authentication:
+#   Set AWS_PROFILE to one of the carina-test-00X profiles. The script
+#   resolves fresh STS credentials from that profile before each carina
+#   invocation (via `aws configure export-credentials`), so long-running
+#   apply/destroy cycles are not bound to a single SSO access-token
+#   lifetime (see carina-rs/carina-provider-awscc#157). The first run
+#   in a session needs `aws sso login --sso-session carina`.
 
 set -e
 
@@ -29,6 +37,28 @@ source "$SCRIPT_DIR/../shared/_helpers.sh"
 TOTAL_PASSED=0
 TOTAL_FAILED=0
 
+# ── with_account_creds: resolve credentials for $AWS_PROFILE into env vars ──
+# and exec the given command. See run-tests.sh for rationale.
+with_account_creds() {
+    local account="${AWS_PROFILE:-}"
+    if [ -z "$account" ]; then
+        echo "ERROR: AWS_PROFILE is not set; cannot resolve credentials" >&2
+        return 1
+    fi
+    local creds
+    if ! creds=$(aws configure export-credentials --profile "$account" --format env-no-export 2>&1); then
+        echo "ERROR: aws configure export-credentials failed for $account: $creds" >&2
+        return 1
+    fi
+    (
+        set -a
+        eval "$creds"
+        set +a
+        unset AWS_PROFILE
+        "$@"
+    )
+}
+
 # Track active work dir for signal cleanup
 ACTIVE_WORK_DIR=""
 
@@ -37,8 +67,8 @@ signal_cleanup() {
         set +e
         echo ""
         echo "Interrupted. Cleaning up resources..."
-        (cd "$ACTIVE_WORK_DIR" && "$CARINA_BIN" destroy --auto-approve . 2>&1)
-        (cd "$ACTIVE_WORK_DIR" && "$CARINA_BIN" destroy --auto-approve . 2>&1)
+        (cd "$ACTIVE_WORK_DIR" && with_account_creds "$CARINA_BIN" destroy --auto-approve . 2>&1)
+        (cd "$ACTIVE_WORK_DIR" && with_account_creds "$CARINA_BIN" destroy --auto-approve . 2>&1)
         rm -rf "$ACTIVE_WORK_DIR"
         ACTIVE_WORK_DIR=""
     fi
@@ -56,7 +86,7 @@ run_step() {
     printf "  %-55s " "$description"
 
     local output
-    if output=$(cd "$work_dir" && "$CARINA_BIN" $command $extra_args . 2>&1); then
+    if output=$(cd "$work_dir" && with_account_creds "$CARINA_BIN" $command $extra_args . 2>&1); then
         echo "OK"
         TOTAL_PASSED=$((TOTAL_PASSED + 1))
         return 0
@@ -76,7 +106,7 @@ run_plan_verify() {
 
     local output
     local rc
-    output=$(cd "$work_dir" && "$CARINA_BIN" plan --detailed-exitcode . 2>&1) || rc=$?
+    output=$(cd "$work_dir" && with_account_creds "$CARINA_BIN" plan --detailed-exitcode . 2>&1) || rc=$?
     rc=${rc:-0}
 
     if [ $rc -eq 2 ]; then
@@ -106,11 +136,11 @@ cleanup() {
     # Disable set -e to ensure all destroy attempts run
     set +e
     echo "  Cleanup: destroying resources..."
-    if (cd "$work_dir" && "$CARINA_BIN" destroy --auto-approve . 2>&1); then
+    if (cd "$work_dir" && with_account_creds "$CARINA_BIN" destroy --auto-approve . 2>&1); then
         any_success=true
     fi
     # Retry: resources may have dependencies that prevent deletion on first pass
-    if (cd "$work_dir" && "$CARINA_BIN" destroy --auto-approve . 2>&1); then
+    if (cd "$work_dir" && with_account_creds "$CARINA_BIN" destroy --auto-approve . 2>&1); then
         any_success=true
     fi
     set -e
@@ -156,7 +186,7 @@ run_test() {
 
     # Load step1 and initialize (creates backend lock + installs providers)
     swap_crn "$step1" "$work_dir"
-    if ! (cd "$work_dir" && "$CARINA_BIN" init . >/dev/null 2>&1); then
+    if ! (cd "$work_dir" && with_account_creds "$CARINA_BIN" init . >/dev/null 2>&1); then
         echo "  step1: init                                             FAIL"
         TOTAL_FAILED=$((TOTAL_FAILED + 1))
         rm -rf "$work_dir"
