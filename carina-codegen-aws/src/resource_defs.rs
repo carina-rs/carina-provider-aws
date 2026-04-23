@@ -1085,7 +1085,12 @@ pub fn logs_resources() -> Vec<ResourceDef> {
         read_structure: Some("LogGroup"),
         read_ops: vec![],
         delete_op: "DeleteLogGroup",
-        update_ops: vec![],
+        // PutRetentionPolicy is the real update path for retention_in_days.
+        // Listing it here lets the codegen mark the attribute as updatable.
+        update_ops: vec![UpdateOp {
+            operation: "PutRetentionPolicy",
+            fields: FieldLayout::Flat(vec!["retentionInDays"]),
+        }],
         identifier: "LogGroupName",
         has_tags: true,
         type_overrides: vec![("KmsKeyId", "super::kms_key_id()"), ("Arn", "super::arn()")],
@@ -1101,7 +1106,13 @@ pub fn logs_resources() -> Vec<ResourceDef> {
         required_overrides: vec![],
         extra_read_only: vec!["Arn"],
         read_only_overrides: vec![],
-        extra_writable: vec![],
+        extra_writable: vec![ExtraField {
+            name: "retentionInDays",
+            read_source: Some("retentionInDays"),
+            description: Some(
+                "The number of days to retain the log events in the log group. If unset, events never expire. The provider applies changes via PutRetentionPolicy / DeleteRetentionPolicy.",
+            ),
+        }],
         identity_overrides: vec![],
     }]
 }
