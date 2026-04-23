@@ -39,11 +39,11 @@ let subnet = aws.ec2.Subnet {
   }
 }
 
-let eip = awscc.ec2.eip {
+let eip = awscc.ec2.Eip {
   domain = 'vpc'
 }
 
-let nat_gw = awscc.ec2.nat_gateway {
+let nat_gw = awscc.ec2.NatGateway {
   allocation_id = eip.allocation_id
   subnet_id     = subnet.subnet_id
 }
