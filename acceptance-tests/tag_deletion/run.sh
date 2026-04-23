@@ -31,18 +31,14 @@ TOTAL_FAILED=0
 
 # Track active work dir for signal cleanup
 ACTIVE_WORK_DIR=""
-ACTIVE_STEP1=""
-ACTIVE_STEP2=""
 
 signal_cleanup() {
     if [ -n "$ACTIVE_WORK_DIR" ] && [ -d "$ACTIVE_WORK_DIR" ]; then
         set +e
         echo ""
         echo "Interrupted. Cleaning up resources..."
-        cd "$ACTIVE_WORK_DIR" && "$CARINA_BIN" destroy --auto-approve "$ACTIVE_STEP2" 2>&1
-        cd "$ACTIVE_WORK_DIR" && "$CARINA_BIN" destroy --auto-approve "$ACTIVE_STEP1" 2>&1
-        cd "$ACTIVE_WORK_DIR" && "$CARINA_BIN" destroy --auto-approve "$ACTIVE_STEP2" 2>&1
-        cd "$ACTIVE_WORK_DIR" && "$CARINA_BIN" destroy --auto-approve "$ACTIVE_STEP1" 2>&1
+        (cd "$ACTIVE_WORK_DIR" && "$CARINA_BIN" destroy --auto-approve . 2>&1)
+        (cd "$ACTIVE_WORK_DIR" && "$CARINA_BIN" destroy --auto-approve . 2>&1)
         rm -rf "$ACTIVE_WORK_DIR"
         ACTIVE_WORK_DIR=""
     fi
@@ -55,13 +51,12 @@ run_step() {
     local work_dir="$1"
     local description="$2"
     local command="$3"
-    local crn_file="$4"
-    local extra_args="${5:-}"
+    local extra_args="${4:-}"
 
     printf "  %-55s " "$description"
 
     local output
-    if output=$(cd "$work_dir" && "$CARINA_BIN" $command $extra_args "$crn_file" 2>&1); then
+    if output=$(cd "$work_dir" && "$CARINA_BIN" $command $extra_args . 2>&1); then
         echo "OK"
         TOTAL_PASSED=$((TOTAL_PASSED + 1))
         return 0
@@ -76,13 +71,12 @@ run_step() {
 run_plan_verify() {
     local work_dir="$1"
     local description="$2"
-    local crn_file="$3"
 
     printf "  %-55s " "$description"
 
     local output
     local rc
-    output=$(cd "$work_dir" && "$CARINA_BIN" plan --detailed-exitcode "$crn_file" 2>&1) || rc=$?
+    output=$(cd "$work_dir" && "$CARINA_BIN" plan --detailed-exitcode . 2>&1) || rc=$?
     rc=${rc:-0}
 
     if [ $rc -eq 2 ]; then
@@ -103,28 +97,20 @@ run_plan_verify() {
     return 0
 }
 
-# Cleanup helper: try to destroy with both step configs, then retry
+# Cleanup helper: destroy resources in work_dir, retrying to handle dependencies
 # Returns 0 if at least one destroy succeeded, 1 if ALL failed
 cleanup() {
     local work_dir="$1"
-    local step2="$2"
-    local step1="$3"
     local any_success=false
 
     # Disable set -e to ensure all destroy attempts run
     set +e
     echo "  Cleanup: destroying resources..."
-    if cd "$work_dir" && "$CARINA_BIN" destroy --auto-approve "$step2" 2>&1; then
-        any_success=true
-    fi
-    if cd "$work_dir" && "$CARINA_BIN" destroy --auto-approve "$step1" 2>&1; then
+    if (cd "$work_dir" && "$CARINA_BIN" destroy --auto-approve . 2>&1); then
         any_success=true
     fi
     # Retry: resources may have dependencies that prevent deletion on first pass
-    if cd "$work_dir" && "$CARINA_BIN" destroy --auto-approve "$step2" 2>&1; then
-        any_success=true
-    fi
-    if cd "$work_dir" && "$CARINA_BIN" destroy --auto-approve "$step1" 2>&1; then
+    if (cd "$work_dir" && "$CARINA_BIN" destroy --auto-approve . 2>&1); then
         any_success=true
     fi
     set -e
@@ -133,6 +119,17 @@ cleanup() {
         return 1
     fi
     return 0
+}
+
+# Swap the active .crn into work_dir/main.crn (with provider source injected).
+# Args: source_crn target_work_dir
+swap_crn() {
+    local src="$1"
+    local target="$2"
+    local injected_dir
+    injected_dir=$(inject_provider_source "$src")
+    cp "$injected_dir/main.crn" "$target/main.crn"
+    rm -rf "$injected_dir"
 }
 
 # Run a single multi-step tag deletion test
@@ -151,67 +148,68 @@ run_test() {
     local work_dir
     work_dir=$(mktemp -d)
 
-    # Inject provider source into .crn files
-    step1=$(inject_provider_source "$step1")
-    step2=$(inject_provider_source "$step2")
-
     # Register for signal cleanup
     ACTIVE_WORK_DIR="$work_dir"
-    ACTIVE_STEP1="$step1"
-    ACTIVE_STEP2="$step2"
 
     echo "$desc"
     echo ""
 
-    # Step 1: Apply initial config (resource with two tags)
-    if ! run_step "$work_dir" "step1: apply initial (two tags)" "apply" "$step1" "--auto-approve"; then
-        cleanup "$work_dir" "$step2" "$step1"
+    # Load step1 and initialize (creates backend lock + installs providers)
+    swap_crn "$step1" "$work_dir"
+    if ! (cd "$work_dir" && "$CARINA_BIN" init . >/dev/null 2>&1); then
+        echo "  step1: init                                             FAIL"
+        TOTAL_FAILED=$((TOTAL_FAILED + 1))
         rm -rf "$work_dir"
-        rm -rf "$step1" "$step2"
+        ACTIVE_WORK_DIR=""
+        return 1
+    fi
+
+    # Step 1: Apply initial config (resource with two tags)
+    if ! run_step "$work_dir" "step1: apply initial (two tags)" "apply" "--auto-approve"; then
+        cleanup "$work_dir"
+        rm -rf "$work_dir"
         ACTIVE_WORK_DIR=""
         return 1
     fi
 
     # Step 1b: Plan-verify initial state
-    if ! run_plan_verify "$work_dir" "step1: plan-verify initial" "$step1"; then
-        cleanup "$work_dir" "$step2" "$step1"
+    if ! run_plan_verify "$work_dir" "step1: plan-verify initial"; then
+        cleanup "$work_dir"
         rm -rf "$work_dir"
-        rm -rf "$step1" "$step2"
         ACTIVE_WORK_DIR=""
         return 1
     fi
 
+    # Swap in step2 config
+    swap_crn "$step2" "$work_dir"
+
     # Step 2: Apply modified config (one tag removed)
-    if ! run_step "$work_dir" "step2: apply tag removal" "apply" "$step2" "--auto-approve"; then
-        cleanup "$work_dir" "$step2" "$step1"
+    if ! run_step "$work_dir" "step2: apply tag removal" "apply" "--auto-approve"; then
+        cleanup "$work_dir"
         rm -rf "$work_dir"
-        rm -rf "$step1" "$step2"
         ACTIVE_WORK_DIR=""
         return 1
     fi
 
     # Step 3: Plan-verify after tag removal (must be idempotent)
-    if ! run_plan_verify "$work_dir" "step3: plan-verify after tag removal" "$step2"; then
-        cleanup "$work_dir" "$step2" "$step1"
+    if ! run_plan_verify "$work_dir" "step3: plan-verify after tag removal"; then
+        cleanup "$work_dir"
         rm -rf "$work_dir"
-        rm -rf "$step1" "$step2"
         ACTIVE_WORK_DIR=""
         return 1
     fi
 
-    # Step 4: Destroy (use cleanup to try both configs and retry)
-    if ! cleanup "$work_dir" "$step2" "$step1"; then
+    # Step 4: Destroy
+    if ! cleanup "$work_dir"; then
         echo "  WARNING: All destroy attempts failed. Preserving work dir for debugging:"
         echo "    $work_dir"
         TOTAL_FAILED=$((TOTAL_FAILED + 1))
-        rm -rf "$step1" "$step2"
         ACTIVE_WORK_DIR=""
         echo ""
         return 1
     fi
 
     rm -rf "$work_dir"
-    rm -rf "$step1" "$step2"
     ACTIVE_WORK_DIR=""
     echo ""
 }
