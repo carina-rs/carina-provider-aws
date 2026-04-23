@@ -543,9 +543,6 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
         .iter()
         .map(|e| (e.name, e.description))
         .collect();
-    // Set of field names that are from extra_writable (always create-only)
-    let extra_writable_names: HashSet<&str> = res.extra_writable.iter().map(|e| e.name).collect();
-
     // Build attribute list
     let mut attrs: Vec<AttrInfo> = Vec::new();
 
@@ -556,10 +553,20 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
             || required_overrides.contains(name.as_str()))
             && !read_only_overrides.contains(name.as_str());
         let is_read_only = read_only_overrides.contains(name.as_str());
+        // `extra_writable` fields with `read_source = None` are synthetic:
+        // the codegen has no Smithy member to ground them in, so it has to
+        // assume create-only. Fields with `read_source = Some(...)` come
+        // from a real read-structure member and follow the normal rules —
+        // whether they're updatable is decided by `create_only_overrides`
+        // and `update_ops`, the same as any other writable field.
+        let is_synthetic_extra_writable = res
+            .extra_writable
+            .iter()
+            .any(|e| e.name == name.as_str() && e.read_source.is_none());
         let is_create_only = if is_read_only {
             false
-        } else if extra_writable_names.contains(name.as_str()) {
-            true // Extra writable fields are always create-only
+        } else if is_synthetic_extra_writable {
+            true
         } else if schema_structure.is_some() {
             // For schema_structure resources, only explicit overrides are create-only.
             // The default is writable since the update operation is hand-coded.

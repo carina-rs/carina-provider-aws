@@ -50,6 +50,11 @@ pub fn logs_log_group_config() -> AwsSchemaConfig {
                 .with_provider_name("logGroupName"),
         )
         .attribute(
+            AttributeSchema::new("retention_in_days", AttributeType::Int)
+                .with_description("The number of days to retain the log events in the log group. If unset, events never expire. The provider applies changes via PutRetentionPolicy / Del...")
+                .with_provider_name("retentionInDays"),
+        )
+        .attribute(
             AttributeSchema::new("tags", AttributeType::map(AttributeType::String))
                 .create_only()
                 .with_description("The key-value pairs to use for the tags. You can grant users access to certain log groups while preventing them from accessing other log groups. To do...")
