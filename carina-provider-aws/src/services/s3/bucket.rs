@@ -5,7 +5,7 @@ use carina_core::resource::{LifecycleConfig, Resource, ResourceId, State, Value}
 use carina_core::utils::{convert_enum_value, extract_enum_value};
 
 use crate::AwsProvider;
-use crate::helpers::sdk_error_message;
+use crate::helpers::{retry_aws_operation, sdk_error_message};
 
 impl AwsProvider {
     /// Read an S3 bucket
@@ -141,10 +141,21 @@ impl AwsProvider {
             req = req.grant_write_acp(val);
         }
 
-        req.send().await.map_err(|e| {
-            ProviderError::new(sdk_error_message("Failed to create bucket", &e))
-                .for_resource(resource.id.clone())
-        })?;
+        // Retry transient errors such as OperationAborted (HTTP 409) which
+        // S3 returns when CreateBucket races a recent DeleteBucket for the
+        // same name — the control plane clears after ~60–90s. See #156.
+        let rid = resource.id.clone();
+        retry_aws_operation("create S3 bucket", 5, 5, || {
+            let req = req.clone();
+            let rid = rid.clone();
+            async move {
+                req.send().await.map_err(|e| {
+                    ProviderError::new(sdk_error_message("Failed to create bucket", &e))
+                        .for_resource(rid)
+                })
+            }
+        })
+        .await?;
 
         // Configure versioning
         let attrs = resource.resolved_attributes();

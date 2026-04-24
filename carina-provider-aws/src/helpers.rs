@@ -133,6 +133,10 @@ fn is_retryable_error(error_msg: &str) -> bool {
         "InternalError",
         "InternalServerError",
         "ServiceException",
+        // S3 returns this with HTTP 409 when CreateBucket races against a
+        // recent DeleteBucket for the same name; the control plane clears
+        // after ~60–90s, so backoff is the right response.
+        "OperationAborted",
     ];
     PATTERNS.iter().any(|p| error_msg.contains(p))
 }
@@ -287,11 +291,51 @@ mod tests {
         assert!(!is_retryable_error("InvalidParameterValue"));
     }
 
+    #[test]
+    fn test_is_retryable_error_s3_operation_aborted() {
+        // S3 CreateBucket can return OperationAborted shortly after the same
+        // name was deleted; the right behavior is to back off and retry, not
+        // propagate. See carina-rs/carina-provider-aws#156.
+        assert!(is_retryable_error(
+            "OperationAborted: A conflicting conditional operation is currently in progress against this resource. Please try again."
+        ));
+        assert!(is_retryable_error(
+            "service error: unhandled error (OperationAborted): ..."
+        ));
+    }
+
     #[tokio::test]
     async fn test_retry_aws_operation_succeeds_first_try() {
         let result: Result<&str, String> =
             retry_aws_operation("test op", 3, 1, || async { Ok("success") }).await;
         assert_eq!(result.unwrap(), "success");
+    }
+
+    #[tokio::test]
+    async fn test_retry_aws_operation_retries_operation_aborted_then_succeeds() {
+        // Models the S3 CreateBucket / DeleteBucket race from #156: the first
+        // attempt sees OperationAborted, the second one goes through once the
+        // control plane has cleared the prior delete.
+        let attempt_count = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
+        let counter = attempt_count.clone();
+        let result: Result<&str, String> = retry_aws_operation("create S3 bucket", 3, 1, || {
+            let counter = counter.clone();
+            async move {
+                let n = counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                if n == 0 {
+                    Err("OperationAborted: A conflicting conditional operation is currently in progress against this resource. Please try again.".to_string())
+                } else {
+                    Ok("created")
+                }
+            }
+        })
+        .await;
+        assert_eq!(result.unwrap(), "created");
+        assert_eq!(
+            attempt_count.load(std::sync::atomic::Ordering::SeqCst),
+            2,
+            "should retry once after OperationAborted"
+        );
     }
 
     #[tokio::test]
