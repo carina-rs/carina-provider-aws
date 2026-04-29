@@ -10,5 +10,8 @@ description = "AWS type definitions for Carina infrastructure management tool"
 [lib]
 doctest = false
 
+[dev-dependencies]
+indexmap = "2"
+
 [dependencies]
 carina-core = { git = "https://github.com/carina-rs/carina" }

@@ -1,3 +1,4 @@
+use indexmap::IndexMap;
 use std::collections::HashMap;
 
 use carina_core::provider::{ProviderError, ProviderResult};
@@ -102,7 +103,7 @@ impl AwsProvider {
                     {
                         let tags = tags_response.tags();
                         if !tags.is_empty() {
-                            let mut tag_map = HashMap::new();
+                            let mut tag_map = IndexMap::new();
                             for tag in tags {
                                 tag_map.insert(
                                     tag.key().to_string(),
@@ -372,11 +373,11 @@ impl AwsProvider {
     ) -> ProviderResult<()> {
         let desired_tags = match desired.get("tags") {
             Some(Value::Map(m)) => m.clone(),
-            _ => HashMap::new(),
+            _ => IndexMap::new(),
         };
         let current_tags = match current.and_then(|c| c.get("tags")) {
             Some(Value::Map(m)) => m.clone(),
-            _ => HashMap::new(),
+            _ => IndexMap::new(),
         };
 
         // Tags to remove

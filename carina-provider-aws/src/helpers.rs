@@ -2,7 +2,7 @@
 //!
 //! These reduce boilerplate across EC2 (and other) service implementations.
 
-use std::collections::HashMap;
+use indexmap::IndexMap;
 use std::future::Future;
 use std::time::Duration;
 
@@ -49,9 +49,9 @@ pub fn build_tag_specification(
     }
 }
 
-/// Build an EC2 `TagSpecification` from a `HashMap` of tags.
+/// Build an EC2 `TagSpecification` from a tag map.
 fn build_tag_specification_from_map(
-    tags: &HashMap<String, Value>,
+    tags: &IndexMap<String, Value>,
     resource_type: ResourceType,
 ) -> TagSpecification {
     let mut tag_spec = TagSpecification::builder().resource_type(resource_type);

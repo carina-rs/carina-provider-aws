@@ -2,6 +2,8 @@
 
 use std::collections::HashMap;
 
+use indexmap::IndexMap;
+
 use carina_core::provider::{BoxFuture, ProviderFactory, ProviderNormalizer};
 use carina_core::resource::Value;
 
@@ -39,14 +41,14 @@ impl ProviderFactory for AwsProviderFactory {
         types
     }
 
-    fn validate_config(&self, _attributes: &HashMap<String, Value>) -> Result<(), String> {
+    fn validate_config(&self, _attributes: &IndexMap<String, Value>) -> Result<(), String> {
         // Region format/value validation is handled by the host via
         // `provider_config_attribute_types`. No provider-specific semantic
         // checks are needed beyond that for now.
         Ok(())
     }
 
-    fn extract_region(&self, attributes: &HashMap<String, Value>) -> String {
+    fn extract_region(&self, attributes: &IndexMap<String, Value>) -> String {
         if let Some(Value::String(region)) = attributes.get("region") {
             return carina_core::utils::convert_region_value(region);
         }
@@ -55,7 +57,7 @@ impl ProviderFactory for AwsProviderFactory {
 
     fn create_provider(
         &self,
-        attributes: &HashMap<String, Value>,
+        attributes: &IndexMap<String, Value>,
     ) -> BoxFuture<'_, Box<dyn carina_core::provider::Provider>> {
         let region = self.extract_region(attributes);
         Box::pin(async move {
@@ -65,7 +67,7 @@ impl ProviderFactory for AwsProviderFactory {
 
     fn create_normalizer(
         &self,
-        _attributes: &HashMap<String, Value>,
+        _attributes: &IndexMap<String, Value>,
     ) -> BoxFuture<'_, Box<dyn ProviderNormalizer>> {
         Box::pin(async { Box::new(AwsNormalizer) as Box<dyn ProviderNormalizer> })
     }

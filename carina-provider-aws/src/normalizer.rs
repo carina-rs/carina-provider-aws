@@ -2,6 +2,8 @@
 
 use std::collections::HashMap;
 
+use indexmap::IndexMap;
+
 use carina_core::provider::{self, ProviderNormalizer};
 use carina_core::resource::{Resource, Value};
 use carina_core::schema::ResourceSchema;
@@ -19,7 +21,7 @@ impl ProviderNormalizer for AwsNormalizer {
     fn merge_default_tags(
         &self,
         resources: &mut [Resource],
-        default_tags: &HashMap<String, Value>,
+        default_tags: &IndexMap<String, Value>,
         schemas: &HashMap<String, ResourceSchema>,
     ) {
         provider::merge_default_tags_for_provider("aws", resources, default_tags, schemas);
@@ -365,7 +367,7 @@ mod tests {
 
     #[test]
     fn test_normalize_state_enums_struct_field_enum() {
-        let mut inner = HashMap::new();
+        let mut inner = IndexMap::new();
         inner.insert(
             "hostname_type".to_string(),
             Value::String("ip-name".to_string()),

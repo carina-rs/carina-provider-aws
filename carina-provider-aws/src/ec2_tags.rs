@@ -1,5 +1,6 @@
 //! EC2 tag helper functions
 
+use indexmap::IndexMap;
 use std::collections::HashMap;
 
 use carina_core::provider::{ProviderError, ProviderResult};
@@ -11,7 +12,7 @@ use crate::helpers::sdk_error_message;
 impl AwsProvider {
     /// Extract tags from EC2 tag list into a Value::Map
     pub(crate) fn ec2_tags_to_value(tags: &[aws_sdk_ec2::types::Tag]) -> Option<Value> {
-        let mut tag_map = HashMap::new();
+        let mut tag_map: IndexMap<String, Value> = IndexMap::new();
         for tag in tags {
             if let (Some(key), Some(value)) = (tag.key(), tag.value()) {
                 tag_map.insert(key.to_string(), Value::String(value.to_string()));
@@ -162,7 +163,7 @@ mod tests {
 
     #[test]
     fn test_value_to_ec2_tags_from_map() {
-        let value = Value::Map(HashMap::from([
+        let value = Value::Map(IndexMap::from([
             ("Name".to_string(), Value::String("test".to_string())),
             ("Env".to_string(), Value::String("prod".to_string())),
         ]));
@@ -191,7 +192,7 @@ mod tests {
 
     #[test]
     fn test_value_to_ec2_tags_non_string_values_skipped() {
-        let value = Value::Map(HashMap::from([
+        let value = Value::Map(IndexMap::from([
             ("Name".to_string(), Value::String("test".to_string())),
             ("Count".to_string(), Value::Int(42)),
         ]));
@@ -203,7 +204,7 @@ mod tests {
 
     #[test]
     fn test_value_to_ec2_tags_empty_map() {
-        let value = Value::Map(HashMap::new());
+        let value = Value::Map(IndexMap::new());
         let tags = AwsProvider::value_to_ec2_tags(&value);
         assert!(tags.is_empty());
     }

@@ -3,6 +3,7 @@
 //! DO NOT EDIT MANUALLY - regenerate with:
 //!   ./carina-provider-aws/scripts/generate-provider.sh
 
+use indexmap::IndexMap;
 use std::collections::HashMap;
 
 use carina_core::provider::{ProviderError, ProviderResult};
@@ -358,7 +359,7 @@ impl AwsProvider {
             attributes.insert("outpost_arn".to_string(), Value::String(v.to_string()));
         }
         if let Some(dns_opts) = obj.private_dns_name_options_on_launch() {
-            let mut fields = HashMap::new();
+            let mut fields = IndexMap::new();
             if let Some(ht) = dns_opts.hostname_type() {
                 fields.insert(
                     "hostname_type".to_string(),

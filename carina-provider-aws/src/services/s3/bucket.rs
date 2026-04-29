@@ -1,3 +1,4 @@
+use indexmap::IndexMap;
 use std::collections::HashMap;
 
 use carina_core::provider::{ProviderError, ProviderResult};
@@ -623,7 +624,7 @@ impl AwsProvider {
             .await
         {
             Ok(output) => {
-                let mut tag_map = HashMap::new();
+                let mut tag_map: IndexMap<String, Value> = IndexMap::new();
                 for tag in output.tag_set() {
                     tag_map.insert(
                         tag.key().to_string(),

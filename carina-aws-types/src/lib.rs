@@ -2460,7 +2460,7 @@ mod tests {
                         Value::Map(
                             vec![(
                                 "StringEquals".to_string(),
-                                Value::Map(std::collections::HashMap::new()),
+                                Value::Map(indexmap::IndexMap::new()),
                             )]
                             .into_iter()
                             .collect(),
@@ -2489,12 +2489,9 @@ mod tests {
                     vec![(
                         "condition".to_string(),
                         Value::Map(
-                            vec![(
-                                "foo_bar".to_string(),
-                                Value::Map(std::collections::HashMap::new()),
-                            )]
-                            .into_iter()
-                            .collect(),
+                            vec![("foo_bar".to_string(), Value::Map(indexmap::IndexMap::new()))]
+                                .into_iter()
+                                .collect(),
                         ),
                     )]
                     .into_iter()
@@ -2518,7 +2515,7 @@ mod tests {
                         Value::Map(
                             vec![(
                                 "string_equals_if_exists".to_string(),
-                                Value::Map(std::collections::HashMap::new()),
+                                Value::Map(indexmap::IndexMap::new()),
                             )]
                             .into_iter()
                             .collect(),
