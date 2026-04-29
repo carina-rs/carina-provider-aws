@@ -7,7 +7,7 @@
 use super::AwsSchemaConfig;
 use super::tags_type;
 use super::validate_tags_map;
-use carina_core::schema::{AttributeSchema, AttributeType, ResourceSchema};
+use carina_core::schema::{AttributeSchema, AttributeType, ResourceSchema, types};
 
 const VALID_IAM_USER_ACCESS_TO_BILLING: &[&str] = &["ALLOW", "DENY"];
 
@@ -31,7 +31,7 @@ pub fn organizations_account_config() -> AwsSchemaConfig {
                 .with_provider_name("AccountName"),
         )
         .attribute(
-            AttributeSchema::new("email", AttributeType::String)
+            AttributeSchema::new("email", types::email())
                 .required()
                 .create_only()
                 .with_description("The email address of the owner to assign to the new member account. This email address must not already be associated with another Amazon Web Services...")

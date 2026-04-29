@@ -2572,56 +2572,33 @@ fn generate_data_source(ds: &resource_defs::DataSourceDef, model: &SmithyModel) 
     let type_overrides: HashMap<&str, &str> = ds.type_overrides.iter().copied().collect();
     let exclude: HashSet<&str> = ds.exclude_fields.iter().copied().collect();
 
-    let mut code = String::new();
-    code.push_str(&format!(
-        "//! {} schema definition for AWS Cloud Control\n\
-         //!\n\
-         //! Auto-generated from Smithy model: {}\n\
-         //!\n\
-         //! DO NOT EDIT MANUALLY - regenerate with smithy-codegen\n\n\
-         use super::AwsSchemaConfig;\n\
-         use carina_core::schema::{{AttributeSchema, AttributeType, ResourceSchema}};\n\n\
-         /// Returns the schema config for {} (Smithy: {})\n\
-         pub fn {}() -> AwsSchemaConfig {{\n\
-         \x20   AwsSchemaConfig {{\n\
-         \x20       aws_type_name: \"{}\",\n\
-         \x20       resource_type_name: \"{}\",\n\
-         \x20       has_tags: false,\n\
-         \x20       schema: ResourceSchema::new(\"{}\")\n\
-         \x20       .as_data_source()\n",
-        ds.name.split('.').next_back().unwrap_or(ds.name),
-        ns,
-        ds.name,
-        ns,
-        config_fn,
-        cf_type,
-        ds.name,
-        namespace,
-    ));
-
-    // Add input attributes (writable)
+    // Build all attribute type strings up-front so we can compute imports.
+    struct DsAttr {
+        name: String,
+        provider_name: String,
+        type_str: String,
+        description: String,
+        required: bool,
+        read_only: bool,
+    }
+    let mut ds_attrs: Vec<DsAttr> = Vec::new();
     for input in &ds.inputs {
         let type_str = if let Some(t) = input.type_override {
             t.to_string()
+        } else if is_email_property(input.provider_name) {
+            "types::email()".to_string()
         } else {
             "AttributeType::String".to_string()
         };
-        let required = if input.required {
-            "\n            .required()"
-        } else {
-            ""
-        };
-        code.push_str(&format!(
-            "\x20       .attribute(\n\
-             \x20           AttributeSchema::new(\"{}\", {}){}\n\
-             \x20               .with_description(\"{}\")\n\
-             \x20               .with_provider_name(\"{}\"),\n\
-             \x20       )\n",
-            input.name, type_str, required, input.description, input.provider_name,
-        ));
+        ds_attrs.push(DsAttr {
+            name: input.name.to_string(),
+            provider_name: input.provider_name.to_string(),
+            type_str,
+            description: input.description.to_string(),
+            required: input.required,
+            read_only: false,
+        });
     }
-
-    // Add output attributes from read_ops (read-only)
     for read_op in &ds.read_ops {
         let op_id = format!("{}#{}", ns, read_op.operation);
         let output = model
@@ -2635,8 +2612,9 @@ fn generate_data_source(ds: &resource_defs::DataSourceDef, model: &SmithyModel) 
             }
             let type_str = if let Some(t) = type_overrides.get(effective_name) {
                 t.to_string()
+            } else if is_email_property(effective_name) {
+                "types::email()".to_string()
             } else {
-                // Default to String for data source outputs; use type_overrides for non-string types
                 "AttributeType::String".to_string()
             };
             let desc = output
@@ -2649,13 +2627,83 @@ fn generate_data_source(ds: &resource_defs::DataSourceDef, model: &SmithyModel) 
                     truncated.replace('"', "\\\"").replace('\n', " ")
                 })
                 .unwrap_or_default();
+            ds_attrs.push(DsAttr {
+                name: dsl_name,
+                provider_name: effective_name.to_string(),
+                type_str,
+                description: format!("{} (read-only)", desc),
+                required: false,
+                read_only: true,
+            });
+        }
+    }
+
+    // Determine needed imports based on actual type strings used.
+    let needs_types = ds_attrs.iter().any(|a| a.type_str.contains("types::"));
+    let needs_attribute_type = ds_attrs
+        .iter()
+        .any(|a| a.type_str.contains("AttributeType::"));
+    let mut schema_imports = vec!["AttributeSchema", "ResourceSchema"];
+    if needs_attribute_type {
+        schema_imports.insert(1, "AttributeType");
+    }
+    if needs_types {
+        schema_imports.push("types");
+    }
+    let schema_imports_str = schema_imports.join(", ");
+
+    let mut code = String::new();
+    code.push_str(&format!(
+        "//! {} schema definition for AWS Cloud Control\n\
+         //!\n\
+         //! Auto-generated from Smithy model: {}\n\
+         //!\n\
+         //! DO NOT EDIT MANUALLY - regenerate with smithy-codegen\n\n\
+         use super::AwsSchemaConfig;\n\
+         use carina_core::schema::{{{}}};\n\n\
+         /// Returns the schema config for {} (Smithy: {})\n\
+         pub fn {}() -> AwsSchemaConfig {{\n\
+         \x20   AwsSchemaConfig {{\n\
+         \x20       aws_type_name: \"{}\",\n\
+         \x20       resource_type_name: \"{}\",\n\
+         \x20       has_tags: false,\n\
+         \x20       schema: ResourceSchema::new(\"{}\")\n\
+         \x20       .as_data_source()\n",
+        ds.name.split('.').next_back().unwrap_or(ds.name),
+        ns,
+        schema_imports_str,
+        ds.name,
+        ns,
+        config_fn,
+        cf_type,
+        ds.name,
+        namespace,
+    ));
+
+    // Emit attributes.
+    for attr in &ds_attrs {
+        if attr.read_only {
             code.push_str(&format!(
                 "\x20       .attribute(\n\
                  \x20           AttributeSchema::new(\"{}\", {})\n\
-                 \x20               .with_description(\"{} (read-only)\")\n\
+                 \x20               .with_description(\"{}\")\n\
                  \x20               .with_provider_name(\"{}\"),\n\
                  \x20       )\n",
-                dsl_name, type_str, desc, effective_name,
+                attr.name, attr.type_str, attr.description, attr.provider_name,
+            ));
+        } else {
+            let required = if attr.required {
+                "\n            .required()"
+            } else {
+                ""
+            };
+            code.push_str(&format!(
+                "\x20       .attribute(\n\
+                 \x20           AttributeSchema::new(\"{}\", {}){}\n\
+                 \x20               .with_description(\"{}\")\n\
+                 \x20               .with_provider_name(\"{}\"),\n\
+                 \x20       )\n",
+                attr.name, attr.type_str, required, attr.description, attr.provider_name,
             ));
         }
     }
@@ -2719,7 +2767,12 @@ fn generate_markdown_data_source(
                 let effective_name = rename.unwrap_or(field_name);
                 let dsl_name = effective_name.to_snake_case();
                 md.push_str(&format!("### `{}`\n\n", dsl_name));
-                md.push_str("- **Type:** String\n");
+                let type_display = if is_email_property(effective_name) {
+                    "Email".to_string()
+                } else {
+                    "String".to_string()
+                };
+                md.push_str(&format!("- **Type:** {}\n", type_display));
                 md.push_str("- **Read-only**\n\n");
                 if let Some(member_ref) = output.members.get(*field_name)
                     && let Some(doc_val) = member_ref.traits.get("smithy.api#documentation")
@@ -2890,6 +2943,7 @@ fn type_code_to_display(type_code: &str) -> String {
         s if s.contains("aws_resource_id") => "AwsResourceId".to_string(),
         s if s.contains("availability_zone_id") => "AvailabilityZoneId".to_string(),
         s if s.contains("availability_zone") => "AvailabilityZone".to_string(),
+        s if s.contains("email") => "Email".to_string(),
         _ => type_code
             .trim_start_matches("super::")
             .trim_end_matches("()")
@@ -3094,7 +3148,29 @@ fn infer_string_type(prop_name: &str) -> Option<String> {
         return Some("super::aws_account_id()".to_string());
     }
 
+    // Email address fields. Match conservatively: only when the field IS the
+    // email value itself, not arbitrary names that happen to contain "email"
+    // (e.g. EmailEnabled, EmailNotificationConfig).
+    if is_email_property(prop_name) {
+        return Some("types::email()".to_string());
+    }
+
     None
+}
+
+/// Returns true if a property name represents an email address value.
+///
+/// Conservative match: the name must be exactly "Email"/"EmailAddress" (or
+/// a plural form), or end with "Email"/"EmailAddress" preceded by a word
+/// boundary (typically PascalCase, e.g. "MasterAccountEmail",
+/// "ContactEmailAddress"). Names like "EmailEnabled" or
+/// "EmailNotificationConfig" are intentionally NOT matched.
+fn is_email_property(prop_name: &str) -> bool {
+    let lower = prop_name.to_lowercase();
+    lower.ends_with("email")
+        || lower.ends_with("emails")
+        || lower.ends_with("emailaddress")
+        || lower.ends_with("emailaddresses")
 }
 
 fn is_aws_resource_id_property(prop_name: &str) -> bool {
@@ -3425,6 +3501,80 @@ mod tests {
         assert!(
             generated.contains("if resource_type == \"iam.Role\""),
             "orphaned iam.Role enum_alias_reverse should be included: {generated}"
+        );
+    }
+
+    #[test]
+    fn infer_string_type_emits_email_for_email_props() {
+        // Exact and plural matches.
+        assert_eq!(
+            infer_string_type("Email"),
+            Some("types::email()".to_string())
+        );
+        assert_eq!(
+            infer_string_type("Emails"),
+            Some("types::email()".to_string())
+        );
+        assert_eq!(
+            infer_string_type("EmailAddress"),
+            Some("types::email()".to_string())
+        );
+        assert_eq!(
+            infer_string_type("EmailAddresses"),
+            Some("types::email()".to_string())
+        );
+        // PascalCase suffix.
+        assert_eq!(
+            infer_string_type("MasterAccountEmail"),
+            Some("types::email()".to_string())
+        );
+        assert_eq!(
+            infer_string_type("ContactEmailAddress"),
+            Some("types::email()".to_string())
+        );
+    }
+
+    #[test]
+    fn infer_string_type_does_not_emit_email_for_unrelated_names() {
+        // Names that contain "email" but are not email values.
+        assert_ne!(
+            infer_string_type("EmailEnabled"),
+            Some("types::email()".to_string())
+        );
+        assert_ne!(
+            infer_string_type("EmailNotificationConfig"),
+            Some("types::email()".to_string())
+        );
+    }
+
+    #[test]
+    fn organizations_account_email_is_email_type() {
+        let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../carina-provider-aws/tests/fixtures/smithy/organizations.json");
+        if !fixture.exists() {
+            eprintln!(
+                "Skipping: Smithy fixture not found: {}\nRun scripts/download-smithy-models.sh to enable this test",
+                fixture.display()
+            );
+            return;
+        }
+        let file = std::fs::File::open(&fixture).expect("failed to open Smithy fixture");
+        let model = carina_smithy::parse_reader(std::io::BufReader::new(file))
+            .expect("failed to parse Smithy fixture");
+        let resource = resource_defs::organizations_resources()
+            .into_iter()
+            .find(|res| res.name == "organizations.Account")
+            .expect("missing organizations.Account resource def");
+
+        let generated = generate_resource(&resource, &model).expect("failed to generate resource");
+
+        assert!(
+            generated.contains("\"email\", types::email()"),
+            "organizations.account.email should be types::email(): {generated}"
+        );
+        assert!(
+            !generated.contains("\"email\", AttributeType::String"),
+            "organizations.account.email should NOT be AttributeType::String: {generated}"
         );
     }
 

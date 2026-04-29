@@ -5,7 +5,7 @@
 //! DO NOT EDIT MANUALLY - regenerate with smithy-codegen
 
 use super::AwsSchemaConfig;
-use carina_core::schema::{AttributeSchema, AttributeType, ResourceSchema};
+use carina_core::schema::{AttributeSchema, AttributeType, ResourceSchema, types};
 
 const VALID_FEATURE_SET: &[&str] = &["ALL", "CONSOLIDATED_BILLING"];
 
@@ -44,7 +44,7 @@ pub fn organizations_organization_config() -> AwsSchemaConfig {
                 .with_provider_name("MasterAccountArn"),
         )
         .attribute(
-            AttributeSchema::new("master_account_email", AttributeType::String)
+            AttributeSchema::new("master_account_email", types::email())
                 .with_description("The email address that is associated with the Amazon Web Services account that is designated as the management account for the organization. (read-only)")
                 .with_provider_name("MasterAccountEmail"),
         )
