@@ -2,6 +2,8 @@
 
 use std::collections::HashMap;
 
+use indexmap::IndexMap;
+
 use carina_core::resource::Value;
 use carina_core::schema::AttributeType;
 
@@ -423,7 +425,7 @@ fn test_route_table_routes_extraction() {
     // Replicate route extraction logic from read_ec2_route_table
     let mut routes_list = Vec::new();
     for route in rt.routes() {
-        let mut route_map = HashMap::new();
+        let mut route_map = IndexMap::new();
         if let Some(dest) = route.destination_cidr_block() {
             route_map.insert("destination".to_string(), Value::String(dest.to_string()));
         }

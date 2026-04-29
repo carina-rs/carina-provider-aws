@@ -29,7 +29,7 @@ pub fn core_to_proto_resource_id(id: &CoreResourceId) -> ProtoResourceId {
     ProtoResourceId {
         provider: id.provider.clone(),
         resource_type: id.resource_type.clone(),
-        name: id.name.clone(),
+        name: id.name.to_string(),
     }
 }
 

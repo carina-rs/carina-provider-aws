@@ -256,7 +256,10 @@ impl CarinaProvider for AwsProcessProvider {
             .iter()
             .map(convert::proto_to_core_resource)
             .collect();
-        let core_tags = convert::proto_to_core_value_map(default_tags);
+        let core_tags: indexmap::IndexMap<String, _> = default_tags
+            .iter()
+            .map(|(k, v)| (k.clone(), convert::proto_to_core_value(v)))
+            .collect();
         let core_schemas: HashMap<String, ResourceSchema> = proto_schemas
             .iter()
             .map(|s| (s.resource_type.clone(), convert::proto_to_core_schema(s)))

@@ -4,6 +4,7 @@
 //! `user_id` (via `DescribeUser` directly). One of the two must be set.
 //! `identity_store_id` is always required.
 
+use indexmap::IndexMap;
 use std::collections::HashMap;
 
 use aws_sdk_identitystore::types::{AlternateIdentifier, UniqueAttribute};
@@ -132,7 +133,7 @@ pub(crate) fn extract_identitystore_user(
         );
     }
     if let Some(name) = resp.name() {
-        let mut name_fields: HashMap<String, Value> = HashMap::new();
+        let mut name_fields: IndexMap<String, Value> = IndexMap::new();
         if let Some(v) = name.formatted() {
             name_fields.insert("formatted".to_string(), Value::String(v.to_string()));
         }

@@ -72,7 +72,7 @@ impl AwsProvider {
         // group_name is required for CreateSecurityGroup API
         let group_name = match resource.get_attr("group_name") {
             Some(Value::String(s)) => s.clone(),
-            _ => resource.id.name.clone(),
+            _ => resource.id.name.to_string(),
         };
 
         // Create Security Group

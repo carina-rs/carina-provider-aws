@@ -1,3 +1,4 @@
+use indexmap::IndexMap;
 use std::collections::HashMap;
 
 use carina_core::provider::{ProviderError, ProviderResult};
@@ -44,7 +45,7 @@ impl AwsProvider {
             // Convert routes to list (complex nested structure)
             let mut routes_list = Vec::new();
             for route in rt.routes() {
-                let mut route_map = HashMap::new();
+                let mut route_map: IndexMap<String, Value> = IndexMap::new();
                 if let Some(dest) = route.destination_cidr_block() {
                     route_map.insert("destination".to_string(), Value::String(dest.to_string()));
                 }

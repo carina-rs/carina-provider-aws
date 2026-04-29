@@ -3,6 +3,7 @@
 //! Uses ChangeResourceRecordSets (UPSERT/DELETE) and ListResourceRecordSets
 //! for CRUD operations. Cloud Control does not support Route 53 records.
 
+use indexmap::IndexMap;
 use std::collections::HashMap;
 
 use aws_sdk_route53::types::{
@@ -64,7 +65,7 @@ fn build_resource_records(records: &[Value]) -> Vec<ResourceRecord> {
 }
 
 fn build_alias_target_from_map(
-    alias: &HashMap<String, Value>,
+    alias: &IndexMap<String, Value>,
     id: &ResourceId,
 ) -> ProviderResult<AliasTarget> {
     let dns_name = alias
@@ -196,7 +197,7 @@ fn extract_attributes(hosted_zone_id: &str, rrs: &ResourceRecordSet) -> HashMap<
     }
 
     if let Some(alias) = rrs.alias_target() {
-        let mut alias_map = HashMap::new();
+        let mut alias_map: IndexMap<String, Value> = IndexMap::new();
         alias_map.insert(
             "dns_name".to_string(),
             Value::String(strip_trailing_dot(alias.dns_name())),

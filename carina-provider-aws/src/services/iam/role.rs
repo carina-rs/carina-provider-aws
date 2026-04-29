@@ -1,3 +1,4 @@
+use indexmap::IndexMap;
 use std::collections::HashMap;
 
 use carina_core::provider::{ProviderError, ProviderResult};
@@ -34,7 +35,7 @@ impl AwsProvider {
                     // Extract tags
                     let tags = role.tags();
                     if !tags.is_empty() {
-                        let mut tag_map = HashMap::new();
+                        let mut tag_map = IndexMap::new();
                         for tag in tags {
                             let key = tag.key();
                             let val = tag.value();
@@ -233,11 +234,11 @@ impl AwsProvider {
     ) -> ProviderResult<()> {
         let desired_tags = match desired.get("tags") {
             Some(Value::Map(m)) => m.clone(),
-            _ => HashMap::new(),
+            _ => IndexMap::new(),
         };
         let current_tags = match current.and_then(|c| c.get("tags")) {
             Some(Value::Map(m)) => m.clone(),
-            _ => HashMap::new(),
+            _ => IndexMap::new(),
         };
 
         // Tags to remove
@@ -348,7 +349,7 @@ fn json_to_value_snake(json: &serde_json::Value) -> Value {
             Value::List(items.iter().map(json_to_value_snake).collect())
         }
         serde_json::Value::Object(obj) => {
-            let map: HashMap<String, Value> = obj
+            let map: IndexMap<String, Value> = obj
                 .iter()
                 .map(|(k, v)| (pascal_to_snake(k), json_to_value_snake(v)))
                 .collect();
