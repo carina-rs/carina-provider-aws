@@ -13,7 +13,7 @@ use carina_core::resource::{
 use carina_core::schema::{
     AttributeSchema as CoreAttributeSchema, AttributeType as CoreAttributeType,
     OperationConfig as CoreOperationConfig, ResourceSchema as CoreResourceSchema,
-    StructField as CoreStructField,
+    StructField as CoreStructField, noop_validator,
 };
 use carina_provider_protocol::types::{
     AttributeSchema as ProtoAttributeSchema, AttributeType as ProtoAttributeType,
@@ -131,12 +131,11 @@ pub fn core_to_proto_lifecycle(l: &CoreLifecycle) -> ProtoLifecycle {
 // -- proto_to_core_resource (reverse of core_to_proto_resource) --
 
 pub fn proto_to_core_resource(r: &ProtoResource) -> CoreResource {
-    use carina_core::resource::Expr;
     let mut resource = CoreResource::with_provider(&r.id.provider, &r.id.resource_type, &r.id.name);
     resource.attributes = r
         .attributes
         .iter()
-        .map(|(k, v)| (k.clone(), Expr(proto_to_core_value(v))))
+        .map(|(k, v)| (k.clone(), proto_to_core_value(v)))
         .collect();
     resource.lifecycle = CoreLifecycle {
         force_delete: r.lifecycle.force_delete,
@@ -192,7 +191,7 @@ fn proto_to_core_attribute_type(t: &ProtoAttributeType) -> CoreAttributeType {
             pattern: None,
             length: None,
             base: Box::new(proto_to_core_attribute_type(base)),
-            validate: |_| Ok(()),
+            validate: noop_validator(),
             namespace: namespace.clone(),
             to_dsl: None,
         },

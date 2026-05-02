@@ -8,7 +8,9 @@ use super::AwsSchemaConfig;
 use super::tags_type;
 use super::validate_tags_map;
 use carina_core::resource::Value;
-use carina_core::schema::{AttributeSchema, AttributeType, ResourceSchema, StructField, types};
+use carina_core::schema::{
+    AttributeSchema, AttributeType, ResourceSchema, StructField, legacy_validator, types,
+};
 
 const VALID_HOSTNAME_TYPE: &[&str] = &["ip-name", "resource-name"];
 
@@ -89,7 +91,7 @@ pub fn ec2_subnet_config() -> AwsSchemaConfig {
                 pattern: None,
                 length: Some((Some(0), Some(32))),
                 base: Box::new(AttributeType::Int),
-                validate: validate_ipv4_netmask_length_range,
+                validate: legacy_validator(validate_ipv4_netmask_length_range),
                 namespace: None,
                 to_dsl: None,
             })
@@ -121,7 +123,7 @@ pub fn ec2_subnet_config() -> AwsSchemaConfig {
                 pattern: None,
                 length: Some((Some(0), Some(128))),
                 base: Box::new(AttributeType::Int),
-                validate: validate_ipv6_netmask_length_range,
+                validate: legacy_validator(validate_ipv6_netmask_length_range),
                 namespace: None,
                 to_dsl: None,
             })

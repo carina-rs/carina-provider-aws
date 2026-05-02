@@ -6,7 +6,9 @@
 
 use super::AwsSchemaConfig;
 use carina_core::resource::Value;
-use carina_core::schema::{AttributeSchema, AttributeType, ResourceSchema, StructField};
+use carina_core::schema::{
+    AttributeSchema, AttributeType, ResourceSchema, StructField, legacy_validator,
+};
 
 const VALID_TYPE: &[&str] = &[
     "A", "AAAA", "CAA", "CNAME", "DS", "HTTPS", "MX", "NAPTR", "NS", "PTR", "SOA", "SPF", "SRV",
@@ -63,7 +65,7 @@ pub fn route53_record_set_config() -> AwsSchemaConfig {
                 pattern: None,
                 length: Some((Some(0), Some(2147483647))),
                 base: Box::new(AttributeType::Int),
-                validate: validate_ttl_range,
+                validate: legacy_validator(validate_ttl_range),
                 namespace: None,
                 to_dsl: None,
             })
