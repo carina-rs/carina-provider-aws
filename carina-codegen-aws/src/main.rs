@@ -175,6 +175,7 @@ fn main() -> Result<()> {
     // Collect all data source definitions
     let mut all_data_sources = resource_defs::sts_data_sources();
     all_data_sources.extend(resource_defs::identitystore_data_sources());
+    all_data_sources.extend(resource_defs::s3_data_sources());
 
     // Filter to requested resource if specified
     let resources: Vec<&ResourceDef> = if let Some(ref name) = args.resource {
@@ -222,38 +223,55 @@ fn main() -> Result<()> {
     match args.format.as_str() {
         "rust" => {
             // Generate each resource into service/resource directory structure
-            let mut generated_modules: Vec<&str> = Vec::new();
+            let mut generated_modules: Vec<GeneratedModule> = Vec::new();
+            let managed_names: std::collections::HashSet<&str> =
+                resources.iter().map(|r| r.name).collect();
             for res in &resources {
                 let model = models.get(res.service_namespace).unwrap();
                 let code = generate_resource(res, model)?;
 
                 let (service, resource) = split_service_resource(res.name);
-                let resource = pascal_to_snake(resource);
+                let resource_snake = pascal_to_snake(resource);
                 let service_dir = args.output_dir.join(service);
                 std::fs::create_dir_all(&service_dir)?;
 
-                let output_path = service_dir.join(format!("{}.rs", resource));
+                let output_path = service_dir.join(format!("{}.rs", resource_snake));
                 std::fs::write(&output_path, &code)
                     .with_context(|| format!("Failed to write {}", output_path.display()))?;
                 eprintln!("Generated: {}", output_path.display());
-                generated_modules.push(res.name);
+                generated_modules.push(GeneratedModule {
+                    dsl_name: res.name.to_string(),
+                    service: service.to_string(),
+                    file_stem: resource_snake.clone(),
+                    config_fn: format!("{}_config", module_name(res.name)),
+                    is_data_source: false,
+                });
             }
 
             // Generate data source schemas
             for ds in &data_sources {
                 let model = models.get(ds.service_namespace).unwrap();
-                let code = generate_data_source(ds, model)?;
+                let dual_registered = managed_names.contains(ds.name);
+                let code = generate_data_source(ds, model, dual_registered)?;
 
                 let (service, resource) = split_service_resource(ds.name);
-                let resource = pascal_to_snake(resource);
+                let resource_snake = pascal_to_snake(resource);
                 let service_dir = args.output_dir.join(service);
                 std::fs::create_dir_all(&service_dir)?;
 
-                let output_path = service_dir.join(format!("{}.rs", resource));
+                let suffix = if dual_registered { "_data_source" } else { "" };
+                let file_stem = format!("{}{}", resource_snake, suffix);
+                let output_path = service_dir.join(format!("{}.rs", file_stem));
                 std::fs::write(&output_path, &code)
                     .with_context(|| format!("Failed to write {}", output_path.display()))?;
                 eprintln!("Generated: {}", output_path.display());
-                generated_modules.push(ds.name);
+                generated_modules.push(GeneratedModule {
+                    dsl_name: ds.name.to_string(),
+                    service: service.to_string(),
+                    file_stem,
+                    config_fn: format!("{}{}_config", module_name(ds.name), suffix),
+                    is_data_source: true,
+                });
             }
 
             // Generate per-service mod.rs files
@@ -275,6 +293,8 @@ fn main() -> Result<()> {
             eprintln!("Generated: {}", output_path.display());
         }
         "markdown" | "md" => {
+            let managed_md_names: std::collections::HashSet<&str> =
+                resources.iter().map(|r| r.name).collect();
             for res in &resources {
                 let model = models.get(res.service_namespace).unwrap();
                 let md = generate_markdown_resource(res, model)?;
@@ -296,7 +316,12 @@ fn main() -> Result<()> {
                 let resource = pascal_to_snake(resource);
                 let service_dir = args.output_dir.join(service);
                 std::fs::create_dir_all(&service_dir)?;
-                let output_path = service_dir.join(format!("{}.md", resource));
+                let suffix = if managed_md_names.contains(ds.name) {
+                    "_data_source"
+                } else {
+                    ""
+                };
+                let output_path = service_dir.join(format!("{}{}.md", resource, suffix));
                 std::fs::write(&output_path, &md)
                     .with_context(|| format!("Failed to write {}", output_path.display()))?;
                 eprintln!("Generated: {}", output_path.display());
@@ -1307,17 +1332,38 @@ fn get_int_range(model: &SmithyModel, target: &str, field_name: &str) -> Option<
 }
 
 /// Generate per-service mod.rs files that declare resource modules.
-fn generate_service_mod_files(output_dir: &std::path::Path, dsl_names: &[&str]) -> Result<()> {
-    // Group resources by service. Resource segments are snake_cased because
-    // they become Rust `mod resource;` declarations in the generated code.
-    let mut services: std::collections::BTreeMap<&str, Vec<String>> =
+/// Tracks one generated schema module (Managed resource or DataSource).
+#[derive(Debug, Clone)]
+struct GeneratedModule {
+    /// DSL resource name (e.g. "s3.Bucket"). Same value for the Managed and
+    /// DataSource entries when a type is dual-registered.
+    dsl_name: String,
+    /// Service segment (e.g. "s3").
+    service: String,
+    /// File stem inside the service directory: "bucket" for the Managed
+    /// resource, "bucket_data_source" for the DataSource sibling when both
+    /// register under the same DSL name.
+    file_stem: String,
+    /// `<file_stem>::<config_fn>()` is the entry point for `configs()`.
+    config_fn: String,
+    is_data_source: bool,
+}
+
+fn generate_service_mod_files(
+    output_dir: &std::path::Path,
+    modules: &[GeneratedModule],
+) -> Result<()> {
+    // Group modules by service. File stems are already snake-cased.
+    let mut services: std::collections::BTreeMap<&str, Vec<&str>> =
         std::collections::BTreeMap::new();
-    for name in dsl_names {
-        let (service, resource) = split_service_resource_snake(name);
-        services.entry(service).or_default().push(resource);
+    for m in modules {
+        services
+            .entry(m.service.as_str())
+            .or_default()
+            .push(m.file_stem.as_str());
     }
 
-    for (service, resources) in &services {
+    for (service, file_stems) in &services {
         let mut code = String::new();
         code.push_str(
             "//! Auto-generated — DO NOT EDIT MANUALLY\n\
@@ -1328,10 +1374,11 @@ fn generate_service_mod_files(output_dir: &std::path::Path, dsl_names: &[&str]) 
              pub use super::*;\n\n",
         );
 
-        let mut sorted_resources: Vec<&String> = resources.iter().collect();
-        sorted_resources.sort();
-        for resource in sorted_resources {
-            code.push_str(&format!("pub mod {};\n", resource));
+        let mut sorted: Vec<&&str> = file_stems.iter().collect();
+        sorted.sort();
+        sorted.dedup();
+        for stem in sorted {
+            code.push_str(&format!("pub mod {};\n", stem));
         }
 
         let mod_path = output_dir.join(service).join("mod.rs");
@@ -1347,17 +1394,16 @@ fn generate_service_mod_files(output_dir: &std::path::Path, dsl_names: &[&str]) 
 /// but are not registered in `resource_defs.rs`. These are typically legacy schemas
 /// generated by an earlier codegen pipeline. Returns DSL names using the
 /// naming-conventions spelling (PascalCase final segment, e.g. `"iam.Role"`).
-fn scan_orphaned_modules(output_dir: &std::path::Path, known_names: &[&str]) -> Vec<String> {
+fn scan_orphaned_modules(
+    output_dir: &std::path::Path,
+    known_modules: &[GeneratedModule],
+) -> Vec<String> {
     let mut orphaned = Vec::new();
-    // The on-disk filename is snake_case (e.g. `role.rs`), but `known_names`
-    // carries the DSL spelling (`"iam.Role"`). Compare in the snake_case
-    // domain by snake-casing the known set.
-    let known_snake: std::collections::HashSet<String> = known_names
+    // The on-disk filename is snake_case (e.g. `role.rs`); compare against
+    // the file stems we just generated.
+    let known_snake: std::collections::HashSet<String> = known_modules
         .iter()
-        .map(|name| {
-            let (service, resource) = split_service_resource_snake(name);
-            format!("{}.{}", service, resource)
-        })
+        .map(|m| format!("{}.{}", m.service, m.file_stem))
         .collect();
 
     let Ok(entries) = std::fs::read_dir(output_dir) else {
@@ -1414,7 +1460,7 @@ fn scan_orphaned_modules(output_dir: &std::path::Path, known_names: &[&str]) -> 
 }
 
 /// Generate mod.rs that includes all generated modules.
-fn generate_mod_rs(dsl_names: &[&str], output_dir: &std::path::Path) -> String {
+fn generate_mod_rs(modules: &[GeneratedModule], output_dir: &std::path::Path) -> String {
     let mut code = String::new();
 
     code.push_str(
@@ -1429,15 +1475,48 @@ fn generate_mod_rs(dsl_names: &[&str], output_dir: &std::path::Path) -> String {
 
     // Scan for orphaned modules (files on disk not in resource_defs.rs) so we
     // preserve legacy schemas across codegen runs.
-    let orphaned = scan_orphaned_modules(output_dir, dsl_names);
+    let orphaned = scan_orphaned_modules(output_dir, modules);
 
-    // Build combined, sorted list (owned strings for unified iteration).
-    let mut sorted: Vec<String> = dsl_names.iter().map(|s| s.to_string()).collect();
-    sorted.extend(orphaned);
-    sorted.sort();
+    // Build a unified entry list. Sort key is (service, file_stem) so the
+    // emitted text is stable across runs.
+    #[derive(Debug, Clone)]
+    struct Entry {
+        dsl_name: String,
+        service: String,
+        file_stem: String,
+        config_fn: String,
+        is_data_source: bool,
+    }
+    let mut entries: Vec<Entry> = modules
+        .iter()
+        .map(|m| Entry {
+            dsl_name: m.dsl_name.clone(),
+            service: m.service.clone(),
+            file_stem: m.file_stem.clone(),
+            config_fn: m.config_fn.clone(),
+            is_data_source: m.is_data_source,
+        })
+        .collect();
+    for orphan in orphaned {
+        // Orphan format is `"<service>.<PascalResource>"` (legacy spelling).
+        let (service, resource) = split_service_resource(&orphan);
+        let resource_snake = pascal_to_snake(resource);
+        entries.push(Entry {
+            dsl_name: orphan.clone(),
+            service: service.to_string(),
+            file_stem: resource_snake.clone(),
+            config_fn: format!("{}_{}_config", service, resource_snake),
+            is_data_source: false,
+        });
+    }
+    entries.sort_by(|a, b| {
+        a.service
+            .cmp(&b.service)
+            .then(a.file_stem.cmp(&b.file_stem))
+    });
 
     // Collect unique services (sorted)
-    let mut services: Vec<&str> = sorted.iter().map(|n| split_service_resource(n).0).collect();
+    let mut services: Vec<&str> = entries.iter().map(|e| e.service.as_str()).collect();
     services.dedup();
 
     // Service module declarations
@@ -1451,12 +1530,10 @@ fn generate_mod_rs(dsl_names: &[&str], output_dir: &std::path::Path) -> String {
          pub fn configs() -> Vec<AwsSchemaConfig> {\n\
          \x20   vec![\n",
     );
-    for name in &sorted {
-        let (service, resource) = split_service_resource_snake(name);
-        let mn = module_name(name);
+    for e in &entries {
         code.push_str(&format!(
-            "\x20       {}::{}::{}_config(),\n",
-            service, resource, mn
+            "\x20       {}::{}::{}(),\n",
+            e.service, e.file_stem, e.config_fn
         ));
     }
     code.push_str(
@@ -1464,7 +1541,8 @@ fn generate_mod_rs(dsl_names: &[&str], output_dir: &std::path::Path) -> String {
          }\n\n",
     );
 
-    // get_enum_valid_values()
+    // get_enum_valid_values() — DataSource modules also expose enum_valid_values()
+    // (codegen always emits a stub), so include them.
     code.push_str(
         "/// Get valid enum values for a given resource type and attribute name.\n\
          /// Used during read-back to normalize AWS-returned values to canonical DSL form.\n\
@@ -1474,11 +1552,10 @@ fn generate_mod_rs(dsl_names: &[&str], output_dir: &std::path::Path) -> String {
          pub fn get_enum_valid_values(resource_type: &str, attr_name: &str) -> Option<&'static [&'static str]> {\n\
          \x20   let modules: &[(&str, &[(&str, &[&str])])] = &[\n",
     );
-    for name in &sorted {
-        let (service, resource) = split_service_resource_snake(name);
+    for e in &entries {
         code.push_str(&format!(
             "\x20       {}::{}::enum_valid_values(),\n",
-            service, resource
+            e.service, e.file_stem
         ));
     }
     code.push_str(
@@ -1497,24 +1574,28 @@ fn generate_mod_rs(dsl_names: &[&str], output_dir: &std::path::Path) -> String {
          }\n\n",
     );
 
-    // get_enum_alias_reverse()
+    // get_enum_alias_reverse() — only the Managed entry contributes; DataSource
+    // entries share the DSL name and would emit a duplicate `if` arm whose
+    // alias_reverse stub returns None anyway.
     code.push_str(
         "/// Maps DSL alias values back to canonical AWS values.\n\
          /// Dispatches to per-module enum_alias_reverse() functions.\n\
          pub fn get_enum_alias_reverse(resource_type: &str, attr_name: &str, value: &str) -> Option<&'static str> {\n",
     );
-    for name in &sorted {
-        let (service, resource) = split_service_resource_snake(name);
+    for e in &entries {
+        if e.is_data_source {
+            continue;
+        }
         code.push_str(&format!(
             "\x20   if resource_type == \"{}\" {{\n\
              \x20       return {}::{}::enum_alias_reverse(attr_name, value);\n\
              \x20   }}\n",
-            name, service, resource
+            e.dsl_name, e.service, e.file_stem
         ));
     }
     code.push_str("    None\n}\n\n");
 
-    // build_enum_aliases_map()
+    // build_enum_aliases_map() — same Managed-only filter as above.
     code.push_str(
         "/// Build a complete enum aliases map for all resource types.\n\
          /// Returns: resource_type -> attr_name -> alias -> canonical_value.\n\
@@ -1522,8 +1603,10 @@ fn generate_mod_rs(dsl_names: &[&str], output_dir: &std::path::Path) -> String {
          pub fn build_enum_aliases_map() -> std::collections::HashMap<String, std::collections::HashMap<String, std::collections::HashMap<String, String>>> {\n\
          \x20   let mut map = std::collections::HashMap::new();\n",
     );
-    for name in &sorted {
-        let (service, resource) = split_service_resource_snake(name);
+    for e in &entries {
+        if e.is_data_source {
+            continue;
+        }
         code.push_str(&format!(
             "\x20   for (attr, alias, canonical) in {}::{}::enum_alias_entries() {{\n\
              \x20       map.entry(\"{}\".to_string())\n\
@@ -1532,7 +1615,7 @@ fn generate_mod_rs(dsl_names: &[&str], output_dir: &std::path::Path) -> String {
              \x20           .or_insert_with(std::collections::HashMap::new)\n\
              \x20           .insert(alias.to_string(), canonical.to_string());\n\
              \x20   }}\n",
-            service, resource, name
+            e.service, e.file_stem, e.dsl_name
         ));
     }
     code.push_str("    map\n}\n");
@@ -2566,9 +2649,19 @@ fn generate_markdown_resource(res: &ResourceDef, model: &SmithyModel) -> Result<
 }
 
 /// Generate Rust schema code for a data source.
-fn generate_data_source(ds: &resource_defs::DataSourceDef, _model: &SmithyModel) -> Result<String> {
+///
+/// `dual_registered` should be true when the same DSL name (e.g. `s3.Bucket`)
+/// is also registered as a Managed resource. In that case the file name and
+/// config function are suffixed with `_data_source` to avoid colliding with
+/// the Managed file (`s3/bucket.rs` + `s3_bucket_config`).
+fn generate_data_source(
+    ds: &resource_defs::DataSourceDef,
+    _model: &SmithyModel,
+    dual_registered: bool,
+) -> Result<String> {
     let ns = ds.service_namespace;
-    let config_fn = format!("{}_config", module_name(ds.name));
+    let suffix = if dual_registered { "_data_source" } else { "" };
+    let config_fn = format!("{}{}_config", module_name(ds.name), suffix);
     let cf_type = cf_type_name(ds.name);
 
     // Build all attribute type strings up-front so we can compute imports.
@@ -2598,7 +2691,14 @@ fn generate_data_source(ds: &resource_defs::DataSourceDef, _model: &SmithyModel)
             read_only: false,
         });
     }
+    let input_names: HashSet<&str> = ds.inputs.iter().map(|i| i.name).collect();
     for output in &ds.output_attributes {
+        // Skip outputs that echo an input — the input row already covers
+        // both directions (e.g. `s3.Bucket.bucket`: user supplies it as
+        // lookup input, runtime echoes it back as the same attribute).
+        if input_names.contains(output.name) {
+            continue;
+        }
         ds_attrs.push(DsAttr {
             name: output.name.to_string(),
             provider_name: output.provider_name.unwrap_or("").to_string(),
@@ -2729,8 +2829,13 @@ fn generate_markdown_data_source(
     }
 
     // Output attributes section
+    let input_names: HashSet<&str> = ds.inputs.iter().map(|i| i.name).collect();
     md.push_str("## Attributes\n\n");
     for output in &ds.output_attributes {
+        // Skip echo-of-input outputs (already documented in the inputs section).
+        if input_names.contains(output.name) {
+            continue;
+        }
         md.push_str(&format!("### `{}`\n\n", output.name));
         let type_display = type_code_to_display(output.type_code);
         md.push_str(&format!("- **Type:** {}\n", type_display));
@@ -3386,7 +3491,7 @@ mod tests {
             .next()
             .unwrap();
 
-        let generated = generate_data_source(&ds, &model).expect("generate_data_source");
+        let generated = generate_data_source(&ds, &model, false).expect("generate_data_source");
 
         assert!(
             generated.contains(".as_data_source()"),
@@ -3424,7 +3529,7 @@ mod tests {
             .next()
             .unwrap();
 
-        let generated = generate_data_source(&ds, &model).expect("generate_data_source");
+        let generated = generate_data_source(&ds, &model, false).expect("generate_data_source");
 
         assert!(
             generated
@@ -3515,7 +3620,13 @@ mod tests {
         std::fs::write(logs_dir.join("log_group.rs"), "// orphaned").unwrap();
         std::fs::write(logs_dir.join("mod.rs"), "pub mod log_group;").unwrap();
 
-        let known = vec!["ec2.Vpc"];
+        let known = vec![GeneratedModule {
+            dsl_name: "ec2.Vpc".to_string(),
+            service: "ec2".to_string(),
+            file_stem: "vpc".to_string(),
+            config_fn: "ec2_vpc_config".to_string(),
+            is_data_source: false,
+        }];
         let orphaned = scan_orphaned_modules(output_dir, &known);
 
         assert_eq!(orphaned, vec!["iam.Role", "logs.LogGroup"]);
@@ -3532,8 +3643,14 @@ mod tests {
         std::fs::write(iam_dir.join("role.rs"), "// orphaned").unwrap();
 
         // Generate with a different known resource (ec2.Vpc)
-        let dsl_names = &["ec2.Vpc"];
-        let generated = generate_mod_rs(dsl_names, output_dir);
+        let known = vec![GeneratedModule {
+            dsl_name: "ec2.Vpc".to_string(),
+            service: "ec2".to_string(),
+            file_stem: "vpc".to_string(),
+            config_fn: "ec2_vpc_config".to_string(),
+            is_data_source: false,
+        }];
+        let generated = generate_mod_rs(&known, output_dir);
 
         assert!(
             generated.contains("pub mod iam;"),
@@ -3546,6 +3663,40 @@ mod tests {
         assert!(
             generated.contains("if resource_type == \"iam.Role\""),
             "orphaned iam.Role enum_alias_reverse should be included: {generated}"
+        );
+    }
+
+    #[test]
+    fn generate_mod_rs_registers_dual_kinds_for_s3_bucket() {
+        let tmp = tempfile::tempdir().expect("create tempdir");
+        let output_dir = tmp.path();
+        let known = vec![
+            GeneratedModule {
+                dsl_name: "s3.Bucket".to_string(),
+                service: "s3".to_string(),
+                file_stem: "bucket".to_string(),
+                config_fn: "s3_bucket_config".to_string(),
+                is_data_source: false,
+            },
+            GeneratedModule {
+                dsl_name: "s3.Bucket".to_string(),
+                service: "s3".to_string(),
+                file_stem: "bucket_data_source".to_string(),
+                config_fn: "s3_bucket_data_source_config".to_string(),
+                is_data_source: true,
+            },
+        ];
+        let generated = generate_mod_rs(&known, output_dir);
+        assert!(generated.contains("s3::bucket::s3_bucket_config()"));
+        assert!(generated.contains("s3::bucket_data_source::s3_bucket_data_source_config()"));
+        // Only one enum_alias_reverse arm for s3.Bucket (the Managed entry).
+        let enum_arms: Vec<_> = generated
+            .match_indices("if resource_type == \"s3.Bucket\"")
+            .collect();
+        assert_eq!(
+            enum_arms.len(),
+            1,
+            "data source must not duplicate alias arm: {generated}"
         );
     }
 
