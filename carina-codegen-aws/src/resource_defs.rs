@@ -1032,6 +1032,73 @@ pub fn s3_resources() -> Vec<ResourceDef> {
     ]
 }
 
+/// Returns S3 data source definitions.
+pub fn s3_data_sources() -> Vec<DataSourceDef> {
+    vec![DataSourceDef {
+        name: "s3.Bucket",
+        service_namespace: "com.amazonaws.s3",
+        inputs: vec![DataSourceInput {
+            name: "bucket",
+            provider_name: "Bucket",
+            description: "Name of the S3 bucket to look up.",
+            required: true,
+            type_override: None,
+        }],
+        output_attributes: vec![
+            DataSourceOutput {
+                name: "bucket",
+                provider_name: None,
+                description: "The bucket name (echo of the input).",
+                type_code: "AttributeType::String",
+            },
+            DataSourceOutput {
+                name: "arn",
+                provider_name: None,
+                description: "ARN of the bucket.",
+                type_code: "super::arn()",
+            },
+            DataSourceOutput {
+                name: "region",
+                provider_name: Some("LocationConstraint"),
+                description: "AWS region the bucket is in.",
+                type_code: "AttributeType::String",
+            },
+            DataSourceOutput {
+                name: "bucket_domain_name",
+                provider_name: None,
+                description: "Bucket domain name (`<bucket>.s3.amazonaws.com`).",
+                type_code: "AttributeType::String",
+            },
+            DataSourceOutput {
+                name: "bucket_regional_domain_name",
+                provider_name: None,
+                description: "Region-specific bucket domain name (`<bucket>.s3.<region>.amazonaws.com`).",
+                type_code: "AttributeType::String",
+            },
+            DataSourceOutput {
+                name: "hosted_zone_id",
+                provider_name: None,
+                description: "Route 53 Hosted Zone ID for the bucket's region.",
+                type_code: "AttributeType::String",
+            },
+        ],
+        read_ops: vec![
+            ReadOp {
+                operation: "HeadBucket",
+                fields: vec![],
+                defaults: vec![],
+            },
+            ReadOp {
+                operation: "GetBucketLocation",
+                fields: vec![("LocationConstraint", None)],
+                defaults: vec![("LocationConstraint", "us-east-1")],
+            },
+        ],
+        type_overrides: vec![],
+        exclude_fields: vec![],
+    }]
+}
+
 /// Returns Route 53 resource definitions.
 pub fn route53_resources() -> Vec<ResourceDef> {
     vec![
@@ -1209,6 +1276,41 @@ mod tests {
         assert_eq!(ds.output_attributes[0].provider_name, Some("DisplayName"));
         assert_eq!(ds.output_attributes[1].provider_name, Some("Emails"));
         assert_eq!(ds.inputs.len(), 3);
+    }
+
+    #[test]
+    fn s3_data_sources_declares_s3_bucket() {
+        let defs = s3_data_sources();
+        assert_eq!(defs.len(), 1);
+        let ds = &defs[0];
+        assert_eq!(ds.name, "s3.Bucket");
+        let inputs: Vec<&str> = ds.inputs.iter().map(|i| i.name).collect();
+        assert_eq!(inputs, vec!["bucket"]);
+        assert!(ds.inputs[0].required);
+        let outputs: Vec<&str> = ds.output_attributes.iter().map(|o| o.name).collect();
+        assert_eq!(
+            outputs,
+            vec![
+                "bucket",
+                "arn",
+                "region",
+                "bucket_domain_name",
+                "bucket_regional_domain_name",
+                "hosted_zone_id"
+            ]
+        );
+        let arn = ds
+            .output_attributes
+            .iter()
+            .find(|o| o.name == "arn")
+            .unwrap();
+        assert!(arn.provider_name.is_none());
+        let region = ds
+            .output_attributes
+            .iter()
+            .find(|o| o.name == "region")
+            .unwrap();
+        assert_eq!(region.provider_name, Some("LocationConstraint"));
     }
 
     #[test]
