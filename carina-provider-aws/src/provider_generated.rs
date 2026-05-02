@@ -6,7 +6,7 @@
 use indexmap::IndexMap;
 use std::collections::HashMap;
 
-use carina_core::provider::{ProviderError, ProviderResult};
+use carina_core::provider::{BoxFuture, ProviderError, ProviderResult};
 use carina_core::resource::{Resource, ResourceId, State, Value};
 use carina_core::utils::extract_enum_value;
 
@@ -810,5 +810,54 @@ impl AwsProvider {
             attributes.insert("to_port".to_string(), Value::Int(v as i64));
         }
         obj.security_group_rule_id().map(String::from)
+    }
+}
+
+// ===== Generated DataSourceLookups Trait =====
+
+/// One method per `DataSourceDef`. AwsProvider must implement all of
+/// them; the codegen-emitted dispatcher below routes by
+/// `resource.id.resource_type`.
+pub trait DataSourceLookups {
+    fn read_sts_caller_identity_data_source(
+        &self,
+        resource: &Resource,
+    ) -> BoxFuture<'_, ProviderResult<State>>;
+
+    fn read_identitystore_user_data_source(
+        &self,
+        resource: &Resource,
+    ) -> BoxFuture<'_, ProviderResult<State>>;
+
+    fn read_s3_bucket_data_source(
+        &self,
+        resource: &Resource,
+    ) -> BoxFuture<'_, ProviderResult<State>>;
+}
+
+// ===== Generated read_data_source dispatcher =====
+
+/// Routes `Provider::read_data_source` calls to the matching
+/// `DataSourceLookups` trait method. The default arm refuses
+/// to drop user-supplied inputs silently.
+pub(crate) fn dispatch_read_data_source<'a>(
+    provider: &'a AwsProvider,
+    resource: &'a Resource,
+) -> BoxFuture<'a, ProviderResult<State>> {
+    match resource.id.resource_type.as_str() {
+        "sts.CallerIdentity" => provider.read_sts_caller_identity_data_source(resource),
+        "identitystore.User" => provider.read_identitystore_user_data_source(resource),
+        "s3.Bucket" => provider.read_s3_bucket_data_source(resource),
+        _ => {
+            let id = resource.id.clone();
+            let resource_type = resource.id.resource_type.clone();
+            Box::pin(async move {
+                Err(ProviderError::new(format!(
+                    "aws provider does not implement read_data_source for '{}'",
+                    resource_type
+                ))
+                .for_resource(id))
+            })
+        }
     }
 }
