@@ -2566,13 +2566,10 @@ fn generate_markdown_resource(res: &ResourceDef, model: &SmithyModel) -> Result<
 }
 
 /// Generate Rust schema code for a data source.
-fn generate_data_source(ds: &resource_defs::DataSourceDef, model: &SmithyModel) -> Result<String> {
+fn generate_data_source(ds: &resource_defs::DataSourceDef, _model: &SmithyModel) -> Result<String> {
     let ns = ds.service_namespace;
     let config_fn = format!("{}_config", module_name(ds.name));
     let cf_type = cf_type_name(ds.name);
-
-    let type_overrides: HashMap<&str, &str> = ds.type_overrides.iter().copied().collect();
-    let exclude: HashSet<&str> = ds.exclude_fields.iter().copied().collect();
 
     // Build all attribute type strings up-front so we can compute imports.
     struct DsAttr {
@@ -2601,43 +2598,15 @@ fn generate_data_source(ds: &resource_defs::DataSourceDef, model: &SmithyModel) 
             read_only: false,
         });
     }
-    for read_op in &ds.read_ops {
-        let op_id = format!("{}#{}", ns, read_op.operation);
-        let output = model
-            .operation_output(&op_id)
-            .with_context(|| format!("Cannot find output for {}", op_id))?;
-        for (field_name, rename) in &read_op.fields {
-            let effective_name = rename.unwrap_or(field_name);
-            let dsl_name = effective_name.to_snake_case();
-            if exclude.contains(dsl_name.as_str()) {
-                continue;
-            }
-            let type_str = if let Some(t) = type_overrides.get(effective_name) {
-                t.to_string()
-            } else if is_email_property(effective_name) {
-                "types::email()".to_string()
-            } else {
-                "AttributeType::String".to_string()
-            };
-            let desc = output
-                .members
-                .get(*field_name)
-                .and_then(|mr| mr.traits.get("smithy.api#documentation"))
-                .and_then(|v| v.as_str())
-                .map(|d| {
-                    let truncated = if d.len() > 200 { &d[..200] } else { d };
-                    truncated.replace('"', "\\\"").replace('\n', " ")
-                })
-                .unwrap_or_default();
-            ds_attrs.push(DsAttr {
-                name: dsl_name,
-                provider_name: effective_name.to_string(),
-                type_str,
-                description: format!("{} (read-only)", desc),
-                required: false,
-                read_only: true,
-            });
-        }
+    for output in &ds.output_attributes {
+        ds_attrs.push(DsAttr {
+            name: output.name.to_string(),
+            provider_name: output.provider_name.unwrap_or("").to_string(),
+            type_str: output.type_code.to_string(),
+            description: output.description.to_string(),
+            required: false,
+            read_only: true,
+        });
     }
 
     // Determine needed imports based on actual type strings used.
@@ -2737,9 +2706,8 @@ fn generate_data_source(ds: &resource_defs::DataSourceDef, model: &SmithyModel) 
 /// Generate markdown documentation for a data source.
 fn generate_markdown_data_source(
     ds: &resource_defs::DataSourceDef,
-    model: &SmithyModel,
+    _model: &SmithyModel,
 ) -> Result<String> {
-    let ns = ds.service_namespace;
     let cf_type = cf_type_name(ds.name);
 
     let mut md = String::new();
@@ -2762,28 +2730,13 @@ fn generate_markdown_data_source(
 
     // Output attributes section
     md.push_str("## Attributes\n\n");
-    for read_op in &ds.read_ops {
-        let op_id = format!("{}#{}", ns, read_op.operation);
-        if let Some(output) = model.operation_output(&op_id) {
-            for (field_name, rename) in &read_op.fields {
-                let effective_name = rename.unwrap_or(field_name);
-                let dsl_name = effective_name.to_snake_case();
-                md.push_str(&format!("### `{}`\n\n", dsl_name));
-                let type_display = if is_email_property(effective_name) {
-                    "Email".to_string()
-                } else {
-                    "String".to_string()
-                };
-                md.push_str(&format!("- **Type:** {}\n", type_display));
-                md.push_str("- **Read-only**\n\n");
-                if let Some(member_ref) = output.members.get(*field_name)
-                    && let Some(doc_val) = member_ref.traits.get("smithy.api#documentation")
-                    && let Some(d) = doc_val.as_str()
-                {
-                    let truncated = if d.len() > 500 { &d[..500] } else { d };
-                    md.push_str(&format!("{}\n\n", truncated));
-                }
-            }
+    for output in &ds.output_attributes {
+        md.push_str(&format!("### `{}`\n\n", output.name));
+        let type_display = type_code_to_display(output.type_code);
+        md.push_str(&format!("- **Type:** {}\n", type_display));
+        md.push_str("- **Read-only**\n\n");
+        if !output.description.is_empty() {
+            md.push_str(&format!("{}\n\n", output.description));
         }
     }
 
@@ -3417,6 +3370,96 @@ fn truncate_str(s: &str, max_len: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn generate_data_source_for_sts_caller_identity_emits_explicit_outputs() {
+        let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../carina-provider-aws/tests/fixtures/smithy/sts.json");
+        if !fixture.exists() {
+            eprintln!("Skipping: Smithy fixture not found: {}", fixture.display());
+            return;
+        }
+        let file = std::fs::File::open(&fixture).expect("open Smithy fixture");
+        let model = carina_smithy::parse_reader(std::io::BufReader::new(file)).expect("parse");
+        let ds = resource_defs::sts_data_sources()
+            .into_iter()
+            .next()
+            .unwrap();
+
+        let generated = generate_data_source(&ds, &model).expect("generate_data_source");
+
+        assert!(
+            generated.contains(".as_data_source()"),
+            "must mark as data source: {generated}"
+        );
+        assert!(
+            generated.contains(r#"AttributeSchema::new("account_id", super::aws_account_id())"#),
+            "account_id must use aws_account_id(): {generated}"
+        );
+        assert!(
+            generated.contains(r#"AttributeSchema::new("arn", super::arn())"#),
+            "arn must use arn(): {generated}"
+        );
+        assert!(
+            generated.contains(r#"AttributeSchema::new("user_id", AttributeType::String)"#),
+            "user_id must be String: {generated}"
+        );
+        assert!(
+            generated.contains(".with_provider_name(\"Account\")"),
+            "account_id keeps Account provider_name: {generated}"
+        );
+    }
+
+    #[test]
+    fn generate_data_source_for_identitystore_user_emits_inputs_and_outputs() {
+        let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../carina-provider-aws/tests/fixtures/smithy/identitystore.json");
+        if !fixture.exists() {
+            return;
+        }
+        let file = std::fs::File::open(&fixture).unwrap();
+        let model = carina_smithy::parse_reader(std::io::BufReader::new(file)).unwrap();
+        let ds = resource_defs::identitystore_data_sources()
+            .into_iter()
+            .next()
+            .unwrap();
+
+        let generated = generate_data_source(&ds, &model).expect("generate_data_source");
+
+        assert!(
+            generated
+                .contains(r#"AttributeSchema::new("identity_store_id", AttributeType::String)"#)
+        );
+        assert!(
+            generated.contains(".required()"),
+            "identity_store_id is required"
+        );
+        assert!(
+            generated.contains(r#"AttributeSchema::new("display_name", AttributeType::String)"#)
+        );
+        assert!(generated.contains(r#"AttributeSchema::new("emails", AttributeType::String)"#));
+    }
+
+    #[test]
+    fn markdown_data_source_lists_explicit_output_attributes() {
+        let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../carina-provider-aws/tests/fixtures/smithy/sts.json");
+        if !fixture.exists() {
+            return;
+        }
+        let file = std::fs::File::open(&fixture).unwrap();
+        let model = carina_smithy::parse_reader(std::io::BufReader::new(file)).unwrap();
+        let ds = resource_defs::sts_data_sources()
+            .into_iter()
+            .next()
+            .unwrap();
+
+        let md = generate_markdown_data_source(&ds, &model).expect("md");
+
+        assert!(md.contains("### `account_id`"), "{md}");
+        assert!(md.contains("### `arn`"), "{md}");
+        assert!(md.contains("### `user_id`"), "{md}");
+    }
 
     #[test]
     fn generate_resource_uses_string_enum_for_namespaced_enums() {
