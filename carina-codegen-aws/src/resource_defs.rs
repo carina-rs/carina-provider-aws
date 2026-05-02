@@ -129,6 +129,8 @@ pub struct DataSourceDef {
     pub service_namespace: &'static str,
     /// User-supplied lookup input fields (empty for zero-input data sources)
     pub inputs: Vec<DataSourceInput>,
+    /// Declared output attributes (read-only fields exposed by the data source).
+    pub output_attributes: Vec<DataSourceOutput>,
     /// Read operations that retrieve output fields
     pub read_ops: Vec<ReadOp>,
     /// Type overrides: (field_name, type_code)
@@ -149,6 +151,23 @@ pub struct DataSourceInput {
     pub required: bool,
     /// Type override (e.g., "AttributeType::String"). None = infer from Smithy.
     pub type_override: Option<&'static str>,
+}
+
+/// One declared output attribute on a `DataSourceDef`.
+///
+/// `provider_name = None` means the value is computed (e.g. ARN built from
+/// inputs); `provider_name = Some("...")` means the value comes from a
+/// `read_ops` API field of that name.
+pub struct DataSourceOutput {
+    /// DSL field name (e.g., "account_id")
+    pub name: &'static str,
+    /// Smithy/AWS field name (e.g., "Account"). None for computed outputs.
+    pub provider_name: Option<&'static str>,
+    /// Human-readable description for docs
+    pub description: &'static str,
+    /// Rust type expression for codegen, e.g. `"AttributeType::String"` or
+    /// `"super::aws_account_id()"`. Required: codegen does not infer.
+    pub type_code: &'static str,
 }
 
 /// Returns EC2 resource definitions.
@@ -793,6 +812,7 @@ pub fn sts_data_sources() -> Vec<DataSourceDef> {
         name: "sts.CallerIdentity",
         service_namespace: "com.amazonaws.sts",
         inputs: vec![],
+        output_attributes: vec![],
         read_ops: vec![ReadOp {
             operation: "GetCallerIdentity",
             fields: vec![
@@ -815,6 +835,7 @@ pub fn identitystore_data_sources() -> Vec<DataSourceDef> {
     vec![DataSourceDef {
         name: "identitystore.User",
         service_namespace: "com.amazonaws.identitystore",
+        output_attributes: vec![],
         inputs: vec![
             DataSourceInput {
                 name: "identity_store_id",
@@ -1115,4 +1136,42 @@ pub fn logs_resources() -> Vec<ResourceDef> {
         }],
         identity_overrides: vec![],
     }]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn data_source_output_field_round_trip() {
+        let o = DataSourceOutput {
+            name: "arn",
+            provider_name: None,
+            description: "Bucket ARN",
+            type_code: "AttributeType::String",
+        };
+        assert_eq!(o.name, "arn");
+        assert!(o.provider_name.is_none());
+        assert_eq!(o.type_code, "AttributeType::String");
+    }
+
+    #[test]
+    fn data_source_def_carries_output_attributes() {
+        let def = DataSourceDef {
+            name: "test.X",
+            service_namespace: "com.test",
+            inputs: vec![],
+            output_attributes: vec![DataSourceOutput {
+                name: "arn",
+                provider_name: None,
+                description: "",
+                type_code: "AttributeType::String",
+            }],
+            read_ops: vec![],
+            type_overrides: vec![],
+            exclude_fields: vec![],
+        };
+        assert_eq!(def.output_attributes.len(), 1);
+        assert_eq!(def.output_attributes[0].name, "arn");
+    }
 }
