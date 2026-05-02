@@ -812,7 +812,26 @@ pub fn sts_data_sources() -> Vec<DataSourceDef> {
         name: "sts.CallerIdentity",
         service_namespace: "com.amazonaws.sts",
         inputs: vec![],
-        output_attributes: vec![],
+        output_attributes: vec![
+            DataSourceOutput {
+                name: "account_id",
+                provider_name: Some("Account"),
+                description: "The Amazon Web Services account ID number of the account that owns or contains the calling entity.",
+                type_code: "super::aws_account_id()",
+            },
+            DataSourceOutput {
+                name: "arn",
+                provider_name: Some("Arn"),
+                description: "The Amazon Web Services ARN associated with the calling entity.",
+                type_code: "super::arn()",
+            },
+            DataSourceOutput {
+                name: "user_id",
+                provider_name: Some("UserId"),
+                description: "The unique identifier of the calling entity.",
+                type_code: "AttributeType::String",
+            },
+        ],
         read_ops: vec![ReadOp {
             operation: "GetCallerIdentity",
             fields: vec![
@@ -835,7 +854,6 @@ pub fn identitystore_data_sources() -> Vec<DataSourceDef> {
     vec![DataSourceDef {
         name: "identitystore.User",
         service_namespace: "com.amazonaws.identitystore",
-        output_attributes: vec![],
         inputs: vec![
             DataSourceInput {
                 name: "identity_store_id",
@@ -857,6 +875,20 @@ pub fn identitystore_data_sources() -> Vec<DataSourceDef> {
                 description: "The user's user name. Provide either user_id or user_name.",
                 required: false,
                 type_override: None,
+            },
+        ],
+        output_attributes: vec![
+            DataSourceOutput {
+                name: "display_name",
+                provider_name: Some("DisplayName"),
+                description: "Display name of the user.",
+                type_code: "AttributeType::String",
+            },
+            DataSourceOutput {
+                name: "emails",
+                provider_name: Some("Emails"),
+                description: "Email addresses associated with the user.",
+                type_code: "AttributeType::String",
             },
         ],
         read_ops: vec![ReadOp {
@@ -1153,6 +1185,30 @@ mod tests {
         assert_eq!(o.name, "arn");
         assert!(o.provider_name.is_none());
         assert_eq!(o.type_code, "AttributeType::String");
+    }
+
+    #[test]
+    fn sts_caller_identity_declares_outputs_explicitly() {
+        let defs = sts_data_sources();
+        let ds = &defs[0];
+        let names: Vec<&str> = ds.output_attributes.iter().map(|o| o.name).collect();
+        assert_eq!(names, vec!["account_id", "arn", "user_id"]);
+        let account_id = &ds.output_attributes[0];
+        assert_eq!(account_id.provider_name, Some("Account"));
+        assert_eq!(account_id.type_code, "super::aws_account_id()");
+        let arn = &ds.output_attributes[1];
+        assert_eq!(arn.type_code, "super::arn()");
+    }
+
+    #[test]
+    fn identitystore_user_declares_outputs_explicitly() {
+        let defs = identitystore_data_sources();
+        let ds = &defs[0];
+        let names: Vec<&str> = ds.output_attributes.iter().map(|o| o.name).collect();
+        assert_eq!(names, vec!["display_name", "emails"]);
+        assert_eq!(ds.output_attributes[0].provider_name, Some("DisplayName"));
+        assert_eq!(ds.output_attributes[1].provider_name, Some("Emails"));
+        assert_eq!(ds.inputs.len(), 3);
     }
 
     #[test]
