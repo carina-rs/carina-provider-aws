@@ -8,7 +8,7 @@ use indexmap::IndexMap;
 use std::collections::HashMap;
 
 use aws_sdk_identitystore::types::{AlternateIdentifier, UniqueAttribute};
-use carina_core::provider::{ProviderError, ProviderResult};
+use carina_core::provider::{BoxFuture, ProviderError, ProviderResult};
 use carina_core::resource::{Resource, State, Value};
 
 use crate::AwsProvider;
@@ -16,39 +16,43 @@ use crate::helpers::sdk_error_message;
 
 impl AwsProvider {
     /// Read `identitystore.user` given a `Resource` with user-supplied
-    /// lookup inputs.
-    pub(crate) async fn read_identitystore_user(
+    /// lookup inputs. Wired into `DataSourceLookups` via
+    /// `data_source_lookups::DataSourceLookups`.
+    pub(crate) fn do_read_identitystore_user_data_source(
         &self,
         resource: &Resource,
-    ) -> ProviderResult<State> {
-        let identity_store_id = resource
-            .get_attr("identity_store_id")
-            .and_then(value_as_str)
-            .ok_or_else(|| {
-                ProviderError::new("identitystore.user requires `identity_store_id`")
+    ) -> BoxFuture<'_, ProviderResult<State>> {
+        let resource = resource.clone();
+        Box::pin(async move {
+            let identity_store_id = resource
+                .get_attr("identity_store_id")
+                .and_then(value_as_str)
+                .ok_or_else(|| {
+                    ProviderError::new("identitystore.user requires `identity_store_id`")
+                        .for_resource(resource.id.clone())
+                })?;
+
+            let user_id =
+                resolve_user_id(&self.identitystore_client, identity_store_id, &resource).await?;
+
+            let describe = self
+                .identitystore_client
+                .describe_user()
+                .identity_store_id(identity_store_id)
+                .user_id(&user_id)
+                .send()
+                .await
+                .map_err(|e| {
+                    ProviderError::new(sdk_error_message(
+                        &format!("Failed to describe identitystore user '{user_id}' in store '{identity_store_id}'"),
+                        &e,
+                    ))
                     .for_resource(resource.id.clone())
-            })?;
+                })?;
 
-        let user_id =
-            resolve_user_id(&self.identitystore_client, identity_store_id, resource).await?;
-
-        let describe = self
-            .identitystore_client
-            .describe_user()
-            .identity_store_id(identity_store_id)
-            .user_id(&user_id)
-            .send()
-            .await
-            .map_err(|e| {
-                ProviderError::new(sdk_error_message(
-                    &format!("Failed to describe identitystore user '{user_id}' in store '{identity_store_id}'"),
-                    &e,
-                ))
-                .for_resource(resource.id.clone())
-            })?;
-
-        let attributes = extract_identitystore_user(&describe);
-        Ok(State::existing(resource.id.clone(), attributes))
+            let attributes = extract_identitystore_user(&describe);
+            Ok(State::existing(resource.id.clone(), attributes))
+        })
     }
 }
 

@@ -286,7 +286,8 @@ fn main() -> Result<()> {
         }
         "provider" => {
             let manual_methods = scan_manual_methods(&args.output_dir.join("services"));
-            let code = generate_provider_code(&all_resources, &models, &manual_methods);
+            let code =
+                generate_provider_code(&all_resources, &all_data_sources, &models, &manual_methods);
             let output_path = args.output_dir.join("provider_generated.rs");
             std::fs::write(&output_path, &code)
                 .with_context(|| format!("Failed to write {}", output_path.display()))?;
@@ -1674,6 +1675,7 @@ fn scan_manual_methods(services_dir: &std::path::Path) -> std::collections::Hash
 /// Uses Smithy models to resolve types for read/write helper generation.
 fn generate_provider_code(
     all_resources: &[ResourceDef],
+    all_data_sources: &[resource_defs::DataSourceDef],
     models: &HashMap<&str, SmithyModel>,
     manual_methods: &std::collections::HashSet<String>,
 ) -> String {
@@ -1686,7 +1688,7 @@ fn generate_provider_code(
          //! DO NOT EDIT MANUALLY - regenerate with:\n\
          //!   ./carina-provider-aws/scripts/generate-provider.sh\n\n\
          use std::collections::HashMap;\n\n\
-         use carina_core::provider::{ProviderError, ProviderResult};\n\
+         use carina_core::provider::{BoxFuture, ProviderError, ProviderResult};\n\
          use carina_core::resource::{Resource, ResourceId, State, Value};\n\
          use carina_core::utils::extract_enum_value;\n\n\
          use crate::AwsProvider;\n\
@@ -1750,7 +1752,7 @@ fn generate_provider_code(
                  \x20       from: &State,\n\
                  \x20       to: Resource,\n\
                  \x20   ) -> ProviderResult<State> {{\n\
-                 \x20       self.apply_ec2_tags(&id, identifier, &to.attributes, Some(&from.attributes))\n\
+                 \x20       self.apply_ec2_tags(&id, identifier, &to.resolved_attributes(), Some(&from.attributes))\n\
                  \x20           .await?;\n\
                  \x20       self.{}(&id, Some(identifier)).await\n\
                  \x20   }}\n\n",
@@ -2197,7 +2199,63 @@ fn generate_provider_code(
         code.push_str("\x20   }\n\n");
     }
 
-    code.push_str("}\n");
+    code.push_str("}\n\n");
+
+    // ===== DataSourceLookups trait =====
+    code.push_str("// ===== Generated DataSourceLookups Trait =====\n\n");
+    code.push_str(
+        "/// One method per `DataSourceDef`. AwsProvider must implement all of\n\
+         /// them; the codegen-emitted dispatcher below routes by\n\
+         /// `resource.id.resource_type`.\n",
+    );
+    code.push_str("pub trait DataSourceLookups {\n");
+    for ds in all_data_sources {
+        let module = module_name(ds.name);
+        code.push_str(&format!(
+            "\x20   fn read_{}_data_source(\n\
+             \x20       &self,\n\
+             \x20       resource: &Resource,\n\
+             \x20   ) -> BoxFuture<'_, ProviderResult<State>>;\n\n",
+            module,
+        ));
+    }
+    code.push_str("}\n\n");
+
+    // ===== read_data_source dispatcher =====
+    code.push_str("// ===== Generated read_data_source dispatcher =====\n\n");
+    code.push_str(
+        "/// Routes `Provider::read_data_source` calls to the matching\n\
+         /// `DataSourceLookups` trait method. The default arm refuses\n\
+         /// to drop user-supplied inputs silently.\n",
+    );
+    code.push_str(
+        "pub(crate) fn dispatch_read_data_source<'a>(\n\
+         \x20   provider: &'a AwsProvider,\n\
+         \x20   resource: &'a Resource,\n\
+         ) -> BoxFuture<'a, ProviderResult<State>> {\n\
+         \x20   match resource.id.resource_type.as_str() {\n",
+    );
+    for ds in all_data_sources {
+        let module = module_name(ds.name);
+        code.push_str(&format!(
+            "\x20       \"{}\" => provider.read_{}_data_source(resource),\n",
+            ds.name, module,
+        ));
+    }
+    code.push_str(
+        "\x20       _ => {\n\
+         \x20           let id = resource.id.clone();\n\
+         \x20           let resource_type = resource.id.resource_type.clone();\n\
+         \x20           Box::pin(async move {\n\
+         \x20               Err(ProviderError::new(format!(\n\
+         \x20                   \"aws provider does not implement read_data_source for '{}'\",\n\
+         \x20                   resource_type\n\
+         \x20               )).for_resource(id))\n\
+         \x20           })\n\
+         \x20       }\n\
+         \x20   }\n\
+         }\n",
+    );
 
     code
 }

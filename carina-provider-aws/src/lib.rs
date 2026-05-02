@@ -2,6 +2,7 @@
 //!
 //! AWS Provider implementation
 
+mod data_source_lookups;
 mod ec2_security_group_rules;
 mod ec2_tags;
 mod factory;

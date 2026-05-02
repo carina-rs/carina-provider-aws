@@ -1,7 +1,7 @@
 use indexmap::IndexMap;
 use std::collections::HashMap;
 
-use carina_core::provider::{ProviderError, ProviderResult};
+use carina_core::provider::{BoxFuture, ProviderError, ProviderResult};
 use carina_core::resource::{LifecycleConfig, Resource, ResourceId, State, Value};
 use carina_core::utils::{convert_enum_value, extract_enum_value};
 
@@ -690,6 +690,142 @@ impl AwsProvider {
 
         Ok(())
     }
+
+    /// Read `s3.Bucket` as a data source. Looks the bucket up by name (the
+    /// required `bucket` input) via `HeadBucket` + `GetBucketLocation`,
+    /// then computes the Terraform-parity attributes (`arn`,
+    /// `bucket_domain_name`, `bucket_regional_domain_name`,
+    /// `hosted_zone_id`).
+    ///
+    /// Wired into `DataSourceLookups` via
+    /// `data_source_lookups::DataSourceLookups`.
+    pub(crate) fn do_read_s3_bucket_data_source(
+        &self,
+        resource: &Resource,
+    ) -> BoxFuture<'_, ProviderResult<State>> {
+        let resource = resource.clone();
+        Box::pin(async move {
+            let bucket = match resource.get_attr("bucket") {
+                Some(Value::String(s)) => s.clone(),
+                _ => {
+                    return Err(ProviderError::new("`bucket` is required")
+                        .for_resource(resource.id.clone()));
+                }
+            };
+
+            // 1. HeadBucket — existence check. Reuses the Managed-side
+            //    classifier so the access-denied / not-found / other split
+            //    is consistent. For a DataSource lookup the user explicitly
+            //    asked to read this bucket, so missing bucket is an error
+            //    (unlike read_s3_bucket which returns State::not_found).
+            self.s3_client
+                .head_bucket()
+                .bucket(&bucket)
+                .send()
+                .await
+                .map_err(|err| {
+                    use aws_sdk_s3::error::SdkError;
+                    let kind = match &err {
+                        SdkError::ServiceError(svc) => classify_head_bucket_status(
+                            svc.raw().status().as_u16(),
+                            svc.err().is_not_found(),
+                        ),
+                        _ => HeadBucketErrorKind::Other,
+                    };
+                    match kind {
+                        HeadBucketErrorKind::NotFound => {
+                            ProviderError::new(format!("Bucket '{bucket}' not found"))
+                                .for_resource(resource.id.clone())
+                        }
+                        HeadBucketErrorKind::AccessDenied => ProviderError::new(format!(
+                            "Access denied for bucket '{bucket}'. This may indicate \
+                             insufficient IAM permissions or the bucket is owned by a \
+                             different AWS account."
+                        ))
+                        .for_resource(resource.id.clone()),
+                        HeadBucketErrorKind::Other => {
+                            ProviderError::new(sdk_error_message("Failed to head bucket", &err))
+                                .for_resource(resource.id.clone())
+                        }
+                    }
+                })?;
+
+            // 2. GetBucketLocation — region. Empty / missing
+            //    LocationConstraint means us-east-1 per S3's protocol.
+            let region = self
+                .s3_client
+                .get_bucket_location()
+                .bucket(&bucket)
+                .send()
+                .await
+                .map_err(|e| {
+                    ProviderError::new(sdk_error_message("Failed to get bucket location", &e))
+                        .for_resource(resource.id.clone())
+                })?
+                .location_constraint()
+                .map(|c| c.as_str().to_string())
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| "us-east-1".to_string());
+
+            // 3. Computed attributes.
+            let arn = format!("arn:aws:s3:::{}", bucket);
+            let bucket_domain_name = format!("{}.s3.amazonaws.com", bucket);
+            let bucket_regional_domain_name = format!("{}.s3.{}.amazonaws.com", bucket, region);
+            let hosted_zone_id = s3_hosted_zone_id(&region)
+                .map_err(|m| ProviderError::new(m).for_resource(resource.id.clone()))?;
+
+            let mut attrs = HashMap::new();
+            attrs.insert("bucket".into(), Value::String(bucket.clone()));
+            attrs.insert("arn".into(), Value::String(arn));
+            attrs.insert("region".into(), Value::String(region));
+            attrs.insert(
+                "bucket_domain_name".into(),
+                Value::String(bucket_domain_name),
+            );
+            attrs.insert(
+                "bucket_regional_domain_name".into(),
+                Value::String(bucket_regional_domain_name),
+            );
+            attrs.insert(
+                "hosted_zone_id".into(),
+                Value::String(hosted_zone_id.to_string()),
+            );
+
+            Ok(State::existing(resource.id.clone(), attrs).with_identifier(&bucket))
+        })
+    }
+}
+
+/// Map AWS region → S3 website-endpoint hosted zone ID.
+///
+/// Source: https://docs.aws.amazon.com/general/latest/gr/s3.html
+/// Limited to commercial regions; isolated partitions (GovCloud, China)
+/// are out of scope.
+pub(crate) fn s3_hosted_zone_id(region: &str) -> Result<&'static str, String> {
+    let id = match region {
+        "us-east-1" => "Z3AQBSTGFYJSTF",
+        "us-east-2" => "Z2O1EMRO9K5GLX",
+        "us-west-1" => "Z2F56UZL2M1ACD",
+        "us-west-2" => "Z3BJ6K6RIION7M",
+        "ap-east-1" => "ZNB98KWMFR0R6",
+        "ap-south-1" => "Z11RGJOFQNVJUP",
+        "ap-northeast-1" => "Z2M4EHUR26P7ZW",
+        "ap-northeast-2" => "Z3W03O7B5YMIYP",
+        "ap-northeast-3" => "Z2YQB5RD63NC85",
+        "ap-southeast-1" => "Z3O0J2DXBE1FTB",
+        "ap-southeast-2" => "Z1WCIGYICN2BYD",
+        "ca-central-1" => "Z1QDHH18159H29",
+        "eu-central-1" => "Z21DNDUVLTQW6Q",
+        "eu-west-1" => "Z1BKCTXD74EZPE",
+        "eu-west-2" => "Z3GKZC51ZF0DB4",
+        "eu-west-3" => "Z3R1K369G5AVDG",
+        "eu-north-1" => "Z3BAZG2TWCNX0D",
+        "eu-south-1" => "Z30OZKI7KPW7MI",
+        "me-south-1" => "Z1MPMWCPA7YB62",
+        "sa-east-1" => "Z7KQH4QJS55SO",
+        _ => return Err(format!("Unknown S3 region: '{region}'")),
+    };
+    Ok(id)
 }
 
 /// Result of classifying an S3 HeadBucket error.
@@ -801,6 +937,22 @@ pub(crate) fn infer_canned_acl(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn s3_hosted_zone_id_known_regions() {
+        assert_eq!(
+            s3_hosted_zone_id("ap-northeast-1").unwrap(),
+            "Z2M4EHUR26P7ZW"
+        );
+        assert_eq!(s3_hosted_zone_id("us-east-1").unwrap(), "Z3AQBSTGFYJSTF");
+        assert_eq!(s3_hosted_zone_id("eu-west-1").unwrap(), "Z1BKCTXD74EZPE");
+    }
+
+    #[test]
+    fn s3_hosted_zone_id_unknown_region_errors() {
+        let err = s3_hosted_zone_id("xx-fake-1").unwrap_err();
+        assert!(err.contains("Unknown S3 region"));
+    }
 
     #[test]
     fn test_infer_canned_acl_private() {
