@@ -180,12 +180,11 @@ mod tests {
     use super::*;
 
     fn make_test_resource(attrs: Vec<(&str, &str)>) -> Resource {
-        use carina_core::resource::Expr;
         let mut resource = Resource::new("route53.RecordSet", "test");
         for (k, v) in attrs {
             resource
                 .attributes
-                .insert(k.to_string(), Expr(Value::String(v.to_string())));
+                .insert(k.to_string(), Value::String(v.to_string()));
         }
         resource
     }

@@ -5,7 +5,7 @@
 //! schema config structs) remain in their respective crates.
 
 use carina_core::resource::Value;
-use carina_core::schema::{AttributeType, CompletionValue, StructField};
+use carina_core::schema::{AttributeType, CompletionValue, StructField, legacy_validator};
 
 // ========== Enum helpers ==========
 
@@ -207,14 +207,14 @@ pub fn aws_resource_id() -> AttributeType {
         pattern: Some("^[a-z-]+-[0-9a-f]{8,}$".to_string()),
         length: None,
         base: Box::new(AttributeType::String),
-        validate: |value| {
+        validate: legacy_validator(|value| {
             if let Value::String(s) = value {
                 validate_aws_resource_id(s)
                     .map_err(|reason| format!("Invalid resource ID '{}': {}", s, reason))
             } else {
                 Err("Expected string".to_string())
             }
-        },
+        }),
         namespace: None,
         to_dsl: None,
     }
@@ -227,14 +227,14 @@ pub fn vpc_id() -> AttributeType {
         pattern: Some("^vpc-[0-9a-f]{8,}$".to_string()),
         length: None,
         base: Box::new(aws_resource_id()),
-        validate: |value| {
+        validate: legacy_validator(|value| {
             if let Value::String(s) = value {
                 validate_prefixed_resource_id(s, "vpc")
                     .map_err(|reason| format!("Invalid VPC ID '{}': {}", s, reason))
             } else {
                 Err("Expected string".to_string())
             }
-        },
+        }),
         namespace: None,
         to_dsl: None,
     }
@@ -247,14 +247,14 @@ pub fn subnet_id() -> AttributeType {
         pattern: Some("^subnet-[0-9a-f]{8,}$".to_string()),
         length: None,
         base: Box::new(aws_resource_id()),
-        validate: |value| {
+        validate: legacy_validator(|value| {
             if let Value::String(s) = value {
                 validate_prefixed_resource_id(s, "subnet")
                     .map_err(|reason| format!("Invalid Subnet ID '{}': {}", s, reason))
             } else {
                 Err("Expected string".to_string())
             }
-        },
+        }),
         namespace: None,
         to_dsl: None,
     }
@@ -267,14 +267,14 @@ pub fn security_group_id() -> AttributeType {
         pattern: Some("^sg-[0-9a-f]{8,}$".to_string()),
         length: None,
         base: Box::new(aws_resource_id()),
-        validate: |value| {
+        validate: legacy_validator(|value| {
             if let Value::String(s) = value {
                 validate_prefixed_resource_id(s, "sg")
                     .map_err(|reason| format!("Invalid Security Group ID '{}': {}", s, reason))
             } else {
                 Err("Expected string".to_string())
             }
-        },
+        }),
         namespace: None,
         to_dsl: None,
     }
@@ -287,14 +287,14 @@ pub fn internet_gateway_id() -> AttributeType {
         pattern: Some("^igw-[0-9a-f]{8,}$".to_string()),
         length: None,
         base: Box::new(aws_resource_id()),
-        validate: |value| {
+        validate: legacy_validator(|value| {
             if let Value::String(s) = value {
                 validate_prefixed_resource_id(s, "igw")
                     .map_err(|reason| format!("Invalid Internet Gateway ID '{}': {}", s, reason))
             } else {
                 Err("Expected string".to_string())
             }
-        },
+        }),
         namespace: None,
         to_dsl: None,
     }
@@ -307,14 +307,14 @@ pub fn route_table_id() -> AttributeType {
         pattern: Some("^rtb-[0-9a-f]{8,}$".to_string()),
         length: None,
         base: Box::new(aws_resource_id()),
-        validate: |value| {
+        validate: legacy_validator(|value| {
             if let Value::String(s) = value {
                 validate_prefixed_resource_id(s, "rtb")
                     .map_err(|reason| format!("Invalid Route Table ID '{}': {}", s, reason))
             } else {
                 Err("Expected string".to_string())
             }
-        },
+        }),
         namespace: None,
         to_dsl: None,
     }
@@ -327,14 +327,14 @@ pub fn nat_gateway_id() -> AttributeType {
         pattern: Some("^nat-[0-9a-f]{8,}$".to_string()),
         length: None,
         base: Box::new(aws_resource_id()),
-        validate: |value| {
+        validate: legacy_validator(|value| {
             if let Value::String(s) = value {
                 validate_prefixed_resource_id(s, "nat")
                     .map_err(|reason| format!("Invalid NAT Gateway ID '{}': {}", s, reason))
             } else {
                 Err("Expected string".to_string())
             }
-        },
+        }),
         namespace: None,
         to_dsl: None,
     }
@@ -347,7 +347,7 @@ pub fn vpc_peering_connection_id() -> AttributeType {
         pattern: Some("^pcx-[0-9a-f]{8,}$".to_string()),
         length: None,
         base: Box::new(aws_resource_id()),
-        validate: |value| {
+        validate: legacy_validator(|value| {
             if let Value::String(s) = value {
                 validate_prefixed_resource_id(s, "pcx").map_err(|reason| {
                     format!("Invalid VPC Peering Connection ID '{}': {}", s, reason)
@@ -355,7 +355,7 @@ pub fn vpc_peering_connection_id() -> AttributeType {
             } else {
                 Err("Expected string".to_string())
             }
-        },
+        }),
         namespace: None,
         to_dsl: None,
     }
@@ -368,14 +368,14 @@ pub fn transit_gateway_id() -> AttributeType {
         pattern: Some("^tgw-[0-9a-f]{8,}$".to_string()),
         length: None,
         base: Box::new(aws_resource_id()),
-        validate: |value| {
+        validate: legacy_validator(|value| {
             if let Value::String(s) = value {
                 validate_prefixed_resource_id(s, "tgw")
                     .map_err(|reason| format!("Invalid Transit Gateway ID '{}': {}", s, reason))
             } else {
                 Err("Expected string".to_string())
             }
-        },
+        }),
         namespace: None,
         to_dsl: None,
     }
@@ -388,7 +388,7 @@ pub fn vpc_cidr_block_association_id() -> AttributeType {
         pattern: Some("^vpc-cidr-assoc-[0-9a-f]{8,}$".to_string()),
         length: None,
         base: Box::new(aws_resource_id()),
-        validate: |value| {
+        validate: legacy_validator(|value| {
             if let Value::String(s) = value {
                 validate_prefixed_resource_id(s, "vpc-cidr-assoc").map_err(|reason| {
                     format!("Invalid VPC CIDR Block Association ID '{}': {}", s, reason)
@@ -396,7 +396,7 @@ pub fn vpc_cidr_block_association_id() -> AttributeType {
             } else {
                 Err("Expected string".to_string())
             }
-        },
+        }),
         namespace: None,
         to_dsl: None,
     }
@@ -409,14 +409,14 @@ pub fn tgw_route_table_id() -> AttributeType {
         pattern: Some("^tgw-rtb-[0-9a-f]{8,}$".to_string()),
         length: None,
         base: Box::new(aws_resource_id()),
-        validate: |value| {
+        validate: legacy_validator(|value| {
             if let Value::String(s) = value {
                 validate_prefixed_resource_id(s, "tgw-rtb")
                     .map_err(|reason| format!("Invalid TGW Route Table ID '{}': {}", s, reason))
             } else {
                 Err("Expected string".to_string())
             }
-        },
+        }),
         namespace: None,
         to_dsl: None,
     }
@@ -429,14 +429,14 @@ pub fn vpn_gateway_id() -> AttributeType {
         pattern: Some("^vgw-[0-9a-f]{8,}$".to_string()),
         length: None,
         base: Box::new(aws_resource_id()),
-        validate: |value| {
+        validate: legacy_validator(|value| {
             if let Value::String(s) = value {
                 validate_prefixed_resource_id(s, "vgw")
                     .map_err(|reason| format!("Invalid VPN Gateway ID '{}': {}", s, reason))
             } else {
                 Err("Expected string".to_string())
             }
-        },
+        }),
         namespace: None,
         to_dsl: None,
     }
@@ -454,7 +454,7 @@ pub fn egress_only_internet_gateway_id() -> AttributeType {
         pattern: Some("^eigw-[0-9a-f]{8,}$".to_string()),
         length: None,
         base: Box::new(aws_resource_id()),
-        validate: |value| {
+        validate: legacy_validator(|value| {
             if let Value::String(s) = value {
                 validate_prefixed_resource_id(s, "eigw").map_err(|reason| {
                     format!(
@@ -465,7 +465,7 @@ pub fn egress_only_internet_gateway_id() -> AttributeType {
             } else {
                 Err("Expected string".to_string())
             }
-        },
+        }),
         namespace: None,
         to_dsl: None,
     }
@@ -478,14 +478,14 @@ pub fn vpc_endpoint_id() -> AttributeType {
         pattern: Some("^vpce-[0-9a-f]{8,}$".to_string()),
         length: None,
         base: Box::new(aws_resource_id()),
-        validate: |value| {
+        validate: legacy_validator(|value| {
             if let Value::String(s) = value {
                 validate_prefixed_resource_id(s, "vpce")
                     .map_err(|reason| format!("Invalid VPC Endpoint ID '{}': {}", s, reason))
             } else {
                 Err("Expected string".to_string())
             }
-        },
+        }),
         namespace: None,
         to_dsl: None,
     }
@@ -498,14 +498,14 @@ pub fn instance_id() -> AttributeType {
         pattern: Some("^i-[0-9a-f]{8,}$".to_string()),
         length: None,
         base: Box::new(aws_resource_id()),
-        validate: |value| {
+        validate: legacy_validator(|value| {
             if let Value::String(s) = value {
                 validate_prefixed_resource_id(s, "i")
                     .map_err(|reason| format!("Invalid Instance ID '{}': {}", s, reason))
             } else {
                 Err("Expected string".to_string())
             }
-        },
+        }),
         namespace: None,
         to_dsl: None,
     }
@@ -518,14 +518,14 @@ pub fn network_interface_id() -> AttributeType {
         pattern: Some("^eni-[0-9a-f]{8,}$".to_string()),
         length: None,
         base: Box::new(aws_resource_id()),
-        validate: |value| {
+        validate: legacy_validator(|value| {
             if let Value::String(s) = value {
                 validate_prefixed_resource_id(s, "eni")
                     .map_err(|reason| format!("Invalid Network Interface ID '{}': {}", s, reason))
             } else {
                 Err("Expected string".to_string())
             }
-        },
+        }),
         namespace: None,
         to_dsl: None,
     }
@@ -539,14 +539,14 @@ pub fn allocation_id() -> AttributeType {
         pattern: Some("^eipalloc-[0-9a-f]{8,}$".to_string()),
         length: None,
         base: Box::new(aws_resource_id()),
-        validate: |value| {
+        validate: legacy_validator(|value| {
             if let Value::String(s) = value {
                 validate_prefixed_resource_id(s, "eipalloc")
                     .map_err(|reason| format!("Invalid Allocation ID '{}': {}", s, reason))
             } else {
                 Err("Expected string".to_string())
             }
-        },
+        }),
         namespace: None,
         to_dsl: None,
     }
@@ -559,14 +559,14 @@ pub fn prefix_list_id() -> AttributeType {
         pattern: Some("^pl-[0-9a-f]{8,}$".to_string()),
         length: None,
         base: Box::new(aws_resource_id()),
-        validate: |value| {
+        validate: legacy_validator(|value| {
             if let Value::String(s) = value {
                 validate_prefixed_resource_id(s, "pl")
                     .map_err(|reason| format!("Invalid Prefix List ID '{}': {}", s, reason))
             } else {
                 Err("Expected string".to_string())
             }
-        },
+        }),
         namespace: None,
         to_dsl: None,
     }
@@ -579,14 +579,14 @@ pub fn carrier_gateway_id() -> AttributeType {
         pattern: Some("^cagw-[0-9a-f]{8,}$".to_string()),
         length: None,
         base: Box::new(aws_resource_id()),
-        validate: |value| {
+        validate: legacy_validator(|value| {
             if let Value::String(s) = value {
                 validate_prefixed_resource_id(s, "cagw")
                     .map_err(|reason| format!("Invalid Carrier Gateway ID '{}': {}", s, reason))
             } else {
                 Err("Expected string".to_string())
             }
-        },
+        }),
         namespace: None,
         to_dsl: None,
     }
@@ -599,14 +599,14 @@ pub fn local_gateway_id() -> AttributeType {
         pattern: Some("^lgw-[0-9a-f]{8,}$".to_string()),
         length: None,
         base: Box::new(aws_resource_id()),
-        validate: |value| {
+        validate: legacy_validator(|value| {
             if let Value::String(s) = value {
                 validate_prefixed_resource_id(s, "lgw")
                     .map_err(|reason| format!("Invalid Local Gateway ID '{}': {}", s, reason))
             } else {
                 Err("Expected string".to_string())
             }
-        },
+        }),
         namespace: None,
         to_dsl: None,
     }
@@ -620,14 +620,14 @@ pub fn network_acl_id() -> AttributeType {
         pattern: Some("^acl-[0-9a-f]{8,}$".to_string()),
         length: None,
         base: Box::new(aws_resource_id()),
-        validate: |value| {
+        validate: legacy_validator(|value| {
             if let Value::String(s) = value {
                 validate_prefixed_resource_id(s, "acl")
                     .map_err(|reason| format!("Invalid Network ACL ID '{}': {}", s, reason))
             } else {
                 Err("Expected string".to_string())
             }
-        },
+        }),
         namespace: None,
         to_dsl: None,
     }
@@ -640,7 +640,7 @@ pub fn transit_gateway_attachment_id() -> AttributeType {
         pattern: Some("^tgw-attach-[0-9a-f]{8,}$".to_string()),
         length: None,
         base: Box::new(aws_resource_id()),
-        validate: |value| {
+        validate: legacy_validator(|value| {
             if let Value::String(s) = value {
                 validate_prefixed_resource_id(s, "tgw-attach").map_err(|reason| {
                     format!("Invalid Transit Gateway Attachment ID '{}': {}", s, reason)
@@ -648,7 +648,7 @@ pub fn transit_gateway_attachment_id() -> AttributeType {
             } else {
                 Err("Expected string".to_string())
             }
-        },
+        }),
         namespace: None,
         to_dsl: None,
     }
@@ -661,14 +661,14 @@ pub fn flow_log_id() -> AttributeType {
         pattern: Some("^fl-[0-9a-f]{8,}$".to_string()),
         length: None,
         base: Box::new(aws_resource_id()),
-        validate: |value| {
+        validate: legacy_validator(|value| {
             if let Value::String(s) = value {
                 validate_prefixed_resource_id(s, "fl")
                     .map_err(|reason| format!("Invalid Flow Log ID '{}': {}", s, reason))
             } else {
                 Err("Expected string".to_string())
             }
-        },
+        }),
         namespace: None,
         to_dsl: None,
     }
@@ -681,14 +681,14 @@ pub fn ipam_id() -> AttributeType {
         pattern: Some("^ipam-[0-9a-f]{8,}$".to_string()),
         length: None,
         base: Box::new(aws_resource_id()),
-        validate: |value| {
+        validate: legacy_validator(|value| {
             if let Value::String(s) = value {
                 validate_prefixed_resource_id(s, "ipam")
                     .map_err(|reason| format!("Invalid IPAM ID '{}': {}", s, reason))
             } else {
                 Err("Expected string".to_string())
             }
-        },
+        }),
         namespace: None,
         to_dsl: None,
     }
@@ -701,7 +701,7 @@ pub fn subnet_route_table_association_id() -> AttributeType {
         pattern: Some("^rtbassoc-[0-9a-f]{8,}$".to_string()),
         length: None,
         base: Box::new(aws_resource_id()),
-        validate: |value| {
+        validate: legacy_validator(|value| {
             if let Value::String(s) = value {
                 validate_prefixed_resource_id(s, "rtbassoc").map_err(|reason| {
                     format!(
@@ -712,7 +712,7 @@ pub fn subnet_route_table_association_id() -> AttributeType {
             } else {
                 Err("Expected string".to_string())
             }
-        },
+        }),
         namespace: None,
         to_dsl: None,
     }
@@ -725,14 +725,14 @@ pub fn security_group_rule_id() -> AttributeType {
         pattern: Some("^sgr-[0-9a-f]{8,}$".to_string()),
         length: None,
         base: Box::new(aws_resource_id()),
-        validate: |value| {
+        validate: legacy_validator(|value| {
             if let Value::String(s) = value {
                 validate_prefixed_resource_id(s, "sgr")
                     .map_err(|reason| format!("Invalid Security Group Rule ID '{}': {}", s, reason))
             } else {
                 Err("Expected string".to_string())
             }
-        },
+        }),
         namespace: None,
         to_dsl: None,
     }
@@ -759,14 +759,14 @@ pub fn iam_role_id() -> AttributeType {
         pattern: Some("^AROA[A-Z0-9]+$".to_string()),
         length: None,
         base: Box::new(aws_resource_id()),
-        validate: |value| {
+        validate: legacy_validator(|value| {
             if let Value::String(s) = value {
                 validate_iam_role_id(s)
                     .map_err(|reason| format!("Invalid IAM Role ID '{}': {}", s, reason))
             } else {
                 Err("Expected string".to_string())
             }
-        },
+        }),
         namespace: None,
         to_dsl: None,
     }
@@ -795,14 +795,14 @@ pub fn aws_account_id() -> AttributeType {
         pattern: Some("^\\d{12}$".to_string()),
         length: Some((Some(12), Some(12))),
         base: Box::new(AttributeType::String),
-        validate: |value| {
+        validate: legacy_validator(|value| {
             if let Value::String(s) = value {
                 validate_aws_account_id(s)
                     .map_err(|reason| format!("Invalid AWS Account ID '{}': {}", s, reason))
             } else {
                 Err("Expected string".to_string())
             }
-        },
+        }),
         namespace: None,
         to_dsl: None,
     }
@@ -934,13 +934,13 @@ pub fn arn() -> AttributeType {
         pattern: Some("^arn:(aws|aws-cn|aws-us-gov):[^:]+:.*$".to_string()),
         length: None,
         base: Box::new(AttributeType::String),
-        validate: |value| {
+        validate: legacy_validator(|value| {
             if let Value::String(s) = value {
                 validate_arn(s).map_err(|reason| format!("Invalid ARN '{}': {}", s, reason))
             } else {
                 Err("Expected string".to_string())
             }
-        },
+        }),
         namespace: None,
         to_dsl: None,
     }
@@ -954,14 +954,14 @@ pub fn iam_role_arn() -> AttributeType {
         pattern: Some("^arn:(aws|aws-cn|aws-us-gov):iam::[^:]*:role/.+$".to_string()),
         length: None,
         base: Box::new(arn()),
-        validate: |value| {
+        validate: legacy_validator(|value| {
             if let Value::String(s) = value {
                 validate_iam_arn(s, "role/")
                     .map_err(|reason| format!("Invalid IAM Role ARN '{}': {}", s, reason))
             } else {
                 Err("Expected string".to_string())
             }
-        },
+        }),
         namespace: None,
         to_dsl: None,
     }
@@ -975,14 +975,14 @@ pub fn iam_policy_arn() -> AttributeType {
         pattern: Some("^arn:(aws|aws-cn|aws-us-gov):iam::[^:]*:policy/.+$".to_string()),
         length: None,
         base: Box::new(arn()),
-        validate: |value| {
+        validate: legacy_validator(|value| {
             if let Value::String(s) = value {
                 validate_iam_arn(s, "policy/")
                     .map_err(|reason| format!("Invalid IAM Policy ARN '{}': {}", s, reason))
             } else {
                 Err("Expected string".to_string())
             }
-        },
+        }),
         namespace: None,
         to_dsl: None,
     }
@@ -996,14 +996,14 @@ pub fn kms_key_arn() -> AttributeType {
         pattern: Some("^arn:(aws|aws-cn|aws-us-gov):kms:[^:]*:[^:]*:key/.+$".to_string()),
         length: None,
         base: Box::new(arn()),
-        validate: |value| {
+        validate: legacy_validator(|value| {
             if let Value::String(s) = value {
                 validate_service_arn(s, "kms", Some("key/"))
                     .map_err(|reason| format!("Invalid KMS Key ARN '{}': {}", s, reason))
             } else {
                 Err("Expected string".to_string())
             }
-        },
+        }),
         namespace: None,
         to_dsl: None,
     }
@@ -1066,14 +1066,14 @@ pub fn kms_key_id() -> AttributeType {
         pattern: None,
         length: None,
         base: Box::new(aws_resource_id()),
-        validate: |value| {
+        validate: legacy_validator(|value| {
             if let Value::String(s) = value {
                 validate_kms_key_id(s)
                     .map_err(|reason| format!("Invalid KMS key identifier '{}': {}", s, reason))
             } else {
                 Err("Expected string".to_string())
             }
-        },
+        }),
         namespace: None,
         to_dsl: None,
     }
@@ -1102,14 +1102,14 @@ pub fn ipam_pool_id() -> AttributeType {
         pattern: Some("^ipam-pool-[0-9a-f]{8,}$".to_string()),
         length: None,
         base: Box::new(aws_resource_id()),
-        validate: |value| {
+        validate: legacy_validator(|value| {
             if let Value::String(s) = value {
                 validate_ipam_pool_id(s)
                     .map_err(|reason| format!("Invalid IPAM Pool ID '{}': {}", s, reason))
             } else {
                 Err("Expected string".to_string())
             }
-        },
+        }),
         namespace: None,
         to_dsl: None,
     }
@@ -1211,14 +1211,14 @@ pub fn availability_zone_id() -> AttributeType {
         pattern: Some("^[a-z]+[0-9]+-az[0-9]+$".to_string()),
         length: None,
         base: Box::new(AttributeType::String),
-        validate: |value| {
+        validate: legacy_validator(|value| {
             if let Value::String(s) = value {
                 validate_availability_zone_id(s)
                     .map_err(|reason| format!("Invalid availability zone ID '{}': {}", s, reason))
             } else {
                 Err("Expected string".to_string())
             }
-        },
+        }),
         namespace: None,
         to_dsl: None,
     }
@@ -1264,7 +1264,7 @@ fn iam_policy_effect() -> AttributeType {
         pattern: Some("^(Allow|Deny)$".to_string()),
         length: None,
         base: Box::new(AttributeType::String),
-        validate: |value| {
+        validate: legacy_validator(|value| {
             if let Value::String(s) = value {
                 match s.as_str() {
                     "Allow" | "Deny" => Ok(()),
@@ -1276,7 +1276,7 @@ fn iam_policy_effect() -> AttributeType {
             } else {
                 Err(format!("Expected string, got {:?}", value))
             }
-        },
+        }),
         namespace: None,
         to_dsl: None,
     }
@@ -1290,7 +1290,7 @@ fn iam_policy_version() -> AttributeType {
         pattern: Some("^(2012-10-17|2008-10-17)$".to_string()),
         length: None,
         base: Box::new(AttributeType::String),
-        validate: |value| {
+        validate: legacy_validator(|value| {
             if let Value::String(s) = value {
                 match s.as_str() {
                     "2012-10-17" | "2008-10-17" => Ok(()),
@@ -1302,7 +1302,7 @@ fn iam_policy_version() -> AttributeType {
             } else {
                 Err(format!("Expected string, got {:?}", value))
             }
-        },
+        }),
         namespace: None,
         to_dsl: None,
     }

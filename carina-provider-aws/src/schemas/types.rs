@@ -8,7 +8,7 @@ pub use carina_aws_types::*;
 use std::collections::HashMap;
 
 use carina_core::resource::Value;
-use carina_core::schema::{AttributeType, ResourceSchema};
+use carina_core::schema::{AttributeType, ResourceSchema, legacy_validator};
 use carina_core::utils::{extract_enum_value, validate_enum_namespace};
 
 /// AWS schema configuration
@@ -36,7 +36,7 @@ pub fn aws_region() -> AttributeType {
         pattern: None,
         length: None,
         base: Box::new(AttributeType::String),
-        validate: |value| {
+        validate: legacy_validator(|value| {
             if let Value::String(s) = value {
                 validate_enum_namespace(s, "Region", "aws")
                     .map_err(|reason| format!("Invalid region '{}': {}", s, reason))?;
@@ -54,7 +54,7 @@ pub fn aws_region() -> AttributeType {
             } else {
                 Err("Expected string".to_string())
             }
-        },
+        }),
         namespace: Some("aws".to_string()),
         to_dsl: Some(|s: &str| s.replace('-', "_")),
     }
@@ -71,7 +71,7 @@ pub fn availability_zone() -> AttributeType {
         pattern: None,
         length: None,
         base: Box::new(AttributeType::String),
-        validate: |value| {
+        validate: legacy_validator(|value| {
             if let Value::String(s) = value {
                 validate_enum_namespace(s, "AvailabilityZone", "aws")
                     .map_err(|reason| format!("Invalid availability zone '{}': {}", s, reason))?;
@@ -82,7 +82,7 @@ pub fn availability_zone() -> AttributeType {
             } else {
                 Err("Expected string".to_string())
             }
-        },
+        }),
         namespace: Some("aws".to_string()),
         to_dsl: Some(|s: &str| s.replace('-', "_")),
     }
@@ -102,7 +102,7 @@ pub fn s3_grantee() -> AttributeType {
         pattern: None,
         length: None,
         base: Box::new(AttributeType::String),
-        validate: |value| {
+        validate: legacy_validator(|value| {
             if let Value::String(s) = value {
                 if s.is_empty() {
                     return Err("Grantee specification must not be empty".to_string());
@@ -125,7 +125,7 @@ pub fn s3_grantee() -> AttributeType {
             } else {
                 Err("Expected string".to_string())
             }
-        },
+        }),
         namespace: None,
         to_dsl: None,
     }

@@ -715,6 +715,9 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
     if needs_types {
         schema_imports.push("types");
     }
+    if has_ranged_ints {
+        schema_imports.push("legacy_validator");
+    }
     let schema_imports_str = schema_imports.join(", ");
 
     code.push_str(&format!(
@@ -1104,7 +1107,7 @@ fn resolve_type(
                          \x20               pattern: None,\n\
                          \x20               length: {},\n\
                          \x20               base: Box::new(AttributeType::Int),\n\
-                         \x20               validate: {},\n\
+                         \x20               validate: legacy_validator({}),\n\
                          \x20               namespace: None,\n\
                          \x20               to_dsl: None,\n\
                          \x20           }}",
