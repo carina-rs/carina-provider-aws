@@ -19,7 +19,7 @@ pub fn ec2_nat_gateway_config() -> AwsSchemaConfig {
         aws_type_name: "AWS::EC2::NatGateway",
         resource_type_name: "ec2.NatGateway",
         has_tags: true,
-        schema: ResourceSchema::new("aws.ec2.NatGateway")
+        schema: ResourceSchema::new("ec2.NatGateway")
         .with_description("Describes a NAT gateway.")
         .attribute(
             AttributeSchema::new("allocation_id", super::allocation_id())

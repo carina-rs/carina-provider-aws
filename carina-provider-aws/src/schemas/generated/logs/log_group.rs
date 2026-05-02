@@ -17,7 +17,7 @@ pub fn logs_log_group_config() -> AwsSchemaConfig {
         aws_type_name: "AWS::Logs::LogGroup",
         resource_type_name: "logs.LogGroup",
         has_tags: true,
-        schema: ResourceSchema::new("aws.logs.LogGroup")
+        schema: ResourceSchema::new("logs.LogGroup")
         .with_description("Represents a log group.")
         .attribute(
             AttributeSchema::new("deletion_protection_enabled", AttributeType::Bool)

@@ -28,7 +28,7 @@ pub fn iam_role_config() -> AwsSchemaConfig {
         aws_type_name: "AWS::IAM::Role",
         resource_type_name: "iam.Role",
         has_tags: true,
-        schema: ResourceSchema::new("aws.iam.Role")
+        schema: ResourceSchema::new("iam.Role")
         .with_description("Contains information about an IAM role. This structure is returned as a response element in several API operations that interact with roles.")
         .attribute(
             AttributeSchema::new("assume_role_policy_document", super::iam_policy_document())

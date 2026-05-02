@@ -15,7 +15,7 @@ pub fn ec2_vpc_peering_connection_config() -> AwsSchemaConfig {
         aws_type_name: "AWS::EC2::VPCPeeringConnection",
         resource_type_name: "ec2.VpcPeeringConnection",
         has_tags: true,
-        schema: ResourceSchema::new("aws.ec2.VpcPeeringConnection")
+        schema: ResourceSchema::new("ec2.VpcPeeringConnection")
         .with_description("Describes a VPC peering connection.")
         .attribute(
             AttributeSchema::new("peer_owner_id", super::aws_account_id())

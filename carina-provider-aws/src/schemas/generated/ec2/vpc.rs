@@ -32,7 +32,7 @@ pub fn ec2_vpc_config() -> AwsSchemaConfig {
         aws_type_name: "AWS::EC2::VPC",
         resource_type_name: "ec2.Vpc",
         has_tags: true,
-        schema: ResourceSchema::new("aws.ec2.Vpc")
+        schema: ResourceSchema::new("ec2.Vpc")
         .with_description("Describes a VPC.")
         .attribute(
             AttributeSchema::new("cidr_block", types::ipv4_cidr())

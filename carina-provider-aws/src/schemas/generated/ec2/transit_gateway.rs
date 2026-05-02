@@ -29,7 +29,7 @@ pub fn ec2_transit_gateway_config() -> AwsSchemaConfig {
         aws_type_name: "AWS::EC2::TransitGateway",
         resource_type_name: "ec2.TransitGateway",
         has_tags: true,
-        schema: ResourceSchema::new("aws.ec2.TransitGateway")
+        schema: ResourceSchema::new("ec2.TransitGateway")
         .with_description("Describes a transit gateway.")
         .attribute(
             AttributeSchema::new("description", AttributeType::String)

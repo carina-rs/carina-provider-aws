@@ -15,7 +15,7 @@ pub fn organizations_organization_config() -> AwsSchemaConfig {
         aws_type_name: "AWS::Organizations::Organization",
         resource_type_name: "organizations.Organization",
         has_tags: false,
-        schema: ResourceSchema::new("aws.organizations.Organization")
+        schema: ResourceSchema::new("organizations.Organization")
         .with_description("Contains details about an organization. An organization is a collection of accounts that are centrally managed together using consolidated billing, organized hierarchically with organizational units (...")
         .attribute(
             AttributeSchema::new("feature_set", AttributeType::StringEnum {

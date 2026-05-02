@@ -33,7 +33,7 @@ pub fn route53_record_set_config() -> AwsSchemaConfig {
         aws_type_name: "AWS::Route53::RecordSet",
         resource_type_name: "route53.RecordSet",
         has_tags: false,
-        schema: ResourceSchema::new("aws.route53.RecordSet")
+        schema: ResourceSchema::new("route53.RecordSet")
         .with_description("Information about the resource record set to create or delete.")
         .attribute(
             AttributeSchema::new("alias_target", AttributeType::Struct {

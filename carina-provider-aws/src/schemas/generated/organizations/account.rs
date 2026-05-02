@@ -21,7 +21,7 @@ pub fn organizations_account_config() -> AwsSchemaConfig {
         aws_type_name: "AWS::Organizations::Account",
         resource_type_name: "organizations.Account",
         has_tags: true,
-        schema: ResourceSchema::new("aws.organizations.Account")
+        schema: ResourceSchema::new("organizations.Account")
         .with_description("Contains information about an Amazon Web Services account that is a member of an organization.")
         .attribute(
             AttributeSchema::new("account_name", AttributeType::String)

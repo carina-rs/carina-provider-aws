@@ -13,7 +13,7 @@ pub fn ec2_vpc_gateway_attachment_config() -> AwsSchemaConfig {
         aws_type_name: "AWS::EC2::VPCGatewayAttachment",
         resource_type_name: "ec2.VpcGatewayAttachment",
         has_tags: false,
-        schema: ResourceSchema::new("aws.ec2.VpcGatewayAttachment")
+        schema: ResourceSchema::new("ec2.VpcGatewayAttachment")
             .attribute(
                 AttributeSchema::new("internet_gateway_id", super::internet_gateway_id())
                     .required()

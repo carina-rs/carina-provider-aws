@@ -804,7 +804,7 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
         cf_type_name(res.name),
         res.name,
         res.has_tags,
-        namespace,
+        res.name,
     ));
 
     // Description from read structure (or create input for multi-op resources)
@@ -2568,7 +2568,6 @@ fn generate_markdown_resource(res: &ResourceDef, model: &SmithyModel) -> Result<
 /// Generate Rust schema code for a data source.
 fn generate_data_source(ds: &resource_defs::DataSourceDef, model: &SmithyModel) -> Result<String> {
     let ns = ds.service_namespace;
-    let namespace = format!("aws.{}", ds.name);
     let config_fn = format!("{}_config", module_name(ds.name));
     let cf_type = cf_type_name(ds.name);
 
@@ -2680,7 +2679,7 @@ fn generate_data_source(ds: &resource_defs::DataSourceDef, model: &SmithyModel) 
         config_fn,
         cf_type,
         ds.name,
-        namespace,
+        ds.name,
     ));
 
     // Emit attributes.

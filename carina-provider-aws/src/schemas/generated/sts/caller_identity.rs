@@ -13,7 +13,7 @@ pub fn sts_caller_identity_config() -> AwsSchemaConfig {
         aws_type_name: "AWS::STS::CallerIdentity",
         resource_type_name: "sts.CallerIdentity",
         has_tags: false,
-        schema: ResourceSchema::new("aws.sts.CallerIdentity")
+        schema: ResourceSchema::new("sts.CallerIdentity")
         .as_data_source()
         .attribute(
             AttributeSchema::new("account_id", super::aws_account_id())

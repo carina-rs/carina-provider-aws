@@ -23,7 +23,7 @@ pub fn ec2_transit_gateway_attachment_config() -> AwsSchemaConfig {
         aws_type_name: "AWS::EC2::TransitGatewayAttachment",
         resource_type_name: "ec2.TransitGatewayAttachment",
         has_tags: true,
-        schema: ResourceSchema::new("aws.ec2.TransitGatewayAttachment")
+        schema: ResourceSchema::new("ec2.TransitGatewayAttachment")
         .with_description("Describes a VPC attachment.")
         .attribute(
             AttributeSchema::new("options", AttributeType::Struct {

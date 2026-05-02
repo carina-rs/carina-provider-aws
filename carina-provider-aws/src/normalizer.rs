@@ -6,7 +6,7 @@ use indexmap::IndexMap;
 
 use carina_core::provider::{self, ProviderNormalizer};
 use carina_core::resource::{Resource, Value};
-use carina_core::schema::ResourceSchema;
+use carina_core::schema::SchemaRegistry;
 
 /// Schema extension for the AWS provider.
 ///
@@ -22,9 +22,9 @@ impl ProviderNormalizer for AwsNormalizer {
         &self,
         resources: &mut [Resource],
         default_tags: &IndexMap<String, Value>,
-        schemas: &HashMap<String, ResourceSchema>,
+        registry: &SchemaRegistry,
     ) {
-        provider::merge_default_tags_for_provider("aws", resources, default_tags, schemas);
+        provider::merge_default_tags_for_provider("aws", resources, default_tags, registry);
     }
 }
 
@@ -42,13 +42,9 @@ pub(crate) fn resolve_enum_identifiers(resources: &mut [Resource]) {
         }
 
         // Find the matching schema config
-        let config = configs.iter().find(|c| {
-            c.schema
-                .resource_type
-                .strip_prefix("aws.")
-                .map(|t| t == resource.id.resource_type)
-                .unwrap_or(false)
-        });
+        let config = configs
+            .iter()
+            .find(|c| c.schema.resource_type == resource.id.resource_type);
         let config = match config {
             Some(c) => c,
             None => continue,
@@ -78,13 +74,9 @@ pub(crate) fn resolve_enum_identifiers(resources: &mut [Resource]) {
 /// to match the resolved DSL values.
 pub(crate) fn normalize_state_enums(resource_type: &str, attributes: &mut HashMap<String, Value>) {
     let configs = crate::schemas::generated::configs();
-    let config = configs.iter().find(|c| {
-        c.schema
-            .resource_type
-            .strip_prefix("aws.")
-            .map(|t| t == resource_type)
-            .unwrap_or(false)
-    });
+    let config = configs
+        .iter()
+        .find(|c| c.schema.resource_type == resource_type);
     let config = match config {
         Some(c) => c,
         None => return,
