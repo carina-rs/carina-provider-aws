@@ -6,7 +6,7 @@ use carina_provider_protocol::types as proto;
 
 use carina_core::provider::{Provider, ProviderError as CoreProviderError, ProviderNormalizer};
 use carina_core::resource::Value as CoreValue;
-use carina_core::schema::ResourceSchema;
+use carina_core::schema::SchemaRegistry;
 
 use carina_provider_aws::AwsNormalizer;
 use carina_provider_aws::AwsProvider;
@@ -260,12 +260,12 @@ impl CarinaProvider for AwsProcessProvider {
             .iter()
             .map(|(k, v)| (k.clone(), convert::proto_to_core_value(v)))
             .collect();
-        let core_schemas: HashMap<String, ResourceSchema> = proto_schemas
-            .iter()
-            .map(|s| (s.resource_type.clone(), convert::proto_to_core_schema(s)))
-            .collect();
+        let mut registry = SchemaRegistry::new();
+        for s in proto_schemas {
+            registry.insert("aws", convert::proto_to_core_schema(s));
+        }
         self.normalizer
-            .merge_default_tags(&mut core_resources, &core_tags, &core_schemas);
+            .merge_default_tags(&mut core_resources, &core_tags, &registry);
         *resources = core_resources
             .iter()
             .map(convert::core_to_proto_resource)
@@ -295,7 +295,7 @@ mod tests {
         let schemas = provider.schemas();
         let bucket = schemas
             .iter()
-            .find(|s| s.resource_type == "aws.s3.Bucket")
+            .find(|s| s.resource_type == "s3.Bucket")
             .expect("s3.bucket schema should exist");
         assert!(
             bucket
@@ -313,7 +313,7 @@ mod tests {
         if let Some(untagged) = configs.iter().find(|c| !c.has_tags) {
             let schema = schemas
                 .iter()
-                .find(|s| s.resource_type == format!("aws.{}", untagged.resource_type_name))
+                .find(|s| s.resource_type == untagged.resource_type_name)
                 .expect("untagged schema should exist");
             assert!(
                 !schema
@@ -329,14 +329,12 @@ mod tests {
         let provider = AwsProcessProvider::new();
         let schemas = provider.schemas();
         assert!(
-            schemas.iter().any(|s| s.resource_type == "aws.iam.Role"),
-            "aws.iam.Role schema should be registered"
+            schemas.iter().any(|s| s.resource_type == "iam.Role"),
+            "iam.Role schema should be registered"
         );
         assert!(
-            schemas
-                .iter()
-                .any(|s| s.resource_type == "aws.logs.LogGroup"),
-            "aws.logs.LogGroup schema should be registered"
+            schemas.iter().any(|s| s.resource_type == "logs.LogGroup"),
+            "logs.LogGroup schema should be registered"
         );
     }
 

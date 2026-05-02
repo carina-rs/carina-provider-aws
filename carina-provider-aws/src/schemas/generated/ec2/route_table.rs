@@ -15,7 +15,7 @@ pub fn ec2_route_table_config() -> AwsSchemaConfig {
         aws_type_name: "AWS::EC2::RouteTable",
         resource_type_name: "ec2.RouteTable",
         has_tags: true,
-        schema: ResourceSchema::new("aws.ec2.RouteTable")
+        schema: ResourceSchema::new("ec2.RouteTable")
             .with_description("Describes a route table.")
             .attribute(
                 AttributeSchema::new("vpc_id", super::vpc_id())

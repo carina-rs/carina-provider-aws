@@ -13,7 +13,7 @@ pub fn ec2_subnet_route_table_association_config() -> AwsSchemaConfig {
         aws_type_name: "AWS::EC2::SubnetRouteTableAssociation",
         resource_type_name: "ec2.SubnetRouteTableAssociation",
         has_tags: false,
-        schema: ResourceSchema::new("aws.ec2.SubnetRouteTableAssociation")
+        schema: ResourceSchema::new("ec2.SubnetRouteTableAssociation")
         .with_description("Describes an association between a route table and a subnet or gateway.")
         .attribute(
             AttributeSchema::new("public_ipv4_pool", AttributeType::String)

@@ -13,14 +13,14 @@ use carina_core::resource::{
 use carina_core::schema::{
     AttributeSchema as CoreAttributeSchema, AttributeType as CoreAttributeType,
     OperationConfig as CoreOperationConfig, ResourceSchema as CoreResourceSchema,
-    StructField as CoreStructField, noop_validator,
+    SchemaKind as CoreSchemaKind, StructField as CoreStructField, noop_validator,
 };
 use carina_provider_protocol::types::{
     AttributeSchema as ProtoAttributeSchema, AttributeType as ProtoAttributeType,
     LifecycleConfig as ProtoLifecycle, OperationConfig as ProtoOperationConfig,
     Resource as ProtoResource, ResourceId as ProtoResourceId,
-    ResourceSchema as ProtoResourceSchema, State as ProtoState, StructField as ProtoStructField,
-    Value as ProtoValue,
+    ResourceSchema as ProtoResourceSchema, SchemaKind as ProtoSchemaKind, State as ProtoState,
+    StructField as ProtoStructField, Value as ProtoValue,
 };
 
 // -- ResourceId --
@@ -237,7 +237,7 @@ pub fn proto_to_core_schema(s: &ProtoResourceSchema) -> CoreResourceSchema {
             .collect(),
         description: s.description.clone(),
         validator: None,
-        data_source: s.data_source,
+        kind: proto_to_core_schema_kind(s.kind),
         name_attribute: s.name_attribute.clone(),
         force_replace: s.force_replace,
         operation_config: s.operation_config.as_ref().map(|c| CoreOperationConfig {
@@ -247,6 +247,20 @@ pub fn proto_to_core_schema(s: &ProtoResourceSchema) -> CoreResourceSchema {
             create_max_retries: c.create_max_retries,
         }),
         exclusive_required: s.exclusive_required.clone(),
+    }
+}
+
+fn proto_to_core_schema_kind(k: ProtoSchemaKind) -> CoreSchemaKind {
+    match k {
+        ProtoSchemaKind::Managed => CoreSchemaKind::Managed,
+        ProtoSchemaKind::DataSource => CoreSchemaKind::DataSource,
+    }
+}
+
+fn core_to_proto_schema_kind(k: CoreSchemaKind) -> ProtoSchemaKind {
+    match k {
+        CoreSchemaKind::Managed => ProtoSchemaKind::Managed,
+        CoreSchemaKind::DataSource => ProtoSchemaKind::DataSource,
     }
 }
 
@@ -331,7 +345,7 @@ pub fn core_to_proto_schema(s: &CoreResourceSchema) -> ProtoResourceSchema {
             .map(|(k, v)| (k.clone(), core_to_proto_attribute_schema(v)))
             .collect(),
         description: s.description.clone(),
-        data_source: s.data_source,
+        kind: core_to_proto_schema_kind(s.kind),
         name_attribute: s.name_attribute.clone(),
         force_replace: s.force_replace,
         operation_config: s.operation_config.as_ref().map(|c| ProtoOperationConfig {

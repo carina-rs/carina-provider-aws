@@ -32,7 +32,7 @@ pub fn s3_bucket_config() -> AwsSchemaConfig {
         aws_type_name: "AWS::S3::Bucket",
         resource_type_name: "s3.Bucket",
         has_tags: true,
-        schema: ResourceSchema::new("aws.s3.Bucket")
+        schema: ResourceSchema::new("s3.Bucket")
         .attribute(
             AttributeSchema::new("acl", AttributeType::StringEnum {
                 name: "ACL".to_string(),

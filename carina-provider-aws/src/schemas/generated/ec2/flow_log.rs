@@ -28,7 +28,7 @@ pub fn ec2_flow_log_config() -> AwsSchemaConfig {
         aws_type_name: "AWS::EC2::FlowLog",
         resource_type_name: "ec2.FlowLog",
         has_tags: true,
-        schema: ResourceSchema::new("aws.ec2.FlowLog")
+        schema: ResourceSchema::new("ec2.FlowLog")
         .with_description("Describes a flow log.")
         .attribute(
             AttributeSchema::new("deliver_logs_permission_arn", super::iam_role_arn())

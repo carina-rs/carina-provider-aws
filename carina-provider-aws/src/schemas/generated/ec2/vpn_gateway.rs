@@ -17,7 +17,7 @@ pub fn ec2_vpn_gateway_config() -> AwsSchemaConfig {
         aws_type_name: "AWS::EC2::VPNGateway",
         resource_type_name: "ec2.VpnGateway",
         has_tags: true,
-        schema: ResourceSchema::new("aws.ec2.VpnGateway")
+        schema: ResourceSchema::new("ec2.VpnGateway")
         .with_description("Describes a virtual private gateway.")
         .attribute(
             AttributeSchema::new("amazon_side_asn", AttributeType::Int)

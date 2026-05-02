@@ -42,7 +42,7 @@ pub fn ec2_security_group_ingress_config() -> AwsSchemaConfig {
         aws_type_name: "AWS::EC2::SecurityGroupIngress",
         resource_type_name: "ec2.SecurityGroupIngress",
         has_tags: false,
-        schema: ResourceSchema::new("aws.ec2.SecurityGroupIngress")
+        schema: ResourceSchema::new("ec2.SecurityGroupIngress")
         .with_description("Describes a security group rule.")
         .attribute(
             AttributeSchema::new("cidr_ip", types::ipv4_cidr())

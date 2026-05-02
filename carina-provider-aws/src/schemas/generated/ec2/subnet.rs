@@ -44,7 +44,7 @@ pub fn ec2_subnet_config() -> AwsSchemaConfig {
         aws_type_name: "AWS::EC2::Subnet",
         resource_type_name: "ec2.Subnet",
         has_tags: true,
-        schema: ResourceSchema::new("aws.ec2.Subnet")
+        schema: ResourceSchema::new("ec2.Subnet")
         .with_description("Describes a subnet.")
         .attribute(
             AttributeSchema::new("assign_ipv6_address_on_creation", AttributeType::Bool)

@@ -13,7 +13,7 @@ pub fn ec2_route_config() -> AwsSchemaConfig {
         aws_type_name: "AWS::EC2::Route",
         resource_type_name: "ec2.Route",
         has_tags: false,
-        schema: ResourceSchema::new("aws.ec2.Route")
+        schema: ResourceSchema::new("ec2.Route")
         .with_description("Describes a route in a route table.")
         .attribute(
             AttributeSchema::new("destination_cidr_block", types::ipv4_cidr())
