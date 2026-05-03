@@ -361,4 +361,73 @@ impl AwsProvider {
 
         Ok(())
     }
+
+    /// Extract ec2.VpcEndpoint attributes from the SDK response.
+    ///
+    /// Lives here (not in `provider_generated.rs`) because
+    /// `policy_document` is parsed JSON → `Value::Map` via
+    /// `iam_policy_json_to_value`, which the codegen template can't
+    /// express. `scan_manual_methods` picks this up by name and the
+    /// codegen skips emitting a duplicate stub. The list-typed members
+    /// (route_table_ids / subnet_ids / Groups[*].group_id) are also
+    /// extracted here for the same reason — keeping the extractor
+    /// whole reads cleaner than re-deriving half of it from
+    /// `derived_attributes`.
+    pub(crate) fn extract_ec2_vpc_endpoint_attributes(
+        obj: &aws_sdk_ec2::types::VpcEndpoint,
+        attributes: &mut HashMap<String, Value>,
+    ) -> Option<String> {
+        if let Some(v) = obj.vpc_endpoint_id() {
+            attributes.insert("vpc_endpoint_id".to_string(), Value::String(v.to_string()));
+        }
+        if let Some(v) = obj.vpc_endpoint_type() {
+            attributes.insert(
+                "vpc_endpoint_type".to_string(),
+                Value::String(v.as_str().to_string()),
+            );
+        }
+        if let Some(v) = obj.vpc_id() {
+            attributes.insert("vpc_id".to_string(), Value::String(v.to_string()));
+        }
+        if let Some(v) = obj.service_name() {
+            attributes.insert("service_name".to_string(), Value::String(v.to_string()));
+        }
+        if let Some(v) = obj.private_dns_enabled() {
+            attributes.insert("private_dns_enabled".to_string(), Value::Bool(v));
+        }
+        if let Some(v) = obj.policy_document() {
+            // Try to parse the policy document JSON into a Value::Map.
+            let policy_value = crate::services::iam::role::iam_policy_json_to_value(v)
+                .unwrap_or_else(|_| Value::String(v.to_string()));
+            attributes.insert("policy_document".to_string(), policy_value);
+        }
+        {
+            let ids = obj.route_table_ids();
+            if !ids.is_empty() {
+                let list: Vec<Value> = ids.iter().map(|s| Value::String(s.to_string())).collect();
+                attributes.insert("route_table_ids".to_string(), Value::List(list));
+            }
+        }
+        {
+            let ids = obj.subnet_ids();
+            if !ids.is_empty() {
+                let list: Vec<Value> = ids.iter().map(|s| Value::String(s.to_string())).collect();
+                attributes.insert("subnet_ids".to_string(), Value::List(list));
+            }
+        }
+        // Extract security group IDs from Groups[*].group_id.
+        {
+            let groups = obj.groups();
+            if !groups.is_empty() {
+                let list: Vec<Value> = groups
+                    .iter()
+                    .filter_map(|g| g.group_id().map(|id| Value::String(id.to_string())))
+                    .collect();
+                if !list.is_empty() {
+                    attributes.insert("security_group_ids".to_string(), Value::List(list));
+                }
+            }
+        }
+        obj.vpc_endpoint_id().map(String::from)
+    }
 }
