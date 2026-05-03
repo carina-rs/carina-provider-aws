@@ -2132,51 +2132,92 @@ fn generate_provider_code(
         for (attr_name, accessor_name, member_ref) in &fields_to_extract {
             let kind = model.shape_kind(&member_ref.target);
             let accessor = escape_rust_keyword(accessor_name);
+            // Smithy `@required` members generate accessors that return the
+            // value directly (`-> &str`, `-> bool`, etc.) rather than as
+            // `Option`. Branch the emission so required strings hit
+            // `let v = obj.<f>(); if !v.is_empty()` and required scalars
+            // skip the `if let` entirely. Optional members keep the
+            // existing `if let Some(v)` shape.
+            let required = SmithyModel::is_required(member_ref);
 
             match kind {
                 Some(ShapeKind::Enum) => {
-                    code.push_str(&format!(
-                        "\x20       if let Some(v) = obj.{}() {{\n",
-                        accessor
-                    ));
-                    code.push_str(&format!(
-                        "\x20           attributes.insert(\"{}\".to_string(), Value::String(v.as_str().to_string()));\n",
-                        attr_name
-                    ));
-                    code.push_str("\x20       }\n");
+                    if required {
+                        code.push_str(&format!(
+                            "\x20       attributes.insert(\"{}\".to_string(), Value::String(obj.{}().as_str().to_string()));\n",
+                            attr_name, accessor
+                        ));
+                    } else {
+                        code.push_str(&format!(
+                            "\x20       if let Some(v) = obj.{}() {{\n",
+                            accessor
+                        ));
+                        code.push_str(&format!(
+                            "\x20           attributes.insert(\"{}\".to_string(), Value::String(v.as_str().to_string()));\n",
+                            attr_name
+                        ));
+                        code.push_str("\x20       }\n");
+                    }
                 }
                 Some(ShapeKind::Boolean) => {
-                    code.push_str(&format!(
-                        "\x20       if let Some(v) = obj.{}() {{\n",
-                        accessor
-                    ));
-                    code.push_str(&format!(
-                        "\x20           attributes.insert(\"{}\".to_string(), Value::Bool(v));\n",
-                        attr_name
-                    ));
-                    code.push_str("\x20       }\n");
+                    if required {
+                        code.push_str(&format!(
+                            "\x20       attributes.insert(\"{}\".to_string(), Value::Bool(obj.{}()));\n",
+                            attr_name, accessor
+                        ));
+                    } else {
+                        code.push_str(&format!(
+                            "\x20       if let Some(v) = obj.{}() {{\n",
+                            accessor
+                        ));
+                        code.push_str(&format!(
+                            "\x20           attributes.insert(\"{}\".to_string(), Value::Bool(v));\n",
+                            attr_name
+                        ));
+                        code.push_str("\x20       }\n");
+                    }
                 }
                 Some(ShapeKind::Integer) | Some(ShapeKind::Long) => {
-                    code.push_str(&format!(
-                        "\x20       if let Some(v) = obj.{}() {{\n",
-                        accessor
-                    ));
-                    code.push_str(&format!(
-                        "\x20           attributes.insert(\"{}\".to_string(), Value::Int(v as i64));\n",
-                        attr_name
-                    ));
-                    code.push_str("\x20       }\n");
+                    if required {
+                        code.push_str(&format!(
+                            "\x20       attributes.insert(\"{}\".to_string(), Value::Int(obj.{}() as i64));\n",
+                            attr_name, accessor
+                        ));
+                    } else {
+                        code.push_str(&format!(
+                            "\x20       if let Some(v) = obj.{}() {{\n",
+                            accessor
+                        ));
+                        code.push_str(&format!(
+                            "\x20           attributes.insert(\"{}\".to_string(), Value::Int(v as i64));\n",
+                            attr_name
+                        ));
+                        code.push_str("\x20       }\n");
+                    }
                 }
                 Some(ShapeKind::String) => {
-                    code.push_str(&format!(
-                        "\x20       if let Some(v) = obj.{}() {{\n",
-                        accessor
-                    ));
-                    code.push_str(&format!(
-                        "\x20           attributes.insert(\"{}\".to_string(), Value::String(v.to_string()));\n",
-                        attr_name
-                    ));
-                    code.push_str("\x20       }\n");
+                    if required {
+                        // Required strings: skip empty-string sentinels the
+                        // SDK uses for "missing on the wire," matching the
+                        // pre-existing hand edits in provider_generated.rs.
+                        code.push_str(&format!(
+                            "\x20       let v = obj.{}();\n\
+                             \x20       if !v.is_empty() {{\n\
+                             \x20           attributes.insert(\"{}\".to_string(), Value::String(v.to_string()));\n\
+                             \x20       }}\n",
+                            accessor, attr_name
+                        ));
+                    } else {
+                        code.push_str(&format!(
+                            "\x20       if let Some(v) = obj.{}() {{\n",
+                            accessor
+                        ));
+                        code.push_str(&format!(
+                            "\x20           attributes.insert(\"{}\".to_string(), Value::String(v.to_string()));\n",
+                            attr_name
+                        ));
+                        code.push_str("\x20       }\n");
+                    }
                 }
                 _ => {
                     // Skip complex types (structures, lists, maps) that need
@@ -2188,10 +2229,19 @@ fn generate_provider_code(
         // Return identifier value (only if identifier exists in read_structure)
         if !res.identifier.is_empty() && read_struct.members.contains_key(res.identifier) {
             let id_snake = escape_rust_keyword(&res.identifier.to_snake_case());
-            code.push_str(&format!(
-                "\x20       obj.{}().map(String::from)\n",
-                id_snake
-            ));
+            let id_member = read_struct.members.get(res.identifier).unwrap();
+            let id_required = SmithyModel::is_required(id_member);
+            if id_required {
+                code.push_str(&format!(
+                    "\x20       Some(obj.{}().to_string())\n",
+                    id_snake
+                ));
+            } else {
+                code.push_str(&format!(
+                    "\x20       obj.{}().map(String::from)\n",
+                    id_snake
+                ));
+            }
         } else {
             code.push_str("\x20       None\n");
         }
@@ -3652,6 +3702,105 @@ mod tests {
         assert!(
             !generated.contains(".with_completions("),
             "enum completions should come from schema type metadata: {generated}"
+        );
+    }
+
+    /// Build the inputs `generate_provider_code` needs for a single
+    /// resource def, loading the Smithy fixture if available. Returns
+    /// `None` when the fixture is missing so the caller can skip
+    /// gracefully.
+    fn provider_code_for_single_resource(res: ResourceDef, fixture: &str) -> Option<String> {
+        let fixture_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../carina-provider-aws/tests/fixtures/smithy/")
+            .join(fixture);
+        if !fixture_path.exists() {
+            eprintln!(
+                "Skipping: Smithy fixture not found: {}",
+                fixture_path.display()
+            );
+            return None;
+        }
+        let file = std::fs::File::open(&fixture_path).expect("open fixture");
+        let model = carina_smithy::parse_reader(std::io::BufReader::new(file)).expect("parse");
+        let mut models: HashMap<&str, SmithyModel> = HashMap::new();
+        // Leak the namespace string to obtain a 'static borrow for the
+        // models map without redesigning the signature.
+        let ns: &'static str = Box::leak(res.service_namespace.to_string().into_boxed_str());
+        models.insert(ns, model);
+
+        let resources = vec![res];
+        let data_sources: Vec<resource_defs::DataSourceDef> = vec![];
+        let manual = std::collections::HashSet::new();
+        Some(generate_provider_code(
+            &resources,
+            &data_sources,
+            &models,
+            &manual,
+        ))
+    }
+
+    #[test]
+    fn extract_iam_role_uses_required_field_pattern() {
+        let res = resource_defs::iam_resources()
+            .into_iter()
+            .find(|r| r.name == "iam.Role")
+            .expect("iam.Role missing");
+        let Some(code) = provider_code_for_single_resource(res, "iam.json") else {
+            return;
+        };
+
+        // Required strings must use the `let v = obj.<f>(); if !v.is_empty()` shape.
+        // The wrong (current) shape is `if let Some(v) = obj.role_name()`, which
+        // fails to compile because the SDK returns &str directly for required
+        // members.
+        assert!(
+            code.contains("let v = obj.role_name();"),
+            "required role_name must use let-then-empty pattern: {code}"
+        );
+        assert!(
+            code.contains("let v = obj.arn();"),
+            "required arn must use let-then-empty pattern: {code}"
+        );
+        assert!(
+            code.contains("let v = obj.path();"),
+            "required path must use let-then-empty pattern: {code}"
+        );
+        assert!(
+            code.contains("let v = obj.role_id();"),
+            "required role_id must use let-then-empty pattern: {code}"
+        );
+
+        // role_name is the identifier; the trailing identifier-return must
+        // unwrap directly (no .map(String::from) on a non-Option).
+        assert!(
+            code.contains("Some(obj.role_name().to_string())"),
+            "required identifier role_name must Some(.to_string()): {code}"
+        );
+
+        // No regression: optional fields keep the if-let-Some shape.
+        assert!(
+            code.contains("if let Some(v) = obj.description()"),
+            "optional description must keep if-let-Some: {code}"
+        );
+    }
+
+    #[test]
+    fn extract_route53_record_set_required_name_compiles() {
+        let res = resource_defs::route53_resources()
+            .into_iter()
+            .find(|r| r.name == "route53.RecordSet")
+            .expect("route53.RecordSet missing");
+        let Some(code) = provider_code_for_single_resource(res, "route53.json") else {
+            return;
+        };
+
+        assert!(
+            code.contains("let v = obj.name();"),
+            "required name must use let-then-empty pattern: {code}"
+        );
+        assert!(
+            code.contains("Some(obj.name().to_string())"),
+            "required identifier name must Some(.to_string()): {code}"
         );
     }
 
