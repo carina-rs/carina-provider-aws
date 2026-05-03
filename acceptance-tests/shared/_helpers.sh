@@ -85,7 +85,8 @@ prepare_work_dir() {
 
 ACTIVE_WORK_DIR=""
 cleanup() {
-    if [ -n "$ACTIVE_WORK_DIR" ] && [ -d "$ACTIVE_WORK_DIR" ]; then
+    if [ -n "$ACTIVE_WORK_DIR" ] && [ -d "$ACTIVE_WORK_DIR" ] && \
+       compgen -G "$ACTIVE_WORK_DIR/*.crn" > /dev/null; then
         echo "  Cleanup: destroying resources..."
         cd "$ACTIVE_WORK_DIR"
         "$CARINA_BIN" destroy --auto-approve . 2>/dev/null || true
