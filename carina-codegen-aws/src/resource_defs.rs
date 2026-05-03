@@ -85,6 +85,39 @@ pub struct ResourceDef {
     /// Fields to mark as identity (contribute to anonymous resource identifier hashing).
     /// Use for attributes that distinguish same-type resources sharing create-only values.
     pub identity_overrides: Vec<&'static str>,
+    /// Read-back projections for attributes that are not direct members of
+    /// the read structure. The DSL attribute already lives in the schema
+    /// (typically because the create input already contains it); this only
+    /// tells the extraction emitter how to recover the value from the
+    /// response shape — see `DerivedSource`.
+    pub derived_attributes: Vec<DerivedAttribute>,
+}
+
+/// One read-back projection for `extract_*_attributes`.
+///
+/// `attr` is the DSL-side attribute name in the same spelling used
+/// elsewhere in `ResourceDef` (PascalCase or pre-snake_cased member name);
+/// the emitter snake_cases it for the attribute key.
+pub struct DerivedAttribute {
+    pub attr: &'static str,
+    pub source: DerivedSource,
+}
+
+/// Where the value for a `DerivedAttribute` lives in the SDK response.
+///
+/// Marked `#[non_exhaustive]` so adding a new projection in a future
+/// sub-issue (B-3, B-4) does not silently force every external match arm
+/// to compile. `carina-codegen-aws` is currently the only consumer.
+#[non_exhaustive]
+pub enum DerivedSource {
+    /// `obj.<list_member>().first().and_then(|x| x.<child_member>())`.
+    /// Used for SDK responses whose top-level field is a `Vec<Struct>` and
+    /// the resource convention is to read only the first element
+    /// (e.g. `NatGateway.NatGatewayAddresses[0].AllocationId`).
+    ListFirst {
+        list_member: &'static str,
+        child_member: &'static str,
+    },
 }
 
 /// How fields are passed to an update API operation.
@@ -210,6 +243,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             read_only_overrides: vec![],
             extra_writable: vec![],
             identity_overrides: vec![],
+            derived_attributes: vec![],
         },
         // ec2.subnet
         ResourceDef {
@@ -244,6 +278,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             read_only_overrides: vec![],
             extra_writable: vec![],
             identity_overrides: vec![],
+            derived_attributes: vec![],
         },
         // ec2.internet_gateway
         ResourceDef {
@@ -275,6 +310,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
                 ),
             }],
             identity_overrides: vec![],
+            derived_attributes: vec![],
         },
         // ec2.route_table
         ResourceDef {
@@ -300,6 +336,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             read_only_overrides: vec![],
             extra_writable: vec![],
             identity_overrides: vec![],
+            derived_attributes: vec![],
         },
         // ec2.route
         ResourceDef {
@@ -343,6 +380,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             read_only_overrides: vec![],
             extra_writable: vec![],
             identity_overrides: vec![],
+            derived_attributes: vec![],
         },
         // ec2.security_group
         ResourceDef {
@@ -368,6 +406,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             read_only_overrides: vec![],
             extra_writable: vec![],
             identity_overrides: vec![],
+            derived_attributes: vec![],
         },
         // ec2.security_group_ingress
         ResourceDef {
@@ -422,6 +461,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
                 },
             ],
             identity_overrides: vec![],
+            derived_attributes: vec![],
         },
         // ec2.security_group_egress
         ResourceDef {
@@ -476,6 +516,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
                 },
             ],
             identity_overrides: vec![],
+            derived_attributes: vec![],
         },
         // ec2.egress_only_internet_gateway
         ResourceDef {
@@ -501,6 +542,15 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             read_only_overrides: vec![],
             extra_writable: vec![],
             identity_overrides: vec![],
+            // VpcId lives on Attachments[0].VpcId in the read response;
+            // there is no top-level VpcId getter on EgressOnlyInternetGateway.
+            derived_attributes: vec![DerivedAttribute {
+                attr: "VpcId",
+                source: DerivedSource::ListFirst {
+                    list_member: "Attachments",
+                    child_member: "VpcId",
+                },
+            }],
         },
         // ec2.eip
         ResourceDef {
@@ -532,6 +582,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             read_only_overrides: vec![],
             extra_writable: vec![],
             identity_overrides: vec![],
+            derived_attributes: vec![],
         },
         // ec2.flow_log
         ResourceDef {
@@ -566,6 +617,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             read_only_overrides: vec![],
             extra_writable: vec![],
             identity_overrides: vec![],
+            derived_attributes: vec![],
         },
         // ec2.nat_gateway
         ResourceDef {
@@ -598,6 +650,16 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             read_only_overrides: vec![],
             extra_writable: vec![],
             identity_overrides: vec![],
+            // AllocationId lives on NatGatewayAddresses[0].AllocationId in the
+            // read response; there is no top-level AllocationId getter on
+            // NatGateway.
+            derived_attributes: vec![DerivedAttribute {
+                attr: "AllocationId",
+                source: DerivedSource::ListFirst {
+                    list_member: "NatGatewayAddresses",
+                    child_member: "AllocationId",
+                },
+            }],
         },
         // ec2.subnet_route_table_association
         ResourceDef {
@@ -623,6 +685,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             read_only_overrides: vec![],
             extra_writable: vec![],
             identity_overrides: vec![],
+            derived_attributes: vec![],
         },
         // ec2.transit_gateway
         ResourceDef {
@@ -651,6 +714,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             read_only_overrides: vec![],
             extra_writable: vec![],
             identity_overrides: vec![],
+            derived_attributes: vec![],
         },
         // ec2.transit_gateway_attachment
         ResourceDef {
@@ -676,6 +740,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             read_only_overrides: vec![],
             extra_writable: vec![],
             identity_overrides: vec![],
+            derived_attributes: vec![],
         },
         // ec2.vpc_endpoint
         ResourceDef {
@@ -711,6 +776,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             read_only_overrides: vec![],
             extra_writable: vec![],
             identity_overrides: vec![],
+            derived_attributes: vec![],
         },
         // ec2.vpc_gateway_attachment
         ResourceDef {
@@ -747,6 +813,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
                 },
             ],
             identity_overrides: vec![],
+            derived_attributes: vec![],
         },
         // ec2.vpc_peering_connection
         ResourceDef {
@@ -772,6 +839,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             read_only_overrides: vec![],
             extra_writable: vec![],
             identity_overrides: vec![],
+            derived_attributes: vec![],
         },
         // ec2.vpn_gateway
         ResourceDef {
@@ -797,6 +865,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             read_only_overrides: vec![],
             extra_writable: vec![],
             identity_overrides: vec![],
+            derived_attributes: vec![],
         },
     ]
 }
@@ -933,6 +1002,7 @@ pub fn organizations_resources() -> Vec<ResourceDef> {
             read_only_overrides: vec![],
             extra_writable: vec![],
             identity_overrides: vec![],
+            derived_attributes: vec![],
         },
         // organizations.account
         ResourceDef {
@@ -963,6 +1033,7 @@ pub fn organizations_resources() -> Vec<ResourceDef> {
             read_only_overrides: vec![],
             extra_writable: vec![],
             identity_overrides: vec![],
+            derived_attributes: vec![],
         },
     ]
 }
@@ -1028,6 +1099,7 @@ pub fn s3_resources() -> Vec<ResourceDef> {
             read_only_overrides: vec![],
             extra_writable: vec![],
             identity_overrides: vec![],
+            derived_attributes: vec![],
         },
     ]
 }
@@ -1152,6 +1224,7 @@ pub fn route53_resources() -> Vec<ResourceDef> {
                 description: Some("The ID of the hosted zone that contains this record set."),
             }],
             identity_overrides: vec!["Type"],
+            derived_attributes: vec![],
         },
     ]
 }
@@ -1190,6 +1263,7 @@ pub fn iam_resources() -> Vec<ResourceDef> {
         read_only_overrides: vec![],
         extra_writable: vec![],
         identity_overrides: vec![],
+        derived_attributes: vec![],
     }]
 }
 
@@ -1234,6 +1308,7 @@ pub fn logs_resources() -> Vec<ResourceDef> {
             ),
         }],
         identity_overrides: vec![],
+        derived_attributes: vec![],
     }]
 }
 
