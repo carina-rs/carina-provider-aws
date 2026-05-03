@@ -127,9 +127,12 @@ run_plan_verify() {
     return 0
 }
 
-# Cleanup helper: destroy resources in work_dir, retrying to handle dependencies
+# destroy_work_dir: destroy resources in work_dir, retrying to handle dependencies
 # Returns 0 if at least one destroy succeeded, 1 if ALL failed
-cleanup() {
+# (Named distinctly from `cleanup` so the EXIT trap in _helpers.sh keeps using
+# its own cleanup() — overriding it would call this with no args at exit and
+# emit "No .crn files found in .".)
+destroy_work_dir() {
     local work_dir="$1"
     local any_success=false
 
@@ -196,7 +199,7 @@ run_test() {
 
     # Step 1: Apply initial config (resource with two tags)
     if ! run_step "$work_dir" "step1: apply initial (two tags)" "apply" "--auto-approve"; then
-        cleanup "$work_dir"
+        destroy_work_dir "$work_dir"
         rm -rf "$work_dir"
         ACTIVE_WORK_DIR=""
         return 1
@@ -204,7 +207,7 @@ run_test() {
 
     # Step 1b: Plan-verify initial state
     if ! run_plan_verify "$work_dir" "step1: plan-verify initial"; then
-        cleanup "$work_dir"
+        destroy_work_dir "$work_dir"
         rm -rf "$work_dir"
         ACTIVE_WORK_DIR=""
         return 1
@@ -215,7 +218,7 @@ run_test() {
 
     # Step 2: Apply modified config (one tag removed)
     if ! run_step "$work_dir" "step2: apply tag removal" "apply" "--auto-approve"; then
-        cleanup "$work_dir"
+        destroy_work_dir "$work_dir"
         rm -rf "$work_dir"
         ACTIVE_WORK_DIR=""
         return 1
@@ -223,7 +226,7 @@ run_test() {
 
     # Step 3: Plan-verify after tag removal (must be idempotent)
     if ! run_plan_verify "$work_dir" "step3: plan-verify after tag removal"; then
-        cleanup "$work_dir"
+        destroy_work_dir "$work_dir"
         rm -rf "$work_dir"
         ACTIVE_WORK_DIR=""
         return 1
