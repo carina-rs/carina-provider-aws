@@ -1151,9 +1151,11 @@ fn resolve_type(
         Some(ShapeKind::Enum) => {
             // Get enum values from Smithy model
             if let Some(values) = ctx.model.enum_values(target) {
-                // Use the field name as type_name for consistency with CF codegen
-                // (e.g., "InstanceTenancy" not "Tenancy")
-                let type_name = field_name.to_string();
+                // Prefer the Smithy shape name (PascalCase, e.g. "LogGroupClass")
+                // over the field name (which can be camelCase, e.g. "logGroupClass")
+                // so the generated DSL identifier reads naturally.
+                let type_name =
+                    pascalize_enum_type_name(SmithyModel::shape_name(target), field_name);
                 let string_values: Vec<String> = values.into_iter().map(|(_, v)| v).collect();
                 let enum_info = EnumInfo {
                     type_name,
@@ -3054,23 +3056,14 @@ fn generate_markdown_resource(res: &ResourceDef, model: &SmithyModel) -> Result<
                     &mut all_enums,
                     &mut BTreeMap::new(),
                 );
+                // Render the full description and escape pipe characters so the
+                // markdown table doesn't break on them. Earlier versions
+                // truncated at 100 chars, which lost important detail.
                 let desc = SmithyModel::documentation(&member_ref.traits)
                     .map(|s| {
                         let cleaned =
                             collapse_whitespace(&strip_html_tags(s).replace(['\n', '\t'], " "));
-                        let trimmed = cleaned.trim().to_string();
-                        if trimmed.len() > 100 {
-                            // Find a safe UTF-8 boundary
-                            let boundary = trimmed
-                                .char_indices()
-                                .take_while(|&(i, _)| i <= 100)
-                                .last()
-                                .map(|(i, _)| i)
-                                .unwrap_or(0);
-                            format!("{}...", &trimmed[..boundary])
-                        } else {
-                            trimmed
-                        }
+                        cleaned.trim().replace('|', "\\|")
                     })
                     .unwrap_or_default();
                 md.push_str(&format!(
@@ -3352,7 +3345,11 @@ fn type_display_string_md<'a>(
         Some(ShapeKind::Float) | Some(ShapeKind::Double) => "Float".to_string(),
         Some(ShapeKind::Enum) => {
             if let Some(values) = model.enum_values(target) {
-                let type_name = field_name.to_string();
+                // Prefer the Smithy shape name (PascalCase, e.g. "LogGroupClass")
+                // over the field name (often camelCase, e.g. "logGroupClass") so
+                // the rendered enum heading reads naturally.
+                let type_name =
+                    pascalize_enum_type_name(SmithyModel::shape_name(target), field_name);
                 let string_values: Vec<String> = values.into_iter().map(|(_, v)| v).collect();
                 let enum_info = EnumInfo {
                     type_name: type_name.clone(),
@@ -3421,7 +3418,25 @@ fn type_display_string_md<'a>(
 }
 
 /// Convert a Rust type code string to a human-readable display name.
+///
+/// Display names use PascalCase consistently (e.g. `IamRoleArn`, not
+/// `iam_role_arn`). Container types like `AttributeType::list(...)` are
+/// rendered as `List<Inner>` so docs never leak Rust constructor syntax.
 fn type_code_to_display(type_code: &str) -> String {
+    // Container types: AttributeType::list(...) and AttributeType::map(...)
+    if let Some(inner) = type_code
+        .strip_prefix("AttributeType::list(")
+        .and_then(|s| s.strip_suffix(')'))
+    {
+        return format!("`List<{}>`", type_code_to_display(inner));
+    }
+    if let Some(inner) = type_code
+        .strip_prefix("AttributeType::map(")
+        .and_then(|s| s.strip_suffix(')'))
+    {
+        return format!("`Map<String, {}>`", type_code_to_display(inner));
+    }
+
     match type_code {
         "AttributeType::String" => "String".to_string(),
         "AttributeType::Bool" => "Bool".to_string(),
@@ -3431,7 +3446,9 @@ fn type_code_to_display(type_code: &str) -> String {
         s if s.contains("ipv4_address") => "Ipv4Address".to_string(),
         s if s.contains("ipv6_address") => "Ipv6Address".to_string(),
         s if s.contains("iam_role_arn") => "IamRoleArn".to_string(),
+        s if s.contains("iam_role_id") => "IamRoleId".to_string(),
         s if s.contains("iam_policy_arn") => "IamPolicyArn".to_string(),
+        s if s.contains("iam_policy_document") => "IamPolicyDocument".to_string(),
         s if s.contains("kms_key_arn") => "KmsKeyArn".to_string(),
         s if s.contains("kms_key_id") => "KmsKeyId".to_string(),
         s if s.contains("vpc_id") => "VpcId".to_string(),
@@ -3440,12 +3457,16 @@ fn type_code_to_display(type_code: &str) -> String {
         s if s.contains("security_group_id") => "SecurityGroupId".to_string(),
         s if s.contains("ipam_pool_id") => "IpamPoolId".to_string(),
         s if s.contains("instance_id") => "InstanceId".to_string(),
+        s if s.contains("internet_gateway_id") => "InternetGatewayId".to_string(),
+        s if s.contains("nat_gateway_id") => "NatGatewayId".to_string(),
+        s if s.contains("route_table_id") => "RouteTableId".to_string(),
         s if s.contains("network_interface_id") => "NetworkInterfaceId".to_string(),
         s if s.contains("allocation_id") => "AllocationId".to_string(),
         s if s.contains("prefix_list_id") => "PrefixListId".to_string(),
         s if s.contains("carrier_gateway_id") => "CarrierGatewayId".to_string(),
         s if s.contains("local_gateway_id") => "LocalGatewayId".to_string(),
         s if s.contains("network_acl_id") => "NetworkAclId".to_string(),
+        s if s.contains("s3_grantee") => "S3Grantee".to_string(),
         "super::gateway_id()" => "GatewayId".to_string(),
         s if s.contains("arn()") => "Arn".to_string(),
         s if s.contains("aws_account_id") => "AwsAccountId".to_string(),
@@ -3453,11 +3474,53 @@ fn type_code_to_display(type_code: &str) -> String {
         s if s.contains("availability_zone_id") => "AvailabilityZoneId".to_string(),
         s if s.contains("availability_zone") => "AvailabilityZone".to_string(),
         s if s.contains("email") => "Email".to_string(),
-        _ => type_code
-            .trim_start_matches("super::")
-            .trim_end_matches("()")
-            .to_string(),
+        _ => snake_to_pascal_type(
+            type_code
+                .trim_start_matches("super::")
+                .trim_start_matches("types::")
+                .trim_end_matches("()"),
+        ),
     }
+}
+
+/// Pick a PascalCase enum type name for use in markdown headings and the
+/// `name:` field of `AttributeType::StringEnum`.
+///
+/// Strategy:
+/// 1. If the field name is already PascalCase (starts uppercase), use it
+///    unchanged. This preserves established conventions where the Smithy
+///    field name is the natural type label (e.g. `InstanceTenancy`).
+/// 2. Otherwise (camelCase field name like `logGroupClass`), uppercase its
+///    first letter to produce `LogGroupClass`.
+///
+/// `shape_name` is accepted for forward compatibility (e.g. if we want to
+/// fall back to the Smithy shape) but is not currently consulted, since the
+/// shape name is sometimes a generic alias (`Tenancy` for `InstanceTenancy`)
+/// that doesn't match user expectations.
+fn pascalize_enum_type_name(_shape_name: &str, field_name: &str) -> String {
+    let mut chars = field_name.chars();
+    match chars.next() {
+        Some(c) if c.is_ascii_uppercase() => field_name.to_string(),
+        Some(c) => format!("{}{}", c.to_ascii_uppercase(), chars.as_str()),
+        None => String::new(),
+    }
+}
+
+/// Convert a snake_case identifier to PascalCase for display in docs.
+/// Already-PascalCase or single-word inputs are returned unchanged.
+fn snake_to_pascal_type(s: &str) -> String {
+    if !s.contains('_') {
+        return s.to_string();
+    }
+    let mut out = String::with_capacity(s.len());
+    for part in s.split('_') {
+        let mut chars = part.chars();
+        if let Some(c) = chars.next() {
+            out.push(c.to_ascii_uppercase());
+            out.push_str(chars.as_str());
+        }
+    }
+    out
 }
 
 /// Get the human-readable display name for a resource ID type.

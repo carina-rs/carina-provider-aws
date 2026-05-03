@@ -33,7 +33,7 @@ pub fn logs_log_group_config() -> AwsSchemaConfig {
         )
         .attribute(
             AttributeSchema::new("log_group_class", AttributeType::StringEnum {
-                name: "logGroupClass".to_string(),
+                name: "LogGroupClass".to_string(),
                 values: vec!["DELIVERY".to_string(), "INFREQUENT_ACCESS".to_string(), "STANDARD".to_string()],
                 namespace: Some("aws.logs.LogGroup".to_string()),
                 to_dsl: None,
