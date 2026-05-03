@@ -204,53 +204,6 @@ impl AwsProvider {
         Ok(())
     }
 
-    /// Extract iam.role attributes from SDK response type (generated)
-    pub(crate) fn extract_iam_role_attributes(
-        obj: &aws_sdk_iam::types::Role,
-        attributes: &mut HashMap<String, Value>,
-    ) -> Option<String> {
-        // arn, path, role_id, role_name return &str (always present)
-        let arn = obj.arn();
-        if !arn.is_empty() {
-            attributes.insert("arn".to_string(), Value::String(arn.to_string()));
-        }
-        if let Some(v) = obj.assume_role_policy_document() {
-            // The SDK URL-encodes the policy document
-            let decoded = urlencoding::decode(v).unwrap_or_else(|_| v.into());
-            // Convert JSON string to Value::Map with snake_case keys for struct comparison
-            let policy_value = crate::services::iam::role::iam_policy_json_to_value(&decoded)
-                .unwrap_or_else(|_| {
-                    // Fallback to raw string if JSON parsing fails
-                    Value::String(decoded.into_owned())
-                });
-            attributes.insert("assume_role_policy_document".to_string(), policy_value);
-        }
-        if let Some(v) = obj.description() {
-            attributes.insert("description".to_string(), Value::String(v.to_string()));
-        }
-        if let Some(v) = obj.max_session_duration() {
-            attributes.insert("max_session_duration".to_string(), Value::Int(v as i64));
-        }
-        let path = obj.path();
-        if !path.is_empty() {
-            attributes.insert("path".to_string(), Value::String(path.to_string()));
-        }
-        let role_id = obj.role_id();
-        if !role_id.is_empty() {
-            attributes.insert("role_id".to_string(), Value::String(role_id.to_string()));
-        }
-        let role_name = obj.role_name();
-        if !role_name.is_empty() {
-            attributes.insert(
-                "role_name".to_string(),
-                Value::String(role_name.to_string()),
-            );
-            Some(role_name.to_string())
-        } else {
-            None
-        }
-    }
-
     /// Extract ec2.eip attributes from SDK response type (generated)
     pub(crate) fn extract_ec2_eip_attributes(
         obj: &aws_sdk_ec2::types::Address,
@@ -498,65 +451,6 @@ impl AwsProvider {
             attributes.insert("to_port".to_string(), Value::Int(v as i64));
         }
         obj.security_group_rule_id().map(String::from)
-    }
-
-    /// Extract ec2.vpc_endpoint attributes from SDK response type (generated)
-    pub(crate) fn extract_ec2_vpc_endpoint_attributes(
-        obj: &aws_sdk_ec2::types::VpcEndpoint,
-        attributes: &mut HashMap<String, Value>,
-    ) -> Option<String> {
-        if let Some(v) = obj.vpc_endpoint_id() {
-            attributes.insert("vpc_endpoint_id".to_string(), Value::String(v.to_string()));
-        }
-        if let Some(v) = obj.vpc_endpoint_type() {
-            attributes.insert(
-                "vpc_endpoint_type".to_string(),
-                Value::String(v.as_str().to_string()),
-            );
-        }
-        if let Some(v) = obj.vpc_id() {
-            attributes.insert("vpc_id".to_string(), Value::String(v.to_string()));
-        }
-        if let Some(v) = obj.service_name() {
-            attributes.insert("service_name".to_string(), Value::String(v.to_string()));
-        }
-        if let Some(v) = obj.private_dns_enabled() {
-            attributes.insert("private_dns_enabled".to_string(), Value::Bool(v));
-        }
-        if let Some(v) = obj.policy_document() {
-            // Try to parse the policy document JSON into a Value::Map
-            let policy_value = crate::services::iam::role::iam_policy_json_to_value(v)
-                .unwrap_or_else(|_| Value::String(v.to_string()));
-            attributes.insert("policy_document".to_string(), policy_value);
-        }
-        {
-            let ids = obj.route_table_ids();
-            if !ids.is_empty() {
-                let list: Vec<Value> = ids.iter().map(|s| Value::String(s.to_string())).collect();
-                attributes.insert("route_table_ids".to_string(), Value::List(list));
-            }
-        }
-        {
-            let ids = obj.subnet_ids();
-            if !ids.is_empty() {
-                let list: Vec<Value> = ids.iter().map(|s| Value::String(s.to_string())).collect();
-                attributes.insert("subnet_ids".to_string(), Value::List(list));
-            }
-        }
-        // Extract security group IDs from groups
-        {
-            let groups = obj.groups();
-            if !groups.is_empty() {
-                let list: Vec<Value> = groups
-                    .iter()
-                    .filter_map(|g| g.group_id().map(|id| Value::String(id.to_string())))
-                    .collect();
-                if !list.is_empty() {
-                    attributes.insert("security_group_ids".to_string(), Value::List(list));
-                }
-            }
-        }
-        obj.vpc_endpoint_id().map(String::from)
     }
 
     /// Extract ec2.flow_log attributes from SDK response type (generated)

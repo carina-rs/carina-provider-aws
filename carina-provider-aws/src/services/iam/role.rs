@@ -294,6 +294,61 @@ impl AwsProvider {
 
         Ok(())
     }
+
+    /// Extract iam.Role attributes from the SDK response.
+    ///
+    /// Lives here (not in `provider_generated.rs`) because
+    /// `assume_role_policy_document` needs URL-decoding and a JSON →
+    /// `Value::Map` parse step that the codegen template can't express;
+    /// `scan_manual_methods` picks it up by name and the codegen skips
+    /// emitting a duplicate stub. Returns the role name as the
+    /// state identifier.
+    pub(crate) fn extract_iam_role_attributes(
+        obj: &aws_sdk_iam::types::Role,
+        attributes: &mut HashMap<String, Value>,
+    ) -> Option<String> {
+        // arn, path, role_id, role_name return &str (always present per
+        // Smithy `@required`); skip the empty-string sentinel the SDK
+        // sometimes uses when the field is absent on the wire.
+        let arn = obj.arn();
+        if !arn.is_empty() {
+            attributes.insert("arn".to_string(), Value::String(arn.to_string()));
+        }
+        if let Some(v) = obj.assume_role_policy_document() {
+            // The SDK URL-encodes the policy document.
+            let decoded = urlencoding::decode(v).unwrap_or_else(|_| v.into());
+            // Convert JSON string to Value::Map with snake_case keys for
+            // struct comparison; fall back to the raw string if the
+            // policy is malformed.
+            let policy_value = iam_policy_json_to_value(&decoded)
+                .unwrap_or_else(|_| Value::String(decoded.into_owned()));
+            attributes.insert("assume_role_policy_document".to_string(), policy_value);
+        }
+        if let Some(v) = obj.description() {
+            attributes.insert("description".to_string(), Value::String(v.to_string()));
+        }
+        if let Some(v) = obj.max_session_duration() {
+            attributes.insert("max_session_duration".to_string(), Value::Int(v as i64));
+        }
+        let path = obj.path();
+        if !path.is_empty() {
+            attributes.insert("path".to_string(), Value::String(path.to_string()));
+        }
+        let role_id = obj.role_id();
+        if !role_id.is_empty() {
+            attributes.insert("role_id".to_string(), Value::String(role_id.to_string()));
+        }
+        let role_name = obj.role_name();
+        if !role_name.is_empty() {
+            attributes.insert(
+                "role_name".to_string(),
+                Value::String(role_name.to_string()),
+            );
+            Some(role_name.to_string())
+        } else {
+            None
+        }
+    }
 }
 
 /// Convert a Carina Value (Map with snake_case keys) to a JSON string
