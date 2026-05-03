@@ -118,6 +118,16 @@ pub enum DerivedSource {
         list_member: &'static str,
         child_member: &'static str,
     },
+    /// `obj.<list_member>().iter().filter_map(|x| x.<child_member>())`.
+    /// Used to flatten a list-of-struct response field into a
+    /// `Value::List(String)` attribute by projecting one member off each
+    /// element (e.g. `VpcEndpoint.Groups[*].GroupId` → `security_group_ids`).
+    /// The attribute is omitted entirely when the projection yields an
+    /// empty list.
+    ListAll {
+        list_member: &'static str,
+        child_member: &'static str,
+    },
 }
 
 /// How fields are passed to an update API operation.
@@ -776,7 +786,17 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             read_only_overrides: vec![],
             extra_writable: vec![],
             identity_overrides: vec![],
-            derived_attributes: vec![],
+            // SecurityGroupIds is a write-side input
+            // (CreateVpcEndpointRequest.SecurityGroupIds: List<String>) but
+            // the read structure exposes it as Groups[*].GroupId on a
+            // SecurityGroupIdentifier struct, not as a direct member.
+            derived_attributes: vec![DerivedAttribute {
+                attr: "SecurityGroupIds",
+                source: DerivedSource::ListAll {
+                    list_member: "Groups",
+                    child_member: "GroupId",
+                },
+            }],
         },
         // ec2.vpc_gateway_attachment
         ResourceDef {

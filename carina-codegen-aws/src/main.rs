@@ -2219,8 +2219,34 @@ fn generate_provider_code(
                         code.push_str("\x20       }\n");
                     }
                 }
+                Some(carina_smithy::ShapeKind::List) => {
+                    // Flatten List<String> response fields directly into
+                    // `Value::List(String)`. Other list element kinds
+                    // (struct, list-of-list, etc.) still need declarative
+                    // help from `derived_attributes` and stay skipped here.
+                    let element_kind = match model.get_shape(&member_ref.target) {
+                        Some(carina_smithy::Shape::List(list_shape)) => {
+                            model.shape_kind(&list_shape.member.target)
+                        }
+                        _ => None,
+                    };
+                    if matches!(element_kind, Some(carina_smithy::ShapeKind::String)) {
+                        code.push_str(&format!(
+                            "\x20       {{\n\
+                             \x20           let ids = obj.{}();\n\
+                             \x20           if !ids.is_empty() {{\n\
+                             \x20               let list: Vec<Value> = ids.iter().map(|s| Value::String(s.to_string())).collect();\n\
+                             \x20               attributes.insert(\"{}\".to_string(), Value::List(list));\n\
+                             \x20           }}\n\
+                             \x20       }}\n",
+                            accessor, attr_name
+                        ));
+                    }
+                    // Non-string-element lists need a declarative
+                    // projection (DerivedSource::ListAll) — handled below.
+                }
                 _ => {
-                    // Skip complex types (structures, lists, maps) that need
+                    // Skip complex types (structures, maps) that need
                     // custom handling in hand-written code
                 }
             }
@@ -2309,10 +2335,83 @@ fn generate_provider_code(
                         list_snake, child_snake, attr_snake
                     ));
                 }
+                resource_defs::DerivedSource::ListAll {
+                    list_member,
+                    child_member,
+                } => {
+                    // Same shape walk as ListFirst: read structure → list
+                    // shape → list element struct → child member.
+                    let Some(list_ref) = read_struct.members.get(*list_member) else {
+                        eprintln!(
+                            "warning: derived_attributes for {}: list member '{}' not found on read structure",
+                            res.name, list_member
+                        );
+                        continue;
+                    };
+                    let element_struct_id = match model.get_shape(&list_ref.target) {
+                        Some(carina_smithy::Shape::List(list_shape)) => {
+                            list_shape.member.target.as_str()
+                        }
+                        _ => {
+                            eprintln!(
+                                "warning: derived_attributes for {}: '{}' is not a list shape",
+                                res.name, list_member
+                            );
+                            continue;
+                        }
+                    };
+                    let Some(element_struct) = model.get_structure(element_struct_id) else {
+                        eprintln!(
+                            "warning: derived_attributes for {}: list element '{}' is not a structure",
+                            res.name, element_struct_id
+                        );
+                        continue;
+                    };
+                    let Some(child_ref) = element_struct.members.get(*child_member) else {
+                        eprintln!(
+                            "warning: derived_attributes for {}: child member '{}' not found on '{}'",
+                            res.name, child_member, element_struct_id
+                        );
+                        continue;
+                    };
+                    let attr_snake = derived.attr.to_snake_case();
+                    let list_snake = escape_rust_keyword(&list_member.to_snake_case());
+                    let child_snake = escape_rust_keyword(&child_member.to_snake_case());
+                    let child_kind = model.shape_kind(&child_ref.target);
+                    if !matches!(child_kind, Some(carina_smithy::ShapeKind::String)) {
+                        eprintln!(
+                            "warning: derived_attributes for {}: ListAll child '{}' is not a String; skipping (extend the emitter when this shape ships)",
+                            res.name, child_member
+                        );
+                        continue;
+                    }
+                    if SmithyModel::is_required(child_ref) {
+                        eprintln!(
+                            "warning: derived_attributes for {}: ListAll child '{}' is required; skipping (extend the emitter when this shape ships)",
+                            res.name, child_member
+                        );
+                        continue;
+                    }
+                    code.push_str(&format!(
+                        "\x20       {{\n\
+                         \x20           let groups = obj.{}();\n\
+                         \x20           if !groups.is_empty() {{\n\
+                         \x20               let list: Vec<Value> = groups\n\
+                         \x20                   .iter()\n\
+                         \x20                   .filter_map(|g| g.{}().map(|id| Value::String(id.to_string())))\n\
+                         \x20                   .collect();\n\
+                         \x20               if !list.is_empty() {{\n\
+                         \x20                   attributes.insert(\"{}\".to_string(), Value::List(list));\n\
+                         \x20               }}\n\
+                         \x20           }}\n\
+                         \x20       }}\n",
+                        list_snake, child_snake, attr_snake
+                    ));
+                }
                 // DerivedSource is #[non_exhaustive]; new variants land in
-                // sub-issues B-3 / B-4 and require this match to grow.
-                // Skip with a loud message instead of silent ignore so the
-                // missing emitter surfaces at codegen time.
+                // sub-issue B-4 and require this match to grow. Skip with
+                // a loud message instead of silent ignore so the missing
+                // emitter surfaces at codegen time.
                 _ => eprintln!(
                     "warning: derived_attributes for {}: unhandled DerivedSource variant; teach the emitter when adding a new projection",
                     res.name
@@ -3957,6 +4056,91 @@ mod tests {
         assert!(
             !code.contains("if let Some(v) = obj.vpc_id()"),
             "must not emit obj.vpc_id() at the top level (EgressOnlyInternetGateway has no top-level vpc_id getter): {code}"
+        );
+    }
+
+    #[test]
+    fn extract_ec2_vpc_endpoint_emits_list_of_string_for_route_table_ids() {
+        let res = resource_defs::ec2_resources()
+            .into_iter()
+            .find(|r| r.name == "ec2.VpcEndpoint")
+            .expect("ec2.VpcEndpoint missing");
+        let Some(code) = provider_code_for_single_resource(res, "ec2.json") else {
+            return;
+        };
+
+        // Hand-written shape that the codegen must reproduce for any
+        // List<String> read-structure member.
+        assert!(
+            code.contains("let ids = obj.route_table_ids();"),
+            "must read .route_table_ids(): {code}"
+        );
+        assert!(
+            code.contains(
+                "let list: Vec<Value> = ids.iter().map(|s| Value::String(s.to_string())).collect();"
+            ),
+            "must collect into Vec<Value>: {code}"
+        );
+        assert!(
+            code.contains("attributes.insert(\"route_table_ids\".to_string(), Value::List(list));"),
+            "must insert as Value::List: {code}"
+        );
+
+        assert!(
+            code.contains("let ids = obj.subnet_ids();"),
+            "must read .subnet_ids(): {code}"
+        );
+        assert!(
+            code.contains("attributes.insert(\"subnet_ids\".to_string(), Value::List(list));"),
+            "must insert subnet_ids as Value::List: {code}"
+        );
+    }
+
+    #[test]
+    fn extract_ec2_transit_gateway_attachment_emits_list_of_string_for_subnet_ids() {
+        let res = resource_defs::ec2_resources()
+            .into_iter()
+            .find(|r| r.name == "ec2.TransitGatewayAttachment")
+            .expect("ec2.TransitGatewayAttachment missing");
+        let Some(code) = provider_code_for_single_resource(res, "ec2.json") else {
+            return;
+        };
+        assert!(
+            code.contains("let ids = obj.subnet_ids();"),
+            "must read .subnet_ids(): {code}"
+        );
+        assert!(
+            code.contains("attributes.insert(\"subnet_ids\".to_string(), Value::List(list));"),
+            "must insert subnet_ids as Value::List: {code}"
+        );
+    }
+
+    #[test]
+    fn extract_ec2_vpc_endpoint_emits_list_all_for_security_group_ids() {
+        let res = resource_defs::ec2_resources()
+            .into_iter()
+            .find(|r| r.name == "ec2.VpcEndpoint")
+            .expect("ec2.VpcEndpoint missing");
+        let Some(code) = provider_code_for_single_resource(res, "ec2.json") else {
+            return;
+        };
+
+        // Walk groups list, project group_id off each element via
+        // filter_map, drop the attribute when the result is empty (so an
+        // empty list does not show up as Value::List([])).
+        assert!(
+            code.contains("let groups = obj.groups();"),
+            "must read .groups() as the list source: {code}"
+        );
+        assert!(
+            code.contains(".filter_map(|g| g.group_id().map(|id| Value::String(id.to_string())))"),
+            "must filter_map child .group_id(): {code}"
+        );
+        assert!(
+            code.contains(
+                "attributes.insert(\"security_group_ids\".to_string(), Value::List(list));"
+            ),
+            "must insert as security_group_ids Value::List: {code}"
         );
     }
 
