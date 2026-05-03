@@ -16,6 +16,24 @@ EXAMPLES_DIR="$PROJECT_ROOT/examples"
 rm -rf "$DOCS_DIR"
 mkdir -p "$DOCS_DIR"
 
+# Map a lowercase service code to its canonical AWS display name.
+# Naive uppercasing produces unreadable strings like "AWS LOGS log_group ..."
+# in the frontmatter description.
+service_display_name() {
+    case "$1" in
+        s3)            echo "S3" ;;
+        ec2)           echo "EC2" ;;
+        iam)           echo "IAM" ;;
+        sts)           echo "STS" ;;
+        sso)           echo "IAM Identity Center" ;;
+        logs)          echo "CloudWatch Logs" ;;
+        route53)       echo "Route 53" ;;
+        identitystore) echo "Identity Store" ;;
+        organizations) echo "Organizations" ;;
+        *)             echo "$1" | tr '[:lower:]' '[:upper:]' ;;
+    esac
+}
+
 # Download models if needed
 "$SCRIPT_DIR/download-smithy-models.sh"
 
@@ -34,13 +52,15 @@ for DOC_FILE in "$DOCS_DIR"/*/*.md; do
     [ -f "$DOC_FILE" ] || continue
     DSL_NAME=$(head -1 "$DOC_FILE" | sed 's/^# *//')
     SERVICE_DIR=$(basename "$(dirname "$DOC_FILE")")
-    SERVICE_DISPLAY=$(echo "$SERVICE_DIR" | tr '[:lower:]' '[:upper:]')
-    RESOURCE_NAME=$(basename "$DOC_FILE" .md)
+    SERVICE_DISPLAY=$(service_display_name "$SERVICE_DIR")
+    # Use the PascalCase resource name from the DSL title (e.g. "Bucket" from
+    # "aws.s3.Bucket") so the description text matches the title casing.
+    RESOURCE_DISPLAY=$(echo "$DSL_NAME" | awk -F'.' '{print $NF}')
     FRONTMATTER_TMPFILE=$(mktemp)
     {
         echo "---"
         echo "title: \"$DSL_NAME\""
-        echo "description: \"AWS $SERVICE_DISPLAY $RESOURCE_NAME resource reference\""
+        echo "description: \"AWS $SERVICE_DISPLAY $RESOURCE_DISPLAY resource reference\""
         echo "---"
         echo ""
         # Strip H1 line (Starlight renders frontmatter title as heading)
