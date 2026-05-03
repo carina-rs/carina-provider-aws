@@ -2226,6 +2226,100 @@ fn generate_provider_code(
             }
         }
 
+        // Emit derived attributes (DerivedSource projections). These are
+        // attributes whose value comes from a non-trivial walk of the read
+        // structure (e.g. `nat_gateway_addresses[0].allocation_id`); the
+        // regular fields_to_extract loop above can only handle direct member
+        // accessors.
+        for derived in &res.derived_attributes {
+            match &derived.source {
+                resource_defs::DerivedSource::ListFirst {
+                    list_member,
+                    child_member,
+                } => {
+                    // Locate the list member on the read structure, follow
+                    // its target shape to a List, then to the list element
+                    // (a Structure), then look up the child member to
+                    // determine the right unwrap pattern.
+                    let Some(list_ref) = read_struct.members.get(*list_member) else {
+                        eprintln!(
+                            "warning: derived_attributes for {}: list member '{}' not found on read structure",
+                            res.name, list_member
+                        );
+                        continue;
+                    };
+                    let element_struct_id = match model.get_shape(&list_ref.target) {
+                        Some(carina_smithy::Shape::List(list_shape)) => {
+                            list_shape.member.target.as_str()
+                        }
+                        _ => {
+                            eprintln!(
+                                "warning: derived_attributes for {}: '{}' is not a list shape",
+                                res.name, list_member
+                            );
+                            continue;
+                        }
+                    };
+                    let Some(element_struct) = model.get_structure(element_struct_id) else {
+                        eprintln!(
+                            "warning: derived_attributes for {}: list element '{}' is not a structure",
+                            res.name, element_struct_id
+                        );
+                        continue;
+                    };
+                    let Some(child_ref) = element_struct.members.get(*child_member) else {
+                        eprintln!(
+                            "warning: derived_attributes for {}: child member '{}' not found on '{}'",
+                            res.name, child_member, element_struct_id
+                        );
+                        continue;
+                    };
+
+                    let attr_snake = derived.attr.to_snake_case();
+                    let list_snake = escape_rust_keyword(&list_member.to_snake_case());
+                    let child_snake = escape_rust_keyword(&child_member.to_snake_case());
+                    let child_kind = model.shape_kind(&child_ref.target);
+                    // Today's two call sites (NatGateway, EgressOnlyInternetGateway)
+                    // both project an optional String off the list element. Other
+                    // shape kinds and required-child variants will appear when
+                    // future ResourceDefs use ListFirst with a different child
+                    // type — surface them loudly so we extend the emitter
+                    // instead of silently emitting wrong code.
+                    if !matches!(child_kind, Some(carina_smithy::ShapeKind::String)) {
+                        eprintln!(
+                            "warning: derived_attributes for {}: ListFirst child '{}' is not a String; skipping (extend the emitter when this shape ships)",
+                            res.name, child_member
+                        );
+                        continue;
+                    }
+                    if SmithyModel::is_required(child_ref) {
+                        eprintln!(
+                            "warning: derived_attributes for {}: ListFirst child '{}' is required; skipping (extend the emitter when this shape ships)",
+                            res.name, child_member
+                        );
+                        continue;
+                    }
+
+                    code.push_str(&format!(
+                        "\x20       if let Some(addr) = obj.{}().first()\n\
+                         \x20           && let Some(v) = addr.{}()\n\
+                         \x20       {{\n\
+                         \x20           attributes.insert(\"{}\".to_string(), Value::String(v.to_string()));\n\
+                         \x20       }}\n",
+                        list_snake, child_snake, attr_snake
+                    ));
+                }
+                // DerivedSource is #[non_exhaustive]; new variants land in
+                // sub-issues B-3 / B-4 and require this match to grow.
+                // Skip with a loud message instead of silent ignore so the
+                // missing emitter surfaces at codegen time.
+                _ => eprintln!(
+                    "warning: derived_attributes for {}: unhandled DerivedSource variant; teach the emitter when adding a new projection",
+                    res.name
+                ),
+            }
+        }
+
         // Return identifier value (only if identifier exists in read_structure)
         if !res.identifier.is_empty() && read_struct.members.contains_key(res.identifier) {
             let id_snake = escape_rust_keyword(&res.identifier.to_snake_case());
@@ -3801,6 +3895,68 @@ mod tests {
         assert!(
             code.contains("Some(obj.name().to_string())"),
             "required identifier name must Some(.to_string()): {code}"
+        );
+    }
+
+    #[test]
+    fn extract_ec2_nat_gateway_emits_list_first_for_allocation_id() {
+        let res = resource_defs::ec2_resources()
+            .into_iter()
+            .find(|r| r.name == "ec2.NatGateway")
+            .expect("ec2.NatGateway missing");
+        let Some(code) = provider_code_for_single_resource(res, "ec2.json") else {
+            return;
+        };
+
+        // The hand-written extractor reads `obj.nat_gateway_addresses().first()`
+        // and projects `.allocation_id()` from the inner struct. The codegen
+        // must reproduce that walk for the DSL `allocation_id` attribute.
+        assert!(
+            code.contains("if let Some(addr) = obj.nat_gateway_addresses().first()"),
+            "must walk nat_gateway_addresses().first(): {code}"
+        );
+        assert!(
+            code.contains("addr.allocation_id()"),
+            "must project allocation_id from the list element: {code}"
+        );
+        assert!(
+            code.contains("attributes.insert(\"allocation_id\".to_string()"),
+            "must insert allocation_id attribute: {code}"
+        );
+        // Regression guard: the regular pass must not also emit
+        // `obj.allocation_id()` (NatGateway has no top-level allocation_id getter,
+        // so that would be a compile error).
+        assert!(
+            !code.contains("if let Some(v) = obj.allocation_id()"),
+            "must not emit obj.allocation_id() at the top level: {code}"
+        );
+    }
+
+    #[test]
+    fn extract_ec2_egress_only_internet_gateway_emits_list_first_for_vpc_id() {
+        let res = resource_defs::ec2_resources()
+            .into_iter()
+            .find(|r| r.name == "ec2.EgressOnlyInternetGateway")
+            .expect("ec2.EgressOnlyInternetGateway missing");
+        let Some(code) = provider_code_for_single_resource(res, "ec2.json") else {
+            return;
+        };
+
+        assert!(
+            code.contains("if let Some(addr) = obj.attachments().first()"),
+            "must walk attachments().first(): {code}"
+        );
+        assert!(
+            code.contains("addr.vpc_id()"),
+            "must project vpc_id from the list element: {code}"
+        );
+        assert!(
+            code.contains("attributes.insert(\"vpc_id\".to_string()"),
+            "must insert vpc_id attribute: {code}"
+        );
+        assert!(
+            !code.contains("if let Some(v) = obj.vpc_id()"),
+            "must not emit obj.vpc_id() at the top level (EgressOnlyInternetGateway has no top-level vpc_id getter): {code}"
         );
     }
 
