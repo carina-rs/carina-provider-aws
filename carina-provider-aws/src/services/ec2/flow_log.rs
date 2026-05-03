@@ -274,4 +274,80 @@ impl AwsProvider {
 
         Ok(())
     }
+
+    /// Extract ec2.FlowLog attributes from the SDK response.
+    ///
+    /// Lives here (not in `provider_generated.rs`) because the
+    /// `resource_type` attribute is derived by string-matching the
+    /// `resource_id` prefix and is only emitted while
+    /// `flow_log_status == "ACTIVE"` — there is no Smithy structural
+    /// feature that would let the codegen express that conditional
+    /// derivation in one resource. `scan_manual_methods` picks this up
+    /// by name and the codegen skips emitting a duplicate stub.
+    pub(crate) fn extract_ec2_flow_log_attributes(
+        obj: &aws_sdk_ec2::types::FlowLog,
+        attributes: &mut HashMap<String, Value>,
+    ) -> Option<String> {
+        if let Some(v) = obj.flow_log_id() {
+            attributes.insert("flow_log_id".to_string(), Value::String(v.to_string()));
+        }
+        if let Some(v) = obj.resource_id() {
+            attributes.insert("resource_id".to_string(), Value::String(v.to_string()));
+        }
+        if let Some(v) = obj.traffic_type() {
+            attributes.insert(
+                "traffic_type".to_string(),
+                Value::String(v.as_str().to_string()),
+            );
+        }
+        if let Some(v) = obj.log_destination_type() {
+            attributes.insert(
+                "log_destination_type".to_string(),
+                Value::String(v.as_str().to_string()),
+            );
+        }
+        if let Some(v) = obj.log_destination() {
+            attributes.insert("log_destination".to_string(), Value::String(v.to_string()));
+        }
+        if let Some(v) = obj.log_group_name() {
+            attributes.insert("log_group_name".to_string(), Value::String(v.to_string()));
+        }
+        if let Some(v) = obj.deliver_logs_permission_arn() {
+            attributes.insert(
+                "deliver_logs_permission_arn".to_string(),
+                Value::String(v.to_string()),
+            );
+        }
+        if let Some(v) = obj.log_format() {
+            attributes.insert("log_format".to_string(), Value::String(v.to_string()));
+        }
+        if let Some(v) = obj.max_aggregation_interval() {
+            attributes.insert("max_aggregation_interval".to_string(), Value::Int(v as i64));
+        }
+        if let Some(v) = obj.flow_log_status()
+            && v == "ACTIVE"
+        {
+            // Only emit resource_type for active flow logs; an inactive
+            // record may carry a stale resource_id whose prefix no
+            // longer reflects what the flow log actually targets.
+            if let Some(rt) = obj.resource_id() {
+                let resource_type_str = if rt.starts_with("vpc-") {
+                    "VPC"
+                } else if rt.starts_with("subnet-") {
+                    "Subnet"
+                } else if rt.starts_with("eni-") {
+                    "NetworkInterface"
+                } else {
+                    ""
+                };
+                if !resource_type_str.is_empty() {
+                    attributes.insert(
+                        "resource_type".to_string(),
+                        Value::String(resource_type_str.to_string()),
+                    );
+                }
+            }
+        }
+        obj.flow_log_id().map(String::from)
+    }
 }

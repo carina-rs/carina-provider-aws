@@ -1688,7 +1688,11 @@ fn struct_child_value_expr(
     let expr = match kind {
         ShapeKind::String => format!("Value::String({}.to_string())", value_var),
         ShapeKind::Boolean => format!("Value::Bool({})", value_var),
-        ShapeKind::Integer | ShapeKind::Long => format!("Value::Int({} as i64)", value_var),
+        // SDK getters return `i32` for Integer, `i64` for Long. Cast only
+        // when widening — clippy::unnecessary_cast catches the no-op
+        // `i64 as i64` shape.
+        ShapeKind::Integer => format!("Value::Int({} as i64)", value_var),
+        ShapeKind::Long => format!("Value::Int({})", value_var),
         ShapeKind::Enum => format!("Value::String({}.as_str().to_string())", value_var),
         _ => return None,
     };
@@ -1720,7 +1724,14 @@ fn generate_provider_code(
 
     // Generate methods on AwsProvider
     code.push_str("// ===== Generated Methods on AwsProvider =====\n\n");
-    code.push_str("impl AwsProvider {\n");
+    // Some emitted helpers (e.g. `extract_<resource>_attributes` for
+    // resources whose hand-written read paths build the attribute map
+    // inline, or `update_<resource>` for noop-update resources whose
+    // service file calls the underlying read method directly) have no
+    // call sites in the current code. They are still emitted so the
+    // generator can stay simple and uniform; gate dead-code on the impl
+    // block instead of pruning case-by-case.
+    code.push_str("#[allow(dead_code)]\nimpl AwsProvider {\n");
 
     // Simple delete methods
     for res in all_resources.iter().filter(|r| r.simple_delete) {
@@ -2200,11 +2211,20 @@ fn generate_provider_code(
                         code.push_str("\x20       }\n");
                     }
                 }
-                Some(ShapeKind::Integer) | Some(ShapeKind::Long) => {
+                Some(int_kind @ (ShapeKind::Integer | ShapeKind::Long)) => {
+                    // SDK getters return `i32` for Integer, `i64` for
+                    // Long. Cast only when widening — clippy's
+                    // `unnecessary_cast` catches the no-op `i64 as i64`
+                    // shape that would otherwise be emitted for Long.
+                    let cast = if matches!(int_kind, ShapeKind::Integer) {
+                        " as i64"
+                    } else {
+                        ""
+                    };
                     if required {
                         code.push_str(&format!(
-                            "\x20       attributes.insert(\"{}\".to_string(), Value::Int(obj.{}() as i64));\n",
-                            attr_name, accessor
+                            "\x20       attributes.insert(\"{}\".to_string(), Value::Int(obj.{}(){}));\n",
+                            attr_name, accessor, cast
                         ));
                     } else {
                         code.push_str(&format!(
@@ -2212,8 +2232,8 @@ fn generate_provider_code(
                             accessor
                         ));
                         code.push_str(&format!(
-                            "\x20           attributes.insert(\"{}\".to_string(), Value::Int(v as i64));\n",
-                            attr_name
+                            "\x20           attributes.insert(\"{}\".to_string(), Value::Int(v{}));\n",
+                            attr_name, cast
                         ));
                         code.push_str("\x20       }\n");
                     }
@@ -4290,9 +4310,9 @@ mod tests {
             "amazon_side_asn must walk obj.options(): {code}"
         );
         assert!(
-            code.contains(
-                "attributes.insert(\"amazon_side_asn\".to_string(), Value::Int(v as i64));"
-            ),
+            // amazon_side_asn is Smithy `Long`, so the SDK getter returns
+            // i64 directly — no widening cast.
+            code.contains("attributes.insert(\"amazon_side_asn\".to_string(), Value::Int(v));"),
             "amazon_side_asn must insert as Int: {code}"
         );
         assert!(
