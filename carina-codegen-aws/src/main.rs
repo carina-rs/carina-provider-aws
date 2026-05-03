@@ -1673,6 +1673,28 @@ fn scan_manual_methods(services_dir: &std::path::Path) -> std::collections::Hash
 
 /// Generate the provider_generated.rs file from ResourceDef metadata and Smithy models.
 /// Uses Smithy models to resolve types for read/write helper generation.
+/// Render the `Value::*` wrapping for a single child member of a
+/// nested struct (used by `DerivedSource::Struct` and `StructAsMap`
+/// emission). Returns `None` for shapes the emitter cannot handle.
+///
+/// `value_var` is the local name (`"v"` in current call sites) bound
+/// to the child accessor result via `if let Some(v) = ...`.
+fn struct_child_value_expr(
+    model: &SmithyModel,
+    child_ref: &carina_smithy::ShapeRef,
+    value_var: &str,
+) -> Option<String> {
+    let kind = model.shape_kind(&child_ref.target)?;
+    let expr = match kind {
+        ShapeKind::String => format!("Value::String({}.to_string())", value_var),
+        ShapeKind::Boolean => format!("Value::Bool({})", value_var),
+        ShapeKind::Integer | ShapeKind::Long => format!("Value::Int({} as i64)", value_var),
+        ShapeKind::Enum => format!("Value::String({}.as_str().to_string())", value_var),
+        _ => return None,
+    };
+    Some(expr)
+}
+
 fn generate_provider_code(
     all_resources: &[ResourceDef],
     all_data_sources: &[resource_defs::DataSourceDef],
@@ -1687,6 +1709,7 @@ fn generate_provider_code(
          //!\n\
          //! DO NOT EDIT MANUALLY - regenerate with:\n\
          //!   ./carina-provider-aws/scripts/generate-provider.sh\n\n\
+         use indexmap::IndexMap;\n\
          use std::collections::HashMap;\n\n\
          use carina_core::provider::{BoxFuture, ProviderError, ProviderResult};\n\
          use carina_core::resource::{Resource, ResourceId, State, Value};\n\
@@ -2408,8 +2431,113 @@ fn generate_provider_code(
                         list_snake, child_snake, attr_snake
                     ));
                 }
-                // DerivedSource is #[non_exhaustive]; new variants land in
-                // sub-issue B-4 and require this match to grow. Skip with
+                resource_defs::DerivedSource::Struct {
+                    struct_member,
+                    child_member,
+                } => {
+                    // Walk: read structure → struct member → inner struct
+                    // → child member. The child's kind drives the value
+                    // wrapping (String / Bool / Int / Long / Enum).
+                    let Some(struct_ref) = read_struct.members.get(*struct_member) else {
+                        eprintln!(
+                            "warning: derived_attributes for {}: struct member '{}' not found on read structure",
+                            res.name, struct_member
+                        );
+                        continue;
+                    };
+                    let Some(inner_struct) = model.get_structure(&struct_ref.target) else {
+                        eprintln!(
+                            "warning: derived_attributes for {}: '{}' is not a structure",
+                            res.name, struct_member
+                        );
+                        continue;
+                    };
+                    let Some(child_ref) = inner_struct.members.get(*child_member) else {
+                        eprintln!(
+                            "warning: derived_attributes for {}: child member '{}' not found on '{}'",
+                            res.name, child_member, struct_ref.target
+                        );
+                        continue;
+                    };
+                    let attr_snake = derived.attr.to_snake_case();
+                    let struct_snake = escape_rust_keyword(&struct_member.to_snake_case());
+                    let child_snake = escape_rust_keyword(&child_member.to_snake_case());
+                    let Some(insert_expr) = struct_child_value_expr(model, child_ref, "v") else {
+                        eprintln!(
+                            "warning: derived_attributes for {}: Struct child '{}' has unsupported shape; skipping",
+                            res.name, child_member
+                        );
+                        continue;
+                    };
+                    code.push_str(&format!(
+                        "\x20       if let Some(opts) = obj.{}()\n\
+                         \x20           && let Some(v) = opts.{}()\n\
+                         \x20       {{\n\
+                         \x20           attributes.insert(\"{}\".to_string(), {});\n\
+                         \x20       }}\n",
+                        struct_snake, child_snake, attr_snake, insert_expr
+                    ));
+                }
+                resource_defs::DerivedSource::StructAsMap {
+                    struct_member,
+                    children,
+                } => {
+                    let Some(struct_ref) = read_struct.members.get(*struct_member) else {
+                        eprintln!(
+                            "warning: derived_attributes for {}: struct member '{}' not found on read structure",
+                            res.name, struct_member
+                        );
+                        continue;
+                    };
+                    let Some(inner_struct) = model.get_structure(&struct_ref.target) else {
+                        eprintln!(
+                            "warning: derived_attributes for {}: '{}' is not a structure",
+                            res.name, struct_member
+                        );
+                        continue;
+                    };
+                    let attr_snake = derived.attr.to_snake_case();
+                    let struct_snake = escape_rust_keyword(&struct_member.to_snake_case());
+
+                    code.push_str(&format!(
+                        "\x20       if let Some(dns_opts) = obj.{}() {{\n\
+                         \x20           let mut fields = IndexMap::new();\n",
+                        struct_snake
+                    ));
+                    for child_name in *children {
+                        let Some(child_ref) = inner_struct.members.get(*child_name) else {
+                            eprintln!(
+                                "warning: derived_attributes for {}: child member '{}' not found on '{}'",
+                                res.name, child_name, struct_ref.target
+                            );
+                            continue;
+                        };
+                        let child_snake = escape_rust_keyword(&child_name.to_snake_case());
+                        let Some(insert_expr) = struct_child_value_expr(model, child_ref, "v")
+                        else {
+                            eprintln!(
+                                "warning: derived_attributes for {}: StructAsMap child '{}' has unsupported shape; skipping",
+                                res.name, child_name
+                            );
+                            continue;
+                        };
+                        code.push_str(&format!(
+                            "\x20           if let Some(v) = dns_opts.{}() {{\n\
+                             \x20               fields.insert(\"{}\".to_string(), {});\n\
+                             \x20           }}\n",
+                            child_snake, child_snake, insert_expr
+                        ));
+                    }
+                    code.push_str(&format!(
+                        "\x20           if !fields.is_empty() {{\n\
+                         \x20               attributes.insert(\"{}\".to_string(), Value::Map(fields));\n\
+                         \x20           }}\n\
+                         \x20       }}\n",
+                        attr_snake
+                    ));
+                }
+                // DerivedSource is #[non_exhaustive]; future variants land in
+                // later sub-issues and require this match to grow. Skip with
                 // a loud message instead of silent ignore so the missing
                 // emitter surfaces at codegen time.
                 _ => eprintln!(
@@ -4141,6 +4269,145 @@ mod tests {
                 "attributes.insert(\"security_group_ids\".to_string(), Value::List(list));"
             ),
             "must insert as security_group_ids Value::List: {code}"
+        );
+    }
+
+    #[test]
+    fn extract_ec2_transit_gateway_emits_struct_nested_options() {
+        let res = resource_defs::ec2_resources()
+            .into_iter()
+            .find(|r| r.name == "ec2.TransitGateway")
+            .expect("ec2.TransitGateway missing");
+        let Some(code) = provider_code_for_single_resource(res, "ec2.json") else {
+            return;
+        };
+
+        // Each child of obj.options() lands as its own top-level attribute.
+        // Pin one numeric (amazon_side_asn) and one enum (dns_support) to
+        // exercise both Int and Enum emission paths.
+        assert!(
+            code.contains("if let Some(opts) = obj.options()\n            && let Some(v) = opts.amazon_side_asn()"),
+            "amazon_side_asn must walk obj.options(): {code}"
+        );
+        assert!(
+            code.contains(
+                "attributes.insert(\"amazon_side_asn\".to_string(), Value::Int(v as i64));"
+            ),
+            "amazon_side_asn must insert as Int: {code}"
+        );
+        assert!(
+            code.contains(
+                "if let Some(opts) = obj.options()\n            && let Some(v) = opts.dns_support()"
+            ),
+            "dns_support must walk obj.options(): {code}"
+        );
+        assert!(
+            code.contains(
+                "attributes.insert(\"dns_support\".to_string(), Value::String(v.as_str().to_string()));"
+            ),
+            "dns_support must insert as enum-as-String: {code}"
+        );
+    }
+
+    #[test]
+    fn extract_ec2_vpc_peering_connection_emits_struct_with_rename() {
+        let res = resource_defs::ec2_resources()
+            .into_iter()
+            .find(|r| r.name == "ec2.VpcPeeringConnection")
+            .expect("ec2.VpcPeeringConnection missing");
+        let Some(code) = provider_code_for_single_resource(res, "ec2.json") else {
+            return;
+        };
+
+        // Requester: child `vpc_id` keeps its DSL name.
+        assert!(
+            code.contains("if let Some(opts) = obj.requester_vpc_info()\n            && let Some(v) = opts.vpc_id()"),
+            "requester_vpc_info.vpc_id must walk obj.requester_vpc_info(): {code}"
+        );
+        assert!(
+            code.contains(
+                "attributes.insert(\"vpc_id\".to_string(), Value::String(v.to_string()));"
+            ),
+            "requester vpc_id inserts under \"vpc_id\": {code}"
+        );
+
+        // Accepter: child `vpc_id` is renamed to `peer_vpc_id` (the rename
+        // is the whole reason this can't be a direct read-structure member
+        // pull). Owner / region get the same rename treatment.
+        assert!(
+            code.contains("if let Some(opts) = obj.accepter_vpc_info()\n            && let Some(v) = opts.vpc_id()"),
+            "accepter_vpc_info.vpc_id must walk obj.accepter_vpc_info(): {code}"
+        );
+        assert!(
+            code.contains(
+                "attributes.insert(\"peer_vpc_id\".to_string(), Value::String(v.to_string()));"
+            ),
+            "accepter vpc_id inserts under \"peer_vpc_id\" (rename): {code}"
+        );
+        assert!(
+            code.contains(
+                "attributes.insert(\"peer_owner_id\".to_string(), Value::String(v.to_string()));"
+            ),
+            "accepter owner_id inserts under \"peer_owner_id\": {code}"
+        );
+        assert!(
+            code.contains(
+                "attributes.insert(\"peer_region\".to_string(), Value::String(v.to_string()));"
+            ),
+            "accepter region inserts under \"peer_region\": {code}"
+        );
+    }
+
+    #[test]
+    fn extract_ec2_subnet_emits_struct_as_map_for_private_dns_options() {
+        let res = resource_defs::ec2_resources()
+            .into_iter()
+            .find(|r| r.name == "ec2.Subnet")
+            .expect("ec2.Subnet missing");
+        let Some(code) = provider_code_for_single_resource(res, "ec2.json") else {
+            return;
+        };
+
+        // The whole inner struct collapses into one Value::Map attribute.
+        // Pin the outer wrap, the IndexMap collection of children, the
+        // empty-map guard, and the final insert.
+        assert!(
+            code.contains("if let Some(dns_opts) = obj.private_dns_name_options_on_launch()"),
+            "must walk obj.private_dns_name_options_on_launch(): {code}"
+        );
+        assert!(
+            code.contains("let mut fields = IndexMap::new();"),
+            "must use an IndexMap as the collector: {code}"
+        );
+        // hostname_type → enum-as-String
+        assert!(
+            code.contains("if let Some(v) = dns_opts.hostname_type()"),
+            "must walk inner hostname_type: {code}"
+        );
+        assert!(
+            code.contains("fields.insert(\"hostname_type\".to_string(), Value::String(v.as_str().to_string()));"),
+            "hostname_type inserts as enum-as-String into fields: {code}"
+        );
+        // enable_resource_name_dns_a_record → Bool
+        assert!(
+            code.contains("if let Some(v) = dns_opts.enable_resource_name_dns_a_record()"),
+            "must walk inner enable_resource_name_dns_a_record: {code}"
+        );
+        assert!(
+            code.contains(
+                "fields.insert(\"enable_resource_name_dns_a_record\".to_string(), Value::Bool(v));"
+            ),
+            "enable_resource_name_dns_a_record inserts as Bool into fields: {code}"
+        );
+        // Empty-map guard
+        assert!(
+            code.contains("if !fields.is_empty()"),
+            "must guard the outer insert on non-empty fields: {code}"
+        );
+        // Final insert under the DSL attr name
+        assert!(
+            code.contains("attributes.insert(\"private_dns_name_options_on_launch\".to_string(), Value::Map(fields));"),
+            "must insert the collected map under \"private_dns_name_options_on_launch\": {code}"
         );
     }
 

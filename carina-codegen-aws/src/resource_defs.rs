@@ -128,6 +128,26 @@ pub enum DerivedSource {
         list_member: &'static str,
         child_member: &'static str,
     },
+    /// `obj.<struct_member>().<child_member>()` flattened into the
+    /// top-level attribute map under the DSL name in
+    /// `DerivedAttribute::attr` — so renames work (e.g.
+    /// `VpcPeeringConnection.AccepterVpcInfo.VpcId` → `peer_vpc_id`).
+    /// One declaration per child; the same `struct_member` may appear
+    /// in multiple `DerivedAttribute` entries to flatten multiple
+    /// children of the same nested struct.
+    Struct {
+        struct_member: &'static str,
+        child_member: &'static str,
+    },
+    /// `obj.<struct_member>()` collected into a single `Value::Map`
+    /// attribute keyed by `DerivedAttribute::attr`. Each listed child
+    /// member contributes one entry; per-child kinds (String / Bool /
+    /// Int / Long / Enum) are inferred from the inner struct shape.
+    /// The outer attribute is omitted when no children are populated.
+    StructAsMap {
+        struct_member: &'static str,
+        children: &'static [&'static str],
+    },
 }
 
 /// How fields are passed to an update API operation.
@@ -288,7 +308,20 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             read_only_overrides: vec![],
             extra_writable: vec![],
             identity_overrides: vec![],
-            derived_attributes: vec![],
+            // private_dns_name_options_on_launch is a nested struct on the
+            // read shape; collapse it into a single Value::Map attribute
+            // so the DSL surface stays flat.
+            derived_attributes: vec![DerivedAttribute {
+                attr: "PrivateDnsNameOptionsOnLaunch",
+                source: DerivedSource::StructAsMap {
+                    struct_member: "PrivateDnsNameOptionsOnLaunch",
+                    children: &[
+                        "HostnameType",
+                        "EnableResourceNameDnsARecord",
+                        "EnableResourceNameDnsAAAARecord",
+                    ],
+                },
+            }],
         },
         // ec2.internet_gateway
         ResourceDef {
@@ -724,7 +757,53 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             read_only_overrides: vec![],
             extra_writable: vec![],
             identity_overrides: vec![],
-            derived_attributes: vec![],
+            // The TransitGatewayRequestOptions sub-struct on the response
+            // is flattened into top-level attributes (matching the DSL
+            // surface, which doesn't expose `options` as a nested struct).
+            derived_attributes: vec![
+                DerivedAttribute {
+                    attr: "AmazonSideAsn",
+                    source: DerivedSource::Struct {
+                        struct_member: "Options",
+                        child_member: "AmazonSideAsn",
+                    },
+                },
+                DerivedAttribute {
+                    attr: "AutoAcceptSharedAttachments",
+                    source: DerivedSource::Struct {
+                        struct_member: "Options",
+                        child_member: "AutoAcceptSharedAttachments",
+                    },
+                },
+                DerivedAttribute {
+                    attr: "DefaultRouteTableAssociation",
+                    source: DerivedSource::Struct {
+                        struct_member: "Options",
+                        child_member: "DefaultRouteTableAssociation",
+                    },
+                },
+                DerivedAttribute {
+                    attr: "DefaultRouteTablePropagation",
+                    source: DerivedSource::Struct {
+                        struct_member: "Options",
+                        child_member: "DefaultRouteTablePropagation",
+                    },
+                },
+                DerivedAttribute {
+                    attr: "DnsSupport",
+                    source: DerivedSource::Struct {
+                        struct_member: "Options",
+                        child_member: "DnsSupport",
+                    },
+                },
+                DerivedAttribute {
+                    attr: "VpnEcmpSupport",
+                    source: DerivedSource::Struct {
+                        struct_member: "Options",
+                        child_member: "VpnEcmpSupport",
+                    },
+                },
+            ],
         },
         // ec2.transit_gateway_attachment
         ResourceDef {
@@ -859,7 +938,40 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             read_only_overrides: vec![],
             extra_writable: vec![],
             identity_overrides: vec![],
-            derived_attributes: vec![],
+            // The peering response carries the requester / accepter VPCs
+            // in two parallel `VpcPeeringConnectionVpcInfo` sub-structs;
+            // the DSL surface flattens both, with the accepter-side
+            // children renamed to `peer_*` so the user can tell them apart.
+            derived_attributes: vec![
+                DerivedAttribute {
+                    attr: "VpcId",
+                    source: DerivedSource::Struct {
+                        struct_member: "RequesterVpcInfo",
+                        child_member: "VpcId",
+                    },
+                },
+                DerivedAttribute {
+                    attr: "PeerVpcId",
+                    source: DerivedSource::Struct {
+                        struct_member: "AccepterVpcInfo",
+                        child_member: "VpcId",
+                    },
+                },
+                DerivedAttribute {
+                    attr: "PeerOwnerId",
+                    source: DerivedSource::Struct {
+                        struct_member: "AccepterVpcInfo",
+                        child_member: "OwnerId",
+                    },
+                },
+                DerivedAttribute {
+                    attr: "PeerRegion",
+                    source: DerivedSource::Struct {
+                        struct_member: "AccepterVpcInfo",
+                        child_member: "Region",
+                    },
+                },
+            ],
         },
         // ec2.vpn_gateway
         ResourceDef {
