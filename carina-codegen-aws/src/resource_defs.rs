@@ -1182,27 +1182,12 @@ pub fn s3_resources() -> Vec<ResourceDef> {
             noop_update: false,
             create_op: "CreateBucket",
             read_structure: None,
-            // Versioning was previously bundled here as a read_op + update_op;
-            // it now lives in the standalone s3.BucketVersioning resource (#211).
+            // Versioning, ACL, ownership controls and object lock were
+            // previously bundled here; they now live in standalone resources
+            // (s3.BucketVersioning #211, s3.BucketAcl + s3.BucketOwnershipControls #213).
             read_ops: vec![],
             delete_op: "DeleteBucket",
-            update_ops: vec![
-                UpdateOp {
-                    operation: "PutBucketOwnershipControls",
-                    fields: FieldLayout::Flat(vec!["ObjectOwnership"]),
-                },
-                UpdateOp {
-                    operation: "PutBucketAcl",
-                    fields: FieldLayout::Flat(vec![
-                        "ACL",
-                        "GrantFullControl",
-                        "GrantRead",
-                        "GrantReadACP",
-                        "GrantWrite",
-                        "GrantWriteACP",
-                    ]),
-                },
-            ],
+            update_ops: vec![],
             identifier: "Bucket",
             has_tags: true,
             type_overrides: vec![],
@@ -1213,6 +1198,15 @@ pub fn s3_resources() -> Vec<ResourceDef> {
                 "MFA",
                 "ExpectedBucketOwner",
                 "VersioningConfiguration",
+                // Bundled attrs moved to standalone resources (#213):
+                "ACL",
+                "GrantFullControl",
+                "GrantRead",
+                "GrantReadACP",
+                "GrantWrite",
+                "GrantWriteACP",
+                "ObjectOwnership",
+                "ObjectLockEnabledForBucket",
             ],
             create_only_overrides: vec![],
             enum_aliases: vec![],
@@ -1331,6 +1325,101 @@ pub fn s3_resources() -> Vec<ResourceDef> {
                     ),
                 },
             ],
+            identity_overrides: vec![],
+            derived_attributes: vec![],
+        },
+        // s3.BucketAcl — sets the canned ACL on an existing S3 bucket.
+        // Maps to PutBucketAcl / GetBucketAcl. There is no DeleteBucketAcl
+        // API; "destroying" the resource resets the ACL to "private".
+        ResourceDef {
+            name: "s3.BucketAcl",
+            service_namespace: "com.amazonaws.s3",
+            schema_structure: None,
+            simple_delete: false,
+            noop_update: false,
+            create_op: "PutBucketAcl",
+            read_structure: None,
+            read_ops: vec![],
+            delete_op: "PutBucketAcl",
+            update_ops: vec![UpdateOp {
+                operation: "PutBucketAcl",
+                fields: FieldLayout::Flat(vec!["ACL"]),
+            }],
+            identifier: "Bucket",
+            has_tags: false,
+            type_overrides: vec![],
+            exclude_fields: vec![
+                "ContentMD5",
+                "ChecksumAlgorithm",
+                "ExpectedBucketOwner",
+                // The full grant-by-header form and AccessControlPolicy are
+                // out of scope for the initial split; canned ACL only.
+                "GrantFullControl",
+                "GrantRead",
+                "GrantReadACP",
+                "GrantWrite",
+                "GrantWriteACP",
+                "AccessControlPolicy",
+            ],
+            create_only_overrides: vec!["Bucket"],
+            enum_aliases: vec![
+                ("acl", "authenticated_read", "authenticated-read"),
+                ("acl", "public_read", "public-read"),
+                ("acl", "public_read_write", "public-read-write"),
+            ],
+            to_dsl_overrides: vec![],
+            required_overrides: vec!["Bucket", "ACL"],
+            extra_read_only: vec![],
+            read_only_overrides: vec![],
+            extra_writable: vec![],
+            identity_overrides: vec![],
+            derived_attributes: vec![],
+        },
+        // s3.BucketOwnershipControls — sets the ObjectOwnership setting on
+        // an existing S3 bucket. Maps to PutBucketOwnershipControls /
+        // GetBucketOwnershipControls / DeleteBucketOwnershipControls.
+        ResourceDef {
+            name: "s3.BucketOwnershipControls",
+            service_namespace: "com.amazonaws.s3",
+            schema_structure: None,
+            simple_delete: false,
+            noop_update: false,
+            create_op: "PutBucketOwnershipControls",
+            read_structure: None,
+            read_ops: vec![],
+            delete_op: "DeleteBucketOwnershipControls",
+            update_ops: vec![UpdateOp {
+                operation: "PutBucketOwnershipControls",
+                fields: FieldLayout::InsideStruct {
+                    name: "OwnershipControls",
+                    fields: vec!["ObjectOwnership"],
+                },
+            }],
+            identifier: "Bucket",
+            has_tags: false,
+            type_overrides: vec![(
+                "ObjectOwnership",
+                "AttributeType::StringEnum { name: \"ObjectOwnership\".to_string(), values: vec![\"BucketOwnerEnforced\".to_string(), \"BucketOwnerPreferred\".to_string(), \"ObjectWriter\".to_string()], namespace: Some(\"aws.s3.BucketOwnershipControls\".to_string()), to_dsl: None }",
+            )],
+            exclude_fields: vec![
+                "ContentMD5",
+                "ChecksumAlgorithm",
+                "ExpectedBucketOwner",
+                "OwnershipControls",
+            ],
+            create_only_overrides: vec!["Bucket"],
+            enum_aliases: vec![],
+            to_dsl_overrides: vec![],
+            required_overrides: vec!["Bucket", "ObjectOwnership"],
+            extra_read_only: vec![],
+            read_only_overrides: vec![],
+            extra_writable: vec![ExtraField {
+                name: "ObjectOwnership",
+                read_source: None,
+                description: Some(
+                    "Object ownership setting: BucketOwnerEnforced, BucketOwnerPreferred, or ObjectWriter.",
+                ),
+            }],
             identity_overrides: vec![],
             derived_attributes: vec![],
         },

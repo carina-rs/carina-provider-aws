@@ -166,7 +166,7 @@ mod tests {
 
     #[test]
     fn test_resolve_enum_identifiers_typename_value() {
-        let mut resource = Resource::with_provider("aws", "s3.Bucket", "test-bucket");
+        let mut resource = Resource::with_provider("aws", "s3.BucketOwnershipControls", "test");
         resource.set_attr(
             "object_ownership".to_string(),
             Value::String("ObjectOwnership.BucketOwnerEnforced".to_string()),
@@ -176,7 +176,7 @@ mod tests {
         assert_eq!(
             resources[0].get_attr("object_ownership"),
             Some(&Value::String(
-                "aws.s3.Bucket.ObjectOwnership.BucketOwnerEnforced".to_string()
+                "aws.s3.BucketOwnershipControls.ObjectOwnership.BucketOwnerEnforced".to_string()
             ))
         );
     }
@@ -246,11 +246,11 @@ mod tests {
                 Value::String("BucketOwnerEnforced".to_string()),
             ),
         ]);
-        normalize_state_enums("s3.Bucket", &mut attributes);
+        normalize_state_enums("s3.BucketOwnershipControls", &mut attributes);
         assert_eq!(
             attributes.get("object_ownership"),
             Some(&Value::String(
-                "aws.s3.Bucket.ObjectOwnership.BucketOwnerEnforced".to_string()
+                "aws.s3.BucketOwnershipControls.ObjectOwnership.BucketOwnerEnforced".to_string()
             ))
         );
         // Non-enum attributes should not be modified
@@ -278,15 +278,15 @@ mod tests {
     #[test]
     fn test_normalize_state_enums_already_namespaced() {
         let mut attributes = HashMap::from([(
-            "versioning_status".to_string(),
-            Value::String("aws.s3.Bucket.VersioningStatus.Enabled".to_string()),
+            "status".to_string(),
+            Value::String("aws.s3.BucketVersioning.VersioningStatus.Enabled".to_string()),
         )]);
-        normalize_state_enums("s3.Bucket", &mut attributes);
+        normalize_state_enums("s3.BucketVersioning", &mut attributes);
         // Already namespaced values (contain dots) should not be modified
         assert_eq!(
-            attributes.get("versioning_status"),
+            attributes.get("status"),
             Some(&Value::String(
-                "aws.s3.Bucket.VersioningStatus.Enabled".to_string()
+                "aws.s3.BucketVersioning.VersioningStatus.Enabled".to_string()
             ))
         );
     }

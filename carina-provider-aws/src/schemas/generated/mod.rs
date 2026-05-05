@@ -45,7 +45,9 @@ pub fn configs() -> Vec<AwsSchemaConfig> {
         organizations::organization::organizations_organization_config(),
         route53::record_set::route53_record_set_config(),
         s3::bucket::s3_bucket_config(),
+        s3::bucket_acl::s3_bucket_acl_config(),
         s3::bucket_data_source::s3_bucket_data_source_config(),
+        s3::bucket_ownership_controls::s3_bucket_ownership_controls_config(),
         s3::bucket_policy::s3_bucket_policy_config(),
         s3::bucket_public_access_block::s3_bucket_public_access_block_config(),
         s3::bucket_server_side_encryption_configuration::s3_bucket_server_side_encryption_configuration_config(),
@@ -90,7 +92,9 @@ pub fn get_enum_valid_values(
         organizations::organization::enum_valid_values(),
         route53::record_set::enum_valid_values(),
         s3::bucket::enum_valid_values(),
+        s3::bucket_acl::enum_valid_values(),
         s3::bucket_data_source::enum_valid_values(),
+        s3::bucket_ownership_controls::enum_valid_values(),
         s3::bucket_policy::enum_valid_values(),
         s3::bucket_public_access_block::enum_valid_values(),
         s3::bucket_server_side_encryption_configuration::enum_valid_values(),
@@ -191,6 +195,12 @@ pub fn get_enum_alias_reverse(
     }
     if resource_type == "s3.Bucket" {
         return s3::bucket::enum_alias_reverse(attr_name, value);
+    }
+    if resource_type == "s3.BucketAcl" {
+        return s3::bucket_acl::enum_alias_reverse(attr_name, value);
+    }
+    if resource_type == "s3.BucketOwnershipControls" {
+        return s3::bucket_ownership_controls::enum_alias_reverse(attr_name, value);
     }
     if resource_type == "s3.BucketPolicy" {
         return s3::bucket_policy::enum_alias_reverse(attr_name, value);
@@ -387,6 +397,20 @@ pub fn build_enum_aliases_map() -> std::collections::HashMap<
     }
     for (attr, alias, canonical) in s3::bucket::enum_alias_entries() {
         map.entry("s3.Bucket".to_string())
+            .or_insert_with(std::collections::HashMap::new)
+            .entry(attr.to_string())
+            .or_insert_with(std::collections::HashMap::new)
+            .insert(alias.to_string(), canonical.to_string());
+    }
+    for (attr, alias, canonical) in s3::bucket_acl::enum_alias_entries() {
+        map.entry("s3.BucketAcl".to_string())
+            .or_insert_with(std::collections::HashMap::new)
+            .entry(attr.to_string())
+            .or_insert_with(std::collections::HashMap::new)
+            .insert(alias.to_string(), canonical.to_string());
+    }
+    for (attr, alias, canonical) in s3::bucket_ownership_controls::enum_alias_entries() {
+        map.entry("s3.BucketOwnershipControls".to_string())
             .or_insert_with(std::collections::HashMap::new)
             .entry(attr.to_string())
             .or_insert_with(std::collections::HashMap::new)
