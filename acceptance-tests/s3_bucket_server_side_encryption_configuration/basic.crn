@@ -1,0 +1,25 @@
+# S3 BucketServerSideEncryptionConfiguration - Basic test
+#
+# Tests: standalone aws.s3.BucketServerSideEncryptionConfiguration
+# applying AES256 SSE on a bucket.
+
+provider aws {
+  region = aws.Region.ap_northeast_1
+}
+
+let bucket = aws.s3.Bucket {
+  bucket = 'carina-acc-test-aws-s3-bucket-sse-basic-v1'
+}
+
+aws.s3.BucketServerSideEncryptionConfiguration {
+  bucket = bucket.bucket
+
+  rules = [
+    {
+      apply_server_side_encryption_by_default = {
+        sse_algorithm = aws.s3.BucketServerSideEncryptionConfiguration.SseAlgorithm.AES256
+      }
+      bucket_key_enabled = true
+    },
+  ]
+}

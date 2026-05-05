@@ -1367,6 +1367,57 @@ pub fn iam_policy_document() -> AttributeType {
     }
 }
 
+/// SSE algorithm enum for `aws.s3.BucketServerSideEncryptionConfiguration`.
+fn s3_sse_algorithm() -> AttributeType {
+    AttributeType::StringEnum {
+        name: "SseAlgorithm".to_string(),
+        values: vec![
+            "AES256".to_string(),
+            "aws:kms".to_string(),
+            "aws:kms:dsse".to_string(),
+        ],
+        namespace: Some("aws.s3.BucketServerSideEncryptionConfiguration".to_string()),
+        to_dsl: None,
+    }
+}
+
+/// `ApplyServerSideEncryptionByDefault` struct: SSE algorithm + optional KMS key.
+fn s3_sse_by_default() -> AttributeType {
+    AttributeType::Struct {
+        name: "SseByDefault".to_string(),
+        fields: vec![
+            StructField::new("sse_algorithm", s3_sse_algorithm())
+                .with_provider_name("SSEAlgorithm")
+                .required(),
+            StructField::new("kms_master_key_id", AttributeType::String)
+                .with_provider_name("KMSMasterKeyID"),
+        ],
+    }
+}
+
+/// A single SSE rule: per-bucket default + optional bucket-key flag.
+fn s3_sse_rule() -> AttributeType {
+    AttributeType::Struct {
+        name: "SseRule".to_string(),
+        fields: vec![
+            StructField::new(
+                "apply_server_side_encryption_by_default",
+                s3_sse_by_default(),
+            )
+            .with_provider_name("ApplyServerSideEncryptionByDefault")
+            .with_block_name("apply_server_side_encryption_by_default"),
+            StructField::new("bucket_key_enabled", AttributeType::Bool)
+                .with_provider_name("BucketKeyEnabled"),
+        ],
+    }
+}
+
+/// List of SSE rules — the `rules` attribute on
+/// `aws.s3.BucketServerSideEncryptionConfiguration`.
+pub fn bucket_encryption_rules() -> AttributeType {
+    AttributeType::list(s3_sse_rule())
+}
+
 /// IAM condition operator mappings: (snake_case, PascalCase).
 ///
 /// See <https://docs.aws.amazon.Com/IAM/latest/UserGuide/reference_policies_elements_condition_operators.html>

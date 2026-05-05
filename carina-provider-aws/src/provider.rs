@@ -30,6 +30,13 @@ impl Provider for AwsProvider {
                     self.read_s3_bucket_versioning(&id, identifier.as_deref())
                         .await
                 }
+                "s3.BucketServerSideEncryptionConfiguration" => {
+                    self.read_s3_bucket_server_side_encryption_configuration(
+                        &id,
+                        identifier.as_deref(),
+                    )
+                    .await
+                }
                 "ec2.Eip" => self.read_ec2_eip(&id, identifier.as_deref()).await,
                 "ec2.Vpc" => self.read_ec2_vpc(&id, identifier.as_deref()).await,
                 "ec2.Subnet" => self.read_ec2_subnet(&id, identifier.as_deref()).await,
@@ -131,6 +138,10 @@ impl Provider for AwsProvider {
                     self.create_s3_bucket_public_access_block(resource).await
                 }
                 "s3.BucketVersioning" => self.create_s3_bucket_versioning(resource).await,
+                "s3.BucketServerSideEncryptionConfiguration" => {
+                    self.create_s3_bucket_server_side_encryption_configuration(resource)
+                        .await
+                }
                 "ec2.Eip" => self.create_ec2_eip(resource).await,
                 "ec2.Vpc" => self.create_ec2_vpc(resource).await,
                 "ec2.Subnet" => self.create_ec2_subnet(resource).await,
@@ -204,6 +215,15 @@ impl Provider for AwsProvider {
                 "s3.BucketVersioning" => {
                     self.update_s3_bucket_versioning(id, &identifier, &from, to)
                         .await
+                }
+                "s3.BucketServerSideEncryptionConfiguration" => {
+                    self.update_s3_bucket_server_side_encryption_configuration(
+                        id,
+                        &identifier,
+                        &from,
+                        to,
+                    )
+                    .await
                 }
                 "ec2.Eip" => self.update_ec2_eip(id, &identifier, &from, to).await,
                 "ec2.Vpc" => self.update_ec2_vpc(id, &identifier, &from, to).await,
@@ -310,6 +330,13 @@ impl Provider for AwsProvider {
                 "s3.BucketVersioning" => {
                     self.delete_s3_bucket_versioning_suspend(id, &identifier)
                         .await
+                }
+                "s3.BucketServerSideEncryptionConfiguration" => {
+                    self.delete_s3_bucket_server_side_encryption_configuration_idempotent(
+                        id,
+                        &identifier,
+                    )
+                    .await
                 }
                 "ec2.Eip" => self.delete_ec2_eip(id, &identifier).await,
                 "ec2.Vpc" => self.delete_ec2_vpc(id, &identifier).await,

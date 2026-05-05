@@ -1334,6 +1334,55 @@ pub fn s3_resources() -> Vec<ResourceDef> {
             identity_overrides: vec![],
             derived_attributes: vec![],
         },
+        // s3.BucketServerSideEncryptionConfiguration — controls the SSE
+        // configuration of an existing S3 bucket. Maps to PutBucketEncryption /
+        // GetBucketEncryption / DeleteBucketEncryption.
+        ResourceDef {
+            name: "s3.BucketServerSideEncryptionConfiguration",
+            service_namespace: "com.amazonaws.s3",
+            schema_structure: None,
+            simple_delete: false,
+            noop_update: false,
+            create_op: "PutBucketEncryption",
+            read_structure: None,
+            // Read / Create / Update / Delete are hand-written; the rules
+            // attribute is a typed Struct list (carina_aws_types::bucket_encryption_rules)
+            // that the generic codegen body cannot construct.
+            read_ops: vec![],
+            delete_op: "DeleteBucketEncryption",
+            // Declare PutBucketEncryption as the update op so codegen marks
+            // `Rules` as updatable; the generated write helper is suppressed
+            // because `Rules` has a `type_overrides` entry.
+            update_ops: vec![UpdateOp {
+                operation: "PutBucketEncryption",
+                fields: FieldLayout::InsideStruct {
+                    name: "ServerSideEncryptionConfiguration",
+                    fields: vec!["Rules"],
+                },
+            }],
+            identifier: "Bucket",
+            has_tags: false,
+            type_overrides: vec![("Rules", "super::bucket_encryption_rules()")],
+            exclude_fields: vec![
+                "ContentMD5",
+                "ChecksumAlgorithm",
+                "ExpectedBucketOwner",
+                "ServerSideEncryptionConfiguration",
+            ],
+            create_only_overrides: vec!["Bucket"],
+            enum_aliases: vec![],
+            to_dsl_overrides: vec![],
+            required_overrides: vec!["Bucket", "Rules"],
+            extra_read_only: vec![],
+            read_only_overrides: vec![],
+            extra_writable: vec![ExtraField {
+                name: "Rules",
+                read_source: None,
+                description: Some("List of server-side encryption rules to apply to the bucket."),
+            }],
+            identity_overrides: vec![],
+            derived_attributes: vec![],
+        },
         // s3.BucketPublicAccessBlock — controls the Public Access Block
         // settings of an existing S3 bucket. Maps to PutPublicAccessBlock /
         // GetPublicAccessBlock / DeletePublicAccessBlock.
