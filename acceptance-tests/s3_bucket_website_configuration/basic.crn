@@ -1,0 +1,20 @@
+# S3 BucketWebsiteConfiguration - Basic test
+
+provider aws {
+  region = aws.Region.ap_northeast_1
+}
+
+let bucket = aws.s3.Bucket {
+  bucket = 'carina-acc-test-aws-s3-bucket-website-basic-v1'
+}
+
+aws.s3.BucketWebsiteConfiguration {
+  bucket = bucket.bucket
+
+  index_document = {
+    suffix = 'index.html'
+  }
+  error_document = {
+    key = 'error.html'
+  }
+}

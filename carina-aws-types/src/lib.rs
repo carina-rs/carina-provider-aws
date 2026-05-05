@@ -1612,6 +1612,49 @@ pub fn bucket_lifecycle_rules() -> AttributeType {
     AttributeType::list(s3_lifecycle_rule())
 }
 
+pub fn s3_index_document() -> AttributeType {
+    AttributeType::Struct {
+        name: "IndexDocument".to_string(),
+        fields: vec![
+            StructField::new("suffix", AttributeType::String)
+                .with_provider_name("Suffix")
+                .required(),
+        ],
+    }
+}
+
+pub fn s3_error_document() -> AttributeType {
+    AttributeType::Struct {
+        name: "ErrorDocument".to_string(),
+        fields: vec![
+            StructField::new("key", AttributeType::String)
+                .with_provider_name("Key")
+                .required(),
+        ],
+    }
+}
+
+pub fn s3_redirect_all_requests_to() -> AttributeType {
+    AttributeType::Struct {
+        name: "RedirectAllRequestsTo".to_string(),
+        fields: vec![
+            StructField::new("host_name", AttributeType::String)
+                .with_provider_name("HostName")
+                .required(),
+            StructField::new(
+                "protocol",
+                AttributeType::StringEnum {
+                    name: "Protocol".to_string(),
+                    values: vec!["http".to_string(), "https".to_string()],
+                    namespace: Some("aws.s3.BucketWebsiteConfiguration".to_string()),
+                    to_dsl: None,
+                },
+            )
+            .with_provider_name("Protocol"),
+        ],
+    }
+}
+
 /// IAM condition operator mappings: (snake_case, PascalCase).
 ///
 /// See <https://docs.aws.amazon.Com/IAM/latest/UserGuide/reference_policies_elements_condition_operators.html>
