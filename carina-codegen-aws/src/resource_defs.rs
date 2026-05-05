@@ -1182,20 +1182,11 @@ pub fn s3_resources() -> Vec<ResourceDef> {
             noop_update: false,
             create_op: "CreateBucket",
             read_structure: None,
-            read_ops: vec![ReadOp {
-                operation: "GetBucketVersioning",
-                fields: vec![("Status", Some("VersioningStatus"))],
-                defaults: vec![("VersioningStatus", "Suspended")],
-            }],
+            // Versioning was previously bundled here as a read_op + update_op;
+            // it now lives in the standalone s3.BucketVersioning resource (#211).
+            read_ops: vec![],
             delete_op: "DeleteBucket",
             update_ops: vec![
-                UpdateOp {
-                    operation: "PutBucketVersioning",
-                    fields: FieldLayout::InsideStruct {
-                        name: "VersioningConfiguration",
-                        fields: vec!["VersioningStatus"],
-                    },
-                },
                 UpdateOp {
                     operation: "PutBucketOwnershipControls",
                     fields: FieldLayout::Flat(vec!["ObjectOwnership"]),
@@ -1273,6 +1264,73 @@ pub fn s3_resources() -> Vec<ResourceDef> {
             extra_read_only: vec![],
             read_only_overrides: vec![],
             extra_writable: vec![],
+            identity_overrides: vec![],
+            derived_attributes: vec![],
+        },
+        // s3.BucketVersioning — controls the versioning configuration of an
+        // existing S3 bucket. Maps to PutBucketVersioning / GetBucketVersioning.
+        // There is no DeleteBucketVersioning API; destroy is implemented as
+        // PutBucketVersioning with Status=Suspended.
+        ResourceDef {
+            name: "s3.BucketVersioning",
+            service_namespace: "com.amazonaws.s3",
+            schema_structure: None,
+            simple_delete: false,
+            noop_update: false,
+            create_op: "PutBucketVersioning",
+            read_structure: None,
+            read_ops: vec![],
+            // Suspend-on-delete: there is no DeleteBucketVersioning API.
+            // The hand-written delete method calls PutBucketVersioning with
+            // Status=Suspended; this delete_op string is a no-op for codegen
+            // because simple_delete is false.
+            delete_op: "PutBucketVersioning",
+            update_ops: vec![UpdateOp {
+                operation: "PutBucketVersioning",
+                fields: FieldLayout::InsideStruct {
+                    name: "VersioningConfiguration",
+                    fields: vec!["Status", "MFADelete"],
+                },
+            }],
+            identifier: "Bucket",
+            has_tags: false,
+            type_overrides: vec![
+                (
+                    "Status",
+                    "AttributeType::StringEnum { name: \"VersioningStatus\".to_string(), values: vec![\"Enabled\".to_string(), \"Suspended\".to_string()], namespace: Some(\"aws.s3.BucketVersioning\".to_string()), to_dsl: None }",
+                ),
+                (
+                    "MFADelete",
+                    "AttributeType::StringEnum { name: \"MFADelete\".to_string(), values: vec![\"Enabled\".to_string(), \"Disabled\".to_string()], namespace: Some(\"aws.s3.BucketVersioning\".to_string()), to_dsl: None }",
+                ),
+            ],
+            exclude_fields: vec![
+                "ContentMD5",
+                "ChecksumAlgorithm",
+                "MFA",
+                "ExpectedBucketOwner",
+                "VersioningConfiguration",
+            ],
+            create_only_overrides: vec!["Bucket"],
+            enum_aliases: vec![],
+            to_dsl_overrides: vec![],
+            required_overrides: vec!["Bucket", "Status"],
+            extra_read_only: vec![],
+            read_only_overrides: vec![],
+            extra_writable: vec![
+                ExtraField {
+                    name: "Status",
+                    read_source: None,
+                    description: Some("Versioning state of the bucket: Enabled or Suspended."),
+                },
+                ExtraField {
+                    name: "MFADelete",
+                    read_source: None,
+                    description: Some(
+                        "MFA-delete state. Specifies whether MFA delete is enabled in the bucket versioning configuration.",
+                    ),
+                },
+            ],
             identity_overrides: vec![],
             derived_attributes: vec![],
         },

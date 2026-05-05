@@ -135,34 +135,31 @@ mod tests {
 
     #[test]
     fn test_resolve_enum_identifiers_namespaced_value() {
-        let mut resource = Resource::with_provider("aws", "s3.Bucket", "test-bucket");
+        let mut resource = Resource::with_provider("aws", "s3.BucketVersioning", "test");
         resource.set_attr(
-            "versioning_status".to_string(),
-            Value::String("aws.s3.Bucket.VersioningStatus.Enabled".to_string()),
+            "status".to_string(),
+            Value::String("aws.s3.BucketVersioning.VersioningStatus.Enabled".to_string()),
         );
         let mut resources = vec![resource];
         resolve_enum_identifiers(&mut resources);
         assert_eq!(
-            resources[0].get_attr("versioning_status"),
+            resources[0].get_attr("status"),
             Some(&Value::String(
-                "aws.s3.Bucket.VersioningStatus.Enabled".to_string()
+                "aws.s3.BucketVersioning.VersioningStatus.Enabled".to_string()
             ))
         );
     }
 
     #[test]
     fn test_resolve_enum_identifiers_bare_ident() {
-        let mut resource = Resource::with_provider("aws", "s3.Bucket", "test-bucket");
-        resource.set_attr(
-            "versioning_status".to_string(),
-            Value::String("Enabled".to_string()),
-        );
+        let mut resource = Resource::with_provider("aws", "s3.BucketVersioning", "test");
+        resource.set_attr("status".to_string(), Value::String("Enabled".to_string()));
         let mut resources = vec![resource];
         resolve_enum_identifiers(&mut resources);
         assert_eq!(
-            resources[0].get_attr("versioning_status"),
+            resources[0].get_attr("status"),
             Some(&Value::String(
-                "aws.s3.Bucket.VersioningStatus.Enabled".to_string()
+                "aws.s3.BucketVersioning.VersioningStatus.Enabled".to_string()
             ))
         );
     }
@@ -186,33 +183,27 @@ mod tests {
 
     #[test]
     fn test_resolve_enum_identifiers_plain_string() {
-        let mut resource = Resource::with_provider("aws", "s3.Bucket", "test-bucket");
-        resource.set_attr(
-            "versioning_status".to_string(),
-            Value::String("Enabled".to_string()),
-        );
+        let mut resource = Resource::with_provider("aws", "s3.BucketVersioning", "test");
+        resource.set_attr("status".to_string(), Value::String("Enabled".to_string()));
         let mut resources = vec![resource];
         resolve_enum_identifiers(&mut resources);
         assert_eq!(
-            resources[0].get_attr("versioning_status"),
+            resources[0].get_attr("status"),
             Some(&Value::String(
-                "aws.s3.Bucket.VersioningStatus.Enabled".to_string()
+                "aws.s3.BucketVersioning.VersioningStatus.Enabled".to_string()
             ))
         );
     }
 
     #[test]
     fn test_resolve_enum_identifiers_skips_non_aws() {
-        let mut resource = Resource::with_provider("awscc", "s3.Bucket", "test");
-        resource.set_attr(
-            "versioning_status".to_string(),
-            Value::String("Enabled".to_string()),
-        );
+        let mut resource = Resource::with_provider("awscc", "s3.BucketVersioning", "test");
+        resource.set_attr("status".to_string(), Value::String("Enabled".to_string()));
         let mut resources = vec![resource];
         resolve_enum_identifiers(&mut resources);
         // Should not be modified since provider is "awscc"
         assert_eq!(
-            resources[0].get_attr("versioning_status"),
+            resources[0].get_attr("status"),
             Some(&Value::String("Enabled".to_string()))
         );
     }
@@ -251,21 +242,11 @@ mod tests {
         let mut attributes = HashMap::from([
             ("bucket".to_string(), Value::String("my-bucket".to_string())),
             (
-                "versioning_status".to_string(),
-                Value::String("Enabled".to_string()),
-            ),
-            (
                 "object_ownership".to_string(),
                 Value::String("BucketOwnerEnforced".to_string()),
             ),
         ]);
         normalize_state_enums("s3.Bucket", &mut attributes);
-        assert_eq!(
-            attributes.get("versioning_status"),
-            Some(&Value::String(
-                "aws.s3.Bucket.VersioningStatus.Enabled".to_string()
-            ))
-        );
         assert_eq!(
             attributes.get("object_ownership"),
             Some(&Value::String(
@@ -276,6 +257,21 @@ mod tests {
         assert_eq!(
             attributes.get("bucket"),
             Some(&Value::String("my-bucket".to_string()))
+        );
+    }
+
+    #[test]
+    fn test_normalize_state_enums_bucket_versioning() {
+        let mut attributes = HashMap::from([
+            ("bucket".to_string(), Value::String("my-bucket".to_string())),
+            ("status".to_string(), Value::String("Enabled".to_string())),
+        ]);
+        normalize_state_enums("s3.BucketVersioning", &mut attributes);
+        assert_eq!(
+            attributes.get("status"),
+            Some(&Value::String(
+                "aws.s3.BucketVersioning.VersioningStatus.Enabled".to_string()
+            ))
         );
     }
 

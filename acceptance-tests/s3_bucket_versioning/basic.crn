@@ -1,18 +1,13 @@
-# S3 Bucket
+# S3 BucketVersioning - Basic test
 #
-# Creates an S3 bucket with versioning enabled via the standalone
-# aws.s3.BucketVersioning resource.
+# Tests: standalone aws.s3.BucketVersioning enabling versioning on a bucket.
 
 provider aws {
   region = aws.Region.ap_northeast_1
 }
 
 let bucket = aws.s3.Bucket {
-  bucket = 'carina-example-s3-bucket'
-
-  tags = {
-    Environment = 'example'
-  }
+  bucket = 'carina-acc-test-aws-s3-bucket-versioning-basic-v1'
 }
 
 aws.s3.BucketVersioning {

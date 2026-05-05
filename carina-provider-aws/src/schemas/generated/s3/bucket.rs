@@ -24,8 +24,6 @@ const VALID_OBJECT_OWNERSHIP: &[&str] = &[
     "ObjectWriter",
 ];
 
-const VALID_VERSIONING_STATUS: &[&str] = &["Enabled", "Suspended"];
-
 /// Returns the schema config for s3.Bucket (Smithy: com.amazonaws.s3)
 pub fn s3_bucket_config() -> AwsSchemaConfig {
     AwsSchemaConfig {
@@ -102,16 +100,6 @@ pub fn s3_bucket_config() -> AwsSchemaConfig {
                 .with_provider_name("ObjectOwnership"),
         )
         .attribute(
-            AttributeSchema::new("versioning_status", AttributeType::StringEnum {
-                name: "VersioningStatus".to_string(),
-                values: vec!["Enabled".to_string(), "Suspended".to_string()],
-                namespace: Some("aws.s3.Bucket".to_string()),
-                to_dsl: None,
-            })
-                .with_description("The versioning state of the bucket.")
-                .with_provider_name("VersioningStatus"),
-        )
-        .attribute(
             AttributeSchema::new("tags", tags_type())
                 .with_description("The tags for the resource.")
                 .with_provider_name("Tags"),
@@ -131,7 +119,6 @@ pub fn enum_valid_values() -> (
             ("acl", VALID_ACL),
             ("bucket_namespace", VALID_BUCKET_NAMESPACE),
             ("object_ownership", VALID_OBJECT_OWNERSHIP),
-            ("versioning_status", VALID_VERSIONING_STATUS),
         ],
     )
 }

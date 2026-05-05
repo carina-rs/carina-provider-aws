@@ -8,6 +8,7 @@ use std::collections::HashMap;
 
 use carina_core::provider::{BoxFuture, ProviderError, ProviderResult};
 use carina_core::resource::{Resource, ResourceId, State, Value};
+#[allow(unused_imports)]
 use carina_core::utils::extract_enum_value;
 
 use crate::AwsProvider;
@@ -152,65 +153,6 @@ impl AwsProvider {
     ) -> ProviderResult<State> {
         self.read_organizations_organization(&id, Some(identifier))
             .await
-    }
-
-    /// Read s3.Bucket GetBucketVersioning (generated)
-    pub(crate) async fn read_s3_bucket_versioning(
-        &self,
-        id: &ResourceId,
-        identifier: &str,
-        attributes: &mut HashMap<String, Value>,
-    ) -> ProviderResult<()> {
-        let output = self
-            .s3_client
-            .get_bucket_versioning()
-            .bucket(identifier)
-            .send()
-            .await
-            .map_err(|e| {
-                ProviderError::new(sdk_error_message(
-                    "Failed to read s3.Bucket GetBucketVersioning",
-                    &e,
-                ))
-                .for_resource(id.clone())
-            })?;
-        let value = output
-            .status()
-            .map(|v| v.as_str().to_string())
-            .unwrap_or_else(|| "Suspended".to_string());
-        attributes.insert("versioning_status".to_string(), Value::String(value));
-        Ok(())
-    }
-
-    /// Write s3.Bucket PutBucketVersioning (generated)
-    pub(crate) async fn write_s3_bucket_versioning(
-        &self,
-        id: &ResourceId,
-        identifier: &str,
-        attributes: &HashMap<String, Value>,
-    ) -> ProviderResult<()> {
-        use aws_sdk_s3::types::{BucketVersioningStatus, VersioningConfiguration};
-        let mut builder = VersioningConfiguration::builder();
-        let mut has_changes = false;
-        if let Some(Value::String(val)) = attributes.get("versioning_status") {
-            let normalized = extract_enum_value(val);
-            builder = builder.status(BucketVersioningStatus::from(normalized));
-            has_changes = true;
-        }
-        if has_changes {
-            let config = builder.build();
-            self.s3_client
-                .put_bucket_versioning()
-                .bucket(identifier)
-                .versioning_configuration(config)
-                .send()
-                .await
-                .map_err(|e| {
-                    ProviderError::new(sdk_error_message("Failed to put bucket versioning", &e))
-                        .for_resource(id.clone())
-                })?;
-        }
-        Ok(())
     }
 
     /// Extract ec2.Vpc attributes from SDK response type (generated)
