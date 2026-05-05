@@ -279,7 +279,10 @@ impl Provider for AwsProvider {
         Box::pin(async move {
             match id.resource_type.as_str() {
                 "s3.Bucket" => self.delete_s3_bucket(id, &identifier, &lifecycle).await,
-                "s3.BucketPolicy" => self.delete_s3_bucket_policy(id, &identifier).await,
+                "s3.BucketPolicy" => {
+                    self.delete_s3_bucket_policy_idempotent(id, &identifier)
+                        .await
+                }
                 "ec2.Eip" => self.delete_ec2_eip(id, &identifier).await,
                 "ec2.Vpc" => self.delete_ec2_vpc(id, &identifier).await,
                 "ec2.Subnet" => self.delete_ec2_subnet(id, &identifier).await,
