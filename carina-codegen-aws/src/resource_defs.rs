@@ -1630,6 +1630,48 @@ pub fn s3_resources() -> Vec<ResourceDef> {
             identity_overrides: vec![],
             derived_attributes: vec![],
         },
+        // s3.BucketCorsConfiguration — controls CORS rules on an existing
+        // S3 bucket. Maps to PutBucketCors / GetBucketCors / DeleteBucketCors.
+        ResourceDef {
+            name: "s3.BucketCorsConfiguration",
+            service_namespace: "com.amazonaws.s3",
+            schema_structure: None,
+            simple_delete: false,
+            noop_update: false,
+            create_op: "PutBucketCors",
+            read_structure: None,
+            read_ops: vec![],
+            delete_op: "DeleteBucketCors",
+            update_ops: vec![UpdateOp {
+                operation: "PutBucketCors",
+                fields: FieldLayout::InsideStruct {
+                    name: "CORSConfiguration",
+                    fields: vec!["CORSRules"],
+                },
+            }],
+            identifier: "Bucket",
+            has_tags: false,
+            type_overrides: vec![("CORSRules", "super::bucket_cors_rules()")],
+            exclude_fields: vec![
+                "ContentMD5",
+                "ChecksumAlgorithm",
+                "ExpectedBucketOwner",
+                "CORSConfiguration",
+            ],
+            create_only_overrides: vec!["Bucket"],
+            enum_aliases: vec![],
+            to_dsl_overrides: vec![],
+            required_overrides: vec!["Bucket", "CORSRules"],
+            extra_read_only: vec![],
+            read_only_overrides: vec![],
+            extra_writable: vec![ExtraField {
+                name: "CORSRules",
+                read_source: None,
+                description: Some("CORS rules to apply to the bucket."),
+            }],
+            identity_overrides: vec![],
+            derived_attributes: vec![],
+        },
         // s3.BucketPublicAccessBlock — controls the Public Access Block
         // settings of an existing S3 bucket. Maps to PutPublicAccessBlock /
         // GetPublicAccessBlock / DeletePublicAccessBlock.

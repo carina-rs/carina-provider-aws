@@ -1,0 +1,24 @@
+# S3 BucketCorsConfiguration - Basic test
+
+provider aws {
+  region = aws.Region.ap_northeast_1
+}
+
+let bucket = aws.s3.Bucket {
+  bucket = 'carina-acc-test-aws-s3-bucket-cors-basic-v1'
+}
+
+aws.s3.BucketCorsConfiguration {
+  bucket = bucket.bucket
+
+  cors_rules = [
+    {
+      id = 'allow-get-from-example'
+      allowed_methods = ['GET']
+      allowed_origins = ['https://example.com']
+      allowed_headers = ['*']
+      expose_headers = ['ETag']
+      max_age_seconds = 3000
+    },
+  ]
+}
