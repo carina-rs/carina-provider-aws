@@ -1646,6 +1646,100 @@ pub fn bucket_cors_rules() -> AttributeType {
     AttributeType::list(s3_cors_rule())
 }
 
+fn s3_notification_filter_rule() -> AttributeType {
+    AttributeType::Struct {
+        name: "FilterRule".to_string(),
+        fields: vec![
+            StructField::new("name", AttributeType::String)
+                .with_provider_name("Name")
+                .required(),
+            StructField::new("value", AttributeType::String)
+                .with_provider_name("Value")
+                .required(),
+        ],
+    }
+}
+
+fn s3_notification_filter() -> AttributeType {
+    AttributeType::Struct {
+        name: "NotificationFilter".to_string(),
+        fields: vec![
+            StructField::new(
+                "filter_rules",
+                AttributeType::list(s3_notification_filter_rule()),
+            )
+            .with_provider_name("FilterRules"),
+        ],
+    }
+}
+
+fn s3_topic_configuration() -> AttributeType {
+    AttributeType::Struct {
+        name: "TopicConfiguration".to_string(),
+        fields: vec![
+            StructField::new("id", AttributeType::String).with_provider_name("Id"),
+            StructField::new("topic_arn", AttributeType::String)
+                .with_provider_name("TopicArn")
+                .required(),
+            StructField::new("events", AttributeType::list(AttributeType::String))
+                .with_provider_name("Events")
+                .required(),
+            StructField::new("filter", s3_notification_filter()).with_provider_name("Filter"),
+        ],
+    }
+}
+
+fn s3_queue_configuration() -> AttributeType {
+    AttributeType::Struct {
+        name: "QueueConfiguration".to_string(),
+        fields: vec![
+            StructField::new("id", AttributeType::String).with_provider_name("Id"),
+            StructField::new("queue_arn", AttributeType::String)
+                .with_provider_name("QueueArn")
+                .required(),
+            StructField::new("events", AttributeType::list(AttributeType::String))
+                .with_provider_name("Events")
+                .required(),
+            StructField::new("filter", s3_notification_filter()).with_provider_name("Filter"),
+        ],
+    }
+}
+
+fn s3_lambda_function_configuration() -> AttributeType {
+    AttributeType::Struct {
+        name: "LambdaFunctionConfiguration".to_string(),
+        fields: vec![
+            StructField::new("id", AttributeType::String).with_provider_name("Id"),
+            StructField::new("lambda_function_arn", AttributeType::String)
+                .with_provider_name("LambdaFunctionArn")
+                .required(),
+            StructField::new("events", AttributeType::list(AttributeType::String))
+                .with_provider_name("Events")
+                .required(),
+            StructField::new("filter", s3_notification_filter()).with_provider_name("Filter"),
+        ],
+    }
+}
+
+pub fn bucket_topic_configurations() -> AttributeType {
+    AttributeType::list(s3_topic_configuration())
+}
+
+pub fn bucket_queue_configurations() -> AttributeType {
+    AttributeType::list(s3_queue_configuration())
+}
+
+pub fn bucket_lambda_function_configurations() -> AttributeType {
+    AttributeType::list(s3_lambda_function_configuration())
+}
+
+pub fn bucket_event_bridge_configuration() -> AttributeType {
+    AttributeType::Struct {
+        name: "EventBridgeConfiguration".to_string(),
+        fields: vec![],
+    }
+}
+
 pub fn s3_index_document() -> AttributeType {
     AttributeType::Struct {
         name: "IndexDocument".to_string(),

@@ -1672,6 +1672,92 @@ pub fn s3_resources() -> Vec<ResourceDef> {
             identity_overrides: vec![],
             derived_attributes: vec![],
         },
+        // s3.BucketNotificationConfiguration — wires bucket events to
+        // SNS / SQS / Lambda / EventBridge destinations. Maps to
+        // PutBucketNotificationConfiguration / GetBucketNotificationConfiguration.
+        // No DeleteBucket* API exists; destroy is implemented as a Put with
+        // empty configuration (Terraform parity).
+        ResourceDef {
+            name: "s3.BucketNotificationConfiguration",
+            service_namespace: "com.amazonaws.s3",
+            schema_structure: None,
+            simple_delete: false,
+            noop_update: false,
+            create_op: "PutBucketNotificationConfiguration",
+            read_structure: None,
+            read_ops: vec![],
+            // No native delete API — destroy uses the same Put op with
+            // empty lists; we still set delete_op for code-gen totality but
+            // the dispatch table calls the hand-written idempotent helper.
+            delete_op: "PutBucketNotificationConfiguration",
+            update_ops: vec![UpdateOp {
+                operation: "PutBucketNotificationConfiguration",
+                fields: FieldLayout::InsideStruct {
+                    name: "NotificationConfiguration",
+                    fields: vec![
+                        "TopicConfigurations",
+                        "QueueConfigurations",
+                        "LambdaFunctionConfigurations",
+                        "EventBridgeConfiguration",
+                    ],
+                },
+            }],
+            identifier: "Bucket",
+            has_tags: false,
+            type_overrides: vec![
+                (
+                    "TopicConfigurations",
+                    "super::bucket_topic_configurations()",
+                ),
+                (
+                    "QueueConfigurations",
+                    "super::bucket_queue_configurations()",
+                ),
+                (
+                    "LambdaFunctionConfigurations",
+                    "super::bucket_lambda_function_configurations()",
+                ),
+                (
+                    "EventBridgeConfiguration",
+                    "super::bucket_event_bridge_configuration()",
+                ),
+            ],
+            exclude_fields: vec![
+                "ExpectedBucketOwner",
+                "SkipDestinationValidation",
+                "NotificationConfiguration",
+            ],
+            create_only_overrides: vec!["Bucket"],
+            enum_aliases: vec![],
+            to_dsl_overrides: vec![],
+            required_overrides: vec!["Bucket"],
+            extra_read_only: vec![],
+            read_only_overrides: vec![],
+            extra_writable: vec![
+                ExtraField {
+                    name: "TopicConfigurations",
+                    read_source: None,
+                    description: Some("SNS topic notification configurations."),
+                },
+                ExtraField {
+                    name: "QueueConfigurations",
+                    read_source: None,
+                    description: Some("SQS queue notification configurations."),
+                },
+                ExtraField {
+                    name: "LambdaFunctionConfigurations",
+                    read_source: None,
+                    description: Some("Lambda function notification configurations."),
+                },
+                ExtraField {
+                    name: "EventBridgeConfiguration",
+                    read_source: None,
+                    description: Some("Enables EventBridge notifications when present."),
+                },
+            ],
+            identity_overrides: vec![],
+            derived_attributes: vec![],
+        },
         // s3.BucketPublicAccessBlock — controls the Public Access Block
         // settings of an existing S3 bucket. Maps to PutPublicAccessBlock /
         // GetPublicAccessBlock / DeletePublicAccessBlock.
