@@ -16,3 +16,4 @@ pub mod bucket_public_access_block;
 pub mod bucket_replication_configuration;
 pub mod bucket_server_side_encryption_configuration;
 pub mod bucket_versioning;
+pub mod bucket_website_configuration;

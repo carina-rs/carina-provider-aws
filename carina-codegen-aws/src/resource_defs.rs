@@ -1567,6 +1567,69 @@ pub fn s3_resources() -> Vec<ResourceDef> {
             identity_overrides: vec![],
             derived_attributes: vec![],
         },
+        // s3.BucketWebsiteConfiguration — configures static-website hosting.
+        // Maps to PutBucketWebsite / GetBucketWebsite / DeleteBucketWebsite.
+        ResourceDef {
+            name: "s3.BucketWebsiteConfiguration",
+            service_namespace: "com.amazonaws.s3",
+            schema_structure: None,
+            simple_delete: false,
+            noop_update: false,
+            create_op: "PutBucketWebsite",
+            read_structure: None,
+            read_ops: vec![],
+            delete_op: "DeleteBucketWebsite",
+            update_ops: vec![UpdateOp {
+                operation: "PutBucketWebsite",
+                fields: FieldLayout::InsideStruct {
+                    name: "WebsiteConfiguration",
+                    fields: vec!["IndexDocument", "ErrorDocument", "RedirectAllRequestsTo"],
+                },
+            }],
+            identifier: "Bucket",
+            has_tags: false,
+            type_overrides: vec![
+                ("IndexDocument", "super::s3_index_document()"),
+                ("ErrorDocument", "super::s3_error_document()"),
+                (
+                    "RedirectAllRequestsTo",
+                    "super::s3_redirect_all_requests_to()",
+                ),
+            ],
+            exclude_fields: vec![
+                "ContentMD5",
+                "ChecksumAlgorithm",
+                "ExpectedBucketOwner",
+                "WebsiteConfiguration",
+            ],
+            create_only_overrides: vec!["Bucket"],
+            enum_aliases: vec![],
+            to_dsl_overrides: vec![],
+            required_overrides: vec!["Bucket"],
+            extra_read_only: vec![],
+            read_only_overrides: vec![],
+            extra_writable: vec![
+                ExtraField {
+                    name: "IndexDocument",
+                    read_source: None,
+                    description: Some("Index document for the bucket's website."),
+                },
+                ExtraField {
+                    name: "ErrorDocument",
+                    read_source: None,
+                    description: Some("Custom error document key."),
+                },
+                ExtraField {
+                    name: "RedirectAllRequestsTo",
+                    read_source: None,
+                    description: Some(
+                        "Redirect all bucket-website requests to another host (alternative to index_document).",
+                    ),
+                },
+            ],
+            identity_overrides: vec![],
+            derived_attributes: vec![],
+        },
         // s3.BucketPublicAccessBlock — controls the Public Access Block
         // settings of an existing S3 bucket. Maps to PutPublicAccessBlock /
         // GetPublicAccessBlock / DeletePublicAccessBlock.
