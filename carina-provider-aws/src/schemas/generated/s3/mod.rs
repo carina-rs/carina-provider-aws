@@ -11,6 +11,7 @@ pub mod bucket_acl;
 pub mod bucket_cors_configuration;
 pub mod bucket_data_source;
 pub mod bucket_lifecycle_configuration;
+pub mod bucket_logging;
 pub mod bucket_notification_configuration;
 pub mod bucket_ownership_controls;
 pub mod bucket_policy;

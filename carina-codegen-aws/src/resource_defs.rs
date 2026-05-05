@@ -1758,6 +1758,66 @@ pub fn s3_resources() -> Vec<ResourceDef> {
             identity_overrides: vec![],
             derived_attributes: vec![],
         },
+        // s3.BucketLogging — controls server-access logging on a bucket.
+        // Maps to PutBucketLogging / GetBucketLogging. No DeleteBucketLogging
+        // API exists; destroy is implemented as a Put with an empty
+        // BucketLoggingStatus (Terraform parity).
+        ResourceDef {
+            name: "s3.BucketLogging",
+            service_namespace: "com.amazonaws.s3",
+            schema_structure: None,
+            simple_delete: false,
+            noop_update: false,
+            create_op: "PutBucketLogging",
+            read_structure: None,
+            read_ops: vec![],
+            // No native delete API — destroy uses the same Put op.
+            delete_op: "PutBucketLogging",
+            update_ops: vec![UpdateOp {
+                operation: "PutBucketLogging",
+                fields: FieldLayout::InsideStruct {
+                    name: "LoggingEnabled",
+                    fields: vec!["TargetBucket", "TargetPrefix", "TargetObjectKeyFormat"],
+                },
+            }],
+            identifier: "Bucket",
+            has_tags: false,
+            type_overrides: vec![(
+                "TargetObjectKeyFormat",
+                "super::bucket_target_object_key_format()",
+            )],
+            exclude_fields: vec![
+                "ContentMD5",
+                "ChecksumAlgorithm",
+                "ExpectedBucketOwner",
+                "BucketLoggingStatus",
+            ],
+            create_only_overrides: vec!["Bucket"],
+            enum_aliases: vec![],
+            to_dsl_overrides: vec![],
+            required_overrides: vec!["Bucket", "TargetBucket"],
+            extra_read_only: vec![],
+            read_only_overrides: vec![],
+            extra_writable: vec![
+                ExtraField {
+                    name: "TargetBucket",
+                    read_source: None,
+                    description: Some("Destination bucket for server access logs."),
+                },
+                ExtraField {
+                    name: "TargetPrefix",
+                    read_source: None,
+                    description: Some("Key prefix to apply to log objects."),
+                },
+                ExtraField {
+                    name: "TargetObjectKeyFormat",
+                    read_source: None,
+                    description: Some("Partitioning / simple-prefix selector for log object keys."),
+                },
+            ],
+            identity_overrides: vec![],
+            derived_attributes: vec![],
+        },
         // s3.BucketPublicAccessBlock — controls the Public Access Block
         // settings of an existing S3 bucket. Maps to PutPublicAccessBlock /
         // GetPublicAccessBlock / DeletePublicAccessBlock.

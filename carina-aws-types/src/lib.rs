@@ -1740,6 +1740,44 @@ pub fn bucket_event_bridge_configuration() -> AttributeType {
     }
 }
 
+fn s3_partition_date_source() -> AttributeType {
+    AttributeType::StringEnum {
+        name: "PartitionDateSource".to_string(),
+        values: vec!["EventTime".to_string(), "DeliveryTime".to_string()],
+        namespace: Some("aws.s3.BucketLogging".to_string()),
+        to_dsl: None,
+    }
+}
+
+fn s3_partitioned_prefix() -> AttributeType {
+    AttributeType::Struct {
+        name: "PartitionedPrefix".to_string(),
+        fields: vec![
+            StructField::new("partition_date_source", s3_partition_date_source())
+                .with_provider_name("PartitionDateSource"),
+        ],
+    }
+}
+
+fn s3_simple_prefix() -> AttributeType {
+    AttributeType::Struct {
+        name: "SimplePrefix".to_string(),
+        fields: vec![],
+    }
+}
+
+pub fn bucket_target_object_key_format() -> AttributeType {
+    AttributeType::Struct {
+        name: "TargetObjectKeyFormat".to_string(),
+        fields: vec![
+            StructField::new("simple_prefix", s3_simple_prefix())
+                .with_provider_name("SimplePrefix"),
+            StructField::new("partitioned_prefix", s3_partitioned_prefix())
+                .with_provider_name("PartitionedPrefix"),
+        ],
+    }
+}
+
 pub fn s3_index_document() -> AttributeType {
     AttributeType::Struct {
         name: "IndexDocument".to_string(),
