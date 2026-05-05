@@ -130,23 +130,8 @@ impl AwsProvider {
         to: Resource,
     ) -> ProviderResult<State> {
         // Update assume role policy document
-        if let Some(policy_value) = to.get_attr("assume_role_policy_document") {
-            let policy_doc = match policy_value {
-                Value::String(s) => s.clone(),
-                Value::Map(_) => value_to_iam_policy_json(policy_value).map_err(|e| {
-                    ProviderError::new(format!(
-                        "Failed to convert assume_role_policy_document: {}",
-                        e
-                    ))
-                    .for_resource(id.clone())
-                })?,
-                _ => {
-                    return Err(ProviderError::new(
-                        "assume_role_policy_document must be a string or map",
-                    )
-                    .for_resource(id.clone()));
-                }
-            };
+        if to.get_attr("assume_role_policy_document").is_some() {
+            let policy_doc = resolve_iam_policy_attr(&to, "assume_role_policy_document")?;
             self.iam_client
                 .update_assume_role_policy()
                 .role_name(identifier)
@@ -549,6 +534,9 @@ fn json_to_policy_doc(json: &serde_json::Value) -> Value {
     };
     let mut map = IndexMap::new();
     for (k, v) in obj {
+        if v.is_null() {
+            continue;
+        }
         let snake_key = lookup_snake(POLICY_TOP_FIELDS, k).unwrap_or(k.as_str());
         let value = if snake_key == "statement" {
             match v {
@@ -572,6 +560,9 @@ fn json_to_policy_statement(json: &serde_json::Value) -> Value {
     };
     let mut map = IndexMap::new();
     for (k, v) in obj {
+        if v.is_null() {
+            continue;
+        }
         let snake_key = lookup_snake(STATEMENT_FIELDS, k).unwrap_or(k.as_str());
         let value = match snake_key {
             "principal" | "not_principal" => json_to_principal(v),
@@ -588,6 +579,9 @@ fn json_to_principal(json: &serde_json::Value) -> Value {
         serde_json::Value::Object(obj) => {
             let mut map = IndexMap::new();
             for (k, v) in obj {
+                if v.is_null() {
+                    continue;
+                }
                 let key = lookup_snake(PRINCIPAL_FIELDS, k).unwrap_or(k.as_str());
                 map.insert(key.to_string(), json_scalar_or_passthrough_to_value(v));
             }
@@ -603,6 +597,9 @@ fn json_to_condition(json: &serde_json::Value) -> Value {
     };
     let mut map = IndexMap::new();
     for (op_key, kv_value) in obj {
+        if kv_value.is_null() {
+            continue;
+        }
         let op_snake =
             carina_aws_types::condition_operator_to_snake(op_key).unwrap_or_else(|| op_key.clone());
         let kv = match kv_value {
@@ -610,6 +607,9 @@ fn json_to_condition(json: &serde_json::Value) -> Value {
             serde_json::Value::Object(inner) => {
                 let mut m = IndexMap::new();
                 for (var, val) in inner {
+                    if val.is_null() {
+                        continue;
+                    }
                     m.insert(var.clone(), json_scalar_or_passthrough_to_value(val));
                 }
                 Value::Map(m)
@@ -854,6 +854,118 @@ mod tests {
             panic!()
         };
         assert!(principal.contains_key("aws"));
+        assert_eq!(
+            principal.get("aws"),
+            Some(&Value::String("*".to_string())),
+            "principal value should round-trip verbatim"
+        );
+    }
+
+    #[test]
+    fn id_field_round_trips() {
+        let mut doc = IndexMap::new();
+        doc.insert(
+            "version".to_string(),
+            Value::String("2012-10-17".to_string()),
+        );
+        doc.insert("id".to_string(), Value::String("MyPolicyId".to_string()));
+        doc.insert("statement".to_string(), Value::List(vec![]));
+
+        let original = Value::Map(doc);
+        let json = value_to_iam_policy_json(&original).expect("ok");
+        assert!(json.contains("\"Id\""));
+        assert!(json.contains("\"MyPolicyId\""));
+
+        let roundtripped = iam_policy_json_to_value(&json).expect("ok");
+        assert_eq!(original, roundtripped);
+    }
+
+    #[test]
+    fn statement_as_single_object_form_is_handled() {
+        // Some tools emit Statement as a single object rather than a list.
+        let aws_json = r#"{
+            "Version": "2012-10-17",
+            "Statement": {
+                "Effect": "Allow",
+                "Action": "s3:GetObject",
+                "Resource": "*"
+            }
+        }"#;
+        let value = iam_policy_json_to_value(aws_json).expect("ok");
+        let Value::Map(doc) = &value else { panic!() };
+        let Value::Map(stmt) = doc.get("statement").unwrap() else {
+            panic!("statement should be a Map for single-object form")
+        };
+        assert_eq!(
+            stmt.get("effect"),
+            Some(&Value::String("Allow".to_string()))
+        );
+    }
+
+    #[test]
+    fn principal_string_form_is_handled() {
+        // Principal: "*" — wildcard as a bare string, not a map.
+        let aws_json = r#"{
+            "Version": "2012-10-17",
+            "Statement": [{
+                "Effect": "Deny",
+                "Principal": "*",
+                "Action": "s3:*",
+                "Resource": "*"
+            }]
+        }"#;
+        let value = iam_policy_json_to_value(aws_json).expect("ok");
+        let Value::Map(doc) = &value else { panic!() };
+        let Value::List(stmts) = doc.get("statement").unwrap() else {
+            panic!()
+        };
+        let Value::Map(stmt) = &stmts[0] else {
+            panic!()
+        };
+        assert_eq!(
+            stmt.get("principal"),
+            Some(&Value::String("*".to_string())),
+            "principal string form should pass through verbatim"
+        );
+    }
+
+    #[test]
+    fn condition_qualifier_round_trips() {
+        // ForAllValues:StringEquals + IfExists are handled by
+        // condition_operator_to_aws/snake; verify they round-trip when used
+        // through the policy converters.
+        let mut inner = IndexMap::new();
+        inner.insert(
+            "aws:TagKeys".to_string(),
+            Value::List(vec![Value::String("Environment".to_string())]),
+        );
+        let mut condition = IndexMap::new();
+        condition.insert(
+            "for_all_values_string_equals_if_exists".to_string(),
+            Value::Map(inner),
+        );
+        let mut stmt = IndexMap::new();
+        stmt.insert("effect".to_string(), Value::String("Allow".to_string()));
+        stmt.insert("action".to_string(), Value::String("s3:*".to_string()));
+        stmt.insert("condition".to_string(), Value::Map(condition));
+        let mut doc = IndexMap::new();
+        doc.insert(
+            "version".to_string(),
+            Value::String("2012-10-17".to_string()),
+        );
+        doc.insert("statement".to_string(), Value::List(vec![Value::Map(stmt)]));
+
+        let original = Value::Map(doc);
+        let json = value_to_iam_policy_json(&original).expect("ok");
+        assert!(
+            json.contains("\"ForAllValues:StringEqualsIfExists\""),
+            "expected qualified op in {}",
+            json
+        );
+        assert!(json.contains("\"aws:TagKeys\""));
+
+        let roundtripped = iam_policy_json_to_value(&json).expect("ok");
+        assert_eq!(original, roundtripped);
     }
 
     #[test]
