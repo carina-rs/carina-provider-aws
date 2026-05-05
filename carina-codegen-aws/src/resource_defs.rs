@@ -1523,6 +1523,50 @@ pub fn s3_resources() -> Vec<ResourceDef> {
             identity_overrides: vec![],
             derived_attributes: vec![],
         },
+        // s3.BucketLifecycleConfiguration — controls object lifecycle rules
+        // (transitions, expiration, abort-multipart). Maps to
+        // PutBucketLifecycleConfiguration / GetBucketLifecycleConfiguration /
+        // DeleteBucketLifecycle.
+        ResourceDef {
+            name: "s3.BucketLifecycleConfiguration",
+            service_namespace: "com.amazonaws.s3",
+            schema_structure: None,
+            simple_delete: false,
+            noop_update: false,
+            create_op: "PutBucketLifecycleConfiguration",
+            read_structure: None,
+            read_ops: vec![],
+            delete_op: "DeleteBucketLifecycle",
+            update_ops: vec![UpdateOp {
+                operation: "PutBucketLifecycleConfiguration",
+                fields: FieldLayout::InsideStruct {
+                    name: "LifecycleConfiguration",
+                    fields: vec!["Rules"],
+                },
+            }],
+            identifier: "Bucket",
+            has_tags: false,
+            type_overrides: vec![("Rules", "super::bucket_lifecycle_rules()")],
+            exclude_fields: vec![
+                "ChecksumAlgorithm",
+                "ExpectedBucketOwner",
+                "LifecycleConfiguration",
+                "TransitionDefaultMinimumObjectSize",
+            ],
+            create_only_overrides: vec!["Bucket"],
+            enum_aliases: vec![],
+            to_dsl_overrides: vec![],
+            required_overrides: vec!["Bucket", "Rules"],
+            extra_read_only: vec![],
+            read_only_overrides: vec![],
+            extra_writable: vec![ExtraField {
+                name: "Rules",
+                read_source: None,
+                description: Some("Lifecycle rules to apply to the bucket."),
+            }],
+            identity_overrides: vec![],
+            derived_attributes: vec![],
+        },
         // s3.BucketPublicAccessBlock — controls the Public Access Block
         // settings of an existing S3 bucket. Maps to PutPublicAccessBlock /
         // GetPublicAccessBlock / DeletePublicAccessBlock.
