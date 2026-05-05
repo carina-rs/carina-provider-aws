@@ -1,0 +1,33 @@
+# S3 BucketLifecycleConfiguration - Basic test
+#
+# Tests: standalone aws.s3.BucketLifecycleConfiguration with one
+# transition rule (Standard → Standard-IA after 30 days) and one
+# expiration rule (delete after 365 days).
+
+provider aws {
+  region = aws.Region.ap_northeast_1
+}
+
+let bucket = aws.s3.Bucket {
+  bucket = 'carina-acc-test-aws-s3-bucket-lifecycle-basic-v1'
+}
+
+aws.s3.BucketLifecycleConfiguration {
+  bucket = bucket.bucket
+
+  rules = [
+    {
+      id     = 'transition-then-expire'
+      status = aws.s3.BucketLifecycleConfiguration.LifecycleRuleStatus.Enabled
+      transitions = [
+        {
+          days          = 30
+          storage_class = aws.s3.BucketLifecycleConfiguration.TransitionStorageClass.STANDARD_IA
+        },
+      ]
+      expiration = {
+        days = 365
+      }
+    },
+  ]
+}

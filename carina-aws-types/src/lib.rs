@@ -1482,6 +1482,136 @@ pub fn bucket_replication_rules() -> AttributeType {
     AttributeType::list(s3_replication_rule())
 }
 
+/// Lifecycle rule status (Enabled / Disabled).
+fn s3_lifecycle_status() -> AttributeType {
+    AttributeType::StringEnum {
+        name: "LifecycleRuleStatus".to_string(),
+        values: vec!["Enabled".to_string(), "Disabled".to_string()],
+        namespace: Some("aws.s3.BucketLifecycleConfiguration".to_string()),
+        to_dsl: None,
+    }
+}
+
+/// Storage class for lifecycle transitions (Glacier / IA / etc.).
+fn s3_transition_storage_class() -> AttributeType {
+    AttributeType::StringEnum {
+        name: "TransitionStorageClass".to_string(),
+        values: vec![
+            "GLACIER".to_string(),
+            "STANDARD_IA".to_string(),
+            "ONEZONE_IA".to_string(),
+            "INTELLIGENT_TIERING".to_string(),
+            "DEEP_ARCHIVE".to_string(),
+            "GLACIER_IR".to_string(),
+        ],
+        namespace: Some("aws.s3.BucketLifecycleConfiguration".to_string()),
+        to_dsl: None,
+    }
+}
+
+fn s3_lifecycle_expiration() -> AttributeType {
+    AttributeType::Struct {
+        name: "LifecycleExpiration".to_string(),
+        fields: vec![
+            StructField::new("days", AttributeType::Int).with_provider_name("Days"),
+            StructField::new("date", AttributeType::String).with_provider_name("Date"),
+            StructField::new("expired_object_delete_marker", AttributeType::Bool)
+                .with_provider_name("ExpiredObjectDeleteMarker"),
+        ],
+    }
+}
+
+fn s3_lifecycle_transition() -> AttributeType {
+    AttributeType::Struct {
+        name: "LifecycleTransition".to_string(),
+        fields: vec![
+            StructField::new("days", AttributeType::Int).with_provider_name("Days"),
+            StructField::new("date", AttributeType::String).with_provider_name("Date"),
+            StructField::new("storage_class", s3_transition_storage_class())
+                .with_provider_name("StorageClass")
+                .required(),
+        ],
+    }
+}
+
+fn s3_noncurrent_version_expiration() -> AttributeType {
+    AttributeType::Struct {
+        name: "NoncurrentVersionExpiration".to_string(),
+        fields: vec![
+            StructField::new("noncurrent_days", AttributeType::Int)
+                .with_provider_name("NoncurrentDays"),
+            StructField::new("newer_noncurrent_versions", AttributeType::Int)
+                .with_provider_name("NewerNoncurrentVersions"),
+        ],
+    }
+}
+
+fn s3_noncurrent_version_transition() -> AttributeType {
+    AttributeType::Struct {
+        name: "NoncurrentVersionTransition".to_string(),
+        fields: vec![
+            StructField::new("noncurrent_days", AttributeType::Int)
+                .with_provider_name("NoncurrentDays"),
+            StructField::new("storage_class", s3_transition_storage_class())
+                .with_provider_name("StorageClass")
+                .required(),
+            StructField::new("newer_noncurrent_versions", AttributeType::Int)
+                .with_provider_name("NewerNoncurrentVersions"),
+        ],
+    }
+}
+
+fn s3_abort_multipart() -> AttributeType {
+    AttributeType::Struct {
+        name: "AbortIncompleteMultipartUpload".to_string(),
+        fields: vec![
+            StructField::new("days_after_initiation", AttributeType::Int)
+                .with_provider_name("DaysAfterInitiation"),
+        ],
+    }
+}
+
+fn s3_lifecycle_rule() -> AttributeType {
+    AttributeType::Struct {
+        name: "LifecycleRule".to_string(),
+        fields: vec![
+            StructField::new("id", AttributeType::String).with_provider_name("ID"),
+            StructField::new("status", s3_lifecycle_status())
+                .with_provider_name("Status")
+                .required(),
+            StructField::new("prefix", AttributeType::String).with_provider_name("Prefix"),
+            StructField::new("expiration", s3_lifecycle_expiration())
+                .with_provider_name("Expiration")
+                .with_block_name("expiration"),
+            StructField::new(
+                "transitions",
+                AttributeType::list(s3_lifecycle_transition()),
+            )
+            .with_provider_name("Transitions")
+            .with_block_name("transition"),
+            StructField::new(
+                "noncurrent_version_expiration",
+                s3_noncurrent_version_expiration(),
+            )
+            .with_provider_name("NoncurrentVersionExpiration")
+            .with_block_name("noncurrent_version_expiration"),
+            StructField::new(
+                "noncurrent_version_transitions",
+                AttributeType::list(s3_noncurrent_version_transition()),
+            )
+            .with_provider_name("NoncurrentVersionTransitions")
+            .with_block_name("noncurrent_version_transition"),
+            StructField::new("abort_incomplete_multipart_upload", s3_abort_multipart())
+                .with_provider_name("AbortIncompleteMultipartUpload")
+                .with_block_name("abort_incomplete_multipart_upload"),
+        ],
+    }
+}
+
+pub fn bucket_lifecycle_rules() -> AttributeType {
+    AttributeType::list(s3_lifecycle_rule())
+}
+
 /// IAM condition operator mappings: (snake_case, PascalCase).
 ///
 /// See <https://docs.aws.amazon.Com/IAM/latest/UserGuide/reference_policies_elements_condition_operators.html>
