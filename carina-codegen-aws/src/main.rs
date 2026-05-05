@@ -3944,6 +3944,10 @@ fn cf_type_name(resource_name: &str) -> &'static str {
         "s3.BucketPublicAccessBlock" => "AWS::S3::BucketPublicAccessBlock",
         // No native CloudFormation type; synthesize for cf_type_name totality.
         "s3.BucketVersioning" => "AWS::S3::BucketVersioning",
+        // No native CloudFormation type; synthesize for cf_type_name totality.
+        "s3.BucketServerSideEncryptionConfiguration" => {
+            "AWS::S3::BucketServerSideEncryptionConfiguration"
+        }
         "sts.CallerIdentity" => "AWS::STS::CallerIdentity",
         "organizations.Organization" => "AWS::Organizations::Organization",
         "organizations.Account" => "AWS::Organizations::Account",
