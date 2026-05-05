@@ -47,6 +47,7 @@ pub fn configs() -> Vec<AwsSchemaConfig> {
         s3::bucket::s3_bucket_config(),
         s3::bucket_data_source::s3_bucket_data_source_config(),
         s3::bucket_policy::s3_bucket_policy_config(),
+        s3::bucket_public_access_block::s3_bucket_public_access_block_config(),
         sts::caller_identity::sts_caller_identity_config(),
     ]
 }
@@ -89,6 +90,7 @@ pub fn get_enum_valid_values(
         s3::bucket::enum_valid_values(),
         s3::bucket_data_source::enum_valid_values(),
         s3::bucket_policy::enum_valid_values(),
+        s3::bucket_public_access_block::enum_valid_values(),
         sts::caller_identity::enum_valid_values(),
     ];
     for (rt, attrs) in modules {
@@ -188,6 +190,9 @@ pub fn get_enum_alias_reverse(
     }
     if resource_type == "s3.BucketPolicy" {
         return s3::bucket_policy::enum_alias_reverse(attr_name, value);
+    }
+    if resource_type == "s3.BucketPublicAccessBlock" {
+        return s3::bucket_public_access_block::enum_alias_reverse(attr_name, value);
     }
     None
 }
@@ -377,6 +382,13 @@ pub fn build_enum_aliases_map() -> std::collections::HashMap<
     }
     for (attr, alias, canonical) in s3::bucket_policy::enum_alias_entries() {
         map.entry("s3.BucketPolicy".to_string())
+            .or_insert_with(std::collections::HashMap::new)
+            .entry(attr.to_string())
+            .or_insert_with(std::collections::HashMap::new)
+            .insert(alias.to_string(), canonical.to_string());
+    }
+    for (attr, alias, canonical) in s3::bucket_public_access_block::enum_alias_entries() {
+        map.entry("s3.BucketPublicAccessBlock".to_string())
             .or_insert_with(std::collections::HashMap::new)
             .entry(attr.to_string())
             .or_insert_with(std::collections::HashMap::new)

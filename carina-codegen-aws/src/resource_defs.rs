@@ -1276,6 +1276,88 @@ pub fn s3_resources() -> Vec<ResourceDef> {
             identity_overrides: vec![],
             derived_attributes: vec![],
         },
+        // s3.BucketPublicAccessBlock — controls the Public Access Block
+        // settings of an existing S3 bucket. Maps to PutPublicAccessBlock /
+        // GetPublicAccessBlock / DeletePublicAccessBlock.
+        ResourceDef {
+            name: "s3.BucketPublicAccessBlock",
+            service_namespace: "com.amazonaws.s3",
+            schema_structure: None,
+            // simple_delete: false because delete is hand-written
+            // (delete_s3_bucket_public_access_block_idempotent) — it treats
+            // NoSuchPublicAccessBlockConfiguration / NoSuchBucket as success
+            // so destroy retries succeed when the configuration or its
+            // parent bucket is already gone.
+            simple_delete: false,
+            noop_update: false,
+            create_op: "PutPublicAccessBlock",
+            read_structure: None,
+            // Read / Create / Update / Delete are hand-written in
+            // services/s3/bucket_public_access_block.rs because the AWS
+            // SDK's PublicAccessBlockConfiguration takes typed `bool`
+            // setters that the generic codegen-emitted write function
+            // (which assumes Value::String) cannot satisfy.
+            read_ops: vec![],
+            delete_op: "DeletePublicAccessBlock",
+            update_ops: vec![UpdateOp {
+                operation: "PutPublicAccessBlock",
+                fields: FieldLayout::InsideStruct {
+                    name: "PublicAccessBlockConfiguration",
+                    fields: vec![
+                        "BlockPublicAcls",
+                        "IgnorePublicAcls",
+                        "BlockPublicPolicy",
+                        "RestrictPublicBuckets",
+                    ],
+                },
+            }],
+            identifier: "Bucket",
+            has_tags: false,
+            type_overrides: vec![
+                ("BlockPublicAcls", "AttributeType::Bool"),
+                ("IgnorePublicAcls", "AttributeType::Bool"),
+                ("BlockPublicPolicy", "AttributeType::Bool"),
+                ("RestrictPublicBuckets", "AttributeType::Bool"),
+            ],
+            exclude_fields: vec![
+                "ContentMD5",
+                "ChecksumAlgorithm",
+                "ExpectedBucketOwner",
+                "PublicAccessBlockConfiguration",
+            ],
+            create_only_overrides: vec!["Bucket"],
+            enum_aliases: vec![],
+            to_dsl_overrides: vec![],
+            required_overrides: vec!["Bucket"],
+            extra_read_only: vec![],
+            read_only_overrides: vec![],
+            extra_writable: vec![
+                ExtraField {
+                    name: "BlockPublicAcls",
+                    read_source: None,
+                    description: Some("Block public ACLs on the bucket and its objects."),
+                },
+                ExtraField {
+                    name: "IgnorePublicAcls",
+                    read_source: None,
+                    description: Some("Ignore any public ACLs on the bucket and its objects."),
+                },
+                ExtraField {
+                    name: "BlockPublicPolicy",
+                    read_source: None,
+                    description: Some("Block public bucket policies for the bucket."),
+                },
+                ExtraField {
+                    name: "RestrictPublicBuckets",
+                    read_source: None,
+                    description: Some(
+                        "Restrict access to the bucket to AWS service principals and authorized users when a public policy is set.",
+                    ),
+                },
+            ],
+            identity_overrides: vec![],
+            derived_attributes: vec![],
+        },
     ]
 }
 
