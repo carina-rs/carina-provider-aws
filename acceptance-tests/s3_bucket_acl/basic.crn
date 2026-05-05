@@ -1,0 +1,23 @@
+# S3 BucketAcl - Basic test
+#
+# ACL requires the bucket's ObjectOwnership to be BucketOwnerPreferred or
+# ObjectWriter (BucketOwnerEnforced disables ACLs entirely). Apply the
+# ownership-controls resource first via dependency on the bucket.
+
+provider aws {
+  region = aws.Region.ap_northeast_1
+}
+
+let bucket = aws.s3.Bucket {
+  bucket = 'carina-acc-test-aws-s3-bucket-acl-basic-v1'
+}
+
+let ownership = aws.s3.BucketOwnershipControls {
+  bucket           = bucket.bucket
+  object_ownership = aws.s3.BucketOwnershipControls.ObjectOwnership.BucketOwnerPreferred
+}
+
+aws.s3.BucketAcl {
+  bucket = ownership.bucket
+  acl    = aws.s3.BucketAcl.Acl.private
+}

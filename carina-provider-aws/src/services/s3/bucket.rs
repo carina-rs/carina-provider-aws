@@ -3,7 +3,7 @@ use std::collections::HashMap;
 
 use carina_core::provider::{BoxFuture, ProviderError, ProviderResult};
 use carina_core::resource::{LifecycleConfig, Resource, ResourceId, State, Value};
-use carina_core::utils::{convert_enum_value, extract_enum_value};
+use carina_core::utils::convert_enum_value;
 
 use crate::AwsProvider;
 use crate::helpers::{retry_aws_operation, sdk_error_message};
@@ -23,17 +23,6 @@ impl AwsProvider {
             Ok(_) => {
                 let mut attributes = HashMap::new();
                 attributes.insert("bucket".to_string(), Value::String(name.to_string()));
-
-                // Get object ownership
-                self.read_s3_bucket_ownership_controls(id, name, &mut attributes)
-                    .await?;
-
-                // Get Object Lock status
-                self.read_s3_bucket_object_lock(id, name, &mut attributes)
-                    .await?;
-
-                // Get ACL
-                self.read_s3_bucket_acl(id, name, &mut attributes).await?;
 
                 // Get tags
                 self.read_s3_bucket_tags(id, name, &mut attributes).await?;
@@ -104,39 +93,9 @@ impl AwsProvider {
             req = req.create_bucket_configuration(config);
         }
 
-        // Set ObjectLockEnabledForBucket on create
-        if let Some(Value::Bool(val)) = resource.get_attr("object_lock_enabled_for_bucket") {
-            req = req.object_lock_enabled_for_bucket(*val);
-        }
-
-        // Set ObjectOwnership on create
-        if let Some(Value::String(val)) = resource.get_attr("object_ownership") {
-            use aws_sdk_s3::types::ObjectOwnership;
-            let normalized = extract_enum_value(val);
-            req = req.object_ownership(ObjectOwnership::from(normalized));
-        }
-
-        // Set ACL on create (convert_enum_value converts underscores back to hyphens)
-        if let Some(Value::String(val)) = resource.get_attr("acl") {
-            use aws_sdk_s3::types::BucketCannedAcl;
-            let normalized = convert_enum_value(val);
-            req = req.acl(BucketCannedAcl::from(normalized));
-        }
-        if let Some(Value::String(val)) = resource.get_attr("grant_full_control") {
-            req = req.grant_full_control(val);
-        }
-        if let Some(Value::String(val)) = resource.get_attr("grant_read") {
-            req = req.grant_read(val);
-        }
-        if let Some(Value::String(val)) = resource.get_attr("grant_read_acp") {
-            req = req.grant_read_acp(val);
-        }
-        if let Some(Value::String(val)) = resource.get_attr("grant_write") {
-            req = req.grant_write(val);
-        }
-        if let Some(Value::String(val)) = resource.get_attr("grant_write_acp") {
-            req = req.grant_write_acp(val);
-        }
+        // ObjectLock / ObjectOwnership / ACL / Grants moved to standalone
+        // resources (s3.BucketAcl, s3.BucketOwnershipControls). The bucket
+        // here is identity-only.
 
         // Retry transient errors such as OperationAborted (HTTP 409) which
         // S3 returns when CreateBucket races a recent DeleteBucket for the
@@ -174,12 +133,6 @@ impl AwsProvider {
         let bucket_name = identifier.to_string();
 
         let attrs = to.resolved_attributes();
-        // Update object ownership
-        self.write_s3_bucket_ownership_controls(&id, &bucket_name, &attrs)
-            .await?;
-
-        // Update ACL
-        self.write_s3_bucket_acl(&id, &bucket_name, &attrs).await?;
 
         // Update tags: if tags were removed entirely, delete all tags
         if from.attributes.contains_key("tags") && !to.attributes.contains_key("tags") {
@@ -312,287 +265,6 @@ impl AwsProvider {
                 break;
             }
         }
-
-        Ok(())
-    }
-
-    /// Read S3 bucket ownership controls
-    async fn read_s3_bucket_ownership_controls(
-        &self,
-        id: &ResourceId,
-        identifier: &str,
-        attributes: &mut HashMap<String, Value>,
-    ) -> ProviderResult<()> {
-        match self
-            .s3_client
-            .get_bucket_ownership_controls()
-            .bucket(identifier)
-            .send()
-            .await
-        {
-            Ok(output) => {
-                if let Some(controls) = output.ownership_controls()
-                    && let Some(rule) = controls.rules().first()
-                {
-                    let value = rule.object_ownership().as_str().to_string();
-                    attributes.insert("object_ownership".to_string(), Value::String(value));
-                }
-            }
-            Err(err) => {
-                if !is_s3_not_configured_error(&err, "OwnershipControlsNotFoundError") {
-                    return Err(ProviderError::new(sdk_error_message(
-                        "Failed to read bucket ownership controls",
-                        &err,
-                    ))
-                    .for_resource(id.clone()));
-                }
-            }
-        }
-        Ok(())
-    }
-
-    /// Write S3 bucket ownership controls
-    async fn write_s3_bucket_ownership_controls(
-        &self,
-        id: &ResourceId,
-        identifier: &str,
-        attributes: &HashMap<String, Value>,
-    ) -> ProviderResult<()> {
-        if let Some(Value::String(val)) = attributes.get("object_ownership") {
-            use aws_sdk_s3::types::{ObjectOwnership, OwnershipControls, OwnershipControlsRule};
-            let normalized = extract_enum_value(val);
-            let rule = OwnershipControlsRule::builder()
-                .object_ownership(ObjectOwnership::from(normalized))
-                .build()
-                .map_err(|e| {
-                    ProviderError::new(sdk_error_message(
-                        "Failed to build ownership controls rule",
-                        &e,
-                    ))
-                    .for_resource(id.clone())
-                })?;
-            let controls = OwnershipControls::builder()
-                .rules(rule)
-                .build()
-                .map_err(|e| {
-                    ProviderError::new(sdk_error_message("Failed to build ownership controls", &e))
-                        .for_resource(id.clone())
-                })?;
-            self.s3_client
-                .put_bucket_ownership_controls()
-                .bucket(identifier)
-                .ownership_controls(controls)
-                .send()
-                .await
-                .map_err(|e| {
-                    ProviderError::new(sdk_error_message(
-                        "Failed to put bucket ownership controls",
-                        &e,
-                    ))
-                    .for_resource(id.clone())
-                })?;
-        }
-        Ok(())
-    }
-
-    /// Read S3 bucket Object Lock status
-    async fn read_s3_bucket_object_lock(
-        &self,
-        id: &ResourceId,
-        identifier: &str,
-        attributes: &mut HashMap<String, Value>,
-    ) -> ProviderResult<()> {
-        match self
-            .s3_client
-            .get_object_lock_configuration()
-            .bucket(identifier)
-            .send()
-            .await
-        {
-            Ok(output) => {
-                let enabled = output
-                    .object_lock_configuration()
-                    .and_then(|config| config.object_lock_enabled())
-                    .is_some();
-                attributes.insert(
-                    "object_lock_enabled_for_bucket".to_string(),
-                    Value::Bool(enabled),
-                );
-            }
-            Err(err) => {
-                if is_s3_not_configured_error(&err, "ObjectLockConfigurationNotFoundError") {
-                    attributes.insert(
-                        "object_lock_enabled_for_bucket".to_string(),
-                        Value::Bool(false),
-                    );
-                } else {
-                    return Err(ProviderError::new(sdk_error_message(
-                        "Failed to read object lock configuration",
-                        &err,
-                    ))
-                    .for_resource(id.clone()));
-                }
-            }
-        }
-        Ok(())
-    }
-
-    /// Read S3 bucket ACL
-    async fn read_s3_bucket_acl(
-        &self,
-        id: &ResourceId,
-        identifier: &str,
-        attributes: &mut HashMap<String, Value>,
-    ) -> ProviderResult<()> {
-        let output = self
-            .s3_client
-            .get_bucket_acl()
-            .bucket(identifier)
-            .send()
-            .await
-            .map_err(|e| {
-                ProviderError::new(sdk_error_message("Failed to read bucket ACL", &e))
-                    .for_resource(id.clone())
-            })?;
-
-        let owner_id = output
-            .owner()
-            .and_then(|o| o.id())
-            .unwrap_or("")
-            .to_string();
-
-        let grants = output.grants();
-
-        // Classify grants by permission, collecting grantee strings
-        let mut full_control: Vec<String> = Vec::new();
-        let mut read: Vec<String> = Vec::new();
-        let mut read_acp: Vec<String> = Vec::new();
-        let mut write: Vec<String> = Vec::new();
-        let mut write_acp: Vec<String> = Vec::new();
-
-        for grant in grants {
-            let Some(grantee) = grant.grantee() else {
-                continue;
-            };
-            let Some(permission) = grant.permission() else {
-                continue;
-            };
-
-            // Build grantee string in header format
-            let grantee_str = if let Some(uri) = grantee.uri() {
-                format!("uri=\"{}\"", uri)
-            } else if let Some(id) = grantee.id() {
-                format!("id=\"{}\"", id)
-            } else if let Some(email) = grantee.email_address() {
-                format!("emailAddress=\"{}\"", email)
-            } else {
-                continue;
-            };
-
-            // Skip owner's FULL_CONTROL (it's implicit)
-            let is_owner = grantee.id().is_some_and(|id| id == owner_id);
-
-            use aws_sdk_s3::types::Permission;
-            match permission {
-                Permission::FullControl if !is_owner => full_control.push(grantee_str),
-                Permission::FullControl => {}
-                Permission::Read => read.push(grantee_str),
-                Permission::ReadAcp => read_acp.push(grantee_str),
-                Permission::Write => write.push(grantee_str),
-                Permission::WriteAcp => write_acp.push(grantee_str),
-                _ => {}
-            }
-        }
-
-        // Try to infer canned ACL
-        let canned_acl = infer_canned_acl(&full_control, &read, &read_acp, &write, &write_acp);
-
-        if let Some(acl) = canned_acl {
-            // When a canned ACL is inferred, only set `acl` — the grant fields
-            // are the expansion of the canned ACL and would cause false diffs.
-            attributes.insert("acl".to_string(), Value::String(acl.to_string()));
-        } else {
-            // No canned ACL matched — set individual grant fields
-            if !full_control.is_empty() {
-                attributes.insert(
-                    "grant_full_control".to_string(),
-                    Value::String(full_control.join(", ")),
-                );
-            }
-            if !read.is_empty() {
-                attributes.insert("grant_read".to_string(), Value::String(read.join(", ")));
-            }
-            if !read_acp.is_empty() {
-                attributes.insert(
-                    "grant_read_acp".to_string(),
-                    Value::String(read_acp.join(", ")),
-                );
-            }
-            if !write.is_empty() {
-                attributes.insert("grant_write".to_string(), Value::String(write.join(", ")));
-            }
-            if !write_acp.is_empty() {
-                attributes.insert(
-                    "grant_write_acp".to_string(),
-                    Value::String(write_acp.join(", ")),
-                );
-            }
-        }
-        Ok(())
-    }
-
-    /// Write S3 bucket ACL
-    async fn write_s3_bucket_acl(
-        &self,
-        id: &ResourceId,
-        identifier: &str,
-        attributes: &HashMap<String, Value>,
-    ) -> ProviderResult<()> {
-        let acl = extract_string_attr(attributes, "acl");
-        let grant_full_control = extract_string_attr(attributes, "grant_full_control");
-        let grant_read = extract_string_attr(attributes, "grant_read");
-        let grant_read_acp = extract_string_attr(attributes, "grant_read_acp");
-        let grant_write = extract_string_attr(attributes, "grant_write");
-        let grant_write_acp = extract_string_attr(attributes, "grant_write_acp");
-
-        let has_acl = acl.is_some()
-            || grant_full_control.is_some()
-            || grant_read.is_some()
-            || grant_read_acp.is_some()
-            || grant_write.is_some()
-            || grant_write_acp.is_some();
-
-        if !has_acl {
-            return Ok(());
-        }
-
-        use aws_sdk_s3::types::BucketCannedAcl;
-        let mut req = self.s3_client.put_bucket_acl().bucket(identifier);
-
-        if let Some(val) = acl {
-            let normalized = convert_enum_value(val);
-            req = req.acl(BucketCannedAcl::from(normalized));
-        }
-        if let Some(val) = grant_full_control {
-            req = req.grant_full_control(val);
-        }
-        if let Some(val) = grant_read {
-            req = req.grant_read(val);
-        }
-        if let Some(val) = grant_read_acp {
-            req = req.grant_read_acp(val);
-        }
-        if let Some(val) = grant_write {
-            req = req.grant_write(val);
-        }
-        if let Some(val) = grant_write_acp {
-            req = req.grant_write_acp(val);
-        }
-
-        req.send().await.map_err(|e| {
-            ProviderError::new(sdk_error_message("Failed to put bucket ACL", &e))
-                .for_resource(id.clone())
-        })?;
 
         Ok(())
     }
@@ -852,76 +524,6 @@ pub(crate) fn is_s3_not_configured_error<E: aws_sdk_s3::error::ProvideErrorMetad
     }
 }
 
-fn extract_string_attr<'a>(attributes: &'a HashMap<String, Value>, key: &str) -> Option<&'a str> {
-    match attributes.get(key) {
-        Some(Value::String(s)) => Some(s.as_str()),
-        _ => None,
-    }
-}
-
-const ALL_USERS_URI: &str = "http://acs.amazonaws.com/groups/global/AllUsers";
-const AUTH_USERS_URI: &str = "http://acs.amazonaws.com/groups/global/AuthenticatedUsers";
-
-/// Infer a canned ACL from the grant lists.
-/// Returns None if the grants don't match any known canned ACL pattern.
-pub(crate) fn infer_canned_acl(
-    full_control: &[String],
-    read: &[String],
-    read_acp: &[String],
-    write: &[String],
-    write_acp: &[String],
-) -> Option<&'static str> {
-    // AllUsers URI is used for both READ and WRITE permission checks
-    let all_users = format!("uri=\"{}\"", ALL_USERS_URI);
-    let auth_users_read = format!("uri=\"{}\"", AUTH_USERS_URI);
-
-    // private: no non-owner grants
-    if full_control.is_empty()
-        && read.is_empty()
-        && read_acp.is_empty()
-        && write.is_empty()
-        && write_acp.is_empty()
-    {
-        return Some("private");
-    }
-
-    // public-read: AllUsers READ, nothing else
-    if full_control.is_empty()
-        && read.len() == 1
-        && read[0] == all_users
-        && read_acp.is_empty()
-        && write.is_empty()
-        && write_acp.is_empty()
-    {
-        return Some("public-read");
-    }
-
-    // public-read-write: AllUsers READ + WRITE, nothing else
-    if full_control.is_empty()
-        && read.len() == 1
-        && read[0] == all_users
-        && read_acp.is_empty()
-        && write.len() == 1
-        && write[0] == all_users
-        && write_acp.is_empty()
-    {
-        return Some("public-read-write");
-    }
-
-    // authenticated-read: AuthenticatedUsers READ, nothing else
-    if full_control.is_empty()
-        && read.len() == 1
-        && read[0] == auth_users_read
-        && read_acp.is_empty()
-        && write.is_empty()
-        && write_acp.is_empty()
-    {
-        return Some("authenticated-read");
-    }
-
-    None
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -940,41 +542,6 @@ mod tests {
     fn s3_hosted_zone_id_unknown_region_errors() {
         let err = s3_hosted_zone_id("xx-fake-1").unwrap_err();
         assert!(err.contains("Unknown S3 region"));
-    }
-
-    #[test]
-    fn test_infer_canned_acl_private() {
-        let result = infer_canned_acl(&[], &[], &[], &[], &[]);
-        assert_eq!(result, Some("private"));
-    }
-
-    #[test]
-    fn test_infer_canned_acl_public_read() {
-        let all_users = format!("uri=\"{}\"", ALL_USERS_URI);
-        let result = infer_canned_acl(&[], &[all_users], &[], &[], &[]);
-        assert_eq!(result, Some("public-read"));
-    }
-
-    #[test]
-    fn test_infer_canned_acl_public_read_write() {
-        let all_users_for_read = format!("uri=\"{}\"", ALL_USERS_URI);
-        let all_users_for_write = format!("uri=\"{}\"", ALL_USERS_URI);
-        let result = infer_canned_acl(&[], &[all_users_for_read], &[], &[all_users_for_write], &[]);
-        assert_eq!(result, Some("public-read-write"));
-    }
-
-    #[test]
-    fn test_infer_canned_acl_authenticated_read() {
-        let auth_users_read = format!("uri=\"{}\"", AUTH_USERS_URI);
-        let result = infer_canned_acl(&[], &[auth_users_read], &[], &[], &[]);
-        assert_eq!(result, Some("authenticated-read"));
-    }
-
-    #[test]
-    fn test_infer_canned_acl_unknown() {
-        let custom = vec!["id=\"abc123\"".to_string()];
-        let result = infer_canned_acl(&custom, &[], &[], &[], &[]);
-        assert_eq!(result, None);
     }
 
     #[test]

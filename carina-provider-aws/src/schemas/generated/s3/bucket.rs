@@ -9,20 +9,7 @@ use super::tags_type;
 use super::validate_tags_map;
 use carina_core::schema::{AttributeSchema, AttributeType, ResourceSchema};
 
-const VALID_ACL: &[&str] = &[
-    "authenticated-read",
-    "private",
-    "public-read",
-    "public-read-write",
-];
-
 const VALID_BUCKET_NAMESPACE: &[&str] = &["account-regional", "global"];
-
-const VALID_OBJECT_OWNERSHIP: &[&str] = &[
-    "BucketOwnerEnforced",
-    "BucketOwnerPreferred",
-    "ObjectWriter",
-];
 
 /// Returns the schema config for s3.Bucket (Smithy: com.amazonaws.s3)
 pub fn s3_bucket_config() -> AwsSchemaConfig {
@@ -31,16 +18,6 @@ pub fn s3_bucket_config() -> AwsSchemaConfig {
         resource_type_name: "s3.Bucket",
         has_tags: true,
         schema: ResourceSchema::new("s3.Bucket")
-        .attribute(
-            AttributeSchema::new("acl", AttributeType::StringEnum {
-                name: "ACL".to_string(),
-                values: vec!["authenticated-read".to_string(), "private".to_string(), "public-read".to_string(), "public-read-write".to_string()],
-                namespace: Some("aws.s3.Bucket".to_string()),
-                to_dsl: Some(|s: &str| s.replace('-', "_")),
-            })
-                .with_description("The canned ACL to apply to the bucket. This functionality is not supported for directory buckets.")
-                .with_provider_name("ACL"),
-        )
         .attribute(
             AttributeSchema::new("bucket", AttributeType::String)
                 .required()
@@ -60,46 +37,6 @@ pub fn s3_bucket_config() -> AwsSchemaConfig {
                 .with_provider_name("BucketNamespace"),
         )
         .attribute(
-            AttributeSchema::new("grant_full_control", super::s3_grantee())
-                .with_description("Allows grantee the read, write, read ACP, and write ACP permissions on the bucket. This functionality is not supported for directory buckets.")
-                .with_provider_name("GrantFullControl"),
-        )
-        .attribute(
-            AttributeSchema::new("grant_read", super::s3_grantee())
-                .with_description("Allows grantee to list the objects in the bucket. This functionality is not supported for directory buckets.")
-                .with_provider_name("GrantRead"),
-        )
-        .attribute(
-            AttributeSchema::new("grant_read_acp", super::s3_grantee())
-                .with_description("Allows grantee to read the bucket ACL. This functionality is not supported for directory buckets.")
-                .with_provider_name("GrantReadACP"),
-        )
-        .attribute(
-            AttributeSchema::new("grant_write", super::s3_grantee())
-                .with_description("Allows grantee to create new objects in the bucket. For the bucket and object owners of existing objects, also allows deletions and overwrites of thos...")
-                .with_provider_name("GrantWrite"),
-        )
-        .attribute(
-            AttributeSchema::new("grant_write_acp", super::s3_grantee())
-                .with_description("Allows grantee to write the ACL for the applicable bucket. This functionality is not supported for directory buckets.")
-                .with_provider_name("GrantWriteACP"),
-        )
-        .attribute(
-            AttributeSchema::new("object_lock_enabled_for_bucket", AttributeType::Bool)
-                .create_only()
-                .with_description("Specifies whether you want S3 Object Lock to be enabled for the new bucket. This functionality is not supported for directory buckets.")
-                .with_provider_name("ObjectLockEnabledForBucket"),
-        )
-        .attribute(
-            AttributeSchema::new("object_ownership", AttributeType::StringEnum {
-                name: "ObjectOwnership".to_string(),
-                values: vec!["BucketOwnerEnforced".to_string(), "BucketOwnerPreferred".to_string(), "ObjectWriter".to_string()],
-                namespace: Some("aws.s3.Bucket".to_string()),
-                to_dsl: None,
-            })
-                .with_provider_name("ObjectOwnership"),
-        )
-        .attribute(
             AttributeSchema::new("tags", tags_type())
                 .with_description("The tags for the resource.")
                 .with_provider_name("Tags"),
@@ -113,23 +50,13 @@ pub fn enum_valid_values() -> (
     &'static str,
     &'static [(&'static str, &'static [&'static str])],
 ) {
-    (
-        "s3.Bucket",
-        &[
-            ("acl", VALID_ACL),
-            ("bucket_namespace", VALID_BUCKET_NAMESPACE),
-            ("object_ownership", VALID_OBJECT_OWNERSHIP),
-        ],
-    )
+    ("s3.Bucket", &[("bucket_namespace", VALID_BUCKET_NAMESPACE)])
 }
 
 /// Maps DSL alias values back to canonical AWS values for this module.
 /// e.g., ("ip_protocol", "all") -> Some("-1")
 pub fn enum_alias_reverse(attr_name: &str, value: &str) -> Option<&'static str> {
     match (attr_name, value) {
-        ("acl", "authenticated_read") => Some("authenticated-read"),
-        ("acl", "public_read") => Some("public-read"),
-        ("acl", "public_read_write") => Some("public-read-write"),
         ("bucket_namespace", "account_regional") => Some("account-regional"),
         _ => None,
     }
@@ -137,10 +64,5 @@ pub fn enum_alias_reverse(attr_name: &str, value: &str) -> Option<&'static str> 
 
 /// Returns all enum alias entries as (attr_name, alias, canonical) tuples.
 pub fn enum_alias_entries() -> &'static [(&'static str, &'static str, &'static str)] {
-    &[
-        ("acl", "authenticated_read", "authenticated-read"),
-        ("acl", "public_read", "public-read"),
-        ("acl", "public_read_write", "public-read-write"),
-        ("bucket_namespace", "account_regional", "account-regional"),
-    ]
+    &[("bucket_namespace", "account_regional", "account-regional")]
 }

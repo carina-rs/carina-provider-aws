@@ -1,0 +1,14 @@
+# S3 BucketOwnershipControls - Basic test
+
+provider aws {
+  region = aws.Region.ap_northeast_1
+}
+
+let bucket = aws.s3.Bucket {
+  bucket = 'carina-acc-test-aws-s3-bucket-ownership-basic-v1'
+}
+
+aws.s3.BucketOwnershipControls {
+  bucket           = bucket.bucket
+  object_ownership = aws.s3.BucketOwnershipControls.ObjectOwnership.BucketOwnerEnforced
+}
