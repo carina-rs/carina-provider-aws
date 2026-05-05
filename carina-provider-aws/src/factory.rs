@@ -38,6 +38,20 @@ impl ProviderFactory for AwsProviderFactory {
                 to_dsl: Some(|s| s.replace('-', "_")),
             },
         );
+        types.insert(
+            "allowed_account_ids".to_string(),
+            carina_core::schema::AttributeType::List {
+                inner: Box::new(carina_core::schema::AttributeType::String),
+                ordered: false,
+            },
+        );
+        types.insert(
+            "forbidden_account_ids".to_string(),
+            carina_core::schema::AttributeType::List {
+                inner: Box::new(carina_core::schema::AttributeType::String),
+                ordered: false,
+            },
+        );
         types
     }
 
@@ -59,9 +73,13 @@ impl ProviderFactory for AwsProviderFactory {
         &self,
         attributes: &IndexMap<String, Value>,
     ) -> BoxFuture<'_, Box<dyn carina_core::provider::Provider>> {
+        use crate::services::sts::account_guard::extract_string_list;
         let region = self.extract_region(attributes);
+        let allowed = extract_string_list(attributes.get("allowed_account_ids"));
+        let forbidden = extract_string_list(attributes.get("forbidden_account_ids"));
         Box::pin(async move {
-            Box::new(AwsProvider::new(&region).await) as Box<dyn carina_core::provider::Provider>
+            Box::new(AwsProvider::new_with_account_guard(&region, allowed, forbidden).await)
+                as Box<dyn carina_core::provider::Provider>
         })
     }
 
