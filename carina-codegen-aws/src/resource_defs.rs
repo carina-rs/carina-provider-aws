@@ -1233,6 +1233,49 @@ pub fn s3_resources() -> Vec<ResourceDef> {
             identity_overrides: vec![],
             derived_attributes: vec![],
         },
+        // s3.BucketPolicy — attaches a resource-based policy to an existing
+        // S3 bucket. Maps to PutBucketPolicy / GetBucketPolicy /
+        // DeleteBucketPolicy.
+        ResourceDef {
+            name: "s3.BucketPolicy",
+            service_namespace: "com.amazonaws.s3",
+            schema_structure: None,
+            // Delete is hand-written in services/s3/bucket_policy.rs as
+            // delete_s3_bucket_policy_idempotent, which treats
+            // NoSuchBucketPolicy / NoSuchBucket as success so destroy retries
+            // succeed when the policy or its parent bucket is already gone.
+            simple_delete: false,
+            noop_update: false,
+            create_op: "PutBucketPolicy",
+            read_structure: None,
+            // Read is hand-written in services/s3/bucket_policy.rs to convert
+            // the JSON policy to a typed Value::Map; the generated per-op read
+            // would emit it as Value::String and bypass that conversion.
+            read_ops: vec![],
+            delete_op: "DeleteBucketPolicy",
+            update_ops: vec![UpdateOp {
+                operation: "PutBucketPolicy",
+                fields: FieldLayout::Flat(vec!["Policy"]),
+            }],
+            identifier: "Bucket",
+            has_tags: false,
+            type_overrides: vec![("Policy", "super::iam_policy_document()")],
+            exclude_fields: vec![
+                "ContentMD5",
+                "ChecksumAlgorithm",
+                "ConfirmRemoveSelfBucketAccess",
+                "ExpectedBucketOwner",
+            ],
+            create_only_overrides: vec!["Bucket"],
+            enum_aliases: vec![],
+            to_dsl_overrides: vec![],
+            required_overrides: vec!["Bucket", "Policy"],
+            extra_read_only: vec![],
+            read_only_overrides: vec![],
+            extra_writable: vec![],
+            identity_overrides: vec![],
+            derived_attributes: vec![],
+        },
     ]
 }
 

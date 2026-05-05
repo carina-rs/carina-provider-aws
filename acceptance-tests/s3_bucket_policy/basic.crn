@@ -1,0 +1,38 @@
+# S3 BucketPolicy - Basic test
+#
+# Tests: standalone aws.s3.BucketPolicy attaching a policy to a bucket
+# created in the same .crn. The policy is written in DSL block syntax
+# and is converted to JSON by the provider before PutBucketPolicy.
+
+provider aws {
+  region = aws.Region.ap_northeast_1
+}
+
+let bucket = aws.s3.Bucket {
+  bucket = 'carina-acc-test-aws-s3-bucket-policy-basic-v1'
+}
+
+aws.s3.BucketPolicy {
+  bucket = bucket.bucket
+
+  policy = {
+    version = '2012-10-17'
+    statement {
+      sid    = 'DenyInsecureTransport'
+      effect = 'Deny'
+      principal = {
+        aws = '*'
+      }
+      action   = 's3:*'
+      resource = [
+        'arn:aws:s3:::carina-acc-test-aws-s3-bucket-policy-basic-v1',
+        'arn:aws:s3:::carina-acc-test-aws-s3-bucket-policy-basic-v1/*',
+      ]
+      condition = {
+        bool = {
+          'aws:SecureTransport' = 'false'
+        }
+      }
+    }
+  }
+}

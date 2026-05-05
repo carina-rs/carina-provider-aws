@@ -3918,6 +3918,7 @@ fn cf_type_name(resource_name: &str) -> &'static str {
         "ec2.VpcPeeringConnection" => "AWS::EC2::VPCPeeringConnection",
         "ec2.VpnGateway" => "AWS::EC2::VPNGateway",
         "s3.Bucket" => "AWS::S3::Bucket",
+        "s3.BucketPolicy" => "AWS::S3::BucketPolicy",
         "sts.CallerIdentity" => "AWS::STS::CallerIdentity",
         "organizations.Organization" => "AWS::Organizations::Organization",
         "organizations.Account" => "AWS::Organizations::Account",

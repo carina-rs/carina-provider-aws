@@ -8,3 +8,4 @@ pub use super::*;
 
 pub mod bucket;
 pub mod bucket_data_source;
+pub mod bucket_policy;
