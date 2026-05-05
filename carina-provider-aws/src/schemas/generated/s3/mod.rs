@@ -10,3 +10,4 @@ pub mod bucket;
 pub mod bucket_data_source;
 pub mod bucket_policy;
 pub mod bucket_public_access_block;
+pub mod bucket_versioning;

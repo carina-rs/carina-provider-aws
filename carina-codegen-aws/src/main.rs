@@ -656,11 +656,12 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
         };
         let is_create_only =
             !updatable_fields.contains(extra.name) || create_only_overrides.contains(extra.name);
+        let is_required = required_overrides.contains(extra.name);
         attrs.push(AttrInfo {
             snake_name,
             provider_name: extra.name.to_string(),
             type_code,
-            is_required: false,
+            is_required,
             is_create_only,
             is_read_only: false,
             is_identity: identity_overrides.contains(extra.name),
@@ -1725,6 +1726,7 @@ fn generate_provider_code(
          use std::collections::HashMap;\n\n\
          use carina_core::provider::{BoxFuture, ProviderError, ProviderResult};\n\
          use carina_core::resource::{Resource, ResourceId, State, Value};\n\
+         #[allow(unused_imports)]\n\
          use carina_core::utils::extract_enum_value;\n\n\
          use crate::AwsProvider;\n\
          use crate::helpers::sdk_error_message;\n\n",
@@ -3940,6 +3942,8 @@ fn cf_type_name(resource_name: &str) -> &'static str {
         // of AWS::S3::Bucket. We synthesize a name to keep cf_type_name a
         // total function for codegen consumers.
         "s3.BucketPublicAccessBlock" => "AWS::S3::BucketPublicAccessBlock",
+        // No native CloudFormation type; synthesize for cf_type_name totality.
+        "s3.BucketVersioning" => "AWS::S3::BucketVersioning",
         "sts.CallerIdentity" => "AWS::STS::CallerIdentity",
         "organizations.Organization" => "AWS::Organizations::Organization",
         "organizations.Account" => "AWS::Organizations::Account",

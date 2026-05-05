@@ -10,8 +10,6 @@ provider aws {
 aws.s3.Bucket {
   bucket = 'carina-acc-test-aws-tag-del'
 
-  versioning_status = aws.s3.Bucket.VersioningStatus.Enabled
-
   tags = {
     Environment = 'acceptance-test'
     ToBeRemoved = 'this-tag-will-be-deleted'

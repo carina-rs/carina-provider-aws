@@ -24,10 +24,6 @@ impl AwsProvider {
                 let mut attributes = HashMap::new();
                 attributes.insert("bucket".to_string(), Value::String(name.to_string()));
 
-                // Get versioning status
-                self.read_s3_bucket_versioning(id, name, &mut attributes)
-                    .await?;
-
                 // Get object ownership
                 self.read_s3_bucket_ownership_controls(id, name, &mut attributes)
                     .await?;
@@ -158,12 +154,8 @@ impl AwsProvider {
         })
         .await?;
 
-        // Configure versioning
-        let attrs = resource.resolved_attributes();
-        self.write_s3_bucket_versioning(&resource.id, &bucket_name, &attrs)
-            .await?;
-
         // Set tags
+        let attrs = resource.resolved_attributes();
         self.write_s3_bucket_tags(&resource.id, &bucket_name, &attrs)
             .await?;
 
@@ -181,11 +173,7 @@ impl AwsProvider {
     ) -> ProviderResult<State> {
         let bucket_name = identifier.to_string();
 
-        // Update versioning status
         let attrs = to.resolved_attributes();
-        self.write_s3_bucket_versioning(&id, &bucket_name, &attrs)
-            .await?;
-
         // Update object ownership
         self.write_s3_bucket_ownership_controls(&id, &bucket_name, &attrs)
             .await?;
