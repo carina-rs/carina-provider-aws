@@ -580,11 +580,11 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
             && !read_only_overrides.contains(name.as_str());
         let is_read_only = read_only_overrides.contains(name.as_str());
         // `extra_writable` fields with `read_source = None` are synthetic:
-        // the codegen has no Smithy member to ground them in, so it has to
-        // assume create-only. Fields with `read_source = Some(...)` come
-        // from a real read-structure member and follow the normal rules —
-        // whether they're updatable is decided by `create_only_overrides`
-        // and `update_ops`, the same as any other writable field.
+        // the codegen has no Smithy member to ground them in. They default
+        // to create-only — UNLESS they appear in `update_ops` (typically as
+        // `FieldLayout::InsideStruct` members, e.g. PutPublicAccessBlock's
+        // `PublicAccessBlockConfiguration` sub-fields), in which case they
+        // are updatable just like any other writable field.
         let is_synthetic_extra_writable = res
             .extra_writable
             .iter()
@@ -592,7 +592,8 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
         let is_create_only = if is_read_only {
             false
         } else if is_synthetic_extra_writable {
-            true
+            !updatable_fields.contains(name.as_str())
+                || create_only_overrides.contains(name.as_str())
         } else if schema_structure.is_some() {
             // For schema_structure resources, only explicit overrides are create-only.
             // The default is writable since the update operation is hand-coded.
@@ -637,7 +638,10 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
         });
     }
 
-    // Process synthetic extra writable fields (no read_source)
+    // Process synthetic extra writable fields (no read_source).
+    // A synthetic field defaults to create-only, but is treated as updatable
+    // when it appears in `update_ops` (typically as a `FieldLayout::InsideStruct`
+    // member of a wrapper struct in the API request shape).
     for extra in &res.extra_writable {
         if extra.read_source.is_some() {
             continue; // Already handled via writable_fields
@@ -650,12 +654,14 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
         } else {
             "AttributeType::String".to_string()
         };
+        let is_create_only =
+            !updatable_fields.contains(extra.name) || create_only_overrides.contains(extra.name);
         attrs.push(AttrInfo {
             snake_name,
             provider_name: extra.name.to_string(),
             type_code,
             is_required: false,
-            is_create_only: true,
+            is_create_only,
             is_read_only: false,
             is_identity: identity_overrides.contains(extra.name),
             description: extra.description.map(|s| s.to_string()),
@@ -1945,6 +1951,17 @@ fn generate_provider_code(
             let suffix = op_suffix(update_op.operation, res.identifier);
             let method_name = format!("write_{}_{}", resource_name, suffix);
             if manual_methods.contains(&method_name) {
+                continue;
+            }
+            // Skip generating the write function if any of the struct fields
+            // has a `type_overrides` entry: the override changes the DSL Value
+            // type (e.g. Bool, Json) but the generated builder body assumes
+            // `Value::String`. The provider-side write must be hand-written
+            // in services/<service>/<resource>.rs.
+            if update_fields
+                .iter()
+                .any(|f| res.type_overrides.iter().any(|(k, _)| *k == *f))
+            {
                 continue;
             }
             let sdk_method = update_op.operation.to_snake_case();
@@ -3919,6 +3936,10 @@ fn cf_type_name(resource_name: &str) -> &'static str {
         "ec2.VpnGateway" => "AWS::EC2::VPNGateway",
         "s3.Bucket" => "AWS::S3::Bucket",
         "s3.BucketPolicy" => "AWS::S3::BucketPolicy",
+        // No native CloudFormation type — PublicAccessBlock is a property
+        // of AWS::S3::Bucket. We synthesize a name to keep cf_type_name a
+        // total function for codegen consumers.
+        "s3.BucketPublicAccessBlock" => "AWS::S3::BucketPublicAccessBlock",
         "sts.CallerIdentity" => "AWS::STS::CallerIdentity",
         "organizations.Organization" => "AWS::Organizations::Organization",
         "organizations.Account" => "AWS::Organizations::Account",

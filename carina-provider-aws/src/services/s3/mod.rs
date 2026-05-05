@@ -1,2 +1,3 @@
 pub mod bucket;
 pub mod bucket_policy;
+pub mod bucket_public_access_block;

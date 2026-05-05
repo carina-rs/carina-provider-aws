@@ -1,0 +1,21 @@
+# S3 BucketPublicAccessBlock - Basic test
+#
+# Tests: standalone aws.s3.BucketPublicAccessBlock controlling the
+# Public Access Block settings of a bucket.
+
+provider aws {
+  region = aws.Region.ap_northeast_1
+}
+
+let bucket = aws.s3.Bucket {
+  bucket = 'carina-acc-test-aws-s3-bucket-pab-basic-v1'
+}
+
+aws.s3.BucketPublicAccessBlock {
+  bucket = bucket.bucket
+
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}

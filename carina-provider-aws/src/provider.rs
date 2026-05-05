@@ -22,6 +22,10 @@ impl Provider for AwsProvider {
             let mut state = match id.resource_type.as_str() {
                 "s3.Bucket" => self.read_s3_bucket(&id, identifier.as_deref()).await,
                 "s3.BucketPolicy" => self.read_s3_bucket_policy(&id, identifier.as_deref()).await,
+                "s3.BucketPublicAccessBlock" => {
+                    self.read_s3_bucket_public_access_block(&id, identifier.as_deref())
+                        .await
+                }
                 "ec2.Eip" => self.read_ec2_eip(&id, identifier.as_deref()).await,
                 "ec2.Vpc" => self.read_ec2_vpc(&id, identifier.as_deref()).await,
                 "ec2.Subnet" => self.read_ec2_subnet(&id, identifier.as_deref()).await,
@@ -119,6 +123,9 @@ impl Provider for AwsProvider {
             match resource.id.resource_type.as_str() {
                 "s3.Bucket" => self.create_s3_bucket(resource).await,
                 "s3.BucketPolicy" => self.create_s3_bucket_policy(resource).await,
+                "s3.BucketPublicAccessBlock" => {
+                    self.create_s3_bucket_public_access_block(resource).await
+                }
                 "ec2.Eip" => self.create_ec2_eip(resource).await,
                 "ec2.Vpc" => self.create_ec2_vpc(resource).await,
                 "ec2.Subnet" => self.create_ec2_subnet(resource).await,
@@ -183,6 +190,10 @@ impl Provider for AwsProvider {
                 "s3.Bucket" => self.update_s3_bucket(id, &identifier, &from, to).await,
                 "s3.BucketPolicy" => {
                     self.update_s3_bucket_policy(id, &identifier, &from, to)
+                        .await
+                }
+                "s3.BucketPublicAccessBlock" => {
+                    self.update_s3_bucket_public_access_block(id, &identifier, &from, to)
                         .await
                 }
                 "ec2.Eip" => self.update_ec2_eip(id, &identifier, &from, to).await,
@@ -281,6 +292,10 @@ impl Provider for AwsProvider {
                 "s3.Bucket" => self.delete_s3_bucket(id, &identifier, &lifecycle).await,
                 "s3.BucketPolicy" => {
                     self.delete_s3_bucket_policy_idempotent(id, &identifier)
+                        .await
+                }
+                "s3.BucketPublicAccessBlock" => {
+                    self.delete_s3_bucket_public_access_block_idempotent(id, &identifier)
                         .await
                 }
                 "ec2.Eip" => self.delete_ec2_eip(id, &identifier).await,
