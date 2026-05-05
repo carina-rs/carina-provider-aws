@@ -3954,6 +3954,7 @@ fn cf_type_name(resource_name: &str) -> &'static str {
         "s3.BucketReplicationConfiguration" => "AWS::S3::BucketReplicationConfiguration",
         "s3.BucketLifecycleConfiguration" => "AWS::S3::BucketLifecycleConfiguration",
         "s3.BucketWebsiteConfiguration" => "AWS::S3::BucketWebsiteConfiguration",
+        "s3.BucketCorsConfiguration" => "AWS::S3::BucketCorsConfiguration",
         "sts.CallerIdentity" => "AWS::STS::CallerIdentity",
         "organizations.Organization" => "AWS::Organizations::Organization",
         "organizations.Account" => "AWS::Organizations::Account",
