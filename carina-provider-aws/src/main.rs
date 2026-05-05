@@ -95,6 +95,20 @@ impl CarinaProvider for AwsProcessProvider {
                 namespace: Some("aws".to_string()),
             },
         );
+        types.insert(
+            "allowed_account_ids".to_string(),
+            proto::AttributeType::List {
+                inner: Box::new(proto::AttributeType::String),
+                ordered: false,
+            },
+        );
+        types.insert(
+            "forbidden_account_ids".to_string(),
+            proto::AttributeType::List {
+                inner: Box::new(proto::AttributeType::String),
+                ordered: false,
+            },
+        );
         types
     }
 
@@ -106,13 +120,22 @@ impl CarinaProvider for AwsProcessProvider {
     }
 
     fn initialize(&mut self, attrs: &HashMap<String, proto::Value>) -> Result<(), String> {
+        use carina_provider_aws::services::sts::account_guard::extract_string_list;
         let core_attrs = convert::proto_to_core_value_map(attrs);
         let region = if let Some(CoreValue::String(region)) = core_attrs.get("region") {
             carina_core::utils::convert_region_value(region)
         } else {
             "ap-northeast-1".to_string()
         };
-        let provider = self.runtime.block_on(AwsProvider::new(&region));
+        let allowed = extract_string_list(core_attrs.get("allowed_account_ids"));
+        let forbidden = extract_string_list(core_attrs.get("forbidden_account_ids"));
+        let provider = self.runtime.block_on(AwsProvider::new_with_account_guard(
+            &region, allowed, forbidden,
+        ));
+        // Run the account guard before we accept this provider — fails
+        // fast (before any read/plan/apply) when the credentials in use
+        // point at the wrong AWS account.
+        self.runtime.block_on(provider.verify_account_id())?;
         self.provider = Some(provider);
         Ok(())
     }
@@ -382,6 +405,30 @@ mod tests {
                 .validate_custom_type("unknown_type", "any-value")
                 .is_ok()
         );
+    }
+
+    #[test]
+    fn provider_config_attribute_types_declares_account_guard_lists() {
+        // The host validates `list(string)` shape against these
+        // declarations before calling `initialize`. If the declarations
+        // disappear, the host silently drops the attributes and the
+        // guard becomes a no-op — this test prevents that regression.
+        let provider = AwsProcessProvider::new();
+        let types = provider.provider_config_attribute_types();
+        for attr in ["allowed_account_ids", "forbidden_account_ids"] {
+            let ty = types.get(attr).unwrap_or_else(|| {
+                panic!("{attr} must be declared as a provider config attribute")
+            });
+            match ty {
+                proto::AttributeType::List { inner, .. } => match inner.as_ref() {
+                    proto::AttributeType::String => {}
+                    other => {
+                        panic!("{attr} must be List<String>, inner was {other:?}")
+                    }
+                },
+                other => panic!("{attr} must be a List, was {other:?}"),
+            }
+        }
     }
 
     #[test]
