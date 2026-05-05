@@ -12,5 +12,6 @@ pub mod bucket_data_source;
 pub mod bucket_ownership_controls;
 pub mod bucket_policy;
 pub mod bucket_public_access_block;
+pub mod bucket_replication_configuration;
 pub mod bucket_server_side_encryption_configuration;
 pub mod bucket_versioning;

@@ -1472,6 +1472,57 @@ pub fn s3_resources() -> Vec<ResourceDef> {
             identity_overrides: vec![],
             derived_attributes: vec![],
         },
+        // s3.BucketReplicationConfiguration — controls cross-region (or
+        // same-region) replication. Maps to PutBucketReplication /
+        // GetBucketReplication / DeleteBucketReplication.
+        ResourceDef {
+            name: "s3.BucketReplicationConfiguration",
+            service_namespace: "com.amazonaws.s3",
+            schema_structure: None,
+            simple_delete: false,
+            noop_update: false,
+            create_op: "PutBucketReplication",
+            read_structure: None,
+            read_ops: vec![],
+            delete_op: "DeleteBucketReplication",
+            update_ops: vec![UpdateOp {
+                operation: "PutBucketReplication",
+                fields: FieldLayout::InsideStruct {
+                    name: "ReplicationConfiguration",
+                    fields: vec!["Role", "Rules"],
+                },
+            }],
+            identifier: "Bucket",
+            has_tags: false,
+            type_overrides: vec![("Rules", "super::bucket_replication_rules()")],
+            exclude_fields: vec![
+                "ContentMD5",
+                "ChecksumAlgorithm",
+                "Token",
+                "ExpectedBucketOwner",
+                "ReplicationConfiguration",
+            ],
+            create_only_overrides: vec!["Bucket"],
+            enum_aliases: vec![],
+            to_dsl_overrides: vec![],
+            required_overrides: vec!["Bucket", "Role", "Rules"],
+            extra_read_only: vec![],
+            read_only_overrides: vec![],
+            extra_writable: vec![
+                ExtraField {
+                    name: "Role",
+                    read_source: None,
+                    description: Some("ARN of the IAM role S3 uses to perform the replication."),
+                },
+                ExtraField {
+                    name: "Rules",
+                    read_source: None,
+                    description: Some("Replication rules — at least one is required."),
+                },
+            ],
+            identity_overrides: vec![],
+            derived_attributes: vec![],
+        },
         // s3.BucketPublicAccessBlock — controls the Public Access Block
         // settings of an existing S3 bucket. Maps to PutPublicAccessBlock /
         // GetPublicAccessBlock / DeletePublicAccessBlock.

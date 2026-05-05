@@ -1418,6 +1418,70 @@ pub fn bucket_encryption_rules() -> AttributeType {
     AttributeType::list(s3_sse_rule())
 }
 
+/// `Destination` for a replication rule. Minimal fields: target bucket
+/// ARN and optional storage class / account.
+fn s3_replication_destination() -> AttributeType {
+    AttributeType::Struct {
+        name: "ReplicationDestination".to_string(),
+        fields: vec![
+            StructField::new("bucket", AttributeType::String)
+                .with_provider_name("Bucket")
+                .required(),
+            StructField::new("account", AttributeType::String).with_provider_name("Account"),
+            StructField::new(
+                "storage_class",
+                AttributeType::StringEnum {
+                    name: "ReplicationStorageClass".to_string(),
+                    values: vec![
+                        "STANDARD".to_string(),
+                        "REDUCED_REDUNDANCY".to_string(),
+                        "STANDARD_IA".to_string(),
+                        "ONEZONE_IA".to_string(),
+                        "INTELLIGENT_TIERING".to_string(),
+                        "GLACIER".to_string(),
+                        "DEEP_ARCHIVE".to_string(),
+                        "GLACIER_IR".to_string(),
+                    ],
+                    namespace: Some("aws.s3.BucketReplicationConfiguration".to_string()),
+                    to_dsl: None,
+                },
+            )
+            .with_provider_name("StorageClass"),
+        ],
+    }
+}
+
+fn s3_replication_status() -> AttributeType {
+    AttributeType::StringEnum {
+        name: "ReplicationRuleStatus".to_string(),
+        values: vec!["Enabled".to_string(), "Disabled".to_string()],
+        namespace: Some("aws.s3.BucketReplicationConfiguration".to_string()),
+        to_dsl: None,
+    }
+}
+
+fn s3_replication_rule() -> AttributeType {
+    AttributeType::Struct {
+        name: "ReplicationRule".to_string(),
+        fields: vec![
+            StructField::new("id", AttributeType::String).with_provider_name("ID"),
+            StructField::new("priority", AttributeType::Int).with_provider_name("Priority"),
+            StructField::new("prefix", AttributeType::String).with_provider_name("Prefix"),
+            StructField::new("status", s3_replication_status())
+                .with_provider_name("Status")
+                .required(),
+            StructField::new("destination", s3_replication_destination())
+                .with_provider_name("Destination")
+                .with_block_name("destination")
+                .required(),
+        ],
+    }
+}
+
+pub fn bucket_replication_rules() -> AttributeType {
+    AttributeType::list(s3_replication_rule())
+}
+
 /// IAM condition operator mappings: (snake_case, PascalCase).
 ///
 /// See <https://docs.aws.amazon.Com/IAM/latest/UserGuide/reference_policies_elements_condition_operators.html>

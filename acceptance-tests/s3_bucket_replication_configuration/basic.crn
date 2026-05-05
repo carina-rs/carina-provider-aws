@@ -1,0 +1,57 @@
+# S3 BucketReplicationConfiguration - Basic test
+#
+# Tests: standalone aws.s3.BucketReplicationConfiguration replicating
+# a versioned source bucket into a destination bucket. Both buckets
+# must have versioning enabled.
+
+provider aws {
+  region = aws.Region.ap_northeast_1
+}
+
+let source = aws.s3.Bucket {
+  bucket = 'carina-acc-test-aws-s3-repl-src-v1'
+}
+
+aws.s3.BucketVersioning {
+  bucket = source.bucket
+  status = aws.s3.BucketVersioning.VersioningStatus.Enabled
+}
+
+let dest = aws.s3.Bucket {
+  bucket = 'carina-acc-test-aws-s3-repl-dst-v1'
+}
+
+aws.s3.BucketVersioning {
+  bucket = dest.bucket
+  status = aws.s3.BucketVersioning.VersioningStatus.Enabled
+}
+
+let role = aws.iam.Role {
+  role_name = 'carina-acc-test-aws-s3-repl-role-v1'
+
+  assume_role_policy_document = {
+    version = '2012-10-17'
+    statement {
+      effect = 'Allow'
+      principal = {
+        service = 's3.amazonaws.com'
+      }
+      action = 'sts:AssumeRole'
+    }
+  }
+}
+
+aws.s3.BucketReplicationConfiguration {
+  bucket = source.bucket
+  role   = role.arn
+
+  rules = [
+    {
+      id     = 'replicate-all'
+      status = aws.s3.BucketReplicationConfiguration.ReplicationRuleStatus.Enabled
+      destination = {
+        bucket = 'arn:aws:s3:::carina-acc-test-aws-s3-repl-dst-v1'
+      }
+    },
+  ]
+}

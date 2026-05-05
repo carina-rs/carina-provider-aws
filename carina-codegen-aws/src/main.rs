@@ -3951,6 +3951,7 @@ fn cf_type_name(resource_name: &str) -> &'static str {
         // No native CloudFormation type; synthesize for cf_type_name totality.
         "s3.BucketAcl" => "AWS::S3::BucketAcl",
         "s3.BucketOwnershipControls" => "AWS::S3::BucketOwnershipControls",
+        "s3.BucketReplicationConfiguration" => "AWS::S3::BucketReplicationConfiguration",
         "sts.CallerIdentity" => "AWS::STS::CallerIdentity",
         "organizations.Organization" => "AWS::Organizations::Organization",
         "organizations.Account" => "AWS::Organizations::Account",
