@@ -122,3 +122,65 @@ fn resolve_policy_attr(resource: &Resource) -> ProviderResult<String> {
         ),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use indexmap::IndexMap;
+
+    fn make_resource(policy: Option<Value>) -> Resource {
+        let mut r = Resource::new("s3.BucketPolicy", "test");
+        r.set_attr("bucket", Value::String("my-bucket".to_string()));
+        if let Some(v) = policy {
+            r.set_attr("policy", v);
+        }
+        r
+    }
+
+    #[test]
+    fn resolve_policy_attr_accepts_json_string_passthrough() {
+        let json = r#"{"Version":"2012-10-17","Statement":[]}"#;
+        let r = make_resource(Some(Value::String(json.to_string())));
+        let resolved = resolve_policy_attr(&r).expect("string passthrough");
+        assert_eq!(resolved, json);
+    }
+
+    #[test]
+    fn resolve_policy_attr_serializes_map_to_pascal_case_json() {
+        let mut policy = IndexMap::new();
+        policy.insert(
+            "version".to_string(),
+            Value::String("2012-10-17".to_string()),
+        );
+        let mut stmt = IndexMap::new();
+        stmt.insert("effect".to_string(), Value::String("Allow".to_string()));
+        stmt.insert(
+            "action".to_string(),
+            Value::String("s3:GetObject".to_string()),
+        );
+        policy.insert("statement".to_string(), Value::List(vec![Value::Map(stmt)]));
+
+        let r = make_resource(Some(Value::Map(policy)));
+        let resolved = resolve_policy_attr(&r).expect("map → JSON");
+
+        assert!(resolved.contains("\"Version\""));
+        assert!(resolved.contains("\"Statement\""));
+        assert!(resolved.contains("\"Effect\""));
+        assert!(resolved.contains("\"Action\""));
+        assert!(!resolved.contains("\"version\""));
+    }
+
+    #[test]
+    fn resolve_policy_attr_errors_when_missing() {
+        let r = make_resource(None);
+        let err = resolve_policy_attr(&r).expect_err("missing policy");
+        assert!(format!("{}", err).contains("policy is required"));
+    }
+
+    #[test]
+    fn resolve_policy_attr_errors_on_non_string_non_map() {
+        let r = make_resource(Some(Value::Bool(true)));
+        let err = resolve_policy_attr(&r).expect_err("invalid type");
+        assert!(format!("{}", err).contains("policy is required"));
+    }
+}
