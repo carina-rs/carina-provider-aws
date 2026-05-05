@@ -200,32 +200,6 @@ impl AwsProvider {
         Ok(())
     }
 
-    /// Read s3.BucketPolicy GetBucketPolicy (generated)
-    pub(crate) async fn read_s3_bucket_policy_policy(
-        &self,
-        id: &ResourceId,
-        identifier: &str,
-        attributes: &mut HashMap<String, Value>,
-    ) -> ProviderResult<()> {
-        let output = self
-            .s3_client
-            .get_bucket_policy()
-            .bucket(identifier)
-            .send()
-            .await
-            .map_err(|e| {
-                ProviderError::new(sdk_error_message(
-                    "Failed to read s3.BucketPolicy GetBucketPolicy",
-                    &e,
-                ))
-                .for_resource(id.clone())
-            })?;
-        if let Some(v) = output.policy() {
-            attributes.insert("policy".to_string(), Value::String(v.to_string()));
-        }
-        Ok(())
-    }
-
     /// Write s3.Bucket PutBucketVersioning (generated)
     pub(crate) async fn write_s3_bucket_versioning(
         &self,

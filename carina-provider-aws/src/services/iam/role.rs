@@ -75,22 +75,8 @@ impl AwsProvider {
     pub(crate) async fn create_iam_role(&self, resource: Resource) -> ProviderResult<State> {
         let role_name = require_string_attr(&resource, "role_name")?;
 
-        let assume_role_policy_document = match resource.get_attr("assume_role_policy_document") {
-            Some(Value::String(s)) => s.clone(),
-            Some(value @ Value::Map(_)) => value_to_iam_policy_json(value).map_err(|e| {
-                ProviderError::new(format!(
-                    "Failed to convert assume_role_policy_document: {}",
-                    e
-                ))
-                .for_resource(resource.id.clone())
-            })?,
-            _ => {
-                return Err(
-                    ProviderError::new("assume_role_policy_document is required")
-                        .for_resource(resource.id.clone()),
-                );
-            }
-        };
+        let assume_role_policy_document =
+            resolve_iam_policy_attr(&resource, "assume_role_policy_document")?;
 
         let mut req = self
             .iam_client
@@ -358,6 +344,27 @@ pub fn value_to_iam_policy_json(value: &Value) -> Result<String, String> {
     serde_json::to_string(&json_value).map_err(|e| format!("JSON serialization failed: {}", e))
 }
 
+/// Resolve an IAM-style policy attribute (e.g. `assume_role_policy_document`,
+/// `policy`) on a `Resource` into a JSON string suitable for the AWS API.
+///
+/// Accepts either a pre-serialized JSON string or a Carina `Value::Map`
+/// (block-syntax DSL form). Errors when the attribute is missing or has an
+/// unsupported type.
+pub fn resolve_iam_policy_attr(resource: &Resource, attr_name: &str) -> ProviderResult<String> {
+    match resource.get_attr(attr_name) {
+        Some(Value::String(s)) => Ok(s.clone()),
+        Some(value @ Value::Map(_)) => value_to_iam_policy_json(value).map_err(|e| {
+            ProviderError::new(format!("Failed to convert {}: {}", attr_name, e))
+                .for_resource(resource.id.clone())
+        }),
+        _ => Err(ProviderError::new(format!(
+            "{} is required (must be a JSON string or block)",
+            attr_name
+        ))
+        .for_resource(resource.id.clone())),
+    }
+}
+
 /// Recursively convert a Carina Value to serde_json::Value with PascalCase keys.
 fn value_to_json_pascal(value: &Value) -> serde_json::Value {
     match value {
@@ -442,4 +449,65 @@ fn snake_to_pascal(s: &str) -> String {
             }
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use indexmap::IndexMap;
+
+    fn make_resource(policy: Option<Value>) -> Resource {
+        let mut r = Resource::new("test.Type", "test");
+        if let Some(v) = policy {
+            r.set_attr("policy", v);
+        }
+        r
+    }
+
+    #[test]
+    fn resolve_iam_policy_attr_accepts_json_string_passthrough() {
+        let json = r#"{"Version":"2012-10-17","Statement":[]}"#;
+        let r = make_resource(Some(Value::String(json.to_string())));
+        let resolved = resolve_iam_policy_attr(&r, "policy").expect("string passthrough");
+        assert_eq!(resolved, json);
+    }
+
+    #[test]
+    fn resolve_iam_policy_attr_serializes_map_to_pascal_case_json() {
+        let mut policy = IndexMap::new();
+        policy.insert(
+            "version".to_string(),
+            Value::String("2012-10-17".to_string()),
+        );
+        let mut stmt = IndexMap::new();
+        stmt.insert("effect".to_string(), Value::String("Allow".to_string()));
+        stmt.insert(
+            "action".to_string(),
+            Value::String("s3:GetObject".to_string()),
+        );
+        policy.insert("statement".to_string(), Value::List(vec![Value::Map(stmt)]));
+
+        let r = make_resource(Some(Value::Map(policy)));
+        let resolved = resolve_iam_policy_attr(&r, "policy").expect("map → JSON");
+
+        assert!(resolved.contains("\"Version\""));
+        assert!(resolved.contains("\"Statement\""));
+        assert!(resolved.contains("\"Effect\""));
+        assert!(resolved.contains("\"Action\""));
+        assert!(!resolved.contains("\"version\""));
+    }
+
+    #[test]
+    fn resolve_iam_policy_attr_errors_when_missing() {
+        let r = make_resource(None);
+        let err = resolve_iam_policy_attr(&r, "policy").expect_err("missing");
+        assert!(format!("{}", err).contains("policy is required"));
+    }
+
+    #[test]
+    fn resolve_iam_policy_attr_errors_on_non_string_non_map() {
+        let r = make_resource(Some(Value::Bool(true)));
+        let err = resolve_iam_policy_attr(&r, "policy").expect_err("invalid type");
+        assert!(format!("{}", err).contains("policy is required"));
+    }
 }

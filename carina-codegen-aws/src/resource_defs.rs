@@ -1233,10 +1233,9 @@ pub fn s3_resources() -> Vec<ResourceDef> {
             identity_overrides: vec![],
             derived_attributes: vec![],
         },
-        // s3.BucketPolicy — standalone resource that attaches a resource-based
-        // policy to an existing S3 bucket. Maps to PutBucketPolicy /
-        // GetBucketPolicy / DeleteBucketPolicy. First slice of the
-        // Terraform-style decomposition decided in carina-provider-aws#164.
+        // s3.BucketPolicy — attaches a resource-based policy to an existing
+        // S3 bucket. Maps to PutBucketPolicy / GetBucketPolicy /
+        // DeleteBucketPolicy.
         ResourceDef {
             name: "s3.BucketPolicy",
             service_namespace: "com.amazonaws.s3",
@@ -1245,11 +1244,10 @@ pub fn s3_resources() -> Vec<ResourceDef> {
             noop_update: false,
             create_op: "PutBucketPolicy",
             read_structure: None,
-            read_ops: vec![ReadOp {
-                operation: "GetBucketPolicy",
-                fields: vec![("Policy", None)],
-                defaults: vec![],
-            }],
+            // Read is hand-written in services/s3/bucket_policy.rs to convert
+            // the JSON policy to a typed Value::Map; the generated per-op read
+            // would emit it as Value::String and bypass that conversion.
+            read_ops: vec![],
             delete_op: "DeleteBucketPolicy",
             update_ops: vec![UpdateOp {
                 operation: "PutBucketPolicy",

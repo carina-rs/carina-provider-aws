@@ -853,7 +853,7 @@ fn classify_head_bucket_status(status: u16, is_not_found_error: bool) -> HeadBuc
 }
 
 /// Check if an S3 SDK error is a "not configured" error that should be silently ignored.
-fn is_s3_not_configured_error<E: aws_sdk_s3::error::ProvideErrorMetadata>(
+pub(crate) fn is_s3_not_configured_error<E: aws_sdk_s3::error::ProvideErrorMetadata>(
     err: &aws_sdk_s3::error::SdkError<E>,
     expected_code: &str,
 ) -> bool {
