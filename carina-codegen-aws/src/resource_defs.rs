@@ -1240,7 +1240,11 @@ pub fn s3_resources() -> Vec<ResourceDef> {
             name: "s3.BucketPolicy",
             service_namespace: "com.amazonaws.s3",
             schema_structure: None,
-            simple_delete: true,
+            // Delete is hand-written in services/s3/bucket_policy.rs as
+            // delete_s3_bucket_policy_idempotent, which treats
+            // NoSuchBucketPolicy / NoSuchBucket as success so destroy retries
+            // succeed when the policy or its parent bucket is already gone.
+            simple_delete: false,
             noop_update: false,
             create_op: "PutBucketPolicy",
             read_structure: None,

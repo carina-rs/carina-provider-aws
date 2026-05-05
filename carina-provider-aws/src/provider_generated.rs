@@ -89,24 +89,6 @@ impl AwsProvider {
         Ok(())
     }
 
-    /// Delete s3.BucketPolicy (generated)
-    pub(crate) async fn delete_s3_bucket_policy(
-        &self,
-        id: ResourceId,
-        identifier: &str,
-    ) -> ProviderResult<()> {
-        self.s3_client
-            .delete_bucket_policy()
-            .bucket(identifier)
-            .send()
-            .await
-            .map_err(|e| {
-                ProviderError::new(sdk_error_message("Failed to delete bucket policy", &e))
-                    .for_resource(id.clone())
-            })?;
-        Ok(())
-    }
-
     /// Update ec2.InternetGateway: apply tag changes and read back (generated)
     pub(crate) async fn update_ec2_internet_gateway(
         &self,

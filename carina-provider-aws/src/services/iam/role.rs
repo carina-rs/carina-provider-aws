@@ -517,11 +517,8 @@ fn scalar_to_json(value: &Value) -> serde_json::Value {
 ///
 /// Mirrors `value_to_iam_policy_json`'s position-aware case conversion:
 /// only IAM standard fields and condition operators are mapped to
-/// snake_case; condition variable keys, ARN values, and other literals
-/// are preserved verbatim. A blanket `pascal_to_snake` would turn
-/// `aws:SecureTransport` → `aws:secure_transport` (wrong), or
-/// `s3:GetObject` (an Action *value*, not a key) is unaffected only
-/// because Action values are not keys.
+/// snake_case; condition variable keys, ARN values, and Action / Resource
+/// literals are preserved verbatim.
 pub fn iam_policy_json_to_value(json_str: &str) -> Result<Value, String> {
     let json: serde_json::Value =
         serde_json::from_str(json_str).map_err(|e| format!("JSON parse failed: {}", e))?;

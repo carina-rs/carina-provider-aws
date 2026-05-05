@@ -99,9 +99,12 @@ impl AwsProvider {
         self.read_s3_bucket_policy(id, Some(bucket)).await
     }
 
-    /// Delete an S3 BucketPolicy. Treats `NoSuchBucketPolicy` as success
-    /// so destroy is idempotent when the policy was already removed
-    /// (e.g. out-of-band cleanup or a destroy retry after partial success).
+    /// Delete an S3 BucketPolicy idempotently.
+    ///
+    /// Treats both `NoSuchBucketPolicy` (no policy was attached) and
+    /// `NoSuchBucket` (the parent bucket itself was deleted out-of-band)
+    /// as success. The policy cannot exist without the bucket, so either
+    /// signal means the destroy goal is satisfied.
     pub(crate) async fn delete_s3_bucket_policy_idempotent(
         &self,
         id: ResourceId,
@@ -116,7 +119,12 @@ impl AwsProvider {
 
         match result {
             Ok(_) => Ok(()),
-            Err(e) if is_s3_not_configured_error(&e, "NoSuchBucketPolicy") => Ok(()),
+            Err(e)
+                if is_s3_not_configured_error(&e, "NoSuchBucketPolicy")
+                    || is_s3_not_configured_error(&e, "NoSuchBucket") =>
+            {
+                Ok(())
+            }
             Err(e) => Err(ProviderError::new(sdk_error_message(
                 "Failed to delete bucket policy",
                 &e,
