@@ -1,0 +1,26 @@
+# S3 BucketLogging - Basic test
+#
+# Two buckets: a source bucket whose access we want logged, and a
+# separate destination bucket that receives the log objects. The
+# destination bucket must allow s3.amazonaws.com to write under the
+# given prefix; the destination bucket's ACL/policy is a precondition
+# (Carina does not yet manage the log-delivery grant).
+
+provider aws {
+  region = aws.Region.ap_northeast_1
+}
+
+let source = aws.s3.Bucket {
+  bucket = 'carina-acc-test-aws-s3-bucket-logging-source-v1'
+}
+
+let logs = aws.s3.Bucket {
+  bucket = 'carina-acc-test-aws-s3-bucket-logging-target-v1'
+}
+
+aws.s3.BucketLogging {
+  bucket = source.bucket
+
+  target_bucket = logs.bucket
+  target_prefix = 'access-logs/'
+}
