@@ -4,7 +4,7 @@ use carina_core::provider::{BoxFuture, Provider, ProviderError, ProviderResult};
 use carina_core::resource::{LifecycleConfig, Resource, ResourceId, State};
 
 use crate::AwsProvider;
-use crate::normalizer::{normalize_absent_collections, normalize_state_enums};
+use crate::normalizer::normalize_state_enums;
 
 impl Provider for AwsProvider {
     fn name(&self) -> &str {
@@ -136,12 +136,9 @@ impl Provider for AwsProvider {
                 .for_resource(id.clone())),
             }?;
 
-            // Normalize enum values in read state to namespaced DSL format,
-            // and canonicalize absent optional list/map attributes to empty
-            // collections (#236) so the differ does not see `(none) → []`.
+            // Normalize enum values in read state to namespaced DSL format
             if state.exists {
                 normalize_state_enums(&id.resource_type, &mut state.attributes);
-                normalize_absent_collections(&id.resource_type, &mut state.attributes);
             }
 
             Ok(state)
@@ -155,7 +152,6 @@ impl Provider for AwsProvider {
                 crate::provider_generated::dispatch_read_data_source(self, &resource).await?;
             if state.exists {
                 normalize_state_enums(&resource.id.resource_type, &mut state.attributes);
-                normalize_absent_collections(&resource.id.resource_type, &mut state.attributes);
             }
             Ok(state)
         })
