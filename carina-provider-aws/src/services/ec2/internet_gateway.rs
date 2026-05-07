@@ -31,7 +31,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::new(sdk_error_message(
+                ProviderError::api_error(sdk_error_message(
                     "Failed to describe internet gateways",
                     &e,
                 ))
@@ -80,7 +80,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::new(sdk_error_message("Failed to create internet gateway", &e))
+                ProviderError::api_error(sdk_error_message("Failed to create internet gateway", &e))
                     .for_resource(resource.id.clone())
             })?;
 
@@ -88,7 +88,7 @@ impl AwsProvider {
             .internet_gateway()
             .and_then(|igw| igw.internet_gateway_id())
             .ok_or_else(|| {
-                ProviderError::new("Internet Gateway created but no ID returned")
+                ProviderError::api_error("Internet Gateway created but no ID returned")
                     .for_resource(resource.id.clone())
             })?;
 
@@ -105,8 +105,11 @@ impl AwsProvider {
                 .send()
                 .await
                 .map_err(|e| {
-                    ProviderError::new(sdk_error_message("Failed to attach internet gateway", &e))
-                        .for_resource(resource.id.clone())
+                    ProviderError::api_error(sdk_error_message(
+                        "Failed to attach internet gateway",
+                        &e,
+                    ))
+                    .for_resource(resource.id.clone())
                 })?;
         }
 
@@ -129,8 +132,11 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::new(sdk_error_message("Failed to describe internet gateway", &e))
-                    .for_resource(id.clone())
+                ProviderError::api_error(sdk_error_message(
+                    "Failed to describe internet gateway",
+                    &e,
+                ))
+                .for_resource(id.clone())
             })?;
 
         if let Some(igw) = result.internet_gateways().first() {
@@ -145,7 +151,7 @@ impl AwsProvider {
                     .send()
                     .await
                     .map_err(|e| {
-                        ProviderError::new(sdk_error_message(
+                        ProviderError::api_error(sdk_error_message(
                             "Failed to detach internet gateway",
                             &e,
                         ))
@@ -161,7 +167,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::new(sdk_error_message("Failed to delete internet gateway", &e))
+                ProviderError::api_error(sdk_error_message("Failed to delete internet gateway", &e))
                     .for_resource(id.clone())
             })?;
 

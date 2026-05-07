@@ -88,10 +88,11 @@ impl AwsProvider {
                 {
                     return Ok(State::not_found(id.clone()));
                 }
-                Err(
-                    ProviderError::new(sdk_error_message("Failed to describe organization", &e))
-                        .for_resource(id.clone()),
-                )
+                Err(ProviderError::api_error(sdk_error_message(
+                    "Failed to describe organization",
+                    &e,
+                ))
+                .for_resource(id.clone()))
             }
         }
     }
@@ -111,7 +112,7 @@ impl AwsProvider {
         }
 
         let response = req.send().await.map_err(|e| {
-            ProviderError::new(sdk_error_message("Failed to create organization", &e))
+            ProviderError::api_error(sdk_error_message("Failed to create organization", &e))
                 .for_resource(resource.id.clone())
         })?;
 
@@ -126,7 +127,7 @@ impl AwsProvider {
             })
         } else {
             Err(
-                ProviderError::new("CreateOrganization returned no organization")
+                ProviderError::api_error("CreateOrganization returned no organization")
                     .for_resource(resource.id),
             )
         }
@@ -143,7 +144,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::new(sdk_error_message("Failed to delete organization", &e))
+                ProviderError::api_error(sdk_error_message("Failed to delete organization", &e))
                     .for_resource(id.clone())
             })?;
         Ok(())

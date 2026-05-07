@@ -58,7 +58,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::new(sdk_error_message(
+                ProviderError::api_error(sdk_error_message(
                     "Failed to describe internet gateways",
                     &e,
                 ))
@@ -106,7 +106,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::new(sdk_error_message("Failed to describe VPN gateways", &e))
+                ProviderError::api_error(sdk_error_message("Failed to describe VPN gateways", &e))
                     .for_resource(id.clone())
             })?;
 
@@ -148,8 +148,11 @@ impl AwsProvider {
                 .send()
                 .await
                 .map_err(|e| {
-                    ProviderError::new(sdk_error_message("Failed to attach internet gateway", &e))
-                        .for_resource(resource.id.clone())
+                    ProviderError::api_error(sdk_error_message(
+                        "Failed to attach internet gateway",
+                        &e,
+                    ))
+                    .for_resource(resource.id.clone())
                 })?;
 
             let composite = format!("{}|{}", vpc_id, igw_id);
@@ -164,7 +167,7 @@ impl AwsProvider {
                 .send()
                 .await
                 .map_err(|e| {
-                    ProviderError::new(sdk_error_message("Failed to attach VPN gateway", &e))
+                    ProviderError::api_error(sdk_error_message("Failed to attach VPN gateway", &e))
                         .for_resource(resource.id.clone())
                 })?;
 
@@ -172,10 +175,10 @@ impl AwsProvider {
             self.read_ec2_vpc_gateway_attachment(&resource.id, Some(&composite))
                 .await
         } else {
-            Err(
-                ProviderError::new("Either internet_gateway_id or vpn_gateway_id is required")
-                    .for_resource(resource.id.clone()),
+            Err(ProviderError::invalid_input(
+                "Either internet_gateway_id or vpn_gateway_id is required",
             )
+            .for_resource(resource.id.clone()))
         }
     }
 
@@ -198,7 +201,7 @@ impl AwsProvider {
         identifier: &str,
     ) -> ProviderResult<()> {
         let Some((vpc_id, gateway_id)) = identifier.split_once('|') else {
-            return Err(ProviderError::new(format!(
+            return Err(ProviderError::invalid_input(format!(
                 "Invalid gateway attachment identifier: {}",
                 identifier
             ))
@@ -213,8 +216,11 @@ impl AwsProvider {
                 .send()
                 .await
                 .map_err(|e| {
-                    ProviderError::new(sdk_error_message("Failed to detach internet gateway", &e))
-                        .for_resource(id.clone())
+                    ProviderError::api_error(sdk_error_message(
+                        "Failed to detach internet gateway",
+                        &e,
+                    ))
+                    .for_resource(id.clone())
                 })?;
         } else if gateway_id.starts_with("vgw-") {
             self.ec2_client
@@ -224,11 +230,11 @@ impl AwsProvider {
                 .send()
                 .await
                 .map_err(|e| {
-                    ProviderError::new(sdk_error_message("Failed to detach VPN gateway", &e))
+                    ProviderError::api_error(sdk_error_message("Failed to detach VPN gateway", &e))
                         .for_resource(id.clone())
                 })?;
         } else {
-            return Err(ProviderError::new(format!(
+            return Err(ProviderError::invalid_input(format!(
                 "Unknown gateway type in identifier: {}",
                 identifier
             ))

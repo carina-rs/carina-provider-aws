@@ -25,7 +25,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::new(sdk_error_message("Failed to describe VPC endpoints", &e))
+                ProviderError::api_error(sdk_error_message("Failed to describe VPC endpoints", &e))
                     .for_resource(id.clone())
             })?;
 
@@ -111,8 +111,11 @@ impl AwsProvider {
             let json_str =
                 crate::services::iam::role::value_to_iam_policy_json(&Value::Map(map.clone()))
                     .map_err(|e| {
-                        ProviderError::new(format!("Failed to serialize policy_document: {}", e))
-                            .for_resource(resource.id.clone())
+                        ProviderError::internal(format!(
+                            "Failed to serialize policy_document: {}",
+                            e
+                        ))
+                        .for_resource(resource.id.clone())
                     })?;
             req = req.policy_document(&json_str);
         }
@@ -123,7 +126,7 @@ impl AwsProvider {
             let rid = rid.clone();
             async move {
                 req.send().await.map_err(|e| {
-                    ProviderError::new(sdk_error_message("Failed to create VPC endpoint", &e))
+                    ProviderError::api_error(sdk_error_message("Failed to create VPC endpoint", &e))
                         .for_resource(rid)
                 })
             }
@@ -134,7 +137,7 @@ impl AwsProvider {
             .vpc_endpoint()
             .and_then(|ep| ep.vpc_endpoint_id())
             .ok_or_else(|| {
-                ProviderError::new("VPC Endpoint created but no ID returned")
+                ProviderError::api_error("VPC Endpoint created but no ID returned")
                     .for_resource(resource.id.clone())
             })?;
 
@@ -304,8 +307,11 @@ impl AwsProvider {
             let json_str =
                 crate::services::iam::role::value_to_iam_policy_json(&Value::Map(map.clone()))
                     .map_err(|e| {
-                        ProviderError::new(format!("Failed to serialize policy_document: {}", e))
-                            .for_resource(id.clone())
+                        ProviderError::internal(format!(
+                            "Failed to serialize policy_document: {}",
+                            e
+                        ))
+                        .for_resource(id.clone())
                     })?;
             req = req.policy_document(&json_str);
             has_modifications = true;
@@ -313,7 +319,7 @@ impl AwsProvider {
 
         if has_modifications {
             req.send().await.map_err(|e| {
-                ProviderError::new(sdk_error_message("Failed to modify VPC endpoint", &e))
+                ProviderError::api_error(sdk_error_message("Failed to modify VPC endpoint", &e))
                     .for_resource(id.clone())
             })?;
         }
@@ -343,7 +349,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::new(sdk_error_message("Failed to delete VPC endpoint", &e))
+                ProviderError::api_error(sdk_error_message("Failed to delete VPC endpoint", &e))
                     .for_resource(id.clone())
             })?;
 
@@ -353,10 +359,11 @@ impl AwsProvider {
                 .error()
                 .and_then(|e| e.message())
                 .unwrap_or("unknown error");
-            return Err(
-                ProviderError::new(format!("Failed to delete VPC endpoint: {}", msg))
-                    .for_resource(id.clone()),
-            );
+            return Err(ProviderError::api_error(format!(
+                "Failed to delete VPC endpoint: {}",
+                msg
+            ))
+            .for_resource(id.clone()));
         }
 
         Ok(())

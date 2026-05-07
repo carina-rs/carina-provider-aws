@@ -32,7 +32,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::new(sdk_error_message("Failed to describe VPN gateways", &e))
+                ProviderError::api_error(sdk_error_message("Failed to describe VPN gateways", &e))
                     .for_resource(id.clone())
             })?;
 
@@ -67,9 +67,8 @@ impl AwsProvider {
         let gw_type = match resource.get_attr("type") {
             Some(Value::String(s)) => extract_enum_value_with_values(s, &["ipsec.1"]).to_string(),
             _ => {
-                return Err(
-                    ProviderError::new("type is required").for_resource(resource.id.clone())
-                );
+                return Err(ProviderError::invalid_input("type is required")
+                    .for_resource(resource.id.clone()));
             }
         };
 
@@ -83,7 +82,7 @@ impl AwsProvider {
         }
 
         let result = req.send().await.map_err(|e| {
-            ProviderError::new(sdk_error_message("Failed to create VPN gateway", &e))
+            ProviderError::api_error(sdk_error_message("Failed to create VPN gateway", &e))
                 .for_resource(resource.id.clone())
         })?;
 
@@ -91,7 +90,7 @@ impl AwsProvider {
             .vpn_gateway()
             .and_then(|vgw| vgw.vpn_gateway_id())
             .ok_or_else(|| {
-                ProviderError::new("VPN Gateway created but no ID returned")
+                ProviderError::api_error("VPN Gateway created but no ID returned")
                     .for_resource(resource.id.clone())
             })?;
 
@@ -133,7 +132,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::new(sdk_error_message("Failed to delete VPN gateway", &e))
+                ProviderError::api_error(sdk_error_message("Failed to delete VPN gateway", &e))
                     .for_resource(id.clone())
             })?;
         Ok(())

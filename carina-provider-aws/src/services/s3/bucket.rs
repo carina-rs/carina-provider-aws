@@ -44,13 +44,13 @@ impl AwsProvider {
 
                 match error_kind {
                     HeadBucketErrorKind::NotFound => Ok(State::not_found(id.clone())),
-                    HeadBucketErrorKind::AccessDenied => Err(ProviderError::new(format!(
+                    HeadBucketErrorKind::AccessDenied => Err(ProviderError::api_error(format!(
                         "Access denied for bucket '{}'. This may indicate insufficient IAM \
                          permissions or the bucket is owned by a different AWS account.",
                         name
                     ))
                     .for_resource(id.clone())),
-                    HeadBucketErrorKind::Other => Err(ProviderError::new(sdk_error_message(
+                    HeadBucketErrorKind::Other => Err(ProviderError::api_error(sdk_error_message(
                         "Failed to read bucket",
                         &err,
                     ))
@@ -65,9 +65,8 @@ impl AwsProvider {
         let bucket_name = match resource.get_attr("bucket") {
             Some(Value::String(s)) => s.clone(),
             _ => {
-                return Err(
-                    ProviderError::new("Bucket name is required").for_resource(resource.id.clone())
-                );
+                return Err(ProviderError::invalid_input("Bucket name is required")
+                    .for_resource(resource.id.clone()));
             }
         };
 
@@ -106,7 +105,7 @@ impl AwsProvider {
             let rid = rid.clone();
             async move {
                 req.send().await.map_err(|e| {
-                    ProviderError::new(sdk_error_message("Failed to create bucket", &e))
+                    ProviderError::api_error(sdk_error_message("Failed to create bucket", &e))
                         .for_resource(rid)
                 })
             }
@@ -142,7 +141,7 @@ impl AwsProvider {
                 .send()
                 .await
                 .map_err(|e| {
-                    ProviderError::new(sdk_error_message("Failed to delete bucket tags", &e))
+                    ProviderError::api_error(sdk_error_message("Failed to delete bucket tags", &e))
                         .for_resource(id.clone())
                 })?;
         } else {
@@ -170,7 +169,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::new(sdk_error_message("Failed to delete bucket", &e))
+                ProviderError::api_error(sdk_error_message("Failed to delete bucket", &e))
                     .for_resource(id.clone())
             })?;
         Ok(())
@@ -195,7 +194,7 @@ impl AwsProvider {
             }
 
             let response = req.send().await.map_err(|e| {
-                ProviderError::new(sdk_error_message("Failed to list object versions", &e))
+                ProviderError::api_error(sdk_error_message("Failed to list object versions", &e))
                     .for_resource(id.clone())
             })?;
 
@@ -209,7 +208,7 @@ impl AwsProvider {
                         oid = oid.version_id(vid);
                     }
                     objects_to_delete.push(oid.build().map_err(|e| {
-                        ProviderError::new(sdk_error_message(
+                        ProviderError::api_error(sdk_error_message(
                             "Failed to build ObjectIdentifier",
                             &e,
                         ))
@@ -226,7 +225,7 @@ impl AwsProvider {
                         oid = oid.version_id(vid);
                     }
                     objects_to_delete.push(oid.build().map_err(|e| {
-                        ProviderError::new(sdk_error_message(
+                        ProviderError::api_error(sdk_error_message(
                             "Failed to build ObjectIdentifier",
                             &e,
                         ))
@@ -242,8 +241,11 @@ impl AwsProvider {
                     .quiet(true)
                     .build()
                     .map_err(|e| {
-                        ProviderError::new(sdk_error_message("Failed to build Delete request", &e))
-                            .for_resource(id.clone())
+                        ProviderError::api_error(sdk_error_message(
+                            "Failed to build Delete request",
+                            &e,
+                        ))
+                        .for_resource(id.clone())
                     })?;
 
                 self.s3_client
@@ -253,7 +255,7 @@ impl AwsProvider {
                     .send()
                     .await
                     .map_err(|e| {
-                        ProviderError::new(sdk_error_message("Failed to delete objects", &e))
+                        ProviderError::api_error(sdk_error_message("Failed to delete objects", &e))
                             .for_resource(id.clone())
                     })?;
             }
@@ -297,7 +299,7 @@ impl AwsProvider {
             }
             Err(err) => {
                 if !is_s3_not_configured_error(&err, "NoSuchTagSet") {
-                    return Err(ProviderError::new(sdk_error_message(
+                    return Err(ProviderError::api_error(sdk_error_message(
                         "Failed to read bucket tagging",
                         &err,
                     ))
@@ -332,7 +334,7 @@ impl AwsProvider {
                 .set_tag_set(Some(tags))
                 .build()
                 .map_err(|e| {
-                    ProviderError::new(sdk_error_message("Failed to build tagging", &e))
+                    ProviderError::api_error(sdk_error_message("Failed to build tagging", &e))
                         .for_resource(id.clone())
                 })?;
 
@@ -343,7 +345,7 @@ impl AwsProvider {
                 .send()
                 .await
                 .map_err(|e| {
-                    ProviderError::new(sdk_error_message("Failed to put bucket tags", &e))
+                    ProviderError::api_error(sdk_error_message("Failed to put bucket tags", &e))
                         .for_resource(id.clone())
                 })?;
         }
@@ -368,7 +370,7 @@ impl AwsProvider {
             let bucket = match resource.get_attr("bucket") {
                 Some(Value::String(s)) => s.clone(),
                 _ => {
-                    return Err(ProviderError::new("`bucket` is required")
+                    return Err(ProviderError::invalid_input("`bucket` is required")
                         .for_resource(resource.id.clone()));
                 }
             };
@@ -394,19 +396,20 @@ impl AwsProvider {
                     };
                     match kind {
                         HeadBucketErrorKind::NotFound => {
-                            ProviderError::new(format!("Bucket '{bucket}' not found"))
+                            ProviderError::not_found(format!("Bucket '{bucket}' not found"))
                                 .for_resource(resource.id.clone())
                         }
-                        HeadBucketErrorKind::AccessDenied => ProviderError::new(format!(
+                        HeadBucketErrorKind::AccessDenied => ProviderError::api_error(format!(
                             "Access denied for bucket '{bucket}'. This may indicate \
                              insufficient IAM permissions or the bucket is owned by a \
                              different AWS account."
                         ))
                         .for_resource(resource.id.clone()),
-                        HeadBucketErrorKind::Other => {
-                            ProviderError::new(sdk_error_message("Failed to head bucket", &err))
-                                .for_resource(resource.id.clone())
-                        }
+                        HeadBucketErrorKind::Other => ProviderError::api_error(sdk_error_message(
+                            "Failed to head bucket",
+                            &err,
+                        ))
+                        .for_resource(resource.id.clone()),
                     }
                 })?;
 
@@ -419,7 +422,7 @@ impl AwsProvider {
                 .send()
                 .await
                 .map_err(|e| {
-                    ProviderError::new(sdk_error_message("Failed to get bucket location", &e))
+                    ProviderError::api_error(sdk_error_message("Failed to get bucket location", &e))
                         .for_resource(resource.id.clone())
                 })?
                 .location_constraint()
@@ -432,7 +435,7 @@ impl AwsProvider {
             let bucket_domain_name = format!("{}.s3.amazonaws.com", bucket);
             let bucket_regional_domain_name = format!("{}.s3.{}.amazonaws.com", bucket, region);
             let hosted_zone_id = s3_hosted_zone_id(&region)
-                .map_err(|m| ProviderError::new(m).for_resource(resource.id.clone()))?;
+                .map_err(|m| ProviderError::internal(m).for_resource(resource.id.clone()))?;
 
             let mut attrs = HashMap::new();
             attrs.insert("bucket".into(), Value::String(bucket.clone()));

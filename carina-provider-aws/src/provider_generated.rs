@@ -30,7 +30,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::new(sdk_error_message("Failed to delete vpc", &e))
+                ProviderError::api_error(sdk_error_message("Failed to delete vpc", &e))
                     .for_resource(id.clone())
             })?;
         Ok(())
@@ -48,7 +48,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::new(sdk_error_message("Failed to delete subnet", &e))
+                ProviderError::api_error(sdk_error_message("Failed to delete subnet", &e))
                     .for_resource(id.clone())
             })?;
         Ok(())
@@ -66,7 +66,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::new(sdk_error_message("Failed to delete route table", &e))
+                ProviderError::api_error(sdk_error_message("Failed to delete route table", &e))
                     .for_resource(id.clone())
             })?;
         Ok(())
@@ -84,7 +84,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::new(sdk_error_message("Failed to delete security group", &e))
+                ProviderError::api_error(sdk_error_message("Failed to delete security group", &e))
                     .for_resource(id.clone())
             })?;
         Ok(())
@@ -716,7 +716,7 @@ pub(crate) fn dispatch_read_data_source<'a>(
             let id = resource.id.clone();
             let resource_type = resource.id.resource_type.clone();
             Box::pin(async move {
-                Err(ProviderError::new(format!(
+                Err(ProviderError::internal(format!(
                     "aws provider does not implement read_data_source for '{}'",
                     resource_type
                 ))

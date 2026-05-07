@@ -68,7 +68,7 @@ impl AwsProvider {
                 {
                     return Ok(State::not_found(id.clone()));
                 }
-                Err(ProviderError::new(sdk_error_message(
+                Err(ProviderError::api_error(sdk_error_message(
                     "Failed to get bucket website configuration",
                     &e,
                 ))
@@ -108,8 +108,10 @@ impl AwsProvider {
             let suffix = match map.get("suffix") {
                 Some(Value::String(s)) => s.clone(),
                 _ => {
-                    return Err(ProviderError::new("index_document.suffix is required")
-                        .for_resource(id.clone()));
+                    return Err(
+                        ProviderError::invalid_input("index_document.suffix is required")
+                            .for_resource(id.clone()),
+                    );
                 }
             };
             config_builder = config_builder.index_document(
@@ -117,8 +119,11 @@ impl AwsProvider {
                     .suffix(suffix)
                     .build()
                     .map_err(|e| {
-                        ProviderError::new(sdk_error_message("Failed to build IndexDocument", &e))
-                            .for_resource(id.clone())
+                        ProviderError::api_error(sdk_error_message(
+                            "Failed to build IndexDocument",
+                            &e,
+                        ))
+                        .for_resource(id.clone())
                     })?,
             );
         }
@@ -126,13 +131,15 @@ impl AwsProvider {
             let key = match map.get("key") {
                 Some(Value::String(s)) => s.clone(),
                 _ => {
-                    return Err(ProviderError::new("error_document.key is required")
-                        .for_resource(id.clone()));
+                    return Err(
+                        ProviderError::invalid_input("error_document.key is required")
+                            .for_resource(id.clone()),
+                    );
                 }
             };
             config_builder = config_builder.error_document(
                 ErrorDocument::builder().key(key).build().map_err(|e| {
-                    ProviderError::new(sdk_error_message("Failed to build ErrorDocument", &e))
+                    ProviderError::api_error(sdk_error_message("Failed to build ErrorDocument", &e))
                         .for_resource(id.clone())
                 })?,
             );
@@ -141,7 +148,7 @@ impl AwsProvider {
             let host_name = match map.get("host_name") {
                 Some(Value::String(s)) => s.clone(),
                 _ => {
-                    return Err(ProviderError::new(
+                    return Err(ProviderError::invalid_input(
                         "redirect_all_requests_to.host_name is required",
                     )
                     .for_resource(id.clone()));
@@ -153,7 +160,7 @@ impl AwsProvider {
                 rb = rb.protocol(Protocol::from(normalized));
             }
             config_builder = config_builder.redirect_all_requests_to(rb.build().map_err(|e| {
-                ProviderError::new(sdk_error_message(
+                ProviderError::api_error(sdk_error_message(
                     "Failed to build RedirectAllRequestsTo",
                     &e,
                 ))
@@ -170,7 +177,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::new(sdk_error_message("Failed to put bucket website", &e))
+                ProviderError::api_error(sdk_error_message("Failed to put bucket website", &e))
                     .for_resource(id.clone())
             })?;
 
@@ -198,7 +205,7 @@ impl AwsProvider {
             {
                 Ok(())
             }
-            Err(e) => Err(ProviderError::new(sdk_error_message(
+            Err(e) => Err(ProviderError::api_error(sdk_error_message(
                 "Failed to delete bucket website",
                 &e,
             ))

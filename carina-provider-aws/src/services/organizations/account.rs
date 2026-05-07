@@ -133,7 +133,7 @@ impl AwsProvider {
                     return Ok(State::not_found(id.clone()));
                 }
                 Err(
-                    ProviderError::new(sdk_error_message("Failed to describe account", &e))
+                    ProviderError::api_error(sdk_error_message("Failed to describe account", &e))
                         .for_resource(id.clone()),
                 )
             }
@@ -173,7 +173,7 @@ impl AwsProvider {
                         .value(val)
                         .build()
                         .map_err(|e| {
-                            ProviderError::new(sdk_error_message("Failed to build tag", &e))
+                            ProviderError::api_error(sdk_error_message("Failed to build tag", &e))
                                 .for_resource(resource.id.clone())
                         })?;
                     req = req.tags(tag);
@@ -182,16 +182,17 @@ impl AwsProvider {
         }
 
         let response = req.send().await.map_err(|e| {
-            ProviderError::new(sdk_error_message("Failed to create account", &e))
+            ProviderError::api_error(sdk_error_message("Failed to create account", &e))
                 .for_resource(resource.id.clone())
         })?;
 
         let create_status = response.create_account_status().ok_or_else(|| {
-            ProviderError::new("CreateAccount returned no status").for_resource(resource.id.clone())
+            ProviderError::api_error("CreateAccount returned no status")
+                .for_resource(resource.id.clone())
         })?;
 
         let request_id = create_status.id().ok_or_else(|| {
-            ProviderError::new("CreateAccount returned no request ID")
+            ProviderError::api_error("CreateAccount returned no request ID")
                 .for_resource(resource.id.clone())
         })?;
 
@@ -208,7 +209,7 @@ impl AwsProvider {
                     .send()
                     .await
                     .map_err(|e| {
-                        ProviderError::new(sdk_error_message(
+                        ProviderError::api_error(sdk_error_message(
                             "Failed to describe create account status",
                             &e,
                         ))
@@ -242,7 +243,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::new(sdk_error_message(
+                ProviderError::api_error(sdk_error_message(
                     "Failed to get final create account status",
                     &e,
                 ))
@@ -253,7 +254,7 @@ impl AwsProvider {
             .create_account_status()
             .and_then(|s| s.account_id())
             .ok_or_else(|| {
-                ProviderError::new("CreateAccount succeeded but no account ID returned")
+                ProviderError::api_error("CreateAccount succeeded but no account ID returned")
                     .for_resource(resource.id.clone())
             })?;
 
@@ -267,7 +268,7 @@ impl AwsProvider {
                 .send()
                 .await
                 .map_err(|e| {
-                    ProviderError::new(sdk_error_message(
+                    ProviderError::api_error(sdk_error_message(
                         "Failed to list parents for new account",
                         &e,
                     ))
@@ -286,7 +287,7 @@ impl AwsProvider {
                     .send()
                     .await
                     .map_err(|e| {
-                        ProviderError::new(sdk_error_message(
+                        ProviderError::api_error(sdk_error_message(
                             "Failed to move account to parent",
                             &e,
                         ))
@@ -328,7 +329,7 @@ impl AwsProvider {
                 .send()
                 .await
                 .map_err(|e| {
-                    ProviderError::new(sdk_error_message("Failed to move account", &e))
+                    ProviderError::api_error(sdk_error_message("Failed to move account", &e))
                         .for_resource(id.clone())
                 })?;
         }
@@ -357,7 +358,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::new(sdk_error_message("Failed to close account", &e))
+                ProviderError::api_error(sdk_error_message("Failed to close account", &e))
                     .for_resource(id.clone())
             })?;
         Ok(())
@@ -395,7 +396,7 @@ impl AwsProvider {
                 .send()
                 .await
                 .map_err(|e| {
-                    ProviderError::new(sdk_error_message("Failed to untag account", &e))
+                    ProviderError::api_error(sdk_error_message("Failed to untag account", &e))
                         .for_resource(id.clone())
                 })?;
         }
@@ -414,7 +415,7 @@ impl AwsProvider {
                         .value(val)
                         .build()
                         .map_err(|e| {
-                            ProviderError::new(sdk_error_message("Failed to build tag", &e))
+                            ProviderError::api_error(sdk_error_message("Failed to build tag", &e))
                                 .for_resource(id.clone())
                         })?;
                     tags_to_add.push(tag);
@@ -430,7 +431,7 @@ impl AwsProvider {
                 .send()
                 .await
                 .map_err(|e| {
-                    ProviderError::new(sdk_error_message("Failed to tag account", &e))
+                    ProviderError::api_error(sdk_error_message("Failed to tag account", &e))
                         .for_resource(id.clone())
                 })?;
         }

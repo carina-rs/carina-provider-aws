@@ -31,8 +31,11 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::new(sdk_error_message("Failed to describe security groups", &e))
-                    .for_resource(id.clone())
+                ProviderError::api_error(sdk_error_message(
+                    "Failed to describe security groups",
+                    &e,
+                ))
+                .for_resource(id.clone())
             })?;
 
         if let Some(sg) = result.security_groups().first() {
@@ -91,15 +94,18 @@ impl AwsProvider {
                     .send()
                     .await
                     .map_err(|e| {
-                        ProviderError::new(sdk_error_message("Failed to create security group", &e))
-                            .for_resource(rid)
+                        ProviderError::api_error(sdk_error_message(
+                            "Failed to create security group",
+                            &e,
+                        ))
+                        .for_resource(rid)
                     })
             }
         })
         .await?;
 
         let sg_id = result.group_id().ok_or_else(|| {
-            ProviderError::new("Security Group created but no ID returned")
+            ProviderError::api_error("Security Group created but no ID returned")
                 .for_resource(resource.id.clone())
         })?;
 

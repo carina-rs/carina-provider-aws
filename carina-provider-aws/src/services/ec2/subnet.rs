@@ -33,7 +33,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::new(sdk_error_message("Failed to describe subnets", &e))
+                ProviderError::api_error(sdk_error_message("Failed to describe subnets", &e))
                     .for_resource(id.clone())
             })?;
 
@@ -81,12 +81,12 @@ impl AwsProvider {
         }
 
         let result = req.send().await.map_err(|e| {
-            ProviderError::new(sdk_error_message("Failed to create subnet", &e))
+            ProviderError::api_error(sdk_error_message("Failed to create subnet", &e))
                 .for_resource(resource.id.clone())
         })?;
 
         let subnet_id = result.subnet().and_then(|s| s.subnet_id()).ok_or_else(|| {
-            ProviderError::new("Subnet created but no ID returned")
+            ProviderError::api_error("Subnet created but no ID returned")
                 .for_resource(resource.id.clone())
         })?;
 
@@ -139,7 +139,7 @@ impl AwsProvider {
                 .send()
                 .await
                 .map_err(|e| {
-                    ProviderError::new(sdk_error_message(
+                    ProviderError::api_error(sdk_error_message(
                         "Failed to set map_public_ip_on_launch",
                         &e,
                     ))
@@ -157,7 +157,7 @@ impl AwsProvider {
                 .send()
                 .await
                 .map_err(|e| {
-                    ProviderError::new(sdk_error_message(
+                    ProviderError::api_error(sdk_error_message(
                         "Failed to set assign_ipv6_address_on_creation",
                         &e,
                     ))
@@ -173,7 +173,7 @@ impl AwsProvider {
                 .send()
                 .await
                 .map_err(|e| {
-                    ProviderError::new(sdk_error_message("Failed to set enable_dns64", &e))
+                    ProviderError::api_error(sdk_error_message("Failed to set enable_dns64", &e))
                         .for_resource(id.clone())
                 })?;
         }
@@ -190,7 +190,7 @@ impl AwsProvider {
                     .send()
                     .await
                     .map_err(|e| {
-                        ProviderError::new(sdk_error_message(
+                        ProviderError::api_error(sdk_error_message(
                             "Failed to set private_dns_name_options_on_launch.hostname_type",
                             &e,
                         ))
@@ -207,7 +207,7 @@ impl AwsProvider {
                     .send()
                     .await
                     .map_err(|e| {
-                        ProviderError::new(sdk_error_message(
+                        ProviderError::api_error(sdk_error_message(
                             "Failed to set private_dns_name_options_on_launch.enable_resource_name_dns_a_record",
                             &e,
                         ))
@@ -224,7 +224,7 @@ impl AwsProvider {
                     .send()
                     .await
                     .map_err(|e| {
-                        ProviderError::new(sdk_error_message(
+                        ProviderError::api_error(sdk_error_message(
                             "Failed to set private_dns_name_options_on_launch.enable_resource_name_dns_aaaa_record",
                             &e,
                         ))

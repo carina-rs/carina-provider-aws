@@ -24,7 +24,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::new(sdk_error_message(
+                ProviderError::api_error(sdk_error_message(
                     "Failed to describe egress-only internet gateways",
                     &e,
                 ))
@@ -74,7 +74,7 @@ impl AwsProvider {
         }
 
         let result = req.send().await.map_err(|e| {
-            ProviderError::new(sdk_error_message(
+            ProviderError::api_error(sdk_error_message(
                 "Failed to create egress-only internet gateway",
                 &e,
             ))
@@ -85,7 +85,7 @@ impl AwsProvider {
             .egress_only_internet_gateway()
             .and_then(|eigw| eigw.egress_only_internet_gateway_id())
             .ok_or_else(|| {
-                ProviderError::new("Egress-Only Internet Gateway created but no ID returned")
+                ProviderError::api_error("Egress-Only Internet Gateway created but no ID returned")
                     .for_resource(resource.id.clone())
             })?;
 
@@ -125,7 +125,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::new(sdk_error_message(
+                ProviderError::api_error(sdk_error_message(
                     "Failed to delete egress-only internet gateway",
                     &e,
                 ))

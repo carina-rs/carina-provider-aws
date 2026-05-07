@@ -32,7 +32,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::new(sdk_error_message("Failed to describe addresses", &e))
+                ProviderError::api_error(sdk_error_message("Failed to describe addresses", &e))
                     .for_resource(id.clone())
             })?;
 
@@ -72,12 +72,12 @@ impl AwsProvider {
         }
 
         let result = req.send().await.map_err(|e| {
-            ProviderError::new(sdk_error_message("Failed to allocate address", &e))
+            ProviderError::api_error(sdk_error_message("Failed to allocate address", &e))
                 .for_resource(resource.id.clone())
         })?;
 
         let alloc_id = result.allocation_id().ok_or_else(|| {
-            ProviderError::new("EIP allocated but no allocation ID returned")
+            ProviderError::api_error("EIP allocated but no allocation ID returned")
                 .for_resource(resource.id.clone())
         })?;
 
@@ -124,7 +124,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::new(sdk_error_message("Failed to release address", &e))
+                ProviderError::api_error(sdk_error_message("Failed to release address", &e))
                     .for_resource(id.clone())
             })?;
         Ok(())

@@ -64,7 +64,7 @@ impl AwsProvider {
                     return Ok(State::not_found(id.clone()));
                 }
                 Err(
-                    ProviderError::new(sdk_error_message("Failed to get IAM role", &e))
+                    ProviderError::api_error(sdk_error_message("Failed to get IAM role", &e))
                         .for_resource(id.clone()),
                 )
             }
@@ -105,7 +105,7 @@ impl AwsProvider {
                         .value(val)
                         .build()
                         .map_err(|e| {
-                            ProviderError::new(sdk_error_message("Failed to build tag", &e))
+                            ProviderError::api_error(sdk_error_message("Failed to build tag", &e))
                                 .for_resource(resource.id.clone())
                         })?;
                     req = req.tags(tag);
@@ -114,7 +114,7 @@ impl AwsProvider {
         }
 
         req.send().await.map_err(|e| {
-            ProviderError::new(sdk_error_message("Failed to create IAM role", &e))
+            ProviderError::api_error(sdk_error_message("Failed to create IAM role", &e))
                 .for_resource(resource.id.clone())
         })?;
 
@@ -139,8 +139,11 @@ impl AwsProvider {
                 .send()
                 .await
                 .map_err(|e| {
-                    ProviderError::new(sdk_error_message("Failed to update assume role policy", &e))
-                        .for_resource(id.clone())
+                    ProviderError::api_error(sdk_error_message(
+                        "Failed to update assume role policy",
+                        &e,
+                    ))
+                    .for_resource(id.clone())
                 })?;
         }
 
@@ -160,7 +163,7 @@ impl AwsProvider {
 
         if needs_update {
             req.send().await.map_err(|e| {
-                ProviderError::new(sdk_error_message("Failed to update IAM role", &e))
+                ProviderError::api_error(sdk_error_message("Failed to update IAM role", &e))
                     .for_resource(id.clone())
             })?;
         }
@@ -189,7 +192,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::new(sdk_error_message("Failed to delete IAM role", &e))
+                ProviderError::api_error(sdk_error_message("Failed to delete IAM role", &e))
                     .for_resource(id.clone())
             })?;
         Ok(())
@@ -225,7 +228,7 @@ impl AwsProvider {
                 req = req.tag_keys(key);
             }
             req.send().await.map_err(|e| {
-                ProviderError::new(sdk_error_message("Failed to untag IAM role", &e))
+                ProviderError::api_error(sdk_error_message("Failed to untag IAM role", &e))
                     .for_resource(id.clone())
             })?;
         }
@@ -244,7 +247,7 @@ impl AwsProvider {
                         .value(val)
                         .build()
                         .map_err(|e| {
-                            ProviderError::new(sdk_error_message("Failed to build tag", &e))
+                            ProviderError::api_error(sdk_error_message("Failed to build tag", &e))
                                 .for_resource(id.clone())
                         })?;
                     tags_to_add.push(tag);
@@ -258,7 +261,7 @@ impl AwsProvider {
                 req = req.tags(tag);
             }
             req.send().await.map_err(|e| {
-                ProviderError::new(sdk_error_message("Failed to tag IAM role", &e))
+                ProviderError::api_error(sdk_error_message("Failed to tag IAM role", &e))
                     .for_resource(id.clone())
             })?;
         }
@@ -348,10 +351,10 @@ pub fn resolve_iam_policy_attr(resource: &Resource, attr_name: &str) -> Provider
     match resource.get_attr(attr_name) {
         Some(Value::String(s)) => Ok(s.clone()),
         Some(value @ Value::Map(_)) => value_to_iam_policy_json(value).map_err(|e| {
-            ProviderError::new(format!("Failed to convert {}: {}", attr_name, e))
+            ProviderError::invalid_input(format!("Failed to convert {}: {}", attr_name, e))
                 .for_resource(resource.id.clone())
         }),
-        _ => Err(ProviderError::new(format!(
+        _ => Err(ProviderError::invalid_input(format!(
             "{} is required (must be a JSON string or block)",
             attr_name
         ))

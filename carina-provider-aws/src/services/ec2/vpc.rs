@@ -29,7 +29,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::new(sdk_error_message("Failed to describe VPCs", &e))
+                ProviderError::api_error(sdk_error_message("Failed to describe VPCs", &e))
                     .for_resource(id.clone())
             })?;
 
@@ -114,7 +114,7 @@ impl AwsProvider {
             let rid = rid.clone();
             async move {
                 builder.send().await.map_err(|e| {
-                    ProviderError::new(sdk_error_message("Failed to create VPC", &e))
+                    ProviderError::api_error(sdk_error_message("Failed to create VPC", &e))
                         .for_resource(rid)
                 })
             }
@@ -122,7 +122,8 @@ impl AwsProvider {
         .await?;
 
         let vpc_id = result.vpc().and_then(|v| v.vpc_id()).ok_or_else(|| {
-            ProviderError::new("VPC created but no ID returned").for_resource(resource.id.clone())
+            ProviderError::api_error("VPC created but no ID returned")
+                .for_resource(resource.id.clone())
         })?;
 
         // Apply tags
@@ -142,7 +143,7 @@ impl AwsProvider {
                 .send()
                 .await
                 .map_err(|e| {
-                    ProviderError::new(sdk_error_message("Failed to set DNS support", &e))
+                    ProviderError::api_error(sdk_error_message("Failed to set DNS support", &e))
                         .for_resource(resource.id.clone())
                 })?;
         }
@@ -160,7 +161,7 @@ impl AwsProvider {
                 .send()
                 .await
                 .map_err(|e| {
-                    ProviderError::new(sdk_error_message("Failed to set DNS hostnames", &e))
+                    ProviderError::api_error(sdk_error_message("Failed to set DNS hostnames", &e))
                         .for_resource(resource.id.clone())
                 })?;
         }
@@ -193,7 +194,7 @@ impl AwsProvider {
                 .send()
                 .await
                 .map_err(|e| {
-                    ProviderError::new(sdk_error_message("Failed to update DNS support", &e))
+                    ProviderError::api_error(sdk_error_message("Failed to update DNS support", &e))
                         .for_resource(id.clone())
                 })?;
         }
@@ -211,8 +212,11 @@ impl AwsProvider {
                 .send()
                 .await
                 .map_err(|e| {
-                    ProviderError::new(sdk_error_message("Failed to update DNS hostnames", &e))
-                        .for_resource(id.clone())
+                    ProviderError::api_error(sdk_error_message(
+                        "Failed to update DNS hostnames",
+                        &e,
+                    ))
+                    .for_resource(id.clone())
                 })?;
         }
 

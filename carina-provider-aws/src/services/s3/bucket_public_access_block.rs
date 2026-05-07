@@ -56,10 +56,11 @@ impl AwsProvider {
                 if is_s3_not_configured_error(&e, "NoSuchPublicAccessBlockConfiguration") {
                     return Ok(State::not_found(id.clone()));
                 }
-                Err(
-                    ProviderError::new(sdk_error_message("Failed to get public access block", &e))
-                        .for_resource(id.clone()),
-                )
+                Err(ProviderError::api_error(sdk_error_message(
+                    "Failed to get public access block",
+                    &e,
+                ))
+                .for_resource(id.clone()))
             }
         }
     }
@@ -112,7 +113,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::new(sdk_error_message("Failed to put public access block", &e))
+                ProviderError::api_error(sdk_error_message("Failed to put public access block", &e))
                     .for_resource(id.clone())
             })?;
 
@@ -144,7 +145,7 @@ impl AwsProvider {
             {
                 Ok(())
             }
-            Err(e) => Err(ProviderError::new(sdk_error_message(
+            Err(e) => Err(ProviderError::api_error(sdk_error_message(
                 "Failed to delete public access block",
                 &e,
             ))

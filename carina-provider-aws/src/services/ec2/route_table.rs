@@ -32,7 +32,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::new(sdk_error_message("Failed to describe route tables", &e))
+                ProviderError::api_error(sdk_error_message("Failed to describe route tables", &e))
                     .for_resource(id.clone())
             })?;
 
@@ -88,7 +88,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::new(sdk_error_message("Failed to create route table", &e))
+                ProviderError::api_error(sdk_error_message("Failed to create route table", &e))
                     .for_resource(resource.id.clone())
             })?;
 
@@ -96,7 +96,7 @@ impl AwsProvider {
             .route_table()
             .and_then(|rt| rt.route_table_id())
             .ok_or_else(|| {
-                ProviderError::new("Route Table created but no ID returned")
+                ProviderError::api_error("Route Table created but no ID returned")
                     .for_resource(resource.id.clone())
             })?;
 
@@ -132,8 +132,11 @@ impl AwsProvider {
                             .send()
                             .await
                             .map_err(|e| {
-                                ProviderError::new(sdk_error_message("Failed to create route", &e))
-                                    .for_resource(resource.id.clone())
+                                ProviderError::api_error(sdk_error_message(
+                                    "Failed to create route",
+                                    &e,
+                                ))
+                                .for_resource(resource.id.clone())
                             })?;
                     }
                 }

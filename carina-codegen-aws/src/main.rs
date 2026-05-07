@@ -1768,7 +1768,7 @@ fn generate_provider_code(
              \x20       identifier: &str,\n\
              \x20   ) -> ProviderResult<()> {{\n\
              \x20       self.{}.{}().{}(identifier).send().await.map_err(|e| {{\n\
-             \x20           ProviderError::new(sdk_error_message(\"Failed to delete {}\", &e))\n\
+             \x20           ProviderError::api_error(sdk_error_message(\"Failed to delete {}\", &e))\n\
              \x20               .for_resource(id.clone())\n\
              \x20       }})?;\n\
              \x20       Ok(())\n\
@@ -1864,7 +1864,7 @@ fn generate_provider_code(
                 client_field, sdk_method, id_setter
             ));
             code.push_str(&format!(
-                "\x20           ProviderError::new(sdk_error_message(\"Failed to read {}\", &e))\n",
+                "\x20           ProviderError::api_error(sdk_error_message(\"Failed to read {}\", &e))\n",
                 op_desc
             ));
             code.push_str("\x20               .for_resource(id.clone())\n");
@@ -2078,7 +2078,7 @@ fn generate_provider_code(
                 client_field, sdk_method, id_setter, struct_setter
             ));
             code.push_str(&format!(
-                "\x20               ProviderError::new(sdk_error_message(\"Failed to {}\", &e))\n",
+                "\x20               ProviderError::api_error(sdk_error_message(\"Failed to {}\", &e))\n",
                 op_desc
             ));
             code.push_str("\x20                   .for_resource(id.clone())\n");
@@ -2659,7 +2659,7 @@ fn generate_provider_code(
          \x20           let id = resource.id.clone();\n\
          \x20           let resource_type = resource.id.resource_type.clone();\n\
          \x20           Box::pin(async move {\n\
-         \x20               Err(ProviderError::new(format!(\n\
+         \x20               Err(ProviderError::internal(format!(\n\
          \x20                   \"aws provider does not implement read_data_source for '{}'\",\n\
          \x20                   resource_type\n\
          \x20               )).for_resource(id))\n\

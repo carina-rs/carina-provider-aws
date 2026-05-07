@@ -32,7 +32,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::new(sdk_error_message("Failed to describe flow logs", &e))
+                ProviderError::api_error(sdk_error_message("Failed to describe flow logs", &e))
                     .for_resource(id.clone())
             })?;
 
@@ -85,7 +85,7 @@ impl AwsProvider {
             _ => Vec::new(),
         };
         if resource_ids_val.is_empty() {
-            return Err(ProviderError::new(
+            return Err(ProviderError::invalid_input(
                 "resource_ids must be a non-empty list of resource identifiers",
             )
             .for_resource(resource.id.clone()));
@@ -94,7 +94,7 @@ impl AwsProvider {
         let resource_type_val = match resource.get_attr("resource_type") {
             Some(Value::String(s)) => extract_enum_value(s).to_string(),
             _ => {
-                return Err(ProviderError::new("resource_type is required")
+                return Err(ProviderError::invalid_input("resource_type is required")
                     .for_resource(resource.id.clone()));
             }
         };
@@ -173,7 +173,7 @@ impl AwsProvider {
                     {
                         continue;
                     }
-                    return Err(ProviderError::new(sdk_error_message(
+                    return Err(ProviderError::api_error(sdk_error_message(
                         "Failed to create flow logs",
                         &e,
                     ))
@@ -197,10 +197,11 @@ impl AwsProvider {
                 {
                     continue;
                 }
-                return Err(
-                    ProviderError::new(format!("Failed to create flow log: {}", msg))
-                        .for_resource(resource.id.clone()),
-                );
+                return Err(ProviderError::api_error(format!(
+                    "Failed to create flow log: {}",
+                    msg
+                ))
+                .for_resource(resource.id.clone()));
             }
 
             result = Some(resp);
@@ -208,7 +209,7 @@ impl AwsProvider {
         }
 
         let result = result.ok_or_else(|| {
-            ProviderError::new(format!(
+            ProviderError::api_error(format!(
                 "Failed to create flow log after retries: {}",
                 last_error
             ))
@@ -216,7 +217,7 @@ impl AwsProvider {
         })?;
 
         let flow_log_id = result.flow_log_ids().first().ok_or_else(|| {
-            ProviderError::new("Flow Log created but no ID returned")
+            ProviderError::api_error("Flow Log created but no ID returned")
                 .for_resource(resource.id.clone())
         })?;
 
@@ -256,7 +257,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::new(sdk_error_message("Failed to delete flow logs", &e))
+                ProviderError::api_error(sdk_error_message("Failed to delete flow logs", &e))
                     .for_resource(id.clone())
             })?;
 
@@ -267,7 +268,7 @@ impl AwsProvider {
                 .and_then(|e| e.message())
                 .unwrap_or("unknown error");
             return Err(
-                ProviderError::new(format!("Failed to delete flow log: {}", msg))
+                ProviderError::api_error(format!("Failed to delete flow log: {}", msg))
                     .for_resource(id.clone()),
             );
         }

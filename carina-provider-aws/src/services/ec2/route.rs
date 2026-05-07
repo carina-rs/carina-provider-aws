@@ -30,7 +30,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::new(sdk_error_message("Failed to describe route table", &e))
+                ProviderError::api_error(sdk_error_message("Failed to describe route table", &e))
                     .for_resource(id.clone())
             })?;
 
@@ -81,7 +81,7 @@ impl AwsProvider {
         }
 
         req.send().await.map_err(|e| {
-            ProviderError::new(sdk_error_message("Failed to create route", &e))
+            ProviderError::api_error(sdk_error_message("Failed to create route", &e))
                 .for_resource(resource.id.clone())
         })?;
 
@@ -103,17 +103,18 @@ impl AwsProvider {
         let route_table_id = match to.get_attr("route_table_id") {
             Some(Value::String(s)) => s.clone(),
             _ => {
-                return Err(
-                    ProviderError::new("route_table_id is required").for_resource(id.clone())
-                );
+                return Err(ProviderError::invalid_input("route_table_id is required")
+                    .for_resource(id.clone()));
             }
         };
 
         let destination_cidr = match to.get_attr("destination_cidr_block") {
             Some(Value::String(s)) => s.clone(),
             _ => {
-                return Err(ProviderError::new("destination_cidr_block is required")
-                    .for_resource(id.clone()));
+                return Err(
+                    ProviderError::invalid_input("destination_cidr_block is required")
+                        .for_resource(id.clone()),
+                );
             }
         };
 
@@ -134,7 +135,7 @@ impl AwsProvider {
         }
 
         req.send().await.map_err(|e| {
-            ProviderError::new(sdk_error_message("Failed to update route", &e))
+            ProviderError::api_error(sdk_error_message("Failed to update route", &e))
                 .for_resource(id.clone())
         })?;
 
@@ -151,10 +152,11 @@ impl AwsProvider {
     ) -> ProviderResult<()> {
         // Parse composite identifier: route_table_id|destination_cidr_block
         let Some((route_table_id, destination_cidr_block)) = identifier.split_once('|') else {
-            return Err(
-                ProviderError::new(format!("Invalid route identifier: {}", identifier))
-                    .for_resource(id),
-            );
+            return Err(ProviderError::invalid_input(format!(
+                "Invalid route identifier: {}",
+                identifier
+            ))
+            .for_resource(id));
         };
 
         self.ec2_client
@@ -164,7 +166,8 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::new(sdk_error_message("Failed to delete route", &e)).for_resource(id)
+                ProviderError::api_error(sdk_error_message("Failed to delete route", &e))
+                    .for_resource(id)
             })?;
 
         Ok(())

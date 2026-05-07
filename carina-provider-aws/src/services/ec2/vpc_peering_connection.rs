@@ -24,7 +24,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::new(sdk_error_message(
+                ProviderError::api_error(sdk_error_message(
                     "Failed to describe VPC peering connections",
                     &e,
                 ))
@@ -96,7 +96,7 @@ impl AwsProvider {
         }
 
         let result = req.send().await.map_err(|e| {
-            ProviderError::new(sdk_error_message(
+            ProviderError::api_error(sdk_error_message(
                 "Failed to create VPC peering connection",
                 &e,
             ))
@@ -107,7 +107,7 @@ impl AwsProvider {
             .vpc_peering_connection()
             .and_then(|pcx| pcx.vpc_peering_connection_id())
             .ok_or_else(|| {
-                ProviderError::new("VPC Peering Connection created but no ID returned")
+                ProviderError::api_error("VPC Peering Connection created but no ID returned")
                     .for_resource(resource.id.clone())
             })?;
 
@@ -147,7 +147,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::new(sdk_error_message(
+                ProviderError::api_error(sdk_error_message(
                     "Failed to delete VPC peering connection",
                     &e,
                 ))

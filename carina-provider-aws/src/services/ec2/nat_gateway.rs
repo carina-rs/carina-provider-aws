@@ -36,7 +36,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::new(sdk_error_message("Failed to describe NAT gateways", &e))
+                ProviderError::api_error(sdk_error_message("Failed to describe NAT gateways", &e))
                     .for_resource(id.clone())
             })?;
 
@@ -89,7 +89,7 @@ impl AwsProvider {
             let rid = rid.clone();
             async move {
                 req.send().await.map_err(|e| {
-                    ProviderError::new(sdk_error_message("Failed to create NAT gateway", &e))
+                    ProviderError::api_error(sdk_error_message("Failed to create NAT gateway", &e))
                         .for_resource(rid)
                 })
             }
@@ -100,7 +100,7 @@ impl AwsProvider {
             .nat_gateway()
             .and_then(|ngw| ngw.nat_gateway_id())
             .ok_or_else(|| {
-                ProviderError::new("NAT Gateway created but no ID returned")
+                ProviderError::api_error("NAT Gateway created but no ID returned")
                     .for_resource(resource.id.clone())
             })?;
 
@@ -146,7 +146,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::new(sdk_error_message("Failed to delete NAT gateway", &e))
+                ProviderError::api_error(sdk_error_message("Failed to delete NAT gateway", &e))
                     .for_resource(id.clone())
             })?;
 
@@ -173,8 +173,11 @@ impl AwsProvider {
                     .send()
                     .await
                     .map_err(|e| {
-                        ProviderError::new(sdk_error_message("Failed to describe NAT gateway", &e))
-                            .for_resource(rid.clone())
+                        ProviderError::api_error(sdk_error_message(
+                            "Failed to describe NAT gateway",
+                            &e,
+                        ))
+                        .for_resource(rid.clone())
                     })?;
                 Ok(
                     if let Some(ngw) = result.nat_gateways().first()
@@ -217,8 +220,11 @@ impl AwsProvider {
                     .send()
                     .await
                     .map_err(|e| {
-                        ProviderError::new(sdk_error_message("Failed to describe NAT gateway", &e))
-                            .for_resource(rid.clone())
+                        ProviderError::api_error(sdk_error_message(
+                            "Failed to describe NAT gateway",
+                            &e,
+                        ))
+                        .for_resource(rid.clone())
                     })?;
                 Ok(if let Some(ngw) = result.nat_gateways().first() {
                     if ngw.state() == Some(&NatGatewayState::Deleted) {

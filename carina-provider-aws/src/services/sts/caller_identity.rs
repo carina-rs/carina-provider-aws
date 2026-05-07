@@ -24,8 +24,11 @@ impl AwsProvider {
                 .send()
                 .await
                 .map_err(|e| {
-                    ProviderError::new(sdk_error_message("Failed to get STS caller identity", &e))
-                        .for_resource(id.clone())
+                    ProviderError::api_error(sdk_error_message(
+                        "Failed to get STS caller identity",
+                        &e,
+                    ))
+                    .for_resource(id.clone())
                 })?;
 
             let mut attributes = HashMap::new();

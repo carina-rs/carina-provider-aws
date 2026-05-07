@@ -28,7 +28,7 @@ impl AwsProvider {
             req = req.security_group_rule_ids(*rule_id);
         }
         let result = req.send().await.map_err(|e| {
-            ProviderError::new(sdk_error_message(
+            ProviderError::api_error(sdk_error_message(
                 "Failed to describe security group rules",
                 &e,
             ))
@@ -105,10 +105,10 @@ impl AwsProvider {
         let sg_id = match resource.get_attr("group_id") {
             Some(Value::String(s)) => s.clone(),
             _ => {
-                return Err(
-                    ProviderError::new("Security Group ID (group_id) is required")
-                        .for_resource(resource.id.clone()),
-                );
+                return Err(ProviderError::invalid_input(
+                    "Security Group ID (group_id) is required",
+                )
+                .for_resource(resource.id.clone()));
             }
         };
 
@@ -215,7 +215,7 @@ impl AwsProvider {
                 .send()
                 .await
                 .map_err(|e| {
-                    ProviderError::new(sdk_error_message("Failed to create ingress rule", &e))
+                    ProviderError::api_error(sdk_error_message("Failed to create ingress rule", &e))
                         .for_resource(resource.id.clone())
                 })?;
 
@@ -233,7 +233,7 @@ impl AwsProvider {
                 .send()
                 .await
                 .map_err(|e| {
-                    ProviderError::new(sdk_error_message("Failed to create egress rule", &e))
+                    ProviderError::api_error(sdk_error_message("Failed to create egress rule", &e))
                         .for_resource(resource.id.clone())
                 })?;
 
@@ -288,7 +288,7 @@ impl AwsProvider {
             req = req.security_group_rule_ids(*rule_id);
         }
         let result = req.send().await.map_err(|e| {
-            ProviderError::new(sdk_error_message(
+            ProviderError::api_error(sdk_error_message(
                 "Failed to describe security group rules",
                 &e,
             ))
@@ -298,12 +298,12 @@ impl AwsProvider {
         let rules = result.security_group_rules();
         if rules.is_empty() {
             return Err(
-                ProviderError::new("Security Group Rule not found").for_resource(id.clone())
+                ProviderError::not_found("Security Group Rule not found").for_resource(id.clone())
             );
         }
 
         let sg_id = rules[0].group_id().ok_or_else(|| {
-            ProviderError::new("Rule has no security group ID").for_resource(id.clone())
+            ProviderError::internal("Rule has no security group ID").for_resource(id.clone())
         })?;
 
         // Delete all rules at once
@@ -316,7 +316,7 @@ impl AwsProvider {
                 request = request.security_group_rule_ids(*rule_id);
             }
             request.send().await.map_err(|e| {
-                ProviderError::new(sdk_error_message("Failed to delete ingress rules", &e))
+                ProviderError::api_error(sdk_error_message("Failed to delete ingress rules", &e))
                     .for_resource(id.clone())
             })?;
         } else {
@@ -328,7 +328,7 @@ impl AwsProvider {
                 request = request.security_group_rule_ids(*rule_id);
             }
             request.send().await.map_err(|e| {
-                ProviderError::new(sdk_error_message("Failed to delete egress rules", &e))
+                ProviderError::api_error(sdk_error_message("Failed to delete egress rules", &e))
                     .for_resource(id.clone())
             })?;
         }

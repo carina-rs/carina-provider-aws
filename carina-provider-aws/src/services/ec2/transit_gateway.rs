@@ -25,8 +25,11 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::new(sdk_error_message("Failed to describe transit gateways", &e))
-                    .for_resource(id.clone())
+                ProviderError::api_error(sdk_error_message(
+                    "Failed to describe transit gateways",
+                    &e,
+                ))
+                .for_resource(id.clone())
             })?;
 
         if let Some(tgw) = result.transit_gateways().first() {
@@ -124,7 +127,7 @@ impl AwsProvider {
         }
 
         let result = req.send().await.map_err(|e| {
-            ProviderError::new(sdk_error_message("Failed to create transit gateway", &e))
+            ProviderError::api_error(sdk_error_message("Failed to create transit gateway", &e))
                 .for_resource(resource.id.clone())
         })?;
 
@@ -132,7 +135,7 @@ impl AwsProvider {
             .transit_gateway()
             .and_then(|tgw| tgw.transit_gateway_id())
             .ok_or_else(|| {
-                ProviderError::new("Transit Gateway created but no ID returned")
+                ProviderError::api_error("Transit Gateway created but no ID returned")
                     .for_resource(resource.id.clone())
             })?;
 
@@ -175,7 +178,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::new(sdk_error_message("Failed to delete transit gateway", &e))
+                ProviderError::api_error(sdk_error_message("Failed to delete transit gateway", &e))
                     .for_resource(id.clone())
             })?;
 
@@ -203,7 +206,7 @@ impl AwsProvider {
                     .send()
                     .await
                     .map_err(|e| {
-                        ProviderError::new(sdk_error_message(
+                        ProviderError::api_error(sdk_error_message(
                             "Failed to describe transit gateway",
                             &e,
                         ))
@@ -247,7 +250,7 @@ impl AwsProvider {
                     .send()
                     .await
                     .map_err(|e| {
-                        ProviderError::new(sdk_error_message(
+                        ProviderError::api_error(sdk_error_message(
                             "Failed to describe transit gateway",
                             &e,
                         ))
