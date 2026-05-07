@@ -36,8 +36,11 @@ impl AwsProvider {
 
                 if let Some(policy_json) = output.policy() {
                     let policy_value = iam_policy_json_to_value(policy_json).map_err(|e| {
-                        ProviderError::new(format!("Failed to parse bucket policy: {}", e))
-                            .for_resource(id.clone())
+                        ProviderError::invalid_input(format!(
+                            "Failed to parse bucket policy: {}",
+                            e
+                        ))
+                        .for_resource(id.clone())
                     })?;
                     attributes.insert("policy".to_string(), policy_value);
                 }
@@ -49,7 +52,7 @@ impl AwsProvider {
                     return Ok(State::not_found(id.clone()));
                 }
                 Err(
-                    ProviderError::new(sdk_error_message("Failed to get bucket policy", &e))
+                    ProviderError::api_error(sdk_error_message("Failed to get bucket policy", &e))
                         .for_resource(id.clone()),
                 )
             }
@@ -92,7 +95,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::new(sdk_error_message("Failed to put bucket policy", &e))
+                ProviderError::api_error(sdk_error_message("Failed to put bucket policy", &e))
                     .for_resource(id.clone())
             })?;
 
@@ -125,7 +128,7 @@ impl AwsProvider {
             {
                 Ok(())
             }
-            Err(e) => Err(ProviderError::new(sdk_error_message(
+            Err(e) => Err(ProviderError::api_error(sdk_error_message(
                 "Failed to delete bucket policy",
                 &e,
             ))

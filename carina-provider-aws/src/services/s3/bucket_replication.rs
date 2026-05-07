@@ -48,10 +48,11 @@ impl AwsProvider {
                 {
                     return Ok(State::not_found(id.clone()));
                 }
-                Err(
-                    ProviderError::new(sdk_error_message("Failed to get bucket replication", &e))
-                        .for_resource(id.clone()),
-                )
+                Err(ProviderError::api_error(sdk_error_message(
+                    "Failed to get bucket replication",
+                    &e,
+                ))
+                .for_resource(id.clone()))
             }
         }
     }
@@ -85,8 +86,10 @@ impl AwsProvider {
         let rules = match resource.get_attr("rules") {
             Some(Value::List(items)) => items,
             _ => {
-                return Err(ProviderError::new("rules is required and must be a list")
-                    .for_resource(id.clone()));
+                return Err(
+                    ProviderError::invalid_input("rules is required and must be a list")
+                        .for_resource(id.clone()),
+                );
             }
         };
 
@@ -100,7 +103,7 @@ impl AwsProvider {
             .set_rules(Some(sdk_rules))
             .build()
             .map_err(|e| {
-                ProviderError::new(sdk_error_message(
+                ProviderError::api_error(sdk_error_message(
                     "Failed to build replication configuration",
                     &e,
                 ))
@@ -114,7 +117,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::new(sdk_error_message("Failed to put bucket replication", &e))
+                ProviderError::api_error(sdk_error_message("Failed to put bucket replication", &e))
                     .for_resource(id.clone())
             })?;
 
@@ -142,7 +145,7 @@ impl AwsProvider {
             {
                 Ok(())
             }
-            Err(e) => Err(ProviderError::new(sdk_error_message(
+            Err(e) => Err(ProviderError::api_error(sdk_error_message(
                 "Failed to delete bucket replication",
                 &e,
             ))
@@ -153,19 +156,24 @@ impl AwsProvider {
 
 fn build_rule(id: &ResourceId, rule_value: &Value) -> ProviderResult<ReplicationRule> {
     let Value::Map(map) = rule_value else {
-        return Err(ProviderError::new("each rule must be a map").for_resource(id.clone()));
+        return Err(
+            ProviderError::invalid_input("each rule must be a map").for_resource(id.clone())
+        );
     };
 
     let status_str = match map.get("status") {
         Some(Value::String(s)) => extract_enum_value(s).to_string(),
         _ => {
-            return Err(ProviderError::new("rule.status is required").for_resource(id.clone()));
+            return Err(
+                ProviderError::invalid_input("rule.status is required").for_resource(id.clone())
+            );
         }
     };
     let destination = match map.get("destination") {
         Some(v) => build_destination(id, v)?,
         None => {
-            return Err(ProviderError::new("rule.destination is required").for_resource(id.clone()));
+            return Err(ProviderError::invalid_input("rule.destination is required")
+                .for_resource(id.clone()));
         }
     };
 
@@ -187,20 +195,23 @@ fn build_rule(id: &ResourceId, rule_value: &Value) -> ProviderResult<Replication
     }
 
     builder.build().map_err(|e| {
-        ProviderError::new(sdk_error_message("Failed to build ReplicationRule", &e))
+        ProviderError::api_error(sdk_error_message("Failed to build ReplicationRule", &e))
             .for_resource(id.clone())
     })
 }
 
 fn build_destination(id: &ResourceId, value: &Value) -> ProviderResult<Destination> {
     let Value::Map(map) = value else {
-        return Err(ProviderError::new("destination must be a map").for_resource(id.clone()));
+        return Err(
+            ProviderError::invalid_input("destination must be a map").for_resource(id.clone())
+        );
     };
     let bucket = match map.get("bucket") {
         Some(Value::String(s)) => s.clone(),
         _ => {
             return Err(
-                ProviderError::new("destination.bucket is required").for_resource(id.clone())
+                ProviderError::invalid_input("destination.bucket is required")
+                    .for_resource(id.clone()),
             );
         }
     };
@@ -213,7 +224,7 @@ fn build_destination(id: &ResourceId, value: &Value) -> ProviderResult<Destinati
         builder = builder.storage_class(StorageClass::from(normalized));
     }
     builder.build().map_err(|e| {
-        ProviderError::new(sdk_error_message("Failed to build Destination", &e))
+        ProviderError::api_error(sdk_error_message("Failed to build Destination", &e))
             .for_resource(id.clone())
     })
 }

@@ -70,7 +70,7 @@ impl AwsProvider {
                     req = req.tags(aws_sdk_ec2::types::Tag::builder().key(key.as_str()).build());
                 }
                 req.send().await.map_err(|e| {
-                    ProviderError::new(sdk_error_message("Failed to delete tags", &e))
+                    ProviderError::api_error(sdk_error_message("Failed to delete tags", &e))
                         .for_resource(resource_id.clone())
                 })?;
             }
@@ -85,7 +85,7 @@ impl AwsProvider {
                     req = req.tags(tag);
                 }
                 req.send().await.map_err(|e| {
-                    ProviderError::new(sdk_error_message("Failed to tag resource", &e))
+                    ProviderError::api_error(sdk_error_message("Failed to tag resource", &e))
                         .for_resource(resource_id.clone())
                 })?;
             }

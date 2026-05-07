@@ -75,7 +75,7 @@ impl AwsProvider {
                 if is_s3_not_configured_error(&e, "NoSuchBucket") {
                     return Ok(State::not_found(id.clone()));
                 }
-                Err(ProviderError::new(sdk_error_message(
+                Err(ProviderError::api_error(sdk_error_message(
                     "Failed to get bucket notification configuration",
                     &e,
                 ))
@@ -162,7 +162,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::new(sdk_error_message(
+                ProviderError::api_error(sdk_error_message(
                     "Failed to put bucket notification configuration",
                     &e,
                 ))
@@ -190,7 +190,7 @@ impl AwsProvider {
         match result {
             Ok(_) => Ok(()),
             Err(e) if is_s3_not_configured_error(&e, "NoSuchBucket") => Ok(()),
-            Err(e) => Err(ProviderError::new(sdk_error_message(
+            Err(e) => Err(ProviderError::api_error(sdk_error_message(
                 "Failed to clear bucket notification configuration",
                 &e,
             ))
@@ -202,7 +202,8 @@ impl AwsProvider {
 fn build_topic(id: &ResourceId, value: &Value) -> ProviderResult<TopicConfiguration> {
     let Value::Map(map) = value else {
         return Err(
-            ProviderError::new("topic_configurations entry must be a map").for_resource(id.clone()),
+            ProviderError::invalid_input("topic_configurations entry must be a map")
+                .for_resource(id.clone()),
         );
     };
     let topic_arn = require_string_field(id, map, "topic_arn", "topic_configurations")?;
@@ -218,7 +219,7 @@ fn build_topic(id: &ResourceId, value: &Value) -> ProviderResult<TopicConfigurat
         builder = builder.filter(filter);
     }
     builder.build().map_err(|e| {
-        ProviderError::new(sdk_error_message("Failed to build TopicConfiguration", &e))
+        ProviderError::api_error(sdk_error_message("Failed to build TopicConfiguration", &e))
             .for_resource(id.clone())
     })
 }
@@ -226,7 +227,8 @@ fn build_topic(id: &ResourceId, value: &Value) -> ProviderResult<TopicConfigurat
 fn build_queue(id: &ResourceId, value: &Value) -> ProviderResult<QueueConfiguration> {
     let Value::Map(map) = value else {
         return Err(
-            ProviderError::new("queue_configurations entry must be a map").for_resource(id.clone()),
+            ProviderError::invalid_input("queue_configurations entry must be a map")
+                .for_resource(id.clone()),
         );
     };
     let queue_arn = require_string_field(id, map, "queue_arn", "queue_configurations")?;
@@ -242,17 +244,17 @@ fn build_queue(id: &ResourceId, value: &Value) -> ProviderResult<QueueConfigurat
         builder = builder.filter(filter);
     }
     builder.build().map_err(|e| {
-        ProviderError::new(sdk_error_message("Failed to build QueueConfiguration", &e))
+        ProviderError::api_error(sdk_error_message("Failed to build QueueConfiguration", &e))
             .for_resource(id.clone())
     })
 }
 
 fn build_lambda(id: &ResourceId, value: &Value) -> ProviderResult<LambdaFunctionConfiguration> {
     let Value::Map(map) = value else {
-        return Err(
-            ProviderError::new("lambda_function_configurations entry must be a map")
-                .for_resource(id.clone()),
-        );
+        return Err(ProviderError::invalid_input(
+            "lambda_function_configurations entry must be a map",
+        )
+        .for_resource(id.clone()));
     };
     let lambda_arn = require_string_field(
         id,
@@ -272,7 +274,7 @@ fn build_lambda(id: &ResourceId, value: &Value) -> ProviderResult<LambdaFunction
         builder = builder.filter(filter);
     }
     builder.build().map_err(|e| {
-        ProviderError::new(sdk_error_message(
+        ProviderError::api_error(sdk_error_message(
             "Failed to build LambdaFunctionConfiguration",
             &e,
         ))
@@ -288,10 +290,10 @@ fn require_string_field(
 ) -> ProviderResult<String> {
     match map.get(field) {
         Some(Value::String(s)) => Ok(s.clone()),
-        _ => {
-            Err(ProviderError::new(format!("{parent}.{field} is required"))
-                .for_resource(id.clone()))
-        }
+        _ => Err(
+            ProviderError::invalid_input(format!("{parent}.{field} is required"))
+                .for_resource(id.clone()),
+        ),
     }
 }
 
@@ -305,15 +307,16 @@ fn build_events(
             .iter()
             .map(|v| match v {
                 Value::String(s) => Ok(Event::from(s.as_str())),
-                _ => Err(
-                    ProviderError::new(format!("{parent}.events must be a list of strings"))
-                        .for_resource(id.clone()),
-                ),
+                _ => Err(ProviderError::invalid_input(format!(
+                    "{parent}.events must be a list of strings"
+                ))
+                .for_resource(id.clone())),
             })
             .collect(),
-        _ => {
-            Err(ProviderError::new(format!("{parent}.events is required")).for_resource(id.clone()))
-        }
+        _ => Err(
+            ProviderError::invalid_input(format!("{parent}.events is required"))
+                .for_resource(id.clone()),
+        ),
     }
 }
 
@@ -333,7 +336,7 @@ fn build_filter(
         .iter()
         .map(|v| {
             let Value::Map(rule_map) = v else {
-                return Err(ProviderError::new(format!(
+                return Err(ProviderError::invalid_input(format!(
                     "{parent}.filter.filter_rules entry must be a map"
                 ))
                 .for_resource(id.clone()));

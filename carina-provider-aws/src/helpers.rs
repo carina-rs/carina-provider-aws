@@ -10,8 +10,8 @@ use aws_sdk_ec2::types::{ResourceType, Tag, TagSpecification};
 use aws_smithy_types::error::display::DisplayErrorContext;
 use tokio::time::sleep;
 
-use carina_core::provider::{ProviderError, ProviderResult};
-use carina_core::resource::{Resource, ResourceId, Value};
+use carina_core::provider::{PatchOpKind, ProviderError, ProviderResult, UpdatePatch};
+use carina_core::resource::{Resource, ResourceId, State, Value};
 
 /// Extract a required `String` attribute from a resource.
 ///
@@ -19,8 +19,10 @@ use carina_core::resource::{Resource, ResourceId, Value};
 pub fn require_string_attr(resource: &Resource, attr_name: &str) -> ProviderResult<String> {
     match resource.get_attr(attr_name) {
         Some(Value::String(s)) => Ok(s.clone()),
-        _ => Err(ProviderError::new(format!("{} is required", attr_name))
-            .for_resource(resource.id.clone())),
+        _ => Err(
+            ProviderError::invalid_input(format!("{} is required", attr_name))
+                .for_resource(resource.id.clone()),
+        ),
     }
 }
 
@@ -141,6 +143,48 @@ fn is_retryable_error(error_msg: &str) -> bool {
     PATTERNS.iter().any(|p| error_msg.contains(p))
 }
 
+/// Reconstruct a `Resource` from `from` state plus an `UpdatePatch`.
+///
+/// The aws provider's existing per-resource `update_*` methods take
+/// `to: Resource` (a full desired state). The Level 3 `Provider::update`
+/// signature replaces `to` with `(from: State, patch: UpdatePatch)`, so
+/// this adapter rebuilds an equivalent desired `Resource` by applying
+/// each [`PatchOpKind`] on top of `from`'s attributes:
+///
+/// - `Add` / `Replace` set the attribute to the patch value.
+/// - `Remove` deletes the attribute from the resulting resource.
+///
+/// This is a faithful translation: the result mirrors what the user's
+/// desired state would look like if it had been computed full-replace
+/// style. Per-resource update methods continue to write the same fields
+/// they always did.
+///
+/// The returned `Resource` carries `from`'s `ResourceId` and an empty
+/// `LifecycleConfig` (lifecycle is delete-only and is not consulted on
+/// update paths in this provider).
+pub fn apply_patch_to_state(from: &State, patch: &UpdatePatch) -> Resource {
+    let mut resource = Resource::new(from.id.resource_type.clone(), from.id.name.to_string());
+    resource.id = from.id.clone();
+    resource.attributes = from
+        .attributes
+        .iter()
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .collect();
+    for op in &patch.ops {
+        match op.kind {
+            PatchOpKind::Add | PatchOpKind::Replace => {
+                if let Some(ref v) = op.value {
+                    resource.attributes.insert(op.key.clone(), v.clone());
+                }
+            }
+            PatchOpKind::Remove => {
+                resource.attributes.shift_remove(&op.key);
+            }
+        }
+    }
+    resource
+}
+
 /// Generic wait/poll loop for EC2 resources.
 ///
 /// Polls at 5-second intervals for up to `max_iterations` iterations.
@@ -165,14 +209,14 @@ where
             PollState::Ready => return Ok(()),
             PollState::Gone => return Ok(()),
             PollState::Failed => {
-                return Err(ProviderError::new(failure_msg).for_resource(id.clone()));
+                return Err(ProviderError::api_error(failure_msg).for_resource(id.clone()));
             }
             PollState::Pending => {}
         }
         sleep(Duration::from_secs(5)).await;
     }
 
-    Err(ProviderError::new(timeout_msg).for_resource(id.clone()))
+    Err(ProviderError::timeout(timeout_msg).for_resource(id.clone()))
 }
 
 #[cfg(test)]
@@ -187,6 +231,73 @@ mod tests {
                 .insert(k.to_string(), Value::String(v.to_string()));
         }
         resource
+    }
+
+    #[test]
+    fn test_apply_patch_to_state_add_replace_remove() {
+        use carina_core::provider::{PatchOp, PatchOpKind, UpdatePatch};
+        use std::collections::HashMap;
+
+        // from-state has two attrs; patch adds one, replaces one, removes one.
+        let id = ResourceId::with_provider("aws", "ec2.Vpc", "test");
+        let mut from_attrs: HashMap<String, Value> = HashMap::new();
+        from_attrs.insert("cidr_block".into(), Value::String("10.0.0.0/16".into()));
+        from_attrs.insert(
+            "tags".into(),
+            Value::Map(
+                [("Name".to_string(), Value::String("old".into()))]
+                    .into_iter()
+                    .collect(),
+            ),
+        );
+        let from = State::existing(id, from_attrs);
+
+        let patch = UpdatePatch {
+            ops: vec![
+                // Add a brand-new attribute
+                PatchOp {
+                    kind: PatchOpKind::Add,
+                    key: "instance_tenancy".into(),
+                    value: Some(Value::String("default".into())),
+                },
+                // Replace the existing tags
+                PatchOp {
+                    kind: PatchOpKind::Replace,
+                    key: "tags".into(),
+                    value: Some(Value::Map(
+                        [("Name".to_string(), Value::String("new".into()))]
+                            .into_iter()
+                            .collect(),
+                    )),
+                },
+                // Remove cidr_block
+                PatchOp {
+                    kind: PatchOpKind::Remove,
+                    key: "cidr_block".into(),
+                    value: None,
+                },
+            ],
+        };
+
+        let to = apply_patch_to_state(&from, &patch);
+
+        assert!(
+            !to.attributes.contains_key("cidr_block"),
+            "Remove op should drop the key"
+        );
+        assert_eq!(
+            to.attributes.get("instance_tenancy"),
+            Some(&Value::String("default".into())),
+            "Add op should insert the new value"
+        );
+        match to.attributes.get("tags") {
+            Some(Value::Map(m)) => {
+                assert_eq!(m.get("Name"), Some(&Value::String("new".into())));
+            }
+            other => panic!("expected tags map, got {:?}", other),
+        }
+        // ResourceId is preserved from `from`
+        assert_eq!(to.id.resource_type, "ec2.Vpc");
     }
 
     #[test]

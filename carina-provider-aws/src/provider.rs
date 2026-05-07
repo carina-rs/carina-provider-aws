@@ -1,9 +1,13 @@
 //! Provider trait implementation for AWS
 
-use carina_core::provider::{BoxFuture, Provider, ProviderError, ProviderResult};
-use carina_core::resource::{LifecycleConfig, Resource, ResourceId, State};
+use carina_core::provider::{
+    BoxFuture, CreateRequest, DeleteRequest, Provider, ProviderError, ProviderResult, ReadRequest,
+    UpdateRequest,
+};
+use carina_core::resource::{Resource, ResourceId, State};
 
 use crate::AwsProvider;
+use crate::helpers::apply_patch_to_state;
 use crate::normalizer::normalize_state_enums;
 
 impl Provider for AwsProvider {
@@ -14,10 +18,11 @@ impl Provider for AwsProvider {
     fn read(
         &self,
         id: &ResourceId,
-        identifier: Option<&str>,
+        identifier: &str,
+        _request: ReadRequest,
     ) -> BoxFuture<'_, ProviderResult<State>> {
         let id = id.clone();
-        let identifier = identifier.map(String::from);
+        let identifier = Some(identifier.to_string());
         Box::pin(async move {
             let mut state = match id.resource_type.as_str() {
                 "s3.Bucket" => self.read_s3_bucket(&id, identifier.as_deref()).await,
@@ -129,7 +134,7 @@ impl Provider for AwsProvider {
                     self.read_route53_record_set(&id, identifier.as_deref())
                         .await
                 }
-                _ => Err(ProviderError::new(format!(
+                _ => Err(ProviderError::internal(format!(
                     "Unknown resource type: {}",
                     id.resource_type
                 ))
@@ -157,8 +162,12 @@ impl Provider for AwsProvider {
         })
     }
 
-    fn create(&self, resource: &Resource) -> BoxFuture<'_, ProviderResult<State>> {
-        let resource = resource.clone();
+    fn create(
+        &self,
+        _id: &ResourceId,
+        request: CreateRequest,
+    ) -> BoxFuture<'_, ProviderResult<State>> {
+        let resource = request.resource;
         Box::pin(async move {
             match resource.id.resource_type.as_str() {
                 "s3.Bucket" => self.create_s3_bucket(resource).await,
@@ -233,7 +242,7 @@ impl Provider for AwsProvider {
                 "iam.Role" => self.create_iam_role(resource).await,
                 "logs.LogGroup" => self.create_logs_log_group(resource).await,
                 "route53.RecordSet" => self.create_route53_record_set(resource).await,
-                _ => Err(ProviderError::new(format!(
+                _ => Err(ProviderError::internal(format!(
                     "Unknown resource type: {}",
                     resource.id.resource_type
                 ))
@@ -246,13 +255,18 @@ impl Provider for AwsProvider {
         &self,
         id: &ResourceId,
         identifier: &str,
-        from: &State,
-        to: &Resource,
+        request: UpdateRequest,
     ) -> BoxFuture<'_, ProviderResult<State>> {
         let id = id.clone();
         let identifier = identifier.to_string();
-        let from = from.clone();
-        let to = to.clone();
+        let from = request.from.clone();
+        // The aws provider's per-resource `update_*` methods predate the
+        // Level 3 patch contract and accept a full `to: Resource`.
+        // Reconstruct that from `(from, patch)` here so each method's
+        // existing logic continues to work without per-resource churn.
+        // Future per-resource updates can read `request.patch` directly
+        // for partial-update API paths once those are wired in.
+        let to = apply_patch_to_state(&request.from, &request.patch);
         Box::pin(async move {
             match id.resource_type.as_str() {
                 "s3.Bucket" => self.update_s3_bucket(id, &identifier, &from, to).await,
@@ -379,7 +393,7 @@ impl Provider for AwsProvider {
                 "iam.Role" => self.update_iam_role(id, &identifier, &from, to).await,
                 "logs.LogGroup" => self.update_logs_log_group(id, &identifier, &from, to).await,
                 "route53.RecordSet" => self.update_route53_record_set(id, &identifier, to).await,
-                _ => Err(ProviderError::new(format!(
+                _ => Err(ProviderError::internal(format!(
                     "Unknown resource type: {}",
                     id.resource_type
                 ))
@@ -392,11 +406,11 @@ impl Provider for AwsProvider {
         &self,
         id: &ResourceId,
         identifier: &str,
-        lifecycle: &LifecycleConfig,
+        request: DeleteRequest,
     ) -> BoxFuture<'_, ProviderResult<()>> {
         let id = id.clone();
         let identifier = identifier.to_string();
-        let lifecycle = lifecycle.clone();
+        let lifecycle = request.lifecycle;
         Box::pin(async move {
             match id.resource_type.as_str() {
                 "s3.Bucket" => self.delete_s3_bucket(id, &identifier, &lifecycle).await,
@@ -495,7 +509,7 @@ impl Provider for AwsProvider {
                 "iam.Role" => self.delete_iam_role(id, &identifier).await,
                 "logs.LogGroup" => self.delete_logs_log_group(id, &identifier).await,
                 "route53.RecordSet" => self.delete_route53_record_set(id, &identifier).await,
-                _ => Err(ProviderError::new(format!(
+                _ => Err(ProviderError::internal(format!(
                     "Unknown resource type: {}",
                     id.resource_type
                 ))

@@ -26,7 +26,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::new(sdk_error_message(
+                ProviderError::api_error(sdk_error_message(
                     "Failed to describe transit gateway VPC attachments",
                     &e,
                 ))
@@ -77,15 +77,14 @@ impl AwsProvider {
                     }
                 }
                 if result.is_empty() {
-                    return Err(ProviderError::new("subnet_ids must not be empty")
+                    return Err(ProviderError::invalid_input("subnet_ids must not be empty")
                         .for_resource(resource.id.clone()));
                 }
                 result
             }
             _ => {
-                return Err(
-                    ProviderError::new("subnet_ids is required").for_resource(resource.id.clone())
-                );
+                return Err(ProviderError::invalid_input("subnet_ids is required")
+                    .for_resource(resource.id.clone()));
             }
         };
 
@@ -108,7 +107,7 @@ impl AwsProvider {
         }
 
         let result = req.send().await.map_err(|e| {
-            ProviderError::new(sdk_error_message(
+            ProviderError::api_error(sdk_error_message(
                 "Failed to create transit gateway VPC attachment",
                 &e,
             ))
@@ -119,7 +118,7 @@ impl AwsProvider {
             .transit_gateway_vpc_attachment()
             .and_then(|att| att.transit_gateway_attachment_id())
             .ok_or_else(|| {
-                ProviderError::new("Transit Gateway Attachment created but no ID returned")
+                ProviderError::api_error("Transit Gateway Attachment created but no ID returned")
                     .for_resource(resource.id.clone())
             })?;
 
@@ -163,7 +162,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::new(sdk_error_message(
+                ProviderError::api_error(sdk_error_message(
                     "Failed to delete transit gateway VPC attachment",
                     &e,
                 ))
@@ -194,7 +193,7 @@ impl AwsProvider {
                     .send()
                     .await
                     .map_err(|e| {
-                        ProviderError::new(sdk_error_message(
+                        ProviderError::api_error(sdk_error_message(
                             "Failed to describe transit gateway VPC attachment",
                             &e,
                         ))
@@ -238,7 +237,7 @@ impl AwsProvider {
                     .send()
                     .await
                     .map_err(|e| {
-                        ProviderError::new(sdk_error_message(
+                        ProviderError::api_error(sdk_error_message(
                             "Failed to describe transit gateway VPC attachment",
                             &e,
                         ))

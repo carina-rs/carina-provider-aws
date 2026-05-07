@@ -48,10 +48,11 @@ impl AwsProvider {
                 {
                     return Ok(State::not_found(id.clone()));
                 }
-                Err(
-                    ProviderError::new(sdk_error_message("Failed to get bucket encryption", &e))
-                        .for_resource(id.clone()),
-                )
+                Err(ProviderError::api_error(sdk_error_message(
+                    "Failed to get bucket encryption",
+                    &e,
+                ))
+                .for_resource(id.clone()))
             }
         }
     }
@@ -84,8 +85,10 @@ impl AwsProvider {
         let rules = match resource.get_attr("rules") {
             Some(Value::List(items)) => items,
             _ => {
-                return Err(ProviderError::new("rules is required and must be a list")
-                    .for_resource(id.clone()));
+                return Err(
+                    ProviderError::invalid_input("rules is required and must be a list")
+                        .for_resource(id.clone()),
+                );
             }
         };
 
@@ -98,7 +101,7 @@ impl AwsProvider {
             .set_rules(Some(sdk_rules))
             .build()
             .map_err(|e| {
-                ProviderError::new(sdk_error_message(
+                ProviderError::api_error(sdk_error_message(
                     "Failed to build server-side encryption configuration",
                     &e,
                 ))
@@ -112,7 +115,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::new(sdk_error_message("Failed to put bucket encryption", &e))
+                ProviderError::api_error(sdk_error_message("Failed to put bucket encryption", &e))
                     .for_resource(id.clone())
             })?;
 
@@ -142,7 +145,7 @@ impl AwsProvider {
             {
                 Ok(())
             }
-            Err(e) => Err(ProviderError::new(sdk_error_message(
+            Err(e) => Err(ProviderError::api_error(sdk_error_message(
                 "Failed to delete bucket encryption",
                 &e,
             ))
@@ -153,7 +156,9 @@ impl AwsProvider {
 
 fn build_rule(id: &ResourceId, rule_value: &Value) -> ProviderResult<ServerSideEncryptionRule> {
     let Value::Map(rule_map) = rule_value else {
-        return Err(ProviderError::new("each rule must be a map").for_resource(id.clone()));
+        return Err(
+            ProviderError::invalid_input("each rule must be a map").for_resource(id.clone())
+        );
     };
 
     let mut builder = ServerSideEncryptionRule::builder();
@@ -174,15 +179,17 @@ fn build_by_default(
     value: &Value,
 ) -> ProviderResult<ServerSideEncryptionByDefault> {
     let Value::Map(map) = value else {
-        return Err(
-            ProviderError::new("apply_server_side_encryption_by_default must be a map")
-                .for_resource(id.clone()),
-        );
+        return Err(ProviderError::invalid_input(
+            "apply_server_side_encryption_by_default must be a map",
+        )
+        .for_resource(id.clone()));
     };
     let algorithm_str = match map.get("sse_algorithm") {
         Some(Value::String(s)) => extract_enum_value(s).to_string(),
         _ => {
-            return Err(ProviderError::new("sse_algorithm is required").for_resource(id.clone()));
+            return Err(
+                ProviderError::invalid_input("sse_algorithm is required").for_resource(id.clone())
+            );
         }
     };
     let mut builder = ServerSideEncryptionByDefault::builder()
@@ -191,7 +198,7 @@ fn build_by_default(
         builder = builder.kms_master_key_id(k);
     }
     builder.build().map_err(|e| {
-        ProviderError::new(sdk_error_message(
+        ProviderError::api_error(sdk_error_message(
             "Failed to build apply_server_side_encryption_by_default",
             &e,
         ))

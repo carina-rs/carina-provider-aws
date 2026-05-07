@@ -57,7 +57,7 @@ impl AwsProvider {
                     return Ok(State::not_found(id.clone()));
                 }
                 Err(
-                    ProviderError::new(sdk_error_message("Failed to get bucket logging", &e))
+                    ProviderError::api_error(sdk_error_message("Failed to get bucket logging", &e))
                         .for_resource(id.clone()),
                 )
             }
@@ -95,7 +95,8 @@ impl AwsProvider {
             None => String::new(),
             _ => {
                 return Err(
-                    ProviderError::new("target_prefix must be a string").for_resource(id.clone())
+                    ProviderError::invalid_input("target_prefix must be a string")
+                        .for_resource(id.clone()),
                 );
             }
         };
@@ -109,7 +110,7 @@ impl AwsProvider {
         }
 
         let le = le_builder.build().map_err(|e| {
-            ProviderError::new(sdk_error_message("Failed to build LoggingEnabled", &e))
+            ProviderError::api_error(sdk_error_message("Failed to build LoggingEnabled", &e))
                 .for_resource(id.clone())
         })?;
 
@@ -122,7 +123,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::new(sdk_error_message("Failed to put bucket logging", &e))
+                ProviderError::api_error(sdk_error_message("Failed to put bucket logging", &e))
                     .for_resource(id.clone())
             })?;
 
@@ -146,7 +147,7 @@ impl AwsProvider {
         match result {
             Ok(_) => Ok(()),
             Err(e) if is_s3_not_configured_error(&e, "NoSuchBucket") => Ok(()),
-            Err(e) => Err(ProviderError::new(sdk_error_message(
+            Err(e) => Err(ProviderError::api_error(sdk_error_message(
                 "Failed to clear bucket logging",
                 &e,
             ))
@@ -158,7 +159,8 @@ impl AwsProvider {
 fn build_key_format(id: &ResourceId, value: &Value) -> ProviderResult<TargetObjectKeyFormat> {
     let Value::Map(map) = value else {
         return Err(
-            ProviderError::new("target_object_key_format must be a map").for_resource(id.clone())
+            ProviderError::invalid_input("target_object_key_format must be a map")
+                .for_resource(id.clone()),
         );
     };
 

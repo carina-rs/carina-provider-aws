@@ -37,7 +37,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::new(sdk_error_message("Failed to describe route tables", &e))
+                ProviderError::api_error(sdk_error_message("Failed to describe route tables", &e))
                     .for_resource(id.clone())
             })?;
 
@@ -88,13 +88,15 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::new(sdk_error_message("Failed to associate route table", &e))
+                ProviderError::api_error(sdk_error_message("Failed to associate route table", &e))
                     .for_resource(resource.id.clone())
             })?;
 
         let assoc_id = result.association_id().ok_or_else(|| {
-            ProviderError::new("Route table association created but no association ID returned")
-                .for_resource(resource.id.clone())
+            ProviderError::api_error(
+                "Route table association created but no association ID returned",
+            )
+            .for_resource(resource.id.clone())
         })?;
 
         // Composite identifier: association_id|subnet_id
@@ -112,7 +114,7 @@ impl AwsProvider {
     ) -> ProviderResult<State> {
         // Parse composite identifier: association_id|subnet_id
         let Some((association_id, subnet_id)) = identifier.split_once('|') else {
-            return Err(ProviderError::new(format!(
+            return Err(ProviderError::invalid_input(format!(
                 "Invalid association identifier: {}",
                 identifier
             ))
@@ -122,9 +124,8 @@ impl AwsProvider {
         let route_table_id = match to.get_attr("route_table_id") {
             Some(Value::String(s)) => s.clone(),
             _ => {
-                return Err(
-                    ProviderError::new("route_table_id is required").for_resource(id.clone())
-                );
+                return Err(ProviderError::invalid_input("route_table_id is required")
+                    .for_resource(id.clone()));
             }
         };
 
@@ -137,7 +138,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::new(sdk_error_message(
+                ProviderError::api_error(sdk_error_message(
                     "Failed to replace route table association",
                     &e,
                 ))
@@ -145,7 +146,7 @@ impl AwsProvider {
             })?;
 
         let new_assoc_id = result.new_association_id().ok_or_else(|| {
-            ProviderError::new(
+            ProviderError::api_error(
                 "Route table association replaced but no new association ID returned",
             )
             .for_resource(id.clone())
@@ -164,7 +165,7 @@ impl AwsProvider {
     ) -> ProviderResult<()> {
         // Parse composite identifier: association_id|subnet_id
         let Some((association_id, _subnet_id)) = identifier.split_once('|') else {
-            return Err(ProviderError::new(format!(
+            return Err(ProviderError::invalid_input(format!(
                 "Invalid association identifier: {}",
                 identifier
             ))
@@ -177,8 +178,11 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::new(sdk_error_message("Failed to disassociate route table", &e))
-                    .for_resource(id.clone())
+                ProviderError::api_error(sdk_error_message(
+                    "Failed to disassociate route table",
+                    &e,
+                ))
+                .for_resource(id.clone())
             })?;
 
         Ok(())

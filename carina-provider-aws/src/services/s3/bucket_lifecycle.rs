@@ -47,7 +47,7 @@ impl AwsProvider {
                 {
                     return Ok(State::not_found(id.clone()));
                 }
-                Err(ProviderError::new(sdk_error_message(
+                Err(ProviderError::api_error(sdk_error_message(
                     "Failed to get bucket lifecycle configuration",
                     &e,
                 ))
@@ -84,8 +84,10 @@ impl AwsProvider {
         let rules = match resource.get_attr("rules") {
             Some(Value::List(items)) => items,
             _ => {
-                return Err(ProviderError::new("rules is required and must be a list")
-                    .for_resource(id.clone()));
+                return Err(
+                    ProviderError::invalid_input("rules is required and must be a list")
+                        .for_resource(id.clone()),
+                );
             }
         };
 
@@ -98,7 +100,7 @@ impl AwsProvider {
             .set_rules(Some(sdk_rules))
             .build()
             .map_err(|e| {
-                ProviderError::new(sdk_error_message(
+                ProviderError::api_error(sdk_error_message(
                     "Failed to build BucketLifecycleConfiguration",
                     &e,
                 ))
@@ -112,7 +114,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::new(sdk_error_message(
+                ProviderError::api_error(sdk_error_message(
                     "Failed to put bucket lifecycle configuration",
                     &e,
                 ))
@@ -143,7 +145,7 @@ impl AwsProvider {
             {
                 Ok(())
             }
-            Err(e) => Err(ProviderError::new(sdk_error_message(
+            Err(e) => Err(ProviderError::api_error(sdk_error_message(
                 "Failed to delete bucket lifecycle configuration",
                 &e,
             ))
@@ -154,13 +156,17 @@ impl AwsProvider {
 
 fn build_rule(id: &ResourceId, rule_value: &Value) -> ProviderResult<LifecycleRule> {
     let Value::Map(map) = rule_value else {
-        return Err(ProviderError::new("each rule must be a map").for_resource(id.clone()));
+        return Err(
+            ProviderError::invalid_input("each rule must be a map").for_resource(id.clone())
+        );
     };
 
     let status_str = match map.get("status") {
         Some(Value::String(s)) => extract_enum_value(s).to_string(),
         _ => {
-            return Err(ProviderError::new("rule.status is required").for_resource(id.clone()));
+            return Err(
+                ProviderError::invalid_input("rule.status is required").for_resource(id.clone())
+            );
         }
     };
 
@@ -198,14 +204,16 @@ fn build_rule(id: &ResourceId, rule_value: &Value) -> ProviderResult<LifecycleRu
     }
 
     builder.build().map_err(|e| {
-        ProviderError::new(sdk_error_message("Failed to build LifecycleRule", &e))
+        ProviderError::api_error(sdk_error_message("Failed to build LifecycleRule", &e))
             .for_resource(id.clone())
     })
 }
 
 fn build_expiration(id: &ResourceId, value: &Value) -> ProviderResult<LifecycleExpiration> {
     let Value::Map(map) = value else {
-        return Err(ProviderError::new("expiration must be a map").for_resource(id.clone()));
+        return Err(
+            ProviderError::invalid_input("expiration must be a map").for_resource(id.clone())
+        );
     };
     let mut builder = LifecycleExpiration::builder();
     if let Some(Value::Int(d)) = map.get("days") {
@@ -219,13 +227,16 @@ fn build_expiration(id: &ResourceId, value: &Value) -> ProviderResult<LifecycleE
 
 fn build_transition(id: &ResourceId, value: &Value) -> ProviderResult<Transition> {
     let Value::Map(map) = value else {
-        return Err(ProviderError::new("transition must be a map").for_resource(id.clone()));
+        return Err(
+            ProviderError::invalid_input("transition must be a map").for_resource(id.clone())
+        );
     };
     let storage_class_str = match map.get("storage_class") {
         Some(Value::String(s)) => extract_enum_value(s).to_string(),
         _ => {
             return Err(
-                ProviderError::new("transition.storage_class is required").for_resource(id.clone())
+                ProviderError::invalid_input("transition.storage_class is required")
+                    .for_resource(id.clone()),
             );
         }
     };
@@ -243,7 +254,7 @@ fn build_ncv_expiration(
 ) -> ProviderResult<NoncurrentVersionExpiration> {
     let Value::Map(map) = value else {
         return Err(
-            ProviderError::new("noncurrent_version_expiration must be a map")
+            ProviderError::invalid_input("noncurrent_version_expiration must be a map")
                 .for_resource(id.clone()),
         );
     };
@@ -263,14 +274,14 @@ fn build_ncv_transition(
 ) -> ProviderResult<NoncurrentVersionTransition> {
     let Value::Map(map) = value else {
         return Err(
-            ProviderError::new("noncurrent_version_transition must be a map")
+            ProviderError::invalid_input("noncurrent_version_transition must be a map")
                 .for_resource(id.clone()),
         );
     };
     let storage_class_str = match map.get("storage_class") {
         Some(Value::String(s)) => extract_enum_value(s).to_string(),
         _ => {
-            return Err(ProviderError::new(
+            return Err(ProviderError::invalid_input(
                 "noncurrent_version_transition.storage_class is required",
             )
             .for_resource(id.clone()));
@@ -292,10 +303,10 @@ fn build_abort_multipart(
     value: &Value,
 ) -> ProviderResult<AbortIncompleteMultipartUpload> {
     let Value::Map(map) = value else {
-        return Err(
-            ProviderError::new("abort_incomplete_multipart_upload must be a map")
-                .for_resource(id.clone()),
-        );
+        return Err(ProviderError::invalid_input(
+            "abort_incomplete_multipart_upload must be a map",
+        )
+        .for_resource(id.clone()));
     };
     let mut builder = AbortIncompleteMultipartUpload::builder();
     if let Some(Value::Int(d)) = map.get("days_after_initiation") {

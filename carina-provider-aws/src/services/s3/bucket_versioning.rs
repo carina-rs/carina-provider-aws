@@ -54,10 +54,11 @@ impl AwsProvider {
                 if is_s3_not_configured_error(&e, "NoSuchBucket") {
                     return Ok(State::not_found(id.clone()));
                 }
-                Err(
-                    ProviderError::new(sdk_error_message("Failed to get bucket versioning", &e))
-                        .for_resource(id.clone()),
-                )
+                Err(ProviderError::api_error(sdk_error_message(
+                    "Failed to get bucket versioning",
+                    &e,
+                ))
+                .for_resource(id.clone()))
             }
         }
     }
@@ -90,7 +91,9 @@ impl AwsProvider {
         let status_str = match resource.get_attr("status") {
             Some(Value::String(s)) => extract_enum_value(s).to_string(),
             _ => {
-                return Err(ProviderError::new("status is required").for_resource(id.clone()));
+                return Err(
+                    ProviderError::invalid_input("status is required").for_resource(id.clone())
+                );
             }
         };
         let status = BucketVersioningStatus::from(status_str.as_str());
@@ -108,7 +111,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::new(sdk_error_message("Failed to put bucket versioning", &e))
+                ProviderError::api_error(sdk_error_message("Failed to put bucket versioning", &e))
                     .for_resource(id.clone())
             })?;
 
@@ -141,7 +144,7 @@ impl AwsProvider {
         match result {
             Ok(_) => Ok(()),
             Err(e) if is_s3_not_configured_error(&e, "NoSuchBucket") => Ok(()),
-            Err(e) => Err(ProviderError::new(sdk_error_message(
+            Err(e) => Err(ProviderError::api_error(sdk_error_message(
                 "Failed to suspend bucket versioning",
                 &e,
             ))

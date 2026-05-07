@@ -39,7 +39,7 @@ impl AwsProvider {
                     return Ok(State::not_found(id.clone()));
                 }
                 Err(
-                    ProviderError::new(sdk_error_message("Failed to get bucket ACL", &e))
+                    ProviderError::api_error(sdk_error_message("Failed to get bucket ACL", &e))
                         .for_resource(id.clone()),
                 )
             }
@@ -74,7 +74,9 @@ impl AwsProvider {
             // (`public_read` ⇄ `public-read`) back to AWS canonical form.
             Some(Value::String(s)) => convert_enum_value(s).to_string(),
             _ => {
-                return Err(ProviderError::new("acl is required").for_resource(id.clone()));
+                return Err(
+                    ProviderError::invalid_input("acl is required").for_resource(id.clone())
+                );
             }
         };
 
@@ -85,7 +87,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::new(sdk_error_message("Failed to put bucket ACL", &e))
+                ProviderError::api_error(sdk_error_message("Failed to put bucket ACL", &e))
                     .for_resource(id.clone())
             })?;
 
@@ -110,10 +112,11 @@ impl AwsProvider {
         match result {
             Ok(_) => Ok(()),
             Err(e) if is_s3_not_configured_error(&e, "NoSuchBucket") => Ok(()),
-            Err(e) => Err(
-                ProviderError::new(sdk_error_message("Failed to reset bucket ACL", &e))
-                    .for_resource(id.clone()),
-            ),
+            Err(e) => Err(ProviderError::api_error(sdk_error_message(
+                "Failed to reset bucket ACL",
+                &e,
+            ))
+            .for_resource(id.clone())),
         }
     }
 }

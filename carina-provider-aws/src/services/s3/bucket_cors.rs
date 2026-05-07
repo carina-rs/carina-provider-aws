@@ -35,7 +35,7 @@ impl AwsProvider {
                 {
                     return Ok(State::not_found(id.clone()));
                 }
-                Err(ProviderError::new(sdk_error_message(
+                Err(ProviderError::api_error(sdk_error_message(
                     "Failed to get bucket cors configuration",
                     &e,
                 ))
@@ -72,10 +72,10 @@ impl AwsProvider {
         let rules = match resource.get_attr("cors_rules") {
             Some(Value::List(items)) => items,
             _ => {
-                return Err(
-                    ProviderError::new("cors_rules is required and must be a list")
-                        .for_resource(id.clone()),
-                );
+                return Err(ProviderError::invalid_input(
+                    "cors_rules is required and must be a list",
+                )
+                .for_resource(id.clone()));
             }
         };
 
@@ -88,7 +88,7 @@ impl AwsProvider {
             .set_cors_rules(Some(sdk_rules))
             .build()
             .map_err(|e| {
-                ProviderError::new(sdk_error_message("Failed to build CorsConfiguration", &e))
+                ProviderError::api_error(sdk_error_message("Failed to build CorsConfiguration", &e))
                     .for_resource(id.clone())
             })?;
 
@@ -99,7 +99,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::new(sdk_error_message("Failed to put bucket cors", &e))
+                ProviderError::api_error(sdk_error_message("Failed to put bucket cors", &e))
                     .for_resource(id.clone())
             })?;
 
@@ -127,7 +127,7 @@ impl AwsProvider {
             {
                 Ok(())
             }
-            Err(e) => Err(ProviderError::new(sdk_error_message(
+            Err(e) => Err(ProviderError::api_error(sdk_error_message(
                 "Failed to delete bucket cors configuration",
                 &e,
             ))
@@ -138,7 +138,9 @@ impl AwsProvider {
 
 fn build_rule(id: &ResourceId, rule_value: &Value) -> ProviderResult<CorsRule> {
     let Value::Map(map) = rule_value else {
-        return Err(ProviderError::new("each cors rule must be a map").for_resource(id.clone()));
+        return Err(
+            ProviderError::invalid_input("each cors rule must be a map").for_resource(id.clone())
+        );
     };
 
     let allowed_methods = require_string_list(id, map, "allowed_methods")?;
@@ -163,7 +165,7 @@ fn build_rule(id: &ResourceId, rule_value: &Value) -> ProviderResult<CorsRule> {
     }
 
     builder.build().map_err(|e| {
-        ProviderError::new(sdk_error_message("Failed to build CorsRule", &e))
+        ProviderError::api_error(sdk_error_message("Failed to build CorsRule", &e))
             .for_resource(id.clone())
     })
 }
@@ -175,10 +177,10 @@ fn require_string_list(
 ) -> ProviderResult<Vec<String>> {
     match map.get(field) {
         Some(Value::List(items)) => strings_from_list(id, items, field),
-        _ => {
-            Err(ProviderError::new(format!("cors_rule.{field} is required"))
-                .for_resource(id.clone()))
-        }
+        _ => Err(
+            ProviderError::invalid_input(format!("cors_rule.{field} is required"))
+                .for_resource(id.clone()),
+        ),
     }
 }
 
@@ -187,10 +189,10 @@ fn strings_from_list(id: &ResourceId, items: &[Value], field: &str) -> ProviderR
         .iter()
         .map(|v| match v {
             Value::String(s) => Ok(s.clone()),
-            _ => Err(
-                ProviderError::new(format!("cors_rule.{field} must be a list of strings"))
-                    .for_resource(id.clone()),
-            ),
+            _ => Err(ProviderError::invalid_input(format!(
+                "cors_rule.{field} must be a list of strings"
+            ))
+            .for_resource(id.clone())),
         })
         .collect()
 }

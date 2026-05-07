@@ -46,7 +46,7 @@ impl AwsProvider {
                 {
                     return Ok(State::not_found(id.clone()));
                 }
-                Err(ProviderError::new(sdk_error_message(
+                Err(ProviderError::api_error(sdk_error_message(
                     "Failed to get bucket ownership controls",
                     &e,
                 ))
@@ -84,9 +84,8 @@ impl AwsProvider {
         let ownership_str = match resource.get_attr("object_ownership") {
             Some(Value::String(s)) => extract_enum_value(s).to_string(),
             _ => {
-                return Err(
-                    ProviderError::new("object_ownership is required").for_resource(id.clone())
-                );
+                return Err(ProviderError::invalid_input("object_ownership is required")
+                    .for_resource(id.clone()));
             }
         };
 
@@ -94,7 +93,7 @@ impl AwsProvider {
             .object_ownership(ObjectOwnership::from(ownership_str.as_str()))
             .build()
             .map_err(|e| {
-                ProviderError::new(sdk_error_message(
+                ProviderError::api_error(sdk_error_message(
                     "Failed to build OwnershipControlsRule",
                     &e,
                 ))
@@ -104,7 +103,7 @@ impl AwsProvider {
             .rules(rule)
             .build()
             .map_err(|e| {
-                ProviderError::new(sdk_error_message("Failed to build OwnershipControls", &e))
+                ProviderError::api_error(sdk_error_message("Failed to build OwnershipControls", &e))
                     .for_resource(id.clone())
             })?;
 
@@ -115,7 +114,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::new(sdk_error_message(
+                ProviderError::api_error(sdk_error_message(
                     "Failed to put bucket ownership controls",
                     &e,
                 ))
@@ -146,7 +145,7 @@ impl AwsProvider {
             {
                 Ok(())
             }
-            Err(e) => Err(ProviderError::new(sdk_error_message(
+            Err(e) => Err(ProviderError::api_error(sdk_error_message(
                 "Failed to delete bucket ownership controls",
                 &e,
             ))

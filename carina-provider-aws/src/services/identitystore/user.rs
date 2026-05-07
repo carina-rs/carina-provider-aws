@@ -28,7 +28,7 @@ impl AwsProvider {
                 .get_attr("identity_store_id")
                 .and_then(value_as_str)
                 .ok_or_else(|| {
-                    ProviderError::new("identitystore.user requires `identity_store_id`")
+                    ProviderError::invalid_input("identitystore.user requires `identity_store_id`")
                         .for_resource(resource.id.clone())
                 })?;
 
@@ -43,7 +43,7 @@ impl AwsProvider {
                 .send()
                 .await
                 .map_err(|e| {
-                    ProviderError::new(sdk_error_message(
+                    ProviderError::api_error(sdk_error_message(
                         &format!("Failed to describe identitystore user '{user_id}' in store '{identity_store_id}'"),
                         &e,
                     ))
@@ -73,8 +73,10 @@ async fn resolve_user_id(
         .get_attr("user_name")
         .and_then(value_as_str)
         .ok_or_else(|| {
-            ProviderError::new("identitystore.user requires either `user_id` or `user_name`")
-                .for_resource(resource.id.clone())
+            ProviderError::invalid_input(
+                "identitystore.user requires either `user_id` or `user_name`",
+            )
+            .for_resource(resource.id.clone())
         })?;
 
     let unique_attribute = UniqueAttribute::builder()
@@ -82,7 +84,7 @@ async fn resolve_user_id(
         .attribute_value(aws_smithy_types::Document::String(user_name.to_string()))
         .build()
         .map_err(|e| {
-            ProviderError::new(sdk_error_message(
+            ProviderError::api_error(sdk_error_message(
                 "Failed to build userName lookup request",
                 &e,
             ))
@@ -98,7 +100,7 @@ async fn resolve_user_id(
         .send()
         .await
         .map_err(|e| {
-            ProviderError::new(sdk_error_message(
+            ProviderError::api_error(sdk_error_message(
                 &format!("Failed to look up user_id for user_name '{user_name}' in store '{identity_store_id}'"),
                 &e,
             ))
