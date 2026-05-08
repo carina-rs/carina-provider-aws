@@ -18,11 +18,11 @@ impl Provider for AwsProvider {
     fn read(
         &self,
         id: &ResourceId,
-        identifier: &str,
+        identifier: Option<&str>,
         _request: ReadRequest,
     ) -> BoxFuture<'_, ProviderResult<State>> {
         let id = id.clone();
-        let identifier = Some(identifier.to_string());
+        let identifier = identifier.map(|s| s.to_string());
         Box::pin(async move {
             let mut state = match id.resource_type.as_str() {
                 "s3.Bucket" => self.read_s3_bucket(&id, identifier.as_deref()).await,
