@@ -410,10 +410,10 @@ impl Provider for AwsProvider {
     ) -> BoxFuture<'_, ProviderResult<()>> {
         let id = id.clone();
         let identifier = identifier.to_string();
-        let lifecycle = request.lifecycle;
+        let directives = request.directives;
         Box::pin(async move {
             match id.resource_type.as_str() {
-                "s3.Bucket" => self.delete_s3_bucket(id, &identifier, &lifecycle).await,
+                "s3.Bucket" => self.delete_s3_bucket(id, &identifier, &directives).await,
                 "s3.BucketPolicy" => {
                     self.delete_s3_bucket_policy_idempotent(id, &identifier)
                         .await

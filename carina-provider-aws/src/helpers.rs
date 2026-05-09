@@ -160,7 +160,7 @@ fn is_retryable_error(error_msg: &str) -> bool {
 /// they always did.
 ///
 /// The returned `Resource` carries `from`'s `ResourceId` and an empty
-/// `LifecycleConfig` (lifecycle is delete-only and is not consulted on
+/// `Directives` (directives are delete-only and are not consulted on
 /// update paths in this provider).
 pub fn apply_patch_to_state(from: &State, patch: &UpdatePatch) -> Resource {
     let mut resource = Resource::new(from.id.resource_type.clone(), from.id.name.to_string());

@@ -282,13 +282,13 @@ impl CarinaProvider for AwsProcessProvider {
         request: proto::DeleteRequest,
     ) -> Result<(), proto::ProviderError> {
         let core_id = convert::proto_to_core_resource_id(id);
-        let core_lifecycle = carina_core::resource::LifecycleConfig {
-            force_delete: request.lifecycle.force_delete,
-            create_before_destroy: request.lifecycle.create_before_destroy,
-            prevent_destroy: request.lifecycle.prevent_destroy,
+        let core_directives = carina_core::resource::Directives {
+            force_delete: request.directives.force_delete,
+            create_before_destroy: request.directives.create_before_destroy,
+            prevent_destroy: request.directives.prevent_destroy,
         };
         let core_request = CoreDeleteRequest {
-            lifecycle: core_lifecycle,
+            directives: core_directives,
         };
         let result =
             self.runtime

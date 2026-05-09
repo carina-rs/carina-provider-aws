@@ -2,7 +2,7 @@ use indexmap::IndexMap;
 use std::collections::HashMap;
 
 use carina_core::provider::{BoxFuture, ProviderError, ProviderResult};
-use carina_core::resource::{LifecycleConfig, Resource, ResourceId, State, Value};
+use carina_core::resource::{Directives, Resource, ResourceId, State, Value};
 use carina_core::utils::convert_enum_value;
 
 use crate::AwsProvider;
@@ -156,10 +156,10 @@ impl AwsProvider {
         &self,
         id: ResourceId,
         identifier: &str,
-        lifecycle: &LifecycleConfig,
+        directives: &Directives,
     ) -> ProviderResult<()> {
         // If force_delete is enabled, empty the bucket before deletion
-        if lifecycle.force_delete {
+        if directives.force_delete {
             self.empty_s3_bucket(&id, identifier).await?;
         }
 
