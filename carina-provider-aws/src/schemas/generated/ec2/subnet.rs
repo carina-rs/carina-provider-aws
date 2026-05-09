@@ -152,7 +152,7 @@ pub fn ec2_subnet_config() -> AwsSchemaConfig {
                 name: "HostnameType".to_string(),
                 values: vec!["ip-name".to_string(), "resource-name".to_string()],
                 namespace: Some("aws.ec2.Subnet".to_string()),
-                to_dsl: Some(|s: &str| match s { "ip-name" => "ip_name".to_string(), "resource-name" => "resource_name".to_string(), _ => s.to_string() }),
+                dsl_aliases: vec![("ip-name".to_string(), "ip_name".to_string()), ("resource-name".to_string(), "resource_name".to_string())],
             }).with_description("The type of hostname for EC2 instances. For IPv4 only subnets, an instance DNS name must be based on the instance IPv4 address. For IPv6 only subnets,...").with_provider_name("HostnameType")
                     ],
                 })

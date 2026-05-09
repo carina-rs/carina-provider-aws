@@ -26,16 +26,33 @@ impl ProviderFactory for AwsProviderFactory {
         &self,
     ) -> HashMap<String, carina_core::schema::AttributeType> {
         let mut types = HashMap::new();
+        // Region codes carry hyphens (`ap-northeast-1`) but the DSL
+        // identifier form replaces them with underscores
+        // (`ap_northeast_1`). Materialize the alias pairs as data so the
+        // mapping survives the WASM-component boundary — a `fn` pointer
+        // would not (carina#2831).
+        let region_values: Vec<String> = carina_aws_types::REGIONS
+            .iter()
+            .map(|(code, _)| code.to_string())
+            .collect();
+        let region_dsl_aliases: Vec<(String, String)> = region_values
+            .iter()
+            .filter_map(|code| {
+                let dsl = code.replace('-', "_");
+                if dsl == *code {
+                    None
+                } else {
+                    Some((code.clone(), dsl))
+                }
+            })
+            .collect();
         types.insert(
             "region".to_string(),
             carina_core::schema::AttributeType::StringEnum {
                 name: "Region".to_string(),
-                values: carina_aws_types::REGIONS
-                    .iter()
-                    .map(|(code, _)| code.to_string())
-                    .collect(),
+                values: region_values,
                 namespace: Some("aws".to_string()),
-                to_dsl: Some(|s| s.replace('-', "_")),
+                dsl_aliases: region_dsl_aliases,
             },
         );
         types.insert(

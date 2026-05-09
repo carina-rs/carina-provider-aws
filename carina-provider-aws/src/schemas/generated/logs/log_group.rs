@@ -43,7 +43,7 @@ pub fn logs_log_group_config() -> AwsSchemaConfig {
                 name: "LogGroupClass".to_string(),
                 values: vec!["DELIVERY".to_string(), "INFREQUENT_ACCESS".to_string(), "STANDARD".to_string()],
                 namespace: Some("aws.logs.LogGroup".to_string()),
-                to_dsl: Some(|s: &str| match s { "DELIVERY" => "delivery".to_string(), "INFREQUENT_ACCESS" => "infrequent_access".to_string(), "STANDARD" => "standard".to_string(), _ => s.to_string() }),
+                dsl_aliases: vec![("DELIVERY".to_string(), "delivery".to_string()), ("INFREQUENT_ACCESS".to_string(), "infrequent_access".to_string()), ("STANDARD".to_string(), "standard".to_string())],
             })
                 .create_only()
                 .with_description("Use this parameter to specify the log group class for this log group. There are three classes: The Standard log class supports all CloudWatch Logs fea...")

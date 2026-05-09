@@ -55,7 +55,7 @@ pub fn ec2_vpc_config() -> AwsSchemaConfig {
                 name: "InstanceTenancy".to_string(),
                 values: vec!["dedicated".to_string(), "default".to_string(), "host".to_string()],
                 namespace: Some("aws.ec2.Vpc".to_string()),
-                to_dsl: None,
+                dsl_aliases: vec![],
             })
                 .create_only()
                 .with_description("The tenancy options for instances launched into the VPC. For default, instances are launched with shared tenancy by default. You can launch instances ...")

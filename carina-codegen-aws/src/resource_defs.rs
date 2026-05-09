@@ -474,10 +474,9 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             ],
             create_only_overrides: vec![],
             enum_aliases: vec![("ip_protocol", "all", "-1")],
-            to_dsl_overrides: vec![(
-                "ip_protocol",
-                r#"Some(|s: &str| match s { "-1" => "all".to_string(), _ => s.replace('-', "_") })"#,
-            )],
+            // dsl_aliases auto-derives hyphen->underscore via dsl_enum_value;
+            // explicit (-1, all) flows in via enum_aliases.
+            to_dsl_overrides: vec![],
             required_overrides: vec!["IpProtocol"],
             extra_read_only: vec![],
             read_only_overrides: vec![],
@@ -529,10 +528,9 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             ],
             create_only_overrides: vec![],
             enum_aliases: vec![("ip_protocol", "all", "-1")],
-            to_dsl_overrides: vec![(
-                "ip_protocol",
-                r#"Some(|s: &str| match s { "-1" => "all".to_string(), _ => s.replace('-', "_") })"#,
-            )],
+            // dsl_aliases auto-derives hyphen->underscore; explicit (-1, all)
+            // flows in via enum_aliases.
+            to_dsl_overrides: vec![],
             required_overrides: vec!["IpProtocol", "GroupId"],
             extra_read_only: vec![],
             read_only_overrides: vec![],
@@ -651,10 +649,8 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             ],
             create_only_overrides: vec![],
             enum_aliases: vec![],
-            to_dsl_overrides: vec![(
-                "log_destination_type",
-                r#"Some(|s: &str| s.replace('-', "_"))"#,
-            )],
+            // dsl_aliases auto-derives hyphen->underscore from values; no override needed.
+            to_dsl_overrides: vec![],
             required_overrides: vec!["ResourceId", "ResourceType"],
             extra_read_only: vec![],
             read_only_overrides: vec![],
@@ -1291,11 +1287,11 @@ pub fn s3_resources() -> Vec<ResourceDef> {
             type_overrides: vec![
                 (
                     "Status",
-                    "AttributeType::StringEnum { name: \"VersioningStatus\".to_string(), values: vec![\"Enabled\".to_string(), \"Suspended\".to_string()], namespace: Some(\"aws.s3.BucketVersioning\".to_string()), to_dsl: None }",
+                    "AttributeType::StringEnum { name: \"VersioningStatus\".to_string(), values: vec![\"Enabled\".to_string(), \"Suspended\".to_string()], namespace: Some(\"aws.s3.BucketVersioning\".to_string()), dsl_aliases: vec![(\"Enabled\".to_string(), \"enabled\".to_string()), (\"Suspended\".to_string(), \"suspended\".to_string())] }",
                 ),
                 (
                     "MFADelete",
-                    "AttributeType::StringEnum { name: \"MFADelete\".to_string(), values: vec![\"Enabled\".to_string(), \"Disabled\".to_string()], namespace: Some(\"aws.s3.BucketVersioning\".to_string()), to_dsl: None }",
+                    "AttributeType::StringEnum { name: \"MFADelete\".to_string(), values: vec![\"Enabled\".to_string(), \"Disabled\".to_string()], namespace: Some(\"aws.s3.BucketVersioning\".to_string()), dsl_aliases: vec![(\"Enabled\".to_string(), \"enabled\".to_string()), (\"Disabled\".to_string(), \"disabled\".to_string())] }",
                 ),
             ],
             exclude_fields: vec![
@@ -1399,7 +1395,7 @@ pub fn s3_resources() -> Vec<ResourceDef> {
             has_tags: false,
             type_overrides: vec![(
                 "ObjectOwnership",
-                "AttributeType::StringEnum { name: \"ObjectOwnership\".to_string(), values: vec![\"BucketOwnerEnforced\".to_string(), \"BucketOwnerPreferred\".to_string(), \"ObjectWriter\".to_string()], namespace: Some(\"aws.s3.BucketOwnershipControls\".to_string()), to_dsl: None }",
+                "AttributeType::StringEnum { name: \"ObjectOwnership\".to_string(), values: vec![\"BucketOwnerEnforced\".to_string(), \"BucketOwnerPreferred\".to_string(), \"ObjectWriter\".to_string()], namespace: Some(\"aws.s3.BucketOwnershipControls\".to_string()), dsl_aliases: vec![(\"BucketOwnerEnforced\".to_string(), \"bucket_owner_enforced\".to_string()), (\"BucketOwnerPreferred\".to_string(), \"bucket_owner_preferred\".to_string()), (\"ObjectWriter\".to_string(), \"object_writer\".to_string())] }",
             )],
             exclude_fields: vec![
                 "ContentMD5",
