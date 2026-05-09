@@ -7,7 +7,7 @@
 use super::AwsSchemaConfig;
 use carina_core::schema::{AttributeSchema, AttributeType, ResourceSchema, types};
 
-const VALID_FEATURE_SET: &[&str] = &["ALL", "CONSOLIDATED_BILLING"];
+const VALID_FEATURE_SET: &[&str] = &["ALL", "CONSOLIDATED_BILLING", "all", "consolidated_billing"];
 
 /// Returns the schema config for organizations.Organization (Smithy: com.amazonaws.organizations)
 pub fn organizations_organization_config() -> AwsSchemaConfig {
@@ -22,7 +22,7 @@ pub fn organizations_organization_config() -> AwsSchemaConfig {
                 name: "FeatureSet".to_string(),
                 values: vec!["ALL".to_string(), "CONSOLIDATED_BILLING".to_string()],
                 namespace: Some("aws.organizations.Organization".to_string()),
-                to_dsl: None,
+                to_dsl: Some(|s: &str| match s { "ALL" => "all".to_string(), "CONSOLIDATED_BILLING" => "consolidated_billing".to_string(), _ => s.to_string() }),
             })
                 .create_only()
                 .with_description("Specifies the feature set supported by the new organization. Each feature set supports different levels of functionality. CONSOLIDATED_BILLING: All me...")
@@ -70,11 +70,21 @@ pub fn enum_valid_values() -> (
 /// Maps DSL alias values back to canonical AWS values for this module.
 /// e.g., ("ip_protocol", "all") -> Some("-1")
 pub fn enum_alias_reverse(attr_name: &str, value: &str) -> Option<&'static str> {
-    let _ = (attr_name, value);
-    None
+    match (attr_name, value) {
+        ("feature_set", "all") => Some("ALL"),
+        ("feature_set", "consolidated_billing") => Some("CONSOLIDATED_BILLING"),
+        _ => None,
+    }
 }
 
 /// Returns all enum alias entries as (attr_name, alias, canonical) tuples.
 pub fn enum_alias_entries() -> &'static [(&'static str, &'static str, &'static str)] {
-    &[]
+    &[
+        ("feature_set", "all", "ALL"),
+        (
+            "feature_set",
+            "consolidated_billing",
+            "CONSOLIDATED_BILLING",
+        ),
+    ]
 }

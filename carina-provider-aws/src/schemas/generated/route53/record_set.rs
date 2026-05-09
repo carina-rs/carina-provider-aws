@@ -12,7 +12,8 @@ use carina_core::schema::{
 
 const VALID_TYPE: &[&str] = &[
     "A", "AAAA", "CAA", "CNAME", "DS", "HTTPS", "MX", "NAPTR", "NS", "PTR", "SOA", "SPF", "SRV",
-    "SSHFP", "SVCB", "TLSA", "TXT",
+    "SSHFP", "SVCB", "TLSA", "TXT", "a", "aaaa", "caa", "cname", "ds", "https", "mx", "naptr",
+    "ns", "ptr", "soa", "spf", "srv", "sshfp", "svcb", "tlsa", "txt",
 ];
 
 fn validate_ttl_range(value: &Value) -> Result<(), String> {
@@ -77,7 +78,7 @@ pub fn route53_record_set_config() -> AwsSchemaConfig {
                 name: "Type".to_string(),
                 values: vec!["A".to_string(), "AAAA".to_string(), "CAA".to_string(), "CNAME".to_string(), "DS".to_string(), "HTTPS".to_string(), "MX".to_string(), "NAPTR".to_string(), "NS".to_string(), "PTR".to_string(), "SOA".to_string(), "SPF".to_string(), "SRV".to_string(), "SSHFP".to_string(), "SVCB".to_string(), "TLSA".to_string(), "TXT".to_string()],
                 namespace: Some("aws.route53.RecordSet".to_string()),
-                to_dsl: None,
+                to_dsl: Some(|s: &str| match s { "A" => "a".to_string(), "AAAA" => "aaaa".to_string(), "CAA" => "caa".to_string(), "CNAME" => "cname".to_string(), "DS" => "ds".to_string(), "HTTPS" => "https".to_string(), "MX" => "mx".to_string(), "NAPTR" => "naptr".to_string(), "NS" => "ns".to_string(), "PTR" => "ptr".to_string(), "SOA" => "soa".to_string(), "SPF" => "spf".to_string(), "SRV" => "srv".to_string(), "SSHFP" => "sshfp".to_string(), "SVCB" => "svcb".to_string(), "TLSA" => "tlsa".to_string(), "TXT" => "txt".to_string(), _ => s.to_string() }),
             })
                 .required()
                 .identity()
@@ -104,11 +105,47 @@ pub fn enum_valid_values() -> (
 /// Maps DSL alias values back to canonical AWS values for this module.
 /// e.g., ("ip_protocol", "all") -> Some("-1")
 pub fn enum_alias_reverse(attr_name: &str, value: &str) -> Option<&'static str> {
-    let _ = (attr_name, value);
-    None
+    match (attr_name, value) {
+        ("type", "a") => Some("A"),
+        ("type", "aaaa") => Some("AAAA"),
+        ("type", "caa") => Some("CAA"),
+        ("type", "cname") => Some("CNAME"),
+        ("type", "ds") => Some("DS"),
+        ("type", "https") => Some("HTTPS"),
+        ("type", "mx") => Some("MX"),
+        ("type", "naptr") => Some("NAPTR"),
+        ("type", "ns") => Some("NS"),
+        ("type", "ptr") => Some("PTR"),
+        ("type", "soa") => Some("SOA"),
+        ("type", "spf") => Some("SPF"),
+        ("type", "srv") => Some("SRV"),
+        ("type", "sshfp") => Some("SSHFP"),
+        ("type", "svcb") => Some("SVCB"),
+        ("type", "tlsa") => Some("TLSA"),
+        ("type", "txt") => Some("TXT"),
+        _ => None,
+    }
 }
 
 /// Returns all enum alias entries as (attr_name, alias, canonical) tuples.
 pub fn enum_alias_entries() -> &'static [(&'static str, &'static str, &'static str)] {
-    &[]
+    &[
+        ("type", "a", "A"),
+        ("type", "aaaa", "AAAA"),
+        ("type", "caa", "CAA"),
+        ("type", "cname", "CNAME"),
+        ("type", "ds", "DS"),
+        ("type", "https", "HTTPS"),
+        ("type", "mx", "MX"),
+        ("type", "naptr", "NAPTR"),
+        ("type", "ns", "NS"),
+        ("type", "ptr", "PTR"),
+        ("type", "soa", "SOA"),
+        ("type", "spf", "SPF"),
+        ("type", "srv", "SRV"),
+        ("type", "sshfp", "SSHFP"),
+        ("type", "svcb", "SVCB"),
+        ("type", "tlsa", "TLSA"),
+        ("type", "txt", "TXT"),
+    ]
 }

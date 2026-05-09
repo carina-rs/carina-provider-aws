@@ -12,7 +12,7 @@ use carina_core::schema::{
     AttributeSchema, AttributeType, ResourceSchema, StructField, legacy_validator, types,
 };
 
-const VALID_HOSTNAME_TYPE: &[&str] = &["ip-name", "resource-name"];
+const VALID_HOSTNAME_TYPE: &[&str] = &["ip-name", "resource-name", "ip_name", "resource_name"];
 
 fn validate_ipv4_netmask_length_range(value: &Value) -> Result<(), String> {
     if let Value::Int(n) = value {
@@ -152,7 +152,7 @@ pub fn ec2_subnet_config() -> AwsSchemaConfig {
                 name: "HostnameType".to_string(),
                 values: vec!["ip-name".to_string(), "resource-name".to_string()],
                 namespace: Some("aws.ec2.Subnet".to_string()),
-                to_dsl: Some(|s: &str| s.replace('-', "_")),
+                to_dsl: Some(|s: &str| match s { "ip-name" => "ip_name".to_string(), "resource-name" => "resource_name".to_string(), _ => s.to_string() }),
             }).with_description("The type of hostname for EC2 instances. For IPv4 only subnets, an instance DNS name must be based on the instance IPv4 address. For IPv6 only subnets,...").with_provider_name("HostnameType")
                     ],
                 })

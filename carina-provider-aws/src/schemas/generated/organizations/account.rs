@@ -9,11 +9,18 @@ use super::tags_type;
 use super::validate_tags_map;
 use carina_core::schema::{AttributeSchema, AttributeType, ResourceSchema, types};
 
-const VALID_IAM_USER_ACCESS_TO_BILLING: &[&str] = &["ALLOW", "DENY"];
+const VALID_IAM_USER_ACCESS_TO_BILLING: &[&str] = &["ALLOW", "DENY", "allow", "deny"];
 
-const VALID_JOINED_METHOD: &[&str] = &["CREATED", "INVITED"];
+const VALID_JOINED_METHOD: &[&str] = &["CREATED", "INVITED", "created", "invited"];
 
-const VALID_STATUS: &[&str] = &["ACTIVE", "PENDING_CLOSURE", "SUSPENDED"];
+const VALID_STATUS: &[&str] = &[
+    "ACTIVE",
+    "PENDING_CLOSURE",
+    "SUSPENDED",
+    "active",
+    "pending_closure",
+    "suspended",
+];
 
 /// Returns the schema config for organizations.Account (Smithy: com.amazonaws.organizations)
 pub fn organizations_account_config() -> AwsSchemaConfig {
@@ -42,7 +49,7 @@ pub fn organizations_account_config() -> AwsSchemaConfig {
                 name: "IamUserAccessToBilling".to_string(),
                 values: vec!["ALLOW".to_string(), "DENY".to_string()],
                 namespace: Some("aws.organizations.Account".to_string()),
-                to_dsl: None,
+                to_dsl: Some(|s: &str| match s { "ALLOW" => "allow".to_string(), "DENY" => "deny".to_string(), _ => s.to_string() }),
             })
                 .create_only()
                 .with_description("If set to ALLOW, the new account enables IAM users to access account billing information if they have the required permissions. If set to DENY, only t...")
@@ -69,7 +76,7 @@ pub fn organizations_account_config() -> AwsSchemaConfig {
                 name: "JoinedMethod".to_string(),
                 values: vec!["CREATED".to_string(), "INVITED".to_string()],
                 namespace: Some("aws.organizations.Account".to_string()),
-                to_dsl: None,
+                to_dsl: Some(|s: &str| match s { "CREATED" => "created".to_string(), "INVITED" => "invited".to_string(), _ => s.to_string() }),
             })
                 .with_description("The method by which the account joined the organization. (read-only)")
                 .with_provider_name("JoinedMethod"),
@@ -89,7 +96,7 @@ pub fn organizations_account_config() -> AwsSchemaConfig {
                 name: "Status".to_string(),
                 values: vec!["ACTIVE".to_string(), "PENDING_CLOSURE".to_string(), "SUSPENDED".to_string()],
                 namespace: Some("aws.organizations.Account".to_string()),
-                to_dsl: None,
+                to_dsl: Some(|s: &str| match s { "ACTIVE" => "active".to_string(), "PENDING_CLOSURE" => "pending_closure".to_string(), "SUSPENDED" => "suspended".to_string(), _ => s.to_string() }),
             })
                 .with_description("The status of the account in the organization. The Status parameter in the Account object will be retired on September 9, 2026. Although both the acco... (read-only)")
                 .with_provider_name("Status"),
@@ -124,11 +131,27 @@ pub fn enum_valid_values() -> (
 /// Maps DSL alias values back to canonical AWS values for this module.
 /// e.g., ("ip_protocol", "all") -> Some("-1")
 pub fn enum_alias_reverse(attr_name: &str, value: &str) -> Option<&'static str> {
-    let _ = (attr_name, value);
-    None
+    match (attr_name, value) {
+        ("iam_user_access_to_billing", "allow") => Some("ALLOW"),
+        ("iam_user_access_to_billing", "deny") => Some("DENY"),
+        ("joined_method", "created") => Some("CREATED"),
+        ("joined_method", "invited") => Some("INVITED"),
+        ("status", "active") => Some("ACTIVE"),
+        ("status", "pending_closure") => Some("PENDING_CLOSURE"),
+        ("status", "suspended") => Some("SUSPENDED"),
+        _ => None,
+    }
 }
 
 /// Returns all enum alias entries as (attr_name, alias, canonical) tuples.
 pub fn enum_alias_entries() -> &'static [(&'static str, &'static str, &'static str)] {
-    &[]
+    &[
+        ("iam_user_access_to_billing", "allow", "ALLOW"),
+        ("iam_user_access_to_billing", "deny", "DENY"),
+        ("joined_method", "created", "CREATED"),
+        ("joined_method", "invited", "INVITED"),
+        ("status", "active", "ACTIVE"),
+        ("status", "pending_closure", "PENDING_CLOSURE"),
+        ("status", "suspended", "SUSPENDED"),
+    ]
 }

@@ -9,7 +9,13 @@ use super::tags_type;
 use super::validate_tags_map;
 use carina_core::schema::{AttributeSchema, AttributeType, ResourceSchema};
 
-const VALID_LOG_DESTINATION_TYPE: &[&str] = &["cloud-watch-logs", "kinesis-data-firehose", "s3"];
+const VALID_LOG_DESTINATION_TYPE: &[&str] = &[
+    "cloud-watch-logs",
+    "kinesis-data-firehose",
+    "s3",
+    "cloud_watch_logs",
+    "kinesis_data_firehose",
+];
 
 const VALID_RESOURCE_TYPE: &[&str] = &[
     "NetworkInterface",
@@ -18,9 +24,15 @@ const VALID_RESOURCE_TYPE: &[&str] = &[
     "TransitGateway",
     "TransitGatewayAttachment",
     "VPC",
+    "network_interface",
+    "regional_nat_gateway",
+    "subnet",
+    "transit_gateway",
+    "transit_gateway_attachment",
+    "vpc",
 ];
 
-const VALID_TRAFFIC_TYPE: &[&str] = &["ACCEPT", "ALL", "REJECT"];
+const VALID_TRAFFIC_TYPE: &[&str] = &["ACCEPT", "ALL", "REJECT", "accept", "all", "reject"];
 
 /// Returns the schema config for ec2.FlowLog (Smithy: com.amazonaws.ec2)
 pub fn ec2_flow_log_config() -> AwsSchemaConfig {
@@ -83,7 +95,7 @@ pub fn ec2_flow_log_config() -> AwsSchemaConfig {
                 name: "ResourceType".to_string(),
                 values: vec!["NetworkInterface".to_string(), "RegionalNatGateway".to_string(), "Subnet".to_string(), "TransitGateway".to_string(), "TransitGatewayAttachment".to_string(), "VPC".to_string()],
                 namespace: Some("aws.ec2.FlowLog".to_string()),
-                to_dsl: None,
+                to_dsl: Some(|s: &str| match s { "NetworkInterface" => "network_interface".to_string(), "RegionalNatGateway" => "regional_nat_gateway".to_string(), "Subnet" => "subnet".to_string(), "TransitGateway" => "transit_gateway".to_string(), "TransitGatewayAttachment" => "transit_gateway_attachment".to_string(), "VPC" => "vpc".to_string(), _ => s.to_string() }),
             })
                 .required()
                 .create_only()
@@ -95,7 +107,7 @@ pub fn ec2_flow_log_config() -> AwsSchemaConfig {
                 name: "TrafficType".to_string(),
                 values: vec!["ACCEPT".to_string(), "ALL".to_string(), "REJECT".to_string()],
                 namespace: Some("aws.ec2.FlowLog".to_string()),
-                to_dsl: None,
+                to_dsl: Some(|s: &str| match s { "ACCEPT" => "accept".to_string(), "ALL" => "all".to_string(), "REJECT" => "reject".to_string(), _ => s.to_string() }),
             })
                 .create_only()
                 .with_description("The type of traffic to monitor (accepted traffic, rejected traffic, or all traffic). This parameter is not supported for transit gateway resource type...")
@@ -136,6 +148,15 @@ pub fn enum_alias_reverse(attr_name: &str, value: &str) -> Option<&'static str> 
     match (attr_name, value) {
         ("log_destination_type", "cloud_watch_logs") => Some("cloud-watch-logs"),
         ("log_destination_type", "kinesis_data_firehose") => Some("kinesis-data-firehose"),
+        ("resource_type", "network_interface") => Some("NetworkInterface"),
+        ("resource_type", "regional_nat_gateway") => Some("RegionalNatGateway"),
+        ("resource_type", "subnet") => Some("Subnet"),
+        ("resource_type", "transit_gateway") => Some("TransitGateway"),
+        ("resource_type", "transit_gateway_attachment") => Some("TransitGatewayAttachment"),
+        ("resource_type", "vpc") => Some("VPC"),
+        ("traffic_type", "accept") => Some("ACCEPT"),
+        ("traffic_type", "all") => Some("ALL"),
+        ("traffic_type", "reject") => Some("REJECT"),
         _ => None,
     }
 }
@@ -153,5 +174,22 @@ pub fn enum_alias_entries() -> &'static [(&'static str, &'static str, &'static s
             "kinesis_data_firehose",
             "kinesis-data-firehose",
         ),
+        ("resource_type", "network_interface", "NetworkInterface"),
+        (
+            "resource_type",
+            "regional_nat_gateway",
+            "RegionalNatGateway",
+        ),
+        ("resource_type", "subnet", "Subnet"),
+        ("resource_type", "transit_gateway", "TransitGateway"),
+        (
+            "resource_type",
+            "transit_gateway_attachment",
+            "TransitGatewayAttachment",
+        ),
+        ("resource_type", "vpc", "VPC"),
+        ("traffic_type", "accept", "ACCEPT"),
+        ("traffic_type", "all", "ALL"),
+        ("traffic_type", "reject", "REJECT"),
     ]
 }

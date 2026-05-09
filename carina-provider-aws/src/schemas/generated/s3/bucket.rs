@@ -9,7 +9,7 @@ use super::tags_type;
 use super::validate_tags_map;
 use carina_core::schema::{AttributeSchema, AttributeType, ResourceSchema};
 
-const VALID_BUCKET_NAMESPACE: &[&str] = &["account-regional", "global"];
+const VALID_BUCKET_NAMESPACE: &[&str] = &["account-regional", "global", "account_regional"];
 
 /// Returns the schema config for s3.Bucket (Smithy: com.amazonaws.s3)
 pub fn s3_bucket_config() -> AwsSchemaConfig {
@@ -30,7 +30,7 @@ pub fn s3_bucket_config() -> AwsSchemaConfig {
                 name: "BucketNamespace".to_string(),
                 values: vec!["account-regional".to_string(), "global".to_string()],
                 namespace: Some("aws.s3.Bucket".to_string()),
-                to_dsl: Some(|s: &str| s.replace('-', "_")),
+                to_dsl: Some(|s: &str| match s { "account-regional" => "account_regional".to_string(), _ => s.to_string() }),
             })
                 .create_only()
                 .with_description("Specifies the namespace where you want to create your general purpose bucket. When you create a general purpose bucket, you can choose to create a buc...")
