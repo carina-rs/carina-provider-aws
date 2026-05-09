@@ -156,10 +156,12 @@ mod tests {
         resource.set_attr("status".to_string(), Value::String("Enabled".to_string()));
         let mut resources = vec![resource];
         resolve_enum_identifiers(&mut resources);
+        // After carina#2832, resolve_enum_value applies dsl_aliases so the
+        // namespaced output uses the DSL spelling (snake_case).
         assert_eq!(
             resources[0].get_attr("status"),
             Some(&Value::String(
-                "aws.s3.BucketVersioning.VersioningStatus.Enabled".to_string()
+                "aws.s3.BucketVersioning.VersioningStatus.enabled".to_string()
             ))
         );
     }
@@ -176,7 +178,7 @@ mod tests {
         assert_eq!(
             resources[0].get_attr("object_ownership"),
             Some(&Value::String(
-                "aws.s3.BucketOwnershipControls.ObjectOwnership.BucketOwnerEnforced".to_string()
+                "aws.s3.BucketOwnershipControls.ObjectOwnership.bucket_owner_enforced".to_string()
             ))
         );
     }
@@ -190,7 +192,7 @@ mod tests {
         assert_eq!(
             resources[0].get_attr("status"),
             Some(&Value::String(
-                "aws.s3.BucketVersioning.VersioningStatus.Enabled".to_string()
+                "aws.s3.BucketVersioning.VersioningStatus.enabled".to_string()
             ))
         );
     }
@@ -247,10 +249,12 @@ mod tests {
             ),
         ]);
         normalize_state_enums("s3.BucketOwnershipControls", &mut attributes);
+        // After carina#2832, normalize_state_enum_value applies dsl_aliases
+        // and writes back the DSL spelling for diff stability.
         assert_eq!(
             attributes.get("object_ownership"),
             Some(&Value::String(
-                "aws.s3.BucketOwnershipControls.ObjectOwnership.BucketOwnerEnforced".to_string()
+                "aws.s3.BucketOwnershipControls.ObjectOwnership.bucket_owner_enforced".to_string()
             ))
         );
         // Non-enum attributes should not be modified
@@ -270,7 +274,7 @@ mod tests {
         assert_eq!(
             attributes.get("status"),
             Some(&Value::String(
-                "aws.s3.BucketVersioning.VersioningStatus.Enabled".to_string()
+                "aws.s3.BucketVersioning.VersioningStatus.enabled".to_string()
             ))
         );
     }
