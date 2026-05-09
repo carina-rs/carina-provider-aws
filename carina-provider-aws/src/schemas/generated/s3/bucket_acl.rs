@@ -36,12 +36,17 @@ pub fn s3_bucket_acl_config() -> AwsSchemaConfig {
                             "public-read-write".to_string(),
                         ],
                         namespace: Some("aws.s3.BucketAcl".to_string()),
-                        to_dsl: Some(|s: &str| match s {
-                            "authenticated-read" => "authenticated_read".to_string(),
-                            "public-read" => "public_read".to_string(),
-                            "public-read-write" => "public_read_write".to_string(),
-                            _ => s.to_string(),
-                        }),
+                        dsl_aliases: vec![
+                            (
+                                "authenticated-read".to_string(),
+                                "authenticated_read".to_string(),
+                            ),
+                            ("public-read".to_string(), "public_read".to_string()),
+                            (
+                                "public-read-write".to_string(),
+                                "public_read_write".to_string(),
+                            ),
+                        ],
                     },
                 )
                 .required()

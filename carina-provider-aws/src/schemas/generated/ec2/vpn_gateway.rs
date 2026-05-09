@@ -36,7 +36,7 @@ pub fn ec2_vpn_gateway_config() -> AwsSchemaConfig {
                 name: "Type".to_string(),
                 values: vec!["ipsec.1".to_string()],
                 namespace: Some("aws.ec2.VpnGateway".to_string()),
-                to_dsl: None,
+                dsl_aliases: vec![],
             })
                 .required()
                 .create_only()

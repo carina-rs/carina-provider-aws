@@ -93,7 +93,7 @@ pub fn ec2_security_group_ingress_config() -> AwsSchemaConfig {
                 name: "IpProtocol".to_string(),
                 values: vec!["tcp".to_string(), "udp".to_string(), "icmp".to_string(), "icmpv6".to_string(), "-1".to_string(), "all".to_string()],
                 namespace: Some("aws.ec2.SecurityGroupIngress".to_string()),
-                to_dsl: Some(|s: &str| match s { "-1" => "all".to_string(), _ => s.replace('-', "_") }),
+                dsl_aliases: vec![("-1".to_string(), "all".to_string())],
             })
                 .required()
                 .create_only()

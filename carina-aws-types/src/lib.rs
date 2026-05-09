@@ -9,6 +9,67 @@ use carina_core::schema::{AttributeType, CompletionValue, StructField, legacy_va
 
 // ========== Enum helpers ==========
 
+/// Convert an AWS API enum value to its DSL (snake_case) spelling.
+///
+/// Behaviorally identical to `carina-codegen-aws::dsl::dsl_enum_value` and
+/// `carina-provider-awscc::bin::codegen::dsl_enum_value`. The three
+/// implementations must stay in sync — they collectively define what users
+/// type in their `.crn` files. Per the naming-conventions design D7
+/// (`carina-rs/carina/docs/specs/2026-04-22-naming-conventions-design.md`):
+/// SHOUTY_SNAKE → lowercase; PascalCase → snake_case; kebab → snake;
+/// numeric/dotted-numeric pass through unchanged.
+fn dsl_enum_value(value: &str) -> String {
+    if value.is_empty() {
+        return String::new();
+    }
+    if value.chars().all(|c| c.is_ascii_digit() || c == '.') {
+        return value.to_string();
+    }
+    if value
+        .chars()
+        .all(|c| c.is_ascii_uppercase() || c == '_' || c.is_ascii_digit())
+        && value.chars().any(|c| c.is_ascii_uppercase())
+    {
+        return value.to_ascii_lowercase();
+    }
+    if !value.chars().any(|c| c.is_ascii_uppercase()) {
+        return value.replace('-', "_");
+    }
+    // PascalCase / mixed → snake_case (no heck dep, hand-rolled to keep
+    // `carina-aws-types` heck-free).
+    let mut out = String::with_capacity(value.len() + 4);
+    for (i, c) in value.chars().enumerate() {
+        if c.is_ascii_uppercase() {
+            if i > 0 {
+                out.push('_');
+            }
+            out.push(c.to_ascii_lowercase());
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
+/// Build a `dsl_aliases` pair list for a `StringEnum`'s `values`.
+///
+/// Returns `(api, dsl)` pairs for every value where `dsl_enum_value(api) != api`.
+/// Values whose DSL spelling already equals the API spelling are omitted
+/// (the validator treats them as canonical).
+fn dsl_aliases_for(values: &[&str]) -> Vec<(String, String)> {
+    values
+        .iter()
+        .filter_map(|v| {
+            let dsl = dsl_enum_value(v);
+            if dsl == *v {
+                None
+            } else {
+                Some((v.to_string(), dsl))
+            }
+        })
+        .collect()
+}
+
 /// Check if `input` matches any of `valid_values` using enum matching rules:
 /// exact match, case-insensitive, or underscore-to-hyphen (case-insensitive).
 /// Returns the matched valid value if found.
@@ -1314,12 +1375,23 @@ fn condition_type() -> AttributeType {
         .iter()
         .map(|(s, _)| s.to_string())
         .collect();
+    let operator_aliases: Vec<(String, String)> = operator_values
+        .iter()
+        .filter_map(|v| {
+            let dsl = dsl_enum_value(v);
+            if dsl == *v {
+                None
+            } else {
+                Some((v.clone(), dsl))
+            }
+        })
+        .collect();
     AttributeType::map_with_key(
         AttributeType::StringEnum {
             name: "ConditionOperator".to_string(),
             values: operator_values,
             namespace: None,
-            to_dsl: None,
+            dsl_aliases: operator_aliases,
         },
         AttributeType::map(string_or_list_of_strings()),
     )
@@ -1377,7 +1449,9 @@ fn s3_sse_algorithm() -> AttributeType {
             "aws:kms:dsse".to_string(),
         ],
         namespace: Some("aws.s3.BucketServerSideEncryptionConfiguration".to_string()),
-        to_dsl: None,
+        // `aws:kms`/`aws:kms:dsse` carry colons that survive verbatim;
+        // only `AES256` (SHOUTY) needs a DSL spelling distinct from the API form.
+        dsl_aliases: dsl_aliases_for(&["AES256", "aws:kms", "aws:kms:dsse"]),
     }
 }
 
@@ -1443,7 +1517,16 @@ fn s3_replication_destination() -> AttributeType {
                         "GLACIER_IR".to_string(),
                     ],
                     namespace: Some("aws.s3.BucketReplicationConfiguration".to_string()),
-                    to_dsl: None,
+                    dsl_aliases: dsl_aliases_for(&[
+                        "STANDARD",
+                        "REDUCED_REDUNDANCY",
+                        "STANDARD_IA",
+                        "ONEZONE_IA",
+                        "INTELLIGENT_TIERING",
+                        "GLACIER",
+                        "DEEP_ARCHIVE",
+                        "GLACIER_IR",
+                    ]),
                 },
             )
             .with_provider_name("StorageClass"),
@@ -1456,7 +1539,7 @@ fn s3_replication_status() -> AttributeType {
         name: "ReplicationRuleStatus".to_string(),
         values: vec!["Enabled".to_string(), "Disabled".to_string()],
         namespace: Some("aws.s3.BucketReplicationConfiguration".to_string()),
-        to_dsl: None,
+        dsl_aliases: dsl_aliases_for(&["Enabled", "Disabled"]),
     }
 }
 
@@ -1488,7 +1571,7 @@ fn s3_lifecycle_status() -> AttributeType {
         name: "LifecycleRuleStatus".to_string(),
         values: vec!["Enabled".to_string(), "Disabled".to_string()],
         namespace: Some("aws.s3.BucketLifecycleConfiguration".to_string()),
-        to_dsl: None,
+        dsl_aliases: dsl_aliases_for(&["Enabled", "Disabled"]),
     }
 }
 
@@ -1505,7 +1588,14 @@ fn s3_transition_storage_class() -> AttributeType {
             "GLACIER_IR".to_string(),
         ],
         namespace: Some("aws.s3.BucketLifecycleConfiguration".to_string()),
-        to_dsl: None,
+        dsl_aliases: dsl_aliases_for(&[
+            "GLACIER",
+            "STANDARD_IA",
+            "ONEZONE_IA",
+            "INTELLIGENT_TIERING",
+            "DEEP_ARCHIVE",
+            "GLACIER_IR",
+        ]),
     }
 }
 
@@ -1745,7 +1835,7 @@ fn s3_partition_date_source() -> AttributeType {
         name: "PartitionDateSource".to_string(),
         values: vec!["EventTime".to_string(), "DeliveryTime".to_string()],
         namespace: Some("aws.s3.BucketLogging".to_string()),
-        to_dsl: None,
+        dsl_aliases: dsl_aliases_for(&["EventTime", "DeliveryTime"]),
     }
 }
 
@@ -1813,7 +1903,8 @@ pub fn s3_redirect_all_requests_to() -> AttributeType {
                     name: "Protocol".to_string(),
                     values: vec!["http".to_string(), "https".to_string()],
                     namespace: Some("aws.s3.BucketWebsiteConfiguration".to_string()),
-                    to_dsl: None,
+                    // Already lowercase — DSL spelling matches API; no aliases needed.
+                    dsl_aliases: vec![],
                 },
             )
             .with_provider_name("Protocol"),

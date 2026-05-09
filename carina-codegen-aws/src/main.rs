@@ -64,19 +64,24 @@ struct EnumInfo {
     values: Vec<String>,
 }
 
-/// Build the `to_dsl: ...` code fragment for an enum attribute.
+/// Build the `dsl_aliases: ...` Rust source code for a `StringEnum`'s
+/// alias table, following naming-conventions design D7.
 ///
-/// Per naming-conventions design D7, every `StringEnum` value must be
-/// addressable in snake_case from the DSL, with the API spelling preserved
-/// for the underlying SDK call. This helper emits a closure that maps each
-/// canonical (API) value to its DSL spelling, layering in any explicit
+/// Per #247 / D3 / D7, every enum value gets a snake_case DSL spelling and
+/// the canonical AWS spelling is preserved for the underlying SDK call.
+/// This helper emits a `Vec<(String, String)>` literal mapping each
+/// canonical (API) value to its DSL spelling, layered with any explicit
 /// aliases configured via `ResourceDef::enum_aliases`.
 ///
-/// Returned source compiles into a `Some(|s: &str| match s { ... })`. We
-/// always return `Some(_)` (rather than `None`) when at least one value
-/// needs translation, because the validator's `matches_alias` path only
-/// fires when `to_dsl` is set.
-fn build_to_dsl_code(values: &[String], explicit_aliases: Option<&Vec<(&str, &str)>>) -> String {
+/// Data form (rather than a `fn` closure) is required so the alias map
+/// survives the WASM-component boundary — see carina#2832 / aws#247.
+///
+/// Returns Rust source that evaluates to `vec![("api","dsl"), ...]` or
+/// `vec![]` when no value needs translation.
+fn build_dsl_aliases_code(
+    values: &[String],
+    explicit_aliases: Option<&Vec<(&str, &str)>>,
+) -> String {
     // Collect (canonical, dsl_form) pairs. Explicit aliases take precedence
     // over the auto-derived `dsl_enum_value` form.
     let mut pairs: Vec<(String, String)> = Vec::new();
@@ -99,16 +104,14 @@ fn build_to_dsl_code(values: &[String], explicit_aliases: Option<&Vec<(&str, &st
     }
 
     if pairs.is_empty() {
-        // No translation needed; passthrough fallback would be a no-op.
-        return "None".to_string();
+        return "vec![]".to_string();
     }
 
-    let mut match_arms: Vec<String> = pairs
+    let entries: Vec<String> = pairs
         .iter()
-        .map(|(canonical, dsl)| format!("\"{}\" => \"{}\".to_string()", canonical, dsl))
+        .map(|(canonical, dsl)| format!("(\"{}\".to_string(), \"{}\".to_string())", canonical, dsl))
         .collect();
-    match_arms.push("_ => s.to_string()".to_string());
-    format!("Some(|s: &str| match s {{ {} }})", match_arms.join(", "))
+    format!("vec![{}]", entries.join(", "))
 }
 
 /// Information about an attribute to generate
@@ -930,17 +933,17 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
             // Use shared schema enum type for constrained strings.
             //
             // Per naming-conventions design D7, every enum value gets a
-            // snake_case DSL alias. `build_to_dsl_code` derives the per-value
-            // mapping from `dsl_enum_value()` and layers in explicit aliases
-            // from `ResourceDef::enum_aliases`. Explicit `to_dsl_overrides`
-            // wins over both.
-            let to_dsl_code =
+            // snake_case DSL alias. `build_dsl_aliases_code` derives the
+            // per-value mapping from `dsl_enum_value()` and layers in
+            // explicit aliases from `ResourceDef::enum_aliases`. Explicit
+            // `to_dsl_overrides` wins over both.
+            let dsl_aliases_code =
                 if let Some(override_code) = to_dsl_overrides.get(attr.snake_name.as_str()) {
                     override_code.to_string()
                 } else {
                     let snake = attr.provider_name.to_snake_case();
                     let explicit = enum_alias_map.get(snake.as_str());
-                    build_to_dsl_code(&ei.values, explicit)
+                    build_dsl_aliases_code(&ei.values, explicit)
                 };
             let values_str = ei
                 .values
@@ -953,9 +956,9 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
                  \x20               name: \"{}\".to_string(),\n\
                  \x20               values: vec![{}],\n\
                  \x20               namespace: Some(\"{}\".to_string()),\n\
-                 \x20               to_dsl: {},\n\
+                 \x20               dsl_aliases: {},\n\
                  \x20           }}",
-                ei.type_name, values_str, namespace, to_dsl_code
+                ei.type_name, values_str, namespace, dsl_aliases_code
             )
         } else {
             attr.type_code.clone()
@@ -1293,12 +1296,12 @@ fn generate_struct_type(
             // Same D7 rule as the top-level enum attribute path: derive a
             // snake_case DSL alias for every API value, layer in explicit
             // aliases, and let `to_dsl_overrides` take precedence over both.
-            let to_dsl_code =
+            let dsl_aliases_code =
                 if let Some(override_code) = ctx.to_dsl_overrides.get(snake_name.as_str()) {
                     override_code.to_string()
                 } else {
                     let explicit = ctx.enum_alias_map.get(snake_name.as_str());
-                    build_to_dsl_code(&ei.values, explicit)
+                    build_dsl_aliases_code(&ei.values, explicit)
                 };
             let values_str = ei
                 .values
@@ -1311,9 +1314,9 @@ fn generate_struct_type(
                  \x20               name: \"{}\".to_string(),\n\
                  \x20               values: vec![{}],\n\
                  \x20               namespace: Some(\"{}\".to_string()),\n\
-                 \x20               to_dsl: {},\n\
+                 \x20               dsl_aliases: {},\n\
                  \x20           }}",
-                ei.type_name, values_str, ctx.namespace, to_dsl_code
+                ei.type_name, values_str, ctx.namespace, dsl_aliases_code
             )
         } else {
             field_type
@@ -4144,13 +4147,14 @@ mod tests {
         assert!(md.contains("### `user_id`"), "{md}");
     }
 
-    /// Per naming-conventions design D7 the codegen must emit a `to_dsl`
-    /// closure for every `StringEnum`, not just the hyphen-only case.
-    /// route53.RecordSet's Type enum (`A`, `AAAA`, `CNAME`, ...) is the
-    /// canonical SHOUTY-snake case: each value gets a snake_case alias
-    /// (`a`, `aaaa`, `cname`) so users can write `aws.route53.RecordSet.Type.a`.
+    /// Per naming-conventions design D7 the codegen must emit a
+    /// `dsl_aliases` data table for every `StringEnum`, not just the
+    /// hyphen-only case. route53.RecordSet's Type enum (`A`, `AAAA`,
+    /// `CNAME`, ...) is the canonical SHOUTY-snake case: each value gets
+    /// a snake_case alias (`a`, `aaaa`, `cname`) so users can write
+    /// `aws.route53.RecordSet.Type.a`.
     #[test]
-    fn generate_resource_emits_to_dsl_and_alias_entries_for_pascal_enum() {
+    fn generate_resource_emits_dsl_aliases_and_alias_entries_for_pascal_enum() {
         let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../carina-provider-aws/tests/fixtures/smithy/route53.json");
         if !fixture.exists() {
@@ -4176,15 +4180,15 @@ mod tests {
             generated.contains("\"A\"") && generated.contains("\"a\""),
             "VALID_TYPE should list both API and DSL spellings: {generated}"
         );
-        // The StringEnum's `to_dsl` must be a closure mapping API → DSL,
-        // not the previous `None`.
+        // The StringEnum's `dsl_aliases` must contain `(api, dsl)` pairs
+        // as data so the mapping survives the WASM-component boundary.
         assert!(
-            generated.contains("\"A\" => \"a\".to_string()"),
-            "to_dsl should map A -> a: {generated}"
+            generated.contains("(\"A\".to_string(), \"a\".to_string())"),
+            "dsl_aliases should include (A, a): {generated}"
         );
         assert!(
-            generated.contains("\"CNAME\" => \"cname\".to_string()"),
-            "to_dsl should map CNAME -> cname: {generated}"
+            generated.contains("(\"CNAME\".to_string(), \"cname\".to_string())"),
+            "dsl_aliases should include (CNAME, cname): {generated}"
         );
         // The runtime alias table must include the same pairs so state
         // normalization rewrites SDK responses into DSL spellings.
@@ -4201,10 +4205,10 @@ mod tests {
     /// PascalCase mixed-case enums (e.g. `BucketOwnerEnforced`) must also
     /// produce `bucket_owner_enforced` aliases. Exercises s3.Bucket's
     /// ObjectOwnership-style enum if available, falling back to a check
-    /// that the codegen at least emits `to_dsl` rather than `None` for
+    /// that the codegen at least emits a non-empty `dsl_aliases` for
     /// PascalCase values.
     #[test]
-    fn generate_resource_to_dsl_handles_pascal_case_mixed() {
+    fn generate_resource_dsl_aliases_handles_pascal_case_mixed() {
         // Use the dsl helper directly so the assertion does not depend on
         // a specific Smithy fixture being present.
         use carina_codegen_aws::dsl::dsl_enum_value;

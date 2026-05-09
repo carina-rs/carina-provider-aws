@@ -88,7 +88,7 @@ pub fn ec2_vpc_endpoint_config() -> AwsSchemaConfig {
                 name: "VpcEndpointType".to_string(),
                 values: vec!["Gateway".to_string(), "GatewayLoadBalancer".to_string(), "Interface".to_string(), "Resource".to_string(), "ServiceNetwork".to_string()],
                 namespace: Some("aws.ec2.VpcEndpoint".to_string()),
-                to_dsl: Some(|s: &str| match s { "Gateway" => "gateway".to_string(), "GatewayLoadBalancer" => "gateway_load_balancer".to_string(), "Interface" => "interface".to_string(), "Resource" => "resource".to_string(), "ServiceNetwork" => "service_network".to_string(), _ => s.to_string() }),
+                dsl_aliases: vec![("Gateway".to_string(), "gateway".to_string()), ("GatewayLoadBalancer".to_string(), "gateway_load_balancer".to_string()), ("Interface".to_string(), "interface".to_string()), ("Resource".to_string(), "resource".to_string()), ("ServiceNetwork".to_string(), "service_network".to_string())],
             })
                 .create_only()
                 .with_description("The type of endpoint. Default: Gateway")

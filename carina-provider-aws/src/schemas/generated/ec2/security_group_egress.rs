@@ -106,10 +106,7 @@ pub fn ec2_security_group_egress_config() -> AwsSchemaConfig {
                             "all".to_string(),
                         ],
                         namespace: Some("aws.ec2.SecurityGroupEgress".to_string()),
-                        to_dsl: Some(|s: &str| match s {
-                            "-1" => "all".to_string(),
-                            _ => s.replace('-', "_"),
-                        }),
+                        dsl_aliases: vec![("-1".to_string(), "all".to_string())],
                     },
                 )
                 .required()

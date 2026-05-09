@@ -32,7 +32,7 @@ pub fn ec2_nat_gateway_config() -> AwsSchemaConfig {
                 name: "AvailabilityMode".to_string(),
                 values: vec!["regional".to_string(), "zonal".to_string()],
                 namespace: Some("aws.ec2.NatGateway".to_string()),
-                to_dsl: None,
+                dsl_aliases: vec![],
             })
                 .create_only()
                 .with_description("Specifies whether to create a zonal (single-AZ) or regional (multi-AZ) NAT gateway. Defaults to zonal. A zonal NAT gateway is a NAT Gateway that provi...")
@@ -56,7 +56,7 @@ pub fn ec2_nat_gateway_config() -> AwsSchemaConfig {
                 name: "ConnectivityType".to_string(),
                 values: vec!["private".to_string(), "public".to_string()],
                 namespace: Some("aws.ec2.NatGateway".to_string()),
-                to_dsl: None,
+                dsl_aliases: vec![],
             })
                 .create_only()
                 .with_description("Indicates whether the NAT gateway supports public or private connectivity. The default is public connectivity.")

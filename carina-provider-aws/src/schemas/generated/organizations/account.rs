@@ -49,7 +49,7 @@ pub fn organizations_account_config() -> AwsSchemaConfig {
                 name: "IamUserAccessToBilling".to_string(),
                 values: vec!["ALLOW".to_string(), "DENY".to_string()],
                 namespace: Some("aws.organizations.Account".to_string()),
-                to_dsl: Some(|s: &str| match s { "ALLOW" => "allow".to_string(), "DENY" => "deny".to_string(), _ => s.to_string() }),
+                dsl_aliases: vec![("ALLOW".to_string(), "allow".to_string()), ("DENY".to_string(), "deny".to_string())],
             })
                 .create_only()
                 .with_description("If set to ALLOW, the new account enables IAM users to access account billing information if they have the required permissions. If set to DENY, only t...")
@@ -76,7 +76,7 @@ pub fn organizations_account_config() -> AwsSchemaConfig {
                 name: "JoinedMethod".to_string(),
                 values: vec!["CREATED".to_string(), "INVITED".to_string()],
                 namespace: Some("aws.organizations.Account".to_string()),
-                to_dsl: Some(|s: &str| match s { "CREATED" => "created".to_string(), "INVITED" => "invited".to_string(), _ => s.to_string() }),
+                dsl_aliases: vec![("CREATED".to_string(), "created".to_string()), ("INVITED".to_string(), "invited".to_string())],
             })
                 .with_description("The method by which the account joined the organization. (read-only)")
                 .with_provider_name("JoinedMethod"),
@@ -96,7 +96,7 @@ pub fn organizations_account_config() -> AwsSchemaConfig {
                 name: "Status".to_string(),
                 values: vec!["ACTIVE".to_string(), "PENDING_CLOSURE".to_string(), "SUSPENDED".to_string()],
                 namespace: Some("aws.organizations.Account".to_string()),
-                to_dsl: Some(|s: &str| match s { "ACTIVE" => "active".to_string(), "PENDING_CLOSURE" => "pending_closure".to_string(), "SUSPENDED" => "suspended".to_string(), _ => s.to_string() }),
+                dsl_aliases: vec![("ACTIVE".to_string(), "active".to_string()), ("PENDING_CLOSURE".to_string(), "pending_closure".to_string()), ("SUSPENDED".to_string(), "suspended".to_string())],
             })
                 .with_description("The status of the account in the organization. The Status parameter in the Account object will be retired on September 9, 2026. Although both the acco... (read-only)")
                 .with_provider_name("Status"),

@@ -474,10 +474,9 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             ],
             create_only_overrides: vec![],
             enum_aliases: vec![("ip_protocol", "all", "-1")],
-            to_dsl_overrides: vec![(
-                "ip_protocol",
-                r#"Some(|s: &str| match s { "-1" => "all".to_string(), _ => s.replace('-', "_") })"#,
-            )],
+            // dsl_aliases auto-derives hyphen->underscore via dsl_enum_value;
+            // explicit (-1, all) flows in via enum_aliases.
+            to_dsl_overrides: vec![],
             required_overrides: vec!["IpProtocol"],
             extra_read_only: vec![],
             read_only_overrides: vec![],
@@ -529,10 +528,9 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             ],
             create_only_overrides: vec![],
             enum_aliases: vec![("ip_protocol", "all", "-1")],
-            to_dsl_overrides: vec![(
-                "ip_protocol",
-                r#"Some(|s: &str| match s { "-1" => "all".to_string(), _ => s.replace('-', "_") })"#,
-            )],
+            // dsl_aliases auto-derives hyphen->underscore; explicit (-1, all)
+            // flows in via enum_aliases.
+            to_dsl_overrides: vec![],
             required_overrides: vec!["IpProtocol", "GroupId"],
             extra_read_only: vec![],
             read_only_overrides: vec![],
@@ -651,10 +649,8 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             ],
             create_only_overrides: vec![],
             enum_aliases: vec![],
-            to_dsl_overrides: vec![(
-                "log_destination_type",
-                r#"Some(|s: &str| s.replace('-', "_"))"#,
-            )],
+            // dsl_aliases auto-derives hyphen->underscore from values; no override needed.
+            to_dsl_overrides: vec![],
             required_overrides: vec!["ResourceId", "ResourceType"],
             extra_read_only: vec![],
             read_only_overrides: vec![],

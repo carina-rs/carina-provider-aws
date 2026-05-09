@@ -99,15 +99,31 @@ impl CarinaProvider for AwsProcessProvider {
 
     fn provider_config_attribute_types(&self) -> HashMap<String, proto::AttributeType> {
         let mut types = HashMap::new();
+        // Region codes carry hyphens; the DSL form replaces them with
+        // underscores. Materialize the alias pairs so the WASM-component
+        // boundary preserves the mapping (carina#2832 / aws#247).
+        let region_values: Vec<String> = carina_aws_types::REGIONS
+            .iter()
+            .map(|(code, _)| code.to_string())
+            .collect();
+        let region_dsl_aliases: Vec<(String, String)> = region_values
+            .iter()
+            .filter_map(|code| {
+                let dsl = code.replace('-', "_");
+                if dsl == *code {
+                    None
+                } else {
+                    Some((code.clone(), dsl))
+                }
+            })
+            .collect();
         types.insert(
             "region".to_string(),
             proto::AttributeType::StringEnum {
                 name: "Region".to_string(),
-                values: carina_aws_types::REGIONS
-                    .iter()
-                    .map(|(code, _)| code.to_string())
-                    .collect(),
+                values: region_values,
                 namespace: Some("aws".to_string()),
+                dsl_aliases: region_dsl_aliases,
             },
         );
         types.insert(

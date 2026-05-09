@@ -59,7 +59,7 @@ pub fn ec2_flow_log_config() -> AwsSchemaConfig {
                 name: "LogDestinationType".to_string(),
                 values: vec!["cloud-watch-logs".to_string(), "kinesis-data-firehose".to_string(), "s3".to_string()],
                 namespace: Some("aws.ec2.FlowLog".to_string()),
-                to_dsl: Some(|s: &str| s.replace('-', "_")),
+                dsl_aliases: vec![("cloud-watch-logs".to_string(), "cloud_watch_logs".to_string()), ("kinesis-data-firehose".to_string(), "kinesis_data_firehose".to_string())],
             })
                 .create_only()
                 .with_description("The type of destination for the flow log data. Default: cloud-watch-logs")
@@ -95,7 +95,7 @@ pub fn ec2_flow_log_config() -> AwsSchemaConfig {
                 name: "ResourceType".to_string(),
                 values: vec!["NetworkInterface".to_string(), "RegionalNatGateway".to_string(), "Subnet".to_string(), "TransitGateway".to_string(), "TransitGatewayAttachment".to_string(), "VPC".to_string()],
                 namespace: Some("aws.ec2.FlowLog".to_string()),
-                to_dsl: Some(|s: &str| match s { "NetworkInterface" => "network_interface".to_string(), "RegionalNatGateway" => "regional_nat_gateway".to_string(), "Subnet" => "subnet".to_string(), "TransitGateway" => "transit_gateway".to_string(), "TransitGatewayAttachment" => "transit_gateway_attachment".to_string(), "VPC" => "vpc".to_string(), _ => s.to_string() }),
+                dsl_aliases: vec![("NetworkInterface".to_string(), "network_interface".to_string()), ("RegionalNatGateway".to_string(), "regional_nat_gateway".to_string()), ("Subnet".to_string(), "subnet".to_string()), ("TransitGateway".to_string(), "transit_gateway".to_string()), ("TransitGatewayAttachment".to_string(), "transit_gateway_attachment".to_string()), ("VPC".to_string(), "vpc".to_string())],
             })
                 .required()
                 .create_only()
@@ -107,7 +107,7 @@ pub fn ec2_flow_log_config() -> AwsSchemaConfig {
                 name: "TrafficType".to_string(),
                 values: vec!["ACCEPT".to_string(), "ALL".to_string(), "REJECT".to_string()],
                 namespace: Some("aws.ec2.FlowLog".to_string()),
-                to_dsl: Some(|s: &str| match s { "ACCEPT" => "accept".to_string(), "ALL" => "all".to_string(), "REJECT" => "reject".to_string(), _ => s.to_string() }),
+                dsl_aliases: vec![("ACCEPT".to_string(), "accept".to_string()), ("ALL".to_string(), "all".to_string()), ("REJECT".to_string(), "reject".to_string())],
             })
                 .create_only()
                 .with_description("The type of traffic to monitor (accepted traffic, rejected traffic, or all traffic). This parameter is not supported for transit gateway resource type...")
