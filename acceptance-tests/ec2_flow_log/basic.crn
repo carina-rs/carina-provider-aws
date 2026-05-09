@@ -47,8 +47,8 @@ let flow_log_role = aws.iam.Role {
 
 aws.ec2.FlowLog {
   resource_ids                = [vpc.vpc_id]
-  resource_type               = aws.ec2.FlowLog.ResourceType.VPC
-  traffic_type                = aws.ec2.FlowLog.TrafficType.ALL
+  resource_type               = aws.ec2.FlowLog.ResourceType.vpc
+  traffic_type                = aws.ec2.FlowLog.TrafficType.all
   log_destination_type        = aws.ec2.FlowLog.LogDestinationType.cloud_watch_logs
   log_group_name              = log_group.log_group_name
   deliver_logs_permission_arn = flow_log_role.arn

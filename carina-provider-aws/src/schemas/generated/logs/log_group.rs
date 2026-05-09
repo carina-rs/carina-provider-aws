@@ -9,7 +9,14 @@ use super::tags_type;
 use super::validate_tags_map;
 use carina_core::schema::{AttributeSchema, AttributeType, ResourceSchema};
 
-const VALID_LOG_GROUP_CLASS: &[&str] = &["DELIVERY", "INFREQUENT_ACCESS", "STANDARD"];
+const VALID_LOG_GROUP_CLASS: &[&str] = &[
+    "DELIVERY",
+    "INFREQUENT_ACCESS",
+    "STANDARD",
+    "delivery",
+    "infrequent_access",
+    "standard",
+];
 
 /// Returns the schema config for logs.LogGroup (Smithy: com.amazonaws.cloudwatchlogs)
 pub fn logs_log_group_config() -> AwsSchemaConfig {
@@ -36,7 +43,7 @@ pub fn logs_log_group_config() -> AwsSchemaConfig {
                 name: "LogGroupClass".to_string(),
                 values: vec!["DELIVERY".to_string(), "INFREQUENT_ACCESS".to_string(), "STANDARD".to_string()],
                 namespace: Some("aws.logs.LogGroup".to_string()),
-                to_dsl: None,
+                to_dsl: Some(|s: &str| match s { "DELIVERY" => "delivery".to_string(), "INFREQUENT_ACCESS" => "infrequent_access".to_string(), "STANDARD" => "standard".to_string(), _ => s.to_string() }),
             })
                 .create_only()
                 .with_description("Use this parameter to specify the log group class for this log group. There are three classes: The Standard log class supports all CloudWatch Logs fea...")
@@ -83,11 +90,19 @@ pub fn enum_valid_values() -> (
 /// Maps DSL alias values back to canonical AWS values for this module.
 /// e.g., ("ip_protocol", "all") -> Some("-1")
 pub fn enum_alias_reverse(attr_name: &str, value: &str) -> Option<&'static str> {
-    let _ = (attr_name, value);
-    None
+    match (attr_name, value) {
+        ("log_group_class", "delivery") => Some("DELIVERY"),
+        ("log_group_class", "infrequent_access") => Some("INFREQUENT_ACCESS"),
+        ("log_group_class", "standard") => Some("STANDARD"),
+        _ => None,
+    }
 }
 
 /// Returns all enum alias entries as (attr_name, alias, canonical) tuples.
 pub fn enum_alias_entries() -> &'static [(&'static str, &'static str, &'static str)] {
-    &[]
+    &[
+        ("log_group_class", "delivery", "DELIVERY"),
+        ("log_group_class", "infrequent_access", "INFREQUENT_ACCESS"),
+        ("log_group_class", "standard", "STANDARD"),
+    ]
 }

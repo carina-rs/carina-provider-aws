@@ -1436,3 +1436,80 @@ fn test_security_group_ingress_schema_includes_all_variant() {
         panic!("ip_protocol should be StringEnum");
     }
 }
+
+// --- Issue #247: D7 snake_case enum DSL spelling ---
+
+/// Per naming-conventions design D7, every `StringEnum` emitted by codegen
+/// must carry a `to_dsl` closure that maps each canonical AWS value to its
+/// snake_case DSL alias. The validator's `matches_alias` path then accepts
+/// the snake_case form alongside the canonical form.
+#[test]
+fn test_organization_feature_set_validates_snake_case_alias() {
+    use carina_core::resource::Value;
+
+    let config =
+        crate::schemas::generated::organizations::organization::organizations_organization_config();
+    let feature_set = config
+        .schema
+        .attributes
+        .get("feature_set")
+        .expect("feature_set attribute not found");
+
+    // Both the API form (`ALL`) and the DSL form (`all`) must validate.
+    feature_set
+        .attr_type
+        .validate(&Value::String("ALL".to_string()))
+        .expect("API spelling ALL should be accepted");
+    feature_set
+        .attr_type
+        .validate(&Value::String("all".to_string()))
+        .expect("DSL spelling all should be accepted");
+    feature_set
+        .attr_type
+        .validate(&Value::String("CONSOLIDATED_BILLING".to_string()))
+        .expect("API spelling CONSOLIDATED_BILLING should be accepted");
+    feature_set
+        .attr_type
+        .validate(&Value::String("consolidated_billing".to_string()))
+        .expect("DSL spelling consolidated_billing should be accepted");
+    // Bogus values still rejected.
+    assert!(
+        feature_set
+            .attr_type
+            .validate(&Value::String("not_a_value".to_string()))
+            .is_err(),
+        "unknown values must still be rejected"
+    );
+}
+
+/// Sibling check for a PascalCase StringEnum: route53.RecordSet's `Type`
+/// should accept both `A`, `AAAA`, ... (the API spellings, which happen to
+/// be SHOUTY) and their lowercase DSL aliases.
+#[test]
+fn test_route53_record_type_validates_snake_case_alias() {
+    use carina_core::resource::Value;
+
+    let config = crate::schemas::generated::route53::record_set::route53_record_set_config();
+    let type_attr = config
+        .schema
+        .attributes
+        .get("type")
+        .expect("type attribute not found");
+
+    type_attr
+        .attr_type
+        .validate(&Value::String("A".to_string()))
+        .expect("API spelling A should be accepted");
+    type_attr
+        .attr_type
+        .validate(&Value::String("a".to_string()))
+        .expect("DSL spelling a should be accepted");
+    type_attr
+        .attr_type
+        .validate(&Value::String("CNAME".to_string()))
+        .expect("API spelling CNAME should be accepted");
+    type_attr
+        .attr_type
+        .validate(&Value::String("cname".to_string()))
+        .expect("DSL spelling cname should be accepted");
+}

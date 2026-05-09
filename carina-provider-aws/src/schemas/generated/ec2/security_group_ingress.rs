@@ -10,7 +10,7 @@ use carina_core::schema::{
     AttributeSchema, AttributeType, ResourceSchema, legacy_validator, types,
 };
 
-const VALID_IP_PROTOCOL: &[&str] = &["tcp", "udp", "icmp", "icmpv6", "-1", "all"];
+const VALID_IP_PROTOCOL: &[&str] = &["tcp", "udp", "icmp", "icmpv6", "-1", "all", "_1"];
 
 fn validate_from_port_range(value: &Value) -> Result<(), String> {
     if let Value::Int(n) = value {

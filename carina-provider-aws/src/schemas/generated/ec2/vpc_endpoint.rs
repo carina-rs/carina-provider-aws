@@ -15,6 +15,11 @@ const VALID_VPC_ENDPOINT_TYPE: &[&str] = &[
     "Interface",
     "Resource",
     "ServiceNetwork",
+    "gateway",
+    "gateway_load_balancer",
+    "interface",
+    "resource",
+    "service_network",
 ];
 
 /// Returns the schema config for ec2.VpcEndpoint (Smithy: com.amazonaws.ec2)
@@ -83,7 +88,7 @@ pub fn ec2_vpc_endpoint_config() -> AwsSchemaConfig {
                 name: "VpcEndpointType".to_string(),
                 values: vec!["Gateway".to_string(), "GatewayLoadBalancer".to_string(), "Interface".to_string(), "Resource".to_string(), "ServiceNetwork".to_string()],
                 namespace: Some("aws.ec2.VpcEndpoint".to_string()),
-                to_dsl: None,
+                to_dsl: Some(|s: &str| match s { "Gateway" => "gateway".to_string(), "GatewayLoadBalancer" => "gateway_load_balancer".to_string(), "Interface" => "interface".to_string(), "Resource" => "resource".to_string(), "ServiceNetwork" => "service_network".to_string(), _ => s.to_string() }),
             })
                 .create_only()
                 .with_description("The type of endpoint. Default: Gateway")
@@ -124,11 +129,27 @@ pub fn enum_valid_values() -> (
 /// Maps DSL alias values back to canonical AWS values for this module.
 /// e.g., ("ip_protocol", "all") -> Some("-1")
 pub fn enum_alias_reverse(attr_name: &str, value: &str) -> Option<&'static str> {
-    let _ = (attr_name, value);
-    None
+    match (attr_name, value) {
+        ("vpc_endpoint_type", "gateway") => Some("Gateway"),
+        ("vpc_endpoint_type", "gateway_load_balancer") => Some("GatewayLoadBalancer"),
+        ("vpc_endpoint_type", "interface") => Some("Interface"),
+        ("vpc_endpoint_type", "resource") => Some("Resource"),
+        ("vpc_endpoint_type", "service_network") => Some("ServiceNetwork"),
+        _ => None,
+    }
 }
 
 /// Returns all enum alias entries as (attr_name, alias, canonical) tuples.
 pub fn enum_alias_entries() -> &'static [(&'static str, &'static str, &'static str)] {
-    &[]
+    &[
+        ("vpc_endpoint_type", "gateway", "Gateway"),
+        (
+            "vpc_endpoint_type",
+            "gateway_load_balancer",
+            "GatewayLoadBalancer",
+        ),
+        ("vpc_endpoint_type", "interface", "Interface"),
+        ("vpc_endpoint_type", "resource", "Resource"),
+        ("vpc_endpoint_type", "service_network", "ServiceNetwork"),
+    ]
 }

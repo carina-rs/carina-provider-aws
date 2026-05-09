@@ -40,7 +40,7 @@ pub fn s3_bucket_acl_config() -> AwsSchemaConfig {
                             "authenticated-read" => "authenticated_read".to_string(),
                             "public-read" => "public_read".to_string(),
                             "public-read-write" => "public_read_write".to_string(),
-                            _ => s.replace('-', "_"),
+                            _ => s.to_string(),
                         }),
                     },
                 )
