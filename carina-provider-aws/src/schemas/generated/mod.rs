@@ -7,6 +7,7 @@
 // generated schema files can use `super::` to access them.
 pub use super::types::*;
 
+pub mod acm;
 pub mod ec2;
 pub mod iam;
 pub mod identitystore;
@@ -19,6 +20,7 @@ pub mod sts;
 /// Returns all generated schema configs
 pub fn configs() -> Vec<AwsSchemaConfig> {
     vec![
+        acm::certificate::acm_certificate_config(),
         ec2::egress_only_internet_gateway::ec2_egress_only_internet_gateway_config(),
         ec2::eip::ec2_eip_config(),
         ec2::flow_log::ec2_flow_log_config(),
@@ -72,6 +74,7 @@ pub fn get_enum_valid_values(
     attr_name: &str,
 ) -> Option<&'static [&'static str]> {
     let modules: &[(&str, &[(&str, &[&str])])] = &[
+        acm::certificate::enum_valid_values(),
         ec2::egress_only_internet_gateway::enum_valid_values(),
         ec2::eip::enum_valid_values(),
         ec2::flow_log::enum_valid_values(),
@@ -133,6 +136,9 @@ pub fn get_enum_alias_reverse(
     attr_name: &str,
     value: &str,
 ) -> Option<&'static str> {
+    if resource_type == "acm.Certificate" {
+        return acm::certificate::enum_alias_reverse(attr_name, value);
+    }
     if resource_type == "ec2.EgressOnlyInternetGateway" {
         return ec2::egress_only_internet_gateway::enum_alias_reverse(attr_name, value);
     }
@@ -193,6 +199,9 @@ pub fn get_enum_alias_reverse(
     if resource_type == "iam.Role" {
         return iam::role::enum_alias_reverse(attr_name, value);
     }
+    if resource_type == "identitystore.User" {
+        return identitystore::user::enum_alias_reverse(attr_name, value);
+    }
     if resource_type == "logs.LogGroup" {
         return logs::log_group::enum_alias_reverse(attr_name, value);
     }
@@ -213,6 +222,9 @@ pub fn get_enum_alias_reverse(
     }
     if resource_type == "s3.BucketCorsConfiguration" {
         return s3::bucket_cors_configuration::enum_alias_reverse(attr_name, value);
+    }
+    if resource_type == "s3.BucketDataSource" {
+        return s3::bucket_data_source::enum_alias_reverse(attr_name, value);
     }
     if resource_type == "s3.BucketLifecycleConfiguration" {
         return s3::bucket_lifecycle_configuration::enum_alias_reverse(attr_name, value);
@@ -246,6 +258,9 @@ pub fn get_enum_alias_reverse(
     if resource_type == "s3.BucketWebsiteConfiguration" {
         return s3::bucket_website_configuration::enum_alias_reverse(attr_name, value);
     }
+    if resource_type == "sts.CallerIdentity" {
+        return sts::caller_identity::enum_alias_reverse(attr_name, value);
+    }
     None
 }
 
@@ -257,6 +272,13 @@ pub fn build_enum_aliases_map() -> std::collections::HashMap<
     std::collections::HashMap<String, std::collections::HashMap<String, String>>,
 > {
     let mut map = std::collections::HashMap::new();
+    for (attr, alias, canonical) in acm::certificate::enum_alias_entries() {
+        map.entry("acm.Certificate".to_string())
+            .or_insert_with(std::collections::HashMap::new)
+            .entry(attr.to_string())
+            .or_insert_with(std::collections::HashMap::new)
+            .insert(alias.to_string(), canonical.to_string());
+    }
     for (attr, alias, canonical) in ec2::egress_only_internet_gateway::enum_alias_entries() {
         map.entry("ec2.EgressOnlyInternetGateway".to_string())
             .or_insert_with(std::collections::HashMap::new)
@@ -397,6 +419,13 @@ pub fn build_enum_aliases_map() -> std::collections::HashMap<
             .or_insert_with(std::collections::HashMap::new)
             .insert(alias.to_string(), canonical.to_string());
     }
+    for (attr, alias, canonical) in identitystore::user::enum_alias_entries() {
+        map.entry("identitystore.User".to_string())
+            .or_insert_with(std::collections::HashMap::new)
+            .entry(attr.to_string())
+            .or_insert_with(std::collections::HashMap::new)
+            .insert(alias.to_string(), canonical.to_string());
+    }
     for (attr, alias, canonical) in logs::log_group::enum_alias_entries() {
         map.entry("logs.LogGroup".to_string())
             .or_insert_with(std::collections::HashMap::new)
@@ -441,6 +470,13 @@ pub fn build_enum_aliases_map() -> std::collections::HashMap<
     }
     for (attr, alias, canonical) in s3::bucket_cors_configuration::enum_alias_entries() {
         map.entry("s3.BucketCorsConfiguration".to_string())
+            .or_insert_with(std::collections::HashMap::new)
+            .entry(attr.to_string())
+            .or_insert_with(std::collections::HashMap::new)
+            .insert(alias.to_string(), canonical.to_string());
+    }
+    for (attr, alias, canonical) in s3::bucket_data_source::enum_alias_entries() {
+        map.entry("s3.BucketDataSource".to_string())
             .or_insert_with(std::collections::HashMap::new)
             .entry(attr.to_string())
             .or_insert_with(std::collections::HashMap::new)
@@ -513,6 +549,13 @@ pub fn build_enum_aliases_map() -> std::collections::HashMap<
     }
     for (attr, alias, canonical) in s3::bucket_website_configuration::enum_alias_entries() {
         map.entry("s3.BucketWebsiteConfiguration".to_string())
+            .or_insert_with(std::collections::HashMap::new)
+            .entry(attr.to_string())
+            .or_insert_with(std::collections::HashMap::new)
+            .insert(alias.to_string(), canonical.to_string());
+    }
+    for (attr, alias, canonical) in sts::caller_identity::enum_alias_entries() {
+        map.entry("sts.CallerIdentity".to_string())
             .or_insert_with(std::collections::HashMap::new)
             .entry(attr.to_string())
             .or_insert_with(std::collections::HashMap::new)

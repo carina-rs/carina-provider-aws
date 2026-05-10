@@ -1966,6 +1966,87 @@ pub fn s3_data_sources() -> Vec<DataSourceDef> {
     }]
 }
 
+/// Returns ACM resource definitions.
+///
+/// `aws.acm.Certificate` covers the request-issue-renew lifecycle of an
+/// ACM certificate. CertificateValidation is intentionally NOT a
+/// separate waiter resource — the wait-construct (carina#2825) is the
+/// canonical way to block downstream resources on `status == ISSUED`.
+/// See carina-rs/carina-provider-aws#244 for the design discussion.
+pub fn acm_resources() -> Vec<ResourceDef> {
+    vec![ResourceDef {
+        name: "acm.Certificate",
+        service_namespace: "com.amazonaws.acm",
+        schema_structure: None,
+        simple_delete: true,
+        // ACM `UpdateCertificateOptions` is narrow (CT logging + export
+        // preference). Other field updates require replacement.
+        noop_update: false,
+        create_op: "RequestCertificate",
+        read_structure: Some("CertificateDetail"),
+        read_ops: vec![],
+        delete_op: "DeleteCertificate",
+        update_ops: vec![],
+        identifier: "CertificateArn",
+        has_tags: true,
+        type_overrides: vec![],
+        exclude_fields: vec![
+            // Imported / private-CA flows are out of scope for the
+            // initial cut. The wait construct is the validation path,
+            // not these legacy fields.
+            "CertificateAuthorityArn",
+            "PrivateKey",
+            "Certificate",
+            "CertificateChain",
+            "Passphrase",
+            "ExtendedKeyUsages",
+            "InUseBy",
+            "IssuedAt",
+            "ImportedAt",
+            "RevokedAt",
+            "RevocationReason",
+            "CreatedAt",
+            "NotAfter",
+            "NotBefore",
+            "Issuer",
+            "Subject",
+            "Signature",
+            "SignatureAlgorithm",
+            "Serial",
+            "ManagedBy",
+            "ExportOption",
+            "ExportablePrivateKey",
+            "Managed",
+            "KeyUsages",
+            "FailureReason",
+        ],
+        // RequestCertificate-only fields. Most ACM fields cannot be
+        // mutated post-issue without re-requesting the certificate.
+        create_only_overrides: vec![
+            "DomainName",
+            "SubjectAlternativeNames",
+            "ValidationMethod",
+            "KeyAlgorithm",
+            "DomainValidationOptions",
+            "IdempotencyToken",
+        ],
+        enum_aliases: vec![],
+        to_dsl_overrides: vec![],
+        required_overrides: vec!["DomainName"],
+        extra_read_only: vec![
+            "Status",
+            "DomainValidationOptions",
+            "Type",
+            "RenewalEligibility",
+            "RenewalSummary",
+        ],
+        read_only_overrides: vec![],
+        extra_writable: vec![],
+        identity_overrides: vec![],
+        derived_attributes: vec![],
+    }]
+}
+
 /// Returns Route 53 resource definitions.
 pub fn route53_resources() -> Vec<ResourceDef> {
     vec![

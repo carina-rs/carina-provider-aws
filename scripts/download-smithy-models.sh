@@ -32,5 +32,6 @@ download "route53"       "route-53/service/2013-04-01/route-53-2013-04-01.json"
 download "iam"           "iam/service/2010-05-08/iam-2010-05-08.json"
 download "cloudwatchlogs" "cloudwatch-logs/service/2014-03-28/cloudwatch-logs-2014-03-28.json"
 download "identitystore"  "identitystore/service/2020-06-15/identitystore-2020-06-15.json"
+download "acm"            "acm/service/2015-12-08/acm-2015-12-08.json"
 
 echo "Done."

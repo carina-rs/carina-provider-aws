@@ -134,6 +134,7 @@ impl Provider for AwsProvider {
                     self.read_route53_record_set(&id, identifier.as_deref())
                         .await
                 }
+                "acm.Certificate" => self.read_acm_certificate(&id, identifier.as_deref()).await,
                 _ => Err(ProviderError::internal(format!(
                     "Unknown resource type: {}",
                     id.resource_type
@@ -242,6 +243,7 @@ impl Provider for AwsProvider {
                 "iam.Role" => self.create_iam_role(resource).await,
                 "logs.LogGroup" => self.create_logs_log_group(resource).await,
                 "route53.RecordSet" => self.create_route53_record_set(resource).await,
+                "acm.Certificate" => self.create_acm_certificate(resource).await,
                 _ => Err(ProviderError::internal(format!(
                     "Unknown resource type: {}",
                     resource.id.resource_type
@@ -393,6 +395,10 @@ impl Provider for AwsProvider {
                 "iam.Role" => self.update_iam_role(id, &identifier, &from, to).await,
                 "logs.LogGroup" => self.update_logs_log_group(id, &identifier, &from, to).await,
                 "route53.RecordSet" => self.update_route53_record_set(id, &identifier, to).await,
+                "acm.Certificate" => {
+                    self.update_acm_certificate(id, &identifier, &from, to)
+                        .await
+                }
                 _ => Err(ProviderError::internal(format!(
                     "Unknown resource type: {}",
                     id.resource_type
@@ -509,6 +515,7 @@ impl Provider for AwsProvider {
                 "iam.Role" => self.delete_iam_role(id, &identifier).await,
                 "logs.LogGroup" => self.delete_logs_log_group(id, &identifier).await,
                 "route53.RecordSet" => self.delete_route53_record_set(id, &identifier).await,
+                "acm.Certificate" => self.delete_acm_certificate(id, &identifier).await,
                 _ => Err(ProviderError::internal(format!(
                     "Unknown resource type: {}",
                     id.resource_type
