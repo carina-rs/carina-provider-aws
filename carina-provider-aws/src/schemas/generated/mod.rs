@@ -7,6 +7,7 @@
 // generated schema files can use `super::` to access them.
 pub use super::types::*;
 
+pub mod acm;
 pub mod ec2;
 pub mod iam;
 pub mod identitystore;
@@ -19,6 +20,7 @@ pub mod sts;
 /// Returns all generated schema configs
 pub fn configs() -> Vec<AwsSchemaConfig> {
     vec![
+        acm::certificate::acm_certificate_config(),
         ec2::egress_only_internet_gateway::ec2_egress_only_internet_gateway_config(),
         ec2::eip::ec2_eip_config(),
         ec2::flow_log::ec2_flow_log_config(),
@@ -72,6 +74,7 @@ pub fn get_enum_valid_values(
     attr_name: &str,
 ) -> Option<&'static [&'static str]> {
     let modules: &[(&str, &[(&str, &[&str])])] = &[
+        acm::certificate::enum_valid_values(),
         ec2::egress_only_internet_gateway::enum_valid_values(),
         ec2::eip::enum_valid_values(),
         ec2::flow_log::enum_valid_values(),
@@ -133,6 +136,9 @@ pub fn get_enum_alias_reverse(
     attr_name: &str,
     value: &str,
 ) -> Option<&'static str> {
+    if resource_type == "acm.Certificate" {
+        return acm::certificate::enum_alias_reverse(attr_name, value);
+    }
     if resource_type == "ec2.EgressOnlyInternetGateway" {
         return ec2::egress_only_internet_gateway::enum_alias_reverse(attr_name, value);
     }
@@ -257,6 +263,13 @@ pub fn build_enum_aliases_map() -> std::collections::HashMap<
     std::collections::HashMap<String, std::collections::HashMap<String, String>>,
 > {
     let mut map = std::collections::HashMap::new();
+    for (attr, alias, canonical) in acm::certificate::enum_alias_entries() {
+        map.entry("acm.Certificate".to_string())
+            .or_insert_with(std::collections::HashMap::new)
+            .entry(attr.to_string())
+            .or_insert_with(std::collections::HashMap::new)
+            .insert(alias.to_string(), canonical.to_string());
+    }
     for (attr, alias, canonical) in ec2::egress_only_internet_gateway::enum_alias_entries() {
         map.entry("ec2.EgressOnlyInternetGateway".to_string())
             .or_insert_with(std::collections::HashMap::new)

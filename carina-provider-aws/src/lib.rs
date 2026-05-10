@@ -19,6 +19,7 @@ pub use factory::AwsProviderFactory;
 pub use normalizer::AwsNormalizer;
 
 use aws_config::Region;
+use aws_sdk_acm::Client as AcmClient;
 use aws_sdk_cloudwatchlogs::Client as CloudWatchLogsClient;
 use aws_sdk_ec2::Client as Ec2Client;
 use aws_sdk_iam::Client as IamClient;
@@ -38,6 +39,7 @@ pub struct AwsProvider {
     organizations_client: OrganizationsClient,
     identitystore_client: IdentityStoreClient,
     route53_client: Route53Client,
+    acm_client: AcmClient,
     region: String,
     /// Provider-level allow-list of AWS account IDs. Empty means "no
     /// allow-list configured" (the check is skipped). Enforced once
@@ -75,6 +77,7 @@ impl AwsProvider {
             organizations_client: OrganizationsClient::new(&config),
             identitystore_client: IdentityStoreClient::new(&config),
             route53_client: Route53Client::new(&config),
+            acm_client: AcmClient::new(&config),
             region: region.to_string(),
             allowed_account_ids,
             forbidden_account_ids,
@@ -110,6 +113,7 @@ impl AwsProvider {
         organizations_client: OrganizationsClient,
         identitystore_client: IdentityStoreClient,
         route53_client: Route53Client,
+        acm_client: AcmClient,
         region: String,
     ) -> Self {
         Self {
@@ -121,6 +125,7 @@ impl AwsProvider {
             organizations_client,
             identitystore_client,
             route53_client,
+            acm_client,
             region,
             allowed_account_ids: Vec::new(),
             forbidden_account_ids: Vec::new(),
