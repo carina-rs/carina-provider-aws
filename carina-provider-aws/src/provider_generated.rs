@@ -675,6 +675,45 @@ impl AwsProvider {
         }
         None
     }
+
+    /// Extract acm.Certificate attributes from SDK response type (generated)
+    pub(crate) fn extract_acm_certificate_attributes(
+        obj: &aws_sdk_acm::types::CertificateDetail,
+        attributes: &mut HashMap<String, Value>,
+    ) -> Option<String> {
+        if let Some(v) = obj.certificate_arn() {
+            attributes.insert("certificate_arn".to_string(), Value::String(v.to_string()));
+        }
+        if let Some(v) = obj.domain_name() {
+            attributes.insert("domain_name".to_string(), Value::String(v.to_string()));
+        }
+        if let Some(v) = obj.key_algorithm() {
+            attributes.insert(
+                "key_algorithm".to_string(),
+                Value::String(v.as_str().to_string()),
+            );
+        }
+        if let Some(v) = obj.renewal_eligibility() {
+            attributes.insert(
+                "renewal_eligibility".to_string(),
+                Value::String(v.as_str().to_string()),
+            );
+        }
+        if let Some(v) = obj.status() {
+            attributes.insert("status".to_string(), Value::String(v.as_str().to_string()));
+        }
+        {
+            let ids = obj.subject_alternative_names();
+            if !ids.is_empty() {
+                let list: Vec<Value> = ids.iter().map(|s| Value::String(s.to_string())).collect();
+                attributes.insert("subject_alternative_names".to_string(), Value::List(list));
+            }
+        }
+        if let Some(v) = obj.r#type() {
+            attributes.insert("type".to_string(), Value::String(v.as_str().to_string()));
+        }
+        obj.certificate_arn().map(String::from)
+    }
 }
 
 // ===== Generated DataSourceLookups Trait =====

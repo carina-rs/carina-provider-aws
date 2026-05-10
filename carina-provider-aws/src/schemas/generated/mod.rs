@@ -199,9 +199,6 @@ pub fn get_enum_alias_reverse(
     if resource_type == "iam.Role" {
         return iam::role::enum_alias_reverse(attr_name, value);
     }
-    if resource_type == "identitystore.User" {
-        return identitystore::user::enum_alias_reverse(attr_name, value);
-    }
     if resource_type == "logs.LogGroup" {
         return logs::log_group::enum_alias_reverse(attr_name, value);
     }
@@ -222,9 +219,6 @@ pub fn get_enum_alias_reverse(
     }
     if resource_type == "s3.BucketCorsConfiguration" {
         return s3::bucket_cors_configuration::enum_alias_reverse(attr_name, value);
-    }
-    if resource_type == "s3.BucketDataSource" {
-        return s3::bucket_data_source::enum_alias_reverse(attr_name, value);
     }
     if resource_type == "s3.BucketLifecycleConfiguration" {
         return s3::bucket_lifecycle_configuration::enum_alias_reverse(attr_name, value);
@@ -257,9 +251,6 @@ pub fn get_enum_alias_reverse(
     }
     if resource_type == "s3.BucketWebsiteConfiguration" {
         return s3::bucket_website_configuration::enum_alias_reverse(attr_name, value);
-    }
-    if resource_type == "sts.CallerIdentity" {
-        return sts::caller_identity::enum_alias_reverse(attr_name, value);
     }
     None
 }
@@ -419,13 +410,6 @@ pub fn build_enum_aliases_map() -> std::collections::HashMap<
             .or_insert_with(std::collections::HashMap::new)
             .insert(alias.to_string(), canonical.to_string());
     }
-    for (attr, alias, canonical) in identitystore::user::enum_alias_entries() {
-        map.entry("identitystore.User".to_string())
-            .or_insert_with(std::collections::HashMap::new)
-            .entry(attr.to_string())
-            .or_insert_with(std::collections::HashMap::new)
-            .insert(alias.to_string(), canonical.to_string());
-    }
     for (attr, alias, canonical) in logs::log_group::enum_alias_entries() {
         map.entry("logs.LogGroup".to_string())
             .or_insert_with(std::collections::HashMap::new)
@@ -470,13 +454,6 @@ pub fn build_enum_aliases_map() -> std::collections::HashMap<
     }
     for (attr, alias, canonical) in s3::bucket_cors_configuration::enum_alias_entries() {
         map.entry("s3.BucketCorsConfiguration".to_string())
-            .or_insert_with(std::collections::HashMap::new)
-            .entry(attr.to_string())
-            .or_insert_with(std::collections::HashMap::new)
-            .insert(alias.to_string(), canonical.to_string());
-    }
-    for (attr, alias, canonical) in s3::bucket_data_source::enum_alias_entries() {
-        map.entry("s3.BucketDataSource".to_string())
             .or_insert_with(std::collections::HashMap::new)
             .entry(attr.to_string())
             .or_insert_with(std::collections::HashMap::new)
@@ -549,13 +526,6 @@ pub fn build_enum_aliases_map() -> std::collections::HashMap<
     }
     for (attr, alias, canonical) in s3::bucket_website_configuration::enum_alias_entries() {
         map.entry("s3.BucketWebsiteConfiguration".to_string())
-            .or_insert_with(std::collections::HashMap::new)
-            .entry(attr.to_string())
-            .or_insert_with(std::collections::HashMap::new)
-            .insert(alias.to_string(), canonical.to_string());
-    }
-    for (attr, alias, canonical) in sts::caller_identity::enum_alias_entries() {
-        map.entry("sts.CallerIdentity".to_string())
             .or_insert_with(std::collections::HashMap::new)
             .entry(attr.to_string())
             .or_insert_with(std::collections::HashMap::new)
