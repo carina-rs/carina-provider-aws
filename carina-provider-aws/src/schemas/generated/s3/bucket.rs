@@ -30,7 +30,7 @@ pub fn s3_bucket_config() -> AwsSchemaConfig {
                 name: "BucketNamespace".to_string(),
                 values: vec!["account-regional".to_string(), "global".to_string()],
                 namespace: Some("aws.s3.Bucket".to_string()),
-                dsl_aliases: vec![("account-regional".to_string(), "account_regional".to_string())],
+                dsl_aliases: vec![("account-regional".to_string(), "account_regional".to_string()), ("global".to_string(), "global".to_string())],
             })
                 .create_only()
                 .with_description("Specifies the namespace where you want to create your general purpose bucket. When you create a general purpose bucket, you can choose to create a buc...")

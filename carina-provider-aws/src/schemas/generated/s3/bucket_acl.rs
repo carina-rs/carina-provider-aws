@@ -46,6 +46,7 @@ pub fn s3_bucket_acl_config() -> AwsSchemaConfig {
                                 "public-read-write".to_string(),
                                 "public_read_write".to_string(),
                             ),
+                            ("private".to_string(), "private".to_string()),
                         ],
                     },
                 )

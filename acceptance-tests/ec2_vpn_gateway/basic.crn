@@ -7,7 +7,7 @@ provider aws {
 }
 
 aws.ec2.VpnGateway {
-  type = aws.ec2.VpnGateway.Type.ipsec.1
+  type = aws.ec2.VpnGateway.Type.ipsec_1
 
   tags = {
     Environment = 'acceptance-test'

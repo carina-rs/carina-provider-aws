@@ -33,7 +33,12 @@ fn dsl_enum_value(value: &str) -> String {
         return value.to_ascii_lowercase();
     }
     if !value.chars().any(|c| c.is_ascii_uppercase()) {
-        return value.replace('-', "_");
+        // No uppercase letter: kebab and dotted-numeric (e.g.
+        // `cloud-watch-logs`, `ipsec.1`) collapse to snake_case so DSL
+        // identifiers stay parseable. Dotted-numeric values would
+        // otherwise need to be quoted (`'ipsec.1'`), and the strict
+        // validator (carina#2980) gates on the DSL spelling.
+        return value.replace(['-', '.'], "_");
     }
     // PascalCase / mixed → snake_case (no heck dep, hand-rolled to keep
     // `carina-aws-types` heck-free).
@@ -53,20 +58,19 @@ fn dsl_enum_value(value: &str) -> String {
 
 /// Build a `dsl_aliases` pair list for a `StringEnum`'s `values`.
 ///
-/// Returns `(api, dsl)` pairs for every value where `dsl_enum_value(api) != api`.
-/// Values whose DSL spelling already equals the API spelling are omitted
-/// (the validator treats them as canonical).
+/// Returns `(api, dsl)` pairs for **every** value, including identity
+/// rows where the DSL spelling equals the API spelling. The exhaustive
+/// table is what makes the carina-core strict-DSL validator (see
+/// `carina-rs/carina#2980`) treat the whole enum uniformly — every
+/// enum that has at least one rewrite triggers strict mode for the
+/// whole variant set, and identity rows ensure values like
+/// `("Subnet", "subnet")` / `("STANDARD_IA", "standard_ia")` accept
+/// the DSL spelling cleanly without falling back to the legacy lax
+/// canonical-fallback.
 fn dsl_aliases_for(values: &[&str]) -> Vec<(String, String)> {
     values
         .iter()
-        .filter_map(|v| {
-            let dsl = dsl_enum_value(v);
-            if dsl == *v {
-                None
-            } else {
-                Some((v.to_string(), dsl))
-            }
-        })
+        .map(|v| (v.to_string(), dsl_enum_value(v)))
         .collect()
 }
 

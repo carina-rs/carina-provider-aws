@@ -43,9 +43,13 @@ pub fn dsl_enum_value(value: &str) -> String {
         return value.to_ascii_lowercase();
     }
 
-    // Already snake / kebab (no uppercase): just normalize hyphens.
+    // Already snake / kebab (no uppercase): normalize hyphens and
+    // dotted-numeric splits (e.g. `cloud-watch-logs` → `cloud_watch_logs`,
+    // `ipsec.1` → `ipsec_1`). Dotted-numeric values would otherwise need
+    // to be quoted (`'ipsec.1'`) in DSL position, and the strict-DSL
+    // validator (carina#2980) gates acceptance on the DSL spelling.
     if !value.chars().any(|c| c.is_ascii_uppercase()) {
-        return value.replace('-', "_");
+        return value.replace(['-', '.'], "_");
     }
 
     // PascalCase or anything else mixed: route through heck's ToSnakeCase.
@@ -68,10 +72,20 @@ mod tests {
     }
 
     #[test]
-    fn dotted_numeric_passes_through() {
-        // IPSec / IKE-style values that AWS APIs occasionally surface.
-        assert_eq!(dsl_enum_value("ipsec.1"), "ipsec.1");
+    fn pure_dotted_numeric_passes_through() {
+        // All-digit / all-dot strings stay as-is so they can be quoted in
+        // DSL position (`'1.0'`). Only mixed dotted values that contain
+        // letters get the `.` → `_` rewrite below.
         assert_eq!(dsl_enum_value("1.0"), "1.0");
+    }
+
+    #[test]
+    fn mixed_dotted_values_become_snake() {
+        // IPSec / IKE-style values that AWS APIs occasionally surface.
+        // The `.` would force a quoted-literal in DSL position; rewriting
+        // to `_` keeps the DSL spelling a bare identifier and the strict
+        // validator (carina#2980) can gate on it cleanly.
+        assert_eq!(dsl_enum_value("ipsec.1"), "ipsec_1");
     }
 
     #[test]

@@ -96,10 +96,12 @@ fn build_dsl_aliases_code(
     }
     for value in values {
         if seen_canonical.insert(value.clone()) {
+            // Emit every value, including identity rows where the DSL
+            // spelling equals the API spelling. The exhaustive table
+            // is what makes the carina-core strict-DSL validator (see
+            // `carina-rs/carina#2980`) treat the whole enum uniformly.
             let dsl_form = dsl_enum_value(value);
-            if dsl_form != *value {
-                pairs.push((value.clone(), dsl_form));
-            }
+            pairs.push((value.clone(), dsl_form));
         }
     }
 
