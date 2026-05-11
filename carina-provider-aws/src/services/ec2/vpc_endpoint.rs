@@ -2,7 +2,6 @@ use std::collections::HashMap;
 
 use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
-use carina_core::utils::extract_enum_value;
 
 use crate::AwsProvider;
 use crate::helpers::{require_string_attr, retry_aws_operation, sdk_error_message};
@@ -74,8 +73,7 @@ impl AwsProvider {
             resource.get_attr("vpc_endpoint_type")
         {
             use aws_sdk_ec2::types::VpcEndpointType;
-            let et = VpcEndpointType::from(extract_enum_value(ep_type));
-            req = req.vpc_endpoint_type(et);
+            req = req.vpc_endpoint_type(VpcEndpointType::from(ep_type.as_str()));
         }
 
         if let Some(Value::Concrete(ConcreteValue::List(ids))) =

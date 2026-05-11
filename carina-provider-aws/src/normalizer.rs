@@ -6,7 +6,7 @@ use indexmap::IndexMap;
 
 use carina_core::provider::{self, ProviderNormalizer};
 use carina_core::resource::{ConcreteValue, Resource, Value};
-use carina_core::schema::SchemaRegistry;
+use carina_core::schema::{AttributeType, SchemaRegistry};
 
 /// Schema extension for the AWS provider.
 ///
@@ -28,10 +28,26 @@ impl ProviderNormalizer for AwsNormalizer {
     }
 }
 
-/// Resolve enum identifiers in resources to their fully-qualified DSL format.
+/// Normalize enum identifiers in resources to the AWS API-canonical
+/// spelling — including nested positions (Struct fields, List items,
+/// Map values).
 ///
-/// For example, resolves bare `Enabled` or `VersioningStatus.Enabled` into
-/// `aws.s3.Bucket.VersioningStatus.Enabled` based on schema definitions.
+/// Runs as two passes per attribute:
+///
+/// 1. [`carina_core::utils::resolve_enum_value_recursive`] converts every
+///    DSL identifier in the value tree to the fully-qualified DSL form
+///    (`enabled` → `aws.s3.Bucket.VersioningStatus.enabled`). This step
+///    is provider-neutral.
+/// 2. [`api_canonicalize_recursive`] then walks the same shape and
+///    rewrites each enum value to its API-canonical spelling
+///    (`aws.s3.Bucket.VersioningStatus.enabled` → `Enabled`) via
+///    [`DslMap::api_for`]. Provider hand-written code reads
+///    `Value::Concrete(ConcreteValue::String(api_canonical))` and
+///    passes it straight to the AWS SDK builder — `extract_enum_value`
+///    is no longer needed anywhere in `services/`.
+///
+/// The recursion is the contract: every enum value reaching the
+/// provider is API-canonical no matter how deeply it is nested.
 pub(crate) fn resolve_enum_identifiers(resources: &mut [Resource]) {
     let configs = crate::schemas::generated::configs();
 
@@ -50,20 +66,115 @@ pub(crate) fn resolve_enum_identifiers(resources: &mut [Resource]) {
             None => continue,
         };
 
-        // Resolve enum attributes
         let mut resolved_attrs = HashMap::new();
         for (key, value) in &resource.attributes {
-            if let Some(attr_schema) = config.schema.attributes.get(key.as_str())
-                && let Some(parts) = attr_schema.attr_type.namespaced_enum_parts()
-                && let Some(resolved) = carina_core::utils::resolve_enum_value(value, &parts)
-            {
-                resolved_attrs.insert(key.clone(), resolved);
+            let Some(attr_schema) = config.schema.attributes.get(key.as_str()) else {
+                continue;
+            };
+            // Pass 1: bare/short DSL identifiers → fully-qualified DSL form.
+            let after_dsl =
+                carina_core::utils::resolve_enum_value_recursive(value, &attr_schema.attr_type);
+            // Pass 2: DSL spelling → API canonical at every nested enum position.
+            let base = after_dsl.as_ref().unwrap_or(value);
+            let after_api = api_canonicalize_recursive(base, &attr_schema.attr_type);
+
+            match (after_dsl, after_api) {
+                (_, Some(v)) => {
+                    resolved_attrs.insert(key.clone(), v);
+                }
+                (Some(v), None) => {
+                    resolved_attrs.insert(key.clone(), v);
+                }
+                (None, None) => {}
             }
         }
 
         for (key, value) in resolved_attrs {
             resource.set_attr(key, value);
         }
+    }
+}
+
+/// Walk `value` against `attr_type` and rewrite every enum spelling to
+/// the AWS API-canonical form via `DslMap::api_for`.
+///
+/// Input expectation: enum identifiers are already in fully-qualified
+/// DSL form (the output of `resolve_enum_value_recursive`), so the
+/// extraction is `extract_enum_value(s)` — strip the namespace prefix —
+/// followed by `dsl_map.api_for(trailing)` to translate DSL → API.
+///
+/// Returns `None` when nothing was rewritten, mirroring the
+/// `resolve_enum_value_recursive` contract so callers can compose the
+/// two passes without redundant clones.
+fn api_canonicalize_recursive(value: &Value, attr_type: &AttributeType) -> Option<Value> {
+    // Leaf: StringEnum (with or without namespace). We canonicalize via
+    // the alias table regardless of whether the input was namespaced —
+    // `extract_enum_value` handles both shapes.
+    if let Some((_, _, _, dsl_map)) = attr_type.string_enum_parts() {
+        let Value::Concrete(ConcreteValue::String(s)) = value else {
+            return None;
+        };
+        let dsl_trailing = carina_core::utils::extract_enum_value(s);
+        let api = dsl_map.api_for(dsl_trailing);
+        // No-op if the string is already API-canonical AND has no
+        // namespace prefix (i.e. `s == api`). Otherwise rewrite to the
+        // bare API spelling so SDK::from(...) accepts it.
+        if s == &api {
+            return None;
+        }
+        return Some(Value::Concrete(ConcreteValue::String(api)));
+    }
+
+    match attr_type {
+        AttributeType::Struct { fields, .. } => {
+            let Value::Concrete(ConcreteValue::Map(map)) = value else {
+                return None;
+            };
+            let mut rewritten = map.clone();
+            let mut changed = false;
+            for field in fields {
+                if let Some(field_value) = map.get(&field.name)
+                    && let Some(new_field) =
+                        api_canonicalize_recursive(field_value, &field.field_type)
+                {
+                    rewritten.insert(field.name.clone(), new_field);
+                    changed = true;
+                }
+            }
+            changed.then_some(Value::Concrete(ConcreteValue::Map(rewritten)))
+        }
+        AttributeType::List { inner, .. } => {
+            let Value::Concrete(ConcreteValue::List(items)) = value else {
+                return None;
+            };
+            let mut rewritten = items.clone();
+            let mut changed = false;
+            for (i, item) in items.iter().enumerate() {
+                if let Some(new_item) = api_canonicalize_recursive(item, inner) {
+                    rewritten[i] = new_item;
+                    changed = true;
+                }
+            }
+            changed.then_some(Value::Concrete(ConcreteValue::List(rewritten)))
+        }
+        AttributeType::Map { value: inner, .. } => {
+            let Value::Concrete(ConcreteValue::Map(map)) = value else {
+                return None;
+            };
+            let mut rewritten = map.clone();
+            let mut changed = false;
+            for (k, v) in map {
+                if let Some(new_v) = api_canonicalize_recursive(v, inner) {
+                    rewritten.insert(k.clone(), new_v);
+                    changed = true;
+                }
+            }
+            changed.then_some(Value::Concrete(ConcreteValue::Map(rewritten)))
+        }
+        // Scalars and Union: nothing to descend into. Union arms with
+        // enum values are not supported (mirroring the upstream
+        // `resolve_enum_value_recursive` contract).
+        _ => None,
     }
 }
 
@@ -136,6 +247,13 @@ pub(crate) fn normalize_state_enums(resource_type: &str, attributes: &mut HashMa
 mod tests {
     use super::*;
 
+    // After aws#258, `resolve_enum_identifiers` runs a second pass that
+    // canonicalizes DSL spellings into the AWS API form (bare value). So
+    // every shape of input — namespaced, TypeName.value, bare DSL alias,
+    // bare API canonical — collapses to the AWS API spelling
+    // (e.g. `"Enabled"`) before the provider sees it. Pre-#258, the
+    // output was the fully-qualified DSL form
+    // (e.g. `"aws.s3.BucketVersioning.VersioningStatus.enabled"`).
     #[test]
     fn test_resolve_enum_identifiers_namespaced_value() {
         let mut resource = Resource::with_provider("aws", "s3.BucketVersioning", "test");
@@ -150,7 +268,7 @@ mod tests {
         assert_eq!(
             resources[0].get_attr("status"),
             Some(&Value::Concrete(ConcreteValue::String(
-                "aws.s3.BucketVersioning.VersioningStatus.Enabled".to_string()
+                "Enabled".to_string()
             )))
         );
     }
@@ -164,12 +282,10 @@ mod tests {
         );
         let mut resources = vec![resource];
         resolve_enum_identifiers(&mut resources);
-        // After carina#2832, resolve_enum_value applies dsl_aliases so the
-        // namespaced output uses the DSL spelling (snake_case).
         assert_eq!(
             resources[0].get_attr("status"),
             Some(&Value::Concrete(ConcreteValue::String(
-                "aws.s3.BucketVersioning.VersioningStatus.enabled".to_string()
+                "Enabled".to_string()
             )))
         );
     }
@@ -188,7 +304,7 @@ mod tests {
         assert_eq!(
             resources[0].get_attr("object_ownership"),
             Some(&Value::Concrete(ConcreteValue::String(
-                "aws.s3.BucketOwnershipControls.ObjectOwnership.bucket_owner_enforced".to_string()
+                "BucketOwnerEnforced".to_string()
             )))
         );
     }
@@ -205,7 +321,7 @@ mod tests {
         assert_eq!(
             resources[0].get_attr("status"),
             Some(&Value::Concrete(ConcreteValue::String(
-                "aws.s3.BucketVersioning.VersioningStatus.enabled".to_string()
+                "Enabled".to_string()
             )))
         );
     }
@@ -230,7 +346,11 @@ mod tests {
 
     #[test]
     fn test_resolve_enum_identifiers_with_to_dsl() {
-        // ip_protocol has to_dsl that maps "-1" → "all"
+        // ip_protocol has `dsl_aliases` mapping API `"-1"` ↔ DSL `"all"`.
+        // The pass-2 canonicalize rewrites the DSL spelling back to
+        // the API form, so `"-1"` round-trips to itself (it's already
+        // API-canonical; pass-1 only namespaces it, pass-2 strips the
+        // namespace and canonicalizes via api_for).
         let mut resource = Resource::with_provider("aws", "ec2.SecurityGroupIngress", "test-rule");
         resource.set_attr(
             "ip_protocol".to_string(),
@@ -240,9 +360,7 @@ mod tests {
         resolve_enum_identifiers(&mut resources);
         assert_eq!(
             resources[0].get_attr("ip_protocol"),
-            Some(&Value::Concrete(ConcreteValue::String(
-                "aws.ec2.SecurityGroupIngress.IpProtocol.all".to_string()
-            )))
+            Some(&Value::Concrete(ConcreteValue::String("-1".to_string())))
         );
     }
 
@@ -332,6 +450,69 @@ mod tests {
     }
 
     #[test]
+    fn test_resolve_enum_identifiers_dsl_alias_to_api_canonical() {
+        // Regression for issue #258: DSL alias `enabled` must be
+        // canonicalized to AWS API spelling `Enabled` before reaching
+        // the provider's SDK::from() call. Without this, the SDK wraps
+        // the unknown value and S3 returns MalformedXML.
+        let mut resource = Resource::with_provider("aws", "s3.BucketVersioning", "test");
+        resource.set_attr(
+            "status".to_string(),
+            Value::Concrete(ConcreteValue::String(
+                "aws.s3.BucketVersioning.VersioningStatus.enabled".to_string(),
+            )),
+        );
+        let mut resources = vec![resource];
+        resolve_enum_identifiers(&mut resources);
+        assert_eq!(
+            resources[0].get_attr("status"),
+            Some(&Value::Concrete(ConcreteValue::String(
+                "Enabled".to_string()
+            )))
+        );
+    }
+
+    #[test]
+    fn test_resolve_enum_identifiers_nested_struct_field() {
+        // Struct field enums (e.g. partitioned_prefix.partition_date_source
+        // in BucketLogging) must be canonicalized through the recursion,
+        // not just the top-level attribute.
+        use indexmap::IndexMap;
+        let mut resource = Resource::with_provider("aws", "s3.BucketLogging", "test");
+        let mut pp = IndexMap::new();
+        pp.insert(
+            "partition_date_source".to_string(),
+            Value::Concrete(ConcreteValue::String("event_time".to_string())),
+        );
+        let mut tokf = IndexMap::new();
+        tokf.insert(
+            "partitioned_prefix".to_string(),
+            Value::Concrete(ConcreteValue::Map(pp)),
+        );
+        resource.set_attr(
+            "target_object_key_format".to_string(),
+            Value::Concrete(ConcreteValue::Map(tokf)),
+        );
+        let mut resources = vec![resource];
+        resolve_enum_identifiers(&mut resources);
+        let Some(Value::Concrete(ConcreteValue::Map(outer))) =
+            resources[0].get_attr("target_object_key_format")
+        else {
+            panic!("expected map");
+        };
+        let Some(Value::Concrete(ConcreteValue::Map(inner))) = outer.get("partitioned_prefix")
+        else {
+            panic!("expected nested map");
+        };
+        assert_eq!(
+            inner.get("partition_date_source"),
+            Some(&Value::Concrete(ConcreteValue::String(
+                "EventTime".to_string()
+            )))
+        );
+    }
+
+    #[test]
     fn test_resolve_enum_identifiers_ec2_vpc_instance_tenancy() {
         let mut resource = Resource::with_provider("aws", "ec2.Vpc", "test-vpc");
         resource.set_attr(
@@ -345,7 +526,7 @@ mod tests {
         assert_eq!(
             resources[0].get_attr("instance_tenancy"),
             Some(&Value::Concrete(ConcreteValue::String(
-                "aws.ec2.Vpc.InstanceTenancy.dedicated".to_string()
+                "dedicated".to_string()
             )))
         );
     }
@@ -361,9 +542,7 @@ mod tests {
         resolve_enum_identifiers(&mut resources);
         assert_eq!(
             resources[0].get_attr("ip_protocol"),
-            Some(&Value::Concrete(ConcreteValue::String(
-                "aws.ec2.SecurityGroupIngress.IpProtocol.tcp".to_string()
-            )))
+            Some(&Value::Concrete(ConcreteValue::String("tcp".to_string())))
         );
     }
 

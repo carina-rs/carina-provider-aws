@@ -2,7 +2,6 @@ use std::collections::HashMap;
 
 use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
-use carina_core::utils::extract_enum_value;
 
 use crate::AwsProvider;
 use crate::helpers::sdk_error_message;
@@ -113,9 +112,8 @@ impl AwsProvider {
         if let Some(Value::Concrete(ConcreteValue::String(feature_set))) =
             resource.get_attr("feature_set")
         {
-            let fs = aws_sdk_organizations::types::OrganizationFeatureSet::from(
-                extract_enum_value(feature_set),
-            );
+            let fs =
+                aws_sdk_organizations::types::OrganizationFeatureSet::from(feature_set.as_str());
             req = req.feature_set(fs);
         }
 

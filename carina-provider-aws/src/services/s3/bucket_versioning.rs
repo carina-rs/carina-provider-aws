@@ -1,13 +1,11 @@
 use std::collections::HashMap;
 
-use aws_sdk_s3::types::{BucketVersioningStatus, MfaDelete, VersioningConfiguration};
-use carina_core::provider::{ProviderError, ProviderResult};
-use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
-use carina_core::utils::extract_enum_value;
-
 use crate::AwsProvider;
 use crate::helpers::{require_string_attr, sdk_error_message};
 use crate::services::s3::bucket::is_s3_not_configured_error;
+use aws_sdk_s3::types::{BucketVersioningStatus, MfaDelete, VersioningConfiguration};
+use carina_core::provider::{ProviderError, ProviderResult};
+use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
 
 impl AwsProvider {
     /// Read an S3 BucketVersioning.
@@ -92,7 +90,7 @@ impl AwsProvider {
         resource: &Resource,
     ) -> ProviderResult<State> {
         let status_str = match resource.get_attr("status") {
-            Some(Value::Concrete(ConcreteValue::String(s))) => extract_enum_value(s).to_string(),
+            Some(Value::Concrete(ConcreteValue::String(s))) => s.clone(),
             _ => {
                 return Err(
                     ProviderError::invalid_input("status is required").for_resource(id.clone())
@@ -103,8 +101,7 @@ impl AwsProvider {
 
         let mut config_builder = VersioningConfiguration::builder().status(status);
         if let Some(Value::Concrete(ConcreteValue::String(s))) = resource.get_attr("mfa_delete") {
-            let mfa_str = extract_enum_value(s);
-            config_builder = config_builder.mfa_delete(MfaDelete::from(mfa_str));
+            config_builder = config_builder.mfa_delete(MfaDelete::from(s.as_str()));
         }
 
         self.s3_client

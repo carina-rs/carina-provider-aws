@@ -5,7 +5,6 @@ use aws_sdk_s3::types::{
 };
 use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
-use carina_core::utils::extract_enum_value;
 use indexmap::IndexMap;
 
 use crate::AwsProvider;
@@ -175,8 +174,7 @@ impl AwsProvider {
             };
             let mut rb = RedirectAllRequestsTo::builder().host_name(host_name);
             if let Some(Value::Concrete(ConcreteValue::String(p))) = map.get("protocol") {
-                let normalized = extract_enum_value(p);
-                rb = rb.protocol(Protocol::from(normalized));
+                rb = rb.protocol(Protocol::from(p.as_str()));
             }
             config_builder = config_builder.redirect_all_requests_to(rb.build().map_err(|e| {
                 ProviderError::api_error(sdk_error_message(

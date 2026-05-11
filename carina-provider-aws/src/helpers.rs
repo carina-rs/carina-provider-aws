@@ -26,15 +26,19 @@ pub fn require_string_attr(resource: &Resource, attr_name: &str) -> ProviderResu
     }
 }
 
-/// Extract a required enum attribute from a resource, stripping the DSL namespace prefix.
+/// Extract a required enum attribute from a resource.
 ///
-/// StringEnum attributes arrive as namespaced identifiers
-/// (e.g., `aws.route53.RecordSet.Type.A`). This extracts just the variant (`A`).
-/// Using `require_string_attr` instead will pass the full namespaced path to
-/// the AWS API, causing failures that are hard to diagnose.
+/// `AwsNormalizer::normalize_desired` rewrites every enum value to its
+/// AWS API-canonical bare spelling (`Enabled`, `VPC`, `STANDARD_IA`) at
+/// plan time, so the caller can feed the result straight to an SDK
+/// builder like `BucketVersioningStatus::from(...)`.
+///
+/// Equivalent to `require_string_attr` today — the alias historically
+/// stripped a DSL namespace prefix, but normalization now happens
+/// upstream and namespaces never reach the provider. The helper is
+/// kept so caller intent stays readable.
 pub fn require_enum_attr(resource: &Resource, attr_name: &str) -> ProviderResult<String> {
-    let raw = require_string_attr(resource, attr_name)?;
-    Ok(carina_core::utils::extract_enum_value(&raw).to_string())
+    require_string_attr(resource, attr_name)
 }
 
 /// Build an EC2 `TagSpecification` from DSL tags for a given resource type.
@@ -314,8 +318,11 @@ mod tests {
     }
 
     #[test]
-    fn test_require_enum_attr_strips_namespace() {
-        let resource = make_test_resource(vec![("type", "aws.route53.RecordSet.Type.A")]);
+    fn test_require_enum_attr_returns_canonical_value() {
+        // After AwsNormalizer::normalize_desired runs, enum attributes
+        // carry the bare AWS API-canonical spelling. require_enum_attr
+        // just passes it through.
+        let resource = make_test_resource(vec![("type", "A")]);
         assert_eq!(require_enum_attr(&resource, "type").unwrap(), "A");
     }
 

@@ -2632,22 +2632,32 @@ mod tests {
             vec![
                 (
                     "version".to_string(),
-                    Value::String("2012-10-17".to_string()),
+                    Value::Concrete(ConcreteValue::String("2012-10-17".to_string())),
                 ),
                 (
                     "statement".to_string(),
-                    Value::List(vec![Value::Map(
-                        vec![
-                            ("effect".to_string(), Value::String("Allow".to_string())),
-                            (
-                                "action".to_string(),
-                                Value::String("sts:AssumeRole".to_string()),
-                            ),
-                            ("resource".to_string(), Value::String("*".to_string())),
-                        ]
-                        .into_iter()
-                        .collect(),
-                    )]),
+                    Value::Concrete(ConcreteValue::List(vec![Value::Concrete(
+                        ConcreteValue::Map(
+                            vec![
+                                (
+                                    "effect".to_string(),
+                                    Value::Concrete(ConcreteValue::String("Allow".to_string())),
+                                ),
+                                (
+                                    "action".to_string(),
+                                    Value::Concrete(ConcreteValue::String(
+                                        "sts:AssumeRole".to_string(),
+                                    )),
+                                ),
+                                (
+                                    "resource".to_string(),
+                                    Value::Concrete(ConcreteValue::String("*".to_string())),
+                                ),
+                            ]
+                            .into_iter()
+                            .collect(),
+                        ),
+                    )])),
                 ),
             ]
             .into_iter()
@@ -2661,7 +2671,7 @@ mod tests {
         let doc = Value::Concrete(ConcreteValue::Map(
             vec![(
                 "version".to_string(),
-                Value::String("2020-01-01".to_string()),
+                Value::Concrete(ConcreteValue::String("2020-01-01".to_string())),
             )]
             .into_iter()
             .collect(),
@@ -2674,11 +2684,16 @@ mod tests {
         let doc = Value::Concrete(ConcreteValue::Map(
             vec![(
                 "statement".to_string(),
-                Value::List(vec![Value::Map(
-                    vec![("effect".to_string(), Value::String("Grant".to_string()))]
+                Value::Concrete(ConcreteValue::List(vec![Value::Concrete(
+                    ConcreteValue::Map(
+                        vec![(
+                            "effect".to_string(),
+                            Value::Concrete(ConcreteValue::String("Grant".to_string())),
+                        )]
                         .into_iter()
                         .collect(),
-                )]),
+                    ),
+                )])),
             )]
             .into_iter()
             .collect(),
@@ -2693,19 +2708,30 @@ mod tests {
             vec![
                 (
                     "version".to_string(),
-                    Value::String("2012-10-17".to_string()),
+                    Value::Concrete(ConcreteValue::String("2012-10-17".to_string())),
                 ),
                 (
                     "statement".to_string(),
-                    Value::List(vec![Value::Map(
-                        vec![
-                            ("effect".to_string(), Value::String("Deny".to_string())),
-                            ("action".to_string(), Value::String("s3:*".to_string())),
-                            ("resource".to_string(), Value::String("*".to_string())),
-                        ]
-                        .into_iter()
-                        .collect(),
-                    )]),
+                    Value::Concrete(ConcreteValue::List(vec![Value::Concrete(
+                        ConcreteValue::Map(
+                            vec![
+                                (
+                                    "effect".to_string(),
+                                    Value::Concrete(ConcreteValue::String("Deny".to_string())),
+                                ),
+                                (
+                                    "action".to_string(),
+                                    Value::Concrete(ConcreteValue::String("s3:*".to_string())),
+                                ),
+                                (
+                                    "resource".to_string(),
+                                    Value::Concrete(ConcreteValue::String("*".to_string())),
+                                ),
+                            ]
+                            .into_iter()
+                            .collect(),
+                        ),
+                    )])),
                 ),
             ]
             .into_iter()
@@ -2722,32 +2748,41 @@ mod tests {
             vec![
                 (
                     "version".to_string(),
-                    Value::String("2012-10-17".to_string()),
+                    Value::Concrete(ConcreteValue::String("2012-10-17".to_string())),
                 ),
                 (
                     "statement".to_string(),
-                    Value::List(vec![Value::Map(
-                        vec![
-                            ("effect".to_string(), Value::String("Allow".to_string())),
-                            (
-                                "principal".to_string(),
-                                Value::Map(
-                                    vec![(
-                                        "service".to_string(),
-                                        Value::String("ec2.amazonaws.com".to_string()),
-                                    )]
-                                    .into_iter()
-                                    .collect(),
+                    Value::Concrete(ConcreteValue::List(vec![Value::Concrete(
+                        ConcreteValue::Map(
+                            vec![
+                                (
+                                    "effect".to_string(),
+                                    Value::Concrete(ConcreteValue::String("Allow".to_string())),
                                 ),
-                            ),
-                            (
-                                "action".to_string(),
-                                Value::String("sts:AssumeRole".to_string()),
-                            ),
-                        ]
-                        .into_iter()
-                        .collect(),
-                    )]),
+                                (
+                                    "principal".to_string(),
+                                    Value::Concrete(ConcreteValue::Map(
+                                        vec![(
+                                            "service".to_string(),
+                                            Value::Concrete(ConcreteValue::String(
+                                                "ec2.amazonaws.com".to_string(),
+                                            )),
+                                        )]
+                                        .into_iter()
+                                        .collect(),
+                                    )),
+                                ),
+                                (
+                                    "action".to_string(),
+                                    Value::Concrete(ConcreteValue::String(
+                                        "sts:AssumeRole".to_string(),
+                                    )),
+                                ),
+                            ]
+                            .into_iter()
+                            .collect(),
+                        ),
+                    )])),
                 ),
             ]
             .into_iter()
@@ -2768,22 +2803,32 @@ mod tests {
             vec![
                 (
                     "version".to_string(),
-                    Value::String("2012-10-17".to_string()),
+                    Value::Concrete(ConcreteValue::String("2012-10-17".to_string())),
                 ),
                 (
                     "statement".to_string(),
-                    Value::List(vec![Value::Map(
-                        vec![
-                            ("effect".to_string(), Value::String("Allow".to_string())),
-                            ("principal".to_string(), Value::String("*".to_string())),
-                            (
-                                "action".to_string(),
-                                Value::String("sts:AssumeRole".to_string()),
-                            ),
-                        ]
-                        .into_iter()
-                        .collect(),
-                    )]),
+                    Value::Concrete(ConcreteValue::List(vec![Value::Concrete(
+                        ConcreteValue::Map(
+                            vec![
+                                (
+                                    "effect".to_string(),
+                                    Value::Concrete(ConcreteValue::String("Allow".to_string())),
+                                ),
+                                (
+                                    "principal".to_string(),
+                                    Value::Concrete(ConcreteValue::String("*".to_string())),
+                                ),
+                                (
+                                    "action".to_string(),
+                                    Value::Concrete(ConcreteValue::String(
+                                        "sts:AssumeRole".to_string(),
+                                    )),
+                                ),
+                            ]
+                            .into_iter()
+                            .collect(),
+                        ),
+                    )])),
                 ),
             ]
             .into_iter()
@@ -2890,8 +2935,14 @@ mod tests {
             "tags".to_string(),
             Value::Concrete(ConcreteValue::Map(
                 [
-                    ("key".to_string(), Value::String("Project".to_string())),
-                    ("value".to_string(), Value::String("carina".to_string())),
+                    (
+                        "key".to_string(),
+                        Value::Concrete(ConcreteValue::String("Project".to_string())),
+                    ),
+                    (
+                        "value".to_string(),
+                        Value::Concrete(ConcreteValue::String("carina".to_string())),
+                    ),
                 ]
                 .into_iter()
                 .collect(),
@@ -2907,8 +2958,14 @@ mod tests {
             "tags".to_string(),
             Value::Concrete(ConcreteValue::Map(
                 [
-                    ("Key".to_string(), Value::String("Project".to_string())),
-                    ("Value".to_string(), Value::String("carina".to_string())),
+                    (
+                        "Key".to_string(),
+                        Value::Concrete(ConcreteValue::String("Project".to_string())),
+                    ),
+                    (
+                        "Value".to_string(),
+                        Value::Concrete(ConcreteValue::String("carina".to_string())),
+                    ),
                 ]
                 .into_iter()
                 .collect(),
@@ -2924,8 +2981,14 @@ mod tests {
             "tags".to_string(),
             Value::Concrete(ConcreteValue::Map(
                 [
-                    ("Project".to_string(), Value::String("carina".to_string())),
-                    ("ManagedBy".to_string(), Value::String("carina".to_string())),
+                    (
+                        "Project".to_string(),
+                        Value::Concrete(ConcreteValue::String("carina".to_string())),
+                    ),
+                    (
+                        "ManagedBy".to_string(),
+                        Value::Concrete(ConcreteValue::String("carina".to_string())),
+                    ),
                 ]
                 .into_iter()
                 .collect(),
@@ -3012,28 +3075,32 @@ mod tests {
         let doc = Value::Concrete(ConcreteValue::Map(
             vec![(
                 "statement".to_string(),
-                Value::List(vec![Value::Map(
-                    vec![(
-                        "condition".to_string(),
-                        Value::Map(
-                            vec![(
-                                "string_equals".to_string(),
-                                Value::Map(
-                                    vec![(
-                                        "aws:RequestedRegion".to_string(),
-                                        Value::String("us-east-1".to_string()),
-                                    )]
-                                    .into_iter()
-                                    .collect(),
-                                ),
-                            )]
-                            .into_iter()
-                            .collect(),
-                        ),
-                    )]
-                    .into_iter()
-                    .collect(),
-                )]),
+                Value::Concrete(ConcreteValue::List(vec![Value::Concrete(
+                    ConcreteValue::Map(
+                        vec![(
+                            "condition".to_string(),
+                            Value::Concrete(ConcreteValue::Map(
+                                vec![(
+                                    "string_equals".to_string(),
+                                    Value::Concrete(ConcreteValue::Map(
+                                        vec![(
+                                            "aws:RequestedRegion".to_string(),
+                                            Value::Concrete(ConcreteValue::String(
+                                                "us-east-1".to_string(),
+                                            )),
+                                        )]
+                                        .into_iter()
+                                        .collect(),
+                                    )),
+                                )]
+                                .into_iter()
+                                .collect(),
+                            )),
+                        )]
+                        .into_iter()
+                        .collect(),
+                    ),
+                )])),
             )]
             .into_iter()
             .collect(),
@@ -3046,21 +3113,23 @@ mod tests {
         let doc = Value::Concrete(ConcreteValue::Map(
             vec![(
                 "statement".to_string(),
-                Value::List(vec![Value::Map(
-                    vec![(
-                        "condition".to_string(),
-                        Value::Map(
-                            vec![(
-                                "StringEquals".to_string(),
-                                Value::Map(indexmap::IndexMap::new()),
-                            )]
-                            .into_iter()
-                            .collect(),
-                        ),
-                    )]
-                    .into_iter()
-                    .collect(),
-                )]),
+                Value::Concrete(ConcreteValue::List(vec![Value::Concrete(
+                    ConcreteValue::Map(
+                        vec![(
+                            "condition".to_string(),
+                            Value::Concrete(ConcreteValue::Map(
+                                vec![(
+                                    "StringEquals".to_string(),
+                                    Value::Concrete(ConcreteValue::Map(indexmap::IndexMap::new())),
+                                )]
+                                .into_iter()
+                                .collect(),
+                            )),
+                        )]
+                        .into_iter()
+                        .collect(),
+                    ),
+                )])),
             )]
             .into_iter()
             .collect(),
@@ -3077,18 +3146,23 @@ mod tests {
         let doc = Value::Concrete(ConcreteValue::Map(
             vec![(
                 "statement".to_string(),
-                Value::List(vec![Value::Map(
-                    vec![(
-                        "condition".to_string(),
-                        Value::Map(
-                            vec![("foo_bar".to_string(), Value::Map(indexmap::IndexMap::new()))]
+                Value::Concrete(ConcreteValue::List(vec![Value::Concrete(
+                    ConcreteValue::Map(
+                        vec![(
+                            "condition".to_string(),
+                            Value::Concrete(ConcreteValue::Map(
+                                vec![(
+                                    "foo_bar".to_string(),
+                                    Value::Concrete(ConcreteValue::Map(indexmap::IndexMap::new())),
+                                )]
                                 .into_iter()
                                 .collect(),
-                        ),
-                    )]
-                    .into_iter()
-                    .collect(),
-                )]),
+                            )),
+                        )]
+                        .into_iter()
+                        .collect(),
+                    ),
+                )])),
             )]
             .into_iter()
             .collect(),
@@ -3101,21 +3175,23 @@ mod tests {
         let doc = Value::Concrete(ConcreteValue::Map(
             vec![(
                 "statement".to_string(),
-                Value::List(vec![Value::Map(
-                    vec![(
-                        "condition".to_string(),
-                        Value::Map(
-                            vec![(
-                                "string_equals_if_exists".to_string(),
-                                Value::Map(indexmap::IndexMap::new()),
-                            )]
-                            .into_iter()
-                            .collect(),
-                        ),
-                    )]
-                    .into_iter()
-                    .collect(),
-                )]),
+                Value::Concrete(ConcreteValue::List(vec![Value::Concrete(
+                    ConcreteValue::Map(
+                        vec![(
+                            "condition".to_string(),
+                            Value::Concrete(ConcreteValue::Map(
+                                vec![(
+                                    "string_equals_if_exists".to_string(),
+                                    Value::Concrete(ConcreteValue::Map(indexmap::IndexMap::new())),
+                                )]
+                                .into_iter()
+                                .collect(),
+                            )),
+                        )]
+                        .into_iter()
+                        .collect(),
+                    ),
+                )])),
             )]
             .into_iter()
             .collect(),

@@ -2,7 +2,6 @@ use std::collections::HashMap;
 
 use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
-use carina_core::utils::extract_enum_value;
 
 use aws_sdk_ec2::types::NatGatewayState;
 
@@ -83,8 +82,7 @@ impl AwsProvider {
             resource.get_attr("connectivity_type")
         {
             use aws_sdk_ec2::types::ConnectivityType;
-            let ct = ConnectivityType::from(extract_enum_value(conn_type));
-            req = req.connectivity_type(ct);
+            req = req.connectivity_type(ConnectivityType::from(conn_type.as_str()));
         }
 
         let rid = resource.id.clone();

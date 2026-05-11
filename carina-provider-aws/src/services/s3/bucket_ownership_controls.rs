@@ -3,7 +3,6 @@ use std::collections::HashMap;
 use aws_sdk_s3::types::{ObjectOwnership, OwnershipControls, OwnershipControlsRule};
 use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
-use carina_core::utils::extract_enum_value;
 
 use crate::AwsProvider;
 use crate::helpers::{require_string_attr, sdk_error_message};
@@ -87,7 +86,7 @@ impl AwsProvider {
         resource: &Resource,
     ) -> ProviderResult<State> {
         let ownership_str = match resource.get_attr("object_ownership") {
-            Some(Value::Concrete(ConcreteValue::String(s))) => extract_enum_value(s).to_string(),
+            Some(Value::Concrete(ConcreteValue::String(s))) => s.clone(),
             _ => {
                 return Err(ProviderError::invalid_input("object_ownership is required")
                     .for_resource(id.clone()));

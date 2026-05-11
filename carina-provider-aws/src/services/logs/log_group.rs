@@ -3,7 +3,6 @@ use std::collections::HashMap;
 
 use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
-use carina_core::utils::extract_enum_value;
 
 use crate::AwsProvider;
 use crate::helpers::{require_string_attr, sdk_error_message};
@@ -130,8 +129,7 @@ impl AwsProvider {
             resource.get_attr("log_group_class")
         {
             use aws_sdk_cloudwatchlogs::types::LogGroupClass;
-            let class_value = extract_enum_value(class);
-            req = req.log_group_class(LogGroupClass::from(class_value));
+            req = req.log_group_class(LogGroupClass::from(class.as_str()));
         }
 
         if let Some(Value::Concrete(ConcreteValue::Map(tag_map))) = resource.get_attr("tags") {

@@ -3,7 +3,6 @@ use std::collections::HashMap;
 
 use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
-use carina_core::utils::extract_enum_value;
 
 use crate::AwsProvider;
 use crate::helpers::{PollState, require_string_attr, sdk_error_message, wait_for_ec2_state};
@@ -172,9 +171,8 @@ impl AwsProvider {
         if let Some(Value::Concrete(ConcreteValue::String(iam_billing))) =
             resource.get_attr("iam_user_access_to_billing")
         {
-            let val = aws_sdk_organizations::types::IamUserAccessToBilling::from(
-                extract_enum_value(iam_billing),
-            );
+            let val =
+                aws_sdk_organizations::types::IamUserAccessToBilling::from(iam_billing.as_str());
             req = req.iam_user_access_to_billing(val);
         }
 
