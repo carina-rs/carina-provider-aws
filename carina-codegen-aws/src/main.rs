@@ -820,7 +820,7 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
         code.push_str("use super::validate_tags_map;\n");
     }
     if has_ranged_ints {
-        code.push_str("use carina_core::resource::{ConcreteValue, DeferredValue, Value};\n");
+        code.push_str("use carina_core::resource::{ConcreteValue, Value};\n");
     }
     code.push_str(&format!(
         "use carina_core::schema::{{{}}};\n\n",
@@ -874,7 +874,7 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
         let (condition, display) = int_range_condition_and_display(range.min, range.max);
         code.push_str(&format!(
             "fn {}(value: &Value) -> Result<(), String> {{\n\
-             \x20   if let Value::Int(n) = value {{\n\
+             \x20   if let Value::Concrete(ConcreteValue::Int(n)) = value {{\n\
              \x20       if {} {{\n\
              \x20           Err(format!(\"Value {{}} is out of range {}\", n))\n\
              \x20       }} else {{\n\
