@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crate::AwsProvider;
-use crate::helpers::{require_string_attr, sdk_error_message};
+use crate::helpers::{require_string_attr, retry_aws_operation, sdk_error_message};
 use crate::services::s3::bucket::is_s3_not_configured_error;
 use aws_sdk_s3::types::{BucketVersioningStatus, MfaDelete, VersioningConfiguration};
 use carina_core::provider::{ProviderError, ProviderResult};
@@ -129,17 +129,22 @@ impl AwsProvider {
         id: ResourceId,
         identifier: &str,
     ) -> ProviderResult<()> {
-        let result = self
-            .s3_client
-            .put_bucket_versioning()
-            .bucket(identifier)
-            .versioning_configuration(
-                VersioningConfiguration::builder()
-                    .status(BucketVersioningStatus::Suspended)
-                    .build(),
-            )
-            .send()
-            .await;
+        let result = retry_aws_operation("suspend bucket versioning", 3, 5, || {
+            let client = &self.s3_client;
+            async move {
+                client
+                    .put_bucket_versioning()
+                    .bucket(identifier)
+                    .versioning_configuration(
+                        VersioningConfiguration::builder()
+                            .status(BucketVersioningStatus::Suspended)
+                            .build(),
+                    )
+                    .send()
+                    .await
+            }
+        })
+        .await;
 
         match result {
             Ok(_) => Ok(()),

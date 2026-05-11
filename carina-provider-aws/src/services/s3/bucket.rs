@@ -105,15 +105,13 @@ impl AwsProvider {
         let rid = resource.id.clone();
         retry_aws_operation("create S3 bucket", 5, 5, || {
             let req = req.clone();
-            let rid = rid.clone();
-            async move {
-                req.send().await.map_err(|e| {
-                    ProviderError::api_error(sdk_error_message("Failed to create bucket", &e))
-                        .for_resource(rid)
-                })
-            }
+            async move { req.send().await }
         })
-        .await?;
+        .await
+        .map_err(|e| {
+            ProviderError::api_error(sdk_error_message("Failed to create bucket", &e))
+                .for_resource(rid.clone())
+        })?;
 
         // Set tags
         let attrs = resource.resolved_attributes();
@@ -166,15 +164,15 @@ impl AwsProvider {
             self.empty_s3_bucket(&id, identifier).await?;
         }
 
-        self.s3_client
-            .delete_bucket()
-            .bucket(identifier)
-            .send()
-            .await
-            .map_err(|e| {
-                ProviderError::api_error(sdk_error_message("Failed to delete bucket", &e))
-                    .for_resource(id.clone())
-            })?;
+        retry_aws_operation("delete S3 bucket", 3, 5, || {
+            let client = &self.s3_client;
+            async move { client.delete_bucket().bucket(identifier).send().await }
+        })
+        .await
+        .map_err(|e| {
+            ProviderError::api_error(sdk_error_message("Failed to delete bucket", &e))
+                .for_resource(id.clone())
+        })?;
         Ok(())
     }
 

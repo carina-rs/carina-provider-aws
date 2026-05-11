@@ -7,7 +7,10 @@ use std::future::Future;
 use std::time::Duration;
 
 use aws_sdk_ec2::types::{ResourceType, Tag, TagSpecification};
+use aws_smithy_runtime_api::client::result::SdkError;
 use aws_smithy_types::error::display::DisplayErrorContext;
+use aws_smithy_types::error::metadata::ProvideErrorMetadata;
+use aws_smithy_types::retry::ProvideErrorKind;
 use tokio::time::sleep;
 
 use carina_core::provider::{PatchOpKind, ProviderError, ProviderResult, UpdatePatch};
@@ -92,34 +95,40 @@ pub fn sdk_error_message(context: &str, err: &(impl std::error::Error + 'static)
 
 /// Retry an AWS SDK operation with exponential backoff on transient errors.
 ///
-/// Only retries on known transient error patterns (throttling, service errors).
-/// Does NOT retry on validation, permission, or resource-not-found errors.
+/// Whether an error is retried is decided by [`is_retryable_sdk_error`],
+/// which consults the SDK's own classification (`ProvideErrorKind`) plus
+/// a small explicit carve-out for S3 `OperationAborted` (a 409 race that
+/// the SDK does not flag as retryable but the AWS docs say to back off).
 ///
 /// - `operation_name`: Human-readable name for log messages.
 /// - `max_attempts`: Maximum number of attempts (including the first).
 /// - `initial_delay_secs`: Delay before the first retry (doubles each attempt, capped at 120s).
 /// - `f`: A closure that returns a `Future` producing the SDK result.
-pub async fn retry_aws_operation<F, Fut, T, E>(
+pub async fn retry_aws_operation<F, Fut, T, E, R>(
     operation_name: &str,
     max_attempts: u32,
     initial_delay_secs: u64,
     f: F,
-) -> Result<T, E>
+) -> Result<T, SdkError<E, R>>
 where
     F: Fn() -> Fut,
-    Fut: Future<Output = Result<T, E>>,
-    E: std::fmt::Display,
+    Fut: Future<Output = Result<T, SdkError<E, R>>>,
+    E: ProvideErrorKind + ProvideErrorMetadata + std::error::Error + 'static,
+    R: std::fmt::Debug,
 {
     let mut attempt = 0;
     loop {
         attempt += 1;
         match f().await {
             Ok(result) => return Ok(result),
-            Err(e) if attempt < max_attempts && is_retryable_error(&e.to_string()) => {
+            Err(e) if attempt < max_attempts && is_retryable_sdk_error(&e) => {
                 let delay = std::cmp::min(initial_delay_secs * 2u64.pow(attempt - 1), 120);
                 eprintln!(
                     "  Retrying {} (attempt {}/{}): {}",
-                    operation_name, attempt, max_attempts, e
+                    operation_name,
+                    attempt,
+                    max_attempts,
+                    DisplayErrorContext(&e)
                 );
                 sleep(Duration::from_secs(delay)).await;
             }
@@ -128,23 +137,44 @@ where
     }
 }
 
-/// Check whether an error message indicates a transient AWS error worth retrying.
-fn is_retryable_error(error_msg: &str) -> bool {
-    const PATTERNS: &[&str] = &[
-        "ThrottlingException",
-        "Throttling",
-        "Rate exceeded",
-        "RequestLimitExceeded",
-        "ServiceUnavailable",
-        "InternalError",
-        "InternalServerError",
-        "ServiceException",
-        // S3 returns this with HTTP 409 when CreateBucket races against a
-        // recent DeleteBucket for the same name; the control plane clears
-        // after ~60–90s, so backoff is the right response.
-        "OperationAborted",
-    ];
-    PATTERNS.iter().any(|p| error_msg.contains(p))
+/// Classify an [`SdkError`] as transient (worth retrying) or terminal.
+///
+/// Trusts the SDK's own retryability flag for service errors — the
+/// `retryable_error_kind()` accessor returns `Some(ErrorKind)` exactly
+/// when the service marked the response retryable (throttling, server
+/// errors, modeled transient conditions like S3 `RequestTimeout`).
+/// Transport-layer failures (`TimeoutError`, `DispatchFailure`,
+/// `ResponseError`, `ConstructionFailure`) are always transient — the
+/// HTTP exchange did not complete, so a retry is safe for idempotent
+/// operations (which is what all carina provider operations are).
+///
+/// One explicit carve-out: S3 `OperationAborted` is HTTP 409 and the
+/// SDK does not flag it as retryable, but the AWS docs say to back off
+/// because the bucket name's control plane state clears after ~60–90s
+/// when CreateBucket races a recent DeleteBucket.
+pub fn is_retryable_sdk_error<E, R>(err: &SdkError<E, R>) -> bool
+where
+    E: ProvideErrorKind + ProvideErrorMetadata,
+{
+    match err {
+        SdkError::ConstructionFailure(_)
+        | SdkError::TimeoutError(_)
+        | SdkError::DispatchFailure(_)
+        | SdkError::ResponseError(_) => true,
+        SdkError::ServiceError(ctx) => {
+            let inner = ctx.err();
+            if inner.retryable_error_kind().is_some() {
+                return true;
+            }
+            // S3-specific: CreateBucket / DeleteBucket race condition.
+            // Disambiguate `code()` — both `ProvideErrorKind` and
+            // `ProvideErrorMetadata` define a same-named accessor.
+            matches!(ProvideErrorMetadata::code(inner), Some("OperationAborted"))
+        }
+        // `SdkError` is `#[non_exhaustive]`; future-added variants get
+        // the conservative default (don't retry).
+        _ => false,
+    }
 }
 
 /// Reconstruct a `Resource` from `from` state plus an `UpdatePatch`.
@@ -397,94 +427,168 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_is_retryable_error_throttling() {
-        assert!(is_retryable_error("ThrottlingException: Rate exceeded"));
-        assert!(is_retryable_error("Throttling: request limit"));
-        assert!(is_retryable_error("Rate exceeded for API call"));
-        assert!(is_retryable_error("RequestLimitExceeded"));
+    // Mock service-error type for testing the retry classifier. Implements
+    // the minimum traits the helper requires: `ProvideErrorKind` (for
+    // SDK-modeled retryability) and `ProvideErrorMetadata` (for the S3
+    // `OperationAborted` carve-out).
+    use aws_smithy_runtime_api::client::orchestrator::HttpResponse;
+    use aws_smithy_runtime_api::client::result::SdkError;
+    use aws_smithy_types::body::SdkBody;
+    use aws_smithy_types::error::ErrorMetadata;
+    use aws_smithy_types::error::metadata::ProvideErrorMetadata;
+    use aws_smithy_types::retry::{ErrorKind, ProvideErrorKind};
+
+    #[derive(Debug)]
+    struct MockServiceError {
+        meta: ErrorMetadata,
+        retryable: Option<ErrorKind>,
+    }
+
+    impl MockServiceError {
+        fn new(code: impl Into<String>, retryable: Option<ErrorKind>) -> Self {
+            let meta = ErrorMetadata::builder().code(code).build();
+            Self { meta, retryable }
+        }
+    }
+
+    impl std::fmt::Display for MockServiceError {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "{:?}", self.meta)
+        }
+    }
+
+    impl std::error::Error for MockServiceError {}
+
+    impl ProvideErrorMetadata for MockServiceError {
+        fn meta(&self) -> &ErrorMetadata {
+            &self.meta
+        }
+    }
+
+    impl ProvideErrorKind for MockServiceError {
+        fn retryable_error_kind(&self) -> Option<ErrorKind> {
+            self.retryable
+        }
+        fn code(&self) -> Option<&str> {
+            self.meta.code()
+        }
+    }
+
+    fn empty_http_response() -> HttpResponse {
+        HttpResponse::new(500.try_into().unwrap(), SdkBody::empty())
+    }
+
+    fn service_err(
+        code: &str,
+        retryable: Option<ErrorKind>,
+    ) -> SdkError<MockServiceError, HttpResponse> {
+        SdkError::service_error(
+            MockServiceError::new(code, retryable),
+            empty_http_response(),
+        )
     }
 
     #[test]
-    fn test_is_retryable_error_service_errors() {
-        assert!(is_retryable_error("ServiceUnavailable: try again"));
-        assert!(is_retryable_error("InternalError occurred"));
-        assert!(is_retryable_error("InternalServerError"));
-        assert!(is_retryable_error("ServiceException: transient"));
+    fn sdk_marked_transient_error_retries() {
+        // Service returned a response the SDK flagged as transient
+        // (e.g. RequestTimeout — the bug behind #260). Should retry.
+        let err = service_err("RequestTimeout", Some(ErrorKind::TransientError));
+        assert!(is_retryable_sdk_error(&err));
     }
 
     #[test]
-    fn test_is_retryable_error_non_retryable() {
-        assert!(!is_retryable_error("ValidationError: invalid parameter"));
-        assert!(!is_retryable_error("AccessDeniedException: not authorized"));
-        assert!(!is_retryable_error("ResourceNotFoundException: not found"));
-        assert!(!is_retryable_error("InvalidParameterValue"));
+    fn sdk_marked_throttling_retries() {
+        let err = service_err("Throttling", Some(ErrorKind::ThrottlingError));
+        assert!(is_retryable_sdk_error(&err));
     }
 
     #[test]
-    fn test_is_retryable_error_s3_operation_aborted() {
-        // S3 CreateBucket can return OperationAborted shortly after the same
-        // name was deleted; the right behavior is to back off and retry, not
-        // propagate. See carina-rs/carina-provider-aws#156.
-        assert!(is_retryable_error(
-            "OperationAborted: A conflicting conditional operation is currently in progress against this resource. Please try again."
-        ));
-        assert!(is_retryable_error(
-            "service error: unhandled error (OperationAborted): ..."
-        ));
+    fn sdk_marked_server_error_retries() {
+        let err = service_err("InternalError", Some(ErrorKind::ServerError));
+        assert!(is_retryable_sdk_error(&err));
+    }
+
+    #[test]
+    fn unmodeled_client_error_does_not_retry() {
+        // Validation / permission / not-found errors must terminate
+        // immediately — they will never succeed on a second attempt.
+        let err = service_err("ValidationException", None);
+        assert!(!is_retryable_sdk_error(&err));
+    }
+
+    #[test]
+    fn s3_operation_aborted_retries_despite_no_sdk_flag() {
+        // S3 CreateBucket / DeleteBucket race: the SDK does not classify
+        // OperationAborted (HTTP 409) as retryable, but the AWS docs say
+        // to back off because the control plane clears in ~60–90s.
+        // See carina-rs/carina-provider-aws#156.
+        let err = service_err("OperationAborted", None);
+        assert!(is_retryable_sdk_error(&err));
+    }
+
+    #[test]
+    fn transport_failures_retry() {
+        // No HTTP response received → safe to retry idempotent operations.
+        let timeout: SdkError<MockServiceError, HttpResponse> =
+            SdkError::timeout_error("hit deadline");
+        assert!(is_retryable_sdk_error(&timeout));
     }
 
     #[tokio::test]
-    async fn test_retry_aws_operation_succeeds_first_try() {
-        let result: Result<&str, String> =
-            retry_aws_operation("test op", 3, 1, || async { Ok("success") }).await;
+    async fn retry_aws_operation_succeeds_first_try() {
+        let result: Result<&str, SdkError<MockServiceError, HttpResponse>> =
+            retry_aws_operation("test op", 3, 0, || async { Ok("success") }).await;
         assert_eq!(result.unwrap(), "success");
     }
 
     #[tokio::test]
-    async fn test_retry_aws_operation_retries_operation_aborted_then_succeeds() {
-        // Models the S3 CreateBucket / DeleteBucket race from #156: the first
-        // attempt sees OperationAborted, the second one goes through once the
-        // control plane has cleared the prior delete.
+    async fn retry_aws_operation_retries_transient_then_succeeds() {
+        // Models the bug from #260: a transient RequestTimeout is followed
+        // by a successful retry once the SDK's retryable flag is honored.
         let attempt_count = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
         let counter = attempt_count.clone();
-        let result: Result<&str, String> = retry_aws_operation("create S3 bucket", 3, 1, || {
-            let counter = counter.clone();
-            async move {
-                let n = counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                if n == 0 {
-                    Err("OperationAborted: A conflicting conditional operation is currently in progress against this resource. Please try again.".to_string())
-                } else {
-                    Ok("created")
+        let result: Result<&str, SdkError<MockServiceError, HttpResponse>> =
+            retry_aws_operation("delete bucket sub-resource", 3, 0, || {
+                let counter = counter.clone();
+                async move {
+                    let n = counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    if n == 0 {
+                        Err(service_err(
+                            "RequestTimeout",
+                            Some(ErrorKind::TransientError),
+                        ))
+                    } else {
+                        Ok("deleted")
+                    }
                 }
-            }
-        })
-        .await;
-        assert_eq!(result.unwrap(), "created");
+            })
+            .await;
+        assert_eq!(result.unwrap(), "deleted");
         assert_eq!(
             attempt_count.load(std::sync::atomic::Ordering::SeqCst),
             2,
-            "should retry once after OperationAborted"
+            "should retry once after a transient RequestTimeout"
         );
     }
 
     #[tokio::test]
-    async fn test_retry_aws_operation_non_retryable_fails_immediately() {
+    async fn retry_aws_operation_non_retryable_fails_immediately() {
         let attempt_count = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
         let counter = attempt_count.clone();
-        let result: Result<&str, String> = retry_aws_operation("test op", 3, 1, || {
-            let counter = counter.clone();
-            async move {
-                counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                Err("ValidationError: bad input".to_string())
-            }
-        })
-        .await;
+        let result: Result<&str, SdkError<MockServiceError, HttpResponse>> =
+            retry_aws_operation("test op", 3, 0, || {
+                let counter = counter.clone();
+                async move {
+                    counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    Err(service_err("ValidationException", None))
+                }
+            })
+            .await;
         assert!(result.is_err());
         assert_eq!(
             attempt_count.load(std::sync::atomic::Ordering::SeqCst),
             1,
-            "should not retry non-retryable errors"
+            "non-retryable errors must terminate after one attempt"
         );
     }
 }

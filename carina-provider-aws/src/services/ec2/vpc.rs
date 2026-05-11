@@ -109,15 +109,13 @@ impl AwsProvider {
         let rid = resource.id.clone();
         let result = retry_aws_operation("create VPC", 5, 5, || {
             let builder = create_vpc_builder.clone();
-            let rid = rid.clone();
-            async move {
-                builder.send().await.map_err(|e| {
-                    ProviderError::api_error(sdk_error_message("Failed to create VPC", &e))
-                        .for_resource(rid)
-                })
-            }
+            async move { builder.send().await }
         })
-        .await?;
+        .await
+        .map_err(|e| {
+            ProviderError::api_error(sdk_error_message("Failed to create VPC", &e))
+                .for_resource(rid.clone())
+        })?;
 
         let vpc_id = result.vpc().and_then(|v| v.vpc_id()).ok_or_else(|| {
             ProviderError::api_error("VPC created but no ID returned")

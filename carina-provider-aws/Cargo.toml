@@ -27,6 +27,7 @@ indexmap = "2"
 aws-config = { version = "1", default-features = false, features = ["behavior-version-latest", "rt-tokio"] }
 aws-smithy-async = { version = "1", features = ["rt-tokio"] }
 aws-smithy-types = { version = "1" }
+aws-smithy-runtime-api = { version = "1" }
 aws-sdk-s3 = { version = "1", default-features = false, features = ["behavior-version-latest"] }
 aws-sdk-cloudwatchlogs = { version = "1", default-features = false, features = ["behavior-version-latest"] }
 aws-sdk-ec2 = { version = "1", default-features = false, features = ["behavior-version-latest"] }
