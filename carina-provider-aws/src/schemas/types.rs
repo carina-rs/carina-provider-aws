@@ -165,7 +165,6 @@ pub fn aws_validators() -> HashMap<String, CustomValidatorFn> {
     register_validators! {
         simple {
             arn => validate_arn,
-            availability_zone => validate_availability_zone,
             aws_resource_id => validate_aws_resource_id,
             iam_role_id => validate_iam_role_id,
             aws_account_id => validate_aws_account_id,
@@ -204,6 +203,21 @@ pub fn aws_validators() -> HashMap<String, CustomValidatorFn> {
             iam_role_arn => |s: &str| validate_iam_arn(s, "role/"),
             iam_policy_arn => |s: &str| validate_iam_arn(s, "policy/"),
             kms_key_arn => |s: &str| validate_kms_key_id(s),
+            // The availability_zone validator must accept both the DSL
+            // namespaced form (`aws.AvailabilityZone.ap_northeast_1a`) and the
+            // raw AWS string format (`"ap-northeast-1a"`). The single-arg
+            // `validate_availability_zone` from carina-aws-types only knows
+            // the raw form, so we wrap it: strip the namespace prefix if
+            // present, then convert underscores to hyphens before validating.
+            availability_zone => |s: &str| {
+                if s.contains('.') {
+                    carina_core::utils::validate_enum_namespace(s, "AvailabilityZone", "aws")
+                        .map_err(|reason| format!("Invalid availability zone '{}': {}", s, reason))?;
+                }
+                let extracted = carina_core::utils::extract_enum_value(s);
+                let normalized = extracted.replace('_', "-");
+                validate_availability_zone(&normalized)
+            },
         }
     }
 }
@@ -481,7 +495,6 @@ mod tests {
 
         let expected_simple = [
             "arn",
-            "availability_zone",
             "aws_resource_id",
             "iam_role_id",
             "aws_account_id",
@@ -518,7 +531,12 @@ mod tests {
             "egress_only_internet_gateway_id",
         ];
 
-        let expected_arn = ["iam_role_arn", "iam_policy_arn", "kms_key_arn"];
+        let expected_arn = [
+            "iam_role_arn",
+            "iam_policy_arn",
+            "kms_key_arn",
+            "availability_zone",
+        ];
 
         let mut all_expected: Vec<&str> = Vec::new();
         all_expected.extend_from_slice(&expected_simple);
@@ -567,5 +585,35 @@ mod tests {
 
         // Test unknown type returns no validator (not an error)
         assert!(!validators.contains_key("unknown_type"));
+    }
+
+    // The provider-side validate_custom_type entry point passes the raw DSL
+    // string straight through, so the availability_zone validator must accept
+    // both the namespaced DSL form and the raw AWS string form (mirrors the
+    // Region validator's accept-both behavior; see CLAUDE.md "Validation
+    // Formats"). Reproduces the failure surfaced by acceptance test
+    // ec2_subnet/basic.crn against pre-fix main.
+    #[test]
+    fn aws_validators_availability_zone_accepts_dsl_and_aws_format() {
+        let validators = aws_validators();
+        let az = validators.get("availability_zone").unwrap();
+
+        // Raw AWS format
+        assert!(az("us-east-1a").is_ok());
+        assert!(az("ap-northeast-1c").is_ok());
+
+        // Fully-qualified DSL format (the form acceptance tests use)
+        assert!(az("aws.AvailabilityZone.ap_northeast_1a").is_ok());
+        assert!(az("aws.AvailabilityZone.us_east_1a").is_ok());
+
+        // Shorthand DSL form (TypeName.value)
+        assert!(az("AvailabilityZone.ap_northeast_1a").is_ok());
+
+        // Rejects non-AZ strings (regions, garbage)
+        assert!(az("us-east-1").is_err()); // region, not AZ
+        assert!(az("not-an-az").is_err());
+
+        // Rejects wrong namespace
+        assert!(az("aws.Region.ap_northeast_1").is_err());
     }
 }
