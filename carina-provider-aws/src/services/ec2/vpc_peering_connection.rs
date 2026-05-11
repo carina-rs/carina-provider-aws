@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use carina_core::provider::{ProviderError, ProviderResult};
-use carina_core::resource::{Resource, ResourceId, State, Value};
+use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
 
 use crate::AwsProvider;
 use crate::helpers::{build_tag_specification, require_string_attr, sdk_error_message};
@@ -79,11 +79,15 @@ impl AwsProvider {
             .vpc_id(&vpc_id)
             .peer_vpc_id(&peer_vpc_id);
 
-        if let Some(Value::String(owner_id)) = resource.get_attr("peer_owner_id") {
+        if let Some(Value::Concrete(ConcreteValue::String(owner_id))) =
+            resource.get_attr("peer_owner_id")
+        {
             req = req.peer_owner_id(owner_id);
         }
 
-        if let Some(Value::String(region)) = resource.get_attr("peer_region") {
+        if let Some(Value::Concrete(ConcreteValue::String(region))) =
+            resource.get_attr("peer_region")
+        {
             req = req.peer_region(region);
         }
 

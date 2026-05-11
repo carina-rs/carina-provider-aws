@@ -5,7 +5,7 @@ use aws_sdk_s3::types::{
     ServerSideEncryptionRule,
 };
 use carina_core::provider::{ProviderError, ProviderResult};
-use carina_core::resource::{Resource, ResourceId, State, Value};
+use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
 use carina_core::utils::extract_enum_value;
 use indexmap::IndexMap;
 
@@ -33,11 +33,17 @@ impl AwsProvider {
         match result {
             Ok(output) => {
                 let mut attributes = HashMap::new();
-                attributes.insert("bucket".to_string(), Value::String(bucket.to_string()));
+                attributes.insert(
+                    "bucket".to_string(),
+                    Value::Concrete(ConcreteValue::String(bucket.to_string())),
+                );
                 if let Some(config) = output.server_side_encryption_configuration() {
                     let rules: Vec<Value> = config.rules().iter().map(rule_to_value).collect();
                     if !rules.is_empty() {
-                        attributes.insert("rules".to_string(), Value::List(rules));
+                        attributes.insert(
+                            "rules".to_string(),
+                            Value::Concrete(ConcreteValue::List(rules)),
+                        );
                     }
                 }
                 Ok(State::existing(id.clone(), attributes).with_identifier(bucket.to_string()))
@@ -83,7 +89,7 @@ impl AwsProvider {
         resource: &Resource,
     ) -> ProviderResult<State> {
         let rules = match resource.get_attr("rules") {
-            Some(Value::List(items)) => items,
+            Some(Value::Concrete(ConcreteValue::List(items))) => items,
             _ => {
                 return Err(
                     ProviderError::invalid_input("rules is required and must be a list")
@@ -155,7 +161,7 @@ impl AwsProvider {
 }
 
 fn build_rule(id: &ResourceId, rule_value: &Value) -> ProviderResult<ServerSideEncryptionRule> {
-    let Value::Map(rule_map) = rule_value else {
+    let Value::Concrete(ConcreteValue::Map(rule_map)) = rule_value else {
         return Err(
             ProviderError::invalid_input("each rule must be a map").for_resource(id.clone())
         );
@@ -167,7 +173,7 @@ fn build_rule(id: &ResourceId, rule_value: &Value) -> ProviderResult<ServerSideE
         builder =
             builder.apply_server_side_encryption_by_default(build_by_default(id, by_default)?);
     }
-    if let Some(Value::Bool(b)) = rule_map.get("bucket_key_enabled") {
+    if let Some(Value::Concrete(ConcreteValue::Bool(b))) = rule_map.get("bucket_key_enabled") {
         builder = builder.bucket_key_enabled(*b);
     }
 
@@ -178,14 +184,14 @@ fn build_by_default(
     id: &ResourceId,
     value: &Value,
 ) -> ProviderResult<ServerSideEncryptionByDefault> {
-    let Value::Map(map) = value else {
+    let Value::Concrete(ConcreteValue::Map(map)) = value else {
         return Err(ProviderError::invalid_input(
             "apply_server_side_encryption_by_default must be a map",
         )
         .for_resource(id.clone()));
     };
     let algorithm_str = match map.get("sse_algorithm") {
-        Some(Value::String(s)) => extract_enum_value(s).to_string(),
+        Some(Value::Concrete(ConcreteValue::String(s))) => extract_enum_value(s).to_string(),
         _ => {
             return Err(
                 ProviderError::invalid_input("sse_algorithm is required").for_resource(id.clone())
@@ -194,7 +200,7 @@ fn build_by_default(
     };
     let mut builder = ServerSideEncryptionByDefault::builder()
         .sse_algorithm(ServerSideEncryption::from(algorithm_str.as_str()));
-    if let Some(Value::String(k)) = map.get("kms_master_key_id") {
+    if let Some(Value::Concrete(ConcreteValue::String(k))) = map.get("kms_master_key_id") {
         builder = builder.kms_master_key_id(k);
     }
     builder.build().map_err(|e| {
@@ -212,21 +218,26 @@ fn rule_to_value(rule: &ServerSideEncryptionRule) -> Value {
         let mut inner = IndexMap::new();
         inner.insert(
             "sse_algorithm".to_string(),
-            Value::String(by_default.sse_algorithm().as_str().to_string()),
+            Value::Concrete(ConcreteValue::String(
+                by_default.sse_algorithm().as_str().to_string(),
+            )),
         );
         if let Some(k) = by_default.kms_master_key_id() {
             inner.insert(
                 "kms_master_key_id".to_string(),
-                Value::String(k.to_string()),
+                Value::Concrete(ConcreteValue::String(k.to_string())),
             );
         }
         map.insert(
             "apply_server_side_encryption_by_default".to_string(),
-            Value::Map(inner),
+            Value::Concrete(ConcreteValue::Map(inner)),
         );
     }
     if let Some(b) = rule.bucket_key_enabled() {
-        map.insert("bucket_key_enabled".to_string(), Value::Bool(b));
+        map.insert(
+            "bucket_key_enabled".to_string(),
+            Value::Concrete(ConcreteValue::Bool(b)),
+        );
     }
-    Value::Map(map)
+    Value::Concrete(ConcreteValue::Map(map))
 }

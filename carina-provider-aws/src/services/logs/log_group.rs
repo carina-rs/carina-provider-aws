@@ -2,7 +2,7 @@ use indexmap::IndexMap;
 use std::collections::HashMap;
 
 use carina_core::provider::{ProviderError, ProviderResult};
-use carina_core::resource::{Resource, ResourceId, State, Value};
+use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
 use carina_core::utils::extract_enum_value;
 
 use crate::AwsProvider;
@@ -41,26 +41,35 @@ impl AwsProvider {
             if let Some(name) = lg.log_group_name() {
                 attributes.insert(
                     "log_group_name".to_string(),
-                    Value::String(name.to_string()),
+                    Value::Concrete(ConcreteValue::String(name.to_string())),
                 );
             }
 
             if let Some(arn) = lg.arn() {
-                attributes.insert("arn".to_string(), Value::String(arn.to_string()));
+                attributes.insert(
+                    "arn".to_string(),
+                    Value::Concrete(ConcreteValue::String(arn.to_string())),
+                );
             }
 
             if let Some(days) = lg.retention_in_days() {
-                attributes.insert("retention_in_days".to_string(), Value::Int(days as i64));
+                attributes.insert(
+                    "retention_in_days".to_string(),
+                    Value::Concrete(ConcreteValue::Int(days as i64)),
+                );
             }
 
             if let Some(kms_key) = lg.kms_key_id() {
-                attributes.insert("kms_key_id".to_string(), Value::String(kms_key.to_string()));
+                attributes.insert(
+                    "kms_key_id".to_string(),
+                    Value::Concrete(ConcreteValue::String(kms_key.to_string())),
+                );
             }
 
             if let Some(class) = lg.log_group_class() {
                 attributes.insert(
                     "log_group_class".to_string(),
-                    Value::String(class.as_str().to_string()),
+                    Value::Concrete(ConcreteValue::String(class.as_str().to_string())),
                 );
             }
 
@@ -79,9 +88,15 @@ impl AwsProvider {
                     {
                         let mut tag_map = IndexMap::new();
                         for (key, val) in tags {
-                            tag_map.insert(key.to_string(), Value::String(val.to_string()));
+                            tag_map.insert(
+                                key.to_string(),
+                                Value::Concrete(ConcreteValue::String(val.to_string())),
+                            );
                         }
-                        attributes.insert("tags".to_string(), Value::Map(tag_map));
+                        attributes.insert(
+                            "tags".to_string(),
+                            Value::Concrete(ConcreteValue::Map(tag_map)),
+                        );
                     }
                 }
                 Err(_) => {
@@ -105,20 +120,24 @@ impl AwsProvider {
             .create_log_group()
             .log_group_name(&log_group_name);
 
-        if let Some(Value::String(kms_key)) = resource.get_attr("kms_key_id") {
+        if let Some(Value::Concrete(ConcreteValue::String(kms_key))) =
+            resource.get_attr("kms_key_id")
+        {
             req = req.kms_key_id(kms_key);
         }
 
-        if let Some(Value::String(class)) = resource.get_attr("log_group_class") {
+        if let Some(Value::Concrete(ConcreteValue::String(class))) =
+            resource.get_attr("log_group_class")
+        {
             use aws_sdk_cloudwatchlogs::types::LogGroupClass;
             let class_value = extract_enum_value(class);
             req = req.log_group_class(LogGroupClass::from(class_value));
         }
 
-        if let Some(Value::Map(tag_map)) = resource.get_attr("tags") {
+        if let Some(Value::Concrete(ConcreteValue::Map(tag_map))) = resource.get_attr("tags") {
             let mut tags = HashMap::new();
             for (key, value) in tag_map {
-                if let Value::String(val) = value {
+                if let Value::Concrete(ConcreteValue::String(val)) = value {
                     tags.insert(key.clone(), val.clone());
                 }
             }
@@ -131,7 +150,9 @@ impl AwsProvider {
         })?;
 
         // Set retention if specified
-        if let Some(Value::Int(days)) = resource.get_attr("retention_in_days") {
+        if let Some(Value::Concrete(ConcreteValue::Int(days))) =
+            resource.get_attr("retention_in_days")
+        {
             self.logs_client
                 .put_retention_policy()
                 .log_group_name(&log_group_name)
@@ -161,7 +182,7 @@ impl AwsProvider {
     ) -> ProviderResult<State> {
         // Update retention
         match to.get_attr("retention_in_days") {
-            Some(Value::Int(days)) => {
+            Some(Value::Concrete(ConcreteValue::Int(days))) => {
                 self.logs_client
                     .put_retention_policy()
                     .log_group_name(identifier)
@@ -195,7 +216,7 @@ impl AwsProvider {
         }
 
         // Update KMS key
-        if let Some(Value::String(kms_key)) = to.get_attr("kms_key_id") {
+        if let Some(Value::Concrete(ConcreteValue::String(kms_key))) = to.get_attr("kms_key_id") {
             self.logs_client
                 .associate_kms_key()
                 .log_group_name(identifier)
@@ -260,11 +281,11 @@ impl AwsProvider {
         current: Option<&HashMap<String, Value>>,
     ) -> ProviderResult<()> {
         let desired_tags = match desired.get("tags") {
-            Some(Value::Map(m)) => m.clone(),
+            Some(Value::Concrete(ConcreteValue::Map(m))) => m.clone(),
             _ => IndexMap::new(),
         };
         let current_tags = match current.and_then(|c| c.get("tags")) {
-            Some(Value::Map(m)) => m.clone(),
+            Some(Value::Concrete(ConcreteValue::Map(m))) => m.clone(),
             _ => IndexMap::new(),
         };
 
@@ -293,9 +314,9 @@ impl AwsProvider {
         // Tags to add/update
         let mut tags_to_add = HashMap::new();
         for (key, value) in &desired_tags {
-            if let Value::String(val) = value {
+            if let Value::Concrete(ConcreteValue::String(val)) = value {
                 let should_add = match current_tags.get(key) {
-                    Some(Value::String(current_val)) => current_val != val,
+                    Some(Value::Concrete(ConcreteValue::String(current_val))) => current_val != val,
                     _ => true,
                 };
                 if should_add {

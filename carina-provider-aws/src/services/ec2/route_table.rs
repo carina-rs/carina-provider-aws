@@ -2,7 +2,7 @@ use indexmap::IndexMap;
 use std::collections::HashMap;
 
 use carina_core::provider::{ProviderError, ProviderResult};
-use carina_core::resource::{Resource, ResourceId, State, Value};
+use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
 
 use crate::AwsProvider;
 use crate::helpers::{require_string_attr, sdk_error_message};
@@ -47,17 +47,26 @@ impl AwsProvider {
             for route in rt.routes() {
                 let mut route_map: IndexMap<String, Value> = IndexMap::new();
                 if let Some(dest) = route.destination_cidr_block() {
-                    route_map.insert("destination".to_string(), Value::String(dest.to_string()));
+                    route_map.insert(
+                        "destination".to_string(),
+                        Value::Concrete(ConcreteValue::String(dest.to_string())),
+                    );
                 }
                 if let Some(gw) = route.gateway_id() {
-                    route_map.insert("gateway_id".to_string(), Value::String(gw.to_string()));
+                    route_map.insert(
+                        "gateway_id".to_string(),
+                        Value::Concrete(ConcreteValue::String(gw.to_string())),
+                    );
                 }
                 if !route_map.is_empty() {
-                    routes_list.push(Value::Map(route_map));
+                    routes_list.push(Value::Concrete(ConcreteValue::Map(route_map)));
                 }
             }
             if !routes_list.is_empty() {
-                attributes.insert("routes".to_string(), Value::List(routes_list));
+                attributes.insert(
+                    "routes".to_string(),
+                    Value::Concrete(ConcreteValue::List(routes_list)),
+                );
             }
 
             // Extract user-defined tags
@@ -105,18 +114,18 @@ impl AwsProvider {
             .await?;
 
         // Add routes
-        if let Some(Value::List(routes)) = resource.get_attr("routes") {
+        if let Some(Value::Concrete(ConcreteValue::List(routes))) = resource.get_attr("routes") {
             for route in routes {
-                if let Value::Map(route_map) = route {
+                if let Value::Concrete(ConcreteValue::Map(route_map)) = route {
                     let destination = route_map.get("destination").and_then(|v| {
-                        if let Value::String(s) = v {
+                        if let Value::Concrete(ConcreteValue::String(s)) = v {
                             Some(s)
                         } else {
                             None
                         }
                     });
                     let gateway_id = route_map.get("gateway_id").and_then(|v| {
-                        if let Value::String(s) = v {
+                        if let Value::Concrete(ConcreteValue::String(s)) = v {
                             Some(s)
                         } else {
                             None

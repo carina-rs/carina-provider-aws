@@ -6,7 +6,7 @@ use aws_sdk_s3::types::{
     Transition, TransitionStorageClass,
 };
 use carina_core::provider::{ProviderError, ProviderResult};
-use carina_core::resource::{Resource, ResourceId, State, Value};
+use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
 use carina_core::utils::extract_enum_value;
 use indexmap::IndexMap;
 
@@ -34,10 +34,16 @@ impl AwsProvider {
         match result {
             Ok(output) => {
                 let mut attributes = HashMap::new();
-                attributes.insert("bucket".to_string(), Value::String(bucket.to_string()));
+                attributes.insert(
+                    "bucket".to_string(),
+                    Value::Concrete(ConcreteValue::String(bucket.to_string())),
+                );
                 let rules: Vec<Value> = output.rules().iter().map(rule_to_value).collect();
                 if !rules.is_empty() {
-                    attributes.insert("rules".to_string(), Value::List(rules));
+                    attributes.insert(
+                        "rules".to_string(),
+                        Value::Concrete(ConcreteValue::List(rules)),
+                    );
                 }
                 Ok(State::existing(id.clone(), attributes).with_identifier(bucket.to_string()))
             }
@@ -82,7 +88,7 @@ impl AwsProvider {
         resource: &Resource,
     ) -> ProviderResult<State> {
         let rules = match resource.get_attr("rules") {
-            Some(Value::List(items)) => items,
+            Some(Value::Concrete(ConcreteValue::List(items))) => items,
             _ => {
                 return Err(
                     ProviderError::invalid_input("rules is required and must be a list")
@@ -155,14 +161,14 @@ impl AwsProvider {
 }
 
 fn build_rule(id: &ResourceId, rule_value: &Value) -> ProviderResult<LifecycleRule> {
-    let Value::Map(map) = rule_value else {
+    let Value::Concrete(ConcreteValue::Map(map)) = rule_value else {
         return Err(
             ProviderError::invalid_input("each rule must be a map").for_resource(id.clone())
         );
     };
 
     let status_str = match map.get("status") {
-        Some(Value::String(s)) => extract_enum_value(s).to_string(),
+        Some(Value::Concrete(ConcreteValue::String(s))) => extract_enum_value(s).to_string(),
         _ => {
             return Err(
                 ProviderError::invalid_input("rule.status is required").for_resource(id.clone())
@@ -172,17 +178,17 @@ fn build_rule(id: &ResourceId, rule_value: &Value) -> ProviderResult<LifecycleRu
 
     let mut builder = LifecycleRule::builder().status(ExpirationStatus::from(status_str.as_str()));
 
-    if let Some(Value::String(s)) = map.get("id") {
+    if let Some(Value::Concrete(ConcreteValue::String(s))) = map.get("id") {
         builder = builder.id(s);
     }
     #[allow(deprecated)]
-    if let Some(Value::String(s)) = map.get("prefix") {
+    if let Some(Value::Concrete(ConcreteValue::String(s))) = map.get("prefix") {
         builder = builder.prefix(s);
     }
     if let Some(v) = map.get("expiration") {
         builder = builder.expiration(build_expiration(id, v)?);
     }
-    if let Some(Value::List(items)) = map.get("transitions") {
+    if let Some(Value::Concrete(ConcreteValue::List(items))) = map.get("transitions") {
         let transitions: Vec<Transition> = items
             .iter()
             .map(|v| build_transition(id, v))
@@ -192,7 +198,9 @@ fn build_rule(id: &ResourceId, rule_value: &Value) -> ProviderResult<LifecycleRu
     if let Some(v) = map.get("noncurrent_version_expiration") {
         builder = builder.noncurrent_version_expiration(build_ncv_expiration(id, v)?);
     }
-    if let Some(Value::List(items)) = map.get("noncurrent_version_transitions") {
+    if let Some(Value::Concrete(ConcreteValue::List(items))) =
+        map.get("noncurrent_version_transitions")
+    {
         let transitions: Vec<NoncurrentVersionTransition> = items
             .iter()
             .map(|v| build_ncv_transition(id, v))
@@ -210,29 +218,29 @@ fn build_rule(id: &ResourceId, rule_value: &Value) -> ProviderResult<LifecycleRu
 }
 
 fn build_expiration(id: &ResourceId, value: &Value) -> ProviderResult<LifecycleExpiration> {
-    let Value::Map(map) = value else {
+    let Value::Concrete(ConcreteValue::Map(map)) = value else {
         return Err(
             ProviderError::invalid_input("expiration must be a map").for_resource(id.clone())
         );
     };
     let mut builder = LifecycleExpiration::builder();
-    if let Some(Value::Int(d)) = map.get("days") {
+    if let Some(Value::Concrete(ConcreteValue::Int(d))) = map.get("days") {
         builder = builder.days(*d as i32);
     }
-    if let Some(Value::Bool(b)) = map.get("expired_object_delete_marker") {
+    if let Some(Value::Concrete(ConcreteValue::Bool(b))) = map.get("expired_object_delete_marker") {
         builder = builder.expired_object_delete_marker(*b);
     }
     Ok(builder.build())
 }
 
 fn build_transition(id: &ResourceId, value: &Value) -> ProviderResult<Transition> {
-    let Value::Map(map) = value else {
+    let Value::Concrete(ConcreteValue::Map(map)) = value else {
         return Err(
             ProviderError::invalid_input("transition must be a map").for_resource(id.clone())
         );
     };
     let storage_class_str = match map.get("storage_class") {
-        Some(Value::String(s)) => extract_enum_value(s).to_string(),
+        Some(Value::Concrete(ConcreteValue::String(s))) => extract_enum_value(s).to_string(),
         _ => {
             return Err(
                 ProviderError::invalid_input("transition.storage_class is required")
@@ -242,7 +250,7 @@ fn build_transition(id: &ResourceId, value: &Value) -> ProviderResult<Transition
     };
     let mut builder = Transition::builder()
         .storage_class(TransitionStorageClass::from(storage_class_str.as_str()));
-    if let Some(Value::Int(d)) = map.get("days") {
+    if let Some(Value::Concrete(ConcreteValue::Int(d))) = map.get("days") {
         builder = builder.days(*d as i32);
     }
     Ok(builder.build())
@@ -252,17 +260,17 @@ fn build_ncv_expiration(
     id: &ResourceId,
     value: &Value,
 ) -> ProviderResult<NoncurrentVersionExpiration> {
-    let Value::Map(map) = value else {
+    let Value::Concrete(ConcreteValue::Map(map)) = value else {
         return Err(
             ProviderError::invalid_input("noncurrent_version_expiration must be a map")
                 .for_resource(id.clone()),
         );
     };
     let mut builder = NoncurrentVersionExpiration::builder();
-    if let Some(Value::Int(d)) = map.get("noncurrent_days") {
+    if let Some(Value::Concrete(ConcreteValue::Int(d))) = map.get("noncurrent_days") {
         builder = builder.noncurrent_days(*d as i32);
     }
-    if let Some(Value::Int(n)) = map.get("newer_noncurrent_versions") {
+    if let Some(Value::Concrete(ConcreteValue::Int(n))) = map.get("newer_noncurrent_versions") {
         builder = builder.newer_noncurrent_versions(*n as i32);
     }
     Ok(builder.build())
@@ -272,14 +280,14 @@ fn build_ncv_transition(
     id: &ResourceId,
     value: &Value,
 ) -> ProviderResult<NoncurrentVersionTransition> {
-    let Value::Map(map) = value else {
+    let Value::Concrete(ConcreteValue::Map(map)) = value else {
         return Err(
             ProviderError::invalid_input("noncurrent_version_transition must be a map")
                 .for_resource(id.clone()),
         );
     };
     let storage_class_str = match map.get("storage_class") {
-        Some(Value::String(s)) => extract_enum_value(s).to_string(),
+        Some(Value::Concrete(ConcreteValue::String(s))) => extract_enum_value(s).to_string(),
         _ => {
             return Err(ProviderError::invalid_input(
                 "noncurrent_version_transition.storage_class is required",
@@ -289,10 +297,10 @@ fn build_ncv_transition(
     };
     let mut builder = NoncurrentVersionTransition::builder()
         .storage_class(TransitionStorageClass::from(storage_class_str.as_str()));
-    if let Some(Value::Int(d)) = map.get("noncurrent_days") {
+    if let Some(Value::Concrete(ConcreteValue::Int(d))) = map.get("noncurrent_days") {
         builder = builder.noncurrent_days(*d as i32);
     }
-    if let Some(Value::Int(n)) = map.get("newer_noncurrent_versions") {
+    if let Some(Value::Concrete(ConcreteValue::Int(n))) = map.get("newer_noncurrent_versions") {
         builder = builder.newer_noncurrent_versions(*n as i32);
     }
     Ok(builder.build())
@@ -302,14 +310,14 @@ fn build_abort_multipart(
     id: &ResourceId,
     value: &Value,
 ) -> ProviderResult<AbortIncompleteMultipartUpload> {
-    let Value::Map(map) = value else {
+    let Value::Concrete(ConcreteValue::Map(map)) = value else {
         return Err(ProviderError::invalid_input(
             "abort_incomplete_multipart_upload must be a map",
         )
         .for_resource(id.clone()));
     };
     let mut builder = AbortIncompleteMultipartUpload::builder();
-    if let Some(Value::Int(d)) = map.get("days_after_initiation") {
+    if let Some(Value::Concrete(ConcreteValue::Int(d))) = map.get("days_after_initiation") {
         builder = builder.days_after_initiation(*d as i32);
     }
     Ok(builder.build())
@@ -320,47 +328,71 @@ fn rule_to_value(rule: &LifecycleRule) -> Value {
     if let Some(s) = rule.id()
         && !s.is_empty()
     {
-        map.insert("id".to_string(), Value::String(s.to_string()));
+        map.insert(
+            "id".to_string(),
+            Value::Concrete(ConcreteValue::String(s.to_string())),
+        );
     }
     map.insert(
         "status".to_string(),
-        Value::String(rule.status().as_str().to_string()),
+        Value::Concrete(ConcreteValue::String(rule.status().as_str().to_string())),
     );
     #[allow(deprecated)]
     if let Some(s) = rule.prefix()
         && !s.is_empty()
     {
-        map.insert("prefix".to_string(), Value::String(s.to_string()));
+        map.insert(
+            "prefix".to_string(),
+            Value::Concrete(ConcreteValue::String(s.to_string())),
+        );
     }
     if let Some(exp) = rule.expiration() {
         let mut e = IndexMap::new();
         if let Some(d) = exp.days() {
-            e.insert("days".to_string(), Value::Int(d as i64));
+            e.insert(
+                "days".to_string(),
+                Value::Concrete(ConcreteValue::Int(d as i64)),
+            );
         }
         if let Some(b) = exp.expired_object_delete_marker() {
-            e.insert("expired_object_delete_marker".to_string(), Value::Bool(b));
+            e.insert(
+                "expired_object_delete_marker".to_string(),
+                Value::Concrete(ConcreteValue::Bool(b)),
+            );
         }
         if !e.is_empty() {
-            map.insert("expiration".to_string(), Value::Map(e));
+            map.insert(
+                "expiration".to_string(),
+                Value::Concrete(ConcreteValue::Map(e)),
+            );
         }
     }
     let transitions: Vec<Value> = rule.transitions().iter().map(transition_to_value).collect();
     if !transitions.is_empty() {
-        map.insert("transitions".to_string(), Value::List(transitions));
+        map.insert(
+            "transitions".to_string(),
+            Value::Concrete(ConcreteValue::List(transitions)),
+        );
     }
     if let Some(ncv) = rule.noncurrent_version_expiration() {
         let mut e = IndexMap::new();
         if let Some(d) = ncv.noncurrent_days() {
-            e.insert("noncurrent_days".to_string(), Value::Int(d as i64));
+            e.insert(
+                "noncurrent_days".to_string(),
+                Value::Concrete(ConcreteValue::Int(d as i64)),
+            );
         }
         if let Some(n) = ncv.newer_noncurrent_versions() {
             e.insert(
                 "newer_noncurrent_versions".to_string(),
-                Value::Int(n as i64),
+                Value::Concrete(ConcreteValue::Int(n as i64)),
             );
         }
         if !e.is_empty() {
-            map.insert("noncurrent_version_expiration".to_string(), Value::Map(e));
+            map.insert(
+                "noncurrent_version_expiration".to_string(),
+                Value::Concrete(ConcreteValue::Map(e)),
+            );
         }
     }
     let ncv_transitions: Vec<Value> = rule
@@ -371,54 +403,63 @@ fn rule_to_value(rule: &LifecycleRule) -> Value {
     if !ncv_transitions.is_empty() {
         map.insert(
             "noncurrent_version_transitions".to_string(),
-            Value::List(ncv_transitions),
+            Value::Concrete(ConcreteValue::List(ncv_transitions)),
         );
     }
     if let Some(abort) = rule.abort_incomplete_multipart_upload() {
         let mut a = IndexMap::new();
         if let Some(d) = abort.days_after_initiation() {
-            a.insert("days_after_initiation".to_string(), Value::Int(d as i64));
+            a.insert(
+                "days_after_initiation".to_string(),
+                Value::Concrete(ConcreteValue::Int(d as i64)),
+            );
         }
         if !a.is_empty() {
             map.insert(
                 "abort_incomplete_multipart_upload".to_string(),
-                Value::Map(a),
+                Value::Concrete(ConcreteValue::Map(a)),
             );
         }
     }
-    Value::Map(map)
+    Value::Concrete(ConcreteValue::Map(map))
 }
 
 fn transition_to_value(t: &Transition) -> Value {
     let mut m = IndexMap::new();
     if let Some(d) = t.days() {
-        m.insert("days".to_string(), Value::Int(d as i64));
+        m.insert(
+            "days".to_string(),
+            Value::Concrete(ConcreteValue::Int(d as i64)),
+        );
     }
     if let Some(sc) = t.storage_class() {
         m.insert(
             "storage_class".to_string(),
-            Value::String(sc.as_str().to_string()),
+            Value::Concrete(ConcreteValue::String(sc.as_str().to_string())),
         );
     }
-    Value::Map(m)
+    Value::Concrete(ConcreteValue::Map(m))
 }
 
 fn ncv_transition_to_value(t: &NoncurrentVersionTransition) -> Value {
     let mut m = IndexMap::new();
     if let Some(d) = t.noncurrent_days() {
-        m.insert("noncurrent_days".to_string(), Value::Int(d as i64));
+        m.insert(
+            "noncurrent_days".to_string(),
+            Value::Concrete(ConcreteValue::Int(d as i64)),
+        );
     }
     if let Some(n) = t.newer_noncurrent_versions() {
         m.insert(
             "newer_noncurrent_versions".to_string(),
-            Value::Int(n as i64),
+            Value::Concrete(ConcreteValue::Int(n as i64)),
         );
     }
     if let Some(sc) = t.storage_class() {
         m.insert(
             "storage_class".to_string(),
-            Value::String(sc.as_str().to_string()),
+            Value::Concrete(ConcreteValue::String(sc.as_str().to_string())),
         );
     }
-    Value::Map(m)
+    Value::Concrete(ConcreteValue::Map(m))
 }

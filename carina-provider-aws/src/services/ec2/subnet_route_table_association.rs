@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use carina_core::provider::{ProviderError, ProviderResult};
-use carina_core::resource::{Resource, ResourceId, State, Value};
+use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
 
 use crate::AwsProvider;
 use crate::helpers::{require_string_attr, sdk_error_message};
@@ -49,18 +49,21 @@ impl AwsProvider {
 
                     attributes.insert(
                         "association_id".to_string(),
-                        Value::String(association_id.to_string()),
+                        Value::Concrete(ConcreteValue::String(association_id.to_string())),
                     );
 
                     if let Some(rt_id) = assoc.route_table_id() {
                         attributes.insert(
                             "route_table_id".to_string(),
-                            Value::String(rt_id.to_string()),
+                            Value::Concrete(ConcreteValue::String(rt_id.to_string())),
                         );
                     }
 
                     if let Some(sid) = assoc.subnet_id() {
-                        attributes.insert("subnet_id".to_string(), Value::String(sid.to_string()));
+                        attributes.insert(
+                            "subnet_id".to_string(),
+                            Value::Concrete(ConcreteValue::String(sid.to_string())),
+                        );
                     }
 
                     let composite = format!("{}|{}", association_id, subnet_id);
@@ -122,7 +125,7 @@ impl AwsProvider {
         };
 
         let route_table_id = match to.get_attr("route_table_id") {
-            Some(Value::String(s)) => s.clone(),
+            Some(Value::Concrete(ConcreteValue::String(s))) => s.clone(),
             _ => {
                 return Err(ProviderError::invalid_input("route_table_id is required")
                     .for_resource(id.clone()));

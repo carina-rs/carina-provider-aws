@@ -2,7 +2,7 @@ use indexmap::IndexMap;
 use std::collections::HashMap;
 
 use carina_core::provider::{ProviderError, ProviderResult};
-use carina_core::resource::{Resource, ResourceId, State, Value};
+use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
 
 use crate::AwsProvider;
 use crate::helpers::{require_string_attr, sdk_error_message};
@@ -39,10 +39,16 @@ impl AwsProvider {
                         for tag in tags {
                             let key = tag.key();
                             let val = tag.value();
-                            tag_map.insert(key.to_string(), Value::String(val.to_string()));
+                            tag_map.insert(
+                                key.to_string(),
+                                Value::Concrete(ConcreteValue::String(val.to_string())),
+                            );
                         }
                         if !tag_map.is_empty() {
-                            attributes.insert("tags".to_string(), Value::Map(tag_map));
+                            attributes.insert(
+                                "tags".to_string(),
+                                Value::Concrete(ConcreteValue::Map(tag_map)),
+                            );
                         }
                     }
 
@@ -84,22 +90,25 @@ impl AwsProvider {
             .role_name(&role_name)
             .assume_role_policy_document(&assume_role_policy_document);
 
-        if let Some(Value::String(desc)) = resource.get_attr("description") {
+        if let Some(Value::Concrete(ConcreteValue::String(desc))) = resource.get_attr("description")
+        {
             req = req.description(desc);
         }
 
-        if let Some(Value::String(path)) = resource.get_attr("path") {
+        if let Some(Value::Concrete(ConcreteValue::String(path))) = resource.get_attr("path") {
             req = req.path(path);
         }
 
-        if let Some(Value::Int(duration)) = resource.get_attr("max_session_duration") {
+        if let Some(Value::Concrete(ConcreteValue::Int(duration))) =
+            resource.get_attr("max_session_duration")
+        {
             req = req.max_session_duration(*duration as i32);
         }
 
         // Apply tags at creation time
-        if let Some(Value::Map(tag_map)) = resource.get_attr("tags") {
+        if let Some(Value::Concrete(ConcreteValue::Map(tag_map))) = resource.get_attr("tags") {
             for (key, value) in tag_map {
-                if let Value::String(val) = value {
+                if let Value::Concrete(ConcreteValue::String(val)) = value {
                     let tag = aws_sdk_iam::types::Tag::builder()
                         .key(key)
                         .value(val)
@@ -151,12 +160,14 @@ impl AwsProvider {
         let mut needs_update = false;
         let mut req = self.iam_client.update_role().role_name(identifier);
 
-        if let Some(Value::String(desc)) = to.get_attr("description") {
+        if let Some(Value::Concrete(ConcreteValue::String(desc))) = to.get_attr("description") {
             req = req.description(desc);
             needs_update = true;
         }
 
-        if let Some(Value::Int(duration)) = to.get_attr("max_session_duration") {
+        if let Some(Value::Concrete(ConcreteValue::Int(duration))) =
+            to.get_attr("max_session_duration")
+        {
             req = req.max_session_duration(*duration as i32);
             needs_update = true;
         }
@@ -207,11 +218,11 @@ impl AwsProvider {
         current: Option<&HashMap<String, Value>>,
     ) -> ProviderResult<()> {
         let desired_tags = match desired.get("tags") {
-            Some(Value::Map(m)) => m.clone(),
+            Some(Value::Concrete(ConcreteValue::Map(m))) => m.clone(),
             _ => IndexMap::new(),
         };
         let current_tags = match current.and_then(|c| c.get("tags")) {
-            Some(Value::Map(m)) => m.clone(),
+            Some(Value::Concrete(ConcreteValue::Map(m))) => m.clone(),
             _ => IndexMap::new(),
         };
 
@@ -236,9 +247,9 @@ impl AwsProvider {
         // Tags to add/update
         let mut tags_to_add = Vec::new();
         for (key, value) in &desired_tags {
-            if let Value::String(val) = value {
+            if let Value::Concrete(ConcreteValue::String(val)) = value {
                 let should_add = match current_tags.get(key) {
-                    Some(Value::String(current_val)) => current_val != val,
+                    Some(Value::Concrete(ConcreteValue::String(current_val))) => current_val != val,
                     _ => true,
                 };
                 if should_add {
@@ -286,7 +297,10 @@ impl AwsProvider {
         // sometimes uses when the field is absent on the wire.
         let arn = obj.arn();
         if !arn.is_empty() {
-            attributes.insert("arn".to_string(), Value::String(arn.to_string()));
+            attributes.insert(
+                "arn".to_string(),
+                Value::Concrete(ConcreteValue::String(arn.to_string())),
+            );
         }
         if let Some(v) = obj.assume_role_policy_document() {
             // The SDK URL-encodes the policy document.
@@ -295,28 +309,40 @@ impl AwsProvider {
             // struct comparison; fall back to the raw string if the
             // policy is malformed.
             let policy_value = iam_policy_json_to_value(&decoded)
-                .unwrap_or_else(|_| Value::String(decoded.into_owned()));
+                .unwrap_or_else(|_| Value::Concrete(ConcreteValue::String(decoded.into_owned())));
             attributes.insert("assume_role_policy_document".to_string(), policy_value);
         }
         if let Some(v) = obj.description() {
-            attributes.insert("description".to_string(), Value::String(v.to_string()));
+            attributes.insert(
+                "description".to_string(),
+                Value::Concrete(ConcreteValue::String(v.to_string())),
+            );
         }
         if let Some(v) = obj.max_session_duration() {
-            attributes.insert("max_session_duration".to_string(), Value::Int(v as i64));
+            attributes.insert(
+                "max_session_duration".to_string(),
+                Value::Concrete(ConcreteValue::Int(v as i64)),
+            );
         }
         let path = obj.path();
         if !path.is_empty() {
-            attributes.insert("path".to_string(), Value::String(path.to_string()));
+            attributes.insert(
+                "path".to_string(),
+                Value::Concrete(ConcreteValue::String(path.to_string())),
+            );
         }
         let role_id = obj.role_id();
         if !role_id.is_empty() {
-            attributes.insert("role_id".to_string(), Value::String(role_id.to_string()));
+            attributes.insert(
+                "role_id".to_string(),
+                Value::Concrete(ConcreteValue::String(role_id.to_string())),
+            );
         }
         let role_name = obj.role_name();
         if !role_name.is_empty() {
             attributes.insert(
                 "role_name".to_string(),
-                Value::String(role_name.to_string()),
+                Value::Concrete(ConcreteValue::String(role_name.to_string())),
             );
             Some(role_name.to_string())
         } else {
@@ -349,11 +375,12 @@ pub fn value_to_iam_policy_json(value: &Value) -> Result<String, String> {
 /// unsupported type.
 pub fn resolve_iam_policy_attr(resource: &Resource, attr_name: &str) -> ProviderResult<String> {
     match resource.get_attr(attr_name) {
-        Some(Value::String(s)) => Ok(s.clone()),
-        Some(value @ Value::Map(_)) => value_to_iam_policy_json(value).map_err(|e| {
-            ProviderError::invalid_input(format!("Failed to convert {}: {}", attr_name, e))
-                .for_resource(resource.id.clone())
-        }),
+        Some(Value::Concrete(ConcreteValue::String(s))) => Ok(s.clone()),
+        Some(value @ Value::Concrete(ConcreteValue::Map(_))) => value_to_iam_policy_json(value)
+            .map_err(|e| {
+                ProviderError::invalid_input(format!("Failed to convert {}: {}", attr_name, e))
+                    .for_resource(resource.id.clone())
+            }),
         _ => Err(ProviderError::invalid_input(format!(
             "{} is required (must be a JSON string or block)",
             attr_name
@@ -408,7 +435,7 @@ fn lookup_snake(
 /// case-mapped via `POLICY_TOP_FIELDS`; the value of `Statement` is
 /// further converted by `policy_statement_to_json`.
 fn policy_doc_to_json(value: &Value) -> serde_json::Value {
-    let Value::Map(map) = value else {
+    let Value::Concrete(ConcreteValue::Map(map)) = value else {
         return scalar_to_json(value);
     };
     let mut obj = serde_json::Map::new();
@@ -416,10 +443,10 @@ fn policy_doc_to_json(value: &Value) -> serde_json::Value {
         let pascal_key = lookup_pascal(POLICY_TOP_FIELDS, k).unwrap_or(k.as_str());
         let json_value = if k == "statement" {
             match v {
-                Value::List(items) => {
+                Value::Concrete(ConcreteValue::List(items)) => {
                     serde_json::Value::Array(items.iter().map(policy_statement_to_json).collect())
                 }
-                Value::Map(_) => policy_statement_to_json(v),
+                Value::Concrete(ConcreteValue::Map(_)) => policy_statement_to_json(v),
                 _ => scalar_to_json(v),
             }
         } else {
@@ -431,7 +458,7 @@ fn policy_doc_to_json(value: &Value) -> serde_json::Value {
 }
 
 fn policy_statement_to_json(value: &Value) -> serde_json::Value {
-    let Value::Map(map) = value else {
+    let Value::Concrete(ConcreteValue::Map(map)) = value else {
         return scalar_to_json(value);
     };
     let mut obj = serde_json::Map::new();
@@ -449,7 +476,7 @@ fn policy_statement_to_json(value: &Value) -> serde_json::Value {
 
 fn principal_to_json(value: &Value) -> serde_json::Value {
     match value {
-        Value::Map(map) => {
+        Value::Concrete(ConcreteValue::Map(map)) => {
             let mut obj = serde_json::Map::new();
             for (k, v) in map {
                 let key = lookup_pascal(PRINCIPAL_FIELDS, k).unwrap_or(k.as_str());
@@ -462,7 +489,7 @@ fn principal_to_json(value: &Value) -> serde_json::Value {
 }
 
 fn condition_to_json(value: &Value) -> serde_json::Value {
-    let Value::Map(operators) = value else {
+    let Value::Concrete(ConcreteValue::Map(operators)) = value else {
         return scalar_to_json(value);
     };
     let mut obj = serde_json::Map::new();
@@ -472,7 +499,7 @@ fn condition_to_json(value: &Value) -> serde_json::Value {
         let kv_json = match kv_value {
             // Inner map keys are condition variables (e.g. "aws:SecureTransport")
             // and must pass through verbatim — no case conversion.
-            Value::Map(inner) => {
+            Value::Concrete(ConcreteValue::Map(inner)) => {
                 let mut m = serde_json::Map::new();
                 for (var, val) in inner {
                     m.insert(var.clone(), scalar_or_passthrough_to_json(val));
@@ -490,10 +517,10 @@ fn condition_to_json(value: &Value) -> serde_json::Value {
 /// Sid / Effect / condition variable values. No key conversion.
 fn scalar_or_passthrough_to_json(value: &Value) -> serde_json::Value {
     match value {
-        Value::List(items) => {
+        Value::Concrete(ConcreteValue::List(items)) => {
             serde_json::Value::Array(items.iter().map(scalar_or_passthrough_to_json).collect())
         }
-        Value::Map(map) => {
+        Value::Concrete(ConcreteValue::Map(map)) => {
             // Generic map (e.g. nested condition value map): keys verbatim.
             let mut obj = serde_json::Map::new();
             for (k, v) in map {
@@ -507,11 +534,13 @@ fn scalar_or_passthrough_to_json(value: &Value) -> serde_json::Value {
 
 fn scalar_to_json(value: &Value) -> serde_json::Value {
     match value {
-        Value::String(s) => serde_json::Value::String(s.clone()),
-        Value::Int(n) => serde_json::Value::Number((*n).into()),
-        Value::Float(f) => serde_json::json!(*f),
-        Value::Bool(b) => serde_json::Value::Bool(*b),
-        Value::List(_) | Value::Map(_) => scalar_or_passthrough_to_json(value),
+        Value::Concrete(ConcreteValue::String(s)) => serde_json::Value::String(s.clone()),
+        Value::Concrete(ConcreteValue::Int(n)) => serde_json::Value::Number((*n).into()),
+        Value::Concrete(ConcreteValue::Float(f)) => serde_json::json!(*f),
+        Value::Concrete(ConcreteValue::Bool(b)) => serde_json::Value::Bool(*b),
+        Value::Concrete(ConcreteValue::List(_)) | Value::Concrete(ConcreteValue::Map(_)) => {
+            scalar_or_passthrough_to_json(value)
+        }
         _ => serde_json::Value::Null,
     }
 }
@@ -540,9 +569,9 @@ fn json_to_policy_doc(json: &serde_json::Value) -> Value {
         let snake_key = lookup_snake(POLICY_TOP_FIELDS, k).unwrap_or(k.as_str());
         let value = if snake_key == "statement" {
             match v {
-                serde_json::Value::Array(items) => {
-                    Value::List(items.iter().map(json_to_policy_statement).collect())
-                }
+                serde_json::Value::Array(items) => Value::Concrete(ConcreteValue::List(
+                    items.iter().map(json_to_policy_statement).collect(),
+                )),
                 serde_json::Value::Object(_) => json_to_policy_statement(v),
                 _ => json_scalar_to_value(v),
             }
@@ -551,7 +580,7 @@ fn json_to_policy_doc(json: &serde_json::Value) -> Value {
         };
         map.insert(snake_key.to_string(), value);
     }
-    Value::Map(map)
+    Value::Concrete(ConcreteValue::Map(map))
 }
 
 fn json_to_policy_statement(json: &serde_json::Value) -> Value {
@@ -571,7 +600,7 @@ fn json_to_policy_statement(json: &serde_json::Value) -> Value {
         };
         map.insert(snake_key.to_string(), value);
     }
-    Value::Map(map)
+    Value::Concrete(ConcreteValue::Map(map))
 }
 
 fn json_to_principal(json: &serde_json::Value) -> Value {
@@ -585,7 +614,7 @@ fn json_to_principal(json: &serde_json::Value) -> Value {
                 let key = lookup_snake(PRINCIPAL_FIELDS, k).unwrap_or(k.as_str());
                 map.insert(key.to_string(), json_scalar_or_passthrough_to_value(v));
             }
-            Value::Map(map)
+            Value::Concrete(ConcreteValue::Map(map))
         }
         _ => json_scalar_to_value(json),
     }
@@ -612,29 +641,29 @@ fn json_to_condition(json: &serde_json::Value) -> Value {
                     }
                     m.insert(var.clone(), json_scalar_or_passthrough_to_value(val));
                 }
-                Value::Map(m)
+                Value::Concrete(ConcreteValue::Map(m))
             }
             _ => json_scalar_to_value(kv_value),
         };
         map.insert(op_snake, kv);
     }
-    Value::Map(map)
+    Value::Concrete(ConcreteValue::Map(map))
 }
 
 fn json_scalar_or_passthrough_to_value(json: &serde_json::Value) -> Value {
     match json {
-        serde_json::Value::Array(items) => Value::List(
+        serde_json::Value::Array(items) => Value::Concrete(ConcreteValue::List(
             items
                 .iter()
                 .map(json_scalar_or_passthrough_to_value)
                 .collect(),
-        ),
+        )),
         serde_json::Value::Object(obj) => {
             let mut map = IndexMap::new();
             for (k, v) in obj {
                 map.insert(k.clone(), json_scalar_or_passthrough_to_value(v));
             }
-            Value::Map(map)
+            Value::Concrete(ConcreteValue::Map(map))
         }
         _ => json_scalar_to_value(json),
     }
@@ -642,22 +671,22 @@ fn json_scalar_or_passthrough_to_value(json: &serde_json::Value) -> Value {
 
 fn json_scalar_to_value(json: &serde_json::Value) -> Value {
     match json {
-        serde_json::Value::String(s) => Value::String(s.clone()),
+        serde_json::Value::String(s) => Value::Concrete(ConcreteValue::String(s.clone())),
         serde_json::Value::Number(n) => {
             if let Some(i) = n.as_i64() {
-                Value::Int(i)
+                Value::Concrete(ConcreteValue::Int(i))
             } else if let Some(f) = n.as_f64() {
-                Value::Float(f)
+                Value::Concrete(ConcreteValue::Float(f))
             } else {
-                Value::String(n.to_string())
+                Value::Concrete(ConcreteValue::String(n.to_string()))
             }
         }
-        serde_json::Value::Bool(b) => Value::Bool(*b),
+        serde_json::Value::Bool(b) => Value::Concrete(ConcreteValue::Bool(*b)),
         // JSON null in policy documents is uncommon and has no faithful
         // Carina counterpart (Value has no Null variant). Map to empty
         // string only as a last resort; callers should normally treat
         // null fields as absent.
-        serde_json::Value::Null => Value::String(String::new()),
+        serde_json::Value::Null => Value::Concrete(ConcreteValue::String(String::new())),
         serde_json::Value::Array(_) | serde_json::Value::Object(_) => {
             json_scalar_or_passthrough_to_value(json)
         }
@@ -680,7 +709,9 @@ mod tests {
     #[test]
     fn resolve_iam_policy_attr_accepts_json_string_passthrough() {
         let json = r#"{"Version":"2012-10-17","Statement":[]}"#;
-        let r = make_resource(Some(Value::String(json.to_string())));
+        let r = make_resource(Some(Value::Concrete(ConcreteValue::String(
+            json.to_string(),
+        ))));
         let resolved = resolve_iam_policy_attr(&r, "policy").expect("string passthrough");
         assert_eq!(resolved, json);
     }
@@ -690,17 +721,23 @@ mod tests {
         let mut policy = IndexMap::new();
         policy.insert(
             "version".to_string(),
-            Value::String("2012-10-17".to_string()),
+            Value::Concrete(ConcreteValue::String("2012-10-17".to_string())),
         );
         let mut stmt = IndexMap::new();
-        stmt.insert("effect".to_string(), Value::String("Allow".to_string()));
+        stmt.insert(
+            "effect".to_string(),
+            Value::Concrete(ConcreteValue::String("Allow".to_string())),
+        );
         stmt.insert(
             "action".to_string(),
-            Value::String("s3:GetObject".to_string()),
+            Value::Concrete(ConcreteValue::String("s3:GetObject".to_string())),
         );
-        policy.insert("statement".to_string(), Value::List(vec![Value::Map(stmt)]));
+        policy.insert(
+            "statement".to_string(),
+            Value::Concrete(ConcreteValue::List(vec![Value::Map(stmt)])),
+        );
 
-        let r = make_resource(Some(Value::Map(policy)));
+        let r = make_resource(Some(Value::Concrete(ConcreteValue::Map(policy))));
         let resolved = resolve_iam_policy_attr(&r, "policy").expect("map → JSON");
 
         assert!(resolved.contains("\"Version\""));
@@ -719,7 +756,7 @@ mod tests {
 
     #[test]
     fn resolve_iam_policy_attr_errors_on_non_string_non_map() {
-        let r = make_resource(Some(Value::Bool(true)));
+        let r = make_resource(Some(Value::Concrete(ConcreteValue::Bool(true))));
         let err = resolve_iam_policy_attr(&r, "policy").expect_err("invalid type");
         assert!(format!("{}", err).contains("policy is required"));
     }
@@ -729,40 +766,61 @@ mod tests {
     /// `bool` condition with the `aws:SecureTransport` value key.
     fn full_deny_policy_value() -> Value {
         let mut principal = IndexMap::new();
-        principal.insert("aws".to_string(), Value::String("*".to_string()));
+        principal.insert(
+            "aws".to_string(),
+            Value::Concrete(ConcreteValue::String("*".to_string())),
+        );
 
         let mut bool_inner = IndexMap::new();
         bool_inner.insert(
             "aws:SecureTransport".to_string(),
-            Value::String("false".to_string()),
+            Value::Concrete(ConcreteValue::String("false".to_string())),
         );
         let mut condition = IndexMap::new();
-        condition.insert("bool".to_string(), Value::Map(bool_inner));
+        condition.insert(
+            "bool".to_string(),
+            Value::Concrete(ConcreteValue::Map(bool_inner)),
+        );
 
         let mut stmt = IndexMap::new();
         stmt.insert(
             "sid".to_string(),
-            Value::String("DenyInsecureTransport".to_string()),
+            Value::Concrete(ConcreteValue::String("DenyInsecureTransport".to_string())),
         );
-        stmt.insert("effect".to_string(), Value::String("Deny".to_string()));
-        stmt.insert("principal".to_string(), Value::Map(principal));
-        stmt.insert("action".to_string(), Value::String("s3:*".to_string()));
+        stmt.insert(
+            "effect".to_string(),
+            Value::Concrete(ConcreteValue::String("Deny".to_string())),
+        );
+        stmt.insert(
+            "principal".to_string(),
+            Value::Concrete(ConcreteValue::Map(principal)),
+        );
+        stmt.insert(
+            "action".to_string(),
+            Value::Concrete(ConcreteValue::String("s3:*".to_string())),
+        );
         stmt.insert(
             "resource".to_string(),
-            Value::List(vec![
+            Value::Concrete(ConcreteValue::List(vec![
                 Value::String("arn:aws:s3:::my-bucket".to_string()),
                 Value::String("arn:aws:s3:::my-bucket/*".to_string()),
-            ]),
+            ])),
         );
-        stmt.insert("condition".to_string(), Value::Map(condition));
+        stmt.insert(
+            "condition".to_string(),
+            Value::Concrete(ConcreteValue::Map(condition)),
+        );
 
         let mut doc = IndexMap::new();
         doc.insert(
             "version".to_string(),
-            Value::String("2012-10-17".to_string()),
+            Value::Concrete(ConcreteValue::String("2012-10-17".to_string())),
         );
-        doc.insert("statement".to_string(), Value::List(vec![Value::Map(stmt)]));
-        Value::Map(doc)
+        doc.insert(
+            "statement".to_string(),
+            Value::Concrete(ConcreteValue::List(vec![Value::Map(stmt)])),
+        );
+        Value::Concrete(ConcreteValue::Map(doc))
     }
 
     #[test]
@@ -825,7 +883,7 @@ mod tests {
             }]
         }"#;
         let value = iam_policy_json_to_value(aws_json).expect("ok");
-        let Value::Map(doc) = &value else {
+        let Value::Concrete(ConcreteValue::Map(doc)) = &value else {
             panic!("expected map");
         };
         // Top-level snake_case.
@@ -833,16 +891,16 @@ mod tests {
         assert!(doc.contains_key("statement"));
 
         // Drill into statement[0].condition.bool.
-        let Value::List(stmts) = doc.get("statement").unwrap() else {
+        let Value::Concrete(ConcreteValue::List(stmts)) = doc.get("statement").unwrap() else {
             panic!();
         };
-        let Value::Map(stmt) = &stmts[0] else {
+        let Value::Concrete(ConcreteValue::Map(stmt)) = &stmts[0] else {
             panic!()
         };
-        let Value::Map(cond) = stmt.get("condition").unwrap() else {
+        let Value::Concrete(ConcreteValue::Map(cond)) = stmt.get("condition").unwrap() else {
             panic!()
         };
-        let Value::Map(bool_inner) = cond.get("bool").unwrap() else {
+        let Value::Concrete(ConcreteValue::Map(bool_inner)) = cond.get("bool").unwrap() else {
             panic!()
         };
         // CRITICAL: condition variable key preserved verbatim.
@@ -850,13 +908,13 @@ mod tests {
         assert!(!bool_inner.contains_key("aws:secure_transport"));
 
         // Principal {"AWS"} → snake "aws".
-        let Value::Map(principal) = stmt.get("principal").unwrap() else {
+        let Value::Concrete(ConcreteValue::Map(principal)) = stmt.get("principal").unwrap() else {
             panic!()
         };
         assert!(principal.contains_key("aws"));
         assert_eq!(
             principal.get("aws"),
-            Some(&Value::String("*".to_string())),
+            Some(&Value::Concrete(ConcreteValue::String("*".to_string()))),
             "principal value should round-trip verbatim"
         );
     }
@@ -866,12 +924,18 @@ mod tests {
         let mut doc = IndexMap::new();
         doc.insert(
             "version".to_string(),
-            Value::String("2012-10-17".to_string()),
+            Value::Concrete(ConcreteValue::String("2012-10-17".to_string())),
         );
-        doc.insert("id".to_string(), Value::String("MyPolicyId".to_string()));
-        doc.insert("statement".to_string(), Value::List(vec![]));
+        doc.insert(
+            "id".to_string(),
+            Value::Concrete(ConcreteValue::String("MyPolicyId".to_string())),
+        );
+        doc.insert(
+            "statement".to_string(),
+            Value::Concrete(ConcreteValue::List(vec![])),
+        );
 
-        let original = Value::Map(doc);
+        let original = Value::Concrete(ConcreteValue::Map(doc));
         let json = value_to_iam_policy_json(&original).expect("ok");
         assert!(json.contains("\"Id\""));
         assert!(json.contains("\"MyPolicyId\""));
@@ -892,13 +956,15 @@ mod tests {
             }
         }"#;
         let value = iam_policy_json_to_value(aws_json).expect("ok");
-        let Value::Map(doc) = &value else { panic!() };
-        let Value::Map(stmt) = doc.get("statement").unwrap() else {
+        let Value::Concrete(ConcreteValue::Map(doc)) = &value else {
+            panic!()
+        };
+        let Value::Concrete(ConcreteValue::Map(stmt)) = doc.get("statement").unwrap() else {
             panic!("statement should be a Map for single-object form")
         };
         assert_eq!(
             stmt.get("effect"),
-            Some(&Value::String("Allow".to_string()))
+            Some(&Value::Concrete(ConcreteValue::String("Allow".to_string())))
         );
     }
 
@@ -915,16 +981,18 @@ mod tests {
             }]
         }"#;
         let value = iam_policy_json_to_value(aws_json).expect("ok");
-        let Value::Map(doc) = &value else { panic!() };
-        let Value::List(stmts) = doc.get("statement").unwrap() else {
+        let Value::Concrete(ConcreteValue::Map(doc)) = &value else {
             panic!()
         };
-        let Value::Map(stmt) = &stmts[0] else {
+        let Value::Concrete(ConcreteValue::List(stmts)) = doc.get("statement").unwrap() else {
+            panic!()
+        };
+        let Value::Concrete(ConcreteValue::Map(stmt)) = &stmts[0] else {
             panic!()
         };
         assert_eq!(
             stmt.get("principal"),
-            Some(&Value::String("*".to_string())),
+            Some(&Value::Concrete(ConcreteValue::String("*".to_string()))),
             "principal string form should pass through verbatim"
         );
     }
@@ -937,25 +1005,39 @@ mod tests {
         let mut inner = IndexMap::new();
         inner.insert(
             "aws:TagKeys".to_string(),
-            Value::List(vec![Value::String("Environment".to_string())]),
+            Value::Concrete(ConcreteValue::List(vec![Value::String(
+                "Environment".to_string(),
+            )])),
         );
         let mut condition = IndexMap::new();
         condition.insert(
             "for_all_values_string_equals_if_exists".to_string(),
-            Value::Map(inner),
+            Value::Concrete(ConcreteValue::Map(inner)),
         );
         let mut stmt = IndexMap::new();
-        stmt.insert("effect".to_string(), Value::String("Allow".to_string()));
-        stmt.insert("action".to_string(), Value::String("s3:*".to_string()));
-        stmt.insert("condition".to_string(), Value::Map(condition));
+        stmt.insert(
+            "effect".to_string(),
+            Value::Concrete(ConcreteValue::String("Allow".to_string())),
+        );
+        stmt.insert(
+            "action".to_string(),
+            Value::Concrete(ConcreteValue::String("s3:*".to_string())),
+        );
+        stmt.insert(
+            "condition".to_string(),
+            Value::Concrete(ConcreteValue::Map(condition)),
+        );
         let mut doc = IndexMap::new();
         doc.insert(
             "version".to_string(),
-            Value::String("2012-10-17".to_string()),
+            Value::Concrete(ConcreteValue::String("2012-10-17".to_string())),
         );
-        doc.insert("statement".to_string(), Value::List(vec![Value::Map(stmt)]));
+        doc.insert(
+            "statement".to_string(),
+            Value::Concrete(ConcreteValue::List(vec![Value::Map(stmt)])),
+        );
 
-        let original = Value::Map(doc);
+        let original = Value::Concrete(ConcreteValue::Map(doc));
         let json = value_to_iam_policy_json(&original).expect("ok");
         assert!(
             json.contains("\"ForAllValues:StringEqualsIfExists\""),
@@ -974,25 +1056,37 @@ mod tests {
         let mut inner = IndexMap::new();
         inner.insert(
             "aws:PrincipalOrgID".to_string(),
-            Value::String("o-1234567890".to_string()),
+            Value::Concrete(ConcreteValue::String("o-1234567890".to_string())),
         );
         let mut condition = IndexMap::new();
-        condition.insert("string_equals".to_string(), Value::Map(inner));
+        condition.insert(
+            "string_equals".to_string(),
+            Value::Concrete(ConcreteValue::Map(inner)),
+        );
         let mut stmt = IndexMap::new();
-        stmt.insert("effect".to_string(), Value::String("Allow".to_string()));
+        stmt.insert(
+            "effect".to_string(),
+            Value::Concrete(ConcreteValue::String("Allow".to_string())),
+        );
         stmt.insert(
             "action".to_string(),
-            Value::String("s3:GetObject".to_string()),
+            Value::Concrete(ConcreteValue::String("s3:GetObject".to_string())),
         );
-        stmt.insert("condition".to_string(), Value::Map(condition));
+        stmt.insert(
+            "condition".to_string(),
+            Value::Concrete(ConcreteValue::Map(condition)),
+        );
         let mut doc = IndexMap::new();
         doc.insert(
             "version".to_string(),
-            Value::String("2012-10-17".to_string()),
+            Value::Concrete(ConcreteValue::String("2012-10-17".to_string())),
         );
-        doc.insert("statement".to_string(), Value::List(vec![Value::Map(stmt)]));
+        doc.insert(
+            "statement".to_string(),
+            Value::Concrete(ConcreteValue::List(vec![Value::Map(stmt)])),
+        );
 
-        let original = Value::Map(doc);
+        let original = Value::Concrete(ConcreteValue::Map(doc));
         let json = value_to_iam_policy_json(&original).expect("ok");
         assert!(json.contains("\"StringEquals\""));
         assert!(json.contains("\"aws:PrincipalOrgID\""));

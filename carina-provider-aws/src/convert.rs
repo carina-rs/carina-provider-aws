@@ -7,8 +7,8 @@
 use std::collections::HashMap;
 
 use carina_core::resource::{
-    Directives as CoreDirectives, Resource as CoreResource, ResourceId as CoreResourceId,
-    State as CoreState, Value as CoreValue,
+    ConcreteValue, DeferredValue, Directives as CoreDirectives, Resource as CoreResource,
+    ResourceId as CoreResourceId, State as CoreState, Value as CoreValue,
 };
 use carina_core::schema::{
     AttributeSchema as CoreAttributeSchema, AttributeType as CoreAttributeType,
@@ -41,34 +41,70 @@ pub fn proto_to_core_resource_id(id: &ProtoResourceId) -> CoreResourceId {
 
 pub fn core_to_proto_value(v: &CoreValue) -> ProtoValue {
     match v {
-        CoreValue::String(s) => ProtoValue::String(s.clone()),
-        CoreValue::Int(i) => ProtoValue::Int(*i),
-        CoreValue::Float(f) => ProtoValue::Float(*f),
-        CoreValue::Bool(b) => ProtoValue::Bool(*b),
-        CoreValue::List(l) => ProtoValue::List(l.iter().map(core_to_proto_value).collect()),
-        CoreValue::Map(m) => ProtoValue::Map(
+        CoreValue::Concrete(ConcreteValue::String(s)) => ProtoValue::String(s.clone()),
+        CoreValue::Concrete(ConcreteValue::Int(i)) => ProtoValue::Int(*i),
+        CoreValue::Concrete(ConcreteValue::Float(f)) => ProtoValue::Float(*f),
+        CoreValue::Concrete(ConcreteValue::Bool(b)) => ProtoValue::Bool(*b),
+        // Duration is currently serialised to providers as integer seconds —
+        // the WIT contract has no native Duration variant. Matches the
+        // wire-side type mapping in `core_to_proto_attribute_type`.
+        CoreValue::Concrete(ConcreteValue::Duration(d)) => ProtoValue::Int(d.as_secs() as i64),
+        CoreValue::Concrete(ConcreteValue::List(l)) => {
+            ProtoValue::List(l.iter().map(core_to_proto_value).collect())
+        }
+        CoreValue::Concrete(ConcreteValue::StringList(items)) => ProtoValue::List(
+            items
+                .iter()
+                .map(|s| ProtoValue::String(s.clone()))
+                .collect(),
+        ),
+        CoreValue::Concrete(ConcreteValue::Map(m)) => ProtoValue::Map(
             m.iter()
                 .map(|(k, v)| (k.clone(), core_to_proto_value(v)))
                 .collect(),
         ),
-        // ResourceRef, Interpolation, FunctionCall, Closure, Secret
-        // should be resolved before reaching the provider.
-        _ => ProtoValue::String(format!("{v:?}")),
+        // Deferred-axis values must be resolved before reaching the provider.
+        // Phase 5a of RFC #2972 makes the axis explicit so we can pattern-match
+        // each deferred variant individually. We do NOT fall through to
+        // `format!("{v:?}")` because `Debug` on `Value::Deferred(Secret(inner))`
+        // includes the inner plaintext — a leak. Emit a redacted sentinel
+        // instead so the provider sees a clearly-bogus value rather than
+        // either the plaintext or an inner pointer / panic.
+        CoreValue::Deferred(DeferredValue::Secret(_)) => {
+            ProtoValue::String("<redacted-secret>".to_string())
+        }
+        CoreValue::Deferred(DeferredValue::ResourceRef { path }) => {
+            ProtoValue::String(format!("<unresolved-ref:{}>", path.to_dot_string()))
+        }
+        CoreValue::Deferred(DeferredValue::BindingRef { binding }) => {
+            ProtoValue::String(format!("<unresolved-binding:{binding}>"))
+        }
+        CoreValue::Deferred(DeferredValue::Interpolation(_)) => {
+            ProtoValue::String("<unresolved-interpolation>".to_string())
+        }
+        CoreValue::Deferred(DeferredValue::FunctionCall { name, .. }) => {
+            ProtoValue::String(format!("<unresolved-fn:{name}>"))
+        }
+        CoreValue::Deferred(DeferredValue::Unknown(_)) => {
+            ProtoValue::String("<unknown>".to_string())
+        }
     }
 }
 
 pub fn proto_to_core_value(v: &ProtoValue) -> CoreValue {
     match v {
-        ProtoValue::String(s) => CoreValue::String(s.clone()),
-        ProtoValue::Int(i) => CoreValue::Int(*i),
-        ProtoValue::Float(f) => CoreValue::Float(*f),
-        ProtoValue::Bool(b) => CoreValue::Bool(*b),
-        ProtoValue::List(l) => CoreValue::List(l.iter().map(proto_to_core_value).collect()),
-        ProtoValue::Map(m) => CoreValue::Map(
+        ProtoValue::String(s) => CoreValue::Concrete(ConcreteValue::String(s.clone())),
+        ProtoValue::Int(i) => CoreValue::Concrete(ConcreteValue::Int(*i)),
+        ProtoValue::Float(f) => CoreValue::Concrete(ConcreteValue::Float(*f)),
+        ProtoValue::Bool(b) => CoreValue::Concrete(ConcreteValue::Bool(*b)),
+        ProtoValue::List(l) => CoreValue::Concrete(ConcreteValue::List(
+            l.iter().map(proto_to_core_value).collect(),
+        )),
+        ProtoValue::Map(m) => CoreValue::Concrete(ConcreteValue::Map(
             m.iter()
                 .map(|(k, v)| (k.clone(), proto_to_core_value(v)))
                 .collect(),
-        ),
+        )),
     }
 }
 
@@ -141,6 +177,7 @@ pub fn proto_to_core_resource(r: &ProtoResource) -> CoreResource {
         force_delete: r.directives.force_delete,
         create_before_destroy: r.directives.create_before_destroy,
         prevent_destroy: r.directives.prevent_destroy,
+        depends_on: Vec::new(),
     };
     resource
 }
@@ -252,6 +289,8 @@ pub fn proto_to_core_schema(s: &ProtoResourceSchema) -> CoreResourceSchema {
             create_max_retries: c.create_max_retries,
         }),
         exclusive_required: s.exclusive_required.clone(),
+        default_wait_timeout: None,
+        default_wait_interval: None,
     }
 }
 
@@ -275,6 +314,11 @@ fn core_to_proto_attribute_type(t: &CoreAttributeType) -> ProtoAttributeType {
         CoreAttributeType::Int => ProtoAttributeType::Int,
         CoreAttributeType::Float => ProtoAttributeType::Float,
         CoreAttributeType::Bool => ProtoAttributeType::Bool,
+        // `Duration` isn't representable on the WIT wire today; map to Int
+        // seconds. Carina-core only emits Duration values from DSL literals
+        // (`75min`, `1h`), and providers receive the resolved int form
+        // through json_to_dsl_value, so the inverse direction is moot.
+        CoreAttributeType::Duration => ProtoAttributeType::Int,
         CoreAttributeType::StringEnum {
             values,
             name,

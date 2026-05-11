@@ -820,7 +820,7 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
         code.push_str("use super::validate_tags_map;\n");
     }
     if has_ranged_ints {
-        code.push_str("use carina_core::resource::Value;\n");
+        code.push_str("use carina_core::resource::{ConcreteValue, DeferredValue, Value};\n");
     }
     code.push_str(&format!(
         "use carina_core::schema::{{{}}};\n\n",
@@ -1767,7 +1767,7 @@ fn generate_provider_code(
          use indexmap::IndexMap;\n\
          use std::collections::HashMap;\n\n\
          use carina_core::provider::{BoxFuture, ProviderError, ProviderResult};\n\
-         use carina_core::resource::{Resource, ResourceId, State, Value};\n\
+         use carina_core::resource::{ConcreteValue, DeferredValue, Resource, ResourceId, State, Value};\n\
          #[allow(unused_imports)]\n\
          use carina_core::utils::extract_enum_value;\n\n\
          use crate::AwsProvider;\n\

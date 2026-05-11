@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use carina_core::provider::{ProviderError, ProviderResult};
-use carina_core::resource::{Resource, ResourceId, State, Value};
+use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
 use carina_core::utils::extract_enum_value;
 
 use aws_sdk_ec2::types::NatGatewayState;
@@ -73,11 +73,15 @@ impl AwsProvider {
 
         let mut req = self.ec2_client.create_nat_gateway().subnet_id(&subnet_id);
 
-        if let Some(Value::String(alloc_id)) = resource.get_attr("allocation_id") {
+        if let Some(Value::Concrete(ConcreteValue::String(alloc_id))) =
+            resource.get_attr("allocation_id")
+        {
             req = req.allocation_id(alloc_id);
         }
 
-        if let Some(Value::String(conn_type)) = resource.get_attr("connectivity_type") {
+        if let Some(Value::Concrete(ConcreteValue::String(conn_type))) =
+            resource.get_attr("connectivity_type")
+        {
             use aws_sdk_ec2::types::ConnectivityType;
             let ct = ConnectivityType::from(extract_enum_value(conn_type));
             req = req.connectivity_type(ct);

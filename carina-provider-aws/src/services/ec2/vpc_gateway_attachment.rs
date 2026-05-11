@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use carina_core::provider::{ProviderError, ProviderResult};
-use carina_core::resource::{Resource, ResourceId, State, Value};
+use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
 
 use crate::AwsProvider;
 use crate::helpers::{require_string_attr, sdk_error_message};
@@ -70,10 +70,13 @@ impl AwsProvider {
             for attachment in igw.attachments() {
                 if attachment.vpc_id() == Some(vpc_id) {
                     let mut attributes = HashMap::new();
-                    attributes.insert("vpc_id".to_string(), Value::String(vpc_id.to_string()));
+                    attributes.insert(
+                        "vpc_id".to_string(),
+                        Value::Concrete(ConcreteValue::String(vpc_id.to_string())),
+                    );
                     attributes.insert(
                         "internet_gateway_id".to_string(),
-                        Value::String(igw_id.to_string()),
+                        Value::Concrete(ConcreteValue::String(igw_id.to_string())),
                     );
 
                     return Ok(State::existing(id.clone(), attributes)
@@ -116,10 +119,13 @@ impl AwsProvider {
                     let state_str = attachment.state().map(|s| s.as_str());
                     if state_str == Some("attached") {
                         let mut attributes = HashMap::new();
-                        attributes.insert("vpc_id".to_string(), Value::String(vpc_id.to_string()));
+                        attributes.insert(
+                            "vpc_id".to_string(),
+                            Value::Concrete(ConcreteValue::String(vpc_id.to_string())),
+                        );
                         attributes.insert(
                             "vpn_gateway_id".to_string(),
-                            Value::String(vgw_id.to_string()),
+                            Value::Concrete(ConcreteValue::String(vgw_id.to_string())),
                         );
 
                         return Ok(State::existing(id.clone(), attributes)
@@ -139,7 +145,9 @@ impl AwsProvider {
     ) -> ProviderResult<State> {
         let vpc_id = require_string_attr(&resource, "vpc_id")?;
 
-        if let Some(Value::String(igw_id)) = resource.get_attr("internet_gateway_id") {
+        if let Some(Value::Concrete(ConcreteValue::String(igw_id))) =
+            resource.get_attr("internet_gateway_id")
+        {
             // Attach Internet Gateway
             self.ec2_client
                 .attach_internet_gateway()
@@ -158,7 +166,9 @@ impl AwsProvider {
             let composite = format!("{}|{}", vpc_id, igw_id);
             self.read_ec2_vpc_gateway_attachment(&resource.id, Some(&composite))
                 .await
-        } else if let Some(Value::String(vgw_id)) = resource.get_attr("vpn_gateway_id") {
+        } else if let Some(Value::Concrete(ConcreteValue::String(vgw_id))) =
+            resource.get_attr("vpn_gateway_id")
+        {
             // Attach VPN Gateway
             self.ec2_client
                 .attach_vpn_gateway()

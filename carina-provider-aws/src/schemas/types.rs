@@ -7,7 +7,7 @@ pub use carina_aws_types::*;
 
 use std::collections::HashMap;
 
-use carina_core::resource::Value;
+use carina_core::resource::{ConcreteValue, Value};
 use carina_core::schema::{AttributeType, ResourceSchema, legacy_validator};
 use carina_core::utils::{extract_enum_value, validate_enum_namespace};
 
@@ -37,7 +37,7 @@ pub fn aws_region() -> AttributeType {
         length: None,
         base: Box::new(AttributeType::String),
         validate: legacy_validator(|value| {
-            if let Value::String(s) = value {
+            if let Value::Concrete(ConcreteValue::String(s)) = value {
                 validate_enum_namespace(s, "Region", "aws")
                     .map_err(|reason| format!("Invalid region '{}': {}", s, reason))?;
                 // Normalize the input to AWS format (hyphens)
@@ -72,7 +72,7 @@ pub fn availability_zone() -> AttributeType {
         length: None,
         base: Box::new(AttributeType::String),
         validate: legacy_validator(|value| {
-            if let Value::String(s) = value {
+            if let Value::Concrete(ConcreteValue::String(s)) = value {
                 validate_enum_namespace(s, "AvailabilityZone", "aws")
                     .map_err(|reason| format!("Invalid availability zone '{}': {}", s, reason))?;
                 let extracted = extract_enum_value(s);
@@ -103,7 +103,7 @@ pub fn s3_grantee() -> AttributeType {
         length: None,
         base: Box::new(AttributeType::String),
         validate: legacy_validator(|value| {
-            if let Value::String(s) = value {
+            if let Value::Concrete(ConcreteValue::String(s)) = value {
                 if s.is_empty() {
                     return Err("Grantee specification must not be empty".to_string());
                 }
@@ -219,7 +219,9 @@ mod tests {
         let region_type = aws_region();
         assert!(
             region_type
-                .validate(&Value::String("ap-northeast-1".to_string()))
+                .validate(&Value::Concrete(ConcreteValue::String(
+                    "ap-northeast-1".to_string()
+                )))
                 .is_ok()
         );
     }
@@ -229,7 +231,9 @@ mod tests {
         let region_type = aws_region();
         assert!(
             region_type
-                .validate(&Value::String("aws.Region.ap_northeast_1".to_string()))
+                .validate(&Value::Concrete(ConcreteValue::String(
+                    "aws.Region.ap_northeast_1".to_string()
+                )))
                 .is_ok()
         );
     }
@@ -239,7 +243,9 @@ mod tests {
         let region_type = aws_region();
         assert!(
             region_type
-                .validate(&Value::String("Region.ap_northeast_1".to_string()))
+                .validate(&Value::Concrete(ConcreteValue::String(
+                    "Region.ap_northeast_1".to_string()
+                )))
                 .is_ok()
         );
     }
@@ -247,7 +253,9 @@ mod tests {
     #[test]
     fn region_rejects_invalid_region() {
         let region_type = aws_region();
-        let result = region_type.validate(&Value::String("invalid-region".to_string()));
+        let result = region_type.validate(&Value::Concrete(ConcreteValue::String(
+            "invalid-region".to_string(),
+        )));
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
         assert!(err.contains("Invalid region"));
@@ -260,7 +268,9 @@ mod tests {
         // ap-northeast-1a is an AZ, not a region
         assert!(
             region_type
-                .validate(&Value::String("ap-northeast-1a".to_string()))
+                .validate(&Value::Concrete(ConcreteValue::String(
+                    "ap-northeast-1a".to_string()
+                )))
                 .is_err()
         );
     }
@@ -271,7 +281,7 @@ mod tests {
         for (region, _) in REGIONS {
             assert!(
                 region_type
-                    .validate(&Value::String(region.to_string()))
+                    .validate(&Value::Concrete(ConcreteValue::String(region.to_string())))
                     .is_ok(),
                 "Region {} should be valid",
                 region
@@ -286,7 +296,9 @@ mod tests {
         let az_type = availability_zone();
         assert!(
             az_type
-                .validate(&Value::String("us-east-1a".to_string()))
+                .validate(&Value::Concrete(ConcreteValue::String(
+                    "us-east-1a".to_string()
+                )))
                 .is_ok()
         );
     }
@@ -296,9 +308,9 @@ mod tests {
         let az_type = availability_zone();
         assert!(
             az_type
-                .validate(&Value::String(
+                .validate(&Value::Concrete(ConcreteValue::String(
                     "aws.AvailabilityZone.us_east_1a".to_string()
-                ))
+                )))
                 .is_ok()
         );
     }
@@ -308,7 +320,9 @@ mod tests {
         let az_type = availability_zone();
         assert!(
             az_type
-                .validate(&Value::String("us_east_1a".to_string()))
+                .validate(&Value::Concrete(ConcreteValue::String(
+                    "us_east_1a".to_string()
+                )))
                 .is_ok()
         );
     }
@@ -318,7 +332,9 @@ mod tests {
         let az_type = availability_zone();
         assert!(
             az_type
-                .validate(&Value::String("invalid-zone".to_string()))
+                .validate(&Value::Concrete(ConcreteValue::String(
+                    "invalid-zone".to_string()
+                )))
                 .is_err()
         );
     }
@@ -328,9 +344,9 @@ mod tests {
         let az_type = availability_zone();
         assert!(
             az_type
-                .validate(&Value::String(
+                .validate(&Value::Concrete(ConcreteValue::String(
                     "gcp.AvailabilityZone.us_east_1a".to_string()
-                ))
+                )))
                 .is_err()
         );
     }
@@ -363,10 +379,10 @@ mod tests {
     fn grantee_accepts_id_format() {
         let t = s3_grantee();
         assert!(
-            t.validate(&Value::String(
+            t.validate(&Value::Concrete(ConcreteValue::String(
                 "id=\"79a59df900b949e55d96a1e698fbacedfd6e09d98eacf8f8d5218e7cd47ef2be\""
                     .to_string()
-            ))
+            )))
             .is_ok()
         );
     }
@@ -375,9 +391,9 @@ mod tests {
     fn grantee_accepts_email_format() {
         let t = s3_grantee();
         assert!(
-            t.validate(&Value::String(
+            t.validate(&Value::Concrete(ConcreteValue::String(
                 "emailAddress=\"user@example.com\"".to_string()
-            ))
+            )))
             .is_ok()
         );
     }
@@ -386,9 +402,9 @@ mod tests {
     fn grantee_accepts_uri_format() {
         let t = s3_grantee();
         assert!(
-            t.validate(&Value::String(
+            t.validate(&Value::Concrete(ConcreteValue::String(
                 "uri=\"http://acs.amazonaws.com/groups/global/AllUsers\"".to_string()
-            ))
+            )))
             .is_ok()
         );
     }
@@ -397,9 +413,9 @@ mod tests {
     fn grantee_accepts_multiple_specs() {
         let t = s3_grantee();
         assert!(
-            t.validate(&Value::String(
+            t.validate(&Value::Concrete(ConcreteValue::String(
                 "id=\"abc123\", emailAddress=\"user@example.com\"".to_string()
-            ))
+            )))
             .is_ok()
         );
     }
@@ -407,13 +423,18 @@ mod tests {
     #[test]
     fn grantee_rejects_empty_string() {
         let t = s3_grantee();
-        assert!(t.validate(&Value::String("".to_string())).is_err());
+        assert!(
+            t.validate(&Value::Concrete(ConcreteValue::String("".to_string())))
+                .is_err()
+        );
     }
 
     #[test]
     fn grantee_rejects_invalid_prefix() {
         let t = s3_grantee();
-        let result = t.validate(&Value::String("foo=\"bar\"".to_string()));
+        let result = t.validate(&Value::Concrete(ConcreteValue::String(
+            "foo=\"bar\"".to_string(),
+        )));
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
         assert!(err.contains("must start with id=, emailAddress=, or uri="));
@@ -424,22 +445,30 @@ mod tests {
         let region_type = aws_region();
         assert!(
             region_type
-                .validate(&Value::String("gcp.Region.ap_northeast_1".to_string()))
+                .validate(&Value::Concrete(ConcreteValue::String(
+                    "gcp.Region.ap_northeast_1".to_string()
+                )))
                 .is_err()
         );
         assert!(
             region_type
-                .validate(&Value::String("aws.Location.ap_northeast_1".to_string()))
+                .validate(&Value::Concrete(ConcreteValue::String(
+                    "aws.Location.ap_northeast_1".to_string()
+                )))
                 .is_err()
         );
         assert!(
             region_type
-                .validate(&Value::String("foo.bar.baz.ap_northeast_1".to_string()))
+                .validate(&Value::Concrete(ConcreteValue::String(
+                    "foo.bar.baz.ap_northeast_1".to_string()
+                )))
                 .is_err()
         );
         assert!(
             region_type
-                .validate(&Value::String("Location.ap_northeast_1".to_string()))
+                .validate(&Value::Concrete(ConcreteValue::String(
+                    "Location.ap_northeast_1".to_string()
+                )))
                 .is_err()
         );
     }

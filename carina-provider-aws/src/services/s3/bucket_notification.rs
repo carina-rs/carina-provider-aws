@@ -6,7 +6,7 @@ use aws_sdk_s3::types::{
     TopicConfiguration,
 };
 use carina_core::provider::{ProviderError, ProviderResult};
-use carina_core::resource::{Resource, ResourceId, State, Value};
+use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
 use indexmap::IndexMap;
 
 use crate::AwsProvider;
@@ -33,7 +33,10 @@ impl AwsProvider {
         match result {
             Ok(output) => {
                 let mut attributes = HashMap::new();
-                attributes.insert("bucket".to_string(), Value::String(bucket.to_string()));
+                attributes.insert(
+                    "bucket".to_string(),
+                    Value::Concrete(ConcreteValue::String(bucket.to_string())),
+                );
 
                 let topics: Vec<Value> = output
                     .topic_configurations()
@@ -41,7 +44,10 @@ impl AwsProvider {
                     .map(topic_to_value)
                     .collect();
                 if !topics.is_empty() {
-                    attributes.insert("topic_configurations".to_string(), Value::List(topics));
+                    attributes.insert(
+                        "topic_configurations".to_string(),
+                        Value::Concrete(ConcreteValue::List(topics)),
+                    );
                 }
                 let queues: Vec<Value> = output
                     .queue_configurations()
@@ -49,7 +55,10 @@ impl AwsProvider {
                     .map(queue_to_value)
                     .collect();
                 if !queues.is_empty() {
-                    attributes.insert("queue_configurations".to_string(), Value::List(queues));
+                    attributes.insert(
+                        "queue_configurations".to_string(),
+                        Value::Concrete(ConcreteValue::List(queues)),
+                    );
                 }
                 let lambdas: Vec<Value> = output
                     .lambda_function_configurations()
@@ -59,13 +68,13 @@ impl AwsProvider {
                 if !lambdas.is_empty() {
                     attributes.insert(
                         "lambda_function_configurations".to_string(),
-                        Value::List(lambdas),
+                        Value::Concrete(ConcreteValue::List(lambdas)),
                     );
                 }
                 if output.event_bridge_configuration().is_some() {
                     attributes.insert(
                         "event_bridge_configuration".to_string(),
-                        Value::Map(IndexMap::new()),
+                        Value::Concrete(ConcreteValue::Map(IndexMap::new())),
                     );
                 }
 
@@ -110,21 +119,21 @@ impl AwsProvider {
         resource: &Resource,
     ) -> ProviderResult<State> {
         let topics = match resource.get_attr("topic_configurations") {
-            Some(Value::List(items)) => items
+            Some(Value::Concrete(ConcreteValue::List(items))) => items
                 .iter()
                 .map(|v| build_topic(id, v))
                 .collect::<ProviderResult<Vec<_>>>()?,
             _ => Vec::new(),
         };
         let queues = match resource.get_attr("queue_configurations") {
-            Some(Value::List(items)) => items
+            Some(Value::Concrete(ConcreteValue::List(items))) => items
                 .iter()
                 .map(|v| build_queue(id, v))
                 .collect::<ProviderResult<Vec<_>>>()?,
             _ => Vec::new(),
         };
         let lambdas = match resource.get_attr("lambda_function_configurations") {
-            Some(Value::List(items)) => items
+            Some(Value::Concrete(ConcreteValue::List(items))) => items
                 .iter()
                 .map(|v| build_lambda(id, v))
                 .collect::<ProviderResult<Vec<_>>>()?,
@@ -200,7 +209,7 @@ impl AwsProvider {
 }
 
 fn build_topic(id: &ResourceId, value: &Value) -> ProviderResult<TopicConfiguration> {
-    let Value::Map(map) = value else {
+    let Value::Concrete(ConcreteValue::Map(map)) = value else {
         return Err(
             ProviderError::invalid_input("topic_configurations entry must be a map")
                 .for_resource(id.clone()),
@@ -212,7 +221,7 @@ fn build_topic(id: &ResourceId, value: &Value) -> ProviderResult<TopicConfigurat
     let mut builder = TopicConfiguration::builder()
         .topic_arn(topic_arn)
         .set_events(Some(events));
-    if let Some(Value::String(s)) = map.get("id") {
+    if let Some(Value::Concrete(ConcreteValue::String(s))) = map.get("id") {
         builder = builder.id(s);
     }
     if let Some(filter) = build_filter(id, map, "topic_configurations")? {
@@ -225,7 +234,7 @@ fn build_topic(id: &ResourceId, value: &Value) -> ProviderResult<TopicConfigurat
 }
 
 fn build_queue(id: &ResourceId, value: &Value) -> ProviderResult<QueueConfiguration> {
-    let Value::Map(map) = value else {
+    let Value::Concrete(ConcreteValue::Map(map)) = value else {
         return Err(
             ProviderError::invalid_input("queue_configurations entry must be a map")
                 .for_resource(id.clone()),
@@ -237,7 +246,7 @@ fn build_queue(id: &ResourceId, value: &Value) -> ProviderResult<QueueConfigurat
     let mut builder = QueueConfiguration::builder()
         .queue_arn(queue_arn)
         .set_events(Some(events));
-    if let Some(Value::String(s)) = map.get("id") {
+    if let Some(Value::Concrete(ConcreteValue::String(s))) = map.get("id") {
         builder = builder.id(s);
     }
     if let Some(filter) = build_filter(id, map, "queue_configurations")? {
@@ -250,7 +259,7 @@ fn build_queue(id: &ResourceId, value: &Value) -> ProviderResult<QueueConfigurat
 }
 
 fn build_lambda(id: &ResourceId, value: &Value) -> ProviderResult<LambdaFunctionConfiguration> {
-    let Value::Map(map) = value else {
+    let Value::Concrete(ConcreteValue::Map(map)) = value else {
         return Err(ProviderError::invalid_input(
             "lambda_function_configurations entry must be a map",
         )
@@ -267,7 +276,7 @@ fn build_lambda(id: &ResourceId, value: &Value) -> ProviderResult<LambdaFunction
     let mut builder = LambdaFunctionConfiguration::builder()
         .lambda_function_arn(lambda_arn)
         .set_events(Some(events));
-    if let Some(Value::String(s)) = map.get("id") {
+    if let Some(Value::Concrete(ConcreteValue::String(s))) = map.get("id") {
         builder = builder.id(s);
     }
     if let Some(filter) = build_filter(id, map, "lambda_function_configurations")? {
@@ -289,7 +298,7 @@ fn require_string_field(
     parent: &str,
 ) -> ProviderResult<String> {
     match map.get(field) {
-        Some(Value::String(s)) => Ok(s.clone()),
+        Some(Value::Concrete(ConcreteValue::String(s))) => Ok(s.clone()),
         _ => Err(
             ProviderError::invalid_input(format!("{parent}.{field} is required"))
                 .for_resource(id.clone()),
@@ -303,10 +312,10 @@ fn build_events(
     parent: &str,
 ) -> ProviderResult<Vec<Event>> {
     match map.get("events") {
-        Some(Value::List(items)) => items
+        Some(Value::Concrete(ConcreteValue::List(items))) => items
             .iter()
             .map(|v| match v {
-                Value::String(s) => Ok(Event::from(s.as_str())),
+                Value::Concrete(ConcreteValue::String(s)) => Ok(Event::from(s.as_str())),
                 _ => Err(ProviderError::invalid_input(format!(
                     "{parent}.events must be a list of strings"
                 ))
@@ -325,17 +334,17 @@ fn build_filter(
     map: &IndexMap<String, Value>,
     parent: &str,
 ) -> ProviderResult<Option<NotificationConfigurationFilter>> {
-    let Some(Value::Map(filter_map)) = map.get("filter") else {
+    let Some(Value::Concrete(ConcreteValue::Map(filter_map))) = map.get("filter") else {
         return Ok(None);
     };
-    let Some(Value::List(rules)) = filter_map.get("filter_rules") else {
+    let Some(Value::Concrete(ConcreteValue::List(rules))) = filter_map.get("filter_rules") else {
         return Ok(Some(NotificationConfigurationFilter::builder().build()));
     };
 
     let sdk_rules: Vec<FilterRule> = rules
         .iter()
         .map(|v| {
-            let Value::Map(rule_map) = v else {
+            let Value::Concrete(ConcreteValue::Map(rule_map)) = v else {
                 return Err(ProviderError::invalid_input(format!(
                     "{parent}.filter.filter_rules entry must be a map"
                 ))
@@ -361,58 +370,67 @@ fn build_filter(
 fn topic_to_value(t: &TopicConfiguration) -> Value {
     let mut m = IndexMap::new();
     if let Some(s) = t.id() {
-        m.insert("id".to_string(), Value::String(s.to_string()));
+        m.insert(
+            "id".to_string(),
+            Value::Concrete(ConcreteValue::String(s.to_string())),
+        );
     }
     m.insert(
         "topic_arn".to_string(),
-        Value::String(t.topic_arn().to_string()),
+        Value::Concrete(ConcreteValue::String(t.topic_arn().to_string())),
     );
     m.insert("events".to_string(), events_to_value(t.events()));
     if let Some(f) = t.filter() {
         m.insert("filter".to_string(), filter_to_value(f));
     }
-    Value::Map(m)
+    Value::Concrete(ConcreteValue::Map(m))
 }
 
 fn queue_to_value(q: &QueueConfiguration) -> Value {
     let mut m = IndexMap::new();
     if let Some(s) = q.id() {
-        m.insert("id".to_string(), Value::String(s.to_string()));
+        m.insert(
+            "id".to_string(),
+            Value::Concrete(ConcreteValue::String(s.to_string())),
+        );
     }
     m.insert(
         "queue_arn".to_string(),
-        Value::String(q.queue_arn().to_string()),
+        Value::Concrete(ConcreteValue::String(q.queue_arn().to_string())),
     );
     m.insert("events".to_string(), events_to_value(q.events()));
     if let Some(f) = q.filter() {
         m.insert("filter".to_string(), filter_to_value(f));
     }
-    Value::Map(m)
+    Value::Concrete(ConcreteValue::Map(m))
 }
 
 fn lambda_to_value(l: &LambdaFunctionConfiguration) -> Value {
     let mut m = IndexMap::new();
     if let Some(s) = l.id() {
-        m.insert("id".to_string(), Value::String(s.to_string()));
+        m.insert(
+            "id".to_string(),
+            Value::Concrete(ConcreteValue::String(s.to_string())),
+        );
     }
     m.insert(
         "lambda_function_arn".to_string(),
-        Value::String(l.lambda_function_arn().to_string()),
+        Value::Concrete(ConcreteValue::String(l.lambda_function_arn().to_string())),
     );
     m.insert("events".to_string(), events_to_value(l.events()));
     if let Some(f) = l.filter() {
         m.insert("filter".to_string(), filter_to_value(f));
     }
-    Value::Map(m)
+    Value::Concrete(ConcreteValue::Map(m))
 }
 
 fn events_to_value(events: &[Event]) -> Value {
-    Value::List(
+    Value::Concrete(ConcreteValue::List(
         events
             .iter()
             .map(|e| Value::String(e.as_str().to_string()))
             .collect(),
-    )
+    ))
 }
 
 fn filter_to_value(f: &NotificationConfigurationFilter) -> Value {
@@ -424,15 +442,24 @@ fn filter_to_value(f: &NotificationConfigurationFilter) -> Value {
             .map(|r| {
                 let mut m = IndexMap::new();
                 if let Some(n) = r.name() {
-                    m.insert("name".to_string(), Value::String(n.as_str().to_string()));
+                    m.insert(
+                        "name".to_string(),
+                        Value::Concrete(ConcreteValue::String(n.as_str().to_string())),
+                    );
                 }
                 if let Some(v) = r.value() {
-                    m.insert("value".to_string(), Value::String(v.to_string()));
+                    m.insert(
+                        "value".to_string(),
+                        Value::Concrete(ConcreteValue::String(v.to_string())),
+                    );
                 }
-                Value::Map(m)
+                Value::Concrete(ConcreteValue::Map(m))
             })
             .collect();
-        outer.insert("filter_rules".to_string(), Value::List(rules));
+        outer.insert(
+            "filter_rules".to_string(),
+            Value::Concrete(ConcreteValue::List(rules)),
+        );
     }
-    Value::Map(outer)
+    Value::Concrete(ConcreteValue::Map(outer))
 }

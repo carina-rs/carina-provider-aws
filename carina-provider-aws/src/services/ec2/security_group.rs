@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use carina_core::provider::{ProviderError, ProviderResult};
-use carina_core::resource::{Resource, ResourceId, State, Value};
+use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
 
 use crate::AwsProvider;
 use crate::helpers::{require_string_attr, retry_aws_operation, sdk_error_message};
@@ -68,13 +68,13 @@ impl AwsProvider {
         let vpc_id = require_string_attr(&resource, "vpc_id")?;
 
         let description = match resource.get_attr("description") {
-            Some(Value::String(s)) => s.clone(),
+            Some(Value::Concrete(ConcreteValue::String(s))) => s.clone(),
             _ => String::new(),
         };
 
         // group_name is required for CreateSecurityGroup API
         let group_name = match resource.get_attr("group_name") {
-            Some(Value::String(s)) => s.clone(),
+            Some(Value::Concrete(ConcreteValue::String(s))) => s.clone(),
             _ => resource.id.name.to_string(),
         };
 

@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use aws_sdk_s3::types::{BucketVersioningStatus, MfaDelete, VersioningConfiguration};
 use carina_core::provider::{ProviderError, ProviderResult};
-use carina_core::resource::{Resource, ResourceId, State, Value};
+use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
 use carina_core::utils::extract_enum_value;
 
 use crate::AwsProvider;
@@ -37,15 +37,18 @@ impl AwsProvider {
                     return Ok(State::not_found(id.clone()));
                 };
                 let mut attributes = HashMap::new();
-                attributes.insert("bucket".to_string(), Value::String(bucket.to_string()));
+                attributes.insert(
+                    "bucket".to_string(),
+                    Value::Concrete(ConcreteValue::String(bucket.to_string())),
+                );
                 attributes.insert(
                     "status".to_string(),
-                    Value::String(status.as_str().to_string()),
+                    Value::Concrete(ConcreteValue::String(status.as_str().to_string())),
                 );
                 if let Some(mfa) = output.mfa_delete() {
                     attributes.insert(
                         "mfa_delete".to_string(),
-                        Value::String(mfa.as_str().to_string()),
+                        Value::Concrete(ConcreteValue::String(mfa.as_str().to_string())),
                     );
                 }
                 Ok(State::existing(id.clone(), attributes).with_identifier(bucket.to_string()))
@@ -89,7 +92,7 @@ impl AwsProvider {
         resource: &Resource,
     ) -> ProviderResult<State> {
         let status_str = match resource.get_attr("status") {
-            Some(Value::String(s)) => extract_enum_value(s).to_string(),
+            Some(Value::Concrete(ConcreteValue::String(s))) => extract_enum_value(s).to_string(),
             _ => {
                 return Err(
                     ProviderError::invalid_input("status is required").for_resource(id.clone())
@@ -99,7 +102,7 @@ impl AwsProvider {
         let status = BucketVersioningStatus::from(status_str.as_str());
 
         let mut config_builder = VersioningConfiguration::builder().status(status);
-        if let Some(Value::String(s)) = resource.get_attr("mfa_delete") {
+        if let Some(Value::Concrete(ConcreteValue::String(s))) = resource.get_attr("mfa_delete") {
             let mfa_str = extract_enum_value(s);
             config_builder = config_builder.mfa_delete(MfaDelete::from(mfa_str));
         }

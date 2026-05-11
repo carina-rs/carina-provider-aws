@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 
 use carina_core::provider::{ProviderError, ProviderResult};
-use carina_core::resource::{Resource, ResourceId, State, Value};
+use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
 use carina_core::utils::convert_enum_value;
 
 use crate::AwsProvider;
@@ -64,7 +64,7 @@ impl AwsProvider {
         let rule_identifier = if !rule_ids.is_empty() {
             attributes.insert(
                 "security_group_rule_id".to_string(),
-                Value::String(rule_ids.join(",")),
+                Value::Concrete(ConcreteValue::String(rule_ids.join(","))),
             );
             Some(rule_ids.join(","))
         } else {
@@ -73,7 +73,10 @@ impl AwsProvider {
 
         // IPv4 CIDR (CidrIp in schema maps to CidrIpv4 in SDK)
         if let Some(cidr_ip) = first_rule.cidr_ipv4() {
-            attributes.insert("cidr_ip".to_string(), Value::String(cidr_ip.to_string()));
+            attributes.insert(
+                "cidr_ip".to_string(),
+                Value::Concrete(ConcreteValue::String(cidr_ip.to_string())),
+            );
         }
 
         // Referenced security group ID (nested struct, not auto-extracted)
@@ -85,7 +88,10 @@ impl AwsProvider {
             } else {
                 "destination_security_group_id"
             };
-            attributes.insert(attr_name.to_string(), Value::String(group_id.to_string()));
+            attributes.insert(
+                attr_name.to_string(),
+                Value::Concrete(ConcreteValue::String(group_id.to_string())),
+            );
         }
 
         let state = State::existing(id.clone(), attributes);
@@ -103,7 +109,7 @@ impl AwsProvider {
         is_ingress: bool,
     ) -> ProviderResult<State> {
         let sg_id = match resource.get_attr("group_id") {
-            Some(Value::String(s)) => s.clone(),
+            Some(Value::Concrete(ConcreteValue::String(s))) => s.clone(),
             _ => {
                 return Err(ProviderError::invalid_input(
                     "Security Group ID (group_id) is required",
@@ -113,32 +119,32 @@ impl AwsProvider {
         };
 
         let protocol = match resource.get_attr("ip_protocol") {
-            Some(Value::String(s)) => convert_protocol_value(s),
+            Some(Value::Concrete(ConcreteValue::String(s))) => convert_protocol_value(s),
             _ => "-1".to_string(),
         };
 
         let from_port = match resource.get_attr("from_port") {
-            Some(Value::Int(n)) => *n as i32,
+            Some(Value::Concrete(ConcreteValue::Int(n))) => *n as i32,
             _ => 0,
         };
 
         let to_port = match resource.get_attr("to_port") {
-            Some(Value::Int(n)) => *n as i32,
+            Some(Value::Concrete(ConcreteValue::Int(n))) => *n as i32,
             _ => 0,
         };
 
         let cidr_ip = match resource.get_attr("cidr_ip") {
-            Some(Value::String(s)) => Some(s.clone()),
+            Some(Value::Concrete(ConcreteValue::String(s))) => Some(s.clone()),
             _ => None,
         };
 
         let cidr_ipv6 = match resource.get_attr("cidr_ipv6") {
-            Some(Value::String(s)) => Some(s.clone()),
+            Some(Value::Concrete(ConcreteValue::String(s))) => Some(s.clone()),
             _ => None,
         };
 
         let description = match resource.get_attr("description") {
-            Some(Value::String(s)) => Some(s.clone()),
+            Some(Value::Concrete(ConcreteValue::String(s))) => Some(s.clone()),
             _ => None,
         };
 
@@ -148,7 +154,7 @@ impl AwsProvider {
             "destination_prefix_list_id"
         };
         let prefix_list_id = match resource.get_attr(prefix_list_attr) {
-            Some(Value::String(s)) => Some(s.clone()),
+            Some(Value::Concrete(ConcreteValue::String(s))) => Some(s.clone()),
             _ => None,
         };
 
@@ -158,7 +164,7 @@ impl AwsProvider {
             "destination_security_group_id"
         };
         let ref_security_group_id = match resource.get_attr(sg_ref_attr) {
-            Some(Value::String(s)) => Some(s.clone()),
+            Some(Value::Concrete(ConcreteValue::String(s))) => Some(s.clone()),
             _ => None,
         };
 
@@ -440,13 +446,15 @@ mod tests {
         {
             attributes.insert(
                 "source_security_group_id".to_string(),
-                Value::String(group_id.to_string()),
+                Value::Concrete(ConcreteValue::String(group_id.to_string())),
             );
         }
 
         assert_eq!(
             attributes.get("source_security_group_id"),
-            Some(&Value::String("sg-ref-12345678".to_string()))
+            Some(&Value::Concrete(ConcreteValue::String(
+                "sg-ref-12345678".to_string()
+            )))
         );
     }
 
@@ -464,12 +472,17 @@ mod tests {
         // Replicate logic from read_ec2_security_group_rule
         let mut attributes = HashMap::new();
         if let Some(cidr_ip) = rule.cidr_ipv4() {
-            attributes.insert("cidr_ip".to_string(), Value::String(cidr_ip.to_string()));
+            attributes.insert(
+                "cidr_ip".to_string(),
+                Value::Concrete(ConcreteValue::String(cidr_ip.to_string())),
+            );
         }
 
         assert_eq!(
             attributes.get("cidr_ip"),
-            Some(&Value::String("10.0.0.0/8".to_string()))
+            Some(&Value::Concrete(ConcreteValue::String(
+                "10.0.0.0/8".to_string()
+            )))
         );
     }
 

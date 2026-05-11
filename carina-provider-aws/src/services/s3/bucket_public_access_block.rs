@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use aws_sdk_s3::types::PublicAccessBlockConfiguration;
 use carina_core::provider::{ProviderError, ProviderResult};
-use carina_core::resource::{Resource, ResourceId, State, Value};
+use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
 
 use crate::AwsProvider;
 use crate::helpers::{require_string_attr, sdk_error_message};
@@ -33,20 +33,35 @@ impl AwsProvider {
         match result {
             Ok(output) => {
                 let mut attributes = HashMap::new();
-                attributes.insert("bucket".to_string(), Value::String(bucket.to_string()));
+                attributes.insert(
+                    "bucket".to_string(),
+                    Value::Concrete(ConcreteValue::String(bucket.to_string())),
+                );
 
                 if let Some(config) = output.public_access_block_configuration() {
                     if let Some(v) = config.block_public_acls() {
-                        attributes.insert("block_public_acls".to_string(), Value::Bool(v));
+                        attributes.insert(
+                            "block_public_acls".to_string(),
+                            Value::Concrete(ConcreteValue::Bool(v)),
+                        );
                     }
                     if let Some(v) = config.ignore_public_acls() {
-                        attributes.insert("ignore_public_acls".to_string(), Value::Bool(v));
+                        attributes.insert(
+                            "ignore_public_acls".to_string(),
+                            Value::Concrete(ConcreteValue::Bool(v)),
+                        );
                     }
                     if let Some(v) = config.block_public_policy() {
-                        attributes.insert("block_public_policy".to_string(), Value::Bool(v));
+                        attributes.insert(
+                            "block_public_policy".to_string(),
+                            Value::Concrete(ConcreteValue::Bool(v)),
+                        );
                     }
                     if let Some(v) = config.restrict_public_buckets() {
-                        attributes.insert("restrict_public_buckets".to_string(), Value::Bool(v));
+                        attributes.insert(
+                            "restrict_public_buckets".to_string(),
+                            Value::Concrete(ConcreteValue::Bool(v)),
+                        );
                     }
                 }
 
@@ -92,16 +107,24 @@ impl AwsProvider {
         resource: &Resource,
     ) -> ProviderResult<State> {
         let mut builder = PublicAccessBlockConfiguration::builder();
-        if let Some(Value::Bool(v)) = resource.get_attr("block_public_acls") {
+        if let Some(Value::Concrete(ConcreteValue::Bool(v))) =
+            resource.get_attr("block_public_acls")
+        {
             builder = builder.block_public_acls(*v);
         }
-        if let Some(Value::Bool(v)) = resource.get_attr("ignore_public_acls") {
+        if let Some(Value::Concrete(ConcreteValue::Bool(v))) =
+            resource.get_attr("ignore_public_acls")
+        {
             builder = builder.ignore_public_acls(*v);
         }
-        if let Some(Value::Bool(v)) = resource.get_attr("block_public_policy") {
+        if let Some(Value::Concrete(ConcreteValue::Bool(v))) =
+            resource.get_attr("block_public_policy")
+        {
             builder = builder.block_public_policy(*v);
         }
-        if let Some(Value::Bool(v)) = resource.get_attr("restrict_public_buckets") {
+        if let Some(Value::Concrete(ConcreteValue::Bool(v))) =
+            resource.get_attr("restrict_public_buckets")
+        {
             builder = builder.restrict_public_buckets(*v);
         }
         let config = builder.build();

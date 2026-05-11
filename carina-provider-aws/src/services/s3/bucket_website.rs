@@ -4,7 +4,7 @@ use aws_sdk_s3::types::{
     ErrorDocument, IndexDocument, Protocol, RedirectAllRequestsTo, WebsiteConfiguration,
 };
 use carina_core::provider::{ProviderError, ProviderResult};
-use carina_core::resource::{Resource, ResourceId, State, Value};
+use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
 use carina_core::utils::extract_enum_value;
 use indexmap::IndexMap;
 
@@ -32,33 +32,48 @@ impl AwsProvider {
         match result {
             Ok(output) => {
                 let mut attributes = HashMap::new();
-                attributes.insert("bucket".to_string(), Value::String(bucket.to_string()));
+                attributes.insert(
+                    "bucket".to_string(),
+                    Value::Concrete(ConcreteValue::String(bucket.to_string())),
+                );
                 if let Some(idx) = output.index_document() {
                     let mut m = IndexMap::new();
                     m.insert(
                         "suffix".to_string(),
-                        Value::String(idx.suffix().to_string()),
+                        Value::Concrete(ConcreteValue::String(idx.suffix().to_string())),
                     );
-                    attributes.insert("index_document".to_string(), Value::Map(m));
+                    attributes.insert(
+                        "index_document".to_string(),
+                        Value::Concrete(ConcreteValue::Map(m)),
+                    );
                 }
                 if let Some(err) = output.error_document() {
                     let mut m = IndexMap::new();
-                    m.insert("key".to_string(), Value::String(err.key().to_string()));
-                    attributes.insert("error_document".to_string(), Value::Map(m));
+                    m.insert(
+                        "key".to_string(),
+                        Value::Concrete(ConcreteValue::String(err.key().to_string())),
+                    );
+                    attributes.insert(
+                        "error_document".to_string(),
+                        Value::Concrete(ConcreteValue::Map(m)),
+                    );
                 }
                 if let Some(r) = output.redirect_all_requests_to() {
                     let mut m = IndexMap::new();
                     m.insert(
                         "host_name".to_string(),
-                        Value::String(r.host_name().to_string()),
+                        Value::Concrete(ConcreteValue::String(r.host_name().to_string())),
                     );
                     if let Some(p) = r.protocol() {
                         m.insert(
                             "protocol".to_string(),
-                            Value::String(p.as_str().to_string()),
+                            Value::Concrete(ConcreteValue::String(p.as_str().to_string())),
                         );
                     }
-                    attributes.insert("redirect_all_requests_to".to_string(), Value::Map(m));
+                    attributes.insert(
+                        "redirect_all_requests_to".to_string(),
+                        Value::Concrete(ConcreteValue::Map(m)),
+                    );
                 }
                 Ok(State::existing(id.clone(), attributes).with_identifier(bucket.to_string()))
             }
@@ -104,9 +119,10 @@ impl AwsProvider {
     ) -> ProviderResult<State> {
         let mut config_builder = WebsiteConfiguration::builder();
 
-        if let Some(Value::Map(map)) = resource.get_attr("index_document") {
+        if let Some(Value::Concrete(ConcreteValue::Map(map))) = resource.get_attr("index_document")
+        {
             let suffix = match map.get("suffix") {
-                Some(Value::String(s)) => s.clone(),
+                Some(Value::Concrete(ConcreteValue::String(s))) => s.clone(),
                 _ => {
                     return Err(
                         ProviderError::invalid_input("index_document.suffix is required")
@@ -127,9 +143,10 @@ impl AwsProvider {
                     })?,
             );
         }
-        if let Some(Value::Map(map)) = resource.get_attr("error_document") {
+        if let Some(Value::Concrete(ConcreteValue::Map(map))) = resource.get_attr("error_document")
+        {
             let key = match map.get("key") {
-                Some(Value::String(s)) => s.clone(),
+                Some(Value::Concrete(ConcreteValue::String(s))) => s.clone(),
                 _ => {
                     return Err(
                         ProviderError::invalid_input("error_document.key is required")
@@ -144,9 +161,11 @@ impl AwsProvider {
                 })?,
             );
         }
-        if let Some(Value::Map(map)) = resource.get_attr("redirect_all_requests_to") {
+        if let Some(Value::Concrete(ConcreteValue::Map(map))) =
+            resource.get_attr("redirect_all_requests_to")
+        {
             let host_name = match map.get("host_name") {
-                Some(Value::String(s)) => s.clone(),
+                Some(Value::Concrete(ConcreteValue::String(s))) => s.clone(),
                 _ => {
                     return Err(ProviderError::invalid_input(
                         "redirect_all_requests_to.host_name is required",
@@ -155,7 +174,7 @@ impl AwsProvider {
                 }
             };
             let mut rb = RedirectAllRequestsTo::builder().host_name(host_name);
-            if let Some(Value::String(p)) = map.get("protocol") {
+            if let Some(Value::Concrete(ConcreteValue::String(p))) = map.get("protocol") {
                 let normalized = extract_enum_value(p);
                 rb = rb.protocol(Protocol::from(normalized));
             }

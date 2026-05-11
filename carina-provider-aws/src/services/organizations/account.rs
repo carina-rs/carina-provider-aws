@@ -2,7 +2,7 @@ use indexmap::IndexMap;
 use std::collections::HashMap;
 
 use carina_core::provider::{ProviderError, ProviderResult};
-use carina_core::resource::{Resource, ResourceId, State, Value};
+use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
 use carina_core::utils::extract_enum_value;
 
 use crate::AwsProvider;
@@ -19,33 +19,45 @@ impl AwsProvider {
         if let Some(id) = account.id() {
             let id_string = id.to_string();
             identifier = Some(id_string.clone());
-            attributes.insert("id".to_string(), Value::String(id_string));
+            attributes.insert(
+                "id".to_string(),
+                Value::Concrete(ConcreteValue::String(id_string)),
+            );
         }
         if let Some(arn) = account.arn() {
-            attributes.insert("arn".to_string(), Value::String(arn.to_string()));
+            attributes.insert(
+                "arn".to_string(),
+                Value::Concrete(ConcreteValue::String(arn.to_string())),
+            );
         }
         if let Some(name) = account.name() {
-            attributes.insert("name".to_string(), Value::String(name.to_string()));
+            attributes.insert(
+                "name".to_string(),
+                Value::Concrete(ConcreteValue::String(name.to_string())),
+            );
         }
         if let Some(email) = account.email() {
-            attributes.insert("email".to_string(), Value::String(email.to_string()));
+            attributes.insert(
+                "email".to_string(),
+                Value::Concrete(ConcreteValue::String(email.to_string())),
+            );
         }
         if let Some(status) = account.status() {
             attributes.insert(
                 "status".to_string(),
-                Value::String(status.as_str().to_string()),
+                Value::Concrete(ConcreteValue::String(status.as_str().to_string())),
             );
         }
         if let Some(joined_method) = account.joined_method() {
             attributes.insert(
                 "joined_method".to_string(),
-                Value::String(joined_method.as_str().to_string()),
+                Value::Concrete(ConcreteValue::String(joined_method.as_str().to_string())),
             );
         }
         if let Some(joined_timestamp) = account.joined_timestamp() {
             attributes.insert(
                 "joined_timestamp".to_string(),
-                Value::String(joined_timestamp.to_string()),
+                Value::Concrete(ConcreteValue::String(joined_timestamp.to_string())),
             );
         }
 
@@ -89,7 +101,7 @@ impl AwsProvider {
                     {
                         attributes.insert(
                             "parent_id".to_string(),
-                            Value::String(parent_id.to_string()),
+                            Value::Concrete(ConcreteValue::String(parent_id.to_string())),
                         );
                     }
 
@@ -107,11 +119,14 @@ impl AwsProvider {
                             for tag in tags {
                                 tag_map.insert(
                                     tag.key().to_string(),
-                                    Value::String(tag.value().to_string()),
+                                    Value::Concrete(ConcreteValue::String(tag.value().to_string())),
                                 );
                             }
                             if !tag_map.is_empty() {
-                                attributes.insert("tags".to_string(), Value::Map(tag_map));
+                                attributes.insert(
+                                    "tags".to_string(),
+                                    Value::Concrete(ConcreteValue::Map(tag_map)),
+                                );
                             }
                         }
                     }
@@ -154,20 +169,24 @@ impl AwsProvider {
             .account_name(&name)
             .email(&email);
 
-        if let Some(Value::String(iam_billing)) = resource.get_attr("iam_user_access_to_billing") {
+        if let Some(Value::Concrete(ConcreteValue::String(iam_billing))) =
+            resource.get_attr("iam_user_access_to_billing")
+        {
             let val = aws_sdk_organizations::types::IamUserAccessToBilling::from(
                 extract_enum_value(iam_billing),
             );
             req = req.iam_user_access_to_billing(val);
         }
 
-        if let Some(Value::String(role_name)) = resource.get_attr("role_name") {
+        if let Some(Value::Concrete(ConcreteValue::String(role_name))) =
+            resource.get_attr("role_name")
+        {
             req = req.role_name(role_name);
         }
 
-        if let Some(Value::Map(tag_map)) = resource.get_attr("tags") {
+        if let Some(Value::Concrete(ConcreteValue::Map(tag_map))) = resource.get_attr("tags") {
             for (key, value) in tag_map {
-                if let Value::String(val) = value {
+                if let Value::Concrete(ConcreteValue::String(val)) = value {
                     let tag = aws_sdk_organizations::types::Tag::builder()
                         .key(key)
                         .value(val)
@@ -259,7 +278,9 @@ impl AwsProvider {
             })?;
 
         // Move to parent OU if specified
-        if let Some(Value::String(parent_id)) = resource.get_attr("parent_id") {
+        if let Some(Value::Concrete(ConcreteValue::String(parent_id))) =
+            resource.get_attr("parent_id")
+        {
             // Get current parent (root)
             let parents_response = self
                 .organizations_client
@@ -310,11 +331,11 @@ impl AwsProvider {
     ) -> ProviderResult<State> {
         // Handle parent_id change via MoveAccount
         let desired_parent = to.get_attr("parent_id").and_then(|v| match v {
-            Value::String(s) => Some(s.as_str()),
+            Value::Concrete(ConcreteValue::String(s)) => Some(s.as_str()),
             _ => None,
         });
         let current_parent = from.attributes.get("parent_id").and_then(|v| match v {
-            Value::String(s) => Some(s.as_str()),
+            Value::Concrete(ConcreteValue::String(s)) => Some(s.as_str()),
             _ => None,
         });
 
@@ -373,11 +394,11 @@ impl AwsProvider {
         current: Option<&HashMap<String, Value>>,
     ) -> ProviderResult<()> {
         let desired_tags = match desired.get("tags") {
-            Some(Value::Map(m)) => m.clone(),
+            Some(Value::Concrete(ConcreteValue::Map(m))) => m.clone(),
             _ => IndexMap::new(),
         };
         let current_tags = match current.and_then(|c| c.get("tags")) {
-            Some(Value::Map(m)) => m.clone(),
+            Some(Value::Concrete(ConcreteValue::Map(m))) => m.clone(),
             _ => IndexMap::new(),
         };
 
@@ -404,9 +425,9 @@ impl AwsProvider {
         // Tags to add/update
         let mut tags_to_add = Vec::new();
         for (key, value) in &desired_tags {
-            if let Value::String(val) = value {
+            if let Value::Concrete(ConcreteValue::String(val)) = value {
                 let should_add = match current_tags.get(key) {
-                    Some(Value::String(current_val)) => current_val != val,
+                    Some(Value::Concrete(ConcreteValue::String(current_val))) => current_val != val,
                     _ => true,
                 };
                 if should_add {

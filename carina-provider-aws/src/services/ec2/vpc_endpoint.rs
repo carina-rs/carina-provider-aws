@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use carina_core::provider::{ProviderError, ProviderResult};
-use carina_core::resource::{Resource, ResourceId, State, Value};
+use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
 use carina_core::utils::extract_enum_value;
 
 use crate::AwsProvider;
@@ -70,53 +70,63 @@ impl AwsProvider {
             .vpc_id(&vpc_id)
             .service_name(&service_name);
 
-        if let Some(Value::String(ep_type)) = resource.get_attr("vpc_endpoint_type") {
+        if let Some(Value::Concrete(ConcreteValue::String(ep_type))) =
+            resource.get_attr("vpc_endpoint_type")
+        {
             use aws_sdk_ec2::types::VpcEndpointType;
             let et = VpcEndpointType::from(extract_enum_value(ep_type));
             req = req.vpc_endpoint_type(et);
         }
 
-        if let Some(Value::List(ids)) = resource.get_attr("route_table_ids") {
+        if let Some(Value::Concrete(ConcreteValue::List(ids))) =
+            resource.get_attr("route_table_ids")
+        {
             for id_val in ids {
-                if let Value::String(s) = id_val {
+                if let Value::Concrete(ConcreteValue::String(s)) = id_val {
                     req = req.route_table_ids(s);
                 }
             }
         }
 
-        if let Some(Value::List(ids)) = resource.get_attr("subnet_ids") {
+        if let Some(Value::Concrete(ConcreteValue::List(ids))) = resource.get_attr("subnet_ids") {
             for id_val in ids {
-                if let Value::String(s) = id_val {
+                if let Value::Concrete(ConcreteValue::String(s)) = id_val {
                     req = req.subnet_ids(s);
                 }
             }
         }
 
-        if let Some(Value::List(ids)) = resource.get_attr("security_group_ids") {
+        if let Some(Value::Concrete(ConcreteValue::List(ids))) =
+            resource.get_attr("security_group_ids")
+        {
             for id_val in ids {
-                if let Value::String(s) = id_val {
+                if let Value::Concrete(ConcreteValue::String(s)) = id_val {
                     req = req.security_group_ids(s);
                 }
             }
         }
 
-        if let Some(Value::Bool(v)) = resource.get_attr("private_dns_enabled") {
+        if let Some(Value::Concrete(ConcreteValue::Bool(v))) =
+            resource.get_attr("private_dns_enabled")
+        {
             req = req.private_dns_enabled(*v);
         }
 
-        if let Some(Value::String(policy)) = resource.get_attr("policy_document") {
+        if let Some(Value::Concrete(ConcreteValue::String(policy))) =
+            resource.get_attr("policy_document")
+        {
             req = req.policy_document(policy);
-        } else if let Some(Value::Map(map)) = resource.get_attr("policy_document") {
+        } else if let Some(Value::Concrete(ConcreteValue::Map(map))) =
+            resource.get_attr("policy_document")
+        {
             // Convert Value::Map to JSON string for the API
-            let json_str =
-                crate::services::iam::role::value_to_iam_policy_json(&Value::Map(map.clone()))
-                    .map_err(|e| {
-                        ProviderError::internal(format!(
-                            "Failed to serialize policy_document: {}",
-                            e
-                        ))
-                        .for_resource(resource.id.clone())
-                    })?;
+            let json_str = crate::services::iam::role::value_to_iam_policy_json(&Value::Concrete(
+                ConcreteValue::Map(map.clone()),
+            ))
+            .map_err(|e| {
+                ProviderError::internal(format!("Failed to serialize policy_document: {}", e))
+                    .for_resource(resource.id.clone())
+            })?;
             req = req.policy_document(&json_str);
         }
 
@@ -171,25 +181,27 @@ impl AwsProvider {
         let mut has_modifications = false;
 
         // Update route_table_ids
-        if let Some(Value::List(new_ids)) = to.get_attr("route_table_ids") {
-            let old_ids: Vec<String> =
-                if let Some(Value::List(old)) = from.attributes.get("route_table_ids") {
-                    old.iter()
-                        .filter_map(|v| {
-                            if let Value::String(s) = v {
-                                Some(s.clone())
-                            } else {
-                                None
-                            }
-                        })
-                        .collect()
-                } else {
-                    vec![]
-                };
+        if let Some(Value::Concrete(ConcreteValue::List(new_ids))) = to.get_attr("route_table_ids")
+        {
+            let old_ids: Vec<String> = if let Some(Value::Concrete(ConcreteValue::List(old))) =
+                from.attributes.get("route_table_ids")
+            {
+                old.iter()
+                    .filter_map(|v| {
+                        if let Value::Concrete(ConcreteValue::String(s)) = v {
+                            Some(s.clone())
+                        } else {
+                            None
+                        }
+                    })
+                    .collect()
+            } else {
+                vec![]
+            };
             let new_id_strs: Vec<String> = new_ids
                 .iter()
                 .filter_map(|v| {
-                    if let Value::String(s) = v {
+                    if let Value::Concrete(ConcreteValue::String(s)) = v {
                         Some(s.clone())
                     } else {
                         None
@@ -212,25 +224,26 @@ impl AwsProvider {
         }
 
         // Update subnet_ids
-        if let Some(Value::List(new_ids)) = to.get_attr("subnet_ids") {
-            let old_ids: Vec<String> =
-                if let Some(Value::List(old)) = from.attributes.get("subnet_ids") {
-                    old.iter()
-                        .filter_map(|v| {
-                            if let Value::String(s) = v {
-                                Some(s.clone())
-                            } else {
-                                None
-                            }
-                        })
-                        .collect()
-                } else {
-                    vec![]
-                };
+        if let Some(Value::Concrete(ConcreteValue::List(new_ids))) = to.get_attr("subnet_ids") {
+            let old_ids: Vec<String> = if let Some(Value::Concrete(ConcreteValue::List(old))) =
+                from.attributes.get("subnet_ids")
+            {
+                old.iter()
+                    .filter_map(|v| {
+                        if let Value::Concrete(ConcreteValue::String(s)) = v {
+                            Some(s.clone())
+                        } else {
+                            None
+                        }
+                    })
+                    .collect()
+            } else {
+                vec![]
+            };
             let new_id_strs: Vec<String> = new_ids
                 .iter()
                 .filter_map(|v| {
-                    if let Value::String(s) = v {
+                    if let Value::Concrete(ConcreteValue::String(s)) = v {
                         Some(s.clone())
                     } else {
                         None
@@ -253,25 +266,28 @@ impl AwsProvider {
         }
 
         // Update security_group_ids
-        if let Some(Value::List(new_ids)) = to.get_attr("security_group_ids") {
-            let old_ids: Vec<String> =
-                if let Some(Value::List(old)) = from.attributes.get("security_group_ids") {
-                    old.iter()
-                        .filter_map(|v| {
-                            if let Value::String(s) = v {
-                                Some(s.clone())
-                            } else {
-                                None
-                            }
-                        })
-                        .collect()
-                } else {
-                    vec![]
-                };
+        if let Some(Value::Concrete(ConcreteValue::List(new_ids))) =
+            to.get_attr("security_group_ids")
+        {
+            let old_ids: Vec<String> = if let Some(Value::Concrete(ConcreteValue::List(old))) =
+                from.attributes.get("security_group_ids")
+            {
+                old.iter()
+                    .filter_map(|v| {
+                        if let Value::Concrete(ConcreteValue::String(s)) = v {
+                            Some(s.clone())
+                        } else {
+                            None
+                        }
+                    })
+                    .collect()
+            } else {
+                vec![]
+            };
             let new_id_strs: Vec<String> = new_ids
                 .iter()
                 .filter_map(|v| {
-                    if let Value::String(s) = v {
+                    if let Value::Concrete(ConcreteValue::String(s)) = v {
                         Some(s.clone())
                     } else {
                         None
@@ -294,25 +310,26 @@ impl AwsProvider {
         }
 
         // Update private_dns_enabled
-        if let Some(Value::Bool(v)) = to.get_attr("private_dns_enabled") {
+        if let Some(Value::Concrete(ConcreteValue::Bool(v))) = to.get_attr("private_dns_enabled") {
             req = req.private_dns_enabled(*v);
             has_modifications = true;
         }
 
         // Update policy_document
-        if let Some(Value::String(policy)) = to.get_attr("policy_document") {
+        if let Some(Value::Concrete(ConcreteValue::String(policy))) = to.get_attr("policy_document")
+        {
             req = req.policy_document(policy);
             has_modifications = true;
-        } else if let Some(Value::Map(map)) = to.get_attr("policy_document") {
-            let json_str =
-                crate::services::iam::role::value_to_iam_policy_json(&Value::Map(map.clone()))
-                    .map_err(|e| {
-                        ProviderError::internal(format!(
-                            "Failed to serialize policy_document: {}",
-                            e
-                        ))
-                        .for_resource(id.clone())
-                    })?;
+        } else if let Some(Value::Concrete(ConcreteValue::Map(map))) =
+            to.get_attr("policy_document")
+        {
+            let json_str = crate::services::iam::role::value_to_iam_policy_json(&Value::Concrete(
+                ConcreteValue::Map(map.clone()),
+            ))
+            .map_err(|e| {
+                ProviderError::internal(format!("Failed to serialize policy_document: {}", e))
+                    .for_resource(id.clone())
+            })?;
             req = req.policy_document(&json_str);
             has_modifications = true;
         }
@@ -385,41 +402,65 @@ impl AwsProvider {
         attributes: &mut HashMap<String, Value>,
     ) -> Option<String> {
         if let Some(v) = obj.vpc_endpoint_id() {
-            attributes.insert("vpc_endpoint_id".to_string(), Value::String(v.to_string()));
+            attributes.insert(
+                "vpc_endpoint_id".to_string(),
+                Value::Concrete(ConcreteValue::String(v.to_string())),
+            );
         }
         if let Some(v) = obj.vpc_endpoint_type() {
             attributes.insert(
                 "vpc_endpoint_type".to_string(),
-                Value::String(v.as_str().to_string()),
+                Value::Concrete(ConcreteValue::String(v.as_str().to_string())),
             );
         }
         if let Some(v) = obj.vpc_id() {
-            attributes.insert("vpc_id".to_string(), Value::String(v.to_string()));
+            attributes.insert(
+                "vpc_id".to_string(),
+                Value::Concrete(ConcreteValue::String(v.to_string())),
+            );
         }
         if let Some(v) = obj.service_name() {
-            attributes.insert("service_name".to_string(), Value::String(v.to_string()));
+            attributes.insert(
+                "service_name".to_string(),
+                Value::Concrete(ConcreteValue::String(v.to_string())),
+            );
         }
         if let Some(v) = obj.private_dns_enabled() {
-            attributes.insert("private_dns_enabled".to_string(), Value::Bool(v));
+            attributes.insert(
+                "private_dns_enabled".to_string(),
+                Value::Concrete(ConcreteValue::Bool(v)),
+            );
         }
         if let Some(v) = obj.policy_document() {
             // Try to parse the policy document JSON into a Value::Map.
             let policy_value = crate::services::iam::role::iam_policy_json_to_value(v)
-                .unwrap_or_else(|_| Value::String(v.to_string()));
+                .unwrap_or_else(|_| Value::Concrete(ConcreteValue::String(v.to_string())));
             attributes.insert("policy_document".to_string(), policy_value);
         }
         {
             let ids = obj.route_table_ids();
             if !ids.is_empty() {
-                let list: Vec<Value> = ids.iter().map(|s| Value::String(s.to_string())).collect();
-                attributes.insert("route_table_ids".to_string(), Value::List(list));
+                let list: Vec<Value> = ids
+                    .iter()
+                    .map(|s| Value::Concrete(ConcreteValue::String(s.to_string())))
+                    .collect();
+                attributes.insert(
+                    "route_table_ids".to_string(),
+                    Value::Concrete(ConcreteValue::List(list)),
+                );
             }
         }
         {
             let ids = obj.subnet_ids();
             if !ids.is_empty() {
-                let list: Vec<Value> = ids.iter().map(|s| Value::String(s.to_string())).collect();
-                attributes.insert("subnet_ids".to_string(), Value::List(list));
+                let list: Vec<Value> = ids
+                    .iter()
+                    .map(|s| Value::Concrete(ConcreteValue::String(s.to_string())))
+                    .collect();
+                attributes.insert(
+                    "subnet_ids".to_string(),
+                    Value::Concrete(ConcreteValue::List(list)),
+                );
             }
         }
         // Extract security group IDs from Groups[*].group_id.
@@ -428,10 +469,16 @@ impl AwsProvider {
             if !groups.is_empty() {
                 let list: Vec<Value> = groups
                     .iter()
-                    .filter_map(|g| g.group_id().map(|id| Value::String(id.to_string())))
+                    .filter_map(|g| {
+                        g.group_id()
+                            .map(|id| Value::Concrete(ConcreteValue::String(id.to_string())))
+                    })
                     .collect();
                 if !list.is_empty() {
-                    attributes.insert("security_group_ids".to_string(), Value::List(list));
+                    attributes.insert(
+                        "security_group_ids".to_string(),
+                        Value::Concrete(ConcreteValue::List(list)),
+                    );
                 }
             }
         }

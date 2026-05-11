@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use carina_core::provider::{ProviderError, ProviderResult};
-use carina_core::resource::{Resource, ResourceId, State, Value};
+use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
 use carina_core::utils::extract_enum_value;
 
 use crate::AwsProvider;
@@ -62,7 +62,7 @@ impl AwsProvider {
     pub(crate) async fn create_ec2_eip(&self, resource: Resource) -> ProviderResult<State> {
         let mut req = self.ec2_client.allocate_address();
 
-        if let Some(Value::String(domain)) = resource.get_attr("domain") {
+        if let Some(Value::Concrete(ConcreteValue::String(domain))) = resource.get_attr("domain") {
             use aws_sdk_ec2::types::DomainType;
             let domain_type = DomainType::from(extract_enum_value(domain));
             req = req.domain(domain_type);

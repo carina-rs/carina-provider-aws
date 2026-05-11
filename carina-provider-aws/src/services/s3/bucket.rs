@@ -2,7 +2,7 @@ use indexmap::IndexMap;
 use std::collections::HashMap;
 
 use carina_core::provider::{BoxFuture, ProviderError, ProviderResult};
-use carina_core::resource::{Directives, Resource, ResourceId, State, Value};
+use carina_core::resource::{ConcreteValue, Directives, Resource, ResourceId, State, Value};
 use carina_core::utils::convert_enum_value;
 
 use crate::AwsProvider;
@@ -22,7 +22,10 @@ impl AwsProvider {
         match self.s3_client.head_bucket().bucket(name).send().await {
             Ok(_) => {
                 let mut attributes = HashMap::new();
-                attributes.insert("bucket".to_string(), Value::String(name.to_string()));
+                attributes.insert(
+                    "bucket".to_string(),
+                    Value::Concrete(ConcreteValue::String(name.to_string())),
+                );
 
                 // Get tags
                 self.read_s3_bucket_tags(id, name, &mut attributes).await?;
@@ -63,7 +66,7 @@ impl AwsProvider {
     /// Create an S3 bucket
     pub(crate) async fn create_s3_bucket(&self, resource: Resource) -> ProviderResult<State> {
         let bucket_name = match resource.get_attr("bucket") {
-            Some(Value::String(s)) => s.clone(),
+            Some(Value::Concrete(ConcreteValue::String(s))) => s.clone(),
             _ => {
                 return Err(ProviderError::invalid_input("Bucket name is required")
                     .for_resource(resource.id.clone()));
@@ -72,7 +75,7 @@ impl AwsProvider {
 
         // Get region (use Provider's region if not specified)
         let region = match resource.get_attr("region") {
-            Some(Value::String(s)) => {
+            Some(Value::Concrete(ConcreteValue::String(s))) => {
                 // Convert from aws.Region.ap_northeast_1 format to ap-northeast-1 format
                 convert_enum_value(s).to_string()
             }
@@ -290,11 +293,14 @@ impl AwsProvider {
                 for tag in output.tag_set() {
                     tag_map.insert(
                         tag.key().to_string(),
-                        Value::String(tag.value().to_string()),
+                        Value::Concrete(ConcreteValue::String(tag.value().to_string())),
                     );
                 }
                 if !tag_map.is_empty() {
-                    attributes.insert("tags".to_string(), Value::Map(tag_map));
+                    attributes.insert(
+                        "tags".to_string(),
+                        Value::Concrete(ConcreteValue::Map(tag_map)),
+                    );
                 }
             }
             Err(err) => {
@@ -317,12 +323,12 @@ impl AwsProvider {
         identifier: &str,
         attributes: &HashMap<String, Value>,
     ) -> ProviderResult<()> {
-        if let Some(Value::Map(tag_map)) = attributes.get("tags") {
+        if let Some(Value::Concrete(ConcreteValue::Map(tag_map))) = attributes.get("tags") {
             use aws_sdk_s3::types::{Tag, Tagging};
             let tags: Vec<Tag> = tag_map
                 .iter()
                 .filter_map(|(k, v)| {
-                    if let Value::String(val) = v {
+                    if let Value::Concrete(ConcreteValue::String(val)) = v {
                         Some(Tag::builder().key(k).value(val).build().ok()?)
                     } else {
                         None
@@ -368,7 +374,7 @@ impl AwsProvider {
         let resource = resource.clone();
         Box::pin(async move {
             let bucket = match resource.get_attr("bucket") {
-                Some(Value::String(s)) => s.clone(),
+                Some(Value::Concrete(ConcreteValue::String(s))) => s.clone(),
                 _ => {
                     return Err(ProviderError::invalid_input("`bucket` is required")
                         .for_resource(resource.id.clone()));
@@ -438,20 +444,26 @@ impl AwsProvider {
                 .map_err(|m| ProviderError::internal(m).for_resource(resource.id.clone()))?;
 
             let mut attrs = HashMap::new();
-            attrs.insert("bucket".into(), Value::String(bucket.clone()));
-            attrs.insert("arn".into(), Value::String(arn));
-            attrs.insert("region".into(), Value::String(region));
+            attrs.insert(
+                "bucket".into(),
+                Value::Concrete(ConcreteValue::String(bucket.clone())),
+            );
+            attrs.insert("arn".into(), Value::Concrete(ConcreteValue::String(arn)));
+            attrs.insert(
+                "region".into(),
+                Value::Concrete(ConcreteValue::String(region)),
+            );
             attrs.insert(
                 "bucket_domain_name".into(),
-                Value::String(bucket_domain_name),
+                Value::Concrete(ConcreteValue::String(bucket_domain_name)),
             );
             attrs.insert(
                 "bucket_regional_domain_name".into(),
-                Value::String(bucket_regional_domain_name),
+                Value::Concrete(ConcreteValue::String(bucket_regional_domain_name)),
             );
             attrs.insert(
                 "hosted_zone_id".into(),
-                Value::String(hosted_zone_id.to_string()),
+                Value::Concrete(ConcreteValue::String(hosted_zone_id.to_string())),
             );
 
             Ok(State::existing(resource.id.clone(), attrs).with_identifier(&bucket))

@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use carina_core::provider::{ProviderError, ProviderResult};
-use carina_core::resource::{Resource, ResourceId, State, Value};
+use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
 use carina_core::utils::extract_enum_value;
 
 use crate::AwsProvider;
@@ -18,33 +18,39 @@ impl AwsProvider {
         if let Some(id) = org.id() {
             let id_string = id.to_string();
             identifier = Some(id_string.clone());
-            attributes.insert("id".to_string(), Value::String(id_string));
+            attributes.insert(
+                "id".to_string(),
+                Value::Concrete(ConcreteValue::String(id_string)),
+            );
         }
         if let Some(arn) = org.arn() {
-            attributes.insert("arn".to_string(), Value::String(arn.to_string()));
+            attributes.insert(
+                "arn".to_string(),
+                Value::Concrete(ConcreteValue::String(arn.to_string())),
+            );
         }
         if let Some(feature_set) = org.feature_set() {
             attributes.insert(
                 "feature_set".to_string(),
-                Value::String(feature_set.as_str().to_string()),
+                Value::Concrete(ConcreteValue::String(feature_set.as_str().to_string())),
             );
         }
         if let Some(master_account_id) = org.master_account_id() {
             attributes.insert(
                 "master_account_id".to_string(),
-                Value::String(master_account_id.to_string()),
+                Value::Concrete(ConcreteValue::String(master_account_id.to_string())),
             );
         }
         if let Some(master_account_arn) = org.master_account_arn() {
             attributes.insert(
                 "master_account_arn".to_string(),
-                Value::String(master_account_arn.to_string()),
+                Value::Concrete(ConcreteValue::String(master_account_arn.to_string())),
             );
         }
         if let Some(master_account_email) = org.master_account_email() {
             attributes.insert(
                 "master_account_email".to_string(),
-                Value::String(master_account_email.to_string()),
+                Value::Concrete(ConcreteValue::String(master_account_email.to_string())),
             );
         }
 
@@ -104,7 +110,9 @@ impl AwsProvider {
     ) -> ProviderResult<State> {
         let mut req = self.organizations_client.create_organization();
 
-        if let Some(Value::String(feature_set)) = resource.get_attr("feature_set") {
+        if let Some(Value::Concrete(ConcreteValue::String(feature_set))) =
+            resource.get_attr("feature_set")
+        {
             let fs = aws_sdk_organizations::types::OrganizationFeatureSet::from(
                 extract_enum_value(feature_set),
             );
