@@ -82,7 +82,6 @@ impl AwsProvider {
         let ec2 = &self.ec2_client;
         let rid = resource.id.clone();
         let result = retry_aws_operation("create security group", 5, 5, || {
-            let rid = rid.clone();
             let group_name = group_name.clone();
             let description = description.clone();
             let vpc_id = vpc_id.clone();
@@ -93,16 +92,13 @@ impl AwsProvider {
                     .vpc_id(&vpc_id)
                     .send()
                     .await
-                    .map_err(|e| {
-                        ProviderError::api_error(sdk_error_message(
-                            "Failed to create security group",
-                            &e,
-                        ))
-                        .for_resource(rid)
-                    })
             }
         })
-        .await?;
+        .await
+        .map_err(|e| {
+            ProviderError::api_error(sdk_error_message("Failed to create security group", &e))
+                .for_resource(rid.clone())
+        })?;
 
         let sg_id = result.group_id().ok_or_else(|| {
             ProviderError::api_error("Security Group created but no ID returned")

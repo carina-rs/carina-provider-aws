@@ -88,15 +88,13 @@ impl AwsProvider {
         let rid = resource.id.clone();
         let result = retry_aws_operation("create NAT gateway", 5, 5, || {
             let req = req.clone();
-            let rid = rid.clone();
-            async move {
-                req.send().await.map_err(|e| {
-                    ProviderError::api_error(sdk_error_message("Failed to create NAT gateway", &e))
-                        .for_resource(rid)
-                })
-            }
+            async move { req.send().await }
         })
-        .await?;
+        .await
+        .map_err(|e| {
+            ProviderError::api_error(sdk_error_message("Failed to create NAT gateway", &e))
+                .for_resource(rid.clone())
+        })?;
 
         let ngw_id = result
             .nat_gateway()

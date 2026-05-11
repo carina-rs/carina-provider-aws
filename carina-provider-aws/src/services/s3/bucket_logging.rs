@@ -9,7 +9,7 @@ use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
 use indexmap::IndexMap;
 
 use crate::AwsProvider;
-use crate::helpers::{require_string_attr, sdk_error_message};
+use crate::helpers::{require_string_attr, retry_aws_operation, sdk_error_message};
 use crate::services::s3::bucket::is_s3_not_configured_error;
 
 impl AwsProvider {
@@ -137,14 +137,18 @@ impl AwsProvider {
         id: ResourceId,
         identifier: &str,
     ) -> ProviderResult<()> {
-        let empty = BucketLoggingStatus::builder().build();
-        let result = self
-            .s3_client
-            .put_bucket_logging()
-            .bucket(identifier)
-            .bucket_logging_status(empty)
-            .send()
-            .await;
+        let result = retry_aws_operation("clear bucket logging", 3, 5, || {
+            let client = &self.s3_client;
+            async move {
+                client
+                    .put_bucket_logging()
+                    .bucket(identifier)
+                    .bucket_logging_status(BucketLoggingStatus::builder().build())
+                    .send()
+                    .await
+            }
+        })
+        .await;
 
         match result {
             Ok(_) => Ok(()),
