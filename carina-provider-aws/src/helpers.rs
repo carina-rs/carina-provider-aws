@@ -249,9 +249,12 @@ mod tests {
         from_attrs.insert(
             "tags".into(),
             Value::Concrete(ConcreteValue::Map(
-                [("Name".to_string(), Value::String("old".into()))]
-                    .into_iter()
-                    .collect(),
+                [(
+                    "Name".to_string(),
+                    Value::Concrete(ConcreteValue::String("old".into())),
+                )]
+                .into_iter()
+                .collect(),
             )),
         );
         let from = State::existing(id, from_attrs);
@@ -269,9 +272,12 @@ mod tests {
                     kind: PatchOpKind::Replace,
                     key: "tags".into(),
                     value: Some(Value::Concrete(ConcreteValue::Map(
-                        [("Name".to_string(), Value::String("new".into()))]
-                            .into_iter()
-                            .collect(),
+                        [(
+                            "Name".to_string(),
+                            Value::Concrete(ConcreteValue::String("new".into())),
+                        )]
+                        .into_iter()
+                        .collect(),
                     ))),
                 },
                 // Remove cidr_block

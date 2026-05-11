@@ -197,7 +197,9 @@ impl AwsProvider {
             attributes.insert(
                 "subject_alternative_names".to_string(),
                 Value::Concrete(ConcreteValue::List(
-                    sans.iter().map(|s| Value::String(s.clone())).collect(),
+                    sans.iter()
+                        .map(|s| Value::Concrete(ConcreteValue::String(s.clone())))
+                        .collect(),
                 )),
             );
         }

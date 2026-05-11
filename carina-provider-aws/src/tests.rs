@@ -880,15 +880,15 @@ fn test_extract_ec2_vpc_endpoint_attributes() {
     );
     assert_eq!(
         attributes.get("route_table_ids"),
-        Some(&Value::Concrete(ConcreteValue::List(vec![Value::String(
-            "rtb-12345678".to_string()
-        )])))
+        Some(&Value::Concrete(ConcreteValue::List(vec![
+            Value::Concrete(ConcreteValue::String("rtb-12345678".to_string()))
+        ])))
     );
     assert_eq!(
         attributes.get("security_group_ids"),
-        Some(&Value::Concrete(ConcreteValue::List(vec![Value::String(
-            "sg-12345678".to_string()
-        )])))
+        Some(&Value::Concrete(ConcreteValue::List(vec![
+            Value::Concrete(ConcreteValue::String("sg-12345678".to_string()))
+        ])))
     );
 }
 
@@ -929,9 +929,9 @@ fn test_extract_ec2_vpc_endpoint_attributes_interface() {
     );
     assert_eq!(
         attributes.get("subnet_ids"),
-        Some(&Value::Concrete(ConcreteValue::List(vec![Value::String(
-            "subnet-12345678".to_string()
-        )])))
+        Some(&Value::Concrete(ConcreteValue::List(vec![
+            Value::Concrete(ConcreteValue::String("subnet-12345678".to_string()))
+        ])))
     );
 }
 
@@ -1260,8 +1260,8 @@ fn test_extract_ec2_transit_gateway_attachment_attributes() {
     assert_eq!(
         attributes.get("subnet_ids"),
         Some(&Value::Concrete(ConcreteValue::List(vec![
-            Value::String("subnet-12345678".to_string()),
-            Value::String("subnet-87654321".to_string()),
+            Value::Concrete(ConcreteValue::String("subnet-12345678".to_string())),
+            Value::Concrete(ConcreteValue::String("subnet-87654321".to_string())),
         ])))
     );
 }

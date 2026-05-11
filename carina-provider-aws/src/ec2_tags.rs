@@ -178,8 +178,14 @@ mod tests {
     #[test]
     fn test_value_to_ec2_tags_from_map() {
         let value = Value::Concrete(ConcreteValue::Map(IndexMap::from([
-            ("Name".to_string(), Value::String("test".to_string())),
-            ("Env".to_string(), Value::String("prod".to_string())),
+            (
+                "Name".to_string(),
+                Value::Concrete(ConcreteValue::String("test".to_string())),
+            ),
+            (
+                "Env".to_string(),
+                Value::Concrete(ConcreteValue::String("prod".to_string())),
+            ),
         ])));
         let tags = AwsProvider::value_to_ec2_tags(&value);
         assert_eq!(tags.len(), 2);
@@ -207,8 +213,11 @@ mod tests {
     #[test]
     fn test_value_to_ec2_tags_non_string_values_skipped() {
         let value = Value::Concrete(ConcreteValue::Map(IndexMap::from([
-            ("Name".to_string(), Value::String("test".to_string())),
-            ("Count".to_string(), Value::Int(42)),
+            (
+                "Name".to_string(),
+                Value::Concrete(ConcreteValue::String("test".to_string())),
+            ),
+            ("Count".to_string(), Value::Concrete(ConcreteValue::Int(42))),
         ])));
         let tags = AwsProvider::value_to_ec2_tags(&value);
         assert_eq!(tags.len(), 1);

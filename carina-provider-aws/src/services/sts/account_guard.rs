@@ -183,8 +183,8 @@ mod tests {
     #[test]
     fn extract_string_list_extracts_strings_in_order() {
         let v = Value::Concrete(ConcreteValue::List(vec![
-            Value::String("aaa".into()),
-            Value::String("bbb".into()),
+            Value::Concrete(ConcreteValue::String("aaa".into())),
+            Value::Concrete(ConcreteValue::String("bbb".into())),
         ]));
         assert_eq!(
             extract_string_list(Some(&v)),
@@ -197,9 +197,9 @@ mod tests {
         // Type validation happens host-side via
         // `provider_config_attribute_types`; this is just the safety net.
         let v = Value::Concrete(ConcreteValue::List(vec![
-            Value::String("aaa".into()),
-            Value::Int(42),
-            Value::String("bbb".into()),
+            Value::Concrete(ConcreteValue::String("aaa".into())),
+            Value::Concrete(ConcreteValue::Int(42)),
+            Value::Concrete(ConcreteValue::String("bbb".into())),
         ]));
         assert_eq!(
             extract_string_list(Some(&v)),

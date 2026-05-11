@@ -428,7 +428,7 @@ fn events_to_value(events: &[Event]) -> Value {
     Value::Concrete(ConcreteValue::List(
         events
             .iter()
-            .map(|e| Value::String(e.as_str().to_string()))
+            .map(|e| Value::Concrete(ConcreteValue::String(e.as_str().to_string())))
             .collect(),
     ))
 }
