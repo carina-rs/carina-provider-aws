@@ -30,7 +30,7 @@ pub fn ec2_eip_config() -> AwsSchemaConfig {
                 name: "Domain".to_string(),
                 values: vec!["standard".to_string(), "vpc".to_string()],
                 namespace: Some("aws.ec2.Eip".to_string()),
-                dsl_aliases: vec![],
+                dsl_aliases: vec![("standard".to_string(), "standard".to_string()), ("vpc".to_string(), "vpc".to_string())],
             })
                 .create_only()
                 .with_description("The network (vpc).")

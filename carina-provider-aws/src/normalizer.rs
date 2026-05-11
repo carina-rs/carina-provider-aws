@@ -628,8 +628,11 @@ mod tests {
 
     #[test]
     fn test_normalize_state_enums_vpn_gateway_type_with_dot() {
-        // "ipsec.1" contains a dot but is a raw enum value, not a namespaced identifier.
-        // The normalizer should recognize it as a valid enum value and namespace it.
+        // "ipsec.1" arrives from the AWS API as the canonical spelling.
+        // Under carina#2980 / aws#268 the dotted form is rewritten to
+        // snake_case (`ipsec.1` → `ipsec_1`) so it stays a bare DSL
+        // identifier, and the namespaced DSL form uses the underscore
+        // variant.
         let mut attributes = HashMap::from([(
             "type".to_string(),
             Value::Concrete(ConcreteValue::String("ipsec.1".to_string())),
@@ -638,7 +641,7 @@ mod tests {
         assert_eq!(
             attributes.get("type"),
             Some(&Value::Concrete(ConcreteValue::String(
-                "aws.ec2.VpnGateway.Type.ipsec.1".to_string()
+                "aws.ec2.VpnGateway.Type.ipsec_1".to_string()
             )))
         );
     }

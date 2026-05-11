@@ -59,7 +59,7 @@ pub fn ec2_flow_log_config() -> AwsSchemaConfig {
                 name: "LogDestinationType".to_string(),
                 values: vec!["cloud-watch-logs".to_string(), "kinesis-data-firehose".to_string(), "s3".to_string()],
                 namespace: Some("aws.ec2.FlowLog".to_string()),
-                dsl_aliases: vec![("cloud-watch-logs".to_string(), "cloud_watch_logs".to_string()), ("kinesis-data-firehose".to_string(), "kinesis_data_firehose".to_string())],
+                dsl_aliases: vec![("cloud-watch-logs".to_string(), "cloud_watch_logs".to_string()), ("kinesis-data-firehose".to_string(), "kinesis_data_firehose".to_string()), ("s3".to_string(), "s3".to_string())],
             })
                 .create_only()
                 .with_description("The type of destination for the flow log data. Default: cloud-watch-logs")

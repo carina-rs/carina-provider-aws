@@ -9,7 +9,7 @@ use super::tags_type;
 use super::validate_tags_map;
 use carina_core::schema::{AttributeSchema, AttributeType, ResourceSchema};
 
-const VALID_TYPE: &[&str] = &["ipsec.1"];
+const VALID_TYPE: &[&str] = &["ipsec.1", "ipsec_1"];
 
 /// Returns the schema config for ec2.VpnGateway (Smithy: com.amazonaws.ec2)
 pub fn ec2_vpn_gateway_config() -> AwsSchemaConfig {
@@ -36,7 +36,7 @@ pub fn ec2_vpn_gateway_config() -> AwsSchemaConfig {
                 name: "Type".to_string(),
                 values: vec!["ipsec.1".to_string()],
                 namespace: Some("aws.ec2.VpnGateway".to_string()),
-                dsl_aliases: vec![],
+                dsl_aliases: vec![("ipsec.1".to_string(), "ipsec_1".to_string())],
             })
                 .required()
                 .create_only()
@@ -68,11 +68,13 @@ pub fn enum_valid_values() -> (
 /// Maps DSL alias values back to canonical AWS values for this module.
 /// e.g., ("ip_protocol", "all") -> Some("-1")
 pub fn enum_alias_reverse(attr_name: &str, value: &str) -> Option<&'static str> {
-    let _ = (attr_name, value);
-    None
+    match (attr_name, value) {
+        ("type", "ipsec_1") => Some("ipsec.1"),
+        _ => None,
+    }
 }
 
 /// Returns all enum alias entries as (attr_name, alias, canonical) tuples.
 pub fn enum_alias_entries() -> &'static [(&'static str, &'static str, &'static str)] {
-    &[]
+    &[("type", "ipsec_1", "ipsec.1")]
 }
