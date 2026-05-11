@@ -28,7 +28,7 @@ pub fn s3_bucket_acl_config() -> AwsSchemaConfig {
                 AttributeSchema::new(
                     "acl",
                     AttributeType::StringEnum {
-                        name: "ACL".to_string(),
+                        name: "Acl".to_string(),
                         values: vec![
                             "authenticated-read".to_string(),
                             "private".to_string(),
