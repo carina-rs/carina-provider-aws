@@ -734,7 +734,9 @@ mod tests {
         );
         policy.insert(
             "statement".to_string(),
-            Value::Concrete(ConcreteValue::List(vec![Value::Map(stmt)])),
+            Value::Concrete(ConcreteValue::List(vec![Value::Concrete(
+                ConcreteValue::Map(stmt),
+            )])),
         );
 
         let r = make_resource(Some(Value::Concrete(ConcreteValue::Map(policy))));
@@ -802,8 +804,10 @@ mod tests {
         stmt.insert(
             "resource".to_string(),
             Value::Concrete(ConcreteValue::List(vec![
-                Value::String("arn:aws:s3:::my-bucket".to_string()),
-                Value::String("arn:aws:s3:::my-bucket/*".to_string()),
+                Value::Concrete(ConcreteValue::String("arn:aws:s3:::my-bucket".to_string())),
+                Value::Concrete(ConcreteValue::String(
+                    "arn:aws:s3:::my-bucket/*".to_string(),
+                )),
             ])),
         );
         stmt.insert(
@@ -818,7 +822,9 @@ mod tests {
         );
         doc.insert(
             "statement".to_string(),
-            Value::Concrete(ConcreteValue::List(vec![Value::Map(stmt)])),
+            Value::Concrete(ConcreteValue::List(vec![Value::Concrete(
+                ConcreteValue::Map(stmt),
+            )])),
         );
         Value::Concrete(ConcreteValue::Map(doc))
     }
@@ -1005,8 +1011,8 @@ mod tests {
         let mut inner = IndexMap::new();
         inner.insert(
             "aws:TagKeys".to_string(),
-            Value::Concrete(ConcreteValue::List(vec![Value::String(
-                "Environment".to_string(),
+            Value::Concrete(ConcreteValue::List(vec![Value::Concrete(
+                ConcreteValue::String("Environment".to_string()),
             )])),
         );
         let mut condition = IndexMap::new();
@@ -1034,7 +1040,9 @@ mod tests {
         );
         doc.insert(
             "statement".to_string(),
-            Value::Concrete(ConcreteValue::List(vec![Value::Map(stmt)])),
+            Value::Concrete(ConcreteValue::List(vec![Value::Concrete(
+                ConcreteValue::Map(stmt),
+            )])),
         );
 
         let original = Value::Concrete(ConcreteValue::Map(doc));
@@ -1083,7 +1091,9 @@ mod tests {
         );
         doc.insert(
             "statement".to_string(),
-            Value::Concrete(ConcreteValue::List(vec![Value::Map(stmt)])),
+            Value::Concrete(ConcreteValue::List(vec![Value::Concrete(
+                ConcreteValue::Map(stmt),
+            )])),
         );
 
         let original = Value::Concrete(ConcreteValue::Map(doc));

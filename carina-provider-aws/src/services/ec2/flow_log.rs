@@ -51,7 +51,9 @@ impl AwsProvider {
             {
                 attributes.insert(
                     "resource_ids".to_string(),
-                    Value::Concrete(ConcreteValue::List(vec![Value::String(rid)])),
+                    Value::Concrete(ConcreteValue::List(vec![Value::Concrete(
+                        ConcreteValue::String(rid),
+                    )])),
                 );
             }
 
