@@ -3556,6 +3556,16 @@ fn type_code_to_display(type_code: &str) -> String {
 /// shape name is sometimes a generic alias (`Tenancy` for `InstanceTenancy`)
 /// that doesn't match user expectations.
 fn pascalize_enum_type_name(_shape_name: &str, field_name: &str) -> String {
+    // Initialism (all ASCII uppercase, e.g. "ACL", "MFA", "VPC") → first
+    // letter kept, rest lowercased so the DSL TypeName segment follows
+    // Rust's RFC 430 acronym convention. Mixed-case names (e.g.
+    // "VersioningStatus") pass through unchanged. Names starting with a
+    // lowercase letter get their first character uppercased.
+    if !field_name.is_empty() && field_name.chars().all(|c| c.is_ascii_uppercase()) {
+        let mut chars = field_name.chars();
+        let first = chars.next().unwrap();
+        return format!("{}{}", first, chars.as_str().to_ascii_lowercase());
+    }
     let mut chars = field_name.chars();
     match chars.next() {
         Some(c) if c.is_ascii_uppercase() => field_name.to_string(),
@@ -4883,5 +4893,44 @@ mod tests {
         let missing = tmp.path().join("does_not_exist");
         let methods = scan_manual_methods(&missing);
         assert!(methods.is_empty());
+    }
+
+    #[test]
+    fn pascalize_enum_type_name_initialism_to_pascal() {
+        // All-uppercase initialisms become Rust-RFC-430 PascalCase so the
+        // DSL TypeName segment matches the convention used by every other
+        // enum (e.g. `Acl`, not `ACL`).
+        assert_eq!(pascalize_enum_type_name("BucketCannedACL", "ACL"), "Acl");
+        assert_eq!(pascalize_enum_type_name("MFADelete", "MFA"), "Mfa");
+        assert_eq!(pascalize_enum_type_name("VPC", "VPC"), "Vpc");
+    }
+
+    #[test]
+    fn pascalize_enum_type_name_mixed_case_passes_through() {
+        // Already-PascalCase names with mixed case (the common case for
+        // AWS enums like `InstanceTenancy`) must not be touched.
+        assert_eq!(
+            pascalize_enum_type_name("InstanceTenancy", "InstanceTenancy"),
+            "InstanceTenancy"
+        );
+        assert_eq!(
+            pascalize_enum_type_name("VersioningStatus", "VersioningStatus"),
+            "VersioningStatus"
+        );
+    }
+
+    #[test]
+    fn pascalize_enum_type_name_camel_case_first_letter_uppercased() {
+        // camelCase field names like `logGroupClass` get their first
+        // letter uppercased only — the rest of the casing is preserved.
+        assert_eq!(
+            pascalize_enum_type_name("LogGroupClass", "logGroupClass"),
+            "LogGroupClass"
+        );
+    }
+
+    #[test]
+    fn pascalize_enum_type_name_empty_input_returns_empty() {
+        assert_eq!(pascalize_enum_type_name("", ""), "");
     }
 }
