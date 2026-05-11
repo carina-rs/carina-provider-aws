@@ -7,7 +7,6 @@ use aws_sdk_s3::types::{
 };
 use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
-use carina_core::utils::extract_enum_value;
 use indexmap::IndexMap;
 
 use crate::AwsProvider;
@@ -168,7 +167,7 @@ fn build_rule(id: &ResourceId, rule_value: &Value) -> ProviderResult<LifecycleRu
     };
 
     let status_str = match map.get("status") {
-        Some(Value::Concrete(ConcreteValue::String(s))) => extract_enum_value(s).to_string(),
+        Some(Value::Concrete(ConcreteValue::String(s))) => s.clone(),
         _ => {
             return Err(
                 ProviderError::invalid_input("rule.status is required").for_resource(id.clone())
@@ -240,7 +239,7 @@ fn build_transition(id: &ResourceId, value: &Value) -> ProviderResult<Transition
         );
     };
     let storage_class_str = match map.get("storage_class") {
-        Some(Value::Concrete(ConcreteValue::String(s))) => extract_enum_value(s).to_string(),
+        Some(Value::Concrete(ConcreteValue::String(s))) => s.clone(),
         _ => {
             return Err(
                 ProviderError::invalid_input("transition.storage_class is required")
@@ -287,7 +286,7 @@ fn build_ncv_transition(
         );
     };
     let storage_class_str = match map.get("storage_class") {
-        Some(Value::Concrete(ConcreteValue::String(s))) => extract_enum_value(s).to_string(),
+        Some(Value::Concrete(ConcreteValue::String(s))) => s.clone(),
         _ => {
             return Err(ProviderError::invalid_input(
                 "noncurrent_version_transition.storage_class is required",

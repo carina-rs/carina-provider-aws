@@ -2,7 +2,6 @@ use std::collections::HashMap;
 
 use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
-use carina_core::utils::extract_enum_value;
 
 use crate::AwsProvider;
 use crate::helpers::sdk_error_message;
@@ -64,8 +63,7 @@ impl AwsProvider {
 
         if let Some(Value::Concrete(ConcreteValue::String(domain))) = resource.get_attr("domain") {
             use aws_sdk_ec2::types::DomainType;
-            let domain_type = DomainType::from(extract_enum_value(domain));
-            req = req.domain(domain_type);
+            req = req.domain(DomainType::from(domain.as_str()));
         } else {
             // Default to VPC
             req = req.domain(aws_sdk_ec2::types::DomainType::Vpc);

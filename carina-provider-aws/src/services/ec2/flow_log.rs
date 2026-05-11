@@ -2,7 +2,6 @@ use std::collections::HashMap;
 
 use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
-use carina_core::utils::extract_enum_value;
 
 use crate::AwsProvider;
 use crate::helpers::{build_tag_specification, sdk_error_message};
@@ -96,7 +95,7 @@ impl AwsProvider {
         }
 
         let resource_type_val = match resource.get_attr("resource_type") {
-            Some(Value::Concrete(ConcreteValue::String(s))) => extract_enum_value(s).to_string(),
+            Some(Value::Concrete(ConcreteValue::String(s))) => s.clone(),
             _ => {
                 return Err(ProviderError::invalid_input("resource_type is required")
                     .for_resource(resource.id.clone()));
@@ -115,23 +114,14 @@ impl AwsProvider {
             resource.get_attr("traffic_type")
         {
             use aws_sdk_ec2::types::TrafficType;
-            let tt = TrafficType::from(extract_enum_value(traffic_type));
-            req = req.traffic_type(tt);
+            req = req.traffic_type(TrafficType::from(traffic_type.as_str()));
         }
 
         if let Some(Value::Concrete(ConcreteValue::String(log_dest_type))) =
             resource.get_attr("log_destination_type")
         {
             use aws_sdk_ec2::types::LogDestinationType;
-            let raw = extract_enum_value(log_dest_type);
-            // Map DSL snake_case enum values back to API hyphenated format
-            let api_value = match raw {
-                "cloud_watch_logs" => "cloud-watch-logs",
-                "kinesis_data_firehose" => "kinesis-data-firehose",
-                other => other,
-            };
-            let ldt = LogDestinationType::from(api_value);
-            req = req.log_destination_type(ldt);
+            req = req.log_destination_type(LogDestinationType::from(log_dest_type.as_str()));
         }
 
         if let Some(Value::Concrete(ConcreteValue::String(log_dest))) =

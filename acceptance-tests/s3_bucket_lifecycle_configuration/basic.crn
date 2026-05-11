@@ -18,11 +18,11 @@ aws.s3.BucketLifecycleConfiguration {
   rules = [
     {
       id     = 'transition-then-expire'
-      status = aws.s3.BucketLifecycleConfiguration.LifecycleRuleStatus.enabled
+      status = aws.s3.BucketLifecycleConfiguration.LifecycleRuleStatus.Enabled
       transitions = [
         {
           days          = 30
-          storage_class = aws.s3.BucketLifecycleConfiguration.TransitionStorageClass.standard_ia
+          storage_class = aws.s3.BucketLifecycleConfiguration.TransitionStorageClass.STANDARD_IA
         },
       ]
       expiration = {

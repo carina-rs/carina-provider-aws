@@ -2,7 +2,6 @@ use std::collections::HashMap;
 
 use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
-use carina_core::utils::extract_enum_value;
 
 use crate::AwsProvider;
 use crate::helpers::{require_string_attr, retry_aws_operation, sdk_error_message};
@@ -99,10 +98,7 @@ impl AwsProvider {
         if let Some(Value::Concrete(ConcreteValue::String(tenancy))) =
             resource.get_attr("instance_tenancy")
         {
-            // Convert DSL format (aws.vpc.InstanceTenancy.dedicated) to API value (dedicated)
-            let tenancy_value = extract_enum_value(tenancy);
-
-            let tenancy_enum = match tenancy_value {
+            let tenancy_enum = match tenancy.as_str() {
                 "dedicated" => aws_sdk_ec2::types::Tenancy::Dedicated,
                 "host" => aws_sdk_ec2::types::Tenancy::Host,
                 _ => aws_sdk_ec2::types::Tenancy::Default,

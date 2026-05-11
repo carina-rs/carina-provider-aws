@@ -6,7 +6,6 @@ use aws_sdk_s3::types::{
 };
 use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
-use carina_core::utils::extract_enum_value;
 use indexmap::IndexMap;
 
 use crate::AwsProvider;
@@ -191,7 +190,7 @@ fn build_by_default(
         .for_resource(id.clone()));
     };
     let algorithm_str = match map.get("sse_algorithm") {
-        Some(Value::Concrete(ConcreteValue::String(s))) => extract_enum_value(s).to_string(),
+        Some(Value::Concrete(ConcreteValue::String(s))) => s.clone(),
         _ => {
             return Err(
                 ProviderError::invalid_input("sse_algorithm is required").for_resource(id.clone())

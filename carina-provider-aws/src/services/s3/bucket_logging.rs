@@ -6,7 +6,6 @@ use aws_sdk_s3::types::{
 };
 use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
-use carina_core::utils::extract_enum_value;
 use indexmap::IndexMap;
 
 use crate::AwsProvider;
@@ -174,8 +173,7 @@ fn build_key_format(id: &ResourceId, value: &Value) -> ProviderResult<TargetObje
     if let Some(Value::Concrete(ConcreteValue::Map(pp))) = map.get("partitioned_prefix") {
         let mut pb = PartitionedPrefix::builder();
         if let Some(Value::Concrete(ConcreteValue::String(s))) = pp.get("partition_date_source") {
-            let normalized = extract_enum_value(s);
-            pb = pb.partition_date_source(PartitionDateSource::from(normalized));
+            pb = pb.partition_date_source(PartitionDateSource::from(s.as_str()));
         }
         builder = builder.partitioned_prefix(pb.build());
     }

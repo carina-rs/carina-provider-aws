@@ -2,7 +2,6 @@ use std::collections::HashMap;
 
 use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
-use carina_core::utils::extract_enum_value;
 
 use crate::AwsProvider;
 use crate::helpers::{PollState, build_tag_specification, sdk_error_message, wait_for_ec2_state};
@@ -85,9 +84,8 @@ impl AwsProvider {
             resource.get_attr("auto_accept_shared_attachments")
         {
             use aws_sdk_ec2::types::AutoAcceptSharedAttachmentsValue;
-            options = options.auto_accept_shared_attachments(
-                AutoAcceptSharedAttachmentsValue::from(extract_enum_value(v)),
-            );
+            options = options
+                .auto_accept_shared_attachments(AutoAcceptSharedAttachmentsValue::from(v.as_str()));
             has_options = true;
         }
 
@@ -96,7 +94,7 @@ impl AwsProvider {
         {
             use aws_sdk_ec2::types::DefaultRouteTableAssociationValue;
             options = options.default_route_table_association(
-                DefaultRouteTableAssociationValue::from(extract_enum_value(v)),
+                DefaultRouteTableAssociationValue::from(v.as_str()),
             );
             has_options = true;
         }
@@ -106,14 +104,14 @@ impl AwsProvider {
         {
             use aws_sdk_ec2::types::DefaultRouteTablePropagationValue;
             options = options.default_route_table_propagation(
-                DefaultRouteTablePropagationValue::from(extract_enum_value(v)),
+                DefaultRouteTablePropagationValue::from(v.as_str()),
             );
             has_options = true;
         }
 
         if let Some(Value::Concrete(ConcreteValue::String(v))) = resource.get_attr("dns_support") {
             use aws_sdk_ec2::types::DnsSupportValue;
-            options = options.dns_support(DnsSupportValue::from(extract_enum_value(v)));
+            options = options.dns_support(DnsSupportValue::from(v.as_str()));
             has_options = true;
         }
 
@@ -121,7 +119,7 @@ impl AwsProvider {
             resource.get_attr("vpn_ecmp_support")
         {
             use aws_sdk_ec2::types::VpnEcmpSupportValue;
-            options = options.vpn_ecmp_support(VpnEcmpSupportValue::from(extract_enum_value(v)));
+            options = options.vpn_ecmp_support(VpnEcmpSupportValue::from(v.as_str()));
             has_options = true;
         }
 

@@ -10,5 +10,5 @@ let bucket = aws.s3.Bucket {
 
 aws.s3.BucketOwnershipControls {
   bucket           = bucket.bucket
-  object_ownership = aws.s3.BucketOwnershipControls.ObjectOwnership.bucket_owner_enforced
+  object_ownership = aws.s3.BucketOwnershipControls.ObjectOwnership.BucketOwnerEnforced
 }

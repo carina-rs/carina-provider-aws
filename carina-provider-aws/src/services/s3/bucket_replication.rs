@@ -5,7 +5,6 @@ use aws_sdk_s3::types::{
 };
 use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
-use carina_core::utils::extract_enum_value;
 use indexmap::IndexMap;
 
 use crate::AwsProvider;
@@ -171,7 +170,7 @@ fn build_rule(id: &ResourceId, rule_value: &Value) -> ProviderResult<Replication
     };
 
     let status_str = match map.get("status") {
-        Some(Value::Concrete(ConcreteValue::String(s))) => extract_enum_value(s).to_string(),
+        Some(Value::Concrete(ConcreteValue::String(s))) => s.clone(),
         _ => {
             return Err(
                 ProviderError::invalid_input("rule.status is required").for_resource(id.clone())
@@ -229,8 +228,7 @@ fn build_destination(id: &ResourceId, value: &Value) -> ProviderResult<Destinati
         builder = builder.account(s);
     }
     if let Some(Value::Concrete(ConcreteValue::String(s))) = map.get("storage_class") {
-        let normalized = extract_enum_value(s);
-        builder = builder.storage_class(StorageClass::from(normalized));
+        builder = builder.storage_class(StorageClass::from(s.as_str()));
     }
     builder.build().map_err(|e| {
         ProviderError::api_error(sdk_error_message("Failed to build Destination", &e))

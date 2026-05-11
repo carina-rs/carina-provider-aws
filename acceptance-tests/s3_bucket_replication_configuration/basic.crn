@@ -14,7 +14,7 @@ let source = aws.s3.Bucket {
 
 aws.s3.BucketVersioning {
   bucket = source.bucket
-  status = aws.s3.BucketVersioning.VersioningStatus.enabled
+  status = aws.s3.BucketVersioning.VersioningStatus.Enabled
 }
 
 let dest = aws.s3.Bucket {
@@ -23,7 +23,7 @@ let dest = aws.s3.Bucket {
 
 aws.s3.BucketVersioning {
   bucket = dest.bucket
-  status = aws.s3.BucketVersioning.VersioningStatus.enabled
+  status = aws.s3.BucketVersioning.VersioningStatus.Enabled
 }
 
 let role = aws.iam.Role {
@@ -48,7 +48,7 @@ aws.s3.BucketReplicationConfiguration {
   rules = [
     {
       id     = 'replicate-all'
-      status = aws.s3.BucketReplicationConfiguration.ReplicationRuleStatus.enabled
+      status = aws.s3.BucketReplicationConfiguration.ReplicationRuleStatus.Enabled
       destination = {
         bucket = 'arn:aws:s3:::carina-acc-test-aws-s3-repl-dst-v1'
       }
