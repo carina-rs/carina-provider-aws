@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use carina_core::provider::{ProviderError, ProviderResult};
-use carina_core::resource::{Resource, ResourceId, State, Value};
+use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
 use carina_core::utils::extract_enum_value_with_values;
 
 use crate::AwsProvider;
@@ -65,7 +65,9 @@ impl AwsProvider {
     /// Create an EC2 VPN Gateway
     pub(crate) async fn create_ec2_vpn_gateway(&self, resource: Resource) -> ProviderResult<State> {
         let gw_type = match resource.get_attr("type") {
-            Some(Value::String(s)) => extract_enum_value_with_values(s, &["ipsec.1"]).to_string(),
+            Some(Value::Concrete(ConcreteValue::String(s))) => {
+                extract_enum_value_with_values(s, &["ipsec.1"]).to_string()
+            }
             _ => {
                 return Err(ProviderError::invalid_input("type is required")
                     .for_resource(resource.id.clone()));
@@ -77,7 +79,8 @@ impl AwsProvider {
             .create_vpn_gateway()
             .r#type(aws_sdk_ec2::types::GatewayType::from(gw_type.as_str()));
 
-        if let Some(Value::Int(asn)) = resource.get_attr("amazon_side_asn") {
+        if let Some(Value::Concrete(ConcreteValue::Int(asn))) = resource.get_attr("amazon_side_asn")
+        {
             req = req.amazon_side_asn(*asn);
         }
 

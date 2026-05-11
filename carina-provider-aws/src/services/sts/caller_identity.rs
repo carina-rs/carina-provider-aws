@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use carina_core::provider::{BoxFuture, ProviderError, ProviderResult};
-use carina_core::resource::{Resource, State, Value};
+use carina_core::resource::{ConcreteValue, Resource, State, Value};
 
 use crate::AwsProvider;
 use crate::helpers::sdk_error_message;
@@ -33,13 +33,22 @@ impl AwsProvider {
 
             let mut attributes = HashMap::new();
             if let Some(account) = response.account() {
-                attributes.insert("account_id".to_string(), Value::String(account.to_string()));
+                attributes.insert(
+                    "account_id".to_string(),
+                    Value::Concrete(ConcreteValue::String(account.to_string())),
+                );
             }
             if let Some(arn) = response.arn() {
-                attributes.insert("arn".to_string(), Value::String(arn.to_string()));
+                attributes.insert(
+                    "arn".to_string(),
+                    Value::Concrete(ConcreteValue::String(arn.to_string())),
+                );
             }
             if let Some(user_id) = response.user_id() {
-                attributes.insert("user_id".to_string(), Value::String(user_id.to_string()));
+                attributes.insert(
+                    "user_id".to_string(),
+                    Value::Concrete(ConcreteValue::String(user_id.to_string())),
+                );
             }
 
             Ok(State::existing(id, attributes))

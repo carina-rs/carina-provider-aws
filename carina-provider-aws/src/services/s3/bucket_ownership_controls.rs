@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use aws_sdk_s3::types::{ObjectOwnership, OwnershipControls, OwnershipControlsRule};
 use carina_core::provider::{ProviderError, ProviderResult};
-use carina_core::resource::{Resource, ResourceId, State, Value};
+use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
 use carina_core::utils::extract_enum_value;
 
 use crate::AwsProvider;
@@ -29,13 +29,18 @@ impl AwsProvider {
         match result {
             Ok(output) => {
                 let mut attributes = HashMap::new();
-                attributes.insert("bucket".to_string(), Value::String(bucket.to_string()));
+                attributes.insert(
+                    "bucket".to_string(),
+                    Value::Concrete(ConcreteValue::String(bucket.to_string())),
+                );
                 if let Some(controls) = output.ownership_controls()
                     && let Some(rule) = controls.rules().first()
                 {
                     attributes.insert(
                         "object_ownership".to_string(),
-                        Value::String(rule.object_ownership().as_str().to_string()),
+                        Value::Concrete(ConcreteValue::String(
+                            rule.object_ownership().as_str().to_string(),
+                        )),
                     );
                 }
                 Ok(State::existing(id.clone(), attributes).with_identifier(bucket.to_string()))
@@ -82,7 +87,7 @@ impl AwsProvider {
         resource: &Resource,
     ) -> ProviderResult<State> {
         let ownership_str = match resource.get_attr("object_ownership") {
-            Some(Value::String(s)) => extract_enum_value(s).to_string(),
+            Some(Value::Concrete(ConcreteValue::String(s))) => extract_enum_value(s).to_string(),
             _ => {
                 return Err(ProviderError::invalid_input("object_ownership is required")
                     .for_resource(id.clone()));

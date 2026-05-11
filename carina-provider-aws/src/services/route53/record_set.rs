@@ -11,7 +11,7 @@ use aws_sdk_route53::types::{
 };
 
 use carina_core::provider::{ProviderError, ProviderResult};
-use carina_core::resource::{Resource, ResourceId, State, Value};
+use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
 
 use crate::AwsProvider;
 use crate::helpers::{require_enum_attr, require_string_attr, sdk_error_message};
@@ -44,7 +44,7 @@ fn strip_trailing_dot(name: &str) -> String {
 }
 
 fn extract_string(value: &Value) -> Option<&str> {
-    if let Value::String(s) = value {
+    if let Value::Concrete(ConcreteValue::String(s)) = value {
         Some(s.as_str())
     } else {
         None
@@ -55,7 +55,7 @@ fn build_resource_records(records: &[Value]) -> Vec<ResourceRecord> {
     records
         .iter()
         .filter_map(|v| {
-            if let Value::String(s) = v {
+            if let Value::Concrete(ConcreteValue::String(s)) = v {
                 ResourceRecord::builder().value(s.clone()).build().ok()
             } else {
                 None
@@ -79,7 +79,7 @@ fn build_alias_target_from_map(
     let evaluate = alias
         .get("evaluate_target_health")
         .and_then(|v| {
-            if let Value::Bool(b) = v {
+            if let Value::Concrete(ConcreteValue::Bool(b)) = v {
                 Some(*b)
             } else {
                 None
@@ -107,15 +107,17 @@ fn build_record_set(resource: &Resource) -> ProviderResult<ResourceRecordSet> {
         .name(normalize_dns_name(&name))
         .r#type(RrType::from(record_type.as_str()));
 
-    if let Some(Value::Int(ttl)) = resource.get_attr("ttl") {
+    if let Some(Value::Concrete(ConcreteValue::Int(ttl))) = resource.get_attr("ttl") {
         builder = builder.ttl(*ttl);
     }
 
-    if let Some(Value::List(records)) = resource.get_attr("resource_records") {
+    if let Some(Value::Concrete(ConcreteValue::List(records))) =
+        resource.get_attr("resource_records")
+    {
         builder = builder.set_resource_records(Some(build_resource_records(records)));
     }
 
-    if let Some(Value::Map(alias)) = resource.get_attr("alias_target") {
+    if let Some(Value::Concrete(ConcreteValue::Map(alias))) = resource.get_attr("alias_target") {
         builder = builder.alias_target(build_alias_target_from_map(alias, &resource.id)?);
     }
 
@@ -170,47 +172,53 @@ fn extract_attributes(hosted_zone_id: &str, rrs: &ResourceRecordSet) -> HashMap<
 
     attrs.insert(
         "hosted_zone_id".to_string(),
-        Value::String(hosted_zone_id.to_string()),
+        Value::Concrete(ConcreteValue::String(hosted_zone_id.to_string())),
     );
 
     attrs.insert(
         "name".to_string(),
-        Value::String(strip_trailing_dot(rrs.name())),
+        Value::Concrete(ConcreteValue::String(strip_trailing_dot(rrs.name()))),
     );
 
     attrs.insert(
         "type".to_string(),
-        Value::String(rrs.r#type().as_str().to_string()),
+        Value::Concrete(ConcreteValue::String(rrs.r#type().as_str().to_string())),
     );
 
     if let Some(ttl) = rrs.ttl() {
-        attrs.insert("ttl".to_string(), Value::Int(ttl));
+        attrs.insert("ttl".to_string(), Value::Concrete(ConcreteValue::Int(ttl)));
     }
 
     let records: Vec<Value> = rrs
         .resource_records()
         .iter()
-        .map(|r| Value::String(r.value().to_string()))
+        .map(|r| Value::Concrete(ConcreteValue::String(r.value().to_string())))
         .collect();
     if !records.is_empty() {
-        attrs.insert("resource_records".to_string(), Value::List(records));
+        attrs.insert(
+            "resource_records".to_string(),
+            Value::Concrete(ConcreteValue::List(records)),
+        );
     }
 
     if let Some(alias) = rrs.alias_target() {
         let mut alias_map: IndexMap<String, Value> = IndexMap::new();
         alias_map.insert(
             "dns_name".to_string(),
-            Value::String(strip_trailing_dot(alias.dns_name())),
+            Value::Concrete(ConcreteValue::String(strip_trailing_dot(alias.dns_name()))),
         );
         alias_map.insert(
             "hosted_zone_id".to_string(),
-            Value::String(alias.hosted_zone_id().to_string()),
+            Value::Concrete(ConcreteValue::String(alias.hosted_zone_id().to_string())),
         );
         alias_map.insert(
             "evaluate_target_health".to_string(),
-            Value::Bool(alias.evaluate_target_health()),
+            Value::Concrete(ConcreteValue::Bool(alias.evaluate_target_health())),
         );
-        attrs.insert("alias_target".to_string(), Value::Map(alias_map));
+        attrs.insert(
+            "alias_target".to_string(),
+            Value::Concrete(ConcreteValue::Map(alias_map)),
+        );
     }
 
     attrs
@@ -332,15 +340,19 @@ impl AwsProvider {
             .name(&normalized_name)
             .r#type(RrType::from(record_type));
 
-        if let Some(Value::Int(ttl)) = current.attributes.get("ttl") {
+        if let Some(Value::Concrete(ConcreteValue::Int(ttl))) = current.attributes.get("ttl") {
             builder = builder.ttl(*ttl);
         }
 
-        if let Some(Value::List(records)) = current.attributes.get("resource_records") {
+        if let Some(Value::Concrete(ConcreteValue::List(records))) =
+            current.attributes.get("resource_records")
+        {
             builder = builder.set_resource_records(Some(build_resource_records(records)));
         }
 
-        if let Some(Value::Map(alias)) = current.attributes.get("alias_target") {
+        if let Some(Value::Concrete(ConcreteValue::Map(alias))) =
+            current.attributes.get("alias_target")
+        {
             builder = builder.alias_target(build_alias_target_from_map(alias, &id)?);
         }
 

@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use carina_core::provider::{ProviderError, ProviderResult};
-use carina_core::resource::{Resource, ResourceId, State, Value};
+use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
 use carina_core::utils::convert_enum_value;
 
 use crate::AwsProvider;
@@ -46,7 +46,10 @@ impl AwsProvider {
             // Override availability_zone with DSL format
             if let Some(az) = subnet.availability_zone() {
                 let az_dsl = format!("aws.AvailabilityZone.{}", az.replace('-', "_"));
-                attributes.insert("availability_zone".to_string(), Value::String(az_dsl));
+                attributes.insert(
+                    "availability_zone".to_string(),
+                    Value::Concrete(ConcreteValue::String(az_dsl)),
+                );
             }
 
             // Extract user-defined tags
@@ -76,7 +79,9 @@ impl AwsProvider {
             .vpc_id(&vpc_id)
             .cidr_block(&cidr_block);
 
-        if let Some(Value::String(az)) = resource.get_attr("availability_zone") {
+        if let Some(Value::Concrete(ConcreteValue::String(az))) =
+            resource.get_attr("availability_zone")
+        {
             req = req.availability_zone(convert_enum_value(az).replace('_', "-"));
         }
 
@@ -131,7 +136,9 @@ impl AwsProvider {
         subnet_id: &str,
         attributes: &HashMap<String, Value>,
     ) -> ProviderResult<()> {
-        if let Some(Value::Bool(enabled)) = attributes.get("map_public_ip_on_launch") {
+        if let Some(Value::Concrete(ConcreteValue::Bool(enabled))) =
+            attributes.get("map_public_ip_on_launch")
+        {
             self.ec2_client
                 .modify_subnet_attribute()
                 .subnet_id(subnet_id)
@@ -147,7 +154,9 @@ impl AwsProvider {
                 })?;
         }
 
-        if let Some(Value::Bool(enabled)) = attributes.get("assign_ipv6_address_on_creation") {
+        if let Some(Value::Concrete(ConcreteValue::Bool(enabled))) =
+            attributes.get("assign_ipv6_address_on_creation")
+        {
             self.ec2_client
                 .modify_subnet_attribute()
                 .subnet_id(subnet_id)
@@ -165,7 +174,8 @@ impl AwsProvider {
                 })?;
         }
 
-        if let Some(Value::Bool(enabled)) = attributes.get("enable_dns64") {
+        if let Some(Value::Concrete(ConcreteValue::Bool(enabled))) = attributes.get("enable_dns64")
+        {
             self.ec2_client
                 .modify_subnet_attribute()
                 .subnet_id(subnet_id)
@@ -180,8 +190,10 @@ impl AwsProvider {
 
         // The ModifySubnetAttribute API only allows modifying one attribute at a time.
         // Each private_dns_name_options_on_launch field must be a separate API call.
-        if let Some(Value::Map(fields)) = attributes.get("private_dns_name_options_on_launch") {
-            if let Some(Value::String(ht)) = fields.get("hostname_type") {
+        if let Some(Value::Concrete(ConcreteValue::Map(fields))) =
+            attributes.get("private_dns_name_options_on_launch")
+        {
+            if let Some(Value::Concrete(ConcreteValue::String(ht))) = fields.get("hostname_type") {
                 let hostname_val = convert_enum_value(ht).replace('_', "-");
                 self.ec2_client
                     .modify_subnet_attribute()
@@ -197,7 +209,9 @@ impl AwsProvider {
                         .for_resource(id.clone())
                     })?;
             }
-            if let Some(Value::Bool(v)) = fields.get("enable_resource_name_dns_a_record") {
+            if let Some(Value::Concrete(ConcreteValue::Bool(v))) =
+                fields.get("enable_resource_name_dns_a_record")
+            {
                 self.ec2_client
                     .modify_subnet_attribute()
                     .subnet_id(subnet_id)
@@ -214,7 +228,9 @@ impl AwsProvider {
                         .for_resource(id.clone())
                     })?;
             }
-            if let Some(Value::Bool(v)) = fields.get("enable_resource_name_dns_aaaa_record") {
+            if let Some(Value::Concrete(ConcreteValue::Bool(v))) =
+                fields.get("enable_resource_name_dns_aaaa_record")
+            {
                 self.ec2_client
                     .modify_subnet_attribute()
                     .subnet_id(subnet_id)

@@ -19,10 +19,10 @@ default = ["native"]
 native = []
 
 [dependencies]
-carina-core = { git = "https://github.com/carina-rs/carina", rev = "1d5f1a24233aff498fb523f3316148031be56348" }
+carina-core = { git = "https://github.com/carina-rs/carina", rev = "e73e8bee" }
 carina-aws-types = { path = "../carina-aws-types" }
-carina-plugin-sdk = { git = "https://github.com/carina-rs/carina", rev = "1d5f1a24233aff498fb523f3316148031be56348" }
-carina-provider-protocol = { git = "https://github.com/carina-rs/carina", rev = "1d5f1a24233aff498fb523f3316148031be56348" }
+carina-plugin-sdk = { git = "https://github.com/carina-rs/carina", rev = "e73e8bee" }
+carina-provider-protocol = { git = "https://github.com/carina-rs/carina", rev = "e73e8bee" }
 indexmap = "2"
 aws-config = { version = "1", default-features = false, features = ["behavior-version-latest", "rt-tokio"] }
 aws-smithy-async = { version = "1", features = ["rt-tokio"] }

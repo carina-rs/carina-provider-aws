@@ -4,7 +4,7 @@ use aws_sdk_s3::types::{
     Destination, ReplicationConfiguration, ReplicationRule, ReplicationRuleStatus, StorageClass,
 };
 use carina_core::provider::{ProviderError, ProviderResult};
-use carina_core::resource::{Resource, ResourceId, State, Value};
+use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
 use carina_core::utils::extract_enum_value;
 use indexmap::IndexMap;
 
@@ -32,12 +32,21 @@ impl AwsProvider {
         match result {
             Ok(output) => {
                 let mut attributes = HashMap::new();
-                attributes.insert("bucket".to_string(), Value::String(bucket.to_string()));
+                attributes.insert(
+                    "bucket".to_string(),
+                    Value::Concrete(ConcreteValue::String(bucket.to_string())),
+                );
                 if let Some(config) = output.replication_configuration() {
-                    attributes.insert("role".to_string(), Value::String(config.role().to_string()));
+                    attributes.insert(
+                        "role".to_string(),
+                        Value::Concrete(ConcreteValue::String(config.role().to_string())),
+                    );
                     let rules: Vec<Value> = config.rules().iter().map(rule_to_value).collect();
                     if !rules.is_empty() {
-                        attributes.insert("rules".to_string(), Value::List(rules));
+                        attributes.insert(
+                            "rules".to_string(),
+                            Value::Concrete(ConcreteValue::List(rules)),
+                        );
                     }
                 }
                 Ok(State::existing(id.clone(), attributes).with_identifier(bucket.to_string()))
@@ -84,7 +93,7 @@ impl AwsProvider {
     ) -> ProviderResult<State> {
         let role = require_string_attr(resource, "role")?;
         let rules = match resource.get_attr("rules") {
-            Some(Value::List(items)) => items,
+            Some(Value::Concrete(ConcreteValue::List(items))) => items,
             _ => {
                 return Err(
                     ProviderError::invalid_input("rules is required and must be a list")
@@ -155,14 +164,14 @@ impl AwsProvider {
 }
 
 fn build_rule(id: &ResourceId, rule_value: &Value) -> ProviderResult<ReplicationRule> {
-    let Value::Map(map) = rule_value else {
+    let Value::Concrete(ConcreteValue::Map(map)) = rule_value else {
         return Err(
             ProviderError::invalid_input("each rule must be a map").for_resource(id.clone())
         );
     };
 
     let status_str = match map.get("status") {
-        Some(Value::String(s)) => extract_enum_value(s).to_string(),
+        Some(Value::Concrete(ConcreteValue::String(s))) => extract_enum_value(s).to_string(),
         _ => {
             return Err(
                 ProviderError::invalid_input("rule.status is required").for_resource(id.clone())
@@ -181,13 +190,13 @@ fn build_rule(id: &ResourceId, rule_value: &Value) -> ProviderResult<Replication
         .status(ReplicationRuleStatus::from(status_str.as_str()))
         .destination(destination);
 
-    if let Some(Value::String(s)) = map.get("id") {
+    if let Some(Value::Concrete(ConcreteValue::String(s))) = map.get("id") {
         builder = builder.id(s);
     }
-    if let Some(Value::Int(n)) = map.get("priority") {
+    if let Some(Value::Concrete(ConcreteValue::Int(n))) = map.get("priority") {
         builder = builder.priority(*n as i32);
     }
-    if let Some(Value::String(s)) = map.get("prefix") {
+    if let Some(Value::Concrete(ConcreteValue::String(s))) = map.get("prefix") {
         #[allow(deprecated)]
         {
             builder = builder.prefix(s);
@@ -201,13 +210,13 @@ fn build_rule(id: &ResourceId, rule_value: &Value) -> ProviderResult<Replication
 }
 
 fn build_destination(id: &ResourceId, value: &Value) -> ProviderResult<Destination> {
-    let Value::Map(map) = value else {
+    let Value::Concrete(ConcreteValue::Map(map)) = value else {
         return Err(
             ProviderError::invalid_input("destination must be a map").for_resource(id.clone())
         );
     };
     let bucket = match map.get("bucket") {
-        Some(Value::String(s)) => s.clone(),
+        Some(Value::Concrete(ConcreteValue::String(s))) => s.clone(),
         _ => {
             return Err(
                 ProviderError::invalid_input("destination.bucket is required")
@@ -216,10 +225,10 @@ fn build_destination(id: &ResourceId, value: &Value) -> ProviderResult<Destinati
         }
     };
     let mut builder = Destination::builder().bucket(bucket);
-    if let Some(Value::String(s)) = map.get("account") {
+    if let Some(Value::Concrete(ConcreteValue::String(s))) = map.get("account") {
         builder = builder.account(s);
     }
-    if let Some(Value::String(s)) = map.get("storage_class") {
+    if let Some(Value::Concrete(ConcreteValue::String(s))) = map.get("storage_class") {
         let normalized = extract_enum_value(s);
         builder = builder.storage_class(StorageClass::from(normalized));
     }
@@ -234,37 +243,52 @@ fn rule_to_value(rule: &ReplicationRule) -> Value {
     if let Some(s) = rule.id()
         && !s.is_empty()
     {
-        map.insert("id".to_string(), Value::String(s.to_string()));
+        map.insert(
+            "id".to_string(),
+            Value::Concrete(ConcreteValue::String(s.to_string())),
+        );
     }
     if let Some(p) = rule.priority() {
-        map.insert("priority".to_string(), Value::Int(p as i64));
+        map.insert(
+            "priority".to_string(),
+            Value::Concrete(ConcreteValue::Int(p as i64)),
+        );
     }
     #[allow(deprecated)]
     if let Some(s) = rule.prefix()
         && !s.is_empty()
     {
-        map.insert("prefix".to_string(), Value::String(s.to_string()));
+        map.insert(
+            "prefix".to_string(),
+            Value::Concrete(ConcreteValue::String(s.to_string())),
+        );
     }
     map.insert(
         "status".to_string(),
-        Value::String(rule.status().as_str().to_string()),
+        Value::Concrete(ConcreteValue::String(rule.status().as_str().to_string())),
     );
     if let Some(dest) = rule.destination() {
         let mut d = IndexMap::new();
         d.insert(
             "bucket".to_string(),
-            Value::String(dest.bucket().to_string()),
+            Value::Concrete(ConcreteValue::String(dest.bucket().to_string())),
         );
         if let Some(a) = dest.account() {
-            d.insert("account".to_string(), Value::String(a.to_string()));
+            d.insert(
+                "account".to_string(),
+                Value::Concrete(ConcreteValue::String(a.to_string())),
+            );
         }
         if let Some(sc) = dest.storage_class() {
             d.insert(
                 "storage_class".to_string(),
-                Value::String(sc.as_str().to_string()),
+                Value::Concrete(ConcreteValue::String(sc.as_str().to_string())),
             );
         }
-        map.insert("destination".to_string(), Value::Map(d));
+        map.insert(
+            "destination".to_string(),
+            Value::Concrete(ConcreteValue::Map(d)),
+        );
     }
-    Value::Map(map)
+    Value::Concrete(ConcreteValue::Map(map))
 }

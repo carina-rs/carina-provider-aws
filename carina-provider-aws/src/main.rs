@@ -10,7 +10,7 @@ use carina_core::provider::{
     ProviderNormalizer, ReadRequest as CoreReadRequest, UpdatePatch as CoreUpdatePatch,
     UpdateRequest as CoreUpdateRequest,
 };
-use carina_core::resource::Value as CoreValue;
+use carina_core::resource::{ConcreteValue, Value as CoreValue};
 use carina_core::schema::SchemaRegistry;
 
 use carina_provider_aws::AwsNormalizer;
@@ -153,7 +153,9 @@ impl CarinaProvider for AwsProcessProvider {
     fn initialize(&mut self, attrs: &HashMap<String, proto::Value>) -> Result<(), String> {
         use carina_provider_aws::services::sts::account_guard::extract_string_list;
         let core_attrs = convert::proto_to_core_value_map(attrs);
-        let region = if let Some(CoreValue::String(region)) = core_attrs.get("region") {
+        let region = if let Some(CoreValue::Concrete(ConcreteValue::String(region))) =
+            core_attrs.get("region")
+        {
             carina_core::utils::convert_region_value(region)
         } else {
             "ap-northeast-1".to_string()
@@ -302,6 +304,7 @@ impl CarinaProvider for AwsProcessProvider {
             force_delete: request.directives.force_delete,
             create_before_destroy: request.directives.create_before_destroy,
             prevent_destroy: request.directives.prevent_destroy,
+            depends_on: Vec::new(),
         };
         let core_request = CoreDeleteRequest {
             directives: core_directives,

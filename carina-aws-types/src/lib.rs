@@ -4,7 +4,7 @@
 //! and `carina-provider-awscc`. Provider-specific types (region with namespace,
 //! schema config structs) remain in their respective crates.
 
-use carina_core::resource::Value;
+use carina_core::resource::{ConcreteValue, Value};
 use carina_core::schema::{AttributeType, CompletionValue, StructField, legacy_validator};
 
 // ========== Enum helpers ==========
@@ -202,7 +202,7 @@ pub fn tags_type() -> AttributeType {
 pub fn validate_tags_map(
     attributes: &std::collections::HashMap<String, Value>,
 ) -> Result<(), Vec<carina_core::schema::TypeError>> {
-    if let Some(Value::Map(map)) = attributes.get("tags") {
+    if let Some(Value::Concrete(ConcreteValue::Map(map))) = attributes.get("tags") {
         let has_key = map.keys().any(|k| k.eq_ignore_ascii_case("key"));
         let has_value = map.keys().any(|k| k.eq_ignore_ascii_case("value"));
         if has_key && has_value {
@@ -269,7 +269,7 @@ pub fn aws_resource_id() -> AttributeType {
         length: None,
         base: Box::new(AttributeType::String),
         validate: legacy_validator(|value| {
-            if let Value::String(s) = value {
+            if let Value::Concrete(ConcreteValue::String(s)) = value {
                 validate_aws_resource_id(s)
                     .map_err(|reason| format!("Invalid resource ID '{}': {}", s, reason))
             } else {
@@ -289,7 +289,7 @@ pub fn vpc_id() -> AttributeType {
         length: None,
         base: Box::new(aws_resource_id()),
         validate: legacy_validator(|value| {
-            if let Value::String(s) = value {
+            if let Value::Concrete(ConcreteValue::String(s)) = value {
                 validate_prefixed_resource_id(s, "vpc")
                     .map_err(|reason| format!("Invalid VPC ID '{}': {}", s, reason))
             } else {
@@ -309,7 +309,7 @@ pub fn subnet_id() -> AttributeType {
         length: None,
         base: Box::new(aws_resource_id()),
         validate: legacy_validator(|value| {
-            if let Value::String(s) = value {
+            if let Value::Concrete(ConcreteValue::String(s)) = value {
                 validate_prefixed_resource_id(s, "subnet")
                     .map_err(|reason| format!("Invalid Subnet ID '{}': {}", s, reason))
             } else {
@@ -329,7 +329,7 @@ pub fn security_group_id() -> AttributeType {
         length: None,
         base: Box::new(aws_resource_id()),
         validate: legacy_validator(|value| {
-            if let Value::String(s) = value {
+            if let Value::Concrete(ConcreteValue::String(s)) = value {
                 validate_prefixed_resource_id(s, "sg")
                     .map_err(|reason| format!("Invalid Security Group ID '{}': {}", s, reason))
             } else {
@@ -349,7 +349,7 @@ pub fn internet_gateway_id() -> AttributeType {
         length: None,
         base: Box::new(aws_resource_id()),
         validate: legacy_validator(|value| {
-            if let Value::String(s) = value {
+            if let Value::Concrete(ConcreteValue::String(s)) = value {
                 validate_prefixed_resource_id(s, "igw")
                     .map_err(|reason| format!("Invalid Internet Gateway ID '{}': {}", s, reason))
             } else {
@@ -369,7 +369,7 @@ pub fn route_table_id() -> AttributeType {
         length: None,
         base: Box::new(aws_resource_id()),
         validate: legacy_validator(|value| {
-            if let Value::String(s) = value {
+            if let Value::Concrete(ConcreteValue::String(s)) = value {
                 validate_prefixed_resource_id(s, "rtb")
                     .map_err(|reason| format!("Invalid Route Table ID '{}': {}", s, reason))
             } else {
@@ -389,7 +389,7 @@ pub fn nat_gateway_id() -> AttributeType {
         length: None,
         base: Box::new(aws_resource_id()),
         validate: legacy_validator(|value| {
-            if let Value::String(s) = value {
+            if let Value::Concrete(ConcreteValue::String(s)) = value {
                 validate_prefixed_resource_id(s, "nat")
                     .map_err(|reason| format!("Invalid NAT Gateway ID '{}': {}", s, reason))
             } else {
@@ -409,7 +409,7 @@ pub fn vpc_peering_connection_id() -> AttributeType {
         length: None,
         base: Box::new(aws_resource_id()),
         validate: legacy_validator(|value| {
-            if let Value::String(s) = value {
+            if let Value::Concrete(ConcreteValue::String(s)) = value {
                 validate_prefixed_resource_id(s, "pcx").map_err(|reason| {
                     format!("Invalid VPC Peering Connection ID '{}': {}", s, reason)
                 })
@@ -430,7 +430,7 @@ pub fn transit_gateway_id() -> AttributeType {
         length: None,
         base: Box::new(aws_resource_id()),
         validate: legacy_validator(|value| {
-            if let Value::String(s) = value {
+            if let Value::Concrete(ConcreteValue::String(s)) = value {
                 validate_prefixed_resource_id(s, "tgw")
                     .map_err(|reason| format!("Invalid Transit Gateway ID '{}': {}", s, reason))
             } else {
@@ -450,7 +450,7 @@ pub fn vpc_cidr_block_association_id() -> AttributeType {
         length: None,
         base: Box::new(aws_resource_id()),
         validate: legacy_validator(|value| {
-            if let Value::String(s) = value {
+            if let Value::Concrete(ConcreteValue::String(s)) = value {
                 validate_prefixed_resource_id(s, "vpc-cidr-assoc").map_err(|reason| {
                     format!("Invalid VPC CIDR Block Association ID '{}': {}", s, reason)
                 })
@@ -471,7 +471,7 @@ pub fn tgw_route_table_id() -> AttributeType {
         length: None,
         base: Box::new(aws_resource_id()),
         validate: legacy_validator(|value| {
-            if let Value::String(s) = value {
+            if let Value::Concrete(ConcreteValue::String(s)) = value {
                 validate_prefixed_resource_id(s, "tgw-rtb")
                     .map_err(|reason| format!("Invalid TGW Route Table ID '{}': {}", s, reason))
             } else {
@@ -491,7 +491,7 @@ pub fn vpn_gateway_id() -> AttributeType {
         length: None,
         base: Box::new(aws_resource_id()),
         validate: legacy_validator(|value| {
-            if let Value::String(s) = value {
+            if let Value::Concrete(ConcreteValue::String(s)) = value {
                 validate_prefixed_resource_id(s, "vgw")
                     .map_err(|reason| format!("Invalid VPN Gateway ID '{}': {}", s, reason))
             } else {
@@ -516,7 +516,7 @@ pub fn egress_only_internet_gateway_id() -> AttributeType {
         length: None,
         base: Box::new(aws_resource_id()),
         validate: legacy_validator(|value| {
-            if let Value::String(s) = value {
+            if let Value::Concrete(ConcreteValue::String(s)) = value {
                 validate_prefixed_resource_id(s, "eigw").map_err(|reason| {
                     format!(
                         "Invalid Egress Only Internet Gateway ID '{}': {}",
@@ -540,7 +540,7 @@ pub fn vpc_endpoint_id() -> AttributeType {
         length: None,
         base: Box::new(aws_resource_id()),
         validate: legacy_validator(|value| {
-            if let Value::String(s) = value {
+            if let Value::Concrete(ConcreteValue::String(s)) = value {
                 validate_prefixed_resource_id(s, "vpce")
                     .map_err(|reason| format!("Invalid VPC Endpoint ID '{}': {}", s, reason))
             } else {
@@ -560,7 +560,7 @@ pub fn instance_id() -> AttributeType {
         length: None,
         base: Box::new(aws_resource_id()),
         validate: legacy_validator(|value| {
-            if let Value::String(s) = value {
+            if let Value::Concrete(ConcreteValue::String(s)) = value {
                 validate_prefixed_resource_id(s, "i")
                     .map_err(|reason| format!("Invalid Instance ID '{}': {}", s, reason))
             } else {
@@ -580,7 +580,7 @@ pub fn network_interface_id() -> AttributeType {
         length: None,
         base: Box::new(aws_resource_id()),
         validate: legacy_validator(|value| {
-            if let Value::String(s) = value {
+            if let Value::Concrete(ConcreteValue::String(s)) = value {
                 validate_prefixed_resource_id(s, "eni")
                     .map_err(|reason| format!("Invalid Network Interface ID '{}': {}", s, reason))
             } else {
@@ -601,7 +601,7 @@ pub fn allocation_id() -> AttributeType {
         length: None,
         base: Box::new(aws_resource_id()),
         validate: legacy_validator(|value| {
-            if let Value::String(s) = value {
+            if let Value::Concrete(ConcreteValue::String(s)) = value {
                 validate_prefixed_resource_id(s, "eipalloc")
                     .map_err(|reason| format!("Invalid Allocation ID '{}': {}", s, reason))
             } else {
@@ -621,7 +621,7 @@ pub fn prefix_list_id() -> AttributeType {
         length: None,
         base: Box::new(aws_resource_id()),
         validate: legacy_validator(|value| {
-            if let Value::String(s) = value {
+            if let Value::Concrete(ConcreteValue::String(s)) = value {
                 validate_prefixed_resource_id(s, "pl")
                     .map_err(|reason| format!("Invalid Prefix List ID '{}': {}", s, reason))
             } else {
@@ -641,7 +641,7 @@ pub fn carrier_gateway_id() -> AttributeType {
         length: None,
         base: Box::new(aws_resource_id()),
         validate: legacy_validator(|value| {
-            if let Value::String(s) = value {
+            if let Value::Concrete(ConcreteValue::String(s)) = value {
                 validate_prefixed_resource_id(s, "cagw")
                     .map_err(|reason| format!("Invalid Carrier Gateway ID '{}': {}", s, reason))
             } else {
@@ -661,7 +661,7 @@ pub fn local_gateway_id() -> AttributeType {
         length: None,
         base: Box::new(aws_resource_id()),
         validate: legacy_validator(|value| {
-            if let Value::String(s) = value {
+            if let Value::Concrete(ConcreteValue::String(s)) = value {
                 validate_prefixed_resource_id(s, "lgw")
                     .map_err(|reason| format!("Invalid Local Gateway ID '{}': {}", s, reason))
             } else {
@@ -682,7 +682,7 @@ pub fn network_acl_id() -> AttributeType {
         length: None,
         base: Box::new(aws_resource_id()),
         validate: legacy_validator(|value| {
-            if let Value::String(s) = value {
+            if let Value::Concrete(ConcreteValue::String(s)) = value {
                 validate_prefixed_resource_id(s, "acl")
                     .map_err(|reason| format!("Invalid Network ACL ID '{}': {}", s, reason))
             } else {
@@ -702,7 +702,7 @@ pub fn transit_gateway_attachment_id() -> AttributeType {
         length: None,
         base: Box::new(aws_resource_id()),
         validate: legacy_validator(|value| {
-            if let Value::String(s) = value {
+            if let Value::Concrete(ConcreteValue::String(s)) = value {
                 validate_prefixed_resource_id(s, "tgw-attach").map_err(|reason| {
                     format!("Invalid Transit Gateway Attachment ID '{}': {}", s, reason)
                 })
@@ -723,7 +723,7 @@ pub fn flow_log_id() -> AttributeType {
         length: None,
         base: Box::new(aws_resource_id()),
         validate: legacy_validator(|value| {
-            if let Value::String(s) = value {
+            if let Value::Concrete(ConcreteValue::String(s)) = value {
                 validate_prefixed_resource_id(s, "fl")
                     .map_err(|reason| format!("Invalid Flow Log ID '{}': {}", s, reason))
             } else {
@@ -743,7 +743,7 @@ pub fn ipam_id() -> AttributeType {
         length: None,
         base: Box::new(aws_resource_id()),
         validate: legacy_validator(|value| {
-            if let Value::String(s) = value {
+            if let Value::Concrete(ConcreteValue::String(s)) = value {
                 validate_prefixed_resource_id(s, "ipam")
                     .map_err(|reason| format!("Invalid IPAM ID '{}': {}", s, reason))
             } else {
@@ -763,7 +763,7 @@ pub fn subnet_route_table_association_id() -> AttributeType {
         length: None,
         base: Box::new(aws_resource_id()),
         validate: legacy_validator(|value| {
-            if let Value::String(s) = value {
+            if let Value::Concrete(ConcreteValue::String(s)) = value {
                 validate_prefixed_resource_id(s, "rtbassoc").map_err(|reason| {
                     format!(
                         "Invalid Subnet Route Table Association ID '{}': {}",
@@ -787,7 +787,7 @@ pub fn security_group_rule_id() -> AttributeType {
         length: None,
         base: Box::new(aws_resource_id()),
         validate: legacy_validator(|value| {
-            if let Value::String(s) = value {
+            if let Value::Concrete(ConcreteValue::String(s)) = value {
                 validate_prefixed_resource_id(s, "sgr")
                     .map_err(|reason| format!("Invalid Security Group Rule ID '{}': {}", s, reason))
             } else {
@@ -821,7 +821,7 @@ pub fn iam_role_id() -> AttributeType {
         length: None,
         base: Box::new(aws_resource_id()),
         validate: legacy_validator(|value| {
-            if let Value::String(s) = value {
+            if let Value::Concrete(ConcreteValue::String(s)) = value {
                 validate_iam_role_id(s)
                     .map_err(|reason| format!("Invalid IAM Role ID '{}': {}", s, reason))
             } else {
@@ -857,7 +857,7 @@ pub fn aws_account_id() -> AttributeType {
         length: Some((Some(12), Some(12))),
         base: Box::new(AttributeType::String),
         validate: legacy_validator(|value| {
-            if let Value::String(s) = value {
+            if let Value::Concrete(ConcreteValue::String(s)) = value {
                 validate_aws_account_id(s)
                     .map_err(|reason| format!("Invalid AWS Account ID '{}': {}", s, reason))
             } else {
@@ -996,7 +996,7 @@ pub fn arn() -> AttributeType {
         length: None,
         base: Box::new(AttributeType::String),
         validate: legacy_validator(|value| {
-            if let Value::String(s) = value {
+            if let Value::Concrete(ConcreteValue::String(s)) = value {
                 validate_arn(s).map_err(|reason| format!("Invalid ARN '{}': {}", s, reason))
             } else {
                 Err("Expected string".to_string())
@@ -1016,7 +1016,7 @@ pub fn iam_role_arn() -> AttributeType {
         length: None,
         base: Box::new(arn()),
         validate: legacy_validator(|value| {
-            if let Value::String(s) = value {
+            if let Value::Concrete(ConcreteValue::String(s)) = value {
                 validate_iam_arn(s, "role/")
                     .map_err(|reason| format!("Invalid IAM Role ARN '{}': {}", s, reason))
             } else {
@@ -1037,7 +1037,7 @@ pub fn iam_policy_arn() -> AttributeType {
         length: None,
         base: Box::new(arn()),
         validate: legacy_validator(|value| {
-            if let Value::String(s) = value {
+            if let Value::Concrete(ConcreteValue::String(s)) = value {
                 validate_iam_arn(s, "policy/")
                     .map_err(|reason| format!("Invalid IAM Policy ARN '{}': {}", s, reason))
             } else {
@@ -1058,7 +1058,7 @@ pub fn kms_key_arn() -> AttributeType {
         length: None,
         base: Box::new(arn()),
         validate: legacy_validator(|value| {
-            if let Value::String(s) = value {
+            if let Value::Concrete(ConcreteValue::String(s)) = value {
                 validate_service_arn(s, "kms", Some("key/"))
                     .map_err(|reason| format!("Invalid KMS Key ARN '{}': {}", s, reason))
             } else {
@@ -1128,7 +1128,7 @@ pub fn kms_key_id() -> AttributeType {
         length: None,
         base: Box::new(aws_resource_id()),
         validate: legacy_validator(|value| {
-            if let Value::String(s) = value {
+            if let Value::Concrete(ConcreteValue::String(s)) = value {
                 validate_kms_key_id(s)
                     .map_err(|reason| format!("Invalid KMS key identifier '{}': {}", s, reason))
             } else {
@@ -1164,7 +1164,7 @@ pub fn ipam_pool_id() -> AttributeType {
         length: None,
         base: Box::new(aws_resource_id()),
         validate: legacy_validator(|value| {
-            if let Value::String(s) = value {
+            if let Value::Concrete(ConcreteValue::String(s)) = value {
                 validate_ipam_pool_id(s)
                     .map_err(|reason| format!("Invalid IPAM Pool ID '{}': {}", s, reason))
             } else {
@@ -1273,7 +1273,7 @@ pub fn availability_zone_id() -> AttributeType {
         length: None,
         base: Box::new(AttributeType::String),
         validate: legacy_validator(|value| {
-            if let Value::String(s) = value {
+            if let Value::Concrete(ConcreteValue::String(s)) = value {
                 validate_availability_zone_id(s)
                     .map_err(|reason| format!("Invalid availability zone ID '{}': {}", s, reason))
             } else {
@@ -1326,7 +1326,7 @@ fn iam_policy_effect() -> AttributeType {
         length: None,
         base: Box::new(AttributeType::String),
         validate: legacy_validator(|value| {
-            if let Value::String(s) = value {
+            if let Value::Concrete(ConcreteValue::String(s)) = value {
                 match s.as_str() {
                     "Allow" | "Deny" => Ok(()),
                     _ => Err(format!(
@@ -1352,7 +1352,7 @@ fn iam_policy_version() -> AttributeType {
         length: None,
         base: Box::new(AttributeType::String),
         validate: legacy_validator(|value| {
-            if let Value::String(s) = value {
+            if let Value::Concrete(ConcreteValue::String(s)) = value {
                 match s.as_str() {
                     "2012-10-17" | "2008-10-17" => Ok(()),
                     _ => Err(format!(
@@ -2043,18 +2043,18 @@ pub fn is_valid_condition_operator(key: &str) -> bool {
 /// Walks the document looking for `condition` maps and validates that
 /// all operator keys are valid snake_case condition operators.
 pub fn validate_condition_operators(value: &Value) -> Result<(), String> {
-    let Value::Map(doc) = value else {
+    let Value::Concrete(ConcreteValue::Map(doc)) = value else {
         return Ok(());
     };
     // Look for "statement" list
-    let Some(Value::List(statements)) = doc.get("statement") else {
+    let Some(Value::Concrete(ConcreteValue::List(statements))) = doc.get("statement") else {
         return Ok(());
     };
     for (i, stmt) in statements.iter().enumerate() {
-        let Value::Map(stmt_map) = stmt else {
+        let Value::Concrete(ConcreteValue::Map(stmt_map)) = stmt else {
             continue;
         };
-        let Some(Value::Map(condition)) = stmt_map.get("condition") else {
+        let Some(Value::Concrete(ConcreteValue::Map(condition))) = stmt_map.get("condition") else {
             continue;
         };
         for key in condition.keys() {
@@ -2159,14 +2159,21 @@ mod tests {
     fn validate_arn_type_with_value() {
         let t = arn();
         assert!(
-            t.validate(&Value::String("arn:aws:s3:::my-bucket".to_string()))
-                .is_ok()
+            t.validate(&Value::Concrete(ConcreteValue::String(
+                "arn:aws:s3:::my-bucket".to_string()
+            )))
+            .is_ok()
         );
         assert!(
-            t.validate(&Value::String("not-an-arn".to_string()))
+            t.validate(&Value::Concrete(ConcreteValue::String(
+                "not-an-arn".to_string()
+            )))
+            .is_err()
+        );
+        assert!(
+            t.validate(&Value::Concrete(ConcreteValue::Int(42)))
                 .is_err()
         );
-        assert!(t.validate(&Value::Int(42)).is_err());
         assert!(
             t.validate(&Value::resource_ref(
                 "role".to_string(),
@@ -2202,11 +2209,19 @@ mod tests {
     fn validate_aws_resource_id_type_with_value() {
         let t = aws_resource_id();
         assert!(
-            t.validate(&Value::String("vpc-1a2b3c4d".to_string()))
-                .is_ok()
+            t.validate(&Value::Concrete(ConcreteValue::String(
+                "vpc-1a2b3c4d".to_string()
+            )))
+            .is_ok()
         );
-        assert!(t.validate(&Value::String("vpc".to_string())).is_err());
-        assert!(t.validate(&Value::Int(42)).is_err());
+        assert!(
+            t.validate(&Value::Concrete(ConcreteValue::String("vpc".to_string())))
+                .is_err()
+        );
+        assert!(
+            t.validate(&Value::Concrete(ConcreteValue::Int(42)))
+                .is_err()
+        );
         assert!(
             t.validate(&Value::resource_ref(
                 "my_vpc".to_string(),
@@ -2221,13 +2236,15 @@ mod tests {
     fn validate_vpc_cidr_block_association_id_valid() {
         let t = vpc_cidr_block_association_id();
         assert!(
-            t.validate(&Value::String("vpc-cidr-assoc-12345678".to_string()))
-                .is_ok()
+            t.validate(&Value::Concrete(ConcreteValue::String(
+                "vpc-cidr-assoc-12345678".to_string()
+            )))
+            .is_ok()
         );
         assert!(
-            t.validate(&Value::String(
+            t.validate(&Value::Concrete(ConcreteValue::String(
                 "vpc-cidr-assoc-0123456789abcdef0".to_string()
-            ))
+            )))
             .is_ok()
         );
     }
@@ -2236,22 +2253,33 @@ mod tests {
     fn validate_vpc_cidr_block_association_id_invalid() {
         let t = vpc_cidr_block_association_id();
         assert!(
-            t.validate(&Value::String("vpc-12345678".to_string()))
-                .is_err()
+            t.validate(&Value::Concrete(ConcreteValue::String(
+                "vpc-12345678".to_string()
+            )))
+            .is_err()
         );
-        assert!(t.validate(&Value::String("invalid".to_string())).is_err());
+        assert!(
+            t.validate(&Value::Concrete(ConcreteValue::String(
+                "invalid".to_string()
+            )))
+            .is_err()
+        );
     }
 
     #[test]
     fn validate_tgw_route_table_id_valid() {
         let t = tgw_route_table_id();
         assert!(
-            t.validate(&Value::String("tgw-rtb-12345678".to_string()))
-                .is_ok()
+            t.validate(&Value::Concrete(ConcreteValue::String(
+                "tgw-rtb-12345678".to_string()
+            )))
+            .is_ok()
         );
         assert!(
-            t.validate(&Value::String("tgw-rtb-0123456789abcdef0".to_string()))
-                .is_ok()
+            t.validate(&Value::Concrete(ConcreteValue::String(
+                "tgw-rtb-0123456789abcdef0".to_string()
+            )))
+            .is_ok()
         );
     }
 
@@ -2260,15 +2288,24 @@ mod tests {
         let t = tgw_route_table_id();
         // Regular route table ID should fail
         assert!(
-            t.validate(&Value::String("rtb-12345678".to_string()))
-                .is_err()
+            t.validate(&Value::Concrete(ConcreteValue::String(
+                "rtb-12345678".to_string()
+            )))
+            .is_err()
         );
         // Transit gateway ID should fail
         assert!(
-            t.validate(&Value::String("tgw-12345678".to_string()))
-                .is_err()
+            t.validate(&Value::Concrete(ConcreteValue::String(
+                "tgw-12345678".to_string()
+            )))
+            .is_err()
         );
-        assert!(t.validate(&Value::String("invalid".to_string())).is_err());
+        assert!(
+            t.validate(&Value::Concrete(ConcreteValue::String(
+                "invalid".to_string()
+            )))
+            .is_err()
+        );
     }
 
     // Availability zone tests
@@ -2336,12 +2373,22 @@ mod tests {
     #[test]
     fn validate_availability_zone_id_type_with_value() {
         let t = availability_zone_id();
-        assert!(t.validate(&Value::String("use1-az1".to_string())).is_ok());
         assert!(
-            t.validate(&Value::String("us-east-1a".to_string()))
+            t.validate(&Value::Concrete(ConcreteValue::String(
+                "use1-az1".to_string()
+            )))
+            .is_ok()
+        );
+        assert!(
+            t.validate(&Value::Concrete(ConcreteValue::String(
+                "us-east-1a".to_string()
+            )))
+            .is_err()
+        );
+        assert!(
+            t.validate(&Value::Concrete(ConcreteValue::Int(42)))
                 .is_err()
         );
-        assert!(t.validate(&Value::Int(42)).is_err());
         assert!(
             t.validate(&Value::resource_ref(
                 "subnet".to_string(),
@@ -2581,7 +2628,7 @@ mod tests {
 
     #[test]
     fn validate_iam_policy_document_basic() {
-        let doc = Value::Map(
+        let doc = Value::Concrete(ConcreteValue::Map(
             vec![
                 (
                     "version".to_string(),
@@ -2605,26 +2652,26 @@ mod tests {
             ]
             .into_iter()
             .collect(),
-        );
+        ));
         assert!(validate_iam_policy_document(&doc).is_ok());
     }
 
     #[test]
     fn validate_iam_policy_document_invalid_version() {
-        let doc = Value::Map(
+        let doc = Value::Concrete(ConcreteValue::Map(
             vec![(
                 "version".to_string(),
                 Value::String("2020-01-01".to_string()),
             )]
             .into_iter()
             .collect(),
-        );
+        ));
         assert!(validate_iam_policy_document(&doc).is_err());
     }
 
     #[test]
     fn validate_iam_policy_document_invalid_effect() {
-        let doc = Value::Map(
+        let doc = Value::Concrete(ConcreteValue::Map(
             vec![(
                 "statement".to_string(),
                 Value::List(vec![Value::Map(
@@ -2635,14 +2682,14 @@ mod tests {
             )]
             .into_iter()
             .collect(),
-        );
+        ));
         assert!(validate_iam_policy_document(&doc).is_err());
     }
 
     #[test]
     fn iam_policy_document_type_validates() {
         let t = iam_policy_document();
-        let valid_doc = Value::Map(
+        let valid_doc = Value::Concrete(ConcreteValue::Map(
             vec![
                 (
                     "version".to_string(),
@@ -2663,7 +2710,7 @@ mod tests {
             ]
             .into_iter()
             .collect(),
-        );
+        ));
         assert!(t.validate(&valid_doc).is_ok());
     }
 
@@ -2671,7 +2718,7 @@ mod tests {
     fn iam_policy_document_principal_map_validates() {
         let t = iam_policy_document();
         // principal as a map: { service = "ec2.amazonaws.com" }
-        let doc_with_principal_map = Value::Map(
+        let doc_with_principal_map = Value::Concrete(ConcreteValue::Map(
             vec![
                 (
                     "version".to_string(),
@@ -2705,7 +2752,7 @@ mod tests {
             ]
             .into_iter()
             .collect(),
-        );
+        ));
         assert!(
             t.validate(&doc_with_principal_map).is_ok(),
             "principal as map (struct) should be valid: {:?}",
@@ -2717,7 +2764,7 @@ mod tests {
     fn iam_policy_document_principal_string_validates() {
         let t = iam_policy_document();
         // principal as a string: "*"
-        let doc_with_principal_string = Value::Map(
+        let doc_with_principal_string = Value::Concrete(ConcreteValue::Map(
             vec![
                 (
                     "version".to_string(),
@@ -2741,7 +2788,7 @@ mod tests {
             ]
             .into_iter()
             .collect(),
-        );
+        ));
         assert!(
             t.validate(&doc_with_principal_string).is_ok(),
             "principal as string should be valid: {:?}",
@@ -2841,14 +2888,14 @@ mod tests {
         let mut attrs = std::collections::HashMap::new();
         attrs.insert(
             "tags".to_string(),
-            Value::Map(
+            Value::Concrete(ConcreteValue::Map(
                 [
                     ("key".to_string(), Value::String("Project".to_string())),
                     ("value".to_string(), Value::String("carina".to_string())),
                 ]
                 .into_iter()
                 .collect(),
-            ),
+            )),
         );
         assert!(validate_tags_map(&attrs).is_err());
     }
@@ -2858,14 +2905,14 @@ mod tests {
         let mut attrs = std::collections::HashMap::new();
         attrs.insert(
             "tags".to_string(),
-            Value::Map(
+            Value::Concrete(ConcreteValue::Map(
                 [
                     ("Key".to_string(), Value::String("Project".to_string())),
                     ("Value".to_string(), Value::String("carina".to_string())),
                 ]
                 .into_iter()
                 .collect(),
-            ),
+            )),
         );
         assert!(validate_tags_map(&attrs).is_err());
     }
@@ -2875,14 +2922,14 @@ mod tests {
         let mut attrs = std::collections::HashMap::new();
         attrs.insert(
             "tags".to_string(),
-            Value::Map(
+            Value::Concrete(ConcreteValue::Map(
                 [
                     ("Project".to_string(), Value::String("carina".to_string())),
                     ("ManagedBy".to_string(), Value::String("carina".to_string())),
                 ]
                 .into_iter()
                 .collect(),
-            ),
+            )),
         );
         assert!(validate_tags_map(&attrs).is_ok());
     }
@@ -2962,7 +3009,7 @@ mod tests {
 
     #[test]
     fn validate_condition_operators_accepts_valid() {
-        let doc = Value::Map(
+        let doc = Value::Concrete(ConcreteValue::Map(
             vec![(
                 "statement".to_string(),
                 Value::List(vec![Value::Map(
@@ -2990,13 +3037,13 @@ mod tests {
             )]
             .into_iter()
             .collect(),
-        );
+        ));
         assert!(validate_condition_operators(&doc).is_ok());
     }
 
     #[test]
     fn validate_condition_operators_rejects_pascal_case() {
-        let doc = Value::Map(
+        let doc = Value::Concrete(ConcreteValue::Map(
             vec![(
                 "statement".to_string(),
                 Value::List(vec![Value::Map(
@@ -3017,7 +3064,7 @@ mod tests {
             )]
             .into_iter()
             .collect(),
-        );
+        ));
         let err = validate_condition_operators(&doc).unwrap_err();
         assert!(
             err.contains("StringEquals"),
@@ -3027,7 +3074,7 @@ mod tests {
 
     #[test]
     fn validate_condition_operators_rejects_unknown() {
-        let doc = Value::Map(
+        let doc = Value::Concrete(ConcreteValue::Map(
             vec![(
                 "statement".to_string(),
                 Value::List(vec![Value::Map(
@@ -3045,13 +3092,13 @@ mod tests {
             )]
             .into_iter()
             .collect(),
-        );
+        ));
         assert!(validate_condition_operators(&doc).is_err());
     }
 
     #[test]
     fn validate_condition_operators_accepts_if_exists() {
-        let doc = Value::Map(
+        let doc = Value::Concrete(ConcreteValue::Map(
             vec![(
                 "statement".to_string(),
                 Value::List(vec![Value::Map(
@@ -3072,7 +3119,7 @@ mod tests {
             )]
             .into_iter()
             .collect(),
-        );
+        ));
         assert!(validate_condition_operators(&doc).is_ok());
     }
 }

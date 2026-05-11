@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use carina_core::provider::{ProviderError, ProviderResult};
-use carina_core::resource::{Resource, ResourceId, State, Value};
+use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
 
 use crate::AwsProvider;
 use crate::helpers::{require_string_attr, sdk_error_message};
@@ -46,7 +46,7 @@ impl AwsProvider {
                     // route_table_id is not in the Route struct, add from parameter
                     attributes.insert(
                         "route_table_id".to_string(),
-                        Value::String(route_table_id.to_string()),
+                        Value::Concrete(ConcreteValue::String(route_table_id.to_string())),
                     );
 
                     // Route identifier is route_table_id|destination_cidr_block
@@ -71,12 +71,15 @@ impl AwsProvider {
             .destination_cidr_block(&destination_cidr);
 
         // Add gateway_id if specified
-        if let Some(Value::String(gw_id)) = resource.get_attr("gateway_id") {
+        if let Some(Value::Concrete(ConcreteValue::String(gw_id))) = resource.get_attr("gateway_id")
+        {
             req = req.gateway_id(gw_id);
         }
 
         // Add nat_gateway_id if specified
-        if let Some(Value::String(nat_gw_id)) = resource.get_attr("nat_gateway_id") {
+        if let Some(Value::Concrete(ConcreteValue::String(nat_gw_id))) =
+            resource.get_attr("nat_gateway_id")
+        {
             req = req.nat_gateway_id(nat_gw_id);
         }
 
@@ -101,7 +104,7 @@ impl AwsProvider {
         to: Resource,
     ) -> ProviderResult<State> {
         let route_table_id = match to.get_attr("route_table_id") {
-            Some(Value::String(s)) => s.clone(),
+            Some(Value::Concrete(ConcreteValue::String(s))) => s.clone(),
             _ => {
                 return Err(ProviderError::invalid_input("route_table_id is required")
                     .for_resource(id.clone()));
@@ -109,7 +112,7 @@ impl AwsProvider {
         };
 
         let destination_cidr = match to.get_attr("destination_cidr_block") {
-            Some(Value::String(s)) => s.clone(),
+            Some(Value::Concrete(ConcreteValue::String(s))) => s.clone(),
             _ => {
                 return Err(
                     ProviderError::invalid_input("destination_cidr_block is required")
@@ -125,12 +128,14 @@ impl AwsProvider {
             .destination_cidr_block(&destination_cidr);
 
         // Add gateway_id if specified
-        if let Some(Value::String(gw_id)) = to.get_attr("gateway_id") {
+        if let Some(Value::Concrete(ConcreteValue::String(gw_id))) = to.get_attr("gateway_id") {
             req = req.gateway_id(gw_id);
         }
 
         // Add nat_gateway_id if specified
-        if let Some(Value::String(nat_gw_id)) = to.get_attr("nat_gateway_id") {
+        if let Some(Value::Concrete(ConcreteValue::String(nat_gw_id))) =
+            to.get_attr("nat_gateway_id")
+        {
             req = req.nat_gateway_id(nat_gw_id);
         }
 

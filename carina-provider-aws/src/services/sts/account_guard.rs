@@ -6,7 +6,7 @@
 //! initialization (before any read/plan/apply mutation) and fails fast
 //! when the credentials in use point at the wrong AWS account.
 
-use carina_core::resource::Value;
+use carina_core::resource::{ConcreteValue, Value};
 
 use crate::AwsProvider;
 use crate::helpers::sdk_error_message;
@@ -48,10 +48,10 @@ pub fn check_account_id(
 /// treats as "list not configured".
 pub fn extract_string_list(value: Option<&Value>) -> Vec<String> {
     match value {
-        Some(Value::List(items)) => items
+        Some(Value::Concrete(ConcreteValue::List(items))) => items
             .iter()
             .filter_map(|v| match v {
-                Value::String(s) => Some(s.clone()),
+                Value::Concrete(ConcreteValue::String(s)) => Some(s.clone()),
                 _ => None,
             })
             .collect(),
@@ -174,15 +174,18 @@ mod tests {
 
     #[test]
     fn extract_string_list_handles_non_list() {
-        assert!(extract_string_list(Some(&Value::String("oops".into()))).is_empty());
+        assert!(
+            extract_string_list(Some(&Value::Concrete(ConcreteValue::String("oops".into()))))
+                .is_empty()
+        );
     }
 
     #[test]
     fn extract_string_list_extracts_strings_in_order() {
-        let v = Value::List(vec![
+        let v = Value::Concrete(ConcreteValue::List(vec![
             Value::String("aaa".into()),
             Value::String("bbb".into()),
-        ]);
+        ]));
         assert_eq!(
             extract_string_list(Some(&v)),
             vec!["aaa".to_string(), "bbb".to_string()]
@@ -193,11 +196,11 @@ mod tests {
     fn extract_string_list_drops_non_string_entries() {
         // Type validation happens host-side via
         // `provider_config_attribute_types`; this is just the safety net.
-        let v = Value::List(vec![
+        let v = Value::Concrete(ConcreteValue::List(vec![
             Value::String("aaa".into()),
             Value::Int(42),
             Value::String("bbb".into()),
-        ]);
+        ]));
         assert_eq!(
             extract_string_list(Some(&v)),
             vec!["aaa".to_string(), "bbb".to_string()]

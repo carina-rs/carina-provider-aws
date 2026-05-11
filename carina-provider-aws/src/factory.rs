@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use indexmap::IndexMap;
 
 use carina_core::provider::{BoxFuture, ProviderFactory, ProviderNormalizer};
-use carina_core::resource::Value;
+use carina_core::resource::{ConcreteValue, Value};
 
 use crate::AwsProvider;
 use crate::normalizer::AwsNormalizer;
@@ -80,7 +80,7 @@ impl ProviderFactory for AwsProviderFactory {
     }
 
     fn extract_region(&self, attributes: &IndexMap<String, Value>) -> String {
-        if let Some(Value::String(region)) = attributes.get("region") {
+        if let Some(Value::Concrete(ConcreteValue::String(region))) = attributes.get("region") {
             return carina_core::utils::convert_region_value(region);
         }
         "ap-northeast-1".to_string()

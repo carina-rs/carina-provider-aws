@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use carina_core::provider::{ProviderError, ProviderResult};
-use carina_core::resource::{Resource, ResourceId, State, Value};
+use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
 
 use crate::AwsProvider;
 use crate::helpers::{
@@ -69,10 +69,10 @@ impl AwsProvider {
         let vpc_id = require_string_attr(&resource, "vpc_id")?;
 
         let subnet_ids = match resource.get_attr("subnet_ids") {
-            Some(Value::List(ids)) => {
+            Some(Value::Concrete(ConcreteValue::List(ids))) => {
                 let mut result = Vec::new();
                 for id_val in ids {
-                    if let Value::String(s) = id_val {
+                    if let Value::Concrete(ConcreteValue::String(s)) = id_val {
                         result.push(s.clone());
                     }
                 }

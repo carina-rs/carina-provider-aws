@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use aws_sdk_s3::types::{CorsConfiguration, CorsRule};
 use carina_core::provider::{ProviderError, ProviderResult};
-use carina_core::resource::{Resource, ResourceId, State, Value};
+use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
 use indexmap::IndexMap;
 
 use crate::AwsProvider;
@@ -24,9 +24,15 @@ impl AwsProvider {
         match result {
             Ok(output) => {
                 let mut attributes = HashMap::new();
-                attributes.insert("bucket".to_string(), Value::String(bucket.to_string()));
+                attributes.insert(
+                    "bucket".to_string(),
+                    Value::Concrete(ConcreteValue::String(bucket.to_string())),
+                );
                 let rules: Vec<Value> = output.cors_rules().iter().map(rule_to_value).collect();
-                attributes.insert("cors_rules".to_string(), Value::List(rules));
+                attributes.insert(
+                    "cors_rules".to_string(),
+                    Value::Concrete(ConcreteValue::List(rules)),
+                );
                 Ok(State::existing(id.clone(), attributes).with_identifier(bucket.to_string()))
             }
             Err(e) => {
@@ -70,7 +76,7 @@ impl AwsProvider {
         resource: &Resource,
     ) -> ProviderResult<State> {
         let rules = match resource.get_attr("cors_rules") {
-            Some(Value::List(items)) => items,
+            Some(Value::Concrete(ConcreteValue::List(items))) => items,
             _ => {
                 return Err(ProviderError::invalid_input(
                     "cors_rules is required and must be a list",
@@ -137,7 +143,7 @@ impl AwsProvider {
 }
 
 fn build_rule(id: &ResourceId, rule_value: &Value) -> ProviderResult<CorsRule> {
-    let Value::Map(map) = rule_value else {
+    let Value::Concrete(ConcreteValue::Map(map)) = rule_value else {
         return Err(
             ProviderError::invalid_input("each cors rule must be a map").for_resource(id.clone())
         );
@@ -150,17 +156,17 @@ fn build_rule(id: &ResourceId, rule_value: &Value) -> ProviderResult<CorsRule> {
         .set_allowed_methods(Some(allowed_methods))
         .set_allowed_origins(Some(allowed_origins));
 
-    if let Some(Value::String(s)) = map.get("id") {
+    if let Some(Value::Concrete(ConcreteValue::String(s))) = map.get("id") {
         builder = builder.id(s);
     }
-    if let Some(Value::List(items)) = map.get("allowed_headers") {
+    if let Some(Value::Concrete(ConcreteValue::List(items))) = map.get("allowed_headers") {
         builder =
             builder.set_allowed_headers(Some(strings_from_list(id, items, "allowed_headers")?));
     }
-    if let Some(Value::List(items)) = map.get("expose_headers") {
+    if let Some(Value::Concrete(ConcreteValue::List(items))) = map.get("expose_headers") {
         builder = builder.set_expose_headers(Some(strings_from_list(id, items, "expose_headers")?));
     }
-    if let Some(Value::Int(n)) = map.get("max_age_seconds") {
+    if let Some(Value::Concrete(ConcreteValue::Int(n))) = map.get("max_age_seconds") {
         builder = builder.max_age_seconds(*n as i32);
     }
 
@@ -176,7 +182,7 @@ fn require_string_list(
     field: &str,
 ) -> ProviderResult<Vec<String>> {
     match map.get(field) {
-        Some(Value::List(items)) => strings_from_list(id, items, field),
+        Some(Value::Concrete(ConcreteValue::List(items))) => strings_from_list(id, items, field),
         _ => Err(
             ProviderError::invalid_input(format!("cors_rule.{field} is required"))
                 .for_resource(id.clone()),
@@ -188,7 +194,7 @@ fn strings_from_list(id: &ResourceId, items: &[Value], field: &str) -> ProviderR
     items
         .iter()
         .map(|v| match v {
-            Value::String(s) => Ok(s.clone()),
+            Value::Concrete(ConcreteValue::String(s)) => Ok(s.clone()),
             _ => Err(ProviderError::invalid_input(format!(
                 "cors_rule.{field} must be a list of strings"
             ))
@@ -202,38 +208,56 @@ fn rule_to_value(rule: &CorsRule) -> Value {
     if let Some(s) = rule.id()
         && !s.is_empty()
     {
-        m.insert("id".to_string(), Value::String(s.to_string()));
+        m.insert(
+            "id".to_string(),
+            Value::Concrete(ConcreteValue::String(s.to_string())),
+        );
     }
     let methods: Vec<Value> = rule
         .allowed_methods()
         .iter()
-        .map(|s| Value::String(s.clone()))
+        .map(|s| Value::Concrete(ConcreteValue::String(s.clone())))
         .collect();
-    m.insert("allowed_methods".to_string(), Value::List(methods));
+    m.insert(
+        "allowed_methods".to_string(),
+        Value::Concrete(ConcreteValue::List(methods)),
+    );
     let origins: Vec<Value> = rule
         .allowed_origins()
         .iter()
-        .map(|s| Value::String(s.clone()))
+        .map(|s| Value::Concrete(ConcreteValue::String(s.clone())))
         .collect();
-    m.insert("allowed_origins".to_string(), Value::List(origins));
+    m.insert(
+        "allowed_origins".to_string(),
+        Value::Concrete(ConcreteValue::List(origins)),
+    );
     let headers: Vec<Value> = rule
         .allowed_headers()
         .iter()
-        .map(|s| Value::String(s.clone()))
+        .map(|s| Value::Concrete(ConcreteValue::String(s.clone())))
         .collect();
     if !headers.is_empty() {
-        m.insert("allowed_headers".to_string(), Value::List(headers));
+        m.insert(
+            "allowed_headers".to_string(),
+            Value::Concrete(ConcreteValue::List(headers)),
+        );
     }
     let expose: Vec<Value> = rule
         .expose_headers()
         .iter()
-        .map(|s| Value::String(s.clone()))
+        .map(|s| Value::Concrete(ConcreteValue::String(s.clone())))
         .collect();
     if !expose.is_empty() {
-        m.insert("expose_headers".to_string(), Value::List(expose));
+        m.insert(
+            "expose_headers".to_string(),
+            Value::Concrete(ConcreteValue::List(expose)),
+        );
     }
     if let Some(n) = rule.max_age_seconds() {
-        m.insert("max_age_seconds".to_string(), Value::Int(n as i64));
+        m.insert(
+            "max_age_seconds".to_string(),
+            Value::Concrete(ConcreteValue::Int(n as i64)),
+        );
     }
-    Value::Map(m)
+    Value::Concrete(ConcreteValue::Map(m))
 }

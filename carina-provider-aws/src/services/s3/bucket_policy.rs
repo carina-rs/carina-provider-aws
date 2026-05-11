@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use carina_core::provider::{ProviderError, ProviderResult};
-use carina_core::resource::{Resource, ResourceId, State, Value};
+use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
 
 use crate::AwsProvider;
 use crate::helpers::{require_string_attr, sdk_error_message};
@@ -32,7 +32,10 @@ impl AwsProvider {
         match result {
             Ok(output) => {
                 let mut attributes = HashMap::new();
-                attributes.insert("bucket".to_string(), Value::String(bucket.to_string()));
+                attributes.insert(
+                    "bucket".to_string(),
+                    Value::Concrete(ConcreteValue::String(bucket.to_string())),
+                );
 
                 if let Some(policy_json) = output.policy() {
                     let policy_value = iam_policy_json_to_value(policy_json).map_err(|e| {

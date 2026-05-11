@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use carina_core::provider::{ProviderError, ProviderResult};
-use carina_core::resource::{Resource, ResourceId, State, Value};
+use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
 
 use crate::AwsProvider;
 use crate::helpers::sdk_error_message;
@@ -49,7 +49,10 @@ impl AwsProvider {
             if let Some(attachment) = igw.attachments().first()
                 && let Some(vpc_id) = attachment.vpc_id()
             {
-                attributes.insert("vpc_id".to_string(), Value::String(vpc_id.to_string()));
+                attributes.insert(
+                    "vpc_id".to_string(),
+                    Value::Concrete(ConcreteValue::String(vpc_id.to_string())),
+                );
             }
 
             // Extract user-defined tags
@@ -97,7 +100,7 @@ impl AwsProvider {
             .await?;
 
         // Attach to VPC if specified
-        if let Some(Value::String(vpc_id)) = resource.get_attr("vpc_id") {
+        if let Some(Value::Concrete(ConcreteValue::String(vpc_id))) = resource.get_attr("vpc_id") {
             self.ec2_client
                 .attach_internet_gateway()
                 .internet_gateway_id(igw_id)

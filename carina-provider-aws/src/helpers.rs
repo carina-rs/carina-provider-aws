@@ -11,14 +11,14 @@ use aws_smithy_types::error::display::DisplayErrorContext;
 use tokio::time::sleep;
 
 use carina_core::provider::{PatchOpKind, ProviderError, ProviderResult, UpdatePatch};
-use carina_core::resource::{Resource, ResourceId, State, Value};
+use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
 
 /// Extract a required `String` attribute from a resource.
 ///
 /// Returns the string value or a `ProviderError` with `"{attr_name} is required"`.
 pub fn require_string_attr(resource: &Resource, attr_name: &str) -> ProviderResult<String> {
     match resource.get_attr(attr_name) {
-        Some(Value::String(s)) => Ok(s.clone()),
+        Some(Value::Concrete(ConcreteValue::String(s))) => Ok(s.clone()),
         _ => Err(
             ProviderError::invalid_input(format!("{} is required", attr_name))
                 .for_resource(resource.id.clone()),
@@ -44,7 +44,7 @@ pub fn build_tag_specification(
     resource: &Resource,
     resource_type: ResourceType,
 ) -> Option<TagSpecification> {
-    if let Some(Value::Map(tags)) = resource.get_attr("tags") {
+    if let Some(Value::Concrete(ConcreteValue::Map(tags))) = resource.get_attr("tags") {
         Some(build_tag_specification_from_map(tags, resource_type))
     } else {
         None
@@ -58,7 +58,7 @@ fn build_tag_specification_from_map(
 ) -> TagSpecification {
     let mut tag_spec = TagSpecification::builder().resource_type(resource_type);
     for (key, val) in tags {
-        if let Value::String(v) = val {
+        if let Value::Concrete(ConcreteValue::String(v)) = val {
             tag_spec = tag_spec.tags(Tag::builder().key(key).value(v).build());
         }
     }
@@ -226,9 +226,10 @@ mod tests {
     fn make_test_resource(attrs: Vec<(&str, &str)>) -> Resource {
         let mut resource = Resource::new("route53.RecordSet", "test");
         for (k, v) in attrs {
-            resource
-                .attributes
-                .insert(k.to_string(), Value::String(v.to_string()));
+            resource.attributes.insert(
+                k.to_string(),
+                Value::Concrete(ConcreteValue::String(v.to_string())),
+            );
         }
         resource
     }
@@ -241,14 +242,17 @@ mod tests {
         // from-state has two attrs; patch adds one, replaces one, removes one.
         let id = ResourceId::with_provider("aws", "ec2.Vpc", "test");
         let mut from_attrs: HashMap<String, Value> = HashMap::new();
-        from_attrs.insert("cidr_block".into(), Value::String("10.0.0.0/16".into()));
+        from_attrs.insert(
+            "cidr_block".into(),
+            Value::Concrete(ConcreteValue::String("10.0.0.0/16".into())),
+        );
         from_attrs.insert(
             "tags".into(),
-            Value::Map(
+            Value::Concrete(ConcreteValue::Map(
                 [("Name".to_string(), Value::String("old".into()))]
                     .into_iter()
                     .collect(),
-            ),
+            )),
         );
         let from = State::existing(id, from_attrs);
 
@@ -258,17 +262,17 @@ mod tests {
                 PatchOp {
                     kind: PatchOpKind::Add,
                     key: "instance_tenancy".into(),
-                    value: Some(Value::String("default".into())),
+                    value: Some(Value::Concrete(ConcreteValue::String("default".into()))),
                 },
                 // Replace the existing tags
                 PatchOp {
                     kind: PatchOpKind::Replace,
                     key: "tags".into(),
-                    value: Some(Value::Map(
+                    value: Some(Value::Concrete(ConcreteValue::Map(
                         [("Name".to_string(), Value::String("new".into()))]
                             .into_iter()
                             .collect(),
-                    )),
+                    ))),
                 },
                 // Remove cidr_block
                 PatchOp {
@@ -287,12 +291,15 @@ mod tests {
         );
         assert_eq!(
             to.attributes.get("instance_tenancy"),
-            Some(&Value::String("default".into())),
+            Some(&Value::Concrete(ConcreteValue::String("default".into()))),
             "Add op should insert the new value"
         );
         match to.attributes.get("tags") {
-            Some(Value::Map(m)) => {
-                assert_eq!(m.get("Name"), Some(&Value::String("new".into())));
+            Some(Value::Concrete(ConcreteValue::Map(m))) => {
+                assert_eq!(
+                    m.get("Name"),
+                    Some(&Value::Concrete(ConcreteValue::String("new".into())))
+                );
             }
             other => panic!("expected tags map, got {:?}", other),
         }

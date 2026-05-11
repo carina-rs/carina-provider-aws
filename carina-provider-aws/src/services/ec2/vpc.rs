@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use carina_core::provider::{ProviderError, ProviderResult};
-use carina_core::resource::{Resource, ResourceId, State, Value};
+use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
 use carina_core::utils::extract_enum_value;
 
 use crate::AwsProvider;
@@ -57,7 +57,7 @@ impl AwsProvider {
                 {
                     attributes.insert(
                         "enable_dns_support".to_string(),
-                        Value::Bool(attr.value.unwrap_or(false)),
+                        Value::Concrete(ConcreteValue::Bool(attr.value.unwrap_or(false))),
                     );
                 }
 
@@ -72,7 +72,7 @@ impl AwsProvider {
                 {
                     attributes.insert(
                         "enable_dns_hostnames".to_string(),
-                        Value::Bool(attr.value.unwrap_or(false)),
+                        Value::Concrete(ConcreteValue::Bool(attr.value.unwrap_or(false))),
                     );
                 }
             }
@@ -96,7 +96,9 @@ impl AwsProvider {
         let mut create_vpc_builder = self.ec2_client.create_vpc().cidr_block(&cidr_block);
 
         // Handle instance_tenancy if specified
-        if let Some(Value::String(tenancy)) = resource.get_attr("instance_tenancy") {
+        if let Some(Value::Concrete(ConcreteValue::String(tenancy))) =
+            resource.get_attr("instance_tenancy")
+        {
             // Convert DSL format (aws.vpc.InstanceTenancy.dedicated) to API value (dedicated)
             let tenancy_value = extract_enum_value(tenancy);
 
@@ -131,7 +133,9 @@ impl AwsProvider {
             .await?;
 
         // Configure DNS support
-        if let Some(Value::Bool(enabled)) = resource.get_attr("enable_dns_support") {
+        if let Some(Value::Concrete(ConcreteValue::Bool(enabled))) =
+            resource.get_attr("enable_dns_support")
+        {
             self.ec2_client
                 .modify_vpc_attribute()
                 .vpc_id(vpc_id)
@@ -149,7 +153,9 @@ impl AwsProvider {
         }
 
         // Configure DNS hostnames
-        if let Some(Value::Bool(enabled)) = resource.get_attr("enable_dns_hostnames") {
+        if let Some(Value::Concrete(ConcreteValue::Bool(enabled))) =
+            resource.get_attr("enable_dns_hostnames")
+        {
             self.ec2_client
                 .modify_vpc_attribute()
                 .vpc_id(vpc_id)
@@ -182,7 +188,9 @@ impl AwsProvider {
         let vpc_id = identifier.to_string();
 
         // Update DNS support
-        if let Some(Value::Bool(enabled)) = to.get_attr("enable_dns_support") {
+        if let Some(Value::Concrete(ConcreteValue::Bool(enabled))) =
+            to.get_attr("enable_dns_support")
+        {
             self.ec2_client
                 .modify_vpc_attribute()
                 .vpc_id(&vpc_id)
@@ -200,7 +208,9 @@ impl AwsProvider {
         }
 
         // Update DNS hostnames
-        if let Some(Value::Bool(enabled)) = to.get_attr("enable_dns_hostnames") {
+        if let Some(Value::Concrete(ConcreteValue::Bool(enabled))) =
+            to.get_attr("enable_dns_hostnames")
+        {
             self.ec2_client
                 .modify_vpc_attribute()
                 .vpc_id(&vpc_id)

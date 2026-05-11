@@ -4,7 +4,7 @@ use indexmap::IndexMap;
 use std::collections::HashMap;
 
 use carina_core::provider::{ProviderError, ProviderResult};
-use carina_core::resource::{ResourceId, Value};
+use carina_core::resource::{ConcreteValue, ResourceId, Value};
 
 use crate::AwsProvider;
 use crate::helpers::sdk_error_message;
@@ -15,22 +15,25 @@ impl AwsProvider {
         let mut tag_map: IndexMap<String, Value> = IndexMap::new();
         for tag in tags {
             if let (Some(key), Some(value)) = (tag.key(), tag.value()) {
-                tag_map.insert(key.to_string(), Value::String(value.to_string()));
+                tag_map.insert(
+                    key.to_string(),
+                    Value::Concrete(ConcreteValue::String(value.to_string())),
+                );
             }
         }
         if tag_map.is_empty() {
             None
         } else {
-            Some(Value::Map(tag_map))
+            Some(Value::Concrete(ConcreteValue::Map(tag_map)))
         }
     }
 
     /// Build EC2 Tag list from Value::Map
     pub(crate) fn value_to_ec2_tags(value: &Value) -> Vec<aws_sdk_ec2::types::Tag> {
         let mut tags = Vec::new();
-        if let Value::Map(map) = value {
+        if let Value::Concrete(ConcreteValue::Map(map)) = value {
             for (key, val) in map {
-                if let Value::String(v) = val {
+                if let Value::Concrete(ConcreteValue::String(v)) = val {
                     tags.push(aws_sdk_ec2::types::Tag::builder().key(key).value(v).build());
                 }
             }
@@ -51,18 +54,22 @@ impl AwsProvider {
     ) -> ProviderResult<()> {
         // Delete tags that were removed (present in from but not in to)
         if let Some(from_attrs) = from_attributes {
-            let old_keys: std::collections::HashSet<&String> =
-                if let Some(Value::Map(old_map)) = from_attrs.get("tags") {
-                    old_map.keys().collect()
-                } else {
-                    std::collections::HashSet::new()
-                };
-            let new_keys: std::collections::HashSet<&String> =
-                if let Some(Value::Map(new_map)) = attributes.get("tags") {
-                    new_map.keys().collect()
-                } else {
-                    std::collections::HashSet::new()
-                };
+            let old_keys: std::collections::HashSet<&String> = if let Some(Value::Concrete(
+                ConcreteValue::Map(old_map),
+            )) = from_attrs.get("tags")
+            {
+                old_map.keys().collect()
+            } else {
+                std::collections::HashSet::new()
+            };
+            let new_keys: std::collections::HashSet<&String> = if let Some(Value::Concrete(
+                ConcreteValue::Map(new_map),
+            )) = attributes.get("tags")
+            {
+                new_map.keys().collect()
+            } else {
+                std::collections::HashSet::new()
+            };
             let removed_keys: Vec<&String> = old_keys.difference(&new_keys).copied().collect();
             if !removed_keys.is_empty() {
                 let mut req = self.ec2_client.delete_tags().resources(ec2_resource_id);
@@ -117,10 +124,12 @@ mod tests {
         ];
         let result = AwsProvider::ec2_tags_to_value(&tags);
         assert!(result.is_some());
-        if let Some(Value::Map(map)) = result {
+        if let Some(Value::Concrete(ConcreteValue::Map(map))) = result {
             assert_eq!(
                 map.get("Name"),
-                Some(&Value::String("my-resource".to_string()))
+                Some(&Value::Concrete(ConcreteValue::String(
+                    "my-resource".to_string()
+                )))
             );
         } else {
             panic!("Expected Value::Map");
@@ -140,12 +149,17 @@ mod tests {
                 .build(),
         ];
         let result = AwsProvider::ec2_tags_to_value(&tags);
-        if let Some(Value::Map(map)) = result {
+        if let Some(Value::Concrete(ConcreteValue::Map(map))) = result {
             assert_eq!(map.len(), 2);
-            assert_eq!(map.get("Name"), Some(&Value::String("test".to_string())));
+            assert_eq!(
+                map.get("Name"),
+                Some(&Value::Concrete(ConcreteValue::String("test".to_string())))
+            );
             assert_eq!(
                 map.get("Environment"),
-                Some(&Value::String("production".to_string()))
+                Some(&Value::Concrete(ConcreteValue::String(
+                    "production".to_string()
+                )))
             );
         } else {
             panic!("Expected Value::Map with 2 entries");
@@ -163,10 +177,10 @@ mod tests {
 
     #[test]
     fn test_value_to_ec2_tags_from_map() {
-        let value = Value::Map(IndexMap::from([
+        let value = Value::Concrete(ConcreteValue::Map(IndexMap::from([
             ("Name".to_string(), Value::String("test".to_string())),
             ("Env".to_string(), Value::String("prod".to_string())),
-        ]));
+        ])));
         let tags = AwsProvider::value_to_ec2_tags(&value);
         assert_eq!(tags.len(), 2);
         // Check both tags exist (order not guaranteed from HashMap)
@@ -185,17 +199,17 @@ mod tests {
 
     #[test]
     fn test_value_to_ec2_tags_non_map_value() {
-        let value = Value::String("not a map".to_string());
+        let value = Value::Concrete(ConcreteValue::String("not a map".to_string()));
         let tags = AwsProvider::value_to_ec2_tags(&value);
         assert!(tags.is_empty());
     }
 
     #[test]
     fn test_value_to_ec2_tags_non_string_values_skipped() {
-        let value = Value::Map(IndexMap::from([
+        let value = Value::Concrete(ConcreteValue::Map(IndexMap::from([
             ("Name".to_string(), Value::String("test".to_string())),
             ("Count".to_string(), Value::Int(42)),
-        ]));
+        ])));
         let tags = AwsProvider::value_to_ec2_tags(&value);
         assert_eq!(tags.len(), 1);
         assert_eq!(tags[0].key(), Some("Name"));
@@ -204,7 +218,7 @@ mod tests {
 
     #[test]
     fn test_value_to_ec2_tags_empty_map() {
-        let value = Value::Map(IndexMap::new());
+        let value = Value::Concrete(ConcreteValue::Map(IndexMap::new()));
         let tags = AwsProvider::value_to_ec2_tags(&value);
         assert!(tags.is_empty());
     }

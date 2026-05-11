@@ -16,13 +16,13 @@ use aws_sdk_acm::types::{DomainValidationOption, ValidationMethod};
 use indexmap::IndexMap;
 
 use carina_core::provider::{ProviderError, ProviderResult};
-use carina_core::resource::{Resource, ResourceId, State, Value};
+use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
 
 use crate::AwsProvider;
 use crate::helpers::{require_string_attr, sdk_error_message};
 
 fn extract_string(value: &Value) -> Option<&str> {
-    if let Value::String(s) = value {
+    if let Value::Concrete(ConcreteValue::String(s)) = value {
         Some(s.as_str())
     } else {
         None
@@ -30,18 +30,18 @@ fn extract_string(value: &Value) -> Option<&str> {
 }
 
 fn extract_string_list(value: &Value) -> Vec<String> {
-    if let Value::List(items) = value {
+    if let Value::Concrete(ConcreteValue::List(items)) = value {
         items
             .iter()
             .filter_map(|v| {
-                if let Value::String(s) = v {
+                if let Value::Concrete(ConcreteValue::String(s)) = v {
                     Some(s.clone())
                 } else {
                     None
                 }
             })
             .collect()
-    } else if let Value::StringList(items) = value {
+    } else if let Value::Concrete(ConcreteValue::StringList(items)) = value {
         items.clone()
     } else {
         Vec::new()
@@ -92,9 +92,11 @@ impl AwsProvider {
         }
         // `domain_validation_options` (per-SAN validation domain
         // override) is parsed from a list of structs.
-        if let Some(Value::List(opts)) = resource.get_attr("domain_validation_options") {
+        if let Some(Value::Concrete(ConcreteValue::List(opts))) =
+            resource.get_attr("domain_validation_options")
+        {
             for entry in opts {
-                if let Value::Map(map) = entry {
+                if let Value::Concrete(ConcreteValue::Map(map)) = entry {
                     let domain = map.get("domain_name").and_then(extract_string);
                     let validation_domain = map.get("validation_domain").and_then(extract_string);
                     if let (Some(d), Some(vd)) = (domain, validation_domain) {
@@ -155,34 +157,48 @@ impl AwsProvider {
 
         let mut attributes: HashMap<String, Value> = HashMap::new();
         if let Some(v) = cert.domain_name() {
-            attributes.insert("domain_name".to_string(), Value::String(v.to_string()));
+            attributes.insert(
+                "domain_name".to_string(),
+                Value::Concrete(ConcreteValue::String(v.to_string())),
+            );
         }
         if let Some(v) = cert.certificate_arn() {
-            attributes.insert("arn".to_string(), Value::String(v.to_string()));
+            attributes.insert(
+                "arn".to_string(),
+                Value::Concrete(ConcreteValue::String(v.to_string())),
+            );
         }
         if let Some(v) = cert.status() {
-            attributes.insert("status".to_string(), Value::String(v.as_str().to_string()));
+            attributes.insert(
+                "status".to_string(),
+                Value::Concrete(ConcreteValue::String(v.as_str().to_string())),
+            );
         }
         if let Some(v) = cert.r#type() {
-            attributes.insert("type".to_string(), Value::String(v.as_str().to_string()));
+            attributes.insert(
+                "type".to_string(),
+                Value::Concrete(ConcreteValue::String(v.as_str().to_string())),
+            );
         }
         if let Some(v) = cert.key_algorithm() {
             attributes.insert(
                 "key_algorithm".to_string(),
-                Value::String(v.as_str().to_string()),
+                Value::Concrete(ConcreteValue::String(v.as_str().to_string())),
             );
         }
         if let Some(v) = cert.renewal_eligibility() {
             attributes.insert(
                 "renewal_eligibility".to_string(),
-                Value::String(v.as_str().to_string()),
+                Value::Concrete(ConcreteValue::String(v.as_str().to_string())),
             );
         }
         let sans = cert.subject_alternative_names();
         if !sans.is_empty() {
             attributes.insert(
                 "subject_alternative_names".to_string(),
-                Value::List(sans.iter().map(|s| Value::String(s.clone())).collect()),
+                Value::Concrete(ConcreteValue::List(
+                    sans.iter().map(|s| Value::String(s.clone())).collect(),
+                )),
             );
         }
         // domain_validation_options carries the DNS records the user
@@ -195,37 +211,40 @@ impl AwsProvider {
                 let mut m: IndexMap<String, Value> = IndexMap::new();
                 m.insert(
                     "domain_name".to_string(),
-                    Value::String(dv.domain_name().to_string()),
+                    Value::Concrete(ConcreteValue::String(dv.domain_name().to_string())),
                 );
                 if let Some(rr) = dv.resource_record() {
                     m.insert(
                         "resource_record_name".to_string(),
-                        Value::String(rr.name().to_string()),
+                        Value::Concrete(ConcreteValue::String(rr.name().to_string())),
                     );
                     m.insert(
                         "resource_record_type".to_string(),
-                        Value::String(rr.r#type().as_str().to_string()),
+                        Value::Concrete(ConcreteValue::String(rr.r#type().as_str().to_string())),
                     );
                     m.insert(
                         "resource_record_value".to_string(),
-                        Value::String(rr.value().to_string()),
+                        Value::Concrete(ConcreteValue::String(rr.value().to_string())),
                     );
                 }
                 if let Some(status) = dv.validation_status() {
                     m.insert(
                         "validation_status".to_string(),
-                        Value::String(status.as_str().to_string()),
+                        Value::Concrete(ConcreteValue::String(status.as_str().to_string())),
                     );
                 }
                 if let Some(method) = dv.validation_method() {
                     m.insert(
                         "validation_method".to_string(),
-                        Value::String(method.as_str().to_string()),
+                        Value::Concrete(ConcreteValue::String(method.as_str().to_string())),
                     );
                 }
-                list.push(Value::Map(m));
+                list.push(Value::Concrete(ConcreteValue::Map(m)));
             }
-            attributes.insert("domain_validation_options".to_string(), Value::List(list));
+            attributes.insert(
+                "domain_validation_options".to_string(),
+                Value::Concrete(ConcreteValue::List(list)),
+            );
         }
         // The user-supplied validation_method is preserved from the
         // request side (DescribeCertificate doesn't echo the top-level
@@ -237,7 +256,7 @@ impl AwsProvider {
         {
             attributes.insert(
                 "validation_method".to_string(),
-                Value::String(method.as_str().to_string()),
+                Value::Concrete(ConcreteValue::String(method.as_str().to_string())),
             );
         }
 
@@ -258,10 +277,13 @@ impl AwsProvider {
             for tag in tags {
                 if let Some(k) = Some(tag.key()) {
                     let v = tag.value().unwrap_or("").to_string();
-                    tag_map.insert(k.to_string(), Value::String(v));
+                    tag_map.insert(k.to_string(), Value::Concrete(ConcreteValue::String(v)));
                 }
             }
-            attributes.insert("tags".to_string(), Value::Map(tag_map));
+            attributes.insert(
+                "tags".to_string(),
+                Value::Concrete(ConcreteValue::Map(tag_map)),
+            );
         }
 
         Ok(State::existing(id.clone(), attributes).with_identifier(arn))

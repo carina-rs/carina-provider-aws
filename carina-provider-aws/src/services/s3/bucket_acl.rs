@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use aws_sdk_s3::types::BucketCannedAcl;
 use carina_core::provider::{ProviderError, ProviderResult};
-use carina_core::resource::{Resource, ResourceId, State, Value};
+use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
 use carina_core::utils::convert_enum_value;
 
 use crate::AwsProvider;
@@ -31,7 +31,10 @@ impl AwsProvider {
         match result {
             Ok(_) => {
                 let mut attributes = HashMap::new();
-                attributes.insert("bucket".to_string(), Value::String(bucket.to_string()));
+                attributes.insert(
+                    "bucket".to_string(),
+                    Value::Concrete(ConcreteValue::String(bucket.to_string())),
+                );
                 Ok(State::existing(id.clone(), attributes).with_identifier(bucket.to_string()))
             }
             Err(e) => {
@@ -72,7 +75,7 @@ impl AwsProvider {
             // convert_enum_value normalizes namespaced/typed identifiers
             // (`aws.s3.BucketAcl.Acl.public_read`) and snake-cased aliases
             // (`public_read` ⇄ `public-read`) back to AWS canonical form.
-            Some(Value::String(s)) => convert_enum_value(s).to_string(),
+            Some(Value::Concrete(ConcreteValue::String(s))) => convert_enum_value(s).to_string(),
             _ => {
                 return Err(
                     ProviderError::invalid_input("acl is required").for_resource(id.clone())

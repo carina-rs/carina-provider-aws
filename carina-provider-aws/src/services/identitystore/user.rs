@@ -9,7 +9,7 @@ use std::collections::HashMap;
 
 use aws_sdk_identitystore::types::{AlternateIdentifier, UniqueAttribute};
 use carina_core::provider::{BoxFuture, ProviderError, ProviderResult};
-use carina_core::resource::{Resource, State, Value};
+use carina_core::resource::{ConcreteValue, Resource, State, Value};
 
 use crate::AwsProvider;
 use crate::helpers::sdk_error_message;
@@ -120,64 +120,89 @@ pub(crate) fn extract_identitystore_user(
 
     attributes.insert(
         "user_id".to_string(),
-        Value::String(resp.user_id().to_string()),
+        Value::Concrete(ConcreteValue::String(resp.user_id().to_string())),
     );
     attributes.insert(
         "identity_store_id".to_string(),
-        Value::String(resp.identity_store_id().to_string()),
+        Value::Concrete(ConcreteValue::String(resp.identity_store_id().to_string())),
     );
     if let Some(user_name) = resp.user_name() {
         attributes.insert(
             "user_name".to_string(),
-            Value::String(user_name.to_string()),
+            Value::Concrete(ConcreteValue::String(user_name.to_string())),
         );
     }
     if let Some(display_name) = resp.display_name() {
         attributes.insert(
             "display_name".to_string(),
-            Value::String(display_name.to_string()),
+            Value::Concrete(ConcreteValue::String(display_name.to_string())),
         );
     }
     if let Some(name) = resp.name() {
         let mut name_fields: IndexMap<String, Value> = IndexMap::new();
         if let Some(v) = name.formatted() {
-            name_fields.insert("formatted".to_string(), Value::String(v.to_string()));
+            name_fields.insert(
+                "formatted".to_string(),
+                Value::Concrete(ConcreteValue::String(v.to_string())),
+            );
         }
         if let Some(v) = name.family_name() {
-            name_fields.insert("family_name".to_string(), Value::String(v.to_string()));
+            name_fields.insert(
+                "family_name".to_string(),
+                Value::Concrete(ConcreteValue::String(v.to_string())),
+            );
         }
         if let Some(v) = name.given_name() {
-            name_fields.insert("given_name".to_string(), Value::String(v.to_string()));
+            name_fields.insert(
+                "given_name".to_string(),
+                Value::Concrete(ConcreteValue::String(v.to_string())),
+            );
         }
         if let Some(v) = name.middle_name() {
-            name_fields.insert("middle_name".to_string(), Value::String(v.to_string()));
+            name_fields.insert(
+                "middle_name".to_string(),
+                Value::Concrete(ConcreteValue::String(v.to_string())),
+            );
         }
         if let Some(v) = name.honorific_prefix() {
-            name_fields.insert("honorific_prefix".to_string(), Value::String(v.to_string()));
+            name_fields.insert(
+                "honorific_prefix".to_string(),
+                Value::Concrete(ConcreteValue::String(v.to_string())),
+            );
         }
         if let Some(v) = name.honorific_suffix() {
-            name_fields.insert("honorific_suffix".to_string(), Value::String(v.to_string()));
+            name_fields.insert(
+                "honorific_suffix".to_string(),
+                Value::Concrete(ConcreteValue::String(v.to_string())),
+            );
         }
         if !name_fields.is_empty() {
-            attributes.insert("name".to_string(), Value::Map(name_fields));
+            attributes.insert(
+                "name".to_string(),
+                Value::Concrete(ConcreteValue::Map(name_fields)),
+            );
         }
     }
     let email_values: Vec<Value> = resp
         .emails()
         .iter()
         .filter_map(|e: &aws_sdk_identitystore::types::Email| {
-            e.value().map(|v| Value::String(v.to_string()))
+            e.value()
+                .map(|v| Value::Concrete(ConcreteValue::String(v.to_string())))
         })
         .collect();
     if !email_values.is_empty() {
-        attributes.insert("emails".to_string(), Value::List(email_values));
+        attributes.insert(
+            "emails".to_string(),
+            Value::Concrete(ConcreteValue::List(email_values)),
+        );
     }
 
     attributes
 }
 
 fn value_as_str(v: &Value) -> Option<&str> {
-    if let Value::String(s) = v {
+    if let Value::Concrete(ConcreteValue::String(s)) = v {
         Some(s.as_str())
     } else {
         None
@@ -221,21 +246,27 @@ mod tests {
 
         assert_eq!(
             attrs.get("user_id"),
-            Some(&Value::String(
+            Some(&Value::Concrete(ConcreteValue::String(
                 "37846ac8-4021-705b-1bf2-26861723348f".to_string()
-            ))
+            )))
         );
         assert_eq!(
             attrs.get("identity_store_id"),
-            Some(&Value::String("d-9567916d09".to_string()))
+            Some(&Value::Concrete(ConcreteValue::String(
+                "d-9567916d09".to_string()
+            )))
         );
         assert_eq!(
             attrs.get("user_name"),
-            Some(&Value::String("gosukenator@gmail.com".to_string()))
+            Some(&Value::Concrete(ConcreteValue::String(
+                "gosukenator@gmail.com".to_string()
+            )))
         );
         assert_eq!(
             attrs.get("display_name"),
-            Some(&Value::String("Gosuke Miyashita".to_string()))
+            Some(&Value::Concrete(ConcreteValue::String(
+                "Gosuke Miyashita".to_string()
+            )))
         );
     }
 
@@ -244,20 +275,26 @@ mod tests {
         let resp = describe_user_full();
         let attrs = extract_identitystore_user(&resp);
 
-        let Some(Value::Map(name)) = attrs.get("name") else {
+        let Some(Value::Concrete(ConcreteValue::Map(name))) = attrs.get("name") else {
             panic!("expected name map, got {:?}", attrs.get("name"));
         };
         assert_eq!(
             name.get("formatted"),
-            Some(&Value::String("Gosuke Miyashita".to_string()))
+            Some(&Value::Concrete(ConcreteValue::String(
+                "Gosuke Miyashita".to_string()
+            )))
         );
         assert_eq!(
             name.get("family_name"),
-            Some(&Value::String("Miyashita".to_string()))
+            Some(&Value::Concrete(ConcreteValue::String(
+                "Miyashita".to_string()
+            )))
         );
         assert_eq!(
             name.get("given_name"),
-            Some(&Value::String("Gosuke".to_string()))
+            Some(&Value::Concrete(ConcreteValue::String(
+                "Gosuke".to_string()
+            )))
         );
         // Unset optional fields must not appear in the map.
         assert!(!name.contains_key("middle_name"));
@@ -269,13 +306,13 @@ mod tests {
         let resp = describe_user_full();
         let attrs = extract_identitystore_user(&resp);
 
-        let Some(Value::List(emails)) = attrs.get("emails") else {
+        let Some(Value::Concrete(ConcreteValue::List(emails))) = attrs.get("emails") else {
             panic!("expected emails list, got {:?}", attrs.get("emails"));
         };
         assert_eq!(emails.len(), 1);
         assert_eq!(
             emails[0],
-            Value::String("gosukenator@gmail.com".to_string())
+            Value::Concrete(ConcreteValue::String("gosukenator@gmail.com".to_string()))
         );
     }
 
@@ -291,11 +328,13 @@ mod tests {
 
         assert_eq!(
             attrs.get("user_id"),
-            Some(&Value::String("uid-min".to_string()))
+            Some(&Value::Concrete(ConcreteValue::String(
+                "uid-min".to_string()
+            )))
         );
         assert_eq!(
             attrs.get("identity_store_id"),
-            Some(&Value::String("d-min".to_string()))
+            Some(&Value::Concrete(ConcreteValue::String("d-min".to_string())))
         );
         assert!(!attrs.contains_key("user_name"));
         assert!(!attrs.contains_key("display_name"));
@@ -315,13 +354,15 @@ mod tests {
             .unwrap();
         let attrs = extract_identitystore_user(&resp);
 
-        let Some(Value::Map(name)) = attrs.get("name") else {
+        let Some(Value::Concrete(ConcreteValue::Map(name))) = attrs.get("name") else {
             panic!("expected name map, got {:?}", attrs.get("name"));
         };
         assert_eq!(name.len(), 1);
         assert_eq!(
             name.get("given_name"),
-            Some(&Value::String("Gosuke".to_string()))
+            Some(&Value::Concrete(ConcreteValue::String(
+                "Gosuke".to_string()
+            )))
         );
         assert!(!name.contains_key("formatted"));
         assert!(!name.contains_key("family_name"));

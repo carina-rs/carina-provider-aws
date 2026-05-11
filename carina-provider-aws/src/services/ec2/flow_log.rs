@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use carina_core::provider::{ProviderError, ProviderResult};
-use carina_core::resource::{Resource, ResourceId, State, Value};
+use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
 use carina_core::utils::extract_enum_value;
 
 use crate::AwsProvider;
@@ -46,10 +46,12 @@ impl AwsProvider {
             // describe response exposes one resource_id per FlowLog entity. The
             // generated extractor inserts the singular key, so replace it here
             // with a one-element list matching the schema.
-            if let Some(Value::String(rid)) = attributes.remove("resource_id") {
+            if let Some(Value::Concrete(ConcreteValue::String(rid))) =
+                attributes.remove("resource_id")
+            {
                 attributes.insert(
                     "resource_ids".to_string(),
-                    Value::List(vec![Value::String(rid)]),
+                    Value::Concrete(ConcreteValue::List(vec![Value::String(rid)])),
                 );
             }
 
@@ -72,10 +74,10 @@ impl AwsProvider {
     /// Create an EC2 Flow Log
     pub(crate) async fn create_ec2_flow_log(&self, resource: Resource) -> ProviderResult<State> {
         let resource_ids_val: Vec<String> = match resource.get_attr("resource_ids") {
-            Some(Value::List(items)) => items
+            Some(Value::Concrete(ConcreteValue::List(items))) => items
                 .iter()
                 .filter_map(|v| {
-                    if let Value::String(s) = v {
+                    if let Value::Concrete(ConcreteValue::String(s)) = v {
                         Some(s.clone())
                     } else {
                         None
@@ -92,7 +94,7 @@ impl AwsProvider {
         }
 
         let resource_type_val = match resource.get_attr("resource_type") {
-            Some(Value::String(s)) => extract_enum_value(s).to_string(),
+            Some(Value::Concrete(ConcreteValue::String(s))) => extract_enum_value(s).to_string(),
             _ => {
                 return Err(ProviderError::invalid_input("resource_type is required")
                     .for_resource(resource.id.clone()));
@@ -107,13 +109,17 @@ impl AwsProvider {
                 resource_type_val.as_str(),
             ));
 
-        if let Some(Value::String(traffic_type)) = resource.get_attr("traffic_type") {
+        if let Some(Value::Concrete(ConcreteValue::String(traffic_type))) =
+            resource.get_attr("traffic_type")
+        {
             use aws_sdk_ec2::types::TrafficType;
             let tt = TrafficType::from(extract_enum_value(traffic_type));
             req = req.traffic_type(tt);
         }
 
-        if let Some(Value::String(log_dest_type)) = resource.get_attr("log_destination_type") {
+        if let Some(Value::Concrete(ConcreteValue::String(log_dest_type))) =
+            resource.get_attr("log_destination_type")
+        {
             use aws_sdk_ec2::types::LogDestinationType;
             let raw = extract_enum_value(log_dest_type);
             // Map DSL snake_case enum values back to API hyphenated format
@@ -126,23 +132,33 @@ impl AwsProvider {
             req = req.log_destination_type(ldt);
         }
 
-        if let Some(Value::String(log_dest)) = resource.get_attr("log_destination") {
+        if let Some(Value::Concrete(ConcreteValue::String(log_dest))) =
+            resource.get_attr("log_destination")
+        {
             req = req.log_destination(log_dest);
         }
 
-        if let Some(Value::String(log_group)) = resource.get_attr("log_group_name") {
+        if let Some(Value::Concrete(ConcreteValue::String(log_group))) =
+            resource.get_attr("log_group_name")
+        {
             req = req.log_group_name(log_group);
         }
 
-        if let Some(Value::String(perm_arn)) = resource.get_attr("deliver_logs_permission_arn") {
+        if let Some(Value::Concrete(ConcreteValue::String(perm_arn))) =
+            resource.get_attr("deliver_logs_permission_arn")
+        {
             req = req.deliver_logs_permission_arn(perm_arn);
         }
 
-        if let Some(Value::String(log_format)) = resource.get_attr("log_format") {
+        if let Some(Value::Concrete(ConcreteValue::String(log_format))) =
+            resource.get_attr("log_format")
+        {
             req = req.log_format(log_format);
         }
 
-        if let Some(Value::Int(interval)) = resource.get_attr("max_aggregation_interval") {
+        if let Some(Value::Concrete(ConcreteValue::Int(interval))) =
+            resource.get_attr("max_aggregation_interval")
+        {
             req = req.max_aggregation_interval(*interval as i32);
         }
 
@@ -290,40 +306,58 @@ impl AwsProvider {
         attributes: &mut HashMap<String, Value>,
     ) -> Option<String> {
         if let Some(v) = obj.flow_log_id() {
-            attributes.insert("flow_log_id".to_string(), Value::String(v.to_string()));
+            attributes.insert(
+                "flow_log_id".to_string(),
+                Value::Concrete(ConcreteValue::String(v.to_string())),
+            );
         }
         if let Some(v) = obj.resource_id() {
-            attributes.insert("resource_id".to_string(), Value::String(v.to_string()));
+            attributes.insert(
+                "resource_id".to_string(),
+                Value::Concrete(ConcreteValue::String(v.to_string())),
+            );
         }
         if let Some(v) = obj.traffic_type() {
             attributes.insert(
                 "traffic_type".to_string(),
-                Value::String(v.as_str().to_string()),
+                Value::Concrete(ConcreteValue::String(v.as_str().to_string())),
             );
         }
         if let Some(v) = obj.log_destination_type() {
             attributes.insert(
                 "log_destination_type".to_string(),
-                Value::String(v.as_str().to_string()),
+                Value::Concrete(ConcreteValue::String(v.as_str().to_string())),
             );
         }
         if let Some(v) = obj.log_destination() {
-            attributes.insert("log_destination".to_string(), Value::String(v.to_string()));
+            attributes.insert(
+                "log_destination".to_string(),
+                Value::Concrete(ConcreteValue::String(v.to_string())),
+            );
         }
         if let Some(v) = obj.log_group_name() {
-            attributes.insert("log_group_name".to_string(), Value::String(v.to_string()));
+            attributes.insert(
+                "log_group_name".to_string(),
+                Value::Concrete(ConcreteValue::String(v.to_string())),
+            );
         }
         if let Some(v) = obj.deliver_logs_permission_arn() {
             attributes.insert(
                 "deliver_logs_permission_arn".to_string(),
-                Value::String(v.to_string()),
+                Value::Concrete(ConcreteValue::String(v.to_string())),
             );
         }
         if let Some(v) = obj.log_format() {
-            attributes.insert("log_format".to_string(), Value::String(v.to_string()));
+            attributes.insert(
+                "log_format".to_string(),
+                Value::Concrete(ConcreteValue::String(v.to_string())),
+            );
         }
         if let Some(v) = obj.max_aggregation_interval() {
-            attributes.insert("max_aggregation_interval".to_string(), Value::Int(v as i64));
+            attributes.insert(
+                "max_aggregation_interval".to_string(),
+                Value::Concrete(ConcreteValue::Int(v as i64)),
+            );
         }
         if let Some(v) = obj.flow_log_status()
             && v == "ACTIVE"
@@ -344,7 +378,7 @@ impl AwsProvider {
                 if !resource_type_str.is_empty() {
                     attributes.insert(
                         "resource_type".to_string(),
-                        Value::String(resource_type_str.to_string()),
+                        Value::Concrete(ConcreteValue::String(resource_type_str.to_string())),
                     );
                 }
             }

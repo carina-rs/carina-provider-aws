@@ -5,7 +5,7 @@ use aws_sdk_s3::types::{
     TargetObjectKeyFormat,
 };
 use carina_core::provider::{ProviderError, ProviderResult};
-use carina_core::resource::{Resource, ResourceId, State, Value};
+use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
 use carina_core::utils::extract_enum_value;
 use indexmap::IndexMap;
 
@@ -33,15 +33,18 @@ impl AwsProvider {
         match result {
             Ok(output) => {
                 let mut attributes = HashMap::new();
-                attributes.insert("bucket".to_string(), Value::String(bucket.to_string()));
+                attributes.insert(
+                    "bucket".to_string(),
+                    Value::Concrete(ConcreteValue::String(bucket.to_string())),
+                );
                 if let Some(le) = output.logging_enabled() {
                     attributes.insert(
                         "target_bucket".to_string(),
-                        Value::String(le.target_bucket().to_string()),
+                        Value::Concrete(ConcreteValue::String(le.target_bucket().to_string())),
                     );
                     attributes.insert(
                         "target_prefix".to_string(),
-                        Value::String(le.target_prefix().to_string()),
+                        Value::Concrete(ConcreteValue::String(le.target_prefix().to_string())),
                     );
                     if let Some(fmt) = le.target_object_key_format() {
                         attributes.insert(
@@ -91,7 +94,7 @@ impl AwsProvider {
     ) -> ProviderResult<State> {
         let target_bucket = require_string_attr(resource, "target_bucket")?;
         let target_prefix = match resource.get_attr("target_prefix") {
-            Some(Value::String(s)) => s.clone(),
+            Some(Value::Concrete(ConcreteValue::String(s))) => s.clone(),
             None => String::new(),
             _ => {
                 return Err(
@@ -157,7 +160,7 @@ impl AwsProvider {
 }
 
 fn build_key_format(id: &ResourceId, value: &Value) -> ProviderResult<TargetObjectKeyFormat> {
-    let Value::Map(map) = value else {
+    let Value::Concrete(ConcreteValue::Map(map)) = value else {
         return Err(
             ProviderError::invalid_input("target_object_key_format must be a map")
                 .for_resource(id.clone()),
@@ -168,9 +171,9 @@ fn build_key_format(id: &ResourceId, value: &Value) -> ProviderResult<TargetObje
     if map.contains_key("simple_prefix") {
         builder = builder.simple_prefix(SimplePrefix::builder().build());
     }
-    if let Some(Value::Map(pp)) = map.get("partitioned_prefix") {
+    if let Some(Value::Concrete(ConcreteValue::Map(pp))) = map.get("partitioned_prefix") {
         let mut pb = PartitionedPrefix::builder();
-        if let Some(Value::String(s)) = pp.get("partition_date_source") {
+        if let Some(Value::Concrete(ConcreteValue::String(s))) = pp.get("partition_date_source") {
             let normalized = extract_enum_value(s);
             pb = pb.partition_date_source(PartitionDateSource::from(normalized));
         }
@@ -182,17 +185,23 @@ fn build_key_format(id: &ResourceId, value: &Value) -> ProviderResult<TargetObje
 fn target_object_key_format_to_value(fmt: &TargetObjectKeyFormat) -> Value {
     let mut m = IndexMap::new();
     if fmt.simple_prefix().is_some() {
-        m.insert("simple_prefix".to_string(), Value::Map(IndexMap::new()));
+        m.insert(
+            "simple_prefix".to_string(),
+            Value::Concrete(ConcreteValue::Map(IndexMap::new())),
+        );
     }
     if let Some(pp) = fmt.partitioned_prefix() {
         let mut inner = IndexMap::new();
         if let Some(src) = pp.partition_date_source() {
             inner.insert(
                 "partition_date_source".to_string(),
-                Value::String(src.as_str().to_string()),
+                Value::Concrete(ConcreteValue::String(src.as_str().to_string())),
             );
         }
-        m.insert("partitioned_prefix".to_string(), Value::Map(inner));
+        m.insert(
+            "partitioned_prefix".to_string(),
+            Value::Concrete(ConcreteValue::Map(inner)),
+        );
     }
-    Value::Map(m)
+    Value::Concrete(ConcreteValue::Map(m))
 }

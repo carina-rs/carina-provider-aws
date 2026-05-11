@@ -7,7 +7,7 @@
 use super::AwsSchemaConfig;
 use super::tags_type;
 use super::validate_tags_map;
-use carina_core::resource::Value;
+use carina_core::resource::{ConcreteValue, Value};
 use carina_core::schema::{
     AttributeSchema, AttributeType, ResourceSchema, StructField, legacy_validator, types,
 };
@@ -15,7 +15,7 @@ use carina_core::schema::{
 const VALID_HOSTNAME_TYPE: &[&str] = &["ip-name", "resource-name", "ip_name", "resource_name"];
 
 fn validate_ipv4_netmask_length_range(value: &Value) -> Result<(), String> {
-    if let Value::Int(n) = value {
+    if let Value::Concrete(ConcreteValue::Int(n)) = value {
         if *n < 0 || *n > 32 {
             Err(format!("Value {} is out of range 0..=32", n))
         } else {
@@ -27,7 +27,7 @@ fn validate_ipv4_netmask_length_range(value: &Value) -> Result<(), String> {
 }
 
 fn validate_ipv6_netmask_length_range(value: &Value) -> Result<(), String> {
-    if let Value::Int(n) = value {
+    if let Value::Concrete(ConcreteValue::Int(n)) = value {
         if *n < 0 || *n > 128 {
             Err(format!("Value {} is out of range 0..=128", n))
         } else {
