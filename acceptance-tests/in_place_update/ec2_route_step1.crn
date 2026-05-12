@@ -40,7 +40,7 @@ let subnet = aws.ec2.Subnet {
 }
 
 let eip = awscc.ec2.Eip {
-  domain = 'vpc'
+  domain = awscc.ec2.Eip.Domain.vpc
 }
 
 awscc.ec2.NatGateway {

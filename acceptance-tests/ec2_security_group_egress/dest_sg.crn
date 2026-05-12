@@ -37,7 +37,7 @@ let dest_sg = aws.ec2.SecurityGroup {
 aws.ec2.SecurityGroupEgress {
   group_id                      = source_sg.group_id
   description                   = 'Allow HTTPS to destination SG'
-  ip_protocol                   = 'tcp'
+  ip_protocol                   = tcp
   from_port                     = 443
   to_port                       = 443
   destination_security_group_id = dest_sg.group_id
