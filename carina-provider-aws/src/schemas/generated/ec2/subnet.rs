@@ -168,6 +168,7 @@ pub fn ec2_subnet_config() -> AwsSchemaConfig {
         )
         .attribute(
             AttributeSchema::new("subnet_id", super::subnet_id())
+                .read_only()
                 .with_description("The ID of the subnet. (read-only)")
                 .with_provider_name("SubnetId"),
         )

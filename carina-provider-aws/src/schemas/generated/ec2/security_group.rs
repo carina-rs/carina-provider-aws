@@ -39,6 +39,7 @@ pub fn ec2_security_group_config() -> AwsSchemaConfig {
         )
         .attribute(
             AttributeSchema::new("group_id", super::security_group_id())
+                .read_only()
                 .with_description("The ID of the security group. (read-only)")
                 .with_provider_name("GroupId"),
         )

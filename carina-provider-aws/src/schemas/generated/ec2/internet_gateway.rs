@@ -25,6 +25,7 @@ pub fn ec2_internet_gateway_config() -> AwsSchemaConfig {
         )
         .attribute(
             AttributeSchema::new("internet_gateway_id", super::internet_gateway_id())
+                .read_only()
                 .with_description("The ID of the internet gateway. (read-only)")
                 .with_provider_name("InternetGatewayId"),
         )

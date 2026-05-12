@@ -83,6 +83,7 @@ pub fn ec2_nat_gateway_config() -> AwsSchemaConfig {
         )
         .attribute(
             AttributeSchema::new("nat_gateway_id", super::nat_gateway_id())
+                .read_only()
                 .with_description("The ID of the NAT gateway. (read-only)")
                 .with_provider_name("NatGatewayId"),
         )

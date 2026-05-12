@@ -83,6 +83,7 @@ pub fn ec2_vpc_config() -> AwsSchemaConfig {
         )
         .attribute(
             AttributeSchema::new("vpc_id", super::vpc_id())
+                .read_only()
                 .with_description("The ID of the VPC. (read-only)")
                 .with_provider_name("VpcId"),
         )

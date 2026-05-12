@@ -82,6 +82,7 @@ pub fn ec2_transit_gateway_attachment_config() -> AwsSchemaConfig {
         )
         .attribute(
             AttributeSchema::new("transit_gateway_attachment_id", AttributeType::String)
+                .read_only()
                 .with_description("The ID of the attachment. (read-only)")
                 .with_provider_name("TransitGatewayAttachmentId"),
         )

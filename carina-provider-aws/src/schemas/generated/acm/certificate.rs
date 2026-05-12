@@ -196,6 +196,7 @@ pub fn acm_certificate_config() -> AwsSchemaConfig {
         )
         .attribute(
             AttributeSchema::new("certificate_arn", super::arn())
+                .read_only()
                 .with_description("The Amazon Resource Name (ARN) of the certificate. For more information about ARNs, see Amazon Resource Names (ARNs) in the Amazon Web Services Genera... (read-only)")
                 .with_provider_name("CertificateArn"),
         )
@@ -206,6 +207,7 @@ pub fn acm_certificate_config() -> AwsSchemaConfig {
                 namespace: Some("aws.acm.Certificate".to_string()),
                 dsl_aliases: vec![("ELIGIBLE".to_string(), "eligible".to_string()), ("INELIGIBLE".to_string(), "ineligible".to_string())],
             })
+                .read_only()
                 .with_description("Specifies whether the certificate is eligible for renewal. At this time, only exported private certificates can be renewed with the RenewCertificate c... (read-only)")
                 .with_provider_name("RenewalEligibility"),
         )
@@ -268,6 +270,7 @@ pub fn acm_certificate_config() -> AwsSchemaConfig {
                     StructField::new("updated_at", AttributeType::String).required().with_description("The time at which the renewal summary was last updated.").with_provider_name("UpdatedAt")
                     ],
                 })
+                .read_only()
                 .with_description("Contains information about the status of ACM's managed renewal for the certificate. This field exists only when the certificate type is AMAZON_ISSUED. (read-only)")
                 .with_provider_name("RenewalSummary"),
         )
@@ -278,6 +281,7 @@ pub fn acm_certificate_config() -> AwsSchemaConfig {
                 namespace: Some("aws.acm.Certificate".to_string()),
                 dsl_aliases: vec![("EXPIRED".to_string(), "expired".to_string()), ("FAILED".to_string(), "failed".to_string()), ("INACTIVE".to_string(), "inactive".to_string()), ("ISSUED".to_string(), "issued".to_string()), ("PENDING_VALIDATION".to_string(), "pending_validation".to_string()), ("REVOKED".to_string(), "revoked".to_string()), ("VALIDATION_TIMED_OUT".to_string(), "validation_timed_out".to_string())],
             })
+                .read_only()
                 .with_description("The status of the certificate. A certificate enters status PENDING_VALIDATION upon being requested, unless it fails for any of the reasons given in th... (read-only)")
                 .with_provider_name("Status"),
         )
@@ -288,6 +292,7 @@ pub fn acm_certificate_config() -> AwsSchemaConfig {
                 namespace: Some("aws.acm.Certificate".to_string()),
                 dsl_aliases: vec![("AMAZON_ISSUED".to_string(), "amazon_issued".to_string()), ("IMPORTED".to_string(), "imported".to_string()), ("PRIVATE".to_string(), "private".to_string())],
             })
+                .read_only()
                 .with_description("The source of the certificate. For certificates provided by ACM, this value is AMAZON_ISSUED. For certificates that you imported with ImportCertificat... (read-only)")
                 .with_provider_name("Type"),
         )

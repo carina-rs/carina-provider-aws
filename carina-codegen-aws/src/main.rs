@@ -983,6 +983,9 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
         if attr.is_create_only {
             attr_code.push_str("\n\x20               .create_only()");
         }
+        if attr.is_read_only {
+            attr_code.push_str("\n\x20               .read_only()");
+        }
         if attr.is_identity {
             attr_code.push_str("\n\x20               .identity()");
         }

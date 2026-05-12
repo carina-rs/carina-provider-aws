@@ -158,6 +158,7 @@ pub fn ec2_security_group_egress_config() -> AwsSchemaConfig {
             )
             .attribute(
                 AttributeSchema::new("security_group_rule_id", super::security_group_rule_id())
+                    .read_only()
                     .with_description("The ID of the security group rule. (read-only)")
                     .with_provider_name("SecurityGroupRuleId"),
             ),

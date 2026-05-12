@@ -39,6 +39,7 @@ pub fn ec2_vpc_peering_connection_config() -> AwsSchemaConfig {
         )
         .attribute(
             AttributeSchema::new("vpc_peering_connection_id", super::vpc_peering_connection_id())
+                .read_only()
                 .with_description("The ID of the VPC peering connection. (read-only)")
                 .with_provider_name("VpcPeeringConnectionId"),
         )

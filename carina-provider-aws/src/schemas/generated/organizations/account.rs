@@ -63,11 +63,13 @@ pub fn organizations_account_config() -> AwsSchemaConfig {
         )
         .attribute(
             AttributeSchema::new("arn", super::arn())
+                .read_only()
                 .with_description("The Amazon Resource Name (ARN) of the account. For more information about ARNs in Organizations, see ARN Formats Supported by Organizations in the Ama... (read-only)")
                 .with_provider_name("Arn"),
         )
         .attribute(
             AttributeSchema::new("id", AttributeType::String)
+                .read_only()
                 .with_description("The unique identifier (ID) of the account. The regex pattern for an account ID string requires exactly 12 digits. (read-only)")
                 .with_provider_name("Id"),
         )
@@ -78,16 +80,19 @@ pub fn organizations_account_config() -> AwsSchemaConfig {
                 namespace: Some("aws.organizations.Account".to_string()),
                 dsl_aliases: vec![("CREATED".to_string(), "created".to_string()), ("INVITED".to_string(), "invited".to_string())],
             })
+                .read_only()
                 .with_description("The method by which the account joined the organization. (read-only)")
                 .with_provider_name("JoinedMethod"),
         )
         .attribute(
             AttributeSchema::new("joined_timestamp", AttributeType::String)
+                .read_only()
                 .with_description("The date the account became a part of the organization. (read-only)")
                 .with_provider_name("JoinedTimestamp"),
         )
         .attribute(
             AttributeSchema::new("name", AttributeType::String)
+                .read_only()
                 .with_description("The friendly name of the account. The regex pattern that is used to validate this parameter is a string of any of the characters in the ASCII characte... (read-only)")
                 .with_provider_name("Name"),
         )
@@ -98,6 +103,7 @@ pub fn organizations_account_config() -> AwsSchemaConfig {
                 namespace: Some("aws.organizations.Account".to_string()),
                 dsl_aliases: vec![("ACTIVE".to_string(), "active".to_string()), ("PENDING_CLOSURE".to_string(), "pending_closure".to_string()), ("SUSPENDED".to_string(), "suspended".to_string())],
             })
+                .read_only()
                 .with_description("The status of the account in the organization. The Status parameter in the Account object will be retired on September 9, 2026. Although both the acco... (read-only)")
                 .with_provider_name("Status"),
         )

@@ -45,6 +45,7 @@ pub fn ec2_vpn_gateway_config() -> AwsSchemaConfig {
         )
         .attribute(
             AttributeSchema::new("vpn_gateway_id", super::vpn_gateway_id())
+                .read_only()
                 .with_description("The ID of the virtual private gateway. (read-only)")
                 .with_provider_name("VpnGatewayId"),
         )
