@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use aws_sdk_s3::types::BucketCannedAcl;
+use aws_sdk_s3::types::{BucketCannedAcl, Grant, Permission, Type as GranteeType};
 use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
 use carina_core::utils::convert_enum_value;
@@ -9,14 +9,100 @@ use crate::AwsProvider;
 use crate::helpers::{require_string_attr, retry_aws_operation, sdk_error_message};
 use crate::services::s3::bucket::is_s3_not_configured_error;
 
+/// AWS group URIs used to identify canned-ACL grant patterns.
+const URI_ALL_USERS: &str = "http://acs.amazonaws.com/groups/global/AllUsers";
+const URI_AUTHENTICATED_USERS: &str = "http://acs.amazonaws.com/groups/global/AuthenticatedUsers";
+
+/// Inspect the grant list returned by `GetBucketAcl` and infer which
+/// canned ACL produced it, if any. Returns the wire-form name
+/// (`"private"`, `"public-read"`, `"public-read-write"`,
+/// `"authenticated-read"`) the SDK accepts as input to
+/// `BucketCannedAcl::from`.
+///
+/// The four bucket-level canned ACLs Carina supports have fixed grant
+/// shapes:
+/// - `private`: owner FULL_CONTROL only.
+/// - `public-read`: owner FULL_CONTROL + AllUsers READ.
+/// - `public-read-write`: owner FULL_CONTROL + AllUsers READ + AllUsers WRITE.
+/// - `authenticated-read`: owner FULL_CONTROL + AuthenticatedUsers READ.
+///
+/// Returns `None` for any grant shape that does not match — for
+/// example, a custom grant set or a canned ACL Carina does not yet
+/// surface in the schema. Callers should leave the `acl` attribute
+/// absent in state in that case (state then disagrees with desired,
+/// surfacing a real diff, which is the correct behavior).
+fn infer_canned_acl_from_grants(grants: &[Grant], owner_id: Option<&str>) -> Option<&'static str> {
+    let owner_id = owner_id?;
+    // Bucket the grants by (grantee key, permission). Owner grants
+    // are keyed by canonical-user ID; group grants by URI.
+    let mut owner_perms: Vec<&Permission> = Vec::new();
+    let mut all_users_perms: Vec<&Permission> = Vec::new();
+    let mut auth_users_perms: Vec<&Permission> = Vec::new();
+    for grant in grants {
+        let Some(grantee) = grant.grantee() else {
+            continue;
+        };
+        let Some(perm) = grant.permission() else {
+            continue;
+        };
+        match (grantee.r#type(), grantee.id(), grantee.uri()) {
+            (GranteeType::CanonicalUser, Some(id), _) if id == owner_id => {
+                owner_perms.push(perm);
+            }
+            (GranteeType::CanonicalUser, _, _) => {
+                // Non-owner canonical user grant — not a canned shape.
+                return None;
+            }
+            (GranteeType::Group, _, Some(URI_ALL_USERS)) => all_users_perms.push(perm),
+            (GranteeType::Group, _, Some(URI_AUTHENTICATED_USERS)) => {
+                auth_users_perms.push(perm);
+            }
+            _ => return None,
+        }
+    }
+
+    let owner_has_full = owner_perms
+        .iter()
+        .any(|p| matches!(p, Permission::FullControl));
+    if !owner_has_full {
+        return None;
+    }
+
+    match (
+        all_users_perms.as_slice(),
+        auth_users_perms.as_slice(),
+        owner_perms.len(),
+    ) {
+        // private: owner FULL_CONTROL only.
+        ([], [], 1) => Some("private"),
+        // authenticated-read: owner FULL_CONTROL + AuthenticatedUsers READ.
+        ([], [Permission::Read], 1) => Some("authenticated-read"),
+        // public-read: owner FULL_CONTROL + AllUsers READ.
+        ([Permission::Read], [], 1) => Some("public-read"),
+        // public-read-write: owner FULL_CONTROL + AllUsers READ + AllUsers WRITE
+        // (order returned by S3 is not guaranteed).
+        (au, [], 1)
+            if au.len() == 2
+                && au.iter().any(|p| matches!(p, Permission::Read))
+                && au.iter().any(|p| matches!(p, Permission::Write)) =>
+        {
+            Some("public-read-write")
+        }
+        _ => None,
+    }
+}
+
 impl AwsProvider {
     /// Read an S3 BucketAcl.
     ///
-    /// AWS does not return a "canned ACL" name from `GetBucketAcl`; it
-    /// returns the underlying grant list. We do not attempt to round-trip
-    /// the canned-ACL name on read, only echo back the configured
-    /// `acl` attribute when the bucket exists. This is acceptable because
-    /// `acl` is a write-only setter from the API's perspective.
+    /// AWS does not return a canned-ACL name from `GetBucketAcl`; it
+    /// returns the underlying grant list. We infer which canned ACL
+    /// produced the grant shape (private / public-read / public-read-write
+    /// / authenticated-read) and write that into state so post-apply
+    /// `plan-verify` is idempotent. Custom grant sets that do not match
+    /// any canned shape leave `acl` absent in state — the resulting diff
+    /// is accurate (the bucket no longer matches the requested canned
+    /// ACL).
     pub(crate) async fn read_s3_bucket_acl(
         &self,
         id: &ResourceId,
@@ -29,12 +115,19 @@ impl AwsProvider {
         let result = self.s3_client.get_bucket_acl().bucket(bucket).send().await;
 
         match result {
-            Ok(_) => {
+            Ok(output) => {
                 let mut attributes = HashMap::new();
                 attributes.insert(
                     "bucket".to_string(),
                     Value::Concrete(ConcreteValue::String(bucket.to_string())),
                 );
+                let owner_id = output.owner().and_then(|o| o.id());
+                if let Some(canned) = infer_canned_acl_from_grants(output.grants(), owner_id) {
+                    attributes.insert(
+                        "acl".to_string(),
+                        Value::Concrete(ConcreteValue::String(canned.to_string())),
+                    );
+                }
                 Ok(State::existing(id.clone(), attributes).with_identifier(bucket.to_string()))
             }
             Err(e) => {
@@ -126,5 +219,112 @@ impl AwsProvider {
             ))
             .for_resource(id.clone())),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use aws_sdk_s3::types::Grantee;
+
+    fn owner_full_control(owner_id: &str) -> Grant {
+        Grant::builder()
+            .grantee(
+                Grantee::builder()
+                    .r#type(GranteeType::CanonicalUser)
+                    .id(owner_id)
+                    .build()
+                    .unwrap(),
+            )
+            .permission(Permission::FullControl)
+            .build()
+    }
+
+    fn group_grant(uri: &str, perm: Permission) -> Grant {
+        Grant::builder()
+            .grantee(
+                Grantee::builder()
+                    .r#type(GranteeType::Group)
+                    .uri(uri)
+                    .build()
+                    .unwrap(),
+            )
+            .permission(perm)
+            .build()
+    }
+
+    #[test]
+    fn infer_private_canned_acl() {
+        let grants = vec![owner_full_control("OWNER123")];
+        assert_eq!(
+            infer_canned_acl_from_grants(&grants, Some("OWNER123")),
+            Some("private")
+        );
+    }
+
+    #[test]
+    fn infer_public_read_canned_acl() {
+        let grants = vec![
+            owner_full_control("OWNER123"),
+            group_grant(URI_ALL_USERS, Permission::Read),
+        ];
+        assert_eq!(
+            infer_canned_acl_from_grants(&grants, Some("OWNER123")),
+            Some("public-read")
+        );
+    }
+
+    #[test]
+    fn infer_public_read_write_canned_acl() {
+        // S3 may return grants in any order.
+        let grants = vec![
+            owner_full_control("OWNER123"),
+            group_grant(URI_ALL_USERS, Permission::Write),
+            group_grant(URI_ALL_USERS, Permission::Read),
+        ];
+        assert_eq!(
+            infer_canned_acl_from_grants(&grants, Some("OWNER123")),
+            Some("public-read-write")
+        );
+    }
+
+    #[test]
+    fn infer_authenticated_read_canned_acl() {
+        let grants = vec![
+            owner_full_control("OWNER123"),
+            group_grant(URI_AUTHENTICATED_USERS, Permission::Read),
+        ];
+        assert_eq!(
+            infer_canned_acl_from_grants(&grants, Some("OWNER123")),
+            Some("authenticated-read")
+        );
+    }
+
+    #[test]
+    fn infer_returns_none_for_custom_grant() {
+        // A non-owner canonical user grant doesn't match any canned ACL.
+        let grants = vec![
+            owner_full_control("OWNER123"),
+            Grant::builder()
+                .grantee(
+                    Grantee::builder()
+                        .r#type(GranteeType::CanonicalUser)
+                        .id("ANOTHER_USER")
+                        .build()
+                        .unwrap(),
+                )
+                .permission(Permission::Read)
+                .build(),
+        ];
+        assert_eq!(
+            infer_canned_acl_from_grants(&grants, Some("OWNER123")),
+            None
+        );
+    }
+
+    #[test]
+    fn infer_returns_none_without_owner() {
+        let grants = vec![owner_full_control("OWNER123")];
+        assert_eq!(infer_canned_acl_from_grants(&grants, None), None);
     }
 }
