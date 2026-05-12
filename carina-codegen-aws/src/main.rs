@@ -576,8 +576,8 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
         }
     }
 
-    // Add extra writable fields from read structure
-    for extra in &res.extra_writable {
+    // Add extra_attributes fields sourced from the read structure
+    for extra in &res.extra_attributes {
         if writable_fields.contains_key(extra.name) {
             continue;
         }
@@ -617,9 +617,9 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
         }
     }
 
-    // Build extra_writable description override map
-    let extra_writable_descs: HashMap<&str, Option<&str>> = res
-        .extra_writable
+    // Build extra_attributes description override map
+    let extra_attribute_descs: HashMap<&str, Option<&str>> = res
+        .extra_attributes
         .iter()
         .map(|e| (e.name, e.description))
         .collect();
@@ -633,19 +633,19 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
             || required_overrides.contains(name.as_str()))
             && !read_only_overrides.contains(name.as_str());
         let is_read_only = read_only_overrides.contains(name.as_str());
-        // `extra_writable` fields with `read_source = None` are synthetic:
+        // `extra_attributes` fields with `read_source = None` are synthetic:
         // the codegen has no Smithy member to ground them in. They default
         // to create-only — UNLESS they appear in `update_ops` (typically as
         // `FieldLayout::InsideStruct` members, e.g. PutPublicAccessBlock's
         // `PublicAccessBlockConfiguration` sub-fields), in which case they
         // are updatable just like any other writable field.
-        let is_synthetic_extra_writable = res
-            .extra_writable
+        let is_synthetic_extra_attribute = res
+            .extra_attributes
             .iter()
             .any(|e| e.name == name.as_str() && e.read_source.is_none());
         let is_create_only = if is_read_only {
             false
-        } else if is_synthetic_extra_writable {
+        } else if is_synthetic_extra_attribute {
             !updatable_fields.contains(name.as_str())
                 || create_only_overrides.contains(name.as_str())
         } else if schema_structure.is_some() {
@@ -657,7 +657,7 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
                 || !updatable_fields.contains(name.as_str())
         };
         // Use ExtraField description override if available, otherwise Smithy docs
-        let description = if let Some(Some(desc)) = extra_writable_descs.get(name.as_str()) {
+        let description = if let Some(Some(desc)) = extra_attribute_descs.get(name.as_str()) {
             Some(desc.to_string())
         } else {
             SmithyModel::documentation(&member_ref.traits).map(|s| s.to_string())
@@ -692,11 +692,13 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
         });
     }
 
-    // Process synthetic extra writable fields (no read_source).
+    // Process synthetic extra_attributes fields (no read_source).
     // A synthetic field defaults to create-only, but is treated as updatable
     // when it appears in `update_ops` (typically as a `FieldLayout::InsideStruct`
-    // member of a wrapper struct in the API request shape).
-    for extra in &res.extra_writable {
+    // member of a wrapper struct in the API request shape). When the field is
+    // listed in `read_only_overrides`, it is emitted as read-only instead —
+    // mirrors the behaviour for Smithy-grounded fields.
+    for extra in &res.extra_attributes {
         if extra.read_source.is_some() {
             continue; // Already handled via writable_fields
         }
@@ -708,8 +710,10 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
         } else {
             "AttributeType::String".to_string()
         };
-        let is_create_only =
-            !updatable_fields.contains(extra.name) || create_only_overrides.contains(extra.name);
+        let is_read_only = read_only_overrides.contains(extra.name);
+        let is_create_only = !is_read_only
+            && (!updatable_fields.contains(extra.name)
+                || create_only_overrides.contains(extra.name));
         let is_required = required_overrides.contains(extra.name);
         attrs.push(AttrInfo {
             snake_name,
@@ -717,7 +721,7 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
             type_code,
             is_required,
             is_create_only,
-            is_read_only: false,
+            is_read_only,
             is_identity: identity_overrides.contains(extra.name),
             description: extra.description.map(|s| s.to_string()),
             enum_info: None,
@@ -2203,8 +2207,8 @@ fn generate_provider_code(
             fields_to_extract.push((snake_name.clone(), snake_name, member_ref));
         }
 
-        // Add extra_writable fields with read_source (different attr name vs accessor)
-        for extra in &res.extra_writable {
+        // Add extra_attributes fields with read_source (different attr name vs accessor)
+        for extra in &res.extra_attributes {
             if let Some(read_source) = extra.read_source
                 && let Some(member_ref) = read_struct.members.get(read_source)
             {
@@ -2877,8 +2881,8 @@ fn generate_markdown_resource(res: &ResourceDef, model: &SmithyModel) -> Result<
         }
     }
 
-    // Add extra writable fields from read structure
-    for extra in &res.extra_writable {
+    // Add extra_attributes fields sourced from the read structure
+    for extra in &res.extra_attributes {
         if writable_fields.contains_key(extra.name) {
             continue;
         }
@@ -2925,9 +2929,9 @@ fn generate_markdown_resource(res: &ResourceDef, model: &SmithyModel) -> Result<
         description: Option<String>,
     }
 
-    // Build extra_writable description override map
-    let extra_writable_descs: HashMap<&str, Option<&str>> = res
-        .extra_writable
+    // Build extra_attributes description override map
+    let extra_attribute_descs: HashMap<&str, Option<&str>> = res
+        .extra_attributes
         .iter()
         .map(|e| (e.name, e.description))
         .collect();
@@ -2938,7 +2942,7 @@ fn generate_markdown_resource(res: &ResourceDef, model: &SmithyModel) -> Result<
         let is_required = (SmithyModel::is_required(member_ref)
             || required_overrides.contains(name.as_str()))
             && !read_only_overrides.contains(name.as_str());
-        let description = if let Some(Some(desc)) = extra_writable_descs.get(name.as_str()) {
+        let description = if let Some(Some(desc)) = extra_attribute_descs.get(name.as_str()) {
             Some(desc.to_string())
         } else {
             SmithyModel::documentation(&member_ref.traits).map(|s| s.to_string())
@@ -2961,8 +2965,12 @@ fn generate_markdown_resource(res: &ResourceDef, model: &SmithyModel) -> Result<
         });
     }
 
-    // Add synthetic extra writable fields (no read_source) to markdown
-    for extra in &res.extra_writable {
+    let mut read_only_attrs: Vec<MdAttrInfo> = Vec::new();
+
+    // Add synthetic extra_attributes fields (no read_source) to markdown.
+    // A field listed in `read_only_overrides` goes into the read-only
+    // table; otherwise into the writable table.
+    for extra in &res.extra_attributes {
         if extra.read_source.is_some() {
             continue;
         }
@@ -2974,15 +2982,19 @@ fn generate_markdown_resource(res: &ResourceDef, model: &SmithyModel) -> Result<
         } else {
             "String".to_string()
         };
-        writable_attrs.push(MdAttrInfo {
+        let entry = MdAttrInfo {
             snake_name,
             type_display,
             is_required: false,
             description: extra.description.map(|s| s.to_string()),
-        });
+        };
+        if read_only_overrides.contains(extra.name) {
+            read_only_attrs.push(entry);
+        } else {
+            writable_attrs.push(entry);
+        }
     }
 
-    let mut read_only_attrs: Vec<MdAttrInfo> = Vec::new();
     for (name, member_ref) in &read_only_fields {
         let snake_name = name.to_snake_case();
         let description = SmithyModel::documentation(&member_ref.traits).map(|s| s.to_string());
