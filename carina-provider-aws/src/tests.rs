@@ -1645,24 +1645,32 @@ fn test_organization_feature_set_validates_snake_case_alias() {
         .get("feature_set")
         .expect("feature_set attribute not found");
 
-    // Both the API form (`ALL`) and the DSL form (`all`) must validate.
+    // Phase 4 of carina#2986: enum attributes accept only
+    // `EnumIdentifier` shape; a `ConcreteValue::String` here would route
+    // to `StringLiteralExpectedEnum`. Both the API form (`ALL`) and the
+    // DSL form (`all`) are identifier-shape inputs in real DSL — the
+    // parser would emit `EnumIdentifier` for both. Mirror that here.
     feature_set
         .attr_type
-        .validate(&Value::Concrete(ConcreteValue::String("ALL".to_string())))
+        .validate(&Value::Concrete(ConcreteValue::EnumIdentifier(
+            "ALL".to_string(),
+        )))
         .expect("API spelling ALL should be accepted");
     feature_set
         .attr_type
-        .validate(&Value::Concrete(ConcreteValue::String("all".to_string())))
+        .validate(&Value::Concrete(ConcreteValue::EnumIdentifier(
+            "all".to_string(),
+        )))
         .expect("DSL spelling all should be accepted");
     feature_set
         .attr_type
-        .validate(&Value::Concrete(ConcreteValue::String(
+        .validate(&Value::Concrete(ConcreteValue::EnumIdentifier(
             "CONSOLIDATED_BILLING".to_string(),
         )))
         .expect("API spelling CONSOLIDATED_BILLING should be accepted");
     feature_set
         .attr_type
-        .validate(&Value::Concrete(ConcreteValue::String(
+        .validate(&Value::Concrete(ConcreteValue::EnumIdentifier(
             "consolidated_billing".to_string(),
         )))
         .expect("DSL spelling consolidated_billing should be accepted");
@@ -1670,7 +1678,7 @@ fn test_organization_feature_set_validates_snake_case_alias() {
     assert!(
         feature_set
             .attr_type
-            .validate(&Value::Concrete(ConcreteValue::String(
+            .validate(&Value::Concrete(ConcreteValue::EnumIdentifier(
                 "not_a_value".to_string()
             )))
             .is_err(),
@@ -1692,20 +1700,31 @@ fn test_route53_record_type_validates_snake_case_alias() {
         .get("type")
         .expect("type attribute not found");
 
+    // Phase 4 of carina#2986: use `EnumIdentifier` shape to reach the
+    // variant-match path. A `ConcreteValue::String` here would route
+    // to `StringLiteralExpectedEnum`.
     type_attr
         .attr_type
-        .validate(&Value::Concrete(ConcreteValue::String("A".to_string())))
+        .validate(&Value::Concrete(ConcreteValue::EnumIdentifier(
+            "A".to_string(),
+        )))
         .expect("API spelling A should be accepted");
     type_attr
         .attr_type
-        .validate(&Value::Concrete(ConcreteValue::String("a".to_string())))
+        .validate(&Value::Concrete(ConcreteValue::EnumIdentifier(
+            "a".to_string(),
+        )))
         .expect("DSL spelling a should be accepted");
     type_attr
         .attr_type
-        .validate(&Value::Concrete(ConcreteValue::String("CNAME".to_string())))
+        .validate(&Value::Concrete(ConcreteValue::EnumIdentifier(
+            "CNAME".to_string(),
+        )))
         .expect("API spelling CNAME should be accepted");
     type_attr
         .attr_type
-        .validate(&Value::Concrete(ConcreteValue::String("cname".to_string())))
+        .validate(&Value::Concrete(ConcreteValue::EnumIdentifier(
+            "cname".to_string(),
+        )))
         .expect("DSL spelling cname should be accepted");
 }

@@ -41,7 +41,14 @@ pub fn proto_to_core_resource_id(id: &ProtoResourceId) -> CoreResourceId {
 
 pub fn core_to_proto_value(v: &CoreValue) -> ProtoValue {
     match v {
-        CoreValue::Concrete(ConcreteValue::String(s)) => ProtoValue::String(s.clone()),
+        // `EnumIdentifier` carries identifier-shape text (parser-level
+        // distinction from quoted-string literals, carina#2986). The
+        // provider wire protocol has no native identifier variant, so we
+        // emit it as `ProtoValue::String` — identical to the `String`
+        // arm. The shape distinction is consumed at the validator entry
+        // before reaching this conversion.
+        CoreValue::Concrete(ConcreteValue::String(s))
+        | CoreValue::Concrete(ConcreteValue::EnumIdentifier(s)) => ProtoValue::String(s.clone()),
         CoreValue::Concrete(ConcreteValue::Int(i)) => ProtoValue::Int(*i),
         CoreValue::Concrete(ConcreteValue::Float(f)) => ProtoValue::Float(*f),
         CoreValue::Concrete(ConcreteValue::Bool(b)) => ProtoValue::Bool(*b),
