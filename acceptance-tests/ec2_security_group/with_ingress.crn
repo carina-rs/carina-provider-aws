@@ -27,7 +27,7 @@ let sg = aws.ec2.SecurityGroup {
 aws.ec2.SecurityGroupIngress {
   group_id    = sg.group_id
   description = 'Allow HTTP'
-  ip_protocol = 'tcp'
+  ip_protocol = tcp
   from_port   = 80
   to_port     = 80
   cidr_ip     = '0.0.0.0/0'
@@ -36,7 +36,7 @@ aws.ec2.SecurityGroupIngress {
 aws.ec2.SecurityGroupIngress {
   group_id    = sg.group_id
   description = 'Allow HTTPS'
-  ip_protocol = 'tcp'
+  ip_protocol = tcp
   from_port   = 443
   to_port     = 443
   cidr_ip     = '0.0.0.0/0'
