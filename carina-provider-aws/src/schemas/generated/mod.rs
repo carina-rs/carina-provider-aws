@@ -15,6 +15,7 @@ pub mod logs;
 pub mod organizations;
 pub mod route53;
 pub mod s3;
+pub mod sqs;
 pub mod sts;
 
 /// Returns all generated schema configs
@@ -60,6 +61,7 @@ pub fn configs() -> Vec<AwsSchemaConfig> {
         s3::bucket_server_side_encryption_configuration::s3_bucket_server_side_encryption_configuration_config(),
         s3::bucket_versioning::s3_bucket_versioning_config(),
         s3::bucket_website_configuration::s3_bucket_website_configuration_config(),
+        sqs::queue::sqs_queue_config(),
         sts::caller_identity::sts_caller_identity_config(),
     ]
 }
@@ -114,6 +116,7 @@ pub fn get_enum_valid_values(
         s3::bucket_server_side_encryption_configuration::enum_valid_values(),
         s3::bucket_versioning::enum_valid_values(),
         s3::bucket_website_configuration::enum_valid_values(),
+        sqs::queue::enum_valid_values(),
         sts::caller_identity::enum_valid_values(),
     ];
     for (rt, attrs) in modules {
@@ -251,6 +254,9 @@ pub fn get_enum_alias_reverse(
     }
     if resource_type == "s3.BucketWebsiteConfiguration" {
         return s3::bucket_website_configuration::enum_alias_reverse(attr_name, value);
+    }
+    if resource_type == "sqs.Queue" {
+        return sqs::queue::enum_alias_reverse(attr_name, value);
     }
     None
 }
@@ -526,6 +532,13 @@ pub fn build_enum_aliases_map() -> std::collections::HashMap<
     }
     for (attr, alias, canonical) in s3::bucket_website_configuration::enum_alias_entries() {
         map.entry("s3.BucketWebsiteConfiguration".to_string())
+            .or_insert_with(std::collections::HashMap::new)
+            .entry(attr.to_string())
+            .or_insert_with(std::collections::HashMap::new)
+            .insert(alias.to_string(), canonical.to_string());
+    }
+    for (attr, alias, canonical) in sqs::queue::enum_alias_entries() {
+        map.entry("sqs.Queue".to_string())
             .or_insert_with(std::collections::HashMap::new)
             .entry(attr.to_string())
             .or_insert_with(std::collections::HashMap::new)

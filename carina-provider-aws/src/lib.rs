@@ -27,6 +27,7 @@ use aws_sdk_identitystore::Client as IdentityStoreClient;
 use aws_sdk_organizations::Client as OrganizationsClient;
 use aws_sdk_route53::Client as Route53Client;
 use aws_sdk_s3::Client as S3Client;
+use aws_sdk_sqs::Client as SqsClient;
 use aws_sdk_sts::Client as StsClient;
 
 /// AWS Provider
@@ -40,6 +41,7 @@ pub struct AwsProvider {
     identitystore_client: IdentityStoreClient,
     route53_client: Route53Client,
     acm_client: AcmClient,
+    sqs_client: SqsClient,
     region: String,
     /// Provider-level allow-list of AWS account IDs. Empty means "no
     /// allow-list configured" (the check is skipped). Enforced once
@@ -78,6 +80,7 @@ impl AwsProvider {
             identitystore_client: IdentityStoreClient::new(&config),
             route53_client: Route53Client::new(&config),
             acm_client: AcmClient::new(&config),
+            sqs_client: SqsClient::new(&config),
             region: region.to_string(),
             allowed_account_ids,
             forbidden_account_ids,
@@ -114,6 +117,7 @@ impl AwsProvider {
         identitystore_client: IdentityStoreClient,
         route53_client: Route53Client,
         acm_client: AcmClient,
+        sqs_client: SqsClient,
         region: String,
     ) -> Self {
         Self {
@@ -126,6 +130,7 @@ impl AwsProvider {
             identitystore_client,
             route53_client,
             acm_client,
+            sqs_client,
             region,
             allowed_account_ids: Vec::new(),
             forbidden_account_ids: Vec::new(),

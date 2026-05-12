@@ -33,5 +33,6 @@ download "iam"           "iam/service/2010-05-08/iam-2010-05-08.json"
 download "cloudwatchlogs" "cloudwatch-logs/service/2014-03-28/cloudwatch-logs-2014-03-28.json"
 download "identitystore"  "identitystore/service/2020-06-15/identitystore-2020-06-15.json"
 download "acm"            "acm/service/2015-12-08/acm-2015-12-08.json"
+download "sqs"            "sqs/service/2012-11-05/sqs-2012-11-05.json"
 
 echo "Done."

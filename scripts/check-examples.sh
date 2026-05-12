@@ -6,7 +6,7 @@
 
 set -e
 
-EXAMPLES_DIR="carina-provider-aws/examples"
+EXAMPLES_DIR="examples"
 
 # All resource types supported by the aws provider
 # (from carina-provider-aws/src/schemas/generated/mod.rs)
@@ -20,6 +20,7 @@ RESOURCE_TYPES=(
     "ec2_subnet"
     "ec2_vpc"
     "s3_bucket"
+    "sqs_queue"
     "sts_caller_identity"
 )
 

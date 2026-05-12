@@ -2191,6 +2191,100 @@ pub fn logs_resources() -> Vec<ResourceDef> {
     }]
 }
 
+/// Returns SQS resource definitions.
+///
+/// SQS does not expose its mutable knobs as flat fields on `CreateQueue`;
+/// they live inside an `Attributes: Map<QueueAttributeName, String>`.
+/// We pick the Carina-supported subset and surface them as flat top-level
+/// attributes (`visibility_timeout`, `message_retention_period`, etc.).
+/// The map↔flat packing/unpacking happens in the hand-written
+/// `services/sqs/queue.rs`; the codegen here only emits the schema shape.
+pub fn sqs_resources() -> Vec<ResourceDef> {
+    vec![ResourceDef {
+        name: "sqs.Queue",
+        service_namespace: "com.amazonaws.sqs",
+        schema_structure: None,
+        simple_delete: true,
+        noop_update: false,
+        create_op: "CreateQueue",
+        // `GetQueueAttributes` returns a Map, not a structure — the read
+        // path is hand-written in `services/sqs/queue.rs`. The codegen's
+        // `extract_*_attributes` emission skips this resource via the
+        // `manual_methods` scan (it finds `extract_sqs_queue_attributes`).
+        read_structure: None,
+        read_ops: vec![],
+        delete_op: "DeleteQueue",
+        // `SetQueueAttributes` is the update path. Listing the synthetic
+        // attribute names here marks them updatable on the schema side.
+        update_ops: vec![UpdateOp {
+            operation: "SetQueueAttributes",
+            fields: FieldLayout::Flat(vec![
+                "VisibilityTimeout",
+                "MessageRetentionPeriod",
+                "DelaySeconds",
+                "MaximumMessageSize",
+            ]),
+        }],
+        identifier: "QueueUrl",
+        has_tags: true,
+        type_overrides: vec![
+            ("QueueArn", "super::arn()"),
+            ("VisibilityTimeout", "AttributeType::Int"),
+            ("MessageRetentionPeriod", "AttributeType::Int"),
+            ("DelaySeconds", "AttributeType::Int"),
+            ("MaximumMessageSize", "AttributeType::Int"),
+        ],
+        // Keep the raw `Attributes` map out of the schema; the synthetic
+        // entries below project the keys we care about.
+        exclude_fields: vec!["Attributes"],
+        create_only_overrides: vec!["QueueName"],
+        enum_aliases: vec![],
+        to_dsl_overrides: vec![],
+        required_overrides: vec![],
+        extra_read_only: vec![],
+        // Marks `QueueArn` (a synthetic `extra_attributes` entry) as
+        // read-only. Honored by codegen after aws#282.
+        read_only_overrides: vec!["QueueArn"],
+        extra_attributes: vec![
+            ExtraField {
+                name: "VisibilityTimeout",
+                read_source: None,
+                description: Some(
+                    "The visibility timeout for the queue, in seconds. Defaults to 30. Range 0–43,200.",
+                ),
+            },
+            ExtraField {
+                name: "MessageRetentionPeriod",
+                read_source: None,
+                description: Some(
+                    "The length of time, in seconds, for which Amazon SQS retains a message. Defaults to 345,600 (4 days). Range 60–1,209,600 (1 minute–14 days).",
+                ),
+            },
+            ExtraField {
+                name: "DelaySeconds",
+                read_source: None,
+                description: Some(
+                    "The length of time, in seconds, for which the delivery of all messages in the queue is delayed. Defaults to 0. Range 0–900 (15 minutes).",
+                ),
+            },
+            ExtraField {
+                name: "MaximumMessageSize",
+                read_source: None,
+                description: Some(
+                    "The limit of how many bytes a message can contain before Amazon SQS rejects it. Defaults to 262,144 (256 KiB). Range 1,024–262,144 (1–256 KiB).",
+                ),
+            },
+            ExtraField {
+                name: "QueueArn",
+                read_source: None,
+                description: Some("The Amazon Resource Name (ARN) of the queue."),
+            },
+        ],
+        identity_overrides: vec![],
+        derived_attributes: vec![],
+    }]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

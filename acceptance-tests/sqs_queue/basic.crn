@@ -1,0 +1,20 @@
+# SQS Queue - Basic test
+#
+# Tests: queue creation with the four writable numeric attributes,
+# tags, and the read-back of `queue_arn`.
+
+provider aws {
+  region = aws.Region.ap_northeast_1
+}
+
+aws.sqs.Queue {
+  queue_name               = 'carina-acc-test-aws-sqs-queue-basic-v1'
+  visibility_timeout       = 60
+  message_retention_period = 86400
+  delay_seconds            = 0
+  maximum_message_size     = 262144
+
+  tags = {
+    Environment = 'acceptance-test'
+  }
+}
