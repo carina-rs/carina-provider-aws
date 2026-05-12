@@ -434,7 +434,7 @@ fn lookup_snake(
 /// Convert a Carina policy document Value to JSON. Top-level fields are
 /// case-mapped via `POLICY_TOP_FIELDS`; the value of `Statement` is
 /// further converted by `policy_statement_to_json`.
-fn policy_doc_to_json(value: &Value) -> serde_json::Value {
+pub(crate) fn policy_doc_to_json(value: &Value) -> serde_json::Value {
     let Value::Concrete(ConcreteValue::Map(map)) = value else {
         return scalar_to_json(value);
     };
@@ -538,6 +538,20 @@ fn scalar_to_json(value: &Value) -> serde_json::Value {
         Value::Concrete(ConcreteValue::Int(n)) => serde_json::Value::Number((*n).into()),
         Value::Concrete(ConcreteValue::Float(f)) => serde_json::json!(*f),
         Value::Concrete(ConcreteValue::Bool(b)) => serde_json::Value::Bool(*b),
+        // `effect` lands here as `EnumIdentifier("allow"|"deny")` after
+        // the read-side canonicalization. AWS's wire form is the
+        // PascalCase canonical (`Allow` / `Deny`), so map the snake_case
+        // alias back. Trailing-segment strip handles any namespaced
+        // form too (`aws.iam.PolicyStatement.Effect.allow` → `allow`).
+        Value::Concrete(ConcreteValue::EnumIdentifier(id)) => {
+            let trailing = id.rsplit('.').next().unwrap_or(id.as_str());
+            let canonical = match trailing {
+                "allow" => "Allow",
+                "deny" => "Deny",
+                other => other,
+            };
+            serde_json::Value::String(canonical.to_string())
+        }
         Value::Concrete(ConcreteValue::List(_)) | Value::Concrete(ConcreteValue::Map(_)) => {
             scalar_or_passthrough_to_json(value)
         }
@@ -557,7 +571,7 @@ pub fn iam_policy_json_to_value(json_str: &str) -> Result<Value, String> {
     Ok(json_to_policy_doc(&json))
 }
 
-fn json_to_policy_doc(json: &serde_json::Value) -> Value {
+pub(crate) fn json_to_policy_doc(json: &serde_json::Value) -> Value {
     let serde_json::Value::Object(obj) = json else {
         return json_scalar_to_value(json);
     };
@@ -596,11 +610,54 @@ fn json_to_policy_statement(json: &serde_json::Value) -> Value {
         let value = match snake_key {
             "principal" | "not_principal" => json_to_principal(v),
             "condition" => json_to_condition(v),
+            // `effect` is a StringEnum with `dsl_aliases: [("Allow",
+            // "allow"), ("Deny", "deny")]`. AWS returns the canonical
+            // PascalCase ("Allow"); the DSL surface is the snake_case
+            // alias ("allow"). Emit `EnumIdentifier` directly with the
+            // DSL form so post-apply plan-verify compares equal.
+            "effect" => json_effect_to_enum_identifier(v),
+            // `Action` / `Resource` are `Map<String, StringOrList>`
+            // — AWS may return a scalar (`"sts:AssumeRole"`) or a list.
+            // The DSL schema accepts both, but to avoid post-apply
+            // plan-verify churn we normalize scalars to a single-element
+            // list (the typical DSL spelling).
+            "action" | "not_action" | "resource" | "not_resource" => {
+                json_scalar_to_singleton_list(v)
+            }
             _ => json_scalar_or_passthrough_to_value(v),
         };
         map.insert(snake_key.to_string(), value);
     }
     Value::Concrete(ConcreteValue::Map(map))
+}
+
+/// AWS returns `Effect: "Allow"`; the DSL StringEnum surface for that
+/// field is the snake_case alias (`allow` / `deny`). Emit
+/// `EnumIdentifier` carrying the alias so the read state matches what
+/// the DSL produces.
+fn json_effect_to_enum_identifier(v: &serde_json::Value) -> Value {
+    let Some(s) = v.as_str() else {
+        return json_scalar_to_value(v);
+    };
+    let alias = match s {
+        "Allow" => "allow",
+        "Deny" => "deny",
+        _ => s,
+    };
+    Value::Concrete(ConcreteValue::EnumIdentifier(alias.to_string()))
+}
+
+/// AWS returns `Principal: {"AWS": "*"}` (scalar) for single-element
+/// principals; the DSL schema declares `aws: List<String>`. Wrap the
+/// scalar into a single-element list so post-apply plan-verify does
+/// not see a shape mismatch.
+fn json_scalar_to_singleton_list(v: &serde_json::Value) -> Value {
+    match v {
+        serde_json::Value::Array(items) => Value::Concrete(ConcreteValue::List(
+            items.iter().map(json_scalar_to_value).collect(),
+        )),
+        _ => Value::Concrete(ConcreteValue::List(vec![json_scalar_to_value(v)])),
+    }
 }
 
 fn json_to_principal(json: &serde_json::Value) -> Value {
@@ -612,7 +669,12 @@ fn json_to_principal(json: &serde_json::Value) -> Value {
                     continue;
                 }
                 let key = lookup_snake(PRINCIPAL_FIELDS, k).unwrap_or(k.as_str());
-                map.insert(key.to_string(), json_scalar_or_passthrough_to_value(v));
+                // All Principal sub-fields (`aws`, `service`,
+                // `federated`, `canonical_user`) are declared as
+                // `List<String>` in the schema; normalize scalar JSON
+                // (which AWS returns when there is only one entry)
+                // into a singleton list.
+                map.insert(key.to_string(), json_scalar_to_singleton_list(v));
             }
             Value::Concrete(ConcreteValue::Map(map))
         }
@@ -767,10 +829,20 @@ mod tests {
     /// Exercises principal map, list-valued action/resource, and a
     /// `bool` condition with the `aws:SecureTransport` value key.
     fn full_deny_policy_value() -> Value {
+        // Canonical post-read shape:
+        //   - `effect`: EnumIdentifier carrying snake_case alias
+        //   - `principal.aws`: singleton List (schema declares List<String>)
+        //   - `action`: singleton List (schema declares List<String>)
+        // value_to_iam_policy_json serializes both List-of-one and bare
+        // scalars to the same JSON, and json_to_policy_doc normalizes
+        // scalars to singleton lists, so this is the round-trip fixed
+        // point.
         let mut principal = IndexMap::new();
         principal.insert(
             "aws".to_string(),
-            Value::Concrete(ConcreteValue::String("*".to_string())),
+            Value::Concrete(ConcreteValue::List(vec![Value::Concrete(
+                ConcreteValue::String("*".to_string()),
+            )])),
         );
 
         let mut bool_inner = IndexMap::new();
@@ -791,7 +863,7 @@ mod tests {
         );
         stmt.insert(
             "effect".to_string(),
-            Value::Concrete(ConcreteValue::String("Deny".to_string())),
+            Value::Concrete(ConcreteValue::EnumIdentifier("deny".to_string())),
         );
         stmt.insert(
             "principal".to_string(),
@@ -799,7 +871,9 @@ mod tests {
         );
         stmt.insert(
             "action".to_string(),
-            Value::Concrete(ConcreteValue::String("s3:*".to_string())),
+            Value::Concrete(ConcreteValue::List(vec![Value::Concrete(
+                ConcreteValue::String("s3:*".to_string()),
+            )])),
         );
         stmt.insert(
             "resource".to_string(),
@@ -918,10 +992,29 @@ mod tests {
             panic!()
         };
         assert!(principal.contains_key("aws"));
+        // Schema declares principal sub-fields as List<String>; scalar
+        // JSON (`"AWS": "*"`) is normalized to a singleton list on read
+        // so post-apply plan-verify does not see a shape mismatch.
         assert_eq!(
             principal.get("aws"),
-            Some(&Value::Concrete(ConcreteValue::String("*".to_string()))),
-            "principal value should round-trip verbatim"
+            Some(&Value::Concrete(ConcreteValue::List(vec![
+                Value::Concrete(ConcreteValue::String("*".to_string()))
+            ])))
+        );
+
+        // Effect is the snake_case alias of the StringEnum on read.
+        assert_eq!(
+            stmt.get("effect"),
+            Some(&Value::Concrete(ConcreteValue::EnumIdentifier(
+                "deny".to_string()
+            )))
+        );
+        // Action scalar is wrapped to singleton list.
+        assert_eq!(
+            stmt.get("action"),
+            Some(&Value::Concrete(ConcreteValue::List(vec![
+                Value::Concrete(ConcreteValue::String("s3:*".to_string()))
+            ])))
         );
     }
 
@@ -968,9 +1061,12 @@ mod tests {
         let Value::Concrete(ConcreteValue::Map(stmt)) = doc.get("statement").unwrap() else {
             panic!("statement should be a Map for single-object form")
         };
+        // Effect is the snake_case alias of the StringEnum on read.
         assert_eq!(
             stmt.get("effect"),
-            Some(&Value::Concrete(ConcreteValue::String("Allow".to_string())))
+            Some(&Value::Concrete(ConcreteValue::EnumIdentifier(
+                "allow".to_string()
+            )))
         );
     }
 
@@ -1021,13 +1117,17 @@ mod tests {
             Value::Concrete(ConcreteValue::Map(inner)),
         );
         let mut stmt = IndexMap::new();
+        // Canonical post-read form: effect EnumIdentifier alias, action
+        // singleton List.
         stmt.insert(
             "effect".to_string(),
-            Value::Concrete(ConcreteValue::String("Allow".to_string())),
+            Value::Concrete(ConcreteValue::EnumIdentifier("allow".to_string())),
         );
         stmt.insert(
             "action".to_string(),
-            Value::Concrete(ConcreteValue::String("s3:*".to_string())),
+            Value::Concrete(ConcreteValue::List(vec![Value::Concrete(
+                ConcreteValue::String("s3:*".to_string()),
+            )])),
         );
         stmt.insert(
             "condition".to_string(),
@@ -1072,13 +1172,17 @@ mod tests {
             Value::Concrete(ConcreteValue::Map(inner)),
         );
         let mut stmt = IndexMap::new();
+        // Canonical post-read form: effect EnumIdentifier alias, action
+        // singleton List.
         stmt.insert(
             "effect".to_string(),
-            Value::Concrete(ConcreteValue::String("Allow".to_string())),
+            Value::Concrete(ConcreteValue::EnumIdentifier("allow".to_string())),
         );
         stmt.insert(
             "action".to_string(),
-            Value::Concrete(ConcreteValue::String("s3:GetObject".to_string())),
+            Value::Concrete(ConcreteValue::List(vec![Value::Concrete(
+                ConcreteValue::String("s3:GetObject".to_string()),
+            )])),
         );
         stmt.insert(
             "condition".to_string(),

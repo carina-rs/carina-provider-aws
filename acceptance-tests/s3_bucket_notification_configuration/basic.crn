@@ -1,9 +1,8 @@
 # S3 BucketNotificationConfiguration - Basic test
 #
-# NOTE: this fixture references an SQS queue ARN that must already exist
-# (and grant s3.amazonaws.com permission to send messages) when running
-# the acceptance test. Carina does not yet manage SQS, so the queue is a
-# precondition rather than a fixture-managed resource.
+# Self-contained: the SQS queue is provisioned by the fixture itself,
+# with a queue policy that grants s3.amazonaws.com permission to send
+# messages for events on this specific bucket.
 
 provider aws {
   region = aws.Region.ap_northeast_1
@@ -13,13 +12,32 @@ let bucket = aws.s3.Bucket {
   bucket = 'carina-acc-test-aws-s3-bucket-notification-basic-v1'
 }
 
+let queue = aws.sqs.Queue {
+  queue_name = 'carina-acc-test-aws-s3-bucket-notification-queue'
+
+  policy = {
+    version = '2012-10-17'
+    statement = [
+      {
+        sid = 'AllowS3SendMessage'
+        effect = allow
+        principal = {
+          service = ['s3.amazonaws.com']
+        }
+        action = ['sqs:SendMessage']
+        resource = ['arn:aws:sqs:ap-northeast-1:*:carina-acc-test-aws-s3-bucket-notification-queue']
+      },
+    ]
+  }
+}
+
 aws.s3.BucketNotificationConfiguration {
   bucket = bucket.bucket
 
   queue_configurations = [
     {
       id = 'object-created'
-      queue_arn = 'arn:aws:sqs:ap-northeast-1:000000000000:carina-acc-test-aws-s3-bucket-notification-queue'
+      queue_arn = queue.queue_arn
       events = ['s3:ObjectCreated:*']
     },
   ]

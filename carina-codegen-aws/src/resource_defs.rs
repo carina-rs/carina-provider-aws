@@ -2195,10 +2195,15 @@ pub fn logs_resources() -> Vec<ResourceDef> {
 ///
 /// SQS does not expose its mutable knobs as flat fields on `CreateQueue`;
 /// they live inside an `Attributes: Map<QueueAttributeName, String>`.
-/// We pick the Carina-supported subset and surface them as flat top-level
-/// attributes (`visibility_timeout`, `message_retention_period`, etc.).
-/// The map↔flat packing/unpacking happens in the hand-written
+/// We surface every `QueueAttributeName` variant as a flat top-level
+/// attribute. The map↔flat packing/unpacking happens in the hand-written
 /// `services/sqs/queue.rs`; the codegen here only emits the schema shape.
+///
+/// Variants intentionally skipped (per
+/// `feedback_resource_unit_complete_attrs.md` we surface "every attribute
+/// the API exposes" — these are the genuinely non-attribute entries):
+/// - `All`: meta marker used by `GetQueueAttributes` to mean "fetch
+///   everything". Not a queue attribute itself.
 pub fn sqs_resources() -> Vec<ResourceDef> {
     vec![ResourceDef {
         name: "sqs.Queue",
@@ -2214,38 +2219,87 @@ pub fn sqs_resources() -> Vec<ResourceDef> {
         read_structure: None,
         read_ops: vec![],
         delete_op: "DeleteQueue",
-        // `SetQueueAttributes` is the update path. Listing the synthetic
-        // attribute names here marks them updatable on the schema side.
+        // Every queue attribute SetQueueAttributes accepts goes here.
+        // Listing them marks them updatable on the schema side; the
+        // immutable ones (FifoQueue, FifoThroughputLimit, DeduplicationScope)
+        // are forced create-only via `create_only_overrides`.
         update_ops: vec![UpdateOp {
             operation: "SetQueueAttributes",
             fields: FieldLayout::Flat(vec![
+                "Policy",
                 "VisibilityTimeout",
+                "MaximumMessageSize",
                 "MessageRetentionPeriod",
                 "DelaySeconds",
-                "MaximumMessageSize",
+                "ReceiveMessageWaitTimeSeconds",
+                "RedrivePolicy",
+                "RedriveAllowPolicy",
+                "ContentBasedDeduplication",
+                "KmsMasterKeyId",
+                "KmsDataKeyReusePeriodSeconds",
+                "SqsManagedSseEnabled",
             ]),
         }],
         identifier: "QueueUrl",
         has_tags: true,
         type_overrides: vec![
             ("QueueArn", "super::arn()"),
+            ("KmsMasterKeyId", "super::kms_key_id()"),
+            ("Policy", "super::iam_policy_document()"),
+            ("RedrivePolicy", "super::sqs_redrive_policy()"),
+            ("RedriveAllowPolicy", "super::sqs_redrive_allow_policy()"),
             ("VisibilityTimeout", "AttributeType::Int"),
+            ("MaximumMessageSize", "AttributeType::Int"),
             ("MessageRetentionPeriod", "AttributeType::Int"),
             ("DelaySeconds", "AttributeType::Int"),
-            ("MaximumMessageSize", "AttributeType::Int"),
+            ("ReceiveMessageWaitTimeSeconds", "AttributeType::Int"),
+            ("KmsDataKeyReusePeriodSeconds", "AttributeType::Int"),
+            ("FifoQueue", "AttributeType::Bool"),
+            ("ContentBasedDeduplication", "AttributeType::Bool"),
+            ("SqsManagedSseEnabled", "AttributeType::Bool"),
+            ("ApproximateNumberOfMessages", "AttributeType::Int"),
+            ("ApproximateNumberOfMessagesDelayed", "AttributeType::Int"),
+            (
+                "ApproximateNumberOfMessagesNotVisible",
+                "AttributeType::Int",
+            ),
+            ("CreatedTimestamp", "AttributeType::Int"),
+            ("LastModifiedTimestamp", "AttributeType::Int"),
         ],
         // Keep the raw `Attributes` map out of the schema; the synthetic
-        // entries below project the keys we care about.
+        // entries below project every QueueAttributeName key.
         exclude_fields: vec!["Attributes"],
-        create_only_overrides: vec!["QueueName"],
+        // FifoQueue, FifoThroughputLimit, and DeduplicationScope cannot be
+        // changed after the queue is created — AWS rejects SetQueueAttributes
+        // for these.
+        create_only_overrides: vec![
+            "QueueName",
+            "FifoQueue",
+            "FifoThroughputLimit",
+            "DeduplicationScope",
+        ],
         enum_aliases: vec![],
         to_dsl_overrides: vec![],
         required_overrides: vec![],
         extra_read_only: vec![],
-        // Marks `QueueArn` (a synthetic `extra_attributes` entry) as
-        // read-only. Honored by codegen after aws#282.
-        read_only_overrides: vec!["QueueArn"],
+        // QueueArn + the runtime counters and timestamps are read-only.
+        read_only_overrides: vec![
+            "QueueArn",
+            "ApproximateNumberOfMessages",
+            "ApproximateNumberOfMessagesDelayed",
+            "ApproximateNumberOfMessagesNotVisible",
+            "CreatedTimestamp",
+            "LastModifiedTimestamp",
+        ],
         extra_attributes: vec![
+            // Writable / mutable knobs
+            ExtraField {
+                name: "Policy",
+                read_source: None,
+                description: Some(
+                    "The queue's access policy, as a JSON-encoded IAM policy document.",
+                ),
+            },
             ExtraField {
                 name: "VisibilityTimeout",
                 read_source: None,
@@ -2275,9 +2329,115 @@ pub fn sqs_resources() -> Vec<ResourceDef> {
                 ),
             },
             ExtraField {
+                name: "ReceiveMessageWaitTimeSeconds",
+                read_source: None,
+                description: Some(
+                    "The duration, in seconds, for which a ReceiveMessage call waits for a message to arrive (long polling). Defaults to 0. Range 0–20.",
+                ),
+            },
+            ExtraField {
+                name: "RedrivePolicy",
+                read_source: None,
+                description: Some(
+                    "Dead-letter queue redrive policy, as a JSON document with `deadLetterTargetArn` and `maxReceiveCount` keys.",
+                ),
+            },
+            ExtraField {
+                name: "RedriveAllowPolicy",
+                read_source: None,
+                description: Some(
+                    "Permissions for source queues that can use this queue as their dead-letter destination, as a JSON document.",
+                ),
+            },
+            // FIFO-specific (all create-only except ContentBasedDeduplication)
+            ExtraField {
+                name: "FifoQueue",
+                read_source: None,
+                description: Some(
+                    "Whether the queue is FIFO. Create-only. The queue name must end with `.fifo` when true.",
+                ),
+            },
+            ExtraField {
+                name: "ContentBasedDeduplication",
+                read_source: None,
+                description: Some(
+                    "FIFO only: enables content-based message deduplication using a SHA-256 hash of the message body.",
+                ),
+            },
+            ExtraField {
+                name: "DeduplicationScope",
+                read_source: None,
+                description: Some(
+                    "FIFO only, create-only: scope of message deduplication. Valid values: `messageGroup`, `queue`.",
+                ),
+            },
+            ExtraField {
+                name: "FifoThroughputLimit",
+                read_source: None,
+                description: Some(
+                    "FIFO only, create-only: per-queue or per-message-group throughput limit. Valid values: `perQueue`, `perMessageGroupId`.",
+                ),
+            },
+            // KMS encryption
+            ExtraField {
+                name: "KmsMasterKeyId",
+                read_source: None,
+                description: Some(
+                    "The ID of an AWS KMS customer master key (CMK) to use for server-side encryption (SSE-KMS). Use `alias/aws/sqs` for the AWS-managed key.",
+                ),
+            },
+            ExtraField {
+                name: "KmsDataKeyReusePeriodSeconds",
+                read_source: None,
+                description: Some(
+                    "Length of time, in seconds, that SQS can reuse a data key before invoking KMS again. Defaults to 300 (5 minutes). Range 60–86,400.",
+                ),
+            },
+            ExtraField {
+                name: "SqsManagedSseEnabled",
+                read_source: None,
+                description: Some(
+                    "Enables SQS-managed server-side encryption (SSE-SQS). Mutually exclusive with KmsMasterKeyId.",
+                ),
+            },
+            // Read-only
+            ExtraField {
                 name: "QueueArn",
                 read_source: None,
                 description: Some("The Amazon Resource Name (ARN) of the queue."),
+            },
+            ExtraField {
+                name: "ApproximateNumberOfMessages",
+                read_source: None,
+                description: Some(
+                    "Approximate number of visible messages in the queue. Runtime metric reported by the SQS service.",
+                ),
+            },
+            ExtraField {
+                name: "ApproximateNumberOfMessagesDelayed",
+                read_source: None,
+                description: Some(
+                    "Approximate number of messages currently being delayed before becoming visible. Runtime metric.",
+                ),
+            },
+            ExtraField {
+                name: "ApproximateNumberOfMessagesNotVisible",
+                read_source: None,
+                description: Some(
+                    "Approximate number of messages that are in flight (received but not yet deleted or returned to the queue). Runtime metric.",
+                ),
+            },
+            ExtraField {
+                name: "CreatedTimestamp",
+                read_source: None,
+                description: Some("Unix epoch seconds at which the queue was created."),
+            },
+            ExtraField {
+                name: "LastModifiedTimestamp",
+                read_source: None,
+                description: Some(
+                    "Unix epoch seconds at which the queue's attributes were last modified.",
+                ),
             },
         ],
         identity_overrides: vec![],
