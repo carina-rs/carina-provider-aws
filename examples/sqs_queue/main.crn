@@ -1,0 +1,13 @@
+provider aws {
+  region = aws.Region.ap_northeast_1
+}
+
+aws.sqs.Queue {
+  queue_name               = 'carina-example-queue'
+  visibility_timeout       = 60
+  message_retention_period = 86400
+
+  tags = {
+    Environment = 'example'
+  }
+}

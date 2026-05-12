@@ -225,6 +225,7 @@ fn main() -> Result<()> {
     all_resources.extend(resource_defs::iam_resources());
     all_resources.extend(resource_defs::logs_resources());
     all_resources.extend(resource_defs::acm_resources());
+    all_resources.extend(resource_defs::sqs_resources());
 
     // Collect all data source definitions
     let mut all_data_sources = resource_defs::sts_data_sources();
@@ -4031,6 +4032,7 @@ fn cf_type_name(resource_name: &str) -> &'static str {
         "logs.LogGroup" => "AWS::Logs::LogGroup",
         "identitystore.User" => "AWS::IdentityStore::User",
         "acm.Certificate" => "AWS::CertificateManager::Certificate",
+        "sqs.Queue" => "AWS::SQS::Queue",
         _ => panic!(
             "Unknown resource: {}. Add it to cf_type_name().",
             resource_name

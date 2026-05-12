@@ -135,6 +135,7 @@ impl Provider for AwsProvider {
                         .await
                 }
                 "acm.Certificate" => self.read_acm_certificate(&id, identifier.as_deref()).await,
+                "sqs.Queue" => self.read_sqs_queue(&id, identifier.as_deref()).await,
                 _ => Err(ProviderError::internal(format!(
                     "Unknown resource type: {}",
                     id.resource_type
@@ -244,6 +245,7 @@ impl Provider for AwsProvider {
                 "logs.LogGroup" => self.create_logs_log_group(resource).await,
                 "route53.RecordSet" => self.create_route53_record_set(resource).await,
                 "acm.Certificate" => self.create_acm_certificate(resource).await,
+                "sqs.Queue" => self.create_sqs_queue(resource).await,
                 _ => Err(ProviderError::internal(format!(
                     "Unknown resource type: {}",
                     resource.id.resource_type
@@ -399,6 +401,7 @@ impl Provider for AwsProvider {
                     self.update_acm_certificate(id, &identifier, &from, to)
                         .await
                 }
+                "sqs.Queue" => self.update_sqs_queue(id, &identifier, &from, to).await,
                 _ => Err(ProviderError::internal(format!(
                     "Unknown resource type: {}",
                     id.resource_type
@@ -516,6 +519,7 @@ impl Provider for AwsProvider {
                 "logs.LogGroup" => self.delete_logs_log_group(id, &identifier).await,
                 "route53.RecordSet" => self.delete_route53_record_set(id, &identifier).await,
                 "acm.Certificate" => self.delete_acm_certificate(id, &identifier).await,
+                "sqs.Queue" => self.delete_sqs_queue(id, &identifier).await,
                 _ => Err(ProviderError::internal(format!(
                     "Unknown resource type: {}",
                     id.resource_type
