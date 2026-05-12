@@ -31,6 +31,11 @@ pub fn sqs_queue_config() -> AwsSchemaConfig {
                 .with_provider_name("tags"),
         )
         .attribute(
+            AttributeSchema::new("policy", super::iam_policy_document())
+                .with_description("The queue's access policy, as a JSON-encoded IAM policy document.")
+                .with_provider_name("Policy"),
+        )
+        .attribute(
             AttributeSchema::new("visibility_timeout", AttributeType::Int)
                 .with_description("The visibility timeout for the queue, in seconds. Defaults to 30. Range 0–43,200.")
                 .with_provider_name("VisibilityTimeout"),
@@ -51,10 +56,93 @@ pub fn sqs_queue_config() -> AwsSchemaConfig {
                 .with_provider_name("MaximumMessageSize"),
         )
         .attribute(
+            AttributeSchema::new("receive_message_wait_time_seconds", AttributeType::Int)
+                .with_description("The duration, in seconds, for which a ReceiveMessage call waits for a message to arrive (long polling). Defaults to 0. Range 0–20.")
+                .with_provider_name("ReceiveMessageWaitTimeSeconds"),
+        )
+        .attribute(
+            AttributeSchema::new("redrive_policy", super::sqs_redrive_policy())
+                .with_description("Dead-letter queue redrive policy, as a JSON document with `deadLetterTargetArn` and `maxReceiveCount` keys.")
+                .with_provider_name("RedrivePolicy"),
+        )
+        .attribute(
+            AttributeSchema::new("redrive_allow_policy", super::sqs_redrive_allow_policy())
+                .with_description("Permissions for source queues that can use this queue as their dead-letter destination, as a JSON document.")
+                .with_provider_name("RedriveAllowPolicy"),
+        )
+        .attribute(
+            AttributeSchema::new("fifo_queue", AttributeType::Bool)
+                .create_only()
+                .with_description("Whether the queue is FIFO. Create-only. The queue name must end with `.fifo` when true.")
+                .with_provider_name("FifoQueue"),
+        )
+        .attribute(
+            AttributeSchema::new("content_based_deduplication", AttributeType::Bool)
+                .with_description("FIFO only: enables content-based message deduplication using a SHA-256 hash of the message body.")
+                .with_provider_name("ContentBasedDeduplication"),
+        )
+        .attribute(
+            AttributeSchema::new("deduplication_scope", AttributeType::String)
+                .create_only()
+                .with_description("FIFO only, create-only: scope of message deduplication. Valid values: `messageGroup`, `queue`.")
+                .with_provider_name("DeduplicationScope"),
+        )
+        .attribute(
+            AttributeSchema::new("fifo_throughput_limit", AttributeType::String)
+                .create_only()
+                .with_description("FIFO only, create-only: per-queue or per-message-group throughput limit. Valid values: `perQueue`, `perMessageGroupId`.")
+                .with_provider_name("FifoThroughputLimit"),
+        )
+        .attribute(
+            AttributeSchema::new("kms_master_key_id", super::kms_key_id())
+                .with_description("The ID of an AWS KMS customer master key (CMK) to use for server-side encryption (SSE-KMS). Use `alias/aws/sqs` for the AWS-managed key.")
+                .with_provider_name("KmsMasterKeyId"),
+        )
+        .attribute(
+            AttributeSchema::new("kms_data_key_reuse_period_seconds", AttributeType::Int)
+                .with_description("Length of time, in seconds, that SQS can reuse a data key before invoking KMS again. Defaults to 300 (5 minutes). Range 60–86,400.")
+                .with_provider_name("KmsDataKeyReusePeriodSeconds"),
+        )
+        .attribute(
+            AttributeSchema::new("sqs_managed_sse_enabled", AttributeType::Bool)
+                .with_description("Enables SQS-managed server-side encryption (SSE-SQS). Mutually exclusive with KmsMasterKeyId.")
+                .with_provider_name("SqsManagedSseEnabled"),
+        )
+        .attribute(
             AttributeSchema::new("queue_arn", super::arn())
                 .read_only()
                 .with_description("The Amazon Resource Name (ARN) of the queue. (read-only)")
                 .with_provider_name("QueueArn"),
+        )
+        .attribute(
+            AttributeSchema::new("approximate_number_of_messages", AttributeType::Int)
+                .read_only()
+                .with_description("Approximate number of visible messages in the queue. Runtime metric reported by the SQS service. (read-only)")
+                .with_provider_name("ApproximateNumberOfMessages"),
+        )
+        .attribute(
+            AttributeSchema::new("approximate_number_of_messages_delayed", AttributeType::Int)
+                .read_only()
+                .with_description("Approximate number of messages currently being delayed before becoming visible. Runtime metric. (read-only)")
+                .with_provider_name("ApproximateNumberOfMessagesDelayed"),
+        )
+        .attribute(
+            AttributeSchema::new("approximate_number_of_messages_not_visible", AttributeType::Int)
+                .read_only()
+                .with_description("Approximate number of messages that are in flight (received but not yet deleted or returned to the queue). Runtime metric. (read-only)")
+                .with_provider_name("ApproximateNumberOfMessagesNotVisible"),
+        )
+        .attribute(
+            AttributeSchema::new("created_timestamp", AttributeType::Int)
+                .read_only()
+                .with_description("Unix epoch seconds at which the queue was created. (read-only)")
+                .with_provider_name("CreatedTimestamp"),
+        )
+        .attribute(
+            AttributeSchema::new("last_modified_timestamp", AttributeType::Int)
+                .read_only()
+                .with_description("Unix epoch seconds at which the queue's attributes were last modified. (read-only)")
+                .with_provider_name("LastModifiedTimestamp"),
         )
         .attribute(
             AttributeSchema::new("tags", tags_type())

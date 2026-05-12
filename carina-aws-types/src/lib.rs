@@ -1443,6 +1443,60 @@ pub fn iam_policy_document() -> AttributeType {
     }
 }
 
+/// SQS dead-letter queue redrive policy. Returned by the SQS API as a
+/// stringified JSON document under the `RedrivePolicy` queue attribute,
+/// but it is a fixed, narrow shape (target ARN + retry count) rather
+/// than an IAM-style policy — so it gets its own Struct rather than
+/// reusing `iam_policy_document()`.
+pub fn sqs_redrive_policy() -> AttributeType {
+    AttributeType::Struct {
+        name: "SqsRedrivePolicy".to_string(),
+        fields: vec![
+            StructField::new("dead_letter_target_arn", arn())
+                .with_provider_name("deadLetterTargetArn")
+                .required()
+                .with_description("ARN of the dead-letter queue to which Amazon SQS moves messages after `max_receive_count` is exceeded."),
+            StructField::new("max_receive_count", AttributeType::Int)
+                .with_provider_name("maxReceiveCount")
+                .required()
+                .with_description("Number of times a consumer can receive a message before it is moved to the dead-letter queue. Range 1–1,000."),
+        ],
+    }
+}
+
+/// `redrive_permission` enum used inside `sqs_redrive_allow_policy`.
+fn sqs_redrive_permission() -> AttributeType {
+    AttributeType::StringEnum {
+        name: "SqsRedrivePermission".to_string(),
+        values: vec![
+            "allowAll".to_string(),
+            "denyAll".to_string(),
+            "byQueue".to_string(),
+        ],
+        namespace: Some("aws.sqs.Queue".to_string()),
+        dsl_aliases: dsl_aliases_for(&["allowAll", "denyAll", "byQueue"]),
+    }
+}
+
+/// SQS redrive-allow policy. Controls which source queues may use this
+/// queue as their dead-letter destination. Distinct from
+/// `iam_policy_document()`: the shape is `{redrivePermission, sourceQueueArns?}`,
+/// not a generic IAM statement list.
+pub fn sqs_redrive_allow_policy() -> AttributeType {
+    AttributeType::Struct {
+        name: "SqsRedriveAllowPolicy".to_string(),
+        fields: vec![
+            StructField::new("redrive_permission", sqs_redrive_permission())
+                .with_provider_name("redrivePermission")
+                .required()
+                .with_description("Which source queues may redrive into this queue. `allowAll`: any queue in the account; `denyAll`: none; `byQueue`: only the ARNs in `source_queue_arns`."),
+            StructField::new("source_queue_arns", AttributeType::list(arn()))
+                .with_provider_name("sourceQueueArns")
+                .with_description("Up to 10 source queue ARNs permitted to redrive into this queue. Required when `redrive_permission` is `byQueue`."),
+        ],
+    }
+}
+
 /// SSE algorithm enum for `aws.s3.BucketServerSideEncryptionConfiguration`.
 fn s3_sse_algorithm() -> AttributeType {
     AttributeType::StringEnum {

@@ -1,0 +1,22 @@
+# SQS Queue - FIFO test
+#
+# Tests: FIFO queue (fifo_queue + content_based_deduplication +
+# deduplication_scope + fifo_throughput_limit). Queue name must end in
+# `.fifo`.
+
+provider aws {
+  region = aws.Region.ap_northeast_1
+}
+
+aws.sqs.Queue {
+  queue_name                  = 'carina-acc-test-aws-sqs-queue-fifo-v1.fifo'
+  fifo_queue                  = true
+  content_based_deduplication = true
+  deduplication_scope         = 'messageGroup'
+  fifo_throughput_limit       = 'perMessageGroupId'
+  visibility_timeout          = 30
+
+  tags = {
+    Environment = 'acceptance-test'
+  }
+}
