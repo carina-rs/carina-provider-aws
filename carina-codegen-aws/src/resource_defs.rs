@@ -79,9 +79,12 @@ pub struct ResourceDef {
     pub extra_read_only: Vec<&'static str>,
     /// Fields to force as read-only even if they appear in create input
     pub read_only_overrides: Vec<&'static str>,
-    /// Extra writable fields to add as create-only attributes.
-    /// These are fields not present in the create operation input.
-    pub extra_writable: Vec<ExtraField>,
+    /// Extra schema attributes (writable or read-only) that are not present
+    /// in the create operation input. Each entry is emitted as an
+    /// `AttributeSchema::new(...)` line with the usual flag combination:
+    /// - `update_ops` lists the field → updatable (else create-only).
+    /// - `read_only_overrides` lists the field → read-only.
+    pub extra_attributes: Vec<ExtraField>,
     /// Fields to mark as identity (contribute to anonymous resource identifier hashing).
     /// Use for attributes that distinguish same-type resources sharing create-only values.
     pub identity_overrides: Vec<&'static str>,
@@ -271,7 +274,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             required_overrides: vec![],
             extra_read_only: vec![],
             read_only_overrides: vec![],
-            extra_writable: vec![],
+            extra_attributes: vec![],
             identity_overrides: vec![],
             derived_attributes: vec![],
         },
@@ -306,7 +309,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             required_overrides: vec![],
             extra_read_only: vec![],
             read_only_overrides: vec![],
-            extra_writable: vec![],
+            extra_attributes: vec![],
             identity_overrides: vec![],
             // private_dns_name_options_on_launch is a nested struct on the
             // read shape; collapse it into a single Value::Map attribute
@@ -345,7 +348,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             required_overrides: vec![],
             extra_read_only: vec![],
             read_only_overrides: vec![],
-            extra_writable: vec![ExtraField {
+            extra_attributes: vec![ExtraField {
                 name: "VpcId",
                 read_source: None,
                 description: Some(
@@ -377,7 +380,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             required_overrides: vec![],
             extra_read_only: vec![],
             read_only_overrides: vec![],
-            extra_writable: vec![],
+            extra_attributes: vec![],
             identity_overrides: vec![],
             derived_attributes: vec![],
         },
@@ -421,7 +424,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             required_overrides: vec![],
             extra_read_only: vec![],
             read_only_overrides: vec![],
-            extra_writable: vec![],
+            extra_attributes: vec![],
             identity_overrides: vec![],
             derived_attributes: vec![],
         },
@@ -447,7 +450,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             required_overrides: vec![],
             extra_read_only: vec![],
             read_only_overrides: vec![],
-            extra_writable: vec![],
+            extra_attributes: vec![],
             identity_overrides: vec![],
             derived_attributes: vec![],
         },
@@ -480,7 +483,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             required_overrides: vec!["IpProtocol"],
             extra_read_only: vec![],
             read_only_overrides: vec![],
-            extra_writable: vec![
+            extra_attributes: vec![
                 ExtraField {
                     name: "CidrIpv6",
                     read_source: Some("CidrIpv6"),
@@ -534,7 +537,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             required_overrides: vec!["IpProtocol", "GroupId"],
             extra_read_only: vec![],
             read_only_overrides: vec![],
-            extra_writable: vec![
+            extra_attributes: vec![
                 ExtraField {
                     name: "CidrIpv6",
                     read_source: Some("CidrIpv6"),
@@ -581,7 +584,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             required_overrides: vec!["VpcId"],
             extra_read_only: vec![],
             read_only_overrides: vec![],
-            extra_writable: vec![],
+            extra_attributes: vec![],
             identity_overrides: vec![],
             // VpcId lives on Attachments[0].VpcId in the read response;
             // there is no top-level VpcId getter on EgressOnlyInternetGateway.
@@ -621,7 +624,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             required_overrides: vec![],
             extra_read_only: vec!["PublicIp"],
             read_only_overrides: vec![],
-            extra_writable: vec![],
+            extra_attributes: vec![],
             identity_overrides: vec![],
             derived_attributes: vec![],
         },
@@ -654,7 +657,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             required_overrides: vec!["ResourceId", "ResourceType"],
             extra_read_only: vec![],
             read_only_overrides: vec![],
-            extra_writable: vec![],
+            extra_attributes: vec![],
             identity_overrides: vec![],
             derived_attributes: vec![],
         },
@@ -687,7 +690,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             required_overrides: vec!["SubnetId"],
             extra_read_only: vec![],
             read_only_overrides: vec![],
-            extra_writable: vec![],
+            extra_attributes: vec![],
             identity_overrides: vec![],
             // AllocationId lives on NatGatewayAddresses[0].AllocationId in the
             // read response; there is no top-level AllocationId getter on
@@ -722,7 +725,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             required_overrides: vec!["RouteTableId", "SubnetId"],
             extra_read_only: vec![],
             read_only_overrides: vec![],
-            extra_writable: vec![],
+            extra_attributes: vec![],
             identity_overrides: vec![],
             derived_attributes: vec![],
         },
@@ -751,7 +754,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             required_overrides: vec![],
             extra_read_only: vec![],
             read_only_overrides: vec![],
-            extra_writable: vec![],
+            extra_attributes: vec![],
             identity_overrides: vec![],
             // The TransitGatewayRequestOptions sub-struct on the response
             // is flattened into top-level attributes (matching the DSL
@@ -823,7 +826,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             required_overrides: vec!["TransitGatewayId", "VpcId", "SubnetIds"],
             extra_read_only: vec![],
             read_only_overrides: vec![],
-            extra_writable: vec![],
+            extra_attributes: vec![],
             identity_overrides: vec![],
             derived_attributes: vec![],
         },
@@ -859,7 +862,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             required_overrides: vec!["ServiceName", "VpcId"],
             extra_read_only: vec![],
             read_only_overrides: vec![],
-            extra_writable: vec![],
+            extra_attributes: vec![],
             identity_overrides: vec![],
             // SecurityGroupIds is a write-side input
             // (CreateVpcEndpointRequest.SecurityGroupIds: List<String>) but
@@ -895,7 +898,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             required_overrides: vec!["VpcId"],
             extra_read_only: vec![],
             read_only_overrides: vec![],
-            extra_writable: vec![
+            extra_attributes: vec![
                 ExtraField {
                     name: "InternetGatewayId",
                     read_source: None,
@@ -932,7 +935,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             required_overrides: vec!["VpcId", "PeerVpcId"],
             extra_read_only: vec![],
             read_only_overrides: vec![],
-            extra_writable: vec![],
+            extra_attributes: vec![],
             identity_overrides: vec![],
             // The peering response carries the requester / accepter VPCs
             // in two parallel `VpcPeeringConnectionVpcInfo` sub-structs;
@@ -991,7 +994,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             required_overrides: vec!["Type"],
             extra_read_only: vec![],
             read_only_overrides: vec![],
-            extra_writable: vec![],
+            extra_attributes: vec![],
             identity_overrides: vec![],
             derived_attributes: vec![],
         },
@@ -1128,7 +1131,7 @@ pub fn organizations_resources() -> Vec<ResourceDef> {
                 "MasterAccountEmail",
             ],
             read_only_overrides: vec![],
-            extra_writable: vec![],
+            extra_attributes: vec![],
             identity_overrides: vec![],
             derived_attributes: vec![],
         },
@@ -1159,7 +1162,7 @@ pub fn organizations_resources() -> Vec<ResourceDef> {
             required_overrides: vec!["AccountName", "Email"],
             extra_read_only: vec!["Arn", "Name", "Status", "JoinedMethod", "JoinedTimestamp"],
             read_only_overrides: vec![],
-            extra_writable: vec![],
+            extra_attributes: vec![],
             identity_overrides: vec![],
             derived_attributes: vec![],
         },
@@ -1210,7 +1213,7 @@ pub fn s3_resources() -> Vec<ResourceDef> {
             required_overrides: vec![],
             extra_read_only: vec![],
             read_only_overrides: vec![],
-            extra_writable: vec![],
+            extra_attributes: vec![],
             identity_overrides: vec![],
             derived_attributes: vec![],
         },
@@ -1253,7 +1256,7 @@ pub fn s3_resources() -> Vec<ResourceDef> {
             required_overrides: vec!["Bucket", "Policy"],
             extra_read_only: vec![],
             read_only_overrides: vec![],
-            extra_writable: vec![],
+            extra_attributes: vec![],
             identity_overrides: vec![],
             derived_attributes: vec![],
         },
@@ -1307,7 +1310,7 @@ pub fn s3_resources() -> Vec<ResourceDef> {
             required_overrides: vec!["Bucket", "Status"],
             extra_read_only: vec![],
             read_only_overrides: vec![],
-            extra_writable: vec![
+            extra_attributes: vec![
                 ExtraField {
                     name: "Status",
                     read_source: None,
@@ -1367,7 +1370,7 @@ pub fn s3_resources() -> Vec<ResourceDef> {
             required_overrides: vec!["Bucket", "ACL"],
             extra_read_only: vec![],
             read_only_overrides: vec![],
-            extra_writable: vec![],
+            extra_attributes: vec![],
             identity_overrides: vec![],
             derived_attributes: vec![],
         },
@@ -1409,7 +1412,7 @@ pub fn s3_resources() -> Vec<ResourceDef> {
             required_overrides: vec!["Bucket", "ObjectOwnership"],
             extra_read_only: vec![],
             read_only_overrides: vec![],
-            extra_writable: vec![ExtraField {
+            extra_attributes: vec![ExtraField {
                 name: "ObjectOwnership",
                 read_source: None,
                 description: Some(
@@ -1460,7 +1463,7 @@ pub fn s3_resources() -> Vec<ResourceDef> {
             required_overrides: vec!["Bucket", "Rules"],
             extra_read_only: vec![],
             read_only_overrides: vec![],
-            extra_writable: vec![ExtraField {
+            extra_attributes: vec![ExtraField {
                 name: "Rules",
                 read_source: None,
                 description: Some("List of server-side encryption rules to apply to the bucket."),
@@ -1504,7 +1507,7 @@ pub fn s3_resources() -> Vec<ResourceDef> {
             required_overrides: vec!["Bucket", "Role", "Rules"],
             extra_read_only: vec![],
             read_only_overrides: vec![],
-            extra_writable: vec![
+            extra_attributes: vec![
                 ExtraField {
                     name: "Role",
                     read_source: None,
@@ -1555,7 +1558,7 @@ pub fn s3_resources() -> Vec<ResourceDef> {
             required_overrides: vec!["Bucket", "Rules"],
             extra_read_only: vec![],
             read_only_overrides: vec![],
-            extra_writable: vec![ExtraField {
+            extra_attributes: vec![ExtraField {
                 name: "Rules",
                 read_source: None,
                 description: Some("Lifecycle rules to apply to the bucket."),
@@ -1604,7 +1607,7 @@ pub fn s3_resources() -> Vec<ResourceDef> {
             required_overrides: vec!["Bucket"],
             extra_read_only: vec![],
             read_only_overrides: vec![],
-            extra_writable: vec![
+            extra_attributes: vec![
                 ExtraField {
                     name: "IndexDocument",
                     read_source: None,
@@ -1660,7 +1663,7 @@ pub fn s3_resources() -> Vec<ResourceDef> {
             required_overrides: vec!["Bucket", "CORSRules"],
             extra_read_only: vec![],
             read_only_overrides: vec![],
-            extra_writable: vec![ExtraField {
+            extra_attributes: vec![ExtraField {
                 name: "CORSRules",
                 read_source: None,
                 description: Some("CORS rules to apply to the bucket."),
@@ -1729,7 +1732,7 @@ pub fn s3_resources() -> Vec<ResourceDef> {
             required_overrides: vec!["Bucket"],
             extra_read_only: vec![],
             read_only_overrides: vec![],
-            extra_writable: vec![
+            extra_attributes: vec![
                 ExtraField {
                     name: "TopicConfigurations",
                     read_source: None,
@@ -1794,7 +1797,7 @@ pub fn s3_resources() -> Vec<ResourceDef> {
             required_overrides: vec!["Bucket", "TargetBucket"],
             extra_read_only: vec![],
             read_only_overrides: vec![],
-            extra_writable: vec![
+            extra_attributes: vec![
                 ExtraField {
                     name: "TargetBucket",
                     read_source: None,
@@ -1869,7 +1872,7 @@ pub fn s3_resources() -> Vec<ResourceDef> {
             required_overrides: vec!["Bucket"],
             extra_read_only: vec![],
             read_only_overrides: vec![],
-            extra_writable: vec![
+            extra_attributes: vec![
                 ExtraField {
                     name: "BlockPublicAcls",
                     read_source: None,
@@ -2041,7 +2044,7 @@ pub fn acm_resources() -> Vec<ResourceDef> {
             "RenewalSummary",
         ],
         read_only_overrides: vec![],
-        extra_writable: vec![],
+        extra_attributes: vec![],
         identity_overrides: vec![],
         derived_attributes: vec![],
     }]
@@ -2094,7 +2097,7 @@ pub fn route53_resources() -> Vec<ResourceDef> {
             required_overrides: vec!["Name", "Type"],
             extra_read_only: vec![],
             read_only_overrides: vec![],
-            extra_writable: vec![ExtraField {
+            extra_attributes: vec![ExtraField {
                 name: "HostedZoneId",
                 read_source: None,
                 description: Some("The ID of the hosted zone that contains this record set."),
@@ -2137,7 +2140,7 @@ pub fn iam_resources() -> Vec<ResourceDef> {
         required_overrides: vec!["AssumeRolePolicyDocument"],
         extra_read_only: vec!["Arn", "RoleId"],
         read_only_overrides: vec![],
-        extra_writable: vec![],
+        extra_attributes: vec![],
         identity_overrides: vec![],
         derived_attributes: vec![],
     }]
@@ -2176,7 +2179,7 @@ pub fn logs_resources() -> Vec<ResourceDef> {
         required_overrides: vec![],
         extra_read_only: vec!["Arn"],
         read_only_overrides: vec![],
-        extra_writable: vec![ExtraField {
+        extra_attributes: vec![ExtraField {
             name: "retentionInDays",
             read_source: Some("retentionInDays"),
             description: Some(

@@ -21,7 +21,7 @@ Add `schema_structure: Option<&'static str>` to `ResourceDef`. When set, the cod
    - Resolves `com.amazonaws.route53#ResourceRecordSet` from the Smithy model
    - Uses its members as the writable field source (replacing the create input)
    - Still respects `exclude_fields`, `type_overrides`, `create_only_overrides`, `identity_overrides`, `required_overrides`
-   - `extra_writable` adds fields not in the schema structure (e.g., `HostedZoneId`)
+   - `extra_attributes` adds fields not in the schema structure (e.g., `HostedZoneId`)
 
 2. If `schema_structure` is `None` (default), existing behavior unchanged — fields come from create input.
 
@@ -56,7 +56,7 @@ ResourceDef {
     required_overrides: vec!["Name", "Type"],
     create_only_overrides: vec!["Name"],
     identity_overrides: vec!["Type"],
-    extra_writable: vec![
+    extra_attributes: vec![
         ExtraField {
             name: "HostedZoneId",
             read_source: None,
@@ -74,6 +74,6 @@ ResourceDef {
 
 ## Edge cases
 
-- `extra_writable` fields with `schema_structure` should be marked `create_only` (same as current behavior)
+- `extra_attributes` fields with `schema_structure` should be marked `create_only` (same as current behavior)
 - `exclude_fields` removes fields from the schema structure that aren't needed in the initial version (routing policies, health checks)
 - `TTL` in Route 53 Smithy model is typed as `Long` — codegen should map to `Int`
