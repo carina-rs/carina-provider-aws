@@ -44,11 +44,13 @@ pub fn ec2_eip_config() -> AwsSchemaConfig {
         )
         .attribute(
             AttributeSchema::new("allocation_id", super::allocation_id())
+                .read_only()
                 .with_description("The ID representing the allocation of the address. (read-only)")
                 .with_provider_name("AllocationId"),
         )
         .attribute(
             AttributeSchema::new("public_ip", types::ipv4_address())
+                .read_only()
                 .with_description("The Elastic IP address. (read-only)")
                 .with_provider_name("PublicIp"),
         )

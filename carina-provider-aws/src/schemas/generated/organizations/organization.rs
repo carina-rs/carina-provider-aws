@@ -30,26 +30,31 @@ pub fn organizations_organization_config() -> AwsSchemaConfig {
         )
         .attribute(
             AttributeSchema::new("arn", super::arn())
+                .read_only()
                 .with_description("The Amazon Resource Name (ARN) of an organization. For more information about ARNs in Organizations, see ARN Formats Supported by Organizations in the... (read-only)")
                 .with_provider_name("Arn"),
         )
         .attribute(
             AttributeSchema::new("id", AttributeType::String)
+                .read_only()
                 .with_description("The unique identifier (ID) of an organization. The regex pattern for an organization ID string requires \"o-\" followed by from 10 to 32 lowercase let... (read-only)")
                 .with_provider_name("Id"),
         )
         .attribute(
             AttributeSchema::new("master_account_arn", super::arn())
+                .read_only()
                 .with_description("The Amazon Resource Name (ARN) of the account that is designated as the management account for the organization. For more information about ARNs in Or... (read-only)")
                 .with_provider_name("MasterAccountArn"),
         )
         .attribute(
             AttributeSchema::new("master_account_email", types::email())
+                .read_only()
                 .with_description("The email address that is associated with the Amazon Web Services account that is designated as the management account for the organization. (read-only)")
                 .with_provider_name("MasterAccountEmail"),
         )
         .attribute(
             AttributeSchema::new("master_account_id", super::aws_account_id())
+                .read_only()
                 .with_description("The unique identifier (ID) of the management account of an organization. The regex pattern for an account ID string requires exactly 12 digits. (read-only)")
                 .with_provider_name("MasterAccountId"),
         )

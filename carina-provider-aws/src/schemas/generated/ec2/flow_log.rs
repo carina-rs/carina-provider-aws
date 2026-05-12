@@ -115,6 +115,7 @@ pub fn ec2_flow_log_config() -> AwsSchemaConfig {
         )
         .attribute(
             AttributeSchema::new("flow_log_id", AttributeType::String)
+                .read_only()
                 .with_description("The ID of the flow log. (read-only)")
                 .with_provider_name("FlowLogId"),
         )

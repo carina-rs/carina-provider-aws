@@ -26,6 +26,7 @@ pub fn ec2_route_table_config() -> AwsSchemaConfig {
             )
             .attribute(
                 AttributeSchema::new("route_table_id", super::route_table_id())
+                    .read_only()
                     .with_description("The ID of the route table. (read-only)")
                     .with_provider_name("RouteTableId"),
             )

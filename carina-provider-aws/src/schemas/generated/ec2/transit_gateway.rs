@@ -92,6 +92,7 @@ pub fn ec2_transit_gateway_config() -> AwsSchemaConfig {
         )
         .attribute(
             AttributeSchema::new("transit_gateway_id", super::transit_gateway_id())
+                .read_only()
                 .with_description("The ID of the transit gateway. (read-only)")
                 .with_provider_name("TransitGatewayId"),
         )

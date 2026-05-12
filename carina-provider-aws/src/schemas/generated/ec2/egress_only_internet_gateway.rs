@@ -31,6 +31,7 @@ pub fn ec2_egress_only_internet_gateway_config() -> AwsSchemaConfig {
                     "egress_only_internet_gateway_id",
                     super::egress_only_internet_gateway_id(),
                 )
+                .read_only()
                 .with_description("The ID of the egress-only internet gateway. (read-only)")
                 .with_provider_name("EgressOnlyInternetGatewayId"),
             )

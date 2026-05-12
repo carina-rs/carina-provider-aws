@@ -72,11 +72,13 @@ pub fn iam_role_config() -> AwsSchemaConfig {
         )
         .attribute(
             AttributeSchema::new("arn", super::iam_role_arn())
+                .read_only()
                 .with_description("The Amazon Resource Name (ARN) specifying the role. For more information about ARNs and how to use them in policies, see IAM identifiers in the IAM Us... (read-only)")
                 .with_provider_name("Arn"),
         )
         .attribute(
             AttributeSchema::new("role_id", super::iam_role_id())
+                .read_only()
                 .with_description("The stable and unique string identifying the role. For more information about IDs, see IAM identifiers in the IAM User Guide. (read-only)")
                 .with_provider_name("RoleId"),
         )
