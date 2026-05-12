@@ -7,3 +7,4 @@
 pub use super::*;
 
 pub mod role;
+pub mod roles;

@@ -231,6 +231,7 @@ fn main() -> Result<()> {
     let mut all_data_sources = resource_defs::sts_data_sources();
     all_data_sources.extend(resource_defs::identitystore_data_sources());
     all_data_sources.extend(resource_defs::s3_data_sources());
+    all_data_sources.extend(resource_defs::iam_data_sources());
 
     // Filter to requested resource if specified
     let resources: Vec<&ResourceDef> = if let Some(ref name) = args.resource {
@@ -3210,21 +3211,40 @@ fn generate_data_source(
         });
     }
     let input_names: HashSet<&str> = ds.inputs.iter().map(|i| i.name).collect();
-    for output in &ds.output_attributes {
-        // Skip outputs that echo an input — the input row already covers
-        // both directions (e.g. `s3.Bucket.bucket`: user supplies it as
-        // lookup input, runtime echoes it back as the same attribute).
-        if input_names.contains(output.name) {
-            continue;
+    match &ds.shape {
+        resource_defs::DataSourceShape::Single { output_attributes } => {
+            for output in output_attributes {
+                // Skip outputs that echo an input — the input row already covers
+                // both directions (e.g. `s3.Bucket.bucket`: user supplies it as
+                // lookup input, runtime echoes it back as the same attribute).
+                if input_names.contains(output.name) {
+                    continue;
+                }
+                ds_attrs.push(DsAttr {
+                    name: output.name.to_string(),
+                    provider_name: output.provider_name.unwrap_or("").to_string(),
+                    type_str: output.type_code.to_string(),
+                    description: output.description.to_string(),
+                    required: false,
+                    read_only: true,
+                });
+            }
         }
-        ds_attrs.push(DsAttr {
-            name: output.name.to_string(),
-            provider_name: output.provider_name.unwrap_or("").to_string(),
-            type_str: output.type_code.to_string(),
-            description: output.description.to_string(),
-            required: false,
-            read_only: true,
-        });
+        resource_defs::DataSourceShape::ListAggregated { aggregated_outputs } => {
+            for output in aggregated_outputs {
+                ds_attrs.push(DsAttr {
+                    name: output.name.to_string(),
+                    provider_name: String::new(),
+                    type_str: format!(
+                        "AttributeType::List {{ inner: Box::new({}), ordered: false }}",
+                        output.item_type,
+                    ),
+                    description: output.description.to_string(),
+                    required: false,
+                    read_only: true,
+                });
+            }
+        }
     }
 
     // Determine needed imports based on actual type strings used.
@@ -3349,17 +3369,32 @@ fn generate_markdown_data_source(
     // Output attributes section
     let input_names: HashSet<&str> = ds.inputs.iter().map(|i| i.name).collect();
     md.push_str("## Attributes\n\n");
-    for output in &ds.output_attributes {
-        // Skip echo-of-input outputs (already documented in the inputs section).
-        if input_names.contains(output.name) {
-            continue;
+    match &ds.shape {
+        resource_defs::DataSourceShape::Single { output_attributes } => {
+            for output in output_attributes {
+                // Skip echo-of-input outputs (already documented in the inputs section).
+                if input_names.contains(output.name) {
+                    continue;
+                }
+                md.push_str(&format!("### `{}`\n\n", output.name));
+                let type_display = type_code_to_display(output.type_code);
+                md.push_str(&format!("- **Type:** {}\n", type_display));
+                md.push_str("- **Read-only**\n\n");
+                if !output.description.is_empty() {
+                    md.push_str(&format!("{}\n\n", output.description));
+                }
+            }
         }
-        md.push_str(&format!("### `{}`\n\n", output.name));
-        let type_display = type_code_to_display(output.type_code);
-        md.push_str(&format!("- **Type:** {}\n", type_display));
-        md.push_str("- **Read-only**\n\n");
-        if !output.description.is_empty() {
-            md.push_str(&format!("{}\n\n", output.description));
+        resource_defs::DataSourceShape::ListAggregated { aggregated_outputs } => {
+            for output in aggregated_outputs {
+                md.push_str(&format!("### `{}`\n\n", output.name));
+                let item_display = type_code_to_display(output.item_type);
+                md.push_str(&format!("- **Type:** List({})\n", item_display));
+                md.push_str("- **Read-only**\n\n");
+                if !output.description.is_empty() {
+                    md.push_str(&format!("{}\n\n", output.description));
+                }
+            }
         }
     }
 
@@ -4029,6 +4064,8 @@ fn cf_type_name(resource_name: &str) -> &'static str {
         "organizations.Account" => "AWS::Organizations::Account",
         "route53.RecordSet" => "AWS::Route53::RecordSet",
         "iam.Role" => "AWS::IAM::Role",
+        // Synthetic: no native CloudFormation type.
+        "iam.Roles" => "AWS::IAM::Roles",
         "logs.LogGroup" => "AWS::Logs::LogGroup",
         "identitystore.User" => "AWS::IdentityStore::User",
         "acm.Certificate" => "AWS::CertificateManager::Certificate",
@@ -4184,6 +4221,92 @@ mod tests {
         assert!(md.contains("### `account_id`"), "{md}");
         assert!(md.contains("### `arn`"), "{md}");
         assert!(md.contains("### `user_id`"), "{md}");
+    }
+
+    /// `iam.Roles` is the first list-aggregated data source. The codegen
+    /// must wrap each declared `item_type` in `AttributeType::List { ... }`
+    /// in both the schema and the markdown output so consumers see
+    /// `arns: List(...)` rather than scalar.
+    #[test]
+    fn generate_data_source_for_iam_roles_emits_list_attributes() {
+        let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../carina-provider-aws/tests/fixtures/smithy/iam.json");
+        if !fixture.exists() {
+            eprintln!("Skipping: Smithy fixture not found: {}", fixture.display());
+            return;
+        }
+        let file = std::fs::File::open(&fixture).expect("open iam fixture");
+        let model = carina_smithy::parse_reader(std::io::BufReader::new(file)).expect("parse iam");
+        let ds = resource_defs::iam_data_sources()
+            .into_iter()
+            .next()
+            .unwrap();
+
+        let generated = generate_data_source(&ds, &model, false).expect("generate_data_source");
+
+        assert!(
+            generated.contains(".as_data_source()"),
+            "must mark as data source: {generated}"
+        );
+        // arns is List<iam_role_arn>
+        assert!(
+            generated.contains(
+                "AttributeSchema::new(\"arns\", AttributeType::List { inner: Box::new(super::iam_role_arn()), ordered: false })"
+            ),
+            "arns must be List(iam_role_arn): {generated}"
+        );
+        // names is List<String>
+        assert!(
+            generated.contains(
+                "AttributeSchema::new(\"names\", AttributeType::List { inner: Box::new(AttributeType::String), ordered: false })"
+            ),
+            "names must be List(String): {generated}"
+        );
+        // Inputs are both optional strings.
+        assert!(
+            generated.contains(r#"AttributeSchema::new("path_prefix", AttributeType::String)"#),
+            "path_prefix input: {generated}"
+        );
+        assert!(
+            generated.contains(r#"AttributeSchema::new("name_regex", AttributeType::String)"#),
+            "name_regex input: {generated}"
+        );
+        // Neither input is marked .required().
+        let path_prefix_idx = generated
+            .find("path_prefix")
+            .expect("path_prefix in generated");
+        let name_regex_idx = generated
+            .find("name_regex")
+            .expect("name_regex in generated");
+        let path_prefix_block = &generated[path_prefix_idx..name_regex_idx];
+        assert!(
+            !path_prefix_block.contains(".required()"),
+            "path_prefix must not be required: {path_prefix_block}"
+        );
+    }
+
+    #[test]
+    fn markdown_data_source_for_iam_roles_emits_list_types() {
+        let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../carina-provider-aws/tests/fixtures/smithy/iam.json");
+        if !fixture.exists() {
+            return;
+        }
+        let file = std::fs::File::open(&fixture).unwrap();
+        let model = carina_smithy::parse_reader(std::io::BufReader::new(file)).unwrap();
+        let ds = resource_defs::iam_data_sources()
+            .into_iter()
+            .next()
+            .unwrap();
+
+        let md = generate_markdown_data_source(&ds, &model).expect("md");
+
+        assert!(md.contains("### `arns`"), "arns section: {md}");
+        assert!(md.contains("### `names`"), "names section: {md}");
+        assert!(
+            md.contains("List(") || md.contains("- **Type:** List"),
+            "List(...) type marker for aggregated outputs: {md}"
+        );
     }
 
     /// Per naming-conventions design D7 the codegen must emit a

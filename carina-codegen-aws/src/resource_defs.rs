@@ -195,14 +195,44 @@ pub struct DataSourceDef {
     pub service_namespace: &'static str,
     /// User-supplied lookup input fields (empty for zero-input data sources)
     pub inputs: Vec<DataSourceInput>,
-    /// Declared output attributes (read-only fields exposed by the data source).
-    pub output_attributes: Vec<DataSourceOutput>,
-    /// Read operations that retrieve output fields
-    pub read_ops: Vec<ReadOp>,
-    /// Type overrides: (field_name, type_code)
-    pub type_overrides: Vec<(&'static str, &'static str)>,
-    /// Fields to exclude from the schema
-    pub exclude_fields: Vec<&'static str>,
+    /// Output shape: a single item (scalar attributes) or a list-aggregated
+    /// result (each attribute is `list(T)` aggregated across paginated API calls).
+    pub shape: DataSourceShape,
+}
+
+/// Output shape of a data source.
+///
+/// Splits "single-item lookup" from "paginated list lookup with client-side
+/// filter" so each variant carries only the fields that make sense for it.
+/// The hand-written read implementation under `services/<svc>/<resource>.rs`
+/// is responsible for honoring the shape contract — codegen only emits the
+/// matching schema/docs.
+pub enum DataSourceShape {
+    /// One AWS API response → scalar attributes (e.g. `sts.CallerIdentity`,
+    /// `identitystore.User`, `s3.Bucket`).
+    Single {
+        /// Declared output attributes (read-only fields exposed to the DSL).
+        output_attributes: Vec<DataSourceOutput>,
+    },
+    /// Paginated list API + client-side filter → each attribute is `list(T)`,
+    /// aggregated across pages (e.g. `iam.Roles` over `ListRoles`).
+    ListAggregated {
+        /// Declared aggregated output attributes. Each becomes
+        /// `AttributeType::List { inner: item_type, ordered: false }`.
+        aggregated_outputs: Vec<DataSourceListOutput>,
+    },
+}
+
+impl DataSourceShape {
+    /// Returns the `Single` shape's outputs, or `None` for `ListAggregated`.
+    /// Callers must explicitly handle the `None` arm — there is no silent
+    /// "empty slice for the wrong shape" fallback.
+    pub fn single_outputs(&self) -> Option<&[DataSourceOutput]> {
+        match self {
+            DataSourceShape::Single { output_attributes } => Some(output_attributes),
+            DataSourceShape::ListAggregated { .. } => None,
+        }
+    }
 }
 
 /// A user-supplied input field for a data source lookup.
@@ -234,6 +264,23 @@ pub struct DataSourceOutput {
     /// Rust type expression for codegen, e.g. `"AttributeType::String"` or
     /// `"super::aws_account_id()"`. Required: codegen does not infer.
     pub type_code: &'static str,
+}
+
+/// One aggregated output attribute on a `DataSourceShape::ListAggregated`.
+///
+/// The runtime implementation must populate this attribute with
+/// `Value::Concrete(ConcreteValue::List(...))` whose items are of `item_type`.
+/// Codegen wraps `item_type` in `AttributeType::List { inner, ordered: false }`
+/// when emitting the schema.
+pub struct DataSourceListOutput {
+    /// DSL field name (e.g., "arns")
+    pub name: &'static str,
+    /// Human-readable description for docs
+    pub description: &'static str,
+    /// Rust type expression for the *element* type, e.g.
+    /// `"AttributeType::String"` or `"super::arn()"`. Codegen wraps it in
+    /// `AttributeType::List { inner: <item_type>, ordered: false }`.
+    pub item_type: &'static str,
 }
 
 /// Returns EC2 resource definitions.
@@ -1012,40 +1059,28 @@ pub fn sts_data_sources() -> Vec<DataSourceDef> {
         name: "sts.CallerIdentity",
         service_namespace: "com.amazonaws.sts",
         inputs: vec![],
-        output_attributes: vec![
-            DataSourceOutput {
-                name: "account_id",
-                provider_name: Some("Account"),
-                description: "The Amazon Web Services account ID number of the account that owns or contains the calling entity.",
-                type_code: "super::aws_account_id()",
-            },
-            DataSourceOutput {
-                name: "arn",
-                provider_name: Some("Arn"),
-                description: "The Amazon Web Services ARN associated with the calling entity.",
-                type_code: "super::arn()",
-            },
-            DataSourceOutput {
-                name: "user_id",
-                provider_name: Some("UserId"),
-                description: "The unique identifier of the calling entity.",
-                type_code: "AttributeType::String",
-            },
-        ],
-        read_ops: vec![ReadOp {
-            operation: "GetCallerIdentity",
-            fields: vec![
-                ("Account", Some("AccountId")),
-                ("Arn", None),
-                ("UserId", None),
+        shape: DataSourceShape::Single {
+            output_attributes: vec![
+                DataSourceOutput {
+                    name: "account_id",
+                    provider_name: Some("Account"),
+                    description: "The Amazon Web Services account ID number of the account that owns or contains the calling entity.",
+                    type_code: "super::aws_account_id()",
+                },
+                DataSourceOutput {
+                    name: "arn",
+                    provider_name: Some("Arn"),
+                    description: "The Amazon Web Services ARN associated with the calling entity.",
+                    type_code: "super::arn()",
+                },
+                DataSourceOutput {
+                    name: "user_id",
+                    provider_name: Some("UserId"),
+                    description: "The unique identifier of the calling entity.",
+                    type_code: "AttributeType::String",
+                },
             ],
-            defaults: vec![],
-        }],
-        type_overrides: vec![
-            ("AccountId", "super::aws_account_id()"),
-            ("Arn", "super::arn()"),
-        ],
-        exclude_fields: vec![],
+        },
     }]
 }
 
@@ -1077,27 +1112,22 @@ pub fn identitystore_data_sources() -> Vec<DataSourceDef> {
                 type_override: None,
             },
         ],
-        output_attributes: vec![
-            DataSourceOutput {
-                name: "display_name",
-                provider_name: Some("DisplayName"),
-                description: "Display name of the user.",
-                type_code: "AttributeType::String",
-            },
-            DataSourceOutput {
-                name: "emails",
-                provider_name: Some("Emails"),
-                description: "Email addresses associated with the user.",
-                type_code: "AttributeType::String",
-            },
-        ],
-        read_ops: vec![ReadOp {
-            operation: "DescribeUser",
-            fields: vec![("DisplayName", None), ("Emails", None)],
-            defaults: vec![],
-        }],
-        type_overrides: vec![],
-        exclude_fields: vec![],
+        shape: DataSourceShape::Single {
+            output_attributes: vec![
+                DataSourceOutput {
+                    name: "display_name",
+                    provider_name: Some("DisplayName"),
+                    description: "Display name of the user.",
+                    type_code: "AttributeType::String",
+                },
+                DataSourceOutput {
+                    name: "emails",
+                    provider_name: Some("Emails"),
+                    description: "Email addresses associated with the user.",
+                    type_code: "AttributeType::String",
+                },
+            ],
+        },
     }]
 }
 
@@ -1914,58 +1944,46 @@ pub fn s3_data_sources() -> Vec<DataSourceDef> {
             required: true,
             type_override: None,
         }],
-        output_attributes: vec![
-            DataSourceOutput {
-                name: "bucket",
-                provider_name: None,
-                description: "The bucket name (echo of the input).",
-                type_code: "AttributeType::String",
-            },
-            DataSourceOutput {
-                name: "arn",
-                provider_name: None,
-                description: "ARN of the bucket.",
-                type_code: "super::arn()",
-            },
-            DataSourceOutput {
-                name: "region",
-                provider_name: Some("LocationConstraint"),
-                description: "AWS region the bucket is in.",
-                type_code: "AttributeType::String",
-            },
-            DataSourceOutput {
-                name: "bucket_domain_name",
-                provider_name: None,
-                description: "Bucket domain name (`<bucket>.s3.amazonaws.com`).",
-                type_code: "AttributeType::String",
-            },
-            DataSourceOutput {
-                name: "bucket_regional_domain_name",
-                provider_name: None,
-                description: "Region-specific bucket domain name (`<bucket>.s3.<region>.amazonaws.com`).",
-                type_code: "AttributeType::String",
-            },
-            DataSourceOutput {
-                name: "hosted_zone_id",
-                provider_name: None,
-                description: "Route 53 Hosted Zone ID for the bucket's region.",
-                type_code: "AttributeType::String",
-            },
-        ],
-        read_ops: vec![
-            ReadOp {
-                operation: "HeadBucket",
-                fields: vec![],
-                defaults: vec![],
-            },
-            ReadOp {
-                operation: "GetBucketLocation",
-                fields: vec![("LocationConstraint", None)],
-                defaults: vec![("LocationConstraint", "us-east-1")],
-            },
-        ],
-        type_overrides: vec![],
-        exclude_fields: vec![],
+        shape: DataSourceShape::Single {
+            output_attributes: vec![
+                DataSourceOutput {
+                    name: "bucket",
+                    provider_name: None,
+                    description: "The bucket name (echo of the input).",
+                    type_code: "AttributeType::String",
+                },
+                DataSourceOutput {
+                    name: "arn",
+                    provider_name: None,
+                    description: "ARN of the bucket.",
+                    type_code: "super::arn()",
+                },
+                DataSourceOutput {
+                    name: "region",
+                    provider_name: Some("LocationConstraint"),
+                    description: "AWS region the bucket is in.",
+                    type_code: "AttributeType::String",
+                },
+                DataSourceOutput {
+                    name: "bucket_domain_name",
+                    provider_name: None,
+                    description: "Bucket domain name (`<bucket>.s3.amazonaws.com`).",
+                    type_code: "AttributeType::String",
+                },
+                DataSourceOutput {
+                    name: "bucket_regional_domain_name",
+                    provider_name: None,
+                    description: "Region-specific bucket domain name (`<bucket>.s3.<region>.amazonaws.com`).",
+                    type_code: "AttributeType::String",
+                },
+                DataSourceOutput {
+                    name: "hosted_zone_id",
+                    provider_name: None,
+                    description: "Route 53 Hosted Zone ID for the bucket's region.",
+                    type_code: "AttributeType::String",
+                },
+            ],
+        },
     }]
 }
 
@@ -2106,6 +2124,44 @@ pub fn route53_resources() -> Vec<ResourceDef> {
             derived_attributes: vec![],
         },
     ]
+}
+
+/// Returns IAM data source definitions.
+pub fn iam_data_sources() -> Vec<DataSourceDef> {
+    vec![DataSourceDef {
+        name: "iam.Roles",
+        service_namespace: "com.amazonaws.iam",
+        inputs: vec![
+            DataSourceInput {
+                name: "path_prefix",
+                provider_name: "PathPrefix",
+                description: "Path prefix for filtering the results. If it is not included, it defaults to `/`, listing all roles.",
+                required: false,
+                type_override: None,
+            },
+            DataSourceInput {
+                name: "name_regex",
+                provider_name: "",
+                description: "Regular expression string applied client-side to filter results by role name.",
+                required: false,
+                type_override: None,
+            },
+        ],
+        shape: DataSourceShape::ListAggregated {
+            aggregated_outputs: vec![
+                DataSourceListOutput {
+                    name: "arns",
+                    description: "Set of ARNs of the matched IAM roles.",
+                    item_type: "super::iam_role_arn()",
+                },
+                DataSourceListOutput {
+                    name: "names",
+                    description: "Set of names of the matched IAM roles.",
+                    item_type: "AttributeType::String",
+                },
+            ],
+        },
+    }]
 }
 
 /// Returns IAM resource definitions.
@@ -2466,23 +2522,23 @@ mod tests {
     fn sts_caller_identity_declares_outputs_explicitly() {
         let defs = sts_data_sources();
         let ds = &defs[0];
-        let names: Vec<&str> = ds.output_attributes.iter().map(|o| o.name).collect();
+        let outs = ds.shape.single_outputs().expect("Single shape");
+        let names: Vec<&str> = outs.iter().map(|o| o.name).collect();
         assert_eq!(names, vec!["account_id", "arn", "user_id"]);
-        let account_id = &ds.output_attributes[0];
-        assert_eq!(account_id.provider_name, Some("Account"));
-        assert_eq!(account_id.type_code, "super::aws_account_id()");
-        let arn = &ds.output_attributes[1];
-        assert_eq!(arn.type_code, "super::arn()");
+        assert_eq!(outs[0].provider_name, Some("Account"));
+        assert_eq!(outs[0].type_code, "super::aws_account_id()");
+        assert_eq!(outs[1].type_code, "super::arn()");
     }
 
     #[test]
     fn identitystore_user_declares_outputs_explicitly() {
         let defs = identitystore_data_sources();
         let ds = &defs[0];
-        let names: Vec<&str> = ds.output_attributes.iter().map(|o| o.name).collect();
+        let outs = ds.shape.single_outputs().expect("Single shape");
+        let names: Vec<&str> = outs.iter().map(|o| o.name).collect();
         assert_eq!(names, vec!["display_name", "emails"]);
-        assert_eq!(ds.output_attributes[0].provider_name, Some("DisplayName"));
-        assert_eq!(ds.output_attributes[1].provider_name, Some("Emails"));
+        assert_eq!(outs[0].provider_name, Some("DisplayName"));
+        assert_eq!(outs[1].provider_name, Some("Emails"));
         assert_eq!(ds.inputs.len(), 3);
     }
 
@@ -2495,7 +2551,8 @@ mod tests {
         let inputs: Vec<&str> = ds.inputs.iter().map(|i| i.name).collect();
         assert_eq!(inputs, vec!["bucket"]);
         assert!(ds.inputs[0].required);
-        let outputs: Vec<&str> = ds.output_attributes.iter().map(|o| o.name).collect();
+        let outs = ds.shape.single_outputs().expect("Single shape");
+        let outputs: Vec<&str> = outs.iter().map(|o| o.name).collect();
         assert_eq!(
             outputs,
             vec![
@@ -2507,18 +2564,32 @@ mod tests {
                 "hosted_zone_id"
             ]
         );
-        let arn = ds
-            .output_attributes
-            .iter()
-            .find(|o| o.name == "arn")
-            .unwrap();
+        let arn = outs.iter().find(|o| o.name == "arn").unwrap();
         assert!(arn.provider_name.is_none());
-        let region = ds
-            .output_attributes
-            .iter()
-            .find(|o| o.name == "region")
-            .unwrap();
+        let region = outs.iter().find(|o| o.name == "region").unwrap();
         assert_eq!(region.provider_name, Some("LocationConstraint"));
+    }
+
+    #[test]
+    fn iam_roles_is_list_aggregated_with_path_and_regex_inputs() {
+        let defs = iam_data_sources();
+        assert_eq!(defs.len(), 1);
+        let ds = &defs[0];
+        assert_eq!(ds.name, "iam.Roles");
+
+        let inputs: Vec<&str> = ds.inputs.iter().map(|i| i.name).collect();
+        assert_eq!(inputs, vec!["path_prefix", "name_regex"]);
+        for i in &ds.inputs {
+            assert!(!i.required, "iam.Roles inputs are all optional");
+        }
+
+        let DataSourceShape::ListAggregated { aggregated_outputs } = &ds.shape else {
+            panic!("expected ListAggregated, got Single");
+        };
+        let names: Vec<&str> = aggregated_outputs.iter().map(|o| o.name).collect();
+        assert_eq!(names, vec!["arns", "names"]);
+        assert_eq!(aggregated_outputs[0].item_type, "super::iam_role_arn()");
+        assert_eq!(aggregated_outputs[1].item_type, "AttributeType::String");
     }
 
     #[test]
@@ -2527,17 +2598,17 @@ mod tests {
             name: "test.X",
             service_namespace: "com.test",
             inputs: vec![],
-            output_attributes: vec![DataSourceOutput {
-                name: "arn",
-                provider_name: None,
-                description: "",
-                type_code: "AttributeType::String",
-            }],
-            read_ops: vec![],
-            type_overrides: vec![],
-            exclude_fields: vec![],
+            shape: DataSourceShape::Single {
+                output_attributes: vec![DataSourceOutput {
+                    name: "arn",
+                    provider_name: None,
+                    description: "",
+                    type_code: "AttributeType::String",
+                }],
+            },
         };
-        assert_eq!(def.output_attributes.len(), 1);
-        assert_eq!(def.output_attributes[0].name, "arn");
+        let outs = def.shape.single_outputs().expect("Single shape");
+        assert_eq!(outs.len(), 1);
+        assert_eq!(outs[0].name, "arn");
     }
 }

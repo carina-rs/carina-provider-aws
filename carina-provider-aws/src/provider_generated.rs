@@ -928,6 +928,11 @@ pub trait DataSourceLookups {
         &self,
         resource: &Resource,
     ) -> BoxFuture<'_, ProviderResult<State>>;
+
+    fn read_iam_roles_data_source(
+        &self,
+        resource: &Resource,
+    ) -> BoxFuture<'_, ProviderResult<State>>;
 }
 
 // ===== Generated read_data_source dispatcher =====
@@ -943,6 +948,7 @@ pub(crate) fn dispatch_read_data_source<'a>(
         "sts.CallerIdentity" => provider.read_sts_caller_identity_data_source(resource),
         "identitystore.User" => provider.read_identitystore_user_data_source(resource),
         "s3.Bucket" => provider.read_s3_bucket_data_source(resource),
+        "iam.Roles" => provider.read_iam_roles_data_source(resource),
         _ => {
             let id = resource.id.clone();
             let resource_type = resource.id.resource_type.clone();
