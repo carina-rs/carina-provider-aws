@@ -33,6 +33,13 @@ impl DataSourceLookups for AwsProvider {
     ) -> BoxFuture<'_, ProviderResult<State>> {
         self.do_read_s3_bucket_data_source(resource)
     }
+
+    fn read_iam_roles_data_source(
+        &self,
+        resource: &Resource,
+    ) -> BoxFuture<'_, ProviderResult<State>> {
+        self.do_read_iam_roles_data_source(resource)
+    }
 }
 
 #[cfg(test)]

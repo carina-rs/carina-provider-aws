@@ -12,7 +12,7 @@ use carina_core::provider::{BoxFuture, ProviderError, ProviderResult};
 use carina_core::resource::{ConcreteValue, Resource, State, Value};
 
 use crate::AwsProvider;
-use crate::helpers::sdk_error_message;
+use crate::helpers::{sdk_error_message, value_as_str};
 
 impl AwsProvider {
     /// Read `identitystore.user` given a `Resource` with user-supplied
@@ -199,14 +199,6 @@ pub(crate) fn extract_identitystore_user(
     }
 
     attributes
-}
-
-fn value_as_str(v: &Value) -> Option<&str> {
-    if let Value::Concrete(ConcreteValue::String(s)) = v {
-        Some(s.as_str())
-    } else {
-        None
-    }
 }
 
 #[cfg(test)]

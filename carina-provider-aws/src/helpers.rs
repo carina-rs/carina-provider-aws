@@ -16,6 +16,15 @@ use tokio::time::sleep;
 use carina_core::provider::{PatchOpKind, ProviderError, ProviderResult, UpdatePatch};
 use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
 
+/// Borrow a `Value` as `&str` if it is a concrete string, otherwise `None`.
+pub fn value_as_str(v: &Value) -> Option<&str> {
+    if let Value::Concrete(ConcreteValue::String(s)) = v {
+        Some(s.as_str())
+    } else {
+        None
+    }
+}
+
 /// Extract a required `String` attribute from a resource.
 ///
 /// Returns the string value or a `ProviderError` with `"{attr_name} is required"`.
