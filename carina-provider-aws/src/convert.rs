@@ -185,6 +185,7 @@ pub fn proto_to_core_resource(r: &ProtoResource) -> CoreResource {
         create_before_destroy: r.directives.create_before_destroy,
         prevent_destroy: r.directives.prevent_destroy,
         depends_on: Vec::new(),
+        provider_instance: None,
     };
     resource
 }

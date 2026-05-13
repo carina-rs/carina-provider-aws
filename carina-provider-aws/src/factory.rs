@@ -88,11 +88,17 @@ impl ProviderFactory for AwsProviderFactory {
 
     fn create_provider(
         &self,
+        _binding: Option<&str>,
         attributes: &IndexMap<String, Value>,
     ) -> BoxFuture<
         '_,
         carina_core::provider::ProviderResult<Box<dyn carina_core::provider::Provider>>,
     > {
+        // `_binding` is intentionally unused: the AWS factory does not
+        // cache instances, so each call already produces an
+        // independent `AwsProvider`. The host uses the binding name
+        // as a cache key in `WasmProviderFactory`; for in-process
+        // factories the constructed-fresh shape is enough.
         use crate::services::sts::account_guard::extract_string_list;
         let region = self.extract_region(attributes);
         let allowed = extract_string_list(attributes.get("allowed_account_ids"));
@@ -107,6 +113,7 @@ impl ProviderFactory for AwsProviderFactory {
 
     fn create_normalizer(
         &self,
+        _binding: Option<&str>,
         _attributes: &IndexMap<String, Value>,
     ) -> BoxFuture<'_, Box<dyn ProviderNormalizer>> {
         Box::pin(async { Box::new(AwsNormalizer) as Box<dyn ProviderNormalizer> })
