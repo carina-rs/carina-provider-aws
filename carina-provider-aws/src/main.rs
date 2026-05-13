@@ -305,6 +305,7 @@ impl CarinaProvider for AwsProcessProvider {
             create_before_destroy: request.directives.create_before_destroy,
             prevent_destroy: request.directives.prevent_destroy,
             depends_on: Vec::new(),
+            provider_instance: None,
         };
         let core_request = CoreDeleteRequest {
             directives: core_directives,
