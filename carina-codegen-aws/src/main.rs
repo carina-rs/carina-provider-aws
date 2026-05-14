@@ -133,6 +133,10 @@ struct AttrInfo {
     is_read_only: bool,
     /// Whether the field contributes to anonymous resource identity hashing
     is_identity: bool,
+    /// Whether the AWS API populates this field asynchronously after Create
+    /// (carina#3034). Validate-time check rejects chained references to
+    /// such a field unless the user has declared a `wait` block.
+    is_deferred_populate: bool,
     /// Description from Smithy docs
     description: Option<String>,
     /// Enum info if this attribute is an enum
@@ -429,6 +433,12 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
     // Build identity override set
     let identity_overrides: HashSet<&str> = res.identity_overrides.iter().copied().collect();
 
+    // Build deferred-populate override set (carina#3034). Names are
+    // PascalCase, matched against `name` (Smithy member name) before
+    // it is snake_cased for the schema.
+    let deferred_populate_overrides: HashSet<&str> =
+        res.deferred_populate_overrides.iter().copied().collect();
+
     // Build extra read-only set
     let extra_read_only: HashSet<&str> = res.extra_read_only.iter().copied().collect();
 
@@ -680,6 +690,7 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
         );
 
         let is_identity = identity_overrides.contains(name.as_str());
+        let is_deferred_populate = deferred_populate_overrides.contains(name.as_str());
 
         attrs.push(AttrInfo {
             snake_name,
@@ -689,6 +700,7 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
             is_create_only,
             is_read_only,
             is_identity,
+            is_deferred_populate,
             description,
             enum_info,
         });
@@ -725,6 +737,7 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
             is_create_only,
             is_read_only,
             is_identity: identity_overrides.contains(extra.name),
+            is_deferred_populate: deferred_populate_overrides.contains(extra.name),
             description: extra.description.map(|s| s.to_string()),
             enum_info: None,
         });
@@ -757,6 +770,7 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
             is_create_only: false,
             is_read_only: true,
             is_identity: false,
+            is_deferred_populate: deferred_populate_overrides.contains(name.as_str()),
             description,
             enum_info,
         });
@@ -990,6 +1004,9 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
         }
         if attr.is_identity {
             attr_code.push_str("\n\x20               .identity()");
+        }
+        if attr.is_deferred_populate {
+            attr_code.push_str("\n\x20               .deferred_populate()");
         }
 
         if let Some(ref desc) = attr.description {

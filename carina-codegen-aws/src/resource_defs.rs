@@ -88,6 +88,14 @@ pub struct ResourceDef {
     /// Fields to mark as identity (contribute to anonymous resource identifier hashing).
     /// Use for attributes that distinguish same-type resources sharing create-only values.
     pub identity_overrides: Vec<&'static str>,
+    /// Fields whose value the AWS API populates *asynchronously after Create
+    /// returns* — chained references to these from another resource will be
+    /// rejected at validate time unless the user has declared a `wait`
+    /// block on the binding (carina#3034). Examples: ACM `Status`
+    /// (PENDING_VALIDATION → ISSUED), CloudFront `DomainName`,
+    /// RDS `Endpoint`. Names are PascalCase, matching the rest of
+    /// `ResourceDef`'s `*_overrides` Vecs.
+    pub deferred_populate_overrides: Vec<&'static str>,
     /// Read-back projections for attributes that are not direct members of
     /// the read structure. The DSL attribute already lives in the schema
     /// (typically because the create input already contains it); this only
@@ -323,6 +331,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             read_only_overrides: vec![],
             extra_attributes: vec![],
             identity_overrides: vec![],
+            deferred_populate_overrides: vec![],
             derived_attributes: vec![],
         },
         // ec2.subnet
@@ -358,6 +367,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             read_only_overrides: vec![],
             extra_attributes: vec![],
             identity_overrides: vec![],
+            deferred_populate_overrides: vec![],
             // private_dns_name_options_on_launch is a nested struct on the
             // read shape; collapse it into a single Value::Map attribute
             // so the DSL surface stays flat.
@@ -403,6 +413,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
                 ),
             }],
             identity_overrides: vec![],
+            deferred_populate_overrides: vec![],
             derived_attributes: vec![],
         },
         // ec2.route_table
@@ -429,6 +440,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             read_only_overrides: vec![],
             extra_attributes: vec![],
             identity_overrides: vec![],
+            deferred_populate_overrides: vec![],
             derived_attributes: vec![],
         },
         // ec2.route
@@ -473,6 +485,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             read_only_overrides: vec![],
             extra_attributes: vec![],
             identity_overrides: vec![],
+            deferred_populate_overrides: vec![],
             derived_attributes: vec![],
         },
         // ec2.security_group
@@ -499,6 +512,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             read_only_overrides: vec![],
             extra_attributes: vec![],
             identity_overrides: vec![],
+            deferred_populate_overrides: vec![],
             derived_attributes: vec![],
         },
         // ec2.security_group_ingress
@@ -553,6 +567,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
                 },
             ],
             identity_overrides: vec![],
+            deferred_populate_overrides: vec![],
             derived_attributes: vec![],
         },
         // ec2.security_group_egress
@@ -607,6 +622,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
                 },
             ],
             identity_overrides: vec![],
+            deferred_populate_overrides: vec![],
             derived_attributes: vec![],
         },
         // ec2.egress_only_internet_gateway
@@ -633,6 +649,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             read_only_overrides: vec![],
             extra_attributes: vec![],
             identity_overrides: vec![],
+            deferred_populate_overrides: vec![],
             // VpcId lives on Attachments[0].VpcId in the read response;
             // there is no top-level VpcId getter on EgressOnlyInternetGateway.
             derived_attributes: vec![DerivedAttribute {
@@ -673,6 +690,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             read_only_overrides: vec![],
             extra_attributes: vec![],
             identity_overrides: vec![],
+            deferred_populate_overrides: vec![],
             derived_attributes: vec![],
         },
         // ec2.flow_log
@@ -706,6 +724,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             read_only_overrides: vec![],
             extra_attributes: vec![],
             identity_overrides: vec![],
+            deferred_populate_overrides: vec![],
             derived_attributes: vec![],
         },
         // ec2.nat_gateway
@@ -739,6 +758,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             read_only_overrides: vec![],
             extra_attributes: vec![],
             identity_overrides: vec![],
+            deferred_populate_overrides: vec![],
             // AllocationId lives on NatGatewayAddresses[0].AllocationId in the
             // read response; there is no top-level AllocationId getter on
             // NatGateway.
@@ -774,6 +794,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             read_only_overrides: vec![],
             extra_attributes: vec![],
             identity_overrides: vec![],
+            deferred_populate_overrides: vec![],
             derived_attributes: vec![],
         },
         // ec2.transit_gateway
@@ -803,6 +824,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             read_only_overrides: vec![],
             extra_attributes: vec![],
             identity_overrides: vec![],
+            deferred_populate_overrides: vec![],
             // The TransitGatewayRequestOptions sub-struct on the response
             // is flattened into top-level attributes (matching the DSL
             // surface, which doesn't expose `options` as a nested struct).
@@ -875,6 +897,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             read_only_overrides: vec![],
             extra_attributes: vec![],
             identity_overrides: vec![],
+            deferred_populate_overrides: vec![],
             derived_attributes: vec![],
         },
         // ec2.vpc_endpoint
@@ -911,6 +934,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             read_only_overrides: vec![],
             extra_attributes: vec![],
             identity_overrides: vec![],
+            deferred_populate_overrides: vec![],
             // SecurityGroupIds is a write-side input
             // (CreateVpcEndpointRequest.SecurityGroupIds: List<String>) but
             // the read structure exposes it as Groups[*].GroupId on a
@@ -958,6 +982,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
                 },
             ],
             identity_overrides: vec![],
+            deferred_populate_overrides: vec![],
             derived_attributes: vec![],
         },
         // ec2.vpc_peering_connection
@@ -984,6 +1009,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             read_only_overrides: vec![],
             extra_attributes: vec![],
             identity_overrides: vec![],
+            deferred_populate_overrides: vec![],
             // The peering response carries the requester / accepter VPCs
             // in two parallel `VpcPeeringConnectionVpcInfo` sub-structs;
             // the DSL surface flattens both, with the accepter-side
@@ -1043,6 +1069,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             read_only_overrides: vec![],
             extra_attributes: vec![],
             identity_overrides: vec![],
+            deferred_populate_overrides: vec![],
             derived_attributes: vec![],
         },
     ]
@@ -1163,6 +1190,7 @@ pub fn organizations_resources() -> Vec<ResourceDef> {
             read_only_overrides: vec![],
             extra_attributes: vec![],
             identity_overrides: vec![],
+            deferred_populate_overrides: vec![],
             derived_attributes: vec![],
         },
         // organizations.account
@@ -1194,6 +1222,7 @@ pub fn organizations_resources() -> Vec<ResourceDef> {
             read_only_overrides: vec![],
             extra_attributes: vec![],
             identity_overrides: vec![],
+            deferred_populate_overrides: vec![],
             derived_attributes: vec![],
         },
     ]
@@ -1245,6 +1274,7 @@ pub fn s3_resources() -> Vec<ResourceDef> {
             read_only_overrides: vec![],
             extra_attributes: vec![],
             identity_overrides: vec![],
+            deferred_populate_overrides: vec![],
             derived_attributes: vec![],
         },
         // s3.BucketPolicy — attaches a resource-based policy to an existing
@@ -1288,6 +1318,7 @@ pub fn s3_resources() -> Vec<ResourceDef> {
             read_only_overrides: vec![],
             extra_attributes: vec![],
             identity_overrides: vec![],
+            deferred_populate_overrides: vec![],
             derived_attributes: vec![],
         },
         // s3.BucketVersioning — controls the versioning configuration of an
@@ -1355,6 +1386,7 @@ pub fn s3_resources() -> Vec<ResourceDef> {
                 },
             ],
             identity_overrides: vec![],
+            deferred_populate_overrides: vec![],
             derived_attributes: vec![],
         },
         // s3.BucketAcl — sets the canned ACL on an existing S3 bucket.
@@ -1402,6 +1434,7 @@ pub fn s3_resources() -> Vec<ResourceDef> {
             read_only_overrides: vec![],
             extra_attributes: vec![],
             identity_overrides: vec![],
+            deferred_populate_overrides: vec![],
             derived_attributes: vec![],
         },
         // s3.BucketOwnershipControls — sets the ObjectOwnership setting on
@@ -1450,6 +1483,7 @@ pub fn s3_resources() -> Vec<ResourceDef> {
                 ),
             }],
             identity_overrides: vec![],
+            deferred_populate_overrides: vec![],
             derived_attributes: vec![],
         },
         // s3.BucketServerSideEncryptionConfiguration — controls the SSE
@@ -1499,6 +1533,7 @@ pub fn s3_resources() -> Vec<ResourceDef> {
                 description: Some("List of server-side encryption rules to apply to the bucket."),
             }],
             identity_overrides: vec![],
+            deferred_populate_overrides: vec![],
             derived_attributes: vec![],
         },
         // s3.BucketReplicationConfiguration — controls cross-region (or
@@ -1550,6 +1585,7 @@ pub fn s3_resources() -> Vec<ResourceDef> {
                 },
             ],
             identity_overrides: vec![],
+            deferred_populate_overrides: vec![],
             derived_attributes: vec![],
         },
         // s3.BucketLifecycleConfiguration — controls object lifecycle rules
@@ -1594,6 +1630,7 @@ pub fn s3_resources() -> Vec<ResourceDef> {
                 description: Some("Lifecycle rules to apply to the bucket."),
             }],
             identity_overrides: vec![],
+            deferred_populate_overrides: vec![],
             derived_attributes: vec![],
         },
         // s3.BucketWebsiteConfiguration — configures static-website hosting.
@@ -1657,6 +1694,7 @@ pub fn s3_resources() -> Vec<ResourceDef> {
                 },
             ],
             identity_overrides: vec![],
+            deferred_populate_overrides: vec![],
             derived_attributes: vec![],
         },
         // s3.BucketCorsConfiguration — controls CORS rules on an existing
@@ -1699,6 +1737,7 @@ pub fn s3_resources() -> Vec<ResourceDef> {
                 description: Some("CORS rules to apply to the bucket."),
             }],
             identity_overrides: vec![],
+            deferred_populate_overrides: vec![],
             derived_attributes: vec![],
         },
         // s3.BucketNotificationConfiguration — wires bucket events to
@@ -1785,6 +1824,7 @@ pub fn s3_resources() -> Vec<ResourceDef> {
                 },
             ],
             identity_overrides: vec![],
+            deferred_populate_overrides: vec![],
             derived_attributes: vec![],
         },
         // s3.BucketLogging — controls server-access logging on a bucket.
@@ -1845,6 +1885,7 @@ pub fn s3_resources() -> Vec<ResourceDef> {
                 },
             ],
             identity_overrides: vec![],
+            deferred_populate_overrides: vec![],
             derived_attributes: vec![],
         },
         // s3.BucketPublicAccessBlock — controls the Public Access Block
@@ -1927,6 +1968,7 @@ pub fn s3_resources() -> Vec<ResourceDef> {
                 },
             ],
             identity_overrides: vec![],
+            deferred_populate_overrides: vec![],
             derived_attributes: vec![],
         },
     ]
@@ -2064,6 +2106,22 @@ pub fn acm_resources() -> Vec<ResourceDef> {
         read_only_overrides: vec![],
         extra_attributes: vec![],
         identity_overrides: vec![],
+        // ACM transitions Status PENDING_VALIDATION → ISSUED
+        // asynchronously after RequestCertificate returns. Downstream
+        // resources that read `cert.status` directly without a
+        // synchronizing `wait` block hit the carina#3032 failure
+        // mode at apply time. carina#3034 marks this here so
+        // validate flags it before apply.
+        //
+        // `domain_validation_options[*].resource_record_*` are also
+        // populated asynchronously, but the codegen schema currently
+        // models DVO with the request-side struct fields only
+        // (`domain_name` + `validation_domain`), missing the
+        // read-side `resource_record` substruct. Once that codegen
+        // bug is fixed, mark the inner field with `.deferred_populate()`
+        // via this list — it is the same mechanism, just one level
+        // deeper into the schema.
+        deferred_populate_overrides: vec!["Status"],
         derived_attributes: vec![],
     }]
 }
@@ -2121,6 +2179,7 @@ pub fn route53_resources() -> Vec<ResourceDef> {
                 description: Some("The ID of the hosted zone that contains this record set."),
             }],
             identity_overrides: vec!["Type"],
+            deferred_populate_overrides: vec![],
             derived_attributes: vec![],
         },
     ]
@@ -2198,6 +2257,7 @@ pub fn iam_resources() -> Vec<ResourceDef> {
         read_only_overrides: vec![],
         extra_attributes: vec![],
         identity_overrides: vec![],
+        deferred_populate_overrides: vec![],
         derived_attributes: vec![],
     }]
 }
@@ -2243,6 +2303,7 @@ pub fn logs_resources() -> Vec<ResourceDef> {
             ),
         }],
         identity_overrides: vec![],
+        deferred_populate_overrides: vec![],
         derived_attributes: vec![],
     }]
 }
@@ -2497,6 +2558,7 @@ pub fn sqs_resources() -> Vec<ResourceDef> {
             },
         ],
         identity_overrides: vec![],
+        deferred_populate_overrides: vec![],
         derived_attributes: vec![],
     }]
 }
