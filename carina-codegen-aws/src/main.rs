@@ -442,6 +442,24 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
     // Build extra read-only set
     let extra_read_only: HashSet<&str> = res.extra_read_only.iter().copied().collect();
 
+    // Build read-shape override set (carina-provider-aws#296). Names
+    // here force the codegen to use the read structure's member_ref
+    // for the attribute's type, even if the create input has a
+    // narrower shape under the same name. The attribute is also
+    // forced read-only — the rich response shape cannot be
+    // round-tripped back into the create input.
+    let read_shape_overrides: HashSet<&str> = res.read_shape_overrides.iter().copied().collect();
+
+    // Build deferred-populate StructField override set (carina#3034).
+    // Each tuple is (attr_pascal_name, member_pascal_name); used
+    // when only specific inner fields of a struct/list-of-struct
+    // attribute populate asynchronously, not the whole attribute.
+    let deferred_populate_struct_fields: HashSet<(&str, &str)> = res
+        .deferred_populate_struct_field_overrides
+        .iter()
+        .copied()
+        .collect();
+
     // Build enum alias map: attr_snake_name -> [(canonical, alias)]
     let mut enum_alias_map: HashMap<&str, Vec<(&str, &str)>> = HashMap::new();
     for (attr, alias, canonical) in &res.enum_aliases {
@@ -531,6 +549,13 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
             }
             if name == "Tags" {
                 continue; // handled separately
+            }
+            // Skip names whose schema type should come from the read
+            // structure instead — they will be inserted into
+            // `read_only_fields` below from the read_structure's
+            // member_ref. carina-provider-aws#296.
+            if read_shape_overrides.contains(name.as_str()) {
+                continue;
             }
             writable_fields.insert(name.clone(), member_ref);
         }
@@ -684,6 +709,8 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
                 to_dsl_overrides: &to_dsl_overrides,
                 all_enums: &mut all_enums,
                 all_ranged_ints: &mut all_ranged_ints,
+                current_root_attr: Some(name.as_str()),
+                deferred_populate_struct_fields: &deferred_populate_struct_fields,
             },
             &member_ref.target,
             name,
@@ -757,6 +784,8 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
                 to_dsl_overrides: &to_dsl_overrides,
                 all_enums: &mut all_enums,
                 all_ranged_ints: &mut all_ranged_ints,
+                current_root_attr: Some(name.as_str()),
+                deferred_populate_struct_fields: &deferred_populate_struct_fields,
             },
             &member_ref.target,
             name,
@@ -1162,6 +1191,18 @@ struct TypeResolutionContext<'a> {
     to_dsl_overrides: &'a HashMap<&'a str, &'a str>,
     all_enums: &'a mut BTreeMap<String, EnumInfo>,
     all_ranged_ints: &'a mut BTreeMap<String, IntRange>,
+    /// Top-level attribute being resolved — set by callers in the
+    /// writable / read-only loops, used by `generate_struct_type` to
+    /// decide whether a nested StructField needs `.deferred_populate()`.
+    /// `None` for callers (e.g. inside enum collection passes) that
+    /// don't have an attribute context.
+    current_root_attr: Option<&'a str>,
+    /// `(attr_pascal_name, member_pascal_name)` pairs whose nested
+    /// StructField should be marked `.deferred_populate()`. Carries
+    /// `ResourceDef.deferred_populate_struct_field_overrides` —
+    /// `generate_struct_type` checks `(current_root_attr, member)`
+    /// against this set when emitting each field. carina#3034.
+    deferred_populate_struct_fields: &'a HashSet<(&'a str, &'a str)>,
 }
 
 /// Resolve a Smithy type to a Carina type code string.
@@ -1354,6 +1395,13 @@ fn generate_struct_type(
         let mut field_code = format!("StructField::new(\"{}\", {})", snake_name, field_type);
         if is_required {
             field_code.push_str(".required()");
+        }
+        if let Some(root_attr) = ctx.current_root_attr
+            && ctx
+                .deferred_populate_struct_fields
+                .contains(&(root_attr, field_name.as_str()))
+        {
+            field_code.push_str(".deferred_populate()");
         }
         if let Some(desc) = SmithyModel::documentation(&member_ref.traits) {
             let escaped = escape_description(desc);

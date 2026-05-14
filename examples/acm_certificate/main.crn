@@ -40,10 +40,10 @@ let cert = aws.acm.Certificate {
 # apply time after the cert resource finishes its create.
 let validation_record = aws.route53.RecordSet {
   hosted_zone_id   = 'Z123EXAMPLE'
-  name             = cert.domain_validation_options[0].resource_record_name
-  type             = cert.domain_validation_options[0].resource_record_type
+  name             = cert.domain_validation_options[0].resource_record.name
+  type             = cert.domain_validation_options[0].resource_record.type
   ttl              = 60
-  resource_records = [cert.domain_validation_options[0].resource_record_value]
+  resource_records = [cert.domain_validation_options[0].resource_record.value]
 }
 
 # Block downstream resources until the cert is ISSUED.
