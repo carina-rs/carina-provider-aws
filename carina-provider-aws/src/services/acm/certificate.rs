@@ -12,7 +12,7 @@
 
 use std::collections::HashMap;
 
-use aws_sdk_acm::types::{DomainValidationOption, ValidationMethod};
+use aws_sdk_acm::types::ValidationMethod;
 use indexmap::IndexMap;
 
 use carina_core::provider::{ProviderError, ProviderResult};
@@ -90,32 +90,15 @@ impl AwsProvider {
             // narrowing has already validated it.
             req = req.key_algorithm(key_algorithm.into());
         }
-        // `domain_validation_options` (per-SAN validation domain
-        // override) is parsed from a list of structs.
-        if let Some(Value::Concrete(ConcreteValue::List(opts))) =
-            resource.get_attr("domain_validation_options")
-        {
-            for entry in opts {
-                if let Value::Concrete(ConcreteValue::Map(map)) = entry {
-                    let domain = map.get("domain_name").and_then(extract_string);
-                    let validation_domain = map.get("validation_domain").and_then(extract_string);
-                    if let (Some(d), Some(vd)) = (domain, validation_domain) {
-                        let opt = DomainValidationOption::builder()
-                            .domain_name(d)
-                            .validation_domain(vd)
-                            .build()
-                            .map_err(|e| {
-                                ProviderError::api_error(sdk_error_message(
-                                    "Invalid domain_validation_option",
-                                    &e,
-                                ))
-                                .for_resource(id.clone())
-                            })?;
-                        req = req.domain_validation_options(opt);
-                    }
-                }
-            }
-        }
+        // The previous request-side `domain_validation_options`
+        // (per-SAN email validation domain override) has been
+        // dropped: the codegen schema now models DVO as the
+        // *response* shape (with `resource_record`, `validation_status`,
+        // ...) rather than the request shape (just `domain_name` +
+        // `validation_domain`), so the user cannot set it from DSL
+        // anymore. The override was a rare-use email-validation
+        // feature; the common DNS-validation path is unaffected.
+        // carina-rs/carina-provider-aws#296.
 
         let output = req.send().await.map_err(|e| {
             ProviderError::api_error(sdk_error_message("RequestCertificate failed", &e))
@@ -208,6 +191,11 @@ impl AwsProvider {
         // construct's primary use case.
         let dvs = cert.domain_validation_options();
         if !dvs.is_empty() {
+            // Emit the nested `resource_record: { name, type, value }`
+            // shape that matches the codegen-generated schema (#296).
+            // The DSL chained access is
+            // `cert.domain_validation_options[0].resource_record.value`,
+            // not the older flat `resource_record_value`.
             let mut list: Vec<Value> = Vec::with_capacity(dvs.len());
             for dv in dvs {
                 let mut m: IndexMap<String, Value> = IndexMap::new();
@@ -216,17 +204,22 @@ impl AwsProvider {
                     Value::Concrete(ConcreteValue::String(dv.domain_name().to_string())),
                 );
                 if let Some(rr) = dv.resource_record() {
-                    m.insert(
-                        "resource_record_name".to_string(),
+                    let mut rr_map: IndexMap<String, Value> = IndexMap::new();
+                    rr_map.insert(
+                        "name".to_string(),
                         Value::Concrete(ConcreteValue::String(rr.name().to_string())),
                     );
-                    m.insert(
-                        "resource_record_type".to_string(),
+                    rr_map.insert(
+                        "type".to_string(),
                         Value::Concrete(ConcreteValue::String(rr.r#type().as_str().to_string())),
                     );
-                    m.insert(
-                        "resource_record_value".to_string(),
+                    rr_map.insert(
+                        "value".to_string(),
                         Value::Concrete(ConcreteValue::String(rr.value().to_string())),
+                    );
+                    m.insert(
+                        "resource_record".to_string(),
+                        Value::Concrete(ConcreteValue::Map(rr_map)),
                     );
                 }
                 if let Some(status) = dv.validation_status() {

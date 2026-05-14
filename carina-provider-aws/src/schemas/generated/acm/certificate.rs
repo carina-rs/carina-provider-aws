@@ -127,18 +127,6 @@ pub fn acm_certificate_config() -> AwsSchemaConfig {
                 .with_provider_name("DomainName"),
         )
         .attribute(
-            AttributeSchema::new("domain_validation_options", AttributeType::list(AttributeType::Struct {
-                    name: "DomainValidationOption".to_string(),
-                    fields: vec![
-                    StructField::new("domain_name", AttributeType::String).required().with_description("A fully qualified domain name (FQDN) in the certificate request.").with_provider_name("DomainName"),
-                    StructField::new("validation_domain", AttributeType::String).required().with_description("The domain name that you want ACM to use to send you validation emails. This domain name is the suffix of the email addresses that you want ACM to use...").with_provider_name("ValidationDomain")
-                    ],
-                }))
-                .create_only()
-                .with_description("The domain name that you want ACM to use to send you emails so that you can validate domain ownership.")
-                .with_provider_name("DomainValidationOptions"),
-        )
-        .attribute(
             AttributeSchema::new("idempotency_token", AttributeType::String)
                 .create_only()
                 .with_description("Customer chosen string that can be used to distinguish between calls to RequestCertificate. Idempotency tokens time out after one hour. Therefore, if ...")
@@ -199,6 +187,51 @@ pub fn acm_certificate_config() -> AwsSchemaConfig {
                 .read_only()
                 .with_description("The Amazon Resource Name (ARN) of the certificate. For more information about ARNs, see Amazon Resource Names (ARNs) in the Amazon Web Services Genera... (read-only)")
                 .with_provider_name("CertificateArn"),
+        )
+        .attribute(
+            AttributeSchema::new("domain_validation_options", AttributeType::list(AttributeType::Struct {
+                    name: "DomainValidation".to_string(),
+                    fields: vec![
+                    StructField::new("domain_name", AttributeType::String).required().with_description("A fully qualified domain name (FQDN) in the certificate. For example, www.example.com or example.com.").with_provider_name("DomainName"),
+                    StructField::new("http_redirect", AttributeType::Struct {
+                    name: "HttpRedirect".to_string(),
+                    fields: vec![
+                    StructField::new("redirect_from", AttributeType::String).with_description("The URL including the domain to be validated. The certificate authority sends GET requests here during validation.").with_provider_name("RedirectFrom"),
+                    StructField::new("redirect_to", AttributeType::String).with_description("The URL hosting the validation token. RedirectFrom must return this content or redirect here.").with_provider_name("RedirectTo")
+                    ],
+                }).with_description("Contains information for HTTP-based domain validation of certificates requested through Amazon CloudFront and issued by ACM. This field exists only wh...").with_provider_name("HttpRedirect"),
+                    StructField::new("resource_record", AttributeType::Struct {
+                    name: "ResourceRecord".to_string(),
+                    fields: vec![
+                    StructField::new("name", AttributeType::String).required().with_description("The name of the DNS record to create in your domain. This is supplied by ACM.").with_provider_name("Name"),
+                    StructField::new("type", AttributeType::StringEnum {
+                name: "Type".to_string(),
+                values: vec!["CNAME".to_string()],
+                namespace: Some("aws.acm.Certificate".to_string()),
+                dsl_aliases: vec![("CNAME".to_string(), "cname".to_string())],
+            }).required().with_description("The type of DNS record. Currently this can be CNAME.").with_provider_name("Type"),
+                    StructField::new("value", AttributeType::String).required().with_description("The value of the CNAME record to add to your DNS database. This is supplied by ACM.").with_provider_name("Value")
+                    ],
+                }).deferred_populate().with_description("Contains the CNAME record that you add to your DNS database for domain validation. For more information, see Use DNS to Validate Domain Ownership. The...").with_provider_name("ResourceRecord"),
+                    StructField::new("validation_domain", AttributeType::String).with_description("The domain name that ACM used to send domain validation emails.").with_provider_name("ValidationDomain"),
+                    StructField::new("validation_emails", AttributeType::list(types::email())).with_description("A list of email addresses that ACM used to send domain validation emails.").with_provider_name("ValidationEmails"),
+                    StructField::new("validation_method", AttributeType::StringEnum {
+                name: "ValidationMethod".to_string(),
+                values: vec!["DNS".to_string(), "EMAIL".to_string(), "HTTP".to_string()],
+                namespace: Some("aws.acm.Certificate".to_string()),
+                dsl_aliases: vec![("DNS".to_string(), "dns".to_string()), ("EMAIL".to_string(), "email".to_string()), ("HTTP".to_string(), "http".to_string())],
+            }).with_description("Specifies the domain validation method.").with_provider_name("ValidationMethod"),
+                    StructField::new("validation_status", AttributeType::StringEnum {
+                name: "ValidationStatus".to_string(),
+                values: vec!["FAILED".to_string(), "PENDING_VALIDATION".to_string(), "SUCCESS".to_string()],
+                namespace: Some("aws.acm.Certificate".to_string()),
+                dsl_aliases: vec![("FAILED".to_string(), "failed".to_string()), ("PENDING_VALIDATION".to_string(), "pending_validation".to_string()), ("SUCCESS".to_string(), "success".to_string())],
+            }).with_description("The validation status of the domain name. This can be one of the following values: PENDING_VALIDATION SUCCESS FAILED").with_provider_name("ValidationStatus")
+                    ],
+                }))
+                .read_only()
+                .with_description("Contains information about the initial validation of each domain name that occurs as a result of the RequestCertificate request. This field exists onl... (read-only)")
+                .with_provider_name("DomainValidationOptions"),
         )
         .attribute(
             AttributeSchema::new("renewal_eligibility", AttributeType::StringEnum {
