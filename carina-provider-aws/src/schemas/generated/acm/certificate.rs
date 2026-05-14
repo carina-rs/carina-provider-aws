@@ -282,6 +282,7 @@ pub fn acm_certificate_config() -> AwsSchemaConfig {
                 dsl_aliases: vec![("EXPIRED".to_string(), "expired".to_string()), ("FAILED".to_string(), "failed".to_string()), ("INACTIVE".to_string(), "inactive".to_string()), ("ISSUED".to_string(), "issued".to_string()), ("PENDING_VALIDATION".to_string(), "pending_validation".to_string()), ("REVOKED".to_string(), "revoked".to_string()), ("VALIDATION_TIMED_OUT".to_string(), "validation_timed_out".to_string())],
             })
                 .read_only()
+                .deferred_populate()
                 .with_description("The status of the certificate. A certificate enters status PENDING_VALIDATION upon being requested, unless it fails for any of the reasons given in th... (read-only)")
                 .with_provider_name("Status"),
         )
