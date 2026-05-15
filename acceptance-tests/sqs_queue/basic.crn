@@ -17,11 +17,11 @@ aws.sqs.Queue {
   sqs_managed_sse_enabled             = true
 
   policy = {
-    version = 2012_10_17
+    version = aws.iam.PolicyDocument.Version.2012_10_17
     statement = [
       {
         sid    = 'AllowSelf'
-        effect = allow
+        effect = aws.iam.PolicyDocument.Effect.allow
         principal = {
           aws = ['*']
         }
