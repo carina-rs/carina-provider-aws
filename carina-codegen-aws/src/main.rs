@@ -460,6 +460,15 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
         .copied()
         .collect();
 
+    // Build per-(parent_struct, member) type override map (aws#302).
+    // Distinguishes struct fields by parent struct shape so the same
+    // member name can resolve to different types in different contexts.
+    let struct_field_type_overrides: HashMap<(&str, &str), &str> = res
+        .struct_field_type_overrides
+        .iter()
+        .map(|(p, m, t)| ((*p, *m), *t))
+        .collect();
+
     // Build enum alias map: attr_snake_name -> [(canonical, alias)]
     let mut enum_alias_map: HashMap<&str, Vec<(&str, &str)>> = HashMap::new();
     for (attr, alias, canonical) in &res.enum_aliases {
@@ -711,6 +720,7 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
                 all_ranged_ints: &mut all_ranged_ints,
                 current_root_attr: Some(name.as_str()),
                 deferred_populate_struct_fields: &deferred_populate_struct_fields,
+                struct_field_type_overrides: &struct_field_type_overrides,
             },
             &member_ref.target,
             name,
@@ -786,6 +796,7 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
                 all_ranged_ints: &mut all_ranged_ints,
                 current_root_attr: Some(name.as_str()),
                 deferred_populate_struct_fields: &deferred_populate_struct_fields,
+                struct_field_type_overrides: &struct_field_type_overrides,
             },
             &member_ref.target,
             name,
@@ -1203,6 +1214,12 @@ struct TypeResolutionContext<'a> {
     /// `generate_struct_type` checks `(current_root_attr, member)`
     /// against this set when emitting each field. carina#3034.
     deferred_populate_struct_fields: &'a HashSet<(&'a str, &'a str)>,
+    /// `(parent_struct, member) -> type_code` overrides for struct
+    /// fields, keyed by the immediate parent struct shape name (not the
+    /// top-level attribute). Lets a member like `HostedZoneId` resolve
+    /// to one type inside `AliasTarget` and another at the top level.
+    /// Carries `ResourceDef.struct_field_type_overrides` (aws#302).
+    struct_field_type_overrides: &'a HashMap<(&'a str, &'a str), &'a str>,
 }
 
 /// Resolve a Smithy type to a Carina type code string.
@@ -1359,7 +1376,20 @@ fn generate_struct_type(
         let snake_name = field_name.to_snake_case();
         let is_required = SmithyModel::is_required(member_ref);
 
-        let (field_type, enum_info) = resolve_type(ctx, &member_ref.target, field_name);
+        // Check `(parent_struct, member)` type override first — distinguishes
+        // a member name shared across structs (e.g. `HostedZoneId` in
+        // `AliasTarget` vs `RecordSet`). Falls through to the default
+        // resolve_type path when no per-parent override is registered.
+        let override_type = ctx
+            .struct_field_type_overrides
+            .get(&(struct_name, field_name.as_str()))
+            .copied();
+
+        let (field_type, enum_info) = if let Some(t) = override_type {
+            (t.to_string(), None)
+        } else {
+            resolve_type(ctx, &member_ref.target, field_name)
+        };
 
         // If enum detected, use shared schema enum type.
         let field_type = if let Some(ei) = enum_info {
@@ -2845,6 +2875,11 @@ fn generate_markdown_resource(res: &ResourceDef, model: &SmithyModel) -> Result<
 
     let exclude: HashSet<&str> = res.exclude_fields.iter().copied().collect();
     let type_overrides: HashMap<&str, &str> = res.type_overrides.iter().copied().collect();
+    let struct_field_type_overrides: HashMap<(&str, &str), &str> = res
+        .struct_field_type_overrides
+        .iter()
+        .map(|(p, m, t)| ((*p, *m), *t))
+        .collect();
     let required_overrides: HashSet<&str> = res.required_overrides.iter().copied().collect();
     let read_only_overrides: HashSet<&str> = res.read_only_overrides.iter().copied().collect();
     let extra_read_only: HashSet<&str> = res.extra_read_only.iter().copied().collect();
@@ -3023,6 +3058,8 @@ fn generate_markdown_resource(res: &ResourceDef, model: &SmithyModel) -> Result<
             name,
             &namespace,
             &type_overrides,
+            &struct_field_type_overrides,
+            None,
             &mut all_enums,
             &mut struct_defs,
         );
@@ -3074,6 +3111,8 @@ fn generate_markdown_resource(res: &ResourceDef, model: &SmithyModel) -> Result<
             name,
             &namespace,
             &type_overrides,
+            &struct_field_type_overrides,
+            None,
             &mut all_enums,
             &mut struct_defs,
         );
@@ -3195,6 +3234,8 @@ fn generate_markdown_resource(res: &ResourceDef, model: &SmithyModel) -> Result<
                     field_name,
                     &namespace,
                     &type_overrides,
+                    &struct_field_type_overrides,
+                    Some(struct_name.as_str()),
                     &mut all_enums,
                     &mut BTreeMap::new(),
                 );
@@ -3467,16 +3508,30 @@ fn generate_markdown_data_source(
 }
 
 /// Determine the display string for a type in markdown docs.
-#[allow(clippy::only_used_in_recursion)]
+///
+/// `parent_struct` is `Some(struct_name)` when this is called for a
+/// member of a struct-fields table (so per-`(parent, member)` overrides
+/// can fire), and `None` for top-level attributes and list-element
+/// recursion where no parent struct is in scope.
+#[allow(clippy::only_used_in_recursion, clippy::too_many_arguments)]
 fn type_display_string_md<'a>(
     model: &'a SmithyModel,
     target: &str,
     field_name: &str,
     namespace: &str,
     type_overrides: &HashMap<&str, &str>,
+    struct_field_type_overrides: &HashMap<(&str, &str), &str>,
+    parent_struct: Option<&str>,
     all_enums: &mut BTreeMap<String, EnumInfo>,
     struct_defs: &mut BTreeMap<String, Vec<(String, &'a carina_smithy::ShapeRef)>>,
 ) -> String {
+    // Per-(parent_struct, member) override wins over per-member and Smithy
+    // default. Distinguishes a member name shared across structs (aws#302).
+    if let Some(parent) = parent_struct
+        && let Some(&override_type) = struct_field_type_overrides.get(&(parent, field_name))
+    {
+        return type_code_to_display(override_type);
+    }
     // Check type overrides
     if let Some(&override_type) = type_overrides.get(field_name) {
         return type_code_to_display(override_type);
@@ -3553,6 +3608,8 @@ fn type_display_string_md<'a>(
                     field_name,
                     namespace,
                     type_overrides,
+                    struct_field_type_overrides,
+                    parent_struct,
                     all_enums,
                     struct_defs,
                 );

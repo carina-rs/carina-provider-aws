@@ -514,6 +514,144 @@ mod tests {
     }
 
     #[test]
+    fn test_resolve_enum_identifiers_cloudfront_hosted_zone_id_in_alias_target() {
+        // Regression for aws#302: `aws.cloudfront.HostedZoneId.global` written
+        // at value position of `alias_target.hosted_zone_id` (a Struct field)
+        // must resolve to the AWS-published constant `Z2FDTNDATAQYW2` before
+        // the value reaches the SDK builder. The receiving Struct field is
+        // schema-typed as a CloudFront-namespaced StringEnum, so the normalizer
+        // descends into the struct and rewrites via `DslMap::api_for`.
+        use indexmap::IndexMap;
+        let mut resource = Resource::with_provider("aws", "route53.RecordSet", "test-cf-alias");
+        let mut alias_target = IndexMap::new();
+        alias_target.insert(
+            "dns_name".to_string(),
+            Value::Concrete(ConcreteValue::String("d1234.cloudfront.net".to_string())),
+        );
+        alias_target.insert(
+            "evaluate_target_health".to_string(),
+            Value::Concrete(ConcreteValue::Bool(false)),
+        );
+        alias_target.insert(
+            "hosted_zone_id".to_string(),
+            Value::Concrete(ConcreteValue::String(
+                "aws.cloudfront.HostedZoneId.global".to_string(),
+            )),
+        );
+        resource.set_attr(
+            "alias_target".to_string(),
+            Value::Concrete(ConcreteValue::Map(alias_target)),
+        );
+        let mut resources = vec![resource];
+        resolve_enum_identifiers(&mut resources);
+        let Some(Value::Concrete(ConcreteValue::Map(at))) = resources[0].get_attr("alias_target")
+        else {
+            panic!("expected alias_target Map");
+        };
+        assert_eq!(
+            at.get("hosted_zone_id"),
+            Some(&Value::Concrete(ConcreteValue::String(
+                "Z2FDTNDATAQYW2".to_string()
+            )))
+        );
+    }
+
+    /// Variants of the aws#302 input shape — literal AWS spelling,
+    /// TypeName shorthand, and the negative case where the *top-level*
+    /// `RecordSet.hosted_zone_id` (user's own Route 53 zone) must NOT
+    /// be coerced through the CloudFront alias table.
+    #[test]
+    fn test_resolve_enum_identifiers_cloudfront_hosted_zone_id_input_shapes() {
+        use indexmap::IndexMap;
+        let make_resource = |hzid: &str| {
+            let mut resource = Resource::with_provider("aws", "route53.RecordSet", "test");
+            let mut at = IndexMap::new();
+            at.insert(
+                "dns_name".to_string(),
+                Value::Concrete(ConcreteValue::String("d1.cloudfront.net".to_string())),
+            );
+            at.insert(
+                "evaluate_target_health".to_string(),
+                Value::Concrete(ConcreteValue::Bool(false)),
+            );
+            at.insert(
+                "hosted_zone_id".to_string(),
+                Value::Concrete(ConcreteValue::String(hzid.to_string())),
+            );
+            resource.set_attr(
+                "alias_target".to_string(),
+                Value::Concrete(ConcreteValue::Map(at)),
+            );
+            resource
+        };
+
+        // Literal `Z2FDTNDATAQYW2` (the AWS-published spelling) — the
+        // StringEnum's `values` list accepts it directly without alias
+        // rewriting.
+        let mut resources = vec![make_resource("Z2FDTNDATAQYW2")];
+        resolve_enum_identifiers(&mut resources);
+        let Some(Value::Concrete(ConcreteValue::Map(at))) = resources[0].get_attr("alias_target")
+        else {
+            panic!("expected alias_target Map");
+        };
+        assert_eq!(
+            at.get("hosted_zone_id"),
+            Some(&Value::Concrete(ConcreteValue::String(
+                "Z2FDTNDATAQYW2".to_string()
+            )))
+        );
+
+        // TypeName shorthand `HostedZoneId.global` — resolves through
+        // Pass 1's `TypeName.value` arm.
+        let mut resources = vec![make_resource("HostedZoneId.global")];
+        resolve_enum_identifiers(&mut resources);
+        let Some(Value::Concrete(ConcreteValue::Map(at))) = resources[0].get_attr("alias_target")
+        else {
+            panic!("expected alias_target Map");
+        };
+        assert_eq!(
+            at.get("hosted_zone_id"),
+            Some(&Value::Concrete(ConcreteValue::String(
+                "Z2FDTNDATAQYW2".to_string()
+            )))
+        );
+
+        // Bare DSL alias `global` — `resolve_enum_value_recursive`
+        // expands a bare identifier to `aws.cloudfront.HostedZoneId.global`
+        // (Pass 1), and Pass 2 then rewrites the trailing alias through
+        // `DslMap::api_for` to land on `Z2FDTNDATAQYW2`.
+        let mut resources = vec![make_resource("global")];
+        resolve_enum_identifiers(&mut resources);
+        let Some(Value::Concrete(ConcreteValue::Map(at))) = resources[0].get_attr("alias_target")
+        else {
+            panic!("expected alias_target Map");
+        };
+        assert_eq!(
+            at.get("hosted_zone_id"),
+            Some(&Value::Concrete(ConcreteValue::String(
+                "Z2FDTNDATAQYW2".to_string()
+            )))
+        );
+
+        // Negative: top-level `RecordSet.hosted_zone_id` is the user's
+        // own Route 53 zone (plain String in the schema) — a literal
+        // hosted-zone ID like `Z1XYZABC123` must NOT be rewritten.
+        let mut resource = Resource::with_provider("aws", "route53.RecordSet", "test-toplevel");
+        resource.set_attr(
+            "hosted_zone_id".to_string(),
+            Value::Concrete(ConcreteValue::String("Z1XYZABC123".to_string())),
+        );
+        let mut resources = vec![resource];
+        resolve_enum_identifiers(&mut resources);
+        assert_eq!(
+            resources[0].get_attr("hosted_zone_id"),
+            Some(&Value::Concrete(ConcreteValue::String(
+                "Z1XYZABC123".to_string()
+            )))
+        );
+    }
+
+    #[test]
     fn test_resolve_enum_identifiers_ec2_vpc_instance_tenancy() {
         let mut resource = Resource::with_provider("aws", "ec2.Vpc", "test-vpc");
         resource.set_attr(
