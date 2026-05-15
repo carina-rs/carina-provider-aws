@@ -11,7 +11,7 @@ aws.iam.Role {
   assume_role_policy_document = {
     version = '2012-10-17'
     statement {
-      effect = 'Allow'
+      effect = allow
       principal = {
         service = 'ec2.amazonaws.com'
       }

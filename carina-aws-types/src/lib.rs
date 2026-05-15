@@ -1321,29 +1321,16 @@ fn string_or_principal_struct() -> AttributeType {
     ])
 }
 
-/// IAM Policy Effect enum type
-/// Only allows "Allow" or "Deny"
+/// IAM Policy Effect enum type. Allows `Allow` / `Deny` (AWS canonical) and
+/// their snake_case DSL aliases `allow` / `deny`, so users can write
+/// `effect = allow` as a bare identifier — matching the bare-identifier
+/// convention used by every other enum field in the same `.crn` file.
 fn iam_policy_effect() -> AttributeType {
-    AttributeType::Custom {
-        semantic_name: Some("IamPolicyEffect".to_string()),
-        pattern: Some("^(Allow|Deny)$".to_string()),
-        length: None,
-        base: Box::new(AttributeType::String),
-        validate: legacy_validator(|value| {
-            if let Value::Concrete(ConcreteValue::String(s)) = value {
-                match s.as_str() {
-                    "Allow" | "Deny" => Ok(()),
-                    _ => Err(format!(
-                        "Invalid IAM policy effect: \"{}\". Must be \"Allow\" or \"Deny\"",
-                        s
-                    )),
-                }
-            } else {
-                Err(format!("Expected string, got {:?}", value))
-            }
-        }),
+    AttributeType::StringEnum {
+        name: "IamPolicyEffect".to_string(),
+        values: vec!["Allow".to_string(), "Deny".to_string()],
         namespace: None,
-        to_dsl: None,
+        dsl_aliases: dsl_aliases_for(&["Allow", "Deny"]),
     }
 }
 
@@ -2699,7 +2686,9 @@ mod tests {
                             vec![
                                 (
                                     "effect".to_string(),
-                                    Value::Concrete(ConcreteValue::String("Allow".to_string())),
+                                    Value::Concrete(ConcreteValue::EnumIdentifier(
+                                        "allow".to_string(),
+                                    )),
                                 ),
                                 (
                                     "action".to_string(),
@@ -2746,7 +2735,7 @@ mod tests {
                     ConcreteValue::Map(
                         vec![(
                             "effect".to_string(),
-                            Value::Concrete(ConcreteValue::String("Grant".to_string())),
+                            Value::Concrete(ConcreteValue::EnumIdentifier("grant".to_string())),
                         )]
                         .into_iter()
                         .collect(),
@@ -2775,7 +2764,9 @@ mod tests {
                             vec![
                                 (
                                     "effect".to_string(),
-                                    Value::Concrete(ConcreteValue::String("Deny".to_string())),
+                                    Value::Concrete(ConcreteValue::EnumIdentifier(
+                                        "deny".to_string(),
+                                    )),
                                 ),
                                 (
                                     "action".to_string(),
@@ -2815,7 +2806,9 @@ mod tests {
                             vec![
                                 (
                                     "effect".to_string(),
-                                    Value::Concrete(ConcreteValue::String("Allow".to_string())),
+                                    Value::Concrete(ConcreteValue::EnumIdentifier(
+                                        "allow".to_string(),
+                                    )),
                                 ),
                                 (
                                     "principal".to_string(),
@@ -2870,7 +2863,9 @@ mod tests {
                             vec![
                                 (
                                     "effect".to_string(),
-                                    Value::Concrete(ConcreteValue::String("Allow".to_string())),
+                                    Value::Concrete(ConcreteValue::EnumIdentifier(
+                                        "allow".to_string(),
+                                    )),
                                 ),
                                 (
                                     "principal".to_string(),
@@ -3255,5 +3250,29 @@ mod tests {
             .collect(),
         ));
         assert!(validate_condition_operators(&doc).is_ok());
+    }
+
+    #[test]
+    fn iam_policy_effect_is_string_enum() {
+        let effect = super::iam_policy_effect();
+        match effect {
+            AttributeType::StringEnum {
+                name,
+                values,
+                dsl_aliases,
+                ..
+            } => {
+                assert_eq!(name, "IamPolicyEffect");
+                assert_eq!(values, vec!["Allow".to_string(), "Deny".to_string()]);
+                assert_eq!(
+                    dsl_aliases,
+                    vec![
+                        ("Allow".to_string(), "allow".to_string()),
+                        ("Deny".to_string(), "deny".to_string()),
+                    ]
+                );
+            }
+            other => panic!("expected StringEnum, got {:?}", other),
+        }
     }
 }

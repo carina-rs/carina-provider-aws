@@ -786,6 +786,9 @@ mod tests {
             Value::Concrete(ConcreteValue::String("2012-10-17".to_string())),
         );
         let mut stmt = IndexMap::new();
+        // `effect` is a StringEnum; the canonical post-read shape is
+        // `EnumIdentifier("allow")`, which `scalar_to_json` maps back to the
+        // PascalCase wire form (`"Allow"`).
         stmt.insert(
             "effect".to_string(),
             Value::Concrete(ConcreteValue::String("Allow".to_string())),

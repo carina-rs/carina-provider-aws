@@ -19,7 +19,7 @@ aws.s3.BucketPolicy {
     version = '2012-10-17'
     statement {
       sid    = 'DenyInsecureTransport'
-      effect = 'Deny'
+      effect = deny
       principal = {
         aws = '*'
       }
