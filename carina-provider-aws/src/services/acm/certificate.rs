@@ -48,6 +48,49 @@ fn extract_string_list(value: &Value) -> Vec<String> {
     }
 }
 
+/// Compute the tag-reconciliation deltas needed to drive `desired` from
+/// `current`.
+///
+/// Returns `(to_add, to_remove)`:
+///   - `to_add` lists every key whose desired value differs from current
+///     (or is absent from current). Values that aren't strings are
+///     skipped; ACM tag values are strings, and a malformed entry should
+///     not stall the whole reconcile.
+///   - `to_remove` lists every key present in current but absent from
+///     desired.
+///
+/// A key whose value merely changed appears in `to_add` only — never
+/// `to_remove` — because `AddTagsToCertificate` upserts by key, so a
+/// changed value is one add, not a remove + add round-trip.
+///
+/// Pure function over `IndexMap`s so it can be unit-tested without an
+/// AWS client. The caller wraps the results in
+/// `AddTagsToCertificate` / `RemoveTagsFromCertificate` calls.
+fn compute_tag_diff(
+    desired: &IndexMap<String, Value>,
+    current: &IndexMap<String, Value>,
+) -> (Vec<(String, String)>, Vec<String>) {
+    let mut to_add = Vec::new();
+    for (key, value) in desired {
+        let Value::Concrete(ConcreteValue::String(val)) = value else {
+            continue;
+        };
+        let unchanged = matches!(
+            current.get(key),
+            Some(Value::Concrete(ConcreteValue::String(c))) if c == val,
+        );
+        if !unchanged {
+            to_add.push((key.clone(), val.clone()));
+        }
+    }
+    let to_remove: Vec<String> = current
+        .keys()
+        .filter(|k| !desired.contains_key(*k))
+        .cloned()
+        .collect();
+    (to_add, to_remove)
+}
+
 fn parse_validation_method(input: &str) -> Option<ValidationMethod> {
     match input.to_ascii_uppercase().as_str() {
         "DNS" => Some(ValidationMethod::Dns),
@@ -89,6 +132,26 @@ impl AwsProvider {
             // Pass the AWS canonical form through verbatim — schema
             // narrowing has already validated it.
             req = req.key_algorithm(key_algorithm.into());
+        }
+        // RequestCertificate accepts tags inline, avoiding a follow-up
+        // AddTagsToCertificate round-trip on the create path.
+        if let Some(Value::Concrete(ConcreteValue::Map(tag_map))) = resource.get_attr("tags") {
+            for (key, value) in tag_map {
+                if let Value::Concrete(ConcreteValue::String(val)) = value {
+                    let tag = aws_sdk_acm::types::Tag::builder()
+                        .key(key)
+                        .value(val)
+                        .build()
+                        .map_err(|e| {
+                            ProviderError::api_error(sdk_error_message(
+                                "Failed to build ACM tag",
+                                &e,
+                            ))
+                            .for_resource(id.clone())
+                        })?;
+                    req = req.tags(tag);
+                }
+            }
         }
         // The previous request-side `domain_validation_options`
         // (per-SAN email validation domain override) has been
@@ -344,7 +407,7 @@ impl AwsProvider {
         &self,
         id: ResourceId,
         identifier: &str,
-        _from: &State,
+        from: &State,
         to: Resource,
     ) -> ProviderResult<State> {
         if let Some(pref) = to
@@ -369,12 +432,82 @@ impl AwsProvider {
                     .for_resource(id.clone())
                 })?;
         }
-        // Tag reconciliation deferred to a follow-up — the initial cut
-        // surfaces tag changes as a planned diff but doesn't apply them
-        // automatically. ACM tag APIs are AddTagsToCertificate /
-        // RemoveTagsFromCertificate; both take a list of tag records.
+        self.apply_acm_tags(&id, identifier, &to, from).await?;
 
         self.read_acm_certificate(&id, Some(identifier)).await
+    }
+
+    /// Reconcile tags on an existing certificate by issuing
+    /// `AddTagsToCertificate` / `RemoveTagsFromCertificate` for the
+    /// add/remove sets returned by [`compute_tag_diff`].
+    ///
+    /// Either call is skipped when its set is empty.
+    async fn apply_acm_tags(
+        &self,
+        id: &ResourceId,
+        arn: &str,
+        to: &Resource,
+        from: &State,
+    ) -> ProviderResult<()> {
+        let empty = IndexMap::new();
+        let desired = match to.get_attr("tags") {
+            Some(Value::Concrete(ConcreteValue::Map(m))) => m,
+            _ => &empty,
+        };
+        let current = match from.attributes.get("tags") {
+            Some(Value::Concrete(ConcreteValue::Map(m))) => m,
+            _ => &empty,
+        };
+        let (to_add, to_remove) = compute_tag_diff(desired, current);
+
+        if !to_add.is_empty() {
+            let mut req = self
+                .acm_client
+                .add_tags_to_certificate()
+                .certificate_arn(arn);
+            for (k, v) in to_add {
+                let tag = aws_sdk_acm::types::Tag::builder()
+                    .key(k)
+                    .value(v)
+                    .build()
+                    .map_err(|e| {
+                        ProviderError::api_error(sdk_error_message("Failed to build ACM tag", &e))
+                            .for_resource(id.clone())
+                    })?;
+                req = req.tags(tag);
+            }
+            req.send().await.map_err(|e| {
+                ProviderError::api_error(sdk_error_message("AddTagsToCertificate failed", &e))
+                    .for_resource(id.clone())
+            })?;
+        }
+
+        if !to_remove.is_empty() {
+            let mut req = self
+                .acm_client
+                .remove_tags_from_certificate()
+                .certificate_arn(arn);
+            for k in to_remove {
+                // RemoveTagsFromCertificate accepts a Tag with just `key`.
+                let tag = aws_sdk_acm::types::Tag::builder()
+                    .key(k)
+                    .build()
+                    .map_err(|e| {
+                        ProviderError::api_error(sdk_error_message(
+                            "Failed to build ACM tag for removal",
+                            &e,
+                        ))
+                        .for_resource(id.clone())
+                    })?;
+                req = req.tags(tag);
+            }
+            req.send().await.map_err(|e| {
+                ProviderError::api_error(sdk_error_message("RemoveTagsFromCertificate failed", &e))
+                    .for_resource(id.clone())
+            })?;
+        }
+
+        Ok(())
     }
 
     /// Delete an ACM certificate via `DeleteCertificate`.
@@ -636,6 +769,102 @@ mod tests {
                 .iter()
                 .all(|dv| dv.resource_record().is_some()),
         );
+    }
+
+    fn tag_map(pairs: &[(&str, &str)]) -> IndexMap<String, Value> {
+        let mut m = IndexMap::new();
+        for (k, v) in pairs {
+            m.insert(
+                (*k).to_string(),
+                Value::Concrete(ConcreteValue::String((*v).to_string())),
+            );
+        }
+        m
+    }
+
+    #[test]
+    fn compute_tag_diff_initial_create_adds_all() {
+        let desired = tag_map(&[("Env", "dev"), ("Project", "carina")]);
+        let current = IndexMap::new();
+        let (to_add, to_remove) = compute_tag_diff(&desired, &current);
+        assert_eq!(
+            to_add,
+            vec![
+                ("Env".to_string(), "dev".to_string()),
+                ("Project".to_string(), "carina".to_string()),
+            ],
+        );
+        assert!(to_remove.is_empty());
+    }
+
+    #[test]
+    fn compute_tag_diff_no_change_is_noop() {
+        let desired = tag_map(&[("Env", "dev")]);
+        let current = tag_map(&[("Env", "dev")]);
+        let (to_add, to_remove) = compute_tag_diff(&desired, &current);
+        assert!(to_add.is_empty(), "no value change ⇒ no add: {to_add:?}");
+        assert!(to_remove.is_empty());
+    }
+
+    #[test]
+    fn compute_tag_diff_value_change_adds_only_changed_key() {
+        let desired = tag_map(&[("Env", "prod"), ("Project", "carina")]);
+        let current = tag_map(&[("Env", "dev"), ("Project", "carina")]);
+        let (to_add, to_remove) = compute_tag_diff(&desired, &current);
+        assert_eq!(to_add, vec![("Env".to_string(), "prod".to_string())]);
+        assert!(to_remove.is_empty());
+    }
+
+    #[test]
+    fn compute_tag_diff_removed_key_goes_to_remove_list() {
+        let desired = tag_map(&[("Env", "dev")]);
+        let current = tag_map(&[("Env", "dev"), ("Project", "carina")]);
+        let (to_add, to_remove) = compute_tag_diff(&desired, &current);
+        assert!(to_add.is_empty());
+        assert_eq!(to_remove, vec!["Project".to_string()]);
+    }
+
+    #[test]
+    fn compute_tag_diff_full_clear_removes_all() {
+        let desired = IndexMap::new();
+        let current = tag_map(&[("Env", "dev"), ("Project", "carina")]);
+        let (to_add, to_remove) = compute_tag_diff(&desired, &current);
+        assert!(to_add.is_empty());
+        assert_eq!(to_remove, vec!["Env".to_string(), "Project".to_string()],);
+    }
+
+    #[test]
+    fn compute_tag_diff_mixed_add_remove_change() {
+        let desired = tag_map(&[("Env", "prod"), ("Owner", "team")]);
+        let current = tag_map(&[("Env", "dev"), ("Project", "carina")]);
+        let (to_add, to_remove) = compute_tag_diff(&desired, &current);
+        // Env value-change + new Owner → both in add list
+        assert_eq!(
+            to_add,
+            vec![
+                ("Env".to_string(), "prod".to_string()),
+                ("Owner".to_string(), "team".to_string()),
+            ],
+        );
+        // Project absent from desired → remove
+        assert_eq!(to_remove, vec!["Project".to_string()]);
+    }
+
+    #[test]
+    fn compute_tag_diff_skips_non_string_values() {
+        // Defensive: a Map<String, Value> may, in theory, hold non-string
+        // entries. ACM tag values are strings, so anything else is skipped
+        // rather than panicking.
+        let mut desired = IndexMap::new();
+        desired.insert("Count".to_string(), Value::Concrete(ConcreteValue::Int(3)));
+        desired.insert(
+            "Env".to_string(),
+            Value::Concrete(ConcreteValue::String("dev".to_string())),
+        );
+        let current = IndexMap::new();
+        let (to_add, to_remove) = compute_tag_diff(&desired, &current);
+        assert_eq!(to_add, vec![("Env".to_string(), "dev".to_string())]);
+        assert!(to_remove.is_empty());
     }
 
     #[tokio::test]
