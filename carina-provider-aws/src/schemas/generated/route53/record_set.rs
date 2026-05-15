@@ -42,7 +42,7 @@ pub fn route53_record_set_config() -> AwsSchemaConfig {
                     fields: vec![
                     StructField::new("dns_name", AttributeType::String).required().with_description("Alias resource record sets only: The value that you specify depends on where you want to route queries: Amazon API Gateway custom regional APIs and ed...").with_provider_name("DNSName"),
                     StructField::new("evaluate_target_health", AttributeType::Bool).required().with_description("Applies only to alias, failover alias, geolocation alias, latency alias, and weighted alias resource record sets: When EvaluateTargetHealth is true, a...").with_provider_name("EvaluateTargetHealth"),
-                    StructField::new("hosted_zone_id", AttributeType::String).required().with_description("Alias resource records sets only: The value used depends on where you want to route traffic: Amazon API Gateway custom regional APIs and edge-optimize...").with_provider_name("HostedZoneId")
+                    StructField::new("hosted_zone_id", super::cloudfront_hosted_zone_id()).required().with_description("Alias resource records sets only: The value used depends on where you want to route traffic: Amazon API Gateway custom regional APIs and edge-optimize...").with_provider_name("HostedZoneId")
                     ],
                 })
                 .with_description("Alias resource record sets only: Information about the Amazon Web Services resource, such as a CloudFront distribution or an Amazon S3 bucket, that yo...")
