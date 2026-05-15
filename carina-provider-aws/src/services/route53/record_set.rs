@@ -426,7 +426,7 @@ mod tests {
     use carina_core::resource::Resource;
 
     fn record_set(name: &str) -> Resource {
-        let mut r = Resource::with_provider("aws", "route53.RecordSet", "test-rec");
+        let mut r = Resource::with_provider("aws", "route53.RecordSet", "test-rec", None);
         r.set_attr(
             "name".to_string(),
             Value::Concrete(ConcreteValue::String(name.to_string())),
@@ -496,7 +496,7 @@ mod tests {
 
     #[test]
     fn ignores_non_route53_record_set_resources() {
-        let mut r = Resource::with_provider("aws", "s3.Bucket", "test");
+        let mut r = Resource::with_provider("aws", "s3.Bucket", "test", None);
         r.set_attr(
             "name".to_string(),
             Value::Concrete(ConcreteValue::String(
@@ -515,7 +515,7 @@ mod tests {
 
     #[test]
     fn ignores_non_aws_provider() {
-        let mut r = Resource::with_provider("awscc", "route53.RecordSet", "test");
+        let mut r = Resource::with_provider("awscc", "route53.RecordSet", "test", None);
         r.set_attr(
             "name".to_string(),
             Value::Concrete(ConcreteValue::String("foo.example.com.".to_string())),

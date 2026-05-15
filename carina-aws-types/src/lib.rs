@@ -1334,29 +1334,18 @@ fn iam_policy_effect() -> AttributeType {
     }
 }
 
-/// IAM Policy Document Version enum type
-/// Only allows "2012-10-17" or "2008-10-17"
+/// IAM Policy Document Version enum type. Allows `2012-10-17` / `2008-10-17`
+/// (AWS canonical) with snake_case DSL aliases `2012_10_17` / `2008_10_17`,
+/// so users can write `version = 2012_10_17` as a bare identifier —
+/// matching the bare-identifier convention `effect = allow` uses in the
+/// same `.crn` block. The numeric-tail bare form is parseable thanks to
+/// `carina-rs/carina#3051`'s `namespaced_id` grammar extension.
 fn iam_policy_version() -> AttributeType {
-    AttributeType::Custom {
-        semantic_name: Some("IamPolicyVersion".to_string()),
-        pattern: Some("^(2012-10-17|2008-10-17)$".to_string()),
-        length: None,
-        base: Box::new(AttributeType::String),
-        validate: legacy_validator(|value| {
-            if let Value::Concrete(ConcreteValue::String(s)) = value {
-                match s.as_str() {
-                    "2012-10-17" | "2008-10-17" => Ok(()),
-                    _ => Err(format!(
-                        "Invalid IAM policy version: \"{}\". Must be \"2012-10-17\" or \"2008-10-17\"",
-                        s
-                    )),
-                }
-            } else {
-                Err(format!("Expected string, got {:?}", value))
-            }
-        }),
+    AttributeType::StringEnum {
+        name: "IamPolicyVersion".to_string(),
+        values: vec!["2012-10-17".to_string(), "2008-10-17".to_string()],
         namespace: None,
-        to_dsl: None,
+        dsl_aliases: dsl_aliases_for(&["2012-10-17", "2008-10-17"]),
     }
 }
 
@@ -2677,7 +2666,7 @@ mod tests {
             vec![
                 (
                     "version".to_string(),
-                    Value::Concrete(ConcreteValue::String("2012-10-17".to_string())),
+                    Value::Concrete(ConcreteValue::EnumIdentifier("2012_10_17".to_string())),
                 ),
                 (
                     "statement".to_string(),
@@ -2718,7 +2707,7 @@ mod tests {
         let doc = Value::Concrete(ConcreteValue::Map(
             vec![(
                 "version".to_string(),
-                Value::Concrete(ConcreteValue::String("2020-01-01".to_string())),
+                Value::Concrete(ConcreteValue::EnumIdentifier("2020_01_01".to_string())),
             )]
             .into_iter()
             .collect(),
@@ -2755,7 +2744,7 @@ mod tests {
             vec![
                 (
                     "version".to_string(),
-                    Value::Concrete(ConcreteValue::String("2012-10-17".to_string())),
+                    Value::Concrete(ConcreteValue::EnumIdentifier("2012_10_17".to_string())),
                 ),
                 (
                     "statement".to_string(),
@@ -2797,7 +2786,7 @@ mod tests {
             vec![
                 (
                     "version".to_string(),
-                    Value::Concrete(ConcreteValue::String("2012-10-17".to_string())),
+                    Value::Concrete(ConcreteValue::EnumIdentifier("2012_10_17".to_string())),
                 ),
                 (
                     "statement".to_string(),
@@ -2854,7 +2843,7 @@ mod tests {
             vec![
                 (
                     "version".to_string(),
-                    Value::Concrete(ConcreteValue::String("2012-10-17".to_string())),
+                    Value::Concrete(ConcreteValue::EnumIdentifier("2012_10_17".to_string())),
                 ),
                 (
                     "statement".to_string(),
@@ -3269,6 +3258,33 @@ mod tests {
                     vec![
                         ("Allow".to_string(), "allow".to_string()),
                         ("Deny".to_string(), "deny".to_string()),
+                    ]
+                );
+            }
+            other => panic!("expected StringEnum, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn iam_policy_version_is_string_enum() {
+        let version = super::iam_policy_version();
+        match version {
+            AttributeType::StringEnum {
+                name,
+                values,
+                dsl_aliases,
+                ..
+            } => {
+                assert_eq!(name, "IamPolicyVersion");
+                assert_eq!(
+                    values,
+                    vec!["2012-10-17".to_string(), "2008-10-17".to_string()]
+                );
+                assert_eq!(
+                    dsl_aliases,
+                    vec![
+                        ("2012-10-17".to_string(), "2012_10_17".to_string()),
+                        ("2008-10-17".to_string(), "2008_10_17".to_string()),
                     ]
                 );
             }

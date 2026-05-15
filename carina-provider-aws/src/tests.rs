@@ -1120,17 +1120,23 @@ fn test_extract_iam_role_attributes() {
         attributes.get("max_session_duration"),
         Some(&Value::Concrete(ConcreteValue::Int(7200)))
     );
-    // Verify that the assume_role_policy_document is converted to a Map with snake_case keys
+    // Verify that the assume_role_policy_document is converted to a Map
+    // with snake_case keys. `version` lands as `EnumIdentifier` carrying
+    // the underscore DSL alias (`2012_10_17`); the read-side helper maps
+    // AWS's canonical `"2012-10-17"` to the alias for plan-verify parity.
     let policy_doc = attributes
         .get("assume_role_policy_document")
         .expect("assume_role_policy_document should be present");
     if let Value::Concrete(ConcreteValue::Map(map)) = policy_doc {
         assert!(map.contains_key("version"), "should have 'version' key");
         assert!(map.contains_key("statement"), "should have 'statement' key");
-        if let Some(Value::Concrete(ConcreteValue::String(v))) = map.get("version") {
-            assert_eq!(v, "2012-10-17");
+        if let Some(Value::Concrete(ConcreteValue::EnumIdentifier(v))) = map.get("version") {
+            assert_eq!(v, "2012_10_17");
         } else {
-            panic!("Expected version to be String");
+            panic!(
+                "Expected version to be EnumIdentifier, got {:?}",
+                map.get("version")
+            );
         }
     } else {
         panic!("Expected Map, got {:?}", policy_doc);

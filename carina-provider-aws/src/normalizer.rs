@@ -257,7 +257,7 @@ mod tests {
     // (e.g. `"aws.s3.BucketVersioning.VersioningStatus.enabled"`).
     #[test]
     fn test_resolve_enum_identifiers_namespaced_value() {
-        let mut resource = Resource::with_provider("aws", "s3.BucketVersioning", "test");
+        let mut resource = Resource::with_provider("aws", "s3.BucketVersioning", "test", None);
         resource.set_attr(
             "status".to_string(),
             Value::Concrete(ConcreteValue::String(
@@ -276,7 +276,7 @@ mod tests {
 
     #[test]
     fn test_resolve_enum_identifiers_bare_ident() {
-        let mut resource = Resource::with_provider("aws", "s3.BucketVersioning", "test");
+        let mut resource = Resource::with_provider("aws", "s3.BucketVersioning", "test", None);
         resource.set_attr(
             "status".to_string(),
             Value::Concrete(ConcreteValue::String("Enabled".to_string())),
@@ -293,7 +293,8 @@ mod tests {
 
     #[test]
     fn test_resolve_enum_identifiers_typename_value() {
-        let mut resource = Resource::with_provider("aws", "s3.BucketOwnershipControls", "test");
+        let mut resource =
+            Resource::with_provider("aws", "s3.BucketOwnershipControls", "test", None);
         resource.set_attr(
             "object_ownership".to_string(),
             Value::Concrete(ConcreteValue::String(
@@ -312,7 +313,7 @@ mod tests {
 
     #[test]
     fn test_resolve_enum_identifiers_plain_string() {
-        let mut resource = Resource::with_provider("aws", "s3.BucketVersioning", "test");
+        let mut resource = Resource::with_provider("aws", "s3.BucketVersioning", "test", None);
         resource.set_attr(
             "status".to_string(),
             Value::Concrete(ConcreteValue::String("Enabled".to_string())),
@@ -329,7 +330,7 @@ mod tests {
 
     #[test]
     fn test_resolve_enum_identifiers_skips_non_aws() {
-        let mut resource = Resource::with_provider("awscc", "s3.BucketVersioning", "test");
+        let mut resource = Resource::with_provider("awscc", "s3.BucketVersioning", "test", None);
         resource.set_attr(
             "status".to_string(),
             Value::Concrete(ConcreteValue::String("Enabled".to_string())),
@@ -352,7 +353,8 @@ mod tests {
         // the API form, so `"-1"` round-trips to itself (it's already
         // API-canonical; pass-1 only namespaces it, pass-2 strips the
         // namespace and canonicalizes via api_for).
-        let mut resource = Resource::with_provider("aws", "ec2.SecurityGroupIngress", "test-rule");
+        let mut resource =
+            Resource::with_provider("aws", "ec2.SecurityGroupIngress", "test-rule", None);
         resource.set_attr(
             "ip_protocol".to_string(),
             Value::Concrete(ConcreteValue::String("-1".to_string())),
@@ -456,7 +458,7 @@ mod tests {
         // canonicalized to AWS API spelling `Enabled` before reaching
         // the provider's SDK::from() call. Without this, the SDK wraps
         // the unknown value and S3 returns MalformedXML.
-        let mut resource = Resource::with_provider("aws", "s3.BucketVersioning", "test");
+        let mut resource = Resource::with_provider("aws", "s3.BucketVersioning", "test", None);
         resource.set_attr(
             "status".to_string(),
             Value::Concrete(ConcreteValue::String(
@@ -479,7 +481,7 @@ mod tests {
         // in BucketLogging) must be canonicalized through the recursion,
         // not just the top-level attribute.
         use indexmap::IndexMap;
-        let mut resource = Resource::with_provider("aws", "s3.BucketLogging", "test");
+        let mut resource = Resource::with_provider("aws", "s3.BucketLogging", "test", None);
         let mut pp = IndexMap::new();
         pp.insert(
             "partition_date_source".to_string(),
@@ -522,7 +524,8 @@ mod tests {
         // schema-typed as a CloudFront-namespaced StringEnum, so the normalizer
         // descends into the struct and rewrites via `DslMap::api_for`.
         use indexmap::IndexMap;
-        let mut resource = Resource::with_provider("aws", "route53.RecordSet", "test-cf-alias");
+        let mut resource =
+            Resource::with_provider("aws", "route53.RecordSet", "test-cf-alias", None);
         let mut alias_target = IndexMap::new();
         alias_target.insert(
             "dns_name".to_string(),
@@ -564,7 +567,7 @@ mod tests {
     fn test_resolve_enum_identifiers_cloudfront_hosted_zone_id_input_shapes() {
         use indexmap::IndexMap;
         let make_resource = |hzid: &str| {
-            let mut resource = Resource::with_provider("aws", "route53.RecordSet", "test");
+            let mut resource = Resource::with_provider("aws", "route53.RecordSet", "test", None);
             let mut at = IndexMap::new();
             at.insert(
                 "dns_name".to_string(),
@@ -636,7 +639,8 @@ mod tests {
         // Negative: top-level `RecordSet.hosted_zone_id` is the user's
         // own Route 53 zone (plain String in the schema) — a literal
         // hosted-zone ID like `Z1XYZABC123` must NOT be rewritten.
-        let mut resource = Resource::with_provider("aws", "route53.RecordSet", "test-toplevel");
+        let mut resource =
+            Resource::with_provider("aws", "route53.RecordSet", "test-toplevel", None);
         resource.set_attr(
             "hosted_zone_id".to_string(),
             Value::Concrete(ConcreteValue::String("Z1XYZABC123".to_string())),
@@ -653,7 +657,7 @@ mod tests {
 
     #[test]
     fn test_resolve_enum_identifiers_ec2_vpc_instance_tenancy() {
-        let mut resource = Resource::with_provider("aws", "ec2.Vpc", "test-vpc");
+        let mut resource = Resource::with_provider("aws", "ec2.Vpc", "test-vpc", None);
         resource.set_attr(
             "instance_tenancy".to_string(),
             Value::Concrete(ConcreteValue::String(
@@ -672,7 +676,8 @@ mod tests {
 
     #[test]
     fn test_resolve_enum_identifiers_ec2_security_group_ingress_protocol() {
-        let mut resource = Resource::with_provider("aws", "ec2.SecurityGroupIngress", "test-rule");
+        let mut resource =
+            Resource::with_provider("aws", "ec2.SecurityGroupIngress", "test-rule", None);
         resource.set_attr(
             "ip_protocol".to_string(),
             Value::Concrete(ConcreteValue::String("IpProtocol.tcp".to_string())),
@@ -792,7 +797,7 @@ mod tests {
         // .resource_record.name`), the AWS API returns the FQDN with a
         // trailing dot. AwsNormalizer::normalize_desired must strip it so
         // the diff against the dot-stripped state row is stable.
-        let mut resource = Resource::with_provider("aws", "route53.RecordSet", "test-rec");
+        let mut resource = Resource::with_provider("aws", "route53.RecordSet", "test-rec", None);
         resource.set_attr(
             "name".to_string(),
             Value::Concrete(ConcreteValue::String("_abc.example.com.".to_string())),
