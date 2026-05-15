@@ -16,6 +16,7 @@ pub struct AwsNormalizer;
 impl ProviderNormalizer for AwsNormalizer {
     fn normalize_desired(&self, resources: &mut [Resource]) {
         resolve_enum_identifiers(resources);
+        crate::services::route53::record_set::normalize_record_set_dns_names(resources);
     }
 
     fn merge_default_tags(
@@ -642,6 +643,28 @@ mod tests {
             attributes.get("type"),
             Some(&Value::Concrete(ConcreteValue::String(
                 "aws.ec2.VpnGateway.Type.ipsec_1".to_string()
+            )))
+        );
+    }
+
+    #[test]
+    fn test_aws_normalizer_strips_record_set_trailing_dot() {
+        // Regression for aws#300: when `route53.RecordSet.name` is fed by
+        // another resource's read (e.g. `cert.domain_validation_options[0]
+        // .resource_record.name`), the AWS API returns the FQDN with a
+        // trailing dot. AwsNormalizer::normalize_desired must strip it so
+        // the diff against the dot-stripped state row is stable.
+        let mut resource = Resource::with_provider("aws", "route53.RecordSet", "test-rec");
+        resource.set_attr(
+            "name".to_string(),
+            Value::Concrete(ConcreteValue::String("_abc.example.com.".to_string())),
+        );
+        let mut resources = vec![resource];
+        AwsNormalizer.normalize_desired(&mut resources);
+        assert_eq!(
+            resources[0].get_attr("name"),
+            Some(&Value::Concrete(ConcreteValue::String(
+                "_abc.example.com".to_string()
             )))
         );
     }
