@@ -283,7 +283,7 @@ mod tests {
         use std::collections::HashMap;
 
         // from-state has two attrs; patch adds one, replaces one, removes one.
-        let id = ResourceId::with_provider("aws", "ec2.Vpc", "test");
+        let id = ResourceId::with_provider("aws", "ec2.Vpc", "test", None);
         let mut from_attrs: HashMap<String, Value> = HashMap::new();
         from_attrs.insert(
             "cidr_block".into(),

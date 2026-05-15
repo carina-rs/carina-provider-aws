@@ -17,7 +17,7 @@ aws.sqs.Queue {
   sqs_managed_sse_enabled             = true
 
   policy = {
-    version = '2012-10-17'
+    version = 2012_10_17
     statement = [
       {
         sid    = 'AllowSelf'

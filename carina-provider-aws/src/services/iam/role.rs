@@ -538,16 +538,19 @@ fn scalar_to_json(value: &Value) -> serde_json::Value {
         Value::Concrete(ConcreteValue::Int(n)) => serde_json::Value::Number((*n).into()),
         Value::Concrete(ConcreteValue::Float(f)) => serde_json::json!(*f),
         Value::Concrete(ConcreteValue::Bool(b)) => serde_json::Value::Bool(*b),
-        // `effect` lands here as `EnumIdentifier("allow"|"deny")` after
-        // the read-side canonicalization. AWS's wire form is the
-        // PascalCase canonical (`Allow` / `Deny`), so map the snake_case
-        // alias back. Trailing-segment strip handles any namespaced
-        // form too (`aws.iam.PolicyStatement.Effect.allow` → `allow`).
+        // `effect` and `version` land here as `EnumIdentifier` after the
+        // read-side canonicalization (e.g. `EnumIdentifier("allow")`,
+        // `EnumIdentifier("2012_10_17")`). AWS's wire form uses the
+        // PascalCase / hyphenated canonical, so map the DSL snake/underscore
+        // alias back. Trailing-segment strip handles any namespaced form
+        // (`aws.iam.PolicyStatement.Effect.allow` → `allow`).
         Value::Concrete(ConcreteValue::EnumIdentifier(id)) => {
             let trailing = id.rsplit('.').next().unwrap_or(id.as_str());
             let canonical = match trailing {
                 "allow" => "Allow",
                 "deny" => "Deny",
+                "2012_10_17" => "2012-10-17",
+                "2008_10_17" => "2008-10-17",
                 other => other,
             };
             serde_json::Value::String(canonical.to_string())
@@ -581,16 +584,21 @@ pub(crate) fn json_to_policy_doc(json: &serde_json::Value) -> Value {
             continue;
         }
         let snake_key = lookup_snake(POLICY_TOP_FIELDS, k).unwrap_or(k.as_str());
-        let value = if snake_key == "statement" {
-            match v {
+        let value = match snake_key {
+            "statement" => match v {
                 serde_json::Value::Array(items) => Value::Concrete(ConcreteValue::List(
                     items.iter().map(json_to_policy_statement).collect(),
                 )),
                 serde_json::Value::Object(_) => json_to_policy_statement(v),
                 _ => json_scalar_to_value(v),
-            }
-        } else {
-            json_scalar_or_passthrough_to_value(v)
+            },
+            // `version` is a StringEnum with `dsl_aliases: [("2012-10-17",
+            // "2012_10_17"), ("2008-10-17", "2008_10_17")]`. AWS returns the
+            // canonical hyphenated form ("2012-10-17"); the DSL surface is the
+            // underscore alias ("2012_10_17"). Emit `EnumIdentifier` directly
+            // with the DSL form so post-apply plan-verify compares equal.
+            "version" => json_version_to_enum_identifier(v),
+            _ => json_scalar_or_passthrough_to_value(v),
         };
         map.insert(snake_key.to_string(), value);
     }
@@ -642,6 +650,22 @@ fn json_effect_to_enum_identifier(v: &serde_json::Value) -> Value {
     let alias = match s {
         "Allow" => "allow",
         "Deny" => "deny",
+        _ => s,
+    };
+    Value::Concrete(ConcreteValue::EnumIdentifier(alias.to_string()))
+}
+
+/// AWS returns `Version: "2012-10-17"`; the DSL StringEnum surface uses
+/// the underscore alias (`2012_10_17` / `2008_10_17`). Emit
+/// `EnumIdentifier` carrying the alias so the read state matches what
+/// the DSL produces.
+fn json_version_to_enum_identifier(v: &serde_json::Value) -> Value {
+    let Some(s) = v.as_str() else {
+        return json_scalar_to_value(v);
+    };
+    let alias = match s {
+        "2012-10-17" => "2012_10_17",
+        "2008-10-17" => "2008_10_17",
         _ => s,
     };
     Value::Concrete(ConcreteValue::EnumIdentifier(alias.to_string()))
@@ -783,7 +807,7 @@ mod tests {
         let mut policy = IndexMap::new();
         policy.insert(
             "version".to_string(),
-            Value::Concrete(ConcreteValue::String("2012-10-17".to_string())),
+            Value::Concrete(ConcreteValue::EnumIdentifier("2012_10_17".to_string())),
         );
         let mut stmt = IndexMap::new();
         // `effect` is a StringEnum; the canonical post-read shape is
@@ -895,7 +919,7 @@ mod tests {
         let mut doc = IndexMap::new();
         doc.insert(
             "version".to_string(),
-            Value::Concrete(ConcreteValue::String("2012-10-17".to_string())),
+            Value::Concrete(ConcreteValue::EnumIdentifier("2012_10_17".to_string())),
         );
         doc.insert(
             "statement".to_string(),
@@ -1026,7 +1050,7 @@ mod tests {
         let mut doc = IndexMap::new();
         doc.insert(
             "version".to_string(),
-            Value::Concrete(ConcreteValue::String("2012-10-17".to_string())),
+            Value::Concrete(ConcreteValue::EnumIdentifier("2012_10_17".to_string())),
         );
         doc.insert(
             "id".to_string(),
@@ -1139,7 +1163,7 @@ mod tests {
         let mut doc = IndexMap::new();
         doc.insert(
             "version".to_string(),
-            Value::Concrete(ConcreteValue::String("2012-10-17".to_string())),
+            Value::Concrete(ConcreteValue::EnumIdentifier("2012_10_17".to_string())),
         );
         doc.insert(
             "statement".to_string(),
@@ -1194,7 +1218,7 @@ mod tests {
         let mut doc = IndexMap::new();
         doc.insert(
             "version".to_string(),
-            Value::Concrete(ConcreteValue::String("2012-10-17".to_string())),
+            Value::Concrete(ConcreteValue::EnumIdentifier("2012_10_17".to_string())),
         );
         doc.insert(
             "statement".to_string(),

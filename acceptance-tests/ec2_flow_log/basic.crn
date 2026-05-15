@@ -28,7 +28,7 @@ let flow_log_role = aws.iam.Role {
   role_name = 'acceptance-test-flow-log-role'
 
   assume_role_policy_document = {
-    version = '2012-10-17'
+    version = 2012_10_17
     statement {
       effect = allow
 
