@@ -374,3 +374,160 @@ impl AwsProvider {
         .await
     }
 }
+
+/// Normalize desired-side `route53.RecordSet` attributes so a trailing
+/// dot fed in from another resource's `read` does not produce a spurious
+/// `forces replacement` diff against state.
+///
+/// The read side (`extract_attributes`) already strips trailing dots from
+/// `name` and `alias_target.dns_name`. Without symmetric normalization on
+/// the desired side, values like `cert.domain_validation_options[0]
+/// .resource_record.name` (which the ACM read returns verbatim as
+/// `"_abc.example.com."`) compare unequal against the dot-stripped state
+/// row, surfacing a replace diff that AWS would not actually require —
+/// the apply would just re-UPSERT the same DNS name.
+///
+/// See aws#300, follow-up to aws#117.
+pub(crate) fn normalize_record_set_dns_names(resources: &mut [Resource]) {
+    for resource in resources.iter_mut() {
+        if resource.id.provider != "aws" || resource.id.resource_type != "route53.RecordSet" {
+            continue;
+        }
+
+        if let Some(Value::Concrete(ConcreteValue::String(name))) = resource.get_attr("name")
+            && let Some(stripped) = name.strip_suffix('.')
+        {
+            resource.set_attr(
+                "name".to_string(),
+                Value::Concrete(ConcreteValue::String(stripped.to_string())),
+            );
+        }
+
+        if let Some(Value::Concrete(ConcreteValue::Map(alias))) = resource.get_attr("alias_target")
+            && let Some(Value::Concrete(ConcreteValue::String(dns_name))) = alias.get("dns_name")
+            && let Some(stripped) = dns_name.strip_suffix('.')
+        {
+            let mut new_alias = alias.clone();
+            new_alias.insert(
+                "dns_name".to_string(),
+                Value::Concrete(ConcreteValue::String(stripped.to_string())),
+            );
+            resource.set_attr(
+                "alias_target".to_string(),
+                Value::Concrete(ConcreteValue::Map(new_alias)),
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use carina_core::resource::Resource;
+
+    fn record_set(name: &str) -> Resource {
+        let mut r = Resource::with_provider("aws", "route53.RecordSet", "test-rec");
+        r.set_attr(
+            "name".to_string(),
+            Value::Concrete(ConcreteValue::String(name.to_string())),
+        );
+        r
+    }
+
+    #[test]
+    fn strips_trailing_dot_on_name() {
+        let mut resources = vec![record_set("_abc.example.com.")];
+        normalize_record_set_dns_names(&mut resources);
+        assert_eq!(
+            resources[0].get_attr("name"),
+            Some(&Value::Concrete(ConcreteValue::String(
+                "_abc.example.com".to_string()
+            )))
+        );
+    }
+
+    #[test]
+    fn leaves_name_without_trailing_dot_untouched() {
+        let mut resources = vec![record_set("_abc.example.com")];
+        normalize_record_set_dns_names(&mut resources);
+        assert_eq!(
+            resources[0].get_attr("name"),
+            Some(&Value::Concrete(ConcreteValue::String(
+                "_abc.example.com".to_string()
+            )))
+        );
+    }
+
+    #[test]
+    fn strips_trailing_dot_on_alias_target_dns_name() {
+        let mut r = record_set("alias.example.com");
+        let mut alias: IndexMap<String, Value> = IndexMap::new();
+        alias.insert(
+            "dns_name".to_string(),
+            Value::Concrete(ConcreteValue::String(
+                "dualstack.elb.amazonaws.com.".to_string(),
+            )),
+        );
+        alias.insert(
+            "hosted_zone_id".to_string(),
+            Value::Concrete(ConcreteValue::String("Z35SXDOTRQ7X7K".to_string())),
+        );
+        alias.insert(
+            "evaluate_target_health".to_string(),
+            Value::Concrete(ConcreteValue::Bool(false)),
+        );
+        r.set_attr(
+            "alias_target".to_string(),
+            Value::Concrete(ConcreteValue::Map(alias)),
+        );
+        let mut resources = vec![r];
+        normalize_record_set_dns_names(&mut resources);
+        let Some(Value::Concrete(ConcreteValue::Map(out))) = resources[0].get_attr("alias_target")
+        else {
+            panic!("expected alias_target map");
+        };
+        assert_eq!(
+            out.get("dns_name"),
+            Some(&Value::Concrete(ConcreteValue::String(
+                "dualstack.elb.amazonaws.com".to_string()
+            )))
+        );
+    }
+
+    #[test]
+    fn ignores_non_route53_record_set_resources() {
+        let mut r = Resource::with_provider("aws", "s3.Bucket", "test");
+        r.set_attr(
+            "name".to_string(),
+            Value::Concrete(ConcreteValue::String(
+                "bucket.with.trailing.dot.".to_string(),
+            )),
+        );
+        let mut resources = vec![r];
+        normalize_record_set_dns_names(&mut resources);
+        assert_eq!(
+            resources[0].get_attr("name"),
+            Some(&Value::Concrete(ConcreteValue::String(
+                "bucket.with.trailing.dot.".to_string()
+            )))
+        );
+    }
+
+    #[test]
+    fn ignores_non_aws_provider() {
+        let mut r = Resource::with_provider("awscc", "route53.RecordSet", "test");
+        r.set_attr(
+            "name".to_string(),
+            Value::Concrete(ConcreteValue::String("foo.example.com.".to_string())),
+        );
+        let mut resources = vec![r];
+        normalize_record_set_dns_names(&mut resources);
+        // unchanged: awscc has its own normalizer
+        assert_eq!(
+            resources[0].get_attr("name"),
+            Some(&Value::Concrete(ConcreteValue::String(
+                "foo.example.com.".to_string()
+            )))
+        );
+    }
+}
