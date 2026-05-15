@@ -16,11 +16,11 @@ let queue = aws.sqs.Queue {
   queue_name = 'carina-acc-test-aws-s3-bucket-notification-queue'
 
   policy = {
-    version = 2012_10_17
+    version = aws.iam.PolicyDocument.Version.2012_10_17
     statement = [
       {
         sid = 'AllowS3SendMessage'
-        effect = allow
+        effect = aws.iam.PolicyDocument.Effect.allow
         principal = {
           service = ['s3.amazonaws.com']
         }

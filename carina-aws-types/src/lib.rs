@@ -1325,11 +1325,16 @@ fn string_or_principal_struct() -> AttributeType {
 /// their snake_case DSL aliases `allow` / `deny`, so users can write
 /// `effect = allow` as a bare identifier — matching the bare-identifier
 /// convention used by every other enum field in the same `.crn` file.
+/// The namespace also makes the fully-qualified form
+/// `aws.iam.PolicyDocument.Effect.allow` parse and resolve: the
+/// resolver's canonical shape is `<namespace>.<type_name>.<value>`, so
+/// `type_name` is the trailing `Effect` segment and `namespace` is
+/// `aws.iam.PolicyDocument`.
 fn iam_policy_effect() -> AttributeType {
     AttributeType::StringEnum {
-        name: "IamPolicyEffect".to_string(),
+        name: "Effect".to_string(),
         values: vec!["Allow".to_string(), "Deny".to_string()],
-        namespace: None,
+        namespace: Some("aws.iam.PolicyDocument".to_string()),
         dsl_aliases: dsl_aliases_for(&["Allow", "Deny"]),
     }
 }
@@ -1338,13 +1343,17 @@ fn iam_policy_effect() -> AttributeType {
 /// (AWS canonical) with snake_case DSL aliases `2012_10_17` / `2008_10_17`,
 /// so users can write `version = 2012_10_17` as a bare identifier —
 /// matching the bare-identifier convention `effect = allow` uses in the
-/// same `.crn` block. The numeric-tail bare form is parseable thanks to
-/// `carina-rs/carina#3051`'s `namespaced_id` grammar extension.
+/// same `.crn` block. The fully-qualified form
+/// `aws.iam.PolicyDocument.Version.2012_10_17` parses via `namespaced_id` +
+/// the numeric-tail extension from `carina-rs/carina#3051` and resolves
+/// through this namespace: the resolver's canonical shape is
+/// `<namespace>.<type_name>.<value>`, so `type_name` is the trailing
+/// `Version` segment and `namespace` is `aws.iam.PolicyDocument`.
 fn iam_policy_version() -> AttributeType {
     AttributeType::StringEnum {
-        name: "IamPolicyVersion".to_string(),
+        name: "Version".to_string(),
         values: vec!["2012-10-17".to_string(), "2008-10-17".to_string()],
-        namespace: None,
+        namespace: Some("aws.iam.PolicyDocument".to_string()),
         dsl_aliases: dsl_aliases_for(&["2012-10-17", "2008-10-17"]),
     }
 }
@@ -3248,11 +3257,12 @@ mod tests {
             AttributeType::StringEnum {
                 name,
                 values,
+                namespace,
                 dsl_aliases,
-                ..
             } => {
-                assert_eq!(name, "IamPolicyEffect");
+                assert_eq!(name, "Effect");
                 assert_eq!(values, vec!["Allow".to_string(), "Deny".to_string()]);
+                assert_eq!(namespace, Some("aws.iam.PolicyDocument".to_string()));
                 assert_eq!(
                     dsl_aliases,
                     vec![
@@ -3272,14 +3282,15 @@ mod tests {
             AttributeType::StringEnum {
                 name,
                 values,
+                namespace,
                 dsl_aliases,
-                ..
             } => {
-                assert_eq!(name, "IamPolicyVersion");
+                assert_eq!(name, "Version");
                 assert_eq!(
                     values,
                     vec!["2012-10-17".to_string(), "2008-10-17".to_string()]
                 );
+                assert_eq!(namespace, Some("aws.iam.PolicyDocument".to_string()));
                 assert_eq!(
                     dsl_aliases,
                     vec![

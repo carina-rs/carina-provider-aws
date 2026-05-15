@@ -30,9 +30,9 @@ let role = aws.iam.Role {
   role_name = 'carina-acc-test-aws-s3-repl-role-v1'
 
   assume_role_policy_document = {
-    version = 2012_10_17
+    version = aws.iam.PolicyDocument.Version.2012_10_17
     statement {
-      effect = allow
+      effect = aws.iam.PolicyDocument.Effect.allow
       principal = {
         service = 's3.amazonaws.com'
       }

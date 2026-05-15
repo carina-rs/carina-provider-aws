@@ -28,9 +28,9 @@ let flow_log_role = aws.iam.Role {
   role_name = 'acceptance-test-flow-log-role'
 
   assume_role_policy_document = {
-    version = 2012_10_17
+    version = aws.iam.PolicyDocument.Version.2012_10_17
     statement {
-      effect = allow
+      effect = aws.iam.PolicyDocument.Effect.allow
 
       principal = {
         service = 'vpc-flow-logs.amazonaws.com'
