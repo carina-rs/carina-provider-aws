@@ -99,6 +99,139 @@ fn parse_validation_method(input: &str) -> Option<ValidationMethod> {
     }
 }
 
+/// Map a `DescribeCertificate` `CertificateDetail` to Carina resource
+/// attributes. Pure (no AWS calls) so the attribute-key contract is
+/// unit-testable offline — tags are fetched separately by the caller.
+///
+/// Attribute keys MUST match the codegen schema
+/// (`schemas/generated/acm/certificate.rs`). In particular the ARN is
+/// published under `certificate_arn` (the schema attribute / DSL
+/// reference), not `arn`: a `wait cert { until = cert.status ==
+/// issued }` polls this read, succeeds on `status`, and a downstream
+/// `cert_issued.certificate_arn` resolves against the captured state —
+/// emitting `arn` instead silently broke that chain (carina#3061).
+fn certificate_detail_to_attributes(
+    cert: &aws_sdk_acm::types::CertificateDetail,
+) -> HashMap<String, Value> {
+    let mut attributes: HashMap<String, Value> = HashMap::new();
+    if let Some(v) = cert.domain_name() {
+        attributes.insert(
+            "domain_name".to_string(),
+            Value::Concrete(ConcreteValue::String(v.to_string())),
+        );
+    }
+    if let Some(v) = cert.certificate_arn() {
+        attributes.insert(
+            "certificate_arn".to_string(),
+            Value::Concrete(ConcreteValue::String(v.to_string())),
+        );
+    }
+    if let Some(v) = cert.status() {
+        attributes.insert(
+            "status".to_string(),
+            Value::Concrete(ConcreteValue::String(v.as_str().to_string())),
+        );
+    }
+    if let Some(v) = cert.r#type() {
+        attributes.insert(
+            "type".to_string(),
+            Value::Concrete(ConcreteValue::String(v.as_str().to_string())),
+        );
+    }
+    if let Some(v) = cert.key_algorithm() {
+        attributes.insert(
+            "key_algorithm".to_string(),
+            Value::Concrete(ConcreteValue::String(v.as_str().to_string())),
+        );
+    }
+    if let Some(v) = cert.renewal_eligibility() {
+        attributes.insert(
+            "renewal_eligibility".to_string(),
+            Value::Concrete(ConcreteValue::String(v.as_str().to_string())),
+        );
+    }
+    let sans = cert.subject_alternative_names();
+    if !sans.is_empty() {
+        attributes.insert(
+            "subject_alternative_names".to_string(),
+            Value::Concrete(ConcreteValue::List(
+                sans.iter()
+                    .map(|s| Value::Concrete(ConcreteValue::String(s.clone())))
+                    .collect(),
+            )),
+        );
+    }
+    // domain_validation_options carries the DNS records the user
+    // needs to publish to satisfy DNS validation — the wait
+    // construct's primary use case.
+    let dvs = cert.domain_validation_options();
+    if !dvs.is_empty() {
+        // Emit the nested `resource_record: { name, type, value }`
+        // shape that matches the codegen-generated schema (#296).
+        // The DSL chained access is
+        // `cert.domain_validation_options[0].resource_record.value`,
+        // not the older flat `resource_record_value`.
+        let mut list: Vec<Value> = Vec::with_capacity(dvs.len());
+        for dv in dvs {
+            let mut m: IndexMap<String, Value> = IndexMap::new();
+            m.insert(
+                "domain_name".to_string(),
+                Value::Concrete(ConcreteValue::String(dv.domain_name().to_string())),
+            );
+            if let Some(rr) = dv.resource_record() {
+                let mut rr_map: IndexMap<String, Value> = IndexMap::new();
+                rr_map.insert(
+                    "name".to_string(),
+                    Value::Concrete(ConcreteValue::String(rr.name().to_string())),
+                );
+                rr_map.insert(
+                    "type".to_string(),
+                    Value::Concrete(ConcreteValue::String(rr.r#type().as_str().to_string())),
+                );
+                rr_map.insert(
+                    "value".to_string(),
+                    Value::Concrete(ConcreteValue::String(rr.value().to_string())),
+                );
+                m.insert(
+                    "resource_record".to_string(),
+                    Value::Concrete(ConcreteValue::Map(rr_map)),
+                );
+            }
+            if let Some(status) = dv.validation_status() {
+                m.insert(
+                    "validation_status".to_string(),
+                    Value::Concrete(ConcreteValue::String(status.as_str().to_string())),
+                );
+            }
+            if let Some(method) = dv.validation_method() {
+                m.insert(
+                    "validation_method".to_string(),
+                    Value::Concrete(ConcreteValue::String(method.as_str().to_string())),
+                );
+            }
+            list.push(Value::Concrete(ConcreteValue::Map(m)));
+        }
+        attributes.insert(
+            "domain_validation_options".to_string(),
+            Value::Concrete(ConcreteValue::List(list)),
+        );
+    }
+    // The user-supplied validation_method is preserved from the
+    // request side (DescribeCertificate doesn't echo the top-level
+    // request validation method); fall through to the option-level
+    // method if the certificate has at least one validation entry.
+    if !attributes.contains_key("validation_method")
+        && let Some(first_opt) = cert.domain_validation_options().first()
+        && let Some(method) = first_opt.validation_method()
+    {
+        attributes.insert(
+            "validation_method".to_string(),
+            Value::Concrete(ConcreteValue::String(method.as_str().to_string())),
+        );
+    }
+    attributes
+}
+
 impl AwsProvider {
     /// Create an ACM certificate by issuing a `RequestCertificate`
     /// call. The returned state carries the cert's ARN as identifier;
@@ -253,122 +386,7 @@ impl AwsProvider {
             return Ok(State::not_found(id.clone()));
         };
 
-        let mut attributes: HashMap<String, Value> = HashMap::new();
-        if let Some(v) = cert.domain_name() {
-            attributes.insert(
-                "domain_name".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string())),
-            );
-        }
-        if let Some(v) = cert.certificate_arn() {
-            attributes.insert(
-                "arn".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string())),
-            );
-        }
-        if let Some(v) = cert.status() {
-            attributes.insert(
-                "status".to_string(),
-                Value::Concrete(ConcreteValue::String(v.as_str().to_string())),
-            );
-        }
-        if let Some(v) = cert.r#type() {
-            attributes.insert(
-                "type".to_string(),
-                Value::Concrete(ConcreteValue::String(v.as_str().to_string())),
-            );
-        }
-        if let Some(v) = cert.key_algorithm() {
-            attributes.insert(
-                "key_algorithm".to_string(),
-                Value::Concrete(ConcreteValue::String(v.as_str().to_string())),
-            );
-        }
-        if let Some(v) = cert.renewal_eligibility() {
-            attributes.insert(
-                "renewal_eligibility".to_string(),
-                Value::Concrete(ConcreteValue::String(v.as_str().to_string())),
-            );
-        }
-        let sans = cert.subject_alternative_names();
-        if !sans.is_empty() {
-            attributes.insert(
-                "subject_alternative_names".to_string(),
-                Value::Concrete(ConcreteValue::List(
-                    sans.iter()
-                        .map(|s| Value::Concrete(ConcreteValue::String(s.clone())))
-                        .collect(),
-                )),
-            );
-        }
-        // domain_validation_options carries the DNS records the user
-        // needs to publish to satisfy DNS validation — the wait
-        // construct's primary use case.
-        let dvs = cert.domain_validation_options();
-        if !dvs.is_empty() {
-            // Emit the nested `resource_record: { name, type, value }`
-            // shape that matches the codegen-generated schema (#296).
-            // The DSL chained access is
-            // `cert.domain_validation_options[0].resource_record.value`,
-            // not the older flat `resource_record_value`.
-            let mut list: Vec<Value> = Vec::with_capacity(dvs.len());
-            for dv in dvs {
-                let mut m: IndexMap<String, Value> = IndexMap::new();
-                m.insert(
-                    "domain_name".to_string(),
-                    Value::Concrete(ConcreteValue::String(dv.domain_name().to_string())),
-                );
-                if let Some(rr) = dv.resource_record() {
-                    let mut rr_map: IndexMap<String, Value> = IndexMap::new();
-                    rr_map.insert(
-                        "name".to_string(),
-                        Value::Concrete(ConcreteValue::String(rr.name().to_string())),
-                    );
-                    rr_map.insert(
-                        "type".to_string(),
-                        Value::Concrete(ConcreteValue::String(rr.r#type().as_str().to_string())),
-                    );
-                    rr_map.insert(
-                        "value".to_string(),
-                        Value::Concrete(ConcreteValue::String(rr.value().to_string())),
-                    );
-                    m.insert(
-                        "resource_record".to_string(),
-                        Value::Concrete(ConcreteValue::Map(rr_map)),
-                    );
-                }
-                if let Some(status) = dv.validation_status() {
-                    m.insert(
-                        "validation_status".to_string(),
-                        Value::Concrete(ConcreteValue::String(status.as_str().to_string())),
-                    );
-                }
-                if let Some(method) = dv.validation_method() {
-                    m.insert(
-                        "validation_method".to_string(),
-                        Value::Concrete(ConcreteValue::String(method.as_str().to_string())),
-                    );
-                }
-                list.push(Value::Concrete(ConcreteValue::Map(m)));
-            }
-            attributes.insert(
-                "domain_validation_options".to_string(),
-                Value::Concrete(ConcreteValue::List(list)),
-            );
-        }
-        // The user-supplied validation_method is preserved from the
-        // request side (DescribeCertificate doesn't echo the top-level
-        // request validation method); fall through to the option-level
-        // method if the certificate has at least one validation entry.
-        if !attributes.contains_key("validation_method")
-            && let Some(first_opt) = cert.domain_validation_options().first()
-            && let Some(method) = first_opt.validation_method()
-        {
-            attributes.insert(
-                "validation_method".to_string(),
-                Value::Concrete(ConcreteValue::String(method.as_str().to_string())),
-            );
-        }
+        let mut attributes = certificate_detail_to_attributes(cert);
 
         // Tags are fetched separately via `ListTagsForCertificate`.
         let tag_output = self
@@ -620,6 +638,51 @@ mod tests {
             b = b.domain_validation_options(dv);
         }
         b.build()
+    }
+
+    /// carina#3061: the certificate ARN must be published under the
+    /// schema attribute name `certificate_arn` (see
+    /// `schemas/generated/acm/certificate.rs` —
+    /// `AttributeSchema::new("certificate_arn", ...)`), NOT `arn`.
+    ///
+    /// Pre-fix the read inserted key `"arn"`, which matches no schema
+    /// attribute and no DSL reference. A `wait cert { until =
+    /// cert.status == issued }` would succeed (status IS published) but
+    /// the captured state lacked `certificate_arn`, so a downstream
+    /// `cert_issued.certificate_arn` could never resolve — the
+    /// self-contradicting "add a `wait` block" apply error reported in
+    /// carina-rs/carina#3061.
+    #[test]
+    fn read_publishes_arn_under_certificate_arn_key_not_arn() {
+        let cert = CertificateDetail::builder()
+            .domain_name("registry.example.com")
+            .certificate_arn("arn:aws:acm:us-east-1:111:certificate/abc")
+            .status(aws_sdk_acm::types::CertificateStatus::Issued)
+            .build();
+
+        let attrs = certificate_detail_to_attributes(&cert);
+
+        assert_eq!(
+            attrs.get("certificate_arn"),
+            Some(&Value::Concrete(ConcreteValue::String(
+                "arn:aws:acm:us-east-1:111:certificate/abc".to_string()
+            ))),
+            "ACM read must publish the ARN under `certificate_arn` to \
+             match the schema attribute the DSL references"
+        );
+        assert!(
+            !attrs.contains_key("arn"),
+            "the legacy `arn` key matches no schema attribute and must \
+             not be emitted (carina#3061)"
+        );
+        // status must still be published (the wait predicate relies on
+        // it; this guards against a regression that breaks the wait).
+        assert_eq!(
+            attrs.get("status"),
+            Some(&Value::Concrete(ConcreteValue::String(
+                "ISSUED".to_string()
+            )))
+        );
     }
 
     #[tokio::test]
