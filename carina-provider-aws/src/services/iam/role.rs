@@ -538,12 +538,15 @@ fn scalar_to_json(value: &Value) -> serde_json::Value {
         Value::Concrete(ConcreteValue::Int(n)) => serde_json::Value::Number((*n).into()),
         Value::Concrete(ConcreteValue::Float(f)) => serde_json::json!(*f),
         Value::Concrete(ConcreteValue::Bool(b)) => serde_json::Value::Bool(*b),
-        // `effect` and `version` land here as `EnumIdentifier` after the
-        // read-side canonicalization (e.g. `EnumIdentifier("allow")`,
-        // `EnumIdentifier("2012_10_17")`). AWS's wire form uses the
-        // PascalCase / hyphenated canonical, so map the DSL snake/underscore
-        // alias back. Trailing-segment strip handles any namespaced form
-        // (`aws.iam.PolicyStatement.Effect.allow` → `allow`).
+        // `effect` / `version` are StringEnum struct fields, so the AWS
+        // normalizer's `api_canonicalize_recursive` pass rewrites them to
+        // the AWS wire form (`Allow`, `2012-10-17`) before this serializer
+        // ever runs — they arrive here as an already-canonical `String`.
+        // This arm is the defensive fallback for any `EnumIdentifier` that
+        // somehow reaches the serializer un-canonicalized (e.g. a future
+        // enum field not yet covered by the schema-typed normalizer pass):
+        // strip the namespace and map the DSL alias back so AWS still
+        // accepts it rather than rejecting with `MalformedPolicy`.
         Value::Concrete(ConcreteValue::EnumIdentifier(id)) => {
             let trailing = id.rsplit('.').next().unwrap_or(id.as_str());
             let canonical = match trailing {
@@ -836,6 +839,57 @@ mod tests {
         assert!(resolved.contains("\"Effect\""));
         assert!(resolved.contains("\"Action\""));
         assert!(!resolved.contains("\"version\""));
+    }
+
+    /// aws#315 defensive fallback: the schema-typed AWS normalizer
+    /// (`api_canonicalize_recursive`) is what actually canonicalizes
+    /// `version` / `effect` before this serializer runs — see the
+    /// end-to-end regression in `normalizer.rs`. But if an
+    /// `EnumIdentifier` reaches the serializer un-canonicalized (a future
+    /// enum field not yet covered by the normalizer pass), the
+    /// `scalar_to_json` fallback must still emit the AWS wire form so AWS
+    /// does not reject the PUT with `MalformedPolicy`. Both the namespaced
+    /// and the bare-alias `EnumIdentifier` shapes are covered here.
+    #[test]
+    fn resolve_iam_policy_attr_enum_identifier_fallback_is_aws_canonical() {
+        let mut policy = IndexMap::new();
+        policy.insert(
+            "version".to_string(),
+            Value::Concrete(ConcreteValue::EnumIdentifier(
+                "aws.iam.PolicyDocument.Version.2012_10_17".to_string(),
+            )),
+        );
+        let mut stmt = IndexMap::new();
+        stmt.insert(
+            "effect".to_string(),
+            Value::Concrete(ConcreteValue::EnumIdentifier("allow".to_string())),
+        );
+        stmt.insert(
+            "action".to_string(),
+            Value::Concrete(ConcreteValue::String("s3:GetObject".to_string())),
+        );
+        policy.insert(
+            "statement".to_string(),
+            Value::Concrete(ConcreteValue::List(vec![Value::Concrete(
+                ConcreteValue::Map(stmt),
+            )])),
+        );
+
+        let r = make_resource(Some(Value::Concrete(ConcreteValue::Map(policy))));
+        let resolved = resolve_iam_policy_attr(&r, "policy").expect("map → JSON");
+
+        assert!(
+            resolved.contains(r#""Version":"2012-10-17""#),
+            "version must be AWS-canonical, got: {resolved}"
+        );
+        assert!(
+            resolved.contains(r#""Effect":"Allow""#),
+            "effect must be AWS-canonical, got: {resolved}"
+        );
+        assert!(
+            !resolved.contains("2012_10_17") && !resolved.contains(r#""allow""#),
+            "DSL spelling must not reach AWS, got: {resolved}"
+        );
     }
 
     #[test]
