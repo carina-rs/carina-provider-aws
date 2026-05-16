@@ -1315,6 +1315,8 @@ fn string_or_principal_struct() -> AttributeType {
                 StructField::new("aws", string_or_list_of_strings()).with_provider_name("AWS"),
                 StructField::new("federated", string_or_list_of_strings())
                     .with_provider_name("Federated"),
+                StructField::new("canonical_user", string_or_list_of_strings())
+                    .with_provider_name("CanonicalUser"),
             ],
         },
         AttributeType::String,
