@@ -99,9 +99,13 @@ pub(crate) fn resolve_enum_identifiers(resources: &mut [Resource]) {
 /// Walk `value` against `attr_type` and rewrite every enum spelling to
 /// the AWS API-canonical form via `DslMap::api_for`.
 ///
-/// Input expectation: enum identifiers are already in fully-qualified
-/// DSL form (the output of `resolve_enum_value_recursive`), so the
-/// extraction is `extract_enum_value(s)` — strip the namespace prefix —
+/// Input shapes: enum leaves arrive either as fully-qualified DSL
+/// `String` (the output of `resolve_enum_value_recursive`) or as
+/// `EnumIdentifier` (DSL-source values that Pass-1 leaves untouched,
+/// e.g. nested IAM policy `version` / `effect` after the carina#3055
+/// state-lift). Both carry the same text payload; extraction is
+/// `extract_enum_value_with_values(s, values)` — strip the namespace
+/// prefix, recovering dotted enum values like the legacy `ipsec.1` —
 /// followed by `dsl_map.api_for(trailing)` to translate DSL → API.
 ///
 /// Returns `None` when nothing was rewritten, mirroring the
@@ -110,17 +114,31 @@ pub(crate) fn resolve_enum_identifiers(resources: &mut [Resource]) {
 fn api_canonicalize_recursive(value: &Value, attr_type: &AttributeType) -> Option<Value> {
     // Leaf: StringEnum (with or without namespace). We canonicalize via
     // the alias table regardless of whether the input was namespaced —
-    // `extract_enum_value` handles both shapes.
-    if let Some((_, _, _, dsl_map)) = attr_type.string_enum_parts() {
-        let Value::Concrete(ConcreteValue::String(s)) = value else {
+    // `extract_enum_value_with_values` handles both shapes (including
+    // dotted enum values like the legacy `ipsec.1`).
+    //
+    // Both `String` and `EnumIdentifier` carry the same text payload; the
+    // shape distinction (carina#2986) is irrelevant once we are
+    // rewriting to the AWS wire form. Accepting `EnumIdentifier` here is
+    // the fix for aws#315: after the carina#3055 state-lift, nested
+    // StringEnum struct fields (IAM policy `version` / `effect`) arrive
+    // as `EnumIdentifier`, and a `String`-only guard silently skipped
+    // them, so the DSL spelling reached AWS and was rejected with
+    // `MalformedPolicy`.
+    if let Some((_, values, _, dsl_map)) = attr_type.string_enum_parts() {
+        let (Value::Concrete(ConcreteValue::String(s))
+        | Value::Concrete(ConcreteValue::EnumIdentifier(s))) = value
+        else {
             return None;
         };
-        let dsl_trailing = carina_core::utils::extract_enum_value(s);
+        let valid: Vec<&str> = values.iter().map(String::as_str).collect();
+        let dsl_trailing = carina_core::utils::extract_enum_value_with_values(s, &valid);
         let api = dsl_map.api_for(dsl_trailing);
-        // No-op if the string is already API-canonical AND has no
-        // namespace prefix (i.e. `s == api`). Otherwise rewrite to the
-        // bare API spelling so SDK::from(...) accepts it.
-        if s == &api {
+        // No-op only when the value is already the bare API spelling AND
+        // arrived as a plain `String` (no namespace, no shape rewrite).
+        // An `EnumIdentifier` must still be lowered to `String` so the
+        // schema-blind downstream serializers see a plain string.
+        if matches!(value, Value::Concrete(ConcreteValue::String(_))) && s == &api {
             return None;
         }
         return Some(Value::Concrete(ConcreteValue::String(api)));
@@ -512,6 +530,77 @@ mod tests {
             Some(&Value::Concrete(ConcreteValue::String(
                 "EventTime".to_string()
             )))
+        );
+    }
+
+    /// Root-cause regression for aws#315: the IAM policy document is a
+    /// fully schema-typed `Struct` (`iam_policy_document()`) whose
+    /// `version` and nested `statement[].effect` are `StringEnum` fields.
+    /// After the carina#3055 state-lift these arrive as `EnumIdentifier`,
+    /// not `String`. The Pass-2 leaf guard previously matched only
+    /// `String`, so it silently skipped them and the DSL spelling
+    /// (`aws.iam.PolicyDocument.Version.2012_10_17`, `allow`) flowed
+    /// through to the AWS API, which rejected the PUT with
+    /// `MalformedPolicy`. The fix accepts `EnumIdentifier` at the
+    /// StringEnum leaf and lowers it to the AWS-canonical `String`
+    /// (`"2012-10-17"`, `"Allow"`) — generically, for every nested
+    /// StringEnum struct field, not just IAM policy.
+    #[test]
+    fn test_resolve_enum_identifiers_iam_policy_doc_enum_identifier_nested() {
+        use indexmap::IndexMap;
+        let mut stmt = IndexMap::new();
+        stmt.insert(
+            "effect".to_string(),
+            Value::Concrete(ConcreteValue::EnumIdentifier("allow".to_string())),
+        );
+        stmt.insert(
+            "action".to_string(),
+            Value::Concrete(ConcreteValue::String("sts:AssumeRole".to_string())),
+        );
+        let mut policy = IndexMap::new();
+        policy.insert(
+            "version".to_string(),
+            Value::Concrete(ConcreteValue::EnumIdentifier(
+                "aws.iam.PolicyDocument.Version.2012_10_17".to_string(),
+            )),
+        );
+        policy.insert(
+            "statement".to_string(),
+            Value::Concrete(ConcreteValue::List(vec![Value::Concrete(
+                ConcreteValue::Map(stmt),
+            )])),
+        );
+
+        let mut resource = Resource::with_provider("aws", "iam.Role", "test-role", None);
+        resource.set_attr(
+            "assume_role_policy_document".to_string(),
+            Value::Concrete(ConcreteValue::Map(policy)),
+        );
+        let mut resources = vec![resource];
+        resolve_enum_identifiers(&mut resources);
+
+        let Some(Value::Concrete(ConcreteValue::Map(pd))) =
+            resources[0].get_attr("assume_role_policy_document")
+        else {
+            panic!("expected assume_role_policy_document Map");
+        };
+        assert_eq!(
+            pd.get("version"),
+            Some(&Value::Concrete(ConcreteValue::String(
+                "2012-10-17".to_string()
+            ))),
+            "version must be lowered to AWS-canonical String"
+        );
+        let Some(Value::Concrete(ConcreteValue::List(stmts))) = pd.get("statement") else {
+            panic!("expected statement List");
+        };
+        let Some(Value::Concrete(ConcreteValue::Map(s0))) = stmts.first() else {
+            panic!("expected statement[0] Map");
+        };
+        assert_eq!(
+            s0.get("effect"),
+            Some(&Value::Concrete(ConcreteValue::String("Allow".to_string()))),
+            "effect must be lowered to AWS-canonical String"
         );
     }
 
