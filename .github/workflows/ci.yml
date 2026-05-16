@@ -54,6 +54,15 @@ jobs:
           components: rustfmt
       - run: cargo fmt --check
 
+  carina-pin:
+    name: Check carina-core Pin
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # The script clones carina itself (filtered) to verify the
+      # pinned rev is consistent and >= .carina-core-min-rev.
+      - run: ./scripts/check-carina-pin.sh
+
   wasm-build:
     name: WASM Build
     runs-on: ubuntu-latest
