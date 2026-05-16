@@ -176,17 +176,67 @@ fn api_canonicalize_recursive(value: &Value, attr_type: &AttributeType) -> Optio
             }
             changed.then_some(Value::Concrete(ConcreteValue::List(rewritten)))
         }
-        AttributeType::Map { value: inner, .. } => {
+        AttributeType::Map { key, value: inner } => {
             let Value::Concrete(ConcreteValue::Map(map)) = value else {
                 return None;
             };
-            let mut rewritten = map.clone();
+            // aws#325: when the Map's *key* type is a `StringEnum`
+            // (e.g. the IAM policy `condition`'s `ConditionOperator`),
+            // canonicalize each key to the StringEnum spelling —
+            // symmetric to the value recursion below. Without this a
+            // non-canonical operator key (namespaced / aliased) on the
+            // desired side was never reconciled, while the state side
+            // already lands on the snake spelling via the IAM read
+            // path (`json_to_condition` → `condition_operator_to_snake`,
+            // role.rs) — leaving the two sides out of sync. This key
+            // canon brings the desired side to the same spelling.
+            let canon_of = |k: &str| -> String {
+                match &key.string_enum_parts() {
+                    Some((_, values, _, dsl_map)) => {
+                        let valid: Vec<&str> = values.iter().map(String::as_str).collect();
+                        dsl_map.api_for(carina_core::utils::extract_enum_value_with_values(
+                            k, &valid,
+                        ))
+                    }
+                    None => k.to_string(),
+                }
+            };
+            // Detect whether canonicalizing keys would collapse two
+            // distinct source keys onto one canonical spelling (e.g.
+            // the same condition operator written twice — bare AND
+            // namespaced). That is malformed input; pre-PR the keys
+            // were never canonicalized so both survived as distinct
+            // keys and the downstream serializer rejected it loudly
+            // with `MalformedPolicy`. To preserve that (never silently
+            // drop a clause) we disable key canonicalization wholesale
+            // for this map when a collision exists — order-independent
+            // because it inspects the whole key set up front, not the
+            // per-iteration insertion order. Value recursion still
+            // applies in both cases.
+            let mut seen_canon = std::collections::HashSet::new();
+            let key_collision = map.keys().any(|k| !seen_canon.insert(canon_of(k)));
+            // Rebuild preserving insertion order (IndexMap order is
+            // load-bearing for plan display, #2222).
+            let mut rewritten = indexmap::IndexMap::with_capacity(map.len());
             let mut changed = false;
             for (k, v) in map {
-                if let Some(new_v) = api_canonicalize_recursive(v, inner) {
-                    rewritten.insert(k.clone(), new_v);
-                    changed = true;
-                }
+                let new_key = if key_collision {
+                    k.clone()
+                } else {
+                    let ck = canon_of(k);
+                    if ck != *k {
+                        changed = true;
+                    }
+                    ck
+                };
+                let new_v = match api_canonicalize_recursive(v, inner) {
+                    Some(nv) => {
+                        changed = true;
+                        nv
+                    }
+                    None => v.clone(),
+                };
+                rewritten.insert(new_key, new_v);
             }
             changed.then_some(Value::Concrete(ConcreteValue::Map(rewritten)))
         }
@@ -917,5 +967,170 @@ mod tests {
                 "aws.ec2.VpnGateway.Type.ipsec.1".to_string()
             )))
         );
+    }
+
+    /// aws#325: the IAM policy `condition` field is
+    /// `Map<StringEnum "ConditionOperator", Map<..>>`.
+    /// `api_canonicalize_recursive`'s `Map` arm recursed only the
+    /// value, never the **key**, so a non-canonical
+    /// `ConditionOperator` map key (here a fully-namespaced form) was
+    /// left untouched on both the desired and state passes. Symmetric
+    /// to the value recursion, the key must be canonicalized to the
+    /// StringEnum's spelling.
+    #[test]
+    fn test_resolve_enum_identifiers_condition_operator_map_key() {
+        use indexmap::IndexMap;
+
+        // Inner condition body: { "aws:SecureTransport": "true" }
+        let mut cond_body = IndexMap::new();
+        cond_body.insert(
+            "aws:SecureTransport".to_string(),
+            Value::Concrete(ConcreteValue::String("true".to_string())),
+        );
+        // Operator key arrives fully-namespaced (the shape Pass-1 can
+        // produce / a read path could emit); only the trailing
+        // `string_equals` is the StringEnum value.
+        let mut condition = IndexMap::new();
+        condition.insert(
+            "aws.iam.IamPolicyStatement.ConditionOperator.string_equals".to_string(),
+            Value::Concrete(ConcreteValue::Map(cond_body)),
+        );
+        let mut stmt = IndexMap::new();
+        stmt.insert(
+            "effect".to_string(),
+            Value::Concrete(ConcreteValue::EnumIdentifier("allow".to_string())),
+        );
+        stmt.insert(
+            "condition".to_string(),
+            Value::Concrete(ConcreteValue::Map(condition)),
+        );
+        let mut policy = IndexMap::new();
+        policy.insert(
+            "statement".to_string(),
+            Value::Concrete(ConcreteValue::List(vec![Value::Concrete(
+                ConcreteValue::Map(stmt),
+            )])),
+        );
+
+        let mut resource = Resource::with_provider("aws", "iam.Role", "test-role", None);
+        resource.set_attr(
+            "assume_role_policy_document".to_string(),
+            Value::Concrete(ConcreteValue::Map(policy)),
+        );
+        let mut resources = vec![resource];
+        resolve_enum_identifiers(&mut resources);
+
+        let Some(Value::Concrete(ConcreteValue::Map(pd))) =
+            resources[0].get_attr("assume_role_policy_document")
+        else {
+            panic!("expected assume_role_policy_document Map");
+        };
+        let Some(Value::Concrete(ConcreteValue::List(stmts))) = pd.get("statement") else {
+            panic!("expected statement List");
+        };
+        let Some(Value::Concrete(ConcreteValue::Map(s0))) = stmts.first() else {
+            panic!("expected statement[0] Map");
+        };
+        let Some(Value::Concrete(ConcreteValue::Map(cond))) = s0.get("condition") else {
+            panic!("expected condition Map");
+        };
+        assert!(
+            cond.contains_key("string_equals"),
+            "ConditionOperator map key must be canonicalized to the \
+             StringEnum spelling, got keys: {:?}",
+            cond.keys().collect::<Vec<_>>()
+        );
+        assert!(
+            !cond.contains_key("aws.iam.IamPolicyStatement.ConditionOperator.string_equals"),
+            "the namespaced key must not survive"
+        );
+    }
+
+    /// aws#325 collision guard: a malformed `condition` writing the
+    /// same operator twice in different spellings (bare + namespaced)
+    /// would have both keys fold to `string_equals`. Blind
+    /// canonicalization lets `IndexMap::insert` overwrite one clause —
+    /// silent policy weakening. The guard inspects the whole key set
+    /// up front and, on collision, disables key canonicalization for
+    /// the map wholesale so BOTH clauses survive with their original
+    /// spellings (pre-PR behavior) and the downstream serializer still
+    /// rejects the malformed input loudly. Asserted for **both**
+    /// insertion orders — the bug the first cut had was order-dependent
+    /// (reversed order silently dropped a clause).
+    #[test]
+    fn test_condition_operator_key_collision_keeps_both_clauses() {
+        use indexmap::IndexMap;
+
+        let body = |v: &str| {
+            let mut m = IndexMap::new();
+            m.insert(
+                "aws:SecureTransport".to_string(),
+                Value::Concrete(ConcreteValue::String(v.to_string())),
+            );
+            Value::Concrete(ConcreteValue::Map(m))
+        };
+        let bare = "string_equals";
+        let nsd = "aws.iam.IamPolicyStatement.ConditionOperator.string_equals";
+
+        // Run the same malformed condition in both key orderings.
+        for (first, second) in [(bare, nsd), (nsd, bare)] {
+            let mut condition = IndexMap::new();
+            condition.insert(first.to_string(), body("true"));
+            condition.insert(second.to_string(), body("false"));
+            let mut stmt = IndexMap::new();
+            stmt.insert(
+                "effect".to_string(),
+                Value::Concrete(ConcreteValue::EnumIdentifier("allow".to_string())),
+            );
+            stmt.insert(
+                "condition".to_string(),
+                Value::Concrete(ConcreteValue::Map(condition)),
+            );
+            let mut policy = IndexMap::new();
+            policy.insert(
+                "statement".to_string(),
+                Value::Concrete(ConcreteValue::List(vec![Value::Concrete(
+                    ConcreteValue::Map(stmt),
+                )])),
+            );
+
+            let mut resource = Resource::with_provider("aws", "iam.Role", "test-role", None);
+            resource.set_attr(
+                "assume_role_policy_document".to_string(),
+                Value::Concrete(ConcreteValue::Map(policy)),
+            );
+            let mut resources = vec![resource];
+            resolve_enum_identifiers(&mut resources);
+
+            let Some(Value::Concrete(ConcreteValue::Map(pd))) =
+                resources[0].get_attr("assume_role_policy_document")
+            else {
+                panic!("expected Map");
+            };
+            let Some(Value::Concrete(ConcreteValue::List(stmts))) = pd.get("statement") else {
+                panic!("expected statement List");
+            };
+            let Some(Value::Concrete(ConcreteValue::Map(s0))) = stmts.first() else {
+                panic!("expected statement[0] Map");
+            };
+            let Some(Value::Concrete(ConcreteValue::Map(cond))) = s0.get("condition") else {
+                panic!("expected condition Map");
+            };
+            // Both clauses survive with their ORIGINAL spellings —
+            // collision disables canon wholesale, order-independent.
+            assert_eq!(
+                cond.len(),
+                2,
+                "order ({first}, {second}): both colliding clauses must \
+                 survive, got: {:?}",
+                cond.keys().collect::<Vec<_>>()
+            );
+            assert!(
+                cond.contains_key(bare) && cond.contains_key(nsd),
+                "order ({first}, {second}): both original keys kept \
+                 (no silent drop), got: {:?}",
+                cond.keys().collect::<Vec<_>>()
+            );
+        }
     }
 }
