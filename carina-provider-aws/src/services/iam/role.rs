@@ -363,7 +363,8 @@ impl AwsProvider {
 /// them (e.g. `aws:SecureTransport` → `Aws:SecureTransport`), which
 /// AWS treats as an unknown — and therefore unenforced — condition.
 pub fn value_to_iam_policy_json(value: &Value) -> Result<String, String> {
-    let json_value = policy_doc_to_json(value);
+    let json_value =
+        dsl_value_to_iam_json(value, &carina_aws_types::iam_policy_document(), "policy");
     serde_json::to_string(&json_value).map_err(|e| format!("JSON serialization failed: {}", e))
 }
 
@@ -417,13 +418,6 @@ const PRINCIPAL_FIELDS: &[(&str, &str)] = &[
     ("canonical_user", "CanonicalUser"),
 ];
 
-fn lookup_pascal(
-    table: &'static [(&'static str, &'static str)],
-    snake: &str,
-) -> Option<&'static str> {
-    table.iter().find_map(|(s, p)| (*s == snake).then_some(*p))
-}
-
 fn lookup_snake(
     table: &'static [(&'static str, &'static str)],
     pascal: &str,
@@ -431,56 +425,151 @@ fn lookup_snake(
     table.iter().find_map(|(s, p)| (*p == pascal).then_some(*s))
 }
 
-/// Convert a Carina policy document Value to JSON. Top-level fields are
-/// case-mapped via `POLICY_TOP_FIELDS`; the value of `Statement` is
-/// further converted by `policy_statement_to_json`.
+/// Convert a Carina IAM policy document `Value` to JSON, driven by the
+/// `iam_policy_document()` schema.
+///
+/// This is the apply-path serializer (reached via `resolve_iam_policy_attr`
+/// from `s3.BucketPolicy` / `iam.Role` / `sqs.Queue`). Being schema-typed
+/// is the root fix for aws#315: `StringEnum` leaves (`version`, `effect`)
+/// are canonicalized to the AWS wire form here via `DslMap::api_for`,
+/// regardless of whether the upstream plan-time normalizer ran. The
+/// previous hand-written serializer was schema-blind and depended on the
+/// normalizer having canonicalized enums first — which the apply path
+/// does not do (carina#3060), so the DSL spelling reached AWS and was
+/// rejected with `MalformedPolicy`.
+///
+/// Mirrors awscc's `dsl_value_to_aws`. Field key casing comes from the
+/// schema's `with_provider_name(...)`; condition operator keys are still
+/// translated positionally (`attr_name == "condition"`) to match awscc.
 pub(crate) fn policy_doc_to_json(value: &Value) -> serde_json::Value {
-    let Value::Concrete(ConcreteValue::Map(map)) = value else {
-        return scalar_to_json(value);
-    };
-    let mut obj = serde_json::Map::new();
-    for (k, v) in map {
-        let pascal_key = lookup_pascal(POLICY_TOP_FIELDS, k).unwrap_or(k.as_str());
-        let json_value = if k == "statement" {
-            match v {
-                Value::Concrete(ConcreteValue::List(items)) => {
-                    serde_json::Value::Array(items.iter().map(policy_statement_to_json).collect())
-                }
-                Value::Concrete(ConcreteValue::Map(_)) => policy_statement_to_json(v),
-                _ => scalar_to_json(v),
+    dsl_value_to_iam_json(value, &carina_aws_types::iam_policy_document(), "policy")
+}
+
+/// Schema-type-driven Value → IAM-policy JSON walk. `attr_name` carries
+/// the current DSL field name so the condition-operator key translation
+/// (which is positional, not schema-expressible without a key-typed map
+/// rewrite) can fire on `condition`, matching awscc's behavior.
+fn dsl_value_to_iam_json(
+    value: &Value,
+    attr_type: &carina_core::schema::AttributeType,
+    attr_name: &str,
+) -> serde_json::Value {
+    use carina_core::schema::AttributeType;
+
+    // StringEnum leaf: canonicalize the DSL spelling to the AWS wire
+    // form. Accepts `String` and `EnumIdentifier` (same text payload;
+    // the WIT boundary collapses `EnumIdentifier` to `String` anyway).
+    if let Some((_, values, _, dsl_map)) = attr_type.string_enum_parts() {
+        match value {
+            Value::Concrete(ConcreteValue::String(s))
+            | Value::Concrete(ConcreteValue::EnumIdentifier(s)) => {
+                let valid: Vec<&str> = values.iter().map(String::as_str).collect();
+                let trailing = carina_core::utils::extract_enum_value_with_values(s, &valid);
+                return serde_json::Value::String(dsl_map.api_for(trailing));
             }
-        } else {
-            scalar_or_passthrough_to_json(v)
-        };
-        obj.insert(pascal_key.to_string(), json_value);
+            _ => return scalar_to_json(value),
+        }
     }
-    serde_json::Value::Object(obj)
-}
 
-fn policy_statement_to_json(value: &Value) -> serde_json::Value {
-    let Value::Concrete(ConcreteValue::Map(map)) = value else {
-        return scalar_to_json(value);
-    };
-    let mut obj = serde_json::Map::new();
-    for (k, v) in map {
-        let pascal_key = lookup_pascal(STATEMENT_FIELDS, k).unwrap_or(k.as_str());
-        let json_value = match k.as_str() {
-            "principal" | "not_principal" => principal_to_json(v),
-            "condition" => condition_to_json(v),
-            _ => scalar_or_passthrough_to_json(v),
-        };
-        obj.insert(pascal_key.to_string(), json_value);
-    }
-    serde_json::Value::Object(obj)
-}
-
-fn principal_to_json(value: &Value) -> serde_json::Value {
-    match value {
-        Value::Concrete(ConcreteValue::Map(map)) => {
+    match attr_type {
+        AttributeType::Union(members) => {
+            // Try each member; first whose *input* value-shape matches
+            // wins. Gating on the input shape (not the output JSON)
+            // avoids an empty Struct member ({} from a Map whose keys
+            // are all unknown) shadowing the String member. Struct must
+            // precede String in the schema (see
+            // `string_or_principal_struct`) so a Map principal is not
+            // matched against the String arm.
+            for member in members {
+                let value_matches_member = match member {
+                    AttributeType::Struct { .. } => {
+                        matches!(value, Value::Concrete(ConcreteValue::Map(_)))
+                    }
+                    AttributeType::List { .. } => {
+                        matches!(value, Value::Concrete(ConcreteValue::List(_)))
+                    }
+                    _ => true,
+                };
+                if value_matches_member {
+                    return dsl_value_to_iam_json(value, member, attr_name);
+                }
+            }
+            scalar_to_json(value)
+        }
+        AttributeType::List { inner, .. } => match value {
+            Value::Concrete(ConcreteValue::List(items)) => serde_json::Value::Array(
+                items
+                    .iter()
+                    .map(|it| dsl_value_to_iam_json(it, inner, attr_name))
+                    .collect(),
+            ),
+            // A scalar where the schema declares a list: emit the scalar
+            // (AWS accepts a bare string for single-element Action etc.).
+            _ => dsl_value_to_iam_json(value, inner, attr_name),
+        },
+        AttributeType::Struct { fields, .. } => {
+            // Block syntax materializes a single-element List<Map>.
+            let map = match value {
+                Value::Concrete(ConcreteValue::Map(m)) => m,
+                Value::Concrete(ConcreteValue::List(items)) if items.len() == 1 => {
+                    match &items[0] {
+                        Value::Concrete(ConcreteValue::Map(m)) => m,
+                        _ => return scalar_to_json(value),
+                    }
+                }
+                _ => return scalar_to_json(value),
+            };
+            // The schema is authoritative for IAM policy documents: the
+            // grammar has no extension keys, so a map key not modeled in
+            // `iam_policy_document()` is a user typo (`statment`) that
+            // AWS would reject anyway. Emitting only schema fields (and
+            // dropping unmodeled keys) matches awscc's `dsl_value_to_aws`
+            // and is the deliberate behavior — the prior hand-written
+            // serializer's verbatim passthrough would instead forward
+            // the malformed key to AWS.
+            let mut obj = serde_json::Map::new();
+            for field in fields {
+                let Some(fv) = map.get(&field.name) else {
+                    continue;
+                };
+                let key = field
+                    .provider_name
+                    .as_deref()
+                    .unwrap_or(&field.name)
+                    .to_string();
+                obj.insert(
+                    key,
+                    dsl_value_to_iam_json(fv, &field.field_type, &field.name),
+                );
+            }
+            serde_json::Value::Object(obj)
+        }
+        AttributeType::Map { value: inner, .. } => {
+            let Value::Concrete(ConcreteValue::Map(map)) = value else {
+                return scalar_to_json(value);
+            };
+            // IAM condition is `Map<Op, Map<Var, StringOrList>>`, so this
+            // arm fires twice with `attr_name` still "condition": once
+            // for operator keys, once for the inner variable keys. The
+            // operator table (`condition_operator_to_aws`) PascalCases
+            // operators; for variable keys (`aws:SecureTransport`) the
+            // table lookup misses and `unwrap_or_else` keeps them
+            // verbatim — a condition variable can never alias an
+            // operator name (operators are bare lowercase, never contain
+            // `:`), so the inner pass is a safe no-op. The schema types
+            // the operator key as a StringEnum, but the Map walk does
+            // not consult the key type, so the positional
+            // `attr_name == "condition"` switch mirrors awscc's
+            // `dsl_value_to_aws`.
+            let is_condition = attr_name == "condition";
             let mut obj = serde_json::Map::new();
             for (k, v) in map {
-                let key = lookup_pascal(PRINCIPAL_FIELDS, k).unwrap_or(k.as_str());
-                obj.insert(key.to_string(), scalar_or_passthrough_to_json(v));
+                let key = if is_condition {
+                    carina_aws_types::condition_operator_to_aws(k).unwrap_or_else(|| k.clone())
+                } else {
+                    k.clone()
+                };
+                obj.insert(key, dsl_value_to_iam_json(v, inner, attr_name));
             }
             serde_json::Value::Object(obj)
         }
@@ -488,78 +577,29 @@ fn principal_to_json(value: &Value) -> serde_json::Value {
     }
 }
 
-fn condition_to_json(value: &Value) -> serde_json::Value {
-    let Value::Concrete(ConcreteValue::Map(operators)) = value else {
-        return scalar_to_json(value);
-    };
-    let mut obj = serde_json::Map::new();
-    for (op_key, kv_value) in operators {
-        let op_pascal =
-            carina_aws_types::condition_operator_to_aws(op_key).unwrap_or_else(|| op_key.clone());
-        let kv_json = match kv_value {
-            // Inner map keys are condition variables (e.g. "aws:SecureTransport")
-            // and must pass through verbatim — no case conversion.
-            Value::Concrete(ConcreteValue::Map(inner)) => {
-                let mut m = serde_json::Map::new();
-                for (var, val) in inner {
-                    m.insert(var.clone(), scalar_or_passthrough_to_json(val));
-                }
-                serde_json::Value::Object(m)
-            }
-            _ => scalar_to_json(kv_value),
-        };
-        obj.insert(op_pascal, kv_json);
-    }
-    serde_json::Value::Object(obj)
-}
-
-/// Scalar-or-list-of-scalars passthrough: used for Action / Resource /
-/// Sid / Effect / condition variable values. No key conversion.
-fn scalar_or_passthrough_to_json(value: &Value) -> serde_json::Value {
-    match value {
-        Value::Concrete(ConcreteValue::List(items)) => {
-            serde_json::Value::Array(items.iter().map(scalar_or_passthrough_to_json).collect())
-        }
-        Value::Concrete(ConcreteValue::Map(map)) => {
-            // Generic map (e.g. nested condition value map): keys verbatim.
-            let mut obj = serde_json::Map::new();
-            for (k, v) in map {
-                obj.insert(k.clone(), scalar_or_passthrough_to_json(v));
-            }
-            serde_json::Value::Object(obj)
-        }
-        _ => scalar_to_json(value),
-    }
-}
-
+/// Terminal scalar conversion. No enum handling here — `StringEnum`
+/// leaves are canonicalized in `dsl_value_to_iam_json` before reaching
+/// this point. An `EnumIdentifier` only lands here for a non-schema
+/// position (none exist in `iam_policy_document()` today); strip its
+/// namespace so a stray value still serializes as a plain string.
 fn scalar_to_json(value: &Value) -> serde_json::Value {
     match value {
         Value::Concrete(ConcreteValue::String(s)) => serde_json::Value::String(s.clone()),
         Value::Concrete(ConcreteValue::Int(n)) => serde_json::Value::Number((*n).into()),
         Value::Concrete(ConcreteValue::Float(f)) => serde_json::json!(*f),
         Value::Concrete(ConcreteValue::Bool(b)) => serde_json::Value::Bool(*b),
-        // `effect` / `version` are StringEnum struct fields, so the AWS
-        // normalizer's `api_canonicalize_recursive` pass rewrites them to
-        // the AWS wire form (`Allow`, `2012-10-17`) before this serializer
-        // ever runs — they arrive here as an already-canonical `String`.
-        // This arm is the defensive fallback for any `EnumIdentifier` that
-        // somehow reaches the serializer un-canonicalized (e.g. a future
-        // enum field not yet covered by the schema-typed normalizer pass):
-        // strip the namespace and map the DSL alias back so AWS still
-        // accepts it rather than rejecting with `MalformedPolicy`.
         Value::Concrete(ConcreteValue::EnumIdentifier(id)) => {
-            let trailing = id.rsplit('.').next().unwrap_or(id.as_str());
-            let canonical = match trailing {
-                "allow" => "Allow",
-                "deny" => "Deny",
-                "2012_10_17" => "2012-10-17",
-                "2008_10_17" => "2008-10-17",
-                other => other,
-            };
-            serde_json::Value::String(canonical.to_string())
+            serde_json::Value::String(id.rsplit('.').next().unwrap_or(id.as_str()).to_string())
         }
-        Value::Concrete(ConcreteValue::List(_)) | Value::Concrete(ConcreteValue::Map(_)) => {
-            scalar_or_passthrough_to_json(value)
+        Value::Concrete(ConcreteValue::List(items)) => {
+            serde_json::Value::Array(items.iter().map(scalar_to_json).collect())
+        }
+        Value::Concrete(ConcreteValue::Map(map)) => {
+            let mut obj = serde_json::Map::new();
+            for (k, v) in map {
+                obj.insert(k.clone(), scalar_to_json(v));
+            }
+            serde_json::Value::Object(obj)
         }
         _ => serde_json::Value::Null,
     }
@@ -889,6 +929,137 @@ mod tests {
         assert!(
             !resolved.contains("2012_10_17") && !resolved.contains(r#""allow""#),
             "DSL spelling must not reach AWS, got: {resolved}"
+        );
+    }
+
+    /// Real aws#315 reproduction (root cause: carina#3060). At apply
+    /// time `resolve_resource_with_source` re-resolves the policy from
+    /// the *un-normalized* source and the WIT boundary collapses
+    /// `EnumIdentifier` to a plain `String`. So the serializer — the
+    /// path that actually reaches AWS — receives `version` /
+    /// `effect` as a `String` carrying the namespaced DSL spelling
+    /// (`aws.iam.PolicyDocument.Version.2012_10_17`) or the bare DSL
+    /// alias (`allow`), NOT an already-canonical value and NOT an
+    /// `EnumIdentifier`. The schema-type-driven serializer must
+    /// canonicalize these to the AWS wire form regardless of the
+    /// upstream normalizer, so `aws.s3.BucketPolicy` apply stops
+    /// failing with `MalformedPolicy`.
+    #[test]
+    fn resolve_iam_policy_attr_canonicalizes_unnormalized_dsl_string() {
+        let mut policy = IndexMap::new();
+        policy.insert(
+            "version".to_string(),
+            Value::Concrete(ConcreteValue::String(
+                "aws.iam.PolicyDocument.Version.2012_10_17".to_string(),
+            )),
+        );
+        let mut stmt = IndexMap::new();
+        stmt.insert(
+            "sid".to_string(),
+            Value::Concrete(ConcreteValue::String("AllowRead".to_string())),
+        );
+        stmt.insert(
+            "effect".to_string(),
+            Value::Concrete(ConcreteValue::String("allow".to_string())),
+        );
+        stmt.insert(
+            "action".to_string(),
+            Value::Concrete(ConcreteValue::String("s3:GetObject".to_string())),
+        );
+        let mut principal = IndexMap::new();
+        principal.insert(
+            "canonical_user".to_string(),
+            Value::Concrete(ConcreteValue::String("CANON123".to_string())),
+        );
+        stmt.insert(
+            "principal".to_string(),
+            Value::Concrete(ConcreteValue::Map(principal)),
+        );
+        policy.insert(
+            "statement".to_string(),
+            Value::Concrete(ConcreteValue::List(vec![Value::Concrete(
+                ConcreteValue::Map(stmt),
+            )])),
+        );
+
+        let r = make_resource(Some(Value::Concrete(ConcreteValue::Map(policy))));
+        let resolved = resolve_iam_policy_attr(&r, "policy").expect("map → JSON");
+
+        assert!(
+            resolved.contains(r#""Version":"2012-10-17""#),
+            "version must be AWS-canonical, got: {resolved}"
+        );
+        assert!(
+            resolved.contains(r#""Effect":"Allow""#),
+            "effect must be AWS-canonical, got: {resolved}"
+        );
+        assert!(
+            !resolved.contains("2012_10_17") && !resolved.contains(r#""allow""#),
+            "DSL spelling must not reach AWS, got: {resolved}"
+        );
+        // Constraint A regression: canonical_user Principal must not be
+        // silently dropped by the schema-driven walk.
+        assert!(
+            resolved.contains(r#""CanonicalUser":"CANON123""#),
+            "canonical_user Principal must round-trip, got: {resolved}"
+        );
+    }
+
+    /// Pins the deliberate schema-authoritative behavior (aws#317): a
+    /// map key not modeled in `iam_policy_document()` is dropped, not
+    /// passed through. The IAM policy grammar has no extension keys, so
+    /// an unmodeled key is a user typo AWS would reject anyway; this
+    /// matches awscc's `dsl_value_to_aws`. Every *modeled* key must
+    /// still round-trip.
+    #[test]
+    fn resolve_iam_policy_attr_drops_unmodeled_keys_keeps_modeled() {
+        let mut policy = IndexMap::new();
+        policy.insert(
+            "version".to_string(),
+            Value::Concrete(ConcreteValue::String("2012-10-17".to_string())),
+        );
+        // Typo / unmodeled top-level key — must NOT reach AWS.
+        policy.insert(
+            "statment".to_string(),
+            Value::Concrete(ConcreteValue::String("oops".to_string())),
+        );
+        let mut stmt = IndexMap::new();
+        stmt.insert(
+            "effect".to_string(),
+            Value::Concrete(ConcreteValue::String("Allow".to_string())),
+        );
+        stmt.insert(
+            "action".to_string(),
+            Value::Concrete(ConcreteValue::String("s3:GetObject".to_string())),
+        );
+        stmt.insert(
+            "resource".to_string(),
+            Value::Concrete(ConcreteValue::String("arn:aws:s3:::b/*".to_string())),
+        );
+        // Unmodeled statement key — dropped.
+        stmt.insert(
+            "bogus_field".to_string(),
+            Value::Concrete(ConcreteValue::String("x".to_string())),
+        );
+        policy.insert(
+            "statement".to_string(),
+            Value::Concrete(ConcreteValue::List(vec![Value::Concrete(
+                ConcreteValue::Map(stmt),
+            )])),
+        );
+
+        let r = make_resource(Some(Value::Concrete(ConcreteValue::Map(policy))));
+        let resolved = resolve_iam_policy_attr(&r, "policy").expect("map → JSON");
+
+        // Modeled keys preserved.
+        assert!(resolved.contains(r#""Version":"2012-10-17""#));
+        assert!(resolved.contains(r#""Effect":"Allow""#));
+        assert!(resolved.contains(r#""Action":"s3:GetObject""#));
+        assert!(resolved.contains(r#""Resource":"arn:aws:s3:::b/*""#));
+        // Unmodeled keys dropped (schema is authoritative).
+        assert!(
+            !resolved.contains("statment") && !resolved.contains("bogus_field"),
+            "unmodeled keys must not reach AWS, got: {resolved}"
         );
     }
 
