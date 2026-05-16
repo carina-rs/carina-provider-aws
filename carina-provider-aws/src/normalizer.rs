@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use indexmap::IndexMap;
 
 use carina_core::provider::{self, ProviderNormalizer};
-use carina_core::resource::{ConcreteValue, Resource, Value};
+use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
 use carina_core::schema::{AttributeType, SchemaRegistry};
 
 /// Schema extension for the AWS provider.
@@ -17,6 +17,10 @@ impl ProviderNormalizer for AwsNormalizer {
     fn normalize_desired(&self, resources: &mut [Resource]) {
         resolve_enum_identifiers(resources);
         crate::services::route53::record_set::normalize_record_set_dns_names(resources);
+    }
+
+    fn normalize_state(&self, current_states: &mut HashMap<ResourceId, State>) {
+        canonicalize_state_enums(current_states);
     }
 
     fn merge_default_tags(
@@ -50,48 +54,104 @@ impl ProviderNormalizer for AwsNormalizer {
 /// The recursion is the contract: every enum value reaching the
 /// provider is API-canonical no matter how deeply it is nested.
 pub(crate) fn resolve_enum_identifiers(resources: &mut [Resource]) {
-    let configs = crate::schemas::generated::configs();
-
     for resource in resources.iter_mut() {
         // Only handle aws resources
         if resource.id.provider != "aws" {
             continue;
         }
 
-        // Find the matching schema config
-        let config = configs
-            .iter()
-            .find(|c| c.schema.resource_type == resource.id.resource_type);
-        let config = match config {
-            Some(c) => c,
-            None => continue,
-        };
-
-        let mut resolved_attrs = HashMap::new();
-        for (key, value) in &resource.attributes {
-            let Some(attr_schema) = config.schema.attributes.get(key.as_str()) else {
-                continue;
-            };
-            // Pass 1: bare/short DSL identifiers → fully-qualified DSL form.
-            let after_dsl =
-                carina_core::utils::resolve_enum_value_recursive(value, &attr_schema.attr_type);
-            // Pass 2: DSL spelling → API canonical at every nested enum position.
-            let base = after_dsl.as_ref().unwrap_or(value);
-            let after_api = api_canonicalize_recursive(base, &attr_schema.attr_type);
-
-            match (after_dsl, after_api) {
-                (_, Some(v)) => {
-                    resolved_attrs.insert(key.clone(), v);
-                }
-                (Some(v), None) => {
-                    resolved_attrs.insert(key.clone(), v);
-                }
-                (None, None) => {}
-            }
-        }
+        let resolved_attrs = resolve_attrs_against_schema(
+            &resource.id.resource_type,
+            resource.attributes.iter(),
+            |value, attr_type| {
+                // Pass 1: bare/short DSL identifiers → fully-qualified DSL form.
+                let after_dsl = carina_core::utils::resolve_enum_value_recursive(value, attr_type);
+                // Pass 2: DSL spelling → API canonical at every nested enum position.
+                let base = after_dsl.as_ref().unwrap_or(value);
+                let after_api = api_canonicalize_recursive(base, attr_type);
+                // Pass 2's rewrite wins; otherwise fall back to Pass 1's.
+                after_api.or(after_dsl)
+            },
+        );
 
         for (key, value) in resolved_attrs {
             resource.set_attr(key, value);
+        }
+    }
+}
+
+/// Look up the AWS schema config for `resource_type`, then run
+/// `rewrite` against every attribute whose schema is known, collecting
+/// the rewrites (`Some`) into a map. Shared scaffold for the
+/// schema-driven enum passes (`resolve_enum_identifiers`,
+/// `canonicalize_state_enums`); callers own the provider guard,
+/// container iteration, and write-back, since `Resource` and `State`
+/// store attributes differently and the two passes differ.
+fn resolve_attrs_against_schema<'a>(
+    resource_type: &str,
+    attributes: impl Iterator<Item = (&'a String, &'a Value)>,
+    rewrite: impl Fn(&Value, &AttributeType) -> Option<Value>,
+) -> HashMap<String, Value> {
+    let configs = crate::schemas::generated::configs();
+    let Some(config) = configs
+        .iter()
+        .find(|c| c.schema.resource_type == resource_type)
+    else {
+        return HashMap::new();
+    };
+
+    let mut resolved_attrs = HashMap::new();
+    for (key, value) in attributes {
+        let Some(attr_schema) = config.schema.attributes.get(key.as_str()) else {
+            continue;
+        };
+        if let Some(v) = rewrite(value, &attr_schema.attr_type) {
+            resolved_attrs.insert(key.clone(), v);
+        }
+    }
+    resolved_attrs
+}
+
+/// Canonicalize enum spellings in read-returned state to the AWS
+/// API-canonical form, symmetric to `normalize_desired`'s Pass 2.
+///
+/// `normalize_desired` lowers every (nested) `StringEnum` leaf on the
+/// desired side to the AWS wire form via [`api_canonicalize_recursive`].
+/// Provider read paths, however, deliberately emit the DSL-alias
+/// spelling for nested StringEnum leaves (e.g. the IAM policy doc's
+/// `version` / `effect`, which `json_to_policy_doc` returns as
+/// `EnumIdentifier("2012_10_17")` / `EnumIdentifier("allow")`). With no
+/// symmetric state-side pass, the differ compared a DSL-alias
+/// `EnumIdentifier` state leaf against an API-canonical `String`
+/// desired leaf and reported a never-converging
+/// `~ effect: "allow" → "Allow"` diff every plan (aws#323).
+///
+/// Running the *same* [`api_canonicalize_recursive`] pass over
+/// `current_states` makes both differ sides API-canonical `String`, so
+/// the cosmetic diff disappears. The pass is schema-driven and recurses
+/// Struct/List/Map, so this is not IAM-policy-specific — it stabilizes
+/// every AWS resource whose read shape carries a DSL-alias enum leaf.
+///
+/// Only Pass 2 runs here, not Pass 1's `resolve_enum_value_recursive`:
+/// state values are post-read (API `String` or DSL-alias
+/// `EnumIdentifier`), never the bare/short identifiers Pass 1 expands —
+/// see `api_canonicalize_recursive`'s doc for the accepted leaf shapes.
+pub(crate) fn canonicalize_state_enums(current_states: &mut HashMap<ResourceId, State>) {
+    for state in current_states.values_mut() {
+        // Only handle aws resources that actually exist. `not_found`
+        // states carry no attributes, so skip the schema lookup.
+        if state.id.provider != "aws" || !state.exists {
+            continue;
+        }
+
+        let resolved_attrs = resolve_attrs_against_schema(
+            &state.id.resource_type,
+            state.attributes.iter(),
+            api_canonicalize_recursive,
+        );
+
+        for (key, value) in resolved_attrs {
+            state.attributes.insert(key, value);
         }
     }
 }
@@ -102,8 +162,10 @@ pub(crate) fn resolve_enum_identifiers(resources: &mut [Resource]) {
 /// Input shapes: enum leaves arrive either as fully-qualified DSL
 /// `String` (the output of `resolve_enum_value_recursive`) or as
 /// `EnumIdentifier` (DSL-source values that Pass-1 leaves untouched,
-/// e.g. nested IAM policy `version` / `effect` after the carina#3055
-/// state-lift). Both carry the same text payload; extraction is
+/// e.g. nested IAM policy `version` / `effect`, which the provider read
+/// paths emit directly as DSL-alias `EnumIdentifier` via
+/// `json_effect_to_enum_identifier` / `json_version_to_enum_identifier`).
+/// Both carry the same text payload; extraction is
 /// `extract_enum_value_with_values(s, values)` — strip the namespace
 /// prefix, recovering dotted enum values like the legacy `ipsec.1` —
 /// followed by `dsl_map.api_for(trailing)` to translate DSL → API.
@@ -265,6 +327,162 @@ pub(crate) fn normalize_state_enums(resource_type: &str, attributes: &mut HashMa
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Regression for aws#323: after `carina apply` of an
+    /// `aws.s3.BucketPolicy`, the read-back state row carries the IAM
+    /// policy doc's nested StringEnum leaves as DSL-alias
+    /// `EnumIdentifier` (`effect: "allow"`, `version: "2012_10_17"`) and
+    /// principal sub-fields as singleton lists. `normalize_desired`
+    /// canonicalizes the desired side to API-canonical `String`
+    /// (`"Allow"`, `"2012-10-17"`) via `api_canonicalize_recursive`, but
+    /// nothing applied the symmetric pass to `current_states`, so every
+    /// subsequent `carina plan` reported a never-converging
+    /// `~ effect: "allow" → "Allow"` / `~ version: "2012_10_17" →
+    /// "2012-10-17"` diff. `AwsNormalizer::normalize_state` must run the
+    /// same recursive canonicalization over state so both differ sides
+    /// reach the comparator as API-canonical `String`.
+    #[test]
+    fn test_normalize_state_canonicalizes_iam_policy_doc_enum_leaves() {
+        use indexmap::IndexMap;
+
+        let mut stmt = IndexMap::new();
+        stmt.insert(
+            "effect".to_string(),
+            Value::Concrete(ConcreteValue::EnumIdentifier("allow".to_string())),
+        );
+        stmt.insert(
+            "action".to_string(),
+            Value::Concrete(ConcreteValue::List(vec![Value::Concrete(
+                ConcreteValue::String("s3:GetObject".to_string()),
+            )])),
+        );
+        let mut policy = IndexMap::new();
+        policy.insert(
+            "version".to_string(),
+            Value::Concrete(ConcreteValue::EnumIdentifier("2012_10_17".to_string())),
+        );
+        policy.insert(
+            "statement".to_string(),
+            Value::Concrete(ConcreteValue::List(vec![Value::Concrete(
+                ConcreteValue::Map(stmt),
+            )])),
+        );
+
+        let id = ResourceId::with_provider("aws", "s3.BucketPolicy", "test-bp", None);
+        let mut attributes = HashMap::new();
+        attributes.insert(
+            "bucket".to_string(),
+            Value::Concrete(ConcreteValue::String("my-bucket".to_string())),
+        );
+        attributes.insert(
+            "policy".to_string(),
+            Value::Concrete(ConcreteValue::Map(policy)),
+        );
+        let state = State::existing(id.clone(), attributes);
+
+        let mut current_states = HashMap::new();
+        current_states.insert(id.clone(), state);
+
+        AwsNormalizer.normalize_state(&mut current_states);
+
+        let Some(Value::Concrete(ConcreteValue::Map(pd))) =
+            current_states.get(&id).unwrap().attributes.get("policy")
+        else {
+            panic!("expected policy Map");
+        };
+        assert_eq!(
+            pd.get("version"),
+            Some(&Value::Concrete(ConcreteValue::String(
+                "2012-10-17".to_string()
+            ))),
+            "version must be canonicalized to AWS-canonical String"
+        );
+        let Some(Value::Concrete(ConcreteValue::List(stmts))) = pd.get("statement") else {
+            panic!("expected statement List");
+        };
+        let Some(Value::Concrete(ConcreteValue::Map(s0))) = stmts.first() else {
+            panic!("expected statement[0] Map");
+        };
+        assert_eq!(
+            s0.get("effect"),
+            Some(&Value::Concrete(ConcreteValue::String("Allow".to_string()))),
+            "effect must be canonicalized to AWS-canonical String"
+        );
+
+        // Non-enum attributes and non-enum struct fields must survive
+        // untouched — the schema-driven walk must not over-rewrite.
+        assert_eq!(
+            current_states.get(&id).unwrap().attributes.get("bucket"),
+            Some(&Value::Concrete(ConcreteValue::String(
+                "my-bucket".to_string()
+            ))),
+            "non-enum attribute must not be rewritten"
+        );
+        assert_eq!(
+            s0.get("action"),
+            Some(&Value::Concrete(ConcreteValue::List(vec![
+                Value::Concrete(ConcreteValue::String("s3:GetObject".to_string()))
+            ]))),
+            "non-enum struct field must not be rewritten"
+        );
+
+        // Idempotence: re-running over already-canonical state is a
+        // no-op (every leaf is now a plain API-spelling `String`, which
+        // `api_canonicalize_recursive` returns `None` for). A regression
+        // here would re-wrap and reintroduce the never-converging diff.
+        let snapshot = current_states.get(&id).unwrap().attributes.clone();
+        AwsNormalizer.normalize_state(&mut current_states);
+        assert_eq!(
+            current_states.get(&id).unwrap().attributes,
+            snapshot,
+            "second normalize_state pass over canonical state must be a no-op"
+        );
+    }
+
+    /// Companion to the IAM-policy regression above: proves
+    /// `normalize_state` is generic (not IAM-policy-specific) by
+    /// canonicalizing a *top-level* StringEnum state leaf on an
+    /// unrelated resource. `s3.BucketVersioning.status` read-back as the
+    /// DSL-alias `EnumIdentifier` must reach the differ as the
+    /// API-canonical `String` `"Enabled"`, matching the desired side
+    /// (`resolve_enum_identifiers`).
+    #[test]
+    fn test_normalize_state_canonicalizes_top_level_string_enum() {
+        let id = ResourceId::with_provider("aws", "s3.BucketVersioning", "test-bv", None);
+        let mut attributes = HashMap::new();
+        attributes.insert(
+            "status".to_string(),
+            Value::Concrete(ConcreteValue::EnumIdentifier("enabled".to_string())),
+        );
+        let state = State::existing(id.clone(), attributes);
+
+        let mut current_states = HashMap::new();
+        current_states.insert(id.clone(), state);
+
+        AwsNormalizer.normalize_state(&mut current_states);
+
+        assert_eq!(
+            current_states.get(&id).unwrap().attributes.get("status"),
+            Some(&Value::Concrete(ConcreteValue::String(
+                "Enabled".to_string()
+            ))),
+            "top-level StringEnum state leaf must be canonicalized"
+        );
+    }
+
+    /// `not_found` states (`exists == false`) carry no attributes and
+    /// must be skipped without panic.
+    #[test]
+    fn test_normalize_state_skips_not_found_state() {
+        let id = ResourceId::with_provider("aws", "s3.BucketVersioning", "absent", None);
+        let mut current_states = HashMap::new();
+        current_states.insert(id.clone(), State::not_found(id.clone()));
+
+        AwsNormalizer.normalize_state(&mut current_states);
+
+        assert!(!current_states.get(&id).unwrap().exists);
+        assert!(current_states.get(&id).unwrap().attributes.is_empty());
+    }
 
     // After aws#258, `resolve_enum_identifiers` runs a second pass that
     // canonicalizes DSL spellings into the AWS API form (bare value). So
