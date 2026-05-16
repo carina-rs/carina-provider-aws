@@ -1130,11 +1130,11 @@ fn test_extract_iam_role_attributes() {
     if let Value::Concrete(ConcreteValue::Map(map)) = policy_doc {
         assert!(map.contains_key("version"), "should have 'version' key");
         assert!(map.contains_key("statement"), "should have 'statement' key");
-        if let Some(Value::Concrete(ConcreteValue::EnumIdentifier(v))) = map.get("version") {
-            assert_eq!(v, "2012_10_17");
+        if let Some(Value::Concrete(ConcreteValue::String(v))) = map.get("version") {
+            assert_eq!(v, "2012-10-17");
         } else {
             panic!(
-                "Expected version to be EnumIdentifier, got {:?}",
+                "Expected version to be raw AWS-canonical String (aws#326), got {:?}",
                 map.get("version")
             );
         }

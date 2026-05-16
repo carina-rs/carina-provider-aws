@@ -635,12 +635,14 @@ pub(crate) fn json_to_policy_doc(json: &serde_json::Value) -> Value {
                 serde_json::Value::Object(_) => json_to_policy_statement(v),
                 _ => json_scalar_to_value(v),
             },
-            // `version` is a StringEnum with `dsl_aliases: [("2012-10-17",
-            // "2012_10_17"), ("2008-10-17", "2008_10_17")]`. AWS returns the
-            // canonical hyphenated form ("2012-10-17"); the DSL surface is the
-            // underscore alias ("2012_10_17"). Emit `EnumIdentifier` directly
-            // with the DSL form so post-apply plan-verify compares equal.
-            "version" => json_version_to_enum_identifier(v),
+            // `version` is a StringEnum but needs no special arm: emit
+            // the raw AWS-canonical value (`"2012-10-17"`) directly as
+            // a plain `String` via the catch-all. The alias↔canonical
+            // reconciliation against the parsed-desired side is owned
+            // by carina-core (the saved-state `lift_string_enum_leaves`
+            // lift + the differ's spelling-agnostic `StringEnum` arm),
+            // not by this read path emitting a pre-down-converted alias
+            // (aws#326).
             _ => json_scalar_or_passthrough_to_value(v),
         };
         map.insert(snake_key.to_string(), value);
@@ -661,12 +663,12 @@ fn json_to_policy_statement(json: &serde_json::Value) -> Value {
         let value = match snake_key {
             "principal" | "not_principal" => json_to_principal(v),
             "condition" => json_to_condition(v),
-            // `effect` is a StringEnum with `dsl_aliases: [("Allow",
-            // "allow"), ("Deny", "deny")]`. AWS returns the canonical
-            // PascalCase ("Allow"); the DSL surface is the snake_case
-            // alias ("allow"). Emit `EnumIdentifier` directly with the
-            // DSL form so post-apply plan-verify compares equal.
-            "effect" => json_effect_to_enum_identifier(v),
+            // `effect` is a StringEnum. Emit the raw AWS-canonical
+            // value (`"Allow"`) directly as a plain `String` via the
+            // catch-all; carina-core's saved-state lift + the differ's
+            // spelling-agnostic `StringEnum` arm reconcile it against
+            // the parsed-desired alias side (aws#326). No special arm
+            // needed.
             // `Action` / `Resource` are `Map<String, StringOrList>`
             // — AWS may return a scalar (`"sts:AssumeRole"`) or a list.
             // The DSL schema accepts both, but to avoid post-apply
@@ -680,38 +682,6 @@ fn json_to_policy_statement(json: &serde_json::Value) -> Value {
         map.insert(snake_key.to_string(), value);
     }
     Value::Concrete(ConcreteValue::Map(map))
-}
-
-/// AWS returns `Effect: "Allow"`; the DSL StringEnum surface for that
-/// field is the snake_case alias (`allow` / `deny`). Emit
-/// `EnumIdentifier` carrying the alias so the read state matches what
-/// the DSL produces.
-fn json_effect_to_enum_identifier(v: &serde_json::Value) -> Value {
-    let Some(s) = v.as_str() else {
-        return json_scalar_to_value(v);
-    };
-    let alias = match s {
-        "Allow" => "allow",
-        "Deny" => "deny",
-        _ => s,
-    };
-    Value::Concrete(ConcreteValue::EnumIdentifier(alias.to_string()))
-}
-
-/// AWS returns `Version: "2012-10-17"`; the DSL StringEnum surface uses
-/// the underscore alias (`2012_10_17` / `2008_10_17`). Emit
-/// `EnumIdentifier` carrying the alias so the read state matches what
-/// the DSL produces.
-fn json_version_to_enum_identifier(v: &serde_json::Value) -> Value {
-    let Some(s) = v.as_str() else {
-        return json_scalar_to_value(v);
-    };
-    let alias = match s {
-        "2012-10-17" => "2012_10_17",
-        "2008-10-17" => "2008_10_17",
-        _ => s,
-    };
-    Value::Concrete(ConcreteValue::EnumIdentifier(alias.to_string()))
 }
 
 /// AWS returns `Principal: {"AWS": "*"}` (scalar) for single-element
@@ -853,9 +823,13 @@ mod tests {
             Value::Concrete(ConcreteValue::EnumIdentifier("2012_10_17".to_string())),
         );
         let mut stmt = IndexMap::new();
-        // `effect` is a StringEnum; the canonical post-read shape is
-        // `EnumIdentifier("allow")`, which `scalar_to_json` maps back to the
-        // PascalCase wire form (`"Allow"`).
+        // `effect` is a StringEnum. The read path now emits raw
+        // AWS-canonical `String` (aws#326), but the *serializer* must
+        // still accept `EnumIdentifier` because carina-core's
+        // saved-state lift produces `EnumIdentifier("allow")` for the
+        // desired-equivalent state; `scalar_to_json` maps it back to
+        // the PascalCase wire form (`"Allow"`). This test pins that
+        // continued acceptance.
         stmt.insert(
             "effect".to_string(),
             Value::Concrete(ConcreteValue::String("Allow".to_string())),
@@ -1081,8 +1055,10 @@ mod tests {
     /// Exercises principal map, list-valued action/resource, and a
     /// `bool` condition with the `aws:SecureTransport` value key.
     fn full_deny_policy_value() -> Value {
-        // Canonical post-read shape:
-        //   - `effect`: EnumIdentifier carrying snake_case alias
+        // Canonical post-read shape (aws#326):
+        //   - `effect` / `version`: raw AWS-canonical `String`
+        //     (`"Deny"` / `"2012-10-17"`) — the read path no longer
+        //     down-converts to a DSL-alias `EnumIdentifier`
         //   - `principal.aws`: singleton List (schema declares List<String>)
         //   - `action`: singleton List (schema declares List<String>)
         // value_to_iam_policy_json serializes both List-of-one and bare
@@ -1115,7 +1091,7 @@ mod tests {
         );
         stmt.insert(
             "effect".to_string(),
-            Value::Concrete(ConcreteValue::EnumIdentifier("deny".to_string())),
+            Value::Concrete(ConcreteValue::String("Deny".to_string())),
         );
         stmt.insert(
             "principal".to_string(),
@@ -1144,7 +1120,7 @@ mod tests {
         let mut doc = IndexMap::new();
         doc.insert(
             "version".to_string(),
-            Value::Concrete(ConcreteValue::EnumIdentifier("2012_10_17".to_string())),
+            Value::Concrete(ConcreteValue::String("2012-10-17".to_string())),
         );
         doc.insert(
             "statement".to_string(),
@@ -1254,12 +1230,10 @@ mod tests {
             ])))
         );
 
-        // Effect is the snake_case alias of the StringEnum on read.
+        // Effect is the raw AWS-canonical String on read (aws#326).
         assert_eq!(
             stmt.get("effect"),
-            Some(&Value::Concrete(ConcreteValue::EnumIdentifier(
-                "deny".to_string()
-            )))
+            Some(&Value::Concrete(ConcreteValue::String("Deny".to_string())))
         );
         // Action scalar is wrapped to singleton list.
         assert_eq!(
@@ -1275,7 +1249,7 @@ mod tests {
         let mut doc = IndexMap::new();
         doc.insert(
             "version".to_string(),
-            Value::Concrete(ConcreteValue::EnumIdentifier("2012_10_17".to_string())),
+            Value::Concrete(ConcreteValue::String("2012-10-17".to_string())),
         );
         doc.insert(
             "id".to_string(),
@@ -1313,12 +1287,10 @@ mod tests {
         let Value::Concrete(ConcreteValue::Map(stmt)) = doc.get("statement").unwrap() else {
             panic!("statement should be a Map for single-object form")
         };
-        // Effect is the snake_case alias of the StringEnum on read.
+        // Effect is the raw AWS-canonical String on read (aws#326).
         assert_eq!(
             stmt.get("effect"),
-            Some(&Value::Concrete(ConcreteValue::EnumIdentifier(
-                "allow".to_string()
-            )))
+            Some(&Value::Concrete(ConcreteValue::String("Allow".to_string())))
         );
     }
 
@@ -1369,11 +1341,11 @@ mod tests {
             Value::Concrete(ConcreteValue::Map(inner)),
         );
         let mut stmt = IndexMap::new();
-        // Canonical post-read form: effect EnumIdentifier alias, action
-        // singleton List.
+        // Canonical post-read form: effect raw AWS-canonical String,
+        // action singleton List (aws#326).
         stmt.insert(
             "effect".to_string(),
-            Value::Concrete(ConcreteValue::EnumIdentifier("allow".to_string())),
+            Value::Concrete(ConcreteValue::String("Allow".to_string())),
         );
         stmt.insert(
             "action".to_string(),
@@ -1388,7 +1360,7 @@ mod tests {
         let mut doc = IndexMap::new();
         doc.insert(
             "version".to_string(),
-            Value::Concrete(ConcreteValue::EnumIdentifier("2012_10_17".to_string())),
+            Value::Concrete(ConcreteValue::String("2012-10-17".to_string())),
         );
         doc.insert(
             "statement".to_string(),
@@ -1424,11 +1396,11 @@ mod tests {
             Value::Concrete(ConcreteValue::Map(inner)),
         );
         let mut stmt = IndexMap::new();
-        // Canonical post-read form: effect EnumIdentifier alias, action
-        // singleton List.
+        // Canonical post-read form: effect raw AWS-canonical String,
+        // action singleton List (aws#326).
         stmt.insert(
             "effect".to_string(),
-            Value::Concrete(ConcreteValue::EnumIdentifier("allow".to_string())),
+            Value::Concrete(ConcreteValue::String("Allow".to_string())),
         );
         stmt.insert(
             "action".to_string(),
@@ -1443,7 +1415,7 @@ mod tests {
         let mut doc = IndexMap::new();
         doc.insert(
             "version".to_string(),
-            Value::Concrete(ConcreteValue::EnumIdentifier("2012_10_17".to_string())),
+            Value::Concrete(ConcreteValue::String("2012-10-17".to_string())),
         );
         doc.insert(
             "statement".to_string(),
@@ -1459,5 +1431,57 @@ mod tests {
 
         let roundtripped = iam_policy_json_to_value(&json).expect("ok");
         assert_eq!(original, roundtripped);
+    }
+
+    /// aws#326 contract regression: the read path emits the raw
+    /// AWS-canonical value as a plain `String` (no down-conversion to a
+    /// DSL-alias `EnumIdentifier`). Pins (1) the new read shape and
+    /// (2) that this `String` form serializes straight back to the
+    /// identical AWS wire form — so the read→serialize round-trip needs
+    /// no `json_*_to_enum_identifier` step. Reconciliation against the
+    /// parsed-desired alias side is carina-core's job (saved-state
+    /// `lift_string_enum_leaves` + the differ's spelling-agnostic
+    /// `StringEnum` arm), not this read path's.
+    #[test]
+    fn read_path_emits_raw_canonical_string_and_round_trips() {
+        let aws_json = r#"{
+            "Version": "2012-10-17",
+            "Statement": [{
+                "Effect": "Deny",
+                "Action": "s3:*",
+                "Resource": "arn:aws:s3:::b/*"
+            }]
+        }"#;
+        let value = iam_policy_json_to_value(aws_json).expect("read ok");
+        let Value::Concrete(ConcreteValue::Map(doc)) = &value else {
+            panic!("expected policy map");
+        };
+        // (1) New read contract: raw AWS-canonical `String`, not a
+        // down-converted `EnumIdentifier` alias.
+        assert_eq!(
+            doc.get("version"),
+            Some(&Value::Concrete(ConcreteValue::String(
+                "2012-10-17".to_string()
+            ))),
+            "version must be raw AWS-canonical String (aws#326)"
+        );
+        let Value::Concrete(ConcreteValue::List(stmts)) = doc.get("statement").unwrap() else {
+            panic!("expected statement list");
+        };
+        let Value::Concrete(ConcreteValue::Map(s0)) = &stmts[0] else {
+            panic!("expected statement[0] map");
+        };
+        assert_eq!(
+            s0.get("effect"),
+            Some(&Value::Concrete(ConcreteValue::String("Deny".to_string()))),
+            "effect must be raw AWS-canonical String (aws#326)"
+        );
+
+        // (2) That String form serializes straight back to the AWS
+        // wire form with no down-conversion step in between.
+        let back = value_to_iam_policy_json(&value).expect("serialize ok");
+        let back_json: serde_json::Value = serde_json::from_str(&back).expect("parse");
+        assert_eq!(back_json["Version"], "2012-10-17");
+        assert_eq!(back_json["Statement"][0]["Effect"], "Deny");
     }
 }

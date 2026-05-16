@@ -340,20 +340,16 @@ fn redrive_allow_policy_to_json_string(value: &Value) -> Option<String> {
 fn json_to_redrive_allow_policy(json: &serde_json::Value) -> Option<Value> {
     let obj = json.as_object()?;
     let permission_raw = obj.get("redrivePermission")?.as_str()?;
-    // AWS returns the canonical camelCase form (`allowAll`); the DSL
-    // surface is the snake_case alias (`allow_all`). Emit
-    // `EnumIdentifier` carrying the alias so post-apply plan-verify
-    // compares equal.
-    let permission_alias = match permission_raw {
-        "allowAll" => "allow_all",
-        "denyAll" => "deny_all",
-        "byQueue" => "by_queue",
-        other => other,
-    };
+    // Emit the raw AWS-canonical value (`"allowAll"`) directly as a
+    // plain `String`. The alias↔canonical reconciliation against the
+    // parsed-desired side is owned by carina-core (the saved-state
+    // `lift_string_enum_leaves` lift + the differ's spelling-agnostic
+    // `StringEnum` arm), not by this read path emitting a
+    // pre-down-converted alias (aws#326).
     let mut out = IndexMap::new();
     out.insert(
         "redrive_permission".to_string(),
-        Value::Concrete(ConcreteValue::EnumIdentifier(permission_alias.to_string())),
+        Value::Concrete(ConcreteValue::String(permission_raw.to_string())),
     );
     if let Some(arns_json) = obj.get("sourceQueueArns")
         && let Some(arr) = arns_json.as_array()
