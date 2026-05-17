@@ -329,12 +329,19 @@ impl AwsProvider {
                 PageScan::KeepPaging => {}
             }
 
-            if !result.is_truncated() {
-                return Ok(State::not_found(id.clone()));
+            // Only a `next_record_name` lets the scan continue from where
+            // it left off. Treating "no next cursor" as not-found (rather
+            // than re-sending with `start_record_name = None`, which would
+            // silently restart the listing from the beginning of the zone)
+            // keeps the loop bounded to the target name's records.
+            match result.next_record_name() {
+                Some(next_name) if result.is_truncated() => {
+                    start_name = Some(next_name.to_string());
+                    start_type = result.next_record_type().cloned();
+                    start_identifier = result.next_record_identifier().map(str::to_string);
+                }
+                _ => return Ok(State::not_found(id.clone())),
             }
-            start_name = result.next_record_name().map(str::to_string);
-            start_type = result.next_record_type().cloned();
-            start_identifier = result.next_record_identifier().map(str::to_string);
         }
     }
 
