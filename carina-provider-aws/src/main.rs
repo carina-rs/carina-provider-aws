@@ -324,7 +324,13 @@ impl CarinaProvider for AwsProcessProvider {
             .iter()
             .map(convert::proto_to_core_resource)
             .collect();
-        self.normalizer.normalize_desired(&mut core_resources);
+        // Guest-side: drive the now-async normalizer on the guest's own
+        // outermost runtime — the same pattern the `Provider` CRUD
+        // methods use here (`self.runtime.block_on(...)`). Not a nested
+        // runtime: the host drives the WASM call, the guest drives its
+        // internal async with this runtime (carina#3112 design Non-goal).
+        self.runtime
+            .block_on(self.normalizer.normalize_desired(&mut core_resources));
         core_resources
             .iter()
             .map(convert::core_to_proto_resource)
@@ -349,8 +355,11 @@ impl CarinaProvider for AwsProcessProvider {
         for s in proto_schemas {
             registry.insert("aws", convert::proto_to_core_schema(s));
         }
-        self.normalizer
-            .merge_default_tags(&mut core_resources, &core_tags, &registry);
+        self.runtime.block_on(self.normalizer.merge_default_tags(
+            &mut core_resources,
+            &core_tags,
+            &registry,
+        ));
         *resources = core_resources
             .iter()
             .map(convert::core_to_proto_resource)
