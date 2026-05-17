@@ -72,6 +72,12 @@ enum PageScan<'a> {
 /// This walks every record on the page and classifies the page so the
 /// caller can match, page on, or stop early without scanning the whole
 /// zone (carina-rs/carina-provider-aws#333).
+///
+/// NOTE: the match is `(name, type)` only — the carina resource identity
+/// (`zone|name|type`, see `make_identifier`). Routing-policy record sets
+/// (weighted/latency/geo/failover) have multiple records with the same
+/// `(name, type)` distinguished by `SetIdentifier`; those are not
+/// modeled and the first such record is returned (aws#335).
 fn scan_page_for_record<'a>(
     records: &'a [ResourceRecordSet],
     target_name: &str,
@@ -604,7 +610,7 @@ mod tests {
             .expect("name and type set")
     }
 
-    /// The carina#3306 / aws#333 failure shape: an AAAA record exists at a
+    /// The carina#3106 / aws#333 failure shape: an AAAA record exists at a
     /// name that also has A and NS records. Route53 orders A before NS
     /// before AAAA at the same name, so a page started at the AAAA cursor
     /// can still lead with the earlier-sorting types — the old
