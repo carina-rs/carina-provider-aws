@@ -4,8 +4,8 @@ use std::collections::HashMap;
 
 use indexmap::IndexMap;
 
-use carina_core::provider::{self, ProviderNormalizer};
-use carina_core::resource::{ConcreteValue, Resource, Value};
+use carina_core::provider::{self, BoxFuture, ProviderNormalizer, SavedAttrs, ready_noop};
+use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
 use carina_core::schema::{AttributeType, SchemaRegistry};
 
 /// Schema extension for the AWS provider.
@@ -14,18 +14,41 @@ use carina_core::schema::{AttributeType, SchemaRegistry};
 pub struct AwsNormalizer;
 
 impl ProviderNormalizer for AwsNormalizer {
-    fn normalize_desired(&self, resources: &mut [Resource]) {
-        resolve_enum_identifiers(resources);
-        crate::services::route53::record_set::normalize_record_set_dns_names(resources);
+    fn normalize_desired<'a>(&'a self, resources: &'a mut [Resource]) -> BoxFuture<'a, ()> {
+        // Bodies are pure (enum resolution, dns-name strip — no I/O);
+        // the trait is async only so the WASM host impl can `.await`
+        // the guest directly (carina#3112). Wrapping the existing sync
+        // logic in a ready future is sufficient here.
+        Box::pin(async move {
+            resolve_enum_identifiers(resources);
+            crate::services::route53::record_set::normalize_record_set_dns_names(resources);
+        })
     }
 
-    fn merge_default_tags(
-        &self,
-        resources: &mut [Resource],
-        default_tags: &IndexMap<String, Value>,
-        registry: &SchemaRegistry,
-    ) {
-        provider::merge_default_tags_for_provider("aws", resources, default_tags, registry);
+    fn normalize_state<'a>(
+        &'a self,
+        _current_states: &'a mut HashMap<ResourceId, State>,
+    ) -> BoxFuture<'a, ()> {
+        ready_noop()
+    }
+
+    fn hydrate_read_state<'a>(
+        &'a self,
+        _current_states: &'a mut HashMap<ResourceId, State>,
+        _saved_attrs: &'a SavedAttrs,
+    ) -> BoxFuture<'a, ()> {
+        ready_noop()
+    }
+
+    fn merge_default_tags<'a>(
+        &'a self,
+        resources: &'a mut [Resource],
+        default_tags: &'a IndexMap<String, Value>,
+        registry: &'a SchemaRegistry,
+    ) -> BoxFuture<'a, ()> {
+        Box::pin(async move {
+            provider::merge_default_tags_for_provider("aws", resources, default_tags, registry);
+        })
     }
 }
 
@@ -929,8 +952,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_aws_normalizer_strips_record_set_trailing_dot() {
+    #[tokio::test]
+    async fn test_aws_normalizer_strips_record_set_trailing_dot() {
         // Regression for aws#300: when `route53.RecordSet.name` is fed by
         // another resource's read (e.g. `cert.domain_validation_options[0]
         // .resource_record.name`), the AWS API returns the FQDN with a
@@ -942,7 +965,7 @@ mod tests {
             Value::Concrete(ConcreteValue::String("_abc.example.com.".to_string())),
         );
         let mut resources = vec![resource];
-        AwsNormalizer.normalize_desired(&mut resources);
+        AwsNormalizer.normalize_desired(&mut resources).await;
         assert_eq!(
             resources[0].get_attr("name"),
             Some(&Value::Concrete(ConcreteValue::String(
