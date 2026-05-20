@@ -1361,11 +1361,14 @@ fn iam_policy_version() -> AttributeType {
 }
 
 /// IAM condition map type: Map<ConditionOperator, Map<ConditionKey, StringOrList>>
+///
+/// The `ConditionOperator` key set is the full cross-product produced by
+/// `all_condition_operator_snake_forms()` — base operators plus the
+/// `for_all_values_` / `for_any_value_` qualifier prefixes and the
+/// `_if_exists` suffix — so the schema accepts every spelling that
+/// `condition_operator_to_aws` already converts. See issue #340.
 fn condition_type() -> AttributeType {
-    let operator_values: Vec<String> = CONDITION_OPERATORS
-        .iter()
-        .map(|(s, _)| s.to_string())
-        .collect();
+    let operator_values: Vec<String> = all_condition_operator_snake_forms();
     let operator_aliases: Vec<(String, String)> = operator_values
         .iter()
         .filter_map(|v| {
@@ -2003,6 +2006,34 @@ const CONDITION_QUALIFIER_PREFIXES: &[(&str, &str)] = &[
     ("for_all_values_", "ForAllValues:"),
     ("for_any_value_", "ForAnyValue:"),
 ];
+
+/// Full cross-product of every snake_case condition-operator spelling that
+/// `condition_operator_to_aws` accepts: base, qualifier-prefixed,
+/// `_if_exists` suffixed, and the combination.
+///
+/// Single-sourcing this from `CONDITION_OPERATORS` × `CONDITION_QUALIFIER_PREFIXES`
+/// keeps the `ConditionOperator` schema (`condition_type`) in sync with the
+/// conversion layer by construction.
+///
+/// The cross-product is unconditional, so semantically-nonsense combinations
+/// like `for_all_values_null` or `bool_if_exists` are also accepted. The
+/// trade-off is intentional: the conversion layer round-trips them and AWS
+/// is the authority on what IAM evaluates at apply time, so carina does
+/// not pre-judge IAM semantics here. See issue #340.
+fn all_condition_operator_snake_forms() -> Vec<String> {
+    let mut out = Vec::with_capacity(
+        CONDITION_OPERATORS.len() * (1 + CONDITION_QUALIFIER_PREFIXES.len()) * 2,
+    );
+    for (snake, _) in CONDITION_OPERATORS {
+        out.push((*snake).to_string());
+        out.push(format!("{snake}_if_exists"));
+        for (qualifier, _) in CONDITION_QUALIFIER_PREFIXES {
+            out.push(format!("{qualifier}{snake}"));
+            out.push(format!("{qualifier}{snake}_if_exists"));
+        }
+    }
+    out
+}
 
 /// Convert a snake_case condition operator to its PascalCase AWS form.
 /// Returns `None` if the operator is unknown.
@@ -3124,6 +3155,43 @@ mod tests {
     }
 
     #[test]
+    fn condition_type_string_enum_includes_qualifier_and_if_exists_variants() {
+        // The schema's StringEnum values must enumerate every snake_case spelling
+        // that `condition_operator_to_aws` accepts — base, qualifier-prefixed,
+        // `_if_exists` suffixed, and the combination — so that `validate` does
+        // not reject inputs that the conversion layer already handles.
+        let cond = condition_type();
+        let AttributeType::Map { key, .. } = cond else {
+            panic!("condition_type() should be a Map");
+        };
+        let AttributeType::StringEnum { values, .. } = *key else {
+            panic!("condition_type() key should be a StringEnum");
+        };
+        for expected in [
+            "string_equals",
+            "for_all_values_string_equals",
+            "for_any_value_string_like",
+            "string_equals_if_exists",
+            "for_all_values_string_like_if_exists",
+            "for_any_value_arn_like_if_exists",
+            "null",
+        ] {
+            assert!(
+                values.iter().any(|v| v == expected),
+                "ConditionOperator StringEnum should include {expected:?}; got {values:?}"
+            );
+        }
+        // Sanity: every value in the schema must round-trip through the
+        // conversion layer, otherwise the two stay in drift.
+        for v in &values {
+            assert!(
+                condition_operator_to_aws(v).is_some(),
+                "schema value {v:?} not accepted by condition_operator_to_aws"
+            );
+        }
+    }
+
+    #[test]
     fn validate_condition_operators_accepts_valid() {
         let doc = Value::Concrete(ConcreteValue::Map(
             vec![(
@@ -3250,6 +3318,71 @@ mod tests {
             .collect(),
         ));
         assert!(validate_condition_operators(&doc).is_ok());
+    }
+
+    #[test]
+    fn validate_iam_policy_document_accepts_for_all_values_string_equals() {
+        // Regression for the route53 cross-account delegation writer use case
+        // (issue #340): `for_all_values_string_equals` is the only way to narrow
+        // `route53:ChangeResourceRecordSets` to a specific record-name / type /
+        // action set. The conversion layer accepts it; the schema must too.
+        let condition_inner = Value::Concrete(ConcreteValue::Map(
+            vec![(
+                "route53:ChangeResourceRecordSetsRecordTypes".to_string(),
+                Value::Concrete(ConcreteValue::List(vec![Value::Concrete(
+                    ConcreteValue::String("NS".to_string()),
+                )])),
+            )]
+            .into_iter()
+            .collect(),
+        ));
+        let statement = Value::Concrete(ConcreteValue::Map(
+            vec![
+                (
+                    "effect".to_string(),
+                    Value::Concrete(ConcreteValue::EnumIdentifier("allow".to_string())),
+                ),
+                (
+                    "action".to_string(),
+                    Value::Concrete(ConcreteValue::String(
+                        "route53:ChangeResourceRecordSets".to_string(),
+                    )),
+                ),
+                (
+                    "resource".to_string(),
+                    Value::Concrete(ConcreteValue::String(
+                        "arn:aws:route53:::hostedzone/ABC".to_string(),
+                    )),
+                ),
+                (
+                    "condition".to_string(),
+                    Value::Concrete(ConcreteValue::Map(
+                        vec![("for_all_values_string_equals".to_string(), condition_inner)]
+                            .into_iter()
+                            .collect(),
+                    )),
+                ),
+            ]
+            .into_iter()
+            .collect(),
+        ));
+        let doc = Value::Concrete(ConcreteValue::Map(
+            vec![
+                (
+                    "version".to_string(),
+                    Value::Concrete(ConcreteValue::EnumIdentifier("2012_10_17".to_string())),
+                ),
+                (
+                    "statement".to_string(),
+                    Value::Concrete(ConcreteValue::List(vec![statement])),
+                ),
+            ]
+            .into_iter()
+            .collect(),
+        ));
+        validate_iam_policy_document(&doc).expect(
+            "for_all_values_string_equals must validate (schema must match conversion layer)",
+        );
     }
 
     #[test]
