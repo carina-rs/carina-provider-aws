@@ -69,13 +69,23 @@ impl ProviderFactory for AwsProviderFactory {
                 ordered: false,
             },
         );
+        types.insert("assume_role".to_string(), assume_role_attribute_type());
         types
     }
 
-    fn validate_config(&self, _attributes: &IndexMap<String, Value>) -> Result<(), String> {
-        // Region format/value validation is handled by the host via
-        // `provider_config_attribute_types`. No provider-specific semantic
-        // checks are needed beyond that for now.
+    fn validate_config(&self, attributes: &IndexMap<String, Value>) -> Result<(), String> {
+        // Cross-account guardrail: when `assume_role.role_arn` parses to
+        // an account id that is not in `allowed_account_ids` (when that
+        // list is configured), refuse the configuration. Avoids the
+        // foot-gun of an assume-role silently landing in the wrong AWS
+        // account (aws#342).
+        use crate::services::sts::account_guard::extract_string_list;
+        use crate::services::sts::assume_role::{check_cross_account, extract_assume_role};
+        let assume_role = extract_assume_role(attributes.get("assume_role"))?;
+        if let Some(ar) = &assume_role {
+            let allowed = extract_string_list(attributes.get("allowed_account_ids"));
+            check_cross_account(&ar.role_arn, &allowed)?;
+        }
         Ok(())
     }
 
@@ -100,14 +110,22 @@ impl ProviderFactory for AwsProviderFactory {
         // as a cache key in `WasmProviderFactory`; for in-process
         // factories the constructed-fresh shape is enough.
         use crate::services::sts::account_guard::extract_string_list;
+        use crate::services::sts::assume_role::extract_assume_role;
         let region = self.extract_region(attributes);
         let allowed = extract_string_list(attributes.get("allowed_account_ids"));
         let forbidden = extract_string_list(attributes.get("forbidden_account_ids"));
+        let assume_role = match extract_assume_role(attributes.get("assume_role")) {
+            Ok(v) => v,
+            Err(e) => {
+                return Box::pin(async move {
+                    Err(carina_core::provider::ProviderError::invalid_input(e))
+                });
+            }
+        };
         Box::pin(async move {
-            Ok(
-                Box::new(AwsProvider::new_with_account_guard(&region, allowed, forbidden).await)
-                    as Box<dyn carina_core::provider::Provider>,
-            )
+            Ok(Box::new(
+                AwsProvider::new_with_account_guard(&region, allowed, forbidden, assume_role).await,
+            ) as Box<dyn carina_core::provider::Provider>)
         })
     }
 
@@ -144,5 +162,28 @@ impl ProviderFactory for AwsProviderFactory {
     ) -> Option<String> {
         crate::schemas::generated::get_enum_alias_reverse(resource_type, attr_name, value)
             .map(|s| s.to_string())
+    }
+}
+
+/// Schema for the provider-level `assume_role` block. Mirrors the
+/// Terraform AWS provider's `assume_role` (MVP field set: `role_arn`,
+/// `session_name`, `external_id`, `duration`). When present, the
+/// provider chains an `sts:AssumeRole` call on top of the ambient
+/// credential chain (aws#342).
+fn assume_role_attribute_type() -> carina_core::schema::AttributeType {
+    use carina_core::schema::{AttributeType, StructField};
+    AttributeType::Struct {
+        name: "AssumeRole".to_string(),
+        fields: vec![
+            StructField::new("role_arn", AttributeType::String)
+                .required()
+                .with_description("IAM role ARN to assume."),
+            StructField::new("session_name", AttributeType::String)
+                .with_description("STS session name to associate with the assumed-role session."),
+            StructField::new("external_id", AttributeType::String)
+                .with_description("External ID required by the trust policy of the assumed role."),
+            StructField::new("duration", AttributeType::Duration)
+                .with_description("Assumed-role session duration (e.g., 30min, 1h, 15s)."),
+        ],
     }
 }

@@ -56,19 +56,25 @@ pub struct AwsProvider {
 impl AwsProvider {
     /// Create a new AWS Provider
     pub async fn new(region: &str) -> Self {
-        Self::new_with_account_guard(region, Vec::new(), Vec::new()).await
+        Self::new_with_account_guard(region, Vec::new(), Vec::new(), None).await
     }
 
     /// Create a new AWS Provider with provider-level account guard
     /// configuration. `allowed_account_ids` and `forbidden_account_ids`
     /// are stored verbatim; the guard itself is only run when
     /// [`AwsProvider::verify_account_id`] is called.
+    ///
+    /// `assume_role`, when present, layers an
+    /// [`aws_config::sts::AssumeRoleProvider`] on top of the ambient
+    /// credential chain so all SDK calls go out under the assumed-role
+    /// session.
     pub async fn new_with_account_guard(
         region: &str,
         allowed_account_ids: Vec<String>,
         forbidden_account_ids: Vec<String>,
+        assume_role: Option<crate::services::sts::assume_role::AssumeRoleConfig>,
     ) -> Self {
-        let config = Self::build_config(region).await;
+        let config = Self::build_config(region, assume_role).await;
 
         Self {
             s3_client: S3Client::new(&config),
@@ -88,21 +94,58 @@ impl AwsProvider {
     }
 
     #[cfg(not(target_arch = "wasm32"))]
-    async fn build_config(region: &str) -> aws_config::SdkConfig {
-        aws_config::defaults(aws_config::BehaviorVersion::latest())
+    async fn build_config(
+        region: &str,
+        assume_role: Option<crate::services::sts::assume_role::AssumeRoleConfig>,
+    ) -> aws_config::SdkConfig {
+        let base = aws_config::defaults(aws_config::BehaviorVersion::latest())
             .region(Region::new(region.to_string()))
             .load()
-            .await
+            .await;
+        match assume_role {
+            None => base,
+            Some(ar) => Self::wrap_with_assume_role(base, ar).await,
+        }
     }
 
     #[cfg(target_arch = "wasm32")]
-    async fn build_config(region: &str) -> aws_config::SdkConfig {
+    async fn build_config(
+        region: &str,
+        assume_role: Option<crate::services::sts::assume_role::AssumeRoleConfig>,
+    ) -> aws_config::SdkConfig {
         use carina_plugin_sdk::wasi_http::WasiHttpClient;
-        aws_config::defaults(aws_config::BehaviorVersion::latest())
+        let base = aws_config::defaults(aws_config::BehaviorVersion::latest())
             .region(Region::new(region.to_string()))
             .http_client(WasiHttpClient::new())
             .load()
-            .await
+            .await;
+        match assume_role {
+            None => base,
+            Some(ar) => Self::wrap_with_assume_role(base, ar).await,
+        }
+    }
+
+    /// Layer an STS `AssumeRoleProvider` on top of the ambient base
+    /// credential chain. The returned [`aws_config::SdkConfig`] uses the
+    /// assumed-role credentials for every SDK call thereafter.
+    async fn wrap_with_assume_role(
+        base: aws_config::SdkConfig,
+        ar: crate::services::sts::assume_role::AssumeRoleConfig,
+    ) -> aws_config::SdkConfig {
+        let mut builder =
+            aws_config::sts::AssumeRoleProvider::builder(ar.role_arn.clone()).configure(&base);
+        if let Some(name) = ar.session_name.as_deref() {
+            builder = builder.session_name(name);
+        }
+        if let Some(eid) = ar.external_id.as_deref() {
+            builder = builder.external_id(eid);
+        }
+        if let Some(dur) = ar.duration {
+            builder = builder.session_length(dur);
+        }
+        let provider = builder.build().await;
+        let shared = aws_credential_types::provider::SharedCredentialsProvider::new(provider);
+        base.into_builder().credentials_provider(shared).build()
     }
 
     /// Create with specific clients (for testing)
