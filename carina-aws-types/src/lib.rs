@@ -1960,16 +1960,28 @@ pub fn s3_redirect_all_requests_to() -> AttributeType {
     }
 }
 
-/// IAM condition operator — represented as a fully-decomposed sum so
-/// every valid spelling corresponds to one constructible value and
-/// invalid combinations (e.g. a stray "for_all_values_unknown_op")
-/// cannot be built. Stringly-typed conversion is confined to the
-/// `from_snake` / `from_aws` boundary; the schema, validator, and
-/// renderers all consume this type directly so they cannot drift.
+/// IAM condition operator — represented as a fully-decomposed sum
+/// `(Option<qualifier>) × base × if_exists` so every parseable spelling
+/// has exactly one constructible value, and unknown strings can be
+/// rejected once at the [`ConditionOperator::from_snake`] /
+/// [`ConditionOperator::from_aws`] boundary.
+///
+/// The cross-product is intentionally permissive: combinations like
+/// `for_all_values_null` or `bool_if_exists` are constructible and
+/// emitted by [`ConditionOperator::all`] because AWS, not carina, is the
+/// authority on what IAM evaluates at apply time. See the doc-comment
+/// on [`ConditionOperator::all`] for the rationale.
+///
+/// The fields are `pub` so callers can pattern-match exhaustively when
+/// they need the structural decomposition (e.g. to render or to map
+/// across spellings); the schema, validator, and string-wrapper
+/// conversion functions all consume this type directly so they cannot
+/// drift from each other.
 ///
 /// See <https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_elements_condition_operators.html>
 /// and issue #340.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub struct ConditionOperator {
     pub qualifier: Option<ConditionQualifier>,
     pub base: ConditionOperatorBase,
@@ -1978,6 +1990,7 @@ pub struct ConditionOperator {
 
 /// Set-aware qualifier prefix on a [`ConditionOperator`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum ConditionQualifier {
     ForAllValues,
     ForAnyValue,
@@ -2008,7 +2021,16 @@ impl ConditionQualifier {
 }
 
 /// Base IAM condition operator, without any qualifier or `_if_exists` suffix.
+///
+/// Marked `#[non_exhaustive]` so AWS adding a new operator does not
+/// become a downstream SemVer break for code that pattern-matches on this
+/// enum. The new variant goes into [`ConditionOperatorBase::ALL`] together
+/// with the [`ConditionOperatorBase::snake`] / [`ConditionOperatorBase::aws`]
+/// arms — the latter two are exhaustive matches so the compiler enforces
+/// they stay complete, but `ALL` is hand-written and must be edited in
+/// lockstep.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum ConditionOperatorBase {
     StringEquals,
     StringNotEquals,
@@ -2140,6 +2162,20 @@ impl ConditionOperatorBase {
 }
 
 impl ConditionOperator {
+    /// Construct a [`ConditionOperator`] from its three structural pieces.
+    /// Always succeeds — the type does not police IAM semantics; AWS does.
+    pub const fn new(
+        qualifier: Option<ConditionQualifier>,
+        base: ConditionOperatorBase,
+        if_exists: bool,
+    ) -> Self {
+        Self {
+            qualifier,
+            base,
+            if_exists,
+        }
+    }
+
     /// Snake-case DSL spelling (e.g. `for_all_values_string_equals_if_exists`).
     pub fn to_snake(self) -> String {
         let prefix = self.qualifier.map_or("", ConditionQualifier::snake_prefix);
@@ -3358,6 +3394,8 @@ mod tests {
                 Some(op),
                 "aws {aws:?} did not round-trip"
             );
+            // `Display` is the canonical AWS-wire spelling.
+            assert_eq!(op.to_string(), aws);
         }
         // Spot-check a representative spelling, including the qualifier+if_exists
         // combination that issue #340 unblocked.
