@@ -1960,158 +1960,340 @@ pub fn s3_redirect_all_requests_to() -> AttributeType {
     }
 }
 
-/// IAM condition operator mappings: (snake_case, PascalCase).
+/// IAM condition operator — represented as a fully-decomposed sum so
+/// every valid spelling corresponds to one constructible value and
+/// invalid combinations (e.g. a stray "for_all_values_unknown_op")
+/// cannot be built. Stringly-typed conversion is confined to the
+/// `from_snake` / `from_aws` boundary; the schema, validator, and
+/// renderers all consume this type directly so they cannot drift.
 ///
-/// See <https://docs.aws.amazon.Com/IAM/latest/UserGuide/reference_policies_elements_condition_operators.html>
-const CONDITION_OPERATORS: &[(&str, &str)] = &[
-    // String
-    ("string_equals", "StringEquals"),
-    ("string_not_equals", "StringNotEquals"),
-    ("string_equals_ignore_case", "StringEqualsIgnoreCase"),
-    ("string_not_equals_ignore_case", "StringNotEqualsIgnoreCase"),
-    ("string_like", "StringLike"),
-    ("string_not_like", "StringNotLike"),
-    // Numeric
-    ("numeric_equals", "NumericEquals"),
-    ("numeric_not_equals", "NumericNotEquals"),
-    ("numeric_less_than", "NumericLessThan"),
-    ("numeric_less_than_equals", "NumericLessThanEquals"),
-    ("numeric_greater_than", "NumericGreaterThan"),
-    ("numeric_greater_than_equals", "NumericGreaterThanEquals"),
-    // Date
-    ("date_equals", "DateEquals"),
-    ("date_not_equals", "DateNotEquals"),
-    ("date_less_than", "DateLessThan"),
-    ("date_less_than_equals", "DateLessThanEquals"),
-    ("date_greater_than", "DateGreaterThan"),
-    ("date_greater_than_equals", "DateGreaterThanEquals"),
-    // Boolean
-    ("bool", "Bool"),
-    // Binary
-    ("binary_equals", "BinaryEquals"),
-    // IP
-    ("ip_address", "IpAddress"),
-    ("not_ip_address", "NotIpAddress"),
-    // ARN
-    ("arn_equals", "ArnEquals"),
-    ("arn_not_equals", "ArnNotEquals"),
-    ("arn_like", "ArnLike"),
-    ("arn_not_like", "ArnNotLike"),
-    // Null check
-    ("null", "Null"),
-];
+/// See <https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_elements_condition_operators.html>
+/// and issue #340.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ConditionOperator {
+    pub qualifier: Option<ConditionQualifier>,
+    pub base: ConditionOperatorBase,
+    pub if_exists: bool,
+}
 
-/// Snake_case prefixes for set operators and their PascalCase AWS form.
-const CONDITION_QUALIFIER_PREFIXES: &[(&str, &str)] = &[
-    ("for_all_values_", "ForAllValues:"),
-    ("for_any_value_", "ForAnyValue:"),
-];
+/// Set-aware qualifier prefix on a [`ConditionOperator`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ConditionQualifier {
+    ForAllValues,
+    ForAnyValue,
+}
 
-/// Full cross-product of every snake_case condition-operator spelling that
-/// `condition_operator_to_aws` accepts: base, qualifier-prefixed,
-/// `_if_exists` suffixed, and the combination.
-///
-/// Single-sourcing this from `CONDITION_OPERATORS` × `CONDITION_QUALIFIER_PREFIXES`
-/// keeps the `ConditionOperator` schema (`condition_type`) in sync with the
-/// conversion layer by construction.
-///
-/// The cross-product is unconditional, so semantically-nonsense combinations
-/// like `for_all_values_null` or `bool_if_exists` are also accepted. The
-/// trade-off is intentional: the conversion layer round-trips them and AWS
-/// is the authority on what IAM evaluates at apply time, so carina does
-/// not pre-judge IAM semantics here. See issue #340.
-fn all_condition_operator_snake_forms() -> Vec<String> {
-    let mut out = Vec::with_capacity(
-        CONDITION_OPERATORS.len() * (1 + CONDITION_QUALIFIER_PREFIXES.len()) * 2,
-    );
-    for (snake, _) in CONDITION_OPERATORS {
-        out.push((*snake).to_string());
-        out.push(format!("{snake}_if_exists"));
-        for (qualifier, _) in CONDITION_QUALIFIER_PREFIXES {
-            out.push(format!("{qualifier}{snake}"));
-            out.push(format!("{qualifier}{snake}_if_exists"));
+impl ConditionQualifier {
+    /// Every defined qualifier, in the canonical AWS-doc order.
+    pub const ALL: &'static [ConditionQualifier] = &[
+        ConditionQualifier::ForAllValues,
+        ConditionQualifier::ForAnyValue,
+    ];
+
+    /// Snake-case prefix written in the DSL (including the trailing `_`).
+    pub const fn snake_prefix(self) -> &'static str {
+        match self {
+            ConditionQualifier::ForAllValues => "for_all_values_",
+            ConditionQualifier::ForAnyValue => "for_any_value_",
         }
     }
-    out
+
+    /// PascalCase prefix accepted by the AWS IAM API (including the trailing `:`).
+    pub const fn aws_prefix(self) -> &'static str {
+        match self {
+            ConditionQualifier::ForAllValues => "ForAllValues:",
+            ConditionQualifier::ForAnyValue => "ForAnyValue:",
+        }
+    }
+}
+
+/// Base IAM condition operator, without any qualifier or `_if_exists` suffix.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ConditionOperatorBase {
+    StringEquals,
+    StringNotEquals,
+    StringEqualsIgnoreCase,
+    StringNotEqualsIgnoreCase,
+    StringLike,
+    StringNotLike,
+    NumericEquals,
+    NumericNotEquals,
+    NumericLessThan,
+    NumericLessThanEquals,
+    NumericGreaterThan,
+    NumericGreaterThanEquals,
+    DateEquals,
+    DateNotEquals,
+    DateLessThan,
+    DateLessThanEquals,
+    DateGreaterThan,
+    DateGreaterThanEquals,
+    Bool,
+    BinaryEquals,
+    IpAddress,
+    NotIpAddress,
+    ArnEquals,
+    ArnNotEquals,
+    ArnLike,
+    ArnNotLike,
+    Null,
+}
+
+impl ConditionOperatorBase {
+    /// Every defined base operator, in the canonical AWS-doc order
+    /// (String / Numeric / Date / Boolean / Binary / IP / ARN / Null).
+    pub const ALL: &'static [ConditionOperatorBase] = &[
+        ConditionOperatorBase::StringEquals,
+        ConditionOperatorBase::StringNotEquals,
+        ConditionOperatorBase::StringEqualsIgnoreCase,
+        ConditionOperatorBase::StringNotEqualsIgnoreCase,
+        ConditionOperatorBase::StringLike,
+        ConditionOperatorBase::StringNotLike,
+        ConditionOperatorBase::NumericEquals,
+        ConditionOperatorBase::NumericNotEquals,
+        ConditionOperatorBase::NumericLessThan,
+        ConditionOperatorBase::NumericLessThanEquals,
+        ConditionOperatorBase::NumericGreaterThan,
+        ConditionOperatorBase::NumericGreaterThanEquals,
+        ConditionOperatorBase::DateEquals,
+        ConditionOperatorBase::DateNotEquals,
+        ConditionOperatorBase::DateLessThan,
+        ConditionOperatorBase::DateLessThanEquals,
+        ConditionOperatorBase::DateGreaterThan,
+        ConditionOperatorBase::DateGreaterThanEquals,
+        ConditionOperatorBase::Bool,
+        ConditionOperatorBase::BinaryEquals,
+        ConditionOperatorBase::IpAddress,
+        ConditionOperatorBase::NotIpAddress,
+        ConditionOperatorBase::ArnEquals,
+        ConditionOperatorBase::ArnNotEquals,
+        ConditionOperatorBase::ArnLike,
+        ConditionOperatorBase::ArnNotLike,
+        ConditionOperatorBase::Null,
+    ];
+
+    /// Snake-case DSL spelling of this base operator.
+    pub const fn snake(self) -> &'static str {
+        match self {
+            ConditionOperatorBase::StringEquals => "string_equals",
+            ConditionOperatorBase::StringNotEquals => "string_not_equals",
+            ConditionOperatorBase::StringEqualsIgnoreCase => "string_equals_ignore_case",
+            ConditionOperatorBase::StringNotEqualsIgnoreCase => "string_not_equals_ignore_case",
+            ConditionOperatorBase::StringLike => "string_like",
+            ConditionOperatorBase::StringNotLike => "string_not_like",
+            ConditionOperatorBase::NumericEquals => "numeric_equals",
+            ConditionOperatorBase::NumericNotEquals => "numeric_not_equals",
+            ConditionOperatorBase::NumericLessThan => "numeric_less_than",
+            ConditionOperatorBase::NumericLessThanEquals => "numeric_less_than_equals",
+            ConditionOperatorBase::NumericGreaterThan => "numeric_greater_than",
+            ConditionOperatorBase::NumericGreaterThanEquals => "numeric_greater_than_equals",
+            ConditionOperatorBase::DateEquals => "date_equals",
+            ConditionOperatorBase::DateNotEquals => "date_not_equals",
+            ConditionOperatorBase::DateLessThan => "date_less_than",
+            ConditionOperatorBase::DateLessThanEquals => "date_less_than_equals",
+            ConditionOperatorBase::DateGreaterThan => "date_greater_than",
+            ConditionOperatorBase::DateGreaterThanEquals => "date_greater_than_equals",
+            ConditionOperatorBase::Bool => "bool",
+            ConditionOperatorBase::BinaryEquals => "binary_equals",
+            ConditionOperatorBase::IpAddress => "ip_address",
+            ConditionOperatorBase::NotIpAddress => "not_ip_address",
+            ConditionOperatorBase::ArnEquals => "arn_equals",
+            ConditionOperatorBase::ArnNotEquals => "arn_not_equals",
+            ConditionOperatorBase::ArnLike => "arn_like",
+            ConditionOperatorBase::ArnNotLike => "arn_not_like",
+            ConditionOperatorBase::Null => "null",
+        }
+    }
+
+    /// PascalCase AWS-API spelling of this base operator.
+    pub const fn aws(self) -> &'static str {
+        match self {
+            ConditionOperatorBase::StringEquals => "StringEquals",
+            ConditionOperatorBase::StringNotEquals => "StringNotEquals",
+            ConditionOperatorBase::StringEqualsIgnoreCase => "StringEqualsIgnoreCase",
+            ConditionOperatorBase::StringNotEqualsIgnoreCase => "StringNotEqualsIgnoreCase",
+            ConditionOperatorBase::StringLike => "StringLike",
+            ConditionOperatorBase::StringNotLike => "StringNotLike",
+            ConditionOperatorBase::NumericEquals => "NumericEquals",
+            ConditionOperatorBase::NumericNotEquals => "NumericNotEquals",
+            ConditionOperatorBase::NumericLessThan => "NumericLessThan",
+            ConditionOperatorBase::NumericLessThanEquals => "NumericLessThanEquals",
+            ConditionOperatorBase::NumericGreaterThan => "NumericGreaterThan",
+            ConditionOperatorBase::NumericGreaterThanEquals => "NumericGreaterThanEquals",
+            ConditionOperatorBase::DateEquals => "DateEquals",
+            ConditionOperatorBase::DateNotEquals => "DateNotEquals",
+            ConditionOperatorBase::DateLessThan => "DateLessThan",
+            ConditionOperatorBase::DateLessThanEquals => "DateLessThanEquals",
+            ConditionOperatorBase::DateGreaterThan => "DateGreaterThan",
+            ConditionOperatorBase::DateGreaterThanEquals => "DateGreaterThanEquals",
+            ConditionOperatorBase::Bool => "Bool",
+            ConditionOperatorBase::BinaryEquals => "BinaryEquals",
+            ConditionOperatorBase::IpAddress => "IpAddress",
+            ConditionOperatorBase::NotIpAddress => "NotIpAddress",
+            ConditionOperatorBase::ArnEquals => "ArnEquals",
+            ConditionOperatorBase::ArnNotEquals => "ArnNotEquals",
+            ConditionOperatorBase::ArnLike => "ArnLike",
+            ConditionOperatorBase::ArnNotLike => "ArnNotLike",
+            ConditionOperatorBase::Null => "Null",
+        }
+    }
+}
+
+impl ConditionOperator {
+    /// Snake-case DSL spelling (e.g. `for_all_values_string_equals_if_exists`).
+    pub fn to_snake(self) -> String {
+        let prefix = self.qualifier.map_or("", ConditionQualifier::snake_prefix);
+        let suffix = if self.if_exists { "_if_exists" } else { "" };
+        format!("{prefix}{}{suffix}", self.base.snake())
+    }
+
+    /// PascalCase AWS-API spelling (e.g. `ForAllValues:StringEqualsIfExists`).
+    pub fn to_aws(self) -> String {
+        let prefix = self.qualifier.map_or("", ConditionQualifier::aws_prefix);
+        let suffix = if self.if_exists { "IfExists" } else { "" };
+        format!("{prefix}{}{suffix}", self.base.aws())
+    }
+
+    /// Parse a snake-case DSL spelling. Returns `None` if no variant matches.
+    pub fn from_snake(snake: &str) -> Option<ConditionOperator> {
+        let (rest, if_exists) = match snake.strip_suffix("_if_exists") {
+            Some(base) => (base, true),
+            None => (snake, false),
+        };
+        for &q in ConditionQualifier::ALL {
+            if let Some(base) = rest.strip_prefix(q.snake_prefix()) {
+                return ConditionOperatorBase::ALL
+                    .iter()
+                    .copied()
+                    .find(|b| b.snake() == base)
+                    .map(|base| ConditionOperator {
+                        qualifier: Some(q),
+                        base,
+                        if_exists,
+                    });
+            }
+        }
+        ConditionOperatorBase::ALL
+            .iter()
+            .copied()
+            .find(|b| b.snake() == rest)
+            .map(|base| ConditionOperator {
+                qualifier: None,
+                base,
+                if_exists,
+            })
+    }
+
+    /// Parse a PascalCase AWS-API spelling. Returns `None` if no variant matches.
+    pub fn from_aws(pascal: &str) -> Option<ConditionOperator> {
+        let (rest, if_exists) = match pascal.strip_suffix("IfExists") {
+            Some(base) => (base, true),
+            None => (pascal, false),
+        };
+        for &q in ConditionQualifier::ALL {
+            if let Some(base) = rest.strip_prefix(q.aws_prefix()) {
+                return ConditionOperatorBase::ALL
+                    .iter()
+                    .copied()
+                    .find(|b| b.aws() == base)
+                    .map(|base| ConditionOperator {
+                        qualifier: Some(q),
+                        base,
+                        if_exists,
+                    });
+            }
+        }
+        ConditionOperatorBase::ALL
+            .iter()
+            .copied()
+            .find(|b| b.aws() == rest)
+            .map(|base| ConditionOperator {
+                qualifier: None,
+                base,
+                if_exists,
+            })
+    }
+
+    /// Every `(qualifier, base, if_exists)` cross-product, in a stable order
+    /// (outer = base in AWS-doc order, inner = base → `_if_exists` →
+    /// qualified bases → qualified `_if_exists`). The schema's
+    /// `ConditionOperator` `StringEnum` values and the validator's
+    /// "valid operators" suggestion are both derived from this single list,
+    /// so they cannot drift from each other or from `from_snake` / `from_aws`.
+    ///
+    /// The cross-product is unconditional, so semantically-nonsense
+    /// combinations like `for_all_values_null` or `bool_if_exists` are also
+    /// emitted. Intentional: AWS is the authority on what IAM evaluates at
+    /// apply time, so carina does not pre-judge IAM semantics here.
+    pub fn all() -> impl Iterator<Item = ConditionOperator> {
+        ConditionOperatorBase::ALL.iter().copied().flat_map(|base| {
+            let mut spellings: Vec<ConditionOperator> =
+                Vec::with_capacity(2 + 2 * ConditionQualifier::ALL.len());
+            spellings.push(ConditionOperator {
+                qualifier: None,
+                base,
+                if_exists: false,
+            });
+            spellings.push(ConditionOperator {
+                qualifier: None,
+                base,
+                if_exists: true,
+            });
+            for &q in ConditionQualifier::ALL {
+                spellings.push(ConditionOperator {
+                    qualifier: Some(q),
+                    base,
+                    if_exists: false,
+                });
+                spellings.push(ConditionOperator {
+                    qualifier: Some(q),
+                    base,
+                    if_exists: true,
+                });
+            }
+            spellings
+        })
+    }
+}
+
+impl std::fmt::Display for ConditionOperator {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.to_aws())
+    }
+}
+
+/// Every snake_case condition-operator spelling the type system admits.
+///
+/// Delegates to [`ConditionOperator::all`] so the schema's `StringEnum`
+/// values and the validator's suggestion list both flow from the same
+/// type-level source; the schema cannot drift from `ConditionOperator::from_snake`.
+fn all_condition_operator_snake_forms() -> Vec<String> {
+    ConditionOperator::all().map(|op| op.to_snake()).collect()
 }
 
 /// Convert a snake_case condition operator to its PascalCase AWS form.
 /// Returns `None` if the operator is unknown.
 ///
-/// Handles modifiers generically:
-/// - `_if_exists` suffix: `string_equals_if_exists` → `StringEqualsIfExists`
-/// - `for_all_values_` / `for_any_value_` prefix: `for_all_values_string_like` → `ForAllValues:StringLike`
-/// - Combined: `for_all_values_string_like_if_exists` → `ForAllValues:StringLikeIfExists`
+/// Thin string-boundary wrapper over [`ConditionOperator::from_snake`] +
+/// [`ConditionOperator::to_aws`] so callers that thread `&str` through
+/// `unwrap_or_else(|| k.clone())` keep working. Prefer the typed API
+/// inside this crate.
 pub fn condition_operator_to_aws(snake: &str) -> Option<String> {
-    let (rest, if_exists) = match snake.strip_suffix("_if_exists") {
-        Some(base) => (base, true),
-        None => (snake, false),
-    };
-    // Check for qualifier prefix (for_all_values_, for_any_value_)
-    for (snake_prefix, pascal_prefix) in CONDITION_QUALIFIER_PREFIXES {
-        if let Some(base) = rest.strip_prefix(snake_prefix) {
-            return CONDITION_OPERATORS
-                .iter()
-                .find(|(s, _)| *s == base)
-                .map(|(_, pascal)| {
-                    let suffix = if if_exists { "IfExists" } else { "" };
-                    format!("{pascal_prefix}{pascal}{suffix}")
-                });
-        }
-    }
-    // Direct operator lookup
-    CONDITION_OPERATORS
-        .iter()
-        .find(|(s, _)| *s == rest)
-        .map(|(_, pascal)| {
-            if if_exists {
-                format!("{pascal}IfExists")
-            } else {
-                pascal.to_string()
-            }
-        })
+    ConditionOperator::from_snake(snake).map(|op| op.to_aws())
 }
 
 /// Convert a PascalCase AWS condition operator to snake_case DSL form.
 /// Returns `None` if the operator is unknown.
 ///
-/// Handles modifiers generically:
-/// - `IfExists` suffix: `StringEqualsIfExists` → `string_equals_if_exists`
-/// - `ForAllValues:` / `ForAnyValue:` prefix: `ForAllValues:StringLike` → `for_all_values_string_like`
-/// - Combined: `ForAllValues:StringLikeIfExists` → `for_all_values_string_like_if_exists`
+/// Thin string-boundary wrapper over [`ConditionOperator::from_aws`] +
+/// [`ConditionOperator::to_snake`].
 pub fn condition_operator_to_snake(pascal: &str) -> Option<String> {
-    let (rest, if_exists) = match pascal.strip_suffix("IfExists") {
-        Some(base) => (base, true),
-        None => (pascal, false),
-    };
-    // Check for qualifier prefix (ForAllValues:, ForAnyValue:)
-    for (snake_prefix, pascal_prefix) in CONDITION_QUALIFIER_PREFIXES {
-        if let Some(base) = rest.strip_prefix(pascal_prefix) {
-            return CONDITION_OPERATORS
-                .iter()
-                .find(|(_, p)| *p == base)
-                .map(|(snake, _)| {
-                    let suffix = if if_exists { "_if_exists" } else { "" };
-                    format!("{snake_prefix}{snake}{suffix}")
-                });
-        }
-    }
-    // Direct operator lookup
-    CONDITION_OPERATORS
-        .iter()
-        .find(|(_, p)| *p == rest)
-        .map(|(snake, _)| {
-            if if_exists {
-                format!("{snake}_if_exists")
-            } else {
-                snake.to_string()
-            }
-        })
+    ConditionOperator::from_aws(pascal).map(|op| op.to_snake())
 }
 
 /// Check if a string is a valid snake_case condition operator.
 pub fn is_valid_condition_operator(key: &str) -> bool {
-    condition_operator_to_aws(key).is_some()
+    ConditionOperator::from_snake(key).is_some()
 }
 
 /// Validate condition operators in a parsed IAM policy document.
@@ -2135,8 +2317,10 @@ pub fn validate_condition_operators(value: &Value) -> Result<(), String> {
         };
         for key in condition.keys() {
             if !is_valid_condition_operator(key) {
-                let valid_operators: Vec<&str> =
-                    CONDITION_OPERATORS.iter().map(|(s, _)| *s).collect();
+                let valid_operators: Vec<&'static str> = ConditionOperatorBase::ALL
+                    .iter()
+                    .map(|b| b.snake())
+                    .collect();
                 return Err(format!(
                     "statement[{}]: unknown condition operator '{}'. \
                      Valid operators: {} \
@@ -3152,6 +3336,49 @@ mod tests {
             condition_operator_to_snake("ForAnyValue:ArnLikeIfExists"),
             Some("for_any_value_arn_like_if_exists".to_string())
         );
+    }
+
+    #[test]
+    fn condition_operator_typed_roundtrip() {
+        // Type-level guarantee: every constructible ConditionOperator round-trips
+        // through both snake/AWS Display forms. The schema's StringEnum, the
+        // validator's "valid operators" list, and the conversion wrappers all
+        // flow from `ConditionOperator::all()`, so this assertion forecloses
+        // drift between them.
+        for op in ConditionOperator::all() {
+            let snake = op.to_snake();
+            let aws = op.to_aws();
+            assert_eq!(
+                ConditionOperator::from_snake(&snake),
+                Some(op),
+                "snake {snake:?} did not round-trip"
+            );
+            assert_eq!(
+                ConditionOperator::from_aws(&aws),
+                Some(op),
+                "aws {aws:?} did not round-trip"
+            );
+        }
+        // Spot-check a representative spelling, including the qualifier+if_exists
+        // combination that issue #340 unblocked.
+        let op = ConditionOperator {
+            qualifier: Some(ConditionQualifier::ForAllValues),
+            base: ConditionOperatorBase::StringLike,
+            if_exists: true,
+        };
+        assert_eq!(op.to_snake(), "for_all_values_string_like_if_exists");
+        assert_eq!(op.to_aws(), "ForAllValues:StringLikeIfExists");
+    }
+
+    #[test]
+    fn condition_operator_total_count_matches_cross_product() {
+        // 27 base × 3 qualifier options (None, ForAllValues, ForAnyValue) × 2
+        // if_exists options = 162. If a new base operator is added the count
+        // moves in lockstep, which is the property we want.
+        let n_base = ConditionOperatorBase::ALL.len();
+        let n_qualifier_options = 1 + ConditionQualifier::ALL.len();
+        let expected = n_base * n_qualifier_options * 2;
+        assert_eq!(ConditionOperator::all().count(), expected);
     }
 
     #[test]
