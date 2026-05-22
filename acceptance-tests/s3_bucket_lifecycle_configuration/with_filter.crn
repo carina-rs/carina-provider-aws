@@ -1,0 +1,59 @@
+# S3 BucketLifecycleConfiguration - Filter test
+#
+# Tests: lifecycle rules scoped by `filter` — a prefix filter, a tag
+# filter, and an `and` filter combining a prefix with an object-size
+# bound. Verifies the provider serializes the Filter element correctly.
+
+provider aws {
+  region = aws.Region.ap_northeast_1
+}
+
+let bucket = aws.s3.Bucket {
+  bucket = 'carina-acc-test-aws-s3-lifecycle-filter-v1'
+}
+
+aws.s3.BucketLifecycleConfiguration {
+  bucket = bucket.bucket
+
+  rules = [
+    {
+      id     = 'logs-prefix'
+      status = aws.s3.BucketLifecycleConfiguration.LifecycleRuleStatus.enabled
+      filter = {
+        prefix = 'logs/'
+      }
+      expiration = {
+        days = 90
+      }
+    },
+    {
+      id     = 'archive-tagged'
+      status = aws.s3.BucketLifecycleConfiguration.LifecycleRuleStatus.enabled
+      filter = {
+        tag = {
+          key   = 'tier'
+          value = 'cold'
+        }
+      }
+      transitions = [
+        {
+          days          = 30
+          storage_class = aws.s3.BucketLifecycleConfiguration.TransitionStorageClass.glacier
+        },
+      ]
+    },
+    {
+      id     = 'large-data-objects'
+      status = aws.s3.BucketLifecycleConfiguration.LifecycleRuleStatus.enabled
+      filter = {
+        and = {
+          prefix                   = 'data/'
+          object_size_greater_than = 1048576
+        }
+      }
+      expiration = {
+        days = 365
+      }
+    },
+  ]
+}
