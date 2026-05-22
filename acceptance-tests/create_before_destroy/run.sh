@@ -2,12 +2,20 @@
 # Multi-step acceptance tests for create_before_destroy
 #
 # Usage:
-#   aws-vault exec <profile> -- ./run.sh [filter]
+#   env AWS_PROFILE="<profile>" ./run.sh [filter]
 #
 # Tests:
 #   ec2_vpc - Replacement without temporary name (no name_attribute)
 #
 # Filter (optional): substring to match test names (e.g. "ec2_vpc")
+#
+# AWS authentication:
+#   Set AWS_PROFILE to one of the carina-test-00X profiles. The script
+#   resolves fresh STS credentials from that profile before each carina
+#   invocation (via `aws configure export-credentials`), so long-running
+#   replace/destroy cycles are not bound to a single SSO access-token
+#   lifetime (see carina-rs/carina-provider-awscc#157). The first run
+#   in a session needs `aws sso login --sso-session carina`.
 
 set -e
 
@@ -20,20 +28,38 @@ source "$SCRIPT_DIR/../shared/_helpers.sh"
 TOTAL_PASSED=0
 TOTAL_FAILED=0
 
+# ── with_account_creds: resolve credentials for $AWS_PROFILE into env vars ──
+# and exec the given command. See run-tests.sh for rationale.
+with_account_creds() {
+    local account="${AWS_PROFILE:-}"
+    if [ -z "$account" ]; then
+        echo "ERROR: AWS_PROFILE is not set; cannot resolve credentials" >&2
+        return 1
+    fi
+    local creds
+    if ! creds=$(aws configure export-credentials --profile "$account" --format env-no-export 2>&1); then
+        echo "ERROR: aws configure export-credentials failed for $account: $creds" >&2
+        return 1
+    fi
+    (
+        set -a
+        eval "$creds"
+        set +a
+        unset AWS_PROFILE
+        "$@"
+    )
+}
+
 # Track active work dir for signal cleanup
 ACTIVE_WORK_DIR=""
-ACTIVE_STEP1=""
-ACTIVE_STEP2=""
 
 signal_cleanup() {
     if [ -n "$ACTIVE_WORK_DIR" ] && [ -d "$ACTIVE_WORK_DIR" ]; then
         set +e
         echo ""
         echo "Interrupted. Cleaning up resources..."
-        cd "$ACTIVE_WORK_DIR" && "$CARINA_BIN" destroy --auto-approve "$ACTIVE_STEP2" 2>&1
-        cd "$ACTIVE_WORK_DIR" && "$CARINA_BIN" destroy --auto-approve "$ACTIVE_STEP1" 2>&1
-        cd "$ACTIVE_WORK_DIR" && "$CARINA_BIN" destroy --auto-approve "$ACTIVE_STEP2" 2>&1
-        cd "$ACTIVE_WORK_DIR" && "$CARINA_BIN" destroy --auto-approve "$ACTIVE_STEP1" 2>&1
+        (cd "$ACTIVE_WORK_DIR" && with_account_creds "$CARINA_BIN" destroy --auto-approve . 2>&1)
+        (cd "$ACTIVE_WORK_DIR" && with_account_creds "$CARINA_BIN" destroy --auto-approve . 2>&1)
         rm -rf "$ACTIVE_WORK_DIR"
         ACTIVE_WORK_DIR=""
     fi
@@ -46,13 +72,12 @@ run_step() {
     local work_dir="$1"
     local description="$2"
     local command="$3"
-    local crn_file="$4"
-    local extra_args="${5:-}"
+    local extra_args="${4:-}"
 
     printf "  %-55s " "$description"
 
     local output
-    if output=$(cd "$work_dir" && "$CARINA_BIN" $command $extra_args "$crn_file" 2>&1); then
+    if output=$(cd "$work_dir" && with_account_creds "$CARINA_BIN" $command $extra_args . 2>&1); then
         echo "OK"
         TOTAL_PASSED=$((TOTAL_PASSED + 1))
         return 0
@@ -127,13 +152,12 @@ assert_identifiers() {
 run_plan_verify() {
     local work_dir="$1"
     local description="$2"
-    local crn_file="$3"
 
     printf "  %-55s " "$description"
 
     local output
     local rc
-    output=$(cd "$work_dir" && "$CARINA_BIN" plan --detailed-exitcode "$crn_file" 2>&1) || rc=$?
+    output=$(cd "$work_dir" && with_account_creds "$CARINA_BIN" plan --detailed-exitcode . 2>&1) || rc=$?
     rc=${rc:-0}
 
     if [ $rc -eq 2 ]; then
@@ -154,28 +178,23 @@ run_plan_verify() {
     return 0
 }
 
-# Cleanup helper: try to destroy with both step configs, then retry
+# destroy_work_dir: destroy resources in work_dir, retrying to handle dependencies
 # Returns 0 if at least one destroy succeeded, 1 if ALL failed
-cleanup() {
+# (Named distinctly from `cleanup` so the EXIT trap in _helpers.sh keeps using
+# its own cleanup() — overriding it would call this with no args at exit and
+# emit "No .crn files found in .".)
+destroy_work_dir() {
     local work_dir="$1"
-    local step2="$2"
-    local step1="$3"
     local any_success=false
 
     # Disable set -e to ensure all destroy attempts run
     set +e
     echo "  Cleanup: destroying resources..."
-    if cd "$work_dir" && "$CARINA_BIN" destroy --auto-approve "$step2" 2>&1; then
-        any_success=true
-    fi
-    if cd "$work_dir" && "$CARINA_BIN" destroy --auto-approve "$step1" 2>&1; then
+    if (cd "$work_dir" && with_account_creds "$CARINA_BIN" destroy --auto-approve . 2>&1); then
         any_success=true
     fi
     # Retry: resources may have dependencies that prevent deletion on first pass
-    if cd "$work_dir" && "$CARINA_BIN" destroy --auto-approve "$step2" 2>&1; then
-        any_success=true
-    fi
-    if cd "$work_dir" && "$CARINA_BIN" destroy --auto-approve "$step1" 2>&1; then
+    if (cd "$work_dir" && with_account_creds "$CARINA_BIN" destroy --auto-approve . 2>&1); then
         any_success=true
     fi
     set -e
@@ -184,6 +203,17 @@ cleanup() {
         return 1
     fi
     return 0
+}
+
+# Swap the active .crn into work_dir/main.crn (with provider source injected).
+# Args: source_crn target_work_dir
+swap_crn() {
+    local src="$1"
+    local target="$2"
+    local injected_dir
+    injected_dir=$(inject_provider_source "$src")
+    cp "$injected_dir/main.crn" "$target/main.crn"
+    rm -rf "$injected_dir"
 }
 
 # Run a single multi-step test
@@ -202,32 +232,34 @@ run_test() {
     local work_dir
     work_dir=$(mktemp -d)
 
-    # Inject provider source into .crn files
-    step1=$(inject_provider_source "$step1")
-    step2=$(inject_provider_source "$step2")
-
     # Register for signal cleanup
     ACTIVE_WORK_DIR="$work_dir"
-    ACTIVE_STEP1="$step1"
-    ACTIVE_STEP2="$step2"
 
     echo "$desc"
     echo ""
 
-    # Step 1: Apply initial config
-    if ! run_step "$work_dir" "step1: apply initial" "apply" "$step1" "--auto-approve"; then
-        cleanup "$work_dir" "$step2" "$step1"
+    # Load step1 and initialize (creates backend lock + installs providers)
+    swap_crn "$step1" "$work_dir"
+    if ! (cd "$work_dir" && with_account_creds "$CARINA_BIN" init . >/dev/null 2>&1); then
+        echo "  step1: init                                             FAIL"
+        TOTAL_FAILED=$((TOTAL_FAILED + 1))
         rm -rf "$work_dir"
-        rm -rf "$step1" "$step2"
+        ACTIVE_WORK_DIR=""
+        return 1
+    fi
+
+    # Step 1: Apply initial config
+    if ! run_step "$work_dir" "step1: apply initial" "apply" "--auto-approve"; then
+        destroy_work_dir "$work_dir"
+        rm -rf "$work_dir"
         ACTIVE_WORK_DIR=""
         return 1
     fi
 
     # Step 1b: Plan-verify initial state
-    if ! run_plan_verify "$work_dir" "step1: plan-verify initial" "$step1"; then
-        cleanup "$work_dir" "$step2" "$step1"
+    if ! run_plan_verify "$work_dir" "step1: plan-verify initial"; then
+        destroy_work_dir "$work_dir"
         rm -rf "$work_dir"
-        rm -rf "$step1" "$step2"
         ACTIVE_WORK_DIR=""
         return 1
     fi
@@ -236,11 +268,13 @@ run_test() {
     local ids_after_step1
     ids_after_step1=$(get_identifiers "$work_dir")
 
+    # Swap in step2 config (providers are the same, lock already present)
+    swap_crn "$step2" "$work_dir"
+
     # Step 2: Apply modified config (triggers create_before_destroy replacement)
-    if ! run_step "$work_dir" "step2: apply replace (create_before_destroy)" "apply" "$step2" "--auto-approve"; then
-        cleanup "$work_dir" "$step2" "$step1"
+    if ! run_step "$work_dir" "step2: apply replace (create_before_destroy)" "apply" "--auto-approve"; then
+        destroy_work_dir "$work_dir"
         rm -rf "$work_dir"
-        rm -rf "$step1" "$step2"
         ACTIVE_WORK_DIR=""
         return 1
     fi
@@ -251,35 +285,31 @@ run_test() {
 
     # Assert identifiers changed (create_before_destroy should replace at least one resource)
     if ! assert_identifiers "assert: identifiers changed after replace" "$ids_after_step1" "$ids_after_step2" "different"; then
-        cleanup "$work_dir" "$step2" "$step1"
+        destroy_work_dir "$work_dir"
         rm -rf "$work_dir"
-        rm -rf "$step1" "$step2"
         ACTIVE_WORK_DIR=""
         return 1
     fi
 
     # Step 3: Plan-verify after replacement
-    if ! run_plan_verify "$work_dir" "step3: plan-verify after replace" "$step2"; then
-        cleanup "$work_dir" "$step2" "$step1"
+    if ! run_plan_verify "$work_dir" "step3: plan-verify after replace"; then
+        destroy_work_dir "$work_dir"
         rm -rf "$work_dir"
-        rm -rf "$step1" "$step2"
         ACTIVE_WORK_DIR=""
         return 1
     fi
 
-    # Step 4: Destroy (use cleanup to try both configs and retry)
-    if ! cleanup "$work_dir" "$step2" "$step1"; then
+    # Step 4: Destroy
+    if ! destroy_work_dir "$work_dir"; then
         echo "  WARNING: All destroy attempts failed. Preserving work dir for debugging:"
         echo "    $work_dir"
         TOTAL_FAILED=$((TOTAL_FAILED + 1))
-        rm -rf "$step1" "$step2"
         ACTIVE_WORK_DIR=""
         echo ""
         return 1
     fi
 
     rm -rf "$work_dir"
-    rm -rf "$step1" "$step2"
     ACTIVE_WORK_DIR=""
     echo ""
 }
