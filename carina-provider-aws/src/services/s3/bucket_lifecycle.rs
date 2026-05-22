@@ -2,8 +2,9 @@ use std::collections::HashMap;
 
 use aws_sdk_s3::types::{
     AbortIncompleteMultipartUpload, BucketLifecycleConfiguration, ExpirationStatus,
-    LifecycleExpiration, LifecycleRule, NoncurrentVersionExpiration, NoncurrentVersionTransition,
-    Transition, TransitionStorageClass,
+    LifecycleExpiration, LifecycleRule, LifecycleRuleAndOperator, LifecycleRuleFilter,
+    NoncurrentVersionExpiration, NoncurrentVersionTransition, Tag, Transition,
+    TransitionStorageClass,
 };
 use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{ConcreteValue, ManagedResource, ResourceId, State, Value};
@@ -185,10 +186,14 @@ fn build_rule(id: &ResourceId, rule_value: &Value) -> ProviderResult<LifecycleRu
     if let Some(Value::Concrete(ConcreteValue::String(s))) = map.get("id") {
         builder = builder.id(s);
     }
-    #[allow(deprecated)]
-    if let Some(Value::Concrete(ConcreteValue::String(s))) = map.get("prefix") {
-        builder = builder.prefix(s);
-    }
+    // S3 requires every V2 lifecycle rule to carry a `Filter` element.
+    // Build one from the `filter` attribute, or fall back to an empty
+    // filter (matches all objects) so the request is not rejected with
+    // `MalformedXML`.
+    builder = builder.filter(match map.get("filter") {
+        Some(v) => build_filter(id, v)?,
+        None => LifecycleRuleFilter::builder().build(),
+    });
     if let Some(v) = map.get("expiration") {
         builder = builder.expiration(build_expiration(id, v)?);
     }
@@ -219,6 +224,87 @@ fn build_rule(id: &ResourceId, rule_value: &Value) -> ProviderResult<LifecycleRu
         ProviderError::api_error(sdk_error_message("Failed to build LifecycleRule", &e))
             .for_resource(id.clone())
     })
+}
+
+/// Build a single S3 object tag from a `{ key, value }` map.
+fn build_filter_tag(id: &ResourceId, value: &Value) -> ProviderResult<Tag> {
+    let Value::Concrete(ConcreteValue::Map(map)) = value else {
+        return Err(
+            ProviderError::invalid_input("filter tag must be a map").for_resource(id.clone())
+        );
+    };
+    let key = match map.get("key") {
+        Some(Value::Concrete(ConcreteValue::String(s))) => s.clone(),
+        _ => {
+            return Err(
+                ProviderError::invalid_input("filter tag.key is required").for_resource(id.clone())
+            );
+        }
+    };
+    let val = match map.get("value") {
+        Some(Value::Concrete(ConcreteValue::String(s))) => s.clone(),
+        _ => {
+            return Err(ProviderError::invalid_input("filter tag.value is required")
+                .for_resource(id.clone()));
+        }
+    };
+    Tag::builder().key(key).value(val).build().map_err(|e| {
+        ProviderError::api_error(sdk_error_message("Failed to build filter tag", &e))
+            .for_resource(id.clone())
+    })
+}
+
+/// Build a `LifecycleRuleAndOperator` (prefix + tags + size bounds).
+fn build_filter_and(id: &ResourceId, value: &Value) -> ProviderResult<LifecycleRuleAndOperator> {
+    let Value::Concrete(ConcreteValue::Map(map)) = value else {
+        return Err(
+            ProviderError::invalid_input("filter.and must be a map").for_resource(id.clone())
+        );
+    };
+    let mut builder = LifecycleRuleAndOperator::builder();
+    if let Some(Value::Concrete(ConcreteValue::String(s))) = map.get("prefix") {
+        builder = builder.prefix(s);
+    }
+    if let Some(Value::Concrete(ConcreteValue::List(items))) = map.get("tags") {
+        let tags: Vec<Tag> = items
+            .iter()
+            .map(|v| build_filter_tag(id, v))
+            .collect::<ProviderResult<Vec<_>>>()?;
+        builder = builder.set_tags(Some(tags));
+    }
+    if let Some(Value::Concrete(ConcreteValue::Int(n))) = map.get("object_size_greater_than") {
+        builder = builder.object_size_greater_than(*n);
+    }
+    if let Some(Value::Concrete(ConcreteValue::Int(n))) = map.get("object_size_less_than") {
+        builder = builder.object_size_less_than(*n);
+    }
+    Ok(builder.build())
+}
+
+/// Build a `LifecycleRuleFilter` from the DSL `filter` map. S3 allows at
+/// most one of `prefix` / `tag` / size bound / `and` to be set; the
+/// schema validates the shape, so this just forwards whatever is present.
+fn build_filter(id: &ResourceId, value: &Value) -> ProviderResult<LifecycleRuleFilter> {
+    let Value::Concrete(ConcreteValue::Map(map)) = value else {
+        return Err(ProviderError::invalid_input("filter must be a map").for_resource(id.clone()));
+    };
+    let mut builder = LifecycleRuleFilter::builder();
+    if let Some(Value::Concrete(ConcreteValue::String(s))) = map.get("prefix") {
+        builder = builder.prefix(s);
+    }
+    if let Some(v) = map.get("tag") {
+        builder = builder.tag(build_filter_tag(id, v)?);
+    }
+    if let Some(Value::Concrete(ConcreteValue::Int(n))) = map.get("object_size_greater_than") {
+        builder = builder.object_size_greater_than(*n);
+    }
+    if let Some(Value::Concrete(ConcreteValue::Int(n))) = map.get("object_size_less_than") {
+        builder = builder.object_size_less_than(*n);
+    }
+    if let Some(v) = map.get("and") {
+        builder = builder.and(build_filter_and(id, v)?);
+    }
+    Ok(builder.build())
 }
 
 fn build_expiration(id: &ResourceId, value: &Value) -> ProviderResult<LifecycleExpiration> {
@@ -341,14 +427,13 @@ fn rule_to_value(rule: &LifecycleRule) -> Value {
         "status".to_string(),
         Value::Concrete(ConcreteValue::String(rule.status().as_str().to_string())),
     );
-    #[allow(deprecated)]
-    if let Some(s) = rule.prefix()
-        && !s.is_empty()
+    // Only surface a non-empty filter. S3 returns an empty `<Filter/>`
+    // for match-all rules; reflecting that as an empty map would diff
+    // against a DSL config that simply omits `filter`.
+    if let Some(filter) = rule.filter()
+        && let Some(filter_value) = filter_to_value(filter)
     {
-        map.insert(
-            "prefix".to_string(),
-            Value::Concrete(ConcreteValue::String(s.to_string())),
-        );
+        map.insert("filter".to_string(), filter_value);
     }
     if let Some(exp) = rule.expiration() {
         let mut e = IndexMap::new();
@@ -428,6 +513,97 @@ fn rule_to_value(rule: &LifecycleRule) -> Value {
     Value::Concrete(ConcreteValue::Map(map))
 }
 
+/// Convert an S3 `Tag` into a `{ key, value }` map value.
+fn tag_to_value(tag: &Tag) -> Value {
+    let mut m = IndexMap::new();
+    m.insert(
+        "key".to_string(),
+        Value::Concrete(ConcreteValue::String(tag.key().to_string())),
+    );
+    m.insert(
+        "value".to_string(),
+        Value::Concrete(ConcreteValue::String(tag.value().to_string())),
+    );
+    Value::Concrete(ConcreteValue::Map(m))
+}
+
+/// Convert a `LifecycleRuleAndOperator` into a map value, or `None` when
+/// every field is empty.
+fn filter_and_to_value(and: &LifecycleRuleAndOperator) -> Option<Value> {
+    let mut m = IndexMap::new();
+    if let Some(p) = and.prefix()
+        && !p.is_empty()
+    {
+        m.insert(
+            "prefix".to_string(),
+            Value::Concrete(ConcreteValue::String(p.to_string())),
+        );
+    }
+    let tags = and.tags();
+    if !tags.is_empty() {
+        m.insert(
+            "tags".to_string(),
+            Value::Concrete(ConcreteValue::List(tags.iter().map(tag_to_value).collect())),
+        );
+    }
+    if let Some(n) = and.object_size_greater_than() {
+        m.insert(
+            "object_size_greater_than".to_string(),
+            Value::Concrete(ConcreteValue::Int(n)),
+        );
+    }
+    if let Some(n) = and.object_size_less_than() {
+        m.insert(
+            "object_size_less_than".to_string(),
+            Value::Concrete(ConcreteValue::Int(n)),
+        );
+    }
+    if m.is_empty() {
+        None
+    } else {
+        Some(Value::Concrete(ConcreteValue::Map(m)))
+    }
+}
+
+/// Convert a `LifecycleRuleFilter` into a map value, or `None` when the
+/// filter is empty (a match-all `<Filter/>`).
+fn filter_to_value(filter: &LifecycleRuleFilter) -> Option<Value> {
+    let mut m = IndexMap::new();
+    if let Some(p) = filter.prefix()
+        && !p.is_empty()
+    {
+        m.insert(
+            "prefix".to_string(),
+            Value::Concrete(ConcreteValue::String(p.to_string())),
+        );
+    }
+    if let Some(tag) = filter.tag() {
+        m.insert("tag".to_string(), tag_to_value(tag));
+    }
+    if let Some(n) = filter.object_size_greater_than() {
+        m.insert(
+            "object_size_greater_than".to_string(),
+            Value::Concrete(ConcreteValue::Int(n)),
+        );
+    }
+    if let Some(n) = filter.object_size_less_than() {
+        m.insert(
+            "object_size_less_than".to_string(),
+            Value::Concrete(ConcreteValue::Int(n)),
+        );
+    }
+    if let Some(and) = filter.and()
+        && let Some(and_value) = filter_and_to_value(and)
+    {
+        m.insert("and".to_string(), and_value);
+    }
+    if m.is_empty() {
+        None
+    } else {
+        Some(Value::Concrete(ConcreteValue::Map(m)))
+    }
+}
+
 fn transition_to_value(t: &Transition) -> Value {
     let mut m = IndexMap::new();
     if let Some(d) = t.days() {
@@ -466,4 +642,134 @@ fn ncv_transition_to_value(t: &NoncurrentVersionTransition) -> Value {
         );
     }
     Value::Concrete(ConcreteValue::Map(m))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn rid() -> ResourceId {
+        ResourceId::new("s3.bucket_lifecycle_configuration", "test")
+    }
+
+    fn str_val(s: &str) -> Value {
+        Value::Concrete(ConcreteValue::String(s.to_string()))
+    }
+
+    fn map_val(pairs: Vec<(&str, Value)>) -> Value {
+        let mut m = IndexMap::new();
+        for (k, v) in pairs {
+            m.insert(k.to_string(), v);
+        }
+        Value::Concrete(ConcreteValue::Map(m))
+    }
+
+    #[test]
+    fn rule_without_filter_gets_empty_filter() {
+        // Reproduces carina-rs/carina-provider-aws#273: a rule with no
+        // `filter` must still emit a `Filter` element, otherwise S3
+        // rejects the request with `MalformedXML`.
+        let rule_value = map_val(vec![
+            ("id", str_val("expire-all")),
+            ("status", str_val("Enabled")),
+            (
+                "expiration",
+                map_val(vec![("days", Value::Concrete(ConcreteValue::Int(365)))]),
+            ),
+        ]);
+        let rule = build_rule(&rid(), &rule_value).expect("build_rule should succeed");
+        assert!(
+            rule.filter().is_some(),
+            "a lifecycle rule must always carry a Filter element"
+        );
+    }
+
+    #[test]
+    fn rule_with_prefix_filter() {
+        let rule_value = map_val(vec![
+            ("status", str_val("Enabled")),
+            ("filter", map_val(vec![("prefix", str_val("logs/"))])),
+        ]);
+        let rule = build_rule(&rid(), &rule_value).expect("build_rule should succeed");
+        let filter = rule.filter().expect("filter set");
+        assert_eq!(filter.prefix(), Some("logs/"));
+    }
+
+    #[test]
+    fn rule_with_tag_filter() {
+        let rule_value = map_val(vec![
+            ("status", str_val("Enabled")),
+            (
+                "filter",
+                map_val(vec![(
+                    "tag",
+                    map_val(vec![("key", str_val("env")), ("value", str_val("dev"))]),
+                )]),
+            ),
+        ]);
+        let rule = build_rule(&rid(), &rule_value).expect("build_rule should succeed");
+        let tag = rule.filter().and_then(|f| f.tag()).expect("tag set");
+        assert_eq!(tag.key(), "env");
+        assert_eq!(tag.value(), "dev");
+    }
+
+    #[test]
+    fn rule_with_and_filter() {
+        let rule_value = map_val(vec![
+            ("status", str_val("Enabled")),
+            (
+                "filter",
+                map_val(vec![(
+                    "and",
+                    map_val(vec![
+                        ("prefix", str_val("data/")),
+                        (
+                            "object_size_greater_than",
+                            Value::Concrete(ConcreteValue::Int(1024)),
+                        ),
+                        (
+                            "tags",
+                            Value::Concrete(ConcreteValue::List(vec![map_val(vec![
+                                ("key", str_val("tier")),
+                                ("value", str_val("cold")),
+                            ])])),
+                        ),
+                    ]),
+                )]),
+            ),
+        ]);
+        let rule = build_rule(&rid(), &rule_value).expect("build_rule should succeed");
+        let and = rule.filter().and_then(|f| f.and()).expect("and set");
+        assert_eq!(and.prefix(), Some("data/"));
+        assert_eq!(and.object_size_greater_than(), Some(1024));
+        assert_eq!(and.tags().len(), 1);
+    }
+
+    #[test]
+    fn empty_filter_is_not_surfaced_on_read() {
+        // S3 returns an empty <Filter/> for match-all rules; reading it
+        // back as an empty map would diff against a DSL that omits it.
+        let empty = LifecycleRuleFilter::builder().build();
+        assert!(filter_to_value(&empty).is_none());
+    }
+
+    #[test]
+    fn prefix_filter_round_trips() {
+        let built = build_rule(
+            &rid(),
+            &map_val(vec![
+                ("status", str_val("Enabled")),
+                ("filter", map_val(vec![("prefix", str_val("logs/"))])),
+            ]),
+        )
+        .unwrap();
+        let value = rule_to_value(&built);
+        let Value::Concrete(ConcreteValue::Map(m)) = value else {
+            panic!("expected map");
+        };
+        let Some(Value::Concrete(ConcreteValue::Map(filter))) = m.get("filter") else {
+            panic!("filter should round-trip");
+        };
+        assert_eq!(filter.get("prefix"), Some(&str_val("logs/")));
+    }
 }

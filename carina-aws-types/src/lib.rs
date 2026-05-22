@@ -1591,16 +1591,76 @@ fn s3_replication_status() -> AttributeType {
     }
 }
 
+/// The `And` operator for a replication rule filter — combines a prefix
+/// with multiple tags. Required by S3 whenever a filter needs more than
+/// one condition.
+fn s3_replication_filter_and() -> AttributeType {
+    AttributeType::Struct {
+        name: "ReplicationRuleAndOperator".to_string(),
+        fields: vec![
+            StructField::new("prefix", AttributeType::String).with_provider_name("Prefix"),
+            StructField::new("tags", AttributeType::list(s3_filter_tag()))
+                .with_provider_name("Tags")
+                .with_block_name("tag"),
+        ],
+    }
+}
+
+/// Filter selecting which objects a replication rule applies to. A V2
+/// replication rule requires a `Filter` element; the provider emits an
+/// empty one automatically if this attribute is omitted.
+fn s3_replication_rule_filter() -> AttributeType {
+    AttributeType::Struct {
+        name: "ReplicationRuleFilter".to_string(),
+        fields: vec![
+            StructField::new("prefix", AttributeType::String).with_provider_name("Prefix"),
+            StructField::new("tag", s3_filter_tag())
+                .with_provider_name("Tag")
+                .with_block_name("tag"),
+            StructField::new("and", s3_replication_filter_and())
+                .with_provider_name("And")
+                .with_block_name("and"),
+        ],
+    }
+}
+
+/// Whether delete markers are replicated. A V2 replication rule that
+/// carries a `Filter` must also declare `DeleteMarkerReplication`; the
+/// provider defaults it to `Disabled` when omitted.
+fn s3_delete_marker_replication() -> AttributeType {
+    AttributeType::Struct {
+        name: "DeleteMarkerReplication".to_string(),
+        fields: vec![
+            StructField::new(
+                "status",
+                AttributeType::StringEnum {
+                    name: "DeleteMarkerReplicationStatus".to_string(),
+                    values: vec!["Enabled".to_string(), "Disabled".to_string()],
+                    namespace: Some("aws.s3.BucketReplicationConfiguration".to_string()),
+                    dsl_aliases: dsl_aliases_for(&["Enabled", "Disabled"]),
+                },
+            )
+            .with_provider_name("Status")
+            .required(),
+        ],
+    }
+}
+
 fn s3_replication_rule() -> AttributeType {
     AttributeType::Struct {
         name: "ReplicationRule".to_string(),
         fields: vec![
             StructField::new("id", AttributeType::String).with_provider_name("ID"),
             StructField::new("priority", AttributeType::Int).with_provider_name("Priority"),
-            StructField::new("prefix", AttributeType::String).with_provider_name("Prefix"),
+            StructField::new("filter", s3_replication_rule_filter())
+                .with_provider_name("Filter")
+                .with_block_name("filter"),
             StructField::new("status", s3_replication_status())
                 .with_provider_name("Status")
                 .required(),
+            StructField::new("delete_marker_replication", s3_delete_marker_replication())
+                .with_provider_name("DeleteMarkerReplication")
+                .with_block_name("delete_marker_replication"),
             StructField::new("destination", s3_replication_destination())
                 .with_provider_name("Destination")
                 .with_block_name("destination")
@@ -1709,6 +1769,63 @@ fn s3_abort_multipart() -> AttributeType {
     }
 }
 
+/// A single object tag (`key` / `value`) used inside S3 lifecycle and
+/// replication rule filters.
+fn s3_filter_tag() -> AttributeType {
+    AttributeType::Struct {
+        name: "FilterTag".to_string(),
+        fields: vec![
+            StructField::new("key", AttributeType::String)
+                .with_provider_name("Key")
+                .required(),
+            StructField::new("value", AttributeType::String)
+                .with_provider_name("Value")
+                .required(),
+        ],
+    }
+}
+
+/// The `And` operator for a lifecycle rule filter — combines a prefix,
+/// multiple tags, and object-size bounds. Required by S3 whenever a
+/// filter needs more than one condition.
+fn s3_lifecycle_filter_and() -> AttributeType {
+    AttributeType::Struct {
+        name: "LifecycleRuleAndOperator".to_string(),
+        fields: vec![
+            StructField::new("prefix", AttributeType::String).with_provider_name("Prefix"),
+            StructField::new("tags", AttributeType::list(s3_filter_tag()))
+                .with_provider_name("Tags")
+                .with_block_name("tag"),
+            StructField::new("object_size_greater_than", AttributeType::Int)
+                .with_provider_name("ObjectSizeGreaterThan"),
+            StructField::new("object_size_less_than", AttributeType::Int)
+                .with_provider_name("ObjectSizeLessThan"),
+        ],
+    }
+}
+
+/// Filter selecting which objects a lifecycle rule applies to. When a
+/// rule needs no filter it still requires an empty `<Filter/>` element;
+/// the provider emits one automatically if this attribute is omitted.
+fn s3_lifecycle_rule_filter() -> AttributeType {
+    AttributeType::Struct {
+        name: "LifecycleRuleFilter".to_string(),
+        fields: vec![
+            StructField::new("prefix", AttributeType::String).with_provider_name("Prefix"),
+            StructField::new("tag", s3_filter_tag())
+                .with_provider_name("Tag")
+                .with_block_name("tag"),
+            StructField::new("object_size_greater_than", AttributeType::Int)
+                .with_provider_name("ObjectSizeGreaterThan"),
+            StructField::new("object_size_less_than", AttributeType::Int)
+                .with_provider_name("ObjectSizeLessThan"),
+            StructField::new("and", s3_lifecycle_filter_and())
+                .with_provider_name("And")
+                .with_block_name("and"),
+        ],
+    }
+}
+
 fn s3_lifecycle_rule() -> AttributeType {
     AttributeType::Struct {
         name: "LifecycleRule".to_string(),
@@ -1717,7 +1834,9 @@ fn s3_lifecycle_rule() -> AttributeType {
             StructField::new("status", s3_lifecycle_status())
                 .with_provider_name("Status")
                 .required(),
-            StructField::new("prefix", AttributeType::String).with_provider_name("Prefix"),
+            StructField::new("filter", s3_lifecycle_rule_filter())
+                .with_provider_name("Filter")
+                .with_block_name("filter"),
             StructField::new("expiration", s3_lifecycle_expiration())
                 .with_provider_name("Expiration")
                 .with_block_name("expiration"),
