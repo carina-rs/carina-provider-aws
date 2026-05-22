@@ -9,18 +9,18 @@ use std::collections::HashMap;
 
 use aws_sdk_identitystore::types::{AlternateIdentifier, UniqueAttribute};
 use carina_core::provider::{BoxFuture, ProviderError, ProviderResult};
-use carina_core::resource::{ConcreteValue, Resource, State, Value};
+use carina_core::resource::{ConcreteValue, DataSource, State, Value};
 
 use crate::AwsProvider;
 use crate::helpers::{sdk_error_message, value_as_str};
 
 impl AwsProvider {
-    /// Read `identitystore.user` given a `Resource` with user-supplied
+    /// Read `identitystore.user` given a `DataSource` with user-supplied
     /// lookup inputs. Wired into `DataSourceLookups` via
     /// `data_source_lookups::DataSourceLookups`.
     pub(crate) fn do_read_identitystore_user_data_source(
         &self,
-        resource: &Resource,
+        resource: &DataSource,
     ) -> BoxFuture<'_, ProviderResult<State>> {
         let resource = resource.clone();
         Box::pin(async move {
@@ -56,7 +56,7 @@ impl AwsProvider {
     }
 }
 
-/// Resolve a Carina `Resource` to the Identity Store `UserId` used by the
+/// Resolve a Carina `DataSource` to the Identity Store `UserId` used by the
 /// subsequent `DescribeUser` call. If the user supplied `user_id` directly
 /// we use it as-is; otherwise we look it up by `user_name` via `GetUserId`.
 ///
@@ -64,7 +64,7 @@ impl AwsProvider {
 async fn resolve_user_id(
     client: &aws_sdk_identitystore::Client,
     identity_store_id: &str,
-    resource: &Resource,
+    resource: &DataSource,
 ) -> Result<String, ProviderError> {
     if let Some(user_id) = resource.get_attr("user_id").and_then(value_as_str) {
         return Ok(user_id.to_string());

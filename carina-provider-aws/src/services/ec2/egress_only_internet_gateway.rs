@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use carina_core::provider::{ProviderError, ProviderResult};
-use carina_core::resource::{Resource, ResourceId, State};
+use carina_core::resource::{ManagedResource, ResourceId, State};
 
 use crate::AwsProvider;
 use crate::helpers::{build_tag_specification, require_string_attr, sdk_error_message};
@@ -56,7 +56,7 @@ impl AwsProvider {
     /// Create an EC2 Egress-Only Internet Gateway
     pub(crate) async fn create_ec2_egress_only_internet_gateway(
         &self,
-        resource: Resource,
+        resource: ManagedResource,
     ) -> ProviderResult<State> {
         let vpc_id = require_string_attr(&resource, "vpc_id")?;
 
@@ -100,7 +100,7 @@ impl AwsProvider {
         id: ResourceId,
         identifier: &str,
         from: &State,
-        to: Resource,
+        to: ManagedResource,
     ) -> ProviderResult<State> {
         self.apply_ec2_tags(
             &id,

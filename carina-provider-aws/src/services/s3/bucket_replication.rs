@@ -4,7 +4,7 @@ use aws_sdk_s3::types::{
     Destination, ReplicationConfiguration, ReplicationRule, ReplicationRuleStatus, StorageClass,
 };
 use carina_core::provider::{ProviderError, ProviderResult};
-use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
+use carina_core::resource::{ConcreteValue, ManagedResource, ResourceId, State, Value};
 use indexmap::IndexMap;
 
 use crate::AwsProvider;
@@ -67,7 +67,7 @@ impl AwsProvider {
 
     pub(crate) async fn create_s3_bucket_replication_configuration(
         &self,
-        resource: Resource,
+        resource: ManagedResource,
     ) -> ProviderResult<State> {
         let bucket = require_string_attr(&resource, "bucket")?;
         self.put_s3_bucket_replication(&resource.id, &bucket, &resource)
@@ -79,7 +79,7 @@ impl AwsProvider {
         id: ResourceId,
         identifier: &str,
         _from: &State,
-        to: Resource,
+        to: ManagedResource,
     ) -> ProviderResult<State> {
         self.put_s3_bucket_replication(&id, identifier, &to).await
     }
@@ -88,7 +88,7 @@ impl AwsProvider {
         &self,
         id: &ResourceId,
         bucket: &str,
-        resource: &Resource,
+        resource: &ManagedResource,
     ) -> ProviderResult<State> {
         let role = require_string_attr(resource, "role")?;
         let rules = match resource.get_attr("rules") {

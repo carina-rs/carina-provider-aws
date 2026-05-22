@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use carina_core::provider::{ProviderError, ProviderResult};
-use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
+use carina_core::resource::{ConcreteValue, ManagedResource, ResourceId, State, Value};
 
 use crate::AwsProvider;
 use crate::helpers::{require_string_attr, retry_aws_operation, sdk_error_message};
@@ -88,7 +88,7 @@ impl AwsProvider {
     }
 
     /// Create an EC2 VPC
-    pub(crate) async fn create_ec2_vpc(&self, resource: Resource) -> ProviderResult<State> {
+    pub(crate) async fn create_ec2_vpc(&self, resource: ManagedResource) -> ProviderResult<State> {
         let cidr_block = require_string_attr(&resource, "cidr_block")?;
 
         // Create VPC with optional instance_tenancy
@@ -176,7 +176,7 @@ impl AwsProvider {
         id: ResourceId,
         identifier: &str,
         from: &State,
-        to: Resource,
+        to: ManagedResource,
     ) -> ProviderResult<State> {
         // identifier is the VPC ID (e.g., vpc-12345678)
         let vpc_id = identifier.to_string();

@@ -1881,7 +1881,9 @@ fn generate_provider_code(
          use indexmap::IndexMap;\n\
          use std::collections::HashMap;\n\n\
          use carina_core::provider::{BoxFuture, ProviderError, ProviderResult};\n\
-         use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};\n\
+         use carina_core::resource::{\n\
+         \x20   ConcreteValue, DataSource, ManagedResource, ResourceId, State, Value,\n\
+         };\n\
          #[allow(unused_imports)]\n\
          use carina_core::utils::extract_enum_value;\n\n\
          use crate::AwsProvider;\n\
@@ -1950,7 +1952,7 @@ fn generate_provider_code(
                  \x20       id: ResourceId,\n\
                  \x20       identifier: &str,\n\
                  \x20       from: &State,\n\
-                 \x20       to: Resource,\n\
+                 \x20       to: ManagedResource,\n\
                  \x20   ) -> ProviderResult<State> {{\n\
                  \x20       self.apply_ec2_tags(&id, identifier, &to.resolved_attributes(), Some(&from.attributes))\n\
                  \x20           .await?;\n\
@@ -1965,7 +1967,7 @@ fn generate_provider_code(
                  \x20       &self,\n\
                  \x20       id: ResourceId,\n\
                  \x20       identifier: &str,\n\
-                 \x20       _to: Resource,\n\
+                 \x20       _to: ManagedResource,\n\
                  \x20   ) -> ProviderResult<State> {{\n\
                  \x20       self.{}(&id, Some(identifier)).await\n\
                  \x20   }}\n\n",
@@ -2782,7 +2784,7 @@ fn generate_provider_code(
         code.push_str(&format!(
             "\x20   fn read_{}_data_source(\n\
              \x20       &self,\n\
-             \x20       resource: &Resource,\n\
+             \x20       resource: &DataSource,\n\
              \x20   ) -> BoxFuture<'_, ProviderResult<State>>;\n\n",
             module,
         ));
@@ -2799,7 +2801,7 @@ fn generate_provider_code(
     code.push_str(
         "pub(crate) fn dispatch_read_data_source<'a>(\n\
          \x20   provider: &'a AwsProvider,\n\
-         \x20   resource: &'a Resource,\n\
+         \x20   resource: &'a DataSource,\n\
          ) -> BoxFuture<'a, ProviderResult<State>> {\n\
          \x20   match resource.id.resource_type.as_str() {\n",
     );

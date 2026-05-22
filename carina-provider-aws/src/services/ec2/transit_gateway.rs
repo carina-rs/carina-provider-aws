@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use carina_core::provider::{ProviderError, ProviderResult};
-use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
+use carina_core::resource::{ConcreteValue, ManagedResource, ResourceId, State, Value};
 
 use crate::AwsProvider;
 use crate::helpers::{PollState, build_tag_specification, sdk_error_message, wait_for_ec2_state};
@@ -61,7 +61,7 @@ impl AwsProvider {
     /// Create an EC2 Transit Gateway
     pub(crate) async fn create_ec2_transit_gateway(
         &self,
-        resource: Resource,
+        resource: ManagedResource,
     ) -> ProviderResult<State> {
         let mut req = self.ec2_client.create_transit_gateway();
 
@@ -162,7 +162,7 @@ impl AwsProvider {
         id: ResourceId,
         identifier: &str,
         from: &State,
-        to: Resource,
+        to: ManagedResource,
     ) -> ProviderResult<State> {
         self.apply_ec2_tags(
             &id,

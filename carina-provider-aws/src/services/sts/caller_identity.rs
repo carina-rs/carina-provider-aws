@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use carina_core::provider::{BoxFuture, ProviderError, ProviderResult};
-use carina_core::resource::{ConcreteValue, Resource, State, Value};
+use carina_core::resource::{ConcreteValue, DataSource, State, Value};
 
 use crate::AwsProvider;
 use crate::helpers::sdk_error_message;
@@ -14,7 +14,7 @@ impl AwsProvider {
     /// `data_source_lookups::DataSourceLookups`.
     pub(crate) fn do_read_sts_caller_identity_data_source(
         &self,
-        resource: &Resource,
+        resource: &DataSource,
     ) -> BoxFuture<'_, ProviderResult<State>> {
         let id = resource.id.clone();
         Box::pin(async move {

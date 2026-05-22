@@ -7,7 +7,7 @@ use indexmap::IndexMap;
 use std::collections::HashMap;
 
 use carina_core::provider::{BoxFuture, ProviderError, ProviderResult};
-use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
+use carina_core::resource::{ConcreteValue, DataSource, ManagedResource, ResourceId, State, Value};
 #[allow(unused_imports)]
 use carina_core::utils::extract_enum_value;
 
@@ -96,7 +96,7 @@ impl AwsProvider {
         id: ResourceId,
         identifier: &str,
         from: &State,
-        to: Resource,
+        to: ManagedResource,
     ) -> ProviderResult<State> {
         self.apply_ec2_tags(
             &id,
@@ -114,7 +114,7 @@ impl AwsProvider {
         id: ResourceId,
         identifier: &str,
         from: &State,
-        to: Resource,
+        to: ManagedResource,
     ) -> ProviderResult<State> {
         self.apply_ec2_tags(
             &id,
@@ -132,7 +132,7 @@ impl AwsProvider {
         id: ResourceId,
         identifier: &str,
         from: &State,
-        to: Resource,
+        to: ManagedResource,
     ) -> ProviderResult<State> {
         self.apply_ec2_tags(
             &id,
@@ -149,7 +149,7 @@ impl AwsProvider {
         &self,
         id: ResourceId,
         identifier: &str,
-        _to: Resource,
+        _to: ManagedResource,
     ) -> ProviderResult<State> {
         self.read_organizations_organization(&id, Some(identifier))
             .await
@@ -916,22 +916,22 @@ impl AwsProvider {
 pub trait DataSourceLookups {
     fn read_sts_caller_identity_data_source(
         &self,
-        resource: &Resource,
+        resource: &DataSource,
     ) -> BoxFuture<'_, ProviderResult<State>>;
 
     fn read_identitystore_user_data_source(
         &self,
-        resource: &Resource,
+        resource: &DataSource,
     ) -> BoxFuture<'_, ProviderResult<State>>;
 
     fn read_s3_bucket_data_source(
         &self,
-        resource: &Resource,
+        resource: &DataSource,
     ) -> BoxFuture<'_, ProviderResult<State>>;
 
     fn read_iam_roles_data_source(
         &self,
-        resource: &Resource,
+        resource: &DataSource,
     ) -> BoxFuture<'_, ProviderResult<State>>;
 }
 
@@ -942,7 +942,7 @@ pub trait DataSourceLookups {
 /// to drop user-supplied inputs silently.
 pub(crate) fn dispatch_read_data_source<'a>(
     provider: &'a AwsProvider,
-    resource: &'a Resource,
+    resource: &'a DataSource,
 ) -> BoxFuture<'a, ProviderResult<State>> {
     match resource.id.resource_type.as_str() {
         "sts.CallerIdentity" => provider.read_sts_caller_identity_data_source(resource),

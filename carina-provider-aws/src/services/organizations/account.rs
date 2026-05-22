@@ -2,7 +2,7 @@ use indexmap::IndexMap;
 use std::collections::HashMap;
 
 use carina_core::provider::{ProviderError, ProviderResult};
-use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
+use carina_core::resource::{ConcreteValue, ManagedResource, ResourceId, State, Value};
 
 use crate::AwsProvider;
 use crate::helpers::{PollState, require_string_attr, sdk_error_message, wait_for_ec2_state};
@@ -157,7 +157,7 @@ impl AwsProvider {
     /// Create an Organizations account
     pub(crate) async fn create_organizations_account(
         &self,
-        resource: Resource,
+        resource: ManagedResource,
     ) -> ProviderResult<State> {
         let name = require_string_attr(&resource, "account_name")?;
         let email = require_string_attr(&resource, "email")?;
@@ -325,7 +325,7 @@ impl AwsProvider {
         id: ResourceId,
         identifier: &str,
         from: &State,
-        to: Resource,
+        to: ManagedResource,
     ) -> ProviderResult<State> {
         // Handle parent_id change via MoveAccount
         let desired_parent = to.get_attr("parent_id").and_then(|v| match v {

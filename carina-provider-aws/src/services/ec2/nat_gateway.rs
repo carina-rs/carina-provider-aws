@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use carina_core::provider::{ProviderError, ProviderResult};
-use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
+use carina_core::resource::{ConcreteValue, ManagedResource, ResourceId, State, Value};
 
 use aws_sdk_ec2::types::NatGatewayState;
 
@@ -67,7 +67,10 @@ impl AwsProvider {
     }
 
     /// Create an EC2 NAT Gateway
-    pub(crate) async fn create_ec2_nat_gateway(&self, resource: Resource) -> ProviderResult<State> {
+    pub(crate) async fn create_ec2_nat_gateway(
+        &self,
+        resource: ManagedResource,
+    ) -> ProviderResult<State> {
         let subnet_id = require_string_attr(&resource, "subnet_id")?;
 
         let mut req = self.ec2_client.create_nat_gateway().subnet_id(&subnet_id);
@@ -122,7 +125,7 @@ impl AwsProvider {
         id: ResourceId,
         identifier: &str,
         from: &State,
-        to: Resource,
+        to: ManagedResource,
     ) -> ProviderResult<State> {
         self.apply_ec2_tags(
             &id,

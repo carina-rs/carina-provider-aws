@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use carina_core::provider::{ProviderError, ProviderResult};
-use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
+use carina_core::resource::{ConcreteValue, ManagedResource, ResourceId, State, Value};
 
 use crate::AwsProvider;
 use crate::helpers::sdk_error_message;
@@ -62,7 +62,10 @@ impl AwsProvider {
     }
 
     /// Create an EC2 VPN Gateway
-    pub(crate) async fn create_ec2_vpn_gateway(&self, resource: Resource) -> ProviderResult<State> {
+    pub(crate) async fn create_ec2_vpn_gateway(
+        &self,
+        resource: ManagedResource,
+    ) -> ProviderResult<State> {
         let gw_type = match resource.get_attr("type") {
             Some(Value::Concrete(ConcreteValue::String(s))) => s.clone(),
             _ => {
@@ -108,7 +111,7 @@ impl AwsProvider {
         id: ResourceId,
         identifier: &str,
         from: &State,
-        to: Resource,
+        to: ManagedResource,
     ) -> ProviderResult<State> {
         self.apply_ec2_tags(
             &id,

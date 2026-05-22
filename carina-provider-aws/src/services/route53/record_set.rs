@@ -11,7 +11,7 @@ use aws_sdk_route53::types::{
 };
 
 use carina_core::provider::{ProviderError, ProviderResult};
-use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
+use carina_core::resource::{ConcreteValue, ManagedResource, ResourceId, State, Value};
 
 use crate::AwsProvider;
 use crate::helpers::{require_enum_attr, require_string_attr, sdk_error_message};
@@ -150,7 +150,7 @@ fn build_alias_target_from_map(
 }
 
 /// Build an AWS SDK ResourceRecordSet from carina resource attributes.
-fn build_record_set(resource: &Resource) -> ProviderResult<ResourceRecordSet> {
+fn build_record_set(resource: &ManagedResource) -> ProviderResult<ResourceRecordSet> {
     let name = require_string_attr(resource, "name")?;
     let record_type = require_enum_attr(resource, "type")?;
 
@@ -347,7 +347,7 @@ impl AwsProvider {
 
     pub(crate) async fn create_route53_record_set(
         &self,
-        resource: Resource,
+        resource: ManagedResource,
     ) -> ProviderResult<State> {
         let hosted_zone_id = require_string_attr(&resource, "hosted_zone_id")?;
         let name = require_string_attr(&resource, "name")?;
@@ -372,7 +372,7 @@ impl AwsProvider {
         &self,
         id: ResourceId,
         _identifier: &str,
-        to: Resource,
+        to: ManagedResource,
     ) -> ProviderResult<State> {
         let hosted_zone_id = require_string_attr(&to, "hosted_zone_id")?;
         let name = require_string_attr(&to, "name")?;
@@ -465,7 +465,7 @@ impl AwsProvider {
 /// the apply would just re-UPSERT the same DNS name.
 ///
 /// See aws#300, follow-up to aws#117.
-pub(crate) fn normalize_record_set_dns_names(resources: &mut [Resource]) {
+pub(crate) fn normalize_record_set_dns_names(resources: &mut [ManagedResource]) {
     for resource in resources.iter_mut() {
         if resource.id.provider != "aws" || resource.id.resource_type != "route53.RecordSet" {
             continue;
@@ -500,10 +500,10 @@ pub(crate) fn normalize_record_set_dns_names(resources: &mut [Resource]) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use carina_core::resource::Resource;
+    use carina_core::resource::ManagedResource;
 
-    fn record_set(name: &str) -> Resource {
-        let mut r = Resource::with_provider("aws", "route53.RecordSet", "test-rec", None);
+    fn record_set(name: &str) -> ManagedResource {
+        let mut r = ManagedResource::with_provider("aws", "route53.RecordSet", "test-rec", None);
         r.set_attr(
             "name".to_string(),
             Value::Concrete(ConcreteValue::String(name.to_string())),
@@ -573,7 +573,7 @@ mod tests {
 
     #[test]
     fn ignores_non_route53_record_set_resources() {
-        let mut r = Resource::with_provider("aws", "s3.Bucket", "test", None);
+        let mut r = ManagedResource::with_provider("aws", "s3.Bucket", "test", None);
         r.set_attr(
             "name".to_string(),
             Value::Concrete(ConcreteValue::String(
@@ -592,7 +592,7 @@ mod tests {
 
     #[test]
     fn ignores_non_aws_provider() {
-        let mut r = Resource::with_provider("awscc", "route53.RecordSet", "test", None);
+        let mut r = ManagedResource::with_provider("awscc", "route53.RecordSet", "test", None);
         r.set_attr(
             "name".to_string(),
             Value::Concrete(ConcreteValue::String("foo.example.com.".to_string())),
