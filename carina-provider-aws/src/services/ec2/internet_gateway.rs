@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use carina_core::provider::{ProviderError, ProviderResult};
-use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
+use carina_core::resource::{ConcreteValue, ManagedResource, ResourceId, State, Value};
 
 use crate::AwsProvider;
 use crate::helpers::sdk_error_message;
@@ -74,7 +74,7 @@ impl AwsProvider {
     /// Create an EC2 Internet Gateway
     pub(crate) async fn create_ec2_internet_gateway(
         &self,
-        resource: Resource,
+        resource: ManagedResource,
     ) -> ProviderResult<State> {
         // Create Internet Gateway
         let result = self

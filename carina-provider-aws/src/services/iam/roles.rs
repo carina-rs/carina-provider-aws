@@ -8,18 +8,18 @@ use std::collections::HashMap;
 
 use aws_sdk_iam::types::Role;
 use carina_core::provider::{BoxFuture, ProviderError, ProviderResult};
-use carina_core::resource::{ConcreteValue, Resource, State, Value};
+use carina_core::resource::{ConcreteValue, DataSource, State, Value};
 use regex::Regex;
 
 use crate::AwsProvider;
 use crate::helpers::{sdk_error_message, value_as_str};
 
 impl AwsProvider {
-    /// Read `iam.Roles` given a `Resource` with optional `path_prefix` /
+    /// Read `iam.Roles` given a `DataSource` with optional `path_prefix` /
     /// `name_regex` inputs.
     pub(crate) fn do_read_iam_roles_data_source(
         &self,
-        resource: &Resource,
+        resource: &DataSource,
     ) -> BoxFuture<'_, ProviderResult<State>> {
         let resource = resource.clone();
         Box::pin(async move {
@@ -58,7 +58,7 @@ async fn list_matching_roles(
     client: &aws_sdk_iam::Client,
     path_prefix: Option<&str>,
     name_filter: Option<&Regex>,
-    resource: &Resource,
+    resource: &DataSource,
 ) -> Result<Vec<(String, String)>, ProviderError> {
     let mut matches: Vec<(String, String)> = Vec::new();
     let mut marker: Option<String> = None;

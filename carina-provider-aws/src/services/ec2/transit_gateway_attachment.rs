@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use carina_core::provider::{ProviderError, ProviderResult};
-use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
+use carina_core::resource::{ConcreteValue, ManagedResource, ResourceId, State, Value};
 
 use crate::AwsProvider;
 use crate::helpers::{
@@ -63,7 +63,7 @@ impl AwsProvider {
     /// Create an EC2 Transit Gateway VPC Attachment
     pub(crate) async fn create_ec2_transit_gateway_attachment(
         &self,
-        resource: Resource,
+        resource: ManagedResource,
     ) -> ProviderResult<State> {
         let transit_gateway_id = require_string_attr(&resource, "transit_gateway_id")?;
         let vpc_id = require_string_attr(&resource, "vpc_id")?;
@@ -137,7 +137,7 @@ impl AwsProvider {
         id: ResourceId,
         identifier: &str,
         from: &State,
-        to: Resource,
+        to: ManagedResource,
     ) -> ProviderResult<State> {
         self.apply_ec2_tags(
             &id,

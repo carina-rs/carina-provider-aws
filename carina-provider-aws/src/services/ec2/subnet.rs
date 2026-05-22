@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use carina_core::provider::{ProviderError, ProviderResult};
-use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
+use carina_core::resource::{ConcreteValue, ManagedResource, ResourceId, State, Value};
 use carina_core::utils::convert_enum_value;
 
 use crate::AwsProvider;
@@ -69,7 +69,10 @@ impl AwsProvider {
     }
 
     /// Create an EC2 Subnet
-    pub(crate) async fn create_ec2_subnet(&self, resource: Resource) -> ProviderResult<State> {
+    pub(crate) async fn create_ec2_subnet(
+        &self,
+        resource: ManagedResource,
+    ) -> ProviderResult<State> {
         let cidr_block = require_string_attr(&resource, "cidr_block")?;
         let vpc_id = require_string_attr(&resource, "vpc_id")?;
 
@@ -114,7 +117,7 @@ impl AwsProvider {
         id: ResourceId,
         identifier: &str,
         from: &State,
-        to: Resource,
+        to: ManagedResource,
     ) -> ProviderResult<State> {
         // Apply subnet attributes that require ModifySubnetAttribute
         let attrs = to.resolved_attributes();

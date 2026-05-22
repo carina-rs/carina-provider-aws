@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use carina_core::provider::{ProviderError, ProviderResult};
-use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
+use carina_core::resource::{ConcreteValue, ManagedResource, ResourceId, State, Value};
 
 use crate::AwsProvider;
 use crate::helpers::sdk_error_message;
@@ -105,7 +105,7 @@ impl AwsProvider {
     /// Create an Organizations organization
     pub(crate) async fn create_organizations_organization(
         &self,
-        resource: Resource,
+        resource: ManagedResource,
     ) -> ProviderResult<State> {
         let mut req = self.organizations_client.create_organization();
 

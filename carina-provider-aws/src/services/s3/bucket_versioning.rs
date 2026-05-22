@@ -5,7 +5,7 @@ use crate::helpers::{require_string_attr, retry_aws_operation, sdk_error_message
 use crate::services::s3::bucket::is_s3_not_configured_error;
 use aws_sdk_s3::types::{BucketVersioningStatus, MfaDelete, VersioningConfiguration};
 use carina_core::provider::{ProviderError, ProviderResult};
-use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
+use carina_core::resource::{ConcreteValue, ManagedResource, ResourceId, State, Value};
 
 impl AwsProvider {
     /// Read an S3 BucketVersioning.
@@ -66,7 +66,7 @@ impl AwsProvider {
 
     pub(crate) async fn create_s3_bucket_versioning(
         &self,
-        resource: Resource,
+        resource: ManagedResource,
     ) -> ProviderResult<State> {
         let bucket = require_string_attr(&resource, "bucket")?;
         self.put_s3_bucket_versioning(&resource.id, &bucket, &resource)
@@ -78,7 +78,7 @@ impl AwsProvider {
         id: ResourceId,
         identifier: &str,
         _from: &State,
-        to: Resource,
+        to: ManagedResource,
     ) -> ProviderResult<State> {
         self.put_s3_bucket_versioning(&id, identifier, &to).await
     }
@@ -87,7 +87,7 @@ impl AwsProvider {
         &self,
         id: &ResourceId,
         bucket: &str,
-        resource: &Resource,
+        resource: &ManagedResource,
     ) -> ProviderResult<State> {
         let status_str = match resource.get_attr("status") {
             Some(Value::Concrete(ConcreteValue::String(s))) => s.clone(),
