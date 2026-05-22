@@ -106,8 +106,8 @@ pub fn sdk_error_message(context: &str, err: &(impl std::error::Error + 'static)
 ///
 /// Whether an error is retried is decided by [`is_retryable_sdk_error`],
 /// which consults the SDK's own classification (`ProvideErrorKind`) plus
-/// a small explicit carve-out for S3 `OperationAborted` (a 409 race that
-/// the SDK does not flag as retryable but the AWS docs say to back off).
+/// an explicit carve-out for the [`S3_RETRYABLE_ERROR_CODES`] that the
+/// AWS docs call transient but the S3 SDK model does not flag.
 ///
 /// - `operation_name`: Human-readable name for log messages.
 /// - `max_attempts`: Maximum number of attempts (including the first).
@@ -146,21 +146,39 @@ where
     }
 }
 
+/// S3 service-error codes that the AWS docs classify as transient but
+/// the generated SDK does not flag as retryable.
+///
+/// The S3 Smithy model attaches no `@retryable` trait to any operation
+/// error, so every S3 operation's generated `retryable_error_kind()`
+/// returns `None` unconditionally (e.g. `DeleteBucketWebsiteError` only
+/// has an `Unhandled` variant). Without this carve-out, transient S3
+/// failures abort on the first occurrence instead of backing off.
+///
+/// - `RequestTimeout` (HTTP 400): "Your socket connection to the server
+///   was not read from or written to within the timeout period." The
+///   raw response is marked `retryable: true`; a retry of an idempotent
+///   operation is safe.
+/// - `SlowDown` (HTTP 503): S3 request-rate throttling — back off.
+/// - `OperationAborted` (HTTP 409): CreateBucket / DeleteBucket race;
+///   the bucket name's control-plane state clears in ~60–90s.
+const S3_RETRYABLE_ERROR_CODES: &[&str] = &["RequestTimeout", "SlowDown", "OperationAborted"];
+
 /// Classify an [`SdkError`] as transient (worth retrying) or terminal.
 ///
-/// Trusts the SDK's own retryability flag for service errors — the
-/// `retryable_error_kind()` accessor returns `Some(ErrorKind)` exactly
-/// when the service marked the response retryable (throttling, server
-/// errors, modeled transient conditions like S3 `RequestTimeout`).
+/// Service errors are classified in two steps:
+///
+/// 1. The SDK's own `retryable_error_kind()` — `Some(ErrorKind)` when the
+///    service model marks the error retryable (throttling, server
+///    errors). Note this is **always `None` for S3**: no S3 operation
+///    error carries an `@retryable` trait.
+/// 2. An explicit carve-out for [`S3_RETRYABLE_ERROR_CODES`] — S3 codes
+///    the AWS docs call transient but the SDK model does not flag.
+///
 /// Transport-layer failures (`TimeoutError`, `DispatchFailure`,
 /// `ResponseError`, `ConstructionFailure`) are always transient — the
 /// HTTP exchange did not complete, so a retry is safe for idempotent
 /// operations (which is what all carina provider operations are).
-///
-/// One explicit carve-out: S3 `OperationAborted` is HTTP 409 and the
-/// SDK does not flag it as retryable, but the AWS docs say to back off
-/// because the bucket name's control plane state clears after ~60–90s
-/// when CreateBucket races a recent DeleteBucket.
 pub fn is_retryable_sdk_error<E, R>(err: &SdkError<E, R>) -> bool
 where
     E: ProvideErrorKind + ProvideErrorMetadata,
@@ -175,10 +193,14 @@ where
             if inner.retryable_error_kind().is_some() {
                 return true;
             }
-            // S3-specific: CreateBucket / DeleteBucket race condition.
+            // S3 carve-out: the SDK model flags no S3 error as
+            // retryable, so consult the documented transient codes.
             // Disambiguate `code()` — both `ProvideErrorKind` and
             // `ProvideErrorMetadata` define a same-named accessor.
-            matches!(ProvideErrorMetadata::code(inner), Some("OperationAborted"))
+            matches!(
+                ProvideErrorMetadata::code(inner),
+                Some(code) if S3_RETRYABLE_ERROR_CODES.contains(&code)
+            )
         }
         // `SdkError` is `#[non_exhaustive]`; future-added variants get
         // the conservative default (don't retry).
@@ -533,6 +555,28 @@ mod tests {
         // to back off because the control plane clears in ~60–90s.
         // See carina-rs/carina-provider-aws#156.
         let err = service_err("OperationAborted", None);
+        assert!(is_retryable_sdk_error(&err));
+    }
+
+    #[test]
+    fn s3_request_timeout_retries_despite_no_sdk_flag() {
+        // Reproduces carina-rs/carina-provider-aws#272: the real S3 SDK
+        // attaches NO `@retryable` trait to any operation error, so the
+        // generated `retryable_error_kind()` returns `None` even for
+        // RequestTimeout. The fixture passes `None` to match that real
+        // behavior (earlier tests passed `Some(..)`, which the actual
+        // SDK never produces). The documented-codes carve-out must still
+        // classify RequestTimeout as retryable.
+        let err = service_err("RequestTimeout", None);
+        assert!(is_retryable_sdk_error(&err));
+    }
+
+    #[test]
+    fn s3_slow_down_retries_despite_no_sdk_flag() {
+        // S3 request-rate throttling (HTTP 503). Same SDK gap as
+        // RequestTimeout — no `@retryable` trait, so the carve-out must
+        // cover it.
+        let err = service_err("SlowDown", None);
         assert!(is_retryable_sdk_error(&err));
     }
 
