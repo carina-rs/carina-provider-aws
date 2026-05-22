@@ -10,7 +10,7 @@ use carina_core::resource::{ConcreteValue, ManagedResource, ResourceId, State, V
 use indexmap::IndexMap;
 
 use crate::AwsProvider;
-use crate::helpers::{require_string_attr, retry_aws_operation, sdk_error_message};
+use crate::helpers::{RetryPolicy, require_string_attr, retry_aws_operation, sdk_error_message};
 use crate::services::s3::bucket::is_s3_not_configured_error;
 
 impl AwsProvider {
@@ -140,17 +140,18 @@ impl AwsProvider {
         id: ResourceId,
         identifier: &str,
     ) -> ProviderResult<()> {
-        let result = retry_aws_operation("delete bucket replication", 3, 5, || {
-            let client = &self.s3_client;
-            async move {
-                client
-                    .delete_bucket_replication()
-                    .bucket(identifier)
-                    .send()
-                    .await
-            }
-        })
-        .await;
+        let result =
+            retry_aws_operation("delete bucket replication", RetryPolicy::default(), || {
+                let client = &self.s3_client;
+                async move {
+                    client
+                        .delete_bucket_replication()
+                        .bucket(identifier)
+                        .send()
+                        .await
+                }
+            })
+            .await;
 
         match result {
             Ok(_) => Ok(()),

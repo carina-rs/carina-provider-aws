@@ -4,7 +4,7 @@ use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{ConcreteValue, ManagedResource, ResourceId, State, Value};
 
 use crate::AwsProvider;
-use crate::helpers::{require_string_attr, retry_aws_operation, sdk_error_message};
+use crate::helpers::{RetryPolicy, require_string_attr, retry_aws_operation, sdk_error_message};
 
 impl AwsProvider {
     /// Read an EC2 VPC Endpoint
@@ -129,7 +129,7 @@ impl AwsProvider {
         }
 
         let rid = resource.id.clone();
-        let result = retry_aws_operation("create VPC endpoint", 5, 5, || {
+        let result = retry_aws_operation("create VPC endpoint", RetryPolicy::default(), || {
             let req = req.clone();
             async move { req.send().await }
         })

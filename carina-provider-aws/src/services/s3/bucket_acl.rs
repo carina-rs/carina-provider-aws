@@ -6,7 +6,7 @@ use carina_core::resource::{ConcreteValue, ManagedResource, ResourceId, State, V
 use carina_core::utils::convert_enum_value;
 
 use crate::AwsProvider;
-use crate::helpers::{require_string_attr, retry_aws_operation, sdk_error_message};
+use crate::helpers::{RetryPolicy, require_string_attr, retry_aws_operation, sdk_error_message};
 use crate::services::s3::bucket::is_s3_not_configured_error;
 
 /// AWS group URIs used to identify canned-ACL grant patterns.
@@ -200,7 +200,7 @@ impl AwsProvider {
         id: ResourceId,
         identifier: &str,
     ) -> ProviderResult<()> {
-        let result = retry_aws_operation("reset bucket ACL", 3, 5, || {
+        let result = retry_aws_operation("reset bucket ACL", RetryPolicy::default(), || {
             let client = &self.s3_client;
             async move {
                 client

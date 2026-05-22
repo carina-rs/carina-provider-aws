@@ -7,7 +7,8 @@ use aws_sdk_ec2::types::NatGatewayState;
 
 use crate::AwsProvider;
 use crate::helpers::{
-    PollState, require_string_attr, retry_aws_operation, sdk_error_message, wait_for_ec2_state,
+    PollState, RetryPolicy, require_string_attr, retry_aws_operation, sdk_error_message,
+    wait_for_ec2_state,
 };
 
 impl AwsProvider {
@@ -89,7 +90,7 @@ impl AwsProvider {
         }
 
         let rid = resource.id.clone();
-        let result = retry_aws_operation("create NAT gateway", 5, 5, || {
+        let result = retry_aws_operation("create NAT gateway", RetryPolicy::default(), || {
             let req = req.clone();
             async move { req.send().await }
         })
