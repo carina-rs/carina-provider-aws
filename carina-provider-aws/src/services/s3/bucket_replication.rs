@@ -230,9 +230,14 @@ fn build_rule(id: &ResourceId, rule_value: &Value) -> ProviderResult<Replication
     if let Some(Value::Concrete(ConcreteValue::String(s))) = map.get("id") {
         builder = builder.id(s);
     }
-    if let Some(Value::Concrete(ConcreteValue::Int(n))) = map.get("priority") {
-        builder = builder.priority(*n as i32);
-    }
+    // A V2 replication rule (one carrying a `Filter`) must declare a
+    // `Priority` — S3 uses it to resolve precedence when rules overlap.
+    // Default to 0 (lowest precedence) when the DSL omits it.
+    let priority = match map.get("priority") {
+        Some(Value::Concrete(ConcreteValue::Int(n))) => *n as i32,
+        _ => 0,
+    };
+    builder = builder.priority(priority);
 
     builder.build().map_err(|e| {
         ProviderError::api_error(sdk_error_message("Failed to build ReplicationRule", &e))
@@ -345,7 +350,12 @@ fn rule_to_value(rule: &ReplicationRule) -> Value {
             Value::Concrete(ConcreteValue::String(s.to_string())),
         );
     }
-    if let Some(p) = rule.priority() {
+    // Surface priority only when non-zero. The provider defaults an
+    // omitted priority to 0, so reflecting 0 would diff against a DSL
+    // config that omits `priority`.
+    if let Some(p) = rule.priority()
+        && p != 0
+    {
         map.insert(
             "priority".to_string(),
             Value::Concrete(ConcreteValue::Int(p as i64)),
@@ -613,6 +623,78 @@ mod tests {
         assert!(
             !m.contains_key("delete_marker_replication"),
             "Disabled delete_marker_replication must not be surfaced"
+        );
+    }
+
+    #[test]
+    fn rule_without_priority_defaults_to_zero() {
+        // Reproduces carina-rs/carina-provider-aws#349: a V2 replication
+        // rule (one carrying a Filter) must declare a Priority, or S3
+        // rejects the request with `InvalidRequest: Priority must be
+        // specified`. build_rule must always set one.
+        let rule_value = map_val(vec![
+            ("status", str_val("Enabled")),
+            ("destination", dest()),
+        ]);
+        let rule = build_rule(&rid(), &rule_value).expect("build_rule should succeed");
+        assert_eq!(
+            rule.priority(),
+            Some(0),
+            "an omitted priority must default to 0, not stay unset"
+        );
+    }
+
+    #[test]
+    fn explicit_priority_is_kept() {
+        let rule_value = map_val(vec![
+            ("status", str_val("Enabled")),
+            ("destination", dest()),
+            ("priority", Value::Concrete(ConcreteValue::Int(5))),
+        ]);
+        let rule = build_rule(&rid(), &rule_value).expect("build_rule should succeed");
+        assert_eq!(rule.priority(), Some(5));
+    }
+
+    #[test]
+    fn zero_priority_not_surfaced_on_read() {
+        // The provider defaults an omitted priority to 0; reflecting 0
+        // on read would diff against a DSL config that omits `priority`.
+        let built = build_rule(
+            &rid(),
+            &map_val(vec![
+                ("status", str_val("Enabled")),
+                ("destination", dest()),
+            ]),
+        )
+        .unwrap();
+        let value = rule_to_value(&built);
+        let Value::Concrete(ConcreteValue::Map(m)) = value else {
+            panic!("expected map");
+        };
+        assert!(
+            !m.contains_key("priority"),
+            "a defaulted priority of 0 must not be surfaced"
+        );
+    }
+
+    #[test]
+    fn nonzero_priority_round_trips() {
+        let built = build_rule(
+            &rid(),
+            &map_val(vec![
+                ("status", str_val("Enabled")),
+                ("destination", dest()),
+                ("priority", Value::Concrete(ConcreteValue::Int(3))),
+            ]),
+        )
+        .unwrap();
+        let value = rule_to_value(&built);
+        let Value::Concrete(ConcreteValue::Map(m)) = value else {
+            panic!("expected map");
+        };
+        assert_eq!(
+            m.get("priority"),
+            Some(&Value::Concrete(ConcreteValue::Int(3)))
         );
     }
 }
