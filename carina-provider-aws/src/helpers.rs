@@ -102,6 +102,52 @@ pub fn sdk_error_message(context: &str, err: &(impl std::error::Error + 'static)
     format!("{}: {}", context, DisplayErrorContext(err))
 }
 
+/// Exponential-backoff retry budget for [`retry_aws_operation`].
+///
+/// All AWS calls in this provider share a single policy
+/// ([`RetryPolicy::default`]) rather than per-call-site magic numbers,
+/// so the retry budget is tuned in one place. The fields are named so a
+/// call site reads as intent, not as two unlabeled integers.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct RetryPolicy {
+    /// Maximum number of attempts, including the first.
+    max_attempts: u32,
+    /// Delay before the first retry; doubles each subsequent attempt.
+    initial_delay_secs: u64,
+    /// Upper bound on any single backoff delay.
+    max_delay_secs: u64,
+}
+
+impl RetryPolicy {
+    /// Backoff delay before the given retry (`attempt` is 1-based: the
+    /// delay after the 1st failed attempt is `attempt == 1`).
+    fn delay_secs(&self, attempt: u32) -> u64 {
+        let raw = self
+            .initial_delay_secs
+            .saturating_mul(2u64.saturating_pow(attempt - 1));
+        std::cmp::min(raw, self.max_delay_secs)
+    }
+}
+
+impl Default for RetryPolicy {
+    /// 8 attempts, 5s initial backoff, 120s cap.
+    ///
+    /// Backoff schedule (7 retries): 5, 10, 20, 40, 80, 120, 120 — 395s
+    /// of cumulative sleep. S3 `OperationAborted` (CreateBucket /
+    /// DeleteBucket name races, clearing in ~60–90s) and `RequestTimeout`
+    /// recurring under load both need a budget well past the 75s of
+    /// sleep that the previous 5-attempt default gave (4 retries:
+    /// 5+10+20+40); 8 attempts cover them without pinning a single
+    /// operation for the ~10min an even larger budget would.
+    fn default() -> Self {
+        Self {
+            max_attempts: 8,
+            initial_delay_secs: 5,
+            max_delay_secs: 120,
+        }
+    }
+}
+
 /// Retry an AWS SDK operation with exponential backoff on transient errors.
 ///
 /// Whether an error is retried is decided by [`is_retryable_sdk_error`],
@@ -110,13 +156,12 @@ pub fn sdk_error_message(context: &str, err: &(impl std::error::Error + 'static)
 /// AWS docs call transient but the S3 SDK model does not flag.
 ///
 /// - `operation_name`: Human-readable name for log messages.
-/// - `max_attempts`: Maximum number of attempts (including the first).
-/// - `initial_delay_secs`: Delay before the first retry (doubles each attempt, capped at 120s).
+/// - `policy`: The [`RetryPolicy`] budget — production callers pass
+///   [`RetryPolicy::default()`].
 /// - `f`: A closure that returns a `Future` producing the SDK result.
 pub async fn retry_aws_operation<F, Fut, T, E, R>(
     operation_name: &str,
-    max_attempts: u32,
-    initial_delay_secs: u64,
+    policy: RetryPolicy,
     f: F,
 ) -> Result<T, SdkError<E, R>>
 where
@@ -130,13 +175,13 @@ where
         attempt += 1;
         match f().await {
             Ok(result) => return Ok(result),
-            Err(e) if attempt < max_attempts && is_retryable_sdk_error(&e) => {
-                let delay = std::cmp::min(initial_delay_secs * 2u64.pow(attempt - 1), 120);
+            Err(e) if attempt < policy.max_attempts && is_retryable_sdk_error(&e) => {
+                let delay = policy.delay_secs(attempt);
                 eprintln!(
                     "  Retrying {} (attempt {}/{}): {}",
                     operation_name,
                     attempt,
-                    max_attempts,
+                    policy.max_attempts,
                     DisplayErrorContext(&e)
                 );
                 sleep(Duration::from_secs(delay)).await;
@@ -588,10 +633,19 @@ mod tests {
         assert!(is_retryable_sdk_error(&timeout));
     }
 
+    /// Zero-delay policy so retry tests do not actually sleep.
+    fn test_policy(max_attempts: u32) -> RetryPolicy {
+        RetryPolicy {
+            max_attempts,
+            initial_delay_secs: 0,
+            max_delay_secs: 0,
+        }
+    }
+
     #[tokio::test]
     async fn retry_aws_operation_succeeds_first_try() {
         let result: Result<&str, SdkError<MockServiceError, HttpResponse>> =
-            retry_aws_operation("test op", 3, 0, || async { Ok("success") }).await;
+            retry_aws_operation("test op", test_policy(3), || async { Ok("success") }).await;
         assert_eq!(result.unwrap(), "success");
     }
 
@@ -602,7 +656,7 @@ mod tests {
         let attempt_count = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
         let counter = attempt_count.clone();
         let result: Result<&str, SdkError<MockServiceError, HttpResponse>> =
-            retry_aws_operation("delete bucket sub-resource", 3, 0, || {
+            retry_aws_operation("delete bucket sub-resource", test_policy(3), || {
                 let counter = counter.clone();
                 async move {
                     let n = counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
@@ -630,7 +684,7 @@ mod tests {
         let attempt_count = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
         let counter = attempt_count.clone();
         let result: Result<&str, SdkError<MockServiceError, HttpResponse>> =
-            retry_aws_operation("test op", 3, 0, || {
+            retry_aws_operation("test op", test_policy(3), || {
                 let counter = counter.clone();
                 async move {
                     counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
@@ -644,5 +698,60 @@ mod tests {
             1,
             "non-retryable errors must terminate after one attempt"
         );
+    }
+
+    #[tokio::test]
+    async fn retry_aws_operation_exhausts_policy_budget() {
+        // A transient error that never clears must retry exactly
+        // max_attempts times, then surface the error.
+        let attempt_count = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
+        let counter = attempt_count.clone();
+        let result: Result<&str, SdkError<MockServiceError, HttpResponse>> =
+            retry_aws_operation("create S3 bucket", test_policy(8), || {
+                let counter = counter.clone();
+                async move {
+                    counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    Err(service_err("OperationAborted", None))
+                }
+            })
+            .await;
+        assert!(result.is_err());
+        assert_eq!(
+            attempt_count.load(std::sync::atomic::Ordering::SeqCst),
+            8,
+            "a never-clearing transient error must use the full budget"
+        );
+    }
+
+    #[test]
+    fn default_retry_policy_budget() {
+        // Reproduces carina-rs/carina-provider-aws#351: the previous
+        // per-site budgets (3 attempts for most S3 deletes, 5 for
+        // creates) were exhausted by S3 OperationAborted under load.
+        // The single default must be larger.
+        let p = RetryPolicy::default();
+        assert_eq!(p.max_attempts, 8);
+        assert_eq!(p.initial_delay_secs, 5);
+        assert_eq!(p.max_delay_secs, 120);
+    }
+
+    #[test]
+    fn retry_policy_delay_doubles_then_caps() {
+        let p = RetryPolicy::default();
+        // 5, 10, 20, 40, 80, then capped at 120.
+        assert_eq!(p.delay_secs(1), 5);
+        assert_eq!(p.delay_secs(2), 10);
+        assert_eq!(p.delay_secs(3), 20);
+        assert_eq!(p.delay_secs(4), 40);
+        assert_eq!(p.delay_secs(5), 80);
+        assert_eq!(p.delay_secs(6), 120, "delay must cap at max_delay_secs");
+        assert_eq!(p.delay_secs(7), 120);
+    }
+
+    #[test]
+    fn retry_policy_delay_does_not_overflow() {
+        // A large attempt number must not panic via shift/mul overflow.
+        let p = RetryPolicy::default();
+        assert_eq!(p.delay_secs(100), 120);
     }
 }

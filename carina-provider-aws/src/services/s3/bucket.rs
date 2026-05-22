@@ -8,7 +8,7 @@ use carina_core::resource::{
 use carina_core::utils::convert_enum_value;
 
 use crate::AwsProvider;
-use crate::helpers::{retry_aws_operation, sdk_error_message};
+use crate::helpers::{RetryPolicy, retry_aws_operation, sdk_error_message};
 
 impl AwsProvider {
     /// Read an S3 bucket
@@ -108,7 +108,7 @@ impl AwsProvider {
         // S3 returns when CreateBucket races a recent DeleteBucket for the
         // same name — the control plane clears after ~60–90s. See #156.
         let rid = resource.id.clone();
-        retry_aws_operation("create S3 bucket", 5, 5, || {
+        retry_aws_operation("create S3 bucket", RetryPolicy::default(), || {
             let req = req.clone();
             async move { req.send().await }
         })
@@ -169,7 +169,7 @@ impl AwsProvider {
             self.empty_s3_bucket(&id, identifier).await?;
         }
 
-        retry_aws_operation("delete S3 bucket", 3, 5, || {
+        retry_aws_operation("delete S3 bucket", RetryPolicy::default(), || {
             let client = &self.s3_client;
             async move { client.delete_bucket().bucket(identifier).send().await }
         })

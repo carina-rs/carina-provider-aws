@@ -4,7 +4,7 @@ use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{ConcreteValue, ManagedResource, ResourceId, State, Value};
 
 use crate::AwsProvider;
-use crate::helpers::{require_string_attr, retry_aws_operation, sdk_error_message};
+use crate::helpers::{RetryPolicy, require_string_attr, retry_aws_operation, sdk_error_message};
 
 impl AwsProvider {
     /// Read an EC2 Security Group
@@ -81,7 +81,7 @@ impl AwsProvider {
         // Create Security Group
         let ec2 = &self.ec2_client;
         let rid = resource.id.clone();
-        let result = retry_aws_operation("create security group", 5, 5, || {
+        let result = retry_aws_operation("create security group", RetryPolicy::default(), || {
             let group_name = group_name.clone();
             let description = description.clone();
             let vpc_id = vpc_id.clone();

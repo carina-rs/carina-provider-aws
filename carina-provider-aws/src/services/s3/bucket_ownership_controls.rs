@@ -5,7 +5,7 @@ use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{ConcreteValue, ManagedResource, ResourceId, State, Value};
 
 use crate::AwsProvider;
-use crate::helpers::{require_string_attr, retry_aws_operation, sdk_error_message};
+use crate::helpers::{RetryPolicy, require_string_attr, retry_aws_operation, sdk_error_message};
 use crate::services::s3::bucket::is_s3_not_configured_error;
 
 impl AwsProvider {
@@ -134,16 +134,20 @@ impl AwsProvider {
         id: ResourceId,
         identifier: &str,
     ) -> ProviderResult<()> {
-        let result = retry_aws_operation("delete bucket ownership controls", 3, 5, || {
-            let client = &self.s3_client;
-            async move {
-                client
-                    .delete_bucket_ownership_controls()
-                    .bucket(identifier)
-                    .send()
-                    .await
-            }
-        })
+        let result = retry_aws_operation(
+            "delete bucket ownership controls",
+            RetryPolicy::default(),
+            || {
+                let client = &self.s3_client;
+                async move {
+                    client
+                        .delete_bucket_ownership_controls()
+                        .bucket(identifier)
+                        .send()
+                        .await
+                }
+            },
+        )
         .await;
 
         match result {
