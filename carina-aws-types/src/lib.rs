@@ -5,7 +5,31 @@
 //! schema config structs) remain in their respective crates.
 
 use carina_core::resource::{ConcreteValue, Value};
-use carina_core::schema::{AttributeType, CompletionValue, StructField, legacy_validator};
+use carina_core::schema::{
+    AttributeType, CompletionValue, StructField, TypeIdentity, legacy_validator,
+};
+
+/// Structured identity for an AWS resource-scoped custom type.
+///
+/// `service` + `resource` become the namespace segments and `kind` the
+/// reference-kind tail, yielding `aws.<service>.<Resource>.<kind>` —
+/// e.g. `aws.ec2.Vpc.Id`, `aws.iam.Role.Arn`. The provider axis keeps
+/// the type distinct from any same-named type a future non-AWS provider
+/// might define; the service/resource axis distinguishes, say,
+/// `aws.iam.Role.Arn` from `aws.acm.Certificate.Arn`.
+fn aws_type(service: &str, resource: &str, kind: &str) -> TypeIdentity {
+    TypeIdentity::new(Some("aws"), [service, resource], kind)
+}
+
+/// Structured identity for an AWS custom type with no service axis.
+///
+/// Used for `AvailabilityZone` (a cross-service concept owned by no
+/// single service — `aws.AvailabilityZone.ZoneId`) and for the
+/// fully-generic provider-scoped types (`aws.Arn`, `aws.ResourceId`,
+/// `aws.AccountId`), which pass an empty `segments` slice.
+fn aws_bare_type(segments: &[&str], kind: &str) -> TypeIdentity {
+    TypeIdentity::new(Some("aws"), segments.iter().copied(), kind)
+}
 
 // ========== Enum helpers ==========
 
@@ -268,7 +292,7 @@ pub fn validate_prefixed_resource_id(id: &str, expected_prefix: &str) -> Result<
 #[allow(dead_code)]
 pub fn aws_resource_id() -> AttributeType {
     AttributeType::Custom {
-        semantic_name: Some("AwsResourceId".to_string()),
+        identity: Some(aws_bare_type(&[], "ResourceId")),
         pattern: Some("^[a-z-]+-[0-9a-f]{8,}$".to_string()),
         length: None,
         base: Box::new(AttributeType::String),
@@ -288,7 +312,7 @@ pub fn aws_resource_id() -> AttributeType {
 /// VPC ID type (e.g., "vpc-1a2b3c4d")
 pub fn vpc_id() -> AttributeType {
     AttributeType::Custom {
-        semantic_name: Some("VpcId".to_string()),
+        identity: Some(aws_type("ec2", "Vpc", "Id")),
         pattern: Some("^vpc-[0-9a-f]{8,}$".to_string()),
         length: None,
         base: Box::new(aws_resource_id()),
@@ -308,7 +332,7 @@ pub fn vpc_id() -> AttributeType {
 /// Subnet ID type (e.g., "subnet-0123456789abcdef0")
 pub fn subnet_id() -> AttributeType {
     AttributeType::Custom {
-        semantic_name: Some("SubnetId".to_string()),
+        identity: Some(aws_type("ec2", "Subnet", "Id")),
         pattern: Some("^subnet-[0-9a-f]{8,}$".to_string()),
         length: None,
         base: Box::new(aws_resource_id()),
@@ -328,7 +352,7 @@ pub fn subnet_id() -> AttributeType {
 /// Security Group ID type (e.g., "sg-12345678")
 pub fn security_group_id() -> AttributeType {
     AttributeType::Custom {
-        semantic_name: Some("SecurityGroupId".to_string()),
+        identity: Some(aws_type("ec2", "SecurityGroup", "Id")),
         pattern: Some("^sg-[0-9a-f]{8,}$".to_string()),
         length: None,
         base: Box::new(aws_resource_id()),
@@ -348,7 +372,7 @@ pub fn security_group_id() -> AttributeType {
 /// Internet Gateway ID type (e.g., "igw-12345678")
 pub fn internet_gateway_id() -> AttributeType {
     AttributeType::Custom {
-        semantic_name: Some("InternetGatewayId".to_string()),
+        identity: Some(aws_type("ec2", "InternetGateway", "Id")),
         pattern: Some("^igw-[0-9a-f]{8,}$".to_string()),
         length: None,
         base: Box::new(aws_resource_id()),
@@ -368,7 +392,7 @@ pub fn internet_gateway_id() -> AttributeType {
 /// Route Table ID type (e.g., "rtb-abcdef12")
 pub fn route_table_id() -> AttributeType {
     AttributeType::Custom {
-        semantic_name: Some("RouteTableId".to_string()),
+        identity: Some(aws_type("ec2", "RouteTable", "Id")),
         pattern: Some("^rtb-[0-9a-f]{8,}$".to_string()),
         length: None,
         base: Box::new(aws_resource_id()),
@@ -388,7 +412,7 @@ pub fn route_table_id() -> AttributeType {
 /// NAT Gateway ID type (e.g., "nat-12345678")
 pub fn nat_gateway_id() -> AttributeType {
     AttributeType::Custom {
-        semantic_name: Some("NatGatewayId".to_string()),
+        identity: Some(aws_type("ec2", "NatGateway", "Id")),
         pattern: Some("^nat-[0-9a-f]{8,}$".to_string()),
         length: None,
         base: Box::new(aws_resource_id()),
@@ -408,7 +432,7 @@ pub fn nat_gateway_id() -> AttributeType {
 /// VPC Peering Connection ID type (e.g., "pcx-12345678")
 pub fn vpc_peering_connection_id() -> AttributeType {
     AttributeType::Custom {
-        semantic_name: Some("VpcPeeringConnectionId".to_string()),
+        identity: Some(aws_type("ec2", "VpcPeeringConnection", "Id")),
         pattern: Some("^pcx-[0-9a-f]{8,}$".to_string()),
         length: None,
         base: Box::new(aws_resource_id()),
@@ -429,7 +453,7 @@ pub fn vpc_peering_connection_id() -> AttributeType {
 /// Transit Gateway ID type (e.g., "tgw-12345678")
 pub fn transit_gateway_id() -> AttributeType {
     AttributeType::Custom {
-        semantic_name: Some("TransitGatewayId".to_string()),
+        identity: Some(aws_type("ec2", "TransitGateway", "Id")),
         pattern: Some("^tgw-[0-9a-f]{8,}$".to_string()),
         length: None,
         base: Box::new(aws_resource_id()),
@@ -449,7 +473,7 @@ pub fn transit_gateway_id() -> AttributeType {
 /// VPC CIDR Block Association ID type (e.g., "vpc-cidr-assoc-12345678")
 pub fn vpc_cidr_block_association_id() -> AttributeType {
     AttributeType::Custom {
-        semantic_name: Some("VpcCidrBlockAssociationId".to_string()),
+        identity: Some(aws_type("ec2", "VpcCidrBlockAssociation", "Id")),
         pattern: Some("^vpc-cidr-assoc-[0-9a-f]{8,}$".to_string()),
         length: None,
         base: Box::new(aws_resource_id()),
@@ -470,7 +494,7 @@ pub fn vpc_cidr_block_association_id() -> AttributeType {
 /// Transit Gateway Route Table ID type (e.g., "tgw-rtb-12345678")
 pub fn tgw_route_table_id() -> AttributeType {
     AttributeType::Custom {
-        semantic_name: Some("TgwRouteTableId".to_string()),
+        identity: Some(aws_type("ec2", "TransitGatewayRouteTable", "Id")),
         pattern: Some("^tgw-rtb-[0-9a-f]{8,}$".to_string()),
         length: None,
         base: Box::new(aws_resource_id()),
@@ -490,7 +514,7 @@ pub fn tgw_route_table_id() -> AttributeType {
 /// VPN Gateway ID type (e.g., "vgw-12345678")
 pub fn vpn_gateway_id() -> AttributeType {
     AttributeType::Custom {
-        semantic_name: Some("VpnGatewayId".to_string()),
+        identity: Some(aws_type("ec2", "VpnGateway", "Id")),
         pattern: Some("^vgw-[0-9a-f]{8,}$".to_string()),
         length: None,
         base: Box::new(aws_resource_id()),
@@ -515,7 +539,7 @@ pub fn gateway_id() -> AttributeType {
 /// Egress Only Internet Gateway ID type (e.g., "eigw-12345678")
 pub fn egress_only_internet_gateway_id() -> AttributeType {
     AttributeType::Custom {
-        semantic_name: Some("EgressOnlyInternetGatewayId".to_string()),
+        identity: Some(aws_type("ec2", "EgressOnlyInternetGateway", "Id")),
         pattern: Some("^eigw-[0-9a-f]{8,}$".to_string()),
         length: None,
         base: Box::new(aws_resource_id()),
@@ -539,7 +563,7 @@ pub fn egress_only_internet_gateway_id() -> AttributeType {
 /// VPC Endpoint ID type (e.g., "vpce-12345678")
 pub fn vpc_endpoint_id() -> AttributeType {
     AttributeType::Custom {
-        semantic_name: Some("VpcEndpointId".to_string()),
+        identity: Some(aws_type("ec2", "VpcEndpoint", "Id")),
         pattern: Some("^vpce-[0-9a-f]{8,}$".to_string()),
         length: None,
         base: Box::new(aws_resource_id()),
@@ -559,7 +583,7 @@ pub fn vpc_endpoint_id() -> AttributeType {
 /// Instance ID type (e.g., "i-0123456789abcdef0")
 pub fn instance_id() -> AttributeType {
     AttributeType::Custom {
-        semantic_name: Some("InstanceId".to_string()),
+        identity: Some(aws_type("ec2", "Instance", "Id")),
         pattern: Some("^i-[0-9a-f]{8,}$".to_string()),
         length: None,
         base: Box::new(aws_resource_id()),
@@ -579,7 +603,7 @@ pub fn instance_id() -> AttributeType {
 /// Network Interface ID type (e.g., "eni-0123456789abcdef0")
 pub fn network_interface_id() -> AttributeType {
     AttributeType::Custom {
-        semantic_name: Some("NetworkInterfaceId".to_string()),
+        identity: Some(aws_type("ec2", "NetworkInterface", "Id")),
         pattern: Some("^eni-[0-9a-f]{8,}$".to_string()),
         length: None,
         base: Box::new(aws_resource_id()),
@@ -600,7 +624,7 @@ pub fn network_interface_id() -> AttributeType {
 #[allow(dead_code)]
 pub fn allocation_id() -> AttributeType {
     AttributeType::Custom {
-        semantic_name: Some("AllocationId".to_string()),
+        identity: Some(aws_type("ec2", "Eip", "AllocationId")),
         pattern: Some("^eipalloc-[0-9a-f]{8,}$".to_string()),
         length: None,
         base: Box::new(aws_resource_id()),
@@ -620,7 +644,7 @@ pub fn allocation_id() -> AttributeType {
 /// Prefix List ID type (e.g., "pl-0123456789abcdef0")
 pub fn prefix_list_id() -> AttributeType {
     AttributeType::Custom {
-        semantic_name: Some("PrefixListId".to_string()),
+        identity: Some(aws_type("ec2", "PrefixList", "Id")),
         pattern: Some("^pl-[0-9a-f]{8,}$".to_string()),
         length: None,
         base: Box::new(aws_resource_id()),
@@ -640,7 +664,7 @@ pub fn prefix_list_id() -> AttributeType {
 /// Carrier Gateway ID type (e.g., "cagw-0123456789abcdef0")
 pub fn carrier_gateway_id() -> AttributeType {
     AttributeType::Custom {
-        semantic_name: Some("CarrierGatewayId".to_string()),
+        identity: Some(aws_type("ec2", "CarrierGateway", "Id")),
         pattern: Some("^cagw-[0-9a-f]{8,}$".to_string()),
         length: None,
         base: Box::new(aws_resource_id()),
@@ -660,7 +684,7 @@ pub fn carrier_gateway_id() -> AttributeType {
 /// Local Gateway ID type (e.g., "lgw-0123456789abcdef0")
 pub fn local_gateway_id() -> AttributeType {
     AttributeType::Custom {
-        semantic_name: Some("LocalGatewayId".to_string()),
+        identity: Some(aws_type("ec2", "LocalGateway", "Id")),
         pattern: Some("^lgw-[0-9a-f]{8,}$".to_string()),
         length: None,
         base: Box::new(aws_resource_id()),
@@ -681,7 +705,7 @@ pub fn local_gateway_id() -> AttributeType {
 #[allow(dead_code)]
 pub fn network_acl_id() -> AttributeType {
     AttributeType::Custom {
-        semantic_name: Some("NetworkAclId".to_string()),
+        identity: Some(aws_type("ec2", "NetworkAcl", "Id")),
         pattern: Some("^acl-[0-9a-f]{8,}$".to_string()),
         length: None,
         base: Box::new(aws_resource_id()),
@@ -701,7 +725,7 @@ pub fn network_acl_id() -> AttributeType {
 /// Transit Gateway Attachment ID type (e.g., "tgw-attach-0123456789abcdef0")
 pub fn transit_gateway_attachment_id() -> AttributeType {
     AttributeType::Custom {
-        semantic_name: Some("TransitGatewayAttachmentId".to_string()),
+        identity: Some(aws_type("ec2", "TransitGatewayAttachment", "Id")),
         pattern: Some("^tgw-attach-[0-9a-f]{8,}$".to_string()),
         length: None,
         base: Box::new(aws_resource_id()),
@@ -722,7 +746,7 @@ pub fn transit_gateway_attachment_id() -> AttributeType {
 /// Flow Log ID type (e.g., "fl-0123456789abcdef0")
 pub fn flow_log_id() -> AttributeType {
     AttributeType::Custom {
-        semantic_name: Some("FlowLogId".to_string()),
+        identity: Some(aws_type("ec2", "FlowLog", "Id")),
         pattern: Some("^fl-[0-9a-f]{8,}$".to_string()),
         length: None,
         base: Box::new(aws_resource_id()),
@@ -742,7 +766,7 @@ pub fn flow_log_id() -> AttributeType {
 /// IPAM ID type (e.g., "ipam-0123456789abcdef0")
 pub fn ipam_id() -> AttributeType {
     AttributeType::Custom {
-        semantic_name: Some("IpamId".to_string()),
+        identity: Some(aws_type("ec2", "Ipam", "Id")),
         pattern: Some("^ipam-[0-9a-f]{8,}$".to_string()),
         length: None,
         base: Box::new(aws_resource_id()),
@@ -762,7 +786,7 @@ pub fn ipam_id() -> AttributeType {
 /// Subnet Route Table Association ID type (e.g., "rtbassoc-0123456789abcdef0")
 pub fn subnet_route_table_association_id() -> AttributeType {
     AttributeType::Custom {
-        semantic_name: Some("SubnetRouteTableAssociationId".to_string()),
+        identity: Some(aws_type("ec2", "SubnetRouteTableAssociation", "Id")),
         pattern: Some("^rtbassoc-[0-9a-f]{8,}$".to_string()),
         length: None,
         base: Box::new(aws_resource_id()),
@@ -786,7 +810,7 @@ pub fn subnet_route_table_association_id() -> AttributeType {
 /// Security Group Rule ID type (e.g., "sgr-0123456789abcdef0")
 pub fn security_group_rule_id() -> AttributeType {
     AttributeType::Custom {
-        semantic_name: Some("SecurityGroupRuleId".to_string()),
+        identity: Some(aws_type("ec2", "SecurityGroupRule", "Id")),
         pattern: Some("^sgr-[0-9a-f]{8,}$".to_string()),
         length: None,
         base: Box::new(aws_resource_id()),
@@ -820,7 +844,7 @@ pub fn validate_iam_role_id(id: &str) -> Result<(), String> {
 /// IAM Role ID type (e.g., "AROAEXAMPLEID")
 pub fn iam_role_id() -> AttributeType {
     AttributeType::Custom {
-        semantic_name: Some("IamRoleId".to_string()),
+        identity: Some(aws_type("iam", "Role", "Id")),
         pattern: Some("^AROA[A-Z0-9]+$".to_string()),
         length: None,
         base: Box::new(aws_resource_id()),
@@ -856,7 +880,7 @@ pub fn validate_aws_account_id(id: &str) -> Result<(), String> {
 /// AWS Account ID type (12-digit numeric string, e.g., "123456789012")
 pub fn aws_account_id() -> AttributeType {
     AttributeType::Custom {
-        semantic_name: Some("AwsAccountId".to_string()),
+        identity: Some(aws_bare_type(&[], "AccountId")),
         pattern: Some("^\\d{12}$".to_string()),
         length: Some((Some(12), Some(12))),
         base: Box::new(AttributeType::String),
@@ -995,7 +1019,7 @@ pub fn validate_iam_arn(arn: &str, resource_prefix: &str) -> Result<(), String> 
 /// ARN type (e.g., "arn:aws:s3:::my-bucket")
 pub fn arn() -> AttributeType {
     AttributeType::Custom {
-        semantic_name: Some("Arn".to_string()),
+        identity: Some(aws_bare_type(&[], "Arn")),
         pattern: Some("^arn:(aws|aws-cn|aws-us-gov):[^:]+:.*$".to_string()),
         length: None,
         base: Box::new(AttributeType::String),
@@ -1015,7 +1039,7 @@ pub fn arn() -> AttributeType {
 #[allow(dead_code)]
 pub fn iam_role_arn() -> AttributeType {
     AttributeType::Custom {
-        semantic_name: Some("IamRoleArn".to_string()),
+        identity: Some(aws_type("iam", "Role", "Arn")),
         pattern: Some("^arn:(aws|aws-cn|aws-us-gov):iam::[^:]*:role/.+$".to_string()),
         length: None,
         base: Box::new(arn()),
@@ -1036,7 +1060,7 @@ pub fn iam_role_arn() -> AttributeType {
 #[allow(dead_code)]
 pub fn iam_policy_arn() -> AttributeType {
     AttributeType::Custom {
-        semantic_name: Some("IamPolicyArn".to_string()),
+        identity: Some(aws_type("iam", "Policy", "Arn")),
         pattern: Some("^arn:(aws|aws-cn|aws-us-gov):iam::[^:]*:policy/.+$".to_string()),
         length: None,
         base: Box::new(arn()),
@@ -1057,7 +1081,7 @@ pub fn iam_policy_arn() -> AttributeType {
 #[allow(dead_code)]
 pub fn kms_key_arn() -> AttributeType {
     AttributeType::Custom {
-        semantic_name: Some("KmsKeyArn".to_string()),
+        identity: Some(aws_type("kms", "Key", "Arn")),
         pattern: Some("^arn:(aws|aws-cn|aws-us-gov):kms:[^:]*:[^:]*:key/.+$".to_string()),
         length: None,
         base: Box::new(arn()),
@@ -1127,7 +1151,7 @@ pub fn validate_kms_key_id(value: &str) -> Result<(), String> {
 #[allow(dead_code)]
 pub fn kms_key_id() -> AttributeType {
     AttributeType::Custom {
-        semantic_name: Some("KmsKeyId".to_string()),
+        identity: Some(aws_type("kms", "Key", "Id")),
         pattern: None,
         length: None,
         base: Box::new(aws_resource_id()),
@@ -1163,7 +1187,7 @@ pub fn validate_ipam_pool_id(id: &str) -> Result<(), String> {
 /// IPAM Pool ID type (e.g., "ipam-pool-0123456789abcdef0")
 pub fn ipam_pool_id() -> AttributeType {
     AttributeType::Custom {
-        semantic_name: Some("IpamPoolId".to_string()),
+        identity: Some(aws_type("ec2", "IpamPool", "Id")),
         pattern: Some("^ipam-pool-[0-9a-f]{8,}$".to_string()),
         length: None,
         base: Box::new(aws_resource_id()),
@@ -1272,7 +1296,7 @@ pub fn validate_availability_zone_id(az_id: &str) -> Result<(), String> {
 /// Availability Zone ID type (e.g., "use1-az1", "usw2-az2", "apne1-az4")
 pub fn availability_zone_id() -> AttributeType {
     AttributeType::Custom {
-        semantic_name: Some("AvailabilityZoneId".to_string()),
+        identity: Some(aws_bare_type(&["AvailabilityZone"], "ZoneId")),
         pattern: Some("^[a-z]+[0-9]+-az[0-9]+$".to_string()),
         length: None,
         base: Box::new(AttributeType::String),
@@ -2509,13 +2533,16 @@ mod tests {
     fn aws_account_id_carries_pattern_and_length() {
         let t = aws_account_id();
         if let AttributeType::Custom {
-            semantic_name,
+            identity,
             pattern,
             length,
             ..
         } = t
         {
-            assert_eq!(semantic_name.as_deref(), Some("AwsAccountId"));
+            assert_eq!(
+                identity.map(|id| id.to_string()).as_deref(),
+                Some("aws.AccountId")
+            );
             assert_eq!(pattern.as_deref(), Some(r"^\d{12}$"));
             assert_eq!(length, Some((Some(12), Some(12))));
         } else {
@@ -2524,15 +2551,16 @@ mod tests {
     }
 
     #[test]
-    fn vpc_id_carries_semantic_name_and_pattern() {
+    fn vpc_id_carries_identity_and_pattern() {
         let t = vpc_id();
         if let AttributeType::Custom {
-            semantic_name,
-            pattern,
-            ..
+            identity, pattern, ..
         } = t
         {
-            assert_eq!(semantic_name.as_deref(), Some("VpcId"));
+            assert_eq!(
+                identity.map(|id| id.to_string()).as_deref(),
+                Some("aws.ec2.Vpc.Id")
+            );
             assert!(pattern.is_some(), "VpcId should carry a pattern");
         } else {
             panic!("vpc_id() should be AttributeType::Custom");

@@ -8,7 +8,7 @@ pub use carina_aws_types::*;
 use std::collections::HashMap;
 
 use carina_core::resource::{ConcreteValue, Value};
-use carina_core::schema::{AttributeType, ResourceSchema, legacy_validator};
+use carina_core::schema::{AttributeType, ResourceSchema, TypeIdentity, legacy_validator};
 use carina_core::utils::{extract_enum_value, validate_enum_namespace};
 
 /// AWS schema configuration
@@ -58,13 +58,18 @@ pub fn cloudfront_hosted_zone_id() -> AttributeType {
 /// - Shorthand: ap_northeast_1
 pub fn aws_region() -> AttributeType {
     AttributeType::Custom {
-        semantic_name: Some("Region".to_string()),
+        identity: Some(TypeIdentity::new(
+            Some("aws"),
+            Vec::<String>::new(),
+            "Region",
+        )),
         pattern: None,
         length: None,
         base: Box::new(AttributeType::String),
         validate: legacy_validator(|value| {
             if let Value::Concrete(ConcreteValue::String(s)) = value {
-                validate_enum_namespace(s, "Region", "aws")
+                let id = TypeIdentity::new(Some("aws"), Vec::<String>::new(), "Region");
+                validate_enum_namespace(s, &id)
                     .map_err(|reason| format!("Invalid region '{}': {}", s, reason))?;
                 // Normalize the input to AWS format (hyphens)
                 let normalized = extract_enum_value(s).replace('_', "-");
@@ -93,13 +98,18 @@ pub fn aws_region() -> AttributeType {
 /// - Shorthand: us_east_1a
 pub fn availability_zone() -> AttributeType {
     AttributeType::Custom {
-        semantic_name: Some("AvailabilityZone".to_string()),
+        identity: Some(TypeIdentity::new(
+            Some("aws"),
+            ["AvailabilityZone"],
+            "ZoneName",
+        )),
         pattern: None,
         length: None,
         base: Box::new(AttributeType::String),
         validate: legacy_validator(|value| {
             if let Value::Concrete(ConcreteValue::String(s)) = value {
-                validate_enum_namespace(s, "AvailabilityZone", "aws")
+                let id = TypeIdentity::new(Some("aws"), ["AvailabilityZone"], "ZoneName");
+                validate_enum_namespace(s, &id)
                     .map_err(|reason| format!("Invalid availability zone '{}': {}", s, reason))?;
                 let extracted = extract_enum_value(s);
                 let normalized = extracted.replace('_', "-");
@@ -124,7 +134,7 @@ pub fn availability_zone() -> AttributeType {
 /// Multiple grantees can be comma-separated.
 pub fn s3_grantee() -> AttributeType {
     AttributeType::Custom {
-        semantic_name: Some("S3Grantee".to_string()),
+        identity: Some(TypeIdentity::new(Some("aws"), ["s3"], "Grantee")),
         pattern: None,
         length: None,
         base: Box::new(AttributeType::String),
@@ -237,7 +247,8 @@ pub fn aws_validators() -> HashMap<String, CustomValidatorFn> {
             // present, then convert underscores to hyphens before validating.
             availability_zone => |s: &str| {
                 if s.contains('.') {
-                    carina_core::utils::validate_enum_namespace(s, "AvailabilityZone", "aws")
+                    let id = TypeIdentity::new(Some("aws"), ["AvailabilityZone"], "ZoneName");
+                    carina_core::utils::validate_enum_namespace(s, &id)
                         .map_err(|reason| format!("Invalid availability zone '{}': {}", s, reason))?;
                 }
                 let extracted = carina_core::utils::extract_enum_value(s);
@@ -346,10 +357,13 @@ mod tests {
     #[test]
     fn az_accepts_dsl_format() {
         let az_type = availability_zone();
+        // The full DSL form for the zone-name variant carries the
+        // `ZoneName` kind segment — `aws.AvailabilityZone.ZoneName.<v>` —
+        // matching the structured identity's dotted display.
         assert!(
             az_type
                 .validate(&Value::Concrete(ConcreteValue::String(
-                    "aws.AvailabilityZone.us_east_1a".to_string()
+                    "aws.AvailabilityZone.ZoneName.us_east_1a".to_string()
                 )))
                 .is_ok()
         );
@@ -629,11 +643,13 @@ mod tests {
         assert!(az("ap-northeast-1c").is_ok());
 
         // Fully-qualified DSL format (the form acceptance tests use)
-        assert!(az("aws.AvailabilityZone.ap_northeast_1a").is_ok());
-        assert!(az("aws.AvailabilityZone.us_east_1a").is_ok());
+        // — the structured identity is `aws.AvailabilityZone.ZoneName`
+        // for the zone-name variant.
+        assert!(az("aws.AvailabilityZone.ZoneName.ap_northeast_1a").is_ok());
+        assert!(az("aws.AvailabilityZone.ZoneName.us_east_1a").is_ok());
 
-        // Shorthand DSL form (TypeName.value)
-        assert!(az("AvailabilityZone.ap_northeast_1a").is_ok());
+        // Shorthand DSL form (TypeName.value, where TypeName == kind)
+        assert!(az("ZoneName.ap_northeast_1a").is_ok());
 
         // Rejects non-AZ strings (regions, garbage)
         assert!(az("us-east-1").is_err()); // region, not AZ

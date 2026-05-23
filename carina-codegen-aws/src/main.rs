@@ -1279,7 +1279,7 @@ fn resolve_type(
                 (
                     format!(
                         "AttributeType::Custom {{\n\
-                         \x20               semantic_name: None,\n\
+                         \x20               identity: None,\n\
                          \x20               pattern: None,\n\
                          \x20               length: {},\n\
                          \x20               base: Box::new(AttributeType::Int),\n\
