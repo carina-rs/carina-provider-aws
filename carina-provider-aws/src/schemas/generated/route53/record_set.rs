@@ -62,7 +62,7 @@ pub fn route53_record_set_config() -> AwsSchemaConfig {
         )
         .attribute(
             AttributeSchema::new("ttl", AttributeType::Custom {
-                semantic_name: None,
+                identity: None,
                 pattern: None,
                 length: Some((Some(0), Some(2147483647))),
                 base: Box::new(AttributeType::Int),

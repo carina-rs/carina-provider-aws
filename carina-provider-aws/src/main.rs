@@ -212,13 +212,23 @@ impl CarinaProvider for AwsProcessProvider {
         carina_provider_aws::schemas::generated::build_enum_aliases_map()
     }
 
-    fn validate_custom_type(&self, type_name: &str, value: &str) -> Result<(), String> {
+    fn validate_custom_type(
+        &self,
+        identity: &carina_plugin_sdk::types::TypeIdentity,
+        value: &str,
+    ) -> Result<(), String> {
         use carina_provider_aws::schemas::types::aws_validators;
         use std::sync::OnceLock;
         type ValidatorMap = HashMap<String, Box<dyn Fn(&str) -> Result<(), String> + Send + Sync>>;
         static VALIDATORS: OnceLock<ValidatorMap> = OnceLock::new();
         let validators = VALIDATORS.get_or_init(aws_validators);
-        if let Some(validator) = validators.get(type_name) {
+        // Inner lookup map is still snake_case-keyed; convert the
+        // structured identity's `kind` to snake at this single
+        // boundary. Provider-axis collisions are already filtered by
+        // the host before the call reaches us — the SDK only routes
+        // identities scoped to this provider here.
+        let key = carina_core::parser::pascal_to_snake(&identity.kind);
+        if let Some(validator) = validators.get(&key) {
             validator(value)
         } else {
             Ok(())
@@ -450,7 +460,23 @@ fn main() {}
 #[cfg(test)]
 mod tests {
     use super::*;
-    use carina_plugin_sdk::types::ValidatorType;
+    use carina_plugin_sdk::types::{TypeIdentity, ValidatorType};
+
+    /// Test helper: build a structured identity whose dotted display
+    /// round-trips back to the legacy snake-cased semantic name via
+    /// `pascal_to_snake(identity.kind)`. The production
+    /// `validate_custom_type` impl looks the validator up in
+    /// `aws_validators`, which is still keyed on snake-cased semantic
+    /// names — so a bare identity with the PascalCase kind hits the
+    /// same map entry. Migrating `aws_validators` itself to a
+    /// structured-identity map is S2.5c follow-up work.
+    fn ident(legacy_snake: &str) -> TypeIdentity {
+        TypeIdentity {
+            provider: String::new(),
+            segments: vec![],
+            kind: carina_core::parser::snake_to_pascal(legacy_snake),
+        }
+    }
 
     #[test]
     fn schemas_include_tags_validator_for_tagged_resources() {
@@ -506,7 +532,7 @@ mod tests {
         let provider = AwsProcessProvider::new();
         assert!(
             provider
-                .validate_custom_type("vpc_id", "vpc-12345678")
+                .validate_custom_type(&ident("vpc_id"), "vpc-12345678")
                 .is_ok()
         );
     }
@@ -516,7 +542,7 @@ mod tests {
         let provider = AwsProcessProvider::new();
         assert!(
             provider
-                .validate_custom_type("vpc_id", "subnet-12345678")
+                .validate_custom_type(&ident("vpc_id"), "subnet-12345678")
                 .is_err()
         );
     }
@@ -526,7 +552,7 @@ mod tests {
         let provider = AwsProcessProvider::new();
         assert!(
             provider
-                .validate_custom_type("arn", "arn:aws:s3:::my-bucket")
+                .validate_custom_type(&ident("arn"), "arn:aws:s3:::my-bucket")
                 .is_ok()
         );
     }
@@ -534,7 +560,11 @@ mod tests {
     #[test]
     fn validate_custom_type_rejects_invalid_arn() {
         let provider = AwsProcessProvider::new();
-        assert!(provider.validate_custom_type("arn", "not-an-arn").is_err());
+        assert!(
+            provider
+                .validate_custom_type(&ident("arn"), "not-an-arn")
+                .is_err()
+        );
     }
 
     #[test]
@@ -542,7 +572,7 @@ mod tests {
         let provider = AwsProcessProvider::new();
         assert!(
             provider
-                .validate_custom_type("unknown_type", "any-value")
+                .validate_custom_type(&ident("unknown_type"), "any-value")
                 .is_ok()
         );
     }
@@ -576,7 +606,10 @@ mod tests {
         let provider = AwsProcessProvider::new();
         assert!(
             provider
-                .validate_custom_type("iam_role_arn", "arn:aws:iam::123456789012:role/my-role")
+                .validate_custom_type(
+                    &ident("iam_role_arn"),
+                    "arn:aws:iam::123456789012:role/my-role"
+                )
                 .is_ok()
         );
     }
@@ -586,7 +619,10 @@ mod tests {
         let provider = AwsProcessProvider::new();
         assert!(
             provider
-                .validate_custom_type("iam_role_arn", "arn:aws:iam::123456789012:policy/my-policy")
+                .validate_custom_type(
+                    &ident("iam_role_arn"),
+                    "arn:aws:iam::123456789012:policy/my-policy"
+                )
                 .is_err()
         );
     }
