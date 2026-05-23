@@ -21,7 +21,7 @@ pub fn organizations_organization_config() -> AwsSchemaConfig {
             AttributeSchema::new("feature_set", AttributeType::StringEnum {
                 name: "FeatureSet".to_string(),
                 values: vec!["ALL".to_string(), "CONSOLIDATED_BILLING".to_string()],
-                namespace: Some("aws.organizations.Organization".to_string()),
+                identity: Some(carina_core::schema::string_enum_identity("FeatureSet", Some("aws.organizations.Organization"))),
                 dsl_aliases: vec![("ALL".to_string(), "all".to_string()), ("CONSOLIDATED_BILLING".to_string(), "consolidated_billing".to_string())],
             })
                 .create_only()

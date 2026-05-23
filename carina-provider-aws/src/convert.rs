@@ -237,7 +237,13 @@ fn proto_to_core_attribute_type(t: &ProtoAttributeType) -> CoreAttributeType {
         } => CoreAttributeType::StringEnum {
             name: name.clone(),
             values: values.clone(),
-            namespace: namespace.clone(),
+            // Lift the wire-form flat dotted prefix into the
+            // structured `TypeIdentity` the core schema carries
+            // post-#3222.
+            identity: namespace
+                .as_deref()
+                .filter(|s| !s.is_empty())
+                .map(|ns| carina_core::schema::string_enum_identity(name, Some(ns))),
             // Thread the alias data through the WASM boundary so the host
             // validator's `matches_alias` arm can accept DSL spellings —
             // a `fn` pointer cannot survive proto serialization
@@ -259,11 +265,7 @@ fn proto_to_core_attribute_type(t: &ProtoAttributeType) -> CoreAttributeType {
         ProtoAttributeType::Union { members } => {
             CoreAttributeType::Union(members.iter().map(proto_to_core_attribute_type).collect())
         }
-        ProtoAttributeType::Custom {
-            name,
-            base,
-            namespace,
-        } => CoreAttributeType::Custom {
+        ProtoAttributeType::Custom { name, base } => CoreAttributeType::Custom {
             identity: if name.is_empty() {
                 None
             } else {
@@ -273,7 +275,20 @@ fn proto_to_core_attribute_type(t: &ProtoAttributeType) -> CoreAttributeType {
             length: None,
             base: Box::new(proto_to_core_attribute_type(base)),
             validate: noop_validator(),
-            namespace: namespace.clone(),
+        },
+        // CustomEnum: carries a mandatory identity, lifted from the
+        // wire-form flat `(name, namespace)` pair via the
+        // `string_enum_identity` helper. Matches the post-#3222 core
+        // schema split — enum-shaped Customs expand the namespaced
+        // shorthand before the validator runs.
+        ProtoAttributeType::CustomEnum {
+            name,
+            base,
+            namespace,
+        } => CoreAttributeType::CustomEnum {
+            identity: carina_core::schema::string_enum_identity(name, Some(namespace.as_str())),
+            base: Box::new(proto_to_core_attribute_type(base)),
+            validate: noop_validator(),
             to_dsl: None,
         },
     }
@@ -372,12 +387,16 @@ fn core_to_proto_attribute_type(t: &CoreAttributeType) -> ProtoAttributeType {
         CoreAttributeType::StringEnum {
             values,
             name,
-            namespace,
+            identity,
             dsl_aliases,
         } => ProtoAttributeType::StringEnum {
             values: values.clone(),
             name: name.clone(),
-            namespace: namespace.clone(),
+            // The wire form still carries the dotted prefix as a flat
+            // string. `dotted_prefix()` is the inverse of
+            // `string_enum_identity`: provider + segments without the
+            // trailing `kind`.
+            namespace: identity.as_ref().and_then(|id| id.dotted_prefix()),
             dsl_aliases: dsl_aliases.clone(),
         },
         CoreAttributeType::List { inner, ordered } => ProtoAttributeType::List {
@@ -392,12 +411,7 @@ fn core_to_proto_attribute_type(t: &CoreAttributeType) -> ProtoAttributeType {
             name: name.clone(),
             fields: fields.iter().map(core_to_proto_struct_field).collect(),
         },
-        CoreAttributeType::Custom {
-            identity,
-            base,
-            namespace,
-            ..
-        } => ProtoAttributeType::Custom {
+        CoreAttributeType::Custom { identity, base, .. } => ProtoAttributeType::Custom {
             // Serialize the structured identity to its dotted display
             // form for the wire. The host's `TypeIdentity::from_dotted`
             // parses it back on the other side, so the provider axis
@@ -407,7 +421,15 @@ fn core_to_proto_attribute_type(t: &CoreAttributeType) -> ProtoAttributeType {
                 .map(|id| id.to_string())
                 .unwrap_or_default(),
             base: Box::new(core_to_proto_attribute_type(base)),
-            namespace: namespace.clone(),
+        },
+        // CustomEnum carries the enum-shorthand marker as a type-level
+        // fact (carina#3222); on the wire form it still travels as a
+        // separate `CustomEnum` variant with the dotted prefix as a
+        // flat string.
+        CoreAttributeType::CustomEnum { identity, base, .. } => ProtoAttributeType::CustomEnum {
+            name: identity.to_string(),
+            base: Box::new(core_to_proto_attribute_type(base)),
+            namespace: identity.dotted_prefix().unwrap_or_default(),
         },
         CoreAttributeType::Union(members) => ProtoAttributeType::Union {
             members: members.iter().map(core_to_proto_attribute_type).collect(),
@@ -475,7 +497,10 @@ mod tests {
         let core_type = CoreAttributeType::StringEnum {
             name: "VersioningStatus".to_string(),
             values: vec!["Enabled".to_string(), "Suspended".to_string()],
-            namespace: Some("aws.s3.Bucket".to_string()),
+            identity: Some(carina_core::schema::string_enum_identity(
+                "VersioningStatus",
+                Some("aws.s3.Bucket"),
+            )),
             dsl_aliases: vec![
                 ("Enabled".to_string(), "enabled".to_string()),
                 ("Suspended".to_string(), "suspended".to_string()),

@@ -31,7 +31,7 @@ pub fn ec2_nat_gateway_config() -> AwsSchemaConfig {
             AttributeSchema::new("availability_mode", AttributeType::StringEnum {
                 name: "AvailabilityMode".to_string(),
                 values: vec!["regional".to_string(), "zonal".to_string()],
-                namespace: Some("aws.ec2.NatGateway".to_string()),
+                identity: Some(carina_core::schema::string_enum_identity("AvailabilityMode", Some("aws.ec2.NatGateway"))),
                 dsl_aliases: vec![("regional".to_string(), "regional".to_string()), ("zonal".to_string(), "zonal".to_string())],
             })
                 .create_only()
@@ -55,7 +55,7 @@ pub fn ec2_nat_gateway_config() -> AwsSchemaConfig {
             AttributeSchema::new("connectivity_type", AttributeType::StringEnum {
                 name: "ConnectivityType".to_string(),
                 values: vec!["private".to_string(), "public".to_string()],
-                namespace: Some("aws.ec2.NatGateway".to_string()),
+                identity: Some(carina_core::schema::string_enum_identity("ConnectivityType", Some("aws.ec2.NatGateway"))),
                 dsl_aliases: vec![("private".to_string(), "private".to_string()), ("public".to_string(), "public".to_string())],
             })
                 .create_only()

@@ -58,7 +58,7 @@ pub fn ec2_flow_log_config() -> AwsSchemaConfig {
             AttributeSchema::new("log_destination_type", AttributeType::StringEnum {
                 name: "LogDestinationType".to_string(),
                 values: vec!["cloud-watch-logs".to_string(), "kinesis-data-firehose".to_string(), "s3".to_string()],
-                namespace: Some("aws.ec2.FlowLog".to_string()),
+                identity: Some(carina_core::schema::string_enum_identity("LogDestinationType", Some("aws.ec2.FlowLog"))),
                 dsl_aliases: vec![("cloud-watch-logs".to_string(), "cloud_watch_logs".to_string()), ("kinesis-data-firehose".to_string(), "kinesis_data_firehose".to_string()), ("s3".to_string(), "s3".to_string())],
             })
                 .create_only()
@@ -94,7 +94,7 @@ pub fn ec2_flow_log_config() -> AwsSchemaConfig {
             AttributeSchema::new("resource_type", AttributeType::StringEnum {
                 name: "ResourceType".to_string(),
                 values: vec!["NetworkInterface".to_string(), "RegionalNatGateway".to_string(), "Subnet".to_string(), "TransitGateway".to_string(), "TransitGatewayAttachment".to_string(), "VPC".to_string()],
-                namespace: Some("aws.ec2.FlowLog".to_string()),
+                identity: Some(carina_core::schema::string_enum_identity("ResourceType", Some("aws.ec2.FlowLog"))),
                 dsl_aliases: vec![("NetworkInterface".to_string(), "network_interface".to_string()), ("RegionalNatGateway".to_string(), "regional_nat_gateway".to_string()), ("Subnet".to_string(), "subnet".to_string()), ("TransitGateway".to_string(), "transit_gateway".to_string()), ("TransitGatewayAttachment".to_string(), "transit_gateway_attachment".to_string()), ("VPC".to_string(), "vpc".to_string())],
             })
                 .required()
@@ -106,7 +106,7 @@ pub fn ec2_flow_log_config() -> AwsSchemaConfig {
             AttributeSchema::new("traffic_type", AttributeType::StringEnum {
                 name: "TrafficType".to_string(),
                 values: vec!["ACCEPT".to_string(), "ALL".to_string(), "REJECT".to_string()],
-                namespace: Some("aws.ec2.FlowLog".to_string()),
+                identity: Some(carina_core::schema::string_enum_identity("TrafficType", Some("aws.ec2.FlowLog"))),
                 dsl_aliases: vec![("ACCEPT".to_string(), "accept".to_string()), ("ALL".to_string(), "all".to_string()), ("REJECT".to_string(), "reject".to_string())],
             })
                 .create_only()

@@ -77,8 +77,6 @@ pub fn ec2_security_group_egress_config() -> AwsSchemaConfig {
                         length: None,
                         base: Box::new(AttributeType::Int),
                         validate: legacy_validator(validate_from_port_range),
-                        namespace: None,
-                        to_dsl: None,
                     },
                 )
                 .create_only()
@@ -105,7 +103,10 @@ pub fn ec2_security_group_egress_config() -> AwsSchemaConfig {
                             "-1".to_string(),
                             "all".to_string(),
                         ],
-                        namespace: Some("aws.ec2.SecurityGroupEgress".to_string()),
+                        identity: Some(carina_core::schema::string_enum_identity(
+                            "IpProtocol",
+                            Some("aws.ec2.SecurityGroupEgress"),
+                        )),
                         dsl_aliases: vec![
                             ("-1".to_string(), "all".to_string()),
                             ("tcp".to_string(), "tcp".to_string()),
@@ -142,8 +143,6 @@ pub fn ec2_security_group_egress_config() -> AwsSchemaConfig {
                         length: None,
                         base: Box::new(AttributeType::Int),
                         validate: legacy_validator(validate_to_port_range),
-                        namespace: None,
-                        to_dsl: None,
                     },
                 )
                 .create_only()

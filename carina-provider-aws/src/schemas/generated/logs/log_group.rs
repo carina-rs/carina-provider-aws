@@ -42,7 +42,7 @@ pub fn logs_log_group_config() -> AwsSchemaConfig {
             AttributeSchema::new("log_group_class", AttributeType::StringEnum {
                 name: "LogGroupClass".to_string(),
                 values: vec!["DELIVERY".to_string(), "INFREQUENT_ACCESS".to_string(), "STANDARD".to_string()],
-                namespace: Some("aws.logs.LogGroup".to_string()),
+                identity: Some(carina_core::schema::string_enum_identity("LogGroupClass", Some("aws.logs.LogGroup"))),
                 dsl_aliases: vec![("DELIVERY".to_string(), "delivery".to_string()), ("INFREQUENT_ACCESS".to_string(), "infrequent_access".to_string()), ("STANDARD".to_string(), "standard".to_string())],
             })
                 .create_only()

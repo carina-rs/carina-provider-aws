@@ -35,7 +35,7 @@ pub fn ec2_vpn_gateway_config() -> AwsSchemaConfig {
             AttributeSchema::new("type", AttributeType::StringEnum {
                 name: "Type".to_string(),
                 values: vec!["ipsec.1".to_string()],
-                namespace: Some("aws.ec2.VpnGateway".to_string()),
+                identity: Some(carina_core::schema::string_enum_identity("Type", Some("aws.ec2.VpnGateway"))),
                 dsl_aliases: vec![("ipsec.1".to_string(), "ipsec_1".to_string())],
             })
                 .required()

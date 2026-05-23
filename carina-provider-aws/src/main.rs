@@ -122,6 +122,9 @@ impl CarinaProvider for AwsProcessProvider {
             proto::AttributeType::StringEnum {
                 name: "Region".to_string(),
                 values: region_values,
+                // proto's StringEnum still carries the flat `namespace`
+                // string for the wire form; only the core form was
+                // restructured in carina#3222.
                 namespace: Some("aws".to_string()),
                 dsl_aliases: region_dsl_aliases,
             },

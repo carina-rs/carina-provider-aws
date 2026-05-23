@@ -29,7 +29,7 @@ pub fn ec2_eip_config() -> AwsSchemaConfig {
             AttributeSchema::new("domain", AttributeType::StringEnum {
                 name: "Domain".to_string(),
                 values: vec!["standard".to_string(), "vpc".to_string()],
-                namespace: Some("aws.ec2.Eip".to_string()),
+                identity: Some(carina_core::schema::string_enum_identity("Domain", Some("aws.ec2.Eip"))),
                 dsl_aliases: vec![("standard".to_string(), "standard".to_string()), ("vpc".to_string(), "vpc".to_string())],
             })
                 .create_only()

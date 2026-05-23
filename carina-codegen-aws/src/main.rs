@@ -1018,10 +1018,10 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
                 "AttributeType::StringEnum {{\n\
                  \x20               name: \"{}\".to_string(),\n\
                  \x20               values: vec![{}],\n\
-                 \x20               namespace: Some(\"{}\".to_string()),\n\
+                 \x20               identity: Some(carina_core::schema::string_enum_identity(\"{}\", Some(\"{}\"))),\n\
                  \x20               dsl_aliases: {},\n\
                  \x20           }}",
-                ei.type_name, values_str, namespace, dsl_aliases_code
+                ei.type_name, values_str, ei.type_name, namespace, dsl_aliases_code
             )
         } else {
             attr.type_code.clone()
@@ -1284,8 +1284,6 @@ fn resolve_type(
                          \x20               length: {},\n\
                          \x20               base: Box::new(AttributeType::Int),\n\
                          \x20               validate: legacy_validator({}),\n\
-                         \x20               namespace: None,\n\
-                         \x20               to_dsl: None,\n\
                          \x20           }}",
                         length_expr, validate_fn
                     ),
@@ -1413,10 +1411,10 @@ fn generate_struct_type(
                 "AttributeType::StringEnum {{\n\
                  \x20               name: \"{}\".to_string(),\n\
                  \x20               values: vec![{}],\n\
-                 \x20               namespace: Some(\"{}\".to_string()),\n\
+                 \x20               identity: Some(carina_core::schema::string_enum_identity(\"{}\", Some(\"{}\"))),\n\
                  \x20               dsl_aliases: {},\n\
                  \x20           }}",
-                ei.type_name, values_str, ctx.namespace, dsl_aliases_code
+                ei.type_name, values_str, ei.type_name, ctx.namespace, dsl_aliases_code
             )
         } else {
             field_type

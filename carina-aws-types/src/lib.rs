@@ -304,8 +304,6 @@ pub fn aws_resource_id() -> AttributeType {
                 Err("Expected string".to_string())
             }
         }),
-        namespace: None,
-        to_dsl: None,
     }
 }
 
@@ -324,8 +322,6 @@ pub fn vpc_id() -> AttributeType {
                 Err("Expected string".to_string())
             }
         }),
-        namespace: None,
-        to_dsl: None,
     }
 }
 
@@ -344,8 +340,6 @@ pub fn subnet_id() -> AttributeType {
                 Err("Expected string".to_string())
             }
         }),
-        namespace: None,
-        to_dsl: None,
     }
 }
 
@@ -364,8 +358,6 @@ pub fn security_group_id() -> AttributeType {
                 Err("Expected string".to_string())
             }
         }),
-        namespace: None,
-        to_dsl: None,
     }
 }
 
@@ -384,8 +376,6 @@ pub fn internet_gateway_id() -> AttributeType {
                 Err("Expected string".to_string())
             }
         }),
-        namespace: None,
-        to_dsl: None,
     }
 }
 
@@ -404,8 +394,6 @@ pub fn route_table_id() -> AttributeType {
                 Err("Expected string".to_string())
             }
         }),
-        namespace: None,
-        to_dsl: None,
     }
 }
 
@@ -424,8 +412,6 @@ pub fn nat_gateway_id() -> AttributeType {
                 Err("Expected string".to_string())
             }
         }),
-        namespace: None,
-        to_dsl: None,
     }
 }
 
@@ -445,8 +431,6 @@ pub fn vpc_peering_connection_id() -> AttributeType {
                 Err("Expected string".to_string())
             }
         }),
-        namespace: None,
-        to_dsl: None,
     }
 }
 
@@ -465,8 +449,6 @@ pub fn transit_gateway_id() -> AttributeType {
                 Err("Expected string".to_string())
             }
         }),
-        namespace: None,
-        to_dsl: None,
     }
 }
 
@@ -486,8 +468,6 @@ pub fn vpc_cidr_block_association_id() -> AttributeType {
                 Err("Expected string".to_string())
             }
         }),
-        namespace: None,
-        to_dsl: None,
     }
 }
 
@@ -506,8 +486,6 @@ pub fn tgw_route_table_id() -> AttributeType {
                 Err("Expected string".to_string())
             }
         }),
-        namespace: None,
-        to_dsl: None,
     }
 }
 
@@ -526,8 +504,6 @@ pub fn vpn_gateway_id() -> AttributeType {
                 Err("Expected string".to_string())
             }
         }),
-        namespace: None,
-        to_dsl: None,
     }
 }
 
@@ -555,8 +531,6 @@ pub fn egress_only_internet_gateway_id() -> AttributeType {
                 Err("Expected string".to_string())
             }
         }),
-        namespace: None,
-        to_dsl: None,
     }
 }
 
@@ -575,8 +549,6 @@ pub fn vpc_endpoint_id() -> AttributeType {
                 Err("Expected string".to_string())
             }
         }),
-        namespace: None,
-        to_dsl: None,
     }
 }
 
@@ -595,8 +567,6 @@ pub fn instance_id() -> AttributeType {
                 Err("Expected string".to_string())
             }
         }),
-        namespace: None,
-        to_dsl: None,
     }
 }
 
@@ -615,8 +585,6 @@ pub fn network_interface_id() -> AttributeType {
                 Err("Expected string".to_string())
             }
         }),
-        namespace: None,
-        to_dsl: None,
     }
 }
 
@@ -636,8 +604,6 @@ pub fn allocation_id() -> AttributeType {
                 Err("Expected string".to_string())
             }
         }),
-        namespace: None,
-        to_dsl: None,
     }
 }
 
@@ -656,8 +622,6 @@ pub fn prefix_list_id() -> AttributeType {
                 Err("Expected string".to_string())
             }
         }),
-        namespace: None,
-        to_dsl: None,
     }
 }
 
@@ -676,8 +640,6 @@ pub fn carrier_gateway_id() -> AttributeType {
                 Err("Expected string".to_string())
             }
         }),
-        namespace: None,
-        to_dsl: None,
     }
 }
 
@@ -696,8 +658,6 @@ pub fn local_gateway_id() -> AttributeType {
                 Err("Expected string".to_string())
             }
         }),
-        namespace: None,
-        to_dsl: None,
     }
 }
 
@@ -717,8 +677,6 @@ pub fn network_acl_id() -> AttributeType {
                 Err("Expected string".to_string())
             }
         }),
-        namespace: None,
-        to_dsl: None,
     }
 }
 
@@ -738,8 +696,6 @@ pub fn transit_gateway_attachment_id() -> AttributeType {
                 Err("Expected string".to_string())
             }
         }),
-        namespace: None,
-        to_dsl: None,
     }
 }
 
@@ -758,8 +714,6 @@ pub fn flow_log_id() -> AttributeType {
                 Err("Expected string".to_string())
             }
         }),
-        namespace: None,
-        to_dsl: None,
     }
 }
 
@@ -778,8 +732,6 @@ pub fn ipam_id() -> AttributeType {
                 Err("Expected string".to_string())
             }
         }),
-        namespace: None,
-        to_dsl: None,
     }
 }
 
@@ -802,8 +754,6 @@ pub fn subnet_route_table_association_id() -> AttributeType {
                 Err("Expected string".to_string())
             }
         }),
-        namespace: None,
-        to_dsl: None,
     }
 }
 
@@ -822,8 +772,6 @@ pub fn security_group_rule_id() -> AttributeType {
                 Err("Expected string".to_string())
             }
         }),
-        namespace: None,
-        to_dsl: None,
     }
 }
 
@@ -856,8 +804,6 @@ pub fn iam_role_id() -> AttributeType {
                 Err("Expected string".to_string())
             }
         }),
-        namespace: None,
-        to_dsl: None,
     }
 }
 
@@ -892,8 +838,6 @@ pub fn aws_account_id() -> AttributeType {
                 Err("Expected string".to_string())
             }
         }),
-        namespace: None,
-        to_dsl: None,
     }
 }
 
@@ -1030,8 +974,6 @@ pub fn arn() -> AttributeType {
                 Err("Expected string".to_string())
             }
         }),
-        namespace: None,
-        to_dsl: None,
     }
 }
 
@@ -1051,8 +993,6 @@ pub fn iam_role_arn() -> AttributeType {
                 Err("Expected string".to_string())
             }
         }),
-        namespace: None,
-        to_dsl: None,
     }
 }
 
@@ -1072,8 +1012,6 @@ pub fn iam_policy_arn() -> AttributeType {
                 Err("Expected string".to_string())
             }
         }),
-        namespace: None,
-        to_dsl: None,
     }
 }
 
@@ -1093,8 +1031,6 @@ pub fn kms_key_arn() -> AttributeType {
                 Err("Expected string".to_string())
             }
         }),
-        namespace: None,
-        to_dsl: None,
     }
 }
 
@@ -1163,8 +1099,6 @@ pub fn kms_key_id() -> AttributeType {
                 Err("Expected string".to_string())
             }
         }),
-        namespace: None,
-        to_dsl: None,
     }
 }
 
@@ -1199,8 +1133,6 @@ pub fn ipam_pool_id() -> AttributeType {
                 Err("Expected string".to_string())
             }
         }),
-        namespace: None,
-        to_dsl: None,
     }
 }
 
@@ -1308,8 +1240,6 @@ pub fn availability_zone_id() -> AttributeType {
                 Err("Expected string".to_string())
             }
         }),
-        namespace: None,
-        to_dsl: None,
     }
 }
 
@@ -1360,7 +1290,10 @@ fn iam_policy_effect() -> AttributeType {
     AttributeType::StringEnum {
         name: "Effect".to_string(),
         values: vec!["Allow".to_string(), "Deny".to_string()],
-        namespace: Some("aws.iam.PolicyDocument".to_string()),
+        identity: Some(carina_core::schema::string_enum_identity(
+            "Effect",
+            Some("aws.iam.PolicyDocument"),
+        )),
         dsl_aliases: dsl_aliases_for(&["Allow", "Deny"]),
     }
 }
@@ -1379,7 +1312,10 @@ fn iam_policy_version() -> AttributeType {
     AttributeType::StringEnum {
         name: "Version".to_string(),
         values: vec!["2012-10-17".to_string(), "2008-10-17".to_string()],
-        namespace: Some("aws.iam.PolicyDocument".to_string()),
+        identity: Some(carina_core::schema::string_enum_identity(
+            "Version",
+            Some("aws.iam.PolicyDocument"),
+        )),
         dsl_aliases: dsl_aliases_for(&["2012-10-17", "2008-10-17"]),
     }
 }
@@ -1408,7 +1344,7 @@ fn condition_type() -> AttributeType {
         AttributeType::StringEnum {
             name: "ConditionOperator".to_string(),
             values: operator_values,
-            namespace: None,
+            identity: None,
             dsl_aliases: operator_aliases,
         },
         AttributeType::map(string_or_list_of_strings()),
@@ -1487,7 +1423,10 @@ fn sqs_redrive_permission() -> AttributeType {
             "denyAll".to_string(),
             "byQueue".to_string(),
         ],
-        namespace: Some("aws.sqs.Queue".to_string()),
+        identity: Some(carina_core::schema::string_enum_identity(
+            "SqsRedrivePermission",
+            Some("aws.sqs.Queue"),
+        )),
         dsl_aliases: dsl_aliases_for(&["allowAll", "denyAll", "byQueue"]),
     }
 }
@@ -1520,7 +1459,10 @@ fn s3_sse_algorithm() -> AttributeType {
             "aws:kms".to_string(),
             "aws:kms:dsse".to_string(),
         ],
-        namespace: Some("aws.s3.BucketServerSideEncryptionConfiguration".to_string()),
+        identity: Some(carina_core::schema::string_enum_identity(
+            "SseAlgorithm",
+            Some("aws.s3.BucketServerSideEncryptionConfiguration"),
+        )),
         // `aws:kms`/`aws:kms:dsse` carry colons that survive verbatim;
         // only `AES256` (SHOUTY) needs a DSL spelling distinct from the API form.
         dsl_aliases: dsl_aliases_for(&["AES256", "aws:kms", "aws:kms:dsse"]),
@@ -1588,7 +1530,10 @@ fn s3_replication_destination() -> AttributeType {
                         "DEEP_ARCHIVE".to_string(),
                         "GLACIER_IR".to_string(),
                     ],
-                    namespace: Some("aws.s3.BucketReplicationConfiguration".to_string()),
+                    identity: Some(carina_core::schema::string_enum_identity(
+                        "ReplicationStorageClass",
+                        Some("aws.s3.BucketReplicationConfiguration"),
+                    )),
                     dsl_aliases: dsl_aliases_for(&[
                         "STANDARD",
                         "REDUCED_REDUNDANCY",
@@ -1610,7 +1555,10 @@ fn s3_replication_status() -> AttributeType {
     AttributeType::StringEnum {
         name: "ReplicationRuleStatus".to_string(),
         values: vec!["Enabled".to_string(), "Disabled".to_string()],
-        namespace: Some("aws.s3.BucketReplicationConfiguration".to_string()),
+        identity: Some(carina_core::schema::string_enum_identity(
+            "ReplicationRuleStatus",
+            Some("aws.s3.BucketReplicationConfiguration"),
+        )),
         dsl_aliases: dsl_aliases_for(&["Enabled", "Disabled"]),
     }
 }
@@ -1660,7 +1608,10 @@ fn s3_delete_marker_replication() -> AttributeType {
                 AttributeType::StringEnum {
                     name: "DeleteMarkerReplicationStatus".to_string(),
                     values: vec!["Enabled".to_string(), "Disabled".to_string()],
-                    namespace: Some("aws.s3.BucketReplicationConfiguration".to_string()),
+                    identity: Some(carina_core::schema::string_enum_identity(
+                        "DeleteMarkerReplicationStatus",
+                        Some("aws.s3.BucketReplicationConfiguration"),
+                    )),
                     dsl_aliases: dsl_aliases_for(&["Enabled", "Disabled"]),
                 },
             )
@@ -1702,7 +1653,10 @@ fn s3_lifecycle_status() -> AttributeType {
     AttributeType::StringEnum {
         name: "LifecycleRuleStatus".to_string(),
         values: vec!["Enabled".to_string(), "Disabled".to_string()],
-        namespace: Some("aws.s3.BucketLifecycleConfiguration".to_string()),
+        identity: Some(carina_core::schema::string_enum_identity(
+            "LifecycleRuleStatus",
+            Some("aws.s3.BucketLifecycleConfiguration"),
+        )),
         dsl_aliases: dsl_aliases_for(&["Enabled", "Disabled"]),
     }
 }
@@ -1719,7 +1673,10 @@ fn s3_transition_storage_class() -> AttributeType {
             "DEEP_ARCHIVE".to_string(),
             "GLACIER_IR".to_string(),
         ],
-        namespace: Some("aws.s3.BucketLifecycleConfiguration".to_string()),
+        identity: Some(carina_core::schema::string_enum_identity(
+            "TransitionStorageClass",
+            Some("aws.s3.BucketLifecycleConfiguration"),
+        )),
         dsl_aliases: dsl_aliases_for(&[
             "GLACIER",
             "STANDARD_IA",
@@ -2025,7 +1982,10 @@ fn s3_partition_date_source() -> AttributeType {
     AttributeType::StringEnum {
         name: "PartitionDateSource".to_string(),
         values: vec!["EventTime".to_string(), "DeliveryTime".to_string()],
-        namespace: Some("aws.s3.BucketLogging".to_string()),
+        identity: Some(carina_core::schema::string_enum_identity(
+            "PartitionDateSource",
+            Some("aws.s3.BucketLogging"),
+        )),
         dsl_aliases: dsl_aliases_for(&["EventTime", "DeliveryTime"]),
     }
 }
@@ -2093,7 +2053,10 @@ pub fn s3_redirect_all_requests_to() -> AttributeType {
                 AttributeType::StringEnum {
                     name: "Protocol".to_string(),
                     values: vec!["http".to_string(), "https".to_string()],
-                    namespace: Some("aws.s3.BucketWebsiteConfiguration".to_string()),
+                    identity: Some(carina_core::schema::string_enum_identity(
+                        "Protocol",
+                        Some("aws.s3.BucketWebsiteConfiguration"),
+                    )),
                     // Already lowercase — DSL spelling matches API; no aliases needed.
                     dsl_aliases: vec![],
                 },
@@ -3804,12 +3767,15 @@ mod tests {
             AttributeType::StringEnum {
                 name,
                 values,
-                namespace,
+                identity,
                 dsl_aliases,
             } => {
                 assert_eq!(name, "Effect");
                 assert_eq!(values, vec!["Allow".to_string(), "Deny".to_string()]);
-                assert_eq!(namespace, Some("aws.iam.PolicyDocument".to_string()));
+                assert_eq!(
+                    identity.as_ref().and_then(|id| id.dotted_prefix()),
+                    Some("aws.iam.PolicyDocument".to_string())
+                );
                 assert_eq!(
                     dsl_aliases,
                     vec![
@@ -3829,7 +3795,7 @@ mod tests {
             AttributeType::StringEnum {
                 name,
                 values,
-                namespace,
+                identity,
                 dsl_aliases,
             } => {
                 assert_eq!(name, "Version");
@@ -3837,7 +3803,10 @@ mod tests {
                     values,
                     vec!["2012-10-17".to_string(), "2008-10-17".to_string()]
                 );
-                assert_eq!(namespace, Some("aws.iam.PolicyDocument".to_string()));
+                assert_eq!(
+                    identity.as_ref().and_then(|id| id.dotted_prefix()),
+                    Some("aws.iam.PolicyDocument".to_string())
+                );
                 assert_eq!(
                     dsl_aliases,
                     vec![

@@ -67,8 +67,6 @@ pub fn route53_record_set_config() -> AwsSchemaConfig {
                 length: Some((Some(0), Some(2147483647))),
                 base: Box::new(AttributeType::Int),
                 validate: legacy_validator(validate_ttl_range),
-                namespace: None,
-                to_dsl: None,
             })
                 .with_description("The resource record cache time to live (TTL), in seconds. Note the following: If you're creating or updating an alias resource record set, omit TTL. A...")
                 .with_provider_name("TTL"),
@@ -77,7 +75,7 @@ pub fn route53_record_set_config() -> AwsSchemaConfig {
             AttributeSchema::new("type", AttributeType::StringEnum {
                 name: "Type".to_string(),
                 values: vec!["A".to_string(), "AAAA".to_string(), "CAA".to_string(), "CNAME".to_string(), "DS".to_string(), "HTTPS".to_string(), "MX".to_string(), "NAPTR".to_string(), "NS".to_string(), "PTR".to_string(), "SOA".to_string(), "SPF".to_string(), "SRV".to_string(), "SSHFP".to_string(), "SVCB".to_string(), "TLSA".to_string(), "TXT".to_string()],
-                namespace: Some("aws.route53.RecordSet".to_string()),
+                identity: Some(carina_core::schema::string_enum_identity("Type", Some("aws.route53.RecordSet"))),
                 dsl_aliases: vec![("A".to_string(), "a".to_string()), ("AAAA".to_string(), "aaaa".to_string()), ("CAA".to_string(), "caa".to_string()), ("CNAME".to_string(), "cname".to_string()), ("DS".to_string(), "ds".to_string()), ("HTTPS".to_string(), "https".to_string()), ("MX".to_string(), "mx".to_string()), ("NAPTR".to_string(), "naptr".to_string()), ("NS".to_string(), "ns".to_string()), ("PTR".to_string(), "ptr".to_string()), ("SOA".to_string(), "soa".to_string()), ("SPF".to_string(), "spf".to_string()), ("SRV".to_string(), "srv".to_string()), ("SSHFP".to_string(), "sshfp".to_string()), ("SVCB".to_string(), "svcb".to_string()), ("TLSA".to_string(), "tlsa".to_string()), ("TXT".to_string(), "txt".to_string())],
             })
                 .required()
