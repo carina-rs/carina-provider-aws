@@ -48,7 +48,7 @@ pub fn organizations_account_config() -> AwsSchemaConfig {
             AttributeSchema::new("iam_user_access_to_billing", AttributeType::StringEnum {
                 name: "IamUserAccessToBilling".to_string(),
                 values: vec!["ALLOW".to_string(), "DENY".to_string()],
-                namespace: Some("aws.organizations.Account".to_string()),
+                identity: Some(carina_core::schema::string_enum_identity("IamUserAccessToBilling", Some("aws.organizations.Account"))),
                 dsl_aliases: vec![("ALLOW".to_string(), "allow".to_string()), ("DENY".to_string(), "deny".to_string())],
             })
                 .create_only()
@@ -77,7 +77,7 @@ pub fn organizations_account_config() -> AwsSchemaConfig {
             AttributeSchema::new("joined_method", AttributeType::StringEnum {
                 name: "JoinedMethod".to_string(),
                 values: vec!["CREATED".to_string(), "INVITED".to_string()],
-                namespace: Some("aws.organizations.Account".to_string()),
+                identity: Some(carina_core::schema::string_enum_identity("JoinedMethod", Some("aws.organizations.Account"))),
                 dsl_aliases: vec![("CREATED".to_string(), "created".to_string()), ("INVITED".to_string(), "invited".to_string())],
             })
                 .read_only()
@@ -100,7 +100,7 @@ pub fn organizations_account_config() -> AwsSchemaConfig {
             AttributeSchema::new("status", AttributeType::StringEnum {
                 name: "Status".to_string(),
                 values: vec!["ACTIVE".to_string(), "PENDING_CLOSURE".to_string(), "SUSPENDED".to_string()],
-                namespace: Some("aws.organizations.Account".to_string()),
+                identity: Some(carina_core::schema::string_enum_identity("Status", Some("aws.organizations.Account"))),
                 dsl_aliases: vec![("ACTIVE".to_string(), "active".to_string()), ("PENDING_CLOSURE".to_string(), "pending_closure".to_string()), ("SUSPENDED".to_string(), "suspended".to_string())],
             })
                 .read_only()

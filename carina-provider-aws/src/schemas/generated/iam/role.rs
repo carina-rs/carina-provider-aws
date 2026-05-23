@@ -50,8 +50,6 @@ pub fn iam_role_config() -> AwsSchemaConfig {
                 length: Some((Some(3600), Some(43200))),
                 base: Box::new(AttributeType::Int),
                 validate: legacy_validator(validate_max_session_duration_range),
-                namespace: None,
-                to_dsl: None,
             })
                 .create_only()
                 .with_description("The maximum session duration (in seconds) that you want to set for the specified role. If you do not specify a value for this setting, the default val...")

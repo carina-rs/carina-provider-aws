@@ -46,7 +46,10 @@ pub fn cloudfront_hosted_zone_id() -> AttributeType {
     AttributeType::StringEnum {
         name: "HostedZoneId".to_string(),
         values: vec!["Z2FDTNDATAQYW2".to_string()],
-        namespace: Some("aws.cloudfront".to_string()),
+        identity: Some(carina_core::schema::string_enum_identity(
+            "HostedZoneId",
+            Some("aws.cloudfront"),
+        )),
         dsl_aliases: vec![("Z2FDTNDATAQYW2".to_string(), "global".to_string())],
     }
 }
@@ -57,14 +60,8 @@ pub fn cloudfront_hosted_zone_id() -> AttributeType {
 /// - AWS string format: "ap-northeast-1"
 /// - Shorthand: ap_northeast_1
 pub fn aws_region() -> AttributeType {
-    AttributeType::Custom {
-        identity: Some(TypeIdentity::new(
-            Some("aws"),
-            Vec::<String>::new(),
-            "Region",
-        )),
-        pattern: None,
-        length: None,
+    AttributeType::CustomEnum {
+        identity: TypeIdentity::new(Some("aws"), Vec::<String>::new(), "Region"),
         base: Box::new(AttributeType::String),
         validate: legacy_validator(|value| {
             if let Value::Concrete(ConcreteValue::String(s)) = value {
@@ -86,7 +83,6 @@ pub fn aws_region() -> AttributeType {
                 Err("Expected string".to_string())
             }
         }),
-        namespace: Some("aws".to_string()),
         to_dsl: Some(|s: &str| s.replace('-', "_")),
     }
 }
@@ -97,14 +93,8 @@ pub fn aws_region() -> AttributeType {
 /// - AWS string format: "us-east-1a"
 /// - Shorthand: us_east_1a
 pub fn availability_zone() -> AttributeType {
-    AttributeType::Custom {
-        identity: Some(TypeIdentity::new(
-            Some("aws"),
-            ["AvailabilityZone"],
-            "ZoneName",
-        )),
-        pattern: None,
-        length: None,
+    AttributeType::CustomEnum {
+        identity: TypeIdentity::new(Some("aws"), ["AvailabilityZone"], "ZoneName"),
         base: Box::new(AttributeType::String),
         validate: legacy_validator(|value| {
             if let Value::Concrete(ConcreteValue::String(s)) = value {
@@ -119,7 +109,6 @@ pub fn availability_zone() -> AttributeType {
                 Err("Expected string".to_string())
             }
         }),
-        namespace: Some("aws".to_string()),
         to_dsl: Some(|s: &str| s.replace('-', "_")),
     }
 }
@@ -162,8 +151,6 @@ pub fn s3_grantee() -> AttributeType {
                 Err("Expected string".to_string())
             }
         }),
-        namespace: None,
-        to_dsl: None,
     }
 }
 
@@ -407,23 +394,29 @@ mod tests {
 
     #[test]
     fn az_has_namespace() {
+        // Post-#3222: AZ is a `CustomEnum`, not a `Custom`. The legacy
+        // `namespace: Some("aws")` field is now derived from the
+        // structured identity via `dotted_prefix()`.
         let az_type = availability_zone();
-        if let AttributeType::Custom { namespace, .. } = &az_type {
-            assert_eq!(namespace.as_deref(), Some("aws"));
+        if let AttributeType::CustomEnum { identity, .. } = &az_type {
+            assert_eq!(
+                identity.dotted_prefix().as_deref(),
+                Some("aws.AvailabilityZone")
+            );
         } else {
-            panic!("Expected Custom type");
+            panic!("Expected CustomEnum type");
         }
     }
 
     #[test]
     fn az_has_to_dsl() {
         let az_type = availability_zone();
-        if let AttributeType::Custom { to_dsl, .. } = &az_type {
+        if let AttributeType::CustomEnum { to_dsl, .. } = &az_type {
             assert!(to_dsl.is_some());
             let convert = to_dsl.unwrap();
             assert_eq!(convert("us-east-1a"), "us_east_1a");
         } else {
-            panic!("Expected Custom type");
+            panic!("Expected CustomEnum type");
         }
     }
 

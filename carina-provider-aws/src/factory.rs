@@ -51,7 +51,10 @@ impl ProviderFactory for AwsProviderFactory {
             carina_core::schema::AttributeType::StringEnum {
                 name: "Region".to_string(),
                 values: region_values,
-                namespace: Some("aws".to_string()),
+                identity: Some(carina_core::schema::string_enum_identity(
+                    "Region",
+                    Some("aws"),
+                )),
                 dsl_aliases: region_dsl_aliases,
             },
         );

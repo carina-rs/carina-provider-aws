@@ -35,7 +35,10 @@ pub fn s3_bucket_acl_config() -> AwsSchemaConfig {
                             "public-read".to_string(),
                             "public-read-write".to_string(),
                         ],
-                        namespace: Some("aws.s3.BucketAcl".to_string()),
+                        identity: Some(carina_core::schema::string_enum_identity(
+                            "Acl",
+                            Some("aws.s3.BucketAcl"),
+                        )),
                         dsl_aliases: vec![
                             (
                                 "authenticated-read".to_string(),

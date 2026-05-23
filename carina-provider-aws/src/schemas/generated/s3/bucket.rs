@@ -29,7 +29,7 @@ pub fn s3_bucket_config() -> AwsSchemaConfig {
             AttributeSchema::new("bucket_namespace", AttributeType::StringEnum {
                 name: "BucketNamespace".to_string(),
                 values: vec!["account-regional".to_string(), "global".to_string()],
-                namespace: Some("aws.s3.Bucket".to_string()),
+                identity: Some(carina_core::schema::string_enum_identity("BucketNamespace", Some("aws.s3.Bucket"))),
                 dsl_aliases: vec![("account-regional".to_string(), "account_regional".to_string()), ("global".to_string(), "global".to_string())],
             })
                 .create_only()

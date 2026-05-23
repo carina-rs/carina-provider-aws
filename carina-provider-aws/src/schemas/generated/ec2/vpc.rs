@@ -54,7 +54,7 @@ pub fn ec2_vpc_config() -> AwsSchemaConfig {
             AttributeSchema::new("instance_tenancy", AttributeType::StringEnum {
                 name: "InstanceTenancy".to_string(),
                 values: vec!["dedicated".to_string(), "default".to_string(), "host".to_string()],
-                namespace: Some("aws.ec2.Vpc".to_string()),
+                identity: Some(carina_core::schema::string_enum_identity("InstanceTenancy", Some("aws.ec2.Vpc"))),
                 dsl_aliases: vec![("dedicated".to_string(), "dedicated".to_string()), ("default".to_string(), "default".to_string()), ("host".to_string(), "host".to_string())],
             })
                 .create_only()
@@ -74,8 +74,6 @@ pub fn ec2_vpc_config() -> AwsSchemaConfig {
                 length: Some((Some(0), Some(32))),
                 base: Box::new(AttributeType::Int),
                 validate: legacy_validator(validate_ipv4_netmask_length_range),
-                namespace: None,
-                to_dsl: None,
             })
                 .create_only()
                 .with_description("The netmask length of the IPv4 CIDR you want to allocate to this VPC from an Amazon VPC IP Address Manager (IPAM) pool. For more information about IPA...")

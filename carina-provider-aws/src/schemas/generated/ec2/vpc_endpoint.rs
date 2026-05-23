@@ -87,7 +87,7 @@ pub fn ec2_vpc_endpoint_config() -> AwsSchemaConfig {
             AttributeSchema::new("vpc_endpoint_type", AttributeType::StringEnum {
                 name: "VpcEndpointType".to_string(),
                 values: vec!["Gateway".to_string(), "GatewayLoadBalancer".to_string(), "Interface".to_string(), "Resource".to_string(), "ServiceNetwork".to_string()],
-                namespace: Some("aws.ec2.VpcEndpoint".to_string()),
+                identity: Some(carina_core::schema::string_enum_identity("VpcEndpointType", Some("aws.ec2.VpcEndpoint"))),
                 dsl_aliases: vec![("Gateway".to_string(), "gateway".to_string()), ("GatewayLoadBalancer".to_string(), "gateway_load_balancer".to_string()), ("Interface".to_string(), "interface".to_string()), ("Resource".to_string(), "resource".to_string()), ("ServiceNetwork".to_string(), "service_network".to_string())],
             })
                 .create_only()
