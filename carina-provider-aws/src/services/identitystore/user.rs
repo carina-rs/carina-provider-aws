@@ -12,6 +12,7 @@ use carina_core::provider::{BoxFuture, ProviderError, ProviderResult};
 use carina_core::resource::{ConcreteValue, DataSource, State, Value};
 
 use crate::AwsProvider;
+use crate::error_helpers::api_error_with_meta;
 use crate::helpers::{sdk_error_message, value_as_str};
 
 impl AwsProvider {
@@ -43,10 +44,11 @@ impl AwsProvider {
                 .send()
                 .await
                 .map_err(|e| {
-                    ProviderError::api_error(sdk_error_message(
-                        &format!("Failed to describe identitystore user '{user_id}' in store '{identity_store_id}'"),
-                        &e,
-                    ))
+                    api_error_with_meta(
+                        format!("Failed to describe identitystore user '{user_id}' in store '{identity_store_id}'"),
+                        "identitystore.DescribeUser",
+                        e,
+                    )
                     .for_resource(resource.id.clone())
                 })?;
 
@@ -100,10 +102,11 @@ async fn resolve_user_id(
         .send()
         .await
         .map_err(|e| {
-            ProviderError::api_error(sdk_error_message(
-                &format!("Failed to look up user_id for user_name '{user_name}' in store '{identity_store_id}'"),
-                &e,
-            ))
+            api_error_with_meta(
+                format!("Failed to look up user_id for user_name '{user_name}' in store '{identity_store_id}'"),
+                "identitystore.GetUserId",
+                e,
+            )
             .for_resource(resource.id.clone())
         })?;
 
