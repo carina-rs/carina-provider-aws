@@ -868,6 +868,7 @@ dependencies = [
  "aws-smithy-async",
  "aws-smithy-runtime-api",
  "aws-smithy-types",
+ "aws-types",
  "carina-aws-types",
  "carina-core",
  "carina-plugin-sdk",

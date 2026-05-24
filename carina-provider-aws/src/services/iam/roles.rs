@@ -12,7 +12,8 @@ use carina_core::resource::{ConcreteValue, DataSource, State, Value};
 use regex::Regex;
 
 use crate::AwsProvider;
-use crate::helpers::{sdk_error_message, value_as_str};
+use crate::error_helpers::api_error_with_meta;
+use crate::helpers::value_as_str;
 
 impl AwsProvider {
     /// Read `iam.Roles` given a `DataSource` with optional `path_prefix` /
@@ -72,7 +73,7 @@ async fn list_matching_roles(
             req = req.marker(m);
         }
         let resp = req.send().await.map_err(|e| {
-            ProviderError::api_error(sdk_error_message("Failed to list IAM roles", &e))
+            api_error_with_meta("Failed to list IAM roles", "iam.ListRoles", e)
                 .for_resource(resource.id.clone())
         })?;
 

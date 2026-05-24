@@ -5,6 +5,7 @@
 mod data_source_lookups;
 mod ec2_security_group_rules;
 mod ec2_tags;
+pub(crate) mod error_helpers;
 mod factory;
 pub(crate) mod helpers;
 mod normalizer;
