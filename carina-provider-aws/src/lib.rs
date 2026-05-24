@@ -76,18 +76,69 @@ impl AwsProvider {
     ) -> Self {
         let config = Self::build_config(region, assume_role).await;
 
+        Self::from_clients(
+            region.to_string(),
+            allowed_account_ids,
+            forbidden_account_ids,
+            S3Client::new(&config),
+            Ec2Client::new(&config),
+            IamClient::new(&config),
+            CloudWatchLogsClient::new(&config),
+            StsClient::new(&config),
+            OrganizationsClient::new(&config),
+            IdentityStoreClient::new(&config),
+            Route53Client::new(&config),
+            AcmClient::new(&config),
+            SqsClient::new(&config),
+        )
+    }
+
+    /// Construct an `AwsProvider` from caller-supplied SDK clients.
+    ///
+    /// `new_with_account_guard` is the production entry point — it
+    /// resolves the region, optionally layers an `AssumeRoleProvider`
+    /// onto the credential chain, builds an `SdkConfig`, and constructs
+    /// all 10 clients itself. This constructor exists so integration
+    /// tests can inject clients wired to an in-process AWS mock
+    /// (`winterbaume`, library mode) and exercise the real SDK I/O
+    /// path with no real AWS and no external process (#355).
+    ///
+    /// All 10 clients are required arguments by design: when an 11th
+    /// SDK is added in the future every caller — production and tests
+    /// alike — is forced by the compiler to provide it. An
+    /// `Option<Client>`-shape would silently let tests skip newly-added
+    /// clients; a `from_sdk_config`-shape would block the eventual
+    /// "swap one client for a mock, keep the rest on real AWS"-style
+    /// finer-grained injection. The 10-arg boilerplate is the deliberate
+    /// trade for the type-level guarantee.
+    #[allow(clippy::too_many_arguments)]
+    pub fn from_clients(
+        region: String,
+        allowed_account_ids: Vec<String>,
+        forbidden_account_ids: Vec<String>,
+        s3_client: S3Client,
+        ec2_client: Ec2Client,
+        iam_client: IamClient,
+        logs_client: CloudWatchLogsClient,
+        sts_client: StsClient,
+        organizations_client: OrganizationsClient,
+        identitystore_client: IdentityStoreClient,
+        route53_client: Route53Client,
+        acm_client: AcmClient,
+        sqs_client: SqsClient,
+    ) -> Self {
         Self {
-            s3_client: S3Client::new(&config),
-            ec2_client: Ec2Client::new(&config),
-            iam_client: IamClient::new(&config),
-            logs_client: CloudWatchLogsClient::new(&config),
-            sts_client: StsClient::new(&config),
-            organizations_client: OrganizationsClient::new(&config),
-            identitystore_client: IdentityStoreClient::new(&config),
-            route53_client: Route53Client::new(&config),
-            acm_client: AcmClient::new(&config),
-            sqs_client: SqsClient::new(&config),
-            region: region.to_string(),
+            s3_client,
+            ec2_client,
+            iam_client,
+            logs_client,
+            sts_client,
+            organizations_client,
+            identitystore_client,
+            route53_client,
+            acm_client,
+            sqs_client,
+            region,
             allowed_account_ids,
             forbidden_account_ids,
         }
@@ -146,37 +197,5 @@ impl AwsProvider {
         let provider = builder.build().await;
         let shared = aws_credential_types::provider::SharedCredentialsProvider::new(provider);
         base.into_builder().credentials_provider(shared).build()
-    }
-
-    /// Create with specific clients (for testing)
-    #[allow(clippy::too_many_arguments)]
-    pub fn with_clients(
-        s3_client: S3Client,
-        ec2_client: Ec2Client,
-        iam_client: IamClient,
-        logs_client: CloudWatchLogsClient,
-        sts_client: StsClient,
-        organizations_client: OrganizationsClient,
-        identitystore_client: IdentityStoreClient,
-        route53_client: Route53Client,
-        acm_client: AcmClient,
-        sqs_client: SqsClient,
-        region: String,
-    ) -> Self {
-        Self {
-            s3_client,
-            ec2_client,
-            iam_client,
-            logs_client,
-            sts_client,
-            organizations_client,
-            identitystore_client,
-            route53_client,
-            acm_client,
-            sqs_client,
-            region,
-            allowed_account_ids: Vec::new(),
-            forbidden_account_ids: Vec::new(),
-        }
     }
 }
