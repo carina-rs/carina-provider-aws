@@ -67,6 +67,7 @@ pub fn route53_record_set_config() -> AwsSchemaConfig {
                 length: Some((Some(0), Some(2147483647))),
                 base: Box::new(AttributeType::Int),
                 validate: legacy_validator(validate_ttl_range),
+                to_dsl: None,
             })
                 .with_description("The resource record cache time to live (TTL), in seconds. Note the following: If you're creating or updating an alias resource record set, omit TTL. A...")
                 .with_provider_name("TTL"),

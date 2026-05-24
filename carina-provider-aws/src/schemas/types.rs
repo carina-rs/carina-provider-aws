@@ -123,6 +123,7 @@ pub fn availability_zone() -> AttributeType {
 /// Multiple grantees can be comma-separated.
 pub fn s3_grantee() -> AttributeType {
     AttributeType::Custom {
+        to_dsl: None,
         identity: Some(TypeIdentity::new(Some("aws"), ["s3"], "Grantee")),
         pattern: None,
         length: None,

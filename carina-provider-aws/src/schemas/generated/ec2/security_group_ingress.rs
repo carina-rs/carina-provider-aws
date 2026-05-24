@@ -69,6 +69,7 @@ pub fn ec2_security_group_ingress_config() -> AwsSchemaConfig {
                 length: None,
                 base: Box::new(AttributeType::Int),
                 validate: legacy_validator(validate_from_port_range),
+                to_dsl: None,
             })
                 .create_only()
                 .with_description("If the protocol is TCP or UDP, this is the start of the port range. If the protocol is ICMP, this is the ICMP type or -1 (all ICMP types). To specify ...")
@@ -123,6 +124,7 @@ pub fn ec2_security_group_ingress_config() -> AwsSchemaConfig {
                 length: None,
                 base: Box::new(AttributeType::Int),
                 validate: legacy_validator(validate_to_port_range),
+                to_dsl: None,
             })
                 .create_only()
                 .with_description("If the protocol is TCP or UDP, this is the end of the port range. If the protocol is ICMP, this is the ICMP code or -1 (all ICMP codes). If the start ...")

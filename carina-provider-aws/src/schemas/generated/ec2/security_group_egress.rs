@@ -77,6 +77,7 @@ pub fn ec2_security_group_egress_config() -> AwsSchemaConfig {
                         length: None,
                         base: Box::new(AttributeType::Int),
                         validate: legacy_validator(validate_from_port_range),
+                        to_dsl: None,
                     },
                 )
                 .create_only()
@@ -143,6 +144,7 @@ pub fn ec2_security_group_egress_config() -> AwsSchemaConfig {
                         length: None,
                         base: Box::new(AttributeType::Int),
                         validate: legacy_validator(validate_to_port_range),
+                        to_dsl: None,
                     },
                 )
                 .create_only()
