@@ -12,7 +12,7 @@ use carina_core::resource::{ConcreteValue, DataSource, ManagedResource, Resource
 use carina_core::utils::extract_enum_value;
 
 use crate::AwsProvider;
-use crate::helpers::sdk_error_message;
+use crate::error_helpers::api_error_with_meta;
 
 // ===== Generated Methods on AwsProvider =====
 
@@ -30,7 +30,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::api_error(sdk_error_message("Failed to delete vpc", &e))
+                api_error_with_meta("Failed to delete vpc", "ec2.DeleteVpc", e)
                     .for_resource(id.clone())
             })?;
         Ok(())
@@ -48,7 +48,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::api_error(sdk_error_message("Failed to delete subnet", &e))
+                api_error_with_meta("Failed to delete subnet", "ec2.DeleteSubnet", e)
                     .for_resource(id.clone())
             })?;
         Ok(())
@@ -66,7 +66,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::api_error(sdk_error_message("Failed to delete route table", &e))
+                api_error_with_meta("Failed to delete route table", "ec2.DeleteRouteTable", e)
                     .for_resource(id.clone())
             })?;
         Ok(())
@@ -84,8 +84,12 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::api_error(sdk_error_message("Failed to delete security group", &e))
-                    .for_resource(id.clone())
+                api_error_with_meta(
+                    "Failed to delete security group",
+                    "ec2.DeleteSecurityGroup",
+                    e,
+                )
+                .for_resource(id.clone())
             })?;
         Ok(())
     }
