@@ -15,7 +15,8 @@ use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{ConcreteValue, ManagedResource, ResourceId, State, Value};
 
 use crate::AwsProvider;
-use crate::helpers::{require_string_attr, sdk_error_message};
+use crate::error_helpers::api_error_with_meta;
+use crate::helpers::require_string_attr;
 // IAM policy doc Struct↔JSON converters are borrowed via pub(crate)
 // from services/iam/role.rs until aws#286 extracts them into a shared
 // module. SQS's Policy and RedriveAllowPolicy are IAM-shaped.
@@ -400,10 +401,11 @@ impl AwsProvider {
                 {
                     return Ok(State::not_found(id.clone()));
                 }
-                return Err(ProviderError::api_error(sdk_error_message(
+                return Err(api_error_with_meta(
                     "Failed to get queue attributes",
-                    &err,
-                ))
+                    "sqs.GetQueueAttributes",
+                    err,
+                )
                 .for_resource(id.clone()));
             }
         };
@@ -495,7 +497,7 @@ impl AwsProvider {
         }
 
         let result = req.send().await.map_err(|e| {
-            ProviderError::api_error(sdk_error_message("Failed to create SQS queue", &e))
+            api_error_with_meta("Failed to create SQS queue", "sqs.CreateQueue", e)
                 .for_resource(resource.id.clone())
         })?;
 
@@ -544,10 +546,11 @@ impl AwsProvider {
                 .send()
                 .await
                 .map_err(|e| {
-                    ProviderError::api_error(sdk_error_message(
+                    api_error_with_meta(
                         "Failed to set queue attributes",
-                        &e,
-                    ))
+                        "sqs.SetQueueAttributes",
+                        e,
+                    )
                     .for_resource(id.clone())
                 })?;
         }
@@ -575,7 +578,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::api_error(sdk_error_message("Failed to delete SQS queue", &e))
+                api_error_with_meta("Failed to delete SQS queue", "sqs.DeleteQueue", e)
                     .for_resource(id.clone())
             })?;
         Ok(())
@@ -612,7 +615,7 @@ impl AwsProvider {
                 .send()
                 .await
                 .map_err(|e| {
-                    ProviderError::api_error(sdk_error_message("Failed to untag SQS queue", &e))
+                    api_error_with_meta("Failed to untag SQS queue", "sqs.UntagQueue", e)
                         .for_resource(id.clone())
                 })?;
         }
@@ -638,7 +641,7 @@ impl AwsProvider {
                 .send()
                 .await
                 .map_err(|e| {
-                    ProviderError::api_error(sdk_error_message("Failed to tag SQS queue", &e))
+                    api_error_with_meta("Failed to tag SQS queue", "sqs.TagQueue", e)
                         .for_resource(id.clone())
                 })?;
         }

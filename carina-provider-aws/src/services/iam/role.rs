@@ -5,6 +5,7 @@ use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{ConcreteValue, ManagedResource, ResourceId, State, Value};
 
 use crate::AwsProvider;
+use crate::error_helpers::api_error_with_meta;
 use crate::helpers::{require_string_attr, sdk_error_message};
 
 impl AwsProvider {
@@ -70,7 +71,7 @@ impl AwsProvider {
                     return Ok(State::not_found(id.clone()));
                 }
                 Err(
-                    ProviderError::api_error(sdk_error_message("Failed to get IAM role", &e))
+                    api_error_with_meta("Failed to get IAM role", "iam.GetRole", e)
                         .for_resource(id.clone()),
                 )
             }
@@ -123,7 +124,7 @@ impl AwsProvider {
         }
 
         req.send().await.map_err(|e| {
-            ProviderError::api_error(sdk_error_message("Failed to create IAM role", &e))
+            api_error_with_meta("Failed to create IAM role", "iam.CreateRole", e)
                 .for_resource(resource.id.clone())
         })?;
 
@@ -148,10 +149,11 @@ impl AwsProvider {
                 .send()
                 .await
                 .map_err(|e| {
-                    ProviderError::api_error(sdk_error_message(
+                    api_error_with_meta(
                         "Failed to update assume role policy",
-                        &e,
-                    ))
+                        "iam.UpdateAssumeRolePolicy",
+                        e,
+                    )
                     .for_resource(id.clone())
                 })?;
         }
@@ -174,7 +176,7 @@ impl AwsProvider {
 
         if needs_update {
             req.send().await.map_err(|e| {
-                ProviderError::api_error(sdk_error_message("Failed to update IAM role", &e))
+                api_error_with_meta("Failed to update IAM role", "iam.UpdateRole", e)
                     .for_resource(id.clone())
             })?;
         }
@@ -203,7 +205,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::api_error(sdk_error_message("Failed to delete IAM role", &e))
+                api_error_with_meta("Failed to delete IAM role", "iam.DeleteRole", e)
                     .for_resource(id.clone())
             })?;
         Ok(())
@@ -239,7 +241,7 @@ impl AwsProvider {
                 req = req.tag_keys(key);
             }
             req.send().await.map_err(|e| {
-                ProviderError::api_error(sdk_error_message("Failed to untag IAM role", &e))
+                api_error_with_meta("Failed to untag IAM role", "iam.UntagRole", e)
                     .for_resource(id.clone())
             })?;
         }
@@ -272,7 +274,7 @@ impl AwsProvider {
                 req = req.tags(tag);
             }
             req.send().await.map_err(|e| {
-                ProviderError::api_error(sdk_error_message("Failed to tag IAM role", &e))
+                api_error_with_meta("Failed to tag IAM role", "iam.TagRole", e)
                     .for_resource(id.clone())
             })?;
         }
