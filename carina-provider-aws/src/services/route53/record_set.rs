@@ -14,6 +14,7 @@ use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{ConcreteValue, ManagedResource, ResourceId, State, Value};
 
 use crate::AwsProvider;
+use crate::error_helpers::api_error_with_meta;
 use crate::helpers::{require_enum_attr, require_string_attr, sdk_error_message};
 
 /// Composite identifier format: `hosted_zone_id|name|type`
@@ -210,8 +211,12 @@ async fn change_record_set(
         .send()
         .await
         .map_err(|e| {
-            ProviderError::api_error(sdk_error_message("ChangeResourceRecordSets failed", &e))
-                .for_resource(id.clone())
+            api_error_with_meta(
+                "ChangeResourceRecordSets failed",
+                "route53.ChangeResourceRecordSets",
+                e,
+            )
+            .for_resource(id.clone())
         })?;
 
     Ok(())
@@ -313,8 +318,12 @@ impl AwsProvider {
             }
 
             let result = request.send().await.map_err(|e| {
-                ProviderError::api_error(sdk_error_message("Failed to list record sets", &e))
-                    .for_resource(id.clone())
+                api_error_with_meta(
+                    "Failed to list record sets",
+                    "route53.ListResourceRecordSets",
+                    e,
+                )
+                .for_resource(id.clone())
             })?;
 
             match scan_page_for_record(result.resource_record_sets(), &normalized_name, record_type)
