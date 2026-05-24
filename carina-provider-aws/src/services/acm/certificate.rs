@@ -19,6 +19,7 @@ use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{ConcreteValue, ManagedResource, ResourceId, State, Value};
 
 use crate::AwsProvider;
+use crate::error_helpers::api_error_with_meta;
 use crate::helpers::{require_string_attr, sdk_error_message};
 
 fn extract_string(value: &Value) -> Option<&str> {
@@ -300,7 +301,7 @@ impl AwsProvider {
         // carina-rs/carina-provider-aws#296.
 
         let output = req.send().await.map_err(|e| {
-            ProviderError::api_error(sdk_error_message("RequestCertificate failed", &e))
+            api_error_with_meta("RequestCertificate failed", "acm.RequestCertificate", e)
                 .for_resource(id.clone())
         })?;
 
@@ -328,10 +329,11 @@ impl AwsProvider {
                         .send()
                         .await
                         .map_err(|e| {
-                            ProviderError::api_error(sdk_error_message(
+                            api_error_with_meta(
                                 "DescribeCertificate failed",
-                                &e,
-                            ))
+                                "acm.DescribeCertificate",
+                                e,
+                            )
                             .for_resource(id.clone())
                         })
                         .map(|out| out.certificate().cloned())
@@ -366,7 +368,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::api_error(sdk_error_message("DescribeCertificate failed", &e))
+                api_error_with_meta("DescribeCertificate failed", "acm.DescribeCertificate", e)
                     .for_resource(id.clone())
             })?;
         self.read_acm_certificate_from_detail(id, arn, output.certificate())
@@ -399,8 +401,12 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::api_error(sdk_error_message("ListTagsForCertificate failed", &e))
-                    .for_resource(id.clone())
+                api_error_with_meta(
+                    "ListTagsForCertificate failed",
+                    "acm.ListTagsForCertificate",
+                    e,
+                )
+                .for_resource(id.clone())
             })?;
         let tags = tag_output.tags();
         if !tags.is_empty() {
@@ -446,10 +452,11 @@ impl AwsProvider {
                 .send()
                 .await
                 .map_err(|e| {
-                    ProviderError::api_error(sdk_error_message(
+                    api_error_with_meta(
                         "UpdateCertificateOptions failed",
-                        &e,
-                    ))
+                        "acm.UpdateCertificateOptions",
+                        e,
+                    )
                     .for_resource(id.clone())
                 })?;
         }
@@ -498,7 +505,7 @@ impl AwsProvider {
                 req = req.tags(tag);
             }
             req.send().await.map_err(|e| {
-                ProviderError::api_error(sdk_error_message("AddTagsToCertificate failed", &e))
+                api_error_with_meta("AddTagsToCertificate failed", "acm.AddTagsToCertificate", e)
                     .for_resource(id.clone())
             })?;
         }
@@ -523,8 +530,12 @@ impl AwsProvider {
                 req = req.tags(tag);
             }
             req.send().await.map_err(|e| {
-                ProviderError::api_error(sdk_error_message("RemoveTagsFromCertificate failed", &e))
-                    .for_resource(id.clone())
+                api_error_with_meta(
+                    "RemoveTagsFromCertificate failed",
+                    "acm.RemoveTagsFromCertificate",
+                    e,
+                )
+                .for_resource(id.clone())
             })?;
         }
 
@@ -543,7 +554,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::api_error(sdk_error_message("DeleteCertificate failed", &e))
+                api_error_with_meta("DeleteCertificate failed", "acm.DeleteCertificate", e)
                     .for_resource(id)
             })?;
         Ok(())

@@ -4,7 +4,7 @@ use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{ConcreteValue, ManagedResource, ResourceId, State, Value};
 
 use crate::AwsProvider;
-use crate::helpers::sdk_error_message;
+use crate::error_helpers::api_error_with_meta;
 
 impl AwsProvider {
     /// Extract attributes from an Organizations Organization object
@@ -93,10 +93,11 @@ impl AwsProvider {
                 {
                     return Ok(State::not_found(id.clone()));
                 }
-                Err(ProviderError::api_error(sdk_error_message(
+                Err(api_error_with_meta(
                     "Failed to describe organization",
-                    &e,
-                ))
+                    "organizations.DescribeOrganization",
+                    e,
+                )
                 .for_resource(id.clone()))
             }
         }
@@ -118,8 +119,12 @@ impl AwsProvider {
         }
 
         let response = req.send().await.map_err(|e| {
-            ProviderError::api_error(sdk_error_message("Failed to create organization", &e))
-                .for_resource(resource.id.clone())
+            api_error_with_meta(
+                "Failed to create organization",
+                "organizations.CreateOrganization",
+                e,
+            )
+            .for_resource(resource.id.clone())
         })?;
 
         if let Some(org) = response.organization() {
@@ -150,8 +155,12 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::api_error(sdk_error_message("Failed to delete organization", &e))
-                    .for_resource(id.clone())
+                api_error_with_meta(
+                    "Failed to delete organization",
+                    "organizations.DeleteOrganization",
+                    e,
+                )
+                .for_resource(id.clone())
             })?;
         Ok(())
     }

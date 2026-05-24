@@ -5,6 +5,7 @@ use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{ConcreteValue, ManagedResource, ResourceId, State, Value};
 
 use crate::AwsProvider;
+use crate::error_helpers::api_error_with_meta;
 use crate::helpers::{PollState, require_string_attr, sdk_error_message, wait_for_ec2_state};
 
 impl AwsProvider {
@@ -146,10 +147,12 @@ impl AwsProvider {
                 {
                     return Ok(State::not_found(id.clone()));
                 }
-                Err(
-                    ProviderError::api_error(sdk_error_message("Failed to describe account", &e))
-                        .for_resource(id.clone()),
+                Err(api_error_with_meta(
+                    "Failed to describe account",
+                    "organizations.DescribeAccount",
+                    e,
                 )
+                .for_resource(id.clone()))
             }
         }
     }
@@ -199,7 +202,7 @@ impl AwsProvider {
         }
 
         let response = req.send().await.map_err(|e| {
-            ProviderError::api_error(sdk_error_message("Failed to create account", &e))
+            api_error_with_meta("Failed to create account", "organizations.CreateAccount", e)
                 .for_resource(resource.id.clone())
         })?;
 
@@ -226,10 +229,11 @@ impl AwsProvider {
                     .send()
                     .await
                     .map_err(|e| {
-                        ProviderError::api_error(sdk_error_message(
+                        api_error_with_meta(
                             "Failed to describe create account status",
-                            &e,
-                        ))
+                            "organizations.DescribeCreateAccountStatus",
+                            e,
+                        )
                         .for_resource(resource_id.clone())
                     })?;
                 if let Some(status) = result.create_account_status() {
@@ -260,10 +264,11 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::api_error(sdk_error_message(
+                api_error_with_meta(
                     "Failed to get final create account status",
-                    &e,
-                ))
+                    "organizations.DescribeCreateAccountStatus",
+                    e,
+                )
                 .for_resource(resource.id.clone())
             })?;
 
@@ -287,10 +292,11 @@ impl AwsProvider {
                 .send()
                 .await
                 .map_err(|e| {
-                    ProviderError::api_error(sdk_error_message(
+                    api_error_with_meta(
                         "Failed to list parents for new account",
-                        &e,
-                    ))
+                        "organizations.ListParents",
+                        e,
+                    )
                     .for_resource(resource.id.clone())
                 })?;
 
@@ -306,10 +312,11 @@ impl AwsProvider {
                     .send()
                     .await
                     .map_err(|e| {
-                        ProviderError::api_error(sdk_error_message(
+                        api_error_with_meta(
                             "Failed to move account to parent",
-                            &e,
-                        ))
+                            "organizations.MoveAccount",
+                            e,
+                        )
                         .for_resource(resource.id.clone())
                     })?;
             }
@@ -348,7 +355,7 @@ impl AwsProvider {
                 .send()
                 .await
                 .map_err(|e| {
-                    ProviderError::api_error(sdk_error_message("Failed to move account", &e))
+                    api_error_with_meta("Failed to move account", "organizations.MoveAccount", e)
                         .for_resource(id.clone())
                 })?;
         }
@@ -377,7 +384,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::api_error(sdk_error_message("Failed to close account", &e))
+                api_error_with_meta("Failed to close account", "organizations.CloseAccount", e)
                     .for_resource(id.clone())
             })?;
         Ok(())
@@ -415,7 +422,7 @@ impl AwsProvider {
                 .send()
                 .await
                 .map_err(|e| {
-                    ProviderError::api_error(sdk_error_message("Failed to untag account", &e))
+                    api_error_with_meta("Failed to untag account", "organizations.UntagResource", e)
                         .for_resource(id.clone())
                 })?;
         }
@@ -450,7 +457,7 @@ impl AwsProvider {
                 .send()
                 .await
                 .map_err(|e| {
-                    ProviderError::api_error(sdk_error_message("Failed to tag account", &e))
+                    api_error_with_meta("Failed to tag account", "organizations.TagResource", e)
                         .for_resource(id.clone())
                 })?;
         }
