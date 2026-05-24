@@ -4,7 +4,8 @@ use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{ConcreteValue, ManagedResource, ResourceId, State, Value};
 
 use crate::AwsProvider;
-use crate::helpers::{RetryPolicy, require_string_attr, retry_aws_operation, sdk_error_message};
+use crate::error_helpers::api_error_with_meta;
+use crate::helpers::{RetryPolicy, require_string_attr, retry_aws_operation};
 
 impl AwsProvider {
     /// Read an EC2 Security Group
@@ -31,10 +32,11 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::api_error(sdk_error_message(
+                api_error_with_meta(
                     "Failed to describe security groups",
-                    &e,
-                ))
+                    "ec2.DescribeSecurityGroups",
+                    e,
+                )
                 .for_resource(id.clone())
             })?;
 
@@ -96,8 +98,12 @@ impl AwsProvider {
         })
         .await
         .map_err(|e| {
-            ProviderError::api_error(sdk_error_message("Failed to create security group", &e))
-                .for_resource(rid.clone())
+            api_error_with_meta(
+                "Failed to create security group",
+                "ec2.CreateSecurityGroup",
+                e,
+            )
+            .for_resource(rid.clone())
         })?;
 
         let sg_id = result.group_id().ok_or_else(|| {

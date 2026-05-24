@@ -9,6 +9,7 @@ use carina_core::resource::{ConcreteValue, ManagedResource, ResourceId, State, V
 use indexmap::IndexMap;
 
 use crate::AwsProvider;
+use crate::error_helpers::api_error_with_meta;
 use crate::helpers::{RetryPolicy, require_string_attr, retry_aws_operation, sdk_error_message};
 use crate::services::s3::bucket::is_s3_not_configured_error;
 
@@ -53,10 +54,11 @@ impl AwsProvider {
                 {
                     return Ok(State::not_found(id.clone()));
                 }
-                Err(ProviderError::api_error(sdk_error_message(
+                Err(api_error_with_meta(
                     "Failed to get bucket encryption",
-                    &e,
-                ))
+                    "s3.GetBucketEncryption",
+                    e,
+                )
                 .for_resource(id.clone()))
             }
         }
@@ -120,8 +122,12 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::api_error(sdk_error_message("Failed to put bucket encryption", &e))
-                    .for_resource(id.clone())
+                api_error_with_meta(
+                    "Failed to put bucket encryption",
+                    "s3.PutBucketEncryption",
+                    e,
+                )
+                .for_resource(id.clone())
             })?;
 
         self.read_s3_bucket_server_side_encryption_configuration(id, Some(bucket))
@@ -156,10 +162,11 @@ impl AwsProvider {
             {
                 Ok(())
             }
-            Err(e) => Err(ProviderError::api_error(sdk_error_message(
+            Err(e) => Err(api_error_with_meta(
                 "Failed to delete bucket encryption",
-                &e,
-            ))
+                "s3.DeleteBucketEncryption",
+                e,
+            )
             .for_resource(id.clone())),
         }
     }

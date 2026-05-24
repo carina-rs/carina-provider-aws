@@ -4,7 +4,7 @@ use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{ConcreteValue, ManagedResource, ResourceId, State, Value};
 
 use crate::AwsProvider;
-use crate::helpers::sdk_error_message;
+use crate::error_helpers::api_error_with_meta;
 
 impl AwsProvider {
     /// Read an EC2 Elastic IP
@@ -31,7 +31,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::api_error(sdk_error_message("Failed to describe addresses", &e))
+                api_error_with_meta("Failed to describe addresses", "ec2.DescribeAddresses", e)
                     .for_resource(id.clone())
             })?;
 
@@ -70,7 +70,7 @@ impl AwsProvider {
         }
 
         let result = req.send().await.map_err(|e| {
-            ProviderError::api_error(sdk_error_message("Failed to allocate address", &e))
+            api_error_with_meta("Failed to allocate address", "ec2.AllocateAddress", e)
                 .for_resource(resource.id.clone())
         })?;
 
@@ -122,7 +122,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::api_error(sdk_error_message("Failed to release address", &e))
+                api_error_with_meta("Failed to release address", "ec2.ReleaseAddress", e)
                     .for_resource(id.clone())
             })?;
         Ok(())

@@ -8,6 +8,7 @@ use carina_core::resource::{
 use carina_core::utils::convert_enum_value;
 
 use crate::AwsProvider;
+use crate::error_helpers::api_error_with_meta;
 use crate::helpers::{RetryPolicy, retry_aws_operation, sdk_error_message};
 
 impl AwsProvider {
@@ -55,11 +56,12 @@ impl AwsProvider {
                         name
                     ))
                     .for_resource(id.clone())),
-                    HeadBucketErrorKind::Other => Err(ProviderError::api_error(sdk_error_message(
-                        "Failed to read bucket",
-                        &err,
-                    ))
-                    .for_resource(id.clone())),
+                    HeadBucketErrorKind::Other => {
+                        Err(
+                            api_error_with_meta("Failed to read bucket", "s3.HeadBucket", err)
+                                .for_resource(id.clone()),
+                        )
+                    }
                 }
             }
         }
@@ -114,7 +116,7 @@ impl AwsProvider {
         })
         .await
         .map_err(|e| {
-            ProviderError::api_error(sdk_error_message("Failed to create bucket", &e))
+            api_error_with_meta("Failed to create bucket", "s3.CreateBucket", e)
                 .for_resource(rid.clone())
         })?;
 
@@ -147,7 +149,7 @@ impl AwsProvider {
                 .send()
                 .await
                 .map_err(|e| {
-                    ProviderError::api_error(sdk_error_message("Failed to delete bucket tags", &e))
+                    api_error_with_meta("Failed to delete bucket tags", "s3.DeleteBucketTagging", e)
                         .for_resource(id.clone())
                 })?;
         } else {
@@ -175,7 +177,7 @@ impl AwsProvider {
         })
         .await
         .map_err(|e| {
-            ProviderError::api_error(sdk_error_message("Failed to delete bucket", &e))
+            api_error_with_meta("Failed to delete bucket", "s3.DeleteBucket", e)
                 .for_resource(id.clone())
         })?;
         Ok(())
@@ -200,7 +202,7 @@ impl AwsProvider {
             }
 
             let response = req.send().await.map_err(|e| {
-                ProviderError::api_error(sdk_error_message("Failed to list object versions", &e))
+                api_error_with_meta("Failed to list object versions", "s3.ListObjectVersions", e)
                     .for_resource(id.clone())
             })?;
 
@@ -261,7 +263,7 @@ impl AwsProvider {
                     .send()
                     .await
                     .map_err(|e| {
-                        ProviderError::api_error(sdk_error_message("Failed to delete objects", &e))
+                        api_error_with_meta("Failed to delete objects", "s3.DeleteObjects", e)
                             .for_resource(id.clone())
                     })?;
             }
@@ -308,10 +310,11 @@ impl AwsProvider {
             }
             Err(err) => {
                 if !is_s3_not_configured_error(&err, "NoSuchTagSet") {
-                    return Err(ProviderError::api_error(sdk_error_message(
+                    return Err(api_error_with_meta(
                         "Failed to read bucket tagging",
-                        &err,
-                    ))
+                        "s3.GetBucketTagging",
+                        err,
+                    )
                     .for_resource(id.clone()));
                 }
             }
@@ -354,7 +357,7 @@ impl AwsProvider {
                 .send()
                 .await
                 .map_err(|e| {
-                    ProviderError::api_error(sdk_error_message("Failed to put bucket tags", &e))
+                    api_error_with_meta("Failed to put bucket tags", "s3.PutBucketTagging", e)
                         .for_resource(id.clone())
                 })?;
         }
@@ -414,11 +417,10 @@ impl AwsProvider {
                              different AWS account."
                         ))
                         .for_resource(resource.id.clone()),
-                        HeadBucketErrorKind::Other => ProviderError::api_error(sdk_error_message(
-                            "Failed to head bucket",
-                            &err,
-                        ))
-                        .for_resource(resource.id.clone()),
+                        HeadBucketErrorKind::Other => {
+                            api_error_with_meta("Failed to head bucket", "s3.HeadBucket", err)
+                                .for_resource(resource.id.clone())
+                        }
                     }
                 })?;
 
@@ -431,7 +433,7 @@ impl AwsProvider {
                 .send()
                 .await
                 .map_err(|e| {
-                    ProviderError::api_error(sdk_error_message("Failed to get bucket location", &e))
+                    api_error_with_meta("Failed to get bucket location", "s3.GetBucketLocation", e)
                         .for_resource(resource.id.clone())
                 })?
                 .location_constraint()

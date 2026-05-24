@@ -4,7 +4,8 @@ use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{ConcreteValue, ManagedResource, ResourceId, State, Value};
 
 use crate::AwsProvider;
-use crate::helpers::{RetryPolicy, require_string_attr, retry_aws_operation, sdk_error_message};
+use crate::error_helpers::api_error_with_meta;
+use crate::helpers::{RetryPolicy, require_string_attr, retry_aws_operation};
 use crate::services::iam::role::{iam_policy_json_to_value, resolve_iam_policy_attr};
 use crate::services::s3::bucket::is_s3_not_configured_error;
 
@@ -55,7 +56,7 @@ impl AwsProvider {
                     return Ok(State::not_found(id.clone()));
                 }
                 Err(
-                    ProviderError::api_error(sdk_error_message("Failed to get bucket policy", &e))
+                    api_error_with_meta("Failed to get bucket policy", "s3.GetBucketPolicy", e)
                         .for_resource(id.clone()),
                 )
             }
@@ -98,7 +99,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::api_error(sdk_error_message("Failed to put bucket policy", &e))
+                api_error_with_meta("Failed to put bucket policy", "s3.PutBucketPolicy", e)
                     .for_resource(id.clone())
             })?;
 
@@ -136,10 +137,11 @@ impl AwsProvider {
             {
                 Ok(())
             }
-            Err(e) => Err(ProviderError::api_error(sdk_error_message(
+            Err(e) => Err(api_error_with_meta(
                 "Failed to delete bucket policy",
-                &e,
-            ))
+                "s3.DeleteBucketPolicy",
+                e,
+            )
             .for_resource(id.clone())),
         }
     }

@@ -6,9 +6,9 @@ use carina_core::resource::{ConcreteValue, ManagedResource, ResourceId, State, V
 use aws_sdk_ec2::types::NatGatewayState;
 
 use crate::AwsProvider;
+use crate::error_helpers::api_error_with_meta;
 use crate::helpers::{
-    PollState, RetryPolicy, require_string_attr, retry_aws_operation, sdk_error_message,
-    wait_for_ec2_state,
+    PollState, RetryPolicy, require_string_attr, retry_aws_operation, wait_for_ec2_state,
 };
 
 impl AwsProvider {
@@ -36,8 +36,12 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::api_error(sdk_error_message("Failed to describe NAT gateways", &e))
-                    .for_resource(id.clone())
+                api_error_with_meta(
+                    "Failed to describe NAT gateways",
+                    "ec2.DescribeNatGateways",
+                    e,
+                )
+                .for_resource(id.clone())
             })?;
 
         if let Some(ngw) = result.nat_gateways().first() {
@@ -96,7 +100,7 @@ impl AwsProvider {
         })
         .await
         .map_err(|e| {
-            ProviderError::api_error(sdk_error_message("Failed to create NAT gateway", &e))
+            api_error_with_meta("Failed to create NAT gateway", "ec2.CreateNatGateway", e)
                 .for_resource(rid.clone())
         })?;
 
@@ -150,7 +154,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::api_error(sdk_error_message("Failed to delete NAT gateway", &e))
+                api_error_with_meta("Failed to delete NAT gateway", "ec2.DeleteNatGateway", e)
                     .for_resource(id.clone())
             })?;
 
@@ -177,10 +181,11 @@ impl AwsProvider {
                     .send()
                     .await
                     .map_err(|e| {
-                        ProviderError::api_error(sdk_error_message(
+                        api_error_with_meta(
                             "Failed to describe NAT gateway",
-                            &e,
-                        ))
+                            "ec2.DescribeNatGateways",
+                            e,
+                        )
                         .for_resource(rid.clone())
                     })?;
                 Ok(
@@ -224,10 +229,11 @@ impl AwsProvider {
                     .send()
                     .await
                     .map_err(|e| {
-                        ProviderError::api_error(sdk_error_message(
+                        api_error_with_meta(
                             "Failed to describe NAT gateway",
-                            &e,
-                        ))
+                            "ec2.DescribeNatGateways",
+                            e,
+                        )
                         .for_resource(rid.clone())
                     })?;
                 Ok(if let Some(ngw) = result.nat_gateways().first() {

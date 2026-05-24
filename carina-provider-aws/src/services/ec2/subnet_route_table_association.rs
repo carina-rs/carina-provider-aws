@@ -4,7 +4,8 @@ use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{ConcreteValue, ManagedResource, ResourceId, State, Value};
 
 use crate::AwsProvider;
-use crate::helpers::{require_string_attr, sdk_error_message};
+use crate::error_helpers::api_error_with_meta;
+use crate::helpers::require_string_attr;
 
 impl AwsProvider {
     /// Read an EC2 Subnet Route Table Association
@@ -37,8 +38,12 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::api_error(sdk_error_message("Failed to describe route tables", &e))
-                    .for_resource(id.clone())
+                api_error_with_meta(
+                    "Failed to describe route tables",
+                    "ec2.DescribeRouteTables",
+                    e,
+                )
+                .for_resource(id.clone())
             })?;
 
         if let Some(rt) = result.route_tables().first() {
@@ -91,8 +96,12 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::api_error(sdk_error_message("Failed to associate route table", &e))
-                    .for_resource(resource.id.clone())
+                api_error_with_meta(
+                    "Failed to associate route table",
+                    "ec2.AssociateRouteTable",
+                    e,
+                )
+                .for_resource(resource.id.clone())
             })?;
 
         let assoc_id = result.association_id().ok_or_else(|| {
@@ -141,10 +150,11 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::api_error(sdk_error_message(
+                api_error_with_meta(
                     "Failed to replace route table association",
-                    &e,
-                ))
+                    "ec2.ReplaceRouteTableAssociation",
+                    e,
+                )
                 .for_resource(id.clone())
             })?;
 
@@ -181,10 +191,11 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::api_error(sdk_error_message(
+                api_error_with_meta(
                     "Failed to disassociate route table",
-                    &e,
-                ))
+                    "ec2.DisassociateRouteTable",
+                    e,
+                )
                 .for_resource(id.clone())
             })?;
 
