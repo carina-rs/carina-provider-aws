@@ -614,23 +614,6 @@ fn test_extract_ec2_subnet_attributes_map_public_ip_true() {
     );
 }
 
-// --- Subnet availability zone DSL format conversion ---
-
-#[test]
-fn test_subnet_availability_zone_dsl_format() {
-    // Simulates the AZ conversion in read_ec2_subnet
-    let az = "ap-northeast-1a";
-    let az_dsl = format!("aws.AvailabilityZone.{}", az.replace('-', "_"));
-    assert_eq!(az_dsl, "aws.AvailabilityZone.ap_northeast_1a");
-}
-
-#[test]
-fn test_subnet_availability_zone_dsl_format_us_east() {
-    let az = "us-east-1b";
-    let az_dsl = format!("aws.AvailabilityZone.{}", az.replace('-', "_"));
-    assert_eq!(az_dsl, "aws.AvailabilityZone.us_east_1b");
-}
-
 #[test]
 fn test_subnet_availability_zone_dsl_to_aws_sdk() {
     use carina_core::utils::convert_enum_value;
