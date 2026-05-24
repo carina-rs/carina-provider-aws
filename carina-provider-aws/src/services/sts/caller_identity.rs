@@ -1,10 +1,10 @@
 use std::collections::HashMap;
 
-use carina_core::provider::{BoxFuture, ProviderError, ProviderResult};
+use carina_core::provider::{BoxFuture, ProviderResult};
 use carina_core::resource::{ConcreteValue, DataSource, State, Value};
 
 use crate::AwsProvider;
-use crate::helpers::sdk_error_message;
+use crate::error_helpers::api_error_with_meta;
 
 impl AwsProvider {
     /// Read STS caller identity (data source).
@@ -24,10 +24,11 @@ impl AwsProvider {
                 .send()
                 .await
                 .map_err(|e| {
-                    ProviderError::api_error(sdk_error_message(
+                    api_error_with_meta(
                         "Failed to get STS caller identity",
-                        &e,
-                    ))
+                        "sts.GetCallerIdentity",
+                        e,
+                    )
                     .for_resource(id.clone())
                 })?;
 
