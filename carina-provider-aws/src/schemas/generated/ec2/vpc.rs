@@ -74,6 +74,7 @@ pub fn ec2_vpc_config() -> AwsSchemaConfig {
                 length: Some((Some(0), Some(32))),
                 base: Box::new(AttributeType::Int),
                 validate: legacy_validator(validate_ipv4_netmask_length_range),
+                to_dsl: None,
             })
                 .create_only()
                 .with_description("The netmask length of the IPv4 CIDR you want to allocate to this VPC from an Amazon VPC IP Address Manager (IPAM) pool. For more information about IPA...")

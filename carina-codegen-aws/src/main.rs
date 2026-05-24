@@ -1284,6 +1284,7 @@ fn resolve_type(
                          \x20               length: {},\n\
                          \x20               base: Box::new(AttributeType::Int),\n\
                          \x20               validate: legacy_validator({}),\n\
+                         \x20               to_dsl: None,\n\
                          \x20           }}",
                         length_expr, validate_fn
                     ),

@@ -266,6 +266,7 @@ fn proto_to_core_attribute_type(t: &ProtoAttributeType) -> CoreAttributeType {
             CoreAttributeType::Union(members.iter().map(proto_to_core_attribute_type).collect())
         }
         ProtoAttributeType::Custom { name, base } => CoreAttributeType::Custom {
+            to_dsl: None,
             identity: if name.is_empty() {
                 None
             } else {

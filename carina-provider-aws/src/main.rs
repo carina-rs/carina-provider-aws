@@ -62,6 +62,10 @@ impl AwsProcessProvider {
                 .map(|id| convert::core_to_proto_resource_id(id)),
             cause: detail.cause.as_ref().map(|c| c.to_string()),
             provider_name: detail.provider_name.clone(),
+            operation: detail.operation.clone(),
+            status: detail.status,
+            code: detail.code.clone(),
+            request_id: detail.request_id.clone(),
         }
     }
 
