@@ -8,6 +8,14 @@ use crate::AwsProvider;
 use crate::helpers::{require_string_attr, sdk_error_message};
 use aws_sdk_ec2::types::{AttributeBooleanValue, HostnameType};
 
+// `read_ec2_subnet` must store `availability_zone` as the AWS canonical
+// form (`"ap-northeast-1a"`). Rewriting it to a DSL-prefixed identifier
+// (`"aws.AvailabilityZone.ap_northeast_1a"`) yields a phantom
+// `forces replacement` diff on every post-apply plan: the schema's
+// `CustomEnum.to_dsl` folds both sides to the same identifier when
+// rendered, so the printed values match while the underlying strings
+// do not, and the differ marks the create-only attribute as changed.
+
 impl AwsProvider {
     /// Read an EC2 Subnet
     pub(crate) async fn read_ec2_subnet(
@@ -42,15 +50,6 @@ impl AwsProvider {
 
             // Auto-generated attribute extraction
             let identifier_value = Self::extract_ec2_subnet_attributes(subnet, &mut attributes);
-
-            // Override availability_zone with DSL format
-            if let Some(az) = subnet.availability_zone() {
-                let az_dsl = format!("aws.AvailabilityZone.{}", az.replace('-', "_"));
-                attributes.insert(
-                    "availability_zone".to_string(),
-                    Value::Concrete(ConcreteValue::String(az_dsl)),
-                );
-            }
 
             // Extract user-defined tags
             if let Some(tags_value) = Self::ec2_tags_to_value(subnet.tags()) {
