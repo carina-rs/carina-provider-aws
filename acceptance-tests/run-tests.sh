@@ -954,6 +954,17 @@ for TEST_FILE in "${TESTS[@]}"; do
         cp "$INJECTED_FILE" "$VALIDATE_DIR/main.crn"
         rm -f "$INJECTED_FILE"
         TARGET_PATH="$VALIDATE_DIR"
+
+        # `carina validate` loads the provider WASM to do schema-driven
+        # validation, so the provider must be installed first. `carina init`
+        # on a file:// source does not require AWS credentials.
+        if ! INIT_OUTPUT=$("$CARINA_BIN" init "$VALIDATE_DIR" 2>&1); then
+            echo "FAIL (init)"
+            ERRORS+=("$REL_PATH: $INIT_OUTPUT")
+            FAILED=$((FAILED + 1))
+            rm -rf "$VALIDATE_DIR"
+            continue
+        fi
     fi
 
     RUN_PREFIX=""
