@@ -7,7 +7,7 @@ use carina_core::resource::{ConcreteValue, ManagedResource, ResourceId, State, V
 use carina_core::utils::convert_enum_value;
 
 use crate::AwsProvider;
-use crate::helpers::sdk_error_message;
+use crate::error_helpers::api_error_with_meta;
 
 impl AwsProvider {
     /// Read an EC2 Security Group Rule (shared between ingress and egress)
@@ -28,10 +28,11 @@ impl AwsProvider {
             req = req.security_group_rule_ids(*rule_id);
         }
         let result = req.send().await.map_err(|e| {
-            ProviderError::api_error(sdk_error_message(
+            api_error_with_meta(
                 "Failed to describe security group rules",
-                &e,
-            ))
+                "ec2.DescribeSecurityGroupRules",
+                e,
+            )
             .for_resource(id.clone())
         })?;
         let rules: Vec<_> = result
@@ -221,8 +222,12 @@ impl AwsProvider {
                 .send()
                 .await
                 .map_err(|e| {
-                    ProviderError::api_error(sdk_error_message("Failed to create ingress rule", &e))
-                        .for_resource(resource.id.clone())
+                    api_error_with_meta(
+                        "Failed to create ingress rule",
+                        "ec2.AuthorizeSecurityGroupIngress",
+                        e,
+                    )
+                    .for_resource(resource.id.clone())
                 })?;
 
             result
@@ -239,8 +244,12 @@ impl AwsProvider {
                 .send()
                 .await
                 .map_err(|e| {
-                    ProviderError::api_error(sdk_error_message("Failed to create egress rule", &e))
-                        .for_resource(resource.id.clone())
+                    api_error_with_meta(
+                        "Failed to create egress rule",
+                        "ec2.AuthorizeSecurityGroupEgress",
+                        e,
+                    )
+                    .for_resource(resource.id.clone())
                 })?;
 
             result
@@ -294,10 +303,11 @@ impl AwsProvider {
             req = req.security_group_rule_ids(*rule_id);
         }
         let result = req.send().await.map_err(|e| {
-            ProviderError::api_error(sdk_error_message(
+            api_error_with_meta(
                 "Failed to describe security group rules",
-                &e,
-            ))
+                "ec2.DescribeSecurityGroupRules",
+                e,
+            )
             .for_resource(id.clone())
         })?;
 
@@ -322,8 +332,12 @@ impl AwsProvider {
                 request = request.security_group_rule_ids(*rule_id);
             }
             request.send().await.map_err(|e| {
-                ProviderError::api_error(sdk_error_message("Failed to delete ingress rules", &e))
-                    .for_resource(id.clone())
+                api_error_with_meta(
+                    "Failed to delete ingress rules",
+                    "ec2.RevokeSecurityGroupIngress",
+                    e,
+                )
+                .for_resource(id.clone())
             })?;
         } else {
             let mut request = self
@@ -334,8 +348,12 @@ impl AwsProvider {
                 request = request.security_group_rule_ids(*rule_id);
             }
             request.send().await.map_err(|e| {
-                ProviderError::api_error(sdk_error_message("Failed to delete egress rules", &e))
-                    .for_resource(id.clone())
+                api_error_with_meta(
+                    "Failed to delete egress rules",
+                    "ec2.RevokeSecurityGroupEgress",
+                    e,
+                )
+                .for_resource(id.clone())
             })?;
         }
 

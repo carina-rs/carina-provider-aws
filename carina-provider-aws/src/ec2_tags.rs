@@ -3,11 +3,11 @@
 use indexmap::IndexMap;
 use std::collections::HashMap;
 
-use carina_core::provider::{ProviderError, ProviderResult};
+use carina_core::provider::ProviderResult;
 use carina_core::resource::{ConcreteValue, ResourceId, Value};
 
 use crate::AwsProvider;
-use crate::helpers::sdk_error_message;
+use crate::error_helpers::api_error_with_meta;
 
 impl AwsProvider {
     /// Extract tags from EC2 tag list into a Value::Map
@@ -77,7 +77,7 @@ impl AwsProvider {
                     req = req.tags(aws_sdk_ec2::types::Tag::builder().key(key.as_str()).build());
                 }
                 req.send().await.map_err(|e| {
-                    ProviderError::api_error(sdk_error_message("Failed to delete tags", &e))
+                    api_error_with_meta("Failed to delete tags", "ec2.DeleteTags", e)
                         .for_resource(resource_id.clone())
                 })?;
             }
@@ -92,7 +92,7 @@ impl AwsProvider {
                     req = req.tags(tag);
                 }
                 req.send().await.map_err(|e| {
-                    ProviderError::api_error(sdk_error_message("Failed to tag resource", &e))
+                    api_error_with_meta("Failed to tag resource", "ec2.CreateTags", e)
                         .for_resource(resource_id.clone())
                 })?;
             }

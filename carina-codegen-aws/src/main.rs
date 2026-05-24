@@ -1886,7 +1886,7 @@ fn generate_provider_code(
          #[allow(unused_imports)]\n\
          use carina_core::utils::extract_enum_value;\n\n\
          use crate::AwsProvider;\n\
-         use crate::helpers::sdk_error_message;\n\n",
+         use crate::error_helpers::api_error_with_meta;\n\n",
     );
 
     // Generate methods on AwsProvider
@@ -1917,6 +1917,19 @@ fn generate_provider_code(
         let display_name =
             pascal_to_snake(res.name.split('.').next_back().unwrap_or(res.name)).replace('_', " ");
 
+        // Operation string for the structured error display
+        // (carina-rs/carina#3242): `<service>.<Operation>`, e.g.
+        // "ec2.DeleteVpc". Derived from the per-resource `delete_op`
+        // (snake) → PascalCase, prefixed with the service segment
+        // of `service_namespace` (e.g. "com.amazonaws.ec2" → "ec2").
+        let op_str = format!(
+            "{}.{}",
+            res.service_namespace
+                .strip_prefix("com.amazonaws.")
+                .unwrap_or(res.service_namespace),
+            snake_to_pascal_type(&res.delete_op.to_snake_case()),
+        );
+
         code.push_str(&format!(
             "\x20   /// Delete {} (generated)\n\
              \x20   pub(crate) async fn {}(\n\
@@ -1925,12 +1938,12 @@ fn generate_provider_code(
              \x20       identifier: &str,\n\
              \x20   ) -> ProviderResult<()> {{\n\
              \x20       self.{}.{}().{}(identifier).send().await.map_err(|e| {{\n\
-             \x20           ProviderError::api_error(sdk_error_message(\"Failed to delete {}\", &e))\n\
+             \x20           api_error_with_meta(\"Failed to delete {}\", \"{}\", e)\n\
              \x20               .for_resource(id.clone())\n\
              \x20       }})?;\n\
              \x20       Ok(())\n\
              \x20   }}\n\n",
-            res.name, method_name, client_field, sdk_method, id_setter, display_name,
+            res.name, method_name, client_field, sdk_method, id_setter, display_name, op_str,
         ));
     }
 
@@ -2016,13 +2029,20 @@ fn generate_provider_code(
             code.push_str("\x20       identifier: &str,\n");
             code.push_str("\x20       attributes: &mut HashMap<String, Value>,\n");
             code.push_str("\x20   ) -> ProviderResult<()> {\n");
+            let op_str = format!(
+                "{}.{}",
+                res.service_namespace
+                    .strip_prefix("com.amazonaws.")
+                    .unwrap_or(res.service_namespace),
+                snake_to_pascal_type(&sdk_method.to_snake_case()),
+            );
             code.push_str(&format!(
                 "\x20       let output = self.{}.{}().{}(identifier).send().await.map_err(|e| {{\n",
                 client_field, sdk_method, id_setter
             ));
             code.push_str(&format!(
-                "\x20           ProviderError::api_error(sdk_error_message(\"Failed to read {}\", &e))\n",
-                op_desc
+                "\x20           api_error_with_meta(\"Failed to read {}\", \"{}\", e)\n",
+                op_desc, op_str,
             ));
             code.push_str("\x20               .for_resource(id.clone())\n");
             code.push_str("\x20       })?;\n");
@@ -2230,13 +2250,20 @@ fn generate_provider_code(
             // Send API call
             code.push_str("\x20       if has_changes {\n");
             code.push_str("\x20           let config = builder.build();\n");
+            let op_str = format!(
+                "{}.{}",
+                res.service_namespace
+                    .strip_prefix("com.amazonaws.")
+                    .unwrap_or(res.service_namespace),
+                snake_to_pascal_type(&sdk_method.to_snake_case()),
+            );
             code.push_str(&format!(
                 "\x20           self.{}.{}().{}(identifier).{}(config).send().await.map_err(|e| {{\n",
                 client_field, sdk_method, id_setter, struct_setter
             ));
             code.push_str(&format!(
-                "\x20               ProviderError::api_error(sdk_error_message(\"Failed to {}\", &e))\n",
-                op_desc
+                "\x20               api_error_with_meta(\"Failed to {}\", \"{}\", e)\n",
+                op_desc, op_str,
             ));
             code.push_str("\x20                   .for_resource(id.clone())\n");
             code.push_str("\x20           })?;\n");
