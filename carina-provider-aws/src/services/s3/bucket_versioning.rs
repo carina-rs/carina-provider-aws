@@ -1,7 +1,8 @@
 use std::collections::HashMap;
 
 use crate::AwsProvider;
-use crate::helpers::{RetryPolicy, require_string_attr, retry_aws_operation, sdk_error_message};
+use crate::error_helpers::api_error_with_meta;
+use crate::helpers::{RetryPolicy, require_string_attr, retry_aws_operation};
 use crate::services::s3::bucket::is_s3_not_configured_error;
 use aws_sdk_s3::types::{BucketVersioningStatus, MfaDelete, VersioningConfiguration};
 use carina_core::provider::{ProviderError, ProviderResult};
@@ -55,10 +56,11 @@ impl AwsProvider {
                 if is_s3_not_configured_error(&e, "NoSuchBucket") {
                     return Ok(State::not_found(id.clone()));
                 }
-                Err(ProviderError::api_error(sdk_error_message(
+                Err(api_error_with_meta(
                     "Failed to get bucket versioning",
-                    &e,
-                ))
+                    "s3.GetBucketVersioning",
+                    e,
+                )
                 .for_resource(id.clone()))
             }
         }
@@ -111,8 +113,12 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::api_error(sdk_error_message("Failed to put bucket versioning", &e))
-                    .for_resource(id.clone())
+                api_error_with_meta(
+                    "Failed to put bucket versioning",
+                    "s3.PutBucketVersioning",
+                    e,
+                )
+                .for_resource(id.clone())
             })?;
 
         self.read_s3_bucket_versioning(id, Some(bucket)).await
@@ -150,10 +156,11 @@ impl AwsProvider {
         match result {
             Ok(_) => Ok(()),
             Err(e) if is_s3_not_configured_error(&e, "NoSuchBucket") => Ok(()),
-            Err(e) => Err(ProviderError::api_error(sdk_error_message(
+            Err(e) => Err(api_error_with_meta(
                 "Failed to suspend bucket versioning",
-                &e,
-            ))
+                "s3.PutBucketVersioning",
+                e,
+            )
             .for_resource(id.clone())),
         }
     }

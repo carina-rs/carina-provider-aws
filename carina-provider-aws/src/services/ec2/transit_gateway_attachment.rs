@@ -4,9 +4,8 @@ use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{ConcreteValue, ManagedResource, ResourceId, State, Value};
 
 use crate::AwsProvider;
-use crate::helpers::{
-    PollState, build_tag_specification, require_string_attr, sdk_error_message, wait_for_ec2_state,
-};
+use crate::error_helpers::api_error_with_meta;
+use crate::helpers::{PollState, build_tag_specification, require_string_attr, wait_for_ec2_state};
 
 impl AwsProvider {
     /// Read an EC2 Transit Gateway VPC Attachment
@@ -26,10 +25,11 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::api_error(sdk_error_message(
+                api_error_with_meta(
                     "Failed to describe transit gateway VPC attachments",
-                    &e,
-                ))
+                    "ec2.DescribeTransitGatewayVpcAttachments",
+                    e,
+                )
                 .for_resource(id.clone())
             })?;
 
@@ -107,10 +107,11 @@ impl AwsProvider {
         }
 
         let result = req.send().await.map_err(|e| {
-            ProviderError::api_error(sdk_error_message(
+            api_error_with_meta(
                 "Failed to create transit gateway VPC attachment",
-                &e,
-            ))
+                "ec2.CreateTransitGatewayVpcAttachment",
+                e,
+            )
             .for_resource(resource.id.clone())
         })?;
 
@@ -162,10 +163,11 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::api_error(sdk_error_message(
+                api_error_with_meta(
                     "Failed to delete transit gateway VPC attachment",
-                    &e,
-                ))
+                    "ec2.DeleteTransitGatewayVpcAttachment",
+                    e,
+                )
                 .for_resource(id.clone())
             })?;
 
@@ -193,10 +195,11 @@ impl AwsProvider {
                     .send()
                     .await
                     .map_err(|e| {
-                        ProviderError::api_error(sdk_error_message(
+                        api_error_with_meta(
                             "Failed to describe transit gateway VPC attachment",
-                            &e,
-                        ))
+                            "ec2.DescribeTransitGatewayVpcAttachments",
+                            e,
+                        )
                         .for_resource(rid.clone())
                     })?;
                 Ok(
@@ -237,10 +240,11 @@ impl AwsProvider {
                     .send()
                     .await
                     .map_err(|e| {
-                        ProviderError::api_error(sdk_error_message(
+                        api_error_with_meta(
                             "Failed to describe transit gateway VPC attachment",
-                            &e,
-                        ))
+                            "ec2.DescribeTransitGatewayVpcAttachments",
+                            e,
+                        )
                         .for_resource(rid.clone())
                     })?;
                 Ok(

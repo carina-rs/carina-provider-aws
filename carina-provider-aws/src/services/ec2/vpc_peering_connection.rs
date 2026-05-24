@@ -4,7 +4,8 @@ use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{ConcreteValue, ManagedResource, ResourceId, State, Value};
 
 use crate::AwsProvider;
-use crate::helpers::{build_tag_specification, require_string_attr, sdk_error_message};
+use crate::error_helpers::api_error_with_meta;
+use crate::helpers::{build_tag_specification, require_string_attr};
 
 impl AwsProvider {
     /// Read an EC2 VPC Peering Connection
@@ -24,10 +25,11 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::api_error(sdk_error_message(
+                api_error_with_meta(
                     "Failed to describe VPC peering connections",
-                    &e,
-                ))
+                    "ec2.DescribeVpcPeeringConnections",
+                    e,
+                )
                 .for_resource(id.clone())
             })?;
 
@@ -100,10 +102,11 @@ impl AwsProvider {
         }
 
         let result = req.send().await.map_err(|e| {
-            ProviderError::api_error(sdk_error_message(
+            api_error_with_meta(
                 "Failed to create VPC peering connection",
-                &e,
-            ))
+                "ec2.CreateVpcPeeringConnection",
+                e,
+            )
             .for_resource(resource.id.clone())
         })?;
 
@@ -151,10 +154,11 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::api_error(sdk_error_message(
+                api_error_with_meta(
                     "Failed to delete VPC peering connection",
-                    &e,
-                ))
+                    "ec2.DeleteVpcPeeringConnection",
+                    e,
+                )
                 .for_resource(id.clone())
             })?;
         Ok(())

@@ -5,7 +5,8 @@ use carina_core::resource::{ConcreteValue, ManagedResource, ResourceId, State, V
 use carina_core::utils::convert_enum_value;
 
 use crate::AwsProvider;
-use crate::helpers::{require_string_attr, sdk_error_message};
+use crate::error_helpers::api_error_with_meta;
+use crate::helpers::require_string_attr;
 use aws_sdk_ec2::types::{AttributeBooleanValue, HostnameType};
 
 // `read_ec2_subnet` must store `availability_zone` as the AWS canonical
@@ -41,7 +42,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::api_error(sdk_error_message("Failed to describe subnets", &e))
+                api_error_with_meta("Failed to describe subnets", "ec2.DescribeSubnets", e)
                     .for_resource(id.clone())
             })?;
 
@@ -88,7 +89,7 @@ impl AwsProvider {
         }
 
         let result = req.send().await.map_err(|e| {
-            ProviderError::api_error(sdk_error_message("Failed to create subnet", &e))
+            api_error_with_meta("Failed to create subnet", "ec2.CreateSubnet", e)
                 .for_resource(resource.id.clone())
         })?;
 
@@ -148,10 +149,11 @@ impl AwsProvider {
                 .send()
                 .await
                 .map_err(|e| {
-                    ProviderError::api_error(sdk_error_message(
+                    api_error_with_meta(
                         "Failed to set map_public_ip_on_launch",
-                        &e,
-                    ))
+                        "ec2.ModifySubnetAttribute",
+                        e,
+                    )
                     .for_resource(id.clone())
                 })?;
         }
@@ -168,10 +170,11 @@ impl AwsProvider {
                 .send()
                 .await
                 .map_err(|e| {
-                    ProviderError::api_error(sdk_error_message(
+                    api_error_with_meta(
                         "Failed to set assign_ipv6_address_on_creation",
-                        &e,
-                    ))
+                        "ec2.ModifySubnetAttribute",
+                        e,
+                    )
                     .for_resource(id.clone())
                 })?;
         }
@@ -185,8 +188,12 @@ impl AwsProvider {
                 .send()
                 .await
                 .map_err(|e| {
-                    ProviderError::api_error(sdk_error_message("Failed to set enable_dns64", &e))
-                        .for_resource(id.clone())
+                    api_error_with_meta(
+                        "Failed to set enable_dns64",
+                        "ec2.ModifySubnetAttribute",
+                        e,
+                    )
+                    .for_resource(id.clone())
                 })?;
         }
 
@@ -204,10 +211,11 @@ impl AwsProvider {
                     .send()
                     .await
                     .map_err(|e| {
-                        ProviderError::api_error(sdk_error_message(
+                        api_error_with_meta(
                             "Failed to set private_dns_name_options_on_launch.hostname_type",
-                            &e,
-                        ))
+                            "ec2.ModifySubnetAttribute",
+                            e,
+                        )
                         .for_resource(id.clone())
                     })?;
             }
@@ -223,10 +231,11 @@ impl AwsProvider {
                     .send()
                     .await
                     .map_err(|e| {
-                        ProviderError::api_error(sdk_error_message(
+                        api_error_with_meta(
                             "Failed to set private_dns_name_options_on_launch.enable_resource_name_dns_a_record",
-                            &e,
-                        ))
+                            "ec2.ModifySubnetAttribute",
+                            e,
+                        )
                         .for_resource(id.clone())
                     })?;
             }
@@ -242,10 +251,11 @@ impl AwsProvider {
                     .send()
                     .await
                     .map_err(|e| {
-                        ProviderError::api_error(sdk_error_message(
+                        api_error_with_meta(
                             "Failed to set private_dns_name_options_on_launch.enable_resource_name_dns_aaaa_record",
-                            &e,
-                        ))
+                            "ec2.ModifySubnetAttribute",
+                            e,
+                        )
                         .for_resource(id.clone())
                     })?;
             }

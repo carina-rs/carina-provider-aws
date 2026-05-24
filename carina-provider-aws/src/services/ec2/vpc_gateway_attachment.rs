@@ -4,7 +4,8 @@ use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{ConcreteValue, ManagedResource, ResourceId, State, Value};
 
 use crate::AwsProvider;
-use crate::helpers::{require_string_attr, sdk_error_message};
+use crate::error_helpers::api_error_with_meta;
+use crate::helpers::require_string_attr;
 
 impl AwsProvider {
     /// Read an EC2 VPC Gateway Attachment
@@ -58,10 +59,11 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::api_error(sdk_error_message(
+                api_error_with_meta(
                     "Failed to describe internet gateways",
-                    &e,
-                ))
+                    "ec2.DescribeInternetGateways",
+                    e,
+                )
                 .for_resource(id.clone())
             })?;
 
@@ -109,8 +111,12 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::api_error(sdk_error_message("Failed to describe VPN gateways", &e))
-                    .for_resource(id.clone())
+                api_error_with_meta(
+                    "Failed to describe VPN gateways",
+                    "ec2.DescribeVpnGateways",
+                    e,
+                )
+                .for_resource(id.clone())
             })?;
 
         if let Some(vgw) = result.vpn_gateways().first() {
@@ -156,10 +162,11 @@ impl AwsProvider {
                 .send()
                 .await
                 .map_err(|e| {
-                    ProviderError::api_error(sdk_error_message(
+                    api_error_with_meta(
                         "Failed to attach internet gateway",
-                        &e,
-                    ))
+                        "ec2.AttachInternetGateway",
+                        e,
+                    )
                     .for_resource(resource.id.clone())
                 })?;
 
@@ -177,7 +184,7 @@ impl AwsProvider {
                 .send()
                 .await
                 .map_err(|e| {
-                    ProviderError::api_error(sdk_error_message("Failed to attach VPN gateway", &e))
+                    api_error_with_meta("Failed to attach VPN gateway", "ec2.AttachVpnGateway", e)
                         .for_resource(resource.id.clone())
                 })?;
 
@@ -226,10 +233,11 @@ impl AwsProvider {
                 .send()
                 .await
                 .map_err(|e| {
-                    ProviderError::api_error(sdk_error_message(
+                    api_error_with_meta(
                         "Failed to detach internet gateway",
-                        &e,
-                    ))
+                        "ec2.DetachInternetGateway",
+                        e,
+                    )
                     .for_resource(id.clone())
                 })?;
         } else if gateway_id.starts_with("vgw-") {
@@ -240,7 +248,7 @@ impl AwsProvider {
                 .send()
                 .await
                 .map_err(|e| {
-                    ProviderError::api_error(sdk_error_message("Failed to detach VPN gateway", &e))
+                    api_error_with_meta("Failed to detach VPN gateway", "ec2.DetachVpnGateway", e)
                         .for_resource(id.clone())
                 })?;
         } else {

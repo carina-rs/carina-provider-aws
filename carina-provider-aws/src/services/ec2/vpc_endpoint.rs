@@ -4,7 +4,8 @@ use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{ConcreteValue, ManagedResource, ResourceId, State, Value};
 
 use crate::AwsProvider;
-use crate::helpers::{RetryPolicy, require_string_attr, retry_aws_operation, sdk_error_message};
+use crate::error_helpers::api_error_with_meta;
+use crate::helpers::{RetryPolicy, require_string_attr, retry_aws_operation};
 
 impl AwsProvider {
     /// Read an EC2 VPC Endpoint
@@ -24,8 +25,12 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::api_error(sdk_error_message("Failed to describe VPC endpoints", &e))
-                    .for_resource(id.clone())
+                api_error_with_meta(
+                    "Failed to describe VPC endpoints",
+                    "ec2.DescribeVpcEndpoints",
+                    e,
+                )
+                .for_resource(id.clone())
             })?;
 
         if let Some(endpoint) = result.vpc_endpoints().first() {
@@ -135,7 +140,7 @@ impl AwsProvider {
         })
         .await
         .map_err(|e| {
-            ProviderError::api_error(sdk_error_message("Failed to create VPC endpoint", &e))
+            api_error_with_meta("Failed to create VPC endpoint", "ec2.CreateVpcEndpoint", e)
                 .for_resource(rid.clone())
         })?;
 
@@ -332,7 +337,7 @@ impl AwsProvider {
 
         if has_modifications {
             req.send().await.map_err(|e| {
-                ProviderError::api_error(sdk_error_message("Failed to modify VPC endpoint", &e))
+                api_error_with_meta("Failed to modify VPC endpoint", "ec2.ModifyVpcEndpoint", e)
                     .for_resource(id.clone())
             })?;
         }
@@ -362,7 +367,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                ProviderError::api_error(sdk_error_message("Failed to delete VPC endpoint", &e))
+                api_error_with_meta("Failed to delete VPC endpoint", "ec2.DeleteVpcEndpoints", e)
                     .for_resource(id.clone())
             })?;
 
