@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use aws_sdk_s3::types::{ObjectOwnership, OwnershipControls, OwnershipControlsRule};
 use carina_core::provider::{ProviderError, ProviderResult};
-use carina_core::resource::{ConcreteValue, ManagedResource, ResourceId, State, Value};
+use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
@@ -63,7 +63,7 @@ impl AwsProvider {
 
     pub(crate) async fn create_s3_bucket_ownership_controls(
         &self,
-        resource: ManagedResource,
+        resource: Resource,
     ) -> ProviderResult<State> {
         let bucket = require_string_attr(&resource, "bucket")?;
         self.put_s3_bucket_ownership_controls(&resource.id, &bucket, &resource)
@@ -75,7 +75,7 @@ impl AwsProvider {
         id: ResourceId,
         identifier: &str,
         _from: &State,
-        to: ManagedResource,
+        to: Resource,
     ) -> ProviderResult<State> {
         self.put_s3_bucket_ownership_controls(&id, identifier, &to)
             .await
@@ -85,7 +85,7 @@ impl AwsProvider {
         &self,
         id: &ResourceId,
         bucket: &str,
-        resource: &ManagedResource,
+        resource: &Resource,
     ) -> ProviderResult<State> {
         let ownership_str = match resource.get_attr("object_ownership") {
             Some(Value::Concrete(ConcreteValue::String(s))) => s.clone(),

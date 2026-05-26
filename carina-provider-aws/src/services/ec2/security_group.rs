@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use carina_core::provider::{ProviderError, ProviderResult};
-use carina_core::resource::{ConcreteValue, ManagedResource, ResourceId, State, Value};
+use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
@@ -65,7 +65,7 @@ impl AwsProvider {
     /// Create an EC2 Security Group
     pub(crate) async fn create_ec2_security_group(
         &self,
-        resource: ManagedResource,
+        resource: Resource,
     ) -> ProviderResult<State> {
         let vpc_id = require_string_attr(&resource, "vpc_id")?;
 

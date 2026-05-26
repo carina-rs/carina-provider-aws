@@ -7,7 +7,7 @@ use indexmap::IndexMap;
 use std::collections::HashMap;
 
 use carina_core::provider::{BoxFuture, ProviderError, ProviderResult};
-use carina_core::resource::{ConcreteValue, DataSource, ManagedResource, ResourceId, State, Value};
+use carina_core::resource::{ConcreteValue, DataSource, Resource, ResourceId, State, Value};
 #[allow(unused_imports)]
 use carina_core::utils::extract_enum_value;
 
@@ -100,7 +100,7 @@ impl AwsProvider {
         id: ResourceId,
         identifier: &str,
         from: &State,
-        to: ManagedResource,
+        to: Resource,
     ) -> ProviderResult<State> {
         self.apply_ec2_tags(
             &id,
@@ -118,7 +118,7 @@ impl AwsProvider {
         id: ResourceId,
         identifier: &str,
         from: &State,
-        to: ManagedResource,
+        to: Resource,
     ) -> ProviderResult<State> {
         self.apply_ec2_tags(
             &id,
@@ -136,7 +136,7 @@ impl AwsProvider {
         id: ResourceId,
         identifier: &str,
         from: &State,
-        to: ManagedResource,
+        to: Resource,
     ) -> ProviderResult<State> {
         self.apply_ec2_tags(
             &id,
@@ -153,7 +153,7 @@ impl AwsProvider {
         &self,
         id: ResourceId,
         identifier: &str,
-        _to: ManagedResource,
+        _to: Resource,
     ) -> ProviderResult<State> {
         self.read_organizations_organization(&id, Some(identifier))
             .await

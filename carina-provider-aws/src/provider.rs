@@ -265,7 +265,7 @@ impl Provider for AwsProvider {
         let identifier = identifier.to_string();
         let from = request.from.clone();
         // The aws provider's per-resource `update_*` methods predate the
-        // Level 3 patch contract and accept a full `to: ManagedResource`.
+        // Level 3 patch contract and accept a full `to: Resource`.
         // Reconstruct that from `(from, patch)` here so each method's
         // existing logic continues to work without per-resource churn.
         // Future per-resource updates can read `request.patch` directly

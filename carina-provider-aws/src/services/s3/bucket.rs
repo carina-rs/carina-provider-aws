@@ -3,7 +3,7 @@ use std::collections::HashMap;
 
 use carina_core::provider::{BoxFuture, ProviderError, ProviderResult};
 use carina_core::resource::{
-    ConcreteValue, DataSource, Directives, ManagedResource, ResourceId, State, Value,
+    ConcreteValue, DataSource, Directives, Resource, ResourceId, State, Value,
 };
 use carina_core::utils::convert_enum_value;
 
@@ -68,10 +68,7 @@ impl AwsProvider {
     }
 
     /// Create an S3 bucket
-    pub(crate) async fn create_s3_bucket(
-        &self,
-        resource: ManagedResource,
-    ) -> ProviderResult<State> {
+    pub(crate) async fn create_s3_bucket(&self, resource: Resource) -> ProviderResult<State> {
         let bucket_name = match resource.get_attr("bucket") {
             Some(Value::Concrete(ConcreteValue::String(s))) => s.clone(),
             _ => {
@@ -135,7 +132,7 @@ impl AwsProvider {
         id: ResourceId,
         identifier: &str,
         from: &State,
-        to: ManagedResource,
+        to: Resource,
     ) -> ProviderResult<State> {
         let bucket_name = identifier.to_string();
 

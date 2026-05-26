@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use carina_core::provider::{ProviderError, ProviderResult};
-use carina_core::resource::{ConcreteValue, ManagedResource, ResourceId, State, Value};
+use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
@@ -65,10 +65,7 @@ impl AwsProvider {
     }
 
     /// Create an EC2 Route
-    pub(crate) async fn create_ec2_route(
-        &self,
-        resource: ManagedResource,
-    ) -> ProviderResult<State> {
+    pub(crate) async fn create_ec2_route(&self, resource: Resource) -> ProviderResult<State> {
         let route_table_id = require_string_attr(&resource, "route_table_id")?;
         let destination_cidr = require_string_attr(&resource, "destination_cidr_block")?;
 
@@ -109,7 +106,7 @@ impl AwsProvider {
         &self,
         id: ResourceId,
         _identifier: &str,
-        to: ManagedResource,
+        to: Resource,
     ) -> ProviderResult<State> {
         let route_table_id = match to.get_attr("route_table_id") {
             Some(Value::Concrete(ConcreteValue::String(s))) => s.clone(),

@@ -2,7 +2,7 @@ use indexmap::IndexMap;
 use std::collections::HashMap;
 
 use carina_core::provider::{ProviderError, ProviderResult};
-use carina_core::resource::{ConcreteValue, ManagedResource, ResourceId, State, Value};
+use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
@@ -79,7 +79,7 @@ impl AwsProvider {
     }
 
     /// Create an IAM Role
-    pub(crate) async fn create_iam_role(&self, resource: ManagedResource) -> ProviderResult<State> {
+    pub(crate) async fn create_iam_role(&self, resource: Resource) -> ProviderResult<State> {
         let role_name = require_string_attr(&resource, "role_name")?;
 
         let assume_role_policy_document =
@@ -137,7 +137,7 @@ impl AwsProvider {
         id: ResourceId,
         identifier: &str,
         from: &State,
-        to: ManagedResource,
+        to: Resource,
     ) -> ProviderResult<State> {
         // Update assume role policy document
         if to.get_attr("assume_role_policy_document").is_some() {
@@ -360,7 +360,7 @@ impl AwsProvider {
 /// `version` → `Version`, `statement` → `Statement`) and condition
 /// operators (e.g. `bool` → `Bool`, `string_equals` → `StringEquals`)
 /// are case-converted. Condition variable keys (`aws:SecureTransport`,
-/// `s3:prefix`, ...), ARN values, and Action / ManagedResource literals are
+/// `s3:prefix`, ...), ARN values, and Action / Resource literals are
 /// passed through verbatim. A blanket `snake_to_pascal` would mangle
 /// them (e.g. `aws:SecureTransport` → `Aws:SecureTransport`), which
 /// AWS treats as an unknown — and therefore unenforced — condition.
@@ -371,15 +371,12 @@ pub fn value_to_iam_policy_json(value: &Value) -> Result<String, String> {
 }
 
 /// Resolve an IAM-style policy attribute (e.g. `assume_role_policy_document`,
-/// `policy`) on a `ManagedResource` into a JSON string suitable for the AWS API.
+/// `policy`) on a `Resource` into a JSON string suitable for the AWS API.
 ///
 /// Accepts either a pre-serialized JSON string or a Carina `Value::Map`
 /// (block-syntax DSL form). Errors when the attribute is missing or has an
 /// unsupported type.
-pub fn resolve_iam_policy_attr(
-    resource: &ManagedResource,
-    attr_name: &str,
-) -> ProviderResult<String> {
+pub fn resolve_iam_policy_attr(resource: &Resource, attr_name: &str) -> ProviderResult<String> {
     match resource.get_attr(attr_name) {
         Some(Value::Concrete(ConcreteValue::String(s))) => Ok(s.clone()),
         Some(value @ Value::Concrete(ConcreteValue::Map(_))) => value_to_iam_policy_json(value)
@@ -614,7 +611,7 @@ fn scalar_to_json(value: &Value) -> serde_json::Value {
 ///
 /// Mirrors `value_to_iam_policy_json`'s position-aware case conversion:
 /// only IAM standard fields and condition operators are mapped to
-/// snake_case; condition variable keys, ARN values, and Action / ManagedResource
+/// snake_case; condition variable keys, ARN values, and Action / Resource
 /// literals are preserved verbatim.
 pub fn iam_policy_json_to_value(json_str: &str) -> Result<Value, String> {
     let json: serde_json::Value =
@@ -674,7 +671,7 @@ fn json_to_policy_statement(json: &serde_json::Value) -> Value {
             // spelling-agnostic `StringEnum` arm reconcile it against
             // the parsed-desired alias side (aws#326). No special arm
             // needed.
-            // `Action` / `ManagedResource` are `Map<String, StringOrList>`
+            // `Action` / `Resource` are `Map<String, StringOrList>`
             // — AWS may return a scalar (`"sts:AssumeRole"`) or a list.
             // The DSL schema accepts both, but to avoid post-apply
             // plan-verify churn we normalize scalars to a single-element
@@ -802,8 +799,8 @@ mod tests {
     use super::*;
     use indexmap::IndexMap;
 
-    fn make_resource(policy: Option<Value>) -> ManagedResource {
-        let mut r = ManagedResource::new("test.Type", "test");
+    fn make_resource(policy: Option<Value>) -> Resource {
+        let mut r = Resource::new("test.Type", "test");
         if let Some(v) = policy {
             r.set_attr("policy", v);
         }

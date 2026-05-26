@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use aws_sdk_s3::types::{BucketCannedAcl, Grant, Permission, Type as GranteeType};
 use carina_core::provider::{ProviderError, ProviderResult};
-use carina_core::resource::{ConcreteValue, ManagedResource, ResourceId, State, Value};
+use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
 use carina_core::utils::convert_enum_value;
 
 use crate::AwsProvider;
@@ -143,10 +143,7 @@ impl AwsProvider {
         }
     }
 
-    pub(crate) async fn create_s3_bucket_acl(
-        &self,
-        resource: ManagedResource,
-    ) -> ProviderResult<State> {
+    pub(crate) async fn create_s3_bucket_acl(&self, resource: Resource) -> ProviderResult<State> {
         let bucket = require_string_attr(&resource, "bucket")?;
         self.put_s3_bucket_acl(&resource.id, &bucket, &resource)
             .await
@@ -157,7 +154,7 @@ impl AwsProvider {
         id: ResourceId,
         identifier: &str,
         _from: &State,
-        to: ManagedResource,
+        to: Resource,
     ) -> ProviderResult<State> {
         self.put_s3_bucket_acl(&id, identifier, &to).await
     }
@@ -166,7 +163,7 @@ impl AwsProvider {
         &self,
         id: &ResourceId,
         bucket: &str,
-        resource: &ManagedResource,
+        resource: &Resource,
     ) -> ProviderResult<State> {
         let acl_str = match resource.get_attr("acl") {
             // convert_enum_value normalizes namespaced/typed identifiers

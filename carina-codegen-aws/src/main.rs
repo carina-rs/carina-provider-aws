@@ -1881,7 +1881,7 @@ fn generate_provider_code(
          use std::collections::HashMap;\n\n\
          use carina_core::provider::{BoxFuture, ProviderError, ProviderResult};\n\
          use carina_core::resource::{\n\
-         \x20   ConcreteValue, DataSource, ManagedResource, ResourceId, State, Value,\n\
+         \x20   ConcreteValue, DataSource, Resource, ResourceId, State, Value,\n\
          };\n\
          #[allow(unused_imports)]\n\
          use carina_core::utils::extract_enum_value;\n\n\
@@ -1964,7 +1964,7 @@ fn generate_provider_code(
                  \x20       id: ResourceId,\n\
                  \x20       identifier: &str,\n\
                  \x20       from: &State,\n\
-                 \x20       to: ManagedResource,\n\
+                 \x20       to: Resource,\n\
                  \x20   ) -> ProviderResult<State> {{\n\
                  \x20       self.apply_ec2_tags(&id, identifier, &to.resolved_attributes(), Some(&from.attributes))\n\
                  \x20           .await?;\n\
@@ -1979,7 +1979,7 @@ fn generate_provider_code(
                  \x20       &self,\n\
                  \x20       id: ResourceId,\n\
                  \x20       identifier: &str,\n\
-                 \x20       _to: ManagedResource,\n\
+                 \x20       _to: Resource,\n\
                  \x20   ) -> ProviderResult<State> {{\n\
                  \x20       self.{}(&id, Some(identifier)).await\n\
                  \x20   }}\n\n",
