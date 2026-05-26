@@ -182,9 +182,12 @@ run_plan_verify() {
     return 0
 }
 
-# Cleanup helper: try to destroy with both step configs, then retry
+# destroy_work_dir: try to destroy with both step configs, then retry
 # Returns 0 if at least one destroy succeeded, 1 if ALL failed
-cleanup() {
+# (Named distinctly from `cleanup` so the EXIT trap in _helpers.sh keeps using
+# its own cleanup() — overriding it would call this with no args at exit and
+# emit "No .crn files found in .".)
+destroy_work_dir() {
     local work_dir="$1"
     local step2="$2"
     local step1="$3"
@@ -244,7 +247,7 @@ run_test() {
 
     # Step 1: Apply initial config
     if ! run_step "$work_dir" "step1: apply initial" "apply" "$step1" "--auto-approve"; then
-        cleanup "$work_dir" "$step2" "$step1"
+        destroy_work_dir "$work_dir" "$step2" "$step1"
         rm -rf "$work_dir"
         rm -rf "$step1" "$step2"
         ACTIVE_WORK_DIR=""
@@ -253,7 +256,7 @@ run_test() {
 
     # Step 1b: Plan-verify initial state
     if ! run_plan_verify "$work_dir" "step1: plan-verify initial" "$step1"; then
-        cleanup "$work_dir" "$step2" "$step1"
+        destroy_work_dir "$work_dir" "$step2" "$step1"
         rm -rf "$work_dir"
         rm -rf "$step1" "$step2"
         ACTIVE_WORK_DIR=""
@@ -266,7 +269,7 @@ run_test() {
 
     # Step 2: Apply modified config (in-place update)
     if ! run_step "$work_dir" "step2: apply in-place update" "apply" "$step2" "--auto-approve"; then
-        cleanup "$work_dir" "$step2" "$step1"
+        destroy_work_dir "$work_dir" "$step2" "$step1"
         rm -rf "$work_dir"
         rm -rf "$step1" "$step2"
         ACTIVE_WORK_DIR=""
@@ -279,7 +282,7 @@ run_test() {
 
     # Assert identifiers preserved (in-place update should NOT replace any resource)
     if ! assert_identifiers "assert: identifiers preserved after update" "$ids_after_step1" "$ids_after_step2" "equal"; then
-        cleanup "$work_dir" "$step2" "$step1"
+        destroy_work_dir "$work_dir" "$step2" "$step1"
         rm -rf "$work_dir"
         rm -rf "$step1" "$step2"
         ACTIVE_WORK_DIR=""
@@ -288,15 +291,15 @@ run_test() {
 
     # Step 3: Plan-verify after update
     if ! run_plan_verify "$work_dir" "step3: plan-verify after update" "$step2"; then
-        cleanup "$work_dir" "$step2" "$step1"
+        destroy_work_dir "$work_dir" "$step2" "$step1"
         rm -rf "$work_dir"
         rm -rf "$step1" "$step2"
         ACTIVE_WORK_DIR=""
         return 1
     fi
 
-    # Step 4: Destroy (use cleanup to try both configs and retry)
-    if ! cleanup "$work_dir" "$step2" "$step1"; then
+    # Step 4: Destroy (use destroy_work_dir to try both configs and retry)
+    if ! destroy_work_dir "$work_dir" "$step2" "$step1"; then
         echo "  WARNING: All destroy attempts failed. Preserving work dir for debugging:"
         echo "    $work_dir"
         TOTAL_FAILED=$((TOTAL_FAILED + 1))
