@@ -19,7 +19,7 @@ mod tests {
         let configs = super::generated::configs();
         let managed = configs
             .iter()
-            .find(|c| c.resource_type_name == "s3.Bucket" && c.schema.kind == SchemaKind::Managed);
+            .find(|c| c.resource_type_name == "s3.Bucket" && c.schema.kind == SchemaKind::Resource);
         let data_source = configs.iter().find(|c| {
             c.resource_type_name == "s3.Bucket" && c.schema.kind == SchemaKind::DataSource
         });

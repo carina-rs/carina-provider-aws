@@ -12,7 +12,7 @@ use indexmap::IndexMap;
 use std::collections::HashMap;
 
 use carina_core::provider::{ProviderError, ProviderResult};
-use carina_core::resource::{ConcreteValue, ManagedResource, ResourceId, State, Value};
+use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
@@ -467,10 +467,7 @@ impl AwsProvider {
     }
 
     /// Create an SQS Queue and return its post-create state.
-    pub(crate) async fn create_sqs_queue(
-        &self,
-        resource: ManagedResource,
-    ) -> ProviderResult<State> {
+    pub(crate) async fn create_sqs_queue(&self, resource: Resource) -> ProviderResult<State> {
         let queue_name = require_string_attr(&resource, "queue_name")?;
 
         // Pack every writable attribute the user actually set.
@@ -515,7 +512,7 @@ impl AwsProvider {
         id: ResourceId,
         identifier: &str,
         from: &State,
-        to: ManagedResource,
+        to: Resource,
     ) -> ProviderResult<State> {
         // Build a partial map of attributes whose value changed.
         // Create-only attributes (FifoQueue / FifoThroughputLimit /
@@ -652,7 +649,7 @@ impl AwsProvider {
 
 /// Extract a `tags = { ... }` block from the resource, dropping any
 /// non-string values. Returns `None` when no tags are set.
-fn resource_tags_map(resource: &ManagedResource) -> Option<HashMap<String, String>> {
+fn resource_tags_map(resource: &Resource) -> Option<HashMap<String, String>> {
     let Some(Value::Concrete(ConcreteValue::Map(tag_map))) = resource.get_attr("tags") else {
         return None;
     };

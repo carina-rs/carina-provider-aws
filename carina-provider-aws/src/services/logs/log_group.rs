@@ -2,7 +2,7 @@ use indexmap::IndexMap;
 use std::collections::HashMap;
 
 use carina_core::provider::ProviderResult;
-use carina_core::resource::{ConcreteValue, ManagedResource, ResourceId, State, Value};
+use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
@@ -112,10 +112,7 @@ impl AwsProvider {
     }
 
     /// Create a CloudWatch Logs Log Group
-    pub(crate) async fn create_logs_log_group(
-        &self,
-        resource: ManagedResource,
-    ) -> ProviderResult<State> {
+    pub(crate) async fn create_logs_log_group(&self, resource: Resource) -> ProviderResult<State> {
         let log_group_name = require_string_attr(&resource, "log_group_name")?;
 
         let mut req = self
@@ -181,7 +178,7 @@ impl AwsProvider {
         id: ResourceId,
         identifier: &str,
         from: &State,
-        to: ManagedResource,
+        to: Resource,
     ) -> ProviderResult<State> {
         // Update retention
         match to.get_attr("retention_in_days") {

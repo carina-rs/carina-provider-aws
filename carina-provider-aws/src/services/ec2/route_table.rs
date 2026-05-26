@@ -2,7 +2,7 @@ use indexmap::IndexMap;
 use std::collections::HashMap;
 
 use carina_core::provider::{ProviderError, ProviderResult};
-use carina_core::resource::{ConcreteValue, ManagedResource, ResourceId, State, Value};
+use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
@@ -91,10 +91,7 @@ impl AwsProvider {
     }
 
     /// Create an EC2 Route Table
-    pub(crate) async fn create_ec2_route_table(
-        &self,
-        resource: ManagedResource,
-    ) -> ProviderResult<State> {
+    pub(crate) async fn create_ec2_route_table(&self, resource: Resource) -> ProviderResult<State> {
         let vpc_id = require_string_attr(&resource, "vpc_id")?;
 
         // Create Route Table

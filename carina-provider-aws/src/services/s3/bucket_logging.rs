@@ -5,7 +5,7 @@ use aws_sdk_s3::types::{
     TargetObjectKeyFormat,
 };
 use carina_core::provider::{ProviderError, ProviderResult};
-use carina_core::resource::{ConcreteValue, ManagedResource, ResourceId, State, Value};
+use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
 use indexmap::IndexMap;
 
 use crate::AwsProvider;
@@ -69,7 +69,7 @@ impl AwsProvider {
 
     pub(crate) async fn create_s3_bucket_logging(
         &self,
-        resource: ManagedResource,
+        resource: Resource,
     ) -> ProviderResult<State> {
         let bucket = require_string_attr(&resource, "bucket")?;
         self.put_s3_bucket_logging(&resource.id, &bucket, &resource)
@@ -81,7 +81,7 @@ impl AwsProvider {
         id: ResourceId,
         identifier: &str,
         _from: &State,
-        to: ManagedResource,
+        to: Resource,
     ) -> ProviderResult<State> {
         self.put_s3_bucket_logging(&id, identifier, &to).await
     }
@@ -90,7 +90,7 @@ impl AwsProvider {
         &self,
         id: &ResourceId,
         bucket: &str,
-        resource: &ManagedResource,
+        resource: &Resource,
     ) -> ProviderResult<State> {
         let target_bucket = require_string_attr(resource, "target_bucket")?;
         let target_prefix = match resource.get_attr("target_prefix") {

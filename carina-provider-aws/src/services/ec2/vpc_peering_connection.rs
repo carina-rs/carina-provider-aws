@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use carina_core::provider::{ProviderError, ProviderResult};
-use carina_core::resource::{ConcreteValue, ManagedResource, ResourceId, State, Value};
+use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
@@ -70,7 +70,7 @@ impl AwsProvider {
     /// Create an EC2 VPC Peering Connection
     pub(crate) async fn create_ec2_vpc_peering_connection(
         &self,
-        resource: ManagedResource,
+        resource: Resource,
     ) -> ProviderResult<State> {
         let vpc_id = require_string_attr(&resource, "vpc_id")?;
         let peer_vpc_id = require_string_attr(&resource, "peer_vpc_id")?;
@@ -129,7 +129,7 @@ impl AwsProvider {
         id: ResourceId,
         identifier: &str,
         from: &State,
-        to: ManagedResource,
+        to: Resource,
     ) -> ProviderResult<State> {
         self.apply_ec2_tags(
             &id,

@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 
 use carina_core::provider::{ProviderError, ProviderResult};
-use carina_core::resource::{ConcreteValue, ManagedResource, ResourceId, State, Value};
+use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
 use carina_core::utils::convert_enum_value;
 
 use crate::AwsProvider;
@@ -106,7 +106,7 @@ impl AwsProvider {
     /// Create an EC2 Security Group Rule (shared between ingress and egress)
     pub(crate) async fn create_ec2_security_group_rule(
         &self,
-        resource: ManagedResource,
+        resource: Resource,
         is_ingress: bool,
     ) -> ProviderResult<State> {
         let sg_id = match resource.get_attr("group_id") {
@@ -278,7 +278,7 @@ impl AwsProvider {
         &self,
         id: ResourceId,
         identifier: &str,
-        to: ManagedResource,
+        to: Resource,
         is_ingress: bool,
     ) -> ProviderResult<State> {
         // Security group rules are immutable - delete and recreate

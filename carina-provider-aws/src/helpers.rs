@@ -14,7 +14,7 @@ use aws_smithy_types::retry::ProvideErrorKind;
 use tokio::time::sleep;
 
 use carina_core::provider::{PatchOpKind, ProviderError, ProviderResult, UpdatePatch};
-use carina_core::resource::{ConcreteValue, ManagedResource, ResourceId, State, Value};
+use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
 
 /// Borrow a `Value` as `&str` if it is a concrete string, otherwise `None`.
 pub fn value_as_str(v: &Value) -> Option<&str> {
@@ -28,7 +28,7 @@ pub fn value_as_str(v: &Value) -> Option<&str> {
 /// Extract a required `String` attribute from a resource.
 ///
 /// Returns the string value or a `ProviderError` with `"{attr_name} is required"`.
-pub fn require_string_attr(resource: &ManagedResource, attr_name: &str) -> ProviderResult<String> {
+pub fn require_string_attr(resource: &Resource, attr_name: &str) -> ProviderResult<String> {
     match resource.get_attr(attr_name) {
         Some(Value::Concrete(ConcreteValue::String(s))) => Ok(s.clone()),
         _ => Err(
@@ -49,7 +49,7 @@ pub fn require_string_attr(resource: &ManagedResource, attr_name: &str) -> Provi
 /// stripped a DSL namespace prefix, but normalization now happens
 /// upstream and namespaces never reach the provider. The helper is
 /// kept so caller intent stays readable.
-pub fn require_enum_attr(resource: &ManagedResource, attr_name: &str) -> ProviderResult<String> {
+pub fn require_enum_attr(resource: &Resource, attr_name: &str) -> ProviderResult<String> {
     require_string_attr(resource, attr_name)
 }
 
@@ -57,7 +57,7 @@ pub fn require_enum_attr(resource: &ManagedResource, attr_name: &str) -> Provide
 ///
 /// Returns `None` if the resource has no `tags` attribute.
 pub fn build_tag_specification(
-    resource: &ManagedResource,
+    resource: &Resource,
     resource_type: ResourceType,
 ) -> Option<TagSpecification> {
     if let Some(Value::Concrete(ConcreteValue::Map(tags))) = resource.get_attr("tags") {
@@ -253,12 +253,12 @@ where
     }
 }
 
-/// Reconstruct a `ManagedResource` from `from` state plus an `UpdatePatch`.
+/// Reconstruct a `Resource` from `from` state plus an `UpdatePatch`.
 ///
 /// The aws provider's existing per-resource `update_*` methods take
-/// `to: ManagedResource` (a full desired state). The Level 3 `Provider::update`
+/// `to: Resource` (a full desired state). The Level 3 `Provider::update`
 /// signature replaces `to` with `(from: State, patch: UpdatePatch)`, so
-/// this adapter rebuilds an equivalent desired `ManagedResource` by applying
+/// this adapter rebuilds an equivalent desired `Resource` by applying
 /// each [`PatchOpKind`] on top of `from`'s attributes:
 ///
 /// - `Add` / `Replace` set the attribute to the patch value.
@@ -269,12 +269,11 @@ where
 /// style. Per-resource update methods continue to write the same fields
 /// they always did.
 ///
-/// The returned `ManagedResource` carries `from`'s `ResourceId` and an empty
+/// The returned `Resource` carries `from`'s `ResourceId` and an empty
 /// `Directives` (directives are delete-only and are not consulted on
 /// update paths in this provider).
-pub fn apply_patch_to_state(from: &State, patch: &UpdatePatch) -> ManagedResource {
-    let mut resource =
-        ManagedResource::new(from.id.resource_type.clone(), from.id.name.to_string());
+pub fn apply_patch_to_state(from: &State, patch: &UpdatePatch) -> Resource {
+    let mut resource = Resource::new(from.id.resource_type.clone(), from.id.name.to_string());
     resource.id = from.id.clone();
     resource.attributes = from
         .attributes
@@ -334,8 +333,8 @@ where
 mod tests {
     use super::*;
 
-    fn make_test_resource(attrs: Vec<(&str, &str)>) -> ManagedResource {
-        let mut resource = ManagedResource::new("route53.RecordSet", "test");
+    fn make_test_resource(attrs: Vec<(&str, &str)>) -> Resource {
+        let mut resource = Resource::new("route53.RecordSet", "test");
         for (k, v) in attrs {
             resource.attributes.insert(
                 k.to_string(),

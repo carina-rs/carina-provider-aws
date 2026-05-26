@@ -8,8 +8,7 @@ use std::collections::HashMap;
 
 use carina_core::resource::{
     ConcreteValue, DataSource as CoreDataSource, DeferredValue, Directives as CoreDirectives,
-    ManagedResource as CoreResource, ResourceId as CoreResourceId, State as CoreState,
-    Value as CoreValue,
+    Resource as CoreResource, ResourceId as CoreResourceId, State as CoreState, Value as CoreValue,
 };
 use carina_core::schema::{
     AttributeSchema as CoreAttributeSchema, AttributeType as CoreAttributeType,
@@ -158,7 +157,7 @@ pub fn proto_to_core_state(s: &ProtoState) -> CoreState {
     }
 }
 
-// -- ManagedResource --
+// -- Resource --
 
 pub fn core_to_proto_resource(r: &CoreResource) -> ProtoResource {
     ProtoResource {
@@ -360,14 +359,14 @@ pub fn proto_to_core_schema(s: &ProtoResourceSchema) -> CoreResourceSchema {
 
 fn proto_to_core_schema_kind(k: ProtoSchemaKind) -> CoreSchemaKind {
     match k {
-        ProtoSchemaKind::Managed => CoreSchemaKind::Managed,
+        ProtoSchemaKind::Managed => CoreSchemaKind::Resource,
         ProtoSchemaKind::DataSource => CoreSchemaKind::DataSource,
     }
 }
 
 fn core_to_proto_schema_kind(k: CoreSchemaKind) -> ProtoSchemaKind {
     match k {
-        CoreSchemaKind::Managed => ProtoSchemaKind::Managed,
+        CoreSchemaKind::Resource => ProtoSchemaKind::Managed,
         CoreSchemaKind::DataSource => ProtoSchemaKind::DataSource,
     }
 }

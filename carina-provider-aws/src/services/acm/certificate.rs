@@ -16,7 +16,7 @@ use aws_sdk_acm::types::ValidationMethod;
 use indexmap::IndexMap;
 
 use carina_core::provider::{ProviderError, ProviderResult};
-use carina_core::resource::{ConcreteValue, ManagedResource, ResourceId, State, Value};
+use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
@@ -239,10 +239,7 @@ impl AwsProvider {
     /// the validation status is `PENDING_VALIDATION` until the user
     /// satisfies the DNS / EMAIL challenge — typically wired via a
     /// `wait` construct on `cert.status`.
-    pub(crate) async fn create_acm_certificate(
-        &self,
-        resource: ManagedResource,
-    ) -> ProviderResult<State> {
+    pub(crate) async fn create_acm_certificate(&self, resource: Resource) -> ProviderResult<State> {
         let id = resource.id.clone();
         let domain_name = require_string_attr(&resource, "domain_name")?;
 
@@ -435,7 +432,7 @@ impl AwsProvider {
         id: ResourceId,
         identifier: &str,
         from: &State,
-        to: ManagedResource,
+        to: Resource,
     ) -> ProviderResult<State> {
         if let Some(pref) = to
             .get_attr("certificate_transparency_logging_preference")
@@ -474,7 +471,7 @@ impl AwsProvider {
         &self,
         id: &ResourceId,
         arn: &str,
-        to: &ManagedResource,
+        to: &Resource,
         from: &State,
     ) -> ProviderResult<()> {
         let empty = IndexMap::new();

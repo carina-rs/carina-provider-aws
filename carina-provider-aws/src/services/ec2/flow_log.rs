@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use carina_core::provider::{ProviderError, ProviderResult};
-use carina_core::resource::{ConcreteValue, ManagedResource, ResourceId, State, Value};
+use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
@@ -74,10 +74,7 @@ impl AwsProvider {
     }
 
     /// Create an EC2 Flow Log
-    pub(crate) async fn create_ec2_flow_log(
-        &self,
-        resource: ManagedResource,
-    ) -> ProviderResult<State> {
+    pub(crate) async fn create_ec2_flow_log(&self, resource: Resource) -> ProviderResult<State> {
         let resource_ids_val: Vec<String> = match resource.get_attr("resource_ids") {
             Some(Value::Concrete(ConcreteValue::List(items))) => items
                 .iter()
@@ -245,7 +242,7 @@ impl AwsProvider {
         id: ResourceId,
         identifier: &str,
         from: &State,
-        to: ManagedResource,
+        to: Resource,
     ) -> ProviderResult<State> {
         self.apply_ec2_tags(
             &id,
