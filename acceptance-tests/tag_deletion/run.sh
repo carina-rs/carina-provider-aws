@@ -233,7 +233,7 @@ run_test() {
     fi
 
     # Step 4: Destroy
-    if ! cleanup "$work_dir"; then
+    if ! destroy_work_dir "$work_dir"; then
         echo "  WARNING: All destroy attempts failed. Preserving work dir for debugging:"
         echo "    $work_dir"
         TOTAL_FAILED=$((TOTAL_FAILED + 1))
