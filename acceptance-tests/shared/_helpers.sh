@@ -14,9 +14,17 @@ if [ -z "$SCRIPT_DIR" ]; then
 fi
 PROJECT_ROOT="$(cd "$HELPERS_DIR/../.." && pwd)"
 
+# See run-tests.sh for the rationale: `$PROJECT_ROOT/..` breaks when
+# the script is invoked from a `git wt` worktree
+# (carina-rs/carina-provider-aws#360). Resolve the carina-rs sibling
+# base via the canonical .git directory so worktree and main checkouts
+# both produce the same path.
+GIT_COMMON_DIR="$(cd "$(git -C "$PROJECT_ROOT" rev-parse --git-common-dir)" && pwd)"
+SIBLING_BASE="$(dirname "$(dirname "$GIT_COMMON_DIR")")"
+
 if [ -z "$CARINA_BIN" ]; then
-    if [ -f "$PROJECT_ROOT/../carina/target/debug/carina" ]; then
-        CARINA_BIN="$PROJECT_ROOT/../carina/target/debug/carina"
+    if [ -f "$SIBLING_BASE/carina/target/debug/carina" ]; then
+        CARINA_BIN="$SIBLING_BASE/carina/target/debug/carina"
     elif command -v carina &>/dev/null; then
         CARINA_BIN="$(command -v carina)"
     else
@@ -29,7 +37,7 @@ fi
 # Use WASM provider binaries (carina CLI only supports WASM providers)
 # Build with: cargo build -p carina-provider-aws --target wasm32-wasip2 --release
 _TEST_AWS_WASM="${_TEST_AWS_WASM:-$PROJECT_ROOT/target/wasm32-wasip2/release/carina-provider-aws.wasm}"
-_TEST_AWSCC_WASM="${_TEST_AWSCC_WASM:-$PROJECT_ROOT/../carina-provider-awscc/target/wasm32-wasip2/release/carina-provider-awscc.wasm}"
+_TEST_AWSCC_WASM="${_TEST_AWSCC_WASM:-$SIBLING_BASE/carina-provider-awscc/target/wasm32-wasip2/release/carina-provider-awscc.wasm}"
 PROVIDER_VERSION=$(grep '^version = ' "$PROJECT_ROOT/Cargo.toml" | head -1 | sed 's/version = "\(.*\)"/\1/')
 
 # inject_provider_source: Create a temp directory containing a .crn file with
