@@ -55,6 +55,26 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
+# ── Sibling-repo base for cross-provider lookups ──────────────────────
+#
+# Sibling provider repos (e.g. `carina-provider-awscc`) and the
+# `carina` host binary live next to *this* repo in a flat carina-rs
+# checkout. We resolve their base by walking up from the repo's
+# canonical git directory rather than from `$PROJECT_ROOT/..`, because
+# when the script is invoked from a `git wt` worktree under
+# `.worktrees/`, the parent of `$PROJECT_ROOT` is the `.worktrees/`
+# directory — not the carina-rs root (carina-rs/carina-provider-aws#360).
+#
+# `git rev-parse --git-common-dir` returns the *main* repo's `.git`
+# path even from inside a linked worktree, so `dirname` of that gives
+# the repo root, and one more `dirname` gives the carina-rs root.
+# `cd && pwd` canonicalizes both relative (`.git` from the main
+# checkout) and absolute (full path from a worktree) forms into the
+# same absolute path.
+GIT_COMMON_DIR="$(cd "$(git -C "$PROJECT_ROOT" rev-parse --git-common-dir)" && pwd)"
+REPO_ROOT="$(dirname "$GIT_COMMON_DIR")"
+SIBLING_BASE="$(dirname "$REPO_ROOT")"
+
 # ── Parse options ─────────────────────────────────────────────────────
 ACCOUNT_START=""
 ACCOUNT_END=""
@@ -430,10 +450,10 @@ echo ""
 # CARINA_BIN can be set externally (e.g., when running from the monorepo).
 if [ -z "$CARINA_BIN" ]; then
     # Prefer release build (WASM JIT is much faster with release)
-    if [ -f "$PROJECT_ROOT/../carina/target/release/carina" ]; then
-        CARINA_BIN="$PROJECT_ROOT/../carina/target/release/carina"
-    elif [ -f "$PROJECT_ROOT/../carina/target/debug/carina" ]; then
-        CARINA_BIN="$PROJECT_ROOT/../carina/target/debug/carina"
+    if [ -f "$SIBLING_BASE/carina/target/release/carina" ]; then
+        CARINA_BIN="$SIBLING_BASE/carina/target/release/carina"
+    elif [ -f "$SIBLING_BASE/carina/target/debug/carina" ]; then
+        CARINA_BIN="$SIBLING_BASE/carina/target/debug/carina"
     elif command -v carina &>/dev/null; then
         CARINA_BIN="$(command -v carina)"
     else
@@ -449,7 +469,7 @@ fi
 
 # ── Provider source injection ────────────────────────────────────────
 _TEST_AWS_WASM="${_TEST_AWS_WASM:-$PROJECT_ROOT/target/wasm32-wasip2/release/carina-provider-aws.wasm}"
-_TEST_AWSCC_WASM="${_TEST_AWSCC_WASM:-$PROJECT_ROOT/../carina-provider-awscc/target/wasm32-wasip2/release/carina-provider-awscc.wasm}"
+_TEST_AWSCC_WASM="${_TEST_AWSCC_WASM:-$SIBLING_BASE/carina-provider-awscc/target/wasm32-wasip2/release/carina-provider-awscc.wasm}"
 
 # Read provider version from workspace Cargo.toml to avoid hardcoding
 PROVIDER_VERSION=$(grep '^version = ' "$PROJECT_ROOT/Cargo.toml" | head -1 | sed 's/version = "\(.*\)"/\1/')
