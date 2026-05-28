@@ -291,6 +291,11 @@ fn proto_to_core_attribute_type(t: &ProtoAttributeType) -> CoreAttributeType {
             validate: noop_validator(),
             to_dsl: None,
         },
+        // Cyclic CFN struct reference (carina#3340). The host's
+        // structural counterpart is `AttributeType::Ref`; the matching
+        // `ResourceSchema.defs` map is converted alongside in
+        // `proto_to_core_schema` so resolution at walk-sites succeeds.
+        ProtoAttributeType::Ref { name } => CoreAttributeType::Ref(name.clone()),
     }
 }
 
@@ -354,6 +359,12 @@ pub fn proto_to_core_schema(s: &ProtoResourceSchema) -> CoreResourceSchema {
         exclusive_required: s.exclusive_required.clone(),
         default_wait_timeout: None,
         default_wait_interval: None,
+        // Cyclic CFN struct definitions reachable via Ref (carina#3340).
+        defs: s
+            .defs
+            .iter()
+            .map(|(k, v)| (k.clone(), proto_to_core_attribute_type(v)))
+            .collect(),
     }
 }
 
@@ -434,6 +445,9 @@ fn core_to_proto_attribute_type(t: &CoreAttributeType) -> ProtoAttributeType {
         CoreAttributeType::Union(members) => ProtoAttributeType::Union {
             members: members.iter().map(core_to_proto_attribute_type).collect(),
         },
+        // Cyclic CFN struct reference (carina#3340). Passes through
+        // unchanged so the host can reconstruct the structural Ref.
+        CoreAttributeType::Ref(name) => ProtoAttributeType::Ref { name: name.clone() },
     }
 }
 
@@ -485,6 +499,12 @@ pub fn core_to_proto_schema(s: &CoreResourceSchema) -> ProtoResourceSchema {
         }),
         validators: vec![],
         exclusive_required: s.exclusive_required.clone(),
+        // Cyclic CFN struct definitions reachable via Ref (carina#3340).
+        defs: s
+            .defs
+            .iter()
+            .map(|(k, v)| (k.clone(), core_to_proto_attribute_type(v)))
+            .collect(),
     }
 }
 
