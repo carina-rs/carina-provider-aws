@@ -12,8 +12,9 @@ use carina_core::resource::{
 };
 use carina_core::schema::{
     AttributeSchema as CoreAttributeSchema, AttributeType as CoreAttributeType,
-    OperationConfig as CoreOperationConfig, ResourceSchema as CoreResourceSchema,
-    SchemaKind as CoreSchemaKind, StructField as CoreStructField, noop_validator,
+    OperationConfig as CoreOperationConfig, RawShape as CoreRawShape,
+    ResourceSchema as CoreResourceSchema, SchemaKind as CoreSchemaKind,
+    StructField as CoreStructField, noop_validator,
 };
 use carina_provider_protocol::types::{
     AttributeSchema as ProtoAttributeSchema, AttributeType as ProtoAttributeType,
@@ -387,29 +388,25 @@ fn core_to_proto_schema_kind(k: CoreSchemaKind) -> ProtoSchemaKind {
 }
 
 fn core_to_proto_attribute_type(t: &CoreAttributeType) -> ProtoAttributeType {
-    use carina_core::schema::{Shape, empty_defs};
-    // `core_to_proto_attribute_type` is called with `empty_defs()` because
-    // schema-level `defs` carry through `core_to_proto_schema` as their own
-    // wire field (`ProtoResourceSchema.defs`). Refs cannot appear inside a
-    // non-`defs` AttributeType tree on the producer side: codegen never
-    // emits `AttributeType::ref_(...)` in this provider repo — all cyclic
-    // structures are flat-expanded in the generated schemas. If a Ref does
-    // appear in `defs`, it is encoded directly via the wire-level
-    // `ProtoAttributeType::Ref { name }` arm below by special-casing the
-    // pre-shape inspection.
-    match t.shape(empty_defs()) {
-        Shape::String => ProtoAttributeType::String,
-        Shape::Int => ProtoAttributeType::Int,
-        Shape::Float => ProtoAttributeType::Float,
-        Shape::Bool => ProtoAttributeType::Bool,
+    // `raw_shape()` is the Ref-preserving projection (carina#3349 / #3352).
+    // `shape(defs)` would auto-resolve Ref and either flatten the
+    // structure (acyclic) or infinite-loop (cyclic CFN schemas like
+    // WAFv2 WebACL.Statement); the wire form must transmit Ref verbatim
+    // so the receiver can rebuild from its own copy of `defs`. Aligns
+    // this provider with awscc#284.
+    match t.raw_shape() {
+        CoreRawShape::String => ProtoAttributeType::String,
+        CoreRawShape::Int => ProtoAttributeType::Int,
+        CoreRawShape::Float => ProtoAttributeType::Float,
+        CoreRawShape::Bool => ProtoAttributeType::Bool,
         // `Duration` is now a first-class proto variant (carina#3166) so
         // providers can declare Duration-typed schema attributes and the
         // host's type checker accepts DSL literals like `30min` / `1h` /
         // `15s` against them. The WIT *value* boundary is still
         // integer-seconds (see carina-plugin-host wasm_convert.rs:60-76),
         // but the *type* boundary now round-trips faithfully.
-        Shape::Duration => ProtoAttributeType::Duration,
-        Shape::StringEnum {
+        CoreRawShape::Duration => ProtoAttributeType::Duration,
+        CoreRawShape::StringEnum {
             values,
             name,
             identity,
@@ -424,19 +421,19 @@ fn core_to_proto_attribute_type(t: &CoreAttributeType) -> ProtoAttributeType {
             namespace: identity.and_then(|id| id.dotted_prefix()),
             dsl_aliases: dsl_aliases.to_vec(),
         },
-        Shape::List { inner, ordered } => ProtoAttributeType::List {
+        CoreRawShape::List { inner, ordered } => ProtoAttributeType::List {
             inner: Box::new(core_to_proto_attribute_type(inner)),
             ordered,
         },
-        Shape::Map { key, value: inner } => ProtoAttributeType::Map {
+        CoreRawShape::Map { key, value: inner } => ProtoAttributeType::Map {
             inner: Box::new(core_to_proto_attribute_type(inner)),
             key: Box::new(core_to_proto_attribute_type(key)),
         },
-        Shape::Struct { name, fields } => ProtoAttributeType::Struct {
+        CoreRawShape::Struct { name, fields } => ProtoAttributeType::Struct {
             name: name.to_string(),
             fields: fields.iter().map(core_to_proto_struct_field).collect(),
         },
-        Shape::Custom { identity, base, .. } => ProtoAttributeType::Custom {
+        CoreRawShape::Custom { identity, base, .. } => ProtoAttributeType::Custom {
             // Serialize the structured identity to its dotted display
             // form for the wire. The host's `TypeIdentity::from_dotted`
             // parses it back on the other side, so the provider axis
@@ -448,13 +445,19 @@ fn core_to_proto_attribute_type(t: &CoreAttributeType) -> ProtoAttributeType {
         // fact (carina#3222); on the wire form it still travels as a
         // separate `CustomEnum` variant with the dotted prefix as a
         // flat string.
-        Shape::CustomEnum { identity, base, .. } => ProtoAttributeType::CustomEnum {
+        CoreRawShape::CustomEnum { identity, base, .. } => ProtoAttributeType::CustomEnum {
             name: identity.to_string(),
             base: Box::new(core_to_proto_attribute_type(base)),
             namespace: identity.dotted_prefix().unwrap_or_default(),
         },
-        Shape::Union(members) => ProtoAttributeType::Union {
+        CoreRawShape::Union(members) => ProtoAttributeType::Union {
             members: members.iter().map(core_to_proto_attribute_type).collect(),
+        },
+        // Cyclic CFN struct reference (carina#3340). Passes through
+        // unchanged so the host can reconstruct the structural Ref
+        // against its own copy of `ResourceSchema.defs`.
+        CoreRawShape::Ref(name) => ProtoAttributeType::Ref {
+            name: name.to_string(),
         },
     }
 }
@@ -559,9 +562,7 @@ mod tests {
             _ => panic!("Expected StringEnum"),
         }
         let roundtrip = proto_to_core_attribute_type(&proto_type);
-        if let carina_core::schema::Shape::StringEnum { name, values, .. } =
-            roundtrip.shape(carina_core::schema::empty_defs())
-        {
+        if let CoreRawShape::StringEnum { name, values, .. } = roundtrip.raw_shape() {
             assert_eq!(name, "VersioningStatus");
             assert_eq!(values, &["Enabled", "Suspended"]);
         } else {
