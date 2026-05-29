@@ -5,7 +5,6 @@ use std::collections::HashMap;
 use indexmap::IndexMap;
 
 use carina_core::resource::{ConcreteValue, Value};
-use carina_core::schema::AttributeType;
 
 use crate::AwsProvider;
 
@@ -1454,7 +1453,10 @@ fn test_organizations_organization_schema_feature_set_enum() {
         .attributes
         .get("feature_set")
         .expect("feature_set attribute not found");
-    if let AttributeType::StringEnum { values, .. } = &feature_set.attr_type {
+    if let carina_core::schema::Shape::StringEnum { values, .. } = feature_set
+        .attr_type
+        .shape(carina_core::schema::empty_defs())
+    {
         assert!(values.contains(&"ALL".to_string()));
         assert!(values.contains(&"CONSOLIDATED_BILLING".to_string()));
         assert_eq!(values.len(), 2);
@@ -1585,7 +1587,10 @@ fn test_security_group_egress_schema_includes_all_variant() {
         .attributes
         .get("ip_protocol")
         .expect("ip_protocol attribute not found");
-    if let AttributeType::StringEnum { values, .. } = &ip_protocol.attr_type {
+    if let carina_core::schema::Shape::StringEnum { values, .. } = ip_protocol
+        .attr_type
+        .shape(carina_core::schema::empty_defs())
+    {
         assert!(
             values.contains(&"all".to_string()),
             "StringEnum values must include 'all': {:?}",
@@ -1605,7 +1610,10 @@ fn test_security_group_ingress_schema_includes_all_variant() {
         .attributes
         .get("ip_protocol")
         .expect("ip_protocol attribute not found");
-    if let AttributeType::StringEnum { values, .. } = &ip_protocol.attr_type {
+    if let carina_core::schema::Shape::StringEnum { values, .. } = ip_protocol
+        .attr_type
+        .shape(carina_core::schema::empty_defs())
+    {
         assert!(
             values.contains(&"all".to_string()),
             "StringEnum values must include 'all': {:?}",

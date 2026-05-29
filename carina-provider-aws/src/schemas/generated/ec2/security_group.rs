@@ -18,14 +18,14 @@ pub fn ec2_security_group_config() -> AwsSchemaConfig {
         schema: ResourceSchema::new("ec2.SecurityGroup")
         .with_description("Describes a security group.")
         .attribute(
-            AttributeSchema::new("description", AttributeType::String)
+            AttributeSchema::new("description", AttributeType::string())
                 .required()
                 .create_only()
                 .with_description("A description for the security group. Constraints: Up to 255 characters in length Valid characters: a-z, A-Z, 0-9, spaces, and ._-:/()#,@[]+=&;{}!$*")
                 .with_provider_name("Description"),
         )
         .attribute(
-            AttributeSchema::new("group_name", AttributeType::String)
+            AttributeSchema::new("group_name", AttributeType::string())
                 .required()
                 .create_only()
                 .with_description("The name of the security group. Names are case-insensitive and must be unique within the VPC. Constraints: Up to 255 characters in length. Can't start...")

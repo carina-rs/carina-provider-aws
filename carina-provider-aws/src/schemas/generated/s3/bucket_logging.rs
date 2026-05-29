@@ -15,7 +15,7 @@ pub fn s3_bucket_logging_config() -> AwsSchemaConfig {
         has_tags: false,
         schema: ResourceSchema::new("s3.BucketLogging")
             .attribute(
-                AttributeSchema::new("bucket", AttributeType::String)
+                AttributeSchema::new("bucket", AttributeType::string())
                     .required()
                     .create_only()
                     .with_description(
@@ -24,13 +24,13 @@ pub fn s3_bucket_logging_config() -> AwsSchemaConfig {
                     .with_provider_name("Bucket"),
             )
             .attribute(
-                AttributeSchema::new("target_bucket", AttributeType::String)
+                AttributeSchema::new("target_bucket", AttributeType::string())
                     .required()
                     .with_description("Destination bucket for server access logs.")
                     .with_provider_name("TargetBucket"),
             )
             .attribute(
-                AttributeSchema::new("target_prefix", AttributeType::String)
+                AttributeSchema::new("target_prefix", AttributeType::string())
                     .with_description("Key prefix to apply to log objects.")
                     .with_provider_name("TargetPrefix"),
             )

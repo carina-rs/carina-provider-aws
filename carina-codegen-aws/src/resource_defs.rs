@@ -304,7 +304,7 @@ pub struct DataSourceInput {
     pub description: &'static str,
     /// Whether this input is required
     pub required: bool,
-    /// Type override (e.g., "AttributeType::String"). None = infer from Smithy.
+    /// Type override (e.g., "AttributeType::string()"). None = infer from Smithy.
     pub type_override: Option<&'static str>,
 }
 
@@ -320,7 +320,7 @@ pub struct DataSourceOutput {
     pub provider_name: Option<&'static str>,
     /// Human-readable description for docs
     pub description: &'static str,
-    /// Rust type expression for codegen, e.g. `"AttributeType::String"` or
+    /// Rust type expression for codegen, e.g. `"AttributeType::string()"` or
     /// `"super::aws_account_id()"`. Required: codegen does not infer.
     pub type_code: &'static str,
 }
@@ -337,7 +337,7 @@ pub struct DataSourceListOutput {
     /// Human-readable description for docs
     pub description: &'static str,
     /// Rust type expression for the *element* type, e.g.
-    /// `"AttributeType::String"` or `"super::arn()"`. Codegen wraps it in
+    /// `"AttributeType::string()"` or `"super::arn()"`. Codegen wraps it in
     /// `AttributeType::List { inner: <item_type>, ordered: false }`.
     pub item_type: &'static str,
 }
@@ -1212,7 +1212,7 @@ pub fn sts_data_sources() -> Vec<DataSourceDef> {
                     name: "user_id",
                     provider_name: Some("UserId"),
                     description: "The unique identifier of the calling entity.",
-                    type_code: "AttributeType::String",
+                    type_code: "AttributeType::string()",
                 },
             ],
         },
@@ -1253,13 +1253,13 @@ pub fn identitystore_data_sources() -> Vec<DataSourceDef> {
                     name: "display_name",
                     provider_name: Some("DisplayName"),
                     description: "Display name of the user.",
-                    type_code: "AttributeType::String",
+                    type_code: "AttributeType::string()",
                 },
                 DataSourceOutput {
                     name: "emails",
                     provider_name: Some("Emails"),
                     description: "Email addresses associated with the user.",
-                    type_code: "AttributeType::String",
+                    type_code: "AttributeType::string()",
                 },
             ],
         },
@@ -1471,11 +1471,11 @@ pub fn s3_resources() -> Vec<ResourceDef> {
             type_overrides: vec![
                 (
                     "Status",
-                    "AttributeType::StringEnum { name: \"VersioningStatus\".to_string(), values: vec![\"Enabled\".to_string(), \"Suspended\".to_string()], identity: Some(carina_core::schema::string_enum_identity(\"VersioningStatus\", Some(\"aws.s3.BucketVersioning\"))), dsl_aliases: vec![(\"Enabled\".to_string(), \"enabled\".to_string()), (\"Suspended\".to_string(), \"suspended\".to_string())] }",
+                    "AttributeType::string_enum(\"VersioningStatus\".to_string(), vec![\"Enabled\".to_string(), \"Suspended\".to_string()], Some(carina_core::schema::string_enum_identity(\"VersioningStatus\", Some(\"aws.s3.BucketVersioning\"))), vec![(\"Enabled\".to_string(), \"enabled\".to_string()), (\"Suspended\".to_string(), \"suspended\".to_string())])",
                 ),
                 (
                     "MFADelete",
-                    "AttributeType::StringEnum { name: \"MFADelete\".to_string(), values: vec![\"Enabled\".to_string(), \"Disabled\".to_string()], identity: Some(carina_core::schema::string_enum_identity(\"MFADelete\", Some(\"aws.s3.BucketVersioning\"))), dsl_aliases: vec![(\"Enabled\".to_string(), \"enabled\".to_string()), (\"Disabled\".to_string(), \"disabled\".to_string())] }",
+                    "AttributeType::string_enum(\"MFADelete\".to_string(), vec![\"Enabled\".to_string(), \"Disabled\".to_string()], Some(carina_core::schema::string_enum_identity(\"MFADelete\", Some(\"aws.s3.BucketVersioning\"))), vec![(\"Enabled\".to_string(), \"enabled\".to_string()), (\"Disabled\".to_string(), \"disabled\".to_string())])",
                 ),
             ],
             exclude_fields: vec![
@@ -1587,7 +1587,7 @@ pub fn s3_resources() -> Vec<ResourceDef> {
             has_tags: false,
             type_overrides: vec![(
                 "ObjectOwnership",
-                "AttributeType::StringEnum { name: \"ObjectOwnership\".to_string(), values: vec![\"BucketOwnerEnforced\".to_string(), \"BucketOwnerPreferred\".to_string(), \"ObjectWriter\".to_string()], identity: Some(carina_core::schema::string_enum_identity(\"ObjectOwnership\", Some(\"aws.s3.BucketOwnershipControls\"))), dsl_aliases: vec![(\"BucketOwnerEnforced\".to_string(), \"bucket_owner_enforced\".to_string()), (\"BucketOwnerPreferred\".to_string(), \"bucket_owner_preferred\".to_string()), (\"ObjectWriter\".to_string(), \"object_writer\".to_string())] }",
+                "AttributeType::string_enum(\"ObjectOwnership\".to_string(), vec![\"BucketOwnerEnforced\".to_string(), \"BucketOwnerPreferred\".to_string(), \"ObjectWriter\".to_string()], Some(carina_core::schema::string_enum_identity(\"ObjectOwnership\", Some(\"aws.s3.BucketOwnershipControls\"))), vec![(\"BucketOwnerEnforced\".to_string(), \"bucket_owner_enforced\".to_string()), (\"BucketOwnerPreferred\".to_string(), \"bucket_owner_preferred\".to_string()), (\"ObjectWriter\".to_string(), \"object_writer\".to_string())])",
             )],
             exclude_fields: vec![
                 "ContentMD5",
@@ -2076,10 +2076,10 @@ pub fn s3_resources() -> Vec<ResourceDef> {
             identifier: "Bucket",
             has_tags: false,
             type_overrides: vec![
-                ("BlockPublicAcls", "AttributeType::Bool"),
-                ("IgnorePublicAcls", "AttributeType::Bool"),
-                ("BlockPublicPolicy", "AttributeType::Bool"),
-                ("RestrictPublicBuckets", "AttributeType::Bool"),
+                ("BlockPublicAcls", "AttributeType::bool()"),
+                ("IgnorePublicAcls", "AttributeType::bool()"),
+                ("BlockPublicPolicy", "AttributeType::bool()"),
+                ("RestrictPublicBuckets", "AttributeType::bool()"),
             ],
             exclude_fields: vec![
                 "ContentMD5",
@@ -2145,7 +2145,7 @@ pub fn s3_data_sources() -> Vec<DataSourceDef> {
                     name: "bucket",
                     provider_name: None,
                     description: "The bucket name (echo of the input).",
-                    type_code: "AttributeType::String",
+                    type_code: "AttributeType::string()",
                 },
                 DataSourceOutput {
                     name: "arn",
@@ -2157,25 +2157,25 @@ pub fn s3_data_sources() -> Vec<DataSourceDef> {
                     name: "region",
                     provider_name: Some("LocationConstraint"),
                     description: "AWS region the bucket is in.",
-                    type_code: "AttributeType::String",
+                    type_code: "AttributeType::string()",
                 },
                 DataSourceOutput {
                     name: "bucket_domain_name",
                     provider_name: None,
                     description: "Bucket domain name (`<bucket>.s3.amazonaws.com`).",
-                    type_code: "AttributeType::String",
+                    type_code: "AttributeType::string()",
                 },
                 DataSourceOutput {
                     name: "bucket_regional_domain_name",
                     provider_name: None,
                     description: "Region-specific bucket domain name (`<bucket>.s3.<region>.amazonaws.com`).",
-                    type_code: "AttributeType::String",
+                    type_code: "AttributeType::string()",
                 },
                 DataSourceOutput {
                     name: "hosted_zone_id",
                     provider_name: None,
                     description: "Route 53 Hosted Zone ID for the bucket's region.",
-                    type_code: "AttributeType::String",
+                    type_code: "AttributeType::string()",
                 },
             ],
         },
@@ -2320,7 +2320,7 @@ pub fn route53_resources() -> Vec<ResourceDef> {
                 // single value string.
                 (
                     "ResourceRecords",
-                    "AttributeType::list(AttributeType::String)",
+                    "AttributeType::list(AttributeType::string())",
                 ),
             ],
             exclude_fields: vec![
@@ -2396,7 +2396,7 @@ pub fn iam_data_sources() -> Vec<DataSourceDef> {
                 DataSourceListOutput {
                     name: "names",
                     description: "Set of names of the matched IAM roles.",
-                    item_type: "AttributeType::String",
+                    item_type: "AttributeType::string()",
                 },
             ],
         },
@@ -2551,23 +2551,23 @@ pub fn sqs_resources() -> Vec<ResourceDef> {
             ("Policy", "super::iam_policy_document()"),
             ("RedrivePolicy", "super::sqs_redrive_policy()"),
             ("RedriveAllowPolicy", "super::sqs_redrive_allow_policy()"),
-            ("VisibilityTimeout", "AttributeType::Int"),
-            ("MaximumMessageSize", "AttributeType::Int"),
-            ("MessageRetentionPeriod", "AttributeType::Int"),
-            ("DelaySeconds", "AttributeType::Int"),
-            ("ReceiveMessageWaitTimeSeconds", "AttributeType::Int"),
-            ("KmsDataKeyReusePeriodSeconds", "AttributeType::Int"),
-            ("FifoQueue", "AttributeType::Bool"),
-            ("ContentBasedDeduplication", "AttributeType::Bool"),
-            ("SqsManagedSseEnabled", "AttributeType::Bool"),
-            ("ApproximateNumberOfMessages", "AttributeType::Int"),
-            ("ApproximateNumberOfMessagesDelayed", "AttributeType::Int"),
+            ("VisibilityTimeout", "AttributeType::int()"),
+            ("MaximumMessageSize", "AttributeType::int()"),
+            ("MessageRetentionPeriod", "AttributeType::int()"),
+            ("DelaySeconds", "AttributeType::int()"),
+            ("ReceiveMessageWaitTimeSeconds", "AttributeType::int()"),
+            ("KmsDataKeyReusePeriodSeconds", "AttributeType::int()"),
+            ("FifoQueue", "AttributeType::bool()"),
+            ("ContentBasedDeduplication", "AttributeType::bool()"),
+            ("SqsManagedSseEnabled", "AttributeType::bool()"),
+            ("ApproximateNumberOfMessages", "AttributeType::int()"),
+            ("ApproximateNumberOfMessagesDelayed", "AttributeType::int()"),
             (
                 "ApproximateNumberOfMessagesNotVisible",
-                "AttributeType::Int",
+                "AttributeType::int()",
             ),
-            ("CreatedTimestamp", "AttributeType::Int"),
-            ("LastModifiedTimestamp", "AttributeType::Int"),
+            ("CreatedTimestamp", "AttributeType::int()"),
+            ("LastModifiedTimestamp", "AttributeType::int()"),
         ],
         // Keep the raw `Attributes` map out of the schema; the synthetic
         // entries below project every QueueAttributeName key.
@@ -2762,11 +2762,11 @@ mod tests {
             name: "arn",
             provider_name: None,
             description: "Bucket ARN",
-            type_code: "AttributeType::String",
+            type_code: "AttributeType::string()",
         };
         assert_eq!(o.name, "arn");
         assert!(o.provider_name.is_none());
-        assert_eq!(o.type_code, "AttributeType::String");
+        assert_eq!(o.type_code, "AttributeType::string()");
     }
 
     #[test]
@@ -2840,7 +2840,7 @@ mod tests {
         let names: Vec<&str> = aggregated_outputs.iter().map(|o| o.name).collect();
         assert_eq!(names, vec!["arns", "names"]);
         assert_eq!(aggregated_outputs[0].item_type, "super::iam_role_arn()");
-        assert_eq!(aggregated_outputs[1].item_type, "AttributeType::String");
+        assert_eq!(aggregated_outputs[1].item_type, "AttributeType::string()");
     }
 
     #[test]
@@ -2854,7 +2854,7 @@ mod tests {
                     name: "arn",
                     provider_name: None,
                     description: "",
-                    type_code: "AttributeType::String",
+                    type_code: "AttributeType::string()",
                 }],
             },
         };

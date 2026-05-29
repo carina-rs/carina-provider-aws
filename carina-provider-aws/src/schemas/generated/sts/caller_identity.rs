@@ -26,7 +26,7 @@ pub fn sts_caller_identity_config() -> AwsSchemaConfig {
                 .with_provider_name("Arn"),
         )
         .attribute(
-            AttributeSchema::new("user_id", AttributeType::String)
+            AttributeSchema::new("user_id", AttributeType::string())
                 .with_description("The unique identifier of the calling entity.")
                 .with_provider_name("UserId"),
         )

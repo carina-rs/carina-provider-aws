@@ -26,35 +26,35 @@ pub fn ec2_transit_gateway_attachment_config() -> AwsSchemaConfig {
         schema: ResourceSchema::new("ec2.TransitGatewayAttachment")
         .with_description("Describes a VPC attachment.")
         .attribute(
-            AttributeSchema::new("options", AttributeType::Struct {
-                    name: "CreateTransitGatewayVpcAttachmentRequestOptions".to_string(),
-                    fields: vec![
-                    StructField::new("appliance_mode_support", AttributeType::StringEnum {
-                name: "ApplianceModeSupport".to_string(),
-                values: vec!["disable".to_string(), "enable".to_string()],
-                identity: Some(carina_core::schema::string_enum_identity("ApplianceModeSupport", Some("aws.ec2.TransitGatewayAttachment"))),
-                dsl_aliases: vec![("disable".to_string(), "disable".to_string()), ("enable".to_string(), "enable".to_string())],
-            }).with_description("Enable or disable support for appliance mode. If enabled, a traffic flow between a source and destination uses the same Availability Zone for the VPC ...").with_provider_name("ApplianceModeSupport"),
-                    StructField::new("dns_support", AttributeType::StringEnum {
-                name: "DnsSupport".to_string(),
-                values: vec!["disable".to_string(), "enable".to_string()],
-                identity: Some(carina_core::schema::string_enum_identity("DnsSupport", Some("aws.ec2.TransitGatewayAttachment"))),
-                dsl_aliases: vec![("disable".to_string(), "disable".to_string()), ("enable".to_string(), "enable".to_string())],
-            }).with_description("Enable or disable DNS support. The default is enable.").with_provider_name("DnsSupport"),
-                    StructField::new("ipv6_support", AttributeType::StringEnum {
-                name: "Ipv6Support".to_string(),
-                values: vec!["disable".to_string(), "enable".to_string()],
-                identity: Some(carina_core::schema::string_enum_identity("Ipv6Support", Some("aws.ec2.TransitGatewayAttachment"))),
-                dsl_aliases: vec![("disable".to_string(), "disable".to_string()), ("enable".to_string(), "enable".to_string())],
-            }).with_description("Enable or disable IPv6 support. The default is disable.").with_provider_name("Ipv6Support"),
-                    StructField::new("security_group_referencing_support", AttributeType::StringEnum {
-                name: "SecurityGroupReferencingSupport".to_string(),
-                values: vec!["disable".to_string(), "enable".to_string()],
-                identity: Some(carina_core::schema::string_enum_identity("SecurityGroupReferencingSupport", Some("aws.ec2.TransitGatewayAttachment"))),
-                dsl_aliases: vec![("disable".to_string(), "disable".to_string()), ("enable".to_string(), "enable".to_string())],
-            }).with_description("Enables you to reference a security group across VPCs attached to a transit gateway to simplify security group management. This option is set to enabl...").with_provider_name("SecurityGroupReferencingSupport")
+            AttributeSchema::new("options", AttributeType::struct_(
+                    "CreateTransitGatewayVpcAttachmentRequestOptions".to_string(),
+                    vec![
+                    StructField::new("appliance_mode_support", AttributeType::string_enum(
+                "ApplianceModeSupport".to_string(),
+                vec!["disable".to_string(), "enable".to_string()],
+                Some(carina_core::schema::string_enum_identity("ApplianceModeSupport", Some("aws.ec2.TransitGatewayAttachment"))),
+                vec![("disable".to_string(), "disable".to_string()), ("enable".to_string(), "enable".to_string())],
+            )).with_description("Enable or disable support for appliance mode. If enabled, a traffic flow between a source and destination uses the same Availability Zone for the VPC ...").with_provider_name("ApplianceModeSupport"),
+                    StructField::new("dns_support", AttributeType::string_enum(
+                "DnsSupport".to_string(),
+                vec!["disable".to_string(), "enable".to_string()],
+                Some(carina_core::schema::string_enum_identity("DnsSupport", Some("aws.ec2.TransitGatewayAttachment"))),
+                vec![("disable".to_string(), "disable".to_string()), ("enable".to_string(), "enable".to_string())],
+            )).with_description("Enable or disable DNS support. The default is enable.").with_provider_name("DnsSupport"),
+                    StructField::new("ipv6_support", AttributeType::string_enum(
+                "Ipv6Support".to_string(),
+                vec!["disable".to_string(), "enable".to_string()],
+                Some(carina_core::schema::string_enum_identity("Ipv6Support", Some("aws.ec2.TransitGatewayAttachment"))),
+                vec![("disable".to_string(), "disable".to_string()), ("enable".to_string(), "enable".to_string())],
+            )).with_description("Enable or disable IPv6 support. The default is disable.").with_provider_name("Ipv6Support"),
+                    StructField::new("security_group_referencing_support", AttributeType::string_enum(
+                "SecurityGroupReferencingSupport".to_string(),
+                vec!["disable".to_string(), "enable".to_string()],
+                Some(carina_core::schema::string_enum_identity("SecurityGroupReferencingSupport", Some("aws.ec2.TransitGatewayAttachment"))),
+                vec![("disable".to_string(), "disable".to_string()), ("enable".to_string(), "enable".to_string())],
+            )).with_description("Enables you to reference a security group across VPCs attached to a transit gateway to simplify security group management. This option is set to enabl...").with_provider_name("SecurityGroupReferencingSupport")
                     ],
-                })
+                ))
                 .create_only()
                 .with_description("The VPC attachment options.")
                 .with_provider_name("Options"),
@@ -81,7 +81,7 @@ pub fn ec2_transit_gateway_attachment_config() -> AwsSchemaConfig {
                 .with_provider_name("VpcId"),
         )
         .attribute(
-            AttributeSchema::new("transit_gateway_attachment_id", AttributeType::String)
+            AttributeSchema::new("transit_gateway_attachment_id", AttributeType::string())
                 .read_only()
                 .with_description("The ID of the attachment. (read-only)")
                 .with_provider_name("TransitGatewayAttachmentId"),

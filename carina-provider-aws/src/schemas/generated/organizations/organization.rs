@@ -18,12 +18,12 @@ pub fn organizations_organization_config() -> AwsSchemaConfig {
         schema: ResourceSchema::new("organizations.Organization")
         .with_description("Contains details about an organization. An organization is a collection of accounts that are centrally managed together using consolidated billing, organized hierarchically with organizational units (...")
         .attribute(
-            AttributeSchema::new("feature_set", AttributeType::StringEnum {
-                name: "FeatureSet".to_string(),
-                values: vec!["ALL".to_string(), "CONSOLIDATED_BILLING".to_string()],
-                identity: Some(carina_core::schema::string_enum_identity("FeatureSet", Some("aws.organizations.Organization"))),
-                dsl_aliases: vec![("ALL".to_string(), "all".to_string()), ("CONSOLIDATED_BILLING".to_string(), "consolidated_billing".to_string())],
-            })
+            AttributeSchema::new("feature_set", AttributeType::string_enum(
+                "FeatureSet".to_string(),
+                vec!["ALL".to_string(), "CONSOLIDATED_BILLING".to_string()],
+                Some(carina_core::schema::string_enum_identity("FeatureSet", Some("aws.organizations.Organization"))),
+                vec![("ALL".to_string(), "all".to_string()), ("CONSOLIDATED_BILLING".to_string(), "consolidated_billing".to_string())],
+            ))
                 .create_only()
                 .with_description("Specifies the feature set supported by the new organization. Each feature set supports different levels of functionality. CONSOLIDATED_BILLING: All me...")
                 .with_provider_name("FeatureSet"),
@@ -35,7 +35,7 @@ pub fn organizations_organization_config() -> AwsSchemaConfig {
                 .with_provider_name("Arn"),
         )
         .attribute(
-            AttributeSchema::new("id", AttributeType::String)
+            AttributeSchema::new("id", AttributeType::string())
                 .read_only()
                 .with_description("The unique identifier (ID) of an organization. The regex pattern for an organization ID string requires \"o-\" followed by from 10 to 32 lowercase let... (read-only)")
                 .with_provider_name("Id"),

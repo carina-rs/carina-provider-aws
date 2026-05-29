@@ -37,55 +37,55 @@ pub fn route53_record_set_config() -> AwsSchemaConfig {
         schema: ResourceSchema::new("route53.RecordSet")
         .with_description("Information about the resource record set to create or delete.")
         .attribute(
-            AttributeSchema::new("alias_target", AttributeType::Struct {
-                    name: "AliasTarget".to_string(),
-                    fields: vec![
-                    StructField::new("dns_name", AttributeType::String).required().with_description("Alias resource record sets only: The value that you specify depends on where you want to route queries: Amazon API Gateway custom regional APIs and ed...").with_provider_name("DNSName"),
-                    StructField::new("evaluate_target_health", AttributeType::Bool).required().with_description("Applies only to alias, failover alias, geolocation alias, latency alias, and weighted alias resource record sets: When EvaluateTargetHealth is true, a...").with_provider_name("EvaluateTargetHealth"),
+            AttributeSchema::new("alias_target", AttributeType::struct_(
+                    "AliasTarget".to_string(),
+                    vec![
+                    StructField::new("dns_name", AttributeType::string()).required().with_description("Alias resource record sets only: The value that you specify depends on where you want to route queries: Amazon API Gateway custom regional APIs and ed...").with_provider_name("DNSName"),
+                    StructField::new("evaluate_target_health", AttributeType::bool()).required().with_description("Applies only to alias, failover alias, geolocation alias, latency alias, and weighted alias resource record sets: When EvaluateTargetHealth is true, a...").with_provider_name("EvaluateTargetHealth"),
                     StructField::new("hosted_zone_id", super::cloudfront_hosted_zone_id()).required().with_description("Alias resource records sets only: The value used depends on where you want to route traffic: Amazon API Gateway custom regional APIs and edge-optimize...").with_provider_name("HostedZoneId")
                     ],
-                })
+                ))
                 .with_description("Alias resource record sets only: Information about the Amazon Web Services resource, such as a CloudFront distribution or an Amazon S3 bucket, that yo...")
                 .with_provider_name("AliasTarget"),
         )
         .attribute(
-            AttributeSchema::new("name", AttributeType::String)
+            AttributeSchema::new("name", AttributeType::string())
                 .required()
                 .create_only()
                 .with_description("For ChangeResourceRecordSets requests, the name of the record that you want to create, update, or delete. For ListResourceRecordSets responses, the na...")
                 .with_provider_name("Name"),
         )
         .attribute(
-            AttributeSchema::new("resource_records", AttributeType::list(AttributeType::String))
+            AttributeSchema::new("resource_records", AttributeType::list(AttributeType::string()))
                 .with_description("Information about the resource records to act upon. If you're creating an alias resource record set, omit ResourceRecords.")
                 .with_provider_name("ResourceRecords"),
         )
         .attribute(
-            AttributeSchema::new("ttl", AttributeType::Custom {
-                identity: None,
-                pattern: None,
-                length: Some((Some(0), Some(2147483647))),
-                base: Box::new(AttributeType::Int),
-                validate: legacy_validator(validate_ttl_range),
-                to_dsl: None,
-            })
+            AttributeSchema::new("ttl", AttributeType::custom(
+                None,
+                AttributeType::int(),
+                None,
+                Some((Some(0), Some(2147483647))),
+                legacy_validator(validate_ttl_range),
+                None,
+            ))
                 .with_description("The resource record cache time to live (TTL), in seconds. Note the following: If you're creating or updating an alias resource record set, omit TTL. A...")
                 .with_provider_name("TTL"),
         )
         .attribute(
-            AttributeSchema::new("type", AttributeType::StringEnum {
-                name: "Type".to_string(),
-                values: vec!["A".to_string(), "AAAA".to_string(), "CAA".to_string(), "CNAME".to_string(), "DS".to_string(), "HTTPS".to_string(), "MX".to_string(), "NAPTR".to_string(), "NS".to_string(), "PTR".to_string(), "SOA".to_string(), "SPF".to_string(), "SRV".to_string(), "SSHFP".to_string(), "SVCB".to_string(), "TLSA".to_string(), "TXT".to_string()],
-                identity: Some(carina_core::schema::string_enum_identity("Type", Some("aws.route53.RecordSet"))),
-                dsl_aliases: vec![("A".to_string(), "a".to_string()), ("AAAA".to_string(), "aaaa".to_string()), ("CAA".to_string(), "caa".to_string()), ("CNAME".to_string(), "cname".to_string()), ("DS".to_string(), "ds".to_string()), ("HTTPS".to_string(), "https".to_string()), ("MX".to_string(), "mx".to_string()), ("NAPTR".to_string(), "naptr".to_string()), ("NS".to_string(), "ns".to_string()), ("PTR".to_string(), "ptr".to_string()), ("SOA".to_string(), "soa".to_string()), ("SPF".to_string(), "spf".to_string()), ("SRV".to_string(), "srv".to_string()), ("SSHFP".to_string(), "sshfp".to_string()), ("SVCB".to_string(), "svcb".to_string()), ("TLSA".to_string(), "tlsa".to_string()), ("TXT".to_string(), "txt".to_string())],
-            })
+            AttributeSchema::new("type", AttributeType::string_enum(
+                "Type".to_string(),
+                vec!["A".to_string(), "AAAA".to_string(), "CAA".to_string(), "CNAME".to_string(), "DS".to_string(), "HTTPS".to_string(), "MX".to_string(), "NAPTR".to_string(), "NS".to_string(), "PTR".to_string(), "SOA".to_string(), "SPF".to_string(), "SRV".to_string(), "SSHFP".to_string(), "SVCB".to_string(), "TLSA".to_string(), "TXT".to_string()],
+                Some(carina_core::schema::string_enum_identity("Type", Some("aws.route53.RecordSet"))),
+                vec![("A".to_string(), "a".to_string()), ("AAAA".to_string(), "aaaa".to_string()), ("CAA".to_string(), "caa".to_string()), ("CNAME".to_string(), "cname".to_string()), ("DS".to_string(), "ds".to_string()), ("HTTPS".to_string(), "https".to_string()), ("MX".to_string(), "mx".to_string()), ("NAPTR".to_string(), "naptr".to_string()), ("NS".to_string(), "ns".to_string()), ("PTR".to_string(), "ptr".to_string()), ("SOA".to_string(), "soa".to_string()), ("SPF".to_string(), "spf".to_string()), ("SRV".to_string(), "srv".to_string()), ("SSHFP".to_string(), "sshfp".to_string()), ("SVCB".to_string(), "svcb".to_string()), ("TLSA".to_string(), "tlsa".to_string()), ("TXT".to_string(), "txt".to_string())],
+            ))
                 .required()
                 .identity()
                 .with_description("The DNS record type. For information about different record types and how data is encoded for them, see Supported DNS Resource Record Types in the Ama...")
                 .with_provider_name("Type"),
         )
         .attribute(
-            AttributeSchema::new("hosted_zone_id", AttributeType::String)
+            AttributeSchema::new("hosted_zone_id", AttributeType::string())
                 .create_only()
                 .with_description("The ID of the hosted zone that contains this record set.")
                 .with_provider_name("HostedZoneId"),

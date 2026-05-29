@@ -20,7 +20,7 @@ pub fn ec2_vpn_gateway_config() -> AwsSchemaConfig {
         schema: ResourceSchema::new("ec2.VpnGateway")
         .with_description("Describes a virtual private gateway.")
         .attribute(
-            AttributeSchema::new("amazon_side_asn", AttributeType::Int)
+            AttributeSchema::new("amazon_side_asn", AttributeType::int())
                 .create_only()
                 .with_description("A private Autonomous System Number (ASN) for the Amazon side of a BGP session. If you're using a 16-bit ASN, it must be in the 64512 to 65534 range. I...")
                 .with_provider_name("AmazonSideAsn"),
@@ -32,12 +32,12 @@ pub fn ec2_vpn_gateway_config() -> AwsSchemaConfig {
                 .with_provider_name("AvailabilityZone"),
         )
         .attribute(
-            AttributeSchema::new("type", AttributeType::StringEnum {
-                name: "Type".to_string(),
-                values: vec!["ipsec.1".to_string()],
-                identity: Some(carina_core::schema::string_enum_identity("Type", Some("aws.ec2.VpnGateway"))),
-                dsl_aliases: vec![("ipsec.1".to_string(), "ipsec_1".to_string())],
-            })
+            AttributeSchema::new("type", AttributeType::string_enum(
+                "Type".to_string(),
+                vec!["ipsec.1".to_string()],
+                Some(carina_core::schema::string_enum_identity("Type", Some("aws.ec2.VpnGateway"))),
+                vec![("ipsec.1".to_string(), "ipsec_1".to_string())],
+            ))
                 .required()
                 .create_only()
                 .with_description("The type of VPN connection this virtual private gateway supports.")

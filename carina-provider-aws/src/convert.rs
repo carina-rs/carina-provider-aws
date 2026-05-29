@@ -223,23 +223,23 @@ pub fn proto_to_core_data_source(r: &ProtoResource) -> CoreDataSource {
 
 fn proto_to_core_attribute_type(t: &ProtoAttributeType) -> CoreAttributeType {
     match t {
-        ProtoAttributeType::String => CoreAttributeType::String,
-        ProtoAttributeType::Int => CoreAttributeType::Int,
-        ProtoAttributeType::Float => CoreAttributeType::Float,
-        ProtoAttributeType::Bool => CoreAttributeType::Bool,
-        ProtoAttributeType::Duration => CoreAttributeType::Duration,
+        ProtoAttributeType::String => CoreAttributeType::string(),
+        ProtoAttributeType::Int => CoreAttributeType::int(),
+        ProtoAttributeType::Float => CoreAttributeType::float(),
+        ProtoAttributeType::Bool => CoreAttributeType::bool(),
+        ProtoAttributeType::Duration => CoreAttributeType::duration(),
         ProtoAttributeType::StringEnum {
             values,
             name,
             namespace,
             dsl_aliases,
-        } => CoreAttributeType::StringEnum {
-            name: name.clone(),
-            values: values.clone(),
+        } => CoreAttributeType::string_enum(
+            name.clone(),
+            values.clone(),
             // Lift the wire-form flat dotted prefix into the
             // structured `TypeIdentity` the core schema carries
             // post-#3222.
-            identity: namespace
+            namespace
                 .as_deref()
                 .filter(|s| !s.is_empty())
                 .map(|ns| carina_core::schema::string_enum_identity(name, Some(ns))),
@@ -247,35 +247,39 @@ fn proto_to_core_attribute_type(t: &ProtoAttributeType) -> CoreAttributeType {
             // validator's `matches_alias` arm can accept DSL spellings —
             // a `fn` pointer cannot survive proto serialization
             // (carina#2831 / aws#247).
-            dsl_aliases: dsl_aliases.clone(),
-        },
-        ProtoAttributeType::List { inner, ordered } => CoreAttributeType::List {
-            inner: Box::new(proto_to_core_attribute_type(inner)),
-            ordered: *ordered,
-        },
-        ProtoAttributeType::Map { inner, key } => CoreAttributeType::Map {
-            key: Box::new(proto_to_core_attribute_type(key)),
-            value: Box::new(proto_to_core_attribute_type(inner)),
-        },
-        ProtoAttributeType::Struct { name, fields } => CoreAttributeType::Struct {
-            name: name.clone(),
-            fields: fields.iter().map(proto_to_core_struct_field).collect(),
-        },
-        ProtoAttributeType::Union { members } => {
-            CoreAttributeType::Union(members.iter().map(proto_to_core_attribute_type).collect())
+            dsl_aliases.clone(),
+        ),
+        ProtoAttributeType::List { inner, ordered } => {
+            let inner_t = proto_to_core_attribute_type(inner);
+            if *ordered {
+                CoreAttributeType::list(inner_t)
+            } else {
+                CoreAttributeType::unordered_list(inner_t)
+            }
         }
-        ProtoAttributeType::Custom { name, base } => CoreAttributeType::Custom {
-            to_dsl: None,
-            identity: if name.is_empty() {
+        ProtoAttributeType::Map { inner, key } => CoreAttributeType::map_with_key(
+            proto_to_core_attribute_type(key),
+            proto_to_core_attribute_type(inner),
+        ),
+        ProtoAttributeType::Struct { name, fields } => CoreAttributeType::struct_(
+            name.clone(),
+            fields.iter().map(proto_to_core_struct_field).collect(),
+        ),
+        ProtoAttributeType::Union { members } => {
+            CoreAttributeType::union(members.iter().map(proto_to_core_attribute_type).collect())
+        }
+        ProtoAttributeType::Custom { name, base } => CoreAttributeType::custom(
+            if name.is_empty() {
                 None
             } else {
                 Some(carina_core::schema::TypeIdentity::from_dotted(name))
             },
-            pattern: None,
-            length: None,
-            base: Box::new(proto_to_core_attribute_type(base)),
-            validate: noop_validator(),
-        },
+            proto_to_core_attribute_type(base),
+            None,
+            None,
+            noop_validator(),
+            None,
+        ),
         // CustomEnum: carries a mandatory identity, lifted from the
         // wire-form flat `(name, namespace)` pair via the
         // `string_enum_identity` helper. Matches the post-#3222 core
@@ -285,17 +289,17 @@ fn proto_to_core_attribute_type(t: &ProtoAttributeType) -> CoreAttributeType {
             name,
             base,
             namespace,
-        } => CoreAttributeType::CustomEnum {
-            identity: carina_core::schema::string_enum_identity(name, Some(namespace.as_str())),
-            base: Box::new(proto_to_core_attribute_type(base)),
-            validate: noop_validator(),
-            to_dsl: None,
-        },
+        } => CoreAttributeType::custom_enum(
+            carina_core::schema::string_enum_identity(name, Some(namespace.as_str())),
+            proto_to_core_attribute_type(base),
+            noop_validator(),
+            None,
+        ),
         // Cyclic CFN struct reference (carina#3340). The host's
-        // structural counterpart is `AttributeType::Ref`; the matching
+        // structural counterpart is `AttributeType::ref_`; the matching
         // `ResourceSchema.defs` map is converted alongside in
         // `proto_to_core_schema` so resolution at walk-sites succeeds.
-        ProtoAttributeType::Ref { name } => CoreAttributeType::Ref(name.clone()),
+        ProtoAttributeType::Ref { name } => CoreAttributeType::ref_(name.clone()),
     }
 }
 
@@ -383,71 +387,75 @@ fn core_to_proto_schema_kind(k: CoreSchemaKind) -> ProtoSchemaKind {
 }
 
 fn core_to_proto_attribute_type(t: &CoreAttributeType) -> ProtoAttributeType {
-    match t {
-        CoreAttributeType::String => ProtoAttributeType::String,
-        CoreAttributeType::Int => ProtoAttributeType::Int,
-        CoreAttributeType::Float => ProtoAttributeType::Float,
-        CoreAttributeType::Bool => ProtoAttributeType::Bool,
+    use carina_core::schema::{Shape, empty_defs};
+    // `core_to_proto_attribute_type` is called with `empty_defs()` because
+    // schema-level `defs` carry through `core_to_proto_schema` as their own
+    // wire field (`ProtoResourceSchema.defs`). Refs cannot appear inside a
+    // non-`defs` AttributeType tree on the producer side: codegen never
+    // emits `AttributeType::ref_(...)` in this provider repo — all cyclic
+    // structures are flat-expanded in the generated schemas. If a Ref does
+    // appear in `defs`, it is encoded directly via the wire-level
+    // `ProtoAttributeType::Ref { name }` arm below by special-casing the
+    // pre-shape inspection.
+    match t.shape(empty_defs()) {
+        Shape::String => ProtoAttributeType::String,
+        Shape::Int => ProtoAttributeType::Int,
+        Shape::Float => ProtoAttributeType::Float,
+        Shape::Bool => ProtoAttributeType::Bool,
         // `Duration` is now a first-class proto variant (carina#3166) so
         // providers can declare Duration-typed schema attributes and the
         // host's type checker accepts DSL literals like `30min` / `1h` /
         // `15s` against them. The WIT *value* boundary is still
         // integer-seconds (see carina-plugin-host wasm_convert.rs:60-76),
         // but the *type* boundary now round-trips faithfully.
-        CoreAttributeType::Duration => ProtoAttributeType::Duration,
-        CoreAttributeType::StringEnum {
+        Shape::Duration => ProtoAttributeType::Duration,
+        Shape::StringEnum {
             values,
             name,
             identity,
             dsl_aliases,
         } => ProtoAttributeType::StringEnum {
-            values: values.clone(),
-            name: name.clone(),
+            values: values.to_vec(),
+            name: name.to_string(),
             // The wire form still carries the dotted prefix as a flat
             // string. `dotted_prefix()` is the inverse of
             // `string_enum_identity`: provider + segments without the
             // trailing `kind`.
-            namespace: identity.as_ref().and_then(|id| id.dotted_prefix()),
-            dsl_aliases: dsl_aliases.clone(),
+            namespace: identity.and_then(|id| id.dotted_prefix()),
+            dsl_aliases: dsl_aliases.to_vec(),
         },
-        CoreAttributeType::List { inner, ordered } => ProtoAttributeType::List {
+        Shape::List { inner, ordered } => ProtoAttributeType::List {
             inner: Box::new(core_to_proto_attribute_type(inner)),
-            ordered: *ordered,
+            ordered,
         },
-        CoreAttributeType::Map { key, value: inner } => ProtoAttributeType::Map {
+        Shape::Map { key, value: inner } => ProtoAttributeType::Map {
             inner: Box::new(core_to_proto_attribute_type(inner)),
             key: Box::new(core_to_proto_attribute_type(key)),
         },
-        CoreAttributeType::Struct { name, fields } => ProtoAttributeType::Struct {
-            name: name.clone(),
+        Shape::Struct { name, fields } => ProtoAttributeType::Struct {
+            name: name.to_string(),
             fields: fields.iter().map(core_to_proto_struct_field).collect(),
         },
-        CoreAttributeType::Custom { identity, base, .. } => ProtoAttributeType::Custom {
+        Shape::Custom { identity, base, .. } => ProtoAttributeType::Custom {
             // Serialize the structured identity to its dotted display
             // form for the wire. The host's `TypeIdentity::from_dotted`
             // parses it back on the other side, so the provider axis
             // survives the JSON round-trip.
-            name: identity
-                .as_ref()
-                .map(|id| id.to_string())
-                .unwrap_or_default(),
+            name: identity.map(|id| id.to_string()).unwrap_or_default(),
             base: Box::new(core_to_proto_attribute_type(base)),
         },
         // CustomEnum carries the enum-shorthand marker as a type-level
         // fact (carina#3222); on the wire form it still travels as a
         // separate `CustomEnum` variant with the dotted prefix as a
         // flat string.
-        CoreAttributeType::CustomEnum { identity, base, .. } => ProtoAttributeType::CustomEnum {
+        Shape::CustomEnum { identity, base, .. } => ProtoAttributeType::CustomEnum {
             name: identity.to_string(),
             base: Box::new(core_to_proto_attribute_type(base)),
             namespace: identity.dotted_prefix().unwrap_or_default(),
         },
-        CoreAttributeType::Union(members) => ProtoAttributeType::Union {
+        Shape::Union(members) => ProtoAttributeType::Union {
             members: members.iter().map(core_to_proto_attribute_type).collect(),
         },
-        // Cyclic CFN struct reference (carina#3340). Passes through
-        // unchanged so the host can reconstruct the structural Ref.
-        CoreAttributeType::Ref(name) => ProtoAttributeType::Ref { name: name.clone() },
     }
 }
 
@@ -514,18 +522,18 @@ mod tests {
 
     #[test]
     fn test_string_enum_name_roundtrip() {
-        let core_type = CoreAttributeType::StringEnum {
-            name: "VersioningStatus".to_string(),
-            values: vec!["Enabled".to_string(), "Suspended".to_string()],
-            identity: Some(carina_core::schema::string_enum_identity(
+        let core_type = CoreAttributeType::string_enum(
+            "VersioningStatus".to_string(),
+            vec!["Enabled".to_string(), "Suspended".to_string()],
+            Some(carina_core::schema::string_enum_identity(
                 "VersioningStatus",
                 Some("aws.s3.Bucket"),
             )),
-            dsl_aliases: vec![
+            vec![
                 ("Enabled".to_string(), "enabled".to_string()),
                 ("Suspended".to_string(), "suspended".to_string()),
             ],
-        };
+        );
         let proto_type = core_to_proto_attribute_type(&core_type);
         match &proto_type {
             ProtoAttributeType::StringEnum {
@@ -551,12 +559,13 @@ mod tests {
             _ => panic!("Expected StringEnum"),
         }
         let roundtrip = proto_to_core_attribute_type(&proto_type);
-        match roundtrip {
-            CoreAttributeType::StringEnum { name, values, .. } => {
-                assert_eq!(name, "VersioningStatus");
-                assert_eq!(values, vec!["Enabled", "Suspended"]);
-            }
-            _ => panic!("Expected StringEnum"),
+        if let carina_core::schema::Shape::StringEnum { name, values, .. } =
+            roundtrip.shape(carina_core::schema::empty_defs())
+        {
+            assert_eq!(name, "VersioningStatus");
+            assert_eq!(values, &["Enabled", "Suspended"]);
+        } else {
+            panic!("Expected StringEnum");
         }
     }
 }

@@ -28,36 +28,36 @@ pub fn ec2_nat_gateway_config() -> AwsSchemaConfig {
                 .with_provider_name("AllocationId"),
         )
         .attribute(
-            AttributeSchema::new("availability_mode", AttributeType::StringEnum {
-                name: "AvailabilityMode".to_string(),
-                values: vec!["regional".to_string(), "zonal".to_string()],
-                identity: Some(carina_core::schema::string_enum_identity("AvailabilityMode", Some("aws.ec2.NatGateway"))),
-                dsl_aliases: vec![("regional".to_string(), "regional".to_string()), ("zonal".to_string(), "zonal".to_string())],
-            })
+            AttributeSchema::new("availability_mode", AttributeType::string_enum(
+                "AvailabilityMode".to_string(),
+                vec!["regional".to_string(), "zonal".to_string()],
+                Some(carina_core::schema::string_enum_identity("AvailabilityMode", Some("aws.ec2.NatGateway"))),
+                vec![("regional".to_string(), "regional".to_string()), ("zonal".to_string(), "zonal".to_string())],
+            ))
                 .create_only()
                 .with_description("Specifies whether to create a zonal (single-AZ) or regional (multi-AZ) NAT gateway. Defaults to zonal. A zonal NAT gateway is a NAT Gateway that provi...")
                 .with_provider_name("AvailabilityMode"),
         )
         .attribute(
-            AttributeSchema::new("availability_zone_addresses", AttributeType::list(AttributeType::Struct {
-                    name: "AvailabilityZoneAddress".to_string(),
-                    fields: vec![
+            AttributeSchema::new("availability_zone_addresses", AttributeType::list(AttributeType::struct_(
+                    "AvailabilityZoneAddress".to_string(),
+                    vec![
                     StructField::new("allocation_ids", AttributeType::list(super::allocation_id())).with_description("The allocation IDs of the Elastic IP addresses (EIPs) to be used for handling outbound NAT traffic in this specific Availability Zone.").with_provider_name("AllocationIds"),
                     StructField::new("availability_zone", super::availability_zone()).with_description("For regional NAT gateways only: The Availability Zone where this specific NAT gateway configuration will be active. Each AZ in a regional NAT gateway ...").with_provider_name("AvailabilityZone"),
                     StructField::new("availability_zone_id", super::availability_zone_id()).with_description("For regional NAT gateways only: The ID of the Availability Zone where this specific NAT gateway configuration will be active. Each AZ in a regional NA...").with_provider_name("AvailabilityZoneId")
                     ],
-                }))
+                )))
                 .create_only()
                 .with_description("For regional NAT gateways only: Specifies which Availability Zones you want the NAT gateway to support and the Elastic IP addresses (EIPs) to use in e...")
                 .with_provider_name("AvailabilityZoneAddresses"),
         )
         .attribute(
-            AttributeSchema::new("connectivity_type", AttributeType::StringEnum {
-                name: "ConnectivityType".to_string(),
-                values: vec!["private".to_string(), "public".to_string()],
-                identity: Some(carina_core::schema::string_enum_identity("ConnectivityType", Some("aws.ec2.NatGateway"))),
-                dsl_aliases: vec![("private".to_string(), "private".to_string()), ("public".to_string(), "public".to_string())],
-            })
+            AttributeSchema::new("connectivity_type", AttributeType::string_enum(
+                "ConnectivityType".to_string(),
+                vec!["private".to_string(), "public".to_string()],
+                Some(carina_core::schema::string_enum_identity("ConnectivityType", Some("aws.ec2.NatGateway"))),
+                vec![("private".to_string(), "private".to_string()), ("public".to_string(), "public".to_string())],
+            ))
                 .create_only()
                 .with_description("Indicates whether the NAT gateway supports public or private connectivity. The default is public connectivity.")
                 .with_provider_name("ConnectivityType"),

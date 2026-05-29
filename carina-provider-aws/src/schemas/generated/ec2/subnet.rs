@@ -47,7 +47,7 @@ pub fn ec2_subnet_config() -> AwsSchemaConfig {
         schema: ResourceSchema::new("ec2.Subnet")
         .with_description("Describes a subnet.")
         .attribute(
-            AttributeSchema::new("assign_ipv6_address_on_creation", AttributeType::Bool)
+            AttributeSchema::new("assign_ipv6_address_on_creation", AttributeType::bool())
                 .with_description("Indicates whether a network interface created in this subnet (including a network interface created by RunInstances) receives an IPv6 address.")
                 .with_provider_name("AssignIpv6AddressOnCreation"),
         )
@@ -70,12 +70,12 @@ pub fn ec2_subnet_config() -> AwsSchemaConfig {
                 .with_provider_name("CidrBlock"),
         )
         .attribute(
-            AttributeSchema::new("enable_dns64", AttributeType::Bool)
+            AttributeSchema::new("enable_dns64", AttributeType::bool())
                 .with_description("Indicates whether DNS queries made to the Amazon-provided DNS Resolver in this subnet should return synthetic IPv6 addresses for IPv4-only destination...")
                 .with_provider_name("EnableDns64"),
         )
         .attribute(
-            AttributeSchema::new("enable_lni_at_device_index", AttributeType::Int)
+            AttributeSchema::new("enable_lni_at_device_index", AttributeType::int())
                 .with_description("Indicates the device position for local network interfaces in this subnet. For example, 1 indicates local network interfaces in this subnet are the se...")
                 .with_provider_name("EnableLniAtDeviceIndex"),
         )
@@ -86,14 +86,14 @@ pub fn ec2_subnet_config() -> AwsSchemaConfig {
                 .with_provider_name("Ipv4IpamPoolId"),
         )
         .attribute(
-            AttributeSchema::new("ipv4_netmask_length", AttributeType::Custom {
-                identity: None,
-                pattern: None,
-                length: Some((Some(0), Some(32))),
-                base: Box::new(AttributeType::Int),
-                validate: legacy_validator(validate_ipv4_netmask_length_range),
-                to_dsl: None,
-            })
+            AttributeSchema::new("ipv4_netmask_length", AttributeType::custom(
+                None,
+                AttributeType::int(),
+                None,
+                Some((Some(0), Some(32))),
+                legacy_validator(validate_ipv4_netmask_length_range),
+                None,
+            ))
                 .create_only()
                 .with_description("An IPv4 netmask length for the subnet.")
                 .with_provider_name("Ipv4NetmaskLength"),
@@ -111,26 +111,26 @@ pub fn ec2_subnet_config() -> AwsSchemaConfig {
                 .with_provider_name("Ipv6IpamPoolId"),
         )
         .attribute(
-            AttributeSchema::new("ipv6_native", AttributeType::Bool)
+            AttributeSchema::new("ipv6_native", AttributeType::bool())
                 .create_only()
                 .with_description("Indicates whether to create an IPv6 only subnet.")
                 .with_provider_name("Ipv6Native"),
         )
         .attribute(
-            AttributeSchema::new("ipv6_netmask_length", AttributeType::Custom {
-                identity: None,
-                pattern: None,
-                length: Some((Some(0), Some(128))),
-                base: Box::new(AttributeType::Int),
-                validate: legacy_validator(validate_ipv6_netmask_length_range),
-                to_dsl: None,
-            })
+            AttributeSchema::new("ipv6_netmask_length", AttributeType::custom(
+                None,
+                AttributeType::int(),
+                None,
+                Some((Some(0), Some(128))),
+                legacy_validator(validate_ipv6_netmask_length_range),
+                None,
+            ))
                 .create_only()
                 .with_description("An IPv6 netmask length for the subnet.")
                 .with_provider_name("Ipv6NetmaskLength"),
         )
         .attribute(
-            AttributeSchema::new("map_public_ip_on_launch", AttributeType::Bool)
+            AttributeSchema::new("map_public_ip_on_launch", AttributeType::bool())
                 .with_description("Indicates whether instances launched in this subnet receive a public IPv4 address. Amazon Web Services charges for all public IPv4 addresses, includin...")
                 .with_provider_name("MapPublicIpOnLaunch"),
         )
@@ -141,19 +141,19 @@ pub fn ec2_subnet_config() -> AwsSchemaConfig {
                 .with_provider_name("OutpostArn"),
         )
         .attribute(
-            AttributeSchema::new("private_dns_name_options_on_launch", AttributeType::Struct {
-                    name: "PrivateDnsNameOptionsOnLaunch".to_string(),
-                    fields: vec![
-                    StructField::new("enable_resource_name_dns_aaaa_record", AttributeType::Bool).with_description("Indicates whether to respond to DNS queries for instance hostname with DNS AAAA records.").with_provider_name("EnableResourceNameDnsAAAARecord"),
-                    StructField::new("enable_resource_name_dns_a_record", AttributeType::Bool).with_description("Indicates whether to respond to DNS queries for instance hostnames with DNS A records.").with_provider_name("EnableResourceNameDnsARecord"),
-                    StructField::new("hostname_type", AttributeType::StringEnum {
-                name: "HostnameType".to_string(),
-                values: vec!["ip-name".to_string(), "resource-name".to_string()],
-                identity: Some(carina_core::schema::string_enum_identity("HostnameType", Some("aws.ec2.Subnet"))),
-                dsl_aliases: vec![("ip-name".to_string(), "ip_name".to_string()), ("resource-name".to_string(), "resource_name".to_string())],
-            }).with_description("The type of hostname for EC2 instances. For IPv4 only subnets, an instance DNS name must be based on the instance IPv4 address. For IPv6 only subnets,...").with_provider_name("HostnameType")
+            AttributeSchema::new("private_dns_name_options_on_launch", AttributeType::struct_(
+                    "PrivateDnsNameOptionsOnLaunch".to_string(),
+                    vec![
+                    StructField::new("enable_resource_name_dns_aaaa_record", AttributeType::bool()).with_description("Indicates whether to respond to DNS queries for instance hostname with DNS AAAA records.").with_provider_name("EnableResourceNameDnsAAAARecord"),
+                    StructField::new("enable_resource_name_dns_a_record", AttributeType::bool()).with_description("Indicates whether to respond to DNS queries for instance hostnames with DNS A records.").with_provider_name("EnableResourceNameDnsARecord"),
+                    StructField::new("hostname_type", AttributeType::string_enum(
+                "HostnameType".to_string(),
+                vec!["ip-name".to_string(), "resource-name".to_string()],
+                Some(carina_core::schema::string_enum_identity("HostnameType", Some("aws.ec2.Subnet"))),
+                vec![("ip-name".to_string(), "ip_name".to_string()), ("resource-name".to_string(), "resource_name".to_string())],
+            )).with_description("The type of hostname for EC2 instances. For IPv4 only subnets, an instance DNS name must be based on the instance IPv4 address. For IPv6 only subnets,...").with_provider_name("HostnameType")
                     ],
-                })
+                ))
                 .with_description("The type of hostnames to assign to instances in the subnet at launch. An instance hostname is based on the IPv4 address or ID of the instance.")
                 .with_provider_name("PrivateDnsNameOptionsOnLaunch"),
         )

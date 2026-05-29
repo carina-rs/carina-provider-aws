@@ -32,60 +32,60 @@ pub fn ec2_transit_gateway_config() -> AwsSchemaConfig {
         schema: ResourceSchema::new("ec2.TransitGateway")
         .with_description("Describes a transit gateway.")
         .attribute(
-            AttributeSchema::new("description", AttributeType::String)
+            AttributeSchema::new("description", AttributeType::string())
                 .with_description("A description of the transit gateway.")
                 .with_provider_name("Description"),
         )
         .attribute(
-            AttributeSchema::new("options", AttributeType::Struct {
-                    name: "TransitGatewayRequestOptions".to_string(),
-                    fields: vec![
-                    StructField::new("amazon_side_asn", AttributeType::Int).with_description("A private Autonomous System Number (ASN) for the Amazon side of a BGP session. The range is 64512 to 65534 for 16-bit ASNs and 4200000000 to 429496729...").with_provider_name("AmazonSideAsn"),
-                    StructField::new("auto_accept_shared_attachments", AttributeType::StringEnum {
-                name: "AutoAcceptSharedAttachments".to_string(),
-                values: vec!["disable".to_string(), "enable".to_string()],
-                identity: Some(carina_core::schema::string_enum_identity("AutoAcceptSharedAttachments", Some("aws.ec2.TransitGateway"))),
-                dsl_aliases: vec![("disable".to_string(), "disable".to_string()), ("enable".to_string(), "enable".to_string())],
-            }).with_description("Enable or disable automatic acceptance of attachment requests. Disabled by default.").with_provider_name("AutoAcceptSharedAttachments"),
-                    StructField::new("default_route_table_association", AttributeType::StringEnum {
-                name: "DefaultRouteTableAssociation".to_string(),
-                values: vec!["disable".to_string(), "enable".to_string()],
-                identity: Some(carina_core::schema::string_enum_identity("DefaultRouteTableAssociation", Some("aws.ec2.TransitGateway"))),
-                dsl_aliases: vec![("disable".to_string(), "disable".to_string()), ("enable".to_string(), "enable".to_string())],
-            }).with_description("Enable or disable automatic association with the default association route table. Enabled by default.").with_provider_name("DefaultRouteTableAssociation"),
-                    StructField::new("default_route_table_propagation", AttributeType::StringEnum {
-                name: "DefaultRouteTablePropagation".to_string(),
-                values: vec!["disable".to_string(), "enable".to_string()],
-                identity: Some(carina_core::schema::string_enum_identity("DefaultRouteTablePropagation", Some("aws.ec2.TransitGateway"))),
-                dsl_aliases: vec![("disable".to_string(), "disable".to_string()), ("enable".to_string(), "enable".to_string())],
-            }).with_description("Enable or disable automatic propagation of routes to the default propagation route table. Enabled by default.").with_provider_name("DefaultRouteTablePropagation"),
-                    StructField::new("dns_support", AttributeType::StringEnum {
-                name: "DnsSupport".to_string(),
-                values: vec!["disable".to_string(), "enable".to_string()],
-                identity: Some(carina_core::schema::string_enum_identity("DnsSupport", Some("aws.ec2.TransitGateway"))),
-                dsl_aliases: vec![("disable".to_string(), "disable".to_string()), ("enable".to_string(), "enable".to_string())],
-            }).with_description("Enable or disable DNS support. Enabled by default.").with_provider_name("DnsSupport"),
-                    StructField::new("multicast_support", AttributeType::StringEnum {
-                name: "MulticastSupport".to_string(),
-                values: vec!["disable".to_string(), "enable".to_string()],
-                identity: Some(carina_core::schema::string_enum_identity("MulticastSupport", Some("aws.ec2.TransitGateway"))),
-                dsl_aliases: vec![("disable".to_string(), "disable".to_string()), ("enable".to_string(), "enable".to_string())],
-            }).with_description("Indicates whether multicast is enabled on the transit gateway").with_provider_name("MulticastSupport"),
-                    StructField::new("security_group_referencing_support", AttributeType::StringEnum {
-                name: "SecurityGroupReferencingSupport".to_string(),
-                values: vec!["disable".to_string(), "enable".to_string()],
-                identity: Some(carina_core::schema::string_enum_identity("SecurityGroupReferencingSupport", Some("aws.ec2.TransitGateway"))),
-                dsl_aliases: vec![("disable".to_string(), "disable".to_string()), ("enable".to_string(), "enable".to_string())],
-            }).with_description("Enables you to reference a security group across VPCs attached to a transit gateway to simplify security group management. This option is disabled by ...").with_provider_name("SecurityGroupReferencingSupport"),
+            AttributeSchema::new("options", AttributeType::struct_(
+                    "TransitGatewayRequestOptions".to_string(),
+                    vec![
+                    StructField::new("amazon_side_asn", AttributeType::int()).with_description("A private Autonomous System Number (ASN) for the Amazon side of a BGP session. The range is 64512 to 65534 for 16-bit ASNs and 4200000000 to 429496729...").with_provider_name("AmazonSideAsn"),
+                    StructField::new("auto_accept_shared_attachments", AttributeType::string_enum(
+                "AutoAcceptSharedAttachments".to_string(),
+                vec!["disable".to_string(), "enable".to_string()],
+                Some(carina_core::schema::string_enum_identity("AutoAcceptSharedAttachments", Some("aws.ec2.TransitGateway"))),
+                vec![("disable".to_string(), "disable".to_string()), ("enable".to_string(), "enable".to_string())],
+            )).with_description("Enable or disable automatic acceptance of attachment requests. Disabled by default.").with_provider_name("AutoAcceptSharedAttachments"),
+                    StructField::new("default_route_table_association", AttributeType::string_enum(
+                "DefaultRouteTableAssociation".to_string(),
+                vec!["disable".to_string(), "enable".to_string()],
+                Some(carina_core::schema::string_enum_identity("DefaultRouteTableAssociation", Some("aws.ec2.TransitGateway"))),
+                vec![("disable".to_string(), "disable".to_string()), ("enable".to_string(), "enable".to_string())],
+            )).with_description("Enable or disable automatic association with the default association route table. Enabled by default.").with_provider_name("DefaultRouteTableAssociation"),
+                    StructField::new("default_route_table_propagation", AttributeType::string_enum(
+                "DefaultRouteTablePropagation".to_string(),
+                vec!["disable".to_string(), "enable".to_string()],
+                Some(carina_core::schema::string_enum_identity("DefaultRouteTablePropagation", Some("aws.ec2.TransitGateway"))),
+                vec![("disable".to_string(), "disable".to_string()), ("enable".to_string(), "enable".to_string())],
+            )).with_description("Enable or disable automatic propagation of routes to the default propagation route table. Enabled by default.").with_provider_name("DefaultRouteTablePropagation"),
+                    StructField::new("dns_support", AttributeType::string_enum(
+                "DnsSupport".to_string(),
+                vec!["disable".to_string(), "enable".to_string()],
+                Some(carina_core::schema::string_enum_identity("DnsSupport", Some("aws.ec2.TransitGateway"))),
+                vec![("disable".to_string(), "disable".to_string()), ("enable".to_string(), "enable".to_string())],
+            )).with_description("Enable or disable DNS support. Enabled by default.").with_provider_name("DnsSupport"),
+                    StructField::new("multicast_support", AttributeType::string_enum(
+                "MulticastSupport".to_string(),
+                vec!["disable".to_string(), "enable".to_string()],
+                Some(carina_core::schema::string_enum_identity("MulticastSupport", Some("aws.ec2.TransitGateway"))),
+                vec![("disable".to_string(), "disable".to_string()), ("enable".to_string(), "enable".to_string())],
+            )).with_description("Indicates whether multicast is enabled on the transit gateway").with_provider_name("MulticastSupport"),
+                    StructField::new("security_group_referencing_support", AttributeType::string_enum(
+                "SecurityGroupReferencingSupport".to_string(),
+                vec!["disable".to_string(), "enable".to_string()],
+                Some(carina_core::schema::string_enum_identity("SecurityGroupReferencingSupport", Some("aws.ec2.TransitGateway"))),
+                vec![("disable".to_string(), "disable".to_string()), ("enable".to_string(), "enable".to_string())],
+            )).with_description("Enables you to reference a security group across VPCs attached to a transit gateway to simplify security group management. This option is disabled by ...").with_provider_name("SecurityGroupReferencingSupport"),
                     StructField::new("transit_gateway_cidr_blocks", AttributeType::list(types::ipv4_cidr())).with_description("One or more IPv4 or IPv6 CIDR blocks for the transit gateway. Must be a size /24 CIDR block or larger for IPv4, or a size /64 CIDR block or larger for...").with_provider_name("TransitGatewayCidrBlocks"),
-                    StructField::new("vpn_ecmp_support", AttributeType::StringEnum {
-                name: "VpnEcmpSupport".to_string(),
-                values: vec!["disable".to_string(), "enable".to_string()],
-                identity: Some(carina_core::schema::string_enum_identity("VpnEcmpSupport", Some("aws.ec2.TransitGateway"))),
-                dsl_aliases: vec![("disable".to_string(), "disable".to_string()), ("enable".to_string(), "enable".to_string())],
-            }).with_description("Enable or disable Equal Cost Multipath Protocol support. Enabled by default.").with_provider_name("VpnEcmpSupport")
+                    StructField::new("vpn_ecmp_support", AttributeType::string_enum(
+                "VpnEcmpSupport".to_string(),
+                vec!["disable".to_string(), "enable".to_string()],
+                Some(carina_core::schema::string_enum_identity("VpnEcmpSupport", Some("aws.ec2.TransitGateway"))),
+                vec![("disable".to_string(), "disable".to_string()), ("enable".to_string(), "enable".to_string())],
+            )).with_description("Enable or disable Equal Cost Multipath Protocol support. Enabled by default.").with_provider_name("VpnEcmpSupport")
                     ],
-                })
+                ))
                 .create_only()
                 .with_description("The transit gateway options.")
                 .with_provider_name("Options"),

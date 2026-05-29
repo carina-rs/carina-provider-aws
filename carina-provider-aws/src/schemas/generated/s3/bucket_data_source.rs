@@ -16,7 +16,7 @@ pub fn s3_bucket_data_source_config() -> AwsSchemaConfig {
         schema: ResourceSchema::new("s3.Bucket")
         .as_data_source()
         .attribute(
-            AttributeSchema::new("bucket", AttributeType::String)
+            AttributeSchema::new("bucket", AttributeType::string())
             .required()
                 .with_description("Name of the S3 bucket to look up.")
                 .with_provider_name("Bucket"),
@@ -27,22 +27,22 @@ pub fn s3_bucket_data_source_config() -> AwsSchemaConfig {
                 .with_provider_name(""),
         )
         .attribute(
-            AttributeSchema::new("region", AttributeType::String)
+            AttributeSchema::new("region", AttributeType::string())
                 .with_description("AWS region the bucket is in.")
                 .with_provider_name("LocationConstraint"),
         )
         .attribute(
-            AttributeSchema::new("bucket_domain_name", AttributeType::String)
+            AttributeSchema::new("bucket_domain_name", AttributeType::string())
                 .with_description("Bucket domain name (`<bucket>.s3.amazonaws.com`).")
                 .with_provider_name(""),
         )
         .attribute(
-            AttributeSchema::new("bucket_regional_domain_name", AttributeType::String)
+            AttributeSchema::new("bucket_regional_domain_name", AttributeType::string())
                 .with_description("Region-specific bucket domain name (`<bucket>.s3.<region>.amazonaws.com`).")
                 .with_provider_name(""),
         )
         .attribute(
-            AttributeSchema::new("hosted_zone_id", AttributeType::String)
+            AttributeSchema::new("hosted_zone_id", AttributeType::string())
                 .with_description("Route 53 Hosted Zone ID for the bucket's region.")
                 .with_provider_name(""),
         )

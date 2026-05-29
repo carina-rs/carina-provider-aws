@@ -167,8 +167,9 @@ fn api_canonicalize_recursive(value: &Value, attr_type: &AttributeType) -> Optio
         return Some(Value::Concrete(ConcreteValue::String(api)));
     }
 
-    match attr_type {
-        AttributeType::Struct { fields, .. } => {
+    use carina_core::schema::{Shape, empty_defs};
+    match attr_type.shape(empty_defs()) {
+        Shape::Struct { fields, .. } => {
             let Value::Concrete(ConcreteValue::Map(map)) = value else {
                 return None;
             };
@@ -185,7 +186,7 @@ fn api_canonicalize_recursive(value: &Value, attr_type: &AttributeType) -> Optio
             }
             changed.then_some(Value::Concrete(ConcreteValue::Map(rewritten)))
         }
-        AttributeType::List { inner, .. } => {
+        Shape::List { inner, .. } => {
             let Value::Concrete(ConcreteValue::List(items)) = value else {
                 return None;
             };
@@ -199,7 +200,7 @@ fn api_canonicalize_recursive(value: &Value, attr_type: &AttributeType) -> Optio
             }
             changed.then_some(Value::Concrete(ConcreteValue::List(rewritten)))
         }
-        AttributeType::Map { key, value: inner } => {
+        Shape::Map { key, value: inner } => {
             let Value::Concrete(ConcreteValue::Map(map)) = value else {
                 return None;
             };
@@ -303,8 +304,9 @@ pub(crate) fn normalize_state_enums(resource_type: &str, attributes: &mut HashMa
                 }
             }
             // Normalize enum fields within struct (Map) values
-            if let carina_core::schema::AttributeType::Struct { fields, .. } =
-                &attr_schema.attr_type
+            if let carina_core::schema::Shape::Struct { fields, .. } = attr_schema
+                .attr_type
+                .shape(carina_core::schema::empty_defs())
                 && let Value::Concrete(ConcreteValue::Map(map_fields)) = value
             {
                 let mut normalized_map = map_fields.clone();

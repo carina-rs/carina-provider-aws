@@ -15,7 +15,7 @@ pub fn s3_bucket_cors_configuration_config() -> AwsSchemaConfig {
         has_tags: false,
         schema: ResourceSchema::new("s3.BucketCorsConfiguration")
             .attribute(
-                AttributeSchema::new("bucket", AttributeType::String)
+                AttributeSchema::new("bucket", AttributeType::string())
                     .required()
                     .create_only()
                     .with_description("Specifies the bucket impacted by the corsconfiguration.")
