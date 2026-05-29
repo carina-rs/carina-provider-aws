@@ -2515,7 +2515,9 @@ pub fn validate_condition_operators(value: &Value) -> Result<(), String> {
 
 /// Validate IAM policy document structure and condition operators.
 pub fn validate_iam_policy_document(value: &Value) -> Result<(), String> {
-    iam_policy_document()
+    // The IAM policy schema is flat (no `AttributeType::Ref`), so an
+    // empty `defs` map is sound here (carina#3345).
+    carina_core::schema::Schema::flat(iam_policy_document())
         .validate(value)
         .map_err(|e| e.to_string())?;
     validate_condition_operators(value)
@@ -2604,28 +2606,32 @@ mod tests {
     fn validate_arn_type_with_value() {
         let t = arn();
         assert!(
-            t.validate(&Value::Concrete(ConcreteValue::String(
-                "arn:aws:s3:::my-bucket".to_string()
-            )))
-            .is_ok()
+            carina_core::schema::Schema::flat(t.clone())
+                .validate(&Value::Concrete(ConcreteValue::String(
+                    "arn:aws:s3:::my-bucket".to_string()
+                )))
+                .is_ok()
         );
         assert!(
-            t.validate(&Value::Concrete(ConcreteValue::String(
-                "not-an-arn".to_string()
-            )))
-            .is_err()
-        );
-        assert!(
-            t.validate(&Value::Concrete(ConcreteValue::Int(42)))
+            carina_core::schema::Schema::flat(t.clone())
+                .validate(&Value::Concrete(ConcreteValue::String(
+                    "not-an-arn".to_string()
+                )))
                 .is_err()
         );
         assert!(
-            t.validate(&Value::resource_ref(
-                "role".to_string(),
-                "arn".to_string(),
-                vec![]
-            ))
-            .is_ok()
+            carina_core::schema::Schema::flat(t.clone())
+                .validate(&Value::Concrete(ConcreteValue::Int(42)))
+                .is_err()
+        );
+        assert!(
+            carina_core::schema::Schema::flat(t.clone())
+                .validate(&Value::resource_ref(
+                    "role".to_string(),
+                    "arn".to_string(),
+                    vec![]
+                ))
+                .is_ok()
         );
     }
 
@@ -2654,26 +2660,30 @@ mod tests {
     fn validate_aws_resource_id_type_with_value() {
         let t = aws_resource_id();
         assert!(
-            t.validate(&Value::Concrete(ConcreteValue::String(
-                "vpc-1a2b3c4d".to_string()
-            )))
-            .is_ok()
+            carina_core::schema::Schema::flat(t.clone())
+                .validate(&Value::Concrete(ConcreteValue::String(
+                    "vpc-1a2b3c4d".to_string()
+                )))
+                .is_ok()
         );
         assert!(
-            t.validate(&Value::Concrete(ConcreteValue::String("vpc".to_string())))
+            carina_core::schema::Schema::flat(t.clone())
+                .validate(&Value::Concrete(ConcreteValue::String("vpc".to_string())))
                 .is_err()
         );
         assert!(
-            t.validate(&Value::Concrete(ConcreteValue::Int(42)))
+            carina_core::schema::Schema::flat(t.clone())
+                .validate(&Value::Concrete(ConcreteValue::Int(42)))
                 .is_err()
         );
         assert!(
-            t.validate(&Value::resource_ref(
-                "my_vpc".to_string(),
-                "vpc_id".to_string(),
-                vec![]
-            ))
-            .is_ok()
+            carina_core::schema::Schema::flat(t.clone())
+                .validate(&Value::resource_ref(
+                    "my_vpc".to_string(),
+                    "vpc_id".to_string(),
+                    vec![]
+                ))
+                .is_ok()
         );
     }
 
@@ -2681,16 +2691,18 @@ mod tests {
     fn validate_vpc_cidr_block_association_id_valid() {
         let t = vpc_cidr_block_association_id();
         assert!(
-            t.validate(&Value::Concrete(ConcreteValue::String(
-                "vpc-cidr-assoc-12345678".to_string()
-            )))
-            .is_ok()
+            carina_core::schema::Schema::flat(t.clone())
+                .validate(&Value::Concrete(ConcreteValue::String(
+                    "vpc-cidr-assoc-12345678".to_string()
+                )))
+                .is_ok()
         );
         assert!(
-            t.validate(&Value::Concrete(ConcreteValue::String(
-                "vpc-cidr-assoc-0123456789abcdef0".to_string()
-            )))
-            .is_ok()
+            carina_core::schema::Schema::flat(t.clone())
+                .validate(&Value::Concrete(ConcreteValue::String(
+                    "vpc-cidr-assoc-0123456789abcdef0".to_string()
+                )))
+                .is_ok()
         );
     }
 
@@ -2698,16 +2710,18 @@ mod tests {
     fn validate_vpc_cidr_block_association_id_invalid() {
         let t = vpc_cidr_block_association_id();
         assert!(
-            t.validate(&Value::Concrete(ConcreteValue::String(
-                "vpc-12345678".to_string()
-            )))
-            .is_err()
+            carina_core::schema::Schema::flat(t.clone())
+                .validate(&Value::Concrete(ConcreteValue::String(
+                    "vpc-12345678".to_string()
+                )))
+                .is_err()
         );
         assert!(
-            t.validate(&Value::Concrete(ConcreteValue::String(
-                "invalid".to_string()
-            )))
-            .is_err()
+            carina_core::schema::Schema::flat(t.clone())
+                .validate(&Value::Concrete(ConcreteValue::String(
+                    "invalid".to_string()
+                )))
+                .is_err()
         );
     }
 
@@ -2715,16 +2729,18 @@ mod tests {
     fn validate_tgw_route_table_id_valid() {
         let t = tgw_route_table_id();
         assert!(
-            t.validate(&Value::Concrete(ConcreteValue::String(
-                "tgw-rtb-12345678".to_string()
-            )))
-            .is_ok()
+            carina_core::schema::Schema::flat(t.clone())
+                .validate(&Value::Concrete(ConcreteValue::String(
+                    "tgw-rtb-12345678".to_string()
+                )))
+                .is_ok()
         );
         assert!(
-            t.validate(&Value::Concrete(ConcreteValue::String(
-                "tgw-rtb-0123456789abcdef0".to_string()
-            )))
-            .is_ok()
+            carina_core::schema::Schema::flat(t.clone())
+                .validate(&Value::Concrete(ConcreteValue::String(
+                    "tgw-rtb-0123456789abcdef0".to_string()
+                )))
+                .is_ok()
         );
     }
 
@@ -2733,23 +2749,26 @@ mod tests {
         let t = tgw_route_table_id();
         // Regular route table ID should fail
         assert!(
-            t.validate(&Value::Concrete(ConcreteValue::String(
-                "rtb-12345678".to_string()
-            )))
-            .is_err()
+            carina_core::schema::Schema::flat(t.clone())
+                .validate(&Value::Concrete(ConcreteValue::String(
+                    "rtb-12345678".to_string()
+                )))
+                .is_err()
         );
         // Transit gateway ID should fail
         assert!(
-            t.validate(&Value::Concrete(ConcreteValue::String(
-                "tgw-12345678".to_string()
-            )))
-            .is_err()
+            carina_core::schema::Schema::flat(t.clone())
+                .validate(&Value::Concrete(ConcreteValue::String(
+                    "tgw-12345678".to_string()
+                )))
+                .is_err()
         );
         assert!(
-            t.validate(&Value::Concrete(ConcreteValue::String(
-                "invalid".to_string()
-            )))
-            .is_err()
+            carina_core::schema::Schema::flat(t.clone())
+                .validate(&Value::Concrete(ConcreteValue::String(
+                    "invalid".to_string()
+                )))
+                .is_err()
         );
     }
 
@@ -2819,28 +2838,32 @@ mod tests {
     fn validate_availability_zone_id_type_with_value() {
         let t = availability_zone_id();
         assert!(
-            t.validate(&Value::Concrete(ConcreteValue::String(
-                "use1-az1".to_string()
-            )))
-            .is_ok()
+            carina_core::schema::Schema::flat(t.clone())
+                .validate(&Value::Concrete(ConcreteValue::String(
+                    "use1-az1".to_string()
+                )))
+                .is_ok()
         );
         assert!(
-            t.validate(&Value::Concrete(ConcreteValue::String(
-                "us-east-1a".to_string()
-            )))
-            .is_err()
-        );
-        assert!(
-            t.validate(&Value::Concrete(ConcreteValue::Int(42)))
+            carina_core::schema::Schema::flat(t.clone())
+                .validate(&Value::Concrete(ConcreteValue::String(
+                    "us-east-1a".to_string()
+                )))
                 .is_err()
         );
         assert!(
-            t.validate(&Value::resource_ref(
-                "subnet".to_string(),
-                "availability_zone_id".to_string(),
-                vec![]
-            ))
-            .is_ok()
+            carina_core::schema::Schema::flat(t.clone())
+                .validate(&Value::Concrete(ConcreteValue::Int(42)))
+                .is_err()
+        );
+        assert!(
+            carina_core::schema::Schema::flat(t.clone())
+                .validate(&Value::resource_ref(
+                    "subnet".to_string(),
+                    "availability_zone_id".to_string(),
+                    vec![]
+                ))
+                .is_ok()
         );
     }
 
@@ -3186,7 +3209,11 @@ mod tests {
             .into_iter()
             .collect(),
         ));
-        assert!(t.validate(&valid_doc).is_ok());
+        assert!(
+            carina_core::schema::Schema::flat(t.clone())
+                .validate(&valid_doc)
+                .is_ok()
+        );
     }
 
     #[test]
@@ -3240,9 +3267,11 @@ mod tests {
             .collect(),
         ));
         assert!(
-            t.validate(&doc_with_principal_map).is_ok(),
+            carina_core::schema::Schema::flat(t.clone())
+                .validate(&doc_with_principal_map)
+                .is_ok(),
             "principal as map (struct) should be valid: {:?}",
-            t.validate(&doc_with_principal_map)
+            carina_core::schema::Schema::flat(t.clone()).validate(&doc_with_principal_map)
         );
     }
 
@@ -3288,9 +3317,11 @@ mod tests {
             .collect(),
         ));
         assert!(
-            t.validate(&doc_with_principal_string).is_ok(),
+            carina_core::schema::Schema::flat(t.clone())
+                .validate(&doc_with_principal_string)
+                .is_ok(),
             "principal as string should be valid: {:?}",
-            t.validate(&doc_with_principal_string)
+            carina_core::schema::Schema::flat(t.clone()).validate(&doc_with_principal_string)
         );
     }
 

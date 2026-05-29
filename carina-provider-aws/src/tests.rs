@@ -1639,34 +1639,30 @@ fn test_organization_feature_set_validates_snake_case_alias() {
     // to `StringLiteralExpectedEnum`. Both the API form (`ALL`) and the
     // DSL form (`all`) are identifier-shape inputs in real DSL — the
     // parser would emit `EnumIdentifier` for both. Mirror that here.
-    feature_set
-        .attr_type
+    let schema = carina_core::schema::Schema::flat(feature_set.attr_type.clone());
+    schema
         .validate(&Value::Concrete(ConcreteValue::EnumIdentifier(
             "ALL".to_string(),
         )))
         .expect("API spelling ALL should be accepted");
-    feature_set
-        .attr_type
+    schema
         .validate(&Value::Concrete(ConcreteValue::EnumIdentifier(
             "all".to_string(),
         )))
         .expect("DSL spelling all should be accepted");
-    feature_set
-        .attr_type
+    schema
         .validate(&Value::Concrete(ConcreteValue::EnumIdentifier(
             "CONSOLIDATED_BILLING".to_string(),
         )))
         .expect("API spelling CONSOLIDATED_BILLING should be accepted");
-    feature_set
-        .attr_type
+    schema
         .validate(&Value::Concrete(ConcreteValue::EnumIdentifier(
             "consolidated_billing".to_string(),
         )))
         .expect("DSL spelling consolidated_billing should be accepted");
     // Bogus values still rejected.
     assert!(
-        feature_set
-            .attr_type
+        schema
             .validate(&Value::Concrete(ConcreteValue::EnumIdentifier(
                 "not_a_value".to_string()
             )))
@@ -1692,26 +1688,23 @@ fn test_route53_record_type_validates_snake_case_alias() {
     // Phase 4 of carina#2986: use `EnumIdentifier` shape to reach the
     // variant-match path. A `ConcreteValue::String` here would route
     // to `StringLiteralExpectedEnum`.
-    type_attr
-        .attr_type
+    let schema = carina_core::schema::Schema::flat(type_attr.attr_type.clone());
+    schema
         .validate(&Value::Concrete(ConcreteValue::EnumIdentifier(
             "A".to_string(),
         )))
         .expect("API spelling A should be accepted");
-    type_attr
-        .attr_type
+    schema
         .validate(&Value::Concrete(ConcreteValue::EnumIdentifier(
             "a".to_string(),
         )))
         .expect("DSL spelling a should be accepted");
-    type_attr
-        .attr_type
+    schema
         .validate(&Value::Concrete(ConcreteValue::EnumIdentifier(
             "CNAME".to_string(),
         )))
         .expect("API spelling CNAME should be accepted");
-    type_attr
-        .attr_type
+    schema
         .validate(&Value::Concrete(ConcreteValue::EnumIdentifier(
             "cname".to_string(),
         )))

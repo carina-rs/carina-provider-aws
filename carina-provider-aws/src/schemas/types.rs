@@ -257,7 +257,7 @@ mod tests {
     fn region_accepts_aws_format() {
         let region_type = aws_region();
         assert!(
-            region_type
+            carina_core::schema::Schema::flat(region_type.clone())
                 .validate(&Value::Concrete(ConcreteValue::String(
                     "ap-northeast-1".to_string()
                 )))
@@ -269,7 +269,7 @@ mod tests {
     fn region_accepts_dsl_format() {
         let region_type = aws_region();
         assert!(
-            region_type
+            carina_core::schema::Schema::flat(region_type.clone())
                 .validate(&Value::Concrete(ConcreteValue::String(
                     "aws.Region.ap_northeast_1".to_string()
                 )))
@@ -281,7 +281,7 @@ mod tests {
     fn region_accepts_dsl_format_without_aws_prefix() {
         let region_type = aws_region();
         assert!(
-            region_type
+            carina_core::schema::Schema::flat(region_type.clone())
                 .validate(&Value::Concrete(ConcreteValue::String(
                     "Region.ap_northeast_1".to_string()
                 )))
@@ -292,9 +292,9 @@ mod tests {
     #[test]
     fn region_rejects_invalid_region() {
         let region_type = aws_region();
-        let result = region_type.validate(&Value::Concrete(ConcreteValue::String(
-            "invalid-region".to_string(),
-        )));
+        let result = carina_core::schema::Schema::flat(region_type.clone()).validate(
+            &Value::Concrete(ConcreteValue::String("invalid-region".to_string())),
+        );
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
         assert!(err.contains("Invalid region"));
@@ -306,7 +306,7 @@ mod tests {
         let region_type = aws_region();
         // ap-northeast-1a is an AZ, not a region
         assert!(
-            region_type
+            carina_core::schema::Schema::flat(region_type.clone())
                 .validate(&Value::Concrete(ConcreteValue::String(
                     "ap-northeast-1a".to_string()
                 )))
@@ -319,7 +319,7 @@ mod tests {
         let region_type = aws_region();
         for (region, _) in REGIONS {
             assert!(
-                region_type
+                carina_core::schema::Schema::flat(region_type.clone())
                     .validate(&Value::Concrete(ConcreteValue::String(region.to_string())))
                     .is_ok(),
                 "Region {} should be valid",
@@ -334,7 +334,7 @@ mod tests {
     fn az_accepts_aws_format() {
         let az_type = availability_zone();
         assert!(
-            az_type
+            carina_core::schema::Schema::flat(az_type.clone())
                 .validate(&Value::Concrete(ConcreteValue::String(
                     "us-east-1a".to_string()
                 )))
@@ -349,7 +349,7 @@ mod tests {
         // `ZoneName` kind segment — `aws.AvailabilityZone.ZoneName.<v>` —
         // matching the structured identity's dotted display.
         assert!(
-            az_type
+            carina_core::schema::Schema::flat(az_type.clone())
                 .validate(&Value::Concrete(ConcreteValue::String(
                     "aws.AvailabilityZone.ZoneName.us_east_1a".to_string()
                 )))
@@ -361,7 +361,7 @@ mod tests {
     fn az_accepts_shorthand_format() {
         let az_type = availability_zone();
         assert!(
-            az_type
+            carina_core::schema::Schema::flat(az_type.clone())
                 .validate(&Value::Concrete(ConcreteValue::String(
                     "us_east_1a".to_string()
                 )))
@@ -373,7 +373,7 @@ mod tests {
     fn az_rejects_invalid_az() {
         let az_type = availability_zone();
         assert!(
-            az_type
+            carina_core::schema::Schema::flat(az_type.clone())
                 .validate(&Value::Concrete(ConcreteValue::String(
                     "invalid-zone".to_string()
                 )))
@@ -385,7 +385,7 @@ mod tests {
     fn az_rejects_wrong_namespace() {
         let az_type = availability_zone();
         assert!(
-            az_type
+            carina_core::schema::Schema::flat(az_type.clone())
                 .validate(&Value::Concrete(ConcreteValue::String(
                     "gcp.AvailabilityZone.us_east_1a".to_string()
                 )))
@@ -427,11 +427,12 @@ mod tests {
     fn grantee_accepts_id_format() {
         let t = s3_grantee();
         assert!(
-            t.validate(&Value::Concrete(ConcreteValue::String(
-                "id=\"79a59df900b949e55d96a1e698fbacedfd6e09d98eacf8f8d5218e7cd47ef2be\""
-                    .to_string()
-            )))
-            .is_ok()
+            carina_core::schema::Schema::flat(t.clone())
+                .validate(&Value::Concrete(ConcreteValue::String(
+                    "id=\"79a59df900b949e55d96a1e698fbacedfd6e09d98eacf8f8d5218e7cd47ef2be\""
+                        .to_string()
+                )))
+                .is_ok()
         );
     }
 
@@ -439,10 +440,11 @@ mod tests {
     fn grantee_accepts_email_format() {
         let t = s3_grantee();
         assert!(
-            t.validate(&Value::Concrete(ConcreteValue::String(
-                "emailAddress=\"user@example.com\"".to_string()
-            )))
-            .is_ok()
+            carina_core::schema::Schema::flat(t.clone())
+                .validate(&Value::Concrete(ConcreteValue::String(
+                    "emailAddress=\"user@example.com\"".to_string()
+                )))
+                .is_ok()
         );
     }
 
@@ -450,10 +452,11 @@ mod tests {
     fn grantee_accepts_uri_format() {
         let t = s3_grantee();
         assert!(
-            t.validate(&Value::Concrete(ConcreteValue::String(
-                "uri=\"http://acs.amazonaws.com/groups/global/AllUsers\"".to_string()
-            )))
-            .is_ok()
+            carina_core::schema::Schema::flat(t.clone())
+                .validate(&Value::Concrete(ConcreteValue::String(
+                    "uri=\"http://acs.amazonaws.com/groups/global/AllUsers\"".to_string()
+                )))
+                .is_ok()
         );
     }
 
@@ -461,10 +464,11 @@ mod tests {
     fn grantee_accepts_multiple_specs() {
         let t = s3_grantee();
         assert!(
-            t.validate(&Value::Concrete(ConcreteValue::String(
-                "id=\"abc123\", emailAddress=\"user@example.com\"".to_string()
-            )))
-            .is_ok()
+            carina_core::schema::Schema::flat(t.clone())
+                .validate(&Value::Concrete(ConcreteValue::String(
+                    "id=\"abc123\", emailAddress=\"user@example.com\"".to_string()
+                )))
+                .is_ok()
         );
     }
 
@@ -472,7 +476,8 @@ mod tests {
     fn grantee_rejects_empty_string() {
         let t = s3_grantee();
         assert!(
-            t.validate(&Value::Concrete(ConcreteValue::String("".to_string())))
+            carina_core::schema::Schema::flat(t.clone())
+                .validate(&Value::Concrete(ConcreteValue::String("".to_string())))
                 .is_err()
         );
     }
@@ -480,9 +485,9 @@ mod tests {
     #[test]
     fn grantee_rejects_invalid_prefix() {
         let t = s3_grantee();
-        let result = t.validate(&Value::Concrete(ConcreteValue::String(
-            "foo=\"bar\"".to_string(),
-        )));
+        let result = carina_core::schema::Schema::flat(t.clone()).validate(&Value::Concrete(
+            ConcreteValue::String("foo=\"bar\"".to_string()),
+        ));
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
         assert!(err.contains("must start with id=, emailAddress=, or uri="));
@@ -492,28 +497,28 @@ mod tests {
     fn region_rejects_wrong_namespace() {
         let region_type = aws_region();
         assert!(
-            region_type
+            carina_core::schema::Schema::flat(region_type.clone())
                 .validate(&Value::Concrete(ConcreteValue::String(
                     "gcp.Region.ap_northeast_1".to_string()
                 )))
                 .is_err()
         );
         assert!(
-            region_type
+            carina_core::schema::Schema::flat(region_type.clone())
                 .validate(&Value::Concrete(ConcreteValue::String(
                     "aws.Location.ap_northeast_1".to_string()
                 )))
                 .is_err()
         );
         assert!(
-            region_type
+            carina_core::schema::Schema::flat(region_type.clone())
                 .validate(&Value::Concrete(ConcreteValue::String(
                     "foo.bar.baz.ap_northeast_1".to_string()
                 )))
                 .is_err()
         );
         assert!(
-            region_type
+            carina_core::schema::Schema::flat(region_type.clone())
                 .validate(&Value::Concrete(ConcreteValue::String(
                     "Location.ap_northeast_1".to_string()
                 )))
