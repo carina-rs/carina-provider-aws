@@ -57,7 +57,7 @@ pub fn ec2_security_group_egress_config() -> AwsSchemaConfig {
                     .with_provider_name("CidrIpv6"),
             )
             .attribute(
-                AttributeSchema::new("description", AttributeType::String)
+                AttributeSchema::new("description", AttributeType::string())
                     .create_only()
                     .with_description("The security group rule description.")
                     .with_provider_name("Description"),
@@ -71,14 +71,14 @@ pub fn ec2_security_group_egress_config() -> AwsSchemaConfig {
             .attribute(
                 AttributeSchema::new(
                     "from_port",
-                    AttributeType::Custom {
-                        identity: None,
-                        pattern: None,
-                        length: None,
-                        base: Box::new(AttributeType::Int),
-                        validate: legacy_validator(validate_from_port_range),
-                        to_dsl: None,
-                    },
+                    AttributeType::custom(
+                        None,
+                        AttributeType::int(),
+                        None,
+                        None,
+                        legacy_validator(validate_from_port_range),
+                        None,
+                    ),
                 )
                 .create_only()
                 .with_description("Not supported. Use IP permissions instead.")
@@ -94,9 +94,9 @@ pub fn ec2_security_group_egress_config() -> AwsSchemaConfig {
             .attribute(
                 AttributeSchema::new(
                     "ip_protocol",
-                    AttributeType::StringEnum {
-                        name: "IpProtocol".to_string(),
-                        values: vec![
+                    AttributeType::string_enum(
+                        "IpProtocol".to_string(),
+                        vec![
                             "tcp".to_string(),
                             "udp".to_string(),
                             "icmp".to_string(),
@@ -104,11 +104,11 @@ pub fn ec2_security_group_egress_config() -> AwsSchemaConfig {
                             "-1".to_string(),
                             "all".to_string(),
                         ],
-                        identity: Some(carina_core::schema::string_enum_identity(
+                        Some(carina_core::schema::string_enum_identity(
                             "IpProtocol",
                             Some("aws.ec2.SecurityGroupEgress"),
                         )),
-                        dsl_aliases: vec![
+                        vec![
                             ("-1".to_string(), "all".to_string()),
                             ("tcp".to_string(), "tcp".to_string()),
                             ("udp".to_string(), "udp".to_string()),
@@ -116,7 +116,7 @@ pub fn ec2_security_group_egress_config() -> AwsSchemaConfig {
                             ("icmpv6".to_string(), "icmpv6".to_string()),
                             ("all".to_string(), "all".to_string()),
                         ],
-                    },
+                    ),
                 )
                 .required()
                 .create_only()
@@ -124,7 +124,7 @@ pub fn ec2_security_group_egress_config() -> AwsSchemaConfig {
                 .with_provider_name("IpProtocol"),
             )
             .attribute(
-                AttributeSchema::new("source_security_group_name", AttributeType::String)
+                AttributeSchema::new("source_security_group_name", AttributeType::string())
                     .create_only()
                     .with_description("Not supported. Use IP permissions instead.")
                     .with_provider_name("SourceSecurityGroupName"),
@@ -138,14 +138,14 @@ pub fn ec2_security_group_egress_config() -> AwsSchemaConfig {
             .attribute(
                 AttributeSchema::new(
                     "to_port",
-                    AttributeType::Custom {
-                        identity: None,
-                        pattern: None,
-                        length: None,
-                        base: Box::new(AttributeType::Int),
-                        validate: legacy_validator(validate_to_port_range),
-                        to_dsl: None,
-                    },
+                    AttributeType::custom(
+                        None,
+                        AttributeType::int(),
+                        None,
+                        None,
+                        legacy_validator(validate_to_port_range),
+                        None,
+                    ),
                 )
                 .create_only()
                 .with_description("Not supported. Use IP permissions instead.")

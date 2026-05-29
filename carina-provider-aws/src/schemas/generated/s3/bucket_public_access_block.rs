@@ -15,29 +15,29 @@ pub fn s3_bucket_public_access_block_config() -> AwsSchemaConfig {
         has_tags: false,
         schema: ResourceSchema::new("s3.BucketPublicAccessBlock")
         .attribute(
-            AttributeSchema::new("bucket", AttributeType::String)
+            AttributeSchema::new("bucket", AttributeType::string())
                 .required()
                 .create_only()
                 .with_description("The name of the Amazon S3 bucket whose PublicAccessBlock configuration you want to set.")
                 .with_provider_name("Bucket"),
         )
         .attribute(
-            AttributeSchema::new("block_public_acls", AttributeType::Bool)
+            AttributeSchema::new("block_public_acls", AttributeType::bool())
                 .with_description("Block public ACLs on the bucket and its objects.")
                 .with_provider_name("BlockPublicAcls"),
         )
         .attribute(
-            AttributeSchema::new("ignore_public_acls", AttributeType::Bool)
+            AttributeSchema::new("ignore_public_acls", AttributeType::bool())
                 .with_description("Ignore any public ACLs on the bucket and its objects.")
                 .with_provider_name("IgnorePublicAcls"),
         )
         .attribute(
-            AttributeSchema::new("block_public_policy", AttributeType::Bool)
+            AttributeSchema::new("block_public_policy", AttributeType::bool())
                 .with_description("Block public bucket policies for the bucket.")
                 .with_provider_name("BlockPublicPolicy"),
         )
         .attribute(
-            AttributeSchema::new("restrict_public_buckets", AttributeType::Bool)
+            AttributeSchema::new("restrict_public_buckets", AttributeType::bool())
                 .with_description("Restrict access to the bucket to AWS service principals and authorized users when a public policy is set.")
                 .with_provider_name("RestrictPublicBuckets"),
         )

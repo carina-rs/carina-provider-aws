@@ -15,14 +15,14 @@ pub fn s3_bucket_ownership_controls_config() -> AwsSchemaConfig {
         has_tags: false,
         schema: ResourceSchema::new("s3.BucketOwnershipControls")
         .attribute(
-            AttributeSchema::new("bucket", AttributeType::String)
+            AttributeSchema::new("bucket", AttributeType::string())
                 .required()
                 .create_only()
                 .with_description("The name of the Amazon S3 bucket whose OwnershipControls you want to set.")
                 .with_provider_name("Bucket"),
         )
         .attribute(
-            AttributeSchema::new("object_ownership", AttributeType::StringEnum { name: "ObjectOwnership".to_string(), values: vec!["BucketOwnerEnforced".to_string(), "BucketOwnerPreferred".to_string(), "ObjectWriter".to_string()], identity: Some(carina_core::schema::string_enum_identity("ObjectOwnership", Some("aws.s3.BucketOwnershipControls"))), dsl_aliases: vec![("BucketOwnerEnforced".to_string(), "bucket_owner_enforced".to_string()), ("BucketOwnerPreferred".to_string(), "bucket_owner_preferred".to_string()), ("ObjectWriter".to_string(), "object_writer".to_string())] })
+            AttributeSchema::new("object_ownership", AttributeType::string_enum("ObjectOwnership".to_string(), vec!["BucketOwnerEnforced".to_string(), "BucketOwnerPreferred".to_string(), "ObjectWriter".to_string()], Some(carina_core::schema::string_enum_identity("ObjectOwnership", Some("aws.s3.BucketOwnershipControls"))), vec![("BucketOwnerEnforced".to_string(), "bucket_owner_enforced".to_string()), ("BucketOwnerPreferred".to_string(), "bucket_owner_preferred".to_string()), ("ObjectWriter".to_string(), "object_writer".to_string())]))
                 .required()
                 .with_description("Object ownership setting: BucketOwnerEnforced, BucketOwnerPreferred, or ObjectWriter.")
                 .with_provider_name("ObjectOwnership"),

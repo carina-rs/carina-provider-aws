@@ -31,12 +31,12 @@ pub fn ec2_vpc_endpoint_config() -> AwsSchemaConfig {
         schema: ResourceSchema::new("ec2.VpcEndpoint")
         .with_description("Describes a VPC endpoint.")
         .attribute(
-            AttributeSchema::new("policy_document", AttributeType::String)
+            AttributeSchema::new("policy_document", AttributeType::string())
                 .with_description("(Interface and gateway endpoints) A policy to attach to the endpoint that controls access to the service. The policy must be in valid JSON format. If ...")
                 .with_provider_name("PolicyDocument"),
         )
         .attribute(
-            AttributeSchema::new("private_dns_enabled", AttributeType::Bool)
+            AttributeSchema::new("private_dns_enabled", AttributeType::bool())
                 .with_description("(Interface endpoint) Indicates whether to associate a private hosted zone with the specified VPC. The private hosted zone contains a record set for th...")
                 .with_provider_name("PrivateDnsEnabled"),
         )
@@ -59,7 +59,7 @@ pub fn ec2_vpc_endpoint_config() -> AwsSchemaConfig {
                 .with_provider_name("SecurityGroupIds"),
         )
         .attribute(
-            AttributeSchema::new("service_name", AttributeType::String)
+            AttributeSchema::new("service_name", AttributeType::string())
                 .required()
                 .create_only()
                 .with_description("The name of the endpoint service.")
@@ -84,12 +84,12 @@ pub fn ec2_vpc_endpoint_config() -> AwsSchemaConfig {
                 .with_provider_name("SubnetIds"),
         )
         .attribute(
-            AttributeSchema::new("vpc_endpoint_type", AttributeType::StringEnum {
-                name: "VpcEndpointType".to_string(),
-                values: vec!["Gateway".to_string(), "GatewayLoadBalancer".to_string(), "Interface".to_string(), "Resource".to_string(), "ServiceNetwork".to_string()],
-                identity: Some(carina_core::schema::string_enum_identity("VpcEndpointType", Some("aws.ec2.VpcEndpoint"))),
-                dsl_aliases: vec![("Gateway".to_string(), "gateway".to_string()), ("GatewayLoadBalancer".to_string(), "gateway_load_balancer".to_string()), ("Interface".to_string(), "interface".to_string()), ("Resource".to_string(), "resource".to_string()), ("ServiceNetwork".to_string(), "service_network".to_string())],
-            })
+            AttributeSchema::new("vpc_endpoint_type", AttributeType::string_enum(
+                "VpcEndpointType".to_string(),
+                vec!["Gateway".to_string(), "GatewayLoadBalancer".to_string(), "Interface".to_string(), "Resource".to_string(), "ServiceNetwork".to_string()],
+                Some(carina_core::schema::string_enum_identity("VpcEndpointType", Some("aws.ec2.VpcEndpoint"))),
+                vec![("Gateway".to_string(), "gateway".to_string()), ("GatewayLoadBalancer".to_string(), "gateway_load_balancer".to_string()), ("Interface".to_string(), "interface".to_string()), ("Resource".to_string(), "resource".to_string()), ("ServiceNetwork".to_string(), "service_network".to_string())],
+            ))
                 .create_only()
                 .with_description("The type of endpoint. Default: Gateway")
                 .with_provider_name("VpcEndpointType"),

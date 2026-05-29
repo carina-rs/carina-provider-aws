@@ -15,7 +15,7 @@ pub fn s3_bucket_lifecycle_configuration_config() -> AwsSchemaConfig {
         has_tags: false,
         schema: ResourceSchema::new("s3.BucketLifecycleConfiguration")
             .attribute(
-                AttributeSchema::new("bucket", AttributeType::String)
+                AttributeSchema::new("bucket", AttributeType::string())
                     .required()
                     .create_only()
                     .with_description("The name of the bucket for which to set the configuration.")

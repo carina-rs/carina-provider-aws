@@ -15,7 +15,7 @@ pub fn s3_bucket_server_side_encryption_configuration_config() -> AwsSchemaConfi
         has_tags: false,
         schema: ResourceSchema::new("s3.BucketServerSideEncryptionConfiguration")
         .attribute(
-            AttributeSchema::new("bucket", AttributeType::String)
+            AttributeSchema::new("bucket", AttributeType::string())
                 .required()
                 .create_only()
                 .with_description("Specifies default encryption for a bucket using server-side encryption with different key options. Directory buckets - When you use this operation wit...")

@@ -41,22 +41,22 @@ pub fn ec2_vpc_config() -> AwsSchemaConfig {
                 .with_provider_name("CidrBlock"),
         )
         .attribute(
-            AttributeSchema::new("enable_dns_hostnames", AttributeType::Bool)
+            AttributeSchema::new("enable_dns_hostnames", AttributeType::bool())
                 .with_description("Indicates whether the instances launched in the VPC get DNS hostnames. If enabled, instances in the VPC get DNS hostnames; otherwise, they do not. You...")
                 .with_provider_name("EnableDnsHostnames"),
         )
         .attribute(
-            AttributeSchema::new("enable_dns_support", AttributeType::Bool)
+            AttributeSchema::new("enable_dns_support", AttributeType::bool())
                 .with_description("Indicates whether the DNS resolution is supported for the VPC. If enabled, queries to the Amazon provided DNS server at the 169.254.169.253 IP address...")
                 .with_provider_name("EnableDnsSupport"),
         )
         .attribute(
-            AttributeSchema::new("instance_tenancy", AttributeType::StringEnum {
-                name: "InstanceTenancy".to_string(),
-                values: vec!["dedicated".to_string(), "default".to_string(), "host".to_string()],
-                identity: Some(carina_core::schema::string_enum_identity("InstanceTenancy", Some("aws.ec2.Vpc"))),
-                dsl_aliases: vec![("dedicated".to_string(), "dedicated".to_string()), ("default".to_string(), "default".to_string()), ("host".to_string(), "host".to_string())],
-            })
+            AttributeSchema::new("instance_tenancy", AttributeType::string_enum(
+                "InstanceTenancy".to_string(),
+                vec!["dedicated".to_string(), "default".to_string(), "host".to_string()],
+                Some(carina_core::schema::string_enum_identity("InstanceTenancy", Some("aws.ec2.Vpc"))),
+                vec![("dedicated".to_string(), "dedicated".to_string()), ("default".to_string(), "default".to_string()), ("host".to_string(), "host".to_string())],
+            ))
                 .create_only()
                 .with_description("The tenancy options for instances launched into the VPC. For default, instances are launched with shared tenancy by default. You can launch instances ...")
                 .with_provider_name("InstanceTenancy"),
@@ -68,14 +68,14 @@ pub fn ec2_vpc_config() -> AwsSchemaConfig {
                 .with_provider_name("Ipv4IpamPoolId"),
         )
         .attribute(
-            AttributeSchema::new("ipv4_netmask_length", AttributeType::Custom {
-                identity: None,
-                pattern: None,
-                length: Some((Some(0), Some(32))),
-                base: Box::new(AttributeType::Int),
-                validate: legacy_validator(validate_ipv4_netmask_length_range),
-                to_dsl: None,
-            })
+            AttributeSchema::new("ipv4_netmask_length", AttributeType::custom(
+                None,
+                AttributeType::int(),
+                None,
+                Some((Some(0), Some(32))),
+                legacy_validator(validate_ipv4_netmask_length_range),
+                None,
+            ))
                 .create_only()
                 .with_description("The netmask length of the IPv4 CIDR you want to allocate to this VPC from an Amazon VPC IP Address Manager (IPAM) pool. For more information about IPA...")
                 .with_provider_name("Ipv4NetmaskLength"),

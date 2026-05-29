@@ -43,15 +43,15 @@ pub struct AwsSchemaConfig {
 /// expects an AWS-published constant for the alias target's service,
 /// not an arbitrary string.
 pub fn cloudfront_hosted_zone_id() -> AttributeType {
-    AttributeType::StringEnum {
-        name: "HostedZoneId".to_string(),
-        values: vec!["Z2FDTNDATAQYW2".to_string()],
-        identity: Some(carina_core::schema::string_enum_identity(
+    AttributeType::string_enum(
+        "HostedZoneId".to_string(),
+        vec!["Z2FDTNDATAQYW2".to_string()],
+        Some(carina_core::schema::string_enum_identity(
             "HostedZoneId",
             Some("aws.cloudfront"),
         )),
-        dsl_aliases: vec![("Z2FDTNDATAQYW2".to_string(), "global".to_string())],
-    }
+        vec![("Z2FDTNDATAQYW2".to_string(), "global".to_string())],
+    )
 }
 
 /// AWS region type with custom validation
@@ -60,10 +60,10 @@ pub fn cloudfront_hosted_zone_id() -> AttributeType {
 /// - AWS string format: "ap-northeast-1"
 /// - Shorthand: ap_northeast_1
 pub fn aws_region() -> AttributeType {
-    AttributeType::CustomEnum {
-        identity: TypeIdentity::new(Some("aws"), Vec::<String>::new(), "Region"),
-        base: Box::new(AttributeType::String),
-        validate: legacy_validator(|value| {
+    AttributeType::custom_enum(
+        TypeIdentity::new(Some("aws"), Vec::<String>::new(), "Region"),
+        AttributeType::string(),
+        legacy_validator(|value| {
             if let Value::Concrete(ConcreteValue::String(s)) = value {
                 let id = TypeIdentity::new(Some("aws"), Vec::<String>::new(), "Region");
                 validate_enum_namespace(s, &id)
@@ -83,8 +83,8 @@ pub fn aws_region() -> AttributeType {
                 Err("Expected string".to_string())
             }
         }),
-        to_dsl: Some(|s: &str| s.replace('-', "_")),
-    }
+        Some(|s: &str| s.replace('-', "_")),
+    )
 }
 
 /// Availability zone type with validation (e.g., "us-east-1a")
@@ -93,10 +93,10 @@ pub fn aws_region() -> AttributeType {
 /// - AWS string format: "us-east-1a"
 /// - Shorthand: us_east_1a
 pub fn availability_zone() -> AttributeType {
-    AttributeType::CustomEnum {
-        identity: TypeIdentity::new(Some("aws"), ["AvailabilityZone"], "ZoneName"),
-        base: Box::new(AttributeType::String),
-        validate: legacy_validator(|value| {
+    AttributeType::custom_enum(
+        TypeIdentity::new(Some("aws"), ["AvailabilityZone"], "ZoneName"),
+        AttributeType::string(),
+        legacy_validator(|value| {
             if let Value::Concrete(ConcreteValue::String(s)) = value {
                 let id = TypeIdentity::new(Some("aws"), ["AvailabilityZone"], "ZoneName");
                 validate_enum_namespace(s, &id)
@@ -109,8 +109,8 @@ pub fn availability_zone() -> AttributeType {
                 Err("Expected string".to_string())
             }
         }),
-        to_dsl: Some(|s: &str| s.replace('-', "_")),
-    }
+        Some(|s: &str| s.replace('-', "_")),
+    )
 }
 
 /// S3 grantee specification type with validation
@@ -122,13 +122,12 @@ pub fn availability_zone() -> AttributeType {
 ///
 /// Multiple grantees can be comma-separated.
 pub fn s3_grantee() -> AttributeType {
-    AttributeType::Custom {
-        to_dsl: None,
-        identity: Some(TypeIdentity::new(Some("aws"), ["s3"], "Grantee")),
-        pattern: None,
-        length: None,
-        base: Box::new(AttributeType::String),
-        validate: legacy_validator(|value| {
+    AttributeType::custom(
+        Some(TypeIdentity::new(Some("aws"), ["s3"], "Grantee")),
+        AttributeType::string(),
+        None,
+        None,
+        legacy_validator(|value| {
             if let Value::Concrete(ConcreteValue::String(s)) = value {
                 if s.is_empty() {
                     return Err("Grantee specification must not be empty".to_string());
@@ -152,7 +151,8 @@ pub fn s3_grantee() -> AttributeType {
                 Err("Expected string".to_string())
             }
         }),
-    }
+        None,
+    )
 }
 
 // iam_policy_document() is provided by `pub use carina_aws_types::*` above
@@ -399,7 +399,9 @@ mod tests {
         // `namespace: Some("aws")` field is now derived from the
         // structured identity via `dotted_prefix()`.
         let az_type = availability_zone();
-        if let AttributeType::CustomEnum { identity, .. } = &az_type {
+        if let carina_core::schema::Shape::CustomEnum { identity, .. } =
+            az_type.shape(carina_core::schema::empty_defs())
+        {
             assert_eq!(
                 identity.dotted_prefix().as_deref(),
                 Some("aws.AvailabilityZone")
@@ -412,7 +414,9 @@ mod tests {
     #[test]
     fn az_has_to_dsl() {
         let az_type = availability_zone();
-        if let AttributeType::CustomEnum { to_dsl, .. } = &az_type {
+        if let carina_core::schema::Shape::CustomEnum { to_dsl, .. } =
+            az_type.shape(carina_core::schema::empty_defs())
+        {
             assert!(to_dsl.is_some());
             let convert = to_dsl.unwrap();
             assert_eq!(convert("us-east-1a"), "us_east_1a");

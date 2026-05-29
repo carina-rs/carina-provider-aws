@@ -456,8 +456,6 @@ fn dsl_value_to_iam_json(
     attr_type: &carina_core::schema::AttributeType,
     attr_name: &str,
 ) -> serde_json::Value {
-    use carina_core::schema::AttributeType;
-
     // StringEnum leaf: canonicalize the DSL spelling to the AWS wire
     // form. Accepts `String` and `EnumIdentifier` (same text payload;
     // the WIT boundary collapses `EnumIdentifier` to `String` anyway).
@@ -473,8 +471,10 @@ fn dsl_value_to_iam_json(
         }
     }
 
-    match attr_type {
-        AttributeType::Union(members) => {
+    use carina_core::schema::{Shape, empty_defs};
+    let defs = empty_defs();
+    match attr_type.shape(defs) {
+        Shape::Union(members) => {
             // Try each member; first whose *input* value-shape matches
             // wins. Gating on the input shape (not the output JSON)
             // avoids an empty Struct member ({} from a Map whose keys
@@ -483,11 +483,11 @@ fn dsl_value_to_iam_json(
             // `string_or_principal_struct`) so a Map principal is not
             // matched against the String arm.
             for member in members {
-                let value_matches_member = match member {
-                    AttributeType::Struct { .. } => {
+                let value_matches_member = match member.shape(defs) {
+                    Shape::Struct { .. } => {
                         matches!(value, Value::Concrete(ConcreteValue::Map(_)))
                     }
-                    AttributeType::List { .. } => {
+                    Shape::List { .. } => {
                         matches!(value, Value::Concrete(ConcreteValue::List(_)))
                     }
                     _ => true,
@@ -498,7 +498,7 @@ fn dsl_value_to_iam_json(
             }
             scalar_to_json(value)
         }
-        AttributeType::List { inner, .. } => match value {
+        Shape::List { inner, .. } => match value {
             Value::Concrete(ConcreteValue::List(items)) => serde_json::Value::Array(
                 items
                     .iter()
@@ -509,7 +509,7 @@ fn dsl_value_to_iam_json(
             // (AWS accepts a bare string for single-element Action etc.).
             _ => dsl_value_to_iam_json(value, inner, attr_name),
         },
-        AttributeType::Struct { fields, .. } => {
+        Shape::Struct { fields, .. } => {
             // Block syntax materializes a single-element List<Map>.
             let map = match value {
                 Value::Concrete(ConcreteValue::Map(m)) => m,
@@ -546,7 +546,7 @@ fn dsl_value_to_iam_json(
             }
             serde_json::Value::Object(obj)
         }
-        AttributeType::Map { value: inner, .. } => {
+        Shape::Map { value: inner, .. } => {
             let Value::Concrete(ConcreteValue::Map(map)) = value else {
                 return scalar_to_json(value);
             };

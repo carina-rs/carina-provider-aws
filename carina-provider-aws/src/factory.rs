@@ -48,29 +48,27 @@ impl ProviderFactory for AwsProviderFactory {
             .collect();
         types.insert(
             "region".to_string(),
-            carina_core::schema::AttributeType::StringEnum {
-                name: "Region".to_string(),
-                values: region_values,
-                identity: Some(carina_core::schema::string_enum_identity(
+            carina_core::schema::AttributeType::string_enum(
+                "Region".to_string(),
+                region_values,
+                Some(carina_core::schema::string_enum_identity(
                     "Region",
                     Some("aws"),
                 )),
-                dsl_aliases: region_dsl_aliases,
-            },
+                region_dsl_aliases,
+            ),
         );
         types.insert(
             "allowed_account_ids".to_string(),
-            carina_core::schema::AttributeType::List {
-                inner: Box::new(carina_core::schema::AttributeType::String),
-                ordered: false,
-            },
+            carina_core::schema::AttributeType::unordered_list(
+                carina_core::schema::AttributeType::string(),
+            ),
         );
         types.insert(
             "forbidden_account_ids".to_string(),
-            carina_core::schema::AttributeType::List {
-                inner: Box::new(carina_core::schema::AttributeType::String),
-                ordered: false,
-            },
+            carina_core::schema::AttributeType::unordered_list(
+                carina_core::schema::AttributeType::string(),
+            ),
         );
         types.insert("assume_role".to_string(), assume_role_attribute_type());
         types
@@ -175,18 +173,18 @@ impl ProviderFactory for AwsProviderFactory {
 /// credential chain (aws#342).
 fn assume_role_attribute_type() -> carina_core::schema::AttributeType {
     use carina_core::schema::{AttributeType, StructField};
-    AttributeType::Struct {
-        name: "AssumeRole".to_string(),
-        fields: vec![
-            StructField::new("role_arn", AttributeType::String)
+    AttributeType::struct_(
+        "AssumeRole".to_string(),
+        vec![
+            StructField::new("role_arn", AttributeType::string())
                 .required()
                 .with_description("IAM role ARN to assume."),
-            StructField::new("session_name", AttributeType::String)
+            StructField::new("session_name", AttributeType::string())
                 .with_description("STS session name to associate with the assumed-role session."),
-            StructField::new("external_id", AttributeType::String)
+            StructField::new("external_id", AttributeType::string())
                 .with_description("External ID required by the trust policy of the assumed role."),
-            StructField::new("duration", AttributeType::Duration)
+            StructField::new("duration", AttributeType::duration())
                 .with_description("Assumed-role session duration (e.g., 30min, 1h, 15s)."),
         ],
-    }
+    )
 }

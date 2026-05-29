@@ -15,20 +15,20 @@ pub fn s3_bucket_versioning_config() -> AwsSchemaConfig {
         has_tags: false,
         schema: ResourceSchema::new("s3.BucketVersioning")
         .attribute(
-            AttributeSchema::new("bucket", AttributeType::String)
+            AttributeSchema::new("bucket", AttributeType::string())
                 .required()
                 .create_only()
                 .with_description("The bucket name.")
                 .with_provider_name("Bucket"),
         )
         .attribute(
-            AttributeSchema::new("status", AttributeType::StringEnum { name: "VersioningStatus".to_string(), values: vec!["Enabled".to_string(), "Suspended".to_string()], identity: Some(carina_core::schema::string_enum_identity("VersioningStatus", Some("aws.s3.BucketVersioning"))), dsl_aliases: vec![("Enabled".to_string(), "enabled".to_string()), ("Suspended".to_string(), "suspended".to_string())] })
+            AttributeSchema::new("status", AttributeType::string_enum("VersioningStatus".to_string(), vec!["Enabled".to_string(), "Suspended".to_string()], Some(carina_core::schema::string_enum_identity("VersioningStatus", Some("aws.s3.BucketVersioning"))), vec![("Enabled".to_string(), "enabled".to_string()), ("Suspended".to_string(), "suspended".to_string())]))
                 .required()
                 .with_description("Versioning state of the bucket: Enabled or Suspended.")
                 .with_provider_name("Status"),
         )
         .attribute(
-            AttributeSchema::new("mfa_delete", AttributeType::StringEnum { name: "MFADelete".to_string(), values: vec!["Enabled".to_string(), "Disabled".to_string()], identity: Some(carina_core::schema::string_enum_identity("MFADelete", Some("aws.s3.BucketVersioning"))), dsl_aliases: vec![("Enabled".to_string(), "enabled".to_string()), ("Disabled".to_string(), "disabled".to_string())] })
+            AttributeSchema::new("mfa_delete", AttributeType::string_enum("MFADelete".to_string(), vec!["Enabled".to_string(), "Disabled".to_string()], Some(carina_core::schema::string_enum_identity("MFADelete", Some("aws.s3.BucketVersioning"))), vec![("Enabled".to_string(), "enabled".to_string()), ("Disabled".to_string(), "disabled".to_string())]))
                 .with_description("MFA-delete state. Specifies whether MFA delete is enabled in the bucket versioning configuration.")
                 .with_provider_name("MFADelete"),
         )

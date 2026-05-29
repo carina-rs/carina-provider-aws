@@ -31,7 +31,7 @@ pub fn organizations_account_config() -> AwsSchemaConfig {
         schema: ResourceSchema::new("organizations.Account")
         .with_description("Contains information about an Amazon Web Services account that is a member of an organization.")
         .attribute(
-            AttributeSchema::new("account_name", AttributeType::String)
+            AttributeSchema::new("account_name", AttributeType::string())
                 .required()
                 .create_only()
                 .with_description("The friendly name of the member account.")
@@ -45,18 +45,18 @@ pub fn organizations_account_config() -> AwsSchemaConfig {
                 .with_provider_name("Email"),
         )
         .attribute(
-            AttributeSchema::new("iam_user_access_to_billing", AttributeType::StringEnum {
-                name: "IamUserAccessToBilling".to_string(),
-                values: vec!["ALLOW".to_string(), "DENY".to_string()],
-                identity: Some(carina_core::schema::string_enum_identity("IamUserAccessToBilling", Some("aws.organizations.Account"))),
-                dsl_aliases: vec![("ALLOW".to_string(), "allow".to_string()), ("DENY".to_string(), "deny".to_string())],
-            })
+            AttributeSchema::new("iam_user_access_to_billing", AttributeType::string_enum(
+                "IamUserAccessToBilling".to_string(),
+                vec!["ALLOW".to_string(), "DENY".to_string()],
+                Some(carina_core::schema::string_enum_identity("IamUserAccessToBilling", Some("aws.organizations.Account"))),
+                vec![("ALLOW".to_string(), "allow".to_string()), ("DENY".to_string(), "deny".to_string())],
+            ))
                 .create_only()
                 .with_description("If set to ALLOW, the new account enables IAM users to access account billing information if they have the required permissions. If set to DENY, only t...")
                 .with_provider_name("IamUserAccessToBilling"),
         )
         .attribute(
-            AttributeSchema::new("role_name", AttributeType::String)
+            AttributeSchema::new("role_name", AttributeType::string())
                 .create_only()
                 .with_description("The name of an IAM role that Organizations automatically preconfigures in the new member account. This role trusts the management account, allowing us...")
                 .with_provider_name("RoleName"),
@@ -68,41 +68,41 @@ pub fn organizations_account_config() -> AwsSchemaConfig {
                 .with_provider_name("Arn"),
         )
         .attribute(
-            AttributeSchema::new("id", AttributeType::String)
+            AttributeSchema::new("id", AttributeType::string())
                 .read_only()
                 .with_description("The unique identifier (ID) of the account. The regex pattern for an account ID string requires exactly 12 digits. (read-only)")
                 .with_provider_name("Id"),
         )
         .attribute(
-            AttributeSchema::new("joined_method", AttributeType::StringEnum {
-                name: "JoinedMethod".to_string(),
-                values: vec!["CREATED".to_string(), "INVITED".to_string()],
-                identity: Some(carina_core::schema::string_enum_identity("JoinedMethod", Some("aws.organizations.Account"))),
-                dsl_aliases: vec![("CREATED".to_string(), "created".to_string()), ("INVITED".to_string(), "invited".to_string())],
-            })
+            AttributeSchema::new("joined_method", AttributeType::string_enum(
+                "JoinedMethod".to_string(),
+                vec!["CREATED".to_string(), "INVITED".to_string()],
+                Some(carina_core::schema::string_enum_identity("JoinedMethod", Some("aws.organizations.Account"))),
+                vec![("CREATED".to_string(), "created".to_string()), ("INVITED".to_string(), "invited".to_string())],
+            ))
                 .read_only()
                 .with_description("The method by which the account joined the organization. (read-only)")
                 .with_provider_name("JoinedMethod"),
         )
         .attribute(
-            AttributeSchema::new("joined_timestamp", AttributeType::String)
+            AttributeSchema::new("joined_timestamp", AttributeType::string())
                 .read_only()
                 .with_description("The date the account became a part of the organization. (read-only)")
                 .with_provider_name("JoinedTimestamp"),
         )
         .attribute(
-            AttributeSchema::new("name", AttributeType::String)
+            AttributeSchema::new("name", AttributeType::string())
                 .read_only()
                 .with_description("The friendly name of the account. The regex pattern that is used to validate this parameter is a string of any of the characters in the ASCII characte... (read-only)")
                 .with_provider_name("Name"),
         )
         .attribute(
-            AttributeSchema::new("status", AttributeType::StringEnum {
-                name: "Status".to_string(),
-                values: vec!["ACTIVE".to_string(), "PENDING_CLOSURE".to_string(), "SUSPENDED".to_string()],
-                identity: Some(carina_core::schema::string_enum_identity("Status", Some("aws.organizations.Account"))),
-                dsl_aliases: vec![("ACTIVE".to_string(), "active".to_string()), ("PENDING_CLOSURE".to_string(), "pending_closure".to_string()), ("SUSPENDED".to_string(), "suspended".to_string())],
-            })
+            AttributeSchema::new("status", AttributeType::string_enum(
+                "Status".to_string(),
+                vec!["ACTIVE".to_string(), "PENDING_CLOSURE".to_string(), "SUSPENDED".to_string()],
+                Some(carina_core::schema::string_enum_identity("Status", Some("aws.organizations.Account"))),
+                vec![("ACTIVE".to_string(), "active".to_string()), ("PENDING_CLOSURE".to_string(), "pending_closure".to_string()), ("SUSPENDED".to_string(), "suspended".to_string())],
+            ))
                 .read_only()
                 .with_description("The status of the account in the organization. The Status parameter in the Account object will be retired on September 9, 2026. Although both the acco... (read-only)")
                 .with_provider_name("Status"),

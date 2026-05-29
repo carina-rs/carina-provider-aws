@@ -103,7 +103,7 @@ pub fn extract_assume_role(value: Option<&Value>) -> Result<Option<AssumeRoleCon
         Some(_) => return Err("assume_role.external_id must be a string".to_string()),
     };
 
-    // `duration` is declared as `AttributeType::Duration` in the schema.
+    // `duration` is declared as `AttributeType::duration()` in the schema.
     // The in-process path (factory.rs) delivers the literal value as
     // `ConcreteValue::Duration`; the WASM/proto path (main.rs) currently
     // delivers it as `ConcreteValue::Int(seconds)` because schema-aware

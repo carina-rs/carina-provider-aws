@@ -27,42 +27,42 @@ pub fn logs_log_group_config() -> AwsSchemaConfig {
         schema: ResourceSchema::new("logs.LogGroup")
         .with_description("Represents a log group.")
         .attribute(
-            AttributeSchema::new("deletion_protection_enabled", AttributeType::Bool)
+            AttributeSchema::new("deletion_protection_enabled", AttributeType::bool())
                 .create_only()
                 .with_description("Use this parameter to enable deletion protection for the new log group. When enabled on a log group, deletion protection blocks all deletion operation...")
                 .with_provider_name("deletionProtectionEnabled"),
         )
         .attribute(
-            AttributeSchema::new("kms_key_id", AttributeType::String)
+            AttributeSchema::new("kms_key_id", AttributeType::string())
                 .create_only()
                 .with_description("The Amazon Resource Name (ARN) of the KMS key to use when encrypting log data. For more information, see Amazon Resource Names.")
                 .with_provider_name("kmsKeyId"),
         )
         .attribute(
-            AttributeSchema::new("log_group_class", AttributeType::StringEnum {
-                name: "LogGroupClass".to_string(),
-                values: vec!["DELIVERY".to_string(), "INFREQUENT_ACCESS".to_string(), "STANDARD".to_string()],
-                identity: Some(carina_core::schema::string_enum_identity("LogGroupClass", Some("aws.logs.LogGroup"))),
-                dsl_aliases: vec![("DELIVERY".to_string(), "delivery".to_string()), ("INFREQUENT_ACCESS".to_string(), "infrequent_access".to_string()), ("STANDARD".to_string(), "standard".to_string())],
-            })
+            AttributeSchema::new("log_group_class", AttributeType::string_enum(
+                "LogGroupClass".to_string(),
+                vec!["DELIVERY".to_string(), "INFREQUENT_ACCESS".to_string(), "STANDARD".to_string()],
+                Some(carina_core::schema::string_enum_identity("LogGroupClass", Some("aws.logs.LogGroup"))),
+                vec![("DELIVERY".to_string(), "delivery".to_string()), ("INFREQUENT_ACCESS".to_string(), "infrequent_access".to_string()), ("STANDARD".to_string(), "standard".to_string())],
+            ))
                 .create_only()
                 .with_description("Use this parameter to specify the log group class for this log group. There are three classes: The Standard log class supports all CloudWatch Logs fea...")
                 .with_provider_name("logGroupClass"),
         )
         .attribute(
-            AttributeSchema::new("log_group_name", AttributeType::String)
+            AttributeSchema::new("log_group_name", AttributeType::string())
                 .required()
                 .create_only()
                 .with_description("A name for the log group.")
                 .with_provider_name("logGroupName"),
         )
         .attribute(
-            AttributeSchema::new("retention_in_days", AttributeType::Int)
+            AttributeSchema::new("retention_in_days", AttributeType::int())
                 .with_description("The number of days to retain the log events in the log group. If unset, events never expire. The provider applies changes via PutRetentionPolicy / Del...")
                 .with_provider_name("retentionInDays"),
         )
         .attribute(
-            AttributeSchema::new("tags", AttributeType::map(AttributeType::String))
+            AttributeSchema::new("tags", AttributeType::map(AttributeType::string()))
                 .create_only()
                 .with_description("The key-value pairs to use for the tags. You can grant users access to certain log groups while preventing them from accessing other log groups. To do...")
                 .with_provider_name("tags"),

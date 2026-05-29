@@ -38,32 +38,32 @@ pub fn iam_role_config() -> AwsSchemaConfig {
                 .with_provider_name("AssumeRolePolicyDocument"),
         )
         .attribute(
-            AttributeSchema::new("description", AttributeType::String)
+            AttributeSchema::new("description", AttributeType::string())
                 .create_only()
                 .with_description("A description of the role.")
                 .with_provider_name("Description"),
         )
         .attribute(
-            AttributeSchema::new("max_session_duration", AttributeType::Custom {
-                identity: None,
-                pattern: None,
-                length: Some((Some(3600), Some(43200))),
-                base: Box::new(AttributeType::Int),
-                validate: legacy_validator(validate_max_session_duration_range),
-                to_dsl: None,
-            })
+            AttributeSchema::new("max_session_duration", AttributeType::custom(
+                None,
+                AttributeType::int(),
+                None,
+                Some((Some(3600), Some(43200))),
+                legacy_validator(validate_max_session_duration_range),
+                None,
+            ))
                 .create_only()
                 .with_description("The maximum session duration (in seconds) that you want to set for the specified role. If you do not specify a value for this setting, the default val...")
                 .with_provider_name("MaxSessionDuration"),
         )
         .attribute(
-            AttributeSchema::new("path", AttributeType::String)
+            AttributeSchema::new("path", AttributeType::string())
                 .create_only()
                 .with_description("The path to the role. For more information about paths, see IAM Identifiers in the IAM User Guide. This parameter is optional. If it is not included, ...")
                 .with_provider_name("Path"),
         )
         .attribute(
-            AttributeSchema::new("role_name", AttributeType::String)
+            AttributeSchema::new("role_name", AttributeType::string())
                 .required()
                 .create_only()
                 .with_description("The name of the role to create. IAM user, group, role, and policy names must be unique within the account. Names are not distinguished by case. For ex...")

@@ -57,20 +57,20 @@ pub fn ec2_security_group_ingress_config() -> AwsSchemaConfig {
                 .with_provider_name("CidrIpv6"),
         )
         .attribute(
-            AttributeSchema::new("description", AttributeType::String)
+            AttributeSchema::new("description", AttributeType::string())
                 .create_only()
                 .with_description("The security group rule description.")
                 .with_provider_name("Description"),
         )
         .attribute(
-            AttributeSchema::new("from_port", AttributeType::Custom {
-                identity: None,
-                pattern: None,
-                length: None,
-                base: Box::new(AttributeType::Int),
-                validate: legacy_validator(validate_from_port_range),
-                to_dsl: None,
-            })
+            AttributeSchema::new("from_port", AttributeType::custom(
+                None,
+                AttributeType::int(),
+                None,
+                None,
+                legacy_validator(validate_from_port_range),
+                None,
+            ))
                 .create_only()
                 .with_description("If the protocol is TCP or UDP, this is the start of the port range. If the protocol is ICMP, this is the ICMP type or -1 (all ICMP types). To specify ...")
                 .with_provider_name("FromPort"),
@@ -82,18 +82,18 @@ pub fn ec2_security_group_ingress_config() -> AwsSchemaConfig {
                 .with_provider_name("GroupId"),
         )
         .attribute(
-            AttributeSchema::new("group_name", AttributeType::String)
+            AttributeSchema::new("group_name", AttributeType::string())
                 .create_only()
                 .with_description("[Default VPC] The name of the security group. For security groups for a default VPC you can specify either the ID or the name of the security group. F...")
                 .with_provider_name("GroupName"),
         )
         .attribute(
-            AttributeSchema::new("ip_protocol", AttributeType::StringEnum {
-                name: "IpProtocol".to_string(),
-                values: vec!["tcp".to_string(), "udp".to_string(), "icmp".to_string(), "icmpv6".to_string(), "-1".to_string(), "all".to_string()],
-                identity: Some(carina_core::schema::string_enum_identity("IpProtocol", Some("aws.ec2.SecurityGroupIngress"))),
-                dsl_aliases: vec![("-1".to_string(), "all".to_string()), ("tcp".to_string(), "tcp".to_string()), ("udp".to_string(), "udp".to_string()), ("icmp".to_string(), "icmp".to_string()), ("icmpv6".to_string(), "icmpv6".to_string()), ("all".to_string(), "all".to_string())],
-            })
+            AttributeSchema::new("ip_protocol", AttributeType::string_enum(
+                "IpProtocol".to_string(),
+                vec!["tcp".to_string(), "udp".to_string(), "icmp".to_string(), "icmpv6".to_string(), "-1".to_string(), "all".to_string()],
+                Some(carina_core::schema::string_enum_identity("IpProtocol", Some("aws.ec2.SecurityGroupIngress"))),
+                vec![("-1".to_string(), "all".to_string()), ("tcp".to_string(), "tcp".to_string()), ("udp".to_string(), "udp".to_string()), ("icmp".to_string(), "icmp".to_string()), ("icmpv6".to_string(), "icmpv6".to_string()), ("all".to_string(), "all".to_string())],
+            ))
                 .required()
                 .create_only()
                 .with_description("The IP protocol name (tcp, udp, icmp) or number (see Protocol Numbers). To specify all protocols, use -1. To specify icmpv6, use IP permissions instea...")
@@ -106,7 +106,7 @@ pub fn ec2_security_group_ingress_config() -> AwsSchemaConfig {
                 .with_provider_name("SourcePrefixListId"),
         )
         .attribute(
-            AttributeSchema::new("source_security_group_name", AttributeType::String)
+            AttributeSchema::new("source_security_group_name", AttributeType::string())
                 .create_only()
                 .with_description("[Default VPC] The name of the source security group. The rule grants full ICMP, UDP, and TCP access. To create a rule with a specific protocol and por...")
                 .with_provider_name("SourceSecurityGroupName"),
@@ -118,14 +118,14 @@ pub fn ec2_security_group_ingress_config() -> AwsSchemaConfig {
                 .with_provider_name("SourceSecurityGroupOwnerId"),
         )
         .attribute(
-            AttributeSchema::new("to_port", AttributeType::Custom {
-                identity: None,
-                pattern: None,
-                length: None,
-                base: Box::new(AttributeType::Int),
-                validate: legacy_validator(validate_to_port_range),
-                to_dsl: None,
-            })
+            AttributeSchema::new("to_port", AttributeType::custom(
+                None,
+                AttributeType::int(),
+                None,
+                None,
+                legacy_validator(validate_to_port_range),
+                None,
+            ))
                 .create_only()
                 .with_description("If the protocol is TCP or UDP, this is the end of the port range. If the protocol is ICMP, this is the ICMP code or -1 (all ICMP codes). If the start ...")
                 .with_provider_name("ToPort"),

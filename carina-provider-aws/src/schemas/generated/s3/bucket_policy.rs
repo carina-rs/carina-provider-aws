@@ -15,7 +15,7 @@ pub fn s3_bucket_policy_config() -> AwsSchemaConfig {
         has_tags: false,
         schema: ResourceSchema::new("s3.BucketPolicy")
         .attribute(
-            AttributeSchema::new("bucket", AttributeType::String)
+            AttributeSchema::new("bucket", AttributeType::string())
                 .required()
                 .create_only()
                 .with_description("The name of the bucket. Directory buckets - When you use this operation with a directory bucket, you must use path-style requests in the format https:...")

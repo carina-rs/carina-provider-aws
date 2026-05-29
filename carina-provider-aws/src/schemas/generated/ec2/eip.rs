@@ -20,24 +20,24 @@ pub fn ec2_eip_config() -> AwsSchemaConfig {
         schema: ResourceSchema::new("ec2.Eip")
         .with_description("Describes an Elastic IP address, or a carrier IP address.")
         .attribute(
-            AttributeSchema::new("address", AttributeType::String)
+            AttributeSchema::new("address", AttributeType::string())
                 .create_only()
                 .with_description("The Elastic IP address to recover or an IPv4 address from an address pool.")
                 .with_provider_name("Address"),
         )
         .attribute(
-            AttributeSchema::new("domain", AttributeType::StringEnum {
-                name: "Domain".to_string(),
-                values: vec!["standard".to_string(), "vpc".to_string()],
-                identity: Some(carina_core::schema::string_enum_identity("Domain", Some("aws.ec2.Eip"))),
-                dsl_aliases: vec![("standard".to_string(), "standard".to_string()), ("vpc".to_string(), "vpc".to_string())],
-            })
+            AttributeSchema::new("domain", AttributeType::string_enum(
+                "Domain".to_string(),
+                vec!["standard".to_string(), "vpc".to_string()],
+                Some(carina_core::schema::string_enum_identity("Domain", Some("aws.ec2.Eip"))),
+                vec![("standard".to_string(), "standard".to_string()), ("vpc".to_string(), "vpc".to_string())],
+            ))
                 .create_only()
                 .with_description("The network (vpc).")
                 .with_provider_name("Domain"),
         )
         .attribute(
-            AttributeSchema::new("public_ipv4_pool", AttributeType::String)
+            AttributeSchema::new("public_ipv4_pool", AttributeType::string())
                 .create_only()
                 .with_description("The ID of an address pool that you own. Use this parameter to let Amazon EC2 select an address from the address pool. To specify a specific address fr...")
                 .with_provider_name("PublicIpv4Pool"),

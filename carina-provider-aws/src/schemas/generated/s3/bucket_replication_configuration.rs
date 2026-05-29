@@ -15,14 +15,14 @@ pub fn s3_bucket_replication_configuration_config() -> AwsSchemaConfig {
         has_tags: false,
         schema: ResourceSchema::new("s3.BucketReplicationConfiguration")
             .attribute(
-                AttributeSchema::new("bucket", AttributeType::String)
+                AttributeSchema::new("bucket", AttributeType::string())
                     .required()
                     .create_only()
                     .with_description("The name of the bucket")
                     .with_provider_name("Bucket"),
             )
             .attribute(
-                AttributeSchema::new("role", AttributeType::String)
+                AttributeSchema::new("role", AttributeType::string())
                     .required()
                     .with_description("ARN of the IAM role S3 uses to perform the replication.")
                     .with_provider_name("Role"),

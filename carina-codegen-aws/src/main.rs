@@ -759,7 +759,7 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
         } else if let Some(inferred) = infer_string_type(extra.name) {
             inferred
         } else {
-            "AttributeType::String".to_string()
+            "AttributeType::string()".to_string()
         };
         let is_read_only = read_only_overrides.contains(extra.name);
         let is_create_only = !is_read_only
@@ -1015,12 +1015,12 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
                 .collect::<Vec<_>>()
                 .join(", ");
             format!(
-                "AttributeType::StringEnum {{\n\
-                 \x20               name: \"{}\".to_string(),\n\
-                 \x20               values: vec![{}],\n\
-                 \x20               identity: Some(carina_core::schema::string_enum_identity(\"{}\", Some(\"{}\"))),\n\
-                 \x20               dsl_aliases: {},\n\
-                 \x20           }}",
+                "AttributeType::string_enum(\n\
+                 \x20               \"{}\".to_string(),\n\
+                 \x20               vec![{}],\n\
+                 \x20               Some(carina_core::schema::string_enum_identity(\"{}\", Some(\"{}\"))),\n\
+                 \x20               {},\n\
+                 \x20           )",
                 ei.type_name, values_str, ei.type_name, namespace, dsl_aliases_code
             )
         } else {
@@ -1257,9 +1257,9 @@ fn resolve_type(
                 return (inferred, None);
             }
 
-            ("AttributeType::String".to_string(), None)
+            ("AttributeType::string()".to_string(), None)
         }
-        Some(ShapeKind::Boolean) => ("AttributeType::Bool".to_string(), None),
+        Some(ShapeKind::Boolean) => ("AttributeType::bool()".to_string(), None),
         Some(ShapeKind::Integer) | Some(ShapeKind::Long) => {
             // Check for range traits on the target shape
             let range = get_int_range(ctx.model, target, field_name);
@@ -1278,24 +1278,24 @@ fn resolve_type(
                 };
                 (
                     format!(
-                        "AttributeType::Custom {{\n\
-                         \x20               identity: None,\n\
-                         \x20               pattern: None,\n\
-                         \x20               length: {},\n\
-                         \x20               base: Box::new(AttributeType::Int),\n\
-                         \x20               validate: legacy_validator({}),\n\
-                         \x20               to_dsl: None,\n\
-                         \x20           }}",
+                        "AttributeType::custom(\n\
+                         \x20               None,\n\
+                         \x20               AttributeType::int(),\n\
+                         \x20               None,\n\
+                         \x20               {},\n\
+                         \x20               legacy_validator({}),\n\
+                         \x20               None,\n\
+                         \x20           )",
                         length_expr, validate_fn
                     ),
                     None,
                 )
             } else {
-                ("AttributeType::Int".to_string(), None)
+                ("AttributeType::int()".to_string(), None)
             }
         }
         Some(ShapeKind::Float) | Some(ShapeKind::Double) => {
-            ("AttributeType::Float".to_string(), None)
+            ("AttributeType::float()".to_string(), None)
         }
         Some(ShapeKind::Enum) => {
             // Get enum values from Smithy model
@@ -1315,9 +1315,9 @@ fn resolve_type(
                     .or_insert_with(|| enum_info.clone());
                 return ("/* enum */".to_string(), Some(enum_info));
             }
-            ("AttributeType::String".to_string(), None)
+            ("AttributeType::string()".to_string(), None)
         }
-        Some(ShapeKind::IntEnum) => ("AttributeType::Int".to_string(), None),
+        Some(ShapeKind::IntEnum) => ("AttributeType::int()".to_string(), None),
         Some(ShapeKind::List) => {
             // Get list member type
             if let Some(carina_smithy::Shape::List(list_shape)) = ctx.model.get_shape(target) {
@@ -1325,13 +1325,13 @@ fn resolve_type(
                 (format!("AttributeType::list({})", item_type), None)
             } else {
                 (
-                    "AttributeType::list(AttributeType::String)".to_string(),
+                    "AttributeType::list(AttributeType::string())".to_string(),
                     None,
                 )
             }
         }
         Some(ShapeKind::Map) => (
-            "AttributeType::map(AttributeType::String)".to_string(),
+            "AttributeType::map(AttributeType::string())".to_string(),
             None,
         ),
         Some(ShapeKind::Structure) => {
@@ -1343,7 +1343,7 @@ fn resolve_type(
 
             // Unwrap EC2 AttributeBooleanValue wrapper → plain Bool
             if shape_name == "AttributeBooleanValue" {
-                return ("AttributeType::Bool".to_string(), None);
+                return ("AttributeType::bool()".to_string(), None);
             }
 
             // Generate struct type for nested structures
@@ -1351,14 +1351,14 @@ fn resolve_type(
                 let struct_code = generate_struct_type(ctx, shape_name, structure);
                 return (struct_code, None);
             }
-            ("AttributeType::String".to_string(), None)
+            ("AttributeType::string()".to_string(), None)
         }
         _ => {
             // Fallback: try name-based heuristics
             if let Some(inferred) = infer_string_type(field_name) {
                 (inferred, None)
             } else {
-                ("AttributeType::String".to_string(), None)
+                ("AttributeType::string()".to_string(), None)
             }
         }
     }
@@ -1409,12 +1409,12 @@ fn generate_struct_type(
                 .collect::<Vec<_>>()
                 .join(", ");
             format!(
-                "AttributeType::StringEnum {{\n\
-                 \x20               name: \"{}\".to_string(),\n\
-                 \x20               values: vec![{}],\n\
-                 \x20               identity: Some(carina_core::schema::string_enum_identity(\"{}\", Some(\"{}\"))),\n\
-                 \x20               dsl_aliases: {},\n\
-                 \x20           }}",
+                "AttributeType::string_enum(\n\
+                 \x20               \"{}\".to_string(),\n\
+                 \x20               vec![{}],\n\
+                 \x20               Some(carina_core::schema::string_enum_identity(\"{}\", Some(\"{}\"))),\n\
+                 \x20               {},\n\
+                 \x20           )",
                 ei.type_name, values_str, ei.type_name, ctx.namespace, dsl_aliases_code
             )
         } else {
@@ -1443,12 +1443,12 @@ fn generate_struct_type(
 
     let fields_str = fields.join(",\n                    ");
     format!(
-        "AttributeType::Struct {{\n\
-         \x20                   name: \"{}\".to_string(),\n\
-         \x20                   fields: vec![\n\
+        "AttributeType::struct_(\n\
+         \x20                   \"{}\".to_string(),\n\
+         \x20                   vec![\n\
          \x20                   {}\n\
          \x20                   ],\n\
-         \x20               }}",
+         \x20               )",
         struct_name, fields_str
     )
 }
@@ -3333,7 +3333,7 @@ fn generate_data_source(
         } else if is_email_property(input.provider_name) {
             "types::email()".to_string()
         } else {
-            "AttributeType::String".to_string()
+            "AttributeType::string()".to_string()
         };
         ds_attrs.push(DsAttr {
             name: input.name.to_string(),
@@ -3369,10 +3369,7 @@ fn generate_data_source(
                 ds_attrs.push(DsAttr {
                     name: output.name.to_string(),
                     provider_name: String::new(),
-                    type_str: format!(
-                        "AttributeType::List {{ inner: Box::new({}), ordered: false }}",
-                        output.item_type,
-                    ),
+                    type_str: format!("AttributeType::unordered_list({})", output.item_type),
                     description: output.description.to_string(),
                     required: false,
                     read_only: true,
@@ -3699,9 +3696,11 @@ fn type_code_to_display(type_code: &str) -> String {
     }
 
     match type_code {
-        "AttributeType::String" => "String".to_string(),
-        "AttributeType::Bool" => "Bool".to_string(),
-        "AttributeType::Int" => "Int".to_string(),
+        "AttributeType::string()" => "String".to_string(),
+        "AttributeType::bool()" => "Bool".to_string(),
+        "AttributeType::int()" => "Int".to_string(),
+        "AttributeType::float()" => "Float".to_string(),
+        "AttributeType::duration()" => "Duration".to_string(),
         s if s.contains("ipv4_cidr") => "Ipv4Cidr".to_string(),
         s if s.contains("ipv6_cidr") => "Ipv6Cidr".to_string(),
         s if s.contains("ipv4_address") => "Ipv4Address".to_string(),
@@ -4313,7 +4312,7 @@ mod tests {
             "arn must use arn(): {generated}"
         );
         assert!(
-            generated.contains(r#"AttributeSchema::new("user_id", AttributeType::String)"#),
+            generated.contains(r#"AttributeSchema::new("user_id", AttributeType::string())"#),
             "user_id must be String: {generated}"
         );
         assert!(
@@ -4340,16 +4339,16 @@ mod tests {
 
         assert!(
             generated
-                .contains(r#"AttributeSchema::new("identity_store_id", AttributeType::String)"#)
+                .contains(r#"AttributeSchema::new("identity_store_id", AttributeType::string())"#)
         );
         assert!(
             generated.contains(".required()"),
             "identity_store_id is required"
         );
         assert!(
-            generated.contains(r#"AttributeSchema::new("display_name", AttributeType::String)"#)
+            generated.contains(r#"AttributeSchema::new("display_name", AttributeType::string())"#)
         );
-        assert!(generated.contains(r#"AttributeSchema::new("emails", AttributeType::String)"#));
+        assert!(generated.contains(r#"AttributeSchema::new("emails", AttributeType::string())"#));
     }
 
     #[test]
@@ -4401,24 +4400,24 @@ mod tests {
         // arns is List<iam_role_arn>
         assert!(
             generated.contains(
-                "AttributeSchema::new(\"arns\", AttributeType::List { inner: Box::new(super::iam_role_arn()), ordered: false })"
+                "AttributeSchema::new(\"arns\", AttributeType::unordered_list(super::iam_role_arn()))"
             ),
             "arns must be List(iam_role_arn): {generated}"
         );
         // names is List<String>
         assert!(
             generated.contains(
-                "AttributeSchema::new(\"names\", AttributeType::List { inner: Box::new(AttributeType::String), ordered: false })"
+                "AttributeSchema::new(\"names\", AttributeType::unordered_list(AttributeType::string()))"
             ),
             "names must be List(String): {generated}"
         );
         // Inputs are both optional strings.
         assert!(
-            generated.contains(r#"AttributeSchema::new("path_prefix", AttributeType::String)"#),
+            generated.contains(r#"AttributeSchema::new("path_prefix", AttributeType::string())"#),
             "path_prefix input: {generated}"
         );
         assert!(
-            generated.contains(r#"AttributeSchema::new("name_regex", AttributeType::String)"#),
+            generated.contains(r#"AttributeSchema::new("name_regex", AttributeType::string())"#),
             "name_regex input: {generated}"
         );
         // Neither input is marked .required().
@@ -4555,8 +4554,8 @@ mod tests {
         let generated = generate_resource(&resource, &model).expect("failed to generate resource");
 
         assert!(
-            generated.contains("AttributeType::StringEnum {"),
-            "enum-like strings should be emitted as StringEnum: {generated}"
+            generated.contains("AttributeType::string_enum("),
+            "enum-like strings should be emitted as string_enum: {generated}"
         );
         assert!(
             !generated.contains(".with_completions("),
@@ -5121,8 +5120,8 @@ mod tests {
             "organizations.account.email should be types::email(): {generated}"
         );
         assert!(
-            !generated.contains("\"email\", AttributeType::String"),
-            "organizations.account.email should NOT be AttributeType::String: {generated}"
+            !generated.contains("\"email\", AttributeType::string()"),
+            "organizations.account.email should NOT be AttributeType::string(): {generated}"
         );
     }
 

@@ -16,7 +16,7 @@ pub fn ec2_subnet_route_table_association_config() -> AwsSchemaConfig {
         schema: ResourceSchema::new("ec2.SubnetRouteTableAssociation")
         .with_description("Describes an association between a route table and a subnet or gateway.")
         .attribute(
-            AttributeSchema::new("public_ipv4_pool", AttributeType::String)
+            AttributeSchema::new("public_ipv4_pool", AttributeType::string())
                 .create_only()
                 .with_description("The ID of a public IPv4 pool. A public IPv4 pool is a pool of IPv4 addresses that you've brought to Amazon Web Services with BYOIP.")
                 .with_provider_name("PublicIpv4Pool"),
