@@ -61,7 +61,7 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 # `carina` host binary live next to *this* repo in a flat carina-rs
 # checkout. We resolve their base by walking up from the repo's
 # canonical git directory rather than from `$PROJECT_ROOT/..`, because
-# when the script is invoked from a `git wt` worktree under
+# when the script is invoked from a `git worktree` worktree under
 # `.worktrees/`, the parent of `$PROJECT_ROOT` is the `.worktrees/`
 # directory — not the carina-rs root (carina-rs/carina-provider-aws#360).
 #
