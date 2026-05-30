@@ -63,6 +63,17 @@ jobs:
       # pinned rev is consistent and >= .carina-core-min-rev.
       - run: ./scripts/check-carina-pin.sh
 
+  string-enum-aliases:
+    name: Check StringEnum Aliases
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Enforces #390: hand-written StringEnum sites in
+      # carina-aws-types/src/lib.rs must build their alias table from
+      # the canonical values via string_enum_with_dsl_aliases, not
+      # ship an empty `vec![]`.
+      - run: ./scripts/check-string-enum-aliases.sh
+
   wasm-build:
     name: WASM Build
     runs-on: ubuntu-latest

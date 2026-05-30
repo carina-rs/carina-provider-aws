@@ -98,6 +98,34 @@ fn dsl_aliases_for(values: &[&str]) -> Vec<(String, String)> {
         .collect()
 }
 
+/// Build a `StringEnum` `AttributeType` whose DSL alias table is
+/// derived from `values` via [`dsl_aliases_for`]. Hand-written
+/// `carina-aws-types` enum sites must call this constructor instead of
+/// the raw [`AttributeType::string_enum`] so that aliases cannot be
+/// silently omitted — every call site sources the alias table from the
+/// same `values` slice that defines the canonical AWS API values, making
+/// "StringEnum with empty `dsl_aliases`" impossible by construction.
+///
+/// `AwsNormalizer::api_canonicalize_recursive` relies on this alias
+/// table to rewrite DSL spellings (e.g. `aes256`) to the AWS canonical
+/// (`AES256`) before the wire call. A `StringEnum` whose alias table is
+/// empty silently forwards the raw alias spelling to the AWS SDK and
+/// triggers `MalformedXML` / `Unknown(...)` errors.
+/// See `carina-rs/carina-provider-aws#390`.
+///
+/// The raw [`AttributeType::string_enum`] constructor remains in use
+/// only for the `ConditionOperator` site, which derives its alias table
+/// dynamically from a different source.
+fn string_enum_with_dsl_aliases(
+    name: &str,
+    values: &[&str],
+    identity: Option<carina_core::schema::TypeIdentity>,
+) -> AttributeType {
+    let owned_values: Vec<String> = values.iter().map(|v| v.to_string()).collect();
+    let aliases = dsl_aliases_for(values);
+    AttributeType::string_enum(name.to_string(), owned_values, identity, aliases)
+}
+
 /// Check if `input` matches any of `valid_values` using enum matching rules:
 /// exact match, case-insensitive, or underscore-to-hyphen (case-insensitive).
 /// Returns the matched valid value if found.
@@ -1322,14 +1350,13 @@ fn string_or_principal_struct() -> AttributeType {
 /// `type_name` is the trailing `Effect` segment and `namespace` is
 /// `aws.iam.PolicyDocument`.
 fn iam_policy_effect() -> AttributeType {
-    AttributeType::string_enum(
-        "Effect".to_string(),
-        vec!["Allow".to_string(), "Deny".to_string()],
+    string_enum_with_dsl_aliases(
+        "Effect",
+        &["Allow", "Deny"],
         Some(carina_core::schema::string_enum_identity(
             "Effect",
             Some("aws.iam.PolicyDocument"),
         )),
-        dsl_aliases_for(&["Allow", "Deny"]),
     )
 }
 
@@ -1344,14 +1371,13 @@ fn iam_policy_effect() -> AttributeType {
 /// `<namespace>.<type_name>.<value>`, so `type_name` is the trailing
 /// `Version` segment and `namespace` is `aws.iam.PolicyDocument`.
 fn iam_policy_version() -> AttributeType {
-    AttributeType::string_enum(
-        "Version".to_string(),
-        vec!["2012-10-17".to_string(), "2008-10-17".to_string()],
+    string_enum_with_dsl_aliases(
+        "Version",
+        &["2012-10-17", "2008-10-17"],
         Some(carina_core::schema::string_enum_identity(
             "Version",
             Some("aws.iam.PolicyDocument"),
         )),
-        dsl_aliases_for(&["2012-10-17", "2008-10-17"]),
     )
 }
 
@@ -1451,18 +1477,13 @@ pub fn sqs_redrive_policy() -> AttributeType {
 
 /// `redrive_permission` enum used inside `sqs_redrive_allow_policy`.
 fn sqs_redrive_permission() -> AttributeType {
-    AttributeType::string_enum(
-        "SqsRedrivePermission".to_string(),
-        vec![
-            "allowAll".to_string(),
-            "denyAll".to_string(),
-            "byQueue".to_string(),
-        ],
+    string_enum_with_dsl_aliases(
+        "SqsRedrivePermission",
+        &["allowAll", "denyAll", "byQueue"],
         Some(carina_core::schema::string_enum_identity(
             "SqsRedrivePermission",
             Some("aws.sqs.Queue"),
         )),
-        dsl_aliases_for(&["allowAll", "denyAll", "byQueue"]),
     )
 }
 
@@ -1487,18 +1508,13 @@ pub fn sqs_redrive_allow_policy() -> AttributeType {
 
 /// SSE algorithm enum for `aws.s3.BucketServerSideEncryptionConfiguration`.
 fn s3_sse_algorithm() -> AttributeType {
-    AttributeType::string_enum(
-        "SseAlgorithm".to_string(),
-        vec![
-            "AES256".to_string(),
-            "aws:kms".to_string(),
-            "aws:kms:dsse".to_string(),
-        ],
+    string_enum_with_dsl_aliases(
+        "SseAlgorithm",
+        &["AES256", "aws:kms", "aws:kms:dsse"],
         Some(carina_core::schema::string_enum_identity(
             "SseAlgorithm",
             Some("aws.s3.BucketServerSideEncryptionConfiguration"),
         )),
-        vec![],
     )
 }
 
@@ -1551,23 +1567,9 @@ fn s3_replication_destination() -> AttributeType {
             StructField::new("account", AttributeType::string()).with_provider_name("Account"),
             StructField::new(
                 "storage_class",
-                AttributeType::string_enum(
-                    "ReplicationStorageClass".to_string(),
-                    vec![
-                        "STANDARD".to_string(),
-                        "REDUCED_REDUNDANCY".to_string(),
-                        "STANDARD_IA".to_string(),
-                        "ONEZONE_IA".to_string(),
-                        "INTELLIGENT_TIERING".to_string(),
-                        "GLACIER".to_string(),
-                        "DEEP_ARCHIVE".to_string(),
-                        "GLACIER_IR".to_string(),
-                    ],
-                    Some(carina_core::schema::string_enum_identity(
-                        "ReplicationStorageClass",
-                        Some("aws.s3.BucketReplicationConfiguration"),
-                    )),
-                    dsl_aliases_for(&[
+                string_enum_with_dsl_aliases(
+                    "ReplicationStorageClass",
+                    &[
                         "STANDARD",
                         "REDUCED_REDUNDANCY",
                         "STANDARD_IA",
@@ -1576,7 +1578,11 @@ fn s3_replication_destination() -> AttributeType {
                         "GLACIER",
                         "DEEP_ARCHIVE",
                         "GLACIER_IR",
-                    ]),
+                    ],
+                    Some(carina_core::schema::string_enum_identity(
+                        "ReplicationStorageClass",
+                        Some("aws.s3.BucketReplicationConfiguration"),
+                    )),
                 ),
             )
             .with_provider_name("StorageClass"),
@@ -1585,14 +1591,13 @@ fn s3_replication_destination() -> AttributeType {
 }
 
 fn s3_replication_status() -> AttributeType {
-    AttributeType::string_enum(
-        "ReplicationRuleStatus".to_string(),
-        vec!["Enabled".to_string(), "Disabled".to_string()],
+    string_enum_with_dsl_aliases(
+        "ReplicationRuleStatus",
+        &["Enabled", "Disabled"],
         Some(carina_core::schema::string_enum_identity(
             "ReplicationRuleStatus",
             Some("aws.s3.BucketReplicationConfiguration"),
         )),
-        dsl_aliases_for(&["Enabled", "Disabled"]),
     )
 }
 
@@ -1638,14 +1643,13 @@ fn s3_delete_marker_replication() -> AttributeType {
         vec![
             StructField::new(
                 "status",
-                AttributeType::string_enum(
-                    "DeleteMarkerReplicationStatus".to_string(),
-                    vec!["Enabled".to_string(), "Disabled".to_string()],
+                string_enum_with_dsl_aliases(
+                    "DeleteMarkerReplicationStatus",
+                    &["Enabled", "Disabled"],
                     Some(carina_core::schema::string_enum_identity(
                         "DeleteMarkerReplicationStatus",
                         Some("aws.s3.BucketReplicationConfiguration"),
                     )),
-                    dsl_aliases_for(&["Enabled", "Disabled"]),
                 ),
             )
             .with_provider_name("Status")
@@ -1683,41 +1687,32 @@ pub fn bucket_replication_rules() -> AttributeType {
 
 /// Lifecycle rule status (Enabled / Disabled).
 fn s3_lifecycle_status() -> AttributeType {
-    AttributeType::string_enum(
-        "LifecycleRuleStatus".to_string(),
-        vec!["Enabled".to_string(), "Disabled".to_string()],
+    string_enum_with_dsl_aliases(
+        "LifecycleRuleStatus",
+        &["Enabled", "Disabled"],
         Some(carina_core::schema::string_enum_identity(
             "LifecycleRuleStatus",
             Some("aws.s3.BucketLifecycleConfiguration"),
         )),
-        dsl_aliases_for(&["Enabled", "Disabled"]),
     )
 }
 
 /// Storage class for lifecycle transitions (Glacier / IA / etc.).
 fn s3_transition_storage_class() -> AttributeType {
-    AttributeType::string_enum(
-        "TransitionStorageClass".to_string(),
-        vec![
-            "GLACIER".to_string(),
-            "STANDARD_IA".to_string(),
-            "ONEZONE_IA".to_string(),
-            "INTELLIGENT_TIERING".to_string(),
-            "DEEP_ARCHIVE".to_string(),
-            "GLACIER_IR".to_string(),
-        ],
-        Some(carina_core::schema::string_enum_identity(
-            "TransitionStorageClass",
-            Some("aws.s3.BucketLifecycleConfiguration"),
-        )),
-        dsl_aliases_for(&[
+    string_enum_with_dsl_aliases(
+        "TransitionStorageClass",
+        &[
             "GLACIER",
             "STANDARD_IA",
             "ONEZONE_IA",
             "INTELLIGENT_TIERING",
             "DEEP_ARCHIVE",
             "GLACIER_IR",
-        ]),
+        ],
+        Some(carina_core::schema::string_enum_identity(
+            "TransitionStorageClass",
+            Some("aws.s3.BucketLifecycleConfiguration"),
+        )),
     )
 }
 
@@ -2012,14 +2007,13 @@ pub fn bucket_event_bridge_configuration() -> AttributeType {
 }
 
 fn s3_partition_date_source() -> AttributeType {
-    AttributeType::string_enum(
-        "PartitionDateSource".to_string(),
-        vec!["EventTime".to_string(), "DeliveryTime".to_string()],
+    string_enum_with_dsl_aliases(
+        "PartitionDateSource",
+        &["EventTime", "DeliveryTime"],
         Some(carina_core::schema::string_enum_identity(
             "PartitionDateSource",
             Some("aws.s3.BucketLogging"),
         )),
-        dsl_aliases_for(&["EventTime", "DeliveryTime"]),
     )
 }
 
@@ -2080,14 +2074,13 @@ pub fn s3_redirect_all_requests_to() -> AttributeType {
                 .required(),
             StructField::new(
                 "protocol",
-                AttributeType::string_enum(
-                    "Protocol".to_string(),
-                    vec!["http".to_string(), "https".to_string()],
+                string_enum_with_dsl_aliases(
+                    "Protocol",
+                    &["http", "https"],
                     Some(carina_core::schema::string_enum_identity(
                         "Protocol",
                         Some("aws.s3.BucketWebsiteConfiguration"),
                     )),
-                    vec![],
                 ),
             )
             .with_provider_name("Protocol"),
@@ -3882,5 +3875,87 @@ mod tests {
         } else {
             panic!("expected StringEnum");
         }
+    }
+
+    /// Regression: `s3_sse_algorithm` must register DSL aliases for every
+    /// value so `AwsNormalizer::api_canonicalize_recursive` rewrites the
+    /// DSL alias spelling (e.g. `aes256`) to the AWS API canonical
+    /// (`AES256`) before the apply path forwards it to S3. Without
+    /// aliases the literal alias string flows on the wire and
+    /// `PutBucketEncryption` returns `MalformedXML`. See
+    /// `carina-rs/carina-provider-aws#390`.
+    #[test]
+    fn s3_sse_algorithm_has_dsl_aliases() {
+        let sse = super::s3_sse_algorithm();
+        if let carina_core::schema::Shape::StringEnum {
+            name,
+            values,
+            identity,
+            dsl_aliases,
+        } = sse.shape(carina_core::schema::empty_defs())
+        {
+            assert_eq!(name, "SseAlgorithm");
+            assert_eq!(
+                values,
+                &[
+                    "AES256".to_string(),
+                    "aws:kms".to_string(),
+                    "aws:kms:dsse".to_string(),
+                ]
+            );
+            assert_eq!(
+                identity.and_then(|id| id.dotted_prefix()),
+                Some("aws.s3.BucketServerSideEncryptionConfiguration".to_string())
+            );
+            // `dsl_enum_value` passes `aws:kms` / `aws:kms:dsse` through
+            // unchanged: the colon is not in its known-separators set,
+            // so identity pairs are emitted for those rows. The
+            // load-bearing case for #390 is the `AES256 → aes256`
+            // rewrite; identity rows are present so the strict-DSL
+            // validator (carina#2980) treats the variant set uniformly.
+            assert_eq!(
+                dsl_aliases,
+                &[
+                    ("AES256".to_string(), "aes256".to_string()),
+                    ("aws:kms".to_string(), "aws:kms".to_string()),
+                    ("aws:kms:dsse".to_string(), "aws:kms:dsse".to_string()),
+                ]
+            );
+        } else {
+            panic!("expected StringEnum");
+        }
+    }
+
+    /// Sibling regression flagged in #390: the `protocol` field of
+    /// `RedirectAllRequestsTo` on `aws.s3.BucketWebsiteConfiguration`
+    /// suffers the same missing-aliases bug. Latent today (no fixture
+    /// exercises it) but the test pins the contract.
+    #[test]
+    fn s3_redirect_protocol_has_dsl_aliases() {
+        let redirect = super::s3_redirect_all_requests_to();
+        let shape = redirect.shape(carina_core::schema::empty_defs());
+        let carina_core::schema::Shape::Struct { fields, .. } = shape else {
+            panic!("expected Struct shape");
+        };
+        let protocol = fields
+            .iter()
+            .find(|f| f.name == "protocol")
+            .expect("RedirectAllRequestsTo must have a `protocol` field")
+            .field_type
+            .clone();
+        let carina_core::schema::Shape::StringEnum {
+            name, dsl_aliases, ..
+        } = protocol.shape(carina_core::schema::empty_defs())
+        else {
+            panic!("expected protocol to be a StringEnum");
+        };
+        assert_eq!(name, "Protocol");
+        assert_eq!(
+            dsl_aliases,
+            &[
+                ("http".to_string(), "http".to_string()),
+                ("https".to_string(), "https".to_string()),
+            ]
+        );
     }
 }
