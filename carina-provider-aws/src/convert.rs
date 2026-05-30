@@ -269,15 +269,23 @@ fn proto_to_core_attribute_type(t: &ProtoAttributeType) -> CoreAttributeType {
         ProtoAttributeType::Union { members } => {
             CoreAttributeType::union(members.iter().map(proto_to_core_attribute_type).collect())
         }
-        ProtoAttributeType::Custom { name, base } => CoreAttributeType::custom(
+        ProtoAttributeType::Custom {
+            name,
+            base,
+            pattern,
+            length,
+        } => CoreAttributeType::custom(
             if name.is_empty() {
                 None
             } else {
                 Some(carina_core::schema::TypeIdentity::from_dotted(name))
             },
             proto_to_core_attribute_type(base),
-            None,
-            None,
+            // carina#3364: carry the schema `pattern`/`length` so the
+            // host's `validate_custom` can enforce them; dropping them
+            // here is why a violating value only failed at `apply`.
+            pattern.clone(),
+            *length,
             noop_validator(),
             None,
         ),
@@ -433,13 +441,23 @@ fn core_to_proto_attribute_type(t: &CoreAttributeType) -> ProtoAttributeType {
             name: name.to_string(),
             fields: fields.iter().map(core_to_proto_struct_field).collect(),
         },
-        CoreRawShape::Custom { identity, base, .. } => ProtoAttributeType::Custom {
+        CoreRawShape::Custom {
+            identity,
+            base,
+            pattern,
+            length,
+            ..
+        } => ProtoAttributeType::Custom {
             // Serialize the structured identity to its dotted display
             // form for the wire. The host's `TypeIdentity::from_dotted`
             // parses it back on the other side, so the provider axis
             // survives the JSON round-trip.
             name: identity.map(|id| id.to_string()).unwrap_or_default(),
             base: Box::new(core_to_proto_attribute_type(base)),
+            // carina#3364: carry the schema `pattern`/`length` across the
+            // wire so the host can enforce them at validate/plan time.
+            pattern: pattern.map(|s| s.to_string()),
+            length,
         },
         // CustomEnum carries the enum-shorthand marker as a type-level
         // fact (carina#3222); on the wire form it still travels as a
@@ -567,6 +585,90 @@ mod tests {
             assert_eq!(values, &["Enabled", "Suspended"]);
         } else {
             panic!("Expected StringEnum");
+        }
+    }
+
+    /// Regression for aws#395 / carina#3364: a `Custom` attribute's schema
+    /// `pattern` and `length` constraints MUST cross the WASM boundary in
+    /// BOTH directions. If they are dropped, `carina validate` cannot
+    /// enforce them and a violating value only fails at `apply`. Asserts
+    /// the constraints reach the proto wire form and survive the
+    /// proto -> core round-trip.
+    #[test]
+    fn custom_pattern_and_length_cross_proto_boundary_both_ways() {
+        let pattern = "^[a-z]+$";
+        let length = (Some(1u64), Some(256u64));
+        let core_type = CoreAttributeType::custom(
+            Some(carina_core::schema::TypeIdentity::from_dotted(
+                "aws.example.Resource.SomeConstrained",
+            )),
+            CoreAttributeType::string(),
+            Some(pattern.to_string()),
+            Some(length),
+            noop_validator(),
+            None,
+        );
+
+        // core -> proto: the constraint must reach the wire form.
+        let proto_type = core_to_proto_attribute_type(&core_type);
+        match &proto_type {
+            ProtoAttributeType::Custom {
+                pattern: proto_pattern,
+                length: proto_length,
+                ..
+            } => {
+                assert_eq!(proto_pattern.as_deref(), Some(pattern));
+                assert_eq!(*proto_length, Some(length));
+            }
+            other => panic!("Expected Custom, got {other:?}"),
+        }
+
+        // proto -> core round-trip: the constraint must survive.
+        let roundtripped = proto_to_core_attribute_type(&proto_type);
+        match roundtripped.raw_shape() {
+            CoreRawShape::Custom {
+                pattern: rt_pattern,
+                length: rt_length,
+                ..
+            } => {
+                assert_eq!(rt_pattern, Some(pattern));
+                assert_eq!(rt_length, Some(length));
+            }
+            other => panic!("Expected Custom, got {other:?}"),
+        }
+    }
+
+    /// An anonymous pattern-only `Custom` (`identity: None`, no `length`)
+    /// is the common generated shape for a string attribute carrying just
+    /// a CloudFormation `pattern`. The `identity: None` path crosses the
+    /// boundary via the `name.is_empty()` branch, so it gets its own
+    /// coverage.
+    #[test]
+    fn anonymous_custom_pattern_only_crosses_proto_boundary() {
+        let pattern = "^[\\w\\-]+$";
+        let core_type = CoreAttributeType::custom(
+            None,
+            CoreAttributeType::string(),
+            Some(pattern.to_string()),
+            None,
+            noop_validator(),
+            None,
+        );
+
+        let proto_type = core_to_proto_attribute_type(&core_type);
+        let roundtripped = proto_to_core_attribute_type(&proto_type);
+        match roundtripped.raw_shape() {
+            CoreRawShape::Custom {
+                identity,
+                pattern: rt_pattern,
+                length: rt_length,
+                ..
+            } => {
+                assert!(identity.is_none(), "anonymous custom stays anonymous");
+                assert_eq!(rt_pattern, Some(pattern));
+                assert_eq!(rt_length, None);
+            }
+            other => panic!("Expected Custom, got {other:?}"),
         }
     }
 }
