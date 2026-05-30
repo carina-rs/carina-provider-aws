@@ -15,7 +15,7 @@ fi
 PROJECT_ROOT="$(cd "$HELPERS_DIR/../.." && pwd)"
 
 # See run-tests.sh for the rationale: `$PROJECT_ROOT/..` breaks when
-# the script is invoked from a `git wt` worktree
+# the script is invoked from a `git worktree` worktree
 # (carina-rs/carina-provider-aws#360). Resolve the carina-rs sibling
 # base via the canonical .git directory so worktree and main checkouts
 # both produce the same path.
