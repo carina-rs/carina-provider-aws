@@ -400,7 +400,7 @@ mod tests {
         // structured identity via `dotted_prefix()`.
         let az_type = availability_zone();
         if let carina_core::schema::Shape::CustomEnum { identity, .. } =
-            az_type.shape(carina_core::schema::empty_defs())
+            az_type.shape_ref_free().expect("test schema is Ref-free")
         {
             assert_eq!(
                 identity.dotted_prefix().as_deref(),
@@ -415,7 +415,7 @@ mod tests {
     fn az_has_to_dsl() {
         let az_type = availability_zone();
         if let carina_core::schema::Shape::CustomEnum { to_dsl, .. } =
-            az_type.shape(carina_core::schema::empty_defs())
+            az_type.shape_ref_free().expect("test schema is Ref-free")
         {
             assert!(to_dsl.is_some());
             let convert = to_dsl.unwrap();

@@ -2525,7 +2525,7 @@ mod tests {
             length,
             to_dsl: None,
             ..
-        } = t.shape(carina_core::schema::empty_defs())
+        } = t.shape_ref_free().expect("test schema is Ref-free")
         {
             assert_eq!(
                 identity.map(|id| id.to_string()).as_deref(),
@@ -2546,7 +2546,7 @@ mod tests {
             pattern,
             to_dsl: None,
             ..
-        } = t.shape(carina_core::schema::empty_defs())
+        } = t.shape_ref_free().expect("test schema is Ref-free")
         {
             assert_eq!(
                 identity.map(|id| id.to_string()).as_deref(),
@@ -3593,11 +3593,14 @@ mod tests {
         // `_if_exists` suffixed, and the combination — so that `validate` does
         // not reject inputs that the conversion layer already handles.
         let cond = condition_type();
-        let defs = carina_core::schema::empty_defs();
-        let carina_core::schema::Shape::Map { key, .. } = cond.shape(defs) else {
+        let carina_core::schema::Shape::Map { key, .. } =
+            cond.shape_ref_free().expect("test schema is Ref-free")
+        else {
             panic!("condition_type() should be a Map");
         };
-        let carina_core::schema::Shape::StringEnum { values, .. } = key.shape(defs) else {
+        let carina_core::schema::Shape::StringEnum { values, .. } =
+            key.shape_ref_free().expect("test schema is Ref-free")
+        else {
             panic!("condition_type() key should be a StringEnum");
         };
         for expected in [
@@ -3826,7 +3829,7 @@ mod tests {
             values,
             identity,
             dsl_aliases,
-        } = effect.shape(carina_core::schema::empty_defs())
+        } = effect.shape_ref_free().expect("test schema is Ref-free")
         {
             assert_eq!(name, "Effect");
             assert_eq!(values, &["Allow".to_string(), "Deny".to_string()]);
@@ -3854,7 +3857,7 @@ mod tests {
             values,
             identity,
             dsl_aliases,
-        } = version.shape(carina_core::schema::empty_defs())
+        } = version.shape_ref_free().expect("test schema is Ref-free")
         {
             assert_eq!(name, "Version");
             assert_eq!(
@@ -3892,7 +3895,7 @@ mod tests {
             values,
             identity,
             dsl_aliases,
-        } = sse.shape(carina_core::schema::empty_defs())
+        } = sse.shape_ref_free().expect("test schema is Ref-free")
         {
             assert_eq!(name, "SseAlgorithm");
             assert_eq!(
@@ -3933,7 +3936,7 @@ mod tests {
     #[test]
     fn s3_redirect_protocol_has_dsl_aliases() {
         let redirect = super::s3_redirect_all_requests_to();
-        let shape = redirect.shape(carina_core::schema::empty_defs());
+        let shape = redirect.shape_ref_free().expect("test schema is Ref-free");
         let carina_core::schema::Shape::Struct { fields, .. } = shape else {
             panic!("expected Struct shape");
         };
@@ -3945,7 +3948,7 @@ mod tests {
             .clone();
         let carina_core::schema::Shape::StringEnum {
             name, dsl_aliases, ..
-        } = protocol.shape(carina_core::schema::empty_defs())
+        } = protocol.shape_ref_free().expect("test schema is Ref-free")
         else {
             panic!("expected protocol to be a StringEnum");
         };
