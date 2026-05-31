@@ -305,8 +305,9 @@ fn redrive_allow_policy_to_json_string(value: &Value) -> Option<String> {
     let permission = match map.get("redrive_permission") {
         Some(Value::Concrete(ConcreteValue::String(s))) => s.clone(),
         Some(Value::Concrete(ConcreteValue::EnumIdentifier(s))) => {
-            // Strip any namespace prefix (e.g. aws.sqs.Queue.SqsRedrivePermission.allowAll
-            // → allowAll); the enum surface is the trailing segment.
+            // Strip any namespace prefix (e.g.
+            // aws.sqs.Queue.SqsRedriveAllowPolicy.RedrivePermission.allowAll
+            // -> allowAll); the enum surface is the trailing segment.
             s.rsplit('.').next().unwrap_or(s.as_str()).to_string()
         }
         _ => return None,

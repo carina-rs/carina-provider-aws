@@ -21,7 +21,7 @@ aws.sqs.Queue {
     statement = [
       {
         sid    = 'AllowSelf'
-        effect = aws.iam.PolicyDocument.Effect.allow
+        effect = aws.iam.PolicyDocument.IamPolicyStatement.Effect.allow
         principal = {
           aws = ['*']
         }

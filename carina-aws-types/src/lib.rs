@@ -1345,17 +1345,17 @@ fn string_or_principal_struct() -> AttributeType {
 /// `effect = allow` as a bare identifier — matching the bare-identifier
 /// convention used by every other enum field in the same `.crn` file.
 /// The namespace also makes the fully-qualified form
-/// `aws.iam.PolicyDocument.Effect.allow` parse and resolve: the
-/// resolver's canonical shape is `<namespace>.<type_name>.<value>`, so
-/// `type_name` is the trailing `Effect` segment and `namespace` is
-/// `aws.iam.PolicyDocument`.
+/// `aws.iam.PolicyDocument.IamPolicyStatement.Effect.allow` parse and
+/// resolve: the resolver's canonical shape is
+/// `<namespace>.<type_name>.<value>`, so `type_name` is the trailing
+/// `Effect` segment and `namespace` carries the containing structs.
 fn iam_policy_effect() -> AttributeType {
     string_enum_with_dsl_aliases(
         "Effect",
         &["Allow", "Deny"],
         Some(carina_core::schema::string_enum_identity(
             "Effect",
-            Some("aws.iam.PolicyDocument"),
+            Some("aws.iam.PolicyDocument.IamPolicyStatement"),
         )),
     )
 }
@@ -1478,11 +1478,11 @@ pub fn sqs_redrive_policy() -> AttributeType {
 /// `redrive_permission` enum used inside `sqs_redrive_allow_policy`.
 fn sqs_redrive_permission() -> AttributeType {
     string_enum_with_dsl_aliases(
-        "SqsRedrivePermission",
+        "RedrivePermission",
         &["allowAll", "denyAll", "byQueue"],
         Some(carina_core::schema::string_enum_identity(
-            "SqsRedrivePermission",
-            Some("aws.sqs.Queue"),
+            "RedrivePermission",
+            Some("aws.sqs.Queue.SqsRedriveAllowPolicy"),
         )),
     )
 }
@@ -1513,7 +1513,7 @@ fn s3_sse_algorithm() -> AttributeType {
         &["AES256", "aws:kms", "aws:kms:dsse"],
         Some(carina_core::schema::string_enum_identity(
             "SseAlgorithm",
-            Some("aws.s3.BucketServerSideEncryptionConfiguration"),
+            Some("aws.s3.BucketServerSideEncryptionConfiguration.SseRule.SseByDefault"),
         )),
     )
 }
@@ -1568,7 +1568,7 @@ fn s3_replication_destination() -> AttributeType {
             StructField::new(
                 "storage_class",
                 string_enum_with_dsl_aliases(
-                    "ReplicationStorageClass",
+                    "StorageClass",
                     &[
                         "STANDARD",
                         "REDUCED_REDUNDANCY",
@@ -1580,8 +1580,8 @@ fn s3_replication_destination() -> AttributeType {
                         "GLACIER_IR",
                     ],
                     Some(carina_core::schema::string_enum_identity(
-                        "ReplicationStorageClass",
-                        Some("aws.s3.BucketReplicationConfiguration"),
+                        "StorageClass",
+                        Some("aws.s3.BucketReplicationConfiguration.ReplicationRule.ReplicationDestination"),
                     )),
                 ),
             )
@@ -1592,11 +1592,11 @@ fn s3_replication_destination() -> AttributeType {
 
 fn s3_replication_status() -> AttributeType {
     string_enum_with_dsl_aliases(
-        "ReplicationRuleStatus",
+        "Status",
         &["Enabled", "Disabled"],
         Some(carina_core::schema::string_enum_identity(
-            "ReplicationRuleStatus",
-            Some("aws.s3.BucketReplicationConfiguration"),
+            "Status",
+            Some("aws.s3.BucketReplicationConfiguration.ReplicationRule"),
         )),
     )
 }
@@ -1644,11 +1644,11 @@ fn s3_delete_marker_replication() -> AttributeType {
             StructField::new(
                 "status",
                 string_enum_with_dsl_aliases(
-                    "DeleteMarkerReplicationStatus",
+                    "Status",
                     &["Enabled", "Disabled"],
                     Some(carina_core::schema::string_enum_identity(
-                        "DeleteMarkerReplicationStatus",
-                        Some("aws.s3.BucketReplicationConfiguration"),
+                        "Status",
+                        Some("aws.s3.BucketReplicationConfiguration.ReplicationRule.DeleteMarkerReplication"),
                     )),
                 ),
             )
@@ -1688,11 +1688,11 @@ pub fn bucket_replication_rules() -> AttributeType {
 /// Lifecycle rule status (Enabled / Disabled).
 fn s3_lifecycle_status() -> AttributeType {
     string_enum_with_dsl_aliases(
-        "LifecycleRuleStatus",
+        "Status",
         &["Enabled", "Disabled"],
         Some(carina_core::schema::string_enum_identity(
-            "LifecycleRuleStatus",
-            Some("aws.s3.BucketLifecycleConfiguration"),
+            "Status",
+            Some("aws.s3.BucketLifecycleConfiguration.LifecycleRule"),
         )),
     )
 }
@@ -1700,7 +1700,7 @@ fn s3_lifecycle_status() -> AttributeType {
 /// Storage class for lifecycle transitions (Glacier / IA / etc.).
 fn s3_transition_storage_class() -> AttributeType {
     string_enum_with_dsl_aliases(
-        "TransitionStorageClass",
+        "StorageClass",
         &[
             "GLACIER",
             "STANDARD_IA",
@@ -1710,8 +1710,8 @@ fn s3_transition_storage_class() -> AttributeType {
             "GLACIER_IR",
         ],
         Some(carina_core::schema::string_enum_identity(
-            "TransitionStorageClass",
-            Some("aws.s3.BucketLifecycleConfiguration"),
+            "StorageClass",
+            Some("aws.s3.BucketLifecycleConfiguration.LifecycleRule.LifecycleTransition"),
         )),
     )
 }
@@ -2012,7 +2012,7 @@ fn s3_partition_date_source() -> AttributeType {
         &["EventTime", "DeliveryTime"],
         Some(carina_core::schema::string_enum_identity(
             "PartitionDateSource",
-            Some("aws.s3.BucketLogging"),
+            Some("aws.s3.BucketLogging.TargetObjectKeyFormat.PartitionedPrefix"),
         )),
     )
 }
@@ -2079,7 +2079,7 @@ pub fn s3_redirect_all_requests_to() -> AttributeType {
                     &["http", "https"],
                     Some(carina_core::schema::string_enum_identity(
                         "Protocol",
-                        Some("aws.s3.BucketWebsiteConfiguration"),
+                        Some("aws.s3.BucketWebsiteConfiguration.RedirectAllRequestsTo"),
                     )),
                 ),
             )
@@ -2515,6 +2515,169 @@ mod tests {
     use super::*;
 
     // Custom type shape tests
+
+    fn field_type<'a>(attr: &'a AttributeType, field_name: &str) -> &'a AttributeType {
+        let carina_core::schema::Shape::Struct { fields, .. } =
+            attr.shape_ref_free().expect("test schema is Ref-free")
+        else {
+            panic!("expected Struct shape");
+        };
+        &fields
+            .iter()
+            .find(|field| field.name == field_name)
+            .unwrap_or_else(|| panic!("missing field {field_name}"))
+            .field_type
+    }
+
+    fn list_inner(attr: &AttributeType) -> &AttributeType {
+        let carina_core::schema::Shape::List { inner, .. } =
+            attr.shape_ref_free().expect("test schema is Ref-free")
+        else {
+            panic!("expected List shape");
+        };
+        inner
+    }
+
+    fn string_enum_identity(attr: &AttributeType) -> String {
+        let carina_core::schema::Shape::StringEnum {
+            identity: Some(identity),
+            ..
+        } = attr.shape_ref_free().expect("test schema is Ref-free")
+        else {
+            panic!("expected StringEnum shape with identity");
+        };
+        identity.to_string()
+    }
+
+    #[test]
+    fn hand_written_string_enum_identities_are_structural() {
+        let policy_document = iam_policy_document();
+        let policy_statement = list_inner(field_type(&policy_document, "statement"));
+
+        let queue_redrive_allow_policy = sqs_redrive_allow_policy();
+
+        let sse_rules = bucket_encryption_rules();
+        let sse_rule = list_inner(&sse_rules);
+        let sse_by_default = field_type(sse_rule, "apply_server_side_encryption_by_default");
+
+        let replication_rules = bucket_replication_rules();
+        let replication_rule = list_inner(&replication_rules);
+        let replication_destination = field_type(replication_rule, "destination");
+        let delete_marker_replication = field_type(replication_rule, "delete_marker_replication");
+
+        let lifecycle_rules = bucket_lifecycle_rules();
+        let lifecycle_rule = list_inner(&lifecycle_rules);
+        let lifecycle_transition = list_inner(field_type(lifecycle_rule, "transitions"));
+
+        let target_object_key_format = bucket_target_object_key_format();
+        let partitioned_prefix = field_type(&target_object_key_format, "partitioned_prefix");
+
+        let redirect_all_requests_to = s3_redirect_all_requests_to();
+
+        let actual = vec![
+            (
+                "iam_policy_effect",
+                string_enum_identity(field_type(policy_statement, "effect")),
+            ),
+            (
+                "iam_policy_version",
+                string_enum_identity(field_type(&policy_document, "version")),
+            ),
+            (
+                "sqs_redrive_permission",
+                string_enum_identity(field_type(
+                    &queue_redrive_allow_policy,
+                    "redrive_permission",
+                )),
+            ),
+            (
+                "s3_sse_algorithm",
+                string_enum_identity(field_type(sse_by_default, "sse_algorithm")),
+            ),
+            (
+                "s3_replication_destination.storage_class",
+                string_enum_identity(field_type(replication_destination, "storage_class")),
+            ),
+            (
+                "s3_replication_status",
+                string_enum_identity(field_type(replication_rule, "status")),
+            ),
+            (
+                "s3_delete_marker_replication.status",
+                string_enum_identity(field_type(delete_marker_replication, "status")),
+            ),
+            (
+                "s3_lifecycle_status",
+                string_enum_identity(field_type(lifecycle_rule, "status")),
+            ),
+            (
+                "s3_transition_storage_class",
+                string_enum_identity(field_type(lifecycle_transition, "storage_class")),
+            ),
+            (
+                "s3_partition_date_source",
+                string_enum_identity(field_type(partitioned_prefix, "partition_date_source")),
+            ),
+            (
+                "s3_redirect_all_requests_to.protocol",
+                string_enum_identity(field_type(&redirect_all_requests_to, "protocol")),
+            ),
+        ];
+
+        let expected = vec![
+            (
+                "iam_policy_effect",
+                "aws.iam.PolicyDocument.IamPolicyStatement.Effect".to_string(),
+            ),
+            (
+                "iam_policy_version",
+                "aws.iam.PolicyDocument.Version".to_string(),
+            ),
+            (
+                "sqs_redrive_permission",
+                "aws.sqs.Queue.SqsRedriveAllowPolicy.RedrivePermission".to_string(),
+            ),
+            (
+                "s3_sse_algorithm",
+                "aws.s3.BucketServerSideEncryptionConfiguration.SseRule.SseByDefault.SseAlgorithm"
+                    .to_string(),
+            ),
+            (
+                "s3_replication_destination.storage_class",
+                "aws.s3.BucketReplicationConfiguration.ReplicationRule.ReplicationDestination.StorageClass"
+                    .to_string(),
+            ),
+            (
+                "s3_replication_status",
+                "aws.s3.BucketReplicationConfiguration.ReplicationRule.Status".to_string(),
+            ),
+            (
+                "s3_delete_marker_replication.status",
+                "aws.s3.BucketReplicationConfiguration.ReplicationRule.DeleteMarkerReplication.Status"
+                    .to_string(),
+            ),
+            (
+                "s3_lifecycle_status",
+                "aws.s3.BucketLifecycleConfiguration.LifecycleRule.Status".to_string(),
+            ),
+            (
+                "s3_transition_storage_class",
+                "aws.s3.BucketLifecycleConfiguration.LifecycleRule.LifecycleTransition.StorageClass"
+                    .to_string(),
+            ),
+            (
+                "s3_partition_date_source",
+                "aws.s3.BucketLogging.TargetObjectKeyFormat.PartitionedPrefix.PartitionDateSource"
+                    .to_string(),
+            ),
+            (
+                "s3_redirect_all_requests_to.protocol",
+                "aws.s3.BucketWebsiteConfiguration.RedirectAllRequestsTo.Protocol".to_string(),
+            ),
+        ];
+
+        assert_eq!(actual, expected);
+    }
 
     #[test]
     fn aws_account_id_carries_pattern_and_length() {
@@ -3835,7 +3998,7 @@ mod tests {
             assert_eq!(values, &["Allow".to_string(), "Deny".to_string()]);
             assert_eq!(
                 identity.and_then(|id| id.dotted_prefix()),
-                Some("aws.iam.PolicyDocument".to_string())
+                Some("aws.iam.PolicyDocument.IamPolicyStatement".to_string())
             );
             assert_eq!(
                 dsl_aliases,
@@ -3908,7 +4071,10 @@ mod tests {
             );
             assert_eq!(
                 identity.and_then(|id| id.dotted_prefix()),
-                Some("aws.s3.BucketServerSideEncryptionConfiguration".to_string())
+                Some(
+                    "aws.s3.BucketServerSideEncryptionConfiguration.SseRule.SseByDefault"
+                        .to_string()
+                )
             );
             // `dsl_enum_value` passes `aws:kms` / `aws:kms:dsse` through
             // unchanged: the colon is not in its known-separators set,

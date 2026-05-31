@@ -150,13 +150,13 @@ pub fn acm_certificate_config() -> AwsSchemaConfig {
                     StructField::new("certificate_transparency_logging_preference", AttributeType::string_enum(
                 "CertificateTransparencyLoggingPreference".to_string(),
                 vec!["DISABLED".to_string(), "ENABLED".to_string()],
-                Some(carina_core::schema::string_enum_identity("CertificateTransparencyLoggingPreference", Some("aws.acm.Certificate"))),
+                Some(carina_core::schema::string_enum_identity("CertificateTransparencyLoggingPreference", Some("aws.acm.Certificate.CertificateOptions"))),
                 vec![("DISABLED".to_string(), "disabled".to_string()), ("ENABLED".to_string(), "enabled".to_string())],
             )).with_description("You can opt out of certificate transparency logging by specifying the DISABLED option. Opt in by specifying ENABLED.").with_provider_name("CertificateTransparencyLoggingPreference"),
                     StructField::new("export", AttributeType::string_enum(
                 "Export".to_string(),
                 vec!["DISABLED".to_string(), "ENABLED".to_string()],
-                Some(carina_core::schema::string_enum_identity("Export", Some("aws.acm.Certificate"))),
+                Some(carina_core::schema::string_enum_identity("Export", Some("aws.acm.Certificate.CertificateOptions"))),
                 vec![("DISABLED".to_string(), "disabled".to_string()), ("ENABLED".to_string(), "enabled".to_string())],
             )).with_description("You can opt in to allow the export of your certificates by specifying ENABLED. You cannot update the value of Export after the the certificate is crea...").with_provider_name("Export")
                     ],
@@ -207,7 +207,7 @@ pub fn acm_certificate_config() -> AwsSchemaConfig {
                     StructField::new("type", AttributeType::string_enum(
                 "Type".to_string(),
                 vec!["CNAME".to_string()],
-                Some(carina_core::schema::string_enum_identity("Type", Some("aws.acm.Certificate"))),
+                Some(carina_core::schema::string_enum_identity("Type", Some("aws.acm.Certificate.DomainValidation.ResourceRecord"))),
                 vec![("CNAME".to_string(), "cname".to_string())],
             )).required().with_description("The type of DNS record. Currently this can be CNAME.").with_provider_name("Type"),
                     StructField::new("value", AttributeType::string()).required().with_description("The value of the CNAME record to add to your DNS database. This is supplied by ACM.").with_provider_name("Value")
@@ -218,13 +218,13 @@ pub fn acm_certificate_config() -> AwsSchemaConfig {
                     StructField::new("validation_method", AttributeType::string_enum(
                 "ValidationMethod".to_string(),
                 vec!["DNS".to_string(), "EMAIL".to_string(), "HTTP".to_string()],
-                Some(carina_core::schema::string_enum_identity("ValidationMethod", Some("aws.acm.Certificate"))),
+                Some(carina_core::schema::string_enum_identity("ValidationMethod", Some("aws.acm.Certificate.DomainValidation"))),
                 vec![("DNS".to_string(), "dns".to_string()), ("EMAIL".to_string(), "email".to_string()), ("HTTP".to_string(), "http".to_string())],
             )).with_description("Specifies the domain validation method.").with_provider_name("ValidationMethod"),
                     StructField::new("validation_status", AttributeType::string_enum(
                 "ValidationStatus".to_string(),
                 vec!["FAILED".to_string(), "PENDING_VALIDATION".to_string(), "SUCCESS".to_string()],
-                Some(carina_core::schema::string_enum_identity("ValidationStatus", Some("aws.acm.Certificate"))),
+                Some(carina_core::schema::string_enum_identity("ValidationStatus", Some("aws.acm.Certificate.DomainValidation"))),
                 vec![("FAILED".to_string(), "failed".to_string()), ("PENDING_VALIDATION".to_string(), "pending_validation".to_string()), ("SUCCESS".to_string(), "success".to_string())],
             )).with_description("The validation status of the domain name. This can be one of the following values: PENDING_VALIDATION SUCCESS FAILED").with_provider_name("ValidationStatus")
                     ],
@@ -266,7 +266,7 @@ pub fn acm_certificate_config() -> AwsSchemaConfig {
                     StructField::new("type", AttributeType::string_enum(
                 "Type".to_string(),
                 vec!["CNAME".to_string()],
-                Some(carina_core::schema::string_enum_identity("Type", Some("aws.acm.Certificate"))),
+                Some(carina_core::schema::string_enum_identity("Type", Some("aws.acm.Certificate.RenewalSummary.DomainValidation.ResourceRecord"))),
                 vec![("CNAME".to_string(), "cname".to_string())],
             )).required().with_description("The type of DNS record. Currently this can be CNAME.").with_provider_name("Type"),
                     StructField::new("value", AttributeType::string()).required().with_description("The value of the CNAME record to add to your DNS database. This is supplied by ACM.").with_provider_name("Value")
@@ -277,13 +277,13 @@ pub fn acm_certificate_config() -> AwsSchemaConfig {
                     StructField::new("validation_method", AttributeType::string_enum(
                 "ValidationMethod".to_string(),
                 vec!["DNS".to_string(), "EMAIL".to_string(), "HTTP".to_string()],
-                Some(carina_core::schema::string_enum_identity("ValidationMethod", Some("aws.acm.Certificate"))),
+                Some(carina_core::schema::string_enum_identity("ValidationMethod", Some("aws.acm.Certificate.RenewalSummary.DomainValidation"))),
                 vec![("DNS".to_string(), "dns".to_string()), ("EMAIL".to_string(), "email".to_string()), ("HTTP".to_string(), "http".to_string())],
             )).with_description("Specifies the domain validation method.").with_provider_name("ValidationMethod"),
                     StructField::new("validation_status", AttributeType::string_enum(
                 "ValidationStatus".to_string(),
                 vec!["FAILED".to_string(), "PENDING_VALIDATION".to_string(), "SUCCESS".to_string()],
-                Some(carina_core::schema::string_enum_identity("ValidationStatus", Some("aws.acm.Certificate"))),
+                Some(carina_core::schema::string_enum_identity("ValidationStatus", Some("aws.acm.Certificate.RenewalSummary.DomainValidation"))),
                 vec![("FAILED".to_string(), "failed".to_string()), ("PENDING_VALIDATION".to_string(), "pending_validation".to_string()), ("SUCCESS".to_string(), "success".to_string())],
             )).with_description("The validation status of the domain name. This can be one of the following values: PENDING_VALIDATION SUCCESS FAILED").with_provider_name("ValidationStatus")
                     ],
@@ -291,13 +291,13 @@ pub fn acm_certificate_config() -> AwsSchemaConfig {
                     StructField::new("renewal_status", AttributeType::string_enum(
                 "RenewalStatus".to_string(),
                 vec!["FAILED".to_string(), "PENDING_AUTO_RENEWAL".to_string(), "PENDING_VALIDATION".to_string(), "SUCCESS".to_string()],
-                Some(carina_core::schema::string_enum_identity("RenewalStatus", Some("aws.acm.Certificate"))),
+                Some(carina_core::schema::string_enum_identity("RenewalStatus", Some("aws.acm.Certificate.RenewalSummary"))),
                 vec![("FAILED".to_string(), "failed".to_string()), ("PENDING_AUTO_RENEWAL".to_string(), "pending_auto_renewal".to_string()), ("PENDING_VALIDATION".to_string(), "pending_validation".to_string()), ("SUCCESS".to_string(), "success".to_string())],
             )).required().with_description("The status of ACM's managed renewal of the certificate.").with_provider_name("RenewalStatus"),
                     StructField::new("renewal_status_reason", AttributeType::string_enum(
                 "RenewalStatusReason".to_string(),
                 vec!["ADDITIONAL_VERIFICATION_REQUIRED".to_string(), "CAA_ERROR".to_string(), "DOMAIN_NOT_ALLOWED".to_string(), "DOMAIN_VALIDATION_DENIED".to_string(), "INVALID_PUBLIC_DOMAIN".to_string(), "NO_AVAILABLE_CONTACTS".to_string(), "OTHER".to_string(), "PCA_ACCESS_DENIED".to_string(), "PCA_INVALID_ARGS".to_string(), "PCA_INVALID_ARN".to_string(), "PCA_INVALID_DURATION".to_string(), "PCA_INVALID_STATE".to_string(), "PCA_LIMIT_EXCEEDED".to_string(), "PCA_NAME_CONSTRAINTS_VALIDATION".to_string(), "PCA_REQUEST_FAILED".to_string(), "PCA_RESOURCE_NOT_FOUND".to_string(), "SLR_NOT_FOUND".to_string()],
-                Some(carina_core::schema::string_enum_identity("RenewalStatusReason", Some("aws.acm.Certificate"))),
+                Some(carina_core::schema::string_enum_identity("RenewalStatusReason", Some("aws.acm.Certificate.RenewalSummary"))),
                 vec![("ADDITIONAL_VERIFICATION_REQUIRED".to_string(), "additional_verification_required".to_string()), ("CAA_ERROR".to_string(), "caa_error".to_string()), ("DOMAIN_NOT_ALLOWED".to_string(), "domain_not_allowed".to_string()), ("DOMAIN_VALIDATION_DENIED".to_string(), "domain_validation_denied".to_string()), ("INVALID_PUBLIC_DOMAIN".to_string(), "invalid_public_domain".to_string()), ("NO_AVAILABLE_CONTACTS".to_string(), "no_available_contacts".to_string()), ("OTHER".to_string(), "other".to_string()), ("PCA_ACCESS_DENIED".to_string(), "pca_access_denied".to_string()), ("PCA_INVALID_ARGS".to_string(), "pca_invalid_args".to_string()), ("PCA_INVALID_ARN".to_string(), "pca_invalid_arn".to_string()), ("PCA_INVALID_DURATION".to_string(), "pca_invalid_duration".to_string()), ("PCA_INVALID_STATE".to_string(), "pca_invalid_state".to_string()), ("PCA_LIMIT_EXCEEDED".to_string(), "pca_limit_exceeded".to_string()), ("PCA_NAME_CONSTRAINTS_VALIDATION".to_string(), "pca_name_constraints_validation".to_string()), ("PCA_REQUEST_FAILED".to_string(), "pca_request_failed".to_string()), ("PCA_RESOURCE_NOT_FOUND".to_string(), "pca_resource_not_found".to_string()), ("SLR_NOT_FOUND".to_string(), "slr_not_found".to_string())],
             )).with_description("The reason that a renewal request was unsuccessful.").with_provider_name("RenewalStatusReason"),
                     StructField::new("updated_at", AttributeType::string()).required().with_description("The time at which the renewal summary was last updated.").with_provider_name("UpdatedAt")

@@ -30,7 +30,7 @@ let flow_log_role = aws.iam.Role {
   assume_role_policy_document = {
     version = aws.iam.PolicyDocument.Version.2012_10_17
     statement {
-      effect = aws.iam.PolicyDocument.Effect.allow
+      effect = aws.iam.PolicyDocument.IamPolicyStatement.Effect.allow
 
       principal = {
         service = 'vpc-flow-logs.amazonaws.com'

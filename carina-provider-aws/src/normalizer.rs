@@ -910,7 +910,7 @@ mod tests {
             assert_eq!(
                 fields.get("hostname_type"),
                 Some(&Value::Concrete(ConcreteValue::String(
-                    "aws.ec2.Subnet.HostnameType.ip_name".to_string()
+                    "aws.ec2.Subnet.PrivateDnsNameOptionsOnLaunch.HostnameType.ip_name".to_string()
                 )))
             );
             // Non-enum fields should not be modified

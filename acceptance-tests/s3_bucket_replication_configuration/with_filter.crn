@@ -32,7 +32,7 @@ let role = aws.iam.Role {
   assume_role_policy_document = {
     version = aws.iam.PolicyDocument.Version.2012_10_17
     statement {
-      effect = aws.iam.PolicyDocument.Effect.allow
+      effect = aws.iam.PolicyDocument.IamPolicyStatement.Effect.allow
       principal = {
         service = 's3.amazonaws.com'
       }
@@ -48,13 +48,13 @@ aws.s3.BucketReplicationConfiguration {
   rules = [
     {
       id       = 'replicate-docs'
-      status   = aws.s3.BucketReplicationConfiguration.ReplicationRuleStatus.enabled
+      status   = aws.s3.BucketReplicationConfiguration.ReplicationRule.Status.enabled
       priority = 1
       filter = {
         prefix = 'docs/'
       }
       delete_marker_replication = {
-        status = aws.s3.BucketReplicationConfiguration.DeleteMarkerReplicationStatus.enabled
+        status = aws.s3.BucketReplicationConfiguration.ReplicationRule.DeleteMarkerReplication.Status.enabled
       }
       destination = {
         bucket = 'arn:aws:s3:::carina-acc-test-aws-s3-repl-filter-dst-v1'

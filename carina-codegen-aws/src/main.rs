@@ -713,6 +713,7 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
             &mut TypeResolutionContext {
                 model,
                 namespace: &namespace,
+                struct_path: Vec::new(),
                 type_overrides: &type_overrides,
                 enum_alias_map: &enum_alias_map,
                 to_dsl_overrides: &to_dsl_overrides,
@@ -789,6 +790,7 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
             &mut TypeResolutionContext {
                 model,
                 namespace: &namespace,
+                struct_path: Vec::new(),
                 type_overrides: &type_overrides,
                 enum_alias_map: &enum_alias_map,
                 to_dsl_overrides: &to_dsl_overrides,
@@ -1196,7 +1198,11 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
 /// that are passed to both `resolve_type` and `generate_struct_type`.
 struct TypeResolutionContext<'a> {
     model: &'a SmithyModel,
+    /// Base resource namespace, e.g. `aws.acm.Certificate`.
     namespace: &'a str,
+    /// Containing Smithy struct type names between the resource and the
+    /// field currently being resolved.
+    struct_path: Vec<String>,
     type_overrides: &'a HashMap<&'a str, &'a str>,
     enum_alias_map: &'a HashMap<&'a str, Vec<(&'a str, &'a str)>>,
     to_dsl_overrides: &'a HashMap<&'a str, &'a str>,
@@ -1220,6 +1226,14 @@ struct TypeResolutionContext<'a> {
     /// to one type inside `AliasTarget` and another at the top level.
     /// Carries `ResourceDef.struct_field_type_overrides` (aws#302).
     struct_field_type_overrides: &'a HashMap<(&'a str, &'a str), &'a str>,
+}
+
+fn enum_namespace(ctx: &TypeResolutionContext<'_>) -> String {
+    if ctx.struct_path.is_empty() {
+        ctx.namespace.to_string()
+    } else {
+        format!("{}.{}", ctx.namespace, ctx.struct_path.join("."))
+    }
 }
 
 /// Resolve a Smithy type to a Carina type code string.
@@ -1370,6 +1384,7 @@ fn generate_struct_type(
     struct_name: &str,
     structure: &carina_smithy::StructureShape,
 ) -> String {
+    ctx.struct_path.push(struct_name.to_string());
     let mut fields: Vec<String> = Vec::new();
     for (field_name, member_ref) in &structure.members {
         let snake_name = field_name.to_snake_case();
@@ -1392,6 +1407,7 @@ fn generate_struct_type(
 
         // If enum detected, use shared schema enum type.
         let field_type = if let Some(ei) = enum_info {
+            let namespace = enum_namespace(ctx);
             // Same D7 rule as the top-level enum attribute path: derive a
             // snake_case DSL alias for every API value, layer in explicit
             // aliases, and let `to_dsl_overrides` take precedence over both.
@@ -1415,7 +1431,7 @@ fn generate_struct_type(
                  \x20               Some(carina_core::schema::string_enum_identity(\"{}\", Some(\"{}\"))),\n\
                  \x20               {},\n\
                  \x20           )",
-                ei.type_name, values_str, ei.type_name, ctx.namespace, dsl_aliases_code
+                ei.type_name, values_str, ei.type_name, namespace, dsl_aliases_code
             )
         } else {
             field_type
@@ -1442,6 +1458,7 @@ fn generate_struct_type(
     }
 
     let fields_str = fields.join(",\n                    ");
+    ctx.struct_path.pop();
     format!(
         "AttributeType::struct_(\n\
          \x20                   \"{}\".to_string(),\n\
