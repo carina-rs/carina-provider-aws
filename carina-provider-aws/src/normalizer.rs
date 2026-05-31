@@ -6,7 +6,7 @@ use indexmap::IndexMap;
 
 use carina_core::provider::{self, BoxFuture, ProviderNormalizer, SavedAttrs, ready_noop};
 use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
-use carina_core::schema::{AttributeType, SchemaRegistry};
+use carina_core::schema::{AttributeType, ResourceSchema, SchemaRegistry};
 
 /// Schema extension for the AWS provider.
 ///
@@ -100,7 +100,8 @@ pub(crate) fn resolve_enum_identifiers(resources: &mut [Resource]) {
                 carina_core::utils::resolve_enum_value_recursive(value, &attr_schema.attr_type);
             // Pass 2: DSL spelling → API canonical at every nested enum position.
             let base = after_dsl.as_ref().unwrap_or(value);
-            let after_api = api_canonicalize_recursive(base, &attr_schema.attr_type);
+            let after_api =
+                api_canonicalize_recursive(base, &attr_schema.attr_type, &config.schema);
 
             match (after_dsl, after_api) {
                 (_, Some(v)) => {
@@ -134,7 +135,11 @@ pub(crate) fn resolve_enum_identifiers(resources: &mut [Resource]) {
 /// Returns `None` when nothing was rewritten, mirroring the
 /// `resolve_enum_value_recursive` contract so callers can compose the
 /// two passes without redundant clones.
-fn api_canonicalize_recursive(value: &Value, attr_type: &AttributeType) -> Option<Value> {
+fn api_canonicalize_recursive(
+    value: &Value,
+    attr_type: &AttributeType,
+    schema: &ResourceSchema,
+) -> Option<Value> {
     // Leaf: StringEnum (with or without namespace). We canonicalize via
     // the alias table regardless of whether the input was namespaced —
     // `extract_enum_value_with_values` handles both shapes (including
@@ -167,8 +172,8 @@ fn api_canonicalize_recursive(value: &Value, attr_type: &AttributeType) -> Optio
         return Some(Value::Concrete(ConcreteValue::String(api)));
     }
 
-    use carina_core::schema::{Shape, empty_defs};
-    match attr_type.shape(empty_defs()) {
+    use carina_core::schema::Shape;
+    match schema.shape_of(attr_type) {
         Shape::Struct { fields, .. } => {
             let Value::Concrete(ConcreteValue::Map(map)) = value else {
                 return None;
@@ -178,7 +183,7 @@ fn api_canonicalize_recursive(value: &Value, attr_type: &AttributeType) -> Optio
             for field in fields {
                 if let Some(field_value) = map.get(&field.name)
                     && let Some(new_field) =
-                        api_canonicalize_recursive(field_value, &field.field_type)
+                        api_canonicalize_recursive(field_value, &field.field_type, schema)
                 {
                     rewritten.insert(field.name.clone(), new_field);
                     changed = true;
@@ -193,7 +198,7 @@ fn api_canonicalize_recursive(value: &Value, attr_type: &AttributeType) -> Optio
             let mut rewritten = items.clone();
             let mut changed = false;
             for (i, item) in items.iter().enumerate() {
-                if let Some(new_item) = api_canonicalize_recursive(item, inner) {
+                if let Some(new_item) = api_canonicalize_recursive(item, inner, schema) {
                     rewritten[i] = new_item;
                     changed = true;
                 }
@@ -253,7 +258,7 @@ fn api_canonicalize_recursive(value: &Value, attr_type: &AttributeType) -> Optio
                     }
                     ck
                 };
-                let new_v = match api_canonicalize_recursive(v, inner) {
+                let new_v = match api_canonicalize_recursive(v, inner, schema) {
                     Some(nv) => {
                         changed = true;
                         nv
@@ -304,9 +309,8 @@ pub(crate) fn normalize_state_enums(resource_type: &str, attributes: &mut HashMa
                 }
             }
             // Normalize enum fields within struct (Map) values
-            if let carina_core::schema::Shape::Struct { fields, .. } = attr_schema
-                .attr_type
-                .shape(carina_core::schema::empty_defs())
+            if let carina_core::schema::Shape::Struct { fields, .. } =
+                config.schema.shape_of(&attr_schema.attr_type)
                 && let Value::Concrete(ConcreteValue::Map(map_fields)) = value
             {
                 let mut normalized_map = map_fields.clone();

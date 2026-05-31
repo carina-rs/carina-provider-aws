@@ -471,9 +471,11 @@ fn dsl_value_to_iam_json(
         }
     }
 
-    use carina_core::schema::{Shape, empty_defs};
-    let defs = empty_defs();
-    match attr_type.shape(defs) {
+    use carina_core::schema::Shape;
+    let Ok(shape) = attr_type.shape_ref_free() else {
+        return scalar_to_json(value);
+    };
+    match shape {
         Shape::Union(members) => {
             // Try each member; first whose *input* value-shape matches
             // wins. Gating on the input shape (not the output JSON)
@@ -483,14 +485,17 @@ fn dsl_value_to_iam_json(
             // `string_or_principal_struct`) so a Map principal is not
             // matched against the String arm.
             for member in members {
-                let value_matches_member = match member.shape(defs) {
-                    Shape::Struct { .. } => {
-                        matches!(value, Value::Concrete(ConcreteValue::Map(_)))
-                    }
-                    Shape::List { .. } => {
-                        matches!(value, Value::Concrete(ConcreteValue::List(_)))
-                    }
-                    _ => true,
+                let value_matches_member = match member.shape_ref_free() {
+                    Ok(shape) => match shape {
+                        Shape::Struct { .. } => {
+                            matches!(value, Value::Concrete(ConcreteValue::Map(_)))
+                        }
+                        Shape::List { .. } => {
+                            matches!(value, Value::Concrete(ConcreteValue::List(_)))
+                        }
+                        _ => true,
+                    },
+                    Err(_) => true,
                 };
                 if value_matches_member {
                     return dsl_value_to_iam_json(value, member, attr_name);
