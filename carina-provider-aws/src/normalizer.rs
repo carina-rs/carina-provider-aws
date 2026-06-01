@@ -1021,7 +1021,7 @@ mod tests {
         // `string_equals` is the StringEnum value.
         let mut condition = IndexMap::new();
         condition.insert(
-            "aws.iam.IamPolicyStatement.ConditionOperator.string_equals".to_string(),
+            "aws.iam.Statement.ConditionOperator.string_equals".to_string(),
             Value::Concrete(ConcreteValue::Map(cond_body)),
         );
         let mut stmt = IndexMap::new();
@@ -1070,7 +1070,7 @@ mod tests {
             cond.keys().collect::<Vec<_>>()
         );
         assert!(
-            !cond.contains_key("aws.iam.IamPolicyStatement.ConditionOperator.string_equals"),
+            !cond.contains_key("aws.iam.Statement.ConditionOperator.string_equals"),
             "the namespaced key must not survive"
         );
     }
@@ -1099,7 +1099,7 @@ mod tests {
             Value::Concrete(ConcreteValue::Map(m))
         };
         let bare = "string_equals";
-        let nsd = "aws.iam.IamPolicyStatement.ConditionOperator.string_equals";
+        let nsd = "aws.iam.Statement.ConditionOperator.string_equals";
 
         // Run the same malformed condition in both key orderings.
         for (first, second) in [(bare, nsd), (nsd, bare)] {
