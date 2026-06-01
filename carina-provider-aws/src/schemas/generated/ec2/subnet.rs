@@ -149,7 +149,7 @@ pub fn ec2_subnet_config() -> AwsSchemaConfig {
                     StructField::new("hostname_type", AttributeType::string_enum(
                 "HostnameType".to_string(),
                 vec!["ip-name".to_string(), "resource-name".to_string()],
-                Some(carina_core::schema::string_enum_identity("HostnameType", Some("aws.ec2.Subnet"))),
+                Some(carina_core::schema::string_enum_identity("HostnameType", Some("aws.ec2.Subnet.PrivateDnsNameOptionsOnLaunch"))),
                 vec![("ip-name".to_string(), "ip_name".to_string()), ("resource-name".to_string(), "resource_name".to_string())],
             )).with_description("The type of hostname for EC2 instances. For IPv4 only subnets, an instance DNS name must be based on the instance IPv4 address. For IPv6 only subnets,...").with_provider_name("HostnameType")
                     ],

@@ -18,7 +18,7 @@ aws.s3.BucketLifecycleConfiguration {
   rules = [
     {
       id     = 'logs-prefix'
-      status = aws.s3.BucketLifecycleConfiguration.LifecycleRuleStatus.enabled
+      status = aws.s3.BucketLifecycleConfiguration.LifecycleRule.Status.enabled
       filter = {
         prefix = 'logs/'
       }
@@ -28,7 +28,7 @@ aws.s3.BucketLifecycleConfiguration {
     },
     {
       id     = 'archive-tagged'
-      status = aws.s3.BucketLifecycleConfiguration.LifecycleRuleStatus.enabled
+      status = aws.s3.BucketLifecycleConfiguration.LifecycleRule.Status.enabled
       filter = {
         tag = {
           key   = 'tier'
@@ -38,13 +38,13 @@ aws.s3.BucketLifecycleConfiguration {
       transitions = [
         {
           days          = 30
-          storage_class = aws.s3.BucketLifecycleConfiguration.TransitionStorageClass.glacier
+          storage_class = aws.s3.BucketLifecycleConfiguration.LifecycleRule.LifecycleTransition.StorageClass.glacier
         },
       ]
     },
     {
       id     = 'large-data-objects'
-      status = aws.s3.BucketLifecycleConfiguration.LifecycleRuleStatus.enabled
+      status = aws.s3.BucketLifecycleConfiguration.LifecycleRule.Status.enabled
       filter = {
         and = {
           prefix                   = 'data/'

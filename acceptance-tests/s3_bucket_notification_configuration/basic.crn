@@ -20,7 +20,7 @@ let queue = aws.sqs.Queue {
     statement = [
       {
         sid = 'AllowS3SendMessage'
-        effect = aws.iam.PolicyDocument.Effect.allow
+        effect = aws.iam.PolicyDocument.IamPolicyStatement.Effect.allow
         principal = {
           service = ['s3.amazonaws.com']
         }
