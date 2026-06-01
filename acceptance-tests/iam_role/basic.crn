@@ -11,7 +11,7 @@ aws.iam.Role {
   assume_role_policy_document = {
     version = aws.iam.PolicyDocument.Version.2012_10_17
     statement {
-      effect = aws.iam.PolicyDocument.IamPolicyStatement.Effect.allow
+      effect = aws.iam.PolicyDocument.Statement.Effect.allow
       principal = {
         service = 'ec2.amazonaws.com'
       }

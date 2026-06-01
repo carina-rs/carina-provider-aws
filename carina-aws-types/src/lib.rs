@@ -1345,7 +1345,7 @@ fn string_or_principal_struct() -> AttributeType {
 /// `effect = allow` as a bare identifier — matching the bare-identifier
 /// convention used by every other enum field in the same `.crn` file.
 /// The namespace also makes the fully-qualified form
-/// `aws.iam.PolicyDocument.IamPolicyStatement.Effect.allow` parse and
+/// `aws.iam.PolicyDocument.Statement.Effect.allow` parse and
 /// resolve: the resolver's canonical shape is
 /// `<namespace>.<type_name>.<value>`, so `type_name` is the trailing
 /// `Effect` segment and `namespace` carries the containing structs.
@@ -1355,7 +1355,7 @@ fn iam_policy_effect() -> AttributeType {
         &["Allow", "Deny"],
         Some(carina_core::schema::string_enum_identity(
             "Effect",
-            Some("aws.iam.PolicyDocument.IamPolicyStatement"),
+            Some("aws.iam.PolicyDocument.Statement"),
         )),
     )
 }
@@ -2627,7 +2627,7 @@ mod tests {
         let expected = vec![
             (
                 "iam_policy_effect",
-                "aws.iam.PolicyDocument.IamPolicyStatement.Effect".to_string(),
+                "aws.iam.PolicyDocument.Statement.Effect".to_string(),
             ),
             (
                 "iam_policy_version",
@@ -3998,7 +3998,7 @@ mod tests {
             assert_eq!(values, &["Allow".to_string(), "Deny".to_string()]);
             assert_eq!(
                 identity.and_then(|id| id.dotted_prefix()),
-                Some("aws.iam.PolicyDocument.IamPolicyStatement".to_string())
+                Some("aws.iam.PolicyDocument.Statement".to_string())
             );
             assert_eq!(
                 dsl_aliases,
@@ -4010,6 +4010,47 @@ mod tests {
         } else {
             panic!("expected StringEnum");
         }
+    }
+
+    #[test]
+    fn iam_policy_effect_identity_uses_statement_field_segment() {
+        let effect = super::iam_policy_effect();
+        let carina_core::schema::Shape::StringEnum {
+            identity: Some(identity),
+            ..
+        } = effect.shape_ref_free().expect("test schema is Ref-free")
+        else {
+            panic!("expected StringEnum shape with identity");
+        };
+
+        assert_eq!(
+            identity.to_string(),
+            "aws.iam.PolicyDocument.Statement.Effect"
+        );
+        assert!(
+            carina_core::utils::validate_enum_namespace(
+                "aws.iam.PolicyDocument.Statement.Effect.allow",
+                identity,
+            )
+            .is_ok()
+        );
+        let old_effect_namespace = [
+            "aws.iam.PolicyDocument",
+            "IamPolicyStatement",
+            "Effect",
+            "allow",
+        ]
+        .join(".");
+        assert!(
+            carina_core::utils::validate_enum_namespace(&old_effect_namespace, identity).is_err()
+        );
+        assert!(
+            carina_core::utils::validate_enum_namespace(
+                "awscc.iam.PolicyDocument.Statement.Effect.allow",
+                identity,
+            )
+            .is_err()
+        );
     }
 
     #[test]
