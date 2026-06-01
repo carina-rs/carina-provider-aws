@@ -3725,7 +3725,7 @@ fn type_code_to_display(type_code: &str) -> String {
         s if s.contains("iam_role_arn") => "IamRoleArn".to_string(),
         s if s.contains("iam_role_id") => "IamRoleId".to_string(),
         s if s.contains("iam_policy_arn") => "IamPolicyArn".to_string(),
-        s if s.contains("iam_policy_document") => "IamPolicyDocument".to_string(),
+        s if s.contains("iam_policy_document") => "PolicyDocument".to_string(),
         s if s.contains("kms_key_arn") => "KmsKeyArn".to_string(),
         s if s.contains("kms_key_id") => "KmsKeyId".to_string(),
         s if s.contains("vpc_id") => "VpcId".to_string(),

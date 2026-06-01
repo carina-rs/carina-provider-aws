@@ -1325,7 +1325,7 @@ fn string_or_principal_struct() -> AttributeType {
     // Value::Map against String incorrectly.
     AttributeType::union(vec![
         AttributeType::struct_(
-            "IamPolicyPrincipal".to_string(),
+            "Principal".to_string(),
             vec![
                 StructField::new("service", string_or_list_of_strings())
                     .with_provider_name("Service"),
@@ -1345,7 +1345,7 @@ fn string_or_principal_struct() -> AttributeType {
 /// `effect = allow` as a bare identifier — matching the bare-identifier
 /// convention used by every other enum field in the same `.crn` file.
 /// The namespace also makes the fully-qualified form
-/// `aws.iam.PolicyDocument.IamPolicyStatement.Effect.allow` parse and
+/// `aws.iam.PolicyDocument.Statement.Effect.allow` parse and
 /// resolve: the resolver's canonical shape is
 /// `<namespace>.<type_name>.<value>`, so `type_name` is the trailing
 /// `Effect` segment and `namespace` carries the containing structs.
@@ -1355,7 +1355,7 @@ fn iam_policy_effect() -> AttributeType {
         &["Allow", "Deny"],
         Some(carina_core::schema::string_enum_identity(
             "Effect",
-            Some("aws.iam.PolicyDocument.IamPolicyStatement"),
+            Some("aws.iam.PolicyDocument.Statement"),
         )),
     )
 }
@@ -1415,7 +1415,7 @@ fn condition_type() -> AttributeType {
 /// IAM Policy Statement struct type
 fn iam_policy_statement() -> AttributeType {
     AttributeType::struct_(
-        "IamPolicyStatement".to_string(),
+        "Statement".to_string(),
         vec![
             StructField::new("sid", AttributeType::string()).with_provider_name("Sid"),
             StructField::new("effect", iam_policy_effect()).with_provider_name("Effect"),
@@ -1443,7 +1443,7 @@ fn iam_policy_statement() -> AttributeType {
 /// (e.g., `version` <-> `Version`, `statement` <-> `Statement`).
 pub fn iam_policy_document() -> AttributeType {
     AttributeType::struct_(
-        "IamPolicyDocument".to_string(),
+        "PolicyDocument".to_string(),
         vec![
             StructField::new("version", iam_policy_version()).with_provider_name("Version"),
             StructField::new("id", AttributeType::string()).with_provider_name("Id"),
@@ -1461,7 +1461,7 @@ pub fn iam_policy_document() -> AttributeType {
 /// reusing `iam_policy_document()`.
 pub fn sqs_redrive_policy() -> AttributeType {
     AttributeType::struct_(
-        "SqsRedrivePolicy".to_string(),
+        "RedrivePolicy".to_string(),
         vec![
             StructField::new("dead_letter_target_arn", arn())
                 .with_provider_name("deadLetterTargetArn")
@@ -1482,7 +1482,7 @@ fn sqs_redrive_permission() -> AttributeType {
         &["allowAll", "denyAll", "byQueue"],
         Some(carina_core::schema::string_enum_identity(
             "RedrivePermission",
-            Some("aws.sqs.Queue.SqsRedriveAllowPolicy"),
+            Some("aws.sqs.Queue.RedriveAllowPolicy"),
         )),
     )
 }
@@ -1493,7 +1493,7 @@ fn sqs_redrive_permission() -> AttributeType {
 /// not a generic IAM statement list.
 pub fn sqs_redrive_allow_policy() -> AttributeType {
     AttributeType::struct_(
-        "SqsRedriveAllowPolicy".to_string(),
+        "RedriveAllowPolicy".to_string(),
         vec![
             StructField::new("redrive_permission", sqs_redrive_permission())
                 .with_provider_name("redrivePermission")
@@ -2538,6 +2538,24 @@ mod tests {
         inner
     }
 
+    fn struct_name(attr: &AttributeType) -> &str {
+        let carina_core::schema::Shape::Struct { name, .. } =
+            attr.shape_ref_free().expect("test schema is Ref-free")
+        else {
+            panic!("expected Struct shape");
+        };
+        name
+    }
+
+    fn union_member(attr: &AttributeType, index: usize) -> &AttributeType {
+        let carina_core::schema::Shape::Union(members) =
+            attr.shape_ref_free().expect("test schema is Ref-free")
+        else {
+            panic!("expected Union shape");
+        };
+        &members[index]
+    }
+
     fn string_enum_identity(attr: &AttributeType) -> String {
         let carina_core::schema::Shape::StringEnum {
             identity: Some(identity),
@@ -2547,6 +2565,30 @@ mod tests {
             panic!("expected StringEnum shape with identity");
         };
         identity.to_string()
+    }
+
+    #[test]
+    fn iam_policy_document_struct_names_are_plain_and_effect_identity_is_structural() {
+        let policy_document = iam_policy_document();
+        let policy_statement = list_inner(field_type(&policy_document, "statement"));
+        let principal = union_member(field_type(policy_statement, "principal"), 0);
+
+        assert_eq!(struct_name(&policy_document), "PolicyDocument");
+        assert_eq!(struct_name(policy_statement), "Statement");
+        assert_eq!(struct_name(principal), "Principal");
+        assert_eq!(
+            string_enum_identity(&iam_policy_effect()),
+            "aws.iam.PolicyDocument.Statement.Effect"
+        );
+    }
+
+    #[test]
+    fn sqs_redrive_policy_struct_names_are_plain() {
+        assert_eq!(struct_name(&sqs_redrive_policy()), "RedrivePolicy");
+        assert_eq!(
+            struct_name(&sqs_redrive_allow_policy()),
+            "RedriveAllowPolicy"
+        );
     }
 
     #[test]
@@ -2627,7 +2669,7 @@ mod tests {
         let expected = vec![
             (
                 "iam_policy_effect",
-                "aws.iam.PolicyDocument.IamPolicyStatement.Effect".to_string(),
+                "aws.iam.PolicyDocument.Statement.Effect".to_string(),
             ),
             (
                 "iam_policy_version",
@@ -2635,7 +2677,7 @@ mod tests {
             ),
             (
                 "sqs_redrive_permission",
-                "aws.sqs.Queue.SqsRedriveAllowPolicy.RedrivePermission".to_string(),
+                "aws.sqs.Queue.RedriveAllowPolicy.RedrivePermission".to_string(),
             ),
             (
                 "s3_sse_algorithm",
@@ -3998,7 +4040,7 @@ mod tests {
             assert_eq!(values, &["Allow".to_string(), "Deny".to_string()]);
             assert_eq!(
                 identity.and_then(|id| id.dotted_prefix()),
-                Some("aws.iam.PolicyDocument.IamPolicyStatement".to_string())
+                Some("aws.iam.PolicyDocument.Statement".to_string())
             );
             assert_eq!(
                 dsl_aliases,
