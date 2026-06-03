@@ -4,7 +4,7 @@ This file provides guidance to Claude Code when working with the carina-provider
 
 ## Repository Overview
 
-This is the AWS provider for [Carina](https://github.com/carina-rs/carina), split out as a standalone repository. It depends on carina-core, carina-aws-types, carina-plugin-sdk, and carina-provider-protocol via git dependencies from the main carina repository.
+This is the AWS provider for [Carina](https://github.com/carina-rs/carina), split out as a standalone repository. It depends on carina-core, carina-plugin-sdk, and carina-provider-protocol via git dependencies from the main carina repository. `carina-aws-types` lives in this repository (a local copy, not shared from the main repo).
 
 ## Build and Test Commands
 
@@ -36,12 +36,12 @@ aws-vault exec <profile> -- cargo test
 - **carina-provider-aws**: The AWS provider implementation. Builds as both a native binary and a WASM component.
 - **carina-codegen-aws**: Code generator that produces resource definitions from AWS Smithy models.
 - **carina-smithy**: Smithy 2.0 JSON AST parser used by the code generator.
+- **carina-aws-types**: AWS-specific type definitions. A local copy lives in this repo (the same crate is duplicated in `carina-provider-awscc`; it is not shared from the main carina repository).
 
 ## Dependencies on carina (main repo)
 
 This repository depends on crates from `github.com/carina-rs/carina`:
 - `carina-core` — Core types, parser, traits
-- `carina-aws-types` — AWS-specific type definitions
 - `carina-plugin-sdk` — Plugin SDK for building providers
 - `carina-provider-protocol` — Protocol definitions for provider communication
 
@@ -50,10 +50,13 @@ These are specified as `git` dependencies in `Cargo.toml`. For local development
 ```toml
 [patch."https://github.com/carina-rs/carina"]
 carina-core = { path = "../carina/carina-core" }
-carina-aws-types = { path = "../carina/carina-aws-types" }
 carina-plugin-sdk = { path = "../carina/carina-plugin-sdk" }
 carina-provider-protocol = { path = "../carina/carina-provider-protocol" }
 ```
+
+`carina-aws-types` is **not** a main-repo dependency — it is a local crate in
+this repository (`carina-provider-aws/Cargo.toml` references it as
+`{ path = "../carina-aws-types" }`), so it needs no patch entry.
 
 ## Code Generation
 
