@@ -7,7 +7,10 @@
 use super::AwsSchemaConfig;
 use super::tags_type;
 use super::validate_tags_map;
-use carina_core::schema::{AttributeSchema, AttributeType, ResourceSchema, types};
+use carina_core::resource::{ConcreteValue, Value};
+use carina_core::schema::{
+    AttributeSchema, AttributeType, ResourceSchema, legacy_validator, types,
+};
 
 const VALID_IAM_USER_ACCESS_TO_BILLING: &[&str] = &["ALLOW", "DENY", "allow", "deny"];
 
@@ -21,6 +24,24 @@ const VALID_STATUS: &[&str] = &[
     "pending_closure",
     "suspended",
 ];
+
+pub fn arn() -> AttributeType {
+    AttributeType::custom(
+        Some(super::provider_type("organizations", "Account", "Arn")),
+        super::arn(),
+        Some("^arn:(aws|aws-cn|aws-us-gov):organizations:.*$".to_string()),
+        None,
+        legacy_validator(|value| {
+            if let Value::Concrete(ConcreteValue::String(s)) = value {
+                super::validate_service_arn(s, "organizations", None)
+                    .map_err(|reason| format!("Invalid organizations ARN '{}': {}", s, reason))
+            } else {
+                Err("Expected string".to_string())
+            }
+        }),
+        None,
+    )
+}
 
 /// Returns the schema config for organizations.Account (Smithy: com.amazonaws.organizations)
 pub fn organizations_account_config() -> AwsSchemaConfig {
@@ -62,7 +83,7 @@ pub fn organizations_account_config() -> AwsSchemaConfig {
                 .with_provider_name("RoleName"),
         )
         .attribute(
-            AttributeSchema::new("arn", super::arn())
+            AttributeSchema::new("arn", self::arn())
                 .read_only()
                 .with_description("The Amazon Resource Name (ARN) of the account. For more information about ARNs in Organizations, see ARN Formats Supported by Organizations in the Ama... (read-only)")
                 .with_provider_name("Arn"),

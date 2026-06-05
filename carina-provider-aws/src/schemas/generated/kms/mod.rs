@@ -6,6 +6,4 @@
 // Re-export parent types so resource modules can use `super::` to access them.
 pub use super::*;
 
-pub mod policy;
-pub mod role;
-pub mod roles;
+pub mod key;

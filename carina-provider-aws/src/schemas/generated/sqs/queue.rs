@@ -94,7 +94,7 @@ pub fn sqs_queue_config() -> AwsSchemaConfig {
                 .with_provider_name("FifoThroughputLimit"),
         )
         .attribute(
-            AttributeSchema::new("kms_master_key_id", super::kms_key_id())
+            AttributeSchema::new("kms_master_key_id", super::super::kms::key::id())
                 .with_description("The ID of an AWS KMS customer master key (CMK) to use for server-side encryption (SSE-KMS). Use `alias/aws/sqs` for the AWS-managed key.")
                 .with_provider_name("KmsMasterKeyId"),
         )

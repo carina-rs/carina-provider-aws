@@ -43,7 +43,7 @@ pub fn ec2_flow_log_config() -> AwsSchemaConfig {
         schema: ResourceSchema::new("ec2.FlowLog")
         .with_description("Describes a flow log.")
         .attribute(
-            AttributeSchema::new("deliver_logs_permission_arn", super::iam_role_arn())
+            AttributeSchema::new("deliver_logs_permission_arn", super::super::iam::role::arn())
                 .create_only()
                 .with_description("The ARN of the IAM role that allows Amazon EC2 to publish flow logs to the log destination. This parameter is required if the destination type is clou...")
                 .with_provider_name("DeliverLogsPermissionArn"),

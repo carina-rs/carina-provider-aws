@@ -22,6 +22,24 @@ fn validate_max_session_duration_range(value: &Value) -> Result<(), String> {
     }
 }
 
+pub fn arn() -> AttributeType {
+    AttributeType::custom(
+        Some(super::provider_type("iam", "Role", "Arn")),
+        super::arn(),
+        Some("^arn:(aws|aws-cn|aws-us-gov):iam::[^:]*:role/.+$".to_string()),
+        None,
+        legacy_validator(|value| {
+            if let Value::Concrete(ConcreteValue::String(s)) = value {
+                super::validate_iam_arn(s, "role/")
+                    .map_err(|reason| format!("Invalid IAM Role ARN '{}': {}", s, reason))
+            } else {
+                Err("Expected string".to_string())
+            }
+        }),
+        None,
+    )
+}
+
 /// Returns the schema config for iam.Role (Smithy: com.amazonaws.iam)
 pub fn iam_role_config() -> AwsSchemaConfig {
     AwsSchemaConfig {
@@ -70,7 +88,7 @@ pub fn iam_role_config() -> AwsSchemaConfig {
                 .with_provider_name("RoleName"),
         )
         .attribute(
-            AttributeSchema::new("arn", super::iam_role_arn())
+            AttributeSchema::new("arn", self::arn())
                 .read_only()
                 .with_description("The Amazon Resource Name (ARN) specifying the role. For more information about ARNs and how to use them in policies, see IAM identifiers in the IAM Us... (read-only)")
                 .with_provider_name("Arn"),

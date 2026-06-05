@@ -2391,7 +2391,7 @@ pub fn iam_data_sources() -> Vec<DataSourceDef> {
                 DataSourceListOutput {
                     name: "arns",
                     description: "Set of ARNs of the matched IAM roles.",
-                    item_type: "super::iam_role_arn()",
+                    item_type: "super::super::iam::role::arn()",
                 },
                 DataSourceListOutput {
                     name: "names",
@@ -2420,7 +2420,7 @@ pub fn iam_resources() -> Vec<ResourceDef> {
         has_tags: true,
         type_overrides: vec![
             ("AssumeRolePolicyDocument", "super::iam_policy_document()"),
-            ("Arn", "super::iam_role_arn()"),
+            ("Arn", "super::super::iam::role::arn()"),
             ("RoleId", "super::iam_role_id()"),
         ],
         exclude_fields: vec![
@@ -2465,7 +2465,10 @@ pub fn logs_resources() -> Vec<ResourceDef> {
         }],
         identifier: "LogGroupName",
         has_tags: true,
-        type_overrides: vec![("KmsKeyId", "super::kms_key_id()"), ("Arn", "super::arn()")],
+        type_overrides: vec![
+            ("kmsKeyId", "super::super::kms::key::id()"),
+            ("Arn", "super::arn()"),
+        ],
         exclude_fields: vec![
             "CreationTime",
             "StoredBytes",
@@ -2547,7 +2550,7 @@ pub fn sqs_resources() -> Vec<ResourceDef> {
         has_tags: true,
         type_overrides: vec![
             ("QueueArn", "super::arn()"),
-            ("KmsMasterKeyId", "super::kms_key_id()"),
+            ("KmsMasterKeyId", "super::super::kms::key::id()"),
             ("Policy", "super::iam_policy_document()"),
             ("RedrivePolicy", "super::sqs_redrive_policy()"),
             ("RedriveAllowPolicy", "super::sqs_redrive_allow_policy()"),
@@ -2839,7 +2842,10 @@ mod tests {
         };
         let names: Vec<&str> = aggregated_outputs.iter().map(|o| o.name).collect();
         assert_eq!(names, vec!["arns", "names"]);
-        assert_eq!(aggregated_outputs[0].item_type, "super::iam_role_arn()");
+        assert_eq!(
+            aggregated_outputs[0].item_type,
+            "super::super::iam::role::arn()"
+        );
         assert_eq!(aggregated_outputs[1].item_type, "AttributeType::string()");
     }
 

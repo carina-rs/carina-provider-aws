@@ -8,7 +8,7 @@ pub use carina_aws_types::*;
 use std::collections::HashMap;
 
 use carina_core::resource::{ConcreteValue, Value};
-use carina_core::schema::{AttributeType, ResourceSchema, TypeIdentity, legacy_validator};
+use carina_core::schema::{AttributeType, ResourceSchema, legacy_validator};
 use carina_core::utils::{extract_enum_value, validate_enum_namespace};
 
 /// AWS schema configuration
@@ -61,11 +61,11 @@ pub fn cloudfront_hosted_zone_id() -> AttributeType {
 /// - Shorthand: ap_northeast_1
 pub fn aws_region() -> AttributeType {
     AttributeType::custom_enum(
-        TypeIdentity::new(Some("aws"), Vec::<String>::new(), "Region"),
+        provider_bare_type(&[], "Region"),
         AttributeType::string(),
         legacy_validator(|value| {
             if let Value::Concrete(ConcreteValue::String(s)) = value {
-                let id = TypeIdentity::new(Some("aws"), Vec::<String>::new(), "Region");
+                let id = provider_bare_type(&[], "Region");
                 validate_enum_namespace(s, &id)
                     .map_err(|reason| format!("Invalid region '{}': {}", s, reason))?;
                 // Normalize the input to AWS format (hyphens)
@@ -94,11 +94,11 @@ pub fn aws_region() -> AttributeType {
 /// - Shorthand: us_east_1a
 pub fn availability_zone() -> AttributeType {
     AttributeType::custom_enum(
-        TypeIdentity::new(Some("aws"), ["AvailabilityZone"], "ZoneName"),
+        provider_bare_type(&["AvailabilityZone"], "ZoneName"),
         AttributeType::string(),
         legacy_validator(|value| {
             if let Value::Concrete(ConcreteValue::String(s)) = value {
-                let id = TypeIdentity::new(Some("aws"), ["AvailabilityZone"], "ZoneName");
+                let id = provider_bare_type(&["AvailabilityZone"], "ZoneName");
                 validate_enum_namespace(s, &id)
                     .map_err(|reason| format!("Invalid availability zone '{}': {}", s, reason))?;
                 let extracted = extract_enum_value(s);
@@ -123,7 +123,7 @@ pub fn availability_zone() -> AttributeType {
 /// Multiple grantees can be comma-separated.
 pub fn s3_grantee() -> AttributeType {
     AttributeType::custom(
-        Some(TypeIdentity::new(Some("aws"), ["s3"], "Grantee")),
+        Some(provider_bare_type(&["s3"], "Grantee")),
         AttributeType::string(),
         None,
         None,
@@ -235,7 +235,7 @@ pub fn aws_validators() -> HashMap<String, CustomValidatorFn> {
             // present, then convert underscores to hyphens before validating.
             availability_zone => |s: &str| {
                 if s.contains('.') {
-                    let id = TypeIdentity::new(Some("aws"), ["AvailabilityZone"], "ZoneName");
+                    let id = provider_bare_type(&["AvailabilityZone"], "ZoneName");
                     carina_core::utils::validate_enum_namespace(s, &id)
                         .map_err(|reason| format!("Invalid availability zone '{}': {}", s, reason))?;
                 }

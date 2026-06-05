@@ -5,9 +5,30 @@
 //! DO NOT EDIT MANUALLY - regenerate with smithy-codegen
 
 use super::AwsSchemaConfig;
-use carina_core::schema::{AttributeSchema, AttributeType, ResourceSchema, types};
+use carina_core::resource::{ConcreteValue, Value};
+use carina_core::schema::{
+    AttributeSchema, AttributeType, ResourceSchema, legacy_validator, types,
+};
 
 const VALID_FEATURE_SET: &[&str] = &["ALL", "CONSOLIDATED_BILLING", "all", "consolidated_billing"];
+
+pub fn arn() -> AttributeType {
+    AttributeType::custom(
+        Some(super::provider_type("organizations", "Organization", "Arn")),
+        super::arn(),
+        Some("^arn:(aws|aws-cn|aws-us-gov):organizations:.*$".to_string()),
+        None,
+        legacy_validator(|value| {
+            if let Value::Concrete(ConcreteValue::String(s)) = value {
+                super::validate_service_arn(s, "organizations", None)
+                    .map_err(|reason| format!("Invalid organizations ARN '{}': {}", s, reason))
+            } else {
+                Err("Expected string".to_string())
+            }
+        }),
+        None,
+    )
+}
 
 /// Returns the schema config for organizations.Organization (Smithy: com.amazonaws.organizations)
 pub fn organizations_organization_config() -> AwsSchemaConfig {
@@ -29,7 +50,7 @@ pub fn organizations_organization_config() -> AwsSchemaConfig {
                 .with_provider_name("FeatureSet"),
         )
         .attribute(
-            AttributeSchema::new("arn", super::arn())
+            AttributeSchema::new("arn", self::arn())
                 .read_only()
                 .with_description("The Amazon Resource Name (ARN) of an organization. For more information about ARNs in Organizations, see ARN Formats Supported by Organizations in the... (read-only)")
                 .with_provider_name("Arn"),
