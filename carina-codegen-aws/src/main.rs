@@ -45,7 +45,7 @@ struct Args {
 #[derive(Debug, Clone, PartialEq)]
 #[allow(dead_code)]
 enum TypeOverride {
-    /// Override to a specific string type (e.g., "super::iam_role_arn()")
+    /// Override to a specific string type (e.g., "super::super::iam::role::arn()")
     StringType(&'static str),
     /// Override to an enum with specific values
     Enum(Vec<&'static str>),
@@ -62,6 +62,230 @@ struct EnumInfo {
     type_name: String,
     /// Valid enum values (e.g., ["default", "dedicated", "host"])
     values: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ArnEmitChoice {
+    PerKind(&'static ArnValidation),
+    ServicePrefix(&'static str),
+    Generic,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ArnValidation {
+    service: &'static str,
+    resource: &'static str,
+    regex: &'static str,
+    validator: ArnValidator,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ArnValidator {
+    Iam {
+        prefix: &'static str,
+        label: &'static str,
+    },
+    Service {
+        service: &'static str,
+        prefix: Option<&'static str>,
+        label: &'static str,
+    },
+}
+
+static ARN_VALIDATIONS: &[ArnValidation] = &[
+    ArnValidation {
+        service: "iam",
+        resource: "Role",
+        regex: "^arn:(aws|aws-cn|aws-us-gov):iam::[^:]*:role/.+$",
+        validator: ArnValidator::Iam {
+            prefix: "role/",
+            label: "IAM Role",
+        },
+    },
+    ArnValidation {
+        service: "iam",
+        resource: "Policy",
+        regex: "^arn:(aws|aws-cn|aws-us-gov):iam::[^:]*:policy/.+$",
+        validator: ArnValidator::Iam {
+            prefix: "policy/",
+            label: "IAM Policy",
+        },
+    },
+    ArnValidation {
+        service: "kms",
+        resource: "Key",
+        regex: "^arn:(aws|aws-cn|aws-us-gov):kms:[^:]*:[^:]*:key/.+$",
+        validator: ArnValidator::Service {
+            service: "kms",
+            prefix: Some("key/"),
+            label: "KMS Key",
+        },
+    },
+    ArnValidation {
+        service: "s3",
+        resource: "Bucket",
+        regex: "^arn:(aws|aws-cn|aws-us-gov):s3:::.+$",
+        validator: ArnValidator::Service {
+            service: "s3",
+            prefix: None,
+            label: "s3",
+        },
+    },
+    ArnValidation {
+        service: "cloudfront",
+        resource: "Distribution",
+        regex: "^arn:(aws|aws-cn|aws-us-gov):cloudfront::[^:]*:distribution/.+$",
+        validator: ArnValidator::Service {
+            service: "cloudfront",
+            prefix: Some("distribution/"),
+            label: "cloudfront",
+        },
+    },
+    ArnValidation {
+        service: "ecs",
+        resource: "Cluster",
+        regex: "^arn:(aws|aws-cn|aws-us-gov):ecs:[^:]*:[^:]*:cluster/.+$",
+        validator: ArnValidator::Service {
+            service: "ecs",
+            prefix: Some("cluster/"),
+            label: "ecs",
+        },
+    },
+    ArnValidation {
+        service: "dynamodb",
+        resource: "Table",
+        regex: "^arn:(aws|aws-cn|aws-us-gov):dynamodb:[^:]*:[^:]*:table/.+$",
+        validator: ArnValidator::Service {
+            service: "dynamodb",
+            prefix: Some("table/"),
+            label: "dynamodb",
+        },
+    },
+    ArnValidation {
+        service: "logs",
+        resource: "LogGroup",
+        regex: "^arn:(aws|aws-cn|aws-us-gov):logs:[^:]*:[^:]*:log-group:.+$",
+        validator: ArnValidator::Service {
+            service: "logs",
+            prefix: Some("log-group:"),
+            label: "logs",
+        },
+    },
+];
+
+static KNOWN_SERVICES: &[&str] = &[
+    "cloudfront",
+    "dynamodb",
+    "ec2",
+    "ecs",
+    "iam",
+    "kms",
+    "logs",
+    "organizations",
+    "s3",
+    "sts",
+    "wafv2",
+];
+
+fn arn_emit_choice(service: &str, resource: &str) -> ArnEmitChoice {
+    if let Some(entry) = ARN_VALIDATIONS
+        .iter()
+        .find(|v| v.service == service && v.resource == resource)
+    {
+        ArnEmitChoice::PerKind(entry)
+    } else if let Some(&known) = KNOWN_SERVICES.iter().find(|&&known| known == service) {
+        ArnEmitChoice::ServicePrefix(known)
+    } else {
+        ArnEmitChoice::Generic
+    }
+}
+
+fn resource_identity_parts(name: &str) -> Option<(&str, &str)> {
+    name.split_once('.')
+}
+
+fn arn_validator_for(validator: ArnValidator) -> String {
+    match validator {
+        ArnValidator::Iam { prefix, label } => format!(
+            r#"|value| {{
+            if let Value::Concrete(ConcreteValue::String(s)) = value {{
+                super::validate_iam_arn(s, {prefix:?})
+                    .map_err(|reason| format!("Invalid {label} ARN '{{}}': {{}}", s, reason))
+            }} else {{
+                Err("Expected string".to_string())
+            }}
+        }}"#
+        ),
+        ArnValidator::Service {
+            service,
+            prefix,
+            label,
+        } => {
+            let prefix_expr = match prefix {
+                Some(prefix) => format!("Some({prefix:?})"),
+                None => "None".to_string(),
+            };
+            format!(
+                r#"|value| {{
+            if let Value::Concrete(ConcreteValue::String(s)) = value {{
+                super::validate_service_arn(s, {service:?}, {prefix_expr})
+                    .map_err(|reason| format!("Invalid {label} ARN '{{}}': {{}}", s, reason))
+            }} else {{
+                Err("Expected string".to_string())
+            }}
+        }}"#
+            )
+        }
+    }
+}
+
+fn arn_validator_expression(choice: ArnEmitChoice) -> String {
+    match choice {
+        ArnEmitChoice::PerKind(entry) => arn_validator_for(entry.validator),
+        ArnEmitChoice::ServicePrefix(service) => format!(
+            r#"|value| {{
+            if let Value::Concrete(ConcreteValue::String(s)) = value {{
+                super::validate_service_arn(s, {service:?}, None)
+                    .map_err(|reason| format!("Invalid {service} ARN '{{}}': {{}}", s, reason))
+            }} else {{
+                Err("Expected string".to_string())
+            }}
+        }}"#
+        ),
+        ArnEmitChoice::Generic => unreachable!("generic ARN helper has no validator expression"),
+    }
+}
+
+fn emit_arn_helper(service: &str, resource: &str, choice: ArnEmitChoice) -> String {
+    if matches!(choice, ArnEmitChoice::Generic) {
+        return "pub fn arn() -> AttributeType {\n    super::arn()\n}\n\n".to_string();
+    }
+
+    let regex_expr = match choice {
+        ArnEmitChoice::PerKind(entry) => format!("Some({:?}.to_string())", entry.regex),
+        ArnEmitChoice::ServicePrefix(service) => {
+            format!(
+                "Some(\"^arn:(aws|aws-cn|aws-us-gov):{}:.*$\".to_string())",
+                service
+            )
+        }
+        ArnEmitChoice::Generic => unreachable!("handled above"),
+    };
+    let validator_expr = arn_validator_expression(choice);
+    format!(
+        r#"pub fn arn() -> AttributeType {{
+    AttributeType::custom(
+        Some(super::provider_type("{service}", "{resource}", "Arn")),
+        super::arn(),
+        {regex_expr},
+        None,
+        legacy_validator({validator_expr}),
+        None,
+    )
+}}
+
+"#
+    )
 }
 
 /// Build the `dsl_aliases: ...` Rust source code for a `StringEnum`'s
@@ -333,6 +557,8 @@ fn main() -> Result<()> {
                     is_data_source: true,
                 });
             }
+
+            generate_virtual_helper_modules(&args.output_dir, &mut generated_modules)?;
 
             // Generate per-service mod.rs files
             generate_service_mod_files(&args.output_dir, &generated_modules)?;
@@ -864,11 +1090,23 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
     if needs_types {
         schema_imports.push("types");
     }
+    let arn_helper = resource_identity_parts(res.name).and_then(|(service, resource)| {
+        attrs
+            .iter()
+            .any(|a| a.snake_name == "arn")
+            .then(|| emit_arn_helper(service, resource, arn_emit_choice(service, resource)))
+    });
+    let has_arn_helper = arn_helper.is_some();
+    if has_arn_helper && !schema_imports.contains(&"AttributeType") {
+        schema_imports.insert(1, "AttributeType");
+    }
     if has_ranged_ints {
         schema_imports.push("legacy_validator");
     }
+    if has_arn_helper && !schema_imports.contains(&"legacy_validator") {
+        schema_imports.push("legacy_validator");
+    }
     let schema_imports_str = schema_imports.join(", ");
-
     code.push_str(&format!(
         "//! {} schema definition for AWS Cloud Control\n\
          //!\n\
@@ -883,7 +1121,7 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
         code.push_str("use super::tags_type;\n");
         code.push_str("use super::validate_tags_map;\n");
     }
-    if has_ranged_ints {
+    if has_ranged_ints || has_arn_helper {
         code.push_str("use carina_core::resource::{ConcreteValue, Value};\n");
     }
     code.push_str(&format!(
@@ -950,6 +1188,9 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
              }}\n\n",
             fn_name, condition, display
         ));
+    }
+    if let Some(helper) = &arn_helper {
+        code.push_str(helper);
     }
 
     // Generate config function
@@ -1027,6 +1268,12 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
             )
         } else {
             attr.type_code.clone()
+        };
+
+        let type_code = if has_arn_helper && attr.snake_name == "arn" {
+            "self::arn()".to_string()
+        } else {
+            type_code
         };
 
         let mut attr_code = format!(
@@ -1523,6 +1770,77 @@ struct GeneratedModule {
     is_data_source: bool,
 }
 
+fn generate_virtual_helper_modules(
+    output_dir: &std::path::Path,
+    modules: &mut Vec<GeneratedModule>,
+) -> Result<()> {
+    let iam_dir = output_dir.join("iam");
+    std::fs::create_dir_all(&iam_dir)
+        .with_context(|| format!("Failed to create {}", iam_dir.display()))?;
+    let iam_policy = format!(
+        "//! Auto-generated helper schema module for AWS IAM Policy identifiers\n\
+         //!\n\
+         //! DO NOT EDIT MANUALLY - regenerate with:\n\
+         //!   ./carina-provider-aws/scripts/generate-schemas-smithy.sh\n\n\
+         use carina_core::resource::{{ConcreteValue, Value}};\n\
+         use carina_core::schema::{{AttributeType, legacy_validator}};\n\n{}",
+        emit_arn_helper("iam", "Policy", arn_emit_choice("iam", "Policy"))
+    );
+    let iam_policy_path = iam_dir.join("policy.rs");
+    std::fs::write(&iam_policy_path, iam_policy)
+        .with_context(|| format!("Failed to write {}", iam_policy_path.display()))?;
+
+    let kms_dir = output_dir.join("kms");
+    std::fs::create_dir_all(&kms_dir)
+        .with_context(|| format!("Failed to create {}", kms_dir.display()))?;
+    let kms_key = format!(
+        "//! Auto-generated helper schema module for AWS KMS Key identifiers\n\
+         //!\n\
+         //! DO NOT EDIT MANUALLY - regenerate with:\n\
+         //!   ./carina-provider-aws/scripts/generate-schemas-smithy.sh\n\n\
+         use carina_core::resource::{{ConcreteValue, Value}};\n\
+         use carina_core::schema::{{AttributeType, legacy_validator}};\n\n{}\
+         pub fn id() -> AttributeType {{\n\
+         \x20   AttributeType::custom(\n\
+         \x20       Some(super::provider_type(\"kms\", \"Key\", \"Id\")),\n\
+         \x20       super::aws_resource_id(),\n\
+         \x20       None,\n\
+         \x20       None,\n\
+         \x20       legacy_validator(|value| {{\n\
+         \x20           if let Value::Concrete(ConcreteValue::String(s)) = value {{\n\
+         \x20               super::validate_kms_key_id(s)\n\
+         \x20                   .map_err(|reason| format!(\"Invalid KMS key identifier '{{}}': {{}}\", s, reason))\n\
+         \x20           }} else {{\n\
+         \x20               Err(\"Expected string\".to_string())\n\
+         \x20           }}\n\
+         \x20       }}),\n\
+         \x20       None,\n\
+         \x20   )\n\
+         }}\n",
+        emit_arn_helper("kms", "Key", arn_emit_choice("kms", "Key"))
+    );
+    let kms_key_path = kms_dir.join("key.rs");
+    std::fs::write(&kms_key_path, kms_key)
+        .with_context(|| format!("Failed to write {}", kms_key_path.display()))?;
+
+    modules.push(GeneratedModule {
+        dsl_name: "iam.Policy".to_string(),
+        service: "iam".to_string(),
+        file_stem: "policy".to_string(),
+        config_fn: String::new(),
+        is_data_source: false,
+    });
+    modules.push(GeneratedModule {
+        dsl_name: "kms.Key".to_string(),
+        service: "kms".to_string(),
+        file_stem: "key".to_string(),
+        config_fn: String::new(),
+        is_data_source: false,
+    });
+
+    Ok(())
+}
+
 fn generate_service_mod_files(
     output_dir: &std::path::Path,
     modules: &[GeneratedModule],
@@ -1705,6 +2023,9 @@ fn generate_mod_rs(modules: &[GeneratedModule], output_dir: &std::path::Path) ->
          \x20   vec![\n",
     );
     for e in &entries {
+        if e.config_fn.is_empty() {
+            continue;
+        }
         code.push_str(&format!(
             "\x20       {}::{}::{}(),\n",
             e.service, e.file_stem, e.config_fn
@@ -1727,6 +2048,9 @@ fn generate_mod_rs(modules: &[GeneratedModule], output_dir: &std::path::Path) ->
          \x20   let modules: &[(&str, &[(&str, &[&str])])] = &[\n",
     );
     for e in &entries {
+        if e.config_fn.is_empty() {
+            continue;
+        }
         code.push_str(&format!(
             "\x20       {}::{}::enum_valid_values(),\n",
             e.service, e.file_stem
@@ -1757,7 +2081,7 @@ fn generate_mod_rs(modules: &[GeneratedModule], output_dir: &std::path::Path) ->
          pub fn get_enum_alias_reverse(resource_type: &str, attr_name: &str, value: &str) -> Option<&'static str> {\n",
     );
     for e in &entries {
-        if e.is_data_source {
+        if e.is_data_source || e.config_fn.is_empty() {
             continue;
         }
         code.push_str(&format!(
@@ -1778,7 +2102,7 @@ fn generate_mod_rs(modules: &[GeneratedModule], output_dir: &std::path::Path) ->
          \x20   let mut map = std::collections::HashMap::new();\n",
     );
     for e in &entries {
-        if e.is_data_source {
+        if e.is_data_source || e.config_fn.is_empty() {
             continue;
         }
         code.push_str(&format!(
@@ -3407,7 +3731,26 @@ fn generate_data_source(
     if needs_types {
         schema_imports.push("types");
     }
+    let arn_helper = resource_identity_parts(ds.name).and_then(|(service, resource)| {
+        ds_attrs
+            .iter()
+            .any(|a| a.name == "arn")
+            .then(|| emit_arn_helper(service, resource, arn_emit_choice(service, resource)))
+    });
+    let has_arn_helper = arn_helper.is_some();
+    if has_arn_helper && !schema_imports.contains(&"AttributeType") {
+        schema_imports.insert(1, "AttributeType");
+    }
+    if has_arn_helper && !schema_imports.contains(&"legacy_validator") {
+        schema_imports.push("legacy_validator");
+    }
     let schema_imports_str = schema_imports.join(", ");
+    let resource_import = if has_arn_helper {
+        "use carina_core::resource::{ConcreteValue, Value};\n"
+    } else {
+        ""
+    };
+    let arn_helper_code = arn_helper.unwrap_or_default();
 
     let mut code = String::new();
     code.push_str(&format!(
@@ -3417,7 +3760,9 @@ fn generate_data_source(
          //!\n\
          //! DO NOT EDIT MANUALLY - regenerate with smithy-codegen\n\n\
          use super::AwsSchemaConfig;\n\
+         {resource_import}\
          use carina_core::schema::{{{}}};\n\n\
+         {arn_helper_code}\
          /// Returns the schema config for {} (Smithy: {})\n\
          pub fn {}() -> AwsSchemaConfig {{\n\
          \x20   AwsSchemaConfig {{\n\
@@ -3439,6 +3784,11 @@ fn generate_data_source(
 
     // Emit attributes.
     for attr in &ds_attrs {
+        let type_str = if has_arn_helper && attr.name == "arn" {
+            "self::arn()"
+        } else {
+            attr.type_str.as_str()
+        };
         if attr.read_only {
             code.push_str(&format!(
                 "\x20       .attribute(\n\
@@ -3446,7 +3796,7 @@ fn generate_data_source(
                  \x20               .with_description(\"{}\")\n\
                  \x20               .with_provider_name(\"{}\"),\n\
                  \x20       )\n",
-                attr.name, attr.type_str, attr.description, attr.provider_name,
+                attr.name, type_str, attr.description, attr.provider_name,
             ));
         } else {
             let required = if attr.required {
@@ -3460,7 +3810,7 @@ fn generate_data_source(
                  \x20               .with_description(\"{}\")\n\
                  \x20               .with_provider_name(\"{}\"),\n\
                  \x20       )\n",
-                attr.name, attr.type_str, required, attr.description, attr.provider_name,
+                attr.name, type_str, required, attr.description, attr.provider_name,
             ));
         }
     }
@@ -3726,8 +4076,8 @@ fn type_code_to_display(type_code: &str) -> String {
         s if s.contains("iam_role_id") => "IamRoleId".to_string(),
         s if s.contains("iam_policy_arn") => "IamPolicyArn".to_string(),
         s if s.contains("iam_policy_document") => "PolicyDocument".to_string(),
-        s if s.contains("kms_key_arn") => "KmsKeyArn".to_string(),
-        s if s.contains("kms_key_id") => "KmsKeyId".to_string(),
+        s if s.contains("kms_key_arn") || s.contains("kms::key::arn") => "KmsKeyArn".to_string(),
+        s if s.contains("kms_key_id") || s.contains("kms::key::id") => "KmsKeyId".to_string(),
         s if s.contains("vpc_id") => "VpcId".to_string(),
         s if s.contains("subnet_id") => "SubnetId".to_string(),
         s if s.contains("security_group_rule_id") => "SecurityGroupRuleId".to_string(),
@@ -3844,15 +4194,16 @@ fn known_string_type_overrides() -> &'static HashMap<&'static str, &'static str>
         m.insert("DefaultNetworkAcl", "super::network_acl_id()");
         m.insert("AccountId", "super::aws_account_id()");
         m.insert("GatewayId", "super::gateway_id()");
-        m.insert("DeliverCrossAccountRole", "super::iam_role_arn()");
-        m.insert("DeliverLogsPermissionArn", "super::iam_role_arn()");
-        m.insert("PeerRoleArn", "super::iam_role_arn()");
-        m.insert("PermissionsBoundary", "super::iam_policy_arn()");
-        m.insert("ManagedPolicyArns", "super::iam_policy_arn()");
-        m.insert("KmsKeyId", "super::kms_key_arn()");
-        m.insert("KMSMasterKeyID", "super::kms_key_id()");
-        m.insert("ReplicaKmsKeyID", "super::kms_key_id()");
-        m.insert("KmsKeyArn", "super::kms_key_arn()");
+        m.insert("DeliverCrossAccountRole", "super::super::iam::role::arn()");
+        m.insert("DeliverLogsPermissionArn", "super::super::iam::role::arn()");
+        m.insert("PeerRoleArn", "super::super::iam::role::arn()");
+        m.insert("PermissionsBoundary", "super::super::iam::policy::arn()");
+        m.insert("ManagedPolicyArns", "super::super::iam::policy::arn()");
+        m.insert("KmsKeyId", "super::super::kms::key::id()");
+        m.insert("kmsKeyId", "super::super::kms::key::id()");
+        m.insert("KMSMasterKeyID", "super::super::kms::key::id()");
+        m.insert("ReplicaKmsKeyID", "super::super::kms::key::id()");
+        m.insert("KmsKeyArn", "super::super::kms::key::arn()");
         m.insert("SecurityGroupRuleId", "super::security_group_rule_id()");
         m.insert("Locale", "super::aws_region()");
         m.insert("BucketAccountId", "super::aws_account_id()");
@@ -4325,7 +4676,7 @@ mod tests {
             "account_id must use aws_account_id(): {generated}"
         );
         assert!(
-            generated.contains(r#"AttributeSchema::new("arn", super::arn())"#),
+            generated.contains(r#"AttributeSchema::new("arn", self::arn())"#),
             "arn must use arn(): {generated}"
         );
         assert!(
@@ -4417,7 +4768,7 @@ mod tests {
         // arns is List<iam_role_arn>
         assert!(
             generated.contains(
-                "AttributeSchema::new(\"arns\", AttributeType::unordered_list(super::iam_role_arn()))"
+                "AttributeSchema::new(\"arns\", AttributeType::unordered_list(super::super::iam::role::arn()))"
             ),
             "arns must be List(iam_role_arn): {generated}"
         );

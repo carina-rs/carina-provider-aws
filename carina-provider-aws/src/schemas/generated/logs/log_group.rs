@@ -33,7 +33,7 @@ pub fn logs_log_group_config() -> AwsSchemaConfig {
                 .with_provider_name("deletionProtectionEnabled"),
         )
         .attribute(
-            AttributeSchema::new("kms_key_id", AttributeType::string())
+            AttributeSchema::new("kms_key_id", super::super::kms::key::id())
                 .create_only()
                 .with_description("The Amazon Resource Name (ARN) of the KMS key to use when encrypting log data. For more information, see Amazon Resource Names.")
                 .with_provider_name("kmsKeyId"),

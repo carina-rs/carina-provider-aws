@@ -11,6 +11,7 @@ pub mod acm;
 pub mod ec2;
 pub mod iam;
 pub mod identitystore;
+pub mod kms;
 pub mod logs;
 pub mod organizations;
 pub mod route53;

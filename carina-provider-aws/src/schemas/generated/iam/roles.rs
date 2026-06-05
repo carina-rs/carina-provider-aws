@@ -26,7 +26,7 @@ pub fn iam_roles_config() -> AwsSchemaConfig {
                 .with_provider_name(""),
         )
         .attribute(
-            AttributeSchema::new("arns", AttributeType::unordered_list(super::iam_role_arn()))
+            AttributeSchema::new("arns", AttributeType::unordered_list(super::super::iam::role::arn()))
                 .with_description("Set of ARNs of the matched IAM roles.")
                 .with_provider_name(""),
         )
