@@ -20,6 +20,7 @@ use carina_provider_aws::AwsNormalizer;
 use carina_provider_aws::AwsProvider;
 
 struct AwsProcessProvider {
+    runtime: tokio::runtime::Runtime,
     provider: Option<AwsProvider>,
     normalizer: AwsNormalizer,
 }
@@ -32,7 +33,12 @@ impl Default for AwsProcessProvider {
 
 impl AwsProcessProvider {
     fn new() -> Self {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_time()
+            .build()
+            .expect("failed to build AWS provider tokio runtime");
         Self {
+            runtime,
             provider: None,
             normalizer: AwsNormalizer,
         }
@@ -192,12 +198,17 @@ impl CarinaProvider for AwsProcessProvider {
             let allowed = extract_string_list(core_attrs.get("allowed_account_ids"));
             let forbidden = extract_string_list(core_attrs.get("forbidden_account_ids"));
             let assume_role = extract_assume_role(core_attrs.get("assume_role"))?;
-            let provider =
-                AwsProvider::new_with_account_guard(&region, allowed, forbidden, assume_role).await;
-            // Run the account guard before we accept this provider — fails
-            // fast (before any read/plan/apply) when the credentials in use
-            // point at the wrong AWS account.
-            provider.verify_account_id().await?;
+            let provider = {
+                let _enter = self.runtime.enter();
+                let provider =
+                    AwsProvider::new_with_account_guard(&region, allowed, forbidden, assume_role)
+                        .await;
+                // Run the account guard before we accept this provider — fails
+                // fast (before any read/plan/apply) when the credentials in use
+                // point at the wrong AWS account.
+                provider.verify_account_id().await?;
+                provider
+            };
             self.provider = Some(provider);
             Ok(())
         })
@@ -255,6 +266,7 @@ impl CarinaProvider for AwsProcessProvider {
     ) -> BoxFuture<'a, Result<proto::State, proto::ProviderError>> {
         let core_id = convert::proto_to_core_resource_id(id);
         Box::pin(async move {
+            let _enter = self.runtime.enter();
             let result = self
                 .provider()
                 .read(&core_id, identifier, CoreReadRequest)
@@ -272,6 +284,7 @@ impl CarinaProvider for AwsProcessProvider {
     ) -> BoxFuture<'a, Result<proto::State, proto::ProviderError>> {
         let core_data_source = convert::proto_to_core_data_source(resource);
         Box::pin(async move {
+            let _enter = self.runtime.enter();
             let result = self.provider().read_data_source(&core_data_source).await;
             match result {
                 Ok(state) => Ok(convert::core_to_proto_state(&state)),
@@ -291,6 +304,7 @@ impl CarinaProvider for AwsProcessProvider {
             resource: core_resource,
         };
         Box::pin(async move {
+            let _enter = self.runtime.enter();
             let result = self.provider().create(&core_id, core_request).await;
             match result {
                 Ok(state) => Ok(convert::core_to_proto_state(&state)),
@@ -328,6 +342,7 @@ impl CarinaProvider for AwsProcessProvider {
             patch: core_patch,
         };
         Box::pin(async move {
+            let _enter = self.runtime.enter();
             let result = self
                 .provider()
                 .update(&core_id, identifier, core_request)
@@ -357,6 +372,7 @@ impl CarinaProvider for AwsProcessProvider {
             directives: core_directives,
         };
         Box::pin(async move {
+            let _enter = self.runtime.enter();
             let result = self
                 .provider()
                 .delete(&core_id, identifier, core_request)
