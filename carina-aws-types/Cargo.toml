@@ -14,4 +14,4 @@ doctest = false
 indexmap = "2"
 
 [dependencies]
-carina-core = { git = "https://github.com/carina-rs/carina", rev = "bbcc5ac2d801e2e3f056e446407b095a74569f54" }
+carina-core = { git = "https://github.com/carina-rs/carina", rev = "387d64b5614391132da1bd10aebf040dba0f82cb" }
