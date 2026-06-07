@@ -118,7 +118,7 @@ pub struct ResourceDef {
     ///
     /// Each tuple is `(parent_struct_pascal_name, member_pascal_name,
     /// type_code)`. `type_code` is a Rust expression that evaluates to
-    /// an `AttributeType` — typically a call into `super::types::…`.
+    /// an `AttributeType` — typically a call into `super::config::…`.
     ///
     /// Example: route53 `AliasTarget.HostedZoneId` accepts the
     /// `aws.cloudfront.HostedZoneId.global` namespaced constant

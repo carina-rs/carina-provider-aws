@@ -224,7 +224,7 @@ impl CarinaProvider for AwsProcessProvider {
         identity: &carina_plugin_sdk::types::TypeIdentity,
         value: &str,
     ) -> Result<(), String> {
-        use carina_provider_aws::schemas::types::aws_validators;
+        use carina_provider_aws::schemas::config::aws_validators;
         use std::sync::OnceLock;
         type ValidatorMap = HashMap<String, Box<dyn Fn(&str) -> Result<(), String> + Send + Sync>>;
         static VALIDATORS: OnceLock<ValidatorMap> = OnceLock::new();

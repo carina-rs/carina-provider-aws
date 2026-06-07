@@ -112,6 +112,15 @@ static ARN_VALIDATIONS: &[ArnValidation] = &[
         },
     },
     ArnValidation {
+        service: "iam",
+        resource: "OidcProvider",
+        regex: "^arn:(aws|aws-cn|aws-us-gov):iam::[^:]*:oidc-provider/.+$",
+        validator: ArnValidator::Iam {
+            prefix: "oidc-provider/",
+            label: "IAM OIDC Provider",
+        },
+    },
+    ArnValidation {
         service: "kms",
         resource: "Key",
         regex: "^arn:(aws|aws-cn|aws-us-gov):kms:[^:]*:[^:]*:key/.+$",
@@ -256,7 +265,28 @@ fn arn_validator_expression(choice: ArnEmitChoice) -> String {
     }
 }
 
+fn shared_arn_constructor(service: &str, resource: &str) -> Option<&'static str> {
+    match (service, resource) {
+        ("iam", "Role") => Some("iam_role_arn"),
+        ("iam", "Policy") => Some("iam_policy_arn"),
+        ("iam", "OidcProvider") => Some("iam_oidc_provider_arn"),
+        _ => None,
+    }
+}
+
+fn arn_helper_needs_validation_imports(
+    service: &str,
+    resource: &str,
+    choice: ArnEmitChoice,
+) -> bool {
+    !matches!(choice, ArnEmitChoice::Generic) && shared_arn_constructor(service, resource).is_none()
+}
+
 fn emit_arn_helper(service: &str, resource: &str, choice: ArnEmitChoice) -> String {
+    if let Some(constructor) = shared_arn_constructor(service, resource) {
+        return format!("pub fn arn() -> AttributeType {{\n    super::{constructor}()\n}}\n\n");
+    }
+
     if matches!(choice, ArnEmitChoice::Generic) {
         return "pub fn arn() -> AttributeType {\n    super::arn()\n}\n\n".to_string();
     }
@@ -1090,20 +1120,24 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
     if needs_types {
         schema_imports.push("types");
     }
-    let arn_helper = resource_identity_parts(res.name).and_then(|(service, resource)| {
-        attrs
-            .iter()
-            .any(|a| a.snake_name == "arn")
-            .then(|| emit_arn_helper(service, resource, arn_emit_choice(service, resource)))
-    });
+    let arn_identity = resource_identity_parts(res.name)
+        .filter(|_| attrs.iter().any(|a| a.snake_name == "arn"))
+        .map(|(service, resource)| (service, resource, arn_emit_choice(service, resource)));
+    let arn_helper =
+        arn_identity.map(|(service, resource, choice)| emit_arn_helper(service, resource, choice));
     let has_arn_helper = arn_helper.is_some();
+    let arn_helper_needs_validation_imports = arn_identity
+        .map(|(service, resource, choice)| {
+            arn_helper_needs_validation_imports(service, resource, choice)
+        })
+        .unwrap_or(false);
     if has_arn_helper && !schema_imports.contains(&"AttributeType") {
         schema_imports.insert(1, "AttributeType");
     }
     if has_ranged_ints {
         schema_imports.push("legacy_validator");
     }
-    if has_arn_helper && !schema_imports.contains(&"legacy_validator") {
+    if arn_helper_needs_validation_imports && !schema_imports.contains(&"legacy_validator") {
         schema_imports.push("legacy_validator");
     }
     let schema_imports_str = schema_imports.join(", ");
@@ -1121,7 +1155,7 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
         code.push_str("use super::tags_type;\n");
         code.push_str("use super::validate_tags_map;\n");
     }
-    if has_ranged_ints || has_arn_helper {
+    if has_ranged_ints || arn_helper_needs_validation_imports {
         code.push_str("use carina_core::resource::{ConcreteValue, Value};\n");
     }
     code.push_str(&format!(
@@ -1784,8 +1818,7 @@ fn generate_virtual_helper_modules(
          //!\n\
          //! DO NOT EDIT MANUALLY - regenerate with:\n\
          //!   ./carina-provider-aws/scripts/generate-schemas-smithy.sh\n\n\
-         use carina_core::resource::{{ConcreteValue, Value}};\n\
-         use carina_core::schema::{{AttributeType, legacy_validator}};\n\n{}",
+         use carina_core::schema::AttributeType;\n\n{}",
         emit_arn_helper("iam", "Policy", arn_emit_choice("iam", "Policy"))
     );
     let iam_policy_path = iam_dir.join("policy.rs");
@@ -1962,9 +1995,9 @@ fn generate_mod_rs(modules: &[GeneratedModule], output_dir: &std::path::Path) ->
          //!\n\
          //! DO NOT EDIT MANUALLY - regenerate with:\n\
          //!   ./carina-provider-aws/scripts/generate-schemas-smithy.sh\n\n\
-         // Re-export all types and validators from types so that\n\
+         // Re-export all types and validators from config so that\n\
          // generated schema files can use `super::` to access them.\n\
-         pub use super::types::*;\n\n",
+         pub use super::config::*;\n\n",
     );
 
     // Scan for orphaned modules (files on disk not in resource_defs.rs) so we
@@ -3476,17 +3509,26 @@ fn generate_markdown_resource(res: &ResourceDef, model: &SmithyModel) -> Result<
     for (name, member_ref) in &read_only_fields {
         let snake_name = name.to_snake_case();
         let description = SmithyModel::documentation(&member_ref.traits).map(|s| s.to_string());
-        let type_display = type_display_string_md(
-            model,
-            &member_ref.target,
-            name,
-            &namespace,
-            &type_overrides,
-            &struct_field_type_overrides,
-            None,
-            &mut all_enums,
-            &mut struct_defs,
-        );
+        let type_display = if name == "Arn" {
+            resource_identity_parts(res.name)
+                .and_then(|(service, resource)| shared_arn_constructor(service, resource))
+                .map(|constructor| type_code_to_display(&format!("super::{constructor}()")))
+        } else {
+            None
+        }
+        .unwrap_or_else(|| {
+            type_display_string_md(
+                model,
+                &member_ref.target,
+                name,
+                &namespace,
+                &type_overrides,
+                &struct_field_type_overrides,
+                None,
+                &mut all_enums,
+                &mut struct_defs,
+            )
+        });
 
         read_only_attrs.push(MdAttrInfo {
             snake_name,
@@ -3733,21 +3775,25 @@ fn generate_data_source(
     if needs_types {
         schema_imports.push("types");
     }
-    let arn_helper = resource_identity_parts(ds.name).and_then(|(service, resource)| {
-        ds_attrs
-            .iter()
-            .any(|a| a.name == "arn")
-            .then(|| emit_arn_helper(service, resource, arn_emit_choice(service, resource)))
-    });
+    let arn_identity = resource_identity_parts(ds.name)
+        .filter(|_| ds_attrs.iter().any(|a| a.name == "arn"))
+        .map(|(service, resource)| (service, resource, arn_emit_choice(service, resource)));
+    let arn_helper =
+        arn_identity.map(|(service, resource, choice)| emit_arn_helper(service, resource, choice));
     let has_arn_helper = arn_helper.is_some();
+    let arn_helper_needs_validation_imports = arn_identity
+        .map(|(service, resource, choice)| {
+            arn_helper_needs_validation_imports(service, resource, choice)
+        })
+        .unwrap_or(false);
     if has_arn_helper && !schema_imports.contains(&"AttributeType") {
         schema_imports.insert(1, "AttributeType");
     }
-    if has_arn_helper && !schema_imports.contains(&"legacy_validator") {
+    if arn_helper_needs_validation_imports && !schema_imports.contains(&"legacy_validator") {
         schema_imports.push("legacy_validator");
     }
     let schema_imports_str = schema_imports.join(", ");
-    let resource_import = if has_arn_helper {
+    let resource_import = if arn_helper_needs_validation_imports {
         "use carina_core::resource::{ConcreteValue, Value};\n"
     } else {
         ""
@@ -4077,6 +4123,7 @@ fn type_code_to_display(type_code: &str) -> String {
         s if s.contains("iam_role_arn") => "IamRoleArn".to_string(),
         s if s.contains("iam_role_id") => "IamRoleId".to_string(),
         s if s.contains("iam_policy_arn") => "IamPolicyArn".to_string(),
+        s if s.contains("iam_oidc_provider_arn") => "IamOidcProviderArn".to_string(),
         s if s.contains("iam_policy_document") => "PolicyDocument".to_string(),
         s if s.contains("kms_key_arn") || s.contains("kms::key::arn") => "KmsKeyArn".to_string(),
         s if s.contains("kms_key_id") || s.contains("kms::key::id") => "KmsKeyId".to_string(),
@@ -4653,6 +4700,39 @@ mod tests {
     use super::*;
 
     #[test]
+    fn emit_arn_helper_uses_shared_iam_constructors() {
+        assert_eq!(
+            emit_arn_helper("iam", "Role", arn_emit_choice("iam", "Role")),
+            "pub fn arn() -> AttributeType {\n    super::iam_role_arn()\n}\n\n"
+        );
+        assert_eq!(
+            emit_arn_helper("iam", "Policy", arn_emit_choice("iam", "Policy")),
+            "pub fn arn() -> AttributeType {\n    super::iam_policy_arn()\n}\n\n"
+        );
+        assert_eq!(
+            emit_arn_helper(
+                "iam",
+                "OidcProvider",
+                arn_emit_choice("iam", "OidcProvider")
+            ),
+            "pub fn arn() -> AttributeType {\n    super::iam_oidc_provider_arn()\n}\n\n"
+        );
+    }
+
+    #[test]
+    fn type_display_names_include_shared_iam_arn_constructors() {
+        assert_eq!(type_code_to_display("super::iam_role_arn()"), "IamRoleArn");
+        assert_eq!(
+            type_code_to_display("super::iam_policy_arn()"),
+            "IamPolicyArn"
+        );
+        assert_eq!(
+            type_code_to_display("super::iam_oidc_provider_arn()"),
+            "IamOidcProviderArn"
+        );
+    }
+
+    #[test]
     fn generate_data_source_for_sts_caller_identity_emits_explicit_outputs() {
         let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../carina-provider-aws/tests/fixtures/smithy/sts.json");
@@ -4826,6 +4906,26 @@ mod tests {
             md.contains("List(") || md.contains("- **Type:** List"),
             "List(...) type marker for aggregated outputs: {md}"
         );
+    }
+
+    #[test]
+    fn markdown_resource_for_iam_role_displays_specific_arn_type() {
+        let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../carina-provider-aws/tests/fixtures/smithy/iam.json");
+        if !fixture.exists() {
+            return;
+        }
+        let file = std::fs::File::open(&fixture).unwrap();
+        let model = carina_smithy::parse_reader(std::io::BufReader::new(file)).unwrap();
+        let res = resource_defs::iam_resources()
+            .into_iter()
+            .find(|r| r.name == "iam.Role")
+            .expect("iam.Role missing");
+
+        let md = generate_markdown_resource(&res, &model).expect("md");
+
+        assert!(md.contains("### `arn`"), "{md}");
+        assert!(md.contains("- **Type:** IamRoleArn"), "{md}");
     }
 
     /// Per naming-conventions design D7 the codegen must emit a

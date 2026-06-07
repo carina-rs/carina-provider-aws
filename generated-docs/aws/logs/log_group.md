@@ -19,7 +19,7 @@ Use this parameter to enable deletion protection for the new log group. When ena
 
 ### `kms_key_id`
 
-- **Type:** String
+- **Type:** KmsKeyId
 - **Required:** No
 
 The Amazon Resource Name (ARN) of the KMS key to use when encrypting log data. For more information, see Amazon Resource Names.
