@@ -1258,13 +1258,14 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
                 .collect::<Vec<_>>()
                 .join(", ");
             format!(
-                "AttributeType::string_enum(\n\
-                 \x20               \"{}\".to_string(),\n\
-                 \x20               vec![{}],\n\
-                 \x20               Some(carina_core::schema::string_enum_identity(\"{}\", Some(\"{}\"))),\n\
-                 \x20               {},\n\
-                 \x20           )",
-                ei.type_name, values_str, ei.type_name, namespace, dsl_aliases_code
+                "AttributeType::enum_(\n\
+                 \x20   carina_core::schema::enum_identity(\"{}\", Some(\"{}\")),\n\
+                 \x20   Some(vec![{}]),\n\
+                 \x20   {},\n\
+                 \x20   None,\n\
+                 \x20   None,\n\
+                 )",
+                ei.type_name, namespace, values_str, dsl_aliases_code
             )
         } else {
             attr.type_code.clone()
@@ -1672,13 +1673,14 @@ fn generate_struct_type(
                 .collect::<Vec<_>>()
                 .join(", ");
             format!(
-                "AttributeType::string_enum(\n\
-                 \x20               \"{}\".to_string(),\n\
-                 \x20               vec![{}],\n\
-                 \x20               Some(carina_core::schema::string_enum_identity(\"{}\", Some(\"{}\"))),\n\
-                 \x20               {},\n\
-                 \x20           )",
-                ei.type_name, values_str, ei.type_name, namespace, dsl_aliases_code
+                "AttributeType::enum_(\n\
+                 \x20   carina_core::schema::enum_identity(\"{}\", Some(\"{}\")),\n\
+                 \x20   Some(vec![{}]),\n\
+                 \x20   {},\n\
+                 \x20   None,\n\
+                 \x20   None,\n\
+                 )",
+                ei.type_name, namespace, values_str, dsl_aliases_code
             )
         } else {
             field_type
@@ -4901,7 +4903,7 @@ mod tests {
     }
 
     #[test]
-    fn generate_resource_uses_string_enum_for_namespaced_enums() {
+    fn generate_resource_uses_enum_for_namespaced_enums() {
         let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../carina-provider-aws/tests/fixtures/smithy/s3.json");
         if !fixture.exists() {
@@ -4922,8 +4924,8 @@ mod tests {
         let generated = generate_resource(&resource, &model).expect("failed to generate resource");
 
         assert!(
-            generated.contains("AttributeType::string_enum("),
-            "enum-like strings should be emitted as string_enum: {generated}"
+            generated.contains("AttributeType::enum_("),
+            "enum-like strings should be emitted as enum_: {generated}"
         );
         assert!(
             !generated.contains(".with_completions("),

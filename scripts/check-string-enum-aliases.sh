@@ -1,29 +1,29 @@
 #!/bin/bash
 # Guard against the `carina-rs/carina-provider-aws#390` bug class:
-# hand-written `AttributeType::string_enum(...)` calls in
+# hand-written `AttributeType::enum_(...)` calls in
 # `carina-aws-types/src/lib.rs` that ship with an empty `dsl_aliases`
 # argument (`vec![]`).
 #
 # `AwsNormalizer::api_canonicalize_recursive` relies on the alias table
 # to rewrite DSL spellings (e.g. `aes256`) to the AWS API canonical
-# (`AES256`) before the wire call. A StringEnum whose alias table is
+# (`AES256`) before the wire call. An enum whose alias table is
 # empty silently forwards the raw alias spelling to the AWS SDK and
 # triggers `MalformedXML` / `Unknown(...)` errors at apply time —
 # unit tests pass, acceptance tests fail against real AWS.
 #
-# The fix is to construct hand-written StringEnums via the
-# `string_enum_with_dsl_aliases(name, values, identity)` helper in
+# The fix is to construct hand-written enums via the
+# `enum_with_dsl_aliases(name, values, identity)` helper in
 # `carina-aws-types/src/lib.rs`, which derives the alias table from
 # `values` so "empty by accident" is impossible by construction.
 #
 # Why this script exists at all: the helper is a *convention*, not a
-# type-system gate — the underlying `AttributeType::string_enum`
-# constructor in carina-core still accepts an empty alias vec. This
+# type-system gate — the underlying `AttributeType::enum_`
+# constructor in carina-core accepts an empty alias vec. This
 # script enforces the convention at CI time. See the PR that closes
 # #390 for the full reasoning.
 #
 # The script only checks `carina-aws-types/src/lib.rs`. The two
-# string_enum sites outside that file (`factory.rs` region,
+# enum sites outside that file (`factory.rs` region,
 # `schemas/types.rs` cloudfront_hosted_zone_id) are explicitly
 # reviewed: region builds non-empty aliases dynamically, and
 # cloudfront_hosted_zone_id uses a single hand-curated alias
@@ -40,7 +40,7 @@ if [ ! -f "$TARGET" ]; then
     exit 2
 fi
 
-# Allow-list: line ranges in $TARGET where a raw `AttributeType::string_enum`
+# Allow-list: line ranges in $TARGET where a raw `AttributeType::enum_`
 # call with `vec![]` or a dynamic alias source is intentional.
 #
 # Currently:
@@ -57,11 +57,11 @@ fi
 # exception by accident.
 ALLOWLIST_PATTERN='fn condition_type\('
 
-# Find every `AttributeType::string_enum(` call in $TARGET and report any
+# Find every `AttributeType::enum_(` call in $TARGET and report any
 # whose closing `)` appears with `vec![]` as the last positional arg.
 #
 # Approach: pull out the rough 12-line window starting at each
-# `AttributeType::string_enum(` line, then look for the `vec![],?\s*\)`
+# `AttributeType::enum_(` line, then look for the `vec![],?\s*\)`
 # closing shape. Cross-check against the allow-list by walking up to
 # the nearest `fn <name>(` declaration above the call.
 
@@ -78,8 +78,8 @@ while IFS=: read -r lineno _; do
     window=$(sed -n "${lineno},$((lineno + 14))p" "$TARGET")
 
     # The call must close within the window. Reconstruct the body of
-    # the `string_enum(...)` call by joining lines until the paren
-    # depth that opened at the `string_enum(` returns to zero, then
+    # the `enum_(...)` call by joining lines until the paren
+    # depth that opened at the `enum_(` returns to zero, then
     # inspect the joined body. This catches both multi-line layouts
     # (where `vec![]` sits on its own line) AND single-line layouts
     # (where rustfmt collapses the call onto one line) — round-4
@@ -89,20 +89,20 @@ while IFS=: read -r lineno _; do
     # — the substring after the final top-level `,` and before the
     # closing `)` — is exactly `vec![]`. The depth tracker is needed
     # to ignore commas / closing parens inside nested calls like
-    # `string_enum_identity("X", Some("Y"))`.
+    # `string enum_identity("X", Some("Y"))`.
     if printf '%s\n' "$window" | awk '
         BEGIN { depth = 0; body = ""; found_close = 0; started = 0 }
         {
             line = $0
             # On the first line of the window, skip past anything
-            # before the literal `AttributeType::string_enum(` so we
+            # before the literal `AttributeType::enum_(` so we
             # start paren tracking at the right `(`. Without this, a
             # call inlined into a `fn name() -> AttributeType { ... }`
             # body would trip the `(` of the fn header first.
             if (!started) {
-                pos = index(line, "AttributeType::string_enum(")
+                pos = index(line, "AttributeType::enum_(")
                 if (pos == 0) next
-                line = substr(line, pos + length("AttributeType::string_enum"))
+                line = substr(line, pos + length("AttributeType::enum_"))
                 started = 1
             }
             for (i = 1; i <= length(line); i++) {
@@ -116,7 +116,7 @@ while IFS=: read -r lineno _; do
                 } else if (c == ")") {
                     if (depth == 1) {
                         found_close = 1
-                        # Body now holds the args of the `string_enum`
+                        # Body now holds the args of the `enum_`
                         # call. The last positional arg is whatever
                         # comes after the final top-level `,` once
                         # any trailing-comma + whitespace is stripped.
@@ -145,7 +145,7 @@ while IFS=: read -r lineno _; do
             # `dsl_aliases_for(&[...])` end with `)`, and
             # `string_enum_identity(...)` ends with `))`, so an
             # endswith-`vec![]` check is sufficient for any current
-            # carina-aws-types StringEnum signature.
+            # carina-aws-types enum signature.
             if (length(body) >= 6 && substr(body, length(body) - 5) == "vec![]") {
                 exit 0
             }
@@ -164,13 +164,13 @@ while IFS=: read -r lineno _; do
         violations=$((violations + 1))
         report+="  $TARGET:$lineno (in ${enclosing_fn:-<unknown fn>})"$'\n'
     fi
-done < <(grep -n 'AttributeType::string_enum(' "$TARGET")
+done < <(grep -n 'AttributeType::enum_(' "$TARGET")
 
 if [ "$violations" -gt 0 ]; then
     echo "check-string-enum-aliases: FAIL: found $violations call site(s) with empty dsl_aliases:" >&2
     printf '%s' "$report" >&2
     echo "" >&2
-    echo "Use string_enum_with_dsl_aliases(name, values, identity) instead." >&2
+    echo "Use enum_with_dsl_aliases(name, values, identity) instead." >&2
     echo "It derives the alias table from values via dsl_aliases_for, making" >&2
     echo "the carina-rs/carina-provider-aws#390 bug class impossible by construction." >&2
     echo "If the call really needs a dynamic alias source, add it to the" >&2
@@ -178,4 +178,4 @@ if [ "$violations" -gt 0 ]; then
     exit 1
 fi
 
-echo "check-string-enum-aliases OK: 0 hand-written StringEnums in carina-aws-types with empty dsl_aliases."
+echo "check-string-enum-aliases OK: 0 hand-written enums in carina-aws-types with empty dsl_aliases."

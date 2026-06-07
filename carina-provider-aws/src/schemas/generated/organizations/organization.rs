@@ -39,12 +39,13 @@ pub fn organizations_organization_config() -> AwsSchemaConfig {
         schema: ResourceSchema::new("organizations.Organization")
         .with_description("Contains details about an organization. An organization is a collection of accounts that are centrally managed together using consolidated billing, organized hierarchically with organizational units (...")
         .attribute(
-            AttributeSchema::new("feature_set", AttributeType::string_enum(
-                "FeatureSet".to_string(),
-                vec!["ALL".to_string(), "CONSOLIDATED_BILLING".to_string()],
-                Some(carina_core::schema::string_enum_identity("FeatureSet", Some("aws.organizations.Organization"))),
-                vec![("ALL".to_string(), "all".to_string()), ("CONSOLIDATED_BILLING".to_string(), "consolidated_billing".to_string())],
-            ))
+            AttributeSchema::new("feature_set", AttributeType::enum_(
+    carina_core::schema::enum_identity("FeatureSet", Some("aws.organizations.Organization")),
+    Some(vec!["ALL".to_string(), "CONSOLIDATED_BILLING".to_string()]),
+    vec![("ALL".to_string(), "all".to_string()), ("CONSOLIDATED_BILLING".to_string(), "consolidated_billing".to_string())],
+    None,
+    None,
+))
                 .create_only()
                 .with_description("Specifies the feature set supported by the new organization. Each feature set supports different levels of functionality. CONSOLIDATED_BILLING: All me...")
                 .with_provider_name("FeatureSet"),

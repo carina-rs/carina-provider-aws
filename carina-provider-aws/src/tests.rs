@@ -1453,14 +1453,16 @@ fn test_organizations_organization_schema_feature_set_enum() {
         .attributes
         .get("feature_set")
         .expect("feature_set attribute not found");
-    if let carina_core::schema::Shape::StringEnum { values, .. } =
-        config.schema.shape_of(&feature_set.attr_type)
+    if let carina_core::schema::Shape::Enum {
+        values: Some(values),
+        ..
+    } = config.schema.shape_of(&feature_set.attr_type)
     {
         assert!(values.contains(&"ALL".to_string()));
         assert!(values.contains(&"CONSOLIDATED_BILLING".to_string()));
         assert_eq!(values.len(), 2);
     } else {
-        panic!("feature_set should be StringEnum");
+        panic!("feature_set should be enum");
     }
 }
 
@@ -1577,7 +1579,7 @@ fn test_organizations_account_schema_attributes() {
 
 #[test]
 fn test_security_group_egress_schema_includes_all_variant() {
-    // The "all" value (alias for "-1") must be included in the StringEnum values
+    // The "all" value (alias for "-1") must be included in the enum values
     // so it is accepted even when to_dsl is lost during protocol serialization.
     let config =
         crate::schemas::generated::ec2::security_group_egress::ec2_security_group_egress_config();
@@ -1586,16 +1588,18 @@ fn test_security_group_egress_schema_includes_all_variant() {
         .attributes
         .get("ip_protocol")
         .expect("ip_protocol attribute not found");
-    if let carina_core::schema::Shape::StringEnum { values, .. } =
-        config.schema.shape_of(&ip_protocol.attr_type)
+    if let carina_core::schema::Shape::Enum {
+        values: Some(values),
+        ..
+    } = config.schema.shape_of(&ip_protocol.attr_type)
     {
         assert!(
             values.contains(&"all".to_string()),
-            "StringEnum values must include 'all': {:?}",
+            "enum values must include 'all': {:?}",
             values
         );
     } else {
-        panic!("ip_protocol should be StringEnum");
+        panic!("ip_protocol should be enum");
     }
 }
 
@@ -1608,16 +1612,18 @@ fn test_security_group_ingress_schema_includes_all_variant() {
         .attributes
         .get("ip_protocol")
         .expect("ip_protocol attribute not found");
-    if let carina_core::schema::Shape::StringEnum { values, .. } =
-        config.schema.shape_of(&ip_protocol.attr_type)
+    if let carina_core::schema::Shape::Enum {
+        values: Some(values),
+        ..
+    } = config.schema.shape_of(&ip_protocol.attr_type)
     {
         assert!(
             values.contains(&"all".to_string()),
-            "StringEnum values must include 'all': {:?}",
+            "enum values must include 'all': {:?}",
             values
         );
     } else {
-        panic!("ip_protocol should be StringEnum");
+        panic!("ip_protocol should be enum");
     }
 }
 

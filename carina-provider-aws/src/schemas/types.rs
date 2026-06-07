@@ -43,14 +43,12 @@ pub struct AwsSchemaConfig {
 /// expects an AWS-published constant for the alias target's service,
 /// not an arbitrary string.
 pub fn cloudfront_hosted_zone_id() -> AttributeType {
-    AttributeType::string_enum(
-        "HostedZoneId".to_string(),
-        vec!["Z2FDTNDATAQYW2".to_string()],
-        Some(carina_core::schema::string_enum_identity(
-            "HostedZoneId",
-            Some("aws.cloudfront"),
-        )),
+    AttributeType::enum_(
+        carina_core::schema::enum_identity("HostedZoneId", Some("aws.cloudfront")),
+        Some(vec!["Z2FDTNDATAQYW2".to_string()]),
         vec![("Z2FDTNDATAQYW2".to_string(), "global".to_string())],
+        None,
+        None,
     )
 }
 
@@ -60,10 +58,11 @@ pub fn cloudfront_hosted_zone_id() -> AttributeType {
 /// - AWS string format: "ap-northeast-1"
 /// - Shorthand: ap_northeast_1
 pub fn aws_region() -> AttributeType {
-    AttributeType::custom_enum(
+    AttributeType::enum_(
         provider_bare_type(&[], "Region"),
-        AttributeType::string(),
-        legacy_validator(|value| {
+        None,
+        vec![],
+        Some(legacy_validator(|value| {
             if let Value::Concrete(ConcreteValue::String(s)) = value {
                 let id = provider_bare_type(&[], "Region");
                 validate_enum_namespace(s, &id)
@@ -82,7 +81,7 @@ pub fn aws_region() -> AttributeType {
             } else {
                 Err("Expected string".to_string())
             }
-        }),
+        })),
         Some(|s: &str| s.replace('-', "_")),
     )
 }
@@ -93,10 +92,11 @@ pub fn aws_region() -> AttributeType {
 /// - AWS string format: "us-east-1a"
 /// - Shorthand: us_east_1a
 pub fn availability_zone() -> AttributeType {
-    AttributeType::custom_enum(
+    AttributeType::enum_(
         provider_bare_type(&["AvailabilityZone"], "ZoneName"),
-        AttributeType::string(),
-        legacy_validator(|value| {
+        None,
+        vec![],
+        Some(legacy_validator(|value| {
             if let Value::Concrete(ConcreteValue::String(s)) = value {
                 let id = provider_bare_type(&["AvailabilityZone"], "ZoneName");
                 validate_enum_namespace(s, &id)
@@ -108,7 +108,7 @@ pub fn availability_zone() -> AttributeType {
             } else {
                 Err("Expected string".to_string())
             }
-        }),
+        })),
         Some(|s: &str| s.replace('-', "_")),
     )
 }
@@ -395,11 +395,11 @@ mod tests {
 
     #[test]
     fn az_has_namespace() {
-        // Post-#3222: AZ is a `CustomEnum`, not a `Custom`. The legacy
+        // Post-#3222: AZ is an enum, not a `Custom`. The legacy
         // `namespace: Some("aws")` field is now derived from the
         // structured identity via `dotted_prefix()`.
         let az_type = availability_zone();
-        if let carina_core::schema::Shape::CustomEnum { identity, .. } =
+        if let carina_core::schema::Shape::Enum { identity, .. } =
             az_type.shape_ref_free().expect("test schema is Ref-free")
         {
             assert_eq!(
@@ -407,21 +407,21 @@ mod tests {
                 Some("aws.AvailabilityZone")
             );
         } else {
-            panic!("Expected CustomEnum type");
+            panic!("Expected enum type");
         }
     }
 
     #[test]
     fn az_has_to_dsl() {
         let az_type = availability_zone();
-        if let carina_core::schema::Shape::CustomEnum { to_dsl, .. } =
+        if let carina_core::schema::Shape::Enum { to_dsl, .. } =
             az_type.shape_ref_free().expect("test schema is Ref-free")
         {
             assert!(to_dsl.is_some());
             let convert = to_dsl.unwrap();
             assert_eq!(convert("us-east-1a"), "us_east_1a");
         } else {
-            panic!("Expected CustomEnum type");
+            panic!("Expected enum type");
         }
     }
 

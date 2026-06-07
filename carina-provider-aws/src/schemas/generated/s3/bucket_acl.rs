@@ -27,18 +27,14 @@ pub fn s3_bucket_acl_config() -> AwsSchemaConfig {
             .attribute(
                 AttributeSchema::new(
                     "acl",
-                    AttributeType::string_enum(
-                        "Acl".to_string(),
-                        vec![
+                    AttributeType::enum_(
+                        carina_core::schema::enum_identity("Acl", Some("aws.s3.BucketAcl")),
+                        Some(vec![
                             "authenticated-read".to_string(),
                             "private".to_string(),
                             "public-read".to_string(),
                             "public-read-write".to_string(),
-                        ],
-                        Some(carina_core::schema::string_enum_identity(
-                            "Acl",
-                            Some("aws.s3.BucketAcl"),
-                        )),
+                        ]),
                         vec![
                             (
                                 "authenticated-read".to_string(),
@@ -51,6 +47,8 @@ pub fn s3_bucket_acl_config() -> AwsSchemaConfig {
                             ),
                             ("private".to_string(), "private".to_string()),
                         ],
+                        None,
+                        None,
                     ),
                 )
                 .required()

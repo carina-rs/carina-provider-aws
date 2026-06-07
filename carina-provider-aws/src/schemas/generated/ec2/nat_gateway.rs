@@ -28,12 +28,13 @@ pub fn ec2_nat_gateway_config() -> AwsSchemaConfig {
                 .with_provider_name("AllocationId"),
         )
         .attribute(
-            AttributeSchema::new("availability_mode", AttributeType::string_enum(
-                "AvailabilityMode".to_string(),
-                vec!["regional".to_string(), "zonal".to_string()],
-                Some(carina_core::schema::string_enum_identity("AvailabilityMode", Some("aws.ec2.NatGateway"))),
-                vec![("regional".to_string(), "regional".to_string()), ("zonal".to_string(), "zonal".to_string())],
-            ))
+            AttributeSchema::new("availability_mode", AttributeType::enum_(
+    carina_core::schema::enum_identity("AvailabilityMode", Some("aws.ec2.NatGateway")),
+    Some(vec!["regional".to_string(), "zonal".to_string()]),
+    vec![("regional".to_string(), "regional".to_string()), ("zonal".to_string(), "zonal".to_string())],
+    None,
+    None,
+))
                 .create_only()
                 .with_description("Specifies whether to create a zonal (single-AZ) or regional (multi-AZ) NAT gateway. Defaults to zonal. A zonal NAT gateway is a NAT Gateway that provi...")
                 .with_provider_name("AvailabilityMode"),
@@ -52,12 +53,13 @@ pub fn ec2_nat_gateway_config() -> AwsSchemaConfig {
                 .with_provider_name("AvailabilityZoneAddresses"),
         )
         .attribute(
-            AttributeSchema::new("connectivity_type", AttributeType::string_enum(
-                "ConnectivityType".to_string(),
-                vec!["private".to_string(), "public".to_string()],
-                Some(carina_core::schema::string_enum_identity("ConnectivityType", Some("aws.ec2.NatGateway"))),
-                vec![("private".to_string(), "private".to_string()), ("public".to_string(), "public".to_string())],
-            ))
+            AttributeSchema::new("connectivity_type", AttributeType::enum_(
+    carina_core::schema::enum_identity("ConnectivityType", Some("aws.ec2.NatGateway")),
+    Some(vec!["private".to_string(), "public".to_string()]),
+    vec![("private".to_string(), "private".to_string()), ("public".to_string(), "public".to_string())],
+    None,
+    None,
+))
                 .create_only()
                 .with_description("Indicates whether the NAT gateway supports public or private connectivity. The default is public connectivity.")
                 .with_provider_name("ConnectivityType"),

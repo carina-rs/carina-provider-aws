@@ -32,12 +32,13 @@ pub fn ec2_vpn_gateway_config() -> AwsSchemaConfig {
                 .with_provider_name("AvailabilityZone"),
         )
         .attribute(
-            AttributeSchema::new("type", AttributeType::string_enum(
-                "Type".to_string(),
-                vec!["ipsec.1".to_string()],
-                Some(carina_core::schema::string_enum_identity("Type", Some("aws.ec2.VpnGateway"))),
-                vec![("ipsec.1".to_string(), "ipsec_1".to_string())],
-            ))
+            AttributeSchema::new("type", AttributeType::enum_(
+    carina_core::schema::enum_identity("Type", Some("aws.ec2.VpnGateway")),
+    Some(vec!["ipsec.1".to_string()]),
+    vec![("ipsec.1".to_string(), "ipsec_1".to_string())],
+    None,
+    None,
+))
                 .required()
                 .create_only()
                 .with_description("The type of VPN connection this virtual private gateway supports.")

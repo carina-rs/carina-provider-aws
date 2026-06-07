@@ -26,12 +26,13 @@ pub fn s3_bucket_config() -> AwsSchemaConfig {
                 .with_provider_name("Bucket"),
         )
         .attribute(
-            AttributeSchema::new("bucket_namespace", AttributeType::string_enum(
-                "BucketNamespace".to_string(),
-                vec!["account-regional".to_string(), "global".to_string()],
-                Some(carina_core::schema::string_enum_identity("BucketNamespace", Some("aws.s3.Bucket"))),
-                vec![("account-regional".to_string(), "account_regional".to_string()), ("global".to_string(), "global".to_string())],
-            ))
+            AttributeSchema::new("bucket_namespace", AttributeType::enum_(
+    carina_core::schema::enum_identity("BucketNamespace", Some("aws.s3.Bucket")),
+    Some(vec!["account-regional".to_string(), "global".to_string()]),
+    vec![("account-regional".to_string(), "account_regional".to_string()), ("global".to_string(), "global".to_string())],
+    None,
+    None,
+))
                 .create_only()
                 .with_description("Specifies the namespace where you want to create your general purpose bucket. When you create a general purpose bucket, you can choose to create a buc...")
                 .with_provider_name("BucketNamespace"),

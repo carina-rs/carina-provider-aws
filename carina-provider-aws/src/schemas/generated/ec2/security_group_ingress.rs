@@ -88,12 +88,13 @@ pub fn ec2_security_group_ingress_config() -> AwsSchemaConfig {
                 .with_provider_name("GroupName"),
         )
         .attribute(
-            AttributeSchema::new("ip_protocol", AttributeType::string_enum(
-                "IpProtocol".to_string(),
-                vec!["tcp".to_string(), "udp".to_string(), "icmp".to_string(), "icmpv6".to_string(), "-1".to_string(), "all".to_string()],
-                Some(carina_core::schema::string_enum_identity("IpProtocol", Some("aws.ec2.SecurityGroupIngress"))),
-                vec![("-1".to_string(), "all".to_string()), ("tcp".to_string(), "tcp".to_string()), ("udp".to_string(), "udp".to_string()), ("icmp".to_string(), "icmp".to_string()), ("icmpv6".to_string(), "icmpv6".to_string()), ("all".to_string(), "all".to_string())],
-            ))
+            AttributeSchema::new("ip_protocol", AttributeType::enum_(
+    carina_core::schema::enum_identity("IpProtocol", Some("aws.ec2.SecurityGroupIngress")),
+    Some(vec!["tcp".to_string(), "udp".to_string(), "icmp".to_string(), "icmpv6".to_string(), "-1".to_string(), "all".to_string()]),
+    vec![("-1".to_string(), "all".to_string()), ("tcp".to_string(), "tcp".to_string()), ("udp".to_string(), "udp".to_string()), ("icmp".to_string(), "icmp".to_string()), ("icmpv6".to_string(), "icmpv6".to_string()), ("all".to_string(), "all".to_string())],
+    None,
+    None,
+))
                 .required()
                 .create_only()
                 .with_description("The IP protocol name (tcp, udp, icmp) or number (see Protocol Numbers). To specify all protocols, use -1. To specify icmpv6, use IP permissions instea...")

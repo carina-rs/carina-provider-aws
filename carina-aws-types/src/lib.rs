@@ -100,32 +100,31 @@ fn dsl_aliases_for(values: &[&str]) -> Vec<(String, String)> {
         .collect()
 }
 
-/// Build a `StringEnum` `AttributeType` whose DSL alias table is
+/// Build an enum `AttributeType` whose DSL alias table is
 /// derived from `values` via [`dsl_aliases_for`]. Hand-written
 /// `carina-aws-types` enum sites must call this constructor instead of
-/// the raw [`AttributeType::string_enum`] so that aliases cannot be
+/// the raw [`AttributeType::enum_`] so that aliases cannot be
 /// silently omitted — every call site sources the alias table from the
 /// same `values` slice that defines the canonical AWS API values, making
-/// "StringEnum with empty `dsl_aliases`" impossible by construction.
+/// "closed enum with empty `dsl_aliases`" impossible by construction.
 ///
 /// `AwsNormalizer::api_canonicalize_recursive` relies on this alias
 /// table to rewrite DSL spellings (e.g. `aes256`) to the AWS canonical
-/// (`AES256`) before the wire call. A `StringEnum` whose alias table is
+/// (`AES256`) before the wire call. A closed enum whose alias table is
 /// empty silently forwards the raw alias spelling to the AWS SDK and
 /// triggers `MalformedXML` / `Unknown(...)` errors.
 /// See `carina-rs/carina-provider-aws#390`.
 ///
-/// The raw [`AttributeType::string_enum`] constructor remains in use
+/// The raw [`AttributeType::enum_`] constructor remains in use
 /// only for the `ConditionOperator` site, which derives its alias table
 /// dynamically from a different source.
-fn string_enum_with_dsl_aliases(
-    name: &str,
+fn enum_with_dsl_aliases(
     values: &[&str],
-    identity: Option<carina_core::schema::TypeIdentity>,
+    identity: carina_core::schema::TypeIdentity,
 ) -> AttributeType {
     let owned_values: Vec<String> = values.iter().map(|v| v.to_string()).collect();
     let aliases = dsl_aliases_for(values);
-    AttributeType::string_enum(name.to_string(), owned_values, identity, aliases)
+    AttributeType::enum_(identity, Some(owned_values), aliases, None, None)
 }
 
 /// Check if `input` matches any of `valid_values` using enum matching rules:
@@ -1268,13 +1267,9 @@ fn string_or_principal_struct() -> AttributeType {
 /// `<namespace>.<type_name>.<value>`, so `type_name` is the trailing
 /// `Effect` segment and `namespace` carries the containing structs.
 fn iam_policy_effect() -> AttributeType {
-    string_enum_with_dsl_aliases(
-        "Effect",
+    enum_with_dsl_aliases(
         &["Allow", "Deny"],
-        Some(carina_core::schema::string_enum_identity(
-            "Effect",
-            Some("aws.iam.PolicyDocument.Statement"),
-        )),
+        carina_core::schema::enum_identity("Effect", Some("aws.iam.PolicyDocument.Statement")),
     )
 }
 
@@ -1289,13 +1284,9 @@ fn iam_policy_effect() -> AttributeType {
 /// `<namespace>.<type_name>.<value>`, so `type_name` is the trailing
 /// `Version` segment and `namespace` is `aws.iam.PolicyDocument`.
 fn iam_policy_version() -> AttributeType {
-    string_enum_with_dsl_aliases(
-        "Version",
+    enum_with_dsl_aliases(
         &["2012-10-17", "2008-10-17"],
-        Some(carina_core::schema::string_enum_identity(
-            "Version",
-            Some("aws.iam.PolicyDocument"),
-        )),
+        carina_core::schema::enum_identity("Version", Some("aws.iam.PolicyDocument")),
     )
 }
 
@@ -1320,11 +1311,15 @@ fn condition_type() -> AttributeType {
         })
         .collect();
     AttributeType::map_with_key(
-        AttributeType::string_enum(
-            "ConditionOperator".to_string(),
-            operator_values,
-            None,
+        AttributeType::enum_(
+            carina_core::schema::enum_identity(
+                "ConditionOperator",
+                Some("aws.iam.PolicyDocument.Statement.Condition"),
+            ),
+            Some(operator_values),
             operator_aliases,
+            None,
+            None,
         ),
         AttributeType::map(string_or_list_of_strings()),
     )
@@ -1395,13 +1390,12 @@ pub fn sqs_redrive_policy() -> AttributeType {
 
 /// `redrive_permission` enum used inside `sqs_redrive_allow_policy`.
 fn sqs_redrive_permission() -> AttributeType {
-    string_enum_with_dsl_aliases(
-        "RedrivePermission",
+    enum_with_dsl_aliases(
         &["allowAll", "denyAll", "byQueue"],
-        Some(carina_core::schema::string_enum_identity(
+        carina_core::schema::enum_identity(
             "RedrivePermission",
             Some("aws.sqs.Queue.RedriveAllowPolicy"),
-        )),
+        ),
     )
 }
 
@@ -1426,13 +1420,12 @@ pub fn sqs_redrive_allow_policy() -> AttributeType {
 
 /// SSE algorithm enum for `aws.s3.BucketServerSideEncryptionConfiguration`.
 fn s3_sse_algorithm() -> AttributeType {
-    string_enum_with_dsl_aliases(
-        "SseAlgorithm",
+    enum_with_dsl_aliases(
         &["AES256", "aws:kms", "aws:kms:dsse"],
-        Some(carina_core::schema::string_enum_identity(
+        carina_core::schema::enum_identity(
             "SseAlgorithm",
             Some("aws.s3.BucketServerSideEncryptionConfiguration.SseRule.SseByDefault"),
-        )),
+        ),
     )
 }
 
@@ -1485,9 +1478,8 @@ fn s3_replication_destination() -> AttributeType {
             StructField::new("account", AttributeType::string()).with_provider_name("Account"),
             StructField::new(
                 "storage_class",
-                string_enum_with_dsl_aliases(
-                    "StorageClass",
-                    &[
+                enum_with_dsl_aliases(
+&[
                         "STANDARD",
                         "REDUCED_REDUNDANCY",
                         "STANDARD_IA",
@@ -1497,11 +1489,11 @@ fn s3_replication_destination() -> AttributeType {
                         "DEEP_ARCHIVE",
                         "GLACIER_IR",
                     ],
-                    Some(carina_core::schema::string_enum_identity(
+carina_core::schema::enum_identity(
                         "StorageClass",
                         Some("aws.s3.BucketReplicationConfiguration.ReplicationRule.ReplicationDestination"),
-                    )),
-                ),
+                    )
+),
             )
             .with_provider_name("StorageClass"),
         ],
@@ -1509,13 +1501,12 @@ fn s3_replication_destination() -> AttributeType {
 }
 
 fn s3_replication_status() -> AttributeType {
-    string_enum_with_dsl_aliases(
-        "Status",
+    enum_with_dsl_aliases(
         &["Enabled", "Disabled"],
-        Some(carina_core::schema::string_enum_identity(
+        carina_core::schema::enum_identity(
             "Status",
             Some("aws.s3.BucketReplicationConfiguration.ReplicationRule"),
-        )),
+        ),
     )
 }
 
@@ -1561,14 +1552,13 @@ fn s3_delete_marker_replication() -> AttributeType {
         vec![
             StructField::new(
                 "status",
-                string_enum_with_dsl_aliases(
-                    "Status",
-                    &["Enabled", "Disabled"],
-                    Some(carina_core::schema::string_enum_identity(
+                enum_with_dsl_aliases(
+&["Enabled", "Disabled"],
+carina_core::schema::enum_identity(
                         "Status",
                         Some("aws.s3.BucketReplicationConfiguration.ReplicationRule.DeleteMarkerReplication"),
-                    )),
-                ),
+                    )
+),
             )
             .with_provider_name("Status")
             .required(),
@@ -1605,20 +1595,18 @@ pub fn bucket_replication_rules() -> AttributeType {
 
 /// Lifecycle rule status (Enabled / Disabled).
 fn s3_lifecycle_status() -> AttributeType {
-    string_enum_with_dsl_aliases(
-        "Status",
+    enum_with_dsl_aliases(
         &["Enabled", "Disabled"],
-        Some(carina_core::schema::string_enum_identity(
+        carina_core::schema::enum_identity(
             "Status",
             Some("aws.s3.BucketLifecycleConfiguration.LifecycleRule"),
-        )),
+        ),
     )
 }
 
 /// Storage class for lifecycle transitions (Glacier / IA / etc.).
 fn s3_transition_storage_class() -> AttributeType {
-    string_enum_with_dsl_aliases(
-        "StorageClass",
+    enum_with_dsl_aliases(
         &[
             "GLACIER",
             "STANDARD_IA",
@@ -1627,10 +1615,10 @@ fn s3_transition_storage_class() -> AttributeType {
             "DEEP_ARCHIVE",
             "GLACIER_IR",
         ],
-        Some(carina_core::schema::string_enum_identity(
+        carina_core::schema::enum_identity(
             "StorageClass",
             Some("aws.s3.BucketLifecycleConfiguration.LifecycleRule.LifecycleTransition"),
-        )),
+        ),
     )
 }
 
@@ -1925,13 +1913,12 @@ pub fn bucket_event_bridge_configuration() -> AttributeType {
 }
 
 fn s3_partition_date_source() -> AttributeType {
-    string_enum_with_dsl_aliases(
-        "PartitionDateSource",
+    enum_with_dsl_aliases(
         &["EventTime", "DeliveryTime"],
-        Some(carina_core::schema::string_enum_identity(
+        carina_core::schema::enum_identity(
             "PartitionDateSource",
             Some("aws.s3.BucketLogging.TargetObjectKeyFormat.PartitionedPrefix"),
-        )),
+        ),
     )
 }
 
@@ -1992,13 +1979,12 @@ pub fn s3_redirect_all_requests_to() -> AttributeType {
                 .required(),
             StructField::new(
                 "protocol",
-                string_enum_with_dsl_aliases(
-                    "Protocol",
+                enum_with_dsl_aliases(
                     &["http", "https"],
-                    Some(carina_core::schema::string_enum_identity(
+                    carina_core::schema::enum_identity(
                         "Protocol",
                         Some("aws.s3.BucketWebsiteConfiguration.RedirectAllRequestsTo"),
-                    )),
+                    ),
                 ),
             )
             .with_provider_name("Protocol"),
@@ -2435,8 +2421,10 @@ mod tests {
     // Custom type shape tests
 
     fn field_type<'a>(attr: &'a AttributeType, field_name: &str) -> &'a AttributeType {
-        let carina_core::schema::Shape::Struct { fields, .. } =
-            attr.shape_ref_free().expect("test schema is Ref-free")
+        let mut budget = carina_core::schema::ShapeWalkBudget::new(8);
+        let Some(fields) = attr
+            .struct_fields_ref_free_with_budget(&mut budget)
+            .expect("test schema is Ref-free")
         else {
             panic!("expected Struct shape");
         };
@@ -2466,8 +2454,10 @@ mod tests {
     }
 
     fn union_member(attr: &AttributeType, index: usize) -> &AttributeType {
-        let carina_core::schema::Shape::Union(members) =
-            attr.shape_ref_free().expect("test schema is Ref-free")
+        let mut budget = carina_core::schema::ShapeWalkBudget::new(8);
+        let Some(members) = attr
+            .union_members_ref_free_with_budget(&mut budget)
+            .expect("test schema is Ref-free")
         else {
             panic!("expected Union shape");
         };
@@ -2475,12 +2465,10 @@ mod tests {
     }
 
     fn string_enum_identity(attr: &AttributeType) -> String {
-        let carina_core::schema::Shape::StringEnum {
-            identity: Some(identity),
-            ..
-        } = attr.shape_ref_free().expect("test schema is Ref-free")
+        let carina_core::schema::Shape::Enum { identity, .. } =
+            attr.shape_ref_free().expect("test schema is Ref-free")
         else {
-            panic!("expected StringEnum shape with identity");
+            panic!("expected enum shape with identity");
         };
         identity.to_string()
     }
@@ -3711,7 +3699,7 @@ mod tests {
 
     #[test]
     fn condition_type_string_enum_includes_qualifier_and_if_exists_variants() {
-        // The schema's StringEnum values must enumerate every snake_case spelling
+        // The schema's enum values must enumerate every snake_case spelling
         // that `condition_operator_to_aws` accepts — base, qualifier-prefixed,
         // `_if_exists` suffixed, and the combination — so that `validate` does
         // not reject inputs that the conversion layer already handles.
@@ -3721,10 +3709,12 @@ mod tests {
         else {
             panic!("condition_type() should be a Map");
         };
-        let carina_core::schema::Shape::StringEnum { values, .. } =
-            key.shape_ref_free().expect("test schema is Ref-free")
+        let carina_core::schema::Shape::Enum {
+            values: Some(values),
+            ..
+        } = key.shape_ref_free().expect("test schema is Ref-free")
         else {
-            panic!("condition_type() key should be a StringEnum");
+            panic!("condition_type() key should be an enum");
         };
         for expected in [
             "string_equals",
@@ -3947,17 +3937,17 @@ mod tests {
     #[test]
     fn iam_policy_effect_is_string_enum() {
         let effect = super::iam_policy_effect();
-        if let carina_core::schema::Shape::StringEnum {
-            name,
-            values,
+        if let carina_core::schema::Shape::Enum {
+            values: Some(values),
             identity,
             dsl_aliases,
+            ..
         } = effect.shape_ref_free().expect("test schema is Ref-free")
         {
-            assert_eq!(name, "Effect");
+            assert_eq!(identity.kind, "Effect");
             assert_eq!(values, &["Allow".to_string(), "Deny".to_string()]);
             assert_eq!(
-                identity.and_then(|id| id.dotted_prefix()),
+                identity.dotted_prefix(),
                 Some("aws.iam.PolicyDocument.Statement".to_string())
             );
             assert_eq!(
@@ -3968,27 +3958,27 @@ mod tests {
                 ]
             );
         } else {
-            panic!("expected StringEnum");
+            panic!("expected enum");
         }
     }
 
     #[test]
     fn iam_policy_version_is_string_enum() {
         let version = super::iam_policy_version();
-        if let carina_core::schema::Shape::StringEnum {
-            name,
-            values,
+        if let carina_core::schema::Shape::Enum {
+            values: Some(values),
             identity,
             dsl_aliases,
+            ..
         } = version.shape_ref_free().expect("test schema is Ref-free")
         {
-            assert_eq!(name, "Version");
+            assert_eq!(identity.kind, "Version");
             assert_eq!(
                 values,
                 &["2012-10-17".to_string(), "2008-10-17".to_string()]
             );
             assert_eq!(
-                identity.and_then(|id| id.dotted_prefix()),
+                identity.dotted_prefix(),
                 Some("aws.iam.PolicyDocument".to_string())
             );
             assert_eq!(
@@ -3999,7 +3989,7 @@ mod tests {
                 ]
             );
         } else {
-            panic!("expected StringEnum");
+            panic!("expected enum");
         }
     }
 
@@ -4013,14 +4003,14 @@ mod tests {
     #[test]
     fn s3_sse_algorithm_has_dsl_aliases() {
         let sse = super::s3_sse_algorithm();
-        if let carina_core::schema::Shape::StringEnum {
-            name,
-            values,
+        if let carina_core::schema::Shape::Enum {
+            values: Some(values),
             identity,
             dsl_aliases,
+            ..
         } = sse.shape_ref_free().expect("test schema is Ref-free")
         {
-            assert_eq!(name, "SseAlgorithm");
+            assert_eq!(identity.kind, "SseAlgorithm");
             assert_eq!(
                 values,
                 &[
@@ -4030,7 +4020,7 @@ mod tests {
                 ]
             );
             assert_eq!(
-                identity.and_then(|id| id.dotted_prefix()),
+                identity.dotted_prefix(),
                 Some(
                     "aws.s3.BucketServerSideEncryptionConfiguration.SseRule.SseByDefault"
                         .to_string()
@@ -4051,7 +4041,7 @@ mod tests {
                 ]
             );
         } else {
-            panic!("expected StringEnum");
+            panic!("expected enum");
         }
     }
 
@@ -4062,8 +4052,11 @@ mod tests {
     #[test]
     fn s3_redirect_protocol_has_dsl_aliases() {
         let redirect = super::s3_redirect_all_requests_to();
-        let shape = redirect.shape_ref_free().expect("test schema is Ref-free");
-        let carina_core::schema::Shape::Struct { fields, .. } = shape else {
+        let mut budget = carina_core::schema::ShapeWalkBudget::new(8);
+        let Some(fields) = redirect
+            .struct_fields_ref_free_with_budget(&mut budget)
+            .expect("test schema is Ref-free")
+        else {
             panic!("expected Struct shape");
         };
         let protocol = fields
@@ -4072,13 +4065,15 @@ mod tests {
             .expect("RedirectAllRequestsTo must have a `protocol` field")
             .field_type
             .clone();
-        let carina_core::schema::Shape::StringEnum {
-            name, dsl_aliases, ..
+        let carina_core::schema::Shape::Enum {
+            identity,
+            dsl_aliases,
+            ..
         } = protocol.shape_ref_free().expect("test schema is Ref-free")
         else {
-            panic!("expected protocol to be a StringEnum");
+            panic!("expected protocol to be an enum");
         };
-        assert_eq!(name, "Protocol");
+        assert_eq!(identity.kind, "Protocol");
         assert_eq!(
             dsl_aliases,
             &[
