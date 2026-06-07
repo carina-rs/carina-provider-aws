@@ -8,7 +8,7 @@ pub use carina_aws_types::*;
 use std::collections::HashMap;
 
 use carina_core::resource::{ConcreteValue, Value};
-use carina_core::schema::{AttributeType, ResourceSchema, legacy_validator};
+use carina_core::schema::{AttributeType, DslTransform, ResourceSchema, legacy_validator};
 use carina_core::utils::{extract_enum_value, validate_enum_namespace};
 
 /// AWS schema configuration
@@ -82,7 +82,7 @@ pub fn aws_region() -> AttributeType {
                 Err("Expected string".to_string())
             }
         })),
-        Some(|s: &str| s.replace('-', "_")),
+        Some(DslTransform::HyphenToUnderscore),
     )
 }
 
@@ -109,7 +109,7 @@ pub fn availability_zone() -> AttributeType {
                 Err("Expected string".to_string())
             }
         })),
-        Some(|s: &str| s.replace('-', "_")),
+        Some(DslTransform::HyphenToUnderscore),
     )
 }
 
@@ -417,9 +417,11 @@ mod tests {
         if let carina_core::schema::Shape::Enum { to_dsl, .. } =
             az_type.shape_ref_free().expect("test schema is Ref-free")
         {
-            assert!(to_dsl.is_some());
-            let convert = to_dsl.unwrap();
-            assert_eq!(convert("us-east-1a"), "us_east_1a");
+            assert_eq!(to_dsl, Some(&DslTransform::HyphenToUnderscore));
+            assert_eq!(
+                DslTransform::HyphenToUnderscore.apply("us-east-1a"),
+                "us_east_1a"
+            );
         } else {
             panic!("Expected enum type");
         }
