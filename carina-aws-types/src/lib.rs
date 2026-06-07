@@ -3,9 +3,6 @@
 //! This module contains type validators shared between `carina-provider-aws`
 //! and `carina-provider-awscc`. Provider-specific types (region with namespace,
 //! schema config structs) remain in their respective crates.
-//! Canonical identity types (`aws_account_id`, `iam_role_arn`, `iam_policy_arn`,
-//! `iam_oidc_provider_arn`) are the single source of truth shared with
-//! `carina-provider-awscc` per carina#3413.
 
 use carina_core::resource::{ConcreteValue, Value};
 use carina_core::schema::{
@@ -893,63 +890,6 @@ pub fn aws_account_id() -> AttributeType {
             if let Value::Concrete(ConcreteValue::String(s)) = value {
                 validate_aws_account_id(s)
                     .map_err(|reason| format!("Invalid AWS Account ID '{}': {}", s, reason))
-            } else {
-                Err("Expected string".to_string())
-            }
-        }),
-        None,
-    )
-}
-
-/// IAM Role ARN type (e.g., "arn:aws:iam::123456789012:role/MyRole")
-pub fn iam_role_arn() -> AttributeType {
-    AttributeType::custom(
-        Some(provider_type("iam", "Role", "Arn")),
-        AttributeType::string(),
-        None,
-        None,
-        legacy_validator(|value| {
-            if let Value::Concrete(ConcreteValue::String(s)) = value {
-                validate_iam_arn(s, "role/")
-                    .map_err(|reason| format!("Invalid IAM Role ARN '{}': {}", s, reason))
-            } else {
-                Err("Expected string".to_string())
-            }
-        }),
-        None,
-    )
-}
-
-/// IAM Policy ARN type (e.g., "arn:aws:iam::123456789012:policy/MyPolicy")
-pub fn iam_policy_arn() -> AttributeType {
-    AttributeType::custom(
-        Some(provider_type("iam", "Policy", "Arn")),
-        AttributeType::string(),
-        None,
-        None,
-        legacy_validator(|value| {
-            if let Value::Concrete(ConcreteValue::String(s)) = value {
-                validate_iam_arn(s, "policy/")
-                    .map_err(|reason| format!("Invalid IAM Policy ARN '{}': {}", s, reason))
-            } else {
-                Err("Expected string".to_string())
-            }
-        }),
-        None,
-    )
-}
-
-/// IAM OIDC Provider ARN type (e.g., "arn:aws:iam::123456789012:oidc-provider/server.example.com")
-pub fn iam_oidc_provider_arn() -> AttributeType {
-    AttributeType::custom(
-        Some(provider_type("iam", "OidcProvider", "Arn")),
-        AttributeType::string(),
-        None,
-        None,
-        legacy_validator(|value| {
-            if let Value::Concrete(ConcreteValue::String(s)) = value {
-                validate_iam_arn(s, "oidc-provider/")
-                    .map_err(|reason| format!("Invalid IAM OIDC Provider ARN '{}': {}", s, reason))
             } else {
                 Err("Expected string".to_string())
             }
@@ -2707,65 +2647,6 @@ mod tests {
         } else {
             panic!("aws_account_id() should be AttributeType::Custom");
         }
-    }
-
-    fn assert_custom_identity(attr: &AttributeType, expected: &str) {
-        if let carina_core::schema::Shape::Custom {
-            identity,
-            to_dsl: None,
-            ..
-        } = attr.shape_ref_free().expect("test schema is Ref-free")
-        {
-            assert_eq!(identity.map(|id| id.to_string()).as_deref(), Some(expected));
-        } else {
-            panic!("expected AttributeType::Custom");
-        }
-    }
-
-    fn assert_string_attr_accepts_and_rejects(attr: AttributeType, valid: &str, invalid: &str) {
-        assert!(
-            carina_core::schema::Schema::flat(attr.clone())
-                .validate(&Value::Concrete(ConcreteValue::String(valid.to_string())))
-                .is_ok()
-        );
-        assert!(
-            carina_core::schema::Schema::flat(attr)
-                .validate(&Value::Concrete(ConcreteValue::String(invalid.to_string())))
-                .is_err()
-        );
-    }
-
-    #[test]
-    fn iam_role_arn_carries_identity_and_validates_prefix() {
-        let t = iam_role_arn();
-        assert_custom_identity(&t, "aws.iam.Role.Arn");
-        assert_string_attr_accepts_and_rejects(
-            t,
-            "arn:aws:iam::123456789012:role/MyRole",
-            "arn:aws:iam::123456789012:policy/MyPolicy",
-        );
-    }
-
-    #[test]
-    fn iam_policy_arn_carries_identity_and_validates_prefix() {
-        let t = iam_policy_arn();
-        assert_custom_identity(&t, "aws.iam.Policy.Arn");
-        assert_string_attr_accepts_and_rejects(
-            t,
-            "arn:aws:iam::123456789012:policy/MyPolicy",
-            "arn:aws:iam::123456789012:role/MyRole",
-        );
-    }
-
-    #[test]
-    fn iam_oidc_provider_arn_carries_identity_and_validates_prefix() {
-        let t = iam_oidc_provider_arn();
-        assert_custom_identity(&t, "aws.iam.OidcProvider.Arn");
-        assert_string_attr_accepts_and_rejects(
-            t,
-            "arn:aws:iam::123456789012:oidc-provider/server.example.com",
-            "arn:aws:iam::123456789012:role/MyRole",
-        );
     }
 
     #[test]
