@@ -84,7 +84,13 @@ pub fn ec2_vpc_endpoint_config() -> AwsSchemaConfig {
                 .with_provider_name("SubnetIds"),
         )
         .attribute(
-            AttributeSchema::new("vpc_endpoint_type", AttributeType::enum_(carina_core::schema::enum_identity("VpcEndpointType", Some("aws.ec2.VpcEndpoint")), Some(vec!["Gateway".to_string(), "GatewayLoadBalancer".to_string(), "Interface".to_string(), "Resource".to_string(), "ServiceNetwork".to_string()]), vec![("Gateway".to_string(), "gateway".to_string()), ("GatewayLoadBalancer".to_string(), "gateway_load_balancer".to_string()), ("Interface".to_string(), "interface".to_string()), ("Resource".to_string(), "resource".to_string()), ("ServiceNetwork".to_string(), "service_network".to_string())], None, None))
+            AttributeSchema::new("vpc_endpoint_type", AttributeType::enum_(
+    carina_core::schema::enum_identity("VpcEndpointType", Some("aws.ec2.VpcEndpoint")),
+    Some(vec!["Gateway".to_string(), "GatewayLoadBalancer".to_string(), "Interface".to_string(), "Resource".to_string(), "ServiceNetwork".to_string()]),
+    vec![("Gateway".to_string(), "gateway".to_string()), ("GatewayLoadBalancer".to_string(), "gateway_load_balancer".to_string()), ("Interface".to_string(), "interface".to_string()), ("Resource".to_string(), "resource".to_string()), ("ServiceNetwork".to_string(), "service_network".to_string())],
+    None,
+    None,
+))
                 .create_only()
                 .with_description("The type of endpoint. Default: Gateway")
                 .with_provider_name("VpcEndpointType"),

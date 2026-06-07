@@ -66,7 +66,13 @@ pub fn organizations_account_config() -> AwsSchemaConfig {
                 .with_provider_name("Email"),
         )
         .attribute(
-            AttributeSchema::new("iam_user_access_to_billing", AttributeType::enum_(carina_core::schema::enum_identity("IamUserAccessToBilling", Some("aws.organizations.Account")), Some(vec!["ALLOW".to_string(), "DENY".to_string()]), vec![("ALLOW".to_string(), "allow".to_string()), ("DENY".to_string(), "deny".to_string())], None, None))
+            AttributeSchema::new("iam_user_access_to_billing", AttributeType::enum_(
+    carina_core::schema::enum_identity("IamUserAccessToBilling", Some("aws.organizations.Account")),
+    Some(vec!["ALLOW".to_string(), "DENY".to_string()]),
+    vec![("ALLOW".to_string(), "allow".to_string()), ("DENY".to_string(), "deny".to_string())],
+    None,
+    None,
+))
                 .create_only()
                 .with_description("If set to ALLOW, the new account enables IAM users to access account billing information if they have the required permissions. If set to DENY, only t...")
                 .with_provider_name("IamUserAccessToBilling"),
@@ -90,7 +96,13 @@ pub fn organizations_account_config() -> AwsSchemaConfig {
                 .with_provider_name("Id"),
         )
         .attribute(
-            AttributeSchema::new("joined_method", AttributeType::enum_(carina_core::schema::enum_identity("JoinedMethod", Some("aws.organizations.Account")), Some(vec!["CREATED".to_string(), "INVITED".to_string()]), vec![("CREATED".to_string(), "created".to_string()), ("INVITED".to_string(), "invited".to_string())], None, None))
+            AttributeSchema::new("joined_method", AttributeType::enum_(
+    carina_core::schema::enum_identity("JoinedMethod", Some("aws.organizations.Account")),
+    Some(vec!["CREATED".to_string(), "INVITED".to_string()]),
+    vec![("CREATED".to_string(), "created".to_string()), ("INVITED".to_string(), "invited".to_string())],
+    None,
+    None,
+))
                 .read_only()
                 .with_description("The method by which the account joined the organization. (read-only)")
                 .with_provider_name("JoinedMethod"),
@@ -108,7 +120,13 @@ pub fn organizations_account_config() -> AwsSchemaConfig {
                 .with_provider_name("Name"),
         )
         .attribute(
-            AttributeSchema::new("status", AttributeType::enum_(carina_core::schema::enum_identity("Status", Some("aws.organizations.Account")), Some(vec!["ACTIVE".to_string(), "PENDING_CLOSURE".to_string(), "SUSPENDED".to_string()]), vec![("ACTIVE".to_string(), "active".to_string()), ("PENDING_CLOSURE".to_string(), "pending_closure".to_string()), ("SUSPENDED".to_string(), "suspended".to_string())], None, None))
+            AttributeSchema::new("status", AttributeType::enum_(
+    carina_core::schema::enum_identity("Status", Some("aws.organizations.Account")),
+    Some(vec!["ACTIVE".to_string(), "PENDING_CLOSURE".to_string(), "SUSPENDED".to_string()]),
+    vec![("ACTIVE".to_string(), "active".to_string()), ("PENDING_CLOSURE".to_string(), "pending_closure".to_string()), ("SUSPENDED".to_string(), "suspended".to_string())],
+    None,
+    None,
+))
                 .read_only()
                 .with_description("The status of the account in the organization. The Status parameter in the Account object will be retired on September 9, 2026. Although both the acco... (read-only)")
                 .with_provider_name("Status"),

@@ -26,7 +26,13 @@ pub fn ec2_eip_config() -> AwsSchemaConfig {
                 .with_provider_name("Address"),
         )
         .attribute(
-            AttributeSchema::new("domain", AttributeType::enum_(carina_core::schema::enum_identity("Domain", Some("aws.ec2.Eip")), Some(vec!["standard".to_string(), "vpc".to_string()]), vec![("standard".to_string(), "standard".to_string()), ("vpc".to_string(), "vpc".to_string())], None, None))
+            AttributeSchema::new("domain", AttributeType::enum_(
+    carina_core::schema::enum_identity("Domain", Some("aws.ec2.Eip")),
+    Some(vec!["standard".to_string(), "vpc".to_string()]),
+    vec![("standard".to_string(), "standard".to_string()), ("vpc".to_string(), "vpc".to_string())],
+    None,
+    None,
+))
                 .create_only()
                 .with_description("The network (vpc).")
                 .with_provider_name("Domain"),

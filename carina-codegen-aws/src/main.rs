@@ -1259,12 +1259,12 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
                 .join(", ");
             format!(
                 "AttributeType::enum_(\n\
-                 \x20               carina_core::schema::enum_identity(\"{}\", Some(\"{}\")),\n\
-                 \x20               Some(vec![{}]),\n\
-                 \x20               {},\n\
-                 \x20               None,\n\
-                 \x20               None,\n\
-                 \x20           )",
+                 \x20   carina_core::schema::enum_identity(\"{}\", Some(\"{}\")),\n\
+                 \x20   Some(vec![{}]),\n\
+                 \x20   {},\n\
+                 \x20   None,\n\
+                 \x20   None,\n\
+                 )",
                 ei.type_name, namespace, values_str, dsl_aliases_code
             )
         } else {
@@ -1674,12 +1674,12 @@ fn generate_struct_type(
                 .join(", ");
             format!(
                 "AttributeType::enum_(\n\
-                 \x20               carina_core::schema::enum_identity(\"{}\", Some(\"{}\")),\n\
-                 \x20               Some(vec![{}]),\n\
-                 \x20               {},\n\
-                 \x20               None,\n\
-                 \x20               None,\n\
-                 \x20           )",
+                 \x20   carina_core::schema::enum_identity(\"{}\", Some(\"{}\")),\n\
+                 \x20   Some(vec![{}]),\n\
+                 \x20   {},\n\
+                 \x20   None,\n\
+                 \x20   None,\n\
+                 )",
                 ei.type_name, namespace, values_str, dsl_aliases_code
             )
         } else {
