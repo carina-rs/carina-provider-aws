@@ -153,7 +153,7 @@ fn api_canonicalize_recursive(
     // as `EnumIdentifier`, and a `String`-only guard silently skipped
     // them, so the DSL spelling reached AWS and was rejected with
     // `MalformedPolicy`.
-    if let Some((_, values, _, dsl_map)) = attr_type.string_enum_parts() {
+    if let Some((_, Some(values), _, _, dsl_map)) = attr_type.enum_parts() {
         let (Value::Concrete(ConcreteValue::String(s))
         | Value::Concrete(ConcreteValue::EnumIdentifier(s))) = value
         else {
@@ -174,10 +174,12 @@ fn api_canonicalize_recursive(
 
     use carina_core::schema::Shape;
     match schema.shape_of(attr_type) {
-        Shape::Struct { fields, .. } => {
+        Shape::Struct { .. } => {
             let Value::Concrete(ConcreteValue::Map(map)) = value else {
                 return None;
             };
+            let mut budget = carina_core::schema::ShapeWalkBudget::new(64);
+            let fields = schema.struct_fields_with_budget(attr_type, &mut budget)?;
             let mut rewritten = map.clone();
             let mut changed = false;
             for field in fields {
@@ -220,13 +222,14 @@ fn api_canonicalize_recursive(
             // role.rs) — leaving the two sides out of sync. This key
             // canon brings the desired side to the same spelling.
             let canon_of = |k: &str| -> String {
-                match &key.string_enum_parts() {
-                    Some((_, values, _, dsl_map)) => {
+                match &key.enum_parts() {
+                    Some((_, Some(values), _, _, dsl_map)) => {
                         let valid: Vec<&str> = values.iter().map(String::as_str).collect();
                         dsl_map.api_for(carina_core::utils::extract_enum_value_with_values(
                             k, &valid,
                         ))
                     }
+                    Some((_, None, _, _, _)) => k.to_string(),
                     None => k.to_string(),
                 }
             };
@@ -294,11 +297,7 @@ pub(crate) fn normalize_state_enums(resource_type: &str, attributes: &mut HashMa
     let mut resolved = HashMap::new();
     for (key, value) in attributes.iter() {
         if let Some(attr_schema) = config.schema.attributes.get(key.as_str()) {
-            if let Some(parts) = attr_schema.attr_type.namespaced_enum_parts() {
-                let enum_vals = attr_schema
-                    .attr_type
-                    .string_enum_parts()
-                    .map(|(_, v, _, _)| v);
+            if let Some(parts @ (_, enum_vals, _, _, _)) = attr_schema.attr_type.enum_parts() {
                 let check = |s: &str| {
                     enum_vals.is_some_and(|vals| vals.iter().any(|v| v.eq_ignore_ascii_case(s)))
                 };
@@ -309,13 +308,20 @@ pub(crate) fn normalize_state_enums(resource_type: &str, attributes: &mut HashMa
                 }
             }
             // Normalize enum fields within struct (Map) values
-            if let carina_core::schema::Shape::Struct { fields, .. } =
+            if let carina_core::schema::Shape::Struct { .. } =
                 config.schema.shape_of(&attr_schema.attr_type)
                 && let Value::Concrete(ConcreteValue::Map(map_fields)) = value
             {
+                let mut budget = carina_core::schema::ShapeWalkBudget::new(64);
+                let Some(fields) = config
+                    .schema
+                    .struct_fields_with_budget(&attr_schema.attr_type, &mut budget)
+                else {
+                    continue;
+                };
                 let mut normalized_map = map_fields.clone();
                 for field in fields {
-                    if let Some(parts) = field.field_type.namespaced_enum_parts()
+                    if let Some(parts) = field.field_type.enum_parts()
                         && let Some(field_value) = map_fields.get(&field.name)
                     {
                         // Struct field state normalization: bare values only (no dot-check needed)

@@ -48,14 +48,12 @@ impl ProviderFactory for AwsProviderFactory {
             .collect();
         types.insert(
             "region".to_string(),
-            carina_core::schema::AttributeType::string_enum(
-                "Region".to_string(),
-                region_values,
-                Some(carina_core::schema::string_enum_identity(
-                    "Region",
-                    Some("aws"),
-                )),
+            carina_core::schema::AttributeType::enum_(
+                carina_core::schema::enum_identity("Region", Some("aws")),
+                Some(region_values),
                 region_dsl_aliases,
+                None,
+                None,
             ),
         );
         types.insert(

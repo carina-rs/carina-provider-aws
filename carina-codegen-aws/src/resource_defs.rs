@@ -1471,11 +1471,11 @@ pub fn s3_resources() -> Vec<ResourceDef> {
             type_overrides: vec![
                 (
                     "Status",
-                    "AttributeType::string_enum(\"VersioningStatus\".to_string(), vec![\"Enabled\".to_string(), \"Suspended\".to_string()], Some(carina_core::schema::string_enum_identity(\"VersioningStatus\", Some(\"aws.s3.BucketVersioning\"))), vec![(\"Enabled\".to_string(), \"enabled\".to_string()), (\"Suspended\".to_string(), \"suspended\".to_string())])",
+                    "AttributeType::enum_(carina_core::schema::enum_identity(\"VersioningStatus\", Some(\"aws.s3.BucketVersioning\")), Some(vec![\"Enabled\".to_string(), \"Suspended\".to_string()]), vec![(\"Enabled\".to_string(), \"enabled\".to_string()), (\"Suspended\".to_string(), \"suspended\".to_string())], None, None)",
                 ),
                 (
                     "MFADelete",
-                    "AttributeType::string_enum(\"MFADelete\".to_string(), vec![\"Enabled\".to_string(), \"Disabled\".to_string()], Some(carina_core::schema::string_enum_identity(\"MFADelete\", Some(\"aws.s3.BucketVersioning\"))), vec![(\"Enabled\".to_string(), \"enabled\".to_string()), (\"Disabled\".to_string(), \"disabled\".to_string())])",
+                    "AttributeType::enum_(carina_core::schema::enum_identity(\"MFADelete\", Some(\"aws.s3.BucketVersioning\")), Some(vec![\"Enabled\".to_string(), \"Disabled\".to_string()]), vec![(\"Enabled\".to_string(), \"enabled\".to_string()), (\"Disabled\".to_string(), \"disabled\".to_string())], None, None)",
                 ),
             ],
             exclude_fields: vec![
@@ -1587,7 +1587,7 @@ pub fn s3_resources() -> Vec<ResourceDef> {
             has_tags: false,
             type_overrides: vec![(
                 "ObjectOwnership",
-                "AttributeType::string_enum(\"ObjectOwnership\".to_string(), vec![\"BucketOwnerEnforced\".to_string(), \"BucketOwnerPreferred\".to_string(), \"ObjectWriter\".to_string()], Some(carina_core::schema::string_enum_identity(\"ObjectOwnership\", Some(\"aws.s3.BucketOwnershipControls\"))), vec![(\"BucketOwnerEnforced\".to_string(), \"bucket_owner_enforced\".to_string()), (\"BucketOwnerPreferred\".to_string(), \"bucket_owner_preferred\".to_string()), (\"ObjectWriter\".to_string(), \"object_writer\".to_string())])",
+                "AttributeType::enum_(carina_core::schema::enum_identity(\"ObjectOwnership\", Some(\"aws.s3.BucketOwnershipControls\")), Some(vec![\"BucketOwnerEnforced\".to_string(), \"BucketOwnerPreferred\".to_string(), \"ObjectWriter\".to_string()]), vec![(\"BucketOwnerEnforced\".to_string(), \"bucket_owner_enforced\".to_string()), (\"BucketOwnerPreferred\".to_string(), \"bucket_owner_preferred\".to_string()), (\"ObjectWriter\".to_string(), \"object_writer\".to_string())], None, None)",
             )],
             exclude_fields: vec![
                 "ContentMD5",

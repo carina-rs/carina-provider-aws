@@ -94,20 +94,19 @@ pub fn ec2_security_group_egress_config() -> AwsSchemaConfig {
             .attribute(
                 AttributeSchema::new(
                     "ip_protocol",
-                    AttributeType::string_enum(
-                        "IpProtocol".to_string(),
-                        vec![
+                    AttributeType::enum_(
+                        carina_core::schema::enum_identity(
+                            "IpProtocol",
+                            Some("aws.ec2.SecurityGroupEgress"),
+                        ),
+                        Some(vec![
                             "tcp".to_string(),
                             "udp".to_string(),
                             "icmp".to_string(),
                             "icmpv6".to_string(),
                             "-1".to_string(),
                             "all".to_string(),
-                        ],
-                        Some(carina_core::schema::string_enum_identity(
-                            "IpProtocol",
-                            Some("aws.ec2.SecurityGroupEgress"),
-                        )),
+                        ]),
                         vec![
                             ("-1".to_string(), "all".to_string()),
                             ("tcp".to_string(), "tcp".to_string()),
@@ -116,6 +115,8 @@ pub fn ec2_security_group_egress_config() -> AwsSchemaConfig {
                             ("icmpv6".to_string(), "icmpv6".to_string()),
                             ("all".to_string(), "all".to_string()),
                         ],
+                        None,
+                        None,
                     ),
                 )
                 .required()

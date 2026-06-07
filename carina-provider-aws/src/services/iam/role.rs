@@ -459,7 +459,7 @@ fn dsl_value_to_iam_json(
     // StringEnum leaf: canonicalize the DSL spelling to the AWS wire
     // form. Accepts `String` and `EnumIdentifier` (same text payload;
     // the WIT boundary collapses `EnumIdentifier` to `String` anyway).
-    if let Some((_, values, _, dsl_map)) = attr_type.string_enum_parts() {
+    if let Some((_, Some(values), _, _, dsl_map)) = attr_type.enum_parts() {
         match value {
             Value::Concrete(ConcreteValue::String(s))
             | Value::Concrete(ConcreteValue::EnumIdentifier(s)) => {
@@ -476,7 +476,14 @@ fn dsl_value_to_iam_json(
         return scalar_to_json(value);
     };
     match shape {
-        Shape::Union(members) => {
+        Shape::Union => {
+            let mut budget = carina_core::schema::ShapeWalkBudget::new(64);
+            let Some(members) = attr_type
+                .union_members_ref_free_with_budget(&mut budget)
+                .expect("IAM schema is Ref-free")
+            else {
+                return scalar_to_json(value);
+            };
             // Try each member; first whose *input* value-shape matches
             // wins. Gating on the input shape (not the output JSON)
             // avoids an empty Struct member ({} from a Map whose keys
@@ -514,7 +521,7 @@ fn dsl_value_to_iam_json(
             // (AWS accepts a bare string for single-element Action etc.).
             _ => dsl_value_to_iam_json(value, inner, attr_name),
         },
-        Shape::Struct { fields, .. } => {
+        Shape::Struct { .. } => {
             // Block syntax materializes a single-element List<Map>.
             let map = match value {
                 Value::Concrete(ConcreteValue::Map(m)) => m,
@@ -525,6 +532,13 @@ fn dsl_value_to_iam_json(
                     }
                 }
                 _ => return scalar_to_json(value),
+            };
+            let mut budget = carina_core::schema::ShapeWalkBudget::new(64);
+            let Some(fields) = attr_type
+                .struct_fields_ref_free_with_budget(&mut budget)
+                .expect("IAM schema is Ref-free")
+            else {
+                return scalar_to_json(value);
             };
             // The schema is authoritative for IAM policy documents: the
             // grammar has no extension keys, so a map key not modeled in

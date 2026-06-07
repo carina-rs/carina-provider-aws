@@ -51,12 +51,7 @@ pub fn ec2_vpc_config() -> AwsSchemaConfig {
                 .with_provider_name("EnableDnsSupport"),
         )
         .attribute(
-            AttributeSchema::new("instance_tenancy", AttributeType::string_enum(
-                "InstanceTenancy".to_string(),
-                vec!["dedicated".to_string(), "default".to_string(), "host".to_string()],
-                Some(carina_core::schema::string_enum_identity("InstanceTenancy", Some("aws.ec2.Vpc"))),
-                vec![("dedicated".to_string(), "dedicated".to_string()), ("default".to_string(), "default".to_string()), ("host".to_string(), "host".to_string())],
-            ))
+            AttributeSchema::new("instance_tenancy", AttributeType::enum_(carina_core::schema::enum_identity("InstanceTenancy", Some("aws.ec2.Vpc")), Some(vec!["dedicated".to_string(), "default".to_string(), "host".to_string()]), vec![("dedicated".to_string(), "dedicated".to_string()), ("default".to_string(), "default".to_string()), ("host".to_string(), "host".to_string())], None, None))
                 .create_only()
                 .with_description("The tenancy options for instances launched into the VPC. For default, instances are launched with shared tenancy by default. You can launch instances ...")
                 .with_provider_name("InstanceTenancy"),

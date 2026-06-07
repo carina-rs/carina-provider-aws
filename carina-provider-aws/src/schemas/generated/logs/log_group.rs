@@ -39,12 +39,7 @@ pub fn logs_log_group_config() -> AwsSchemaConfig {
                 .with_provider_name("kmsKeyId"),
         )
         .attribute(
-            AttributeSchema::new("log_group_class", AttributeType::string_enum(
-                "LogGroupClass".to_string(),
-                vec!["DELIVERY".to_string(), "INFREQUENT_ACCESS".to_string(), "STANDARD".to_string()],
-                Some(carina_core::schema::string_enum_identity("LogGroupClass", Some("aws.logs.LogGroup"))),
-                vec![("DELIVERY".to_string(), "delivery".to_string()), ("INFREQUENT_ACCESS".to_string(), "infrequent_access".to_string()), ("STANDARD".to_string(), "standard".to_string())],
-            ))
+            AttributeSchema::new("log_group_class", AttributeType::enum_(carina_core::schema::enum_identity("LogGroupClass", Some("aws.logs.LogGroup")), Some(vec!["DELIVERY".to_string(), "INFREQUENT_ACCESS".to_string(), "STANDARD".to_string()]), vec![("DELIVERY".to_string(), "delivery".to_string()), ("INFREQUENT_ACCESS".to_string(), "infrequent_access".to_string()), ("STANDARD".to_string(), "standard".to_string())], None, None))
                 .create_only()
                 .with_description("Use this parameter to specify the log group class for this log group. There are three classes: The Standard log class supports all CloudWatch Logs fea...")
                 .with_provider_name("logGroupClass"),

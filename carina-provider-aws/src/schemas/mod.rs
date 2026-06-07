@@ -35,39 +35,48 @@ mod tests {
         );
     }
 
-    fn collect_string_enum_identities(
+    fn collect_enum_identities(
         attr: &AttributeType,
         path: &str,
         identities: &mut Vec<(String, String)>,
     ) {
         match attr.shape_ref_free().expect("generated schema is Ref-free") {
-            Shape::StringEnum {
-                identity: Some(identity),
-                ..
-            } => identities.push((path.to_string(), identity.to_string())),
+            Shape::Enum { identity, .. } => {
+                identities.push((path.to_string(), identity.to_string()))
+            }
             Shape::List { inner, .. } => {
-                collect_string_enum_identities(inner, &format!("{path}[]"), identities)
+                collect_enum_identities(inner, &format!("{path}[]"), identities)
             }
             Shape::Map { key, value } => {
-                collect_string_enum_identities(key, &format!("{path}.<key>"), identities);
-                collect_string_enum_identities(value, &format!("{path}.<value>"), identities);
+                collect_enum_identities(key, &format!("{path}.<key>"), identities);
+                collect_enum_identities(value, &format!("{path}.<value>"), identities);
             }
-            Shape::Struct { fields, .. } => {
+            Shape::Struct { .. } => {
+                let mut budget = carina_core::schema::ShapeWalkBudget::new(64);
+                let Some(fields) = attr
+                    .struct_fields_ref_free_with_budget(&mut budget)
+                    .expect("generated schema is Ref-free")
+                else {
+                    return;
+                };
                 for field in fields {
-                    collect_string_enum_identities(
+                    collect_enum_identities(
                         &field.field_type,
                         &format!("{path}.{}", field.name),
                         identities,
                     );
                 }
             }
-            Shape::Union(members) => {
+            Shape::Union => {
+                let mut budget = carina_core::schema::ShapeWalkBudget::new(64);
+                let Some(members) = attr
+                    .union_members_ref_free_with_budget(&mut budget)
+                    .expect("generated schema is Ref-free")
+                else {
+                    return;
+                };
                 for (idx, member) in members.iter().enumerate() {
-                    collect_string_enum_identities(
-                        member,
-                        &format!("{path}.<union:{idx}>"),
-                        identities,
-                    );
+                    collect_enum_identities(member, &format!("{path}.<union:{idx}>"), identities);
                 }
             }
             _ => {}
@@ -79,7 +88,7 @@ mod tests {
         let config = super::generated::acm::certificate::acm_certificate_config();
         let mut identities = Vec::new();
         for (name, attr) in &config.schema.attributes {
-            collect_string_enum_identities(&attr.attr_type, name, &mut identities);
+            collect_enum_identities(&attr.attr_type, name, &mut identities);
         }
 
         let mut by_identity: HashMap<&str, Vec<&str>> = HashMap::new();
@@ -95,7 +104,7 @@ mod tests {
             .collect();
         assert!(
             duplicates.is_empty(),
-            "StringEnum identities must be unique within acm.Certificate; duplicates: {duplicates:?}"
+            "enum identities must be unique within acm.Certificate; duplicates: {duplicates:?}"
         );
 
         let by_path: HashMap<_, _> = identities.into_iter().collect();

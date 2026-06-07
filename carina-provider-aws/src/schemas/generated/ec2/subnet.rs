@@ -146,12 +146,7 @@ pub fn ec2_subnet_config() -> AwsSchemaConfig {
                     vec![
                     StructField::new("enable_resource_name_dns_aaaa_record", AttributeType::bool()).with_description("Indicates whether to respond to DNS queries for instance hostname with DNS AAAA records.").with_provider_name("EnableResourceNameDnsAAAARecord"),
                     StructField::new("enable_resource_name_dns_a_record", AttributeType::bool()).with_description("Indicates whether to respond to DNS queries for instance hostnames with DNS A records.").with_provider_name("EnableResourceNameDnsARecord"),
-                    StructField::new("hostname_type", AttributeType::string_enum(
-                "HostnameType".to_string(),
-                vec!["ip-name".to_string(), "resource-name".to_string()],
-                Some(carina_core::schema::string_enum_identity("HostnameType", Some("aws.ec2.Subnet.PrivateDnsNameOptionsOnLaunch"))),
-                vec![("ip-name".to_string(), "ip_name".to_string()), ("resource-name".to_string(), "resource_name".to_string())],
-            )).with_description("The type of hostname for EC2 instances. For IPv4 only subnets, an instance DNS name must be based on the instance IPv4 address. For IPv6 only subnets,...").with_provider_name("HostnameType")
+                    StructField::new("hostname_type", AttributeType::enum_(carina_core::schema::enum_identity("HostnameType", Some("aws.ec2.Subnet.PrivateDnsNameOptionsOnLaunch")), Some(vec!["ip-name".to_string(), "resource-name".to_string()]), vec![("ip-name".to_string(), "ip_name".to_string()), ("resource-name".to_string(), "resource_name".to_string())], None, None)).with_description("The type of hostname for EC2 instances. For IPv4 only subnets, an instance DNS name must be based on the instance IPv4 address. For IPv6 only subnets,...").with_provider_name("HostnameType")
                     ],
                 ))
                 .with_description("The type of hostnames to assign to instances in the subnet at launch. An instance hostname is based on the IPv4 address or ID of the instance.")
