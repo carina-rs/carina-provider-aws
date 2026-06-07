@@ -307,9 +307,7 @@ fn proto_to_core_attribute_type(t: &ProtoAttributeType) -> CoreAttributeType {
             None,
             vec![],
             None,
-            dsl_transform
-                .as_deref()
-                .and_then(carina_core::schema::dsl_transform_for),
+            dsl_transform.clone(),
         ),
         // Cyclic CFN struct reference (carina#3340). The host's
         // structural counterpart is `AttributeType::ref_`; the matching
@@ -474,12 +472,13 @@ fn core_to_proto_attribute_type(t: &CoreAttributeType) -> ProtoAttributeType {
             identity,
             base,
             values: None,
+            to_dsl,
             ..
         } => ProtoAttributeType::CustomEnum {
             name: identity.kind.clone(),
             base: Box::new(core_to_proto_attribute_type(base)),
             namespace: identity.dotted_prefix().unwrap_or_default(),
-            dsl_transform: None,
+            dsl_transform: to_dsl.cloned(),
         },
         CoreRawShape::Union(members) => ProtoAttributeType::Union {
             members: members.iter().map(core_to_proto_attribute_type).collect(),
@@ -651,6 +650,40 @@ mod tests {
                 assert_eq!(rt_length, Some(length));
             }
             other => panic!("Expected Custom, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn custom_enum_dsl_transform_crosses_proto_boundary_both_ways() {
+        let core_type = CoreAttributeType::enum_with_base(
+            carina_core::schema::enum_identity("Region", Some("aws")),
+            CoreAttributeType::string(),
+            None,
+            vec![],
+            None,
+            Some(carina_core::schema::DslTransform::HyphenToUnderscore),
+        );
+
+        let proto_type = core_to_proto_attribute_type(&core_type);
+        match &proto_type {
+            ProtoAttributeType::CustomEnum { dsl_transform, .. } => {
+                assert_eq!(
+                    dsl_transform.as_ref(),
+                    Some(&carina_core::schema::DslTransform::HyphenToUnderscore)
+                );
+            }
+            other => panic!("Expected CustomEnum, got {other:?}"),
+        }
+
+        let roundtripped = proto_to_core_attribute_type(&proto_type);
+        match roundtripped.raw_shape() {
+            CoreRawShape::Enum { to_dsl, .. } => {
+                assert_eq!(
+                    to_dsl,
+                    Some(&carina_core::schema::DslTransform::HyphenToUnderscore)
+                );
+            }
+            other => panic!("Expected Enum, got {other:?}"),
         }
     }
 
