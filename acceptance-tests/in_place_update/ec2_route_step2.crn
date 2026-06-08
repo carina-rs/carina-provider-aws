@@ -10,7 +10,7 @@ provider aws {
 }
 
 provider awscc {
-  region = awscc.Region.ap_northeast_1
+  region = aws.Region.ap_northeast_1
 }
 
 let vpc = aws.ec2.Vpc {
