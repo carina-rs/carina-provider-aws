@@ -1,7 +1,7 @@
 //! AWS resource schema definitions
 
+pub mod config;
 pub mod generated;
-pub mod types;
 
 use carina_core::schema::ResourceSchema;
 

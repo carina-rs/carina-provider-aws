@@ -3,9 +3,9 @@
 //! DO NOT EDIT MANUALLY - regenerate with:
 //!   ./carina-provider-aws/scripts/generate-schemas-smithy.sh
 
-// Re-export all types and validators from types so that
+// Re-export all types and validators from config so that
 // generated schema files can use `super::` to access them.
-pub use super::types::*;
+pub use super::config::*;
 
 pub mod acm;
 pub mod ec2;
