@@ -23,7 +23,7 @@ aws.ec2.Subnet {
 
   private_dns_name_options_on_launch = {
     enable_resource_name_dns_a_record = true
-    hostname_type                     = aws.ec2.Subnet.HostnameType.ip_name
+    hostname_type                     = aws.ec2.Subnet.PrivateDnsNameOptionsOnLaunch.HostnameType.ip_name
   }
 
   tags = {
