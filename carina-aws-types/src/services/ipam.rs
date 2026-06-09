@@ -1,7 +1,6 @@
-use carina_core::resource::{ConcreteValue, Value};
-use carina_core::schema::{AttributeType, legacy_validator};
+use carina_core::schema::AttributeType;
 
-use crate::{aws_resource_id, provider_type};
+use crate::provider_type;
 
 // ========== IPAM types ==========
 
@@ -21,19 +20,10 @@ pub fn validate_ipam_pool_id(id: &str) -> Result<(), String> {
 
 /// IPAM Pool ID type (e.g., "ipam-pool-0123456789abcdef0")
 pub fn ipam_pool_id() -> AttributeType {
-    AttributeType::custom(
+    AttributeType::refined_string(
         Some(provider_type("ec2", "IpamPool", "Id")),
-        aws_resource_id(),
         Some("^ipam-pool-[0-9a-f]{8,}$".to_string()),
         None,
-        legacy_validator(|value| {
-            if let Value::Concrete(ConcreteValue::String(s)) = value {
-                validate_ipam_pool_id(s)
-                    .map_err(|reason| format!("Invalid IPAM Pool ID '{}': {}", s, reason))
-            } else {
-                Err("Expected string".to_string())
-            }
-        }),
         None,
     )
 }

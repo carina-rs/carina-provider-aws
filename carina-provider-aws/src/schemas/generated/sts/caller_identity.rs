@@ -5,23 +5,13 @@
 //! DO NOT EDIT MANUALLY - regenerate with smithy-codegen
 
 use super::AwsSchemaConfig;
-use carina_core::resource::{ConcreteValue, Value};
-use carina_core::schema::{AttributeSchema, AttributeType, ResourceSchema, legacy_validator};
+use carina_core::schema::{AttributeSchema, AttributeType, ResourceSchema};
 
 pub fn arn() -> AttributeType {
-    AttributeType::custom(
+    AttributeType::refined_string(
         Some(super::provider_type("sts", "CallerIdentity", "Arn")),
-        super::arn(),
         Some("^arn:(aws|aws-cn|aws-us-gov):sts:.*$".to_string()),
         None,
-        legacy_validator(|value| {
-            if let Value::Concrete(ConcreteValue::String(s)) = value {
-                super::validate_service_arn(s, "sts", None)
-                    .map_err(|reason| format!("Invalid sts ARN '{}': {}", s, reason))
-            } else {
-                Err("Expected string".to_string())
-            }
-        }),
         None,
     )
 }

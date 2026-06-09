@@ -510,16 +510,16 @@ fn dsl_value_to_iam_json(
             }
             scalar_to_json(value)
         }
-        Shape::List { inner, .. } => match value {
+        Shape::List { element_type, .. } => match value {
             Value::Concrete(ConcreteValue::List(items)) => serde_json::Value::Array(
                 items
                     .iter()
-                    .map(|it| dsl_value_to_iam_json(it, inner, attr_name))
+                    .map(|it| dsl_value_to_iam_json(it, element_type, attr_name))
                     .collect(),
             ),
             // A scalar where the schema declares a list: emit the scalar
             // (AWS accepts a bare string for single-element Action etc.).
-            _ => dsl_value_to_iam_json(value, inner, attr_name),
+            _ => dsl_value_to_iam_json(value, element_type, attr_name),
         },
         Shape::Struct { .. } => {
             // Block syntax materializes a single-element List<Map>.

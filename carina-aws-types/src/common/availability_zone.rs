@@ -122,19 +122,10 @@ pub fn validate_availability_zone_id(az_id: &str) -> Result<(), String> {
 
 /// Availability Zone ID type (e.g., "use1-az1", "usw2-az2", "apne1-az4")
 pub fn availability_zone_id() -> AttributeType {
-    AttributeType::custom(
+    AttributeType::refined_string(
         Some(provider_bare_type(&["AvailabilityZone"], "ZoneId")),
-        AttributeType::string(),
         Some("^[a-z]+[0-9]+-az[0-9]+$".to_string()),
         None,
-        legacy_validator(|value| {
-            if let Value::Concrete(ConcreteValue::String(s)) = value {
-                validate_availability_zone_id(s)
-                    .map_err(|reason| format!("Invalid availability zone ID '{}': {}", s, reason))
-            } else {
-                Err("Expected string".to_string())
-            }
-        }),
         None,
     )
 }

@@ -136,15 +136,19 @@ impl CarinaProvider for AwsProcessProvider {
         types.insert(
             "allowed_account_ids".to_string(),
             proto::AttributeType::List {
-                inner: Box::new(proto::AttributeType::String),
+                element_type: Box::new(proto_string_type()),
                 ordered: false,
+                length: None,
+                validate: None,
             },
         );
         types.insert(
             "forbidden_account_ids".to_string(),
             proto::AttributeType::List {
-                inner: Box::new(proto::AttributeType::String),
+                element_type: Box::new(proto_string_type()),
                 ordered: false,
+                length: None,
+                validate: None,
             },
         );
         types.insert("assume_role".to_string(), assume_role_attribute_type());
@@ -413,7 +417,7 @@ fn assume_role_attribute_type() -> proto::AttributeType {
         fields: vec![
             proto::StructField {
                 name: "role_arn".to_string(),
-                field_type: proto::AttributeType::String,
+                field_type: proto_string_type(),
                 required: true,
                 description: Some("IAM role ARN to assume.".to_string()),
                 block_name: None,
@@ -421,7 +425,7 @@ fn assume_role_attribute_type() -> proto::AttributeType {
             },
             proto::StructField {
                 name: "session_name".to_string(),
-                field_type: proto::AttributeType::String,
+                field_type: proto_string_type(),
                 required: false,
                 description: Some(
                     "STS session name to associate with the assumed-role session.".to_string(),
@@ -431,7 +435,7 @@ fn assume_role_attribute_type() -> proto::AttributeType {
             },
             proto::StructField {
                 name: "external_id".to_string(),
-                field_type: proto::AttributeType::String,
+                field_type: proto_string_type(),
                 required: false,
                 description: Some(
                     "External ID required by the trust policy of the assumed role.".to_string(),
@@ -450,6 +454,16 @@ fn assume_role_attribute_type() -> proto::AttributeType {
                 provider_name: None,
             },
         ],
+    }
+}
+
+fn proto_string_type() -> proto::AttributeType {
+    proto::AttributeType::String {
+        pattern: None,
+        length: None,
+        validate: None,
+        to_dsl: None,
+        identity: None,
     }
 }
 
@@ -597,8 +611,8 @@ mod tests {
                 panic!("{attr} must be declared as a provider config attribute")
             });
             match ty {
-                proto::AttributeType::List { inner, .. } => match inner.as_ref() {
-                    proto::AttributeType::String => {}
+                proto::AttributeType::List { element_type, .. } => match element_type.as_ref() {
+                    proto::AttributeType::String { .. } => {}
                     other => {
                         panic!("{attr} must be List<String>, inner was {other:?}")
                     }
@@ -655,14 +669,17 @@ mod tests {
                     .find(|f| f.name == "role_arn")
                     .expect("assume_role.role_arn must be declared");
                 assert!(role_arn.required, "role_arn must be required");
-                assert!(matches!(role_arn.field_type, proto::AttributeType::String));
+                assert!(matches!(
+                    role_arn.field_type,
+                    proto::AttributeType::String { .. }
+                ));
                 for opt in ["session_name", "external_id"] {
                     let f = fields
                         .iter()
                         .find(|f| f.name == opt)
                         .unwrap_or_else(|| panic!("assume_role.{opt} must be declared"));
                     assert!(!f.required, "assume_role.{opt} must be optional");
-                    assert!(matches!(f.field_type, proto::AttributeType::String));
+                    assert!(matches!(f.field_type, proto::AttributeType::String { .. }));
                 }
                 let duration = fields
                     .iter()

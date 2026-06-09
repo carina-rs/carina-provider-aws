@@ -5,28 +5,13 @@
 //! DO NOT EDIT MANUALLY - regenerate with smithy-codegen
 
 use super::AwsSchemaConfig;
-use carina_core::resource::{ConcreteValue, Value};
-use carina_core::schema::{
-    AttributeSchema, AttributeType, ResourceSchema, StructField, legacy_validator,
-};
+use carina_core::schema::{AttributeSchema, AttributeType, ResourceSchema, StructField};
 
 const VALID_TYPE: &[&str] = &[
     "A", "AAAA", "CAA", "CNAME", "DS", "HTTPS", "MX", "NAPTR", "NS", "PTR", "SOA", "SPF", "SRV",
     "SSHFP", "SVCB", "TLSA", "TXT", "a", "aaaa", "caa", "cname", "ds", "https", "mx", "naptr",
     "ns", "ptr", "soa", "spf", "srv", "sshfp", "svcb", "tlsa", "txt",
 ];
-
-fn validate_ttl_range(value: &Value) -> Result<(), String> {
-    if let Value::Concrete(ConcreteValue::Int(n)) = value {
-        if *n < 0 || *n > 2147483647 {
-            Err(format!("Value {} is out of range 0..=2147483647", n))
-        } else {
-            Ok(())
-        }
-    } else {
-        Err("Expected integer".to_string())
-    }
-}
 
 /// Returns the schema config for route53.RecordSet (Smithy: com.amazonaws.route53)
 pub fn route53_record_set_config() -> AwsSchemaConfig {
@@ -61,13 +46,9 @@ pub fn route53_record_set_config() -> AwsSchemaConfig {
                 .with_provider_name("ResourceRecords"),
         )
         .attribute(
-            AttributeSchema::new("ttl", AttributeType::custom(
-                None,
-                AttributeType::int(),
+            AttributeSchema::new("ttl", AttributeType::refined_int(
                 None,
                 Some((Some(0), Some(2147483647))),
-                legacy_validator(validate_ttl_range),
-                None,
             ))
                 .with_description("The resource record cache time to live (TTL), in seconds. Note the following: If you're creating or updating an alias resource record set, omit TTL. A...")
                 .with_provider_name("TTL"),

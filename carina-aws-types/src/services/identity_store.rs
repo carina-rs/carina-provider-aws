@@ -1,5 +1,4 @@
-use carina_core::resource::{ConcreteValue, Value};
-use carina_core::schema::{AttributeType, legacy_validator};
+use carina_core::schema::AttributeType;
 
 use crate::provider_type;
 
@@ -22,19 +21,10 @@ pub fn validate_identity_store_id(id: &str) -> Result<(), String> {
 
 /// IdentityStore identity store id (`d-...` or UUID).
 pub fn identity_store_id() -> AttributeType {
-    AttributeType::custom(
+    AttributeType::refined_string(
         Some(provider_type("identitystore", "Store", "Id")),
-        AttributeType::string(),
+        Some("^(d-[0-9a-fA-F]{10}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$".to_string()),
         None,
-        None,
-        legacy_validator(|value| {
-            if let Value::Concrete(ConcreteValue::String(s)) = value {
-                validate_identity_store_id(s)
-                    .map_err(|reason| format!("Invalid IdentityStore id '{}': {}", s, reason))
-            } else {
-                Err("Expected string".to_string())
-            }
-        }),
         None,
     )
 }

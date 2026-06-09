@@ -7,24 +7,9 @@
 use super::AwsSchemaConfig;
 use super::tags_type;
 use super::validate_tags_map;
-use carina_core::resource::{ConcreteValue, Value};
-use carina_core::schema::{
-    AttributeSchema, AttributeType, ResourceSchema, legacy_validator, types,
-};
+use carina_core::schema::{AttributeSchema, AttributeType, ResourceSchema, types};
 
 const VALID_INSTANCE_TENANCY: &[&str] = &["dedicated", "default", "host"];
-
-fn validate_ipv4_netmask_length_range(value: &Value) -> Result<(), String> {
-    if let Value::Concrete(ConcreteValue::Int(n)) = value {
-        if *n < 0 || *n > 32 {
-            Err(format!("Value {} is out of range 0..=32", n))
-        } else {
-            Ok(())
-        }
-    } else {
-        Err("Expected integer".to_string())
-    }
-}
 
 /// Returns the schema config for ec2.Vpc (Smithy: com.amazonaws.ec2)
 pub fn ec2_vpc_config() -> AwsSchemaConfig {
@@ -69,13 +54,9 @@ pub fn ec2_vpc_config() -> AwsSchemaConfig {
                 .with_provider_name("Ipv4IpamPoolId"),
         )
         .attribute(
-            AttributeSchema::new("ipv4_netmask_length", AttributeType::custom(
-                None,
-                AttributeType::int(),
+            AttributeSchema::new("ipv4_netmask_length", AttributeType::refined_int(
                 None,
                 Some((Some(0), Some(32))),
-                legacy_validator(validate_ipv4_netmask_length_range),
-                None,
             ))
                 .create_only()
                 .with_description("The netmask length of the IPv4 CIDR you want to allocate to this VPC from an Amazon VPC IP Address Manager (IPAM) pool. For more information about IPA...")
