@@ -1,5 +1,4 @@
-use carina_core::resource::{ConcreteValue, Value};
-use carina_core::schema::{AttributeType, legacy_validator};
+use carina_core::schema::AttributeType;
 
 use super::provider_bare_type;
 
@@ -51,19 +50,10 @@ pub fn validate_prefixed_resource_id(id: &str, expected_prefix: &str) -> Result<
 /// AWS resource ID type (e.g., "vpc-1a2b3c4d", "subnet-0123456789abcdef0")
 #[allow(dead_code)]
 pub fn aws_resource_id() -> AttributeType {
-    AttributeType::custom(
+    AttributeType::refined_string(
         Some(provider_bare_type(&[], "ResourceId")),
-        AttributeType::string(),
         Some("^[a-z-]+-[0-9a-f]{8,}$".to_string()),
         None,
-        legacy_validator(|value| {
-            if let Value::Concrete(ConcreteValue::String(s)) = value {
-                validate_aws_resource_id(s)
-                    .map_err(|reason| format!("Invalid resource ID '{}': {}", s, reason))
-            } else {
-                Err("Expected string".to_string())
-            }
-        }),
         None,
     )
 }

@@ -14,7 +14,7 @@ pub fn all_schemas() -> Vec<ResourceSchema> {
 mod tests {
     use std::collections::HashMap;
 
-    use carina_core::schema::{AttributeType, SchemaKind, Shape};
+    use carina_core::schema::{AttributeType, RawShape, ResourceSchema, SchemaKind, Shape};
 
     #[test]
     fn configs_register_s3_bucket_under_both_kinds() {
@@ -44,8 +44,8 @@ mod tests {
             Shape::Enum { identity, .. } => {
                 identities.push((path.to_string(), identity.to_string()))
             }
-            Shape::List { inner, .. } => {
-                collect_enum_identities(inner, &format!("{path}[]"), identities)
+            Shape::List { element_type, .. } => {
+                collect_enum_identities(element_type, &format!("{path}[]"), identities)
             }
             Shape::Map { key, value } => {
                 collect_enum_identities(key, &format!("{path}.<key>"), identities);
@@ -81,6 +81,39 @@ mod tests {
             }
             _ => {}
         }
+    }
+
+    fn attr_type<'a>(schema: &'a ResourceSchema, name: &str) -> &'a AttributeType {
+        &schema
+            .attributes
+            .get(name)
+            .unwrap_or_else(|| panic!("missing attribute {name}"))
+            .attr_type
+    }
+
+    fn assert_refined_string(
+        attr: &AttributeType,
+        expected_identity: &str,
+        expected_pattern: Option<&str>,
+    ) {
+        let RawShape::String {
+            identity, pattern, ..
+        } = attr.raw_shape()
+        else {
+            panic!("expected refined String, got {:?}", attr.raw_shape());
+        };
+        assert_eq!(
+            identity.map(|id| id.to_string()).as_deref(),
+            Some(expected_identity)
+        );
+        assert_eq!(pattern, expected_pattern);
+    }
+
+    fn assert_refined_int_range(attr: &AttributeType, expected_range: (Option<i64>, Option<i64>)) {
+        let RawShape::Int { range, .. } = attr.raw_shape() else {
+            panic!("expected refined Int, got {:?}", attr.raw_shape());
+        };
+        assert_eq!(range, Some(expected_range));
     }
 
     #[test]
@@ -135,6 +168,52 @@ mod tests {
             Some(
                 &"aws.acm.Certificate.RenewalSummary.DomainValidation.ValidationMethod".to_string()
             )
+        );
+    }
+
+    #[test]
+    fn generated_acceptance_refined_primitives_are_direct_shapes() {
+        let iam_role = super::generated::iam::role::iam_role_config();
+        assert_refined_int_range(
+            attr_type(&iam_role.schema, "max_session_duration"),
+            (Some(3600), Some(43200)),
+        );
+        assert_refined_string(
+            attr_type(&iam_role.schema, "arn"),
+            "aws.iam.Role.Arn",
+            Some("^arn:(aws|aws-cn|aws-us-gov):iam::[^:]*:role/.+$"),
+        );
+
+        let route53_record_set = super::generated::route53::record_set::route53_record_set_config();
+        assert_refined_int_range(
+            attr_type(&route53_record_set.schema, "ttl"),
+            (Some(0), Some(2147483647)),
+        );
+
+        let s3_bucket = super::generated::s3::bucket_data_source::s3_bucket_data_source_config();
+        assert_refined_string(
+            attr_type(&s3_bucket.schema, "arn"),
+            "aws.s3.Bucket.Arn",
+            Some("^arn:(aws|aws-cn|aws-us-gov):s3:::.+$"),
+        );
+
+        let ec2_vpc = super::generated::ec2::vpc::ec2_vpc_config();
+        assert_refined_string(
+            attr_type(&ec2_vpc.schema, "vpc_id"),
+            "aws.ec2.Vpc.Id",
+            Some("^vpc-[0-9a-f]{8,}$"),
+        );
+
+        let ec2_nat_gateway = super::generated::ec2::nat_gateway::ec2_nat_gateway_config();
+        assert_refined_string(
+            attr_type(&ec2_nat_gateway.schema, "subnet_id"),
+            "aws.ec2.Subnet.Id",
+            Some("^subnet-[0-9a-f]{8,}$"),
+        );
+        assert_refined_string(
+            attr_type(&ec2_nat_gateway.schema, "vpc_id"),
+            "aws.ec2.Vpc.Id",
+            Some("^vpc-[0-9a-f]{8,}$"),
         );
     }
 }

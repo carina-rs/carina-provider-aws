@@ -5,23 +5,13 @@
 //! DO NOT EDIT MANUALLY - regenerate with smithy-codegen
 
 use super::AwsSchemaConfig;
-use carina_core::resource::{ConcreteValue, Value};
-use carina_core::schema::{AttributeSchema, AttributeType, ResourceSchema, legacy_validator};
+use carina_core::schema::{AttributeSchema, AttributeType, ResourceSchema};
 
 pub fn arn() -> AttributeType {
-    AttributeType::custom(
+    AttributeType::refined_string(
         Some(super::provider_type("s3", "Bucket", "Arn")),
-        super::arn(),
         Some("^arn:(aws|aws-cn|aws-us-gov):s3:::.+$".to_string()),
         None,
-        legacy_validator(|value| {
-            if let Value::Concrete(ConcreteValue::String(s)) = value {
-                super::validate_service_arn(s, "s3", None)
-                    .map_err(|reason| format!("Invalid s3 ARN '{}': {}", s, reason))
-            } else {
-                Err("Expected string".to_string())
-            }
-        }),
         None,
     )
 }

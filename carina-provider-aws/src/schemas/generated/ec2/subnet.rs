@@ -7,36 +7,9 @@
 use super::AwsSchemaConfig;
 use super::tags_type;
 use super::validate_tags_map;
-use carina_core::resource::{ConcreteValue, Value};
-use carina_core::schema::{
-    AttributeSchema, AttributeType, ResourceSchema, StructField, legacy_validator, types,
-};
+use carina_core::schema::{AttributeSchema, AttributeType, ResourceSchema, StructField, types};
 
 const VALID_HOSTNAME_TYPE: &[&str] = &["ip-name", "resource-name", "ip_name", "resource_name"];
-
-fn validate_ipv4_netmask_length_range(value: &Value) -> Result<(), String> {
-    if let Value::Concrete(ConcreteValue::Int(n)) = value {
-        if *n < 0 || *n > 32 {
-            Err(format!("Value {} is out of range 0..=32", n))
-        } else {
-            Ok(())
-        }
-    } else {
-        Err("Expected integer".to_string())
-    }
-}
-
-fn validate_ipv6_netmask_length_range(value: &Value) -> Result<(), String> {
-    if let Value::Concrete(ConcreteValue::Int(n)) = value {
-        if *n < 0 || *n > 128 {
-            Err(format!("Value {} is out of range 0..=128", n))
-        } else {
-            Ok(())
-        }
-    } else {
-        Err("Expected integer".to_string())
-    }
-}
 
 /// Returns the schema config for ec2.Subnet (Smithy: com.amazonaws.ec2)
 pub fn ec2_subnet_config() -> AwsSchemaConfig {
@@ -86,13 +59,9 @@ pub fn ec2_subnet_config() -> AwsSchemaConfig {
                 .with_provider_name("Ipv4IpamPoolId"),
         )
         .attribute(
-            AttributeSchema::new("ipv4_netmask_length", AttributeType::custom(
-                None,
-                AttributeType::int(),
+            AttributeSchema::new("ipv4_netmask_length", AttributeType::refined_int(
                 None,
                 Some((Some(0), Some(32))),
-                legacy_validator(validate_ipv4_netmask_length_range),
-                None,
             ))
                 .create_only()
                 .with_description("An IPv4 netmask length for the subnet.")
@@ -117,13 +86,9 @@ pub fn ec2_subnet_config() -> AwsSchemaConfig {
                 .with_provider_name("Ipv6Native"),
         )
         .attribute(
-            AttributeSchema::new("ipv6_netmask_length", AttributeType::custom(
-                None,
-                AttributeType::int(),
+            AttributeSchema::new("ipv6_netmask_length", AttributeType::refined_int(
                 None,
                 Some((Some(0), Some(128))),
-                legacy_validator(validate_ipv6_netmask_length_range),
-                None,
             ))
                 .create_only()
                 .with_description("An IPv6 netmask length for the subnet.")

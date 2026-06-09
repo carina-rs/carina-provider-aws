@@ -4,8 +4,8 @@ use carina_provider_aws::schemas::generated::organizations;
 #[test]
 fn account_arn_identity_is_provider_scoped() {
     let t = organizations::account::arn();
-    let RawShape::Custom { identity, .. } = t.raw_shape() else {
-        panic!("organizations::account::arn() should be Custom");
+    let RawShape::String { identity, .. } = t.raw_shape() else {
+        panic!("organizations::account::arn() should be refined String");
     };
     assert_eq!(
         identity.map(|id| id.to_string()).as_deref(),
@@ -16,8 +16,8 @@ fn account_arn_identity_is_provider_scoped() {
 #[test]
 fn organization_arn_identity_is_provider_scoped() {
     let t = organizations::organization::arn();
-    let RawShape::Custom { identity, .. } = t.raw_shape() else {
-        panic!("organizations::organization::arn() should be Custom");
+    let RawShape::String { identity, .. } = t.raw_shape() else {
+        panic!("organizations::organization::arn() should be refined String");
     };
     assert_eq!(
         identity.map(|id| id.to_string()).as_deref(),

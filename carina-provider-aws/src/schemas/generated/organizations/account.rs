@@ -7,10 +7,7 @@
 use super::AwsSchemaConfig;
 use super::tags_type;
 use super::validate_tags_map;
-use carina_core::resource::{ConcreteValue, Value};
-use carina_core::schema::{
-    AttributeSchema, AttributeType, ResourceSchema, legacy_validator, types,
-};
+use carina_core::schema::{AttributeSchema, AttributeType, ResourceSchema, types};
 
 const VALID_IAM_USER_ACCESS_TO_BILLING: &[&str] = &["ALLOW", "DENY", "allow", "deny"];
 
@@ -26,19 +23,10 @@ const VALID_STATUS: &[&str] = &[
 ];
 
 pub fn arn() -> AttributeType {
-    AttributeType::custom(
+    AttributeType::refined_string(
         Some(super::provider_type("organizations", "Account", "Arn")),
-        super::arn(),
         Some("^arn:(aws|aws-cn|aws-us-gov):organizations:.*$".to_string()),
         None,
-        legacy_validator(|value| {
-            if let Value::Concrete(ConcreteValue::String(s)) = value {
-                super::validate_service_arn(s, "organizations", None)
-                    .map_err(|reason| format!("Invalid organizations ARN '{}': {}", s, reason))
-            } else {
-                Err("Expected string".to_string())
-            }
-        }),
         None,
     )
 }

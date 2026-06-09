@@ -193,14 +193,14 @@ fn api_canonicalize_recursive(
             }
             changed.then_some(Value::Concrete(ConcreteValue::Map(rewritten)))
         }
-        Shape::List { inner, .. } => {
+        Shape::List { element_type, .. } => {
             let Value::Concrete(ConcreteValue::List(items)) = value else {
                 return None;
             };
             let mut rewritten = items.clone();
             let mut changed = false;
             for (i, item) in items.iter().enumerate() {
-                if let Some(new_item) = api_canonicalize_recursive(item, inner, schema) {
+                if let Some(new_item) = api_canonicalize_recursive(item, element_type, schema) {
                     rewritten[i] = new_item;
                     changed = true;
                 }

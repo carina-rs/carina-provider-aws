@@ -1,7 +1,6 @@
-use carina_core::resource::{ConcreteValue, Value};
-use carina_core::schema::{AttributeType, legacy_validator};
+use carina_core::schema::AttributeType;
 
-use crate::{arn, provider_type, validate_arn};
+use crate::{provider_type, validate_arn};
 
 // ========== SSO / Identity Center helpers ==========
 
@@ -20,19 +19,10 @@ pub fn validate_sso_principal_id(id: &str) -> Result<(), String> {
 
 /// SSO PrincipalId type (user or group id from IdentityStore).
 pub fn sso_principal_id() -> AttributeType {
-    AttributeType::custom(
+    AttributeType::refined_string(
         Some(provider_type("sso", "Principal", "Id")),
-        AttributeType::string(),
+        Some("^.{1,64}$".to_string()),
         None,
-        None,
-        legacy_validator(|value| {
-            if let Value::Concrete(ConcreteValue::String(s)) = value {
-                validate_sso_principal_id(s)
-                    .map_err(|reason| format!("Invalid SSO principal ID '{}': {}", s, reason))
-            } else {
-                Err("Expected string".to_string())
-            }
-        }),
         None,
     )
 }
@@ -55,19 +45,10 @@ pub fn validate_sso_instance_arn(arn: &str) -> Result<(), String> {
 
 /// SSO Instance ARN type (e.g., "arn:aws:sso:::instance/ssoins-xxxxxxxx").
 pub fn sso_instance_arn() -> AttributeType {
-    AttributeType::custom(
+    AttributeType::refined_string(
         Some(provider_type("sso", "Instance", "Arn")),
-        arn(),
+        Some("^arn:(aws|aws-cn|aws-us-gov):sso:::instance/.+$".to_string()),
         None,
-        None,
-        legacy_validator(|value| {
-            if let Value::Concrete(ConcreteValue::String(s)) = value {
-                validate_sso_instance_arn(s)
-                    .map_err(|reason| format!("Invalid SSO instance ARN '{}': {}", s, reason))
-            } else {
-                Err("Expected string".to_string())
-            }
-        }),
         None,
     )
 }
@@ -87,19 +68,10 @@ pub fn validate_sso_permission_set_arn(arn: &str) -> Result<(), String> {
 
 /// SSO PermissionSet ARN type.
 pub fn sso_permission_set_arn() -> AttributeType {
-    AttributeType::custom(
+    AttributeType::refined_string(
         Some(provider_type("sso", "PermissionSet", "Arn")),
-        arn(),
+        Some("^arn:(aws|aws-cn|aws-us-gov):sso:::permissionSet/.+$".to_string()),
         None,
-        None,
-        legacy_validator(|value| {
-            if let Value::Concrete(ConcreteValue::String(s)) = value {
-                validate_sso_permission_set_arn(s)
-                    .map_err(|reason| format!("Invalid SSO permission set ARN '{}': {}", s, reason))
-            } else {
-                Err("Expected string".to_string())
-            }
-        }),
         None,
     )
 }

@@ -213,6 +213,7 @@ fn resource_identity_parts(name: &str) -> Option<(&str, &str)> {
     name.split_once('.')
 }
 
+#[allow(dead_code)]
 fn arn_validator_for(validator: ArnValidator) -> String {
     match validator {
         ArnValidator::Iam { prefix, label } => format!(
@@ -248,6 +249,7 @@ fn arn_validator_for(validator: ArnValidator) -> String {
     }
 }
 
+#[allow(dead_code)]
 fn arn_validator_expression(choice: ArnEmitChoice) -> String {
     match choice {
         ArnEmitChoice::PerKind(entry) => arn_validator_for(entry.validator),
@@ -279,7 +281,8 @@ fn arn_helper_needs_validation_imports(
     resource: &str,
     choice: ArnEmitChoice,
 ) -> bool {
-    !matches!(choice, ArnEmitChoice::Generic) && shared_arn_constructor(service, resource).is_none()
+    let _ = (service, resource, choice);
+    false
 }
 
 fn emit_arn_helper(service: &str, resource: &str, choice: ArnEmitChoice) -> String {
@@ -301,15 +304,12 @@ fn emit_arn_helper(service: &str, resource: &str, choice: ArnEmitChoice) -> Stri
         }
         ArnEmitChoice::Generic => unreachable!("handled above"),
     };
-    let validator_expr = arn_validator_expression(choice);
     format!(
         r#"pub fn arn() -> AttributeType {{
-    AttributeType::custom(
+    AttributeType::refined_string(
         Some(super::provider_type("{service}", "{resource}", "Arn")),
-        super::arn(),
         {regex_expr},
         None,
-        legacy_validator({validator_expr}),
         None,
     )
 }}
@@ -1086,7 +1086,6 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
     }
 
     // Determine needed imports
-    let has_ranged_ints = !all_ranged_ints.is_empty();
     let code_str = attrs
         .iter()
         .map(|a| a.type_code.as_str())
@@ -1134,9 +1133,6 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
     if has_arn_helper && !schema_imports.contains(&"AttributeType") {
         schema_imports.insert(1, "AttributeType");
     }
-    if has_ranged_ints {
-        schema_imports.push("legacy_validator");
-    }
     if arn_helper_needs_validation_imports && !schema_imports.contains(&"legacy_validator") {
         schema_imports.push("legacy_validator");
     }
@@ -1155,7 +1151,7 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
         code.push_str("use super::tags_type;\n");
         code.push_str("use super::validate_tags_map;\n");
     }
-    if has_ranged_ints || arn_helper_needs_validation_imports {
+    if arn_helper_needs_validation_imports {
         code.push_str("use carina_core::resource::{ConcreteValue, Value};\n");
     }
     code.push_str(&format!(
@@ -1204,25 +1200,6 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
         ));
     }
 
-    // Generate range validation functions
-    for (prop_name, range) in &all_ranged_ints {
-        let fn_name = format!("validate_{}_range", prop_name.to_snake_case());
-        let (condition, display) = int_range_condition_and_display(range.min, range.max);
-        code.push_str(&format!(
-            "fn {}(value: &Value) -> Result<(), String> {{\n\
-             \x20   if let Value::Concrete(ConcreteValue::Int(n)) = value {{\n\
-             \x20       if {} {{\n\
-             \x20           Err(format!(\"Value {{}} is out of range {}\", n))\n\
-             \x20       }} else {{\n\
-             \x20           Ok(())\n\
-             \x20       }}\n\
-             \x20   }} else {{\n\
-             \x20       Err(\"Expected integer\".to_string())\n\
-             \x20   }}\n\
-             }}\n\n",
-            fn_name, condition, display
-        ));
-    }
     if let Some(helper) = &arn_helper {
         code.push_str(helper);
     }
@@ -1563,26 +1540,21 @@ fn resolve_type(
                 ctx.all_ranged_ints
                     .entry(field_name.to_string())
                     .or_insert(r);
-                let validate_fn = format!("validate_{}_range", field_name.to_snake_case());
-                let length_expr = match (r.min, r.max) {
-                    (Some(min), Some(max)) if min >= 0 && max >= 0 => {
+                let range_expr = match (r.min, r.max) {
+                    (Some(min), Some(max)) => {
                         format!("Some((Some({}), Some({})))", min, max)
                     }
-                    (Some(min), None) if min >= 0 => format!("Some((Some({}), None))", min),
-                    (None, Some(max)) if max >= 0 => format!("Some((None, Some({})))", max),
-                    _ => "None".to_string(),
+                    (Some(min), None) => format!("Some((Some({}), None))", min),
+                    (None, Some(max)) => format!("Some((None, Some({})))", max),
+                    (None, None) => "None".to_string(),
                 };
                 (
                     format!(
-                        "AttributeType::custom(\n\
-                         \x20               None,\n\
-                         \x20               AttributeType::int(),\n\
+                        "AttributeType::refined_int(\n\
                          \x20               None,\n\
                          \x20               {},\n\
-                         \x20               legacy_validator({}),\n\
-                         \x20               None,\n\
                          \x20           )",
-                        length_expr, validate_fn
+                        range_expr
                     ),
                     None,
                 )
@@ -1833,22 +1805,12 @@ fn generate_virtual_helper_modules(
          //!\n\
          //! DO NOT EDIT MANUALLY - regenerate with:\n\
          //!   ./carina-provider-aws/scripts/generate-schemas-smithy.sh\n\n\
-         use carina_core::resource::{{ConcreteValue, Value}};\n\
-         use carina_core::schema::{{AttributeType, legacy_validator}};\n\n{}\
+         use carina_core::schema::AttributeType;\n\n{}\
          pub fn id() -> AttributeType {{\n\
-         \x20   AttributeType::custom(\n\
+         \x20   AttributeType::refined_string(\n\
          \x20       Some(super::provider_type(\"kms\", \"Key\", \"Id\")),\n\
-         \x20       super::aws_resource_id(),\n\
          \x20       None,\n\
          \x20       None,\n\
-         \x20       legacy_validator(|value| {{\n\
-         \x20           if let Value::Concrete(ConcreteValue::String(s)) = value {{\n\
-         \x20               super::validate_kms_key_id(s)\n\
-         \x20                   .map_err(|reason| format!(\"Invalid KMS key identifier '{{}}': {{}}\", s, reason))\n\
-         \x20           }} else {{\n\
-         \x20               Err(\"Expected string\".to_string())\n\
-         \x20           }}\n\
-         \x20       }}),\n\
          \x20       None,\n\
          \x20   )\n\
          }}\n",
@@ -4282,6 +4244,7 @@ fn known_enum_overrides() -> &'static HashMap<&'static str, Vec<&'static str>> {
 }
 
 /// Generate condition string and display string for integer range validation.
+#[allow(dead_code)]
 fn int_range_condition_and_display(min: Option<i64>, max: Option<i64>) -> (String, String) {
     match (min, max) {
         (Some(min), Some(max)) => (

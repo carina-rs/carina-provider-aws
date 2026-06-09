@@ -5,36 +5,9 @@
 //! DO NOT EDIT MANUALLY - regenerate with smithy-codegen
 
 use super::AwsSchemaConfig;
-use carina_core::resource::{ConcreteValue, Value};
-use carina_core::schema::{
-    AttributeSchema, AttributeType, ResourceSchema, legacy_validator, types,
-};
+use carina_core::schema::{AttributeSchema, AttributeType, ResourceSchema, types};
 
 const VALID_IP_PROTOCOL: &[&str] = &["tcp", "udp", "icmp", "icmpv6", "-1", "all", "_1"];
-
-fn validate_from_port_range(value: &Value) -> Result<(), String> {
-    if let Value::Concrete(ConcreteValue::Int(n)) = value {
-        if *n < -1 || *n > 65535 {
-            Err(format!("Value {} is out of range -1..=65535", n))
-        } else {
-            Ok(())
-        }
-    } else {
-        Err("Expected integer".to_string())
-    }
-}
-
-fn validate_to_port_range(value: &Value) -> Result<(), String> {
-    if let Value::Concrete(ConcreteValue::Int(n)) = value {
-        if *n < -1 || *n > 65535 {
-            Err(format!("Value {} is out of range -1..=65535", n))
-        } else {
-            Ok(())
-        }
-    } else {
-        Err("Expected integer".to_string())
-    }
-}
 
 /// Returns the schema config for ec2.SecurityGroupEgress (Smithy: com.amazonaws.ec2)
 pub fn ec2_security_group_egress_config() -> AwsSchemaConfig {
@@ -71,14 +44,7 @@ pub fn ec2_security_group_egress_config() -> AwsSchemaConfig {
             .attribute(
                 AttributeSchema::new(
                     "from_port",
-                    AttributeType::custom(
-                        None,
-                        AttributeType::int(),
-                        None,
-                        None,
-                        legacy_validator(validate_from_port_range),
-                        None,
-                    ),
+                    AttributeType::refined_int(None, Some((Some(-1), Some(65535)))),
                 )
                 .create_only()
                 .with_description("Not supported. Use IP permissions instead.")
@@ -139,14 +105,7 @@ pub fn ec2_security_group_egress_config() -> AwsSchemaConfig {
             .attribute(
                 AttributeSchema::new(
                     "to_port",
-                    AttributeType::custom(
-                        None,
-                        AttributeType::int(),
-                        None,
-                        None,
-                        legacy_validator(validate_to_port_range),
-                        None,
-                    ),
+                    AttributeType::refined_int(None, Some((Some(-1), Some(65535)))),
                 )
                 .create_only()
                 .with_description("Not supported. Use IP permissions instead.")

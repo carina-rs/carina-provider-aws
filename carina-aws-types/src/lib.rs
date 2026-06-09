@@ -35,12 +35,12 @@ mod tests {
     }
 
     fn list_inner(attr: &AttributeType) -> &AttributeType {
-        let carina_core::schema::Shape::List { inner, .. } =
+        let carina_core::schema::Shape::List { element_type, .. } =
             attr.shape_ref_free().expect("test schema is Ref-free")
         else {
             panic!("expected List shape");
         };
-        inner
+        element_type
     }
 
     fn struct_name(attr: &AttributeType) -> &str {
@@ -72,13 +72,13 @@ mod tests {
         identity.to_string()
     }
 
-    fn assert_custom_identity(attr: &AttributeType, expected: &str) {
-        if let carina_core::schema::Shape::Custom { identity, .. } =
+    fn assert_refined_string_identity(attr: &AttributeType, expected: &str) {
+        if let carina_core::schema::Shape::String { identity, .. } =
             attr.shape_ref_free().expect("test schema is Ref-free")
         {
             assert_eq!(identity.map(|id| id.to_string()).as_deref(), Some(expected));
         } else {
-            panic!("expected AttributeType::Custom");
+            panic!("expected refined String");
         }
     }
 
@@ -259,7 +259,7 @@ mod tests {
     #[test]
     fn aws_account_id_carries_pattern_and_length() {
         let t = aws_account_id();
-        if let carina_core::schema::Shape::Custom {
+        if let carina_core::schema::Shape::String {
             identity,
             pattern,
             length,
@@ -274,14 +274,14 @@ mod tests {
             assert_eq!(pattern, Some(r"^\d{12}$"));
             assert_eq!(length, Some((Some(12), Some(12))));
         } else {
-            panic!("aws_account_id() should be AttributeType::Custom");
+            panic!("aws_account_id() should be refined String");
         }
     }
 
     #[test]
     fn vpc_id_carries_identity_and_pattern() {
         let t = vpc_id();
-        if let carina_core::schema::Shape::Custom {
+        if let carina_core::schema::Shape::String {
             identity,
             pattern,
             to_dsl: None,
@@ -294,7 +294,7 @@ mod tests {
             );
             assert!(pattern.is_some(), "VpcId should carry a pattern");
         } else {
-            panic!("vpc_id() should be AttributeType::Custom");
+            panic!("vpc_id() should be refined String");
         }
     }
 
@@ -788,7 +788,7 @@ mod tests {
     #[test]
     fn kms_key_id_carries_identity_and_validates_values() {
         let attr = kms_key_id();
-        assert_custom_identity(&attr, "aws.kms.Key.Id");
+        assert_refined_string_identity(&attr, "aws.kms.Key.Id");
         assert_string_attr_accepts_and_rejects(
             attr,
             "arn:aws:kms:us-east-1:123456789012:key/1234abcd-12ab-34cd-56ef-1234567890ab",
@@ -916,7 +916,7 @@ mod tests {
     #[test]
     fn iam_role_arn_carries_identity_and_validates_values() {
         let attr = iam_role_arn();
-        assert_custom_identity(&attr, "aws.iam.Role.Arn");
+        assert_refined_string_identity(&attr, "aws.iam.Role.Arn");
         assert_string_attr_accepts_and_rejects(
             attr,
             "arn:aws:iam::123456789012:role/service-role/MyRole",
@@ -927,7 +927,7 @@ mod tests {
     #[test]
     fn iam_policy_arn_carries_identity_and_validates_values() {
         let attr = iam_policy_arn();
-        assert_custom_identity(&attr, "aws.iam.Policy.Arn");
+        assert_refined_string_identity(&attr, "aws.iam.Policy.Arn");
         assert_string_attr_accepts_and_rejects(
             attr,
             "arn:aws:iam::123456789012:policy/MyPolicy",
@@ -938,7 +938,7 @@ mod tests {
     #[test]
     fn iam_oidc_provider_arn_carries_identity_and_validates_values() {
         let attr = iam_oidc_provider_arn();
-        assert_custom_identity(&attr, "aws.iam.OidcProvider.Arn");
+        assert_refined_string_identity(&attr, "aws.iam.OidcProvider.Arn");
         assert_string_attr_accepts_and_rejects(
             attr,
             "arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com",
@@ -1261,7 +1261,7 @@ mod tests {
     #[test]
     fn sso_principal_id_carries_identity_and_validates_values() {
         let attr = sso_principal_id();
-        assert_custom_identity(&attr, "aws.sso.Principal.Id");
+        assert_refined_string_identity(&attr, "aws.sso.Principal.Id");
         assert_string_attr_accepts_and_rejects(
             attr,
             "1234567890-12345678-1234-1234-1234-1234567890ab",
@@ -1272,7 +1272,7 @@ mod tests {
     #[test]
     fn sso_instance_arn_carries_identity_and_validates_values() {
         let attr = sso_instance_arn();
-        assert_custom_identity(&attr, "aws.sso.Instance.Arn");
+        assert_refined_string_identity(&attr, "aws.sso.Instance.Arn");
         assert_string_attr_accepts_and_rejects(
             attr,
             "arn:aws:sso:::instance/ssoins-1234567890abcdef",
@@ -1283,14 +1283,14 @@ mod tests {
     #[test]
     fn identity_store_id_carries_identity_and_validates_values() {
         let attr = identity_store_id();
-        assert_custom_identity(&attr, "aws.identitystore.Store.Id");
+        assert_refined_string_identity(&attr, "aws.identitystore.Store.Id");
         assert_string_attr_accepts_and_rejects(attr, "d-1234567890", "store-1234567890");
     }
 
     #[test]
     fn sso_permission_set_arn_carries_identity_and_validates_values() {
         let attr = sso_permission_set_arn();
-        assert_custom_identity(&attr, "aws.sso.PermissionSet.Arn");
+        assert_refined_string_identity(&attr, "aws.sso.PermissionSet.Arn");
         assert_string_attr_accepts_and_rejects(
             attr,
             "arn:aws:sso:::permissionSet/ssoins-1234567890abcdef/ps-1234567890abcdef",
@@ -1463,7 +1463,7 @@ mod tests {
     #[test]
     fn grantee_accepts_id_format() {
         let t = s3_grantee();
-        assert_custom_identity(&t, "aws.s3.Grantee");
+        assert_refined_string_identity(&t, "aws.s3.Grantee");
         assert!(
             carina_core::schema::Schema::flat(t.clone())
                 .validate(&Value::Concrete(ConcreteValue::String(
@@ -1528,7 +1528,7 @@ mod tests {
         ));
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
-        assert!(err.contains("must start with id=, emailAddress=, or uri="));
+        assert!(err.contains("does not match required pattern"));
     }
 
     #[test]
