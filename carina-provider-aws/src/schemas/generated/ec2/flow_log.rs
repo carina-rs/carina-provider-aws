@@ -7,7 +7,7 @@
 use super::AwsSchemaConfig;
 use super::tags_type;
 use super::validate_tags_map;
-use carina_core::schema::{AttributeSchema, AttributeType, ResourceSchema};
+use carina_core::schema::{AttributeSchema, AttributeType, ResourceSchema, StructField};
 
 const VALID_LOG_DESTINATION_TYPE: &[&str] = &[
     "cloud-watch-logs",
@@ -103,6 +103,24 @@ pub fn ec2_flow_log_config() -> AwsSchemaConfig {
                 .create_only()
                 .with_description("The type of resource to monitor.")
                 .with_provider_name("ResourceType"),
+        )
+        .attribute(
+            AttributeSchema::new("tag_field_specifications", AttributeType::list(AttributeType::struct_(
+                    "TagFieldSpecificationRequest".to_string(),
+                    vec![
+                    StructField::new("resource_type", AttributeType::enum_(
+    carina_core::schema::enum_identity("ResourceType", Some("aws.ec2.FlowLog.TagFieldSpecificationRequest")),
+    Some(vec!["auto-scaling-group".to_string(), "instance".to_string(), "network-interface".to_string()]),
+    vec![("auto-scaling-group".to_string(), "auto_scaling_group".to_string()), ("instance".to_string(), "instance".to_string()), ("network-interface".to_string(), "network_interface".to_string())],
+    None,
+    None,
+)).with_description("The resource type for the tag keys associated with the Flow Logs Amazon EC2 Tags feature fields in your custom log format.").with_provider_name("ResourceType"),
+                    StructField::new("tag_keys", AttributeType::list(AttributeType::string())).with_description("The tag keys on your tagged resources to be displayed by the Flow Logs Amazon EC2 Tags feature fields in your custom log format.").with_provider_name("TagKeys")
+                    ],
+                )))
+                .create_only()
+                .with_description("The tag configuration associated with the Flow Logs Amazon EC2 Tags feature fields in your custom log format.")
+                .with_provider_name("TagFieldSpecifications"),
         )
         .attribute(
             AttributeSchema::new("traffic_type", AttributeType::enum_(
