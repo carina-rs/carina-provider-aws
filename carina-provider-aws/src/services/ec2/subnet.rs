@@ -2,7 +2,6 @@ use std::collections::HashMap;
 
 use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
-use carina_core::utils::convert_enum_value;
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
@@ -82,7 +81,7 @@ impl AwsProvider {
         if let Some(Value::Concrete(ConcreteValue::String(az))) =
             resource.get_attr("availability_zone")
         {
-            req = req.availability_zone(convert_enum_value(az).replace('_', "-"));
+            req = req.availability_zone(az);
         }
 
         let result = req.send().await.map_err(|e| {
@@ -200,11 +199,10 @@ impl AwsProvider {
             attributes.get("private_dns_name_options_on_launch")
         {
             if let Some(Value::Concrete(ConcreteValue::String(ht))) = fields.get("hostname_type") {
-                let hostname_val = convert_enum_value(ht).replace('_', "-");
                 self.ec2_client
                     .modify_subnet_attribute()
                     .subnet_id(subnet_id)
-                    .private_dns_hostname_type_on_launch(HostnameType::from(hostname_val.as_str()))
+                    .private_dns_hostname_type_on_launch(HostnameType::from(ht.as_str()))
                     .send()
                     .await
                     .map_err(|e| {

@@ -40,10 +40,10 @@ pub fn require_string_attr(resource: &Resource, attr_name: &str) -> ProviderResu
 
 /// Extract a required enum attribute from a resource.
 ///
-/// `AwsNormalizer::normalize_desired` rewrites every enum value to its
-/// AWS API-canonical bare spelling (`Enabled`, `VPC`, `STANDARD_IA`) at
-/// plan time, so the caller can feed the result straight to an SDK
-/// builder like `BucketVersioningStatus::from(...)`.
+/// Core rewrites every schema-known enum value to its AWS API-canonical
+/// spelling (`Enabled`, `VPC`, `STANDARD_IA`) before the provider sees it,
+/// so the caller can feed the result straight to an SDK builder like
+/// `BucketVersioningStatus::from(...)`.
 ///
 /// Equivalent to `require_string_attr` today — the alias historically
 /// stripped a DSL namespace prefix, but normalization now happens
@@ -425,9 +425,8 @@ mod tests {
 
     #[test]
     fn test_require_enum_attr_returns_canonical_value() {
-        // After AwsNormalizer::normalize_desired runs, enum attributes
-        // carry the bare AWS API-canonical spelling. require_enum_attr
-        // just passes it through.
+        // Core sends enum attributes in AWS API-canonical spelling.
+        // require_enum_attr just passes it through.
         let resource = make_test_resource(vec![("type", "A")]);
         assert_eq!(require_enum_attr(&resource, "type").unwrap(), "A");
     }

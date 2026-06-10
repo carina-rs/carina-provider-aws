@@ -4,9 +4,10 @@ use std::collections::HashMap;
 
 use indexmap::IndexMap;
 
+use carina_core::provider::ProviderNormalizer;
 use carina_core::resource::{ConcreteValue, Value};
 
-use crate::AwsProvider;
+use crate::{AwsNormalizer, AwsProvider};
 
 // --- extract_ec2_vpc_attributes tests ---
 
@@ -613,41 +614,39 @@ fn test_extract_ec2_subnet_attributes_map_public_ip_true() {
     );
 }
 
-#[test]
-fn test_subnet_availability_zone_dsl_to_aws_sdk() {
-    use carina_core::utils::convert_enum_value;
+#[tokio::test]
+async fn test_subnet_availability_zone_survives_normalize_desired() {
+    let mut resource =
+        carina_core::resource::Resource::with_provider("aws", "ec2.Subnet", "test-subnet", None);
+    resource.set_attr(
+        "availability_zone".to_string(),
+        Value::Concrete(ConcreteValue::String("ap-northeast-1a".to_string())),
+    );
+    let mut resources = vec![resource];
 
-    // DSL namespaced form -> AWS hyphenated form that EC2 CreateSubnet expects.
-    let dsl_value = "aws.AvailabilityZone.ap_northeast_1a";
-    let aws_value = convert_enum_value(dsl_value).replace('_', "-");
-    assert_eq!(aws_value, "ap-northeast-1a");
+    AwsNormalizer.normalize_desired(&mut resources).await;
 
-    let dsl_value2 = "aws.AvailabilityZone.us_east_1b";
-    let aws_value2 = convert_enum_value(dsl_value2).replace('_', "-");
-    assert_eq!(aws_value2, "us-east-1b");
+    assert_eq!(
+        resources[0].get_attr("availability_zone"),
+        Some(&Value::Concrete(ConcreteValue::String(
+            "ap-northeast-1a".to_string()
+        )))
+    );
 }
 
 // --- Subnet DNS hostname_type enum conversion ---
 
 #[test]
-fn test_subnet_hostname_type_dsl_to_aws_sdk() {
+fn test_subnet_hostname_type_canonical_value_to_aws_sdk() {
     use aws_sdk_ec2::types::HostnameType;
-    use carina_core::utils::convert_enum_value;
 
-    // DSL uses underscores: aws.ec2.Subnet.HostnameType.ip_name
-    // convert_enum_value extracts the value, then underscore→hyphen for AWS SDK
-    let dsl_value = "aws.ec2.Subnet.HostnameType.ip_name";
-    let extracted = convert_enum_value(dsl_value);
-    assert_eq!(extracted, "ip_name");
-    let aws_value = extracted.replace('_', "-");
-    let hostname_type = HostnameType::from(aws_value.as_str());
+    // Core sends the provider the canonical API spelling.
+    let aws_value = "ip-name";
+    let hostname_type = HostnameType::from(aws_value);
     assert_eq!(hostname_type, HostnameType::IpName);
 
-    let dsl_value2 = "aws.ec2.Subnet.HostnameType.resource_name";
-    let extracted2 = convert_enum_value(dsl_value2);
-    assert_eq!(extracted2, "resource_name");
-    let aws_value2 = extracted2.replace('_', "-");
-    let hostname_type2 = HostnameType::from(aws_value2.as_str());
+    let aws_value2 = "resource-name";
+    let hostname_type2 = HostnameType::from(aws_value2);
     assert_eq!(hostname_type2, HostnameType::ResourceName);
 }
 
@@ -660,15 +659,11 @@ fn test_subnet_hostname_type_dsl_to_aws_sdk() {
 
 #[test]
 fn test_subnet_dns_options_fields_parsed_separately() {
-    use carina_core::utils::convert_enum_value;
-
     // Simulate the attributes map that would be passed to modify_subnet_attributes
     let mut fields = HashMap::new();
     fields.insert(
         "hostname_type".to_string(),
-        Value::Concrete(ConcreteValue::String(
-            "aws.ec2.Subnet.HostnameType.ip_name".to_string(),
-        )),
+        Value::Concrete(ConcreteValue::String("ip-name".to_string())),
     );
     fields.insert(
         "enable_resource_name_dns_a_record".to_string(),
@@ -681,8 +676,10 @@ fn test_subnet_dns_options_fields_parsed_separately() {
 
     // Each field should be independently extractable for separate API calls
     if let Some(Value::Concrete(ConcreteValue::String(ht))) = fields.get("hostname_type") {
-        let hostname_val = convert_enum_value(ht);
-        assert_eq!(hostname_val, "ip_name");
+        assert_eq!(
+            aws_sdk_ec2::types::HostnameType::from(ht.as_str()),
+            aws_sdk_ec2::types::HostnameType::IpName
+        );
     } else {
         panic!("hostname_type should be present and a String");
     }

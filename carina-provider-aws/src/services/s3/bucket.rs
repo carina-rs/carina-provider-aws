@@ -5,7 +5,6 @@ use carina_core::provider::{BoxFuture, ProviderError, ProviderResult};
 use carina_core::resource::{
     ConcreteValue, DataSource, Directives, Resource, ResourceId, State, Value,
 };
-use carina_core::utils::convert_enum_value;
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
@@ -77,12 +76,11 @@ impl AwsProvider {
             }
         };
 
-        // Get region (use Provider's region if not specified)
+        // Region is not part of the generated s3.Bucket schema today, so this
+        // optional hand-written override only supports plain AWS-format strings.
+        // Otherwise use the provider region.
         let region = match resource.get_attr("region") {
-            Some(Value::Concrete(ConcreteValue::String(s))) => {
-                // Convert from aws.Region.ap_northeast_1 format to ap-northeast-1 format
-                convert_enum_value(s).to_string()
-            }
+            Some(Value::Concrete(ConcreteValue::String(s))) => s.to_string(),
             _ => self.region.clone(),
         };
 
