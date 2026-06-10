@@ -1161,39 +1161,17 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
 
     // Generate enum constants.
     //
-    // The constant lists every spelling the validator must accept: the
-    // canonical AWS values, any explicit aliases, and the auto-derived
-    // snake_case DSL aliases (D7). Listing both forms keeps callers that
-    // walk `enum_valid_values()` (e.g. legacy reflection paths) consistent
-    // with what `to_dsl` already accepts at runtime.
+    // The constant lists only canonical AWS wire values. DSL spellings live
+    // in `dsl_aliases` / `enum_alias_entries`; mixing aliases into this list
+    // makes the host treat them as already API-canonical.
     for (prop_name, enum_info) in &all_enums {
         let const_name = format!("VALID_{}", prop_name.to_snake_case().to_uppercase());
-
-        let mut all_values: Vec<String> = enum_info
+        let values_str = enum_info
             .values
             .iter()
             .map(|v| format!("\"{}\"", v))
-            .collect();
-        let snake = prop_name.to_snake_case();
-        if let Some(aliases) = enum_alias_map.get(snake.as_str()) {
-            for (_, alias) in aliases {
-                let formatted = format!("\"{}\"", alias);
-                if !all_values.contains(&formatted) {
-                    all_values.push(formatted);
-                }
-            }
-        }
-        // Auto-derived snake_case DSL aliases per D7.
-        for value in &enum_info.values {
-            let dsl_form = dsl_enum_value(value);
-            if dsl_form != *value {
-                let formatted = format!("\"{}\"", dsl_form);
-                if !all_values.contains(&formatted) {
-                    all_values.push(formatted);
-                }
-            }
-        }
-        let values_str = all_values.join(", ");
+            .collect::<Vec<_>>()
+            .join(", ");
         code.push_str(&format!(
             "const {}: &[&str] = &[{}];\n\n",
             const_name, values_str
@@ -4248,10 +4226,7 @@ fn known_string_type_overrides() -> &'static HashMap<&'static str, &'static str>
 fn known_enum_overrides() -> &'static HashMap<&'static str, Vec<&'static str>> {
     static OVERRIDES: LazyLock<HashMap<&'static str, Vec<&'static str>>> = LazyLock::new(|| {
         let mut m = HashMap::new();
-        m.insert(
-            "IpProtocol",
-            vec!["tcp", "udp", "icmp", "icmpv6", "-1", "all"],
-        );
+        m.insert("IpProtocol", vec!["tcp", "udp", "icmp", "icmpv6", "-1"]);
         m.insert("HostnameType", vec!["ip-name", "resource-name"]);
         m
     });
@@ -4933,11 +4908,18 @@ mod tests {
 
         let generated = generate_resource(&resource, &model).expect("failed to generate resource");
 
-        // The validator's allow-list (VALID_TYPE) must include both API
-        // and DSL spellings so reflection paths see both forms.
+        // The validator's allow-list (VALID_TYPE) must stay API-canonical;
+        // DSL spellings are carried by dsl_aliases / enum_alias_entries.
+        let valid_type_line = generated
+            .lines()
+            .find(|line| line.starts_with("const VALID_TYPE:"))
+            .expect("VALID_TYPE constant should be generated");
         assert!(
-            generated.contains("\"A\"") && generated.contains("\"a\""),
-            "VALID_TYPE should list both API and DSL spellings: {generated}"
+            valid_type_line.contains("\"A\"")
+                && valid_type_line.contains("\"CNAME\"")
+                && !valid_type_line.contains("\"a\"")
+                && !valid_type_line.contains("\"cname\""),
+            "VALID_TYPE should list only API spellings: {generated}"
         );
         // The StringEnum's `dsl_aliases` must contain `(api, dsl)` pairs
         // as data so the mapping survives the WASM-component boundary.

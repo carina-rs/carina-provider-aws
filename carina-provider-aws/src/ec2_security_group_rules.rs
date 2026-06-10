@@ -119,7 +119,7 @@ impl AwsProvider {
         };
 
         let protocol = match resource.get_attr("ip_protocol") {
-            Some(Value::Concrete(ConcreteValue::String(s))) => convert_protocol_value(s),
+            Some(Value::Concrete(ConcreteValue::String(s))) => s.clone(),
             _ => "-1".to_string(),
         };
 
@@ -360,48 +360,9 @@ impl AwsProvider {
     }
 }
 
-/// Convert protocol value to AWS format.
-///
-/// Enum-typed protocol values arrive as AWS-canonical strings from core.
-/// Keep the legacy bare `all` alias mapping here because AWS expects `-1`.
-pub(crate) fn convert_protocol_value(value: &str) -> String {
-    if value == "all" {
-        "-1".to_string()
-    } else {
-        value.to_string()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    // --- convert_protocol_value tests ---
-
-    #[test]
-    fn test_convert_protocol_value_tcp() {
-        assert_eq!(convert_protocol_value("tcp"), "tcp");
-    }
-
-    #[test]
-    fn test_convert_protocol_value_udp() {
-        assert_eq!(convert_protocol_value("udp"), "udp");
-    }
-
-    #[test]
-    fn test_convert_protocol_value_all_keyword() {
-        assert_eq!(convert_protocol_value("all"), "-1");
-    }
-
-    #[test]
-    fn test_convert_protocol_value_minus_one() {
-        assert_eq!(convert_protocol_value("-1"), "-1");
-    }
-
-    #[test]
-    fn test_convert_protocol_value_canonical_tcp() {
-        assert_eq!(convert_protocol_value("tcp"), "tcp");
-    }
 
     // --- Route composite identifier parsing tests ---
 

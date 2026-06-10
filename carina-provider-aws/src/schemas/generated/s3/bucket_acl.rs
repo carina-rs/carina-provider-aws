@@ -12,9 +12,6 @@ const VALID_ACL: &[&str] = &[
     "private",
     "public-read",
     "public-read-write",
-    "authenticated_read",
-    "public_read",
-    "public_read_write",
 ];
 
 /// Returns the schema config for s3.BucketAcl (Smithy: com.amazonaws.s3)

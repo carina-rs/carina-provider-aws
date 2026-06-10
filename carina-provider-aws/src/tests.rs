@@ -1572,12 +1572,10 @@ fn test_organizations_account_schema_attributes() {
     assert!(config.has_tags);
 }
 
-// --- ip_protocol enum "all" variant tests (issue #1428) ---
+// --- ip_protocol enum canonical values and aliases ---
 
 #[test]
-fn test_security_group_egress_schema_includes_all_variant() {
-    // The "all" value (alias for "-1") must be included in the enum values
-    // so it is accepted even when to_dsl is lost during protocol serialization.
+fn test_security_group_egress_schema_keeps_all_as_alias_only() {
     let config =
         crate::schemas::generated::ec2::security_group_egress::ec2_security_group_egress_config();
     let ip_protocol = config
@@ -1591,9 +1589,17 @@ fn test_security_group_egress_schema_includes_all_variant() {
     } = config.schema.shape_of(&ip_protocol.attr_type)
     {
         assert!(
-            values.contains(&"all".to_string()),
-            "enum values must include 'all': {:?}",
+            values.contains(&"-1".to_string()) && !values.contains(&"all".to_string()),
+            "enum values must include '-1' and exclude alias 'all': {:?}",
             values
+        );
+        assert_eq!(
+            crate::schemas::generated::get_enum_alias_reverse(
+                "ec2.SecurityGroupEgress",
+                "ip_protocol",
+                "all"
+            ),
+            Some("-1")
         );
     } else {
         panic!("ip_protocol should be enum");
@@ -1601,7 +1607,7 @@ fn test_security_group_egress_schema_includes_all_variant() {
 }
 
 #[test]
-fn test_security_group_ingress_schema_includes_all_variant() {
+fn test_security_group_ingress_schema_keeps_all_as_alias_only() {
     let config =
         crate::schemas::generated::ec2::security_group_ingress::ec2_security_group_ingress_config();
     let ip_protocol = config
@@ -1615,9 +1621,17 @@ fn test_security_group_ingress_schema_includes_all_variant() {
     } = config.schema.shape_of(&ip_protocol.attr_type)
     {
         assert!(
-            values.contains(&"all".to_string()),
-            "enum values must include 'all': {:?}",
+            values.contains(&"-1".to_string()) && !values.contains(&"all".to_string()),
+            "enum values must include '-1' and exclude alias 'all': {:?}",
             values
+        );
+        assert_eq!(
+            crate::schemas::generated::get_enum_alias_reverse(
+                "ec2.SecurityGroupIngress",
+                "ip_protocol",
+                "all"
+            ),
+            Some("-1")
         );
     } else {
         panic!("ip_protocol should be enum");

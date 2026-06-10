@@ -9,8 +9,7 @@ use carina_core::schema::{AttributeSchema, AttributeType, ResourceSchema, Struct
 
 const VALID_TYPE: &[&str] = &[
     "A", "AAAA", "CAA", "CNAME", "DS", "HTTPS", "MX", "NAPTR", "NS", "PTR", "SOA", "SPF", "SRV",
-    "SSHFP", "SVCB", "TLSA", "TXT", "a", "aaaa", "caa", "cname", "ds", "https", "mx", "naptr",
-    "ns", "ptr", "soa", "spf", "srv", "sshfp", "svcb", "tlsa", "txt",
+    "SSHFP", "SVCB", "TLSA", "TXT",
 ];
 
 /// Returns the schema config for route53.RecordSet (Smithy: com.amazonaws.route53)

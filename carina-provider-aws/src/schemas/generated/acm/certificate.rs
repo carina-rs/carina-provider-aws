@@ -9,10 +9,9 @@ use super::tags_type;
 use super::validate_tags_map;
 use carina_core::schema::{AttributeSchema, AttributeType, ResourceSchema, StructField, types};
 
-const VALID_CERTIFICATE_TRANSPARENCY_LOGGING_PREFERENCE: &[&str] =
-    &["DISABLED", "ENABLED", "disabled", "enabled"];
+const VALID_CERTIFICATE_TRANSPARENCY_LOGGING_PREFERENCE: &[&str] = &["DISABLED", "ENABLED"];
 
-const VALID_EXPORT: &[&str] = &["DISABLED", "ENABLED", "disabled", "enabled"];
+const VALID_EXPORT: &[&str] = &["DISABLED", "ENABLED"];
 
 const VALID_KEY_ALGORITHM: &[&str] = &[
     "EC_prime256v1",
@@ -22,26 +21,15 @@ const VALID_KEY_ALGORITHM: &[&str] = &[
     "RSA_2048",
     "RSA_3072",
     "RSA_4096",
-    "ec_prime256v1",
-    "ec_secp384r1",
-    "ec_secp521r1",
-    "rsa_1024",
-    "rsa_2048",
-    "rsa_3072",
-    "rsa_4096",
 ];
 
-const VALID_RENEWAL_ELIGIBILITY: &[&str] = &["ELIGIBLE", "INELIGIBLE", "eligible", "ineligible"];
+const VALID_RENEWAL_ELIGIBILITY: &[&str] = &["ELIGIBLE", "INELIGIBLE"];
 
 const VALID_RENEWAL_STATUS: &[&str] = &[
     "FAILED",
     "PENDING_AUTO_RENEWAL",
     "PENDING_VALIDATION",
     "SUCCESS",
-    "failed",
-    "pending_auto_renewal",
-    "pending_validation",
-    "success",
 ];
 
 const VALID_RENEWAL_STATUS_REASON: &[&str] = &[
@@ -62,23 +50,6 @@ const VALID_RENEWAL_STATUS_REASON: &[&str] = &[
     "PCA_REQUEST_FAILED",
     "PCA_RESOURCE_NOT_FOUND",
     "SLR_NOT_FOUND",
-    "additional_verification_required",
-    "caa_error",
-    "domain_not_allowed",
-    "domain_validation_denied",
-    "invalid_public_domain",
-    "no_available_contacts",
-    "other",
-    "pca_access_denied",
-    "pca_invalid_args",
-    "pca_invalid_arn",
-    "pca_invalid_duration",
-    "pca_invalid_state",
-    "pca_limit_exceeded",
-    "pca_name_constraints_validation",
-    "pca_request_failed",
-    "pca_resource_not_found",
-    "slr_not_found",
 ];
 
 const VALID_STATUS: &[&str] = &[
@@ -89,27 +60,13 @@ const VALID_STATUS: &[&str] = &[
     "PENDING_VALIDATION",
     "REVOKED",
     "VALIDATION_TIMED_OUT",
-    "expired",
-    "failed",
-    "inactive",
-    "issued",
-    "pending_validation",
-    "revoked",
-    "validation_timed_out",
 ];
 
-const VALID_TYPE: &[&str] = &["CNAME", "cname"];
+const VALID_TYPE: &[&str] = &["CNAME"];
 
-const VALID_VALIDATION_METHOD: &[&str] = &["DNS", "EMAIL", "HTTP", "dns", "email", "http"];
+const VALID_VALIDATION_METHOD: &[&str] = &["DNS", "EMAIL", "HTTP"];
 
-const VALID_VALIDATION_STATUS: &[&str] = &[
-    "FAILED",
-    "PENDING_VALIDATION",
-    "SUCCESS",
-    "failed",
-    "pending_validation",
-    "success",
-];
+const VALID_VALIDATION_STATUS: &[&str] = &["FAILED", "PENDING_VALIDATION", "SUCCESS"];
 
 /// Returns the schema config for acm.Certificate (Smithy: com.amazonaws.acm)
 pub fn acm_certificate_config() -> AwsSchemaConfig {

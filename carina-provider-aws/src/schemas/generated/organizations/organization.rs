@@ -7,7 +7,7 @@
 use super::AwsSchemaConfig;
 use carina_core::schema::{AttributeSchema, AttributeType, ResourceSchema, types};
 
-const VALID_FEATURE_SET: &[&str] = &["ALL", "CONSOLIDATED_BILLING", "all", "consolidated_billing"];
+const VALID_FEATURE_SET: &[&str] = &["ALL", "CONSOLIDATED_BILLING"];
 
 pub fn arn() -> AttributeType {
     AttributeType::refined_string(

@@ -216,4 +216,48 @@ mod tests {
             Some("^vpc-[0-9a-f]{8,}$"),
         );
     }
+
+    #[test]
+    fn security_group_ip_protocol_values_are_canonical_and_aliases_reverse() {
+        for resource_type in ["ec2.SecurityGroupIngress", "ec2.SecurityGroupEgress"] {
+            let values = super::generated::get_enum_valid_values(resource_type, "ip_protocol")
+                .unwrap_or_else(|| panic!("{resource_type}.ip_protocol values should exist"));
+
+            assert!(
+                values.contains(&"tcp")
+                    && values.contains(&"udp")
+                    && values.contains(&"icmp")
+                    && values.contains(&"icmpv6")
+                    && values.contains(&"-1"),
+                "{resource_type}.ip_protocol should include canonical wire values: {values:?}"
+            );
+            assert!(
+                !values.contains(&"all") && !values.contains(&"_1"),
+                "{resource_type}.ip_protocol values must not include DSL aliases: {values:?}"
+            );
+
+            assert_eq!(
+                super::generated::get_enum_alias_reverse(resource_type, "ip_protocol", "all"),
+                Some("-1")
+            );
+            assert_eq!(
+                super::generated::get_enum_alias_reverse(resource_type, "ip_protocol", "_1"),
+                Some("-1")
+            );
+
+            let aliases = super::generated::build_enum_aliases_map();
+            let ip_protocol_aliases = aliases
+                .get(resource_type)
+                .and_then(|attrs| attrs.get("ip_protocol"))
+                .unwrap_or_else(|| panic!("{resource_type}.ip_protocol aliases should exist"));
+            assert_eq!(
+                ip_protocol_aliases.get("all").map(String::as_str),
+                Some("-1")
+            );
+            assert_eq!(
+                ip_protocol_aliases.get("_1").map(String::as_str),
+                Some("-1")
+            );
+        }
+    }
 }
