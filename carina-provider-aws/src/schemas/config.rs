@@ -94,7 +94,7 @@ pub fn aws_validators() -> HashMap<String, CustomValidatorFn> {
             iam_policy_arn => |s: &str| validate_iam_arn(s, "policy/"),
             kms_key_arn => |s: &str| validate_kms_key_id(s),
             // The availability_zone validator must accept both the DSL
-            // namespaced form (`aws.AvailabilityZone.ap_northeast_1a`) and the
+            // namespaced form (`aws.AvailabilityZone.ZoneName.ap_northeast_1a`) and the
             // raw AWS string format (`"ap-northeast-1a"`). The single-arg
             // `validate_availability_zone` from carina-aws-types only knows
             // the raw form, so we wrap it: strip the namespace prefix if
