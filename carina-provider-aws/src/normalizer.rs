@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use indexmap::IndexMap;
 
 use carina_core::provider::{self, BoxFuture, ProviderNormalizer, SavedAttrs, ready_noop};
-use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
+use carina_core::resource::{Resource, ResourceId, State, Value};
 use carina_core::schema::SchemaRegistry;
 
 /// Schema extension for the AWS provider.
@@ -49,77 +49,10 @@ impl ProviderNormalizer for AwsNormalizer {
     }
 }
 
-/// Normalize enum values in read-returned state attributes to namespaced DSL format.
-///
-/// Read methods return plain values like `"Enabled"` from AWS APIs.
-/// This converts them to namespaced format like `aws.s3.Bucket.VersioningStatus.Enabled`
-/// to match the resolved DSL values.
-pub(crate) fn normalize_state_enums(resource_type: &str, attributes: &mut HashMap<String, Value>) {
-    let configs = crate::schemas::generated::configs();
-    let config = configs
-        .iter()
-        .find(|c| c.schema.resource_type == resource_type);
-    let config = match config {
-        Some(c) => c,
-        None => return,
-    };
-
-    let mut resolved = HashMap::new();
-    for (key, value) in attributes.iter() {
-        if let Some(attr_schema) = config.schema.attributes.get(key.as_str()) {
-            if let Some(parts @ (_, enum_vals, _, _, _)) = attr_schema.attr_type.enum_parts() {
-                let check = |s: &str| {
-                    enum_vals.is_some_and(|vals| vals.iter().any(|v| v.eq_ignore_ascii_case(s)))
-                };
-                if let Some(normalized) =
-                    carina_core::utils::normalize_state_enum_value(value, &parts, Some(&check))
-                {
-                    resolved.insert(key.clone(), normalized);
-                }
-            }
-            // Normalize enum fields within struct (Map) values.
-            if let carina_core::schema::Shape::Struct { .. } =
-                config.schema.shape_of(&attr_schema.attr_type)
-                && let Value::Concrete(ConcreteValue::Map(map_fields)) = value
-            {
-                let mut budget = carina_core::schema::ShapeWalkBudget::new(64);
-                let Some(fields) = config
-                    .schema
-                    .struct_fields_with_budget(&attr_schema.attr_type, &mut budget)
-                else {
-                    continue;
-                };
-                let mut normalized_map = map_fields.clone();
-                for field in fields {
-                    if let Some(parts) = field.field_type.enum_parts()
-                        && let Some(field_value) = map_fields.get(&field.name)
-                    {
-                        // Struct field state normalization: bare values only.
-                        if let Some(normalized) =
-                            carina_core::utils::resolve_enum_value(field_value, &parts)
-                        {
-                            normalized_map.insert(field.name.clone(), normalized);
-                        }
-                    }
-                }
-                if normalized_map != *map_fields {
-                    resolved.insert(
-                        key.clone(),
-                        Value::Concrete(ConcreteValue::Map(normalized_map)),
-                    );
-                }
-            }
-        }
-    }
-
-    for (key, value) in resolved {
-        attributes.insert(key, value);
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use carina_core::resource::ConcreteValue;
 
     #[tokio::test]
     async fn normalize_desired_does_not_mutate_enum_typed_attributes() {
@@ -177,118 +110,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_normalize_state_enums_with_to_dsl() {
-        let mut attributes = HashMap::from([(
-            "ip_protocol".to_string(),
-            Value::Concrete(ConcreteValue::String("-1".to_string())),
-        )]);
-        normalize_state_enums("ec2.SecurityGroupIngress", &mut attributes);
-        assert_eq!(
-            attributes.get("ip_protocol"),
-            Some(&Value::Concrete(ConcreteValue::String(
-                "aws.ec2.SecurityGroupIngress.IpProtocol.all".to_string()
-            )))
-        );
-    }
-
-    #[test]
-    fn test_normalize_state_enums() {
-        let mut attributes = HashMap::from([
-            (
-                "bucket".to_string(),
-                Value::Concrete(ConcreteValue::String("my-bucket".to_string())),
-            ),
-            (
-                "object_ownership".to_string(),
-                Value::Concrete(ConcreteValue::String("BucketOwnerEnforced".to_string())),
-            ),
-        ]);
-        normalize_state_enums("s3.BucketOwnershipControls", &mut attributes);
-        assert_eq!(
-            attributes.get("object_ownership"),
-            Some(&Value::Concrete(ConcreteValue::String(
-                "aws.s3.BucketOwnershipControls.ObjectOwnership.bucket_owner_enforced".to_string()
-            )))
-        );
-        assert_eq!(
-            attributes.get("bucket"),
-            Some(&Value::Concrete(ConcreteValue::String(
-                "my-bucket".to_string()
-            )))
-        );
-    }
-
-    #[test]
-    fn test_normalize_state_enums_bucket_versioning() {
-        let mut attributes = HashMap::from([
-            (
-                "bucket".to_string(),
-                Value::Concrete(ConcreteValue::String("my-bucket".to_string())),
-            ),
-            (
-                "status".to_string(),
-                Value::Concrete(ConcreteValue::String("Enabled".to_string())),
-            ),
-        ]);
-        normalize_state_enums("s3.BucketVersioning", &mut attributes);
-        assert_eq!(
-            attributes.get("status"),
-            Some(&Value::Concrete(ConcreteValue::String(
-                "aws.s3.BucketVersioning.VersioningStatus.enabled".to_string()
-            )))
-        );
-    }
-
-    #[test]
-    fn test_normalize_state_enums_already_namespaced() {
-        let mut attributes = HashMap::from([(
-            "status".to_string(),
-            Value::Concrete(ConcreteValue::String(
-                "aws.s3.BucketVersioning.VersioningStatus.Enabled".to_string(),
-            )),
-        )]);
-        normalize_state_enums("s3.BucketVersioning", &mut attributes);
-        assert_eq!(
-            attributes.get("status"),
-            Some(&Value::Concrete(ConcreteValue::String(
-                "aws.s3.BucketVersioning.VersioningStatus.Enabled".to_string()
-            )))
-        );
-    }
-
-    #[test]
-    fn test_normalize_state_enums_ec2_vpc_tenancy() {
-        let mut attributes = HashMap::from([(
-            "instance_tenancy".to_string(),
-            Value::Concrete(ConcreteValue::String("default".to_string())),
-        )]);
-        normalize_state_enums("ec2.Vpc", &mut attributes);
-        assert_eq!(
-            attributes.get("instance_tenancy"),
-            Some(&Value::Concrete(ConcreteValue::String(
-                "aws.ec2.Vpc.InstanceTenancy.default".to_string()
-            )))
-        );
-    }
-
-    #[test]
-    fn test_normalize_state_enums_ec2_security_group_egress() {
-        let mut attributes = HashMap::from([(
-            "ip_protocol".to_string(),
-            Value::Concrete(ConcreteValue::String("-1".to_string())),
-        )]);
-        normalize_state_enums("ec2.SecurityGroupEgress", &mut attributes);
-        assert_eq!(
-            attributes.get("ip_protocol"),
-            Some(&Value::Concrete(ConcreteValue::String(
-                "aws.ec2.SecurityGroupEgress.IpProtocol.all".to_string()
-            )))
-        );
-    }
-
-    #[test]
-    fn test_normalize_state_enums_struct_field_enum() {
+    #[tokio::test]
+    async fn normalize_state_keeps_raw_api_enum_spellings() {
         let mut inner = IndexMap::new();
         inner.insert(
             "hostname_type".to_string(),
@@ -298,18 +121,27 @@ mod tests {
             "enable_resource_name_dns_a_record".to_string(),
             Value::Concrete(ConcreteValue::Bool(true)),
         );
-        let mut attributes = HashMap::from([(
+        let attributes = HashMap::from([(
             "private_dns_name_options_on_launch".to_string(),
             Value::Concrete(ConcreteValue::Map(inner)),
         )]);
-        normalize_state_enums("ec2.Subnet", &mut attributes);
+        let id = Resource::with_provider("aws", "ec2.Subnet", "test-subnet", None).id;
+        let mut states = HashMap::from([(id.clone(), State::existing(id, attributes))]);
+
+        AwsNormalizer.normalize_state(&mut states).await;
+        let state = states
+            .values_mut()
+            .next()
+            .expect("state should survive normalize_state");
+        let attributes = &mut state.attributes;
+
         if let Some(Value::Concrete(ConcreteValue::Map(fields))) =
             attributes.get("private_dns_name_options_on_launch")
         {
             assert_eq!(
                 fields.get("hostname_type"),
                 Some(&Value::Concrete(ConcreteValue::String(
-                    "aws.ec2.Subnet.PrivateDnsNameOptionsOnLaunch.HostnameType.ip_name".to_string()
+                    "ip-name".to_string()
                 )))
             );
             assert_eq!(
@@ -319,52 +151,5 @@ mod tests {
         } else {
             panic!("Expected Value::Map for private_dns_name_options_on_launch");
         }
-    }
-
-    #[test]
-    fn test_normalize_state_enums_ec2_security_group_egress_tcp() {
-        let mut attributes = HashMap::from([(
-            "ip_protocol".to_string(),
-            Value::Concrete(ConcreteValue::String("tcp".to_string())),
-        )]);
-        normalize_state_enums("ec2.SecurityGroupEgress", &mut attributes);
-        assert_eq!(
-            attributes.get("ip_protocol"),
-            Some(&Value::Concrete(ConcreteValue::String(
-                "aws.ec2.SecurityGroupEgress.IpProtocol.tcp".to_string()
-            )))
-        );
-    }
-
-    #[test]
-    fn test_normalize_state_enums_vpn_gateway_type_with_dot() {
-        let mut attributes = HashMap::from([(
-            "type".to_string(),
-            Value::Concrete(ConcreteValue::String("ipsec.1".to_string())),
-        )]);
-        normalize_state_enums("ec2.VpnGateway", &mut attributes);
-        assert_eq!(
-            attributes.get("type"),
-            Some(&Value::Concrete(ConcreteValue::String(
-                "aws.ec2.VpnGateway.Type.ipsec_1".to_string()
-            )))
-        );
-    }
-
-    #[test]
-    fn test_normalize_state_enums_vpn_gateway_type_already_namespaced() {
-        let mut attributes = HashMap::from([(
-            "type".to_string(),
-            Value::Concrete(ConcreteValue::String(
-                "aws.ec2.VpnGateway.Type.ipsec.1".to_string(),
-            )),
-        )]);
-        normalize_state_enums("ec2.VpnGateway", &mut attributes);
-        assert_eq!(
-            attributes.get("type"),
-            Some(&Value::Concrete(ConcreteValue::String(
-                "aws.ec2.VpnGateway.Type.ipsec.1".to_string()
-            )))
-        );
     }
 }

@@ -1,6 +1,6 @@
 use carina_core::resource::{ConcreteValue, Value};
 use carina_core::schema::{AttributeType, CompletionValue, DslTransform, legacy_validator};
-use carina_core::utils::{extract_enum_value, validate_enum_namespace};
+use carina_core::utils::validate_enum_namespace;
 
 use super::provider_bare_type;
 
@@ -72,6 +72,13 @@ pub fn valid_regions_display() -> String {
         .join(", ")
 }
 
+fn strip_region_prefix(value: &str) -> &str {
+    value
+        .strip_prefix("aws.Region.")
+        .or_else(|| value.strip_prefix("Region."))
+        .unwrap_or(value)
+}
+
 /// Region API spelling -> DSL spelling pairs for the carina-core /
 /// carina-provider-protocol `StringEnum.dsl_aliases` field.
 ///
@@ -121,7 +128,7 @@ pub fn aws_region() -> AttributeType {
                 validate_enum_namespace(s, &id)
                     .map_err(|reason| format!("Invalid region '{}': {}", s, reason))?;
                 // Normalize the input to AWS format (hyphens)
-                let normalized = extract_enum_value(s).replace('_', "-");
+                let normalized = strip_region_prefix(s).replace('_', "-");
                 if is_valid_region(&normalized) {
                     Ok(())
                 } else {

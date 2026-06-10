@@ -26,6 +26,13 @@ pub struct AwsSchemaConfig {
 /// Type alias for custom type validator functions.
 pub type CustomValidatorFn = Box<dyn Fn(&str) -> Result<(), String> + Send + Sync>;
 
+fn strip_availability_zone_prefix(value: &str) -> &str {
+    value
+        .strip_prefix("aws.AvailabilityZone.ZoneName.")
+        .or_else(|| value.strip_prefix("ZoneName."))
+        .unwrap_or(value)
+}
+
 /// Return all AWS type validators for use in `validate_custom_type`.
 ///
 /// These validators are keyed by type name (matching the names used in schema
@@ -105,7 +112,7 @@ pub fn aws_validators() -> HashMap<String, CustomValidatorFn> {
                     carina_core::utils::validate_enum_namespace(s, &id)
                         .map_err(|reason| format!("Invalid availability zone '{}': {}", s, reason))?;
                 }
-                let extracted = carina_core::utils::extract_enum_value(s);
+                let extracted = strip_availability_zone_prefix(s);
                 let normalized = extracted.replace('_', "-");
                 validate_availability_zone(&normalized)
             },

@@ -6,13 +6,10 @@
 use indexmap::IndexMap;
 use std::collections::HashMap;
 
-use carina_core::provider::{BoxFuture, ProviderError, ProviderResult};
-use carina_core::resource::{ConcreteValue, DataSource, Resource, ResourceId, State, Value};
-#[allow(unused_imports)]
-use carina_core::utils::extract_enum_value;
-
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
+use carina_core::provider::{BoxFuture, ProviderError, ProviderResult};
+use carina_core::resource::{ConcreteValue, DataSource, Resource, ResourceId, State, Value};
 
 // ===== Generated Methods on AwsProvider =====
 

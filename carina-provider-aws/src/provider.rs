@@ -8,7 +8,6 @@ use carina_core::resource::{DataSource, ResourceId, State};
 
 use crate::AwsProvider;
 use crate::helpers::apply_patch_to_state;
-use crate::normalizer::normalize_state_enums;
 
 impl Provider for AwsProvider {
     fn name(&self) -> &str {
@@ -24,7 +23,7 @@ impl Provider for AwsProvider {
         let id = id.clone();
         let identifier = identifier.map(|s| s.to_string());
         Box::pin(async move {
-            let mut state = match id.resource_type.as_str() {
+            let state = match id.resource_type.as_str() {
                 "s3.Bucket" => self.read_s3_bucket(&id, identifier.as_deref()).await,
                 "s3.BucketPolicy" => self.read_s3_bucket_policy(&id, identifier.as_deref()).await,
                 "s3.BucketPublicAccessBlock" => {
@@ -143,11 +142,6 @@ impl Provider for AwsProvider {
                 .for_resource(id.clone())),
             }?;
 
-            // Normalize enum values in read state to namespaced DSL format
-            if state.exists {
-                normalize_state_enums(&id.resource_type, &mut state.attributes);
-            }
-
             Ok(state)
         })
     }
@@ -155,12 +149,7 @@ impl Provider for AwsProvider {
     fn read_data_source(&self, resource: &DataSource) -> BoxFuture<'_, ProviderResult<State>> {
         let resource = resource.clone();
         Box::pin(async move {
-            let mut state =
-                crate::provider_generated::dispatch_read_data_source(self, &resource).await?;
-            if state.exists {
-                normalize_state_enums(&resource.id.resource_type, &mut state.attributes);
-            }
-            Ok(state)
+            crate::provider_generated::dispatch_read_data_source(self, &resource).await
         })
     }
 
