@@ -10,7 +10,7 @@ use aws_sdk_ec2::types::{AttributeBooleanValue, HostnameType};
 
 // `read_ec2_subnet` must store `availability_zone` as the AWS canonical
 // form (`"ap-northeast-1a"`). Rewriting it to a DSL-prefixed identifier
-// (`"aws.AvailabilityZone.ap_northeast_1a"`) yields a phantom
+// (`"aws.AvailabilityZone.ZoneName.ap_northeast_1a"`) yields a phantom
 // `forces replacement` diff on every post-apply plan: the schema's
 // `CustomEnum.to_dsl` folds both sides to the same identifier when
 // rendered, so the printed values match while the underlying strings

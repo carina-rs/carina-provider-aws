@@ -58,7 +58,7 @@ pub fn validate_availability_zone(az: &str) -> Result<(), String> {
 
 /// Availability zone type with validation (e.g., "us-east-1a")
 /// Accepts:
-/// - DSL format: aws.AvailabilityZone.us_east_1a
+/// - DSL format: aws.AvailabilityZone.ZoneName.us_east_1a
 /// - AWS string format: "us-east-1a"
 /// - Shorthand: us_east_1a
 pub fn availability_zone() -> AttributeType {

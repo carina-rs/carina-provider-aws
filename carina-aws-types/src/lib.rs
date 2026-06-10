@@ -590,7 +590,7 @@ mod tests {
         assert!(
             carina_core::schema::Schema::flat(az_type.clone())
                 .validate(&Value::Concrete(ConcreteValue::String(
-                    "gcp.AvailabilityZone.us_east_1a".to_string()
+                    "gcp.AvailabilityZone.ZoneName.us_east_1a".to_string()
                 )))
                 .is_err()
         );
