@@ -461,11 +461,20 @@ fn dsl_value_to_iam_json(
     // the WIT boundary collapses `EnumIdentifier` to `String` anyway).
     if let Some((_, Some(values), _, _, dsl_map)) = attr_type.enum_parts() {
         match value {
-            Value::Concrete(ConcreteValue::String(s))
-            | Value::Concrete(ConcreteValue::EnumIdentifier(s)) => {
+            Value::Concrete(ConcreteValue::String(s)) => {
                 let valid: Vec<&str> = values.iter().map(String::as_str).collect();
-                let trailing = carina_core::utils::extract_enum_value_with_values(s, &valid);
+                let trailing =
+                    carina_core::utils::extract_enum_value_with_values(s.as_str(), &valid);
                 return serde_json::Value::String(dsl_map.api_for(trailing));
+            }
+            Value::Concrete(ConcreteValue::EnumIdentifier(s)) => {
+                let valid: Vec<&str> = values.iter().map(String::as_str).collect();
+                let trailing =
+                    carina_core::utils::extract_enum_value_with_values(s.as_str(), &valid);
+                return serde_json::Value::String(dsl_map.api_for(trailing));
+            }
+            Value::Concrete(ConcreteValue::CanonicalEnum(c)) => {
+                return serde_json::Value::String(c.api_value().to_string());
             }
             _ => return scalar_to_json(value),
         }
@@ -611,6 +620,9 @@ fn scalar_to_json(value: &Value) -> serde_json::Value {
         Value::Concrete(ConcreteValue::Bool(b)) => serde_json::Value::Bool(*b),
         Value::Concrete(ConcreteValue::EnumIdentifier(id)) => {
             serde_json::Value::String(id.rsplit('.').next().unwrap_or(id.as_str()).to_string())
+        }
+        Value::Concrete(ConcreteValue::CanonicalEnum(c)) => {
+            serde_json::Value::String(c.api_value().to_string())
         }
         Value::Concrete(ConcreteValue::List(items)) => {
             serde_json::Value::Array(items.iter().map(scalar_to_json).collect())
@@ -841,7 +853,7 @@ mod tests {
         let mut policy = IndexMap::new();
         policy.insert(
             "version".to_string(),
-            Value::Concrete(ConcreteValue::EnumIdentifier("2012_10_17".to_string())),
+            Value::Concrete(ConcreteValue::enum_identifier("2012_10_17")),
         );
         let mut stmt = IndexMap::new();
         // `effect` is a StringEnum. The read path now emits raw
@@ -876,6 +888,52 @@ mod tests {
         assert!(!resolved.contains("\"version\""));
     }
 
+    #[test]
+    fn resolve_iam_policy_attr_serializes_canonical_enum_api_value() {
+        let mut stmt = IndexMap::new();
+        stmt.insert(
+            "effect".to_string(),
+            Value::Concrete(ConcreteValue::enum_identifier("allow")),
+        );
+        stmt.insert(
+            "action".to_string(),
+            Value::Concrete(ConcreteValue::String("s3:GetObject".to_string())),
+        );
+        let mut policy = IndexMap::new();
+        policy.insert(
+            "version".to_string(),
+            Value::Concrete(ConcreteValue::enum_identifier("2012_10_17")),
+        );
+        policy.insert(
+            "statement".to_string(),
+            Value::Concrete(ConcreteValue::List(vec![Value::Concrete(
+                ConcreteValue::Map(stmt),
+            )])),
+        );
+        let schema = carina_core::schema::Schema::flat(carina_aws_types::iam_policy_document());
+        let canonical = schema.canonicalize(Value::Concrete(ConcreteValue::Map(policy)));
+        assert!(
+            matches!(canonical, Value::Concrete(ConcreteValue::Map(_))),
+            "policy should canonicalize to a map"
+        );
+
+        let r = make_resource(Some(canonical));
+        let resolved = resolve_iam_policy_attr(&r, "policy").expect("map -> JSON");
+
+        assert!(
+            resolved.contains(r#""Version":"2012-10-17""#),
+            "version must use CanonicalEnum api_value, got: {resolved}"
+        );
+        assert!(
+            resolved.contains(r#""Effect":"Allow""#),
+            "effect must use CanonicalEnum api_value, got: {resolved}"
+        );
+        assert!(
+            !resolved.contains("2012_10_17") && !resolved.contains(r#""allow""#),
+            "DSL spelling must not reach AWS, got: {resolved}"
+        );
+    }
+
     /// aws#315 defensive fallback: the schema-typed AWS normalizer
     /// (`api_canonicalize_recursive`) is what actually canonicalizes
     /// `version` / `effect` before this serializer runs — see the
@@ -890,14 +948,14 @@ mod tests {
         let mut policy = IndexMap::new();
         policy.insert(
             "version".to_string(),
-            Value::Concrete(ConcreteValue::EnumIdentifier(
-                "aws.iam.PolicyDocument.Version.2012_10_17".to_string(),
+            Value::Concrete(ConcreteValue::enum_identifier(
+                "aws.iam.PolicyDocument.Version.2012_10_17",
             )),
         );
         let mut stmt = IndexMap::new();
         stmt.insert(
             "effect".to_string(),
-            Value::Concrete(ConcreteValue::EnumIdentifier("allow".to_string())),
+            Value::Concrete(ConcreteValue::enum_identifier("allow")),
         );
         stmt.insert(
             "action".to_string(),

@@ -154,10 +154,15 @@ fn api_canonicalize_recursive(
     // them, so the DSL spelling reached AWS and was rejected with
     // `MalformedPolicy`.
     if let Some((_, Some(values), _, _, dsl_map)) = attr_type.enum_parts() {
-        let (Value::Concrete(ConcreteValue::String(s))
-        | Value::Concrete(ConcreteValue::EnumIdentifier(s))) = value
-        else {
-            return None;
+        if let Value::Concrete(ConcreteValue::CanonicalEnum(c)) = value {
+            return Some(Value::Concrete(ConcreteValue::String(
+                c.api_value().to_string(),
+            )));
+        }
+        let s = match value {
+            Value::Concrete(ConcreteValue::String(s)) => s.as_str(),
+            Value::Concrete(ConcreteValue::EnumIdentifier(s)) => s.as_str(),
+            _ => return None,
         };
         let valid: Vec<&str> = values.iter().map(String::as_str).collect();
         let dsl_trailing = carina_core::utils::extract_enum_value_with_values(s, &valid);
@@ -166,7 +171,7 @@ fn api_canonicalize_recursive(
         // arrived as a plain `String` (no namespace, no shape rewrite).
         // An `EnumIdentifier` must still be lowered to `String` so the
         // schema-blind downstream serializers see a plain string.
-        if matches!(value, Value::Concrete(ConcreteValue::String(_))) && s == &api {
+        if matches!(value, Value::Concrete(ConcreteValue::String(_))) && s == api {
             return None;
         }
         return Some(Value::Concrete(ConcreteValue::String(api)));
@@ -636,7 +641,7 @@ mod tests {
         let mut stmt = IndexMap::new();
         stmt.insert(
             "effect".to_string(),
-            Value::Concrete(ConcreteValue::EnumIdentifier("allow".to_string())),
+            Value::Concrete(ConcreteValue::enum_identifier("allow")),
         );
         stmt.insert(
             "action".to_string(),
@@ -645,8 +650,8 @@ mod tests {
         let mut policy = IndexMap::new();
         policy.insert(
             "version".to_string(),
-            Value::Concrete(ConcreteValue::EnumIdentifier(
-                "aws.iam.PolicyDocument.Version.2012_10_17".to_string(),
+            Value::Concrete(ConcreteValue::enum_identifier(
+                "aws.iam.PolicyDocument.Version.2012_10_17",
             )),
         );
         policy.insert(
@@ -1033,7 +1038,7 @@ mod tests {
         let mut stmt = IndexMap::new();
         stmt.insert(
             "effect".to_string(),
-            Value::Concrete(ConcreteValue::EnumIdentifier("allow".to_string())),
+            Value::Concrete(ConcreteValue::enum_identifier("allow")),
         );
         stmt.insert(
             "condition".to_string(),
@@ -1115,7 +1120,7 @@ mod tests {
             let mut stmt = IndexMap::new();
             stmt.insert(
                 "effect".to_string(),
-                Value::Concrete(ConcreteValue::EnumIdentifier("allow".to_string())),
+                Value::Concrete(ConcreteValue::enum_identifier("allow")),
             );
             stmt.insert(
                 "condition".to_string(),

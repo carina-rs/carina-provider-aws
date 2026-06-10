@@ -2565,17 +2565,32 @@ fn generate_provider_code(
             code.push_str("\x20       let mut has_changes = false;\n");
 
             for field in &fields {
-                code.push_str(&format!(
-                    "\x20       if let Some(Value::Concrete(ConcreteValue::String(val))) = attributes.get(\"{}\") {{\n",
-                    field.attr_snake
-                ));
                 if let Some(ref enum_type) = field.enum_type_name {
-                    code.push_str("\x20           let normalized = extract_enum_value(val);\n");
+                    code.push_str(&format!(
+                        "\x20       if let Some(value) = attributes.get(\"{}\") {{\n",
+                        field.attr_snake
+                    ));
+                    code.push_str("\x20           let normalized = match value {\n");
+                    code.push_str(
+                        "\x20               Value::Concrete(ConcreteValue::String(val)) => extract_enum_value(val),\n",
+                    );
+                    code.push_str(
+                        "\x20               Value::Concrete(ConcreteValue::EnumIdentifier(val)) => extract_enum_value(val.as_str()),\n",
+                    );
+                    code.push_str(
+                        "\x20               Value::Concrete(ConcreteValue::CanonicalEnum(val)) => val.api_value().to_string(),\n",
+                    );
+                    code.push_str("\x20               _ => continue,\n");
+                    code.push_str("\x20           };\n");
                     code.push_str(&format!(
                         "\x20           builder = builder.{}({}::from(normalized));\n",
                         field.builder_setter, enum_type
                     ));
                 } else {
+                    code.push_str(&format!(
+                        "\x20       if let Some(Value::Concrete(ConcreteValue::String(val))) = attributes.get(\"{}\") {{\n",
+                        field.attr_snake
+                    ));
                     code.push_str(&format!(
                         "\x20           builder = builder.{}(val.as_str());\n",
                         field.builder_setter

@@ -51,8 +51,13 @@ pub fn core_to_proto_value(v: &CoreValue) -> ProtoValue {
         // emit it as `ProtoValue::String` — identical to the `String`
         // arm. The shape distinction is consumed at the validator entry
         // before reaching this conversion.
-        CoreValue::Concrete(ConcreteValue::String(s))
-        | CoreValue::Concrete(ConcreteValue::EnumIdentifier(s)) => ProtoValue::String(s.clone()),
+        CoreValue::Concrete(ConcreteValue::String(s)) => ProtoValue::String(s.clone()),
+        CoreValue::Concrete(ConcreteValue::EnumIdentifier(s)) => {
+            ProtoValue::String(s.as_str().to_string())
+        }
+        CoreValue::Concrete(ConcreteValue::CanonicalEnum(c)) => {
+            ProtoValue::String(c.api_value().to_string())
+        }
         CoreValue::Concrete(ConcreteValue::Int(i)) => ProtoValue::Int(*i),
         CoreValue::Concrete(ConcreteValue::Float(f)) => ProtoValue::Float(*f),
         CoreValue::Concrete(ConcreteValue::Bool(b)) => ProtoValue::Bool(*b),
@@ -286,33 +291,19 @@ fn proto_to_core_attribute_type(t: &ProtoAttributeType) -> CoreAttributeType {
         } => {
             let inner_t = proto_to_core_attribute_type(element_type);
             if *ordered {
-                let list = CoreAttributeType::list(inner_t);
-                if length.is_some() {
-                    CoreAttributeType::custom(
-                        None,
-                        list,
-                        None,
-                        *length,
-                        legacy_validator(|_| Ok(())),
-                        None,
-                    )
-                } else {
-                    list
-                }
+                CoreAttributeType::refined_list(
+                    inner_t,
+                    true,
+                    *length,
+                    legacy_validator(|_| Ok(())),
+                )
             } else {
-                let list = CoreAttributeType::unordered_list(inner_t);
-                if length.is_some() {
-                    CoreAttributeType::custom(
-                        None,
-                        list,
-                        None,
-                        *length,
-                        legacy_validator(|_| Ok(())),
-                        None,
-                    )
-                } else {
-                    list
-                }
+                CoreAttributeType::refined_list(
+                    inner_t,
+                    false,
+                    *length,
+                    legacy_validator(|_| Ok(())),
+                )
             }
         }
         ProtoAttributeType::Map { inner, key } => CoreAttributeType::map_with_key(
@@ -352,14 +343,19 @@ fn proto_to_core_attribute_type(t: &ProtoAttributeType) -> CoreAttributeType {
                     length.map(|(min, max)| (min.map(|v| v as i64), max.map(|v| v as i64))),
                 ),
                 CoreRawShape::Float { .. } => CoreAttributeType::refined_float(identity, None),
-                CoreRawShape::List { .. } => CoreAttributeType::custom(
-                    identity,
-                    base,
-                    pattern.clone(),
-                    *length,
-                    legacy_validator(|_| Ok(())),
-                    None,
-                ),
+                CoreRawShape::List {
+                    element_type,
+                    ordered,
+                    ..
+                } => {
+                    let _ = (identity, pattern);
+                    CoreAttributeType::refined_list(
+                        element_type.clone(),
+                        ordered,
+                        *length,
+                        legacy_validator(|_| Ok(())),
+                    )
+                }
                 other => panic!("unsupported Custom base in provider protocol: {other:?}"),
             }
         }
