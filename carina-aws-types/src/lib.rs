@@ -968,7 +968,7 @@ mod tests {
             vec![
                 (
                     "version".to_string(),
-                    Value::Concrete(ConcreteValue::EnumIdentifier("2012_10_17".to_string())),
+                    Value::Concrete(ConcreteValue::enum_identifier("2012_10_17")),
                 ),
                 (
                     "statement".to_string(),
@@ -977,9 +977,7 @@ mod tests {
                             vec![
                                 (
                                     "effect".to_string(),
-                                    Value::Concrete(ConcreteValue::EnumIdentifier(
-                                        "allow".to_string(),
-                                    )),
+                                    Value::Concrete(ConcreteValue::enum_identifier("allow")),
                                 ),
                                 (
                                     "action".to_string(),
@@ -1009,7 +1007,7 @@ mod tests {
         let doc = Value::Concrete(ConcreteValue::Map(
             vec![(
                 "version".to_string(),
-                Value::Concrete(ConcreteValue::EnumIdentifier("2020_01_01".to_string())),
+                Value::Concrete(ConcreteValue::enum_identifier("2020_01_01")),
             )]
             .into_iter()
             .collect(),
@@ -1026,7 +1024,7 @@ mod tests {
                     ConcreteValue::Map(
                         vec![(
                             "effect".to_string(),
-                            Value::Concrete(ConcreteValue::EnumIdentifier("grant".to_string())),
+                            Value::Concrete(ConcreteValue::enum_identifier("grant")),
                         )]
                         .into_iter()
                         .collect(),
@@ -1046,7 +1044,7 @@ mod tests {
             vec![
                 (
                     "version".to_string(),
-                    Value::Concrete(ConcreteValue::EnumIdentifier("2012_10_17".to_string())),
+                    Value::Concrete(ConcreteValue::enum_identifier("2012_10_17")),
                 ),
                 (
                     "statement".to_string(),
@@ -1055,9 +1053,7 @@ mod tests {
                             vec![
                                 (
                                     "effect".to_string(),
-                                    Value::Concrete(ConcreteValue::EnumIdentifier(
-                                        "deny".to_string(),
-                                    )),
+                                    Value::Concrete(ConcreteValue::enum_identifier("deny")),
                                 ),
                                 (
                                     "action".to_string(),
@@ -1092,7 +1088,7 @@ mod tests {
             vec![
                 (
                     "version".to_string(),
-                    Value::Concrete(ConcreteValue::EnumIdentifier("2012_10_17".to_string())),
+                    Value::Concrete(ConcreteValue::enum_identifier("2012_10_17")),
                 ),
                 (
                     "statement".to_string(),
@@ -1101,9 +1097,7 @@ mod tests {
                             vec![
                                 (
                                     "effect".to_string(),
-                                    Value::Concrete(ConcreteValue::EnumIdentifier(
-                                        "allow".to_string(),
-                                    )),
+                                    Value::Concrete(ConcreteValue::enum_identifier("allow")),
                                 ),
                                 (
                                     "principal".to_string(),
@@ -1151,7 +1145,7 @@ mod tests {
             vec![
                 (
                     "version".to_string(),
-                    Value::Concrete(ConcreteValue::EnumIdentifier("2012_10_17".to_string())),
+                    Value::Concrete(ConcreteValue::enum_identifier("2012_10_17")),
                 ),
                 (
                     "statement".to_string(),
@@ -1160,9 +1154,7 @@ mod tests {
                             vec![
                                 (
                                     "effect".to_string(),
-                                    Value::Concrete(ConcreteValue::EnumIdentifier(
-                                        "allow".to_string(),
-                                    )),
+                                    Value::Concrete(ConcreteValue::enum_identifier("allow")),
                                 ),
                                 (
                                     "principal".to_string(),
@@ -1446,15 +1438,13 @@ mod tests {
         let schema = carina_core::schema::Schema::flat(attr);
         assert!(
             schema
-                .validate(&Value::Concrete(ConcreteValue::EnumIdentifier(
-                    "global".to_string()
-                )))
+                .validate(&Value::Concrete(ConcreteValue::enum_identifier("global")))
                 .is_ok()
         );
         assert!(
             schema
-                .validate(&Value::Concrete(ConcreteValue::EnumIdentifier(
-                    "Z0000000000000".to_string()
+                .validate(&Value::Concrete(ConcreteValue::enum_identifier(
+                    "Z0000000000000"
                 )))
                 .is_err()
         );
@@ -1910,7 +1900,7 @@ mod tests {
             vec![
                 (
                     "effect".to_string(),
-                    Value::Concrete(ConcreteValue::EnumIdentifier("allow".to_string())),
+                    Value::Concrete(ConcreteValue::enum_identifier("allow")),
                 ),
                 (
                     "action".to_string(),
@@ -1940,7 +1930,7 @@ mod tests {
             vec![
                 (
                     "version".to_string(),
-                    Value::Concrete(ConcreteValue::EnumIdentifier("2012_10_17".to_string())),
+                    Value::Concrete(ConcreteValue::enum_identifier("2012_10_17")),
                 ),
                 (
                     "statement".to_string(),

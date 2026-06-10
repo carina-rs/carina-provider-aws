@@ -1652,30 +1652,26 @@ fn test_organization_feature_set_validates_snake_case_alias() {
     // parser would emit `EnumIdentifier` for both. Mirror that here.
     let schema = carina_core::schema::Schema::flat(feature_set.attr_type.clone());
     schema
-        .validate(&Value::Concrete(ConcreteValue::EnumIdentifier(
-            "ALL".to_string(),
-        )))
+        .validate(&Value::Concrete(ConcreteValue::enum_identifier("ALL")))
         .expect("API spelling ALL should be accepted");
     schema
-        .validate(&Value::Concrete(ConcreteValue::EnumIdentifier(
-            "all".to_string(),
-        )))
+        .validate(&Value::Concrete(ConcreteValue::enum_identifier("all")))
         .expect("DSL spelling all should be accepted");
     schema
-        .validate(&Value::Concrete(ConcreteValue::EnumIdentifier(
-            "CONSOLIDATED_BILLING".to_string(),
+        .validate(&Value::Concrete(ConcreteValue::enum_identifier(
+            "CONSOLIDATED_BILLING",
         )))
         .expect("API spelling CONSOLIDATED_BILLING should be accepted");
     schema
-        .validate(&Value::Concrete(ConcreteValue::EnumIdentifier(
-            "consolidated_billing".to_string(),
+        .validate(&Value::Concrete(ConcreteValue::enum_identifier(
+            "consolidated_billing",
         )))
         .expect("DSL spelling consolidated_billing should be accepted");
     // Bogus values still rejected.
     assert!(
         schema
-            .validate(&Value::Concrete(ConcreteValue::EnumIdentifier(
-                "not_a_value".to_string()
+            .validate(&Value::Concrete(ConcreteValue::enum_identifier(
+                "not_a_value"
             )))
             .is_err(),
         "unknown values must still be rejected"
@@ -1701,23 +1697,15 @@ fn test_route53_record_type_validates_snake_case_alias() {
     // to `StringLiteralExpectedEnum`.
     let schema = carina_core::schema::Schema::flat(type_attr.attr_type.clone());
     schema
-        .validate(&Value::Concrete(ConcreteValue::EnumIdentifier(
-            "A".to_string(),
-        )))
+        .validate(&Value::Concrete(ConcreteValue::enum_identifier("A")))
         .expect("API spelling A should be accepted");
     schema
-        .validate(&Value::Concrete(ConcreteValue::EnumIdentifier(
-            "a".to_string(),
-        )))
+        .validate(&Value::Concrete(ConcreteValue::enum_identifier("a")))
         .expect("DSL spelling a should be accepted");
     schema
-        .validate(&Value::Concrete(ConcreteValue::EnumIdentifier(
-            "CNAME".to_string(),
-        )))
+        .validate(&Value::Concrete(ConcreteValue::enum_identifier("CNAME")))
         .expect("API spelling CNAME should be accepted");
     schema
-        .validate(&Value::Concrete(ConcreteValue::EnumIdentifier(
-            "cname".to_string(),
-        )))
+        .validate(&Value::Concrete(ConcreteValue::enum_identifier("cname")))
         .expect("DSL spelling cname should be accepted");
 }

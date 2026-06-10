@@ -310,6 +310,7 @@ fn redrive_allow_policy_to_json_string(value: &Value) -> Option<String> {
             // -> allowAll); the enum surface is the trailing segment.
             s.rsplit('.').next().unwrap_or(s.as_str()).to_string()
         }
+        Some(Value::Concrete(ConcreteValue::CanonicalEnum(c))) => c.api_value().to_string(),
         _ => return None,
     };
     let mut obj = serde_json::Map::new();
