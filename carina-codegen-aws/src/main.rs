@@ -2199,8 +2199,6 @@ fn generate_provider_code(
          use carina_core::resource::{\n\
          \x20   ConcreteValue, DataSource, Resource, ResourceId, State, Value,\n\
          };\n\
-         #[allow(unused_imports)]\n\
-         use carina_core::utils::extract_enum_value;\n\n\
          use crate::AwsProvider;\n\
          use crate::error_helpers::api_error_with_meta;\n\n",
     );
@@ -2550,10 +2548,10 @@ fn generate_provider_code(
                     ));
                     code.push_str("\x20           let normalized = match value {\n");
                     code.push_str(
-                        "\x20               Value::Concrete(ConcreteValue::String(val)) => extract_enum_value(val),\n",
+                        "\x20               Value::Concrete(ConcreteValue::String(val)) => val.clone(),\n",
                     );
                     code.push_str(
-                        "\x20               Value::Concrete(ConcreteValue::EnumIdentifier(val)) => extract_enum_value(val.as_str()),\n",
+                        "\x20               Value::Concrete(ConcreteValue::EnumIdentifier(val)) => val.as_str().to_string(),\n",
                     );
                     code.push_str(
                         "\x20               Value::Concrete(ConcreteValue::CanonicalEnum(val)) => val.api_value().to_string(),\n",

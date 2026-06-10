@@ -573,6 +573,18 @@ mod tests {
     }
 
     #[test]
+    fn az_accepts_kind_shorthand_format() {
+        let az_type = availability_zone();
+        assert!(
+            carina_core::schema::Schema::flat(az_type.clone())
+                .validate(&Value::Concrete(ConcreteValue::String(
+                    "ZoneName.us_east_1a".to_string()
+                )))
+                .is_ok()
+        );
+    }
+
+    #[test]
     fn az_rejects_invalid_az() {
         let az_type = availability_zone();
         assert!(
@@ -1324,6 +1336,18 @@ mod tests {
             carina_core::schema::Schema::flat(region_type.clone())
                 .validate(&Value::Concrete(ConcreteValue::String(
                     "Region.ap_northeast_1".to_string()
+                )))
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn region_accepts_bare_dsl_value() {
+        let region_type = aws_region();
+        assert!(
+            carina_core::schema::Schema::flat(region_type.clone())
+                .validate(&Value::Concrete(ConcreteValue::String(
+                    "ap_northeast_1".to_string()
                 )))
                 .is_ok()
         );

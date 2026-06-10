@@ -910,11 +910,7 @@ fn read_data_source(&self, resource: &Resource) -> BoxFuture<'_, ProviderResult<
     let resource = resource.clone();
     let me = self;
     Box::pin(async move {
-        let mut state = crate::provider_generated::dispatch_read_data_source(me, &resource).await?;
-        if state.exists {
-            normalize_state_enums(&resource.id.resource_type, &mut state.attributes);
-        }
-        Ok(state)
+        crate::provider_generated::dispatch_read_data_source(me, &resource).await
     })
 }
 ```
