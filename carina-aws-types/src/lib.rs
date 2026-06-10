@@ -2005,10 +2005,9 @@ mod tests {
     }
 
     /// Regression: `s3_sse_algorithm` must register DSL aliases for every
-    /// value so `AwsNormalizer::api_canonicalize_recursive` rewrites the
-    /// DSL alias spelling (e.g. `aes256`) to the AWS API canonical
-    /// (`AES256`) before the apply path forwards it to S3. Without
-    /// aliases the literal alias string flows on the wire and
+    /// value so core rewrites the DSL alias spelling (e.g. `aes256`) to
+    /// the AWS API canonical (`AES256`) before the apply path forwards it
+    /// to S3. Without aliases the literal alias string flows on the wire and
     /// `PutBucketEncryption` returns `MalformedXML`. See
     /// `carina-rs/carina-provider-aws#390`.
     #[test]

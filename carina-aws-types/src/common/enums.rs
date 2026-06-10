@@ -75,11 +75,11 @@ fn dsl_aliases_for(values: &[&str]) -> Vec<(String, String)> {
 /// same `values` slice that defines the canonical AWS API values, making
 /// "closed enum with empty `dsl_aliases`" impossible by construction.
 ///
-/// `AwsNormalizer::api_canonicalize_recursive` relies on this alias
-/// table to rewrite DSL spellings (e.g. `aes256`) to the AWS canonical
-/// (`AES256`) before the wire call. A closed enum whose alias table is
-/// empty silently forwards the raw alias spelling to the AWS SDK and
-/// triggers `MalformedXML` / `Unknown(...)` errors.
+/// Core's enum resolver relies on this alias table to rewrite DSL
+/// spellings (e.g. `aes256`) to the AWS canonical (`AES256`) before the
+/// value crosses the provider boundary. A closed enum whose alias table is
+/// empty can silently forward the raw alias spelling to the AWS SDK and
+/// trigger `MalformedXML` / `Unknown(...)` errors.
 /// See `carina-rs/carina-provider-aws#390`.
 ///
 /// The raw [`AttributeType::enum_`] constructor remains in use

@@ -3,7 +3,6 @@ use std::collections::HashMap;
 use aws_sdk_s3::types::{BucketCannedAcl, Grant, Permission, Type as GranteeType};
 use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
-use carina_core::utils::convert_enum_value;
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
@@ -166,10 +165,7 @@ impl AwsProvider {
         resource: &Resource,
     ) -> ProviderResult<State> {
         let acl_str = match resource.get_attr("acl") {
-            // convert_enum_value normalizes namespaced/typed identifiers
-            // (`aws.s3.BucketAcl.Acl.public_read`) and snake-cased aliases
-            // (`public_read` ⇄ `public-read`) back to AWS canonical form.
-            Some(Value::Concrete(ConcreteValue::String(s))) => convert_enum_value(s).to_string(),
+            Some(Value::Concrete(ConcreteValue::String(s))) => s.to_string(),
             _ => {
                 return Err(
                     ProviderError::invalid_input("acl is required").for_resource(id.clone())

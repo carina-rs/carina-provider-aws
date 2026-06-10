@@ -305,10 +305,10 @@ fn redrive_allow_policy_to_json_string(value: &Value) -> Option<String> {
     let permission = match map.get("redrive_permission") {
         Some(Value::Concrete(ConcreteValue::String(s))) => s.clone(),
         Some(Value::Concrete(ConcreteValue::EnumIdentifier(s))) => {
-            // Strip any namespace prefix (e.g.
-            // aws.sqs.Queue.RedriveAllowPolicy.RedrivePermission.allowAll
-            // -> allowAll); the enum surface is the trailing segment.
-            s.rsplit('.').next().unwrap_or(s.as_str()).to_string()
+            // Raw EnumIdentifier at wire-out means the host did not
+            // canonicalize it; pass it through so AWS-side rejection is
+            // visible instead of silently mis-splitting.
+            s.as_str().to_string()
         }
         Some(Value::Concrete(ConcreteValue::CanonicalEnum(c))) => c.api_value().to_string(),
         _ => return None,
@@ -662,4 +662,45 @@ fn resource_tags_map(resource: &Resource) -> Option<HashMap<String, String>> {
         }
     }
     if out.is_empty() { None } else { Some(out) }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn redrive_allow_policy_with_permission(permission: Value) -> Value {
+        let mut map = IndexMap::new();
+        map.insert("redrive_permission".to_string(), permission);
+        Value::Concrete(ConcreteValue::Map(map))
+    }
+
+    #[test]
+    fn redrive_allow_policy_serializes_canonical_enum_api_value() {
+        let mut map = IndexMap::new();
+        map.insert(
+            "redrive_permission".to_string(),
+            Value::Concrete(ConcreteValue::enum_identifier("allowAll")),
+        );
+        let schema =
+            carina_core::schema::Schema::flat(carina_aws_types::sqs_redrive_allow_policy());
+        let canonical = schema.canonicalize(Value::Concrete(ConcreteValue::Map(map)));
+
+        let json = redrive_allow_policy_to_json_string(&canonical).expect("redrive allow JSON");
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(parsed["redrivePermission"].as_str(), Some("allowAll"));
+    }
+
+    #[test]
+    fn redrive_allow_policy_raw_enum_identifier_passes_through_verbatim() {
+        let raw = "aws.sqs.Queue.RedriveAllowPolicy.RedrivePermission.allowAll";
+        let value = redrive_allow_policy_with_permission(Value::Concrete(
+            ConcreteValue::enum_identifier(raw),
+        ));
+
+        let json = redrive_allow_policy_to_json_string(&value).expect("redrive allow JSON");
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(parsed["redrivePermission"].as_str(), Some(raw));
+    }
 }

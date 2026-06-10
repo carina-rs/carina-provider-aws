@@ -4,7 +4,6 @@ use std::collections::HashMap;
 
 use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
-use carina_core::utils::convert_enum_value;
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
@@ -361,18 +360,15 @@ impl AwsProvider {
     }
 }
 
-/// Convert protocol value from DSL format to AWS format
-/// - aws.Protocol.tcp / Protocol.tcp / tcp -> tcp
-/// - aws.Protocol.all / Protocol.all / all / -1 -> -1
+/// Convert protocol value to AWS format.
+///
+/// Enum-typed protocol values arrive as AWS-canonical strings from core.
+/// Keep the legacy bare `all` alias mapping here because AWS expects `-1`.
 pub(crate) fn convert_protocol_value(value: &str) -> String {
-    // First convert DSL enum format to raw value
-    let raw = convert_enum_value(value);
-
-    // Handle special case: "all" means "-1" (all protocols)
-    if raw == "all" {
+    if value == "all" {
         "-1".to_string()
     } else {
-        raw.to_string()
+        value.to_string()
     }
 }
 
@@ -403,18 +399,8 @@ mod tests {
     }
 
     #[test]
-    fn test_convert_protocol_value_dsl_format_tcp() {
-        assert_eq!(convert_protocol_value("aws.Protocol.tcp"), "tcp");
-    }
-
-    #[test]
-    fn test_convert_protocol_value_dsl_format_all() {
-        assert_eq!(convert_protocol_value("aws.Protocol.all"), "-1");
-    }
-
-    #[test]
-    fn test_convert_protocol_value_short_dsl_format() {
-        assert_eq!(convert_protocol_value("Protocol.tcp"), "tcp");
+    fn test_convert_protocol_value_canonical_tcp() {
+        assert_eq!(convert_protocol_value("tcp"), "tcp");
     }
 
     // --- Route composite identifier parsing tests ---

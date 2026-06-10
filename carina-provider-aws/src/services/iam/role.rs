@@ -463,15 +463,19 @@ fn dsl_value_to_iam_json(
         match value {
             Value::Concrete(ConcreteValue::String(s)) => {
                 let valid: Vec<&str> = values.iter().map(String::as_str).collect();
-                let trailing =
-                    carina_core::utils::extract_enum_value_with_values(s.as_str(), &valid);
-                return serde_json::Value::String(dsl_map.api_for(trailing));
+                return serde_json::Value::String(carina_core::utils::canonicalize_enum_to_api(
+                    s.as_str(),
+                    &valid,
+                    &dsl_map,
+                ));
             }
             Value::Concrete(ConcreteValue::EnumIdentifier(s)) => {
                 let valid: Vec<&str> = values.iter().map(String::as_str).collect();
-                let trailing =
-                    carina_core::utils::extract_enum_value_with_values(s.as_str(), &valid);
-                return serde_json::Value::String(dsl_map.api_for(trailing));
+                return serde_json::Value::String(carina_core::utils::canonicalize_enum_to_api(
+                    s.as_str(),
+                    &valid,
+                    &dsl_map,
+                ));
             }
             Value::Concrete(ConcreteValue::CanonicalEnum(c)) => {
                 return serde_json::Value::String(c.api_value().to_string());
@@ -610,8 +614,8 @@ fn dsl_value_to_iam_json(
 /// Terminal scalar conversion. No enum handling here — `StringEnum`
 /// leaves are canonicalized in `dsl_value_to_iam_json` before reaching
 /// this point. An `EnumIdentifier` only lands here for a non-schema
-/// position (none exist in `iam_policy_document()` today); strip its
-/// namespace so a stray value still serializes as a plain string.
+/// position or schema desync, so serialize it verbatim and let AWS reject
+/// invalid wire text visibly.
 fn scalar_to_json(value: &Value) -> serde_json::Value {
     match value {
         Value::Concrete(ConcreteValue::String(s)) => serde_json::Value::String(s.clone()),
@@ -619,7 +623,10 @@ fn scalar_to_json(value: &Value) -> serde_json::Value {
         Value::Concrete(ConcreteValue::Float(f)) => serde_json::json!(*f),
         Value::Concrete(ConcreteValue::Bool(b)) => serde_json::Value::Bool(*b),
         Value::Concrete(ConcreteValue::EnumIdentifier(id)) => {
-            serde_json::Value::String(id.rsplit('.').next().unwrap_or(id.as_str()).to_string())
+            // Raw EnumIdentifier at wire-out means the host did not
+            // canonicalize it; pass it through so AWS-side rejection is
+            // visible instead of silently mis-splitting.
+            serde_json::Value::String(id.as_str().to_string())
         }
         Value::Concrete(ConcreteValue::CanonicalEnum(c)) => {
             serde_json::Value::String(c.api_value().to_string())
@@ -930,21 +937,12 @@ mod tests {
         );
         assert!(
             !resolved.contains("2012_10_17") && !resolved.contains(r#""allow""#),
-            "DSL spelling must not reach AWS, got: {resolved}"
+            "non-canonical enum spelling must not reach IAM JSON, got: {resolved}"
         );
     }
 
-    /// aws#315 defensive fallback: the schema-typed AWS normalizer
-    /// (`api_canonicalize_recursive`) is what actually canonicalizes
-    /// `version` / `effect` before this serializer runs — see the
-    /// end-to-end regression in `normalizer.rs`. But if an
-    /// `EnumIdentifier` reaches the serializer un-canonicalized (a future
-    /// enum field not yet covered by the normalizer pass), the
-    /// `scalar_to_json` fallback must still emit the AWS wire form so AWS
-    /// does not reject the PUT with `MalformedPolicy`. Both the namespaced
-    /// and the bare-alias `EnumIdentifier` shapes are covered here.
     #[test]
-    fn resolve_iam_policy_attr_enum_identifier_fallback_is_aws_canonical() {
+    fn resolve_iam_policy_attr_canonicalizes_schema_typed_enum_identifier() {
         let mut policy = IndexMap::new();
         policy.insert(
             "version".to_string(),
@@ -955,7 +953,9 @@ mod tests {
         let mut stmt = IndexMap::new();
         stmt.insert(
             "effect".to_string(),
-            Value::Concrete(ConcreteValue::enum_identifier("allow")),
+            Value::Concrete(ConcreteValue::enum_identifier(
+                "aws.iam.PolicyDocument.Statement.Effect.allow",
+            )),
         );
         stmt.insert(
             "action".to_string(),
@@ -969,20 +969,24 @@ mod tests {
         );
 
         let r = make_resource(Some(Value::Concrete(ConcreteValue::Map(policy))));
-        let resolved = resolve_iam_policy_attr(&r, "policy").expect("map → JSON");
+        let resolved = resolve_iam_policy_attr(&r, "policy").expect("map -> JSON");
 
         assert!(
             resolved.contains(r#""Version":"2012-10-17""#),
-            "version must be AWS-canonical, got: {resolved}"
+            "version EnumIdentifier must canonicalize at schema-typed position, got: {resolved}"
         );
         assert!(
             resolved.contains(r#""Effect":"Allow""#),
-            "effect must be AWS-canonical, got: {resolved}"
+            "effect EnumIdentifier must canonicalize at schema-typed position, got: {resolved}"
         );
-        assert!(
-            !resolved.contains("2012_10_17") && !resolved.contains(r#""allow""#),
-            "DSL spelling must not reach AWS, got: {resolved}"
-        );
+    }
+
+    #[test]
+    fn scalar_to_json_raw_enum_identifier_passes_through_verbatim() {
+        let raw = "aws.iam.PolicyDocument.Version.2012_10_17";
+        let json = scalar_to_json(&Value::Concrete(ConcreteValue::enum_identifier(raw)));
+
+        assert_eq!(json, serde_json::Value::String(raw.to_string()));
     }
 
     /// Real aws#315 reproduction (root cause: carina#3060). At apply
@@ -1048,7 +1052,7 @@ mod tests {
         );
         assert!(
             !resolved.contains("2012_10_17") && !resolved.contains(r#""allow""#),
-            "DSL spelling must not reach AWS, got: {resolved}"
+            "non-canonical enum spelling must not reach IAM JSON, got: {resolved}"
         );
         // Constraint A regression: canonical_user Principal must not be
         // silently dropped by the schema-driven walk.
