@@ -9,7 +9,7 @@ use super::tags_type;
 use super::validate_tags_map;
 use carina_core::schema::{AttributeSchema, AttributeType, ResourceSchema};
 
-const VALID_TYPE: &[&str] = &["ipsec.1", "ipsec_1"];
+const VALID_TYPE: &[&str] = &["ipsec.1"];
 
 /// Returns the schema config for ec2.VpnGateway (Smithy: com.amazonaws.ec2)
 pub fn ec2_vpn_gateway_config() -> AwsSchemaConfig {

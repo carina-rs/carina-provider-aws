@@ -9,13 +9,7 @@ use super::tags_type;
 use super::validate_tags_map;
 use carina_core::schema::{AttributeSchema, AttributeType, ResourceSchema, StructField};
 
-const VALID_LOG_DESTINATION_TYPE: &[&str] = &[
-    "cloud-watch-logs",
-    "kinesis-data-firehose",
-    "s3",
-    "cloud_watch_logs",
-    "kinesis_data_firehose",
-];
+const VALID_LOG_DESTINATION_TYPE: &[&str] = &["cloud-watch-logs", "kinesis-data-firehose", "s3"];
 
 const VALID_RESOURCE_TYPE: &[&str] = &[
     "NetworkInterface",
@@ -24,15 +18,9 @@ const VALID_RESOURCE_TYPE: &[&str] = &[
     "TransitGateway",
     "TransitGatewayAttachment",
     "VPC",
-    "network_interface",
-    "regional_nat_gateway",
-    "subnet",
-    "transit_gateway",
-    "transit_gateway_attachment",
-    "vpc",
 ];
 
-const VALID_TRAFFIC_TYPE: &[&str] = &["ACCEPT", "ALL", "REJECT", "accept", "all", "reject"];
+const VALID_TRAFFIC_TYPE: &[&str] = &["ACCEPT", "ALL", "REJECT"];
 
 /// Returns the schema config for ec2.FlowLog (Smithy: com.amazonaws.ec2)
 pub fn ec2_flow_log_config() -> AwsSchemaConfig {

@@ -9,7 +9,7 @@ use super::tags_type;
 use super::validate_tags_map;
 use carina_core::schema::{AttributeSchema, AttributeType, ResourceSchema};
 
-const VALID_BUCKET_NAMESPACE: &[&str] = &["account-regional", "global", "account_regional"];
+const VALID_BUCKET_NAMESPACE: &[&str] = &["account-regional", "global"];
 
 /// Returns the schema config for s3.Bucket (Smithy: com.amazonaws.s3)
 pub fn s3_bucket_config() -> AwsSchemaConfig {

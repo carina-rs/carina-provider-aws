@@ -9,7 +9,7 @@ use super::tags_type;
 use super::validate_tags_map;
 use carina_core::schema::{AttributeSchema, AttributeType, ResourceSchema, StructField, types};
 
-const VALID_HOSTNAME_TYPE: &[&str] = &["ip-name", "resource-name", "ip_name", "resource_name"];
+const VALID_HOSTNAME_TYPE: &[&str] = &["ip-name", "resource-name"];
 
 /// Returns the schema config for ec2.Subnet (Smithy: com.amazonaws.ec2)
 pub fn ec2_subnet_config() -> AwsSchemaConfig {

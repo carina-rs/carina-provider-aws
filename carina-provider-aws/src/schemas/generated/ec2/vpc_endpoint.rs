@@ -15,11 +15,6 @@ const VALID_VPC_ENDPOINT_TYPE: &[&str] = &[
     "Interface",
     "Resource",
     "ServiceNetwork",
-    "gateway",
-    "gateway_load_balancer",
-    "interface",
-    "resource",
-    "service_network",
 ];
 
 /// Returns the schema config for ec2.VpcEndpoint (Smithy: com.amazonaws.ec2)

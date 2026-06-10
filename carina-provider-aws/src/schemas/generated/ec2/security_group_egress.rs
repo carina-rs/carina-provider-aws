@@ -7,7 +7,7 @@
 use super::AwsSchemaConfig;
 use carina_core::schema::{AttributeSchema, AttributeType, ResourceSchema, types};
 
-const VALID_IP_PROTOCOL: &[&str] = &["tcp", "udp", "icmp", "icmpv6", "-1", "all", "_1"];
+const VALID_IP_PROTOCOL: &[&str] = &["tcp", "udp", "icmp", "icmpv6", "-1"];
 
 /// Returns the schema config for ec2.SecurityGroupEgress (Smithy: com.amazonaws.ec2)
 pub fn ec2_security_group_egress_config() -> AwsSchemaConfig {
@@ -71,7 +71,6 @@ pub fn ec2_security_group_egress_config() -> AwsSchemaConfig {
                             "icmp".to_string(),
                             "icmpv6".to_string(),
                             "-1".to_string(),
-                            "all".to_string(),
                         ]),
                         vec![
                             ("-1".to_string(), "all".to_string()),
@@ -79,7 +78,6 @@ pub fn ec2_security_group_egress_config() -> AwsSchemaConfig {
                             ("udp".to_string(), "udp".to_string()),
                             ("icmp".to_string(), "icmp".to_string()),
                             ("icmpv6".to_string(), "icmpv6".to_string()),
-                            ("all".to_string(), "all".to_string()),
                         ],
                         None,
                         None,

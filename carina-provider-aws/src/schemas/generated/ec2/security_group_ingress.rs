@@ -7,7 +7,7 @@
 use super::AwsSchemaConfig;
 use carina_core::schema::{AttributeSchema, AttributeType, ResourceSchema, types};
 
-const VALID_IP_PROTOCOL: &[&str] = &["tcp", "udp", "icmp", "icmpv6", "-1", "all", "_1"];
+const VALID_IP_PROTOCOL: &[&str] = &["tcp", "udp", "icmp", "icmpv6", "-1"];
 
 /// Returns the schema config for ec2.SecurityGroupIngress (Smithy: com.amazonaws.ec2)
 pub fn ec2_security_group_ingress_config() -> AwsSchemaConfig {
@@ -59,8 +59,8 @@ pub fn ec2_security_group_ingress_config() -> AwsSchemaConfig {
         .attribute(
             AttributeSchema::new("ip_protocol", AttributeType::enum_(
     carina_core::schema::enum_identity("IpProtocol", Some("aws.ec2.SecurityGroupIngress")),
-    Some(vec!["tcp".to_string(), "udp".to_string(), "icmp".to_string(), "icmpv6".to_string(), "-1".to_string(), "all".to_string()]),
-    vec![("-1".to_string(), "all".to_string()), ("tcp".to_string(), "tcp".to_string()), ("udp".to_string(), "udp".to_string()), ("icmp".to_string(), "icmp".to_string()), ("icmpv6".to_string(), "icmpv6".to_string()), ("all".to_string(), "all".to_string())],
+    Some(vec!["tcp".to_string(), "udp".to_string(), "icmp".to_string(), "icmpv6".to_string(), "-1".to_string()]),
+    vec![("-1".to_string(), "all".to_string()), ("tcp".to_string(), "tcp".to_string()), ("udp".to_string(), "udp".to_string()), ("icmp".to_string(), "icmp".to_string()), ("icmpv6".to_string(), "icmpv6".to_string())],
     None,
     None,
 ))

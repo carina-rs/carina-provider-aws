@@ -9,18 +9,11 @@ use super::tags_type;
 use super::validate_tags_map;
 use carina_core::schema::{AttributeSchema, AttributeType, ResourceSchema, types};
 
-const VALID_IAM_USER_ACCESS_TO_BILLING: &[&str] = &["ALLOW", "DENY", "allow", "deny"];
+const VALID_IAM_USER_ACCESS_TO_BILLING: &[&str] = &["ALLOW", "DENY"];
 
-const VALID_JOINED_METHOD: &[&str] = &["CREATED", "INVITED", "created", "invited"];
+const VALID_JOINED_METHOD: &[&str] = &["CREATED", "INVITED"];
 
-const VALID_STATUS: &[&str] = &[
-    "ACTIVE",
-    "PENDING_CLOSURE",
-    "SUSPENDED",
-    "active",
-    "pending_closure",
-    "suspended",
-];
+const VALID_STATUS: &[&str] = &["ACTIVE", "PENDING_CLOSURE", "SUSPENDED"];
 
 pub fn arn() -> AttributeType {
     AttributeType::refined_string(

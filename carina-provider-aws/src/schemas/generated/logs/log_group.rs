@@ -9,14 +9,7 @@ use super::tags_type;
 use super::validate_tags_map;
 use carina_core::schema::{AttributeSchema, AttributeType, ResourceSchema};
 
-const VALID_LOG_GROUP_CLASS: &[&str] = &[
-    "DELIVERY",
-    "INFREQUENT_ACCESS",
-    "STANDARD",
-    "delivery",
-    "infrequent_access",
-    "standard",
-];
+const VALID_LOG_GROUP_CLASS: &[&str] = &["DELIVERY", "INFREQUENT_ACCESS", "STANDARD"];
 
 /// Returns the schema config for logs.LogGroup (Smithy: com.amazonaws.cloudwatchlogs)
 pub fn logs_log_group_config() -> AwsSchemaConfig {
