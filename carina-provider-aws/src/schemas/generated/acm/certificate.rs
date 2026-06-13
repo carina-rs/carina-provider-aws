@@ -111,7 +111,7 @@ pub fn acm_certificate_config() -> AwsSchemaConfig {
     vec![("DISABLED".to_string(), "disabled".to_string()), ("ENABLED".to_string(), "enabled".to_string())],
     None,
     None,
-)).with_description("You can opt out of certificate transparency logging by specifying the DISABLED option. Opt in by specifying ENABLED.").with_provider_name("CertificateTransparencyLoggingPreference"),
+)).with_description("This parameter has been deprecated. Certificate transparency logging opt-out is no longer available. All public certificates are recorded in a certifi...").with_provider_name("CertificateTransparencyLoggingPreference"),
                     StructField::new("export", AttributeType::enum_(
     carina_core::schema::enum_identity("Export", Some("aws.acm.Certificate.CertificateOptions")),
     Some(vec!["DISABLED".to_string(), "ENABLED".to_string()]),
@@ -122,7 +122,7 @@ pub fn acm_certificate_config() -> AwsSchemaConfig {
                     ],
                 ))
                 .create_only()
-                .with_description("You can use this parameter to specify whether to add the certificate to a certificate transparency log and export your certificate. Certificate transp...")
+                .with_description("You can use this parameter to specify whether to export your certificate. Certificate transparency logging opt-out is no longer available. All public ...")
                 .with_provider_name("Options"),
         )
         .attribute(

@@ -435,7 +435,6 @@ pub fn proto_to_core_schema(s: &ProtoResourceSchema) -> CoreResourceSchema {
         validator: None,
         kind: proto_to_core_schema_kind(s.kind),
         name_attribute: s.name_attribute.clone(),
-        force_replace: s.force_replace,
         operation_config: s.operation_config.as_ref().map(|c| CoreOperationConfig {
             delete_timeout_secs: c.delete_timeout_secs,
             delete_max_retries: c.delete_max_retries,
@@ -610,7 +609,6 @@ pub fn core_to_proto_schema(s: &CoreResourceSchema) -> ProtoResourceSchema {
         description: s.description.clone(),
         kind: core_to_proto_schema_kind(s.kind),
         name_attribute: s.name_attribute.clone(),
-        force_replace: s.force_replace,
         operation_config: s.operation_config.as_ref().map(|c| ProtoOperationConfig {
             delete_timeout_secs: c.delete_timeout_secs,
             delete_max_retries: c.delete_max_retries,
