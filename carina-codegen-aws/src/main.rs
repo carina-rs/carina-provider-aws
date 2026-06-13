@@ -15,7 +15,7 @@ use carina_smithy::{ShapeKind, SmithyModel};
 use clap::Parser;
 use heck::ToSnakeCase;
 
-use carina_codegen_aws::dsl::dsl_enum_value;
+use carina_aws_types::dsl_enum_value;
 use carina_codegen_aws::resource_defs::{self, ResourceDef};
 
 #[derive(Parser, Debug)]
@@ -4950,7 +4950,7 @@ mod tests {
     fn generate_resource_dsl_aliases_handles_pascal_case_mixed() {
         // Use the dsl helper directly so the assertion does not depend on
         // a specific Smithy fixture being present.
-        use carina_codegen_aws::dsl::dsl_enum_value;
+        use carina_aws_types::dsl_enum_value;
         assert_eq!(
             dsl_enum_value("BucketOwnerEnforced"),
             "bucket_owner_enforced"
