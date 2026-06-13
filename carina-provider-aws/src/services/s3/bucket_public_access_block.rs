@@ -84,10 +84,10 @@ impl AwsProvider {
 
     pub(crate) async fn create_s3_bucket_public_access_block(
         &self,
-        resource: Resource,
+        resource: &Resource,
     ) -> ProviderResult<State> {
-        let bucket = require_string_attr(&resource, "bucket")?;
-        self.put_s3_bucket_public_access_block(&resource.id, &bucket, &resource)
+        let bucket = require_string_attr(resource, "bucket")?;
+        self.put_s3_bucket_public_access_block(&resource.id, &bucket, resource)
             .await
     }
 

@@ -63,10 +63,10 @@ impl AwsProvider {
     /// Create an EC2 VPC Endpoint
     pub(crate) async fn create_ec2_vpc_endpoint(
         &self,
-        resource: Resource,
+        resource: &Resource,
     ) -> ProviderResult<State> {
-        let vpc_id = require_string_attr(&resource, "vpc_id")?;
-        let service_name = require_string_attr(&resource, "service_name")?;
+        let vpc_id = require_string_attr(resource, "vpc_id")?;
+        let service_name = require_string_attr(resource, "service_name")?;
 
         let mut req = self
             .ec2_client

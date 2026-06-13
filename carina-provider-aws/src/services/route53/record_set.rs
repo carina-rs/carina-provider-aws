@@ -356,13 +356,13 @@ impl AwsProvider {
 
     pub(crate) async fn create_route53_record_set(
         &self,
-        resource: Resource,
+        resource: &Resource,
     ) -> ProviderResult<State> {
-        let hosted_zone_id = require_string_attr(&resource, "hosted_zone_id")?;
-        let name = require_string_attr(&resource, "name")?;
-        let record_type = require_enum_attr(&resource, "type")?;
+        let hosted_zone_id = require_string_attr(resource, "hosted_zone_id")?;
+        let name = require_string_attr(resource, "name")?;
+        let record_type = require_enum_attr(resource, "type")?;
 
-        let record_set = build_record_set(&resource)?;
+        let record_set = build_record_set(resource)?;
         change_record_set(
             &self.route53_client,
             &hosted_zone_id,

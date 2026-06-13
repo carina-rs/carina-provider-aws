@@ -91,8 +91,11 @@ impl AwsProvider {
     }
 
     /// Create an EC2 Route Table
-    pub(crate) async fn create_ec2_route_table(&self, resource: Resource) -> ProviderResult<State> {
-        let vpc_id = require_string_attr(&resource, "vpc_id")?;
+    pub(crate) async fn create_ec2_route_table(
+        &self,
+        resource: &Resource,
+    ) -> ProviderResult<State> {
+        let vpc_id = require_string_attr(resource, "vpc_id")?;
 
         // Create Route Table
         let result = self

@@ -160,6 +160,7 @@ impl Provider for AwsProvider {
     ) -> BoxFuture<'_, ProviderResult<State>> {
         let resource = request.resource;
         Box::pin(async move {
+            let resource = resource.as_resource();
             match resource.id.resource_type.as_str() {
                 "s3.Bucket" => self.create_s3_bucket(resource).await,
                 "s3.BucketPolicy" => self.create_s3_bucket_policy(resource).await,

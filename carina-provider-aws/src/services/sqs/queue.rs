@@ -469,8 +469,8 @@ impl AwsProvider {
     }
 
     /// Create an SQS Queue and return its post-create state.
-    pub(crate) async fn create_sqs_queue(&self, resource: Resource) -> ProviderResult<State> {
-        let queue_name = require_string_attr(&resource, "queue_name")?;
+    pub(crate) async fn create_sqs_queue(&self, resource: &Resource) -> ProviderResult<State> {
+        let queue_name = require_string_attr(resource, "queue_name")?;
 
         // Pack every writable attribute the user actually set.
         let mut attr_map: HashMap<QueueAttributeName, String> = HashMap::new();
@@ -485,7 +485,7 @@ impl AwsProvider {
             }
         }
 
-        let tags = resource_tags_map(&resource);
+        let tags = resource_tags_map(resource);
 
         let mut req = self.sqs_client.create_queue().queue_name(&queue_name);
         if !attr_map.is_empty() {

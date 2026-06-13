@@ -142,9 +142,9 @@ impl AwsProvider {
         }
     }
 
-    pub(crate) async fn create_s3_bucket_acl(&self, resource: Resource) -> ProviderResult<State> {
-        let bucket = require_string_attr(&resource, "bucket")?;
-        self.put_s3_bucket_acl(&resource.id, &bucket, &resource)
+    pub(crate) async fn create_s3_bucket_acl(&self, resource: &Resource) -> ProviderResult<State> {
+        let bucket = require_string_attr(resource, "bucket")?;
+        self.put_s3_bucket_acl(&resource.id, &bucket, resource)
             .await
     }
 

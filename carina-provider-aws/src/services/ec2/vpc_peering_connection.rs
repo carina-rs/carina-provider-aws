@@ -70,10 +70,10 @@ impl AwsProvider {
     /// Create an EC2 VPC Peering Connection
     pub(crate) async fn create_ec2_vpc_peering_connection(
         &self,
-        resource: Resource,
+        resource: &Resource,
     ) -> ProviderResult<State> {
-        let vpc_id = require_string_attr(&resource, "vpc_id")?;
-        let peer_vpc_id = require_string_attr(&resource, "peer_vpc_id")?;
+        let vpc_id = require_string_attr(resource, "vpc_id")?;
+        let peer_vpc_id = require_string_attr(resource, "peer_vpc_id")?;
 
         let mut req = self
             .ec2_client
@@ -95,7 +95,7 @@ impl AwsProvider {
 
         // Apply tags via TagSpecifications
         if let Some(tag_spec) = build_tag_specification(
-            &resource,
+            resource,
             aws_sdk_ec2::types::ResourceType::VpcPeeringConnection,
         ) {
             req = req.tag_specifications(tag_spec);

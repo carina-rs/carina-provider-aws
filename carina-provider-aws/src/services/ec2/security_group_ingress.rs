@@ -17,7 +17,7 @@ impl AwsProvider {
     /// Create an EC2 Security Group Ingress Rule
     pub(crate) async fn create_ec2_security_group_ingress(
         &self,
-        resource: Resource,
+        resource: &Resource,
     ) -> ProviderResult<State> {
         self.create_ec2_security_group_rule(resource, true).await
     }

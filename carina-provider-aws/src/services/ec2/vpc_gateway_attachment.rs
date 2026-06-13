@@ -147,9 +147,9 @@ impl AwsProvider {
     /// Create an EC2 VPC Gateway Attachment
     pub(crate) async fn create_ec2_vpc_gateway_attachment(
         &self,
-        resource: Resource,
+        resource: &Resource,
     ) -> ProviderResult<State> {
-        let vpc_id = require_string_attr(&resource, "vpc_id")?;
+        let vpc_id = require_string_attr(resource, "vpc_id")?;
 
         if let Some(Value::Concrete(ConcreteValue::String(igw_id))) =
             resource.get_attr("internet_gateway_id")

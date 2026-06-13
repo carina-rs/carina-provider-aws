@@ -66,7 +66,10 @@ impl AwsProvider {
     }
 
     /// Create an EC2 VPN Gateway
-    pub(crate) async fn create_ec2_vpn_gateway(&self, resource: Resource) -> ProviderResult<State> {
+    pub(crate) async fn create_ec2_vpn_gateway(
+        &self,
+        resource: &Resource,
+    ) -> ProviderResult<State> {
         let gw_type = match resource.get_attr("type") {
             Some(Value::Concrete(ConcreteValue::String(s))) => s.clone(),
             _ => {

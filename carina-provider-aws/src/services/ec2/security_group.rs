@@ -65,9 +65,9 @@ impl AwsProvider {
     /// Create an EC2 Security Group
     pub(crate) async fn create_ec2_security_group(
         &self,
-        resource: Resource,
+        resource: &Resource,
     ) -> ProviderResult<State> {
-        let vpc_id = require_string_attr(&resource, "vpc_id")?;
+        let vpc_id = require_string_attr(resource, "vpc_id")?;
 
         let description = match resource.get_attr("description") {
             Some(Value::Concrete(ConcreteValue::String(s))) => s.clone(),

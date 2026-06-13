@@ -63,7 +63,7 @@ impl AwsProvider {
     /// Create an EC2 Transit Gateway
     pub(crate) async fn create_ec2_transit_gateway(
         &self,
-        resource: Resource,
+        resource: &Resource,
     ) -> ProviderResult<State> {
         let mut req = self.ec2_client.create_transit_gateway();
 
@@ -131,7 +131,7 @@ impl AwsProvider {
 
         // Apply tags via TagSpecifications
         if let Some(tag_spec) =
-            build_tag_specification(&resource, aws_sdk_ec2::types::ResourceType::TransitGateway)
+            build_tag_specification(resource, aws_sdk_ec2::types::ResourceType::TransitGateway)
         {
             req = req.tag_specifications(tag_spec);
         }

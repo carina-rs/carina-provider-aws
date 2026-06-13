@@ -67,7 +67,7 @@ impl AwsProvider {
     }
 
     /// Create an S3 bucket
-    pub(crate) async fn create_s3_bucket(&self, resource: Resource) -> ProviderResult<State> {
+    pub(crate) async fn create_s3_bucket(&self, resource: &Resource) -> ProviderResult<State> {
         let bucket_name = match resource.get_attr("bucket") {
             Some(Value::Concrete(ConcreteValue::String(s))) => s.clone(),
             _ => {

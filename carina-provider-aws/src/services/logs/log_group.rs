@@ -112,8 +112,8 @@ impl AwsProvider {
     }
 
     /// Create a CloudWatch Logs Log Group
-    pub(crate) async fn create_logs_log_group(&self, resource: Resource) -> ProviderResult<State> {
-        let log_group_name = require_string_attr(&resource, "log_group_name")?;
+    pub(crate) async fn create_logs_log_group(&self, resource: &Resource) -> ProviderResult<State> {
+        let log_group_name = require_string_attr(resource, "log_group_name")?;
 
         let mut req = self
             .logs_client

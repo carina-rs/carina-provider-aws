@@ -74,7 +74,7 @@ impl AwsProvider {
     }
 
     /// Create an EC2 Flow Log
-    pub(crate) async fn create_ec2_flow_log(&self, resource: Resource) -> ProviderResult<State> {
+    pub(crate) async fn create_ec2_flow_log(&self, resource: &Resource) -> ProviderResult<State> {
         let resource_ids_val: Vec<String> = match resource.get_attr("resource_ids") {
             Some(Value::Concrete(ConcreteValue::List(items))) => items
                 .iter()
@@ -157,7 +157,7 @@ impl AwsProvider {
 
         // Apply tags via TagSpecifications
         if let Some(tag_spec) =
-            build_tag_specification(&resource, aws_sdk_ec2::types::ResourceType::VpcFlowLog)
+            build_tag_specification(resource, aws_sdk_ec2::types::ResourceType::VpcFlowLog)
         {
             req = req.tag_specifications(tag_spec);
         }

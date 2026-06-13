@@ -106,7 +106,7 @@ impl AwsProvider {
     /// Create an Organizations organization
     pub(crate) async fn create_organizations_organization(
         &self,
-        resource: Resource,
+        resource: &Resource,
     ) -> ProviderResult<State> {
         let mut req = self.organizations_client.create_organization();
 
@@ -130,7 +130,7 @@ impl AwsProvider {
         if let Some(org) = response.organization() {
             let mut attributes = HashMap::new();
             let org_id = Self::extract_organizations_organization_attributes(org, &mut attributes);
-            let state = State::existing(resource.id, attributes);
+            let state = State::existing(resource.id.clone(), attributes);
             Ok(if let Some(org_id) = org_id {
                 state.with_identifier(org_id)
             } else {
@@ -139,7 +139,7 @@ impl AwsProvider {
         } else {
             Err(
                 ProviderError::api_error("CreateOrganization returned no organization")
-                    .for_resource(resource.id),
+                    .for_resource(resource.id.clone()),
             )
         }
     }

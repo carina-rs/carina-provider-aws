@@ -75,7 +75,7 @@ impl AwsProvider {
     /// Create an EC2 Internet Gateway
     pub(crate) async fn create_ec2_internet_gateway(
         &self,
-        resource: Resource,
+        resource: &Resource,
     ) -> ProviderResult<State> {
         // Create Internet Gateway
         let result = self
