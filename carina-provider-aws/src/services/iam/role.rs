@@ -79,11 +79,11 @@ impl AwsProvider {
     }
 
     /// Create an IAM Role
-    pub(crate) async fn create_iam_role(&self, resource: Resource) -> ProviderResult<State> {
-        let role_name = require_string_attr(&resource, "role_name")?;
+    pub(crate) async fn create_iam_role(&self, resource: &Resource) -> ProviderResult<State> {
+        let role_name = require_string_attr(resource, "role_name")?;
 
         let assume_role_policy_document =
-            resolve_iam_policy_attr(&resource, "assume_role_policy_document")?;
+            resolve_iam_policy_attr(resource, "assume_role_policy_document")?;
 
         let mut req = self
             .iam_client

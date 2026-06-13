@@ -74,6 +74,14 @@ impl AwsProcessProvider {
             .as_ref()
             .expect("Provider not initialized; call initialize() first")
     }
+
+    fn schema_registry() -> SchemaRegistry {
+        let mut registry = SchemaRegistry::new();
+        for schema in carina_provider_aws::schemas::all_schemas() {
+            registry.insert("aws", schema);
+        }
+        registry
+    }
 }
 
 impl CarinaProvider for AwsProcessProvider {
@@ -283,6 +291,16 @@ impl CarinaProvider for AwsProcessProvider {
     ) -> Result<proto::State, proto::ProviderError> {
         let core_id = convert::proto_to_core_resource_id(id);
         let core_resource = convert::proto_to_core_resource(&request.resource);
+        let schemas = Self::schema_registry();
+        let core_resource = self.runtime.block_on(
+            carina_core::executor::normalized::apply_desired_normalization(
+                core_resource,
+                &[],
+                &self.normalizer,
+                &[],
+                &schemas,
+            ),
+        );
         let core_request = CoreCreateRequest {
             resource: core_resource,
         };

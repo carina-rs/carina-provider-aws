@@ -89,8 +89,8 @@ impl AwsProvider {
     }
 
     /// Create an EC2 VPC
-    pub(crate) async fn create_ec2_vpc(&self, resource: Resource) -> ProviderResult<State> {
-        let cidr_block = require_string_attr(&resource, "cidr_block")?;
+    pub(crate) async fn create_ec2_vpc(&self, resource: &Resource) -> ProviderResult<State> {
+        let cidr_block = require_string_attr(resource, "cidr_block")?;
 
         // Create VPC with optional instance_tenancy
         let mut create_vpc_builder = self.ec2_client.create_vpc().cidr_block(&cidr_block);

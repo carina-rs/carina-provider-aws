@@ -66,10 +66,10 @@ impl AwsProvider {
 
     pub(crate) async fn create_s3_bucket_server_side_encryption_configuration(
         &self,
-        resource: Resource,
+        resource: &Resource,
     ) -> ProviderResult<State> {
-        let bucket = require_string_attr(&resource, "bucket")?;
-        self.put_s3_bucket_encryption(&resource.id, &bucket, &resource)
+        let bucket = require_string_attr(resource, "bucket")?;
+        self.put_s3_bucket_encryption(&resource.id, &bucket, resource)
             .await
     }
 

@@ -58,7 +58,7 @@ impl AwsProvider {
     }
 
     /// Create an EC2 Elastic IP
-    pub(crate) async fn create_ec2_eip(&self, resource: Resource) -> ProviderResult<State> {
+    pub(crate) async fn create_ec2_eip(&self, resource: &Resource) -> ProviderResult<State> {
         let mut req = self.ec2_client.allocate_address();
 
         if let Some(Value::Concrete(ConcreteValue::String(domain))) = resource.get_attr("domain") {

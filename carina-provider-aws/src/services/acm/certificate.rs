@@ -239,9 +239,12 @@ impl AwsProvider {
     /// the validation status is `PENDING_VALIDATION` until the user
     /// satisfies the DNS / EMAIL challenge — typically wired via a
     /// `wait` construct on `cert.status`.
-    pub(crate) async fn create_acm_certificate(&self, resource: Resource) -> ProviderResult<State> {
+    pub(crate) async fn create_acm_certificate(
+        &self,
+        resource: &Resource,
+    ) -> ProviderResult<State> {
         let id = resource.id.clone();
-        let domain_name = require_string_attr(&resource, "domain_name")?;
+        let domain_name = require_string_attr(resource, "domain_name")?;
 
         let mut req = self
             .acm_client

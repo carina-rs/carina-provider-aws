@@ -68,9 +68,9 @@ impl AwsProvider {
     }
 
     /// Create an EC2 Subnet
-    pub(crate) async fn create_ec2_subnet(&self, resource: Resource) -> ProviderResult<State> {
-        let cidr_block = require_string_attr(&resource, "cidr_block")?;
-        let vpc_id = require_string_attr(&resource, "vpc_id")?;
+    pub(crate) async fn create_ec2_subnet(&self, resource: &Resource) -> ProviderResult<State> {
+        let cidr_block = require_string_attr(resource, "cidr_block")?;
+        let vpc_id = require_string_attr(resource, "vpc_id")?;
 
         let mut req = self
             .ec2_client

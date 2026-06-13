@@ -63,10 +63,10 @@ impl AwsProvider {
     /// Create an EC2 Transit Gateway VPC Attachment
     pub(crate) async fn create_ec2_transit_gateway_attachment(
         &self,
-        resource: Resource,
+        resource: &Resource,
     ) -> ProviderResult<State> {
-        let transit_gateway_id = require_string_attr(&resource, "transit_gateway_id")?;
-        let vpc_id = require_string_attr(&resource, "vpc_id")?;
+        let transit_gateway_id = require_string_attr(resource, "transit_gateway_id")?;
+        let vpc_id = require_string_attr(resource, "vpc_id")?;
 
         let subnet_ids = match resource.get_attr("subnet_ids") {
             Some(Value::Concrete(ConcreteValue::List(ids))) => {
@@ -100,7 +100,7 @@ impl AwsProvider {
 
         // Apply tags via TagSpecifications
         if let Some(tag_spec) = build_tag_specification(
-            &resource,
+            resource,
             aws_sdk_ec2::types::ResourceType::TransitGatewayAttachment,
         ) {
             req = req.tag_specifications(tag_spec);

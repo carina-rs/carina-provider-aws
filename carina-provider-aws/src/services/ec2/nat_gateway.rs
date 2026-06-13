@@ -72,8 +72,11 @@ impl AwsProvider {
     }
 
     /// Create an EC2 NAT Gateway
-    pub(crate) async fn create_ec2_nat_gateway(&self, resource: Resource) -> ProviderResult<State> {
-        let subnet_id = require_string_attr(&resource, "subnet_id")?;
+    pub(crate) async fn create_ec2_nat_gateway(
+        &self,
+        resource: &Resource,
+    ) -> ProviderResult<State> {
+        let subnet_id = require_string_attr(resource, "subnet_id")?;
 
         let mut req = self.ec2_client.create_nat_gateway().subnet_id(&subnet_id);
 

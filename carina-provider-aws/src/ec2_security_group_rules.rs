@@ -105,7 +105,7 @@ impl AwsProvider {
     /// Create an EC2 Security Group Rule (shared between ingress and egress)
     pub(crate) async fn create_ec2_security_group_rule(
         &self,
-        resource: Resource,
+        resource: &Resource,
         is_ingress: bool,
     ) -> ProviderResult<State> {
         let sg_id = match resource.get_attr("group_id") {
@@ -283,7 +283,7 @@ impl AwsProvider {
         // Security group rules are immutable - delete and recreate
         self.delete_ec2_security_group_rule(id.clone(), identifier, is_ingress)
             .await?;
-        self.create_ec2_security_group_rule(to, is_ingress).await
+        self.create_ec2_security_group_rule(&to, is_ingress).await
     }
 
     /// Delete an EC2 Security Group Rule (deletes all rules by identifier)

@@ -160,10 +160,10 @@ impl AwsProvider {
     /// Create an Organizations account
     pub(crate) async fn create_organizations_account(
         &self,
-        resource: Resource,
+        resource: &Resource,
     ) -> ProviderResult<State> {
-        let name = require_string_attr(&resource, "account_name")?;
-        let email = require_string_attr(&resource, "email")?;
+        let name = require_string_attr(resource, "account_name")?;
+        let email = require_string_attr(resource, "email")?;
 
         let mut req = self
             .organizations_client
