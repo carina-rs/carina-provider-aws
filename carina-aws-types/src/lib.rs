@@ -279,6 +279,28 @@ mod tests {
     }
 
     #[test]
+    fn http_response_status_code_carries_pattern_and_length() {
+        let t = http_response_status_code();
+        if let carina_core::schema::Shape::String {
+            identity,
+            pattern,
+            length,
+            to_dsl: None,
+            ..
+        } = t.shape_ref_free().expect("test schema is Ref-free")
+        {
+            assert_eq!(
+                identity.map(|id| id.to_string()).as_deref(),
+                Some("aws.HttpResponseStatusCode")
+            );
+            assert_eq!(pattern, Some(r"^(2|4|5)\d{2}$"));
+            assert_eq!(length, Some((Some(3), Some(3))));
+        } else {
+            panic!("http_response_status_code() should be refined String");
+        }
+    }
+
+    #[test]
     fn vpc_id_carries_identity_and_pattern() {
         let t = vpc_id();
         if let carina_core::schema::Shape::String {
@@ -770,6 +792,32 @@ mod tests {
         assert!(validate_aws_account_id("1234").is_err());
         assert!(validate_aws_account_id("12345678901a").is_err());
         assert!(validate_aws_account_id("").is_err());
+    }
+
+    // HTTP Response Status Code tests
+
+    #[test]
+    fn validate_http_response_status_code_valid() {
+        assert!(validate_http_response_status_code("200").is_ok());
+        assert!(validate_http_response_status_code("299").is_ok());
+        assert!(validate_http_response_status_code("400").is_ok());
+        assert!(validate_http_response_status_code("404").is_ok());
+        assert!(validate_http_response_status_code("499").is_ok());
+        assert!(validate_http_response_status_code("500").is_ok());
+        assert!(validate_http_response_status_code("503").is_ok());
+        assert!(validate_http_response_status_code("599").is_ok());
+    }
+
+    #[test]
+    fn validate_http_response_status_code_invalid() {
+        assert!(validate_http_response_status_code("nonsense").is_err());
+        assert!(validate_http_response_status_code("20").is_err());
+        assert!(validate_http_response_status_code("2000").is_err());
+        assert!(validate_http_response_status_code("12a").is_err());
+        assert!(validate_http_response_status_code("").is_err());
+        assert!(validate_http_response_status_code("301").is_err());
+        assert!(validate_http_response_status_code("600").is_err());
+        assert!(validate_http_response_status_code("100").is_err());
     }
 
     // KMS Key ID tests
