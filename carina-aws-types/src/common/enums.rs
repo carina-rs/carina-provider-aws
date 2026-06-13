@@ -1,17 +1,16 @@
 use carina_core::schema::AttributeType;
+use heck::ToSnakeCase;
 
 // ========== Enum helpers ==========
 
 /// Convert an AWS API enum value to its DSL (snake_case) spelling.
 ///
-/// Behaviorally identical to `carina-codegen-aws::dsl::dsl_enum_value` and
-/// `carina-provider-awscc::bin::codegen::dsl_enum_value`. The three
-/// implementations must stay in sync — they collectively define what users
-/// type in their `.crn` files. Per the naming-conventions design D7
+/// Shared by aws and awscc provider codegen; this defines what users type in
+/// their `.crn` files. Per the naming-conventions design D7
 /// (`carina-rs/carina/docs/specs/2026-04-22-naming-conventions-design.md`):
 /// SHOUTY_SNAKE → lowercase; PascalCase → snake_case; kebab → snake;
 /// numeric/dotted-numeric pass through unchanged.
-pub(crate) fn dsl_enum_value(value: &str) -> String {
+pub fn dsl_enum_value(value: &str) -> String {
     if value.is_empty() {
         return String::new();
     }
@@ -26,27 +25,25 @@ pub(crate) fn dsl_enum_value(value: &str) -> String {
         return value.to_ascii_lowercase();
     }
     if !value.chars().any(|c| c.is_ascii_uppercase()) {
-        // No uppercase letter: kebab and dotted-numeric (e.g.
-        // `cloud-watch-logs`, `ipsec.1`) collapse to snake_case so DSL
-        // identifiers stay parseable. Dotted-numeric values would
-        // otherwise need to be quoted (`'ipsec.1'`), and the strict
-        // validator (carina#2980) gates on the DSL spelling.
-        return value.replace(['-', '.'], "_");
+        // No uppercase letter: kebab, slash, colon, and dotted-numeric
+        // separators collapse to snake_case so DSL identifiers stay parseable.
+        // The strict validator (carina#2980) gates on the DSL spelling.
+        return value.replace(['-', '.', ':', '/'], "_");
     }
-    // PascalCase / mixed → snake_case (no heck dep, hand-rolled to keep
-    // `carina-aws-types` heck-free).
-    let mut out = String::with_capacity(value.len() + 4);
-    for (i, c) in value.chars().enumerate() {
-        if c.is_ascii_uppercase() {
-            if i > 0 {
-                out.push('_');
-            }
-            out.push(c.to_ascii_lowercase());
-        } else {
-            out.push(c);
-        }
+    // Special case: acronym + lowercase + digits (e.g. "IPv4", "IPv6").
+    // Heck's snake_case splits these as "i_pv4" which loses the acronym
+    // structure. Treat them as a single all-lowercase word.
+    if let Some(idx) = value.chars().position(|c| c.is_ascii_lowercase())
+        && idx >= 1
+        && value[..idx].chars().all(|c| c.is_ascii_uppercase())
+        && value[idx..]
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
+    {
+        return value.to_ascii_lowercase();
     }
-    out
+
+    value.to_snake_case()
 }
 
 /// Build a `dsl_aliases` pair list for a `StringEnum`'s `values`.
@@ -126,4 +123,90 @@ pub fn canonicalize_enum_value(raw: &str, valid_values: &[&str]) -> String {
     find_matching_enum_value(raw, valid_values)
         .unwrap_or(raw)
         .to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn empty_passes_through() {
+        assert_eq!(dsl_enum_value(""), "");
+    }
+
+    #[test]
+    fn pure_digits_pass_through() {
+        assert_eq!(dsl_enum_value("1"), "1");
+        assert_eq!(dsl_enum_value("123"), "123");
+    }
+
+    #[test]
+    fn pure_dotted_numeric_passes_through() {
+        assert_eq!(dsl_enum_value("1.0"), "1.0");
+    }
+
+    #[test]
+    fn mixed_dotted_values_become_snake() {
+        assert_eq!(dsl_enum_value("ipsec.1"), "ipsec_1");
+    }
+
+    #[test]
+    fn slash_values_become_snake() {
+        assert_eq!(dsl_enum_value("text/plain"), "text_plain");
+        assert_eq!(dsl_enum_value("application/json"), "application_json");
+        assert_eq!(
+            dsl_enum_value("application/javascript"),
+            "application_javascript"
+        );
+    }
+
+    #[test]
+    fn colon_values_become_snake() {
+        assert_eq!(dsl_enum_value("aws:kms"), "aws_kms");
+    }
+
+    #[test]
+    fn acronym_lowercase_digits_lowercase_as_one_word() {
+        assert_eq!(dsl_enum_value("IPv4"), "ipv4");
+        assert_eq!(dsl_enum_value("IPv6"), "ipv6");
+    }
+
+    #[test]
+    fn shouty_snake_lowercases() {
+        assert_eq!(dsl_enum_value("GROUP"), "group");
+        assert_eq!(dsl_enum_value("AWS_ACCOUNT"), "aws_account");
+        assert_eq!(dsl_enum_value("AES256"), "aes256");
+        assert_eq!(dsl_enum_value("STANDARD_IA"), "standard_ia");
+        assert_eq!(dsl_enum_value("ALL"), "all");
+        assert_eq!(dsl_enum_value("VPC"), "vpc");
+    }
+
+    #[test]
+    fn already_snake_or_kebab_normalizes_separators() {
+        assert_eq!(dsl_enum_value("ap-northeast-1"), "ap_northeast_1");
+        assert_eq!(dsl_enum_value("already_snake"), "already_snake");
+        assert_eq!(dsl_enum_value("with-dashes"), "with_dashes");
+    }
+
+    #[test]
+    fn pascal_case_to_snake_case() {
+        assert_eq!(dsl_enum_value("Enabled"), "enabled");
+        assert_eq!(dsl_enum_value("Suspended"), "suspended");
+        assert_eq!(dsl_enum_value("VersioningStatus"), "versioning_status");
+        assert_eq!(
+            dsl_enum_value("BucketOwnerEnforced"),
+            "bucket_owner_enforced"
+        );
+        assert_eq!(dsl_enum_value("ObjectWriter"), "object_writer");
+        assert_eq!(dsl_enum_value("Gateway"), "gateway");
+    }
+
+    #[test]
+    fn route53_record_types_lowercase() {
+        assert_eq!(dsl_enum_value("A"), "a");
+        assert_eq!(dsl_enum_value("AAAA"), "aaaa");
+        assert_eq!(dsl_enum_value("CNAME"), "cname");
+        assert_eq!(dsl_enum_value("MX"), "mx");
+        assert_eq!(dsl_enum_value("TXT"), "txt");
+    }
 }

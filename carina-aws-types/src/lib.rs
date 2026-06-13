@@ -2060,18 +2060,16 @@ mod tests {
                         .to_string()
                 )
             );
-            // `dsl_enum_value` passes `aws:kms` / `aws:kms:dsse` through
-            // unchanged: the colon is not in its known-separators set,
-            // so identity pairs are emitted for those rows. The
-            // load-bearing case for #390 is the `AES256 → aes256`
-            // rewrite; identity rows are present so the strict-DSL
-            // validator (carina#2980) treats the variant set uniformly.
+            // `dsl_enum_value` rewrites colon-separated AWS spellings so they
+            // remain reachable as bare DSL identifiers. The `AES256 → aes256`
+            // rewrite remains the load-bearing case for #390, and exhaustive
+            // rows keep strict-DSL validation uniform across the variant set.
             assert_eq!(
                 dsl_aliases,
                 &[
                     ("AES256".to_string(), "aes256".to_string()),
-                    ("aws:kms".to_string(), "aws:kms".to_string()),
-                    ("aws:kms:dsse".to_string(), "aws:kms:dsse".to_string()),
+                    ("aws:kms".to_string(), "aws_kms".to_string()),
+                    ("aws:kms:dsse".to_string(), "aws_kms_dsse".to_string()),
                 ]
             );
         } else {

@@ -607,7 +607,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             ],
             create_only_overrides: vec![],
             enum_aliases: vec![("ip_protocol", "all", "-1")],
-            // dsl_aliases auto-derives hyphen->underscore via dsl_enum_value;
+            // dsl_aliases auto-derives separator rewrites via dsl_enum_value;
             // explicit (-1, all) flows in via enum_aliases.
             to_dsl_overrides: vec![],
             required_overrides: vec!["IpProtocol"],

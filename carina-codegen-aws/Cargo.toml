@@ -13,6 +13,7 @@ name = "smithy-codegen"
 path = "src/main.rs"
 
 [dependencies]
+carina-aws-types = { path = "../carina-aws-types" }
 carina-smithy = { path = "../carina-smithy" }
 anyhow = "1.0"
 clap = { version = "4.0", features = ["derive"] }
