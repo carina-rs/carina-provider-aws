@@ -227,6 +227,14 @@ impl CarinaProvider for AwsProcessProvider {
         vec!["region".to_string()]
     }
 
+    fn required_permissions(
+        &self,
+        _id: &proto::ResourceId,
+        _op: carina_plugin_sdk::PlanOp,
+    ) -> Vec<String> {
+        Vec::new()
+    }
+
     fn enum_aliases(&self) -> HashMap<String, HashMap<String, HashMap<String, String>>> {
         carina_provider_aws::schemas::generated::build_enum_aliases_map()
     }
