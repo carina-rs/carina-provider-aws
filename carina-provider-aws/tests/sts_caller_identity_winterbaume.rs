@@ -34,8 +34,9 @@ use aws_sdk_s3::Client as S3Client;
 use aws_sdk_sqs::Client as SqsClient;
 use aws_sdk_sts::Client as StsClient;
 
+use carina_core::effect::PlanOp;
 use carina_core::provider::Provider;
-use carina_core::resource::{ConcreteValue, DataSource, Value};
+use carina_core::resource::{ConcreteValue, DataSource, ResourceId, Value};
 use carina_provider_aws::AwsProvider;
 use winterbaume_core::MockAws;
 use winterbaume_sts::StsService;
@@ -47,6 +48,35 @@ const TEST_REGION: &str = "us-east-1";
 /// on this string verbatim; using `sts.caller_identity` (snake_case)
 /// would fall into the default "not implemented" arm.
 const STS_CALLER_IDENTITY_TYPE: &str = "sts.CallerIdentity";
+
+#[tokio::test]
+async fn required_permissions_returns_empty_vec() {
+    let mock = MockAws::builder().with_service(StsService::new()).build();
+    let sdk_config = mock.sdk_config(TEST_REGION).await;
+
+    let provider = AwsProvider::from_clients(
+        TEST_REGION.to_string(),
+        Vec::new(),
+        Vec::new(),
+        S3Client::new(&sdk_config),
+        Ec2Client::new(&sdk_config),
+        IamClient::new(&sdk_config),
+        CloudWatchLogsClient::new(&sdk_config),
+        StsClient::new(&sdk_config),
+        OrganizationsClient::new(&sdk_config),
+        IdentityStoreClient::new(&sdk_config),
+        Route53Client::new(&sdk_config),
+        AcmClient::new(&sdk_config),
+        SqsClient::new(&sdk_config),
+    );
+
+    let id = ResourceId::with_provider("aws", "s3.Bucket", "example", None);
+
+    assert_eq!(
+        provider.required_permissions(&id, PlanOp::Create),
+        Vec::<String>::new()
+    );
+}
 
 #[tokio::test]
 async fn sts_caller_identity_data_source_returns_account_arn_user_id_from_winterbaume() {

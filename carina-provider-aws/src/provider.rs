@@ -1,5 +1,6 @@
 //! Provider trait implementation for AWS
 
+use carina_core::effect::PlanOp;
 use carina_core::provider::{
     BoxFuture, CreateRequest, DeleteRequest, Provider, ProviderError, ProviderResult, ReadRequest,
     UpdateRequest,
@@ -12,6 +13,10 @@ use crate::helpers::apply_patch_to_state;
 impl Provider for AwsProvider {
     fn name(&self) -> &str {
         "aws"
+    }
+
+    fn required_permissions(&self, _id: &ResourceId, _op: PlanOp) -> Vec<String> {
+        Vec::new()
     }
 
     fn read(
