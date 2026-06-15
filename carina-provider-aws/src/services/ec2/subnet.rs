@@ -5,7 +5,9 @@ use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
-use crate::helpers::{optional_bool_struct_field, optional_enum_struct_field, require_string_attr};
+use crate::helpers::{
+    optional_bool_attr, optional_bool_struct_field, optional_enum_struct_field, require_string_attr,
+};
 use aws_sdk_ec2::types::{AttributeBooleanValue, HostnameType};
 
 // `read_ec2_subnet` must store `availability_zone` as the AWS canonical
@@ -134,13 +136,11 @@ impl AwsProvider {
         subnet_id: &str,
         resource: &Resource,
     ) -> ProviderResult<()> {
-        if let Some(Value::Concrete(ConcreteValue::Bool(enabled))) =
-            resource.get_attr("map_public_ip_on_launch")
-        {
+        if let Some(enabled) = optional_bool_attr(resource, "map_public_ip_on_launch") {
             self.ec2_client
                 .modify_subnet_attribute()
                 .subnet_id(subnet_id)
-                .map_public_ip_on_launch(AttributeBooleanValue::builder().value(*enabled).build())
+                .map_public_ip_on_launch(AttributeBooleanValue::builder().value(enabled).build())
                 .send()
                 .await
                 .map_err(|e| {
@@ -153,14 +153,12 @@ impl AwsProvider {
                 })?;
         }
 
-        if let Some(Value::Concrete(ConcreteValue::Bool(enabled))) =
-            resource.get_attr("assign_ipv6_address_on_creation")
-        {
+        if let Some(enabled) = optional_bool_attr(resource, "assign_ipv6_address_on_creation") {
             self.ec2_client
                 .modify_subnet_attribute()
                 .subnet_id(subnet_id)
                 .assign_ipv6_address_on_creation(
-                    AttributeBooleanValue::builder().value(*enabled).build(),
+                    AttributeBooleanValue::builder().value(enabled).build(),
                 )
                 .send()
                 .await
@@ -174,13 +172,11 @@ impl AwsProvider {
                 })?;
         }
 
-        if let Some(Value::Concrete(ConcreteValue::Bool(enabled))) =
-            resource.get_attr("enable_dns64")
-        {
+        if let Some(enabled) = optional_bool_attr(resource, "enable_dns64") {
             self.ec2_client
                 .modify_subnet_attribute()
                 .subnet_id(subnet_id)
-                .enable_dns64(AttributeBooleanValue::builder().value(*enabled).build())
+                .enable_dns64(AttributeBooleanValue::builder().value(enabled).build())
                 .send()
                 .await
                 .map_err(|e| {
