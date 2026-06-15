@@ -810,14 +810,6 @@ impl AwsProvider {
                 Value::Concrete(ConcreteValue::String(v.to_string())),
             );
         }
-        if let Some(opts) = obj.accepter_vpc_info()
-            && let Some(v) = opts.region()
-        {
-            attributes.insert(
-                "peer_region".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string())),
-            );
-        }
         obj.vpc_peering_connection_id().map(String::from)
     }
 

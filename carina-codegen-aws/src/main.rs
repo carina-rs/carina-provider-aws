@@ -2146,8 +2146,8 @@ fn scan_manual_methods(services_dir: &std::path::Path) -> std::collections::Hash
 /// Generate the provider_generated.rs file from ResourceDef metadata and Smithy models.
 /// Uses Smithy models to resolve types for read/write helper generation.
 /// Render the `Value::*` wrapping for a single child member of a
-/// nested struct (used by `DerivedSource::Struct` and `StructAsMap`
-/// emission). Returns `None` for shapes the emitter cannot handle.
+/// nested struct (used by `DerivedSource::FromStruct` emission).
+/// Returns `None` for shapes the emitter cannot handle.
 ///
 /// `value_var` is the local name (`"v"` in current call sites) bound
 /// to the child accessor result via `if let Some(v) = ...`.
@@ -3000,57 +3000,31 @@ fn generate_provider_code(
                         list_snake, child_snake, attr_snake
                     ));
                 }
-                resource_defs::DerivedSource::Struct {
-                    struct_member,
-                    child_member,
-                } => {
-                    // Walk: read structure → struct member → inner struct
-                    // → child member. The child's kind drives the value
-                    // wrapping (String / Bool / Int / Long / Enum).
-                    let Some(struct_ref) = read_struct.members.get(*struct_member) else {
-                        eprintln!(
-                            "warning: derived_attributes for {}: struct member '{}' not found on read structure",
-                            res.name, struct_member
-                        );
-                        continue;
-                    };
-                    let Some(inner_struct) = model.get_structure(&struct_ref.target) else {
-                        eprintln!(
-                            "warning: derived_attributes for {}: '{}' is not a structure",
-                            res.name, struct_member
-                        );
-                        continue;
-                    };
-                    let Some(child_ref) = inner_struct.members.get(*child_member) else {
-                        eprintln!(
-                            "warning: derived_attributes for {}: child member '{}' not found on '{}'",
-                            res.name, child_member, struct_ref.target
-                        );
-                        continue;
-                    };
-                    let attr_snake = derived.attr.to_snake_case();
-                    let struct_snake = escape_rust_keyword(&struct_member.to_snake_case());
-                    let child_snake = escape_rust_keyword(&child_member.to_snake_case());
-                    let Some(insert_expr) = struct_child_value_expr(model, child_ref, "v") else {
-                        eprintln!(
-                            "warning: derived_attributes for {}: Struct child '{}' has unsupported shape; skipping",
-                            res.name, child_member
-                        );
-                        continue;
-                    };
-                    code.push_str(&format!(
-                        "\x20       if let Some(opts) = obj.{}()\n\
-                         \x20           && let Some(v) = opts.{}()\n\
-                         \x20       {{\n\
-                         \x20           attributes.insert(\"{}\".to_string(), {});\n\
-                         \x20       }}\n",
-                        struct_snake, child_snake, attr_snake, insert_expr
-                    ));
-                }
-                resource_defs::DerivedSource::StructAsMap {
+                resource_defs::DerivedSource::FromStruct {
                     struct_member,
                     children,
                 } => {
+                    if children.is_empty() {
+                        panic!(
+                            "codegen: FromStruct for {}'s derived attribute '{}' must list at least one child member",
+                            res.name, derived.attr
+                        );
+                    }
+                    if !schema_declares_attribute(res, model, derived.attr) {
+                        panic!(
+                            "codegen: FromStruct's `attr` '{}' is not declared in the resource's schema for {}",
+                            derived.attr, res.name
+                        );
+                    }
+                    let attr_snake = derived.attr.to_snake_case();
+                    let is_nested_map_layout = attr_snake == struct_member.to_snake_case();
+                    if !is_nested_map_layout && children.len() != 1 {
+                        panic!(
+                            "codegen: FromStruct for {}'s derived attribute '{}' emits a top-level leaf attribute '{}' but lists more than one child; declare separate DerivedAttribute entries for each rename target",
+                            res.name, derived.attr, attr_snake
+                        );
+                    }
+
                     let Some(struct_ref) = read_struct.members.get(*struct_member) else {
                         eprintln!(
                             "warning: derived_attributes for {}: struct member '{}' not found on read structure",
@@ -3065,16 +3039,61 @@ fn generate_provider_code(
                         );
                         continue;
                     };
-                    let attr_snake = derived.attr.to_snake_case();
                     let struct_snake = escape_rust_keyword(&struct_member.to_snake_case());
 
-                    code.push_str(&format!(
-                        "\x20       if let Some(dns_opts) = obj.{}() {{\n\
-                         \x20           let mut fields = IndexMap::new();\n",
-                        struct_snake
-                    ));
-                    for child_name in *children {
-                        let Some(child_ref) = inner_struct.members.get(*child_name) else {
+                    if is_nested_map_layout {
+                        code.push_str(&format!(
+                            "\x20       if let Some(dns_opts) = obj.{}() {{\n\
+                             \x20           let mut fields = IndexMap::new();\n",
+                            struct_snake
+                        ));
+                        for child_name in *children {
+                            let Some(child_ref) = inner_struct.members.get(*child_name) else {
+                                eprintln!(
+                                    "warning: derived_attributes for {}: child member '{}' not found on '{}'",
+                                    res.name, child_name, struct_ref.target
+                                );
+                                continue;
+                            };
+                            let child_snake = escape_rust_keyword(&child_name.to_snake_case());
+                            let child_kind = model.shape_kind(&child_ref.target);
+                            let Some(insert_expr) = struct_child_value_expr(model, child_ref, "v")
+                            else {
+                                eprintln!(
+                                    "warning: derived_attributes for {}: FromStruct child '{}' has unsupported shape; skipping",
+                                    res.name, child_name
+                                );
+                                continue;
+                            };
+                            if matches!(child_kind, Some(ShapeKind::List)) {
+                                code.push_str(&format!(
+                                    "\x20           {{\n\
+                                     \x20               let v = dns_opts.{}();\n\
+                                     \x20               if !v.is_empty() {{\n\
+                                     \x20                   fields.insert(\"{}\".to_string(), {});\n\
+                                     \x20               }}\n\
+                                     \x20           }}\n",
+                                    child_snake, child_snake, insert_expr
+                                ));
+                            } else {
+                                code.push_str(&format!(
+                                    "\x20           if let Some(v) = dns_opts.{}() {{\n\
+                                     \x20               fields.insert(\"{}\".to_string(), {});\n\
+                                     \x20           }}\n",
+                                    child_snake, child_snake, insert_expr
+                                ));
+                            }
+                        }
+                        code.push_str(&format!(
+                            "\x20           if !fields.is_empty() {{\n\
+                             \x20               attributes.insert(\"{}\".to_string(), Value::Concrete(ConcreteValue::Map(fields)));\n\
+                             \x20           }}\n\
+                             \x20       }}\n",
+                            attr_snake
+                        ));
+                    } else {
+                        let child_name = children[0];
+                        let Some(child_ref) = inner_struct.members.get(child_name) else {
                             eprintln!(
                                 "warning: derived_attributes for {}: child member '{}' not found on '{}'",
                                 res.name, child_name, struct_ref.target
@@ -3082,50 +3101,24 @@ fn generate_provider_code(
                             continue;
                         };
                         let child_snake = escape_rust_keyword(&child_name.to_snake_case());
-                        let child_kind = model.shape_kind(&child_ref.target);
                         let Some(insert_expr) = struct_child_value_expr(model, child_ref, "v")
                         else {
                             eprintln!(
-                                "warning: derived_attributes for {}: StructAsMap child '{}' has unsupported shape; skipping",
+                                "warning: derived_attributes for {}: FromStruct child '{}' has unsupported shape; skipping",
                                 res.name, child_name
                             );
                             continue;
                         };
-                        if matches!(child_kind, Some(ShapeKind::List)) {
-                            code.push_str(&format!(
-                                "\x20           {{\n\
-                                 \x20               let v = dns_opts.{}();\n\
-                                 \x20               if !v.is_empty() {{\n\
-                                 \x20                   fields.insert(\"{}\".to_string(), {});\n\
-                                 \x20               }}\n\
-                                 \x20           }}\n",
-                                child_snake, child_snake, insert_expr
-                            ));
-                        } else {
-                            code.push_str(&format!(
-                                "\x20           if let Some(v) = dns_opts.{}() {{\n\
-                                 \x20               fields.insert(\"{}\".to_string(), {});\n\
-                                 \x20           }}\n",
-                                child_snake, child_snake, insert_expr
-                            ));
-                        }
+                        code.push_str(&format!(
+                            "\x20       if let Some(opts) = obj.{}()\n\
+                             \x20           && let Some(v) = opts.{}()\n\
+                             \x20       {{\n\
+                             \x20           attributes.insert(\"{}\".to_string(), {});\n\
+                             \x20       }}\n",
+                            struct_snake, child_snake, attr_snake, insert_expr
+                        ));
                     }
-                    code.push_str(&format!(
-                        "\x20           if !fields.is_empty() {{\n\
-                         \x20               attributes.insert(\"{}\".to_string(), Value::Concrete(ConcreteValue::Map(fields)));\n\
-                         \x20           }}\n\
-                         \x20       }}\n",
-                        attr_snake
-                    ));
                 }
-                // DerivedSource is #[non_exhaustive]; future variants land in
-                // later sub-issues and require this match to grow. Skip with
-                // a loud message instead of silent ignore so the missing
-                // emitter surfaces at codegen time.
-                _ => eprintln!(
-                    "warning: derived_attributes for {}: unhandled DerivedSource variant; teach the emitter when adding a new projection",
-                    res.name
-                ),
             }
         }
 
@@ -3211,6 +3204,79 @@ fn generate_provider_code(
     );
 
     code
+}
+
+/// Returns true when `attr` (as a PascalCase / Smithy member name) is
+/// declared as a top-level attribute in the resource's generated schema.
+///
+/// Single source of truth for the [`DerivedSource::FromStruct`] hard-error
+/// gate: a derived attribute whose name is not in the schema is dead code
+/// (carina-provider-aws#444 surfaced one such case — the orphan
+/// `VpcPeeringConnection.PeerRegion` entry that wrote a state key invisible
+/// to the schema / differ).
+///
+/// Schema-attribute sources checked (mirroring what `generate_resource`
+/// emits as `AttributeSchema::new(...)`): `extra_attributes`,
+/// `update_ops[].fields`, `schema_structure` members (excluding `Tags` and
+/// `exclude_fields`), the create-op input members when `schema_structure`
+/// is None, and `read_structure` members. See
+/// carina-provider-aws#449 for the planned `extra_read_only` extension.
+fn schema_declares_attribute(res: &ResourceDef, model: &SmithyModel, attr: &str) -> bool {
+    let exclude: HashSet<&str> = res.exclude_fields.iter().copied().collect();
+    let attr_snake = attr.to_snake_case();
+
+    let matches_attr = |name: &str| name.to_snake_case() == attr_snake;
+    if res
+        .extra_attributes
+        .iter()
+        .any(|extra| matches_attr(extra.name))
+        || res
+            .update_ops
+            .iter()
+            .flat_map(|op| op.fields.field_names())
+            .any(|name| matches_attr(name))
+    {
+        return true;
+    }
+
+    if let Some(schema_struct_name) = res.schema_structure {
+        let schema_structure_id = format!("{}#{}", res.service_namespace, schema_struct_name);
+        if let Some(schema_struct) = model.get_structure(&schema_structure_id)
+            && schema_struct
+                .members
+                .keys()
+                .filter(|name| !exclude.contains(name.as_str()) && name.as_str() != "Tags")
+                .any(|name| matches_attr(name))
+        {
+            return true;
+        }
+    } else if !res.create_op.is_empty() {
+        let create_op_id = format!("{}#{}", res.service_namespace, res.create_op);
+        if let Some(create_input) = model.operation_input(&create_op_id)
+            && create_input
+                .members
+                .keys()
+                .filter(|name| !exclude.contains(name.as_str()) && name.as_str() != "Tags")
+                .any(|name| matches_attr(name))
+        {
+            return true;
+        }
+    }
+
+    if let Some(read_struct_name) = res.read_structure {
+        let read_structure_id = format!("{}#{}", res.service_namespace, read_struct_name);
+        if let Some(read_struct) = model.get_structure(&read_structure_id)
+            && read_struct
+                .members
+                .keys()
+                .filter(|name| !exclude.contains(name.as_str()) && name.as_str() != "Tags")
+                .any(|name| matches_attr(name))
+        {
+            return true;
+        }
+    }
+
+    false
 }
 
 /// Derive a short suffix from an operation name by stripping the verb prefix and identifier.
@@ -5053,6 +5119,231 @@ mod tests {
         ))
     }
 
+    fn provider_code_for_single_resource_with_model(
+        res: ResourceDef,
+        model: SmithyModel,
+    ) -> String {
+        let mut models: HashMap<&str, SmithyModel> = HashMap::new();
+        let ns = res.service_namespace;
+        models.insert(ns, model);
+
+        let resources = vec![res];
+        let data_sources: Vec<resource_defs::DataSourceDef> = vec![];
+        let manual = std::collections::HashSet::new();
+        generate_provider_code(&resources, &data_sources, &models, &manual)
+    }
+
+    fn minimal_from_struct_model() -> SmithyModel {
+        carina_smithy::parse(
+            r##"{
+              "smithy": "2.0",
+              "metadata": {},
+              "shapes": {
+                "com.amazonaws.ec2#CreateFromStructFixture": {
+                  "type": "operation",
+                  "input": { "target": "com.amazonaws.ec2#CreateFromStructFixtureRequest" },
+                  "output": { "target": "smithy.api#Unit" },
+                  "traits": {}
+                },
+                "com.amazonaws.ec2#CreateFromStructFixtureRequest": {
+                  "type": "structure",
+                  "members": {
+                    "VpcId": { "target": "smithy.api#String", "traits": {} },
+                    "PeerVpcId": { "target": "smithy.api#String", "traits": {} }
+                  },
+                  "traits": { "smithy.api#input": {} }
+                },
+                "com.amazonaws.ec2#FromStructFixture": {
+                  "type": "structure",
+                  "members": {
+                    "RequesterVpcInfo": { "target": "com.amazonaws.ec2#VpcInfo", "traits": {} },
+                    "AccepterVpcInfo": { "target": "com.amazonaws.ec2#VpcInfo", "traits": {} },
+                    "Options": { "target": "com.amazonaws.ec2#Options", "traits": {} }
+                  },
+                  "traits": {}
+                },
+                "com.amazonaws.ec2#VpcInfo": {
+                  "type": "structure",
+                  "members": {
+                    "VpcId": { "target": "smithy.api#String", "traits": {} },
+                    "OwnerId": { "target": "smithy.api#String", "traits": {} }
+                  },
+                  "traits": {}
+                },
+                "com.amazonaws.ec2#Options": {
+                  "type": "structure",
+                  "members": {
+                    "AmazonSideAsn": { "target": "smithy.api#Long", "traits": {} },
+                    "DnsSupport": { "target": "smithy.api#String", "traits": {} }
+                  },
+                  "traits": {}
+                }
+              }
+            }"##,
+        )
+        .expect("parse minimal FromStruct model")
+    }
+
+    fn minimal_from_struct_resource(
+        attr: &'static str,
+        source: resource_defs::DerivedSource,
+    ) -> ResourceDef {
+        ResourceDef {
+            name: "ec2.FromStructFixture",
+            service_namespace: "com.amazonaws.ec2",
+            schema_structure: None,
+            simple_delete: false,
+            noop_update: false,
+            create_op: "CreateFromStructFixture",
+            read_structure: Some("FromStructFixture"),
+            read_ops: vec![],
+            delete_op: "",
+            update_ops: vec![],
+            identifier: "",
+            has_tags: false,
+            type_overrides: vec![],
+            exclude_fields: vec![],
+            create_only_overrides: vec![],
+            enum_aliases: vec![],
+            to_dsl_overrides: vec![],
+            required_overrides: vec![],
+            extra_read_only: vec![],
+            read_only_overrides: vec![],
+            extra_attributes: vec![],
+            identity_overrides: vec![],
+            deferred_populate_overrides: vec![],
+            deferred_populate_struct_field_overrides: vec![],
+            struct_field_type_overrides: vec![],
+            read_shape_overrides: vec![],
+            derived_attributes: vec![resource_defs::DerivedAttribute { attr, source }],
+        }
+    }
+
+    fn provider_code_panic_for_single_resource_with_model(
+        res: ResourceDef,
+        model: SmithyModel,
+    ) -> Option<String> {
+        let result =
+            std::panic::catch_unwind(|| provider_code_for_single_resource_with_model(res, model));
+        match result {
+            Ok(_) => None,
+            Err(payload) => Some(
+                payload
+                    .downcast_ref::<String>()
+                    .cloned()
+                    .or_else(|| payload.downcast_ref::<&str>().map(|s| s.to_string()))
+                    .unwrap_or_else(|| "<non-string panic>".to_string()),
+            ),
+        }
+    }
+
+    #[test]
+    fn from_struct_panics_on_empty_children() {
+        let res = minimal_from_struct_resource(
+            "Options",
+            resource_defs::DerivedSource::FromStruct {
+                struct_member: "Options",
+                children: &[],
+            },
+        );
+
+        let panic =
+            provider_code_panic_for_single_resource_with_model(res, minimal_from_struct_model())
+                .expect("FromStruct with empty children should panic");
+        assert!(
+            panic.contains("must list at least one child member"),
+            "unexpected panic: {panic}"
+        );
+    }
+
+    #[test]
+    fn from_struct_panics_on_flat_rename_with_multiple_children() {
+        let res = minimal_from_struct_resource(
+            "PeerVpcId",
+            resource_defs::DerivedSource::FromStruct {
+                struct_member: "AccepterVpcInfo",
+                children: &["VpcId", "OwnerId"],
+            },
+        );
+
+        let panic =
+            provider_code_panic_for_single_resource_with_model(res, minimal_from_struct_model())
+                .expect("FromStruct flat rename with multiple children should panic");
+        assert!(
+            panic.contains(
+                "emits a top-level leaf attribute 'peer_vpc_id' but lists more than one child"
+            ),
+            "unexpected panic: {panic}"
+        );
+    }
+
+    #[test]
+    fn from_struct_panics_when_attr_is_not_declared_in_schema() {
+        let res = minimal_from_struct_resource(
+            "TypoVpcId",
+            resource_defs::DerivedSource::FromStruct {
+                struct_member: "RequesterVpcInfo",
+                children: &["VpcId"],
+            },
+        );
+
+        let panic =
+            provider_code_panic_for_single_resource_with_model(res, minimal_from_struct_model())
+                .expect("FromStruct with undeclared attr should panic");
+        assert!(
+            panic.contains(
+                "FromStruct's `attr` 'TypoVpcId' is not declared in the resource's schema"
+            ),
+            "unexpected panic: {panic}"
+        );
+    }
+
+    #[test]
+    fn from_struct_emits_flat_rename_for_leaf_attr() {
+        let res = minimal_from_struct_resource(
+            "VpcId",
+            resource_defs::DerivedSource::FromStruct {
+                struct_member: "RequesterVpcInfo",
+                children: &["VpcId"],
+            },
+        );
+        let code = provider_code_for_single_resource_with_model(res, minimal_from_struct_model());
+
+        assert!(
+            code.contains("if let Some(opts) = obj.requester_vpc_info()\n            && let Some(v) = opts.vpc_id()"),
+            "must emit flat rename shape: {code}"
+        );
+        assert!(
+            code.contains("attributes.insert(\"vpc_id\".to_string(), Value::Concrete(ConcreteValue::String(v.to_string())));"),
+            "must insert leaf attr directly: {code}"
+        );
+    }
+
+    #[test]
+    fn from_struct_emits_nested_map_for_struct_attr() {
+        let res = minimal_from_struct_resource(
+            "Options",
+            resource_defs::DerivedSource::FromStruct {
+                struct_member: "Options",
+                children: &["AmazonSideAsn", "DnsSupport"],
+            },
+        );
+        let code = provider_code_for_single_resource_with_model(res, minimal_from_struct_model());
+
+        assert!(
+            code.contains("if let Some(dns_opts) = obj.options() {"),
+            "must emit nested map source walk: {code}"
+        );
+        assert!(
+            code.contains("let mut fields = IndexMap::new();"),
+            "must build nested fields map: {code}"
+        );
+        assert!(
+            code.contains("attributes.insert(\"options\".to_string(), Value::Concrete(ConcreteValue::Map(fields)));"),
+            "must insert nested map attr: {code}"
+        );
+    }
+
     #[test]
     fn extract_iam_role_uses_required_field_pattern() {
         let res = resource_defs::iam_resources()
@@ -5218,7 +5509,7 @@ mod tests {
     }
 
     #[test]
-    fn extract_ec2_transit_gateway_attachment_emits_subnet_ids_and_struct_as_map_options() {
+    fn extract_ec2_transit_gateway_attachment_emits_subnet_ids_and_from_struct_options() {
         let res = resource_defs::ec2_resources()
             .into_iter()
             .find(|r| r.name == "ec2.TransitGatewayAttachment")
@@ -5236,7 +5527,7 @@ mod tests {
         );
         assert!(
             code.contains("if let Some(dns_opts) = obj.options() {"),
-            "must walk obj.options() as a StructAsMap source: {code}"
+            "must walk obj.options() as a FromStruct source: {code}"
         );
         assert!(
             code.contains("let mut fields = IndexMap::new();"),
@@ -5286,7 +5577,7 @@ mod tests {
     }
 
     #[test]
-    fn extract_ec2_transit_gateway_emits_struct_as_map_options() {
+    fn extract_ec2_transit_gateway_emits_from_struct_options() {
         let res = resource_defs::ec2_resources()
             .into_iter()
             .find(|r| r.name == "ec2.TransitGateway")
@@ -5301,7 +5592,7 @@ mod tests {
         // exercise both Int and Enum emission paths.
         assert!(
             code.contains("if let Some(dns_opts) = obj.options() {"),
-            "must walk obj.options() as a StructAsMap source: {code}"
+            "must walk obj.options() as a FromStruct source: {code}"
         );
         assert!(
             code.contains("let mut fields = IndexMap::new();"),
@@ -5373,15 +5664,13 @@ mod tests {
             "accepter owner_id inserts under \"peer_owner_id\": {code}"
         );
         assert!(
-            code.contains(
-                "attributes.insert(\"peer_region\".to_string(), Value::Concrete(ConcreteValue::String(v.to_string())));"
-            ),
-            "accepter region inserts under \"peer_region\": {code}"
+            !code.contains("attributes.insert(\"peer_region\".to_string()"),
+            "peer_region is excluded from the schema and must not be extracted: {code}"
         );
     }
 
     #[test]
-    fn extract_ec2_subnet_emits_struct_as_map_for_private_dns_options() {
+    fn extract_ec2_subnet_emits_from_struct_map_for_private_dns_options() {
         let res = resource_defs::ec2_resources()
             .into_iter()
             .find(|r| r.name == "ec2.Subnet")
