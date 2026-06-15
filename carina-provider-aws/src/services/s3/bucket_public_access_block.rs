@@ -6,7 +6,7 @@ use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
-use crate::helpers::{RetryPolicy, require_string_attr, retry_aws_operation};
+use crate::helpers::{RetryPolicy, optional_bool_attr, require_string_attr, retry_aws_operation};
 use crate::services::s3::bucket::is_s3_not_configured_error;
 
 impl AwsProvider {
@@ -109,25 +109,17 @@ impl AwsProvider {
         resource: &Resource,
     ) -> ProviderResult<State> {
         let mut builder = PublicAccessBlockConfiguration::builder();
-        if let Some(Value::Concrete(ConcreteValue::Bool(v))) =
-            resource.get_attr("block_public_acls")
-        {
-            builder = builder.block_public_acls(*v);
+        if let Some(v) = optional_bool_attr(resource, "block_public_acls") {
+            builder = builder.block_public_acls(v);
         }
-        if let Some(Value::Concrete(ConcreteValue::Bool(v))) =
-            resource.get_attr("ignore_public_acls")
-        {
-            builder = builder.ignore_public_acls(*v);
+        if let Some(v) = optional_bool_attr(resource, "ignore_public_acls") {
+            builder = builder.ignore_public_acls(v);
         }
-        if let Some(Value::Concrete(ConcreteValue::Bool(v))) =
-            resource.get_attr("block_public_policy")
-        {
-            builder = builder.block_public_policy(*v);
+        if let Some(v) = optional_bool_attr(resource, "block_public_policy") {
+            builder = builder.block_public_policy(v);
         }
-        if let Some(Value::Concrete(ConcreteValue::Bool(v))) =
-            resource.get_attr("restrict_public_buckets")
-        {
-            builder = builder.restrict_public_buckets(*v);
+        if let Some(v) = optional_bool_attr(resource, "restrict_public_buckets") {
+            builder = builder.restrict_public_buckets(v);
         }
         let config = builder.build();
 

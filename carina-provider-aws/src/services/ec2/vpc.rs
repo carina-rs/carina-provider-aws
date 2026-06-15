@@ -5,7 +5,9 @@ use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
-use crate::helpers::{RetryPolicy, optional_enum_attr, require_string_attr, retry_aws_operation};
+use crate::helpers::{
+    RetryPolicy, optional_bool_attr, optional_enum_attr, require_string_attr, retry_aws_operation,
+};
 
 impl AwsProvider {
     /// Read an EC2 VPC
@@ -126,15 +128,13 @@ impl AwsProvider {
             .await?;
 
         // Configure DNS support
-        if let Some(Value::Concrete(ConcreteValue::Bool(enabled))) =
-            resource.get_attr("enable_dns_support")
-        {
+        if let Some(enabled) = optional_bool_attr(resource, "enable_dns_support") {
             self.ec2_client
                 .modify_vpc_attribute()
                 .vpc_id(vpc_id)
                 .enable_dns_support(
                     aws_sdk_ec2::types::AttributeBooleanValue::builder()
-                        .value(*enabled)
+                        .value(enabled)
                         .build(),
                 )
                 .send()
@@ -146,15 +146,13 @@ impl AwsProvider {
         }
 
         // Configure DNS hostnames
-        if let Some(Value::Concrete(ConcreteValue::Bool(enabled))) =
-            resource.get_attr("enable_dns_hostnames")
-        {
+        if let Some(enabled) = optional_bool_attr(resource, "enable_dns_hostnames") {
             self.ec2_client
                 .modify_vpc_attribute()
                 .vpc_id(vpc_id)
                 .enable_dns_hostnames(
                     aws_sdk_ec2::types::AttributeBooleanValue::builder()
-                        .value(*enabled)
+                        .value(enabled)
                         .build(),
                 )
                 .send()
@@ -181,15 +179,13 @@ impl AwsProvider {
         let vpc_id = identifier.to_string();
 
         // Update DNS support
-        if let Some(Value::Concrete(ConcreteValue::Bool(enabled))) =
-            to.get_attr("enable_dns_support")
-        {
+        if let Some(enabled) = optional_bool_attr(&to, "enable_dns_support") {
             self.ec2_client
                 .modify_vpc_attribute()
                 .vpc_id(&vpc_id)
                 .enable_dns_support(
                     aws_sdk_ec2::types::AttributeBooleanValue::builder()
-                        .value(*enabled)
+                        .value(enabled)
                         .build(),
                 )
                 .send()
@@ -201,15 +197,13 @@ impl AwsProvider {
         }
 
         // Update DNS hostnames
-        if let Some(Value::Concrete(ConcreteValue::Bool(enabled))) =
-            to.get_attr("enable_dns_hostnames")
-        {
+        if let Some(enabled) = optional_bool_attr(&to, "enable_dns_hostnames") {
             self.ec2_client
                 .modify_vpc_attribute()
                 .vpc_id(&vpc_id)
                 .enable_dns_hostnames(
                     aws_sdk_ec2::types::AttributeBooleanValue::builder()
-                        .value(*enabled)
+                        .value(enabled)
                         .build(),
                 )
                 .send()

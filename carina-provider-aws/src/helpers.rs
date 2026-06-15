@@ -84,6 +84,18 @@ pub fn optional_enum_attr<'a>(resource: &'a Resource, attr_name: &str) -> Option
     enum_attr_str(resource, attr_name)
 }
 
+/// Return the `bool` value of a top-level `Bool`-typed attribute.
+/// Returns `None` if the attribute is absent or carries any other
+/// `Value` shape. Sibling of [`optional_enum_attr`] /
+/// [`value_as_str`]; closes the symmetric top-level helper set for
+/// Bool reads (carina-rs/carina-provider-aws#451).
+pub(crate) fn optional_bool_attr(resource: &Resource, attr_name: &str) -> Option<bool> {
+    match resource.get_attr(attr_name)? {
+        Value::Concrete(ConcreteValue::Bool(b)) => Some(*b),
+        _ => None,
+    }
+}
+
 /// Return the AWS API canonical spelling for a schema-typed enum
 /// attribute that lives inside a nested struct attribute (the
 /// `Map`-shaped value at `struct_attr`). Accepts every `Value` shape the
@@ -704,6 +716,34 @@ mod tests {
     fn test_optional_enum_attr_non_enum_shape_is_none() {
         let resource = make_resource_with_value("type", Value::Concrete(ConcreteValue::Bool(true)));
         assert_eq!(optional_enum_attr(&resource, "type"), None);
+    }
+
+    #[test]
+    fn test_optional_bool_attr_bool() {
+        let true_resource =
+            make_resource_with_value("enabled", Value::Concrete(ConcreteValue::Bool(true)));
+        let false_resource =
+            make_resource_with_value("enabled", Value::Concrete(ConcreteValue::Bool(false)));
+        assert_eq!(optional_bool_attr(&true_resource, "enabled"), Some(true));
+        assert_eq!(optional_bool_attr(&false_resource, "enabled"), Some(false));
+    }
+
+    #[test]
+    fn test_optional_bool_attr_missing_is_none() {
+        let resource = make_test_resource(vec![]);
+        assert_eq!(optional_bool_attr(&resource, "enabled"), None);
+    }
+
+    #[test]
+    fn test_optional_bool_attr_wrong_shape_is_none() {
+        let string_resource = make_resource_with_value(
+            "enabled",
+            Value::Concrete(ConcreteValue::String("true".into())),
+        );
+        let int_resource =
+            make_resource_with_value("enabled", Value::Concrete(ConcreteValue::Int(1)));
+        assert_eq!(optional_bool_attr(&string_resource, "enabled"), None);
+        assert_eq!(optional_bool_attr(&int_resource, "enabled"), None);
     }
 
     #[test]

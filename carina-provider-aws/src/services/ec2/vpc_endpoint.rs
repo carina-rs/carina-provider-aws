@@ -5,7 +5,9 @@ use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
-use crate::helpers::{RetryPolicy, optional_enum_attr, require_string_attr, retry_aws_operation};
+use crate::helpers::{
+    RetryPolicy, optional_bool_attr, optional_enum_attr, require_string_attr, retry_aws_operation,
+};
 
 impl AwsProvider {
     /// Read an EC2 VPC Endpoint
@@ -107,10 +109,8 @@ impl AwsProvider {
             }
         }
 
-        if let Some(Value::Concrete(ConcreteValue::Bool(v))) =
-            resource.get_attr("private_dns_enabled")
-        {
-            req = req.private_dns_enabled(*v);
+        if let Some(v) = optional_bool_attr(resource, "private_dns_enabled") {
+            req = req.private_dns_enabled(v);
         }
 
         if let Some(Value::Concrete(ConcreteValue::String(policy))) =
@@ -309,8 +309,8 @@ impl AwsProvider {
         }
 
         // Update private_dns_enabled
-        if let Some(Value::Concrete(ConcreteValue::Bool(v))) = to.get_attr("private_dns_enabled") {
-            req = req.private_dns_enabled(*v);
+        if let Some(v) = optional_bool_attr(&to, "private_dns_enabled") {
+            req = req.private_dns_enabled(v);
             has_modifications = true;
         }
 
