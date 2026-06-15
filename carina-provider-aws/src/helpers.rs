@@ -147,6 +147,60 @@ pub(crate) fn optional_int_struct_field(
     }
 }
 
+/// Return the `bool` value of a `Bool`-typed field inside the nested
+/// struct attribute `struct_attr`. Same shape contract as
+/// [`enum_struct_field_str`]: outer must be a `Map`, missing
+/// outer/field/wrong-shape returns `None`. Narrowed to a single
+/// `Value` shape: `ConcreteValue::Bool`.
+///
+/// Sibling of [`optional_enum_struct_field`] /
+/// [`optional_int_struct_field`] /
+/// [`optional_string_list_struct_field`] /
+/// [`optional_string_struct_field`]. carina-rs/carina-provider-aws#445.
+pub(crate) fn optional_bool_struct_field(
+    resource: &Resource,
+    struct_attr: &str,
+    field_name: &str,
+) -> Option<bool> {
+    let Some(Value::Concrete(ConcreteValue::Map(m))) = resource.get_attr(struct_attr) else {
+        return None;
+    };
+    match m.get(field_name)? {
+        Value::Concrete(ConcreteValue::Bool(b)) => Some(*b),
+        _ => None,
+    }
+}
+
+/// Return the `&str` value of a plain-`String`-typed field inside the
+/// nested struct attribute `struct_attr`. Same shape contract as
+/// [`enum_struct_field_str`]: outer must be a `Map`, missing
+/// outer/field/wrong-shape returns `None`. Narrowed to
+/// `ConcreteValue::String` only - DO NOT use for enum-shaped fields;
+/// use [`optional_enum_struct_field`] for those so the
+/// `EnumIdentifier` / `CanonicalEnum` Value variants the canonicalize
+/// pipeline can produce are not silently dropped.
+///
+/// carina-rs/carina-provider-aws#445 added this helper as the
+/// symmetric sibling of [`optional_bool_struct_field`] to close the
+/// nested-struct-field helper set; `#[allow(dead_code)]` because no
+/// current resource has a plain-`String` child inside a nested struct
+/// attribute. The helper is exercised by unit tests; do not remove
+/// when grepping for unused functions.
+#[allow(dead_code)]
+pub(crate) fn optional_string_struct_field<'a>(
+    resource: &'a Resource,
+    struct_attr: &str,
+    field_name: &str,
+) -> Option<&'a str> {
+    let Some(Value::Concrete(ConcreteValue::Map(m))) = resource.get_attr(struct_attr) else {
+        return None;
+    };
+    match m.get(field_name)? {
+        Value::Concrete(ConcreteValue::String(s)) => Some(s.as_str()),
+        _ => None,
+    }
+}
+
 /// Return the `Vec<String>` value of a `List<String>`-typed field
 /// inside the nested struct attribute `struct_attr`. Accepts both
 /// `ConcreteValue::StringList` (the canonical shape after carina-core
@@ -709,6 +763,30 @@ mod tests {
     }
 
     #[test]
+    fn test_optional_bool_struct_field_bool() {
+        let resource = make_resource_with_struct_field(
+            "enable_resource_name_dns_a_record",
+            Value::Concrete(ConcreteValue::Bool(true)),
+        );
+        assert_eq!(
+            optional_bool_struct_field(&resource, "options", "enable_resource_name_dns_a_record"),
+            Some(true)
+        );
+    }
+
+    #[test]
+    fn test_optional_string_struct_field_string() {
+        let resource = make_resource_with_struct_field(
+            "domain_name",
+            Value::Concrete(ConcreteValue::String("example.com".to_string())),
+        );
+        assert_eq!(
+            optional_string_struct_field(&resource, "options", "domain_name"),
+            Some("example.com")
+        );
+    }
+
+    #[test]
     fn test_optional_string_list_struct_field_string_list() {
         let resource = make_resource_with_struct_field(
             "transit_gateway_cidr_blocks",
@@ -746,6 +824,14 @@ mod tests {
             None
         );
         assert_eq!(
+            optional_bool_struct_field(&resource, "options", "enable_resource_name_dns_a_record"),
+            None
+        );
+        assert_eq!(
+            optional_string_struct_field(&resource, "options", "domain_name"),
+            None
+        );
+        assert_eq!(
             optional_string_list_struct_field(&resource, "options", "transit_gateway_cidr_blocks"),
             None
         );
@@ -763,6 +849,14 @@ mod tests {
         );
         assert_eq!(
             optional_int_struct_field(&resource, "options", "amazon_side_asn"),
+            None
+        );
+        assert_eq!(
+            optional_bool_struct_field(&resource, "options", "enable_resource_name_dns_a_record"),
+            None
+        );
+        assert_eq!(
+            optional_string_struct_field(&resource, "options", "domain_name"),
             None
         );
         assert_eq!(
@@ -786,6 +880,14 @@ mod tests {
             None
         );
         assert_eq!(
+            optional_bool_struct_field(&resource, "options", "enable_resource_name_dns_a_record"),
+            None
+        );
+        assert_eq!(
+            optional_string_struct_field(&resource, "options", "domain_name"),
+            None
+        );
+        assert_eq!(
             optional_string_list_struct_field(&resource, "options", "transit_gateway_cidr_blocks"),
             None
         );
@@ -805,6 +907,16 @@ mod tests {
             "transit_gateway_cidr_blocks",
             Value::Concrete(ConcreteValue::Int(1)),
         );
+        let bool_resource = make_resource_with_struct_field(
+            "enable_resource_name_dns_a_record",
+            Value::Concrete(ConcreteValue::String("true".to_string())),
+        );
+        let string_resource =
+            make_resource_with_struct_field("domain_name", Value::Concrete(ConcreteValue::Int(1)));
+        let string_enum_identifier_resource = make_resource_with_struct_field(
+            "domain_name",
+            Value::Concrete(ConcreteValue::enum_identifier("example")),
+        );
         let mixed_list_resource = make_resource_with_struct_field(
             "transit_gateway_cidr_blocks",
             Value::Concrete(ConcreteValue::List(vec![Value::Concrete(
@@ -817,6 +929,26 @@ mod tests {
         );
         assert_eq!(
             optional_int_struct_field(&int_resource, "options", "amazon_side_asn"),
+            None
+        );
+        assert_eq!(
+            optional_bool_struct_field(
+                &bool_resource,
+                "options",
+                "enable_resource_name_dns_a_record"
+            ),
+            None
+        );
+        assert_eq!(
+            optional_string_struct_field(&string_resource, "options", "domain_name"),
+            None
+        );
+        assert_eq!(
+            optional_string_struct_field(
+                &string_enum_identifier_resource,
+                "options",
+                "domain_name"
+            ),
             None
         );
         assert_eq!(

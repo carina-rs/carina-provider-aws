@@ -5,7 +5,7 @@ use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
-use crate::helpers::require_string_attr;
+use crate::helpers::{optional_bool_struct_field, optional_enum_struct_field, require_string_attr};
 use aws_sdk_ec2::types::{AttributeBooleanValue, HostnameType};
 
 // `read_ec2_subnet` must store `availability_zone` as the AWS canonical
@@ -100,7 +100,7 @@ impl AwsProvider {
             .await?;
 
         // Apply subnet attributes that require ModifySubnetAttribute
-        self.modify_subnet_attributes(&resource.id, subnet_id, &attrs)
+        self.modify_subnet_attributes(&resource.id, subnet_id, resource)
             .await?;
 
         // Read back using subnet ID (reliable identifier)
@@ -117,8 +117,7 @@ impl AwsProvider {
     ) -> ProviderResult<State> {
         // Apply subnet attributes that require ModifySubnetAttribute
         let attrs = to.resolved_attributes();
-        self.modify_subnet_attributes(&id, identifier, &attrs)
-            .await?;
+        self.modify_subnet_attributes(&id, identifier, &to).await?;
 
         // Update tags
         self.apply_ec2_tags(&id, identifier, &attrs, Some(&from.attributes))
@@ -133,10 +132,10 @@ impl AwsProvider {
         &self,
         id: &ResourceId,
         subnet_id: &str,
-        attributes: &HashMap<String, Value>,
+        resource: &Resource,
     ) -> ProviderResult<()> {
         if let Some(Value::Concrete(ConcreteValue::Bool(enabled))) =
-            attributes.get("map_public_ip_on_launch")
+            resource.get_attr("map_public_ip_on_launch")
         {
             self.ec2_client
                 .modify_subnet_attribute()
@@ -155,7 +154,7 @@ impl AwsProvider {
         }
 
         if let Some(Value::Concrete(ConcreteValue::Bool(enabled))) =
-            attributes.get("assign_ipv6_address_on_creation")
+            resource.get_attr("assign_ipv6_address_on_creation")
         {
             self.ec2_client
                 .modify_subnet_attribute()
@@ -175,7 +174,8 @@ impl AwsProvider {
                 })?;
         }
 
-        if let Some(Value::Concrete(ConcreteValue::Bool(enabled))) = attributes.get("enable_dns64")
+        if let Some(Value::Concrete(ConcreteValue::Bool(enabled))) =
+            resource.get_attr("enable_dns64")
         {
             self.ec2_client
                 .modify_subnet_attribute()
@@ -195,65 +195,71 @@ impl AwsProvider {
 
         // The ModifySubnetAttribute API only allows modifying one attribute at a time.
         // Each private_dns_name_options_on_launch field must be a separate API call.
-        if let Some(Value::Concrete(ConcreteValue::Map(fields))) =
-            attributes.get("private_dns_name_options_on_launch")
-        {
-            if let Some(Value::Concrete(ConcreteValue::String(ht))) = fields.get("hostname_type") {
-                self.ec2_client
-                    .modify_subnet_attribute()
-                    .subnet_id(subnet_id)
-                    .private_dns_hostname_type_on_launch(HostnameType::from(ht.as_str()))
-                    .send()
-                    .await
-                    .map_err(|e| {
-                        api_error_with_meta(
-                            "Failed to set private_dns_name_options_on_launch.hostname_type",
-                            "ec2.ModifySubnetAttribute",
-                            e,
-                        )
-                        .for_resource(id.clone())
-                    })?;
-            }
-            if let Some(Value::Concrete(ConcreteValue::Bool(v))) =
-                fields.get("enable_resource_name_dns_a_record")
-            {
-                self.ec2_client
-                    .modify_subnet_attribute()
-                    .subnet_id(subnet_id)
-                    .enable_resource_name_dns_a_record_on_launch(
-                        AttributeBooleanValue::builder().value(*v).build(),
+        if let Some(ht) = optional_enum_struct_field(
+            resource,
+            "private_dns_name_options_on_launch",
+            "hostname_type",
+        ) {
+            self.ec2_client
+                .modify_subnet_attribute()
+                .subnet_id(subnet_id)
+                .private_dns_hostname_type_on_launch(HostnameType::from(ht))
+                .send()
+                .await
+                .map_err(|e| {
+                    api_error_with_meta(
+                        "Failed to set private_dns_name_options_on_launch.hostname_type",
+                        "ec2.ModifySubnetAttribute",
+                        e,
                     )
-                    .send()
-                    .await
-                    .map_err(|e| {
-                        api_error_with_meta(
-                            "Failed to set private_dns_name_options_on_launch.enable_resource_name_dns_a_record",
-                            "ec2.ModifySubnetAttribute",
-                            e,
-                        )
-                        .for_resource(id.clone())
-                    })?;
-            }
-            if let Some(Value::Concrete(ConcreteValue::Bool(v))) =
-                fields.get("enable_resource_name_dns_aaaa_record")
-            {
-                self.ec2_client
-                    .modify_subnet_attribute()
-                    .subnet_id(subnet_id)
-                    .enable_resource_name_dns_aaaa_record_on_launch(
-                        AttributeBooleanValue::builder().value(*v).build(),
+                    .for_resource(id.clone())
+                })?;
+        }
+
+        if let Some(v) = optional_bool_struct_field(
+            resource,
+            "private_dns_name_options_on_launch",
+            "enable_resource_name_dns_a_record",
+        ) {
+            self.ec2_client
+                .modify_subnet_attribute()
+                .subnet_id(subnet_id)
+                .enable_resource_name_dns_a_record_on_launch(
+                    AttributeBooleanValue::builder().value(v).build(),
+                )
+                .send()
+                .await
+                .map_err(|e| {
+                    api_error_with_meta(
+                        "Failed to set private_dns_name_options_on_launch.enable_resource_name_dns_a_record",
+                        "ec2.ModifySubnetAttribute",
+                        e,
                     )
-                    .send()
-                    .await
-                    .map_err(|e| {
-                        api_error_with_meta(
-                            "Failed to set private_dns_name_options_on_launch.enable_resource_name_dns_aaaa_record",
-                            "ec2.ModifySubnetAttribute",
-                            e,
-                        )
-                        .for_resource(id.clone())
-                    })?;
-            }
+                    .for_resource(id.clone())
+                })?;
+        }
+
+        if let Some(v) = optional_bool_struct_field(
+            resource,
+            "private_dns_name_options_on_launch",
+            "enable_resource_name_dns_aaaa_record",
+        ) {
+            self.ec2_client
+                .modify_subnet_attribute()
+                .subnet_id(subnet_id)
+                .enable_resource_name_dns_aaaa_record_on_launch(
+                    AttributeBooleanValue::builder().value(v).build(),
+                )
+                .send()
+                .await
+                .map_err(|e| {
+                    api_error_with_meta(
+                        "Failed to set private_dns_name_options_on_launch.enable_resource_name_dns_aaaa_record",
+                        "ec2.ModifySubnetAttribute",
+                        e,
+                    )
+                    .for_resource(id.clone())
+                })?;
         }
 
         Ok(())
