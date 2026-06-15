@@ -3016,14 +3016,9 @@ fn generate_provider_code(
                             derived.attr, res.name
                         );
                     }
+                    let schema_attr_kind = schema_attribute_shape_kind(res, model, derived.attr)
+                        .expect("schema_declares_attribute already checked schema presence");
                     let attr_snake = derived.attr.to_snake_case();
-                    let is_nested_map_layout = attr_snake == struct_member.to_snake_case();
-                    if !is_nested_map_layout && children.len() != 1 {
-                        panic!(
-                            "codegen: FromStruct for {}'s derived attribute '{}' emits a top-level leaf attribute '{}' but lists more than one child; declare separate DerivedAttribute entries for each rename target",
-                            res.name, derived.attr, attr_snake
-                        );
-                    }
 
                     let Some(struct_ref) = read_struct.members.get(*struct_member) else {
                         eprintln!(
@@ -3040,6 +3035,21 @@ fn generate_provider_code(
                         continue;
                     };
                     let struct_snake = escape_rust_keyword(&struct_member.to_snake_case());
+                    let name_says_nested_map = attr_snake == struct_member.to_snake_case();
+                    let schema_says_nested_map = matches!(schema_attr_kind, ShapeKind::Structure);
+                    if name_says_nested_map != schema_says_nested_map {
+                        panic!(
+                            "codegen: FromStruct for {}'s derived attribute '{}': name-equality heuristic and schema-shape lookup disagree on layout (name says {}, schema says {}). Misclassification rejected at codegen post-#448; the schema-shape signal is authoritative — fix the resource_defs.rs entry so both signals agree.",
+                            res.name, derived.attr, name_says_nested_map, schema_says_nested_map
+                        );
+                    }
+                    let is_nested_map_layout = schema_says_nested_map;
+                    if !is_nested_map_layout && children.len() != 1 {
+                        panic!(
+                            "codegen: FromStruct for {}'s derived attribute '{}' emits a top-level leaf attribute '{}' but lists more than one child; declare separate DerivedAttribute entries for each rename target",
+                            res.name, derived.attr, attr_snake
+                        );
+                    }
 
                     if is_nested_map_layout {
                         code.push_str(&format!(
@@ -3217,66 +3227,146 @@ fn generate_provider_code(
 ///
 /// Schema-attribute sources checked (mirroring what `generate_resource`
 /// emits as `AttributeSchema::new(...)`): `extra_attributes`,
-/// `update_ops[].fields`, `schema_structure` members (excluding `Tags` and
-/// `exclude_fields`), the create-op input members when `schema_structure`
-/// is None, and `read_structure` members. See
-/// carina-provider-aws#449 for the planned `extra_read_only` extension.
+/// `extra_read_only`, `update_ops[].fields`, `schema_structure` members
+/// (excluding `Tags` and `exclude_fields`), the create-op input members when
+/// `schema_structure` is None, and `read_structure` members.
 fn schema_declares_attribute(res: &ResourceDef, model: &SmithyModel, attr: &str) -> bool {
+    schema_attribute_shape_kind(res, model, attr).is_some()
+}
+
+/// Returns the Smithy shape kind for a declared schema attribute, using the
+/// same attribute-source walk as [`schema_declares_attribute`].
+fn schema_attribute_shape_kind(
+    res: &ResourceDef,
+    model: &SmithyModel,
+    attr: &str,
+) -> Option<ShapeKind> {
     let exclude: HashSet<&str> = res.exclude_fields.iter().copied().collect();
     let attr_snake = attr.to_snake_case();
 
     let matches_attr = |name: &str| name.to_snake_case() == attr_snake;
-    if res
+
+    if let Some(extra) = res
         .extra_attributes
         .iter()
-        .any(|extra| matches_attr(extra.name))
-        || res
-            .update_ops
-            .iter()
-            .flat_map(|op| op.fields.field_names())
-            .any(|name| matches_attr(name))
+        .find(|extra| matches_attr(extra.name))
     {
-        return true;
+        if let Some(source_field) = extra.read_source
+            && let Some(read_struct_name) = res.read_structure
+        {
+            let read_structure_id = format!("{}#{}", res.service_namespace, read_struct_name);
+            if let Some(read_struct) = model.get_structure(&read_structure_id)
+                && let Some(member_ref) = read_struct.members.get(source_field)
+            {
+                return model.shape_kind(&member_ref.target);
+            }
+        }
+
+        return Some(ShapeKind::String);
+    }
+
+    if res.extra_read_only.iter().any(|name| matches_attr(name)) {
+        if let Some(read_struct_name) = res.read_structure {
+            let read_structure_id = format!("{}#{}", res.service_namespace, read_struct_name);
+            if let Some(read_struct) = model.get_structure(&read_structure_id)
+                && let Some((_, member_ref)) = read_struct
+                    .members
+                    .iter()
+                    .find(|(name, _)| matches_attr(name))
+            {
+                return model.shape_kind(&member_ref.target);
+            }
+        }
+
+        return Some(ShapeKind::String);
+    }
+
+    let update_field = res
+        .update_ops
+        .iter()
+        .flat_map(|op| op.fields.field_names())
+        .find(|name| matches_attr(name));
+    if let Some(update_field) = update_field {
+        if let Some(member_ref) = schema_member_ref(res, model, update_field, &exclude) {
+            return model.shape_kind(&member_ref.target);
+        }
+        return Some(ShapeKind::String);
     }
 
     if let Some(schema_struct_name) = res.schema_structure {
         let schema_structure_id = format!("{}#{}", res.service_namespace, schema_struct_name);
         if let Some(schema_struct) = model.get_structure(&schema_structure_id)
-            && schema_struct
+            && let Some((_, member_ref)) = schema_struct
                 .members
-                .keys()
-                .filter(|name| !exclude.contains(name.as_str()) && name.as_str() != "Tags")
-                .any(|name| matches_attr(name))
+                .iter()
+                .filter(|(name, _)| !exclude.contains(name.as_str()) && name.as_str() != "Tags")
+                .find(|(name, _)| matches_attr(name))
         {
-            return true;
+            return model.shape_kind(&member_ref.target);
         }
     } else if !res.create_op.is_empty() {
         let create_op_id = format!("{}#{}", res.service_namespace, res.create_op);
         if let Some(create_input) = model.operation_input(&create_op_id)
-            && create_input
+            && let Some((_, member_ref)) = create_input
                 .members
-                .keys()
-                .filter(|name| !exclude.contains(name.as_str()) && name.as_str() != "Tags")
-                .any(|name| matches_attr(name))
+                .iter()
+                .filter(|(name, _)| !exclude.contains(name.as_str()) && name.as_str() != "Tags")
+                .find(|(name, _)| matches_attr(name))
         {
-            return true;
+            return model.shape_kind(&member_ref.target);
         }
     }
 
     if let Some(read_struct_name) = res.read_structure {
         let read_structure_id = format!("{}#{}", res.service_namespace, read_struct_name);
         if let Some(read_struct) = model.get_structure(&read_structure_id)
-            && read_struct
+            && let Some((_, member_ref)) = read_struct
                 .members
-                .keys()
-                .filter(|name| !exclude.contains(name.as_str()) && name.as_str() != "Tags")
-                .any(|name| matches_attr(name))
+                .iter()
+                .filter(|(name, _)| !exclude.contains(name.as_str()) && name.as_str() != "Tags")
+                .find(|(name, _)| matches_attr(name))
         {
-            return true;
+            return model.shape_kind(&member_ref.target);
         }
     }
 
-    false
+    None
+}
+
+fn schema_member_ref<'a>(
+    res: &ResourceDef,
+    model: &'a SmithyModel,
+    name: &str,
+    exclude: &HashSet<&str>,
+) -> Option<&'a carina_smithy::ShapeRef> {
+    if let Some(schema_struct_name) = res.schema_structure {
+        let schema_structure_id = format!("{}#{}", res.service_namespace, schema_struct_name);
+        return model
+            .get_structure(&schema_structure_id)
+            .and_then(|schema_struct| schema_struct.members.get(name))
+            .filter(|_| !exclude.contains(name) && name != "Tags");
+    }
+
+    if !res.create_op.is_empty() {
+        let create_op_id = format!("{}#{}", res.service_namespace, res.create_op);
+        if let Some(member_ref) = model
+            .operation_input(&create_op_id)
+            .and_then(|create_input| create_input.members.get(name))
+            .filter(|_| !exclude.contains(name) && name != "Tags")
+        {
+            return Some(member_ref);
+        }
+    }
+
+    if let Some(read_struct_name) = res.read_structure {
+        let read_structure_id = format!("{}#{}", res.service_namespace, read_struct_name);
+        return model
+            .get_structure(&read_structure_id)
+            .and_then(|read_struct| read_struct.members.get(name))
+            .filter(|_| !exclude.contains(name) && name != "Tags");
+    }
+
+    None
 }
 
 /// Derive a short suffix from an operation name by stripping the verb prefix and identifier.
@@ -5148,6 +5238,7 @@ mod tests {
                 "com.amazonaws.ec2#CreateFromStructFixtureRequest": {
                   "type": "structure",
                   "members": {
+                    "FlatOptions": { "target": "smithy.api#String", "traits": {} },
                     "VpcId": { "target": "smithy.api#String", "traits": {} },
                     "PeerVpcId": { "target": "smithy.api#String", "traits": {} }
                   },
@@ -5158,6 +5249,7 @@ mod tests {
                   "members": {
                     "RequesterVpcInfo": { "target": "com.amazonaws.ec2#VpcInfo", "traits": {} },
                     "AccepterVpcInfo": { "target": "com.amazonaws.ec2#VpcInfo", "traits": {} },
+                    "FlatOptions": { "target": "com.amazonaws.ec2#Options", "traits": {} },
                     "Options": { "target": "com.amazonaws.ec2#Options", "traits": {} }
                   },
                   "traits": {}
@@ -5294,6 +5386,46 @@ mod tests {
             panic.contains(
                 "FromStruct's `attr` 'TypoVpcId' is not declared in the resource's schema"
             ),
+            "unexpected panic: {panic}"
+        );
+    }
+
+    #[test]
+    fn from_struct_extra_read_only_attr_is_schema_declared() {
+        let mut res = minimal_from_struct_resource(
+            "FooBar",
+            resource_defs::DerivedSource::FromStruct {
+                struct_member: "Options",
+                children: &["DnsSupport"],
+            },
+        );
+        res.extra_read_only = vec!["FooBar"];
+
+        let code = provider_code_for_single_resource_with_model(res, minimal_from_struct_model());
+
+        assert!(
+            code.contains("attributes.insert(\"foo_bar\".to_string(), Value::Concrete(ConcreteValue::String(v.to_string())));"),
+            "extra_read_only FromStruct attr should emit without schema-missing panic: {code}"
+        );
+    }
+
+    #[test]
+    fn from_struct_panics_on_name_equality_vs_schema_shape_mismatch() {
+        let res = minimal_from_struct_resource(
+            "FlatOptions",
+            resource_defs::DerivedSource::FromStruct {
+                struct_member: "FlatOptions",
+                children: &["DnsSupport"],
+            },
+        );
+
+        let panic =
+            provider_code_panic_for_single_resource_with_model(res, minimal_from_struct_model())
+                .expect("FromStruct layout mismatch should panic");
+        assert!(
+            panic.contains("name-equality heuristic and schema-shape lookup disagree on layout")
+                && panic.contains("ec2.FromStructFixture")
+                && panic.contains("FlatOptions"),
             "unexpected panic: {panic}"
         );
     }
