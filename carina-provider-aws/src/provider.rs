@@ -2,13 +2,92 @@
 
 use carina_core::effect::PlanOp;
 use carina_core::provider::{
-    BoxFuture, CreateRequest, DeleteRequest, Provider, ProviderError, ProviderResult, ReadRequest,
-    UpdateRequest,
+    BoxFuture, CreateOutcome, CreateRequest, DeleteRequest, Provider, ProviderError,
+    ProviderResult, ReadRequest, UpdateRequest,
 };
-use carina_core::resource::{DataSource, ResourceId, State};
+use carina_core::resource::{DataSource, Resource, ResourceId, State};
 
 use crate::AwsProvider;
 use crate::helpers::apply_patch_to_state;
+
+impl AwsProvider {
+    pub async fn create_resource(&self, resource: &Resource) -> ProviderResult<CreateOutcome> {
+        let state = match resource.id.resource_type.as_str() {
+            "s3.Bucket" => self.create_s3_bucket(resource).await,
+            "s3.BucketPolicy" => self.create_s3_bucket_policy(resource).await,
+            "s3.BucketPublicAccessBlock" => {
+                self.create_s3_bucket_public_access_block(resource).await
+            }
+            "s3.BucketVersioning" => self.create_s3_bucket_versioning(resource).await,
+            "s3.BucketServerSideEncryptionConfiguration" => {
+                self.create_s3_bucket_server_side_encryption_configuration(resource)
+                    .await
+            }
+            "s3.BucketAcl" => self.create_s3_bucket_acl(resource).await,
+            "s3.BucketOwnershipControls" => {
+                self.create_s3_bucket_ownership_controls(resource).await
+            }
+            "s3.BucketReplicationConfiguration" => {
+                self.create_s3_bucket_replication_configuration(resource)
+                    .await
+            }
+            "s3.BucketLifecycleConfiguration" => {
+                self.create_s3_bucket_lifecycle_configuration(resource)
+                    .await
+            }
+            "s3.BucketWebsiteConfiguration" => {
+                self.create_s3_bucket_website_configuration(resource).await
+            }
+            "s3.BucketCorsConfiguration" => {
+                self.create_s3_bucket_cors_configuration(resource).await
+            }
+            "s3.BucketNotificationConfiguration" => {
+                self.create_s3_bucket_notification_configuration(resource)
+                    .await
+            }
+            "s3.BucketLogging" => self.create_s3_bucket_logging(resource).await,
+            "ec2.Eip" => self.create_ec2_eip(resource).await,
+            "ec2.Vpc" => self.create_ec2_vpc(resource).await,
+            "ec2.Subnet" => self.create_ec2_subnet(resource).await,
+            "ec2.InternetGateway" => self.create_ec2_internet_gateway(resource).await,
+            "ec2.NatGateway" => self.create_ec2_nat_gateway(resource).await,
+            "ec2.RouteTable" => self.create_ec2_route_table(resource).await,
+            "ec2.Route" => self.create_ec2_route(resource).await,
+            "ec2.SecurityGroup" => self.create_ec2_security_group(resource).await,
+            "ec2.SecurityGroupIngress" => self.create_ec2_security_group_ingress(resource).await,
+            "ec2.SecurityGroupEgress" => self.create_ec2_security_group_egress(resource).await,
+            "ec2.SubnetRouteTableAssociation" => {
+                self.create_ec2_subnet_route_table_association(resource)
+                    .await
+            }
+            "ec2.FlowLog" => self.create_ec2_flow_log(resource).await,
+            "ec2.VpcEndpoint" => self.create_ec2_vpc_endpoint(resource).await,
+            "ec2.VpcGatewayAttachment" => self.create_ec2_vpc_gateway_attachment(resource).await,
+            "ec2.VpnGateway" => self.create_ec2_vpn_gateway(resource).await,
+            "ec2.TransitGateway" => self.create_ec2_transit_gateway(resource).await,
+            "ec2.TransitGatewayAttachment" => {
+                self.create_ec2_transit_gateway_attachment(resource).await
+            }
+            "ec2.VpcPeeringConnection" => self.create_ec2_vpc_peering_connection(resource).await,
+            "ec2.EgressOnlyInternetGateway" => {
+                self.create_ec2_egress_only_internet_gateway(resource).await
+            }
+            "organizations.Account" => self.create_organizations_account(resource).await,
+            "organizations.Organization" => self.create_organizations_organization(resource).await,
+            "iam.Role" => self.create_iam_role(resource).await,
+            "logs.LogGroup" => self.create_logs_log_group(resource).await,
+            "route53.RecordSet" => self.create_route53_record_set(resource).await,
+            "acm.Certificate" => self.create_acm_certificate(resource).await,
+            "sqs.Queue" => self.create_sqs_queue(resource).await,
+            _ => Err(ProviderError::internal(format!(
+                "Unknown resource type: {}",
+                resource.id.resource_type
+            ))
+            .for_resource(resource.id.clone())),
+        }?;
+        Ok(CreateOutcome::Success { state })
+    }
+}
 
 impl Provider for AwsProvider {
     fn name(&self) -> &str {
@@ -162,92 +241,9 @@ impl Provider for AwsProvider {
         &self,
         _id: &ResourceId,
         request: CreateRequest,
-    ) -> BoxFuture<'_, ProviderResult<State>> {
+    ) -> BoxFuture<'_, ProviderResult<CreateOutcome>> {
         let resource = request.resource;
-        Box::pin(async move {
-            let resource = resource.as_resource();
-            match resource.id.resource_type.as_str() {
-                "s3.Bucket" => self.create_s3_bucket(resource).await,
-                "s3.BucketPolicy" => self.create_s3_bucket_policy(resource).await,
-                "s3.BucketPublicAccessBlock" => {
-                    self.create_s3_bucket_public_access_block(resource).await
-                }
-                "s3.BucketVersioning" => self.create_s3_bucket_versioning(resource).await,
-                "s3.BucketServerSideEncryptionConfiguration" => {
-                    self.create_s3_bucket_server_side_encryption_configuration(resource)
-                        .await
-                }
-                "s3.BucketAcl" => self.create_s3_bucket_acl(resource).await,
-                "s3.BucketOwnershipControls" => {
-                    self.create_s3_bucket_ownership_controls(resource).await
-                }
-                "s3.BucketReplicationConfiguration" => {
-                    self.create_s3_bucket_replication_configuration(resource)
-                        .await
-                }
-                "s3.BucketLifecycleConfiguration" => {
-                    self.create_s3_bucket_lifecycle_configuration(resource)
-                        .await
-                }
-                "s3.BucketWebsiteConfiguration" => {
-                    self.create_s3_bucket_website_configuration(resource).await
-                }
-                "s3.BucketCorsConfiguration" => {
-                    self.create_s3_bucket_cors_configuration(resource).await
-                }
-                "s3.BucketNotificationConfiguration" => {
-                    self.create_s3_bucket_notification_configuration(resource)
-                        .await
-                }
-                "s3.BucketLogging" => self.create_s3_bucket_logging(resource).await,
-                "ec2.Eip" => self.create_ec2_eip(resource).await,
-                "ec2.Vpc" => self.create_ec2_vpc(resource).await,
-                "ec2.Subnet" => self.create_ec2_subnet(resource).await,
-                "ec2.InternetGateway" => self.create_ec2_internet_gateway(resource).await,
-                "ec2.NatGateway" => self.create_ec2_nat_gateway(resource).await,
-                "ec2.RouteTable" => self.create_ec2_route_table(resource).await,
-                "ec2.Route" => self.create_ec2_route(resource).await,
-                "ec2.SecurityGroup" => self.create_ec2_security_group(resource).await,
-                "ec2.SecurityGroupIngress" => {
-                    self.create_ec2_security_group_ingress(resource).await
-                }
-                "ec2.SecurityGroupEgress" => self.create_ec2_security_group_egress(resource).await,
-                "ec2.SubnetRouteTableAssociation" => {
-                    self.create_ec2_subnet_route_table_association(resource)
-                        .await
-                }
-                "ec2.FlowLog" => self.create_ec2_flow_log(resource).await,
-                "ec2.VpcEndpoint" => self.create_ec2_vpc_endpoint(resource).await,
-                "ec2.VpcGatewayAttachment" => {
-                    self.create_ec2_vpc_gateway_attachment(resource).await
-                }
-                "ec2.VpnGateway" => self.create_ec2_vpn_gateway(resource).await,
-                "ec2.TransitGateway" => self.create_ec2_transit_gateway(resource).await,
-                "ec2.TransitGatewayAttachment" => {
-                    self.create_ec2_transit_gateway_attachment(resource).await
-                }
-                "ec2.VpcPeeringConnection" => {
-                    self.create_ec2_vpc_peering_connection(resource).await
-                }
-                "ec2.EgressOnlyInternetGateway" => {
-                    self.create_ec2_egress_only_internet_gateway(resource).await
-                }
-                "organizations.Account" => self.create_organizations_account(resource).await,
-                "organizations.Organization" => {
-                    self.create_organizations_organization(resource).await
-                }
-                "iam.Role" => self.create_iam_role(resource).await,
-                "logs.LogGroup" => self.create_logs_log_group(resource).await,
-                "route53.RecordSet" => self.create_route53_record_set(resource).await,
-                "acm.Certificate" => self.create_acm_certificate(resource).await,
-                "sqs.Queue" => self.create_sqs_queue(resource).await,
-                _ => Err(ProviderError::internal(format!(
-                    "Unknown resource type: {}",
-                    resource.id.resource_type
-                ))
-                .for_resource(resource.id.clone())),
-            }
-        })
+        Box::pin(async move { self.create_resource(resource.as_resource()).await })
     }
 
     fn update(
