@@ -87,11 +87,12 @@ impl AwsProvider {
             req = req.peer_owner_id(owner_id);
         }
 
-        if let Some(Value::Concrete(ConcreteValue::String(region))) =
-            resource.get_attr("peer_region")
-        {
-            req = req.peer_region(region);
-        }
+        // `peer_region` is excluded from the schema (resource_defs.rs
+        // `exclude_fields: ["DryRun", "TagSpecifications", "PeerRegion"]`),
+        // so a valid DSL cannot set it and this read would never fire.
+        // Cross-region peering would need `peer_region` declared as a
+        // schema attribute + a matching read-side projection;
+        // carina-provider-aws#447.
 
         // Apply tags via TagSpecifications
         if let Some(tag_spec) = build_tag_specification(
