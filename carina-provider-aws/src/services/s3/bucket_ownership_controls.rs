@@ -6,7 +6,9 @@ use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
-use crate::helpers::{RetryPolicy, require_string_attr, retry_aws_operation, sdk_error_message};
+use crate::helpers::{
+    RetryPolicy, require_enum_attr, require_string_attr, retry_aws_operation, sdk_error_message,
+};
 use crate::services::s3::bucket::is_s3_not_configured_error;
 
 impl AwsProvider {
@@ -87,13 +89,7 @@ impl AwsProvider {
         bucket: &str,
         resource: &Resource,
     ) -> ProviderResult<State> {
-        let ownership_str = match resource.get_attr("object_ownership") {
-            Some(Value::Concrete(ConcreteValue::String(s))) => s.clone(),
-            _ => {
-                return Err(ProviderError::invalid_input("object_ownership is required")
-                    .for_resource(id.clone()));
-            }
-        };
+        let ownership_str = require_enum_attr(resource, "object_ownership")?;
 
         let rule = OwnershipControlsRule::builder()
             .object_ownership(ObjectOwnership::from(ownership_str.as_str()))

@@ -2,10 +2,12 @@ use std::collections::HashMap;
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
-use crate::helpers::{RetryPolicy, require_string_attr, retry_aws_operation};
+use crate::helpers::{
+    RetryPolicy, optional_enum_attr, require_enum_attr, require_string_attr, retry_aws_operation,
+};
 use crate::services::s3::bucket::is_s3_not_configured_error;
 use aws_sdk_s3::types::{BucketVersioningStatus, MfaDelete, VersioningConfiguration};
-use carina_core::provider::{ProviderError, ProviderResult};
+use carina_core::provider::ProviderResult;
 use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
 
 impl AwsProvider {
@@ -91,19 +93,12 @@ impl AwsProvider {
         bucket: &str,
         resource: &Resource,
     ) -> ProviderResult<State> {
-        let status_str = match resource.get_attr("status") {
-            Some(Value::Concrete(ConcreteValue::String(s))) => s.clone(),
-            _ => {
-                return Err(
-                    ProviderError::invalid_input("status is required").for_resource(id.clone())
-                );
-            }
-        };
+        let status_str = require_enum_attr(resource, "status")?;
         let status = BucketVersioningStatus::from(status_str.as_str());
 
         let mut config_builder = VersioningConfiguration::builder().status(status);
-        if let Some(Value::Concrete(ConcreteValue::String(s))) = resource.get_attr("mfa_delete") {
-            config_builder = config_builder.mfa_delete(MfaDelete::from(s.as_str()));
+        if let Some(s) = optional_enum_attr(resource, "mfa_delete") {
+            config_builder = config_builder.mfa_delete(MfaDelete::from(s));
         }
 
         self.s3_client

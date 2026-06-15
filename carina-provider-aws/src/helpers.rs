@@ -38,19 +38,50 @@ pub fn require_string_attr(resource: &Resource, attr_name: &str) -> ProviderResu
     }
 }
 
-/// Extract a required enum attribute from a resource.
+/// Return the AWS API canonical spelling for a schema-typed enum
+/// attribute, accepting every `Value` shape the carina-core canonicalize
+/// pipeline can produce at the provider boundary:
 ///
-/// Core rewrites every schema-known enum value to its AWS API-canonical
-/// spelling (`Enabled`, `VPC`, `STANDARD_IA`) before the provider sees it,
-/// so the caller can feed the result straight to an SDK builder like
-/// `BucketVersioningStatus::from(...)`.
+/// - `ConcreteValue::String(s)` — quoted-string DSL form
+///   (`validation_method = 'DNS'`) or a state-read echo
+/// - `ConcreteValue::EnumIdentifier(raw)` — bare DSL identifier form
+///   (`validation_method = dns`, post-carina#3463)
+/// - `ConcreteValue::CanonicalEnum(c)` — typed witness produced by
+///   `canonicalize_resources_with_schemas` for schema-known values
+///   (carina#3438)
 ///
-/// Equivalent to `require_string_attr` today — the alias historically
-/// stripped a DSL namespace prefix, but normalization now happens
-/// upstream and namespaces never reach the provider. The helper is
-/// kept so caller intent stays readable.
+/// Returns `None` for any other shape or a missing attribute. Use this
+/// (or its wrappers below) for any schema attribute declared as
+/// `AttributeType::enum_(..)`. Plain `value_as_str` /
+/// `require_string_attr` match only `ConcreteValue::String` and silently
+/// drop the other two variants, which is the carina-rs/carina-provider-aws#440
+/// failure mode.
+pub(crate) fn enum_attr_str<'a>(resource: &'a Resource, attr_name: &str) -> Option<&'a str> {
+    match resource.get_attr(attr_name)? {
+        Value::Concrete(ConcreteValue::String(s)) => Some(s.as_str()),
+        Value::Concrete(ConcreteValue::EnumIdentifier(raw)) => Some(raw.as_str()),
+        Value::Concrete(ConcreteValue::CanonicalEnum(c)) => Some(c.api_value()),
+        _ => None,
+    }
+}
+
+/// Required-attribute wrapper around [`enum_attr_str`]. Returns the
+/// AWS API canonical spelling, or `ProviderError::invalid_input`
+/// when the attribute is absent or carries a non-enum-shaped value.
 pub fn require_enum_attr(resource: &Resource, attr_name: &str) -> ProviderResult<String> {
-    require_string_attr(resource, attr_name)
+    enum_attr_str(resource, attr_name)
+        .map(|s| s.to_string())
+        .ok_or_else(|| {
+            ProviderError::invalid_input(format!("{} is required", attr_name))
+                .for_resource(resource.id.clone())
+        })
+}
+
+/// Optional-attribute wrapper around [`enum_attr_str`] for readability
+/// at call sites where the enum is optional (e.g. ACM
+/// `validation_method`, `key_algorithm`).
+pub fn optional_enum_attr<'a>(resource: &'a Resource, attr_name: &str) -> Option<&'a str> {
+    enum_attr_str(resource, attr_name)
 }
 
 /// Build an EC2 `TagSpecification` from DSL tags for a given resource type.
@@ -334,7 +365,7 @@ mod tests {
     use super::*;
 
     fn make_test_resource(attrs: Vec<(&str, &str)>) -> Resource {
-        let mut resource = Resource::new("route53.RecordSet", "test");
+        let mut resource = Resource::new("acm.Certificate", "test");
         for (k, v) in attrs {
             resource.attributes.insert(
                 k.to_string(),
@@ -342,6 +373,29 @@ mod tests {
             );
         }
         resource
+    }
+
+    fn make_resource_with_value(attr_name: &str, value: Value) -> Resource {
+        let mut resource = Resource::new("acm.Certificate", "test");
+        resource.attributes.insert(attr_name.to_string(), value);
+        resource
+    }
+
+    fn canonical_validation_method_value() -> Value {
+        use carina_core::schema::{AttributeType, Schema, enum_identity};
+
+        let attr_type = AttributeType::enum_(
+            enum_identity("ValidationMethod", Some("aws.acm.Certificate")),
+            Some(vec!["DNS".to_string(), "EMAIL".to_string()]),
+            vec![
+                ("DNS".to_string(), "dns".to_string()),
+                ("EMAIL".to_string(), "email".to_string()),
+            ],
+            None,
+            None,
+        );
+        let schema = Schema::flat(attr_type);
+        schema.canonicalize(Value::Concrete(ConcreteValue::enum_identifier("dns")))
     }
 
     #[test]
@@ -424,23 +478,69 @@ mod tests {
     }
 
     #[test]
-    fn test_require_enum_attr_returns_canonical_value() {
-        // Core sends enum attributes in AWS API-canonical spelling.
-        // require_enum_attr just passes it through.
-        let resource = make_test_resource(vec![("type", "A")]);
-        assert_eq!(require_enum_attr(&resource, "type").unwrap(), "A");
+    fn test_require_enum_attr_string() {
+        let resource = make_test_resource(vec![("type", "DNS")]);
+        assert_eq!(require_enum_attr(&resource, "type").unwrap(), "DNS");
     }
 
     #[test]
-    fn test_require_enum_attr_plain_value() {
-        let resource = make_test_resource(vec![("type", "AAAA")]);
-        assert_eq!(require_enum_attr(&resource, "type").unwrap(), "AAAA");
+    fn test_require_enum_attr_enum_identifier() {
+        let resource = make_resource_with_value(
+            "type",
+            Value::Concrete(ConcreteValue::enum_identifier("dns")),
+        );
+        assert_eq!(require_enum_attr(&resource, "type").unwrap(), "dns");
     }
 
     #[test]
-    fn test_require_enum_attr_missing() {
+    fn test_require_enum_attr_canonical_enum() {
+        let resource = make_resource_with_value("type", canonical_validation_method_value());
+        assert_eq!(require_enum_attr(&resource, "type").unwrap(), "DNS");
+    }
+
+    #[test]
+    fn test_require_enum_attr_missing_is_err() {
         let resource = make_test_resource(vec![]);
         assert!(require_enum_attr(&resource, "type").is_err());
+    }
+
+    #[test]
+    fn test_require_enum_attr_non_enum_shape_is_err() {
+        let resource = make_resource_with_value("type", Value::Concrete(ConcreteValue::Int(1)));
+        assert!(require_enum_attr(&resource, "type").is_err());
+    }
+
+    #[test]
+    fn test_optional_enum_attr_string() {
+        let resource = make_test_resource(vec![("type", "DNS")]);
+        assert_eq!(optional_enum_attr(&resource, "type"), Some("DNS"));
+    }
+
+    #[test]
+    fn test_optional_enum_attr_enum_identifier() {
+        let resource = make_resource_with_value(
+            "type",
+            Value::Concrete(ConcreteValue::enum_identifier("dns")),
+        );
+        assert_eq!(optional_enum_attr(&resource, "type"), Some("dns"));
+    }
+
+    #[test]
+    fn test_optional_enum_attr_canonical_enum() {
+        let resource = make_resource_with_value("type", canonical_validation_method_value());
+        assert_eq!(optional_enum_attr(&resource, "type"), Some("DNS"));
+    }
+
+    #[test]
+    fn test_optional_enum_attr_missing_is_none() {
+        let resource = make_test_resource(vec![]);
+        assert_eq!(optional_enum_attr(&resource, "type"), None);
+    }
+
+    #[test]
+    fn test_optional_enum_attr_non_enum_shape_is_none() {
+        let resource = make_resource_with_value("type", Value::Concrete(ConcreteValue::Bool(true)));
+        assert_eq!(optional_enum_attr(&resource, "type"), None);
     }
 
     #[test]

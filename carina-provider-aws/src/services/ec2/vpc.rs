@@ -5,7 +5,7 @@ use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
-use crate::helpers::{RetryPolicy, require_string_attr, retry_aws_operation};
+use crate::helpers::{RetryPolicy, optional_enum_attr, require_string_attr, retry_aws_operation};
 
 impl AwsProvider {
     /// Read an EC2 VPC
@@ -96,10 +96,8 @@ impl AwsProvider {
         let mut create_vpc_builder = self.ec2_client.create_vpc().cidr_block(&cidr_block);
 
         // Handle instance_tenancy if specified
-        if let Some(Value::Concrete(ConcreteValue::String(tenancy))) =
-            resource.get_attr("instance_tenancy")
-        {
-            let tenancy_enum = match tenancy.as_str() {
+        if let Some(tenancy) = optional_enum_attr(resource, "instance_tenancy") {
+            let tenancy_enum = match tenancy {
                 "dedicated" => aws_sdk_ec2::types::Tenancy::Dedicated,
                 "host" => aws_sdk_ec2::types::Tenancy::Host,
                 _ => aws_sdk_ec2::types::Tenancy::Default,

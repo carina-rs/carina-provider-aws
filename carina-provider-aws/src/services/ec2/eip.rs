@@ -1,10 +1,11 @@
 use std::collections::HashMap;
 
 use carina_core::provider::{ProviderError, ProviderResult};
-use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
+use carina_core::resource::{Resource, ResourceId, State};
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
+use crate::helpers::optional_enum_attr;
 
 impl AwsProvider {
     /// Read an EC2 Elastic IP
@@ -61,9 +62,9 @@ impl AwsProvider {
     pub(crate) async fn create_ec2_eip(&self, resource: &Resource) -> ProviderResult<State> {
         let mut req = self.ec2_client.allocate_address();
 
-        if let Some(Value::Concrete(ConcreteValue::String(domain))) = resource.get_attr("domain") {
+        if let Some(domain) = optional_enum_attr(resource, "domain") {
             use aws_sdk_ec2::types::DomainType;
-            req = req.domain(DomainType::from(domain.as_str()));
+            req = req.domain(DomainType::from(domain));
         } else {
             // Default to VPC
             req = req.domain(aws_sdk_ec2::types::DomainType::Vpc);

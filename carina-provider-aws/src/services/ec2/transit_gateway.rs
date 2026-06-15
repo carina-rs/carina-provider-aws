@@ -5,7 +5,7 @@ use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
-use crate::helpers::{PollState, build_tag_specification, wait_for_ec2_state};
+use crate::helpers::{PollState, build_tag_specification, optional_enum_attr, wait_for_ec2_state};
 
 impl AwsProvider {
     /// Read an EC2 Transit Gateway
@@ -82,46 +82,36 @@ impl AwsProvider {
             has_options = true;
         }
 
-        if let Some(Value::Concrete(ConcreteValue::String(v))) =
-            resource.get_attr("auto_accept_shared_attachments")
-        {
+        if let Some(v) = optional_enum_attr(resource, "auto_accept_shared_attachments") {
             use aws_sdk_ec2::types::AutoAcceptSharedAttachmentsValue;
-            options = options
-                .auto_accept_shared_attachments(AutoAcceptSharedAttachmentsValue::from(v.as_str()));
+            options =
+                options.auto_accept_shared_attachments(AutoAcceptSharedAttachmentsValue::from(v));
             has_options = true;
         }
 
-        if let Some(Value::Concrete(ConcreteValue::String(v))) =
-            resource.get_attr("default_route_table_association")
-        {
+        if let Some(v) = optional_enum_attr(resource, "default_route_table_association") {
             use aws_sdk_ec2::types::DefaultRouteTableAssociationValue;
-            options = options.default_route_table_association(
-                DefaultRouteTableAssociationValue::from(v.as_str()),
-            );
+            options =
+                options.default_route_table_association(DefaultRouteTableAssociationValue::from(v));
             has_options = true;
         }
 
-        if let Some(Value::Concrete(ConcreteValue::String(v))) =
-            resource.get_attr("default_route_table_propagation")
-        {
+        if let Some(v) = optional_enum_attr(resource, "default_route_table_propagation") {
             use aws_sdk_ec2::types::DefaultRouteTablePropagationValue;
-            options = options.default_route_table_propagation(
-                DefaultRouteTablePropagationValue::from(v.as_str()),
-            );
+            options =
+                options.default_route_table_propagation(DefaultRouteTablePropagationValue::from(v));
             has_options = true;
         }
 
-        if let Some(Value::Concrete(ConcreteValue::String(v))) = resource.get_attr("dns_support") {
+        if let Some(v) = optional_enum_attr(resource, "dns_support") {
             use aws_sdk_ec2::types::DnsSupportValue;
-            options = options.dns_support(DnsSupportValue::from(v.as_str()));
+            options = options.dns_support(DnsSupportValue::from(v));
             has_options = true;
         }
 
-        if let Some(Value::Concrete(ConcreteValue::String(v))) =
-            resource.get_attr("vpn_ecmp_support")
-        {
+        if let Some(v) = optional_enum_attr(resource, "vpn_ecmp_support") {
             use aws_sdk_ec2::types::VpnEcmpSupportValue;
-            options = options.vpn_ecmp_support(VpnEcmpSupportValue::from(v.as_str()));
+            options = options.vpn_ecmp_support(VpnEcmpSupportValue::from(v));
             has_options = true;
         }
 

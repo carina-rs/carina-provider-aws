@@ -545,6 +545,31 @@ mod tests {
     }
 
     #[test]
+    fn build_record_set_accepts_canonical_enum_type() {
+        use carina_core::schema::{AttributeType, Schema, enum_identity};
+
+        let attr_type = AttributeType::enum_(
+            enum_identity("RrType", Some("aws.route53.RecordSet")),
+            Some(vec!["A".to_string(), "AAAA".to_string()]),
+            vec![
+                ("A".to_string(), "a".to_string()),
+                ("AAAA".to_string(), "aaaa".to_string()),
+            ],
+            None,
+            None,
+        );
+        let schema = Schema::flat(attr_type);
+        let canonical =
+            schema.canonicalize(Value::Concrete(ConcreteValue::enum_identifier("aaaa")));
+
+        let mut r = record_set("registry.example.com");
+        r.set_attr("type".to_string(), canonical);
+        let record_set = build_record_set(&r).expect("canonical enum type should build");
+
+        assert_eq!(record_set.r#type().as_str(), "AAAA");
+    }
+
+    #[test]
     fn strips_trailing_dot_on_alias_target_dns_name() {
         let mut r = record_set("alias.example.com");
         let mut alias: IndexMap<String, Value> = IndexMap::new();

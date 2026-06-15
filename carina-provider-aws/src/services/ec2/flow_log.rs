@@ -5,7 +5,7 @@ use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
-use crate::helpers::build_tag_specification;
+use crate::helpers::{build_tag_specification, optional_enum_attr, require_enum_attr};
 
 impl AwsProvider {
     /// Read an EC2 Flow Log
@@ -95,13 +95,7 @@ impl AwsProvider {
             .for_resource(resource.id.clone()));
         }
 
-        let resource_type_val = match resource.get_attr("resource_type") {
-            Some(Value::Concrete(ConcreteValue::String(s))) => s.clone(),
-            _ => {
-                return Err(ProviderError::invalid_input("resource_type is required")
-                    .for_resource(resource.id.clone()));
-            }
-        };
+        let resource_type_val = require_enum_attr(resource, "resource_type")?;
 
         let mut req = self
             .ec2_client
@@ -111,18 +105,14 @@ impl AwsProvider {
                 resource_type_val.as_str(),
             ));
 
-        if let Some(Value::Concrete(ConcreteValue::String(traffic_type))) =
-            resource.get_attr("traffic_type")
-        {
+        if let Some(traffic_type) = optional_enum_attr(resource, "traffic_type") {
             use aws_sdk_ec2::types::TrafficType;
-            req = req.traffic_type(TrafficType::from(traffic_type.as_str()));
+            req = req.traffic_type(TrafficType::from(traffic_type));
         }
 
-        if let Some(Value::Concrete(ConcreteValue::String(log_dest_type))) =
-            resource.get_attr("log_destination_type")
-        {
+        if let Some(log_dest_type) = optional_enum_attr(resource, "log_destination_type") {
             use aws_sdk_ec2::types::LogDestinationType;
-            req = req.log_destination_type(LogDestinationType::from(log_dest_type.as_str()));
+            req = req.log_destination_type(LogDestinationType::from(log_dest_type));
         }
 
         if let Some(Value::Concrete(ConcreteValue::String(log_dest))) =

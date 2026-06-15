@@ -5,7 +5,7 @@ use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
-use crate::helpers::{RetryPolicy, require_string_attr, retry_aws_operation};
+use crate::helpers::{RetryPolicy, optional_enum_attr, require_string_attr, retry_aws_operation};
 
 impl AwsProvider {
     /// Read an EC2 VPC Endpoint
@@ -74,11 +74,9 @@ impl AwsProvider {
             .vpc_id(&vpc_id)
             .service_name(&service_name);
 
-        if let Some(Value::Concrete(ConcreteValue::String(ep_type))) =
-            resource.get_attr("vpc_endpoint_type")
-        {
+        if let Some(ep_type) = optional_enum_attr(resource, "vpc_endpoint_type") {
             use aws_sdk_ec2::types::VpcEndpointType;
-            req = req.vpc_endpoint_type(VpcEndpointType::from(ep_type.as_str()));
+            req = req.vpc_endpoint_type(VpcEndpointType::from(ep_type));
         }
 
         if let Some(Value::Concrete(ConcreteValue::List(ids))) =

@@ -20,15 +20,7 @@ use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
-use crate::helpers::{require_string_attr, sdk_error_message};
-
-fn extract_string(value: &Value) -> Option<&str> {
-    if let Value::Concrete(ConcreteValue::String(s)) = value {
-        Some(s.as_str())
-    } else {
-        None
-    }
-}
+use crate::helpers::{optional_enum_attr, require_string_attr, sdk_error_message};
 
 fn extract_string_list(value: &Value) -> Vec<String> {
     if let Value::Concrete(ConcreteValue::List(items)) = value {
@@ -251,10 +243,8 @@ impl AwsProvider {
             .request_certificate()
             .domain_name(domain_name);
 
-        if let Some(method) = resource
-            .get_attr("validation_method")
-            .and_then(extract_string)
-            .and_then(parse_validation_method)
+        if let Some(method) =
+            optional_enum_attr(resource, "validation_method").and_then(parse_validation_method)
         {
             req = req.validation_method(method);
         }
@@ -265,7 +255,7 @@ impl AwsProvider {
         for san in sans {
             req = req.subject_alternative_names(san);
         }
-        if let Some(key_algorithm) = resource.get_attr("key_algorithm").and_then(extract_string) {
+        if let Some(key_algorithm) = optional_enum_attr(resource, "key_algorithm") {
             // Pass the AWS canonical form through verbatim — schema
             // narrowing has already validated it.
             req = req.key_algorithm(key_algorithm.into());
@@ -310,10 +300,8 @@ impl AwsProvider {
                 .for_resource(id.clone())
         })?;
 
-        let validation_method = resource
-            .get_attr("validation_method")
-            .and_then(extract_string)
-            .and_then(parse_validation_method);
+        let validation_method =
+            optional_enum_attr(resource, "validation_method").and_then(parse_validation_method);
 
         // DNS validation populates DomainValidationOptions[].ResourceRecord
         // asynchronously after RequestCertificate. Wait so the post-create
@@ -437,10 +425,7 @@ impl AwsProvider {
         from: &State,
         to: Resource,
     ) -> ProviderResult<State> {
-        if let Some(pref) = to
-            .get_attr("certificate_transparency_logging_preference")
-            .and_then(extract_string)
-        {
+        if let Some(pref) = optional_enum_attr(&to, "certificate_transparency_logging_preference") {
             self.acm_client
                 .update_certificate_options()
                 .certificate_arn(identifier)
@@ -925,6 +910,123 @@ mod tests {
         );
         // Project absent from desired → remove
         assert_eq!(to_remove, vec!["Project".to_string()]);
+    }
+
+    /// carina-provider-aws#440: `validation_method = dns` was reaching AWS
+    /// as `EMAIL` (default) because the host canonicalize pass wraps the
+    /// schema-typed enum string as `CanonicalEnum("DNS")` before it crosses
+    /// the WIT boundary. Inside the provider, `apply_desired_normalization`
+    /// runs `canonicalize_resources_with_schemas` again, so by the time
+    /// `create_acm_certificate` reads `validation_method`, the value is
+    /// `ConcreteValue::CanonicalEnum`, not `ConcreteValue::String`.
+    ///
+    /// The old local string extractor matched only `ConcreteValue::String`, so the
+    /// `validation_method(...)` call was silently skipped on the SDK
+    /// request. AWS defaulted to `EMAIL`, the read-back persisted that
+    /// to state, and every subsequent plan showed a permanent
+    /// `EMAIL → DNS (forces replacement)` diff. The replacement-created
+    /// cert hit the same bug, so the loop never converged.
+    ///
+    /// The fix is at the helper layer: a request-side extractor for an
+    /// enum-typed attribute must accept the three variants the
+    /// canonicalize pipeline can produce — `String` (e.g. via a quoted
+    /// DSL spelling `validation_method = 'DNS'`), `EnumIdentifier`
+    /// (raw, when canonicalize didn't resolve), and `CanonicalEnum`
+    /// (the typed witness the canonicalize pass produces for schema-known
+    /// values). This test pins all three.
+    ///
+    /// This assertion goes through the production
+    /// `helpers::optional_enum_attr` path so helper regressions are caught here.
+    #[test]
+    fn validation_method_canonical_enum_reaches_request() {
+        use carina_core::schema::{AttributeType, Schema, enum_identity};
+
+        let attr_type = AttributeType::enum_(
+            enum_identity("ValidationMethod", Some("aws.acm.Certificate")),
+            Some(vec![
+                "DNS".to_string(),
+                "EMAIL".to_string(),
+                "HTTP".to_string(),
+            ]),
+            vec![
+                ("DNS".to_string(), "dns".to_string()),
+                ("EMAIL".to_string(), "email".to_string()),
+                ("HTTP".to_string(), "http".to_string()),
+            ],
+            None,
+            None,
+        );
+        let schema = Schema::flat(attr_type);
+
+        // DSL-side enum identifier `validation_method = dns` reaches the
+        // schema-typed canonicalize pass as `EnumIdentifier("dns")`.
+        let canonical = schema.canonicalize(Value::Concrete(ConcreteValue::enum_identifier("dns")));
+        assert!(
+            matches!(&canonical, Value::Concrete(ConcreteValue::CanonicalEnum(c))
+                if c.api_value() == "DNS"),
+            "schema canonicalize must produce CanonicalEnum(DNS) from \
+             EnumIdentifier(\"dns\"); got {canonical:?}"
+        );
+
+        // The fix: extracting the validation method from a Resource whose
+        // `validation_method` is a `CanonicalEnum` must yield
+        // `ValidationMethod::Dns`. Pre-fix the extract→parse chain
+        // silently returned None.
+        let mut resource = Resource::with_provider("aws", "acm.Certificate", "test-cert", None);
+        resource.set_attr("validation_method".to_string(), canonical);
+        let parsed = crate::helpers::optional_enum_attr(&resource, "validation_method")
+            .and_then(parse_validation_method);
+        assert_eq!(
+            parsed,
+            Some(ValidationMethod::Dns),
+            "validation_method CanonicalEnum(DNS) must extract to \
+             ValidationMethod::Dns; pre-fix the silent drop caused AWS to \
+             default to EMAIL (issue #440)"
+        );
+    }
+
+    /// Sibling shape: post-#3463 raw enum identifier carrying the bare
+    /// DSL alias spelling (`dns`) may reach the provider without
+    /// canonicalization when host-side resolution fails for any reason.
+    /// The extract→parse chain must still recover the validation method
+    /// rather than silently dropping it.
+    ///
+    /// This assertion goes through the production
+    /// `helpers::optional_enum_attr` path so helper regressions are caught here.
+    #[test]
+    fn validation_method_enum_identifier_reaches_request() {
+        let mut resource = Resource::with_provider("aws", "acm.Certificate", "test-cert", None);
+        resource.set_attr(
+            "validation_method".to_string(),
+            Value::Concrete(ConcreteValue::enum_identifier("dns")),
+        );
+        let parsed = crate::helpers::optional_enum_attr(&resource, "validation_method")
+            .and_then(parse_validation_method);
+        assert_eq!(
+            parsed,
+            Some(ValidationMethod::Dns),
+            "validation_method EnumIdentifier(\"dns\") must extract to \
+             ValidationMethod::Dns; the parser-emitted enum identifier \
+             shape must not be silently dropped"
+        );
+    }
+
+    /// Quoted-string DSL form `validation_method = 'DNS'` continues to
+    /// work — pin it so the enum-variant additions above can't regress
+    /// the documented example in `examples/acm_certificate/main.crn`.
+    ///
+    /// This assertion goes through the production
+    /// `helpers::optional_enum_attr` path so helper regressions are caught here.
+    #[test]
+    fn validation_method_string_still_reaches_request() {
+        let mut resource = Resource::with_provider("aws", "acm.Certificate", "test-cert", None);
+        resource.set_attr(
+            "validation_method".to_string(),
+            Value::Concrete(ConcreteValue::String("DNS".to_string())),
+        );
+        let parsed = crate::helpers::optional_enum_attr(&resource, "validation_method")
+            .and_then(parse_validation_method);
+        assert_eq!(parsed, Some(ValidationMethod::Dns));
     }
 
     #[test]
