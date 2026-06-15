@@ -630,53 +630,75 @@ impl AwsProvider {
                 Value::Concrete(ConcreteValue::String(v.to_string())),
             );
         }
-        if let Some(opts) = obj.options()
-            && let Some(v) = opts.amazon_side_asn()
-        {
-            attributes.insert(
-                "amazon_side_asn".to_string(),
-                Value::Concrete(ConcreteValue::Int(v)),
-            );
-        }
-        if let Some(opts) = obj.options()
-            && let Some(v) = opts.auto_accept_shared_attachments()
-        {
-            attributes.insert(
-                "auto_accept_shared_attachments".to_string(),
-                Value::Concrete(ConcreteValue::String(v.as_str().to_string())),
-            );
-        }
-        if let Some(opts) = obj.options()
-            && let Some(v) = opts.default_route_table_association()
-        {
-            attributes.insert(
-                "default_route_table_association".to_string(),
-                Value::Concrete(ConcreteValue::String(v.as_str().to_string())),
-            );
-        }
-        if let Some(opts) = obj.options()
-            && let Some(v) = opts.default_route_table_propagation()
-        {
-            attributes.insert(
-                "default_route_table_propagation".to_string(),
-                Value::Concrete(ConcreteValue::String(v.as_str().to_string())),
-            );
-        }
-        if let Some(opts) = obj.options()
-            && let Some(v) = opts.dns_support()
-        {
-            attributes.insert(
-                "dns_support".to_string(),
-                Value::Concrete(ConcreteValue::String(v.as_str().to_string())),
-            );
-        }
-        if let Some(opts) = obj.options()
-            && let Some(v) = opts.vpn_ecmp_support()
-        {
-            attributes.insert(
-                "vpn_ecmp_support".to_string(),
-                Value::Concrete(ConcreteValue::String(v.as_str().to_string())),
-            );
+        if let Some(dns_opts) = obj.options() {
+            let mut fields = IndexMap::new();
+            if let Some(v) = dns_opts.amazon_side_asn() {
+                fields.insert(
+                    "amazon_side_asn".to_string(),
+                    Value::Concrete(ConcreteValue::Int(v)),
+                );
+            }
+            if let Some(v) = dns_opts.auto_accept_shared_attachments() {
+                fields.insert(
+                    "auto_accept_shared_attachments".to_string(),
+                    Value::Concrete(ConcreteValue::String(v.as_str().to_string())),
+                );
+            }
+            if let Some(v) = dns_opts.default_route_table_association() {
+                fields.insert(
+                    "default_route_table_association".to_string(),
+                    Value::Concrete(ConcreteValue::String(v.as_str().to_string())),
+                );
+            }
+            if let Some(v) = dns_opts.default_route_table_propagation() {
+                fields.insert(
+                    "default_route_table_propagation".to_string(),
+                    Value::Concrete(ConcreteValue::String(v.as_str().to_string())),
+                );
+            }
+            if let Some(v) = dns_opts.dns_support() {
+                fields.insert(
+                    "dns_support".to_string(),
+                    Value::Concrete(ConcreteValue::String(v.as_str().to_string())),
+                );
+            }
+            if let Some(v) = dns_opts.multicast_support() {
+                fields.insert(
+                    "multicast_support".to_string(),
+                    Value::Concrete(ConcreteValue::String(v.as_str().to_string())),
+                );
+            }
+            if let Some(v) = dns_opts.security_group_referencing_support() {
+                fields.insert(
+                    "security_group_referencing_support".to_string(),
+                    Value::Concrete(ConcreteValue::String(v.as_str().to_string())),
+                );
+            }
+            {
+                let v = dns_opts.transit_gateway_cidr_blocks();
+                if !v.is_empty() {
+                    fields.insert(
+                        "transit_gateway_cidr_blocks".to_string(),
+                        Value::Concrete(ConcreteValue::List(
+                            v.iter()
+                                .map(|s| Value::Concrete(ConcreteValue::String(s.to_string())))
+                                .collect(),
+                        )),
+                    );
+                }
+            }
+            if let Some(v) = dns_opts.vpn_ecmp_support() {
+                fields.insert(
+                    "vpn_ecmp_support".to_string(),
+                    Value::Concrete(ConcreteValue::String(v.as_str().to_string())),
+                );
+            }
+            if !fields.is_empty() {
+                attributes.insert(
+                    "options".to_string(),
+                    Value::Concrete(ConcreteValue::Map(fields)),
+                );
+            }
         }
         obj.transit_gateway_id().map(String::from)
     }
@@ -716,6 +738,39 @@ impl AwsProvider {
                 "vpc_id".to_string(),
                 Value::Concrete(ConcreteValue::String(v.to_string())),
             );
+        }
+        if let Some(dns_opts) = obj.options() {
+            let mut fields = IndexMap::new();
+            if let Some(v) = dns_opts.appliance_mode_support() {
+                fields.insert(
+                    "appliance_mode_support".to_string(),
+                    Value::Concrete(ConcreteValue::String(v.as_str().to_string())),
+                );
+            }
+            if let Some(v) = dns_opts.dns_support() {
+                fields.insert(
+                    "dns_support".to_string(),
+                    Value::Concrete(ConcreteValue::String(v.as_str().to_string())),
+                );
+            }
+            if let Some(v) = dns_opts.ipv6_support() {
+                fields.insert(
+                    "ipv6_support".to_string(),
+                    Value::Concrete(ConcreteValue::String(v.as_str().to_string())),
+                );
+            }
+            if let Some(v) = dns_opts.security_group_referencing_support() {
+                fields.insert(
+                    "security_group_referencing_support".to_string(),
+                    Value::Concrete(ConcreteValue::String(v.as_str().to_string())),
+                );
+            }
+            if !fields.is_empty() {
+                attributes.insert(
+                    "options".to_string(),
+                    Value::Concrete(ConcreteValue::Map(fields)),
+                );
+            }
         }
         obj.transit_gateway_attachment_id().map(String::from)
     }

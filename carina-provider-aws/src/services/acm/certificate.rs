@@ -20,7 +20,9 @@ use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
-use crate::helpers::{optional_enum_attr, require_string_attr, sdk_error_message};
+use crate::helpers::{
+    optional_enum_attr, optional_enum_struct_field, require_string_attr, sdk_error_message,
+};
 
 fn extract_string_list(value: &Value) -> Vec<String> {
     if let Value::Concrete(ConcreteValue::List(items)) = value {
@@ -92,6 +94,47 @@ fn parse_validation_method(input: &str) -> Option<ValidationMethod> {
     }
 }
 
+fn build_update_certificate_options(
+    resource: &Resource,
+) -> Option<aws_sdk_acm::types::CertificateOptions> {
+    let pref = optional_enum_struct_field(
+        resource,
+        "options",
+        "certificate_transparency_logging_preference",
+    )?;
+    Some(
+        aws_sdk_acm::types::CertificateOptions::builder()
+            .certificate_transparency_logging_preference(pref.into())
+            .build(),
+    )
+}
+
+fn build_create_certificate_options(
+    resource: &Resource,
+) -> Option<aws_sdk_acm::types::CertificateOptions> {
+    use aws_sdk_acm::types::{CertificateExport, CertificateTransparencyLoggingPreference};
+
+    let mut options = aws_sdk_acm::types::CertificateOptions::builder();
+    let mut has_options = false;
+
+    if let Some(pref) = optional_enum_struct_field(
+        resource,
+        "options",
+        "certificate_transparency_logging_preference",
+    ) {
+        options = options.certificate_transparency_logging_preference(
+            CertificateTransparencyLoggingPreference::from(pref),
+        );
+        has_options = true;
+    }
+    if let Some(export) = optional_enum_struct_field(resource, "options", "export") {
+        options = options.export(CertificateExport::from(export));
+        has_options = true;
+    }
+
+    has_options.then(|| options.build())
+}
+
 /// Map a `DescribeCertificate` `CertificateDetail` to Carina resource
 /// attributes. Pure (no AWS calls) so the attribute-key contract is
 /// unit-testable offline — tags are fetched separately by the caller.
@@ -142,6 +185,27 @@ fn certificate_detail_to_attributes(
             "renewal_eligibility".to_string(),
             Value::Concrete(ConcreteValue::String(v.as_str().to_string())),
         );
+    }
+    if let Some(opts) = cert.options() {
+        let mut m: IndexMap<String, Value> = IndexMap::new();
+        if let Some(v) = opts.certificate_transparency_logging_preference() {
+            m.insert(
+                "certificate_transparency_logging_preference".to_string(),
+                Value::Concrete(ConcreteValue::String(v.as_str().to_string())),
+            );
+        }
+        if let Some(v) = opts.export() {
+            m.insert(
+                "export".to_string(),
+                Value::Concrete(ConcreteValue::String(v.as_str().to_string())),
+            );
+        }
+        if !m.is_empty() {
+            attributes.insert(
+                "options".to_string(),
+                Value::Concrete(ConcreteValue::Map(m)),
+            );
+        }
     }
     let sans = cert.subject_alternative_names();
     if !sans.is_empty() {
@@ -259,6 +323,9 @@ impl AwsProvider {
             // Pass the AWS canonical form through verbatim — schema
             // narrowing has already validated it.
             req = req.key_algorithm(key_algorithm.into());
+        }
+        if let Some(options) = build_create_certificate_options(resource) {
+            req = req.options(options);
         }
         // RequestCertificate accepts tags inline, avoiding a follow-up
         // AddTagsToCertificate round-trip on the create path.
@@ -425,15 +492,11 @@ impl AwsProvider {
         from: &State,
         to: Resource,
     ) -> ProviderResult<State> {
-        if let Some(pref) = optional_enum_attr(&to, "certificate_transparency_logging_preference") {
+        if let Some(options) = build_update_certificate_options(&to) {
             self.acm_client
                 .update_certificate_options()
                 .certificate_arn(identifier)
-                .options(
-                    aws_sdk_acm::types::CertificateOptions::builder()
-                        .certificate_transparency_logging_preference(pref.into())
-                        .build(),
-                )
+                .options(options)
                 .send()
                 .await
                 .map_err(|e| {
@@ -602,7 +665,10 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aws_sdk_acm::types::{CertificateDetail, DomainValidation, RecordType, ResourceRecord};
+    use aws_sdk_acm::types::{
+        CertificateDetail, CertificateExport, CertificateOptions,
+        CertificateTransparencyLoggingPreference, DomainValidation, RecordType, ResourceRecord,
+    };
     use std::sync::Mutex;
     use std::time::Duration;
 
@@ -681,6 +747,118 @@ mod tests {
             Some(&Value::Concrete(ConcreteValue::String(
                 "ISSUED".to_string()
             )))
+        );
+    }
+
+    #[test]
+    fn state_read_emits_nested_options_map_when_logging_preference_present() {
+        let cert = CertificateDetail::builder()
+            .domain_name("registry.example.com")
+            .options(
+                CertificateOptions::builder()
+                    .certificate_transparency_logging_preference(
+                        CertificateTransparencyLoggingPreference::Enabled,
+                    )
+                    .build(),
+            )
+            .build();
+
+        let attrs = certificate_detail_to_attributes(&cert);
+
+        let Some(Value::Concrete(ConcreteValue::Map(options))) = attrs.get("options") else {
+            panic!("expected nested options map, got {attrs:?}");
+        };
+        assert_eq!(
+            options.get("certificate_transparency_logging_preference"),
+            Some(&Value::Concrete(ConcreteValue::String(
+                "ENABLED".to_string()
+            )))
+        );
+    }
+
+    #[test]
+    fn certificate_detail_to_attributes_emits_nested_options_export() {
+        let cert = CertificateDetail::builder()
+            .domain_name("registry.example.com")
+            .options(
+                CertificateOptions::builder()
+                    .export(CertificateExport::Enabled)
+                    .build(),
+            )
+            .build();
+
+        let attrs = certificate_detail_to_attributes(&cert);
+
+        let Some(Value::Concrete(ConcreteValue::Map(options))) = attrs.get("options") else {
+            panic!("expected nested options map, got {attrs:?}");
+        };
+        assert_eq!(
+            options.get("export"),
+            Some(&Value::Concrete(ConcreteValue::String(
+                "ENABLED".to_string()
+            )))
+        );
+    }
+
+    #[test]
+    fn create_acm_certificate_passes_options_export_to_sdk_request() {
+        let mut options = IndexMap::new();
+        options.insert(
+            "export".to_string(),
+            Value::Concrete(ConcreteValue::String("ENABLED".to_string())),
+        );
+        let mut resource = Resource::with_provider("aws", "acm.Certificate", "test-cert", None);
+        resource.set_attr(
+            "options".to_string(),
+            Value::Concrete(ConcreteValue::Map(options)),
+        );
+
+        let request_options = build_create_certificate_options(&resource).expect("options");
+        assert_eq!(request_options.export(), Some(&CertificateExport::Enabled));
+    }
+
+    #[test]
+    fn create_acm_certificate_passes_both_options_fields() {
+        let mut options = IndexMap::new();
+        options.insert(
+            "certificate_transparency_logging_preference".to_string(),
+            Value::Concrete(ConcreteValue::String("DISABLED".to_string())),
+        );
+        options.insert(
+            "export".to_string(),
+            Value::Concrete(ConcreteValue::String("ENABLED".to_string())),
+        );
+        let mut resource = Resource::with_provider("aws", "acm.Certificate", "test-cert", None);
+        resource.set_attr(
+            "options".to_string(),
+            Value::Concrete(ConcreteValue::Map(options)),
+        );
+
+        let request_options = build_create_certificate_options(&resource).expect("options");
+        assert_eq!(
+            request_options.certificate_transparency_logging_preference(),
+            Some(&CertificateTransparencyLoggingPreference::Disabled)
+        );
+        assert_eq!(request_options.export(), Some(&CertificateExport::Enabled));
+    }
+
+    #[test]
+    fn update_reads_nested_options_certificate_transparency_logging_preference() {
+        let mut options = IndexMap::new();
+        options.insert(
+            "certificate_transparency_logging_preference".to_string(),
+            Value::Concrete(ConcreteValue::String("DISABLED".to_string())),
+        );
+        let mut resource = Resource::with_provider("aws", "acm.Certificate", "test-cert", None);
+        resource.set_attr(
+            "options".to_string(),
+            Value::Concrete(ConcreteValue::Map(options)),
+        );
+
+        let request_options = build_update_certificate_options(&resource).expect("options");
+        assert_eq!(
+            request_options.certificate_transparency_logging_preference(),
+            Some(&CertificateTransparencyLoggingPreference::Disabled)
         );
     }
 

@@ -1177,28 +1177,32 @@ fn test_extract_ec2_transit_gateway_attributes() {
             "Test TGW".to_string()
         )))
     );
+    let Some(Value::Concrete(ConcreteValue::Map(options))) = attributes.get("options") else {
+        panic!("expected nested options map, got {attributes:?}");
+    };
     assert_eq!(
-        attributes.get("amazon_side_asn"),
+        options.get("amazon_side_asn"),
         Some(&Value::Concrete(ConcreteValue::Int(64512)))
     );
     assert_eq!(
-        attributes.get("auto_accept_shared_attachments"),
+        options.get("auto_accept_shared_attachments"),
         Some(&Value::Concrete(ConcreteValue::String(
             "enable".to_string()
         )))
     );
     assert_eq!(
-        attributes.get("dns_support"),
+        options.get("dns_support"),
         Some(&Value::Concrete(ConcreteValue::String(
             "enable".to_string()
         )))
     );
     assert_eq!(
-        attributes.get("vpn_ecmp_support"),
+        options.get("vpn_ecmp_support"),
         Some(&Value::Concrete(ConcreteValue::String(
             "enable".to_string()
         )))
     );
+    assert!(!attributes.contains_key("amazon_side_asn"));
 }
 
 #[test]

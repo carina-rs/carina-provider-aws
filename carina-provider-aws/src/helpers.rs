@@ -84,6 +84,106 @@ pub fn optional_enum_attr<'a>(resource: &'a Resource, attr_name: &str) -> Option
     enum_attr_str(resource, attr_name)
 }
 
+/// Return the AWS API canonical spelling for a schema-typed enum
+/// attribute that lives inside a nested struct attribute (the
+/// `Map`-shaped value at `struct_attr`). Accepts every `Value` shape the
+/// carina-core canonicalize pipeline can produce, matching
+/// [`enum_attr_str`].
+///
+/// Returns `None` when the outer struct attribute is absent or not a
+/// Map, when the field is absent inside the Map, or when the field's
+/// value is not an enum-shaped scalar. The carina-rs/carina-provider-aws#441
+/// / #442 failure mode was the provider reading a struct field at top
+/// level (`resource.get_attr("dns_support")`) rather than from inside
+/// its parent struct (`resource.get_attr("options")` -> Map ->
+/// `m.get("dns_support")`).
+pub(crate) fn enum_struct_field_str<'a>(
+    resource: &'a Resource,
+    struct_attr: &str,
+    field_name: &str,
+) -> Option<&'a str> {
+    let Some(Value::Concrete(ConcreteValue::Map(m))) = resource.get_attr(struct_attr) else {
+        return None;
+    };
+    match m.get(field_name)? {
+        Value::Concrete(ConcreteValue::String(s)) => Some(s.as_str()),
+        Value::Concrete(ConcreteValue::EnumIdentifier(raw)) => Some(raw.as_str()),
+        Value::Concrete(ConcreteValue::CanonicalEnum(c)) => Some(c.api_value()),
+        _ => None,
+    }
+}
+
+pub(crate) fn optional_enum_struct_field<'a>(
+    resource: &'a Resource,
+    struct_attr: &str,
+    field_name: &str,
+) -> Option<&'a str> {
+    enum_struct_field_str(resource, struct_attr, field_name)
+}
+
+/// Return the `i64` value of an `Int`-typed field inside the nested
+/// struct attribute `struct_attr`. Same shape contract as
+/// [`enum_struct_field_str`] (outer attribute must be a `Map`; missing
+/// outer/field returns `None`), narrowed to a single `Value` shape:
+/// `ConcreteValue::Int`. Anything else returns `None`.
+///
+/// Sibling of [`optional_enum_struct_field`]. The wider-shape variants
+/// the carina-core canonicalize pipeline could in principle produce
+/// (e.g. a Deferred unknown) are intentionally rejected — schema-typed
+/// `Int` attributes do not have a canonical-enum form to absorb, so
+/// there is nothing analogous to the three-variant enum coverage.
+/// carina-rs/carina-provider-aws#441 / #442.
+pub(crate) fn optional_int_struct_field(
+    resource: &Resource,
+    struct_attr: &str,
+    field_name: &str,
+) -> Option<i64> {
+    let Some(Value::Concrete(ConcreteValue::Map(m))) = resource.get_attr(struct_attr) else {
+        return None;
+    };
+    match m.get(field_name)? {
+        Value::Concrete(ConcreteValue::Int(i)) => Some(*i),
+        _ => None,
+    }
+}
+
+/// Return the `Vec<String>` value of a `List<String>`-typed field
+/// inside the nested struct attribute `struct_attr`. Accepts both
+/// `ConcreteValue::StringList` (the canonical shape after carina-core
+/// `canonicalize_resources_with_schemas` resolves a
+/// `string_or_list_of_strings` attribute) and `ConcreteValue::List` of
+/// `ConcreteValue::String` (the parser-emitted shape before
+/// canonicalization). Anything else, including a list with any
+/// non-`String` element, returns `None`.
+///
+/// Same shape contract as [`enum_struct_field_str`] for the outer
+/// `Map`. Sibling of [`optional_enum_struct_field`] /
+/// [`optional_int_struct_field`]; the `List<NonString>` case is
+/// intentionally rejected — schema-typed `List<String>` is the only
+/// inner-list shape this PR's seam covers, and a non-string element
+/// indicates schema/value mismatch upstream.
+/// carina-rs/carina-provider-aws#441 / #442.
+pub(crate) fn optional_string_list_struct_field(
+    resource: &Resource,
+    struct_attr: &str,
+    field_name: &str,
+) -> Option<Vec<String>> {
+    let Some(Value::Concrete(ConcreteValue::Map(m))) = resource.get_attr(struct_attr) else {
+        return None;
+    };
+    match m.get(field_name)? {
+        Value::Concrete(ConcreteValue::StringList(items)) => Some(items.clone()),
+        Value::Concrete(ConcreteValue::List(items)) => items
+            .iter()
+            .map(|item| match item {
+                Value::Concrete(ConcreteValue::String(s)) => Some(s.clone()),
+                _ => None,
+            })
+            .collect(),
+        _ => None,
+    }
+}
+
 /// Build an EC2 `TagSpecification` from DSL tags for a given resource type.
 ///
 /// Returns `None` if the resource has no `tags` attribute.
@@ -381,6 +481,15 @@ mod tests {
         resource
     }
 
+    fn make_resource_with_struct_field(field_name: &str, value: Value) -> Resource {
+        make_resource_with_value(
+            "options",
+            Value::Concrete(ConcreteValue::Map(
+                [(field_name.to_string(), value)].into_iter().collect(),
+            )),
+        )
+    }
+
     fn canonical_validation_method_value() -> Value {
         use carina_core::schema::{AttributeType, Schema, enum_identity};
 
@@ -541,6 +650,191 @@ mod tests {
     fn test_optional_enum_attr_non_enum_shape_is_none() {
         let resource = make_resource_with_value("type", Value::Concrete(ConcreteValue::Bool(true)));
         assert_eq!(optional_enum_attr(&resource, "type"), None);
+    }
+
+    #[test]
+    fn test_optional_enum_struct_field_string() {
+        let resource = make_resource_with_struct_field(
+            "certificate_transparency_logging_preference",
+            Value::Concrete(ConcreteValue::String("ENABLED".to_string())),
+        );
+        assert_eq!(
+            optional_enum_struct_field(
+                &resource,
+                "options",
+                "certificate_transparency_logging_preference"
+            ),
+            Some("ENABLED")
+        );
+    }
+
+    #[test]
+    fn test_optional_enum_struct_field_enum_identifier() {
+        let resource = make_resource_with_struct_field(
+            "certificate_transparency_logging_preference",
+            Value::Concrete(ConcreteValue::enum_identifier("enabled")),
+        );
+        assert_eq!(
+            optional_enum_struct_field(
+                &resource,
+                "options",
+                "certificate_transparency_logging_preference"
+            ),
+            Some("enabled")
+        );
+    }
+
+    #[test]
+    fn test_optional_enum_struct_field_canonical_enum() {
+        let resource = make_resource_with_struct_field(
+            "validation_method",
+            canonical_validation_method_value(),
+        );
+        assert_eq!(
+            optional_enum_struct_field(&resource, "options", "validation_method"),
+            Some("DNS")
+        );
+    }
+
+    #[test]
+    fn test_optional_int_struct_field_int() {
+        let resource = make_resource_with_struct_field(
+            "amazon_side_asn",
+            Value::Concrete(ConcreteValue::Int(64512)),
+        );
+        assert_eq!(
+            optional_int_struct_field(&resource, "options", "amazon_side_asn"),
+            Some(64512)
+        );
+    }
+
+    #[test]
+    fn test_optional_string_list_struct_field_string_list() {
+        let resource = make_resource_with_struct_field(
+            "transit_gateway_cidr_blocks",
+            Value::Concrete(ConcreteValue::StringList(vec!["10.0.0.0/24".to_string()])),
+        );
+        assert_eq!(
+            optional_string_list_struct_field(&resource, "options", "transit_gateway_cidr_blocks"),
+            Some(vec!["10.0.0.0/24".to_string()])
+        );
+    }
+
+    #[test]
+    fn test_optional_string_list_struct_field_list_of_string() {
+        let resource = make_resource_with_struct_field(
+            "transit_gateway_cidr_blocks",
+            Value::Concrete(ConcreteValue::List(vec![Value::Concrete(
+                ConcreteValue::String("10.0.0.0/24".to_string()),
+            )])),
+        );
+        assert_eq!(
+            optional_string_list_struct_field(&resource, "options", "transit_gateway_cidr_blocks"),
+            Some(vec!["10.0.0.0/24".to_string()])
+        );
+    }
+
+    #[test]
+    fn test_struct_field_helpers_missing_outer_struct_are_none() {
+        let resource = make_test_resource(vec![]);
+        assert_eq!(
+            optional_enum_struct_field(&resource, "options", "dns_support"),
+            None
+        );
+        assert_eq!(
+            optional_int_struct_field(&resource, "options", "amazon_side_asn"),
+            None
+        );
+        assert_eq!(
+            optional_string_list_struct_field(&resource, "options", "transit_gateway_cidr_blocks"),
+            None
+        );
+    }
+
+    #[test]
+    fn test_struct_field_helpers_non_map_outer_struct_are_none() {
+        let resource = make_resource_with_value(
+            "options",
+            Value::Concrete(ConcreteValue::String("not-a-map".to_string())),
+        );
+        assert_eq!(
+            optional_enum_struct_field(&resource, "options", "dns_support"),
+            None
+        );
+        assert_eq!(
+            optional_int_struct_field(&resource, "options", "amazon_side_asn"),
+            None
+        );
+        assert_eq!(
+            optional_string_list_struct_field(&resource, "options", "transit_gateway_cidr_blocks"),
+            None
+        );
+    }
+
+    #[test]
+    fn test_struct_field_helpers_missing_field_are_none() {
+        let resource = make_resource_with_value(
+            "options",
+            Value::Concrete(ConcreteValue::Map(IndexMap::new())),
+        );
+        assert_eq!(
+            optional_enum_struct_field(&resource, "options", "dns_support"),
+            None
+        );
+        assert_eq!(
+            optional_int_struct_field(&resource, "options", "amazon_side_asn"),
+            None
+        );
+        assert_eq!(
+            optional_string_list_struct_field(&resource, "options", "transit_gateway_cidr_blocks"),
+            None
+        );
+    }
+
+    #[test]
+    fn test_struct_field_helpers_wrong_shape_are_none() {
+        let enum_resource = make_resource_with_struct_field(
+            "dns_support",
+            Value::Concrete(ConcreteValue::Bool(true)),
+        );
+        let int_resource = make_resource_with_struct_field(
+            "amazon_side_asn",
+            Value::Concrete(ConcreteValue::String("64512".to_string())),
+        );
+        let list_resource = make_resource_with_struct_field(
+            "transit_gateway_cidr_blocks",
+            Value::Concrete(ConcreteValue::Int(1)),
+        );
+        let mixed_list_resource = make_resource_with_struct_field(
+            "transit_gateway_cidr_blocks",
+            Value::Concrete(ConcreteValue::List(vec![Value::Concrete(
+                ConcreteValue::Int(1),
+            )])),
+        );
+        assert_eq!(
+            optional_enum_struct_field(&enum_resource, "options", "dns_support"),
+            None
+        );
+        assert_eq!(
+            optional_int_struct_field(&int_resource, "options", "amazon_side_asn"),
+            None
+        );
+        assert_eq!(
+            optional_string_list_struct_field(
+                &list_resource,
+                "options",
+                "transit_gateway_cidr_blocks"
+            ),
+            None
+        );
+        assert_eq!(
+            optional_string_list_struct_field(
+                &mixed_list_resource,
+                "options",
+                "transit_gateway_cidr_blocks"
+            ),
+            None
+        );
     }
 
     #[test]
