@@ -5,9 +5,9 @@ use carina_plugin_sdk::CarinaProvider;
 use carina_provider_protocol::types as proto;
 
 use carina_core::provider::{
-    CreateRequest as CoreCreateRequest, DeleteRequest as CoreDeleteRequest, PatchOp as CorePatchOp,
-    PatchOpKind as CorePatchOpKind, Provider, ProviderError as CoreProviderError,
-    ProviderNormalizer, ReadRequest as CoreReadRequest, UpdatePatch as CoreUpdatePatch,
+    DeleteRequest as CoreDeleteRequest, PatchOp as CorePatchOp, PatchOpKind as CorePatchOpKind,
+    Provider, ProviderError as CoreProviderError, ProviderNormalizer,
+    ReadRequest as CoreReadRequest, UpdatePatch as CoreUpdatePatch,
     UpdateRequest as CoreUpdateRequest,
 };
 use carina_core::resource::{ConcreteValue, Value as CoreValue};
@@ -294,10 +294,9 @@ impl CarinaProvider for AwsProcessProvider {
 
     fn create(
         &self,
-        id: &proto::ResourceId,
+        _id: &proto::ResourceId,
         request: proto::CreateRequest,
-    ) -> Result<proto::State, proto::ProviderError> {
-        let core_id = convert::proto_to_core_resource_id(id);
+    ) -> Result<proto::CreateOutcome, proto::ProviderError> {
         let core_resource = convert::proto_to_core_resource(&request.resource);
         let schemas = Self::schema_registry();
         let core_resource = self.runtime.block_on(
@@ -309,14 +308,11 @@ impl CarinaProvider for AwsProcessProvider {
                 &schemas,
             ),
         );
-        let core_request = CoreCreateRequest {
-            resource: core_resource,
-        };
         let result = self
             .runtime
-            .block_on(self.provider().create(&core_id, core_request));
+            .block_on(self.provider().create_resource(core_resource.as_resource()));
         match result {
-            Ok(state) => Ok(convert::core_to_proto_state(&state)),
+            Ok(outcome) => Ok(convert::core_to_proto_create_outcome(outcome)),
             Err(e) => Err(Self::convert_error(e)),
         }
     }

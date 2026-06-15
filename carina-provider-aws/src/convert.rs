@@ -6,6 +6,7 @@
 
 use std::collections::HashMap;
 
+use carina_core::provider::CreateOutcome as CoreCreateOutcome;
 use carina_core::resource::{
     ConcreteValue, DataSource as CoreDataSource, DeferredValue, Directives as CoreDirectives,
     Resource as CoreResource, ResourceId as CoreResourceId, State as CoreState, Value as CoreValue,
@@ -18,10 +19,12 @@ use carina_core::schema::{
 };
 use carina_provider_protocol::types::{
     AttributeSchema as ProtoAttributeSchema, AttributeType as ProtoAttributeType,
-    Directives as ProtoDirectives, OperationConfig as ProtoOperationConfig,
-    Resource as ProtoResource, ResourceId as ProtoResourceId,
-    ResourceSchema as ProtoResourceSchema, SchemaKind as ProtoSchemaKind, State as ProtoState,
-    StructField as ProtoStructField, Value as ProtoValue,
+    CreateOutcome as ProtoCreateOutcome, Directives as ProtoDirectives,
+    OperationConfig as ProtoOperationConfig,
+    PartialCreateDiagnostic as ProtoPartialCreateDiagnostic, Resource as ProtoResource,
+    ResourceId as ProtoResourceId, ResourceSchema as ProtoResourceSchema,
+    SchemaKind as ProtoSchemaKind, State as ProtoState, StructField as ProtoStructField,
+    Value as ProtoValue,
 };
 
 // -- ResourceId --
@@ -160,6 +163,25 @@ pub fn proto_to_core_state(s: &ProtoState) -> CoreState {
         state
     } else {
         CoreState::not_found(id)
+    }
+}
+
+// -- CreateOutcome --
+
+pub fn core_to_proto_create_outcome(outcome: CoreCreateOutcome) -> ProtoCreateOutcome {
+    match outcome {
+        CoreCreateOutcome::Success { state } => ProtoCreateOutcome::Success {
+            state: core_to_proto_state(&state),
+        },
+        CoreCreateOutcome::PartialSuccess { state, diagnostic } => {
+            ProtoCreateOutcome::PartialSuccess {
+                state: core_to_proto_state(&state),
+                diagnostic: ProtoPartialCreateDiagnostic {
+                    reason: diagnostic.reason().to_string(),
+                    missing_attributes: diagnostic.missing_attributes().to_vec(),
+                },
+            }
+        }
     }
 }
 
