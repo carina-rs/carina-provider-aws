@@ -167,10 +167,6 @@ pub struct DerivedAttribute {
 
 /// Where the value for a `DerivedAttribute` lives in the SDK response.
 ///
-/// Marked `#[non_exhaustive]` so adding a new projection in a future
-/// sub-issue (B-3, B-4) does not silently force every external match arm
-/// to compile. `carina-codegen-aws` is currently the only consumer.
-#[non_exhaustive]
 pub enum DerivedSource {
     /// `obj.<list_member>().first().and_then(|x| x.<child_member>())`.
     /// Used for SDK responses whose top-level field is a `Vec<Struct>` and
@@ -190,23 +186,16 @@ pub enum DerivedSource {
         list_member: &'static str,
         child_member: &'static str,
     },
-    /// `obj.<struct_member>().<child_member>()` flattened into the
-    /// top-level attribute map under the DSL name in
-    /// `DerivedAttribute::attr` — so renames work (e.g.
-    /// `VpcPeeringConnection.AccepterVpcInfo.VpcId` → `peer_vpc_id`).
-    /// One declaration per child; the same `struct_member` may appear
-    /// in multiple `DerivedAttribute` entries to flatten multiple
-    /// children of the same nested struct.
-    Struct {
-        struct_member: &'static str,
-        child_member: &'static str,
-    },
-    /// `obj.<struct_member>()` collected into a single `Value::Map`
-    /// attribute keyed by `DerivedAttribute::attr`. Each listed child
-    /// member contributes one entry; per-child kinds (String / Bool /
-    /// Int / Long / Enum) are inferred from the inner struct shape.
-    /// The outer attribute is omitted when no children are populated.
-    StructAsMap {
+    /// Read children of `struct_member` (the SDK nested struct).
+    ///
+    /// The codegen dispatches between two output shapes based on the schema:
+    /// - If the schema declares the resource's top-level attribute named
+    ///   `derived.attr.to_snake_case()` as the same struct member, the children
+    ///   are collected into a single `Value::Map` keyed by `derived.attr`.
+    /// - Otherwise, `derived.attr` is a top-level leaf attribute. The single
+    ///   child listed in `children` is projected out and inserted at
+    ///   `derived.attr` (the rename case).
+    FromStruct {
         struct_member: &'static str,
         children: &'static [&'static str],
     },
@@ -430,7 +419,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             // so the DSL surface stays flat.
             derived_attributes: vec![DerivedAttribute {
                 attr: "PrivateDnsNameOptionsOnLaunch",
-                source: DerivedSource::StructAsMap {
+                source: DerivedSource::FromStruct {
                     struct_member: "PrivateDnsNameOptionsOnLaunch",
                     children: &[
                         "HostnameType",
@@ -922,7 +911,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             // is preserved as a nested Map matching the schema struct.
             derived_attributes: vec![DerivedAttribute {
                 attr: "Options",
-                source: DerivedSource::StructAsMap {
+                source: DerivedSource::FromStruct {
                     struct_member: "Options",
                     children: &[
                         "AmazonSideAsn",
@@ -968,7 +957,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             read_shape_overrides: vec![],
             derived_attributes: vec![DerivedAttribute {
                 attr: "Options",
-                source: DerivedSource::StructAsMap {
+                source: DerivedSource::FromStruct {
                     struct_member: "Options",
                     children: &[
                         "ApplianceModeSupport",
@@ -1100,35 +1089,29 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             read_shape_overrides: vec![],
             // The peering response carries the requester / accepter VPCs
             // in two parallel `VpcPeeringConnectionVpcInfo` sub-structs;
-            // the DSL surface flattens both, with the accepter-side
-            // children renamed to `peer_*` so the user can tell them apart.
+            // the DSL surface flattens both VPC IDs plus the accepter owner,
+            // with accepter-side children renamed to `peer_*` so the user can
+            // tell them apart.
             derived_attributes: vec![
                 DerivedAttribute {
                     attr: "VpcId",
-                    source: DerivedSource::Struct {
+                    source: DerivedSource::FromStruct {
                         struct_member: "RequesterVpcInfo",
-                        child_member: "VpcId",
+                        children: &["VpcId"],
                     },
                 },
                 DerivedAttribute {
                     attr: "PeerVpcId",
-                    source: DerivedSource::Struct {
+                    source: DerivedSource::FromStruct {
                         struct_member: "AccepterVpcInfo",
-                        child_member: "VpcId",
+                        children: &["VpcId"],
                     },
                 },
                 DerivedAttribute {
                     attr: "PeerOwnerId",
-                    source: DerivedSource::Struct {
+                    source: DerivedSource::FromStruct {
                         struct_member: "AccepterVpcInfo",
-                        child_member: "OwnerId",
-                    },
-                },
-                DerivedAttribute {
-                    attr: "PeerRegion",
-                    source: DerivedSource::Struct {
-                        struct_member: "AccepterVpcInfo",
-                        child_member: "Region",
+                        children: &["OwnerId"],
                     },
                 },
             ],

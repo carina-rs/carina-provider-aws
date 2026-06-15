@@ -1309,11 +1309,9 @@ fn test_extract_ec2_vpc_peering_connection_attributes() {
             "123456789012".to_string()
         )))
     );
-    assert_eq!(
-        attributes.get("peer_region"),
-        Some(&Value::Concrete(ConcreteValue::String(
-            "ap-northeast-1".to_string()
-        )))
+    assert!(
+        !attributes.contains_key("peer_region"),
+        "peer_region is excluded from the schema and must not be extracted"
     );
 }
 
