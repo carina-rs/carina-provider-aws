@@ -6,7 +6,7 @@ use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
-use crate::helpers::require_string_attr;
+use crate::helpers::{optional_enum_attr, require_string_attr};
 
 impl AwsProvider {
     /// Read a CloudWatch Logs Log Group
@@ -126,11 +126,9 @@ impl AwsProvider {
             req = req.kms_key_id(kms_key);
         }
 
-        if let Some(Value::Concrete(ConcreteValue::String(class))) =
-            resource.get_attr("log_group_class")
-        {
+        if let Some(class) = optional_enum_attr(resource, "log_group_class") {
             use aws_sdk_cloudwatchlogs::types::LogGroupClass;
-            req = req.log_group_class(LogGroupClass::from(class.as_str()));
+            req = req.log_group_class(LogGroupClass::from(class));
         }
 
         if let Some(Value::Concrete(ConcreteValue::Map(tag_map))) = resource.get_attr("tags") {

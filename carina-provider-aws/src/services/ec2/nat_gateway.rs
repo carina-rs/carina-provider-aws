@@ -8,7 +8,8 @@ use aws_sdk_ec2::types::NatGatewayState;
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
 use crate::helpers::{
-    PollState, RetryPolicy, require_string_attr, retry_aws_operation, wait_for_ec2_state,
+    PollState, RetryPolicy, optional_enum_attr, require_string_attr, retry_aws_operation,
+    wait_for_ec2_state,
 };
 
 impl AwsProvider {
@@ -86,11 +87,9 @@ impl AwsProvider {
             req = req.allocation_id(alloc_id);
         }
 
-        if let Some(Value::Concrete(ConcreteValue::String(conn_type))) =
-            resource.get_attr("connectivity_type")
-        {
+        if let Some(conn_type) = optional_enum_attr(resource, "connectivity_type") {
             use aws_sdk_ec2::types::ConnectivityType;
-            req = req.connectivity_type(ConnectivityType::from(conn_type.as_str()));
+            req = req.connectivity_type(ConnectivityType::from(conn_type));
         }
 
         let rid = resource.id.clone();

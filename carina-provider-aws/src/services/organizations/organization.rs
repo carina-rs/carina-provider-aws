@@ -5,6 +5,7 @@ use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
+use crate::helpers::optional_enum_attr;
 
 impl AwsProvider {
     /// Extract attributes from an Organizations Organization object
@@ -110,11 +111,8 @@ impl AwsProvider {
     ) -> ProviderResult<State> {
         let mut req = self.organizations_client.create_organization();
 
-        if let Some(Value::Concrete(ConcreteValue::String(feature_set))) =
-            resource.get_attr("feature_set")
-        {
-            let fs =
-                aws_sdk_organizations::types::OrganizationFeatureSet::from(feature_set.as_str());
+        if let Some(feature_set) = optional_enum_attr(resource, "feature_set") {
+            let fs = aws_sdk_organizations::types::OrganizationFeatureSet::from(feature_set);
             req = req.feature_set(fs);
         }
 

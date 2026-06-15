@@ -6,7 +6,9 @@ use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
-use crate::helpers::{PollState, require_string_attr, sdk_error_message, wait_for_ec2_state};
+use crate::helpers::{
+    PollState, optional_enum_attr, require_string_attr, sdk_error_message, wait_for_ec2_state,
+};
 
 impl AwsProvider {
     /// Extract attributes from an Organizations Account object
@@ -171,11 +173,8 @@ impl AwsProvider {
             .account_name(&name)
             .email(&email);
 
-        if let Some(Value::Concrete(ConcreteValue::String(iam_billing))) =
-            resource.get_attr("iam_user_access_to_billing")
-        {
-            let val =
-                aws_sdk_organizations::types::IamUserAccessToBilling::from(iam_billing.as_str());
+        if let Some(iam_billing) = optional_enum_attr(resource, "iam_user_access_to_billing") {
+            let val = aws_sdk_organizations::types::IamUserAccessToBilling::from(iam_billing);
             req = req.iam_user_access_to_billing(val);
         }
 

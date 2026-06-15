@@ -5,6 +5,7 @@ use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
+use crate::helpers::require_enum_attr;
 
 impl AwsProvider {
     /// Read an EC2 VPN Gateway
@@ -70,13 +71,7 @@ impl AwsProvider {
         &self,
         resource: &Resource,
     ) -> ProviderResult<State> {
-        let gw_type = match resource.get_attr("type") {
-            Some(Value::Concrete(ConcreteValue::String(s))) => s.clone(),
-            _ => {
-                return Err(ProviderError::invalid_input("type is required")
-                    .for_resource(resource.id.clone()));
-            }
-        };
+        let gw_type = require_enum_attr(resource, "type")?;
 
         let mut req = self
             .ec2_client

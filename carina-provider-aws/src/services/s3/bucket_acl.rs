@@ -1,12 +1,12 @@
 use std::collections::HashMap;
 
 use aws_sdk_s3::types::{BucketCannedAcl, Grant, Permission, Type as GranteeType};
-use carina_core::provider::{ProviderError, ProviderResult};
+use carina_core::provider::ProviderResult;
 use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
-use crate::helpers::{RetryPolicy, require_string_attr, retry_aws_operation};
+use crate::helpers::{RetryPolicy, require_enum_attr, require_string_attr, retry_aws_operation};
 use crate::services::s3::bucket::is_s3_not_configured_error;
 
 /// AWS group URIs used to identify canned-ACL grant patterns.
@@ -164,14 +164,7 @@ impl AwsProvider {
         bucket: &str,
         resource: &Resource,
     ) -> ProviderResult<State> {
-        let acl_str = match resource.get_attr("acl") {
-            Some(Value::Concrete(ConcreteValue::String(s))) => s.to_string(),
-            _ => {
-                return Err(
-                    ProviderError::invalid_input("acl is required").for_resource(id.clone())
-                );
-            }
-        };
+        let acl_str = require_enum_attr(resource, "acl")?;
 
         self.s3_client
             .put_bucket_acl()
