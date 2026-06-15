@@ -2174,6 +2174,21 @@ fn struct_child_value_expr(
             "Value::Concrete(ConcreteValue::String({}.as_str().to_string()))",
             value_var
         ),
+        ShapeKind::List => {
+            let element_kind = match model.get_shape(&child_ref.target) {
+                Some(carina_smithy::Shape::List(list_shape)) => {
+                    model.shape_kind(&list_shape.member.target)
+                }
+                _ => None,
+            };
+            if !matches!(element_kind, Some(ShapeKind::String)) {
+                return None;
+            }
+            format!(
+                "Value::Concrete(ConcreteValue::List({}.iter().map(|s| Value::Concrete(ConcreteValue::String(s.to_string()))).collect()))",
+                value_var
+            )
+        }
         _ => return None,
     };
     Some(expr)
@@ -3067,6 +3082,7 @@ fn generate_provider_code(
                             continue;
                         };
                         let child_snake = escape_rust_keyword(&child_name.to_snake_case());
+                        let child_kind = model.shape_kind(&child_ref.target);
                         let Some(insert_expr) = struct_child_value_expr(model, child_ref, "v")
                         else {
                             eprintln!(
@@ -3075,12 +3091,24 @@ fn generate_provider_code(
                             );
                             continue;
                         };
-                        code.push_str(&format!(
-                            "\x20           if let Some(v) = dns_opts.{}() {{\n\
-                             \x20               fields.insert(\"{}\".to_string(), {});\n\
-                             \x20           }}\n",
-                            child_snake, child_snake, insert_expr
-                        ));
+                        if matches!(child_kind, Some(ShapeKind::List)) {
+                            code.push_str(&format!(
+                                "\x20           {{\n\
+                                 \x20               let v = dns_opts.{}();\n\
+                                 \x20               if !v.is_empty() {{\n\
+                                 \x20                   fields.insert(\"{}\".to_string(), {});\n\
+                                 \x20               }}\n\
+                                 \x20           }}\n",
+                                child_snake, child_snake, insert_expr
+                            ));
+                        } else {
+                            code.push_str(&format!(
+                                "\x20           if let Some(v) = dns_opts.{}() {{\n\
+                                 \x20               fields.insert(\"{}\".to_string(), {});\n\
+                                 \x20           }}\n",
+                                child_snake, child_snake, insert_expr
+                            ));
+                        }
                     }
                     code.push_str(&format!(
                         "\x20           if !fields.is_empty() {{\n\
@@ -5190,7 +5218,7 @@ mod tests {
     }
 
     #[test]
-    fn extract_ec2_transit_gateway_attachment_emits_list_of_string_for_subnet_ids() {
+    fn extract_ec2_transit_gateway_attachment_emits_subnet_ids_and_struct_as_map_options() {
         let res = resource_defs::ec2_resources()
             .into_iter()
             .find(|r| r.name == "ec2.TransitGatewayAttachment")
@@ -5205,6 +5233,26 @@ mod tests {
         assert!(
             code.contains("attributes.insert(\"subnet_ids\".to_string(), Value::Concrete(ConcreteValue::List(list)));"),
             "must insert subnet_ids as Value::List: {code}"
+        );
+        assert!(
+            code.contains("if let Some(dns_opts) = obj.options() {"),
+            "must walk obj.options() as a StructAsMap source: {code}"
+        );
+        assert!(
+            code.contains("let mut fields = IndexMap::new();"),
+            "must build nested options fields map: {code}"
+        );
+        assert!(
+            code.contains("if let Some(v) = dns_opts.dns_support()"),
+            "dns_support must read from options map source: {code}"
+        );
+        assert!(
+            code.contains("fields.insert(\"dns_support\".to_string(), Value::Concrete(ConcreteValue::String(v.as_str().to_string())));"),
+            "dns_support must insert inside fields map: {code}"
+        );
+        assert!(
+            code.contains("attributes.insert(\"options\".to_string(), Value::Concrete(ConcreteValue::Map(fields)));"),
+            "must insert nested options map: {code}"
         );
     }
 
@@ -5238,7 +5286,7 @@ mod tests {
     }
 
     #[test]
-    fn extract_ec2_transit_gateway_emits_struct_nested_options() {
+    fn extract_ec2_transit_gateway_emits_struct_as_map_options() {
         let res = resource_defs::ec2_resources()
             .into_iter()
             .find(|r| r.name == "ec2.TransitGateway")
@@ -5247,30 +5295,39 @@ mod tests {
             return;
         };
 
-        // Each child of obj.options() lands as its own top-level attribute.
+        // Each child of obj.options() lands inside a nested `options`
+        // map matching the schema struct.
         // Pin one numeric (amazon_side_asn) and one enum (dns_support) to
         // exercise both Int and Enum emission paths.
         assert!(
-            code.contains("if let Some(opts) = obj.options()\n            && let Some(v) = opts.amazon_side_asn()"),
-            "amazon_side_asn must walk obj.options(): {code}"
+            code.contains("if let Some(dns_opts) = obj.options() {"),
+            "must walk obj.options() as a StructAsMap source: {code}"
+        );
+        assert!(
+            code.contains("let mut fields = IndexMap::new();"),
+            "must build nested options fields map: {code}"
+        );
+        assert!(
+            code.contains("if let Some(v) = dns_opts.amazon_side_asn()"),
+            "amazon_side_asn must read from options map source: {code}"
         );
         assert!(
             // amazon_side_asn is Smithy `Long`, so the SDK getter returns
             // i64 directly — no widening cast.
-            code.contains("attributes.insert(\"amazon_side_asn\".to_string(), Value::Concrete(ConcreteValue::Int(v)));"),
-            "amazon_side_asn must insert as Int: {code}"
+            code.contains("fields.insert(\"amazon_side_asn\".to_string(), Value::Concrete(ConcreteValue::Int(v)));"),
+            "amazon_side_asn must insert as Int inside fields map: {code}"
         );
         assert!(
-            code.contains(
-                "if let Some(opts) = obj.options()\n            && let Some(v) = opts.dns_support()"
-            ),
-            "dns_support must walk obj.options(): {code}"
+            code.contains("if let Some(v) = dns_opts.dns_support()"),
+            "dns_support must read from options map source: {code}"
         );
         assert!(
-            code.contains(
-                "attributes.insert(\"dns_support\".to_string(), Value::Concrete(ConcreteValue::String(v.as_str().to_string())));"
-            ),
-            "dns_support must insert as enum-as-String: {code}"
+            code.contains("fields.insert(\"dns_support\".to_string(), Value::Concrete(ConcreteValue::String(v.as_str().to_string())));"),
+            "dns_support must insert as enum-as-String inside fields map: {code}"
+        );
+        assert!(
+            code.contains("attributes.insert(\"options\".to_string(), Value::Concrete(ConcreteValue::Map(fields)));"),
+            "must insert nested options map: {code}"
         );
     }
 

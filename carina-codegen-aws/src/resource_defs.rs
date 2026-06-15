@@ -919,52 +919,24 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             struct_field_type_overrides: vec![],
             read_shape_overrides: vec![],
             // The TransitGatewayRequestOptions sub-struct on the response
-            // is flattened into top-level attributes (matching the DSL
-            // surface, which doesn't expose `options` as a nested struct).
-            derived_attributes: vec![
-                DerivedAttribute {
-                    attr: "AmazonSideAsn",
-                    source: DerivedSource::Struct {
-                        struct_member: "Options",
-                        child_member: "AmazonSideAsn",
-                    },
+            // is preserved as a nested Map matching the schema struct.
+            derived_attributes: vec![DerivedAttribute {
+                attr: "Options",
+                source: DerivedSource::StructAsMap {
+                    struct_member: "Options",
+                    children: &[
+                        "AmazonSideAsn",
+                        "AutoAcceptSharedAttachments",
+                        "DefaultRouteTableAssociation",
+                        "DefaultRouteTablePropagation",
+                        "DnsSupport",
+                        "MulticastSupport",
+                        "SecurityGroupReferencingSupport",
+                        "TransitGatewayCidrBlocks",
+                        "VpnEcmpSupport",
+                    ],
                 },
-                DerivedAttribute {
-                    attr: "AutoAcceptSharedAttachments",
-                    source: DerivedSource::Struct {
-                        struct_member: "Options",
-                        child_member: "AutoAcceptSharedAttachments",
-                    },
-                },
-                DerivedAttribute {
-                    attr: "DefaultRouteTableAssociation",
-                    source: DerivedSource::Struct {
-                        struct_member: "Options",
-                        child_member: "DefaultRouteTableAssociation",
-                    },
-                },
-                DerivedAttribute {
-                    attr: "DefaultRouteTablePropagation",
-                    source: DerivedSource::Struct {
-                        struct_member: "Options",
-                        child_member: "DefaultRouteTablePropagation",
-                    },
-                },
-                DerivedAttribute {
-                    attr: "DnsSupport",
-                    source: DerivedSource::Struct {
-                        struct_member: "Options",
-                        child_member: "DnsSupport",
-                    },
-                },
-                DerivedAttribute {
-                    attr: "VpnEcmpSupport",
-                    source: DerivedSource::Struct {
-                        struct_member: "Options",
-                        child_member: "VpnEcmpSupport",
-                    },
-                },
-            ],
+            }],
         },
         // ec2.transit_gateway_attachment
         ResourceDef {
@@ -994,7 +966,18 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             deferred_populate_struct_field_overrides: vec![],
             struct_field_type_overrides: vec![],
             read_shape_overrides: vec![],
-            derived_attributes: vec![],
+            derived_attributes: vec![DerivedAttribute {
+                attr: "Options",
+                source: DerivedSource::StructAsMap {
+                    struct_member: "Options",
+                    children: &[
+                        "ApplianceModeSupport",
+                        "DnsSupport",
+                        "Ipv6Support",
+                        "SecurityGroupReferencingSupport",
+                    ],
+                },
+            }],
         },
         // ec2.vpc_endpoint
         ResourceDef {

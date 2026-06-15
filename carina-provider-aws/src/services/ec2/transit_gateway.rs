@@ -5,7 +5,76 @@ use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
-use crate::helpers::{PollState, build_tag_specification, optional_enum_attr, wait_for_ec2_state};
+use crate::helpers::{
+    PollState, build_tag_specification, optional_enum_struct_field, optional_int_struct_field,
+    optional_string_list_struct_field, wait_for_ec2_state,
+};
+
+fn build_create_transit_gateway_options(
+    resource: &Resource,
+) -> Option<aws_sdk_ec2::types::TransitGatewayRequestOptions> {
+    use aws_sdk_ec2::types::{
+        AutoAcceptSharedAttachmentsValue, DefaultRouteTableAssociationValue,
+        DefaultRouteTablePropagationValue, DnsSupportValue, MulticastSupportValue,
+        SecurityGroupReferencingSupportValue, VpnEcmpSupportValue,
+    };
+
+    let mut options = aws_sdk_ec2::types::TransitGatewayRequestOptions::builder();
+    let mut has_options = false;
+
+    if let Some(asn) = optional_int_struct_field(resource, "options", "amazon_side_asn") {
+        options = options.amazon_side_asn(asn);
+        has_options = true;
+    }
+    if let Some(v) =
+        optional_enum_struct_field(resource, "options", "auto_accept_shared_attachments")
+    {
+        options = options.auto_accept_shared_attachments(AutoAcceptSharedAttachmentsValue::from(v));
+        has_options = true;
+    }
+    if let Some(v) =
+        optional_enum_struct_field(resource, "options", "default_route_table_association")
+    {
+        options =
+            options.default_route_table_association(DefaultRouteTableAssociationValue::from(v));
+        has_options = true;
+    }
+    if let Some(v) =
+        optional_enum_struct_field(resource, "options", "default_route_table_propagation")
+    {
+        options =
+            options.default_route_table_propagation(DefaultRouteTablePropagationValue::from(v));
+        has_options = true;
+    }
+    if let Some(v) = optional_enum_struct_field(resource, "options", "dns_support") {
+        options = options.dns_support(DnsSupportValue::from(v));
+        has_options = true;
+    }
+    if let Some(v) = optional_enum_struct_field(resource, "options", "multicast_support") {
+        options = options.multicast_support(MulticastSupportValue::from(v));
+        has_options = true;
+    }
+    if let Some(v) =
+        optional_enum_struct_field(resource, "options", "security_group_referencing_support")
+    {
+        options = options
+            .security_group_referencing_support(SecurityGroupReferencingSupportValue::from(v));
+        has_options = true;
+    }
+    if let Some(blocks) =
+        optional_string_list_struct_field(resource, "options", "transit_gateway_cidr_blocks")
+        && !blocks.is_empty()
+    {
+        options = options.set_transit_gateway_cidr_blocks(Some(blocks));
+        has_options = true;
+    }
+    if let Some(v) = optional_enum_struct_field(resource, "options", "vpn_ecmp_support") {
+        options = options.vpn_ecmp_support(VpnEcmpSupportValue::from(v));
+        has_options = true;
+    }
+
+    has_options.then(|| options.build())
+}
 
 impl AwsProvider {
     /// Read an EC2 Transit Gateway
@@ -72,51 +141,8 @@ impl AwsProvider {
             req = req.description(desc);
         }
 
-        // Build options
-        let mut options = aws_sdk_ec2::types::TransitGatewayRequestOptions::builder();
-        let mut has_options = false;
-
-        if let Some(Value::Concrete(ConcreteValue::Int(asn))) = resource.get_attr("amazon_side_asn")
-        {
-            options = options.amazon_side_asn(*asn);
-            has_options = true;
-        }
-
-        if let Some(v) = optional_enum_attr(resource, "auto_accept_shared_attachments") {
-            use aws_sdk_ec2::types::AutoAcceptSharedAttachmentsValue;
-            options =
-                options.auto_accept_shared_attachments(AutoAcceptSharedAttachmentsValue::from(v));
-            has_options = true;
-        }
-
-        if let Some(v) = optional_enum_attr(resource, "default_route_table_association") {
-            use aws_sdk_ec2::types::DefaultRouteTableAssociationValue;
-            options =
-                options.default_route_table_association(DefaultRouteTableAssociationValue::from(v));
-            has_options = true;
-        }
-
-        if let Some(v) = optional_enum_attr(resource, "default_route_table_propagation") {
-            use aws_sdk_ec2::types::DefaultRouteTablePropagationValue;
-            options =
-                options.default_route_table_propagation(DefaultRouteTablePropagationValue::from(v));
-            has_options = true;
-        }
-
-        if let Some(v) = optional_enum_attr(resource, "dns_support") {
-            use aws_sdk_ec2::types::DnsSupportValue;
-            options = options.dns_support(DnsSupportValue::from(v));
-            has_options = true;
-        }
-
-        if let Some(v) = optional_enum_attr(resource, "vpn_ecmp_support") {
-            use aws_sdk_ec2::types::VpnEcmpSupportValue;
-            options = options.vpn_ecmp_support(VpnEcmpSupportValue::from(v));
-            has_options = true;
-        }
-
-        if has_options {
-            req = req.options(options.build());
+        if let Some(options) = build_create_transit_gateway_options(resource) {
+            req = req.options(options);
         }
 
         // Apply tags via TagSpecifications
@@ -281,5 +307,228 @@ impl AwsProvider {
             "Transit gateway deletion failed",
         )
         .await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use aws_sdk_ec2::types::{
+        AutoAcceptSharedAttachmentsValue, DefaultRouteTableAssociationValue,
+        DefaultRouteTablePropagationValue, DnsSupportValue, MulticastSupportValue,
+        SecurityGroupReferencingSupportValue, TransitGateway, TransitGatewayOptions,
+        VpnEcmpSupportValue,
+    };
+    use indexmap::IndexMap;
+
+    fn resource_with_options(options: IndexMap<String, Value>) -> Resource {
+        let mut resource = Resource::with_provider("aws", "ec2.TransitGateway", "test", None);
+        resource.set_attr(
+            "options".to_string(),
+            Value::Concrete(ConcreteValue::Map(options)),
+        );
+        resource
+    }
+
+    fn canonical_enable_disable(api_value: &str) -> Value {
+        use carina_core::schema::{AttributeType, Schema, enum_identity};
+
+        let attr_type = AttributeType::enum_(
+            enum_identity("EnableDisable", Some("aws.ec2.TransitGateway")),
+            Some(vec!["enable".to_string(), "disable".to_string()]),
+            vec![
+                ("enable".to_string(), "enable".to_string()),
+                ("disable".to_string(), "disable".to_string()),
+            ],
+            None,
+            None,
+        );
+        Schema::flat(attr_type)
+            .canonicalize(Value::Concrete(ConcreteValue::enum_identifier(api_value)))
+    }
+
+    fn one_enum_option(field: &str, value: Value) -> Resource {
+        resource_with_options([(field.to_string(), value)].into_iter().collect())
+    }
+
+    #[test]
+    fn create_reads_nested_options_dns_support_canonical_enum() {
+        let resource = one_enum_option("dns_support", canonical_enable_disable("disable"));
+        let options = build_create_transit_gateway_options(&resource).expect("options");
+        assert_eq!(options.dns_support(), Some(&DnsSupportValue::Disable));
+    }
+
+    #[test]
+    fn create_reads_nested_options_vpn_ecmp_support() {
+        let resource = one_enum_option(
+            "vpn_ecmp_support",
+            Value::Concrete(ConcreteValue::String("enable".to_string())),
+        );
+        let options = build_create_transit_gateway_options(&resource).expect("options");
+        assert_eq!(
+            options.vpn_ecmp_support(),
+            Some(&VpnEcmpSupportValue::Enable)
+        );
+    }
+
+    #[test]
+    fn create_reads_nested_options_multicast_support() {
+        let resource = one_enum_option(
+            "multicast_support",
+            Value::Concrete(ConcreteValue::String("enable".to_string())),
+        );
+        let options = build_create_transit_gateway_options(&resource).expect("options");
+        assert_eq!(
+            options.multicast_support(),
+            Some(&MulticastSupportValue::Enable)
+        );
+    }
+
+    #[test]
+    fn create_reads_nested_options_security_group_referencing_support() {
+        let resource = one_enum_option(
+            "security_group_referencing_support",
+            Value::Concrete(ConcreteValue::String("enable".to_string())),
+        );
+        let options = build_create_transit_gateway_options(&resource).expect("options");
+        assert_eq!(
+            options.security_group_referencing_support(),
+            Some(&SecurityGroupReferencingSupportValue::Enable)
+        );
+    }
+
+    #[test]
+    fn create_reads_nested_options_auto_accept_shared_attachments() {
+        let resource = one_enum_option(
+            "auto_accept_shared_attachments",
+            Value::Concrete(ConcreteValue::String("enable".to_string())),
+        );
+        let options = build_create_transit_gateway_options(&resource).expect("options");
+        assert_eq!(
+            options.auto_accept_shared_attachments(),
+            Some(&AutoAcceptSharedAttachmentsValue::Enable)
+        );
+    }
+
+    #[test]
+    fn create_reads_nested_options_default_route_table_association() {
+        let resource = one_enum_option(
+            "default_route_table_association",
+            Value::Concrete(ConcreteValue::String("disable".to_string())),
+        );
+        let options = build_create_transit_gateway_options(&resource).expect("options");
+        assert_eq!(
+            options.default_route_table_association(),
+            Some(&DefaultRouteTableAssociationValue::Disable)
+        );
+    }
+
+    #[test]
+    fn create_reads_nested_options_default_route_table_propagation() {
+        let resource = one_enum_option(
+            "default_route_table_propagation",
+            Value::Concrete(ConcreteValue::String("disable".to_string())),
+        );
+        let options = build_create_transit_gateway_options(&resource).expect("options");
+        assert_eq!(
+            options.default_route_table_propagation(),
+            Some(&DefaultRouteTablePropagationValue::Disable)
+        );
+    }
+
+    #[test]
+    fn create_reads_nested_options_amazon_side_asn_int() {
+        let resource = resource_with_options(
+            [(
+                "amazon_side_asn".to_string(),
+                Value::Concrete(ConcreteValue::Int(64512)),
+            )]
+            .into_iter()
+            .collect(),
+        );
+        let options = build_create_transit_gateway_options(&resource).expect("options");
+        assert_eq!(options.amazon_side_asn(), Some(64512));
+    }
+
+    #[test]
+    fn create_reads_nested_options_transit_gateway_cidr_blocks_list() {
+        let resource = resource_with_options(
+            [(
+                "transit_gateway_cidr_blocks".to_string(),
+                Value::Concrete(ConcreteValue::List(vec![Value::Concrete(
+                    ConcreteValue::String("10.0.0.0/24".to_string()),
+                )])),
+            )]
+            .into_iter()
+            .collect(),
+        );
+        let options = build_create_transit_gateway_options(&resource).expect("options");
+        assert_eq!(options.transit_gateway_cidr_blocks(), ["10.0.0.0/24"]);
+    }
+
+    #[test]
+    fn create_tgw_skips_explicit_empty_cidr_blocks_list() {
+        let resource = resource_with_options(
+            [(
+                "transit_gateway_cidr_blocks".to_string(),
+                Value::Concrete(ConcreteValue::List(vec![])),
+            )]
+            .into_iter()
+            .collect(),
+        );
+
+        assert!(
+            build_create_transit_gateway_options(&resource).is_none(),
+            "an empty CIDR list must not cause the SDK request to carry options"
+        );
+    }
+
+    #[test]
+    fn state_read_emits_nested_options_map() {
+        let tgw = TransitGateway::builder()
+            .transit_gateway_id("tgw-123")
+            .options(
+                TransitGatewayOptions::builder()
+                    .dns_support(DnsSupportValue::Enable)
+                    .vpn_ecmp_support(VpnEcmpSupportValue::Disable)
+                    .transit_gateway_cidr_blocks("10.0.0.0/24")
+                    .build(),
+            )
+            .build();
+        let mut attrs = HashMap::new();
+        AwsProvider::extract_ec2_transit_gateway_attributes(&tgw, &mut attrs);
+
+        let Some(Value::Concrete(ConcreteValue::Map(options))) = attrs.get("options") else {
+            panic!("expected nested options map, got {attrs:?}");
+        };
+        assert_eq!(
+            options.get("dns_support"),
+            Some(&Value::Concrete(ConcreteValue::String(
+                "enable".to_string()
+            )))
+        );
+        assert_eq!(
+            options.get("vpn_ecmp_support"),
+            Some(&Value::Concrete(ConcreteValue::String(
+                "disable".to_string()
+            )))
+        );
+        assert_eq!(
+            options.get("transit_gateway_cidr_blocks"),
+            Some(&Value::Concrete(ConcreteValue::List(vec![
+                Value::Concrete(ConcreteValue::String("10.0.0.0/24".to_string()))
+            ])))
+        );
+        assert!(!attrs.contains_key("dns_support"));
+    }
+
+    #[test]
+    fn create_top_level_dns_support_is_ignored() {
+        let mut resource = Resource::with_provider("aws", "ec2.TransitGateway", "test", None);
+        resource.set_attr(
+            "dns_support".to_string(),
+            Value::Concrete(ConcreteValue::String("disable".to_string())),
+        );
+        assert!(build_create_transit_gateway_options(&resource).is_none());
     }
 }
