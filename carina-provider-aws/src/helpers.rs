@@ -14,7 +14,8 @@ use aws_smithy_types::retry::ProvideErrorKind;
 use tokio::time::sleep;
 
 use carina_core::provider::{PatchOpKind, ProviderError, ProviderResult, UpdatePatch};
-use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
+use carina_core::resource::{ConcreteValue, EnumValueResolver, Resource, ResourceId, State, Value};
+use carina_core::schema::{AttributeType, ResourceSchema, Shape, ShapeWalkBudget};
 
 /// Borrow a `Value` as `&str` if it is a concrete string, otherwise `None`.
 pub fn value_as_str(v: &Value) -> Option<&str> {
@@ -38,38 +39,25 @@ pub fn require_string_attr(resource: &Resource, attr_name: &str) -> ProviderResu
     }
 }
 
-/// Return the AWS API canonical spelling for a schema-typed enum
-/// attribute, accepting every `Value` shape the carina-core canonicalize
-/// pipeline can produce at the provider boundary:
-///
-/// - `ConcreteValue::String(s)` — quoted-string DSL form
-///   (`validation_method = 'DNS'`) or a state-read echo
-/// - `ConcreteValue::EnumIdentifier(raw)` — bare DSL identifier form
-///   (`validation_method = dns`, post-carina#3463)
-/// - `ConcreteValue::CanonicalEnum(c)` — typed witness produced by
-///   `canonicalize_resources_with_schemas` for schema-known values
-///   (carina#3438)
-///
-/// Returns `None` for any other shape or a missing attribute. Use this
-/// (or its wrappers below) for any schema attribute declared as
-/// `AttributeType::enum_(..)`. Plain `value_as_str` /
-/// `require_string_attr` match only `ConcreteValue::String` and silently
-/// drop the other two variants, which is the carina-rs/carina-provider-aws#440
-/// failure mode.
-pub(crate) fn enum_attr_str<'a>(resource: &'a Resource, attr_name: &str) -> Option<&'a str> {
-    match resource.get_attr(attr_name)? {
-        Value::Concrete(ConcreteValue::String(s)) => Some(s.as_str()),
-        Value::Concrete(ConcreteValue::EnumIdentifier(raw)) => Some(raw.as_str()),
-        Value::Concrete(ConcreteValue::CanonicalEnum(c)) => Some(c.api_value()),
-        _ => None,
-    }
+pub(crate) fn enum_attr_str<'a>(
+    resource: &'a Resource,
+    schema: &'a ResourceSchema,
+    attr_name: &str,
+) -> Option<&'a str> {
+    resource
+        .get_enum_attr(schema, attr_name)
+        .map(|a| a.api_value())
 }
 
 /// Required-attribute wrapper around [`enum_attr_str`]. Returns the
 /// AWS API canonical spelling, or `ProviderError::invalid_input`
 /// when the attribute is absent or carries a non-enum-shaped value.
-pub fn require_enum_attr(resource: &Resource, attr_name: &str) -> ProviderResult<String> {
-    enum_attr_str(resource, attr_name)
+pub fn require_enum_attr(
+    resource: &Resource,
+    schema: &ResourceSchema,
+    attr_name: &str,
+) -> ProviderResult<String> {
+    enum_attr_str(resource, schema, attr_name)
         .map(|s| s.to_string())
         .ok_or_else(|| {
             ProviderError::invalid_input(format!("{} is required", attr_name))
@@ -80,8 +68,12 @@ pub fn require_enum_attr(resource: &Resource, attr_name: &str) -> ProviderResult
 /// Optional-attribute wrapper around [`enum_attr_str`] for readability
 /// at call sites where the enum is optional (e.g. ACM
 /// `validation_method`, `key_algorithm`).
-pub fn optional_enum_attr<'a>(resource: &'a Resource, attr_name: &str) -> Option<&'a str> {
-    enum_attr_str(resource, attr_name)
+pub fn optional_enum_attr<'a>(
+    resource: &'a Resource,
+    schema: &'a ResourceSchema,
+    attr_name: &str,
+) -> Option<&'a str> {
+    enum_attr_str(resource, schema, attr_name)
 }
 
 /// Return the `bool` value of a top-level `Bool`-typed attribute.
@@ -111,26 +103,69 @@ pub(crate) fn optional_bool_attr(resource: &Resource, attr_name: &str) -> Option
 /// `m.get("dns_support")`).
 pub(crate) fn enum_struct_field_str<'a>(
     resource: &'a Resource,
+    schema: &'a ResourceSchema,
     struct_attr: &str,
     field_name: &str,
 ) -> Option<&'a str> {
-    let Some(Value::Concrete(ConcreteValue::Map(m))) = resource.get_attr(struct_attr) else {
-        return None;
-    };
-    match m.get(field_name)? {
-        Value::Concrete(ConcreteValue::String(s)) => Some(s.as_str()),
-        Value::Concrete(ConcreteValue::EnumIdentifier(raw)) => Some(raw.as_str()),
-        Value::Concrete(ConcreteValue::CanonicalEnum(c)) => Some(c.api_value()),
-        _ => None,
-    }
+    resource
+        .get_enum_struct_field(schema, struct_attr, field_name)
+        .map(|a| a.api_value())
 }
 
 pub(crate) fn optional_enum_struct_field<'a>(
     resource: &'a Resource,
+    schema: &'a ResourceSchema,
     struct_attr: &str,
     field_name: &str,
 ) -> Option<&'a str> {
-    enum_struct_field_str(resource, struct_attr, field_name)
+    enum_struct_field_str(resource, schema, struct_attr, field_name)
+}
+
+pub(crate) fn optional_enum_value_at_schema_path(
+    schema: &ResourceSchema,
+    root_attr: &str,
+    path: &[&str],
+    value: &Value,
+) -> Option<String> {
+    let attr_type = enum_attr_type_at_schema_path(schema, root_attr, path)?;
+    let Shape::Enum { identity, .. } = schema.shape_of(attr_type) else {
+        return None;
+    };
+    let resolver = EnumValueResolver::with_defs(attr_type, &schema.defs);
+    match value {
+        Value::Concrete(ConcreteValue::CanonicalEnum(c)) if c.identity() == identity => {
+            Some(c.api_value().to_string())
+        }
+        Value::Concrete(ConcreteValue::EnumIdentifier(raw)) => resolver
+            .resolve_raw(raw)
+            .ok()
+            .map(|c| c.api_value().to_string()),
+        Value::Concrete(ConcreteValue::String(s)) => resolver
+            .resolve_state_text(s)
+            .ok()
+            .map(|c| c.api_value().to_string()),
+        _ => None,
+    }
+}
+
+fn enum_attr_type_at_schema_path<'a>(
+    schema: &'a ResourceSchema,
+    root_attr: &str,
+    path: &[&str],
+) -> Option<&'a AttributeType> {
+    let mut attr_type = &schema.attributes.get(root_attr)?.attr_type;
+    for segment in path {
+        while let Shape::List { element_type, .. } = schema.shape_of(attr_type) {
+            attr_type = element_type;
+        }
+        let mut budget = ShapeWalkBudget::new(64);
+        let fields = schema.struct_fields_with_budget(attr_type, &mut budget)?;
+        attr_type = &fields
+            .iter()
+            .find(|field| field.name == *segment)?
+            .field_type;
+    }
+    Some(attr_type)
 }
 
 /// Return the `i64` value of an `Int`-typed field inside the nested
@@ -556,6 +591,10 @@ mod tests {
         )
     }
 
+    fn acm_schema() -> ResourceSchema {
+        crate::schemas::generated::acm::certificate::acm_certificate_config().schema
+    }
+
     fn canonical_validation_method_value() -> Value {
         use carina_core::schema::{AttributeType, Schema, enum_identity};
 
@@ -571,6 +610,26 @@ mod tests {
         );
         let schema = Schema::flat(attr_type);
         schema.canonicalize(Value::Concrete(ConcreteValue::enum_identifier("dns")))
+    }
+
+    fn canonical_certificate_transparency_value() -> Value {
+        use carina_core::schema::{AttributeType, Schema, enum_identity};
+
+        let attr_type = AttributeType::enum_(
+            enum_identity(
+                "CertificateTransparencyLoggingPreference",
+                Some("aws.acm.Certificate.CertificateOptions"),
+            ),
+            Some(vec!["DISABLED".to_string(), "ENABLED".to_string()]),
+            vec![
+                ("DISABLED".to_string(), "disabled".to_string()),
+                ("ENABLED".to_string(), "enabled".to_string()),
+            ],
+            None,
+            None,
+        );
+        let schema = Schema::flat(attr_type);
+        schema.canonicalize(Value::Concrete(ConcreteValue::enum_identifier("enabled")))
     }
 
     #[test]
@@ -654,68 +713,108 @@ mod tests {
 
     #[test]
     fn test_require_enum_attr_string() {
-        let resource = make_test_resource(vec![("type", "DNS")]);
-        assert_eq!(require_enum_attr(&resource, "type").unwrap(), "DNS");
+        let schema = acm_schema();
+        let resource = make_test_resource(vec![("validation_method", "DNS")]);
+        assert_eq!(
+            require_enum_attr(&resource, &schema, "validation_method").unwrap(),
+            "DNS"
+        );
     }
 
     #[test]
     fn test_require_enum_attr_enum_identifier() {
+        let schema = acm_schema();
         let resource = make_resource_with_value(
-            "type",
+            "validation_method",
             Value::Concrete(ConcreteValue::enum_identifier("dns")),
         );
-        assert_eq!(require_enum_attr(&resource, "type").unwrap(), "dns");
+        assert_eq!(
+            require_enum_attr(&resource, &schema, "validation_method").unwrap(),
+            "DNS"
+        );
     }
 
     #[test]
     fn test_require_enum_attr_canonical_enum() {
-        let resource = make_resource_with_value("type", canonical_validation_method_value());
-        assert_eq!(require_enum_attr(&resource, "type").unwrap(), "DNS");
+        let schema = acm_schema();
+        let resource =
+            make_resource_with_value("validation_method", canonical_validation_method_value());
+        assert_eq!(
+            require_enum_attr(&resource, &schema, "validation_method").unwrap(),
+            "DNS"
+        );
     }
 
     #[test]
     fn test_require_enum_attr_missing_is_err() {
+        let schema = acm_schema();
         let resource = make_test_resource(vec![]);
-        assert!(require_enum_attr(&resource, "type").is_err());
+        assert!(require_enum_attr(&resource, &schema, "validation_method").is_err());
     }
 
     #[test]
     fn test_require_enum_attr_non_enum_shape_is_err() {
-        let resource = make_resource_with_value("type", Value::Concrete(ConcreteValue::Int(1)));
-        assert!(require_enum_attr(&resource, "type").is_err());
+        let schema = acm_schema();
+        let resource =
+            make_resource_with_value("validation_method", Value::Concrete(ConcreteValue::Int(1)));
+        assert!(require_enum_attr(&resource, &schema, "validation_method").is_err());
     }
 
     #[test]
     fn test_optional_enum_attr_string() {
-        let resource = make_test_resource(vec![("type", "DNS")]);
-        assert_eq!(optional_enum_attr(&resource, "type"), Some("DNS"));
+        let schema = acm_schema();
+        let resource = make_test_resource(vec![("validation_method", "DNS")]);
+        assert_eq!(
+            optional_enum_attr(&resource, &schema, "validation_method"),
+            Some("DNS")
+        );
     }
 
     #[test]
     fn test_optional_enum_attr_enum_identifier() {
+        let schema = acm_schema();
         let resource = make_resource_with_value(
-            "type",
+            "validation_method",
             Value::Concrete(ConcreteValue::enum_identifier("dns")),
         );
-        assert_eq!(optional_enum_attr(&resource, "type"), Some("dns"));
+        assert_eq!(
+            optional_enum_attr(&resource, &schema, "validation_method"),
+            Some("DNS")
+        );
     }
 
     #[test]
     fn test_optional_enum_attr_canonical_enum() {
-        let resource = make_resource_with_value("type", canonical_validation_method_value());
-        assert_eq!(optional_enum_attr(&resource, "type"), Some("DNS"));
+        let schema = acm_schema();
+        let resource =
+            make_resource_with_value("validation_method", canonical_validation_method_value());
+        assert_eq!(
+            optional_enum_attr(&resource, &schema, "validation_method"),
+            Some("DNS")
+        );
     }
 
     #[test]
     fn test_optional_enum_attr_missing_is_none() {
+        let schema = acm_schema();
         let resource = make_test_resource(vec![]);
-        assert_eq!(optional_enum_attr(&resource, "type"), None);
+        assert_eq!(
+            optional_enum_attr(&resource, &schema, "validation_method"),
+            None
+        );
     }
 
     #[test]
     fn test_optional_enum_attr_non_enum_shape_is_none() {
-        let resource = make_resource_with_value("type", Value::Concrete(ConcreteValue::Bool(true)));
-        assert_eq!(optional_enum_attr(&resource, "type"), None);
+        let schema = acm_schema();
+        let resource = make_resource_with_value(
+            "validation_method",
+            Value::Concrete(ConcreteValue::Bool(true)),
+        );
+        assert_eq!(
+            optional_enum_attr(&resource, &schema, "validation_method"),
+            None
+        );
     }
 
     #[test]
@@ -748,6 +847,7 @@ mod tests {
 
     #[test]
     fn test_optional_enum_struct_field_string() {
+        let schema = acm_schema();
         let resource = make_resource_with_struct_field(
             "certificate_transparency_logging_preference",
             Value::Concrete(ConcreteValue::String("ENABLED".to_string())),
@@ -755,6 +855,7 @@ mod tests {
         assert_eq!(
             optional_enum_struct_field(
                 &resource,
+                &schema,
                 "options",
                 "certificate_transparency_logging_preference"
             ),
@@ -764,6 +865,7 @@ mod tests {
 
     #[test]
     fn test_optional_enum_struct_field_enum_identifier() {
+        let schema = acm_schema();
         let resource = make_resource_with_struct_field(
             "certificate_transparency_logging_preference",
             Value::Concrete(ConcreteValue::enum_identifier("enabled")),
@@ -771,22 +873,29 @@ mod tests {
         assert_eq!(
             optional_enum_struct_field(
                 &resource,
+                &schema,
                 "options",
                 "certificate_transparency_logging_preference"
             ),
-            Some("enabled")
+            Some("ENABLED")
         );
     }
 
     #[test]
     fn test_optional_enum_struct_field_canonical_enum() {
+        let schema = acm_schema();
         let resource = make_resource_with_struct_field(
-            "validation_method",
-            canonical_validation_method_value(),
+            "certificate_transparency_logging_preference",
+            canonical_certificate_transparency_value(),
         );
         assert_eq!(
-            optional_enum_struct_field(&resource, "options", "validation_method"),
-            Some("DNS")
+            optional_enum_struct_field(
+                &resource,
+                &schema,
+                "options",
+                "certificate_transparency_logging_preference"
+            ),
+            Some("ENABLED")
         );
     }
 
@@ -854,9 +963,10 @@ mod tests {
 
     #[test]
     fn test_struct_field_helpers_missing_outer_struct_are_none() {
+        let schema = acm_schema();
         let resource = make_test_resource(vec![]);
         assert_eq!(
-            optional_enum_struct_field(&resource, "options", "dns_support"),
+            optional_enum_struct_field(&resource, &schema, "options", "dns_support"),
             None
         );
         assert_eq!(
@@ -879,12 +989,13 @@ mod tests {
 
     #[test]
     fn test_struct_field_helpers_non_map_outer_struct_are_none() {
+        let schema = acm_schema();
         let resource = make_resource_with_value(
             "options",
             Value::Concrete(ConcreteValue::String("not-a-map".to_string())),
         );
         assert_eq!(
-            optional_enum_struct_field(&resource, "options", "dns_support"),
+            optional_enum_struct_field(&resource, &schema, "options", "dns_support"),
             None
         );
         assert_eq!(
@@ -907,12 +1018,13 @@ mod tests {
 
     #[test]
     fn test_struct_field_helpers_missing_field_are_none() {
+        let schema = acm_schema();
         let resource = make_resource_with_value(
             "options",
             Value::Concrete(ConcreteValue::Map(IndexMap::new())),
         );
         assert_eq!(
-            optional_enum_struct_field(&resource, "options", "dns_support"),
+            optional_enum_struct_field(&resource, &schema, "options", "dns_support"),
             None
         );
         assert_eq!(
@@ -935,6 +1047,7 @@ mod tests {
 
     #[test]
     fn test_struct_field_helpers_wrong_shape_are_none() {
+        let schema = acm_schema();
         let enum_resource = make_resource_with_struct_field(
             "dns_support",
             Value::Concrete(ConcreteValue::Bool(true)),
@@ -964,7 +1077,7 @@ mod tests {
             )])),
         );
         assert_eq!(
-            optional_enum_struct_field(&enum_resource, "options", "dns_support"),
+            optional_enum_struct_field(&enum_resource, &schema, "options", "dns_support"),
             None
         );
         assert_eq!(

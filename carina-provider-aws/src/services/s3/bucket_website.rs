@@ -5,11 +5,15 @@ use aws_sdk_s3::types::{
 };
 use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
+use carina_core::schema::ResourceSchema;
 use indexmap::IndexMap;
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
-use crate::helpers::{RetryPolicy, require_string_attr, retry_aws_operation, sdk_error_message};
+use crate::helpers::{
+    RetryPolicy, optional_enum_struct_field, require_string_attr, retry_aws_operation,
+    sdk_error_message,
+};
 use crate::services::s3::bucket::is_s3_not_configured_error;
 
 impl AwsProvider {
@@ -96,9 +100,11 @@ impl AwsProvider {
     pub(crate) async fn create_s3_bucket_website_configuration(
         &self,
         resource: &Resource,
+        schema: &ResourceSchema,
     ) -> ProviderResult<State> {
+        let _ = schema;
         let bucket = require_string_attr(resource, "bucket")?;
-        self.put_s3_bucket_website(&resource.id, &bucket, resource)
+        self.put_s3_bucket_website(&resource.id, &bucket, resource, schema)
             .await
     }
 
@@ -108,8 +114,11 @@ impl AwsProvider {
         identifier: &str,
         _from: &State,
         to: Resource,
+        schema: &ResourceSchema,
     ) -> ProviderResult<State> {
-        self.put_s3_bucket_website(&id, identifier, &to).await
+        let _ = schema;
+        self.put_s3_bucket_website(&id, identifier, &to, schema)
+            .await
     }
 
     async fn put_s3_bucket_website(
@@ -117,6 +126,7 @@ impl AwsProvider {
         id: &ResourceId,
         bucket: &str,
         resource: &Resource,
+        schema: &ResourceSchema,
     ) -> ProviderResult<State> {
         let mut config_builder = WebsiteConfiguration::builder();
 
@@ -175,8 +185,10 @@ impl AwsProvider {
                 }
             };
             let mut rb = RedirectAllRequestsTo::builder().host_name(host_name);
-            if let Some(Value::Concrete(ConcreteValue::String(p))) = map.get("protocol") {
-                rb = rb.protocol(Protocol::from(p.as_str()));
+            if let Some(protocol) =
+                optional_enum_struct_field(resource, schema, "redirect_all_requests_to", "protocol")
+            {
+                rb = rb.protocol(Protocol::from(protocol));
             }
             config_builder = config_builder.redirect_all_requests_to(rb.build().map_err(|e| {
                 ProviderError::api_error(sdk_error_message(

@@ -9,6 +9,7 @@ use crate::services::s3::bucket::is_s3_not_configured_error;
 use aws_sdk_s3::types::{BucketVersioningStatus, MfaDelete, VersioningConfiguration};
 use carina_core::provider::ProviderResult;
 use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
+use carina_core::schema::ResourceSchema;
 
 impl AwsProvider {
     /// Read an S3 BucketVersioning.
@@ -71,9 +72,11 @@ impl AwsProvider {
     pub(crate) async fn create_s3_bucket_versioning(
         &self,
         resource: &Resource,
+        schema: &ResourceSchema,
     ) -> ProviderResult<State> {
+        let _ = schema;
         let bucket = require_string_attr(resource, "bucket")?;
-        self.put_s3_bucket_versioning(&resource.id, &bucket, resource)
+        self.put_s3_bucket_versioning(&resource.id, &bucket, resource, schema)
             .await
     }
 
@@ -83,8 +86,11 @@ impl AwsProvider {
         identifier: &str,
         _from: &State,
         to: Resource,
+        schema: &ResourceSchema,
     ) -> ProviderResult<State> {
-        self.put_s3_bucket_versioning(&id, identifier, &to).await
+        let _ = schema;
+        self.put_s3_bucket_versioning(&id, identifier, &to, schema)
+            .await
     }
 
     async fn put_s3_bucket_versioning(
@@ -92,12 +98,13 @@ impl AwsProvider {
         id: &ResourceId,
         bucket: &str,
         resource: &Resource,
+        schema: &ResourceSchema,
     ) -> ProviderResult<State> {
-        let status_str = require_enum_attr(resource, "status")?;
+        let status_str = require_enum_attr(resource, schema, "status")?;
         let status = BucketVersioningStatus::from(status_str.as_str());
 
         let mut config_builder = VersioningConfiguration::builder().status(status);
-        if let Some(s) = optional_enum_attr(resource, "mfa_delete") {
+        if let Some(s) = optional_enum_attr(resource, schema, "mfa_delete") {
             config_builder = config_builder.mfa_delete(MfaDelete::from(s));
         }
 

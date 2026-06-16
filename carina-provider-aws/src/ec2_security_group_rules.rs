@@ -4,9 +4,11 @@ use std::collections::HashMap;
 
 use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
+use carina_core::schema::ResourceSchema;
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
+use crate::helpers::require_enum_attr;
 
 impl AwsProvider {
     /// Read an EC2 Security Group Rule (shared between ingress and egress)
@@ -106,6 +108,7 @@ impl AwsProvider {
     pub(crate) async fn create_ec2_security_group_rule(
         &self,
         resource: &Resource,
+        schema: &ResourceSchema,
         is_ingress: bool,
     ) -> ProviderResult<State> {
         let sg_id = match resource.get_attr("group_id") {
@@ -118,10 +121,8 @@ impl AwsProvider {
             }
         };
 
-        let protocol = match resource.get_attr("ip_protocol") {
-            Some(Value::Concrete(ConcreteValue::String(s))) => s.clone(),
-            _ => "-1".to_string(),
-        };
+        let protocol =
+            require_enum_attr(resource, schema, "ip_protocol").unwrap_or_else(|_| "-1".to_string());
 
         let from_port = match resource.get_attr("from_port") {
             Some(Value::Concrete(ConcreteValue::Int(n))) => *n as i32,
@@ -278,12 +279,14 @@ impl AwsProvider {
         id: ResourceId,
         identifier: &str,
         to: Resource,
+        schema: &ResourceSchema,
         is_ingress: bool,
     ) -> ProviderResult<State> {
         // Security group rules are immutable - delete and recreate
         self.delete_ec2_security_group_rule(id.clone(), identifier, is_ingress)
             .await?;
-        self.create_ec2_security_group_rule(&to, is_ingress).await
+        self.create_ec2_security_group_rule(&to, schema, is_ingress)
+            .await
     }
 
     /// Delete an EC2 Security Group Rule (deletes all rules by identifier)

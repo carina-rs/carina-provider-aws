@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
+use carina_core::schema::ResourceSchema;
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
@@ -66,7 +67,9 @@ impl AwsProvider {
     pub(crate) async fn create_ec2_vpc_endpoint(
         &self,
         resource: &Resource,
+        schema: &ResourceSchema,
     ) -> ProviderResult<State> {
+        let _ = schema;
         let vpc_id = require_string_attr(resource, "vpc_id")?;
         let service_name = require_string_attr(resource, "service_name")?;
 
@@ -76,7 +79,7 @@ impl AwsProvider {
             .vpc_id(&vpc_id)
             .service_name(&service_name);
 
-        if let Some(ep_type) = optional_enum_attr(resource, "vpc_endpoint_type") {
+        if let Some(ep_type) = optional_enum_attr(resource, schema, "vpc_endpoint_type") {
             use aws_sdk_ec2::types::VpcEndpointType;
             req = req.vpc_endpoint_type(VpcEndpointType::from(ep_type));
         }
@@ -171,7 +174,9 @@ impl AwsProvider {
         identifier: &str,
         from: &State,
         to: Resource,
+        schema: &ResourceSchema,
     ) -> ProviderResult<State> {
+        let _ = schema;
         let mut req = self
             .ec2_client
             .modify_vpc_endpoint()

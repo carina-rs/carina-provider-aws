@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
+use carina_core::schema::ResourceSchema;
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
@@ -70,8 +71,10 @@ impl AwsProvider {
     pub(crate) async fn create_ec2_vpn_gateway(
         &self,
         resource: &Resource,
+        schema: &ResourceSchema,
     ) -> ProviderResult<State> {
-        let gw_type = require_enum_attr(resource, "type")?;
+        let _ = schema;
+        let gw_type = require_enum_attr(resource, schema, "type")?;
 
         let mut req = self
             .ec2_client
@@ -111,7 +114,9 @@ impl AwsProvider {
         identifier: &str,
         from: &State,
         to: Resource,
+        schema: &ResourceSchema,
     ) -> ProviderResult<State> {
+        let _ = schema;
         self.apply_ec2_tags(
             &id,
             identifier,

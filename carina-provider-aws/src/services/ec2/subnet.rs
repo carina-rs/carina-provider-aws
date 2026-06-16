@@ -1,12 +1,14 @@
 use std::collections::HashMap;
 
 use carina_core::provider::{ProviderError, ProviderResult};
-use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
+use carina_core::resource::{Resource, ResourceId, State};
+use carina_core::schema::ResourceSchema;
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
 use crate::helpers::{
-    optional_bool_attr, optional_bool_struct_field, optional_enum_struct_field, require_string_attr,
+    optional_bool_attr, optional_bool_struct_field, optional_enum_attr, optional_enum_struct_field,
+    require_string_attr,
 };
 use aws_sdk_ec2::types::{AttributeBooleanValue, HostnameType};
 
@@ -70,7 +72,12 @@ impl AwsProvider {
     }
 
     /// Create an EC2 Subnet
-    pub(crate) async fn create_ec2_subnet(&self, resource: &Resource) -> ProviderResult<State> {
+    pub(crate) async fn create_ec2_subnet(
+        &self,
+        resource: &Resource,
+        schema: &ResourceSchema,
+    ) -> ProviderResult<State> {
+        let _ = schema;
         let cidr_block = require_string_attr(resource, "cidr_block")?;
         let vpc_id = require_string_attr(resource, "vpc_id")?;
 
@@ -80,9 +87,7 @@ impl AwsProvider {
             .vpc_id(&vpc_id)
             .cidr_block(&cidr_block);
 
-        if let Some(Value::Concrete(ConcreteValue::String(az))) =
-            resource.get_attr("availability_zone")
-        {
+        if let Some(az) = optional_enum_attr(resource, schema, "availability_zone") {
             req = req.availability_zone(az);
         }
 
@@ -102,7 +107,7 @@ impl AwsProvider {
             .await?;
 
         // Apply subnet attributes that require ModifySubnetAttribute
-        self.modify_subnet_attributes(&resource.id, subnet_id, resource)
+        self.modify_subnet_attributes(&resource.id, subnet_id, resource, schema)
             .await?;
 
         // Read back using subnet ID (reliable identifier)
@@ -116,10 +121,13 @@ impl AwsProvider {
         identifier: &str,
         from: &State,
         to: Resource,
+        schema: &ResourceSchema,
     ) -> ProviderResult<State> {
+        let _ = schema;
         // Apply subnet attributes that require ModifySubnetAttribute
         let attrs = to.resolved_attributes();
-        self.modify_subnet_attributes(&id, identifier, &to).await?;
+        self.modify_subnet_attributes(&id, identifier, &to, schema)
+            .await?;
 
         // Update tags
         self.apply_ec2_tags(&id, identifier, &attrs, Some(&from.attributes))
@@ -135,6 +143,7 @@ impl AwsProvider {
         id: &ResourceId,
         subnet_id: &str,
         resource: &Resource,
+        schema: &ResourceSchema,
     ) -> ProviderResult<()> {
         if let Some(enabled) = optional_bool_attr(resource, "map_public_ip_on_launch") {
             self.ec2_client
@@ -193,6 +202,7 @@ impl AwsProvider {
         // Each private_dns_name_options_on_launch field must be a separate API call.
         if let Some(ht) = optional_enum_struct_field(
             resource,
+            schema,
             "private_dns_name_options_on_launch",
             "hostname_type",
         ) {

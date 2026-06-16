@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
+use carina_core::schema::ResourceSchema;
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
@@ -12,6 +13,7 @@ use crate::helpers::{
 
 fn build_create_transit_gateway_attachment_options(
     resource: &Resource,
+    schema: &ResourceSchema,
 ) -> Option<aws_sdk_ec2::types::CreateTransitGatewayVpcAttachmentRequestOptions> {
     use aws_sdk_ec2::types::{
         ApplianceModeSupportValue, DnsSupportValue, Ipv6SupportValue,
@@ -22,21 +24,26 @@ fn build_create_transit_gateway_attachment_options(
         aws_sdk_ec2::types::CreateTransitGatewayVpcAttachmentRequestOptions::builder();
     let mut has_options = false;
 
-    if let Some(v) = optional_enum_struct_field(resource, "options", "appliance_mode_support") {
+    if let Some(v) =
+        optional_enum_struct_field(resource, schema, "options", "appliance_mode_support")
+    {
         options = options.appliance_mode_support(ApplianceModeSupportValue::from(v));
         has_options = true;
     }
-    if let Some(v) = optional_enum_struct_field(resource, "options", "dns_support") {
+    if let Some(v) = optional_enum_struct_field(resource, schema, "options", "dns_support") {
         options = options.dns_support(DnsSupportValue::from(v));
         has_options = true;
     }
-    if let Some(v) = optional_enum_struct_field(resource, "options", "ipv6_support") {
+    if let Some(v) = optional_enum_struct_field(resource, schema, "options", "ipv6_support") {
         options = options.ipv6_support(Ipv6SupportValue::from(v));
         has_options = true;
     }
-    if let Some(v) =
-        optional_enum_struct_field(resource, "options", "security_group_referencing_support")
-    {
+    if let Some(v) = optional_enum_struct_field(
+        resource,
+        schema,
+        "options",
+        "security_group_referencing_support",
+    ) {
         options = options
             .security_group_referencing_support(SecurityGroupReferencingSupportValue::from(v));
         has_options = true;
@@ -102,7 +109,9 @@ impl AwsProvider {
     pub(crate) async fn create_ec2_transit_gateway_attachment(
         &self,
         resource: &Resource,
+        schema: &ResourceSchema,
     ) -> ProviderResult<State> {
+        let _ = schema;
         let transit_gateway_id = require_string_attr(resource, "transit_gateway_id")?;
         let vpc_id = require_string_attr(resource, "vpc_id")?;
 
@@ -136,7 +145,7 @@ impl AwsProvider {
             req = req.subnet_ids(subnet_id);
         }
 
-        if let Some(options) = build_create_transit_gateway_attachment_options(resource) {
+        if let Some(options) = build_create_transit_gateway_attachment_options(resource, schema) {
             req = req.options(options);
         }
 
@@ -181,7 +190,9 @@ impl AwsProvider {
         identifier: &str,
         from: &State,
         to: Resource,
+        schema: &ResourceSchema,
     ) -> ProviderResult<State> {
+        let _ = schema;
         self.apply_ec2_tags(
             &id,
             identifier,
@@ -319,6 +330,10 @@ mod tests {
     };
     use indexmap::IndexMap;
 
+    fn schema() -> ResourceSchema {
+        crate::schemas::generated::ec2::transit_gateway_attachment::ec2_transit_gateway_attachment_config().schema
+    }
+
     fn resource_with_options(options: IndexMap<String, Value>) -> Resource {
         let mut resource =
             Resource::with_provider("aws", "ec2.TransitGatewayAttachment", "test", None);
@@ -343,7 +358,8 @@ mod tests {
     #[test]
     fn create_reads_nested_options_appliance_mode_support() {
         let resource = one_enum_option("appliance_mode_support", "enable");
-        let options = build_create_transit_gateway_attachment_options(&resource).expect("options");
+        let options =
+            build_create_transit_gateway_attachment_options(&resource, &schema()).expect("options");
         assert_eq!(
             options.appliance_mode_support(),
             Some(&ApplianceModeSupportValue::Enable)
@@ -353,21 +369,24 @@ mod tests {
     #[test]
     fn create_reads_nested_options_dns_support() {
         let resource = one_enum_option("dns_support", "disable");
-        let options = build_create_transit_gateway_attachment_options(&resource).expect("options");
+        let options =
+            build_create_transit_gateway_attachment_options(&resource, &schema()).expect("options");
         assert_eq!(options.dns_support(), Some(&DnsSupportValue::Disable));
     }
 
     #[test]
     fn create_reads_nested_options_ipv6_support() {
         let resource = one_enum_option("ipv6_support", "enable");
-        let options = build_create_transit_gateway_attachment_options(&resource).expect("options");
+        let options =
+            build_create_transit_gateway_attachment_options(&resource, &schema()).expect("options");
         assert_eq!(options.ipv6_support(), Some(&Ipv6SupportValue::Enable));
     }
 
     #[test]
     fn create_reads_nested_options_security_group_referencing_support() {
         let resource = one_enum_option("security_group_referencing_support", "enable");
-        let options = build_create_transit_gateway_attachment_options(&resource).expect("options");
+        let options =
+            build_create_transit_gateway_attachment_options(&resource, &schema()).expect("options");
         assert_eq!(
             options.security_group_referencing_support(),
             Some(&SecurityGroupReferencingSupportValue::Enable)
@@ -423,6 +442,6 @@ mod tests {
             "dns_support".to_string(),
             Value::Concrete(ConcreteValue::String("disable".to_string())),
         );
-        assert!(build_create_transit_gateway_attachment_options(&resource).is_none());
+        assert!(build_create_transit_gateway_attachment_options(&resource, &schema()).is_none());
     }
 }

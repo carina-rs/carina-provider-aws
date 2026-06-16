@@ -1,5 +1,6 @@
 use carina_core::provider::ProviderResult;
 use carina_core::resource::{Resource, ResourceId, State};
+use carina_core::schema::ResourceSchema;
 
 use crate::AwsProvider;
 
@@ -18,8 +19,11 @@ impl AwsProvider {
     pub(crate) async fn create_ec2_security_group_ingress(
         &self,
         resource: &Resource,
+        schema: &ResourceSchema,
     ) -> ProviderResult<State> {
-        self.create_ec2_security_group_rule(resource, true).await
+        let _ = schema;
+        self.create_ec2_security_group_rule(resource, schema, true)
+            .await
     }
 
     /// Update an EC2 Security Group Ingress Rule
@@ -28,8 +32,10 @@ impl AwsProvider {
         id: ResourceId,
         identifier: &str,
         to: Resource,
+        schema: &ResourceSchema,
     ) -> ProviderResult<State> {
-        self.update_ec2_security_group_rule(id, identifier, to, true)
+        let _ = schema;
+        self.update_ec2_security_group_rule(id, identifier, to, schema, true)
             .await
     }
 

@@ -17,6 +17,7 @@ use indexmap::IndexMap;
 
 use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
+use carina_core::schema::ResourceSchema;
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
@@ -96,9 +97,11 @@ fn parse_validation_method(input: &str) -> Option<ValidationMethod> {
 
 fn build_update_certificate_options(
     resource: &Resource,
+    schema: &ResourceSchema,
 ) -> Option<aws_sdk_acm::types::CertificateOptions> {
     let pref = optional_enum_struct_field(
         resource,
+        schema,
         "options",
         "certificate_transparency_logging_preference",
     )?;
@@ -111,6 +114,7 @@ fn build_update_certificate_options(
 
 fn build_create_certificate_options(
     resource: &Resource,
+    schema: &ResourceSchema,
 ) -> Option<aws_sdk_acm::types::CertificateOptions> {
     use aws_sdk_acm::types::{CertificateExport, CertificateTransparencyLoggingPreference};
 
@@ -119,6 +123,7 @@ fn build_create_certificate_options(
 
     if let Some(pref) = optional_enum_struct_field(
         resource,
+        schema,
         "options",
         "certificate_transparency_logging_preference",
     ) {
@@ -127,7 +132,7 @@ fn build_create_certificate_options(
         );
         has_options = true;
     }
-    if let Some(export) = optional_enum_struct_field(resource, "options", "export") {
+    if let Some(export) = optional_enum_struct_field(resource, schema, "options", "export") {
         options = options.export(CertificateExport::from(export));
         has_options = true;
     }
@@ -298,7 +303,9 @@ impl AwsProvider {
     pub(crate) async fn create_acm_certificate(
         &self,
         resource: &Resource,
+        schema: &ResourceSchema,
     ) -> ProviderResult<State> {
+        let _ = schema;
         let id = resource.id.clone();
         let domain_name = require_string_attr(resource, "domain_name")?;
 
@@ -307,8 +314,8 @@ impl AwsProvider {
             .request_certificate()
             .domain_name(domain_name);
 
-        if let Some(method) =
-            optional_enum_attr(resource, "validation_method").and_then(parse_validation_method)
+        if let Some(method) = optional_enum_attr(resource, schema, "validation_method")
+            .and_then(parse_validation_method)
         {
             req = req.validation_method(method);
         }
@@ -319,12 +326,12 @@ impl AwsProvider {
         for san in sans {
             req = req.subject_alternative_names(san);
         }
-        if let Some(key_algorithm) = optional_enum_attr(resource, "key_algorithm") {
+        if let Some(key_algorithm) = optional_enum_attr(resource, schema, "key_algorithm") {
             // Pass the AWS canonical form through verbatim — schema
             // narrowing has already validated it.
             req = req.key_algorithm(key_algorithm.into());
         }
-        if let Some(options) = build_create_certificate_options(resource) {
+        if let Some(options) = build_create_certificate_options(resource, schema) {
             req = req.options(options);
         }
         // RequestCertificate accepts tags inline, avoiding a follow-up
@@ -367,8 +374,8 @@ impl AwsProvider {
                 .for_resource(id.clone())
         })?;
 
-        let validation_method =
-            optional_enum_attr(resource, "validation_method").and_then(parse_validation_method);
+        let validation_method = optional_enum_attr(resource, schema, "validation_method")
+            .and_then(parse_validation_method);
 
         // DNS validation populates DomainValidationOptions[].ResourceRecord
         // asynchronously after RequestCertificate. Wait so the post-create
@@ -491,8 +498,10 @@ impl AwsProvider {
         identifier: &str,
         from: &State,
         to: Resource,
+        schema: &ResourceSchema,
     ) -> ProviderResult<State> {
-        if let Some(options) = build_update_certificate_options(&to) {
+        let _ = schema;
+        if let Some(options) = build_update_certificate_options(&to, schema) {
             self.acm_client
                 .update_certificate_options()
                 .certificate_arn(identifier)
@@ -665,6 +674,10 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn acm_schema() -> ResourceSchema {
+        crate::schemas::generated::acm::certificate::acm_certificate_config().schema
+    }
     use aws_sdk_acm::types::{
         CertificateDetail, CertificateExport, CertificateOptions,
         CertificateTransparencyLoggingPreference, DomainValidation, RecordType, ResourceRecord,
@@ -813,7 +826,8 @@ mod tests {
             Value::Concrete(ConcreteValue::Map(options)),
         );
 
-        let request_options = build_create_certificate_options(&resource).expect("options");
+        let request_options =
+            build_create_certificate_options(&resource, &acm_schema()).expect("options");
         assert_eq!(request_options.export(), Some(&CertificateExport::Enabled));
     }
 
@@ -834,7 +848,8 @@ mod tests {
             Value::Concrete(ConcreteValue::Map(options)),
         );
 
-        let request_options = build_create_certificate_options(&resource).expect("options");
+        let request_options =
+            build_create_certificate_options(&resource, &acm_schema()).expect("options");
         assert_eq!(
             request_options.certificate_transparency_logging_preference(),
             Some(&CertificateTransparencyLoggingPreference::Disabled)
@@ -855,7 +870,8 @@ mod tests {
             Value::Concrete(ConcreteValue::Map(options)),
         );
 
-        let request_options = build_update_certificate_options(&resource).expect("options");
+        let request_options =
+            build_update_certificate_options(&resource, &acm_schema()).expect("options");
         assert_eq!(
             request_options.certificate_transparency_logging_preference(),
             Some(&CertificateTransparencyLoggingPreference::Disabled)
@@ -1152,7 +1168,8 @@ mod tests {
         // silently returned None.
         let mut resource = Resource::with_provider("aws", "acm.Certificate", "test-cert", None);
         resource.set_attr("validation_method".to_string(), canonical);
-        let parsed = crate::helpers::optional_enum_attr(&resource, "validation_method")
+        let schema = acm_schema();
+        let parsed = crate::helpers::optional_enum_attr(&resource, &schema, "validation_method")
             .and_then(parse_validation_method);
         assert_eq!(
             parsed,
@@ -1178,7 +1195,8 @@ mod tests {
             "validation_method".to_string(),
             Value::Concrete(ConcreteValue::enum_identifier("dns")),
         );
-        let parsed = crate::helpers::optional_enum_attr(&resource, "validation_method")
+        let schema = acm_schema();
+        let parsed = crate::helpers::optional_enum_attr(&resource, &schema, "validation_method")
             .and_then(parse_validation_method);
         assert_eq!(
             parsed,
@@ -1202,7 +1220,8 @@ mod tests {
             "validation_method".to_string(),
             Value::Concrete(ConcreteValue::String("DNS".to_string())),
         );
-        let parsed = crate::helpers::optional_enum_attr(&resource, "validation_method")
+        let schema = acm_schema();
+        let parsed = crate::helpers::optional_enum_attr(&resource, &schema, "validation_method")
             .and_then(parse_validation_method);
         assert_eq!(parsed, Some(ValidationMethod::Dns));
     }

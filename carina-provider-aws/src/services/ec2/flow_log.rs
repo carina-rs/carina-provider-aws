@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
+use carina_core::schema::ResourceSchema;
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
@@ -74,7 +75,12 @@ impl AwsProvider {
     }
 
     /// Create an EC2 Flow Log
-    pub(crate) async fn create_ec2_flow_log(&self, resource: &Resource) -> ProviderResult<State> {
+    pub(crate) async fn create_ec2_flow_log(
+        &self,
+        resource: &Resource,
+        schema: &ResourceSchema,
+    ) -> ProviderResult<State> {
+        let _ = schema;
         let resource_ids_val: Vec<String> = match resource.get_attr("resource_ids") {
             Some(Value::Concrete(ConcreteValue::List(items))) => items
                 .iter()
@@ -95,7 +101,7 @@ impl AwsProvider {
             .for_resource(resource.id.clone()));
         }
 
-        let resource_type_val = require_enum_attr(resource, "resource_type")?;
+        let resource_type_val = require_enum_attr(resource, schema, "resource_type")?;
 
         let mut req = self
             .ec2_client
@@ -105,12 +111,12 @@ impl AwsProvider {
                 resource_type_val.as_str(),
             ));
 
-        if let Some(traffic_type) = optional_enum_attr(resource, "traffic_type") {
+        if let Some(traffic_type) = optional_enum_attr(resource, schema, "traffic_type") {
             use aws_sdk_ec2::types::TrafficType;
             req = req.traffic_type(TrafficType::from(traffic_type));
         }
 
-        if let Some(log_dest_type) = optional_enum_attr(resource, "log_destination_type") {
+        if let Some(log_dest_type) = optional_enum_attr(resource, schema, "log_destination_type") {
             use aws_sdk_ec2::types::LogDestinationType;
             req = req.log_destination_type(LogDestinationType::from(log_dest_type));
         }
@@ -233,7 +239,9 @@ impl AwsProvider {
         identifier: &str,
         from: &State,
         to: Resource,
+        schema: &ResourceSchema,
     ) -> ProviderResult<State> {
+        let _ = schema;
         self.apply_ec2_tags(
             &id,
             identifier,
