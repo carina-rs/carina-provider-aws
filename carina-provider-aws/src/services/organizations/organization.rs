@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
+use carina_core::schema::ResourceSchema;
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
@@ -108,10 +109,12 @@ impl AwsProvider {
     pub(crate) async fn create_organizations_organization(
         &self,
         resource: &Resource,
+        schema: &ResourceSchema,
     ) -> ProviderResult<State> {
+        let _ = schema;
         let mut req = self.organizations_client.create_organization();
 
-        if let Some(feature_set) = optional_enum_attr(resource, "feature_set") {
+        if let Some(feature_set) = optional_enum_attr(resource, schema, "feature_set") {
             let fs = aws_sdk_organizations::types::OrganizationFeatureSet::from(feature_set);
             req = req.feature_set(fs);
         }

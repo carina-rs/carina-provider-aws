@@ -30,6 +30,7 @@ use aws_sdk_route53::Client as Route53Client;
 use aws_sdk_s3::Client as S3Client;
 use aws_sdk_sqs::Client as SqsClient;
 use aws_sdk_sts::Client as StsClient;
+use carina_core::schema::{ResourceSchema, SchemaKind, SchemaRegistry};
 
 /// AWS Provider
 pub struct AwsProvider {
@@ -43,6 +44,7 @@ pub struct AwsProvider {
     route53_client: Route53Client,
     acm_client: AcmClient,
     sqs_client: SqsClient,
+    schema_registry: SchemaRegistry,
     region: String,
     /// Provider-level allow-list of AWS account IDs. Empty means "no
     /// allow-list configured" (the check is skipped). Enforced once
@@ -94,6 +96,19 @@ impl AwsProvider {
         )
     }
 
+    fn schema_registry() -> SchemaRegistry {
+        let mut registry = SchemaRegistry::new();
+        for schema in crate::schemas::all_schemas() {
+            registry.insert("aws", schema);
+        }
+        registry
+    }
+
+    pub(crate) fn resource_schema(&self, resource_type: &str) -> Option<&ResourceSchema> {
+        self.schema_registry
+            .get("aws", resource_type, SchemaKind::Resource)
+    }
+
     /// Construct an `AwsProvider` from caller-supplied SDK clients.
     ///
     /// `new_with_account_guard` is the production entry point — it
@@ -139,6 +154,7 @@ impl AwsProvider {
             route53_client,
             acm_client,
             sqs_client,
+            schema_registry: Self::schema_registry(),
             region,
             allowed_account_ids,
             forbidden_account_ids,

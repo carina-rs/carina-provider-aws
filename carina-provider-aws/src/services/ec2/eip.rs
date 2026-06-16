@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{Resource, ResourceId, State};
+use carina_core::schema::ResourceSchema;
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
@@ -59,10 +60,15 @@ impl AwsProvider {
     }
 
     /// Create an EC2 Elastic IP
-    pub(crate) async fn create_ec2_eip(&self, resource: &Resource) -> ProviderResult<State> {
+    pub(crate) async fn create_ec2_eip(
+        &self,
+        resource: &Resource,
+        schema: &ResourceSchema,
+    ) -> ProviderResult<State> {
+        let _ = schema;
         let mut req = self.ec2_client.allocate_address();
 
-        if let Some(domain) = optional_enum_attr(resource, "domain") {
+        if let Some(domain) = optional_enum_attr(resource, schema, "domain") {
             use aws_sdk_ec2::types::DomainType;
             req = req.domain(DomainType::from(domain));
         } else {
@@ -100,7 +106,9 @@ impl AwsProvider {
         identifier: &str,
         from: &State,
         to: Resource,
+        schema: &ResourceSchema,
     ) -> ProviderResult<State> {
+        let _ = schema;
         self.apply_ec2_tags(
             &id,
             identifier,

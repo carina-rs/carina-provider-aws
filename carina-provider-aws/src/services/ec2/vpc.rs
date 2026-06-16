@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
+use carina_core::schema::ResourceSchema;
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
@@ -91,14 +92,19 @@ impl AwsProvider {
     }
 
     /// Create an EC2 VPC
-    pub(crate) async fn create_ec2_vpc(&self, resource: &Resource) -> ProviderResult<State> {
+    pub(crate) async fn create_ec2_vpc(
+        &self,
+        resource: &Resource,
+        schema: &ResourceSchema,
+    ) -> ProviderResult<State> {
+        let _ = schema;
         let cidr_block = require_string_attr(resource, "cidr_block")?;
 
         // Create VPC with optional instance_tenancy
         let mut create_vpc_builder = self.ec2_client.create_vpc().cidr_block(&cidr_block);
 
         // Handle instance_tenancy if specified
-        if let Some(tenancy) = optional_enum_attr(resource, "instance_tenancy") {
+        if let Some(tenancy) = optional_enum_attr(resource, schema, "instance_tenancy") {
             let tenancy_enum = match tenancy {
                 "dedicated" => aws_sdk_ec2::types::Tenancy::Dedicated,
                 "host" => aws_sdk_ec2::types::Tenancy::Host,
@@ -174,7 +180,9 @@ impl AwsProvider {
         identifier: &str,
         from: &State,
         to: Resource,
+        schema: &ResourceSchema,
     ) -> ProviderResult<State> {
+        let _ = schema;
         // identifier is the VPC ID (e.g., vpc-12345678)
         let vpc_id = identifier.to_string();
 

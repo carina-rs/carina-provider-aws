@@ -12,6 +12,7 @@ use aws_sdk_route53::types::{
 
 use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
+use carina_core::schema::ResourceSchema;
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
@@ -151,9 +152,12 @@ fn build_alias_target_from_map(
 }
 
 /// Build an AWS SDK ResourceRecordSet from carina resource attributes.
-fn build_record_set(resource: &Resource) -> ProviderResult<ResourceRecordSet> {
+fn build_record_set(
+    resource: &Resource,
+    schema: &ResourceSchema,
+) -> ProviderResult<ResourceRecordSet> {
     let name = require_string_attr(resource, "name")?;
-    let record_type = require_enum_attr(resource, "type")?;
+    let record_type = require_enum_attr(resource, schema, "type")?;
 
     let mut builder = ResourceRecordSet::builder()
         .name(normalize_dns_name(&name))
@@ -357,12 +361,14 @@ impl AwsProvider {
     pub(crate) async fn create_route53_record_set(
         &self,
         resource: &Resource,
+        schema: &ResourceSchema,
     ) -> ProviderResult<State> {
+        let _ = schema;
         let hosted_zone_id = require_string_attr(resource, "hosted_zone_id")?;
         let name = require_string_attr(resource, "name")?;
-        let record_type = require_enum_attr(resource, "type")?;
+        let record_type = require_enum_attr(resource, schema, "type")?;
 
-        let record_set = build_record_set(resource)?;
+        let record_set = build_record_set(resource, schema)?;
         change_record_set(
             &self.route53_client,
             &hosted_zone_id,
@@ -382,12 +388,14 @@ impl AwsProvider {
         id: ResourceId,
         _identifier: &str,
         to: Resource,
+        schema: &ResourceSchema,
     ) -> ProviderResult<State> {
+        let _ = schema;
         let hosted_zone_id = require_string_attr(&to, "hosted_zone_id")?;
         let name = require_string_attr(&to, "name")?;
-        let record_type = require_enum_attr(&to, "type")?;
+        let record_type = require_enum_attr(&to, schema, "type")?;
 
-        let record_set = build_record_set(&to)?;
+        let record_set = build_record_set(&to, schema)?;
         change_record_set(
             &self.route53_client,
             &hosted_zone_id,
@@ -549,7 +557,7 @@ mod tests {
         use carina_core::schema::{AttributeType, Schema, enum_identity};
 
         let attr_type = AttributeType::enum_(
-            enum_identity("RrType", Some("aws.route53.RecordSet")),
+            enum_identity("Type", Some("aws.route53.RecordSet")),
             Some(vec!["A".to_string(), "AAAA".to_string()]),
             vec![
                 ("A".to_string(), "a".to_string()),
@@ -564,7 +572,10 @@ mod tests {
 
         let mut r = record_set("registry.example.com");
         r.set_attr("type".to_string(), canonical);
-        let record_set = build_record_set(&r).expect("canonical enum type should build");
+        let resource_schema =
+            crate::schemas::generated::route53::record_set::route53_record_set_config().schema;
+        let record_set =
+            build_record_set(&r, &resource_schema).expect("canonical enum type should build");
 
         assert_eq!(record_set.r#type().as_str(), "AAAA");
     }

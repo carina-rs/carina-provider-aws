@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
+use carina_core::schema::ResourceSchema;
 
 use aws_sdk_ec2::types::NatGatewayState;
 
@@ -76,7 +77,9 @@ impl AwsProvider {
     pub(crate) async fn create_ec2_nat_gateway(
         &self,
         resource: &Resource,
+        schema: &ResourceSchema,
     ) -> ProviderResult<State> {
+        let _ = schema;
         let subnet_id = require_string_attr(resource, "subnet_id")?;
 
         let mut req = self.ec2_client.create_nat_gateway().subnet_id(&subnet_id);
@@ -87,7 +90,7 @@ impl AwsProvider {
             req = req.allocation_id(alloc_id);
         }
 
-        if let Some(conn_type) = optional_enum_attr(resource, "connectivity_type") {
+        if let Some(conn_type) = optional_enum_attr(resource, schema, "connectivity_type") {
             use aws_sdk_ec2::types::ConnectivityType;
             req = req.connectivity_type(ConnectivityType::from(conn_type));
         }
@@ -130,7 +133,9 @@ impl AwsProvider {
         identifier: &str,
         from: &State,
         to: Resource,
+        schema: &ResourceSchema,
     ) -> ProviderResult<State> {
+        let _ = schema;
         self.apply_ec2_tags(
             &id,
             identifier,

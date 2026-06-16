@@ -6,11 +6,15 @@ use aws_sdk_s3::types::{
 };
 use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
+use carina_core::schema::ResourceSchema;
 use indexmap::IndexMap;
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
-use crate::helpers::{RetryPolicy, require_string_attr, retry_aws_operation, sdk_error_message};
+use crate::helpers::{
+    RetryPolicy, optional_enum_value_at_schema_path, require_string_attr, retry_aws_operation,
+    sdk_error_message,
+};
 use crate::services::s3::bucket::is_s3_not_configured_error;
 
 impl AwsProvider {
@@ -70,9 +74,11 @@ impl AwsProvider {
     pub(crate) async fn create_s3_bucket_logging(
         &self,
         resource: &Resource,
+        schema: &ResourceSchema,
     ) -> ProviderResult<State> {
+        let _ = schema;
         let bucket = require_string_attr(resource, "bucket")?;
-        self.put_s3_bucket_logging(&resource.id, &bucket, resource)
+        self.put_s3_bucket_logging(&resource.id, &bucket, resource, schema)
             .await
     }
 
@@ -82,8 +88,11 @@ impl AwsProvider {
         identifier: &str,
         _from: &State,
         to: Resource,
+        schema: &ResourceSchema,
     ) -> ProviderResult<State> {
-        self.put_s3_bucket_logging(&id, identifier, &to).await
+        let _ = schema;
+        self.put_s3_bucket_logging(&id, identifier, &to, schema)
+            .await
     }
 
     async fn put_s3_bucket_logging(
@@ -91,6 +100,7 @@ impl AwsProvider {
         id: &ResourceId,
         bucket: &str,
         resource: &Resource,
+        schema: &ResourceSchema,
     ) -> ProviderResult<State> {
         let target_bucket = require_string_attr(resource, "target_bucket")?;
         let target_prefix = match resource.get_attr("target_prefix") {
@@ -109,7 +119,7 @@ impl AwsProvider {
             .target_prefix(target_prefix);
 
         if let Some(v) = resource.get_attr("target_object_key_format") {
-            le_builder = le_builder.target_object_key_format(build_key_format(id, v)?);
+            le_builder = le_builder.target_object_key_format(build_key_format(id, schema, v)?);
         }
 
         let le = le_builder.build().map_err(|e| {
@@ -164,7 +174,11 @@ impl AwsProvider {
     }
 }
 
-fn build_key_format(id: &ResourceId, value: &Value) -> ProviderResult<TargetObjectKeyFormat> {
+fn build_key_format(
+    id: &ResourceId,
+    schema: &ResourceSchema,
+    value: &Value,
+) -> ProviderResult<TargetObjectKeyFormat> {
     let Value::Concrete(ConcreteValue::Map(map)) = value else {
         return Err(
             ProviderError::invalid_input("target_object_key_format must be a map")
@@ -178,8 +192,15 @@ fn build_key_format(id: &ResourceId, value: &Value) -> ProviderResult<TargetObje
     }
     if let Some(Value::Concrete(ConcreteValue::Map(pp))) = map.get("partitioned_prefix") {
         let mut pb = PartitionedPrefix::builder();
-        if let Some(Value::Concrete(ConcreteValue::String(s))) = pp.get("partition_date_source") {
-            pb = pb.partition_date_source(PartitionDateSource::from(s.as_str()));
+        if let Some(source) = pp.get("partition_date_source").and_then(|v| {
+            optional_enum_value_at_schema_path(
+                schema,
+                "target_object_key_format",
+                &["partitioned_prefix", "partition_date_source"],
+                v,
+            )
+        }) {
+            pb = pb.partition_date_source(PartitionDateSource::from(source.as_str()));
         }
         builder = builder.partitioned_prefix(pb.build());
     }

@@ -3,6 +3,7 @@ use std::collections::HashMap;
 
 use carina_core::provider::ProviderResult;
 use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
+use carina_core::schema::ResourceSchema;
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
@@ -112,7 +113,12 @@ impl AwsProvider {
     }
 
     /// Create a CloudWatch Logs Log Group
-    pub(crate) async fn create_logs_log_group(&self, resource: &Resource) -> ProviderResult<State> {
+    pub(crate) async fn create_logs_log_group(
+        &self,
+        resource: &Resource,
+        schema: &ResourceSchema,
+    ) -> ProviderResult<State> {
+        let _ = schema;
         let log_group_name = require_string_attr(resource, "log_group_name")?;
 
         let mut req = self
@@ -126,7 +132,7 @@ impl AwsProvider {
             req = req.kms_key_id(kms_key);
         }
 
-        if let Some(class) = optional_enum_attr(resource, "log_group_class") {
+        if let Some(class) = optional_enum_attr(resource, schema, "log_group_class") {
             use aws_sdk_cloudwatchlogs::types::LogGroupClass;
             req = req.log_group_class(LogGroupClass::from(class));
         }
@@ -177,7 +183,9 @@ impl AwsProvider {
         identifier: &str,
         from: &State,
         to: Resource,
+        schema: &ResourceSchema,
     ) -> ProviderResult<State> {
+        let _ = schema;
         // Update retention
         match to.get_attr("retention_in_days") {
             Some(Value::Concrete(ConcreteValue::Int(days))) => {

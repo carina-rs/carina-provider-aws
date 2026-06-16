@@ -8,11 +8,15 @@ use aws_sdk_s3::types::{
 };
 use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
+use carina_core::schema::ResourceSchema;
 use indexmap::IndexMap;
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
-use crate::helpers::{RetryPolicy, require_string_attr, retry_aws_operation, sdk_error_message};
+use crate::helpers::{
+    RetryPolicy, optional_enum_value_at_schema_path, require_string_attr, retry_aws_operation,
+    sdk_error_message,
+};
 use crate::services::s3::bucket::is_s3_not_configured_error;
 
 impl AwsProvider {
@@ -67,9 +71,11 @@ impl AwsProvider {
     pub(crate) async fn create_s3_bucket_lifecycle_configuration(
         &self,
         resource: &Resource,
+        schema: &ResourceSchema,
     ) -> ProviderResult<State> {
+        let _ = schema;
         let bucket = require_string_attr(resource, "bucket")?;
-        self.put_s3_bucket_lifecycle(&resource.id, &bucket, resource)
+        self.put_s3_bucket_lifecycle(&resource.id, &bucket, resource, schema)
             .await
     }
 
@@ -79,8 +85,11 @@ impl AwsProvider {
         identifier: &str,
         _from: &State,
         to: Resource,
+        schema: &ResourceSchema,
     ) -> ProviderResult<State> {
-        self.put_s3_bucket_lifecycle(&id, identifier, &to).await
+        let _ = schema;
+        self.put_s3_bucket_lifecycle(&id, identifier, &to, schema)
+            .await
     }
 
     async fn put_s3_bucket_lifecycle(
@@ -88,6 +97,7 @@ impl AwsProvider {
         id: &ResourceId,
         bucket: &str,
         resource: &Resource,
+        schema: &ResourceSchema,
     ) -> ProviderResult<State> {
         let rules = match resource.get_attr("rules") {
             Some(Value::Concrete(ConcreteValue::List(items))) => items,
@@ -101,7 +111,7 @@ impl AwsProvider {
 
         let sdk_rules: Vec<LifecycleRule> = rules
             .iter()
-            .map(|v| build_rule(id, v))
+            .map(|v| build_rule(id, schema, v))
             .collect::<ProviderResult<Vec<_>>>()?;
 
         let config = BucketLifecycleConfiguration::builder()
@@ -173,15 +183,22 @@ impl AwsProvider {
     }
 }
 
-fn build_rule(id: &ResourceId, rule_value: &Value) -> ProviderResult<LifecycleRule> {
+fn build_rule(
+    id: &ResourceId,
+    schema: &ResourceSchema,
+    rule_value: &Value,
+) -> ProviderResult<LifecycleRule> {
     let Value::Concrete(ConcreteValue::Map(map)) = rule_value else {
         return Err(
             ProviderError::invalid_input("each rule must be a map").for_resource(id.clone())
         );
     };
 
-    let status_str = match map.get("status") {
-        Some(Value::Concrete(ConcreteValue::String(s))) => s.clone(),
+    let status_str = match map
+        .get("status")
+        .and_then(|v| optional_enum_value_at_schema_path(schema, "rules", &["status"], v))
+    {
+        Some(s) => s,
         _ => {
             return Err(
                 ProviderError::invalid_input("rule.status is required").for_resource(id.clone())
@@ -208,7 +225,7 @@ fn build_rule(id: &ResourceId, rule_value: &Value) -> ProviderResult<LifecycleRu
     if let Some(Value::Concrete(ConcreteValue::List(items))) = map.get("transitions") {
         let transitions: Vec<Transition> = items
             .iter()
-            .map(|v| build_transition(id, v))
+            .map(|v| build_transition(id, schema, v))
             .collect::<ProviderResult<Vec<_>>>()?;
         builder = builder.set_transitions(Some(transitions));
     }
@@ -220,7 +237,7 @@ fn build_rule(id: &ResourceId, rule_value: &Value) -> ProviderResult<LifecycleRu
     {
         let transitions: Vec<NoncurrentVersionTransition> = items
             .iter()
-            .map(|v| build_ncv_transition(id, v))
+            .map(|v| build_ncv_transition(id, schema, v))
             .collect::<ProviderResult<Vec<_>>>()?;
         builder = builder.set_noncurrent_version_transitions(Some(transitions));
     }
@@ -331,14 +348,20 @@ fn build_expiration(id: &ResourceId, value: &Value) -> ProviderResult<LifecycleE
     Ok(builder.build())
 }
 
-fn build_transition(id: &ResourceId, value: &Value) -> ProviderResult<Transition> {
+fn build_transition(
+    id: &ResourceId,
+    schema: &ResourceSchema,
+    value: &Value,
+) -> ProviderResult<Transition> {
     let Value::Concrete(ConcreteValue::Map(map)) = value else {
         return Err(
             ProviderError::invalid_input("transition must be a map").for_resource(id.clone())
         );
     };
-    let storage_class_str = match map.get("storage_class") {
-        Some(Value::Concrete(ConcreteValue::String(s))) => s.clone(),
+    let storage_class_str = match map.get("storage_class").and_then(|v| {
+        optional_enum_value_at_schema_path(schema, "rules", &["transitions", "storage_class"], v)
+    }) {
+        Some(s) => s,
         _ => {
             return Err(
                 ProviderError::invalid_input("transition.storage_class is required")
@@ -376,6 +399,7 @@ fn build_ncv_expiration(
 
 fn build_ncv_transition(
     id: &ResourceId,
+    schema: &ResourceSchema,
     value: &Value,
 ) -> ProviderResult<NoncurrentVersionTransition> {
     let Value::Concrete(ConcreteValue::Map(map)) = value else {
@@ -384,8 +408,15 @@ fn build_ncv_transition(
                 .for_resource(id.clone()),
         );
     };
-    let storage_class_str = match map.get("storage_class") {
-        Some(Value::Concrete(ConcreteValue::String(s))) => s.clone(),
+    let storage_class_str = match map.get("storage_class").and_then(|v| {
+        optional_enum_value_at_schema_path(
+            schema,
+            "rules",
+            &["noncurrent_version_transitions", "storage_class"],
+            v,
+        )
+    }) {
+        Some(s) => s,
         _ => {
             return Err(ProviderError::invalid_input(
                 "noncurrent_version_transition.storage_class is required",
@@ -660,6 +691,10 @@ mod tests {
         ResourceId::new("s3.bucket_lifecycle_configuration", "test")
     }
 
+    fn schema() -> ResourceSchema {
+        crate::schemas::generated::s3::bucket_lifecycle_configuration::s3_bucket_lifecycle_configuration_config().schema
+    }
+
     fn str_val(s: &str) -> Value {
         Value::Concrete(ConcreteValue::String(s.to_string()))
     }
@@ -685,7 +720,7 @@ mod tests {
                 map_val(vec![("days", Value::Concrete(ConcreteValue::Int(365)))]),
             ),
         ]);
-        let rule = build_rule(&rid(), &rule_value).expect("build_rule should succeed");
+        let rule = build_rule(&rid(), &schema(), &rule_value).expect("build_rule should succeed");
         assert!(
             rule.filter().is_some(),
             "a lifecycle rule must always carry a Filter element"
@@ -698,7 +733,7 @@ mod tests {
             ("status", str_val("Enabled")),
             ("filter", map_val(vec![("prefix", str_val("logs/"))])),
         ]);
-        let rule = build_rule(&rid(), &rule_value).expect("build_rule should succeed");
+        let rule = build_rule(&rid(), &schema(), &rule_value).expect("build_rule should succeed");
         let filter = rule.filter().expect("filter set");
         assert_eq!(filter.prefix(), Some("logs/"));
     }
@@ -715,7 +750,7 @@ mod tests {
                 )]),
             ),
         ]);
-        let rule = build_rule(&rid(), &rule_value).expect("build_rule should succeed");
+        let rule = build_rule(&rid(), &schema(), &rule_value).expect("build_rule should succeed");
         let tag = rule.filter().and_then(|f| f.tag()).expect("tag set");
         assert_eq!(tag.key(), "env");
         assert_eq!(tag.value(), "dev");
@@ -746,7 +781,7 @@ mod tests {
                 )]),
             ),
         ]);
-        let rule = build_rule(&rid(), &rule_value).expect("build_rule should succeed");
+        let rule = build_rule(&rid(), &schema(), &rule_value).expect("build_rule should succeed");
         let and = rule.filter().and_then(|f| f.and()).expect("and set");
         assert_eq!(and.prefix(), Some("data/"));
         assert_eq!(and.object_size_greater_than(), Some(1024));
@@ -765,6 +800,7 @@ mod tests {
     fn prefix_filter_round_trips() {
         let built = build_rule(
             &rid(),
+            &schema(),
             &map_val(vec![
                 ("status", str_val("Enabled")),
                 ("filter", map_val(vec![("prefix", str_val("logs/"))])),

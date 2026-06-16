@@ -12,31 +12,42 @@ use crate::helpers::apply_patch_to_state;
 
 impl AwsProvider {
     pub async fn create_resource(&self, resource: &Resource) -> ProviderResult<CreateOutcome> {
+        let schema = self
+            .resource_schema(resource.id.resource_type.as_str())
+            .ok_or_else(|| {
+                ProviderError::internal(format!(
+                    "Unknown resource schema: {}",
+                    resource.id.resource_type
+                ))
+                .for_resource(resource.id.clone())
+            })?;
         let state = match resource.id.resource_type.as_str() {
             "s3.Bucket" => self.create_s3_bucket(resource).await,
             "s3.BucketPolicy" => self.create_s3_bucket_policy(resource).await,
             "s3.BucketPublicAccessBlock" => {
                 self.create_s3_bucket_public_access_block(resource).await
             }
-            "s3.BucketVersioning" => self.create_s3_bucket_versioning(resource).await,
+            "s3.BucketVersioning" => self.create_s3_bucket_versioning(resource, schema).await,
             "s3.BucketServerSideEncryptionConfiguration" => {
-                self.create_s3_bucket_server_side_encryption_configuration(resource)
+                self.create_s3_bucket_server_side_encryption_configuration(resource, schema)
                     .await
             }
-            "s3.BucketAcl" => self.create_s3_bucket_acl(resource).await,
+            "s3.BucketAcl" => self.create_s3_bucket_acl(resource, schema).await,
             "s3.BucketOwnershipControls" => {
-                self.create_s3_bucket_ownership_controls(resource).await
+                self.create_s3_bucket_ownership_controls(resource, schema)
+                    .await
             }
             "s3.BucketReplicationConfiguration" => {
-                self.create_s3_bucket_replication_configuration(resource)
+                self.create_s3_bucket_replication_configuration(resource, schema)
                     .await
             }
             "s3.BucketLifecycleConfiguration" => {
-                self.create_s3_bucket_lifecycle_configuration(resource)
+                self.create_s3_bucket_lifecycle_configuration(resource, schema)
                     .await
             }
             "s3.BucketWebsiteConfiguration" => {
-                self.create_s3_bucket_website_configuration(resource).await
+                self.create_s3_bucket_website_configuration(resource, schema)
+                    .await
             }
             "s3.BucketCorsConfiguration" => {
                 self.create_s3_bucket_cors_configuration(resource).await
@@ -45,40 +56,50 @@ impl AwsProvider {
                 self.create_s3_bucket_notification_configuration(resource)
                     .await
             }
-            "s3.BucketLogging" => self.create_s3_bucket_logging(resource).await,
-            "ec2.Eip" => self.create_ec2_eip(resource).await,
-            "ec2.Vpc" => self.create_ec2_vpc(resource).await,
-            "ec2.Subnet" => self.create_ec2_subnet(resource).await,
+            "s3.BucketLogging" => self.create_s3_bucket_logging(resource, schema).await,
+            "ec2.Eip" => self.create_ec2_eip(resource, schema).await,
+            "ec2.Vpc" => self.create_ec2_vpc(resource, schema).await,
+            "ec2.Subnet" => self.create_ec2_subnet(resource, schema).await,
             "ec2.InternetGateway" => self.create_ec2_internet_gateway(resource).await,
-            "ec2.NatGateway" => self.create_ec2_nat_gateway(resource).await,
+            "ec2.NatGateway" => self.create_ec2_nat_gateway(resource, schema).await,
             "ec2.RouteTable" => self.create_ec2_route_table(resource).await,
             "ec2.Route" => self.create_ec2_route(resource).await,
             "ec2.SecurityGroup" => self.create_ec2_security_group(resource).await,
-            "ec2.SecurityGroupIngress" => self.create_ec2_security_group_ingress(resource).await,
-            "ec2.SecurityGroupEgress" => self.create_ec2_security_group_egress(resource).await,
+            "ec2.SecurityGroupIngress" => {
+                self.create_ec2_security_group_ingress(resource, schema)
+                    .await
+            }
+            "ec2.SecurityGroupEgress" => {
+                self.create_ec2_security_group_egress(resource, schema)
+                    .await
+            }
             "ec2.SubnetRouteTableAssociation" => {
                 self.create_ec2_subnet_route_table_association(resource)
                     .await
             }
-            "ec2.FlowLog" => self.create_ec2_flow_log(resource).await,
-            "ec2.VpcEndpoint" => self.create_ec2_vpc_endpoint(resource).await,
+            "ec2.FlowLog" => self.create_ec2_flow_log(resource, schema).await,
+            "ec2.VpcEndpoint" => self.create_ec2_vpc_endpoint(resource, schema).await,
             "ec2.VpcGatewayAttachment" => self.create_ec2_vpc_gateway_attachment(resource).await,
-            "ec2.VpnGateway" => self.create_ec2_vpn_gateway(resource).await,
-            "ec2.TransitGateway" => self.create_ec2_transit_gateway(resource).await,
+            "ec2.VpnGateway" => self.create_ec2_vpn_gateway(resource, schema).await,
+            "ec2.TransitGateway" => self.create_ec2_transit_gateway(resource, schema).await,
             "ec2.TransitGatewayAttachment" => {
-                self.create_ec2_transit_gateway_attachment(resource).await
+                self.create_ec2_transit_gateway_attachment(resource, schema)
+                    .await
             }
             "ec2.VpcPeeringConnection" => self.create_ec2_vpc_peering_connection(resource).await,
             "ec2.EgressOnlyInternetGateway" => {
                 self.create_ec2_egress_only_internet_gateway(resource).await
             }
-            "organizations.Account" => self.create_organizations_account(resource).await,
-            "organizations.Organization" => self.create_organizations_organization(resource).await,
+            "organizations.Account" => self.create_organizations_account(resource, schema).await,
+            "organizations.Organization" => {
+                self.create_organizations_organization(resource, schema)
+                    .await
+            }
             "iam.Role" => self.create_iam_role(resource).await,
-            "logs.LogGroup" => self.create_logs_log_group(resource).await,
-            "route53.RecordSet" => self.create_route53_record_set(resource).await,
-            "acm.Certificate" => self.create_acm_certificate(resource).await,
-            "sqs.Queue" => self.create_sqs_queue(resource).await,
+            "logs.LogGroup" => self.create_logs_log_group(resource, schema).await,
+            "route53.RecordSet" => self.create_route53_record_set(resource, schema).await,
+            "acm.Certificate" => self.create_acm_certificate(resource, schema).await,
+            "sqs.Queue" => self.create_sqs_queue(resource, schema).await,
             _ => Err(ProviderError::internal(format!(
                 "Unknown resource type: {}",
                 resource.id.resource_type
@@ -263,6 +284,15 @@ impl Provider for AwsProvider {
         // for partial-update API paths once those are wired in.
         let to = apply_patch_to_state(&request.from, &request.patch);
         Box::pin(async move {
+            let schema = self
+                .resource_schema(id.resource_type.as_str())
+                .ok_or_else(|| {
+                    ProviderError::internal(format!(
+                        "Unknown resource schema: {}",
+                        id.resource_type
+                    ))
+                    .for_resource(id.clone())
+                })?;
             let state = match id.resource_type.as_str() {
                 "s3.Bucket" => self.update_s3_bucket(id, &identifier, &from, to).await,
                 "s3.BucketPolicy" => {
@@ -274,7 +304,7 @@ impl Provider for AwsProvider {
                         .await
                 }
                 "s3.BucketVersioning" => {
-                    self.update_s3_bucket_versioning(id, &identifier, &from, to)
+                    self.update_s3_bucket_versioning(id, &identifier, &from, to, schema)
                         .await
                 }
                 "s3.BucketServerSideEncryptionConfiguration" => {
@@ -283,24 +313,40 @@ impl Provider for AwsProvider {
                         &identifier,
                         &from,
                         to,
+                        schema,
                     )
                     .await
                 }
-                "s3.BucketAcl" => self.update_s3_bucket_acl(id, &identifier, &from, to).await,
+                "s3.BucketAcl" => {
+                    self.update_s3_bucket_acl(id, &identifier, &from, to, schema)
+                        .await
+                }
                 "s3.BucketOwnershipControls" => {
-                    self.update_s3_bucket_ownership_controls(id, &identifier, &from, to)
+                    self.update_s3_bucket_ownership_controls(id, &identifier, &from, to, schema)
                         .await
                 }
                 "s3.BucketReplicationConfiguration" => {
-                    self.update_s3_bucket_replication_configuration(id, &identifier, &from, to)
-                        .await
+                    self.update_s3_bucket_replication_configuration(
+                        id,
+                        &identifier,
+                        &from,
+                        to,
+                        schema,
+                    )
+                    .await
                 }
                 "s3.BucketLifecycleConfiguration" => {
-                    self.update_s3_bucket_lifecycle_configuration(id, &identifier, &from, to)
-                        .await
+                    self.update_s3_bucket_lifecycle_configuration(
+                        id,
+                        &identifier,
+                        &from,
+                        to,
+                        schema,
+                    )
+                    .await
                 }
                 "s3.BucketWebsiteConfiguration" => {
-                    self.update_s3_bucket_website_configuration(id, &identifier, &from, to)
+                    self.update_s3_bucket_website_configuration(id, &identifier, &from, to, schema)
                         .await
                 }
                 "s3.BucketCorsConfiguration" => {
@@ -312,18 +358,27 @@ impl Provider for AwsProvider {
                         .await
                 }
                 "s3.BucketLogging" => {
-                    self.update_s3_bucket_logging(id, &identifier, &from, to)
+                    self.update_s3_bucket_logging(id, &identifier, &from, to, schema)
                         .await
                 }
-                "ec2.Eip" => self.update_ec2_eip(id, &identifier, &from, to).await,
-                "ec2.Vpc" => self.update_ec2_vpc(id, &identifier, &from, to).await,
-                "ec2.Subnet" => self.update_ec2_subnet(id, &identifier, &from, to).await,
+                "ec2.Eip" => {
+                    self.update_ec2_eip(id, &identifier, &from, to, schema)
+                        .await
+                }
+                "ec2.Vpc" => {
+                    self.update_ec2_vpc(id, &identifier, &from, to, schema)
+                        .await
+                }
+                "ec2.Subnet" => {
+                    self.update_ec2_subnet(id, &identifier, &from, to, schema)
+                        .await
+                }
                 "ec2.InternetGateway" => {
                     self.update_ec2_internet_gateway(id, &identifier, &from, to)
                         .await
                 }
                 "ec2.NatGateway" => {
-                    self.update_ec2_nat_gateway(id, &identifier, &from, to)
+                    self.update_ec2_nat_gateway(id, &identifier, &from, to, schema)
                         .await
                 }
                 "ec2.RouteTable" => {
@@ -336,20 +391,23 @@ impl Provider for AwsProvider {
                         .await
                 }
                 "ec2.SecurityGroupIngress" => {
-                    self.update_ec2_security_group_ingress(id, &identifier, to)
+                    self.update_ec2_security_group_ingress(id, &identifier, to, schema)
                         .await
                 }
                 "ec2.SecurityGroupEgress" => {
-                    self.update_ec2_security_group_egress(id, &identifier, to)
+                    self.update_ec2_security_group_egress(id, &identifier, to, schema)
                         .await
                 }
                 "ec2.SubnetRouteTableAssociation" => {
                     self.update_ec2_subnet_route_table_association(id, &identifier, to)
                         .await
                 }
-                "ec2.FlowLog" => self.update_ec2_flow_log(id, &identifier, &from, to).await,
+                "ec2.FlowLog" => {
+                    self.update_ec2_flow_log(id, &identifier, &from, to, schema)
+                        .await
+                }
                 "ec2.VpcEndpoint" => {
-                    self.update_ec2_vpc_endpoint(id, &identifier, &from, to)
+                    self.update_ec2_vpc_endpoint(id, &identifier, &from, to, schema)
                         .await
                 }
                 "ec2.VpcGatewayAttachment" => {
@@ -357,15 +415,15 @@ impl Provider for AwsProvider {
                         .await
                 }
                 "ec2.VpnGateway" => {
-                    self.update_ec2_vpn_gateway(id, &identifier, &from, to)
+                    self.update_ec2_vpn_gateway(id, &identifier, &from, to, schema)
                         .await
                 }
                 "ec2.TransitGateway" => {
-                    self.update_ec2_transit_gateway(id, &identifier, &from, to)
+                    self.update_ec2_transit_gateway(id, &identifier, &from, to, schema)
                         .await
                 }
                 "ec2.TransitGatewayAttachment" => {
-                    self.update_ec2_transit_gateway_attachment(id, &identifier, &from, to)
+                    self.update_ec2_transit_gateway_attachment(id, &identifier, &from, to, schema)
                         .await
                 }
                 "ec2.VpcPeeringConnection" => {
@@ -377,7 +435,7 @@ impl Provider for AwsProvider {
                         .await
                 }
                 "organizations.Account" => {
-                    self.update_organizations_account(id, &identifier, &from, to)
+                    self.update_organizations_account(id, &identifier, &from, to, schema)
                         .await
                 }
                 "organizations.Organization" => {
@@ -386,13 +444,22 @@ impl Provider for AwsProvider {
                         .await
                 }
                 "iam.Role" => self.update_iam_role(id, &identifier, &from, to).await,
-                "logs.LogGroup" => self.update_logs_log_group(id, &identifier, &from, to).await,
-                "route53.RecordSet" => self.update_route53_record_set(id, &identifier, to).await,
-                "acm.Certificate" => {
-                    self.update_acm_certificate(id, &identifier, &from, to)
+                "logs.LogGroup" => {
+                    self.update_logs_log_group(id, &identifier, &from, to, schema)
                         .await
                 }
-                "sqs.Queue" => self.update_sqs_queue(id, &identifier, &from, to).await,
+                "route53.RecordSet" => {
+                    self.update_route53_record_set(id, &identifier, to, schema)
+                        .await
+                }
+                "acm.Certificate" => {
+                    self.update_acm_certificate(id, &identifier, &from, to, schema)
+                        .await
+                }
+                "sqs.Queue" => {
+                    self.update_sqs_queue(id, &identifier, &from, to, schema)
+                        .await
+                }
                 _ => Err(ProviderError::internal(format!(
                     "Unknown resource type: {}",
                     id.resource_type

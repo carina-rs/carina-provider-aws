@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use aws_sdk_s3::types::{ObjectOwnership, OwnershipControls, OwnershipControlsRule};
 use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
+use carina_core::schema::ResourceSchema;
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
@@ -66,9 +67,11 @@ impl AwsProvider {
     pub(crate) async fn create_s3_bucket_ownership_controls(
         &self,
         resource: &Resource,
+        schema: &ResourceSchema,
     ) -> ProviderResult<State> {
+        let _ = schema;
         let bucket = require_string_attr(resource, "bucket")?;
-        self.put_s3_bucket_ownership_controls(&resource.id, &bucket, resource)
+        self.put_s3_bucket_ownership_controls(&resource.id, &bucket, resource, schema)
             .await
     }
 
@@ -78,8 +81,10 @@ impl AwsProvider {
         identifier: &str,
         _from: &State,
         to: Resource,
+        schema: &ResourceSchema,
     ) -> ProviderResult<State> {
-        self.put_s3_bucket_ownership_controls(&id, identifier, &to)
+        let _ = schema;
+        self.put_s3_bucket_ownership_controls(&id, identifier, &to, schema)
             .await
     }
 
@@ -88,8 +93,9 @@ impl AwsProvider {
         id: &ResourceId,
         bucket: &str,
         resource: &Resource,
+        schema: &ResourceSchema,
     ) -> ProviderResult<State> {
-        let ownership_str = require_enum_attr(resource, "object_ownership")?;
+        let ownership_str = require_enum_attr(resource, schema, "object_ownership")?;
 
         let rule = OwnershipControlsRule::builder()
             .object_ownership(ObjectOwnership::from(ownership_str.as_str()))

@@ -6,11 +6,15 @@ use aws_sdk_s3::types::{
 };
 use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
+use carina_core::schema::ResourceSchema;
 use indexmap::IndexMap;
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
-use crate::helpers::{RetryPolicy, require_string_attr, retry_aws_operation, sdk_error_message};
+use crate::helpers::{
+    RetryPolicy, optional_enum_value_at_schema_path, require_string_attr, retry_aws_operation,
+    sdk_error_message,
+};
 use crate::services::s3::bucket::is_s3_not_configured_error;
 
 impl AwsProvider {
@@ -67,9 +71,11 @@ impl AwsProvider {
     pub(crate) async fn create_s3_bucket_server_side_encryption_configuration(
         &self,
         resource: &Resource,
+        schema: &ResourceSchema,
     ) -> ProviderResult<State> {
+        let _ = schema;
         let bucket = require_string_attr(resource, "bucket")?;
-        self.put_s3_bucket_encryption(&resource.id, &bucket, resource)
+        self.put_s3_bucket_encryption(&resource.id, &bucket, resource, schema)
             .await
     }
 
@@ -79,8 +85,11 @@ impl AwsProvider {
         identifier: &str,
         _from: &State,
         to: Resource,
+        schema: &ResourceSchema,
     ) -> ProviderResult<State> {
-        self.put_s3_bucket_encryption(&id, identifier, &to).await
+        let _ = schema;
+        self.put_s3_bucket_encryption(&id, identifier, &to, schema)
+            .await
     }
 
     async fn put_s3_bucket_encryption(
@@ -88,6 +97,7 @@ impl AwsProvider {
         id: &ResourceId,
         bucket: &str,
         resource: &Resource,
+        schema: &ResourceSchema,
     ) -> ProviderResult<State> {
         let rules = match resource.get_attr("rules") {
             Some(Value::Concrete(ConcreteValue::List(items))) => items,
@@ -101,7 +111,7 @@ impl AwsProvider {
 
         let sdk_rules: Vec<ServerSideEncryptionRule> = rules
             .iter()
-            .map(|v| build_rule(id, v))
+            .map(|v| build_rule(id, schema, v))
             .collect::<ProviderResult<Vec<_>>>()?;
 
         let config = ServerSideEncryptionConfiguration::builder()
@@ -172,7 +182,11 @@ impl AwsProvider {
     }
 }
 
-fn build_rule(id: &ResourceId, rule_value: &Value) -> ProviderResult<ServerSideEncryptionRule> {
+fn build_rule(
+    id: &ResourceId,
+    schema: &ResourceSchema,
+    rule_value: &Value,
+) -> ProviderResult<ServerSideEncryptionRule> {
     let Value::Concrete(ConcreteValue::Map(rule_map)) = rule_value else {
         return Err(
             ProviderError::invalid_input("each rule must be a map").for_resource(id.clone())
@@ -182,8 +196,8 @@ fn build_rule(id: &ResourceId, rule_value: &Value) -> ProviderResult<ServerSideE
     let mut builder = ServerSideEncryptionRule::builder();
 
     if let Some(by_default) = rule_map.get("apply_server_side_encryption_by_default") {
-        builder =
-            builder.apply_server_side_encryption_by_default(build_by_default(id, by_default)?);
+        builder = builder
+            .apply_server_side_encryption_by_default(build_by_default(id, schema, by_default)?);
     }
     if let Some(Value::Concrete(ConcreteValue::Bool(b))) = rule_map.get("bucket_key_enabled") {
         builder = builder.bucket_key_enabled(*b);
@@ -194,6 +208,7 @@ fn build_rule(id: &ResourceId, rule_value: &Value) -> ProviderResult<ServerSideE
 
 fn build_by_default(
     id: &ResourceId,
+    schema: &ResourceSchema,
     value: &Value,
 ) -> ProviderResult<ServerSideEncryptionByDefault> {
     let Value::Concrete(ConcreteValue::Map(map)) = value else {
@@ -202,8 +217,15 @@ fn build_by_default(
         )
         .for_resource(id.clone()));
     };
-    let algorithm_str = match map.get("sse_algorithm") {
-        Some(Value::Concrete(ConcreteValue::String(s))) => s.clone(),
+    let algorithm_str = match map.get("sse_algorithm").and_then(|v| {
+        optional_enum_value_at_schema_path(
+            schema,
+            "rules",
+            &["apply_server_side_encryption_by_default", "sse_algorithm"],
+            v,
+        )
+    }) {
+        Some(s) => s,
         _ => {
             return Err(
                 ProviderError::invalid_input("sse_algorithm is required").for_resource(id.clone())

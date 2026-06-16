@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use aws_sdk_s3::types::{BucketCannedAcl, Grant, Permission, Type as GranteeType};
 use carina_core::provider::ProviderResult;
 use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
+use carina_core::schema::ResourceSchema;
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
@@ -142,9 +143,14 @@ impl AwsProvider {
         }
     }
 
-    pub(crate) async fn create_s3_bucket_acl(&self, resource: &Resource) -> ProviderResult<State> {
+    pub(crate) async fn create_s3_bucket_acl(
+        &self,
+        resource: &Resource,
+        schema: &ResourceSchema,
+    ) -> ProviderResult<State> {
+        let _ = schema;
         let bucket = require_string_attr(resource, "bucket")?;
-        self.put_s3_bucket_acl(&resource.id, &bucket, resource)
+        self.put_s3_bucket_acl(&resource.id, &bucket, resource, schema)
             .await
     }
 
@@ -154,8 +160,10 @@ impl AwsProvider {
         identifier: &str,
         _from: &State,
         to: Resource,
+        schema: &ResourceSchema,
     ) -> ProviderResult<State> {
-        self.put_s3_bucket_acl(&id, identifier, &to).await
+        let _ = schema;
+        self.put_s3_bucket_acl(&id, identifier, &to, schema).await
     }
 
     async fn put_s3_bucket_acl(
@@ -163,8 +171,9 @@ impl AwsProvider {
         id: &ResourceId,
         bucket: &str,
         resource: &Resource,
+        schema: &ResourceSchema,
     ) -> ProviderResult<State> {
-        let acl_str = require_enum_attr(resource, "acl")?;
+        let acl_str = require_enum_attr(resource, schema, "acl")?;
 
         self.s3_client
             .put_bucket_acl()

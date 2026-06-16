@@ -13,6 +13,7 @@ use std::collections::HashMap;
 
 use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
+use carina_core::schema::ResourceSchema;
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
@@ -469,7 +470,12 @@ impl AwsProvider {
     }
 
     /// Create an SQS Queue and return its post-create state.
-    pub(crate) async fn create_sqs_queue(&self, resource: &Resource) -> ProviderResult<State> {
+    pub(crate) async fn create_sqs_queue(
+        &self,
+        resource: &Resource,
+        schema: &ResourceSchema,
+    ) -> ProviderResult<State> {
+        let _ = schema;
         let queue_name = require_string_attr(resource, "queue_name")?;
 
         // Pack every writable attribute the user actually set.
@@ -515,7 +521,10 @@ impl AwsProvider {
         identifier: &str,
         from: &State,
         to: Resource,
+        schema: &ResourceSchema,
     ) -> ProviderResult<State> {
+        let _ = schema;
+        let _ = schema;
         // Build a partial map of attributes whose value changed.
         // Create-only attributes (FifoQueue / FifoThroughputLimit /
         // DeduplicationScope) are dropped — schema marks them
