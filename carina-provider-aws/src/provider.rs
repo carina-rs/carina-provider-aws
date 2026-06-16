@@ -3,7 +3,7 @@
 use carina_core::effect::PlanOp;
 use carina_core::provider::{
     BoxFuture, CreateOutcome, CreateRequest, DeleteRequest, Provider, ProviderError,
-    ProviderResult, ReadRequest, UpdateRequest,
+    ProviderResult, ReadRequest, UpdateOutcome, UpdateRequest,
 };
 use carina_core::resource::{DataSource, Resource, ResourceId, State};
 
@@ -251,7 +251,7 @@ impl Provider for AwsProvider {
         id: &ResourceId,
         identifier: &str,
         request: UpdateRequest,
-    ) -> BoxFuture<'_, ProviderResult<State>> {
+    ) -> BoxFuture<'_, ProviderResult<UpdateOutcome>> {
         let id = id.clone();
         let identifier = identifier.to_string();
         let from = request.from.clone();
@@ -263,7 +263,7 @@ impl Provider for AwsProvider {
         // for partial-update API paths once those are wired in.
         let to = apply_patch_to_state(&request.from, &request.patch);
         Box::pin(async move {
-            match id.resource_type.as_str() {
+            let state = match id.resource_type.as_str() {
                 "s3.Bucket" => self.update_s3_bucket(id, &identifier, &from, to).await,
                 "s3.BucketPolicy" => {
                     self.update_s3_bucket_policy(id, &identifier, &from, to)
@@ -398,7 +398,9 @@ impl Provider for AwsProvider {
                     id.resource_type
                 ))
                 .for_resource(id.clone())),
-            }
+            }?;
+
+            Ok(UpdateOutcome::Success { state })
         })
     }
 

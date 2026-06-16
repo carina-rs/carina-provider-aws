@@ -6,7 +6,9 @@
 
 use std::collections::HashMap;
 
-use carina_core::provider::CreateOutcome as CoreCreateOutcome;
+use carina_core::provider::{
+    CreateOutcome as CoreCreateOutcome, UpdateOutcome as CoreUpdateOutcome,
+};
 use carina_core::resource::{
     ConcreteValue, DataSource as CoreDataSource, DeferredValue, Directives as CoreDirectives,
     Resource as CoreResource, ResourceId as CoreResourceId, State as CoreState, Value as CoreValue,
@@ -20,11 +22,10 @@ use carina_core::schema::{
 use carina_provider_protocol::types::{
     AttributeSchema as ProtoAttributeSchema, AttributeType as ProtoAttributeType,
     CreateOutcome as ProtoCreateOutcome, Directives as ProtoDirectives,
-    OperationConfig as ProtoOperationConfig,
-    PartialCreateDiagnostic as ProtoPartialCreateDiagnostic, Resource as ProtoResource,
-    ResourceId as ProtoResourceId, ResourceSchema as ProtoResourceSchema,
-    SchemaKind as ProtoSchemaKind, State as ProtoState, StructField as ProtoStructField,
-    Value as ProtoValue,
+    OperationConfig as ProtoOperationConfig, PartialReadDiagnostic as ProtoPartialReadDiagnostic,
+    Resource as ProtoResource, ResourceId as ProtoResourceId,
+    ResourceSchema as ProtoResourceSchema, SchemaKind as ProtoSchemaKind, State as ProtoState,
+    StructField as ProtoStructField, UpdateOutcome as ProtoUpdateOutcome, Value as ProtoValue,
 };
 
 // -- ResourceId --
@@ -176,7 +177,26 @@ pub fn core_to_proto_create_outcome(outcome: CoreCreateOutcome) -> ProtoCreateOu
         CoreCreateOutcome::PartialSuccess { state, diagnostic } => {
             ProtoCreateOutcome::PartialSuccess {
                 state: core_to_proto_state(&state),
-                diagnostic: ProtoPartialCreateDiagnostic {
+                diagnostic: ProtoPartialReadDiagnostic {
+                    reason: diagnostic.reason().to_string(),
+                    missing_attributes: diagnostic.missing_attributes().to_vec(),
+                },
+            }
+        }
+    }
+}
+
+// -- UpdateOutcome --
+
+pub fn core_to_proto_update_outcome(outcome: CoreUpdateOutcome) -> ProtoUpdateOutcome {
+    match outcome {
+        CoreUpdateOutcome::Success { state } => ProtoUpdateOutcome::Success {
+            state: core_to_proto_state(&state),
+        },
+        CoreUpdateOutcome::PartialSuccess { state, diagnostic } => {
+            ProtoUpdateOutcome::PartialSuccess {
+                state: core_to_proto_state(&state),
+                diagnostic: ProtoPartialReadDiagnostic {
                     reason: diagnostic.reason().to_string(),
                     missing_attributes: diagnostic.missing_attributes().to_vec(),
                 },

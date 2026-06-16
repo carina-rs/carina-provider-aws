@@ -322,7 +322,7 @@ impl CarinaProvider for AwsProcessProvider {
         id: &proto::ResourceId,
         identifier: &str,
         request: proto::UpdateRequest,
-    ) -> Result<proto::State, proto::ProviderError> {
+    ) -> Result<proto::UpdateOutcome, proto::ProviderError> {
         let core_id = convert::proto_to_core_resource_id(id);
         let core_from = convert::proto_to_core_state(&request.from);
         let core_patch = CoreUpdatePatch {
@@ -349,7 +349,7 @@ impl CarinaProvider for AwsProcessProvider {
             self.runtime
                 .block_on(self.provider().update(&core_id, identifier, core_request));
         match result {
-            Ok(state) => Ok(convert::core_to_proto_state(&state)),
+            Ok(outcome) => Ok(convert::core_to_proto_update_outcome(outcome)),
             Err(e) => Err(Self::convert_error(e)),
         }
     }
