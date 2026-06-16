@@ -75,12 +75,9 @@ pub fn core_to_proto_value(v: &CoreValue) -> ProtoValue {
         CoreValue::Concrete(ConcreteValue::List(l)) => {
             ProtoValue::List(l.iter().map(core_to_proto_value).collect())
         }
-        CoreValue::Concrete(ConcreteValue::StringList(items)) => ProtoValue::List(
-            items
-                .iter()
-                .map(|s| ProtoValue::String(s.clone()))
-                .collect(),
-        ),
+        CoreValue::Concrete(ConcreteValue::StringList(items)) => {
+            ProtoValue::StringList(items.clone())
+        }
         CoreValue::Concrete(ConcreteValue::Map(m)) => ProtoValue::Map(
             m.iter()
                 .map(|(k, v)| (k.clone(), core_to_proto_value(v)))
@@ -123,6 +120,9 @@ pub fn proto_to_core_value(v: &ProtoValue) -> CoreValue {
         ProtoValue::List(l) => CoreValue::Concrete(ConcreteValue::List(
             l.iter().map(proto_to_core_value).collect(),
         )),
+        ProtoValue::StringList(items) => {
+            CoreValue::Concrete(ConcreteValue::StringList(items.clone()))
+        }
         ProtoValue::Map(m) => CoreValue::Concrete(ConcreteValue::Map(
             m.iter()
                 .map(|(k, v)| (k.clone(), proto_to_core_value(v)))
