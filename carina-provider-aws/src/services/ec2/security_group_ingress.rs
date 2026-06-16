@@ -21,7 +21,6 @@ impl AwsProvider {
         resource: &Resource,
         schema: &ResourceSchema,
     ) -> ProviderResult<State> {
-        let _ = schema;
         self.create_ec2_security_group_rule(resource, schema, true)
             .await
     }
@@ -34,7 +33,6 @@ impl AwsProvider {
         to: Resource,
         schema: &ResourceSchema,
     ) -> ProviderResult<State> {
-        let _ = schema;
         self.update_ec2_security_group_rule(id, identifier, to, schema, true)
             .await
     }

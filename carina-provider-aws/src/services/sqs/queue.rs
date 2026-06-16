@@ -473,9 +473,8 @@ impl AwsProvider {
     pub(crate) async fn create_sqs_queue(
         &self,
         resource: &Resource,
-        schema: &ResourceSchema,
+        _schema: &ResourceSchema,
     ) -> ProviderResult<State> {
-        let _ = schema;
         let queue_name = require_string_attr(resource, "queue_name")?;
 
         // Pack every writable attribute the user actually set.
@@ -521,10 +520,8 @@ impl AwsProvider {
         identifier: &str,
         from: &State,
         to: Resource,
-        schema: &ResourceSchema,
+        _schema: &ResourceSchema,
     ) -> ProviderResult<State> {
-        let _ = schema;
-        let _ = schema;
         // Build a partial map of attributes whose value changed.
         // Create-only attributes (FifoQueue / FifoThroughputLimit /
         // DeduplicationScope) are dropped — schema marks them

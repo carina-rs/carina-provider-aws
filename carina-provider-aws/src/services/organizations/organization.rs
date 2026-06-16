@@ -111,7 +111,6 @@ impl AwsProvider {
         resource: &Resource,
         schema: &ResourceSchema,
     ) -> ProviderResult<State> {
-        let _ = schema;
         let mut req = self.organizations_client.create_organization();
 
         if let Some(feature_set) = optional_enum_attr(resource, schema, "feature_set") {

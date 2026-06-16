@@ -149,7 +149,6 @@ impl AwsProvider {
         resource: &Resource,
         schema: &ResourceSchema,
     ) -> ProviderResult<State> {
-        let _ = schema;
         let mut req = self.ec2_client.create_transit_gateway();
 
         if let Some(Value::Concrete(ConcreteValue::String(desc))) = resource.get_attr("description")
@@ -201,9 +200,8 @@ impl AwsProvider {
         identifier: &str,
         from: &State,
         to: Resource,
-        schema: &ResourceSchema,
+        _schema: &ResourceSchema,
     ) -> ProviderResult<State> {
-        let _ = schema;
         self.apply_ec2_tags(
             &id,
             identifier,

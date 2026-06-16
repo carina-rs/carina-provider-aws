@@ -305,7 +305,6 @@ impl AwsProvider {
         resource: &Resource,
         schema: &ResourceSchema,
     ) -> ProviderResult<State> {
-        let _ = schema;
         let id = resource.id.clone();
         let domain_name = require_string_attr(resource, "domain_name")?;
 
@@ -500,7 +499,6 @@ impl AwsProvider {
         to: Resource,
         schema: &ResourceSchema,
     ) -> ProviderResult<State> {
-        let _ = schema;
         if let Some(options) = build_update_certificate_options(&to, schema) {
             self.acm_client
                 .update_certificate_options()

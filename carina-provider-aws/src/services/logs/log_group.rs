@@ -118,7 +118,6 @@ impl AwsProvider {
         resource: &Resource,
         schema: &ResourceSchema,
     ) -> ProviderResult<State> {
-        let _ = schema;
         let log_group_name = require_string_attr(resource, "log_group_name")?;
 
         let mut req = self
@@ -183,9 +182,8 @@ impl AwsProvider {
         identifier: &str,
         from: &State,
         to: Resource,
-        schema: &ResourceSchema,
+        _schema: &ResourceSchema,
     ) -> ProviderResult<State> {
-        let _ = schema;
         // Update retention
         match to.get_attr("retention_in_days") {
             Some(Value::Concrete(ConcreteValue::Int(days))) => {
