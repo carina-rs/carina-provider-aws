@@ -79,7 +79,6 @@ impl AwsProvider {
         resource: &Resource,
         schema: &ResourceSchema,
     ) -> ProviderResult<State> {
-        let _ = schema;
         let subnet_id = require_string_attr(resource, "subnet_id")?;
 
         let mut req = self.ec2_client.create_nat_gateway().subnet_id(&subnet_id);
@@ -133,9 +132,8 @@ impl AwsProvider {
         identifier: &str,
         from: &State,
         to: Resource,
-        schema: &ResourceSchema,
+        _schema: &ResourceSchema,
     ) -> ProviderResult<State> {
-        let _ = schema;
         self.apply_ec2_tags(
             &id,
             identifier,

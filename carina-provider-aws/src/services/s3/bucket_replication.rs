@@ -78,7 +78,6 @@ impl AwsProvider {
         resource: &Resource,
         schema: &ResourceSchema,
     ) -> ProviderResult<State> {
-        let _ = schema;
         let bucket = require_string_attr(resource, "bucket")?;
         self.put_s3_bucket_replication(&resource.id, &bucket, resource, schema)
             .await
@@ -92,7 +91,6 @@ impl AwsProvider {
         to: Resource,
         schema: &ResourceSchema,
     ) -> ProviderResult<State> {
-        let _ = schema;
         self.put_s3_bucket_replication(&id, identifier, &to, schema)
             .await
     }

@@ -80,7 +80,6 @@ impl AwsProvider {
         resource: &Resource,
         schema: &ResourceSchema,
     ) -> ProviderResult<State> {
-        let _ = schema;
         let resource_ids_val: Vec<String> = match resource.get_attr("resource_ids") {
             Some(Value::Concrete(ConcreteValue::List(items))) => items
                 .iter()
@@ -239,9 +238,8 @@ impl AwsProvider {
         identifier: &str,
         from: &State,
         to: Resource,
-        schema: &ResourceSchema,
+        _schema: &ResourceSchema,
     ) -> ProviderResult<State> {
-        let _ = schema;
         self.apply_ec2_tags(
             &id,
             identifier,

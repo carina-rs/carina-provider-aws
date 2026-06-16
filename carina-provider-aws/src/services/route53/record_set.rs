@@ -363,7 +363,6 @@ impl AwsProvider {
         resource: &Resource,
         schema: &ResourceSchema,
     ) -> ProviderResult<State> {
-        let _ = schema;
         let hosted_zone_id = require_string_attr(resource, "hosted_zone_id")?;
         let name = require_string_attr(resource, "name")?;
         let record_type = require_enum_attr(resource, schema, "type")?;
@@ -390,7 +389,6 @@ impl AwsProvider {
         to: Resource,
         schema: &ResourceSchema,
     ) -> ProviderResult<State> {
-        let _ = schema;
         let hosted_zone_id = require_string_attr(&to, "hosted_zone_id")?;
         let name = require_string_attr(&to, "name")?;
         let record_type = require_enum_attr(&to, schema, "type")?;

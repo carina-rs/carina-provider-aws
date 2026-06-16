@@ -65,7 +65,6 @@ impl AwsProvider {
         resource: &Resource,
         schema: &ResourceSchema,
     ) -> ProviderResult<State> {
-        let _ = schema;
         let mut req = self.ec2_client.allocate_address();
 
         if let Some(domain) = optional_enum_attr(resource, schema, "domain") {
@@ -106,9 +105,8 @@ impl AwsProvider {
         identifier: &str,
         from: &State,
         to: Resource,
-        schema: &ResourceSchema,
+        _schema: &ResourceSchema,
     ) -> ProviderResult<State> {
-        let _ = schema;
         self.apply_ec2_tags(
             &id,
             identifier,

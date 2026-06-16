@@ -69,7 +69,6 @@ impl AwsProvider {
         resource: &Resource,
         schema: &ResourceSchema,
     ) -> ProviderResult<State> {
-        let _ = schema;
         let vpc_id = require_string_attr(resource, "vpc_id")?;
         let service_name = require_string_attr(resource, "service_name")?;
 
@@ -174,9 +173,8 @@ impl AwsProvider {
         identifier: &str,
         from: &State,
         to: Resource,
-        schema: &ResourceSchema,
+        _schema: &ResourceSchema,
     ) -> ProviderResult<State> {
-        let _ = schema;
         let mut req = self
             .ec2_client
             .modify_vpc_endpoint()

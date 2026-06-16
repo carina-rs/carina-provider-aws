@@ -77,7 +77,6 @@ impl AwsProvider {
         resource: &Resource,
         schema: &ResourceSchema,
     ) -> ProviderResult<State> {
-        let _ = schema;
         let cidr_block = require_string_attr(resource, "cidr_block")?;
         let vpc_id = require_string_attr(resource, "vpc_id")?;
 
@@ -123,7 +122,6 @@ impl AwsProvider {
         to: Resource,
         schema: &ResourceSchema,
     ) -> ProviderResult<State> {
-        let _ = schema;
         // Apply subnet attributes that require ModifySubnetAttribute
         let attrs = to.resolved_attributes();
         self.modify_subnet_attributes(&id, identifier, &to, schema)

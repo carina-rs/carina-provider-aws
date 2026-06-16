@@ -111,7 +111,6 @@ impl AwsProvider {
         resource: &Resource,
         schema: &ResourceSchema,
     ) -> ProviderResult<State> {
-        let _ = schema;
         let transit_gateway_id = require_string_attr(resource, "transit_gateway_id")?;
         let vpc_id = require_string_attr(resource, "vpc_id")?;
 
@@ -190,9 +189,8 @@ impl AwsProvider {
         identifier: &str,
         from: &State,
         to: Resource,
-        schema: &ResourceSchema,
+        _schema: &ResourceSchema,
     ) -> ProviderResult<State> {
-        let _ = schema;
         self.apply_ec2_tags(
             &id,
             identifier,

@@ -166,7 +166,6 @@ impl AwsProvider {
         resource: &Resource,
         schema: &ResourceSchema,
     ) -> ProviderResult<State> {
-        let _ = schema;
         let name = require_string_attr(resource, "account_name")?;
         let email = require_string_attr(resource, "email")?;
 
@@ -337,9 +336,8 @@ impl AwsProvider {
         identifier: &str,
         from: &State,
         to: Resource,
-        schema: &ResourceSchema,
+        _schema: &ResourceSchema,
     ) -> ProviderResult<State> {
-        let _ = schema;
         // Handle parent_id change via MoveAccount
         let desired_parent = to.get_attr("parent_id").and_then(|v| match v {
             Value::Concrete(ConcreteValue::String(s)) => Some(s.as_str()),
