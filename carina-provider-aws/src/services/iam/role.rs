@@ -530,6 +530,12 @@ fn dsl_value_to_iam_json(
                     .map(|it| dsl_value_to_iam_json(it, element_type, attr_name))
                     .collect(),
             ),
+            Value::Concrete(ConcreteValue::StringList(items)) => serde_json::Value::Array(
+                items
+                    .iter()
+                    .map(|s| serde_json::Value::String(s.clone()))
+                    .collect(),
+            ),
             // A scalar where the schema declares a list: emit the scalar
             // (AWS accepts a bare string for single-element Action etc.).
             _ => dsl_value_to_iam_json(value, element_type, attr_name),
@@ -634,6 +640,12 @@ fn scalar_to_json(value: &Value) -> serde_json::Value {
         Value::Concrete(ConcreteValue::List(items)) => {
             serde_json::Value::Array(items.iter().map(scalar_to_json).collect())
         }
+        Value::Concrete(ConcreteValue::StringList(items)) => serde_json::Value::Array(
+            items
+                .iter()
+                .map(|s| serde_json::Value::String(s.clone()))
+                .collect(),
+        ),
         Value::Concrete(ConcreteValue::Map(map)) => {
             let mut obj = serde_json::Map::new();
             for (k, v) in map {
@@ -1117,6 +1129,56 @@ mod tests {
         assert!(
             !resolved.contains("statment") && !resolved.contains("bogus_field"),
             "unmodeled keys must not reach AWS, got: {resolved}"
+        );
+    }
+
+    #[test]
+    fn resolve_iam_policy_attr_serializes_parsed_canonicalized_iam_role_policy() {
+        let src = r#"
+            aws.iam.Role {
+              role_name = 'carina-acceptance-test-role'
+              assume_role_policy_document = {
+                version = aws.iam.PolicyDocument.Version.2012_10_17
+                statement {
+                  effect = aws.iam.PolicyDocument.Statement.Effect.allow
+                  principal = {
+                    service = 'ec2.amazonaws.com'
+                  }
+                  action = 'sts:AssumeRole'
+                }
+              }
+              description = 'Carina acceptance test role'
+              path = '/'
+              max_session_duration = 7200
+              tags = { Environment = 'acceptance-test' }
+            }
+        "#;
+        let parsed =
+            carina_core::parser::parse(src, &carina_core::parser::ProviderContext::default())
+                .expect("parse fixture");
+        let mut resource = parsed.resources[0].clone();
+        let schema = crate::schemas::generated::iam::role::iam_role_config().schema;
+        let policy_attr = &schema
+            .attributes
+            .get("assume_role_policy_document")
+            .expect("policy attr")
+            .attr_type;
+        let policy = resource
+            .get_attr("assume_role_policy_document")
+            .expect("policy")
+            .clone();
+        let policy_schema = carina_core::schema::Schema::flat(policy_attr.clone());
+        resource.set_attr(
+            "assume_role_policy_document",
+            policy_schema.canonicalize(policy),
+        );
+
+        let resolved =
+            resolve_iam_policy_attr(&resource, "assume_role_policy_document").expect("map -> JSON");
+
+        assert_eq!(
+            resolved,
+            r#"{"Statement":[{"Action":["sts:AssumeRole"],"Effect":"Allow","Principal":{"Service":["ec2.amazonaws.com"]}}],"Version":"2012-10-17"}"#
         );
     }
 
