@@ -96,7 +96,12 @@ where
         None => context,
     };
 
-    let mut pe = ProviderError::api_error(header).with_operation(operation);
+    let mut pe = if code.as_deref().is_some_and(is_not_found_error_code) || status == Some(404) {
+        ProviderError::not_found(header)
+    } else {
+        ProviderError::api_error(header)
+    }
+    .with_operation(operation);
     if let Some(s) = status {
         pe = pe.with_status(s);
     }
@@ -107,6 +112,37 @@ where
         pe = pe.with_request_id(id);
     }
     pe.with_cause(err)
+}
+
+fn is_not_found_error_code(code: &str) -> bool {
+    matches!(
+        code,
+        "ResourceNotFoundException"
+            | "NoSuchEntity"
+            | "NoSuchBucket"
+            | "NoSuchEntityException"
+            | "InvalidGroup.NotFound"
+            | "InvalidGroupId.NotFound"
+            | "InvalidRoute.NotFound"
+            | "InvalidRouteTableID.NotFound"
+            | "InvalidVpcID.NotFound"
+            | "InvalidSubnetID.NotFound"
+            | "InvalidInternetGatewayID.NotFound"
+            | "InvalidNatGatewayID.NotFound"
+            | "InvalidAllocationID.NotFound"
+            | "InvalidVpcPeeringConnectionID.NotFound"
+            | "InvalidVpnGatewayID.NotFound"
+            | "InvalidTransitGatewayID.NotFound"
+            | "InvalidPrefixListID.NotFound"
+            | "InvalidIpamID.NotFound"
+            | "InvalidIpamPoolId.NotFound"
+            | "InvalidVpcEndpointId.NotFound"
+            | "InvalidNetworkInterfaceID.NotFound"
+            | "InvalidGatewayID.NotFound"
+            | "InvalidFlowLogId.NotFound"
+            | "ResourceNotFoundFault"
+            | "ResourceNotFoundError"
+    )
 }
 
 #[cfg(test)]
@@ -120,21 +156,39 @@ mod tests {
     use aws_smithy_types::error::metadata::ErrorMetadata;
     use carina_core::provider::ProviderError as CoreProviderError;
 
+    fn list_roles_service_error_with_meta(
+        status: u16,
+        code: Option<&str>,
+        message: Option<&str>,
+    ) -> SdkError<ListRolesError> {
+        let mut meta = ErrorMetadata::builder();
+        if let Some(code) = code {
+            meta = meta.code(code);
+        }
+        if let Some(message) = message {
+            meta = meta.message(message);
+        }
+
+        let inner = ListRolesError::ServiceFailureException(
+            ServiceFailureException::builder()
+                .meta(meta.build())
+                .build(),
+        );
+        let raw = Response::new(StatusCode::try_from(status).unwrap(), SdkBody::empty());
+        SdkError::service_error(inner, raw)
+    }
+
     /// carina#3241: a real `SdkError::service_error(...)` round-trip
     /// through `api_error_with_meta` populates the structured fields
     /// the renderer surfaces — proving the extraction wiring works
     /// against a real AWS SDK error type, not just a synthetic mock.
     #[test]
     fn api_error_with_meta_extracts_response_metadata() {
-        let meta = ErrorMetadata::builder()
-            .code("AccessDenied")
-            .message("User: arn:aws:sts::... is not authorized to perform: iam:ListRoles")
-            .build();
-        let inner = ListRolesError::ServiceFailureException(
-            ServiceFailureException::builder().meta(meta).build(),
+        let sdk_err = list_roles_service_error_with_meta(
+            403,
+            Some("AccessDenied"),
+            Some("User: arn:aws:sts::... is not authorized to perform: iam:ListRoles"),
         );
-        let raw = Response::new(StatusCode::try_from(403u16).unwrap(), SdkBody::empty());
-        let sdk_err = SdkError::service_error(inner, raw);
 
         let pe = api_error_with_meta("Failed to list IAM roles", "iam.ListRoles", sdk_err);
         let CoreProviderError::ApiError(detail) = &pe else {
@@ -181,5 +235,100 @@ mod tests {
         // Cause is preserved so the renderer's fallback path surfaces
         // the transport-level diagnostic.
         assert!(detail.cause.is_some());
+    }
+
+    #[test]
+    fn api_error_with_meta_returns_not_found_for_acm_resource_not_found() {
+        let sdk_err = list_roles_service_error_with_meta(
+            400,
+            Some("ResourceNotFoundException"),
+            Some("resource not found"),
+        );
+
+        let pe = api_error_with_meta(
+            "Failed to describe ACM certificate",
+            "acm.DescribeCertificate",
+            sdk_err,
+        );
+        let CoreProviderError::NotFound(detail) = &pe else {
+            panic!("expected NotFound, got {:?}", pe);
+        };
+
+        assert_eq!(detail.operation.as_deref(), Some("acm.DescribeCertificate"));
+        assert_eq!(detail.status, Some(400));
+        assert_eq!(detail.code.as_deref(), Some("ResourceNotFoundException"));
+    }
+
+    #[test]
+    fn api_error_with_meta_returns_not_found_for_iam_no_such_entity() {
+        let sdk_err =
+            list_roles_service_error_with_meta(404, Some("NoSuchEntity"), Some("role not found"));
+
+        let pe = api_error_with_meta("Failed to get IAM role", "iam.GetRole", sdk_err);
+        let CoreProviderError::NotFound(detail) = &pe else {
+            panic!("expected NotFound, got {:?}", pe);
+        };
+
+        assert_eq!(detail.operation.as_deref(), Some("iam.GetRole"));
+        assert_eq!(detail.status, Some(404));
+        assert_eq!(detail.code.as_deref(), Some("NoSuchEntity"));
+    }
+
+    #[test]
+    fn api_error_with_meta_returns_not_found_for_ec2_invalid_group() {
+        let sdk_err = list_roles_service_error_with_meta(
+            400,
+            Some("InvalidGroup.NotFound"),
+            Some("security group not found"),
+        );
+
+        let pe = api_error_with_meta(
+            "Failed to describe security groups",
+            "ec2.DescribeSecurityGroups",
+            sdk_err,
+        );
+        let CoreProviderError::NotFound(detail) = &pe else {
+            panic!("expected NotFound, got {:?}", pe);
+        };
+
+        assert_eq!(
+            detail.operation.as_deref(),
+            Some("ec2.DescribeSecurityGroups")
+        );
+        assert_eq!(detail.status, Some(400));
+        assert_eq!(detail.code.as_deref(), Some("InvalidGroup.NotFound"));
+    }
+
+    #[test]
+    fn api_error_with_meta_returns_api_error_for_other_codes() {
+        let sdk_err = list_roles_service_error_with_meta(
+            400,
+            Some("ValidationException"),
+            Some("invalid input"),
+        );
+
+        let pe = api_error_with_meta("Failed to list IAM roles", "iam.ListRoles", sdk_err);
+        let CoreProviderError::ApiError(detail) = &pe else {
+            panic!("expected ApiError, got {:?}", pe);
+        };
+
+        assert_eq!(detail.operation.as_deref(), Some("iam.ListRoles"));
+        assert_eq!(detail.status, Some(400));
+        assert_eq!(detail.code.as_deref(), Some("ValidationException"));
+    }
+
+    #[test]
+    fn api_error_with_meta_returns_not_found_for_http_404() {
+        let sdk_err =
+            list_roles_service_error_with_meta(404, None, Some("not found without a code"));
+
+        let pe = api_error_with_meta("Failed to head S3 bucket", "s3.HeadBucket", sdk_err);
+        let CoreProviderError::NotFound(detail) = &pe else {
+            panic!("expected NotFound, got {:?}", pe);
+        };
+
+        assert_eq!(detail.operation.as_deref(), Some("s3.HeadBucket"));
+        assert_eq!(detail.status, Some(404));
+        assert_eq!(detail.code, None);
     }
 }
