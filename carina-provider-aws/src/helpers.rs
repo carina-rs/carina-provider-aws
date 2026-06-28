@@ -505,7 +505,10 @@ where
 /// `Directives` (directives are delete-only and are not consulted on
 /// update paths in this provider).
 pub fn apply_patch_to_state(from: &State, patch: &UpdatePatch) -> Resource {
-    let mut resource = Resource::new(from.id.resource_type.clone(), from.id.name.to_string());
+    let mut resource = Resource::new(
+        from.id.resource_type.clone(),
+        from.id.identity_or_empty().to_string(),
+    );
     resource.id = from.id.clone();
     resource.attributes = from
         .attributes
@@ -638,7 +641,7 @@ mod tests {
         use std::collections::HashMap;
 
         // from-state has two attrs; patch adds one, replaces one, removes one.
-        let id = ResourceId::with_provider("aws", "ec2.Vpc", "test", None);
+        let id = ResourceId::with_provider_identity("aws", "ec2.Vpc", "test", None);
         let mut from_attrs: HashMap<String, Value> = HashMap::new();
         from_attrs.insert(
             "cidr_block".into(),

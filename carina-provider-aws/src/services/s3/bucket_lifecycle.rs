@@ -686,7 +686,7 @@ mod tests {
     use super::*;
 
     fn rid() -> ResourceId {
-        ResourceId::new("s3.bucket_lifecycle_configuration", "test")
+        ResourceId::with_identity("s3.bucket_lifecycle_configuration", "test")
     }
 
     fn schema() -> ResourceSchema {
