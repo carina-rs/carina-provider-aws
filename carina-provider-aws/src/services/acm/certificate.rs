@@ -684,7 +684,7 @@ mod tests {
     use std::time::Duration;
 
     fn id() -> ResourceId {
-        ResourceId::with_provider("aws", "acm.Certificate", "test-cert", None)
+        ResourceId::with_provider_identity("aws", "acm.Certificate", "test-cert", None)
     }
 
     fn dv_without_rr(domain: &str) -> DomainValidation {

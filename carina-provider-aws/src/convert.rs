@@ -34,7 +34,7 @@ pub fn core_to_proto_resource_id(id: &CoreResourceId) -> ProtoResourceId {
     ProtoResourceId {
         provider: id.provider.clone(),
         resource_type: id.resource_type.clone(),
-        name: id.name.to_string(),
+        identity: id.identity_or_empty().to_string(),
     }
 }
 
@@ -42,7 +42,7 @@ pub fn proto_to_core_resource_id(id: &ProtoResourceId) -> CoreResourceId {
     // `ProtoResourceId` predates carina#3038's `provider_instance` field;
     // the WIT wire format does not carry it. Pass `None` so the
     // reconstructed `CoreResourceId` routes through the default provider.
-    CoreResourceId::with_provider(&id.provider, &id.resource_type, &id.name, None)
+    CoreResourceId::with_provider_name_compat(&id.provider, &id.resource_type, &id.identity, None)
 }
 
 // -- Value --
@@ -229,7 +229,7 @@ pub fn core_to_proto_directives(l: &CoreDirectives) -> ProtoDirectives {
 
 pub fn proto_to_core_resource(r: &ProtoResource) -> CoreResource {
     let mut resource =
-        CoreResource::with_provider(&r.id.provider, &r.id.resource_type, &r.id.name, None);
+        CoreResource::with_provider(&r.id.provider, &r.id.resource_type, &r.id.identity, None);
     resource.attributes = r
         .attributes
         .iter()
@@ -251,7 +251,7 @@ pub fn proto_to_core_resource(r: &ProtoResource) -> CoreResource {
 /// data-source read request maps to this typed projection (carina#3181).
 pub fn proto_to_core_data_source(r: &ProtoResource) -> CoreDataSource {
     let mut data_source =
-        CoreDataSource::with_provider(&r.id.provider, &r.id.resource_type, &r.id.name, None);
+        CoreDataSource::with_provider(&r.id.provider, &r.id.resource_type, &r.id.identity, None);
     data_source.attributes = r
         .attributes
         .iter()
@@ -476,7 +476,7 @@ pub fn proto_to_core_schema(s: &ProtoResourceSchema) -> CoreResourceSchema {
         description: s.description.clone(),
         validator: None,
         kind: proto_to_core_schema_kind(s.kind),
-        name_attribute: s.name_attribute.clone(),
+        unique_name_attribute: s.unique_name_attribute.clone(),
         operation_config: s.operation_config.as_ref().map(|c| CoreOperationConfig {
             delete_timeout_secs: c.delete_timeout_secs,
             delete_max_retries: c.delete_max_retries,
@@ -650,7 +650,7 @@ pub fn core_to_proto_schema(s: &CoreResourceSchema) -> ProtoResourceSchema {
             .collect(),
         description: s.description.clone(),
         kind: core_to_proto_schema_kind(s.kind),
-        name_attribute: s.name_attribute.clone(),
+        unique_name_attribute: s.unique_name_attribute.clone(),
         operation_config: s.operation_config.as_ref().map(|c| ProtoOperationConfig {
             delete_timeout_secs: c.delete_timeout_secs,
             delete_max_retries: c.delete_max_retries,

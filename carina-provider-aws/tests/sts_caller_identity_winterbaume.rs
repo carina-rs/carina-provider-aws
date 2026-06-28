@@ -70,7 +70,7 @@ async fn required_permissions_returns_empty_vec() {
         SqsClient::new(&sdk_config),
     );
 
-    let id = ResourceId::with_provider("aws", "s3.Bucket", "example", None);
+    let id = ResourceId::with_provider_identity("aws", "s3.Bucket", "example", None);
 
     assert_eq!(
         provider.required_permissions(&id, PlanOp::Create),
