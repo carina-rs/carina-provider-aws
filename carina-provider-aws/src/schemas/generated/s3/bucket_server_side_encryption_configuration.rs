@@ -14,6 +14,7 @@ pub fn s3_bucket_server_side_encryption_configuration_config() -> AwsSchemaConfi
         resource_type_name: "s3.BucketServerSideEncryptionConfiguration",
         has_tags: false,
         schema: ResourceSchema::new("s3.BucketServerSideEncryptionConfiguration")
+        .with_unique_name_attribute("bucket")
         .attribute(
             AttributeSchema::new("bucket", AttributeType::string())
                 .required()

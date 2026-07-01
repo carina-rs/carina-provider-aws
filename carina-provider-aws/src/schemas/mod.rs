@@ -218,6 +218,31 @@ mod tests {
     }
 
     #[test]
+    fn generated_resource_unique_name_attributes_follow_writable_identifiers() {
+        let iam_role = super::generated::iam::role::iam_role_config();
+        assert_eq!(
+            iam_role.schema.unique_name_attribute,
+            Some("role_name".to_string())
+        );
+
+        let ec2_vpc = super::generated::ec2::vpc::ec2_vpc_config();
+        assert_eq!(ec2_vpc.schema.unique_name_attribute, None);
+
+        let ec2_route = super::generated::ec2::route::ec2_route_config();
+        assert_eq!(ec2_route.schema.unique_name_attribute, None);
+
+        let ec2_vpc_gateway_attachment =
+            super::generated::ec2::vpc_gateway_attachment::ec2_vpc_gateway_attachment_config();
+        assert_eq!(
+            ec2_vpc_gateway_attachment.schema.unique_name_attribute,
+            None
+        );
+
+        let route53_record_set = super::generated::route53::record_set::route53_record_set_config();
+        assert_eq!(route53_record_set.schema.unique_name_attribute, None);
+    }
+
+    #[test]
     fn security_group_ip_protocol_values_are_canonical_and_aliases_reverse() {
         for resource_type in ["ec2.SecurityGroupIngress", "ec2.SecurityGroupEgress"] {
             let values = super::generated::get_enum_valid_values(resource_type, "ip_protocol")
