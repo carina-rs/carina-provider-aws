@@ -11,12 +11,14 @@ use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
 use anyhow::{Context, Result};
-use carina_smithy::{ShapeKind, SmithyModel};
+use carina_smithy::{Shape, ShapeKind, SmithyModel};
 use clap::Parser;
 use heck::ToSnakeCase;
 
 use carina_aws_types::dsl_enum_value;
 use carina_codegen_aws::resource_defs::{self, ResourceDef};
+
+const PLAIN_STRING_TYPE_CODE: &str = "AttributeType::string()";
 
 #[derive(Parser, Debug)]
 #[command(name = "smithy-codegen")]
@@ -385,6 +387,9 @@ struct AttrInfo {
     is_create_only: bool,
     /// Whether the field is read-only
     is_read_only: bool,
+    /// Whether the underlying Smithy member target is a plain string shape.
+    /// This is captured before rendered type overrides are applied.
+    is_plain_string: bool,
     /// Whether the field contributes to anonymous resource identity hashing
     is_identity: bool,
     /// Whether the AWS API populates this field asynchronously after Create
@@ -395,6 +400,49 @@ struct AttrInfo {
     description: Option<String>,
     /// Enum info if this attribute is an enum
     enum_info: Option<EnumInfo>,
+}
+
+fn is_plain_smithy_string(model: &SmithyModel, target: &str) -> bool {
+    match model.get_shape(target) {
+        Some(Shape::String(shape)) => !shape.traits.contains_key("smithy.api#enum"),
+        None => target == "smithy.api#String",
+        _ => false,
+    }
+}
+
+fn derive_unique_name_attribute(
+    identifier: &str,
+    attrs: &[AttrInfo],
+    is_data_source: bool,
+) -> Option<String> {
+    if is_data_source || identifier.is_empty() {
+        return None;
+    }
+    if attrs.iter().any(|attr| attr.is_identity) {
+        // awscc emits unique_name_attribute only when primary_ids.len() == 1.
+        // In this Smithy codegen, identity_overrides mark extra identity
+        // components beyond ResourceDef::identifier, so the identifier alone is
+        // not the resource's unique name.
+        return None;
+    }
+    let identifier_snake = identifier.to_snake_case();
+
+    attrs
+        .iter()
+        .find(|attr| {
+            (attr.provider_name == identifier
+                || attr.provider_name.to_snake_case() == identifier_snake)
+                && !attr.is_read_only
+                && attr.is_plain_string
+                // create_before_destroy temporary-name generation only makes sense
+                // for user-chosen names. Resource IDs, ARNs, CIDRs, and other
+                // inferred/overridden string subtypes are references to existing
+                // server-generated values; suffixing them would produce invalid
+                // temporary inputs. This matches awscc's outcome for resources
+                // whose real primary identity is composite.
+                && attr.type_code == PLAIN_STRING_TYPE_CODE
+        })
+        .map(|attr| attr.snake_name.clone())
 }
 
 /// Integer range constraint (supports one-sided ranges)
@@ -983,6 +1031,7 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
             name,
         );
 
+        let is_plain_string = is_plain_smithy_string(model, &member_ref.target);
         let is_identity = identity_overrides.contains(name.as_str());
         let is_deferred_populate = deferred_populate_overrides.contains(name.as_str());
 
@@ -993,6 +1042,7 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
             is_required,
             is_create_only,
             is_read_only,
+            is_plain_string,
             is_identity,
             is_deferred_populate,
             description,
@@ -1016,7 +1066,7 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
         } else if let Some(inferred) = infer_string_type(extra.name) {
             inferred
         } else {
-            "AttributeType::string()".to_string()
+            PLAIN_STRING_TYPE_CODE.to_string()
         };
         let is_read_only = read_only_overrides.contains(extra.name);
         let is_create_only = !is_read_only
@@ -1030,6 +1080,7 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
             is_required,
             is_create_only,
             is_read_only,
+            is_plain_string: false,
             is_identity: identity_overrides.contains(extra.name),
             is_deferred_populate: deferred_populate_overrides.contains(extra.name),
             description: extra.description.map(|s| s.to_string()),
@@ -1060,6 +1111,7 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
             name,
         );
 
+        let is_plain_string = is_plain_smithy_string(model, &member_ref.target);
         attrs.push(AttrInfo {
             snake_name,
             provider_name: name.clone(),
@@ -1067,6 +1119,7 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
             is_required: false,
             is_create_only: false,
             is_read_only: true,
+            is_plain_string,
             is_identity: false,
             is_deferred_populate: deferred_populate_overrides.contains(name.as_str()),
             description,
@@ -1220,6 +1273,15 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
     // Mark data sources
     if is_data_source {
         code.push_str("\x20       .as_data_source()\n");
+    }
+
+    if let Some(unique_name_attribute) =
+        derive_unique_name_attribute(res.identifier, &attrs, is_data_source)
+    {
+        code.push_str(&format!(
+            "\x20       .with_unique_name_attribute(\"{}\")\n",
+            unique_name_attribute
+        ));
     }
 
     // Generate attributes
@@ -1508,7 +1570,7 @@ fn resolve_type(
                 return (inferred, None);
             }
 
-            ("AttributeType::string()".to_string(), None)
+            (PLAIN_STRING_TYPE_CODE.to_string(), None)
         }
         Some(ShapeKind::Boolean) => ("AttributeType::bool()".to_string(), None),
         Some(ShapeKind::Integer) | Some(ShapeKind::Long) => {
@@ -1561,7 +1623,7 @@ fn resolve_type(
                     .or_insert_with(|| enum_info.clone());
                 return ("/* enum */".to_string(), Some(enum_info));
             }
-            ("AttributeType::string()".to_string(), None)
+            (PLAIN_STRING_TYPE_CODE.to_string(), None)
         }
         Some(ShapeKind::IntEnum) => ("AttributeType::int()".to_string(), None),
         Some(ShapeKind::List) => {
@@ -1571,13 +1633,13 @@ fn resolve_type(
                 (format!("AttributeType::list({})", item_type), None)
             } else {
                 (
-                    "AttributeType::list(AttributeType::string())".to_string(),
+                    format!("AttributeType::list({PLAIN_STRING_TYPE_CODE})"),
                     None,
                 )
             }
         }
         Some(ShapeKind::Map) => (
-            "AttributeType::map(AttributeType::string())".to_string(),
+            format!("AttributeType::map({PLAIN_STRING_TYPE_CODE})"),
             None,
         ),
         Some(ShapeKind::Structure) => {
@@ -1597,14 +1659,14 @@ fn resolve_type(
                 let struct_code = generate_struct_type(ctx, shape_name, structure);
                 return (struct_code, None);
             }
-            ("AttributeType::string()".to_string(), None)
+            (PLAIN_STRING_TYPE_CODE.to_string(), None)
         }
         _ => {
             // Fallback: try name-based heuristics
             if let Some(inferred) = infer_string_type(field_name) {
                 (inferred, None)
             } else {
-                ("AttributeType::string()".to_string(), None)
+                (PLAIN_STRING_TYPE_CODE.to_string(), None)
             }
         }
     }
@@ -3855,7 +3917,7 @@ fn generate_data_source(
         } else if is_email_property(input.provider_name) {
             "types::email()".to_string()
         } else {
-            "AttributeType::string()".to_string()
+            PLAIN_STRING_TYPE_CODE.to_string()
         };
         ds_attrs.push(DsAttr {
             name: input.name.to_string(),
@@ -4248,7 +4310,7 @@ fn type_code_to_display(type_code: &str) -> String {
     }
 
     match type_code {
-        "AttributeType::string()" => "String".to_string(),
+        PLAIN_STRING_TYPE_CODE => "String".to_string(),
         "AttributeType::bool()" => "Bool".to_string(),
         "AttributeType::int()" => "Int".to_string(),
         "AttributeType::float()" => "Float".to_string(),
@@ -4865,6 +4927,122 @@ mod tests {
             type_code_to_display("super::iam_oidc_provider_arn()"),
             "IamOidcProviderArn"
         );
+    }
+
+    fn test_attr(
+        provider_name: &str,
+        snake_name: &str,
+        type_code: &str,
+        is_read_only: bool,
+        is_plain_string: bool,
+        is_identity: bool,
+        enum_info: Option<EnumInfo>,
+    ) -> AttrInfo {
+        AttrInfo {
+            snake_name: snake_name.to_string(),
+            provider_name: provider_name.to_string(),
+            type_code: type_code.to_string(),
+            is_required: false,
+            is_create_only: false,
+            is_read_only,
+            is_plain_string,
+            is_identity,
+            is_deferred_populate: false,
+            description: None,
+            enum_info,
+        }
+    }
+
+    #[test]
+    fn derive_unique_name_attribute_requires_writable_plain_string_identifier() {
+        let attrs = vec![test_attr(
+            "RoleName",
+            "role_name",
+            PLAIN_STRING_TYPE_CODE,
+            false,
+            true,
+            false,
+            None,
+        )];
+        assert_eq!(
+            derive_unique_name_attribute("RoleName", &attrs, false),
+            Some("role_name".to_string())
+        );
+
+        let attrs = vec![test_attr(
+            "logGroupName",
+            "log_group_name",
+            PLAIN_STRING_TYPE_CODE,
+            false,
+            true,
+            false,
+            None,
+        )];
+        assert_eq!(
+            derive_unique_name_attribute("LogGroupName", &attrs, false),
+            Some("log_group_name".to_string())
+        );
+
+        let attrs = vec![test_attr(
+            "VpcId",
+            "vpc_id",
+            PLAIN_STRING_TYPE_CODE,
+            true,
+            true,
+            false,
+            None,
+        )];
+        assert_eq!(derive_unique_name_attribute("VpcId", &attrs, false), None);
+
+        let attrs = vec![test_attr(
+            "VpcId",
+            "vpc_id",
+            "super::vpc_id()",
+            false,
+            true,
+            false,
+            None,
+        )];
+        assert_eq!(derive_unique_name_attribute("VpcId", &attrs, false), None);
+
+        let attrs = vec![test_attr(
+            "DocumentName",
+            "document_name",
+            PLAIN_STRING_TYPE_CODE,
+            false,
+            false,
+            false,
+            None,
+        )];
+        assert_eq!(
+            derive_unique_name_attribute("DocumentName", &attrs, false),
+            None
+        );
+
+        let attrs = vec![
+            test_attr(
+                "Name",
+                "name",
+                PLAIN_STRING_TYPE_CODE,
+                false,
+                true,
+                false,
+                None,
+            ),
+            test_attr("Type", "type", "/* enum */", false, false, true, None),
+        ];
+        assert_eq!(derive_unique_name_attribute("Name", &attrs, false), None);
+
+        let attrs = vec![test_attr(
+            "Bucket",
+            "bucket",
+            PLAIN_STRING_TYPE_CODE,
+            false,
+            true,
+            false,
+            None,
+        )];
+        assert_eq!(derive_unique_name_attribute("Bucket", &attrs, true), None);
     }
 
     #[test]

@@ -21,6 +21,7 @@ pub fn s3_bucket_acl_config() -> AwsSchemaConfig {
         resource_type_name: "s3.BucketAcl",
         has_tags: false,
         schema: ResourceSchema::new("s3.BucketAcl")
+            .with_unique_name_attribute("bucket")
             .attribute(
                 AttributeSchema::new(
                     "acl",

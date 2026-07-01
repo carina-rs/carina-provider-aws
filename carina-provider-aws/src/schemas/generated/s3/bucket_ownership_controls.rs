@@ -14,6 +14,7 @@ pub fn s3_bucket_ownership_controls_config() -> AwsSchemaConfig {
         resource_type_name: "s3.BucketOwnershipControls",
         has_tags: false,
         schema: ResourceSchema::new("s3.BucketOwnershipControls")
+        .with_unique_name_attribute("bucket")
         .attribute(
             AttributeSchema::new("bucket", AttributeType::string())
                 .required()

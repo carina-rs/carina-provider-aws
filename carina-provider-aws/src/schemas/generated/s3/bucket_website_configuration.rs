@@ -14,6 +14,7 @@ pub fn s3_bucket_website_configuration_config() -> AwsSchemaConfig {
         resource_type_name: "s3.BucketWebsiteConfiguration",
         has_tags: false,
         schema: ResourceSchema::new("s3.BucketWebsiteConfiguration")
+        .with_unique_name_attribute("bucket")
         .attribute(
             AttributeSchema::new("bucket", AttributeType::string())
                 .required()

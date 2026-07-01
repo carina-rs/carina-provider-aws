@@ -14,6 +14,7 @@ pub fn s3_bucket_replication_configuration_config() -> AwsSchemaConfig {
         resource_type_name: "s3.BucketReplicationConfiguration",
         has_tags: false,
         schema: ResourceSchema::new("s3.BucketReplicationConfiguration")
+            .with_unique_name_attribute("bucket")
             .attribute(
                 AttributeSchema::new("bucket", AttributeType::string())
                     .required()

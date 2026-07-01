@@ -19,6 +19,7 @@ pub fn logs_log_group_config() -> AwsSchemaConfig {
         has_tags: true,
         schema: ResourceSchema::new("logs.LogGroup")
         .with_description("Represents a log group.")
+        .with_unique_name_attribute("log_group_name")
         .attribute(
             AttributeSchema::new("deletion_protection_enabled", AttributeType::bool())
                 .create_only()
