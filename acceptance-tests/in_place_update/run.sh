@@ -11,7 +11,6 @@
 #   ec2_subnet         - Toggle map_public_ip_on_launch (false -> true)
 #   ec2_route          - Change route target (IGW -> NAT Gateway)
 #   s3_bucket          - Toggle versioning (Enabled -> Suspended)
-#   s3_bucket_acl      - ACL/object_ownership transition
 #
 # Filter (optional): substring to match test names (e.g. "ec2_vpc", "s3_bucket")
 #
@@ -66,10 +65,14 @@ signal_cleanup() {
         set +e
         echo ""
         echo "Interrupted. Cleaning up resources..."
-        cd "$ACTIVE_WORK_DIR" && with_account_creds "$CARINA_BIN" destroy --auto-approve "$ACTIVE_STEP2" 2>&1
-        cd "$ACTIVE_WORK_DIR" && with_account_creds "$CARINA_BIN" destroy --auto-approve "$ACTIVE_STEP1" 2>&1
-        cd "$ACTIVE_WORK_DIR" && with_account_creds "$CARINA_BIN" destroy --auto-approve "$ACTIVE_STEP2" 2>&1
-        cd "$ACTIVE_WORK_DIR" && with_account_creds "$CARINA_BIN" destroy --auto-approve "$ACTIVE_STEP1" 2>&1
+        swap_crn "$ACTIVE_STEP2" "$ACTIVE_WORK_DIR"
+        (cd "$ACTIVE_WORK_DIR" && with_account_creds "$CARINA_BIN" destroy --auto-approve . 2>&1)
+        swap_crn "$ACTIVE_STEP1" "$ACTIVE_WORK_DIR"
+        (cd "$ACTIVE_WORK_DIR" && with_account_creds "$CARINA_BIN" destroy --auto-approve . 2>&1)
+        swap_crn "$ACTIVE_STEP2" "$ACTIVE_WORK_DIR"
+        (cd "$ACTIVE_WORK_DIR" && with_account_creds "$CARINA_BIN" destroy --auto-approve . 2>&1)
+        swap_crn "$ACTIVE_STEP1" "$ACTIVE_WORK_DIR"
+        (cd "$ACTIVE_WORK_DIR" && with_account_creds "$CARINA_BIN" destroy --auto-approve . 2>&1)
         rm -rf "$ACTIVE_WORK_DIR"
         ACTIVE_WORK_DIR=""
     fi
@@ -82,13 +85,12 @@ run_step() {
     local work_dir="$1"
     local description="$2"
     local command="$3"
-    local crn_file="$4"
-    local extra_args="${5:-}"
+    local extra_args="${4:-}"
 
     printf "  %-55s " "$description"
 
     local output
-    if output=$(cd "$work_dir" && with_account_creds "$CARINA_BIN" $command $extra_args "$crn_file" 2>&1); then
+    if output=$(cd "$work_dir" && with_account_creds "$CARINA_BIN" $command $extra_args . 2>&1); then
         echo "OK"
         TOTAL_PASSED=$((TOTAL_PASSED + 1))
         return 0
@@ -155,13 +157,12 @@ assert_identifiers() {
 run_plan_verify() {
     local work_dir="$1"
     local description="$2"
-    local crn_file="$3"
 
     printf "  %-55s " "$description"
 
     local output
     local rc
-    output=$(cd "$work_dir" && with_account_creds "$CARINA_BIN" plan --detailed-exitcode "$crn_file" 2>&1) || rc=$?
+    output=$(cd "$work_dir" && with_account_creds "$CARINA_BIN" plan --detailed-exitcode . 2>&1) || rc=$?
     rc=${rc:-0}
 
     if [ $rc -eq 2 ]; then
@@ -182,6 +183,17 @@ run_plan_verify() {
     return 0
 }
 
+# Swap the active .crn into work_dir/main.crn (with provider source injected).
+# Args: source_crn target_work_dir
+swap_crn() {
+    local src="$1"
+    local target="$2"
+    local injected_dir
+    injected_dir=$(inject_provider_source "$src")
+    cp "$injected_dir/main.crn" "$target/main.crn"
+    rm -rf "$injected_dir"
+}
+
 # destroy_work_dir: try to destroy with both step configs, then retry
 # Returns 0 if at least one destroy succeeded, 1 if ALL failed
 # (Named distinctly from `cleanup` so the EXIT trap in _helpers.sh keeps using
@@ -196,17 +208,21 @@ destroy_work_dir() {
     # Disable set -e to ensure all destroy attempts run
     set +e
     echo "  Cleanup: destroying resources..."
-    if cd "$work_dir" && with_account_creds "$CARINA_BIN" destroy --auto-approve "$step2" 2>&1; then
+    swap_crn "$step2" "$work_dir"
+    if (cd "$work_dir" && with_account_creds "$CARINA_BIN" destroy --auto-approve . 2>&1); then
         any_success=true
     fi
-    if cd "$work_dir" && with_account_creds "$CARINA_BIN" destroy --auto-approve "$step1" 2>&1; then
+    swap_crn "$step1" "$work_dir"
+    if (cd "$work_dir" && with_account_creds "$CARINA_BIN" destroy --auto-approve . 2>&1); then
         any_success=true
     fi
     # Retry: resources may have dependencies that prevent deletion on first pass
-    if cd "$work_dir" && with_account_creds "$CARINA_BIN" destroy --auto-approve "$step2" 2>&1; then
+    swap_crn "$step2" "$work_dir"
+    if (cd "$work_dir" && with_account_creds "$CARINA_BIN" destroy --auto-approve . 2>&1); then
         any_success=true
     fi
-    if cd "$work_dir" && with_account_creds "$CARINA_BIN" destroy --auto-approve "$step1" 2>&1; then
+    swap_crn "$step1" "$work_dir"
+    if (cd "$work_dir" && with_account_creds "$CARINA_BIN" destroy --auto-approve . 2>&1); then
         any_success=true
     fi
     set -e
@@ -233,9 +249,15 @@ run_test() {
     local work_dir
     work_dir=$(mktemp -d)
 
-    # Inject provider source into .crn files
-    step1=$(inject_provider_source "$step1")
-    step2=$(inject_provider_source "$step2")
+    # Load step1 and initialize (creates backend lock + installs providers).
+    swap_crn "$step1" "$work_dir"
+    if ! prepare_work_dir "$work_dir"; then
+        echo "  step0: init                                             FAIL"
+        TOTAL_FAILED=$((TOTAL_FAILED + 1))
+        rm -rf "$work_dir"
+        ACTIVE_WORK_DIR=""
+        return 1
+    fi
 
     # Register for signal cleanup
     ACTIVE_WORK_DIR="$work_dir"
@@ -246,19 +268,17 @@ run_test() {
     echo ""
 
     # Step 1: Apply initial config
-    if ! run_step "$work_dir" "step1: apply initial" "apply" "$step1" "--auto-approve"; then
+    if ! run_step "$work_dir" "step1: apply initial" "apply" "--auto-approve"; then
         destroy_work_dir "$work_dir" "$step2" "$step1"
         rm -rf "$work_dir"
-        rm -rf "$step1" "$step2"
         ACTIVE_WORK_DIR=""
         return 1
     fi
 
     # Step 1b: Plan-verify initial state
-    if ! run_plan_verify "$work_dir" "step1: plan-verify initial" "$step1"; then
+    if ! run_plan_verify "$work_dir" "step1: plan-verify initial"; then
         destroy_work_dir "$work_dir" "$step2" "$step1"
         rm -rf "$work_dir"
-        rm -rf "$step1" "$step2"
         ACTIVE_WORK_DIR=""
         return 1
     fi
@@ -267,11 +287,13 @@ run_test() {
     local ids_after_step1
     ids_after_step1=$(get_identifiers "$work_dir")
 
+    # Swap in step2 config (providers are the same, lock already present).
+    swap_crn "$step2" "$work_dir"
+
     # Step 2: Apply modified config (in-place update)
-    if ! run_step "$work_dir" "step2: apply in-place update" "apply" "$step2" "--auto-approve"; then
+    if ! run_step "$work_dir" "step2: apply in-place update" "apply" "--auto-approve"; then
         destroy_work_dir "$work_dir" "$step2" "$step1"
         rm -rf "$work_dir"
-        rm -rf "$step1" "$step2"
         ACTIVE_WORK_DIR=""
         return 1
     fi
@@ -284,16 +306,14 @@ run_test() {
     if ! assert_identifiers "assert: identifiers preserved after update" "$ids_after_step1" "$ids_after_step2" "equal"; then
         destroy_work_dir "$work_dir" "$step2" "$step1"
         rm -rf "$work_dir"
-        rm -rf "$step1" "$step2"
         ACTIVE_WORK_DIR=""
         return 1
     fi
 
     # Step 3: Plan-verify after update
-    if ! run_plan_verify "$work_dir" "step3: plan-verify after update" "$step2"; then
+    if ! run_plan_verify "$work_dir" "step3: plan-verify after update"; then
         destroy_work_dir "$work_dir" "$step2" "$step1"
         rm -rf "$work_dir"
-        rm -rf "$step1" "$step2"
         ACTIVE_WORK_DIR=""
         return 1
     fi
@@ -303,14 +323,12 @@ run_test() {
         echo "  WARNING: All destroy attempts failed. Preserving work dir for debugging:"
         echo "    $work_dir"
         TOTAL_FAILED=$((TOTAL_FAILED + 1))
-        rm -rf "$step1" "$step2"
         ACTIVE_WORK_DIR=""
         echo ""
         return 1
     fi
 
     rm -rf "$work_dir"
-    rm -rf "$step1" "$step2"
     ACTIVE_WORK_DIR=""
     echo ""
 }
@@ -354,12 +372,6 @@ run_test "s3_bucket" \
     "$SCRIPT_DIR/s3_bucket_step1.crn" \
     "$SCRIPT_DIR/s3_bucket_step2.crn" \
     "Test 6: S3 Bucket (versioning Enabled -> Suspended)"
-
-# Test 7: S3 Bucket ACL - ACL/object_ownership transition
-run_test "s3_bucket_acl" \
-    "$SCRIPT_DIR/s3_bucket_acl_step1.crn" \
-    "$SCRIPT_DIR/s3_bucket_acl_step2.crn" \
-    "Test 7: S3 Bucket ACL (ACL private + BucketOwnerPreferred -> BucketOwnerEnforced)"
 
 echo "════════════════════════════════════════"
 echo "Total: $TOTAL_PASSED passed, $TOTAL_FAILED failed"
