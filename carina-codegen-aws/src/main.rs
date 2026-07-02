@@ -25,8 +25,19 @@ enum UniqueNameReplacementClass {
     Coexisting,
 }
 
-const UNIQUE_NAME_REPLACEMENT_CLASSES: &[(&str, UniqueNameReplacementClass)] =
-    &[("ec2.Vpc", UniqueNameReplacementClass::Coexisting)];
+const UNIQUE_NAME_REPLACEMENT_CLASSES: &[(&str, UniqueNameReplacementClass)] = &[
+    ("ec2.Vpc", UniqueNameReplacementClass::Coexisting),
+    // TransitGatewayAttachment replacements are driven by create-only
+    // transit_gateway_id/vpc_id changes. Any reachable replacement targets a
+    // different (transit gateway, VPC) pair than the original; AWS allows a VPC
+    // to attach to multiple transit gateways simultaneously, so the new
+    // attachment can coexist during create_before_destroy. Cascade-driven
+    // replacements also change the pair because the upstream TGW/VPC id changes.
+    (
+        "ec2.TransitGatewayAttachment",
+        UniqueNameReplacementClass::Coexisting,
+    ),
+];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum UniqueNameEmission {
@@ -5105,7 +5116,13 @@ mod tests {
 
         assert_eq!(
             UNIQUE_NAME_REPLACEMENT_CLASSES,
-            &[("ec2.Vpc", UniqueNameReplacementClass::Coexisting)]
+            &[
+                ("ec2.Vpc", UniqueNameReplacementClass::Coexisting),
+                (
+                    "ec2.TransitGatewayAttachment",
+                    UniqueNameReplacementClass::Coexisting
+                ),
+            ]
         );
 
         let attr_attrs = vec![test_attr(
@@ -5141,6 +5158,18 @@ mod tests {
         assert_eq!(coexisting_emission, UniqueNameEmission::Coexisting);
         assert_eq!(
             emitted(coexisting_emission),
+            "\x20       .with_coexisting_replacement()\n"
+        );
+
+        let tgw_attachment_emission = derive_unique_name_emission(
+            "ec2.TransitGatewayAttachment",
+            "TransitGatewayAttachmentId",
+            &[],
+            false,
+        );
+        assert_eq!(tgw_attachment_emission, UniqueNameEmission::Coexisting);
+        assert_eq!(
+            emitted(tgw_attachment_emission),
             "\x20       .with_coexisting_replacement()\n"
         );
 
