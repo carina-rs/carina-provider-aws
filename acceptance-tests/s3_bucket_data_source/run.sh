@@ -32,4 +32,6 @@ echo "════════════════════════�
 echo "Tests run: $TESTS_RUN, $TOTAL_PASSED passed, $TOTAL_FAILED failed"
 echo "════════════════════════════════════════"
 
-[ "$TOTAL_FAILED" -gt 0 ] && exit 1
+if [ "$TOTAL_FAILED" -gt 0 ]; then
+    exit 1
+fi
