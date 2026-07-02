@@ -13,7 +13,7 @@ provider awscc {
 }
 
 let zone = awscc.route53.HostedZone {
-  name = 'carina-acc-test-route53-record-set.example.com.'
+  name = 'carina-acc-test-record-set.carina-rs-test.com.'
 
   hosted_zone_config = {
     comment = 'Carina acceptance test zone'
@@ -29,7 +29,7 @@ let zone = awscc.route53.HostedZone {
 
 aws.route53.RecordSet {
   hosted_zone_id   = zone.id
-  name             = 'www.carina-acc-test-route53-record-set.example.com'
+  name             = 'www.carina-acc-test-record-set.carina-rs-test.com'
   type             = aws.route53.RecordSet.Type.a
   ttl              = 60
   resource_records = ['192.0.2.10']
