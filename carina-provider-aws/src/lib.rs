@@ -109,11 +109,6 @@ impl AwsProvider {
             .get("aws", resource_type, SchemaKind::Resource)
     }
 
-    pub(crate) fn data_source_schema(&self, resource_type: &str) -> Option<&ResourceSchema> {
-        self.schema_registry
-            .get("aws", resource_type, SchemaKind::DataSource)
-    }
-
     /// Construct an `AwsProvider` from caller-supplied SDK clients.
     ///
     /// `new_with_account_guard` is the production entry point — it
