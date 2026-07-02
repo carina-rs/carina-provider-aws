@@ -1,0 +1,36 @@
+# Route53 RecordSet - cross-provider hosted zone test
+#
+# Tests: aws.route53.RecordSet creation in an awscc.route53.HostedZone.
+# The aws provider owns the record set; awscc supplies the hosted zone
+# resource that is not available in the aws provider.
+
+provider aws {
+  region = aws.Region.ap_northeast_1
+}
+
+provider awscc {
+  region = aws.Region.ap_northeast_1
+}
+
+let zone = awscc.route53.HostedZone {
+  name = 'carina-acc-test-route53-record-set.example.com.'
+
+  hosted_zone_config = {
+    comment = 'Carina acceptance test zone'
+  }
+
+  hosted_zone_tags = [
+    {
+      key   = 'Environment'
+      value = 'acceptance-test'
+    },
+  ]
+}
+
+aws.route53.RecordSet {
+  hosted_zone_id   = zone.id
+  name             = 'www.carina-acc-test-route53-record-set.example.com'
+  type             = aws.route53.RecordSet.Type.a
+  ttl              = 60
+  resource_records = ['192.0.2.10']
+}

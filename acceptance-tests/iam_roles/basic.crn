@@ -1,0 +1,59 @@
+# IAM Roles - data source test
+#
+# Tests: aws.iam.Role creation followed by read aws.iam.Roles.
+# A second role consumes roles.names[0] so the data-source output is
+# referenced by the graph and must be resolved during apply/plan.
+
+provider aws {
+  region = aws.Region.ap_northeast_1
+}
+
+let target_role_name = 'carina-acc-test-iam-roles-target'
+
+let target_role = aws.iam.Role {
+  role_name = target_role_name
+
+  assume_role_policy_document = {
+    version = aws.iam.PolicyDocument.Version.2012_10_17
+    statement {
+      effect = aws.iam.PolicyDocument.Statement.Effect.allow
+
+      principal = {
+        service = 'lambda.amazonaws.com'
+      }
+
+      action = 'sts:AssumeRole'
+    }
+  }
+
+  tags = {
+    Environment = 'acceptance-test'
+  }
+}
+
+let roles = read aws.iam.Roles {
+  path_prefix = '/'
+  name_regex  = "^${target_role.role_name}$"
+}
+
+aws.iam.Role {
+  role_name   = 'carina-acc-test-iam-roles-consumer'
+  description = roles.names[0]
+
+  assume_role_policy_document = {
+    version = aws.iam.PolicyDocument.Version.2012_10_17
+    statement {
+      effect = aws.iam.PolicyDocument.Statement.Effect.allow
+
+      principal = {
+        service = 'lambda.amazonaws.com'
+      }
+
+      action = 'sts:AssumeRole'
+    }
+  }
+
+  tags = {
+    Environment = 'acceptance-test'
+  }
+}

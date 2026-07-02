@@ -399,7 +399,45 @@ deep_cleanup_account() {
         with_account_creds "$account" aws logs delete-log-group --log-group-name "$lg" 2>/dev/null || true
     done
 
-    # 5. Delete transit gateways
+    # 5. Delete orphaned Route53 hosted zones from record set tests
+    local route53_zone_name="carina-acc-test-route53-record-set.example.com."
+    local route53_record_name="www.carina-acc-test-route53-record-set.example.com."
+    local hosted_zones
+    hosted_zones=$(with_account_creds "$account" aws route53 list-hosted-zones-by-name \
+        --dns-name "$route53_zone_name" \
+        --query "HostedZones[?Name=='$route53_zone_name'].Id" --output text 2>/dev/null)
+    for zone_id in $hosted_zones; do
+        if [ -z "$zone_id" ] || [ "$zone_id" = "None" ]; then
+            continue
+        fi
+        found=$((found + 1))
+        echo "  Cleaning Route53 hosted zone $zone_id..."
+        with_account_creds "$account" aws route53 change-resource-record-sets \
+            --hosted-zone-id "$zone_id" \
+            --change-batch '{"Changes":[{"Action":"DELETE","ResourceRecordSet":{"Name":"'"$route53_record_name"'","Type":"A","TTL":60,"ResourceRecords":[{"Value":"192.0.2.10"}]}}]}' \
+            2>/dev/null || true
+        with_account_creds "$account" aws route53 delete-hosted-zone --id "$zone_id" 2>/dev/null || true
+    done
+
+    # 6. Delete orphaned ACM certificates from certificate tests
+    local acm_cert_domain="acceptance-test.carina-rs.example.com"
+    local certs
+    certs=$(with_account_creds "$account" aws acm list-certificates \
+        --region ap-northeast-1 \
+        --certificate-statuses PENDING_VALIDATION ISSUED INACTIVE EXPIRED VALIDATION_TIMED_OUT REVOKED FAILED \
+        --query "CertificateSummaryList[?DomainName=='$acm_cert_domain'].CertificateArn" --output text 2>/dev/null)
+    for cert_arn in $certs; do
+        if [ -z "$cert_arn" ] || [ "$cert_arn" = "None" ]; then
+            continue
+        fi
+        found=$((found + 1))
+        echo "  Cleaning ACM certificate $cert_arn..."
+        with_account_creds "$account" aws acm delete-certificate \
+            --region ap-northeast-1 \
+            --certificate-arn "$cert_arn" 2>/dev/null || true
+    done
+
+    # 7. Delete transit gateways
     local tgws
     tgws=$(with_account_creds "$account" aws ec2 describe-transit-gateways \
         --filters "Name=state,Values=available,pending" \
@@ -420,7 +458,7 @@ deep_cleanup_account() {
         with_account_creds "$account" aws ec2 delete-transit-gateway --transit-gateway-id "$tgw_id" 2>/dev/null || true
     done
 
-    # 6. Release Elastic IPs not associated with anything
+    # 8. Release Elastic IPs not associated with anything
     local eips
     eips=$(with_account_creds "$account" aws ec2 describe-addresses \
         --query 'Addresses[?AssociationId==null].AllocationId' --output text 2>/dev/null)
@@ -448,7 +486,7 @@ fi
 echo ""
 
 # CARINA_BIN can be set externally (e.g., when running from the monorepo).
-if [ -z "$CARINA_BIN" ]; then
+if [ -z "${CARINA_BIN:-}" ]; then
     # Prefer release build (WASM JIT is much faster with release)
     if [ -f "$SIBLING_BASE/carina/target/release/carina" ]; then
         CARINA_BIN="$SIBLING_BASE/carina/target/release/carina"

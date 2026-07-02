@@ -1,0 +1,20 @@
+# ACM Certificate - DNS validation pending test
+#
+# Tests: aws.acm.Certificate create/read/destroy with DNS validation.
+# The reserved example.com name is never validated, so the certificate
+# remains PENDING_VALIDATION while deferred status and validation records
+# are read back for plan-verify.
+
+provider aws {
+  region = aws.Region.ap_northeast_1
+}
+
+aws.acm.Certificate {
+  domain_name       = 'acceptance-test.carina-rs.example.com'
+  validation_method = aws.acm.Certificate.ValidationMethod.dns
+  key_algorithm     = aws.acm.Certificate.KeyAlgorithm.rsa_2048
+
+  tags = {
+    Environment = 'acceptance-test'
+  }
+}
