@@ -3,6 +3,7 @@
 # Exercises:
 # - aws.s3.Bucket as Managed (Carina creates and destroys it)
 # - aws.s3.Bucket as DataSource (Carina reads a pre-existing bucket)
+# - data-source outputs consumed by the Managed bucket through tags
 #
 # The pre-existing bucket is created/destroyed by run.sh outside Carina.
 # Bucket names are templated via envsubst before apply because S3 bucket
@@ -12,10 +13,20 @@ provider aws {
   region = aws.Region.ap_northeast_1
 }
 
-let new_bucket = aws.s3.Bucket {
-  bucket = '${NEW_BUCKET}'
-}
-
 let existing = read aws.s3.Bucket {
   bucket = '${PRE_BUCKET}'
+}
+
+aws.s3.Bucket {
+  bucket = '${NEW_BUCKET}'
+
+  tags = {
+    Environment          = 'acceptance-test'
+    ExistingBucket       = existing.bucket
+    ExistingArn          = existing.arn
+    ExistingRegion       = existing.region
+    ExistingDomain       = existing.bucket_domain_name
+    ExistingRegionalName = existing.bucket_regional_domain_name
+    ExistingHostedZoneId = existing.hosted_zone_id
+  }
 }

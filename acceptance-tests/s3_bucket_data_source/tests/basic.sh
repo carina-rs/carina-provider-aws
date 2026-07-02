@@ -46,86 +46,43 @@ run_step "step0: init (resolve provider)" "$CARINA_BIN" init .
 
 run_step "step1: apply (creates new + reads existing)" "$CARINA_BIN" apply --auto-approve .
 
-# State should hold both resources: new_bucket (Managed) + existing (DataSource).
-assert_state_resource_count "assert: 2 resources in state" "2" "$WORK_DIR"
+# carina#3266 prunes data-source read artifact rows from state.resources;
+# only the managed bucket is persisted. Data-source values are proven
+# end-to-end by tags on the managed bucket that consume existing.* outputs.
+assert_state_resource_count "assert: 1 resource in state" "1" "$WORK_DIR"
 
-# Locate the data source entry by binding name and verify the computed
-# attributes (arn, region, bucket_domain_name, bucket_regional_domain_name,
-# hosted_zone_id) match what the lookup table promises.
-DS_PATH=".resources[] | select(.binding == \"existing\")"
+MANAGED_PATH=".resources[] | select(.attributes.bucket == \"$NEW_BUCKET\")"
 
-printf "  %-50s" "assert: existing.bucket = $PRE_BUCKET"
-ACTUAL=$(jq -r "$DS_PATH | .attributes.bucket" "$WORK_DIR/carina.state.json" 2>/dev/null)
-if [ "$ACTUAL" = "$PRE_BUCKET" ]; then
-    echo "OK"
-    TEST_PASSED=$((TEST_PASSED + 1))
-else
-    echo "FAIL (got '$ACTUAL')"
-    TEST_FAILED=$((TEST_FAILED + 1))
-fi
-
-printf "  %-50s" "assert: existing.region = $REGION"
-ACTUAL=$(jq -r "$DS_PATH | .attributes.region" "$WORK_DIR/carina.state.json" 2>/dev/null)
-if [ "$ACTUAL" = "$REGION" ]; then
-    echo "OK"
-    TEST_PASSED=$((TEST_PASSED + 1))
-else
-    echo "FAIL (got '$ACTUAL')"
-    TEST_FAILED=$((TEST_FAILED + 1))
-fi
-
-printf "  %-50s" "assert: existing.arn formatted"
-ACTUAL=$(jq -r "$DS_PATH | .attributes.arn" "$WORK_DIR/carina.state.json" 2>/dev/null)
-if [ "$ACTUAL" = "arn:aws:s3:::$PRE_BUCKET" ]; then
-    echo "OK"
-    TEST_PASSED=$((TEST_PASSED + 1))
-else
-    echo "FAIL (got '$ACTUAL')"
-    TEST_FAILED=$((TEST_FAILED + 1))
-fi
-
-printf "  %-50s" "assert: existing.bucket_domain_name"
-ACTUAL=$(jq -r "$DS_PATH | .attributes.bucket_domain_name" "$WORK_DIR/carina.state.json" 2>/dev/null)
-if [ "$ACTUAL" = "$PRE_BUCKET.s3.amazonaws.com" ]; then
-    echo "OK"
-    TEST_PASSED=$((TEST_PASSED + 1))
-else
-    echo "FAIL (got '$ACTUAL')"
-    TEST_FAILED=$((TEST_FAILED + 1))
-fi
-
-printf "  %-50s" "assert: existing.bucket_regional_domain_name"
-ACTUAL=$(jq -r "$DS_PATH | .attributes.bucket_regional_domain_name" "$WORK_DIR/carina.state.json" 2>/dev/null)
-if [ "$ACTUAL" = "$PRE_BUCKET.s3.$REGION.amazonaws.com" ]; then
-    echo "OK"
-    TEST_PASSED=$((TEST_PASSED + 1))
-else
-    echo "FAIL (got '$ACTUAL')"
-    TEST_FAILED=$((TEST_FAILED + 1))
-fi
-
+assert_state_value "assert: new_bucket present in state" \
+    "$MANAGED_PATH | .attributes.bucket" \
+    "$NEW_BUCKET" \
+    "$WORK_DIR"
+assert_state_value "assert: tag ExistingBucket = existing.bucket" \
+    "$MANAGED_PATH | .attributes.tags.ExistingBucket" \
+    "$PRE_BUCKET" \
+    "$WORK_DIR"
+assert_state_value "assert: tag ExistingRegion = existing.region" \
+    "$MANAGED_PATH | .attributes.tags.ExistingRegion" \
+    "$REGION" \
+    "$WORK_DIR"
+assert_state_value "assert: tag ExistingArn = existing.arn" \
+    "$MANAGED_PATH | .attributes.tags.ExistingArn" \
+    "arn:aws:s3:::$PRE_BUCKET" \
+    "$WORK_DIR"
+assert_state_value "assert: tag ExistingDomain = existing.bucket_domain_name" \
+    "$MANAGED_PATH | .attributes.tags.ExistingDomain" \
+    "$PRE_BUCKET.s3.amazonaws.com" \
+    "$WORK_DIR"
+assert_state_value "assert: tag ExistingRegionalName = existing.bucket_regional_domain_name" \
+    "$MANAGED_PATH | .attributes.tags.ExistingRegionalName" \
+    "$PRE_BUCKET.s3.$REGION.amazonaws.com" \
+    "$WORK_DIR"
 # Hosted zone for ap-northeast-1 per
 # https://docs.aws.amazon.com/general/latest/gr/s3.html
-printf "  %-50s" "assert: existing.hosted_zone_id (ap-northeast-1)"
-ACTUAL=$(jq -r "$DS_PATH | .attributes.hosted_zone_id" "$WORK_DIR/carina.state.json" 2>/dev/null)
-if [ "$ACTUAL" = "Z2M4EHUR26P7ZW" ]; then
-    echo "OK"
-    TEST_PASSED=$((TEST_PASSED + 1))
-else
-    echo "FAIL (got '$ACTUAL')"
-    TEST_FAILED=$((TEST_FAILED + 1))
-fi
-
-# Verify the Managed-side bucket is also recorded.
-printf "  %-50s" "assert: new_bucket present in state"
-ACTUAL=$(jq -r ".resources[] | select(.binding == \"new_bucket\") | .attributes.bucket" "$WORK_DIR/carina.state.json" 2>/dev/null)
-if [ "$ACTUAL" = "$NEW_BUCKET" ]; then
-    echo "OK"
-    TEST_PASSED=$((TEST_PASSED + 1))
-else
-    echo "FAIL (got '$ACTUAL')"
-    TEST_FAILED=$((TEST_FAILED + 1))
-fi
+assert_state_value "assert: tag ExistingHostedZoneId = existing.hosted_zone_id" \
+    "$MANAGED_PATH | .attributes.tags.ExistingHostedZoneId" \
+    "Z2M4EHUR26P7ZW" \
+    "$WORK_DIR"
 
 run_step "step2: destroy (only the Managed bucket)" "$CARINA_BIN" destroy --auto-approve .
 ACTIVE_WORK_DIR=""

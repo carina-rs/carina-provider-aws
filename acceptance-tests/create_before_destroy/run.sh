@@ -5,9 +5,13 @@
 #   env AWS_PROFILE="<profile>" ./run.sh [filter]
 #
 # Tests:
-#   ec2_vpc - Replacement without temporary name (no name_attribute)
+#   ec2_vpc - Replacement rejected when no unique_name_attribute exists
 #
 # Filter (optional): substring to match test names (e.g. "ec2_vpc")
+#
+# This ec2_vpc case pins core's current MissingNameAttributeError contract.
+# Name-free CBD semantics are tracked in carina-rs/carina#3667; positive CBD
+# replacement coverage lives in the iam_role steps of this suite.
 #
 # AWS authentication:
 #   Set AWS_PROFILE to one of the carina-test-00X profiles. The script
@@ -87,6 +91,39 @@ run_step() {
         TOTAL_FAILED=$((TOTAL_FAILED + 1))
         return 1
     fi
+}
+
+run_expected_error() {
+    local work_dir="$1"
+    local description="$2"
+    local command="$3"
+    local expected_fragment="$4"
+    local extra_args="${5:-}"
+
+    printf "  %-55s " "$description"
+
+    local output
+    if output=$(cd "$work_dir" && with_account_creds "$CARINA_BIN" $command $extra_args . 2>&1); then
+        echo "FAIL"
+        echo "  ERROR: command unexpectedly succeeded; expected error containing:"
+        echo "    $expected_fragment"
+        TOTAL_FAILED=$((TOTAL_FAILED + 1))
+        return 1
+    fi
+
+    if grep -Fq "$expected_fragment" <<< "$output"; then
+        echo "OK"
+        TOTAL_PASSED=$((TOTAL_PASSED + 1))
+        return 0
+    fi
+
+    echo "FAIL"
+    echo "  ERROR: expected error containing:"
+    echo "    $expected_fragment"
+    echo "  Actual output:"
+    echo "  $output"
+    TOTAL_FAILED=$((TOTAL_FAILED + 1))
+    return 1
 }
 
 # Extract all resource identifiers from carina.state.json as a sorted newline-separated string.
@@ -223,6 +260,7 @@ run_test() {
     local step1="$2"
     local step2="$3"
     local desc="$4"
+    local expected_step2_error="${5:-}"
 
     # Apply filter
     if [ -n "$FILTER" ] && [[ "$test_name" != *"$FILTER"* ]]; then
@@ -271,6 +309,33 @@ run_test() {
     # Swap in step2 config (providers are the same, lock already present)
     swap_crn "$step2" "$work_dir"
 
+    if [ -n "$expected_step2_error" ]; then
+        if ! run_expected_error "$work_dir" "step2: plan replace fails as expected" "plan" "$expected_step2_error"; then
+            destroy_work_dir "$work_dir"
+            rm -rf "$work_dir"
+            ACTIVE_WORK_DIR=""
+            return 1
+        fi
+
+        # Restore the applied config so destroy uses the same resource identity
+        # that created the initial VPC.
+        swap_crn "$step1" "$work_dir"
+
+        if ! destroy_work_dir "$work_dir"; then
+            echo "  WARNING: All destroy attempts failed. Preserving work dir for debugging:"
+            echo "    $work_dir"
+            TOTAL_FAILED=$((TOTAL_FAILED + 1))
+            ACTIVE_WORK_DIR=""
+            echo ""
+            return 1
+        fi
+
+        rm -rf "$work_dir"
+        ACTIVE_WORK_DIR=""
+        echo ""
+        return 0
+    fi
+
     # Step 2: Apply modified config (triggers create_before_destroy replacement)
     if ! run_step "$work_dir" "step2: apply replace (create_before_destroy)" "apply" "--auto-approve"; then
         destroy_work_dir "$work_dir"
@@ -318,12 +383,13 @@ echo "create_before_destroy multi-step acceptance tests (AWS)"
 echo "════════════════════════════════════════"
 echo ""
 
-# Test 1: EC2 VPC - replacement WITHOUT temporary name
-# No name_attribute, cidr_block is create-only
+# Test 1: EC2 VPC - CBD rejects schemas without unique_name_attribute
+# ec2.Vpc has no unique_name_attribute; cidr_block is create-only.
 run_test "ec2_vpc" \
     "$SCRIPT_DIR/ec2_vpc_step1.crn" \
     "$SCRIPT_DIR/ec2_vpc_step2.crn" \
-    "Test 1: EC2 VPC (no name_attribute, no temporary name)"
+    "Test 1: EC2 VPC (missing unique_name_attribute error)" \
+    "has no unique_name_attribute"
 
 echo "════════════════════════════════════════"
 echo "Total: $TOTAL_PASSED passed, $TOTAL_FAILED failed"

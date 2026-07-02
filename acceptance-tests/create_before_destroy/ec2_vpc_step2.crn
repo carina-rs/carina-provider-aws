@@ -1,13 +1,18 @@
-# EC2 VPC - create_before_destroy test (step 2: replace)
+# EC2 VPC - create_before_destroy negative test (step 2: replace)
 #
-# Changes cidr_block (create-only) with create_before_destroy lifecycle.
-# VPC has no name_attribute, so no temporary name is generated.
+# Changes cidr_block (create-only) with create_before_destroy lifecycle while
+# keeping the same let binding as step 1. Anonymous resource identities include
+# create-only attributes, so changing cidr_block would route the diff to
+# independent Create+Delete instead of replacement and never exercise the
+# MissingNameAttributeError path. This must fail at plan time because ec2.Vpc
+# has no unique_name_attribute; core needs one to generate a temporary name.
+# Name-free CBD semantics are tracked in carina-rs/carina#3667.
 
 provider aws {
   region = aws.Region.ap_northeast_1
 }
 
-aws.ec2.Vpc {
+let cbd_vpc = aws.ec2.Vpc {
   cidr_block           = '10.201.0.0/16'
   enable_dns_support   = true
   enable_dns_hostnames = true
