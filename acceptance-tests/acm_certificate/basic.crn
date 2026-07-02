@@ -4,8 +4,8 @@
 # The domain is a fake domain we do not own, so DNS validation never
 # completes and the certificate remains PENDING_VALIDATION while deferred
 # status and validation records are read back for plan-verify.
-# Explicit key_algorithm coverage is blocked on #474 (read-back
-# normalization); restore it when fixed.
+# ACM reads key_algorithm back as RSA-2048; the provider boundary
+# normalizes it to the schema enum value RSA_2048.
 
 provider aws {
   region = aws.Region.ap_northeast_1
@@ -14,6 +14,7 @@ provider aws {
 aws.acm.Certificate {
   domain_name       = 'acceptance-test.carina-rs-test.com'
   validation_method = aws.acm.Certificate.ValidationMethod.dns
+  key_algorithm     = aws.acm.Certificate.KeyAlgorithm.rsa_2048
 
   tags = {
     Environment = 'acceptance-test'

@@ -3,6 +3,7 @@
 //! These reduce boilerplate across EC2 (and other) service implementations.
 
 use indexmap::IndexMap;
+use std::collections::HashMap;
 use std::future::Future;
 use std::time::Duration;
 
@@ -146,6 +147,161 @@ pub(crate) fn optional_enum_value_at_schema_path(
             .map(|c| c.api_value().to_string()),
         _ => None,
     }
+}
+
+pub(crate) fn normalize_read_state_enum_values(schema: &ResourceSchema, mut state: State) -> State {
+    if state.exists {
+        normalize_read_attributes_enum_values(schema, &mut state.attributes);
+    }
+    state
+}
+
+pub(crate) fn normalize_read_attributes_enum_values(
+    schema: &ResourceSchema,
+    attributes: &mut HashMap<String, Value>,
+) {
+    for (attr_name, value) in attributes {
+        let Some(attr) = schema.attributes.get(attr_name) else {
+            continue;
+        };
+        let mut budget = ShapeWalkBudget::new(128);
+        normalize_read_value_enum_values(schema, &attr.attr_type, value, &mut budget);
+    }
+}
+
+fn normalize_read_value_enum_values(
+    schema: &ResourceSchema,
+    attr_type: &AttributeType,
+    value: &mut Value,
+    budget: &mut ShapeWalkBudget,
+) {
+    match schema.shape_of(attr_type) {
+        Shape::Enum { values, .. } => normalize_read_enum_leaf(schema, attr_type, values, value),
+        Shape::List { element_type, .. } => {
+            if let Value::Concrete(ConcreteValue::List(items)) = value {
+                for item in items {
+                    let mut item_budget = budget.clone();
+                    normalize_read_value_enum_values(schema, element_type, item, &mut item_budget);
+                }
+            }
+        }
+        Shape::Map {
+            value: value_type, ..
+        } => {
+            if let Value::Concrete(ConcreteValue::Map(map)) = value {
+                for map_value in map.values_mut() {
+                    let mut value_budget = budget.clone();
+                    normalize_read_value_enum_values(
+                        schema,
+                        value_type,
+                        map_value,
+                        &mut value_budget,
+                    );
+                }
+            }
+        }
+        Shape::Struct { .. } => {
+            let Some(fields) = schema.struct_fields_with_budget(attr_type, budget) else {
+                return;
+            };
+            if let Value::Concrete(ConcreteValue::Map(map)) = value {
+                for field in fields {
+                    if let Some(field_value) = map.get_mut(&field.name) {
+                        let mut field_budget = budget.clone();
+                        normalize_read_value_enum_values(
+                            schema,
+                            &field.field_type,
+                            field_value,
+                            &mut field_budget,
+                        );
+                    }
+                }
+            }
+        }
+        Shape::Union => {
+            let Some(members) = schema.union_members_with_budget(attr_type, budget) else {
+                return;
+            };
+            for member in members {
+                let mut member_budget = budget.clone();
+                normalize_read_value_enum_values(schema, member, value, &mut member_budget);
+            }
+        }
+        Shape::String { .. }
+        | Shape::Int { .. }
+        | Shape::Float { .. }
+        | Shape::Bool
+        | Shape::Duration => {}
+    }
+}
+
+fn normalize_read_enum_leaf(
+    schema: &ResourceSchema,
+    attr_type: &AttributeType,
+    valid_values: Option<&[String]>,
+    value: &mut Value,
+) {
+    let normalized = match value {
+        Value::Concrete(ConcreteValue::String(text)) => {
+            normalize_read_enum_text(schema, attr_type, valid_values, text)
+        }
+        Value::Concrete(ConcreteValue::EnumIdentifier(raw)) => {
+            EnumValueResolver::with_defs(attr_type, &schema.defs)
+                .resolve_raw(raw)
+                .ok()
+                .map(|canonical| canonical.api_value().to_string())
+        }
+        Value::Concrete(ConcreteValue::CanonicalEnum(canonical)) => {
+            Some(canonical.api_value().to_string())
+        }
+        _ => None,
+    };
+
+    if let Some(normalized) = normalized {
+        *value = Value::Concrete(ConcreteValue::String(normalized));
+    }
+}
+
+fn normalize_read_enum_text(
+    schema: &ResourceSchema,
+    attr_type: &AttributeType,
+    valid_values: Option<&[String]>,
+    text: &str,
+) -> Option<String> {
+    if let Ok(canonical) =
+        EnumValueResolver::with_defs(attr_type, &schema.defs).resolve_state_text(text)
+    {
+        return Some(canonical.api_value().to_string());
+    }
+
+    // Provider read APIs sometimes use the opposite separator from the
+    // request enum model (for example ACM `RSA-2048` vs `RSA_2048`).
+    // Fall back to a closed-enum match that ignores ASCII case and treats
+    // '-' and '_' as the same separator, but only when exactly one schema
+    // valid value matches.
+    canonical_enum_value_by_separator_case(valid_values?, text)
+}
+
+fn canonical_enum_value_by_separator_case(values: &[String], text: &str) -> Option<String> {
+    let text_key = enum_separator_case_key(text);
+    let mut matches = values
+        .iter()
+        .filter(|value| enum_separator_case_key(value) == text_key);
+    let matched = matches.next()?;
+    if matches.next().is_some() {
+        return None;
+    }
+    Some(matched.clone())
+}
+
+fn enum_separator_case_key(value: &str) -> String {
+    value
+        .chars()
+        .map(|ch| match ch {
+            '-' | '_' => '_',
+            _ => ch.to_ascii_lowercase(),
+        })
+        .collect()
 }
 
 fn enum_attr_type_at_schema_path<'a>(
@@ -633,6 +789,40 @@ mod tests {
         );
         let schema = Schema::flat(attr_type);
         schema.canonicalize(Value::Concrete(ConcreteValue::enum_identifier("enabled")))
+    }
+
+    #[test]
+    fn normalize_read_state_enum_values_canonicalizes_separator_and_case_variants() {
+        use carina_core::schema::{AttributeSchema, AttributeType, ResourceSchema, enum_identity};
+        use std::collections::HashMap;
+
+        let schema = ResourceSchema::new("test.NonAcm").attribute(AttributeSchema::new(
+            "mode",
+            AttributeType::enum_(
+                enum_identity("Mode", Some("test.NonAcm")),
+                Some(vec!["VALUE_ONE".to_string(), "VALUE_TWO".to_string()]),
+                vec![],
+                None,
+                None,
+            ),
+        ));
+        let id = ResourceId::with_provider_identity("test", "NonAcm", "example", None);
+        let state = State::existing(
+            id,
+            HashMap::from([(
+                "mode".to_string(),
+                Value::Concrete(ConcreteValue::String("value-one".to_string())),
+            )]),
+        );
+
+        let state = normalize_read_state_enum_values(&schema, state);
+
+        assert_eq!(
+            state.attributes.get("mode"),
+            Some(&Value::Concrete(ConcreteValue::String(
+                "VALUE_ONE".to_string()
+            ))),
+        );
     }
 
     #[test]
