@@ -71,9 +71,14 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 # `cd && pwd` canonicalizes both relative (`.git` from the main
 # checkout) and absolute (full path from a worktree) forms into the
 # same absolute path.
-GIT_COMMON_DIR="$(cd "$(git -C "$PROJECT_ROOT" rev-parse --git-common-dir)" && pwd)"
-REPO_ROOT="$(dirname "$GIT_COMMON_DIR")"
-SIBLING_BASE="$(dirname "$REPO_ROOT")"
+resolve_sibling_base() {
+    local git_common_dir
+    local repo_root
+
+    git_common_dir="$(cd "$PROJECT_ROOT" && cd "$(git rev-parse --git-common-dir)" && pwd)"
+    repo_root="$(dirname "$git_common_dir")"
+    dirname "$repo_root"
+}
 
 # ── Parse options ─────────────────────────────────────────────────────
 ACCOUNT_START=""
@@ -487,6 +492,8 @@ echo ""
 
 # CARINA_BIN can be set externally (e.g., when running from the monorepo).
 if [ -z "${CARINA_BIN:-}" ]; then
+    SIBLING_BASE="$(resolve_sibling_base)"
+
     # Prefer release build (WASM JIT is much faster with release)
     if [ -f "$SIBLING_BASE/carina/target/release/carina" ]; then
         CARINA_BIN="$SIBLING_BASE/carina/target/release/carina"
@@ -507,7 +514,7 @@ fi
 
 # ── Provider source injection ────────────────────────────────────────
 _TEST_AWS_WASM="${_TEST_AWS_WASM:-$PROJECT_ROOT/target/wasm32-wasip2/release/carina-provider-aws.wasm}"
-_TEST_AWSCC_WASM="${_TEST_AWSCC_WASM:-$SIBLING_BASE/carina-provider-awscc/target/wasm32-wasip2/release/carina-provider-awscc.wasm}"
+_TEST_AWSCC_WASM="${_TEST_AWSCC_WASM:-}"
 
 # Read provider version from workspace Cargo.toml to avoid hardcoding
 PROVIDER_VERSION=$(grep '^version = ' "$PROJECT_ROOT/Cargo.toml" | head -1 | sed 's/version = "\(.*\)"/\1/')
@@ -524,6 +531,12 @@ for bin_var in _TEST_AWS_WASM _TEST_AWSCC_WASM; do
     fi
 done
 
+ensure_awscc_wasm() {
+    if [ -z "${_TEST_AWSCC_WASM:-}" ]; then
+        _TEST_AWSCC_WASM="${SIBLING_BASE:-$(resolve_sibling_base)}/carina-provider-awscc/target/wasm32-wasip2/release/carina-provider-awscc.wasm"
+    fi
+}
+
 # inject_provider_source: Create a temp copy of a .crn file with source/version
 # injected into provider blocks. Prints the temp file path.
 # Args: original_crn_file
@@ -531,6 +544,10 @@ inject_provider_source() {
     local original="$1"
     local tmp_file
     tmp_file=$(mktemp).crn
+
+    if grep -q '^provider awscc {' "$original" 2>/dev/null; then
+        ensure_awscc_wasm
+    fi
 
     sed \
         -e '/^provider aws {/a\

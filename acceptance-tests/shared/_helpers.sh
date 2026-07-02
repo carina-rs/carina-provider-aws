@@ -19,10 +19,14 @@ PROJECT_ROOT="$(cd "$HELPERS_DIR/../.." && pwd)"
 # (carina-rs/carina-provider-aws#360). Resolve the carina-rs sibling
 # base via the canonical .git directory so worktree and main checkouts
 # both produce the same path.
-GIT_COMMON_DIR="$(cd "$(git -C "$PROJECT_ROOT" rev-parse --git-common-dir)" && pwd)"
-SIBLING_BASE="$(dirname "$(dirname "$GIT_COMMON_DIR")")"
+resolve_sibling_base() {
+    local git_common_dir
+    git_common_dir="$(cd "$PROJECT_ROOT" && cd "$(git rev-parse --git-common-dir)" && pwd)"
+    dirname "$(dirname "$git_common_dir")"
+}
 
-if [ -z "$CARINA_BIN" ]; then
+if [ -z "${CARINA_BIN:-}" ]; then
+    SIBLING_BASE="$(resolve_sibling_base)"
     if [ -f "$SIBLING_BASE/carina/target/debug/carina" ]; then
         CARINA_BIN="$SIBLING_BASE/carina/target/debug/carina"
     elif command -v carina &>/dev/null; then
@@ -37,8 +41,14 @@ fi
 # Use WASM provider binaries (carina CLI only supports WASM providers)
 # Build with: cargo build -p carina-provider-aws --target wasm32-wasip2 --release
 _TEST_AWS_WASM="${_TEST_AWS_WASM:-$PROJECT_ROOT/target/wasm32-wasip2/release/carina-provider-aws.wasm}"
-_TEST_AWSCC_WASM="${_TEST_AWSCC_WASM:-$SIBLING_BASE/carina-provider-awscc/target/wasm32-wasip2/release/carina-provider-awscc.wasm}"
+_TEST_AWSCC_WASM="${_TEST_AWSCC_WASM:-}"
 PROVIDER_VERSION=$(grep '^version = ' "$PROJECT_ROOT/Cargo.toml" | head -1 | sed 's/version = "\(.*\)"/\1/')
+
+ensure_awscc_wasm() {
+    if [ -z "${_TEST_AWSCC_WASM:-}" ]; then
+        _TEST_AWSCC_WASM="${SIBLING_BASE:-$(resolve_sibling_base)}/carina-provider-awscc/target/wasm32-wasip2/release/carina-provider-awscc.wasm"
+    fi
+}
 
 # inject_provider_source: Create a temp directory containing a .crn file with
 # source/version injected into provider blocks. Prints the temp directory path.
@@ -48,6 +58,10 @@ inject_provider_source() {
     local original="$1"
     local tmp_dir
     tmp_dir=$(mktemp -d)
+
+    if grep -q '^provider awscc {' "$original" 2>/dev/null; then
+        ensure_awscc_wasm
+    fi
 
     sed \
         -e '/^provider aws {/a\
@@ -66,6 +80,10 @@ inject_provider_source() {
 # Args: directory
 inject_provider_source_dir() {
     local dir="$1"
+    if grep -R -q '^provider awscc {' "$dir" 2>/dev/null; then
+        ensure_awscc_wasm
+    fi
+
     find "$dir" -name '*.crn' -print0 | while IFS= read -r -d '' crn_file; do
         if grep -q '^\s*source\s*=' "$crn_file" 2>/dev/null; then
             continue
