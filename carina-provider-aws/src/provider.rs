@@ -22,8 +22,7 @@ impl AwsProvider {
                 .for_resource(resource.id.clone())
             })?;
         if resource.id.resource_type.as_str() == "acm.Certificate" {
-            let outcome = self.create_acm_certificate(resource, schema).await?;
-            return Ok(normalize_create_outcome(schema, outcome));
+            return self.create_acm_certificate(resource, schema).await;
         }
         let state = match resource.id.resource_type.as_str() {
             "s3.Bucket" => self.create_s3_bucket(resource).await,
@@ -109,23 +108,7 @@ impl AwsProvider {
             ))
             .for_resource(resource.id.clone())),
         }?;
-        let state = crate::helpers::normalize_read_state_enum_values(schema, state);
         Ok(CreateOutcome::Success { state })
-    }
-}
-
-fn normalize_create_outcome(
-    schema: &carina_core::schema::ResourceSchema,
-    outcome: CreateOutcome,
-) -> CreateOutcome {
-    match outcome {
-        CreateOutcome::Success { state } => CreateOutcome::Success {
-            state: crate::helpers::normalize_read_state_enum_values(schema, state),
-        },
-        CreateOutcome::PartialSuccess { state, diagnostic } => CreateOutcome::PartialSuccess {
-            state: crate::helpers::normalize_read_state_enum_values(schema, state),
-            diagnostic,
-        },
     }
 }
 
@@ -147,15 +130,6 @@ impl Provider for AwsProvider {
         let id = id.clone();
         let identifier = identifier.map(|s| s.to_string());
         Box::pin(async move {
-            let schema = self
-                .resource_schema(id.resource_type.as_str())
-                .ok_or_else(|| {
-                    ProviderError::internal(format!(
-                        "Unknown resource schema: {}",
-                        id.resource_type
-                    ))
-                    .for_resource(id.clone())
-                })?;
             let state = match id.resource_type.as_str() {
                 "s3.Bucket" => self.read_s3_bucket(&id, identifier.as_deref()).await,
                 "s3.BucketPolicy" => self.read_s3_bucket_policy(&id, identifier.as_deref()).await,
@@ -274,7 +248,6 @@ impl Provider for AwsProvider {
                 ))
                 .for_resource(id.clone())),
             }?;
-            let state = crate::helpers::normalize_read_state_enum_values(schema, state);
 
             Ok(state)
         })
@@ -283,14 +256,7 @@ impl Provider for AwsProvider {
     fn read_data_source(&self, resource: &DataSource) -> BoxFuture<'_, ProviderResult<State>> {
         let resource = resource.clone();
         Box::pin(async move {
-            let state =
-                crate::provider_generated::dispatch_read_data_source(self, &resource).await?;
-            let Some(schema) = self.data_source_schema(resource.id.resource_type.as_str()) else {
-                return Ok(state);
-            };
-            Ok(crate::helpers::normalize_read_state_enum_values(
-                schema, state,
-            ))
+            crate::provider_generated::dispatch_read_data_source(self, &resource).await
         })
     }
 
@@ -502,8 +468,6 @@ impl Provider for AwsProvider {
                 ))
                 .for_resource(id.clone())),
             }?;
-            let state = crate::helpers::normalize_read_state_enum_values(schema, state);
-
             Ok(UpdateOutcome::Success { state })
         })
     }

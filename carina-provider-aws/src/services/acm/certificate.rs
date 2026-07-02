@@ -982,29 +982,6 @@ mod tests {
     }
 
     #[test]
-    fn read_normalizes_key_algorithm_response_spelling_to_schema_enum() {
-        let cert = CertificateDetail::builder()
-            .domain_name("registry.example.com")
-            .key_algorithm(aws_sdk_acm::types::KeyAlgorithm::from("RSA-2048"))
-            .build();
-
-        let attrs = certificate_detail_to_attributes(&cert);
-        let state = crate::helpers::normalize_read_state_enum_values(
-            &acm_schema(),
-            State::existing(id(), attrs),
-        );
-
-        assert_eq!(
-            state.attributes.get("key_algorithm"),
-            Some(&Value::Concrete(ConcreteValue::String(
-                "RSA_2048".to_string()
-            ))),
-            "ACM DescribeCertificate returns RSA-2048, but state must use \
-             the schema enum value RSA_2048"
-        );
-    }
-
-    #[test]
     fn state_read_emits_nested_options_map_when_logging_preference_present() {
         let cert = CertificateDetail::builder()
             .domain_name("registry.example.com")
