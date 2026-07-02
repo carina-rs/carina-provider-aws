@@ -17,7 +17,7 @@ use carina_core::schema::{
     AttributeSchema as CoreAttributeSchema, AttributeType as CoreAttributeType,
     OperationConfig as CoreOperationConfig, RawShape as CoreRawShape,
     ResourceSchema as CoreResourceSchema, SchemaKind as CoreSchemaKind,
-    StructField as CoreStructField, legacy_validator,
+    StructField as CoreStructField, UniqueNameSpec as CoreUniqueNameSpec, legacy_validator,
 };
 use carina_provider_protocol::types::{
     AttributeSchema as ProtoAttributeSchema, AttributeType as ProtoAttributeType,
@@ -25,7 +25,8 @@ use carina_provider_protocol::types::{
     OperationConfig as ProtoOperationConfig, PartialReadDiagnostic as ProtoPartialReadDiagnostic,
     Resource as ProtoResource, ResourceId as ProtoResourceId,
     ResourceSchema as ProtoResourceSchema, SchemaKind as ProtoSchemaKind, State as ProtoState,
-    StructField as ProtoStructField, UpdateOutcome as ProtoUpdateOutcome, Value as ProtoValue,
+    StructField as ProtoStructField, UniqueNameSpec as ProtoUniqueNameSpec,
+    UpdateOutcome as ProtoUpdateOutcome, Value as ProtoValue,
 };
 
 // -- ResourceId --
@@ -476,7 +477,7 @@ pub fn proto_to_core_schema(s: &ProtoResourceSchema) -> CoreResourceSchema {
         description: s.description.clone(),
         validator: None,
         kind: proto_to_core_schema_kind(s.kind),
-        unique_name_attribute: s.unique_name_attribute.clone(),
+        unique_name: proto_to_core_unique_name(&s.unique_name),
         operation_config: s.operation_config.as_ref().map(|c| CoreOperationConfig {
             delete_timeout_secs: c.delete_timeout_secs,
             delete_max_retries: c.delete_max_retries,
@@ -492,6 +493,16 @@ pub fn proto_to_core_schema(s: &ProtoResourceSchema) -> CoreResourceSchema {
             .iter()
             .map(|(k, v)| (k.clone(), proto_to_core_attribute_type(v)))
             .collect(),
+    }
+}
+
+fn proto_to_core_unique_name(spec: &ProtoUniqueNameSpec) -> CoreUniqueNameSpec {
+    match spec {
+        ProtoUniqueNameSpec::Attribute(attribute) => {
+            CoreUniqueNameSpec::Attribute(attribute.clone())
+        }
+        ProtoUniqueNameSpec::Coexisting => CoreUniqueNameSpec::Coexisting,
+        ProtoUniqueNameSpec::Conflicting => CoreUniqueNameSpec::Conflicting,
     }
 }
 
@@ -650,7 +661,7 @@ pub fn core_to_proto_schema(s: &CoreResourceSchema) -> ProtoResourceSchema {
             .collect(),
         description: s.description.clone(),
         kind: core_to_proto_schema_kind(s.kind),
-        unique_name_attribute: s.unique_name_attribute.clone(),
+        unique_name: core_to_proto_unique_name(&s.unique_name),
         operation_config: s.operation_config.as_ref().map(|c| ProtoOperationConfig {
             delete_timeout_secs: c.delete_timeout_secs,
             delete_max_retries: c.delete_max_retries,
@@ -665,6 +676,16 @@ pub fn core_to_proto_schema(s: &CoreResourceSchema) -> ProtoResourceSchema {
             .iter()
             .map(|(k, v)| (k.clone(), core_to_proto_attribute_type(v)))
             .collect(),
+    }
+}
+
+fn core_to_proto_unique_name(spec: &CoreUniqueNameSpec) -> ProtoUniqueNameSpec {
+    match spec {
+        CoreUniqueNameSpec::Attribute(attribute) => {
+            ProtoUniqueNameSpec::Attribute(attribute.clone())
+        }
+        CoreUniqueNameSpec::Coexisting => ProtoUniqueNameSpec::Coexisting,
+        CoreUniqueNameSpec::Conflicting => ProtoUniqueNameSpec::Conflicting,
     }
 }
 

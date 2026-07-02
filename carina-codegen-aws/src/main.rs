@@ -20,6 +20,21 @@ use carina_codegen_aws::resource_defs::{self, ResourceDef};
 
 const PLAIN_STRING_TYPE_CODE: &str = "AttributeType::string()";
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum UniqueNameReplacementClass {
+    Coexisting,
+}
+
+const UNIQUE_NAME_REPLACEMENT_CLASSES: &[(&str, UniqueNameReplacementClass)] =
+    &[("ec2.Vpc", UniqueNameReplacementClass::Coexisting)];
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum UniqueNameEmission {
+    Attribute(String),
+    Coexisting,
+    Conflicting,
+}
+
 #[derive(Parser, Debug)]
 #[command(name = "smithy-codegen")]
 #[command(about = "Generate Carina AWS provider schema code from Smithy models")]
@@ -443,6 +458,45 @@ fn derive_unique_name_attribute(
                 && attr.type_code == PLAIN_STRING_TYPE_CODE
         })
         .map(|attr| attr.snake_name.clone())
+}
+
+fn unique_name_replacement_class(resource_type_name: &str) -> Option<UniqueNameReplacementClass> {
+    UNIQUE_NAME_REPLACEMENT_CLASSES
+        .iter()
+        .find_map(|(name, class)| (*name == resource_type_name).then_some(*class))
+}
+
+fn derive_unique_name_emission(
+    resource_type_name: &str,
+    identifier: &str,
+    attrs: &[AttrInfo],
+    is_data_source: bool,
+) -> UniqueNameEmission {
+    if is_data_source {
+        return UniqueNameEmission::Conflicting;
+    }
+
+    match unique_name_replacement_class(resource_type_name) {
+        Some(UniqueNameReplacementClass::Coexisting) => UniqueNameEmission::Coexisting,
+        None => derive_unique_name_attribute(identifier, attrs, false)
+            .map(UniqueNameEmission::Attribute)
+            .unwrap_or(UniqueNameEmission::Conflicting),
+    }
+}
+
+fn emit_unique_name_builder(code: &mut String, emission: UniqueNameEmission) {
+    match emission {
+        UniqueNameEmission::Attribute(unique_name_attribute) => {
+            code.push_str(&format!(
+                "\x20       .with_unique_name_attribute(\"{}\")\n",
+                unique_name_attribute
+            ));
+        }
+        UniqueNameEmission::Coexisting => {
+            code.push_str("\x20       .with_coexisting_replacement()\n");
+        }
+        UniqueNameEmission::Conflicting => {}
+    }
 }
 
 /// Integer range constraint (supports one-sided ranges)
@@ -1275,14 +1329,10 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
         code.push_str("\x20       .as_data_source()\n");
     }
 
-    if let Some(unique_name_attribute) =
-        derive_unique_name_attribute(res.identifier, &attrs, is_data_source)
-    {
-        code.push_str(&format!(
-            "\x20       .with_unique_name_attribute(\"{}\")\n",
-            unique_name_attribute
-        ));
-    }
+    emit_unique_name_builder(
+        &mut code,
+        derive_unique_name_emission(res.name, res.identifier, &attrs, is_data_source),
+    );
 
     // Generate attributes
     for attr in &attrs {
@@ -5043,6 +5093,66 @@ mod tests {
             None,
         )];
         assert_eq!(derive_unique_name_attribute("Bucket", &attrs, true), None);
+    }
+
+    #[test]
+    fn unique_name_emission_covers_attribute_coexisting_and_conflicting() {
+        fn emitted(emission: UniqueNameEmission) -> String {
+            let mut code = String::new();
+            emit_unique_name_builder(&mut code, emission);
+            code
+        }
+
+        assert_eq!(
+            UNIQUE_NAME_REPLACEMENT_CLASSES,
+            &[("ec2.Vpc", UniqueNameReplacementClass::Coexisting)]
+        );
+
+        let attr_attrs = vec![test_attr(
+            "RoleName",
+            "role_name",
+            PLAIN_STRING_TYPE_CODE,
+            false,
+            true,
+            false,
+            None,
+        )];
+        let attr_emission = derive_unique_name_emission("iam.Role", "RoleName", &attr_attrs, false);
+        assert_eq!(
+            attr_emission,
+            UniqueNameEmission::Attribute("role_name".to_string())
+        );
+        assert_eq!(
+            emitted(attr_emission),
+            "\x20       .with_unique_name_attribute(\"role_name\")\n"
+        );
+
+        let vpc_attrs = vec![test_attr(
+            "VpcId",
+            "vpc_id",
+            "super::vpc_id()",
+            true,
+            true,
+            false,
+            None,
+        )];
+        let coexisting_emission =
+            derive_unique_name_emission("ec2.Vpc", "VpcId", &vpc_attrs, false);
+        assert_eq!(coexisting_emission, UniqueNameEmission::Coexisting);
+        assert_eq!(
+            emitted(coexisting_emission),
+            "\x20       .with_coexisting_replacement()\n"
+        );
+
+        let conflicting_emission =
+            derive_unique_name_emission("ec2.Route", "RouteTableId", &[], false);
+        assert_eq!(conflicting_emission, UniqueNameEmission::Conflicting);
+        assert_eq!(emitted(conflicting_emission), "");
+
+        assert_eq!(
+            derive_unique_name_emission("ec2.Vpc", "VpcId", &vpc_attrs, true),
+            UniqueNameEmission::Conflicting
+        );
     }
 
     #[test]
