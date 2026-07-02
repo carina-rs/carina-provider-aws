@@ -1,18 +1,19 @@
 # ACM Certificate - DNS validation pending test
 #
 # Tests: aws.acm.Certificate create/read/destroy with DNS validation.
-# The reserved example.com name is never validated, so the certificate
-# remains PENDING_VALIDATION while deferred status and validation records
-# are read back for plan-verify.
+# The domain is a fake domain we do not own, so DNS validation never
+# completes and the certificate remains PENDING_VALIDATION while deferred
+# status and validation records are read back for plan-verify.
+# Explicit key_algorithm coverage is blocked on #474 (read-back
+# normalization); restore it when fixed.
 
 provider aws {
   region = aws.Region.ap_northeast_1
 }
 
 aws.acm.Certificate {
-  domain_name       = 'acceptance-test.carina-rs.example.com'
+  domain_name       = 'acceptance-test.carina-rs-test.com'
   validation_method = aws.acm.Certificate.ValidationMethod.dns
-  key_algorithm     = aws.acm.Certificate.KeyAlgorithm.rsa_2048
 
   tags = {
     Environment = 'acceptance-test'

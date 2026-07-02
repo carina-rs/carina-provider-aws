@@ -400,8 +400,8 @@ deep_cleanup_account() {
     done
 
     # 5. Delete orphaned Route53 hosted zones from record set tests
-    local route53_zone_name="carina-acc-test-route53-record-set.example.com."
-    local route53_record_name="www.carina-acc-test-route53-record-set.example.com."
+    local route53_zone_name="carina-acc-test-record-set.carina-rs-test.com."
+    local route53_record_name="www.carina-acc-test-record-set.carina-rs-test.com."
     local hosted_zones
     hosted_zones=$(with_account_creds "$account" aws route53 list-hosted-zones-by-name \
         --dns-name "$route53_zone_name" \
@@ -420,7 +420,7 @@ deep_cleanup_account() {
     done
 
     # 6. Delete orphaned ACM certificates from certificate tests
-    local acm_cert_domain="acceptance-test.carina-rs.example.com"
+    local acm_cert_domain="acceptance-test.carina-rs-test.com"
     local certs
     certs=$(with_account_creds "$account" aws acm list-certificates \
         --region ap-northeast-1 \
