@@ -3,3 +3,26 @@ provider aws {
 }
 
 let caller = read aws.sts.CallerIdentity {}
+
+aws.iam.Role {
+  role_name   = 'carina-acc-test-sts-caller-consumer'
+  description = caller.account_id
+
+  assume_role_policy_document = {
+    version = aws.iam.PolicyDocument.Version.2012_10_17
+    statement {
+      effect = aws.iam.PolicyDocument.Statement.Effect.allow
+
+      principal = {
+        service = 'lambda.amazonaws.com'
+      }
+
+      action = 'sts:AssumeRole'
+    }
+  }
+
+  tags = {
+    Environment = 'acceptance-test'
+    CallerArn   = caller.arn
+  }
+}
