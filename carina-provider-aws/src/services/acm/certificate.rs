@@ -12,10 +12,10 @@
 
 use std::collections::HashMap;
 
-use aws_sdk_acm::types::ValidationMethod;
+use aws_sdk_acm::types::{CertificateStatus, ValidationMethod};
 use indexmap::IndexMap;
 
-use carina_core::provider::{ProviderError, ProviderResult};
+use carina_core::provider::{CreateOutcome, ProviderError, ProviderResult};
 use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
 use carina_core::schema::ResourceSchema;
 
@@ -24,6 +24,8 @@ use crate::error_helpers::api_error_with_meta;
 use crate::helpers::{
     optional_enum_attr, optional_enum_struct_field, require_string_attr, sdk_error_message,
 };
+
+const DVO_MISSING_ATTRIBUTE: &str = "domain_validation_options";
 
 fn extract_string_list(value: &Value) -> Vec<String> {
     if let Value::Concrete(ConcreteValue::List(items)) = value {
@@ -294,6 +296,99 @@ fn certificate_detail_to_attributes(
     attributes
 }
 
+fn dvo_resource_records_populated(cert: &aws_sdk_acm::types::CertificateDetail) -> bool {
+    let dvs = cert.domain_validation_options();
+    !dvs.is_empty() && dvs.iter().all(|dv| dv.resource_record().is_some())
+}
+
+fn failed_certificate_reason(cert: &aws_sdk_acm::types::CertificateDetail) -> Option<String> {
+    if cert.status() != Some(&CertificateStatus::Failed) {
+        return None;
+    }
+
+    let mut reason = "ACM certificate request FAILED on the AWS side".to_string();
+    if let Some(failure_reason) = cert.failure_reason() {
+        reason.push_str(&format!(" (FailureReason: {})", failure_reason.as_str()));
+    }
+    reason.push_str("; retrying apply will not help. Fix the domain and replace the resource.");
+    Some(reason)
+}
+
+fn partial_acm_certificate_state(
+    id: &ResourceId,
+    arn: &str,
+    domain_name: &str,
+    resource: &Resource,
+    schema: &ResourceSchema,
+    cert: Option<&aws_sdk_acm::types::CertificateDetail>,
+) -> State {
+    let mut attributes = cert
+        .map(certificate_detail_to_attributes)
+        .unwrap_or_default();
+
+    attributes.insert(
+        "certificate_arn".to_string(),
+        Value::Concrete(ConcreteValue::String(arn.to_string())),
+    );
+    attributes
+        .entry("domain_name".to_string())
+        .or_insert_with(|| Value::Concrete(ConcreteValue::String(domain_name.to_string())));
+
+    attributes.remove(DVO_MISSING_ATTRIBUTE);
+
+    if let Some(validation_method) = optional_enum_attr(resource, schema, "validation_method") {
+        attributes
+            .entry("validation_method".to_string())
+            .or_insert_with(|| {
+                Value::Concrete(ConcreteValue::String(validation_method.to_string()))
+            });
+    }
+    if let Some(key_algorithm) = optional_enum_attr(resource, schema, "key_algorithm") {
+        attributes
+            .entry("key_algorithm".to_string())
+            .or_insert_with(|| Value::Concrete(ConcreteValue::String(key_algorithm.to_string())));
+    }
+    if let Some(value) = resource.get_attr("subject_alternative_names") {
+        let sans = extract_string_list(value);
+        if !sans.is_empty() {
+            attributes
+                .entry("subject_alternative_names".to_string())
+                .or_insert_with(|| {
+                    Value::Concrete(ConcreteValue::List(
+                        sans.into_iter()
+                            .map(|san| Value::Concrete(ConcreteValue::String(san)))
+                            .collect(),
+                    ))
+                });
+        }
+    }
+    if let Some(options) = resource.get_attr("options") {
+        attributes
+            .entry("options".to_string())
+            .or_insert_with(|| options.clone());
+    }
+    if let Some(tags) = resource.get_attr("tags") {
+        attributes
+            .entry("tags".to_string())
+            .or_insert_with(|| tags.clone());
+    }
+
+    State::existing(id.clone(), attributes).with_identifier(arn)
+}
+
+fn partial_acm_certificate_create_outcome(
+    id: &ResourceId,
+    arn: &str,
+    domain_name: &str,
+    resource: &Resource,
+    schema: &ResourceSchema,
+    cert: Option<&aws_sdk_acm::types::CertificateDetail>,
+    reason: String,
+) -> CreateOutcome {
+    let state = partial_acm_certificate_state(id, arn, domain_name, resource, schema, cert);
+    CreateOutcome::partial_success(state, reason, vec![DVO_MISSING_ATTRIBUTE.to_string()])
+}
+
 impl AwsProvider {
     /// Create an ACM certificate by issuing a `RequestCertificate`
     /// call. The returned state carries the cert's ARN as identifier;
@@ -304,14 +399,14 @@ impl AwsProvider {
         &self,
         resource: &Resource,
         schema: &ResourceSchema,
-    ) -> ProviderResult<State> {
+    ) -> ProviderResult<CreateOutcome> {
         let id = resource.id.clone();
         let domain_name = require_string_attr(resource, "domain_name")?;
 
         let mut req = self
             .acm_client
             .request_certificate()
-            .domain_name(domain_name);
+            .domain_name(domain_name.clone());
 
         if let Some(method) = optional_enum_attr(resource, schema, "validation_method")
             .and_then(parse_validation_method)
@@ -368,10 +463,13 @@ impl AwsProvider {
                 .for_resource(id.clone())
         })?;
 
-        let arn = output.certificate_arn().ok_or_else(|| {
-            ProviderError::api_error("RequestCertificate returned no certificate_arn")
-                .for_resource(id.clone())
-        })?;
+        let arn = output
+            .certificate_arn()
+            .ok_or_else(|| {
+                ProviderError::api_error("RequestCertificate returned no certificate_arn")
+                    .for_resource(id.clone())
+            })?
+            .to_string();
 
         let validation_method = optional_enum_attr(resource, schema, "validation_method")
             .and_then(parse_validation_method);
@@ -381,12 +479,12 @@ impl AwsProvider {
         // read-back carries the records downstream resources reference.
         // carina-rs/carina-provider-aws#298.
         if matches!(validation_method, Some(ValidationMethod::Dns)) {
-            let cert = wait_for_dvo_populated(
+            let dvo_outcome = wait_for_dvo_populated(
                 &id,
                 || async {
                     self.acm_client
                         .describe_certificate()
-                        .certificate_arn(arn)
+                        .certificate_arn(arn.as_str())
                         .send()
                         .await
                         .map_err(|e| {
@@ -403,14 +501,32 @@ impl AwsProvider {
                 std::time::Duration::from_secs(5),
             )
             .await?;
-            return self
-                .read_acm_certificate_from_detail(&id, arn, Some(&cert))
-                .await;
+            return match dvo_outcome {
+                DvoWaitOutcome::Populated(cert) => {
+                    let state = self
+                        .read_acm_certificate_from_detail(&id, &arn, Some(&cert))
+                        .await?;
+                    Ok(CreateOutcome::Success { state })
+                }
+                DvoWaitOutcome::Incomplete {
+                    certificate,
+                    reason,
+                } => Ok(partial_acm_certificate_create_outcome(
+                    &id,
+                    &arn,
+                    &domain_name,
+                    resource,
+                    schema,
+                    certificate.as_ref(),
+                    reason,
+                )),
+            };
         }
 
         // Read back so the State carries every server-side attribute the
         // user might wait on (`status`, `domain_validation_options`, ...).
-        self.read_acm_certificate(&id, Some(arn)).await
+        let state = self.read_acm_certificate(&id, Some(&arn)).await?;
+        Ok(CreateOutcome::Success { state })
     }
 
     /// Read an ACM certificate via `DescribeCertificate`.
@@ -616,11 +732,21 @@ impl AwsProvider {
     }
 }
 
+#[derive(Debug, Clone)]
+pub(crate) enum DvoWaitOutcome {
+    Populated(aws_sdk_acm::types::CertificateDetail),
+    Incomplete {
+        certificate: Option<aws_sdk_acm::types::CertificateDetail>,
+        reason: String,
+    },
+}
+
 /// Poll a fetch closure that returns an ACM `CertificateDetail`
 /// until every `domain_validation_options[]` entry has its
-/// `resource_record` populated, or the attempt budget is exhausted.
-/// Returns the last fetched `CertificateDetail` so callers can build
-/// state from it without a redundant `DescribeCertificate`.
+/// `resource_record` populated, the certificate request reaches
+/// AWS-side `FAILED`, or the attempt budget is exhausted. Returns the
+/// last fetched `CertificateDetail` so callers can build state from it
+/// without a redundant `DescribeCertificate`.
 ///
 /// AWS populates the DNS validation record asynchronously after
 /// `RequestCertificate` returns. Without this loop the post-create
@@ -633,40 +759,49 @@ impl AwsProvider {
 /// `max_attempts` × `interval` bounds the total wait. The fetch
 /// closure is invoked up to `max_attempts` times, with `interval`
 /// between attempts (no sleep before the first attempt or after the
-/// last). On timeout, returns a `ProviderError::timeout` naming the
-/// resource so the operator can decide between retry and an AWS
-/// support escalation.
+/// last). On timeout or AWS-side `FAILED`, returns `Incomplete`
+/// instead of an error because the certificate exists and must be
+/// recorded in state.
 pub(crate) async fn wait_for_dvo_populated<F, Fut>(
-    id: &ResourceId,
+    _id: &ResourceId,
     mut fetch: F,
     max_attempts: u32,
     interval: std::time::Duration,
-) -> ProviderResult<aws_sdk_acm::types::CertificateDetail>
+) -> ProviderResult<DvoWaitOutcome>
 where
     F: FnMut() -> Fut,
     Fut:
         std::future::Future<Output = ProviderResult<Option<aws_sdk_acm::types::CertificateDetail>>>,
 {
+    let mut last_certificate = None;
     for attempt in 0..max_attempts {
         if let Some(cert) = fetch().await? {
-            let dvs = cert.domain_validation_options();
-            if !dvs.is_empty() && dvs.iter().all(|dv| dv.resource_record().is_some()) {
-                return Ok(cert);
+            if let Some(reason) = failed_certificate_reason(&cert) {
+                return Ok(DvoWaitOutcome::Incomplete {
+                    certificate: Some(cert),
+                    reason,
+                });
             }
+            if dvo_resource_records_populated(&cert) {
+                return Ok(DvoWaitOutcome::Populated(cert));
+            }
+            last_certificate = Some(cert);
         }
         if attempt + 1 < max_attempts {
             tokio::time::sleep(interval).await;
         }
     }
-    Err(ProviderError::timeout(format!(
-        "ACM did not populate domain_validation_options[].resource_record within \
+    Ok(DvoWaitOutcome::Incomplete {
+        certificate: last_certificate,
+        reason: format!(
+            "ACM did not populate domain_validation_options[].resource_record within \
          {} attempts (~{:?}); the certificate exists but cannot be referenced by \
-         downstream resources yet. Retry the apply, or check the ACM console \
-         for the cert ARN.",
-        max_attempts,
-        interval.saturating_mul(max_attempts),
-    ))
-    .for_resource(id.clone()))
+         downstream resources yet. Re-run apply to complete the read, or check \
+         the ACM console for the certificate ARN.",
+            max_attempts,
+            interval.saturating_mul(max_attempts),
+        ),
+    })
 }
 
 #[cfg(test)]
@@ -714,6 +849,91 @@ mod tests {
             b = b.domain_validation_options(dv);
         }
         b.build()
+    }
+
+    fn cert_with_arn_and_status(
+        arn: &str,
+        status: aws_sdk_acm::types::CertificateStatus,
+        dvs: Vec<DomainValidation>,
+    ) -> CertificateDetail {
+        let mut b = CertificateDetail::builder()
+            .domain_name("example.com")
+            .certificate_arn(arn)
+            .status(status);
+        for dv in dvs {
+            b = b.domain_validation_options(dv);
+        }
+        b.build()
+    }
+
+    fn expect_populated(result: ProviderResult<DvoWaitOutcome>) -> CertificateDetail {
+        match result.expect("expected Ok") {
+            DvoWaitOutcome::Populated(cert) => cert,
+            DvoWaitOutcome::Incomplete { reason, .. } => {
+                panic!("expected populated DVO, got incomplete: {reason}")
+            }
+        }
+    }
+
+    fn expect_incomplete(
+        result: ProviderResult<DvoWaitOutcome>,
+    ) -> (Option<CertificateDetail>, String) {
+        match result.expect("expected Ok") {
+            DvoWaitOutcome::Incomplete {
+                certificate,
+                reason,
+            } => (certificate, reason),
+            DvoWaitOutcome::Populated(_) => panic!("expected incomplete DVO outcome"),
+        }
+    }
+
+    fn dns_certificate_resource() -> Resource {
+        let mut resource = Resource::with_provider("aws", "acm.Certificate", "test-cert", None);
+        resource.set_attr(
+            "domain_name".to_string(),
+            Value::Concrete(ConcreteValue::String("example.com".to_string())),
+        );
+        resource.set_attr(
+            "validation_method".to_string(),
+            Value::Concrete(ConcreteValue::String("DNS".to_string())),
+        );
+        resource
+    }
+
+    fn assert_partial_outcome_records_arn(
+        outcome: CreateOutcome,
+        arn: &str,
+        expected_reason_parts: &[&str],
+    ) {
+        let CreateOutcome::PartialSuccess { state, diagnostic } = outcome else {
+            panic!("expected partial create outcome");
+        };
+        assert_eq!(state.identifier.as_deref(), Some(arn));
+        assert_eq!(
+            state.attributes.get("certificate_arn"),
+            Some(&Value::Concrete(ConcreteValue::String(arn.to_string()))),
+        );
+        assert_eq!(
+            state.attributes.get("domain_name"),
+            Some(&Value::Concrete(ConcreteValue::String(
+                "example.com".to_string()
+            ))),
+        );
+        assert!(
+            !state.attributes.contains_key(DVO_MISSING_ATTRIBUTE),
+            "partial state must not publish incomplete DVO as complete state",
+        );
+        assert_eq!(
+            diagnostic.missing_attributes(),
+            &[DVO_MISSING_ATTRIBUTE.to_string()],
+        );
+        for part in expected_reason_parts {
+            assert!(
+                diagnostic.reason().contains(part),
+                "diagnostic reason must contain {part:?}; got: {}",
+                diagnostic.reason(),
+            );
+        }
     }
 
     /// carina#3061: the certificate ARN must be published under the
@@ -912,7 +1132,7 @@ mod tests {
             Duration::from_millis(0),
         )
         .await;
-        let cert = result.expect("expected Ok");
+        let cert = expect_populated(result);
         assert_eq!(*calls.lock().unwrap(), 1, "should not retry after success");
         let dvs = cert.domain_validation_options();
         assert_eq!(dvs.len(), 1);
@@ -939,7 +1159,7 @@ mod tests {
             Duration::from_millis(0),
         )
         .await;
-        let cert = result.expect("expected Ok");
+        let cert = expect_populated(result);
         assert_eq!(
             *calls.lock().unwrap(),
             3,
@@ -979,7 +1199,7 @@ mod tests {
             Duration::from_millis(0),
         )
         .await;
-        let cert = result.expect("expected Ok");
+        let cert = expect_populated(result);
         assert_eq!(*calls.lock().unwrap(), 2);
         assert_eq!(cert.domain_validation_options().len(), 2);
         assert!(
@@ -990,7 +1210,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn wait_for_dvo_times_out_after_max_attempts() {
+    async fn wait_for_dvo_times_out_after_max_attempts_with_incomplete_outcome() {
         let calls = Mutex::new(0u32);
         let result = wait_for_dvo_populated(
             &id(),
@@ -1002,20 +1222,119 @@ mod tests {
             Duration::from_millis(0),
         )
         .await;
-        let err = result.expect_err("expected timeout error");
+        let (_cert, reason) = expect_incomplete(result);
         assert_eq!(
             *calls.lock().unwrap(),
             4,
             "fetched exactly max_attempts times"
         );
-        let msg = format!("{:?}", err);
         assert!(
-            msg.contains("domain_validation_options"),
-            "error message must name the attribute; got: {msg}",
+            reason.contains("domain_validation_options"),
+            "reason must name the attribute; got: {reason}",
         );
         assert!(
-            msg.contains("4 attempts"),
-            "error must report the attempt budget; got: {msg}",
+            reason.contains("4 attempts"),
+            "reason must report the attempt budget; got: {reason}",
+        );
+    }
+
+    #[tokio::test]
+    async fn dvo_timeout_returns_partial_create_outcome_with_arn_state() {
+        let arn = "arn:aws:acm:us-east-1:111:certificate/partial";
+        let calls = Mutex::new(0u32);
+        let result = wait_for_dvo_populated(
+            &id(),
+            || async {
+                *calls.lock().unwrap() += 1;
+                Ok(Some(cert_with_arn_and_status(
+                    arn,
+                    aws_sdk_acm::types::CertificateStatus::PendingValidation,
+                    vec![dv_without_rr("example.com")],
+                )))
+            },
+            4,
+            Duration::from_millis(0),
+        )
+        .await;
+
+        let (cert, reason) = expect_incomplete(result);
+        assert_eq!(
+            *calls.lock().unwrap(),
+            4,
+            "timeout still consumes the configured attempt budget",
+        );
+        let cert = cert.expect("DVO timeout must keep the last certificate for partial state");
+        assert_eq!(cert.certificate_arn(), Some(arn));
+        let resource = dns_certificate_resource();
+        let outcome = partial_acm_certificate_create_outcome(
+            &id(),
+            arn,
+            "example.com",
+            &resource,
+            &acm_schema(),
+            Some(&cert),
+            reason,
+        );
+        assert_partial_outcome_records_arn(
+            outcome,
+            arn,
+            &["domain_validation_options", "4 attempts"],
+        );
+    }
+
+    #[tokio::test]
+    async fn failed_status_short_circuits_to_partial_create_outcome_with_failure_reason() {
+        let arn = "arn:aws:acm:us-east-1:111:certificate/failed";
+        let calls = Mutex::new(0u32);
+        let result = wait_for_dvo_populated(
+            &id(),
+            || async {
+                *calls.lock().unwrap() += 1;
+                Ok(Some(
+                    CertificateDetail::builder()
+                        .domain_name("example.com")
+                        .certificate_arn(arn)
+                        .status(aws_sdk_acm::types::CertificateStatus::Failed)
+                        .failure_reason(aws_sdk_acm::types::FailureReason::DomainNotAllowed)
+                        .domain_validation_options(dv_without_rr("example.com"))
+                        .build(),
+                ))
+            },
+            4,
+            Duration::from_millis(0),
+        )
+        .await;
+
+        let (cert, reason) = expect_incomplete(result);
+        assert_eq!(
+            *calls.lock().unwrap(),
+            1,
+            "FAILED status should short-circuit instead of burning the poll budget",
+        );
+        let cert = cert.expect("FAILED certificates must be returned for partial state");
+        assert_eq!(cert.certificate_arn(), Some(arn));
+        assert_eq!(
+            cert.failure_reason().map(|reason| reason.as_str()),
+            Some("DOMAIN_NOT_ALLOWED"),
+        );
+        let resource = dns_certificate_resource();
+        let outcome = partial_acm_certificate_create_outcome(
+            &id(),
+            arn,
+            "example.com",
+            &resource,
+            &acm_schema(),
+            Some(&cert),
+            reason,
+        );
+        assert_partial_outcome_records_arn(
+            outcome,
+            arn,
+            &[
+                "FAILED",
+                "DOMAIN_NOT_ALLOWED",
+                "retrying apply will not help",
+            ],
         );
     }
 
@@ -1039,7 +1358,7 @@ mod tests {
             Duration::from_millis(0),
         )
         .await;
-        let cert = result.expect("expected Ok");
+        let cert = expect_populated(result);
         assert_eq!(*calls.lock().unwrap(), 2);
         assert!(
             cert.domain_validation_options()

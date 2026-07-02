@@ -21,6 +21,10 @@ impl AwsProvider {
                 ))
                 .for_resource(resource.id.clone())
             })?;
+        if resource.id.resource_type.as_str() == "acm.Certificate" {
+            let outcome = self.create_acm_certificate(resource, schema).await?;
+            return Ok(normalize_create_outcome(schema, outcome));
+        }
         let state = match resource.id.resource_type.as_str() {
             "s3.Bucket" => self.create_s3_bucket(resource).await,
             "s3.BucketPolicy" => self.create_s3_bucket_policy(resource).await,
@@ -98,7 +102,6 @@ impl AwsProvider {
             "iam.Role" => self.create_iam_role(resource).await,
             "logs.LogGroup" => self.create_logs_log_group(resource, schema).await,
             "route53.RecordSet" => self.create_route53_record_set(resource, schema).await,
-            "acm.Certificate" => self.create_acm_certificate(resource, schema).await,
             "sqs.Queue" => self.create_sqs_queue(resource, schema).await,
             _ => Err(ProviderError::internal(format!(
                 "Unknown resource type: {}",
@@ -108,6 +111,21 @@ impl AwsProvider {
         }?;
         let state = crate::helpers::normalize_read_state_enum_values(schema, state);
         Ok(CreateOutcome::Success { state })
+    }
+}
+
+fn normalize_create_outcome(
+    schema: &carina_core::schema::ResourceSchema,
+    outcome: CreateOutcome,
+) -> CreateOutcome {
+    match outcome {
+        CreateOutcome::Success { state } => CreateOutcome::Success {
+            state: crate::helpers::normalize_read_state_enum_values(schema, state),
+        },
+        CreateOutcome::PartialSuccess { state, diagnostic } => CreateOutcome::PartialSuccess {
+            state: crate::helpers::normalize_read_state_enum_values(schema, state),
+            diagnostic,
+        },
     }
 }
 
