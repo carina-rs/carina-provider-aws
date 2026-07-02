@@ -5,13 +5,13 @@
 #   env AWS_PROFILE="<profile>" ./run.sh [filter]
 #
 # Tests:
-#   ec2_vpc - Replacement rejected when no unique_name_attribute exists
+#   ec2_vpc - Replacement succeeds for a name-free coexisting resource
 #
 # Filter (optional): substring to match test names (e.g. "ec2_vpc")
 #
-# This ec2_vpc case pins core's current MissingNameAttributeError contract.
-# Name-free CBD semantics are tracked in carina-rs/carina#3667; positive CBD
-# replacement coverage lives in the iam_role steps of this suite.
+# This ec2_vpc case covers the name-free CBD semantics implemented for
+# carina-rs/carina#3667: ec2.Vpc is declared Coexisting, so replacement can
+# create the new VPC before deleting the old one without a temporary name.
 #
 # AWS authentication:
 #   Set AWS_PROFILE to one of the carina-test-00X profiles. The script
@@ -186,6 +186,72 @@ assert_identifiers() {
     fi
 }
 
+run_plan_expect_replace() {
+    local work_dir="$1"
+    local description="$2"
+
+    printf "  %-55s " "$description"
+
+    local output
+    local rc=0
+    output=$(cd "$work_dir" && with_account_creds "$CARINA_BIN" plan --detailed-exitcode . 2>&1) || rc=$?
+
+    if [ $rc -ne 2 ]; then
+        echo "FAIL"
+        echo "  ERROR: expected replacement plan with exit code 2, got $rc:"
+        echo "  $output"
+        TOTAL_FAILED=$((TOTAL_FAILED + 1))
+        return 1
+    fi
+
+    if ! grep -Eq "must be replaced|[1-9][0-9]* to replace" <<< "$output"; then
+        echo "FAIL"
+        echo "  ERROR: plan exited with changes but did not show a replacement:"
+        echo "  $output"
+        TOTAL_FAILED=$((TOTAL_FAILED + 1))
+        return 1
+    fi
+
+    echo "OK"
+    TOTAL_PASSED=$((TOTAL_PASSED + 1))
+    return 0
+}
+
+assert_ec2_vpc_state() {
+    local work_dir="$1"
+    local description="$2"
+    local expected_cidr="$3"
+
+    printf "  %-55s " "$description"
+
+    local summary
+    if ! summary=$(jq -r --arg cidr "$expected_cidr" '
+        [.resources[] | select(.resource_type == "ec2.Vpc")] as $vpcs
+        | if (($vpcs | length) == 1 and $vpcs[0].attributes.cidr_block == $cidr) then
+            "ok"
+          else
+            "count=\($vpcs | length) cidrs=\($vpcs | map(.attributes.cidr_block // "<missing>") | join(","))"
+          end
+    ' "$work_dir/carina.state.json" 2>&1); then
+        echo "FAIL"
+        echo "  ERROR: could not inspect state:"
+        echo "  $summary"
+        TOTAL_FAILED=$((TOTAL_FAILED + 1))
+        return 1
+    fi
+
+    if [ "$summary" = "ok" ]; then
+        echo "OK"
+        TOTAL_PASSED=$((TOTAL_PASSED + 1))
+        return 0
+    fi
+
+    echo "FAIL"
+    echo "  ERROR: expected exactly 1 ec2.Vpc with cidr_block=$expected_cidr, got $summary"
+    TOTAL_FAILED=$((TOTAL_FAILED + 1))
+    return 1
+}
+
 run_plan_verify() {
     local work_dir="$1"
     local description="$2"
@@ -336,6 +402,14 @@ run_test() {
         return 0
     fi
 
+    # Step 2a: Plan modified config and verify it is a replacement
+    if ! run_plan_expect_replace "$work_dir" "step2: plan replace"; then
+        destroy_work_dir "$work_dir"
+        rm -rf "$work_dir"
+        ACTIVE_WORK_DIR=""
+        return 1
+    fi
+
     # Step 2: Apply modified config (triggers create_before_destroy replacement)
     if ! run_step "$work_dir" "step2: apply replace (create_before_destroy)" "apply" "--auto-approve"; then
         destroy_work_dir "$work_dir"
@@ -350,6 +424,14 @@ run_test() {
 
     # Assert identifiers changed (create_before_destroy should replace at least one resource)
     if ! assert_identifiers "assert: identifiers changed after replace" "$ids_after_step1" "$ids_after_step2" "different"; then
+        destroy_work_dir "$work_dir"
+        rm -rf "$work_dir"
+        ACTIVE_WORK_DIR=""
+        return 1
+    fi
+
+    # Assert final state has only the replacement VPC
+    if [ "$test_name" = "ec2_vpc" ] && ! assert_ec2_vpc_state "$work_dir" "assert: one VPC with new CIDR" "10.201.0.0/16"; then
         destroy_work_dir "$work_dir"
         rm -rf "$work_dir"
         ACTIVE_WORK_DIR=""
@@ -383,13 +465,12 @@ echo "create_before_destroy multi-step acceptance tests (AWS)"
 echo "════════════════════════════════════════"
 echo ""
 
-# Test 1: EC2 VPC - CBD rejects schemas without unique_name_attribute
-# ec2.Vpc has no unique_name_attribute; cidr_block is create-only.
+# Test 1: EC2 VPC - CBD succeeds for Coexisting name-free replacement
+# ec2.Vpc has no unique-name attribute, but replacements can coexist.
 run_test "ec2_vpc" \
     "$SCRIPT_DIR/ec2_vpc_step1.crn" \
     "$SCRIPT_DIR/ec2_vpc_step2.crn" \
-    "Test 1: EC2 VPC (missing unique_name_attribute error)" \
-    "has no unique_name_attribute"
+    "Test 1: EC2 VPC (coexisting name-free replacement)"
 
 echo "════════════════════════════════════════"
 echo "Total: $TOTAL_PASSED passed, $TOTAL_FAILED failed"

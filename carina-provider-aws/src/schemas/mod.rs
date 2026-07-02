@@ -14,7 +14,9 @@ pub fn all_schemas() -> Vec<ResourceSchema> {
 mod tests {
     use std::collections::HashMap;
 
-    use carina_core::schema::{AttributeType, RawShape, ResourceSchema, SchemaKind, Shape};
+    use carina_core::schema::{
+        AttributeType, RawShape, ResourceSchema, SchemaKind, Shape, UniqueNameSpec,
+    };
 
     #[test]
     fn configs_register_s3_bucket_under_both_kinds() {
@@ -218,28 +220,31 @@ mod tests {
     }
 
     #[test]
-    fn generated_resource_unique_name_attributes_follow_writable_identifiers() {
+    fn generated_resource_unique_name_specs_follow_writable_identifiers_and_overrides() {
         let iam_role = super::generated::iam::role::iam_role_config();
         assert_eq!(
-            iam_role.schema.unique_name_attribute,
-            Some("role_name".to_string())
+            iam_role.schema.unique_name,
+            UniqueNameSpec::Attribute("role_name".to_string())
         );
 
         let ec2_vpc = super::generated::ec2::vpc::ec2_vpc_config();
-        assert_eq!(ec2_vpc.schema.unique_name_attribute, None);
+        assert_eq!(ec2_vpc.schema.unique_name, UniqueNameSpec::Coexisting);
 
         let ec2_route = super::generated::ec2::route::ec2_route_config();
-        assert_eq!(ec2_route.schema.unique_name_attribute, None);
+        assert_eq!(ec2_route.schema.unique_name, UniqueNameSpec::Conflicting);
 
         let ec2_vpc_gateway_attachment =
             super::generated::ec2::vpc_gateway_attachment::ec2_vpc_gateway_attachment_config();
         assert_eq!(
-            ec2_vpc_gateway_attachment.schema.unique_name_attribute,
-            None
+            ec2_vpc_gateway_attachment.schema.unique_name,
+            UniqueNameSpec::Conflicting
         );
 
         let route53_record_set = super::generated::route53::record_set::route53_record_set_config();
-        assert_eq!(route53_record_set.schema.unique_name_attribute, None);
+        assert_eq!(
+            route53_record_set.schema.unique_name,
+            UniqueNameSpec::Conflicting
+        );
     }
 
     #[test]

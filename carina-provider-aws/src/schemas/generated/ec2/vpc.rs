@@ -19,6 +19,7 @@ pub fn ec2_vpc_config() -> AwsSchemaConfig {
         has_tags: true,
         schema: ResourceSchema::new("ec2.Vpc")
         .with_description("Describes a VPC.")
+        .with_coexisting_replacement()
         .attribute(
             AttributeSchema::new("cidr_block", types::ipv4_cidr())
                 .create_only()
