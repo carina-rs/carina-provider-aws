@@ -5,6 +5,9 @@ on:
     branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+
 env:
   CARGO_TERM_COLOR: always
 
@@ -93,16 +96,17 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cargo/bin/vela
-          key: vela-cli-${{ runner.os }}-v1
+          key: vela-cli-${{ runner.os }}-4611418f8a84426b4b79077cae3f59357ca09ff7
       - name: Install vela-cli
         if: steps.cache-vela.outputs.cache-hit != 'true'
-        run: cargo install --git https://github.com/mizzy/vela vela-cli --quiet
+        run: cargo install --git https://github.com/mizzy/vela --rev 4611418f8a84426b4b79077cae3f59357ca09ff7 vela-cli --quiet
       - name: Optimize WASM with vela
         run: vela optimize target/wasm32-wasip2/release/carina-provider-aws.wasm -o target/wasm32-wasip2/release/carina-provider-aws.wasm
       - uses: actions/upload-artifact@v4
         with:
           name: carina-provider-aws.wasm
           path: target/wasm32-wasip2/release/carina-provider-aws.wasm
+          overwrite: true
 
   codegen-check:
     name: Codegen Check
@@ -125,3 +129,127 @@ jobs:
             echo "::error::Codegen produced uncommitted changes. Run './scripts/generate-schemas-smithy.sh' and './scripts/generate-provider.sh' locally and commit the results."
             exit 1
           fi
+
+  publish-dev:
+    name: Publish to Carina Registry (dev)
+    needs: [check, test, clippy, fmt, carina-pin, string-enum-aliases, wasm-build, codegen-check]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: write
+    env:
+      REGISTRY_AUDIENCE: registry-dev.carina-rs.dev
+      REGISTRY_PUBLISH_URL: https://publish.registry-dev.carina-rs.dev/v1/publish
+      ROLLING_RELEASE_TAG: main-builds
+    steps:
+      - name: Download WASM Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: carina-provider-aws.wasm
+
+      - name: Prepare Publish Asset
+        run: |
+          set -euo pipefail
+
+          short_sha=${GITHUB_SHA::7}
+          version="0.0.0-main.${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}.g${short_sha}"
+          mv carina-provider-aws.wasm "carina-provider-aws-${version}.wasm"
+          printf 'VERSION=%s\n' "$version" >> "$GITHUB_ENV"
+
+      - name: Upload to Rolling Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          if ! gh release view "$ROLLING_RELEASE_TAG" >/dev/null 2>&1; then
+            gh release create "$ROLLING_RELEASE_TAG" \
+              --prerelease \
+              --title "main builds" \
+              --notes "Rolling container for 0.0.0-main.* dogfooding builds. The Carina registry records these asset download URLs; do not delete this release or its assets, or pinned 0.0.0-main.* resolution will break." \
+              || true
+            if ! gh release view "$ROLLING_RELEASE_TAG" >/dev/null 2>&1; then
+              echo "Failed to create rolling release $ROLLING_RELEASE_TAG" >&2
+              exit 1
+            fi
+          fi
+          gh release upload "$ROLLING_RELEASE_TAG" "carina-provider-aws-${VERSION}.wasm"
+
+      - name: Publish to Carina Registry
+        # For a 403 claim_mismatch, verify that the trusted-publisher policy uses the
+        # main-branch-only sentinel and points to .github/workflows/ci.yml.
+        run: |
+          set -euo pipefail
+
+          version="$VERSION"
+          asset_url="https://github.com/${GITHUB_REPOSITORY}/releases/download/${ROLLING_RELEASE_TAG}/carina-provider-aws-${version}.wasm"
+          payload=$(jq -n \
+            --arg version "$version" \
+            --arg asset_url "$asset_url" \
+            '{
+              namespace: "carina-rs",
+              name: "aws",
+              version: $version,
+              candidate_download_url: $asset_url
+            }')
+          response_file=$(mktemp)
+          trap 'rm -f "$response_file"' EXIT
+
+          for attempt in 1 2 3; do
+            if ! token=$(curl -sS \
+              --connect-timeout 10 \
+              --max-time 60 \
+              -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+              "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=${REGISTRY_AUDIENCE}" \
+              | jq -er .value) || [ -z "$token" ]; then
+              printf 'Failed to obtain OIDC token on attempt %s\n' "$attempt" >&2
+              if [ "$attempt" -lt 3 ]; then
+                sleep 10
+                continue
+              fi
+              printf 'Publish failed after 3 attempts while obtaining OIDC token\n' >&2
+              exit 1
+            fi
+
+            : > "$response_file"
+            if ! status=$(curl -sS \
+              --connect-timeout 10 \
+              --max-time 120 \
+              -o "$response_file" \
+              -w '%{http_code}' \
+              -X POST \
+              -H "Authorization: Bearer $token" \
+              -H 'Content-Type: application/json' \
+              --data "$payload" \
+              "$REGISTRY_PUBLISH_URL"); then
+              status=000
+            fi
+
+            printf 'Publish attempt %s returned HTTP %s\n' "$attempt" "$status"
+            sed 's/^/  /' "$response_file"
+            printf '\n'
+
+            case "$status" in
+              200|201)
+                exit 0
+                ;;
+              000|429|5??)
+                if [ "$attempt" -lt 3 ]; then
+                  sleep 10
+                  continue
+                fi
+                printf 'Publish failed after 3 attempts (last status: %s)\n' "$status" >&2
+                exit 1
+                ;;
+              4??)
+                printf 'Publish failed with non-retryable status %s\n' "$status" >&2
+                exit 1
+                ;;
+              *)
+                printf 'Publish failed with unexpected status %s\n' "$status" >&2
+                exit 1
+                ;;
+            esac
+          done
