@@ -5,8 +5,11 @@ on:
     tags:
       - 'v*'
 
+concurrency:
+  group: release-${{ github.ref }}
+
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build:
@@ -74,7 +77,7 @@ jobs:
 
       - name: Optimize WASM with vela
         run: |
-          cargo install --git https://github.com/mizzy/vela vela-cli --quiet
+          cargo install --git https://github.com/mizzy/vela --rev 4611418f8a84426b4b79077cae3f59357ca09ff7 vela-cli --quiet
           vela optimize target/wasm32-wasip2/release/carina-provider-aws.wasm -o target/wasm32-wasip2/release/carina-provider-aws.wasm
 
       - name: Package
@@ -91,6 +94,8 @@ jobs:
     name: Create Release
     needs: [build, build-wasm]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/download-artifact@v4
         with:
