@@ -50,7 +50,7 @@ pub fn ec2_transit_gateway_attachment_config() -> AwsSchemaConfig {
     vec![("disable".to_string(), "disable".to_string()), ("enable".to_string(), "enable".to_string())],
     None,
     None,
-)).with_description("Enable or disable IPv6 support. The default is disable.").with_provider_name("Ipv6Support"),
+)).with_description("Specifies whether IPv6 support is enabled for the attachment. When enabled, the transit gateway network interface receives an IPv6 address. When you e...").with_provider_name("Ipv6Support"),
                     StructField::new("security_group_referencing_support", AttributeType::enum_(
     carina_core::schema::enum_identity("SecurityGroupReferencingSupport", Some("aws.ec2.TransitGatewayAttachment.CreateTransitGatewayVpcAttachmentRequestOptions")),
     Some(vec!["disable".to_string(), "enable".to_string()]),
