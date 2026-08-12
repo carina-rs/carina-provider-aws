@@ -66,6 +66,37 @@ The `carina-codegen-aws` crate generates resource definitions from AWS Smithy JS
 cargo run -p carina-codegen-aws -- <smithy-model-path>
 ```
 
+## Record measured AWS behaviour in the code, with date and region
+
+Provider work regularly turns on how a specific AWS API actually behaves rather
+than on what its documentation or Smithy model says: which fields a read returns,
+whether an update accepts a change or silently ignores it, how a value is spelled
+back, which changes force replacement. Verify these against real AWS
+(`aws-vault exec <profile> -- ...`) before designing around them.
+
+When an observation produces a code path — an override, a special-case branch, a
+field that must be stripped or synthesised, a value spelling that has to be
+translated — record the observation in a comment at that code path. Note what was
+run, the **region**, the **date**, and which directions were checked.
+
+```rust
+// UpdateFunctionConfiguration accepts removing this block but the read-back is
+// unchanged, so a presence toggle must force replacement rather than an
+// in-place update. Measured us-east-1, 2026-08-12, both directions
+// (add -> ValidationException; remove -> accepted but read-back unchanged).
+```
+
+The reason is re-measurement, not provenance. AWS behaviour changes, and a branch
+whose justification lives only in a PR thread becomes an incantation nobody dares
+touch. With a date and a region, a future reader can decide whether the
+observation is still current and re-run it. Without them, the only safe move is
+to leave the branch alone forever.
+
+Applies equally to the codegen layer: a `resource_type_overrides()` entry or a
+hand-written deviation from the Smithy model that exists because real AWS
+disagrees with the model needs the same comment, since the generated output alone
+cannot explain itself.
+
 ## Git Workflow
 
 ### Worktree-Based Development
