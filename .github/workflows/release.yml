@@ -66,7 +66,9 @@ jobs:
         with:
           submodules: recursive
 
-      - uses: dtolnay/rust-toolchain@stable
+      # Pinned to 1.95.0: current stable's rust-lld SIGSEGVs on wasm targets
+      # (rust-lang/rust#150227). Revert to @stable once fixed upstream.
+      - uses: dtolnay/rust-toolchain@1.95.0
         with:
           targets: wasm32-wasip2
 
