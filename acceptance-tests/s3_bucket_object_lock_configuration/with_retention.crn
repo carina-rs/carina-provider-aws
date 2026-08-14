@@ -1,0 +1,33 @@
+# S3 BucketObjectLockConfiguration - Default retention test
+#
+# Tests: the nested retention-rule DSL, including the days arm of the
+# retention-period union. Bucket-default retention applies only to objects
+# written after the rule exists; this fixture writes no objects, so the empty
+# bucket remains safely deletable during the runner's reverse-order destroy.
+
+provider aws {
+  region = aws.Region.ap_northeast_1
+}
+
+let bucket = aws.s3.Bucket {
+  bucket = 'carina-acc-test-aws-s3-object-lock-retention-v1'
+}
+
+let versioning = aws.s3.BucketVersioning {
+  bucket = bucket.bucket
+  status = aws.s3.BucketVersioning.VersioningStatus.enabled
+}
+
+aws.s3.BucketObjectLockConfiguration {
+  bucket              = versioning.bucket
+  object_lock_enabled = aws.s3.BucketObjectLockConfiguration.ObjectLockEnabled.enabled
+
+  rule = {
+    default_retention = {
+      mode             = aws.s3.BucketObjectLockConfiguration.ObjectLockRule.DefaultRetention.ObjectLockRetentionMode.governance
+      retention_period = {
+        days = 1
+      }
+    }
+  }
+}

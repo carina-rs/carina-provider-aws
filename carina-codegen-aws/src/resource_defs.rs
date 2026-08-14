@@ -1490,6 +1490,77 @@ pub fn s3_resources() -> Vec<ResourceDef> {
             read_shape_overrides: vec![],
             derived_attributes: vec![],
         },
+        // s3.BucketObjectLockConfiguration — controls Object Lock on an
+        // existing S3 bucket. Maps to PutObjectLockConfiguration /
+        // GetObjectLockConfiguration. AWS exposes no disable or delete API.
+        ResourceDef {
+            name: "s3.BucketObjectLockConfiguration",
+            service_namespace: "com.amazonaws.s3",
+            schema_structure: None,
+            // Read / Create / Update / Delete are hand-written because the
+            // configuration is nested and delete must leave AWS unchanged.
+            simple_delete: false,
+            noop_update: false,
+            create_op: "PutObjectLockConfiguration",
+            read_structure: None,
+            read_ops: vec![],
+            // There is no delete operation. The hand-written delete removes
+            // only Carina state and warns about the preserved AWS settings;
+            // this name is ignored by codegen because simple_delete is false.
+            delete_op: "PutObjectLockConfiguration",
+            update_ops: vec![UpdateOp {
+                operation: "PutObjectLockConfiguration",
+                fields: FieldLayout::InsideStruct {
+                    name: "ObjectLockConfiguration",
+                    fields: vec!["ObjectLockEnabled", "Rule"],
+                },
+            }],
+            identifier: "Bucket",
+            has_tags: false,
+            type_overrides: vec![
+                ("ObjectLockEnabled", "super::s3_object_lock_enabled()"),
+                ("Rule", "super::bucket_object_lock_rule()"),
+            ],
+            exclude_fields: vec![
+                "ContentMD5",
+                "ChecksumAlgorithm",
+                "ExpectedBucketOwner",
+                "RequestPayer",
+                "Token",
+                "ObjectLockConfiguration",
+            ],
+            create_only_overrides: vec!["Bucket"],
+            enum_aliases: vec![],
+            to_dsl_overrides: vec![],
+            required_overrides: vec!["Bucket", "ObjectLockEnabled"],
+            extra_read_only: vec![],
+            read_only_overrides: vec![],
+            extra_attributes: vec![
+                ExtraField {
+                    name: "ObjectLockEnabled",
+                    read_source: None,
+                    description: Some("Whether S3 Object Lock is enabled for the bucket."),
+                },
+                // Put with a default Rule followed by a Put without Rule
+                // removed the default, and Get reflected both directions.
+                // Measured in us-east-1 on 2026-08-14. Rule is therefore
+                // optional and updatable; removing it must not replace the
+                // resource.
+                ExtraField {
+                    name: "Rule",
+                    read_source: None,
+                    description: Some(
+                        "Optional bucket-default Object Lock retention rule. If `default_retention` is set, its `retention_period` must contain exactly one of `days` or `years`.",
+                    ),
+                },
+            ],
+            identity_overrides: vec![],
+            deferred_populate_overrides: vec![],
+            deferred_populate_struct_field_overrides: vec![],
+            struct_field_type_overrides: vec![],
+            read_shape_overrides: vec![],
+            derived_attributes: vec![],
+        },
         // s3.BucketAcl — sets the canned ACL on an existing S3 bucket.
         // Maps to PutBucketAcl / GetBucketAcl. There is no DeleteBucketAcl
         // API; "destroying" the resource resets the ACL to "private".
@@ -2851,5 +2922,29 @@ mod tests {
         let outs = def.shape.single_outputs().expect("Single shape");
         assert_eq!(outs.len(), 1);
         assert_eq!(outs[0].name, "arn");
+    }
+
+    #[test]
+    fn s3_bucket_object_lock_rule_is_updatable_and_removable() {
+        let resource = s3_resources()
+            .into_iter()
+            .find(|resource| resource.name == "s3.BucketObjectLockConfiguration")
+            .expect("missing s3.BucketObjectLockConfiguration ResourceDef");
+
+        assert!(
+            !resource.create_only_overrides.contains(&"Rule"),
+            "rule removal must not force replacement"
+        );
+        assert!(
+            resource
+                .update_ops
+                .iter()
+                .any(|op| op.fields.field_names().contains(&"Rule")),
+            "rule must be writable through PutObjectLockConfiguration"
+        );
+        assert!(
+            !resource.required_overrides.contains(&"Rule"),
+            "rule must remain optional"
+        );
     }
 }

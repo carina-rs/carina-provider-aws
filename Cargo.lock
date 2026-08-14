@@ -821,7 +821,7 @@ dependencies = [
 [[package]]
 name = "carina-core"
 version = "0.4.0"
-source = "git+https://github.com/carina-rs/carina?rev=336d128c#336d128c61dea18ac9cfe20891251648e12cc3fb"
+source = "git+https://github.com/carina-rs/carina?rev=5829bc28#5829bc28d9677c04085f917f5099a6aa5936ce69"
 dependencies = [
  "argon2",
  "carina-provider-protocol",
@@ -843,7 +843,7 @@ dependencies = [
 [[package]]
 name = "carina-plugin-sdk"
 version = "0.4.0"
-source = "git+https://github.com/carina-rs/carina?rev=336d128c#336d128c61dea18ac9cfe20891251648e12cc3fb"
+source = "git+https://github.com/carina-rs/carina?rev=5829bc28#5829bc28d9677c04085f917f5099a6aa5936ce69"
 dependencies = [
  "aws-smithy-runtime-api",
  "aws-smithy-types",
@@ -889,6 +889,7 @@ dependencies = [
  "urlencoding",
  "wasi 0.14.7+wasi-0.2.4",
  "winterbaume-core",
+ "winterbaume-s3",
  "winterbaume-sts",
  "wit-bindgen 0.54.0",
 ]
@@ -896,7 +897,7 @@ dependencies = [
 [[package]]
 name = "carina-provider-protocol"
 version = "0.3.0"
-source = "git+https://github.com/carina-rs/carina?rev=336d128c#336d128c61dea18ac9cfe20891251648e12cc3fb"
+source = "git+https://github.com/carina-rs/carina?rev=5829bc28#5829bc28d9677c04085f917f5099a6aa5936ce69"
 dependencies = [
  "serde",
  "serde_json",
@@ -2875,6 +2876,27 @@ dependencies = [
  "tokio",
  "tracing",
  "uuid",
+]
+
+[[package]]
+name = "winterbaume-s3"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8a970d46d8ed2309cda242f31fa147c51bc230a235969a8bbf9e6cab145d7f10"
+dependencies = [
+ "bytes",
+ "chrono",
+ "http 1.4.0",
+ "md-5",
+ "quick-xml",
+ "regex",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+ "tracing",
+ "uuid",
+ "winterbaume-core",
 ]
 
 [[package]]
