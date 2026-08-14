@@ -31,6 +31,10 @@ impl AwsProvider {
                 self.create_s3_bucket_public_access_block(resource).await
             }
             "s3.BucketVersioning" => self.create_s3_bucket_versioning(resource, schema).await,
+            "s3.BucketObjectLockConfiguration" => {
+                self.create_s3_bucket_object_lock_configuration(resource, schema)
+                    .await
+            }
             "s3.BucketServerSideEncryptionConfiguration" => {
                 self.create_s3_bucket_server_side_encryption_configuration(resource, schema)
                     .await
@@ -139,6 +143,10 @@ impl Provider for AwsProvider {
                 }
                 "s3.BucketVersioning" => {
                     self.read_s3_bucket_versioning(&id, identifier.as_deref())
+                        .await
+                }
+                "s3.BucketObjectLockConfiguration" => {
+                    self.read_s3_bucket_object_lock_configuration(&id, identifier.as_deref())
                         .await
                 }
                 "s3.BucketServerSideEncryptionConfiguration" => {
@@ -308,6 +316,16 @@ impl Provider for AwsProvider {
                 "s3.BucketVersioning" => {
                     self.update_s3_bucket_versioning(id, &identifier, &from, to, schema)
                         .await
+                }
+                "s3.BucketObjectLockConfiguration" => {
+                    self.update_s3_bucket_object_lock_configuration(
+                        id,
+                        &identifier,
+                        &from,
+                        to,
+                        schema,
+                    )
+                    .await
                 }
                 "s3.BucketServerSideEncryptionConfiguration" => {
                     self.update_s3_bucket_server_side_encryption_configuration(
@@ -494,6 +512,10 @@ impl Provider for AwsProvider {
                 }
                 "s3.BucketVersioning" => {
                     self.delete_s3_bucket_versioning_suspend(id, &identifier)
+                        .await
+                }
+                "s3.BucketObjectLockConfiguration" => {
+                    self.delete_s3_bucket_object_lock_configuration_noop(id, &identifier)
                         .await
                 }
                 "s3.BucketServerSideEncryptionConfiguration" => {

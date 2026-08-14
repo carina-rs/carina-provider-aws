@@ -56,6 +56,7 @@ pub fn configs() -> Vec<AwsSchemaConfig> {
         s3::bucket_lifecycle_configuration::s3_bucket_lifecycle_configuration_config(),
         s3::bucket_logging::s3_bucket_logging_config(),
         s3::bucket_notification_configuration::s3_bucket_notification_configuration_config(),
+        s3::bucket_object_lock_configuration::s3_bucket_object_lock_configuration_config(),
         s3::bucket_ownership_controls::s3_bucket_ownership_controls_config(),
         s3::bucket_policy::s3_bucket_policy_config(),
         s3::bucket_public_access_block::s3_bucket_public_access_block_config(),
@@ -112,6 +113,7 @@ pub fn get_enum_valid_values(
         s3::bucket_lifecycle_configuration::enum_valid_values(),
         s3::bucket_logging::enum_valid_values(),
         s3::bucket_notification_configuration::enum_valid_values(),
+        s3::bucket_object_lock_configuration::enum_valid_values(),
         s3::bucket_ownership_controls::enum_valid_values(),
         s3::bucket_policy::enum_valid_values(),
         s3::bucket_public_access_block::enum_valid_values(),
@@ -234,6 +236,9 @@ pub fn get_enum_alias_reverse(
     }
     if resource_type == "s3.BucketNotificationConfiguration" {
         return s3::bucket_notification_configuration::enum_alias_reverse(attr_name, value);
+    }
+    if resource_type == "s3.BucketObjectLockConfiguration" {
+        return s3::bucket_object_lock_configuration::enum_alias_reverse(attr_name, value);
     }
     if resource_type == "s3.BucketOwnershipControls" {
         return s3::bucket_ownership_controls::enum_alias_reverse(attr_name, value);
@@ -484,6 +489,13 @@ pub fn build_enum_aliases_map() -> std::collections::HashMap<
     }
     for (attr, alias, canonical) in s3::bucket_notification_configuration::enum_alias_entries() {
         map.entry("s3.BucketNotificationConfiguration".to_string())
+            .or_insert_with(std::collections::HashMap::new)
+            .entry(attr.to_string())
+            .or_insert_with(std::collections::HashMap::new)
+            .insert(alias.to_string(), canonical.to_string());
+    }
+    for (attr, alias, canonical) in s3::bucket_object_lock_configuration::enum_alias_entries() {
+        map.entry("s3.BucketObjectLockConfiguration".to_string())
             .or_insert_with(std::collections::HashMap::new)
             .entry(attr.to_string())
             .or_insert_with(std::collections::HashMap::new)

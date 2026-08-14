@@ -3756,7 +3756,8 @@ fn generate_markdown_resource(res: &ResourceDef, model: &SmithyModel) -> Result<
         let entry = MdAttrInfo {
             snake_name,
             type_display,
-            is_required: false,
+            is_required: required_overrides.contains(extra.name)
+                && !read_only_overrides.contains(extra.name),
             description: extra.description.map(|s| s.to_string()),
         };
         if read_only_overrides.contains(extra.name) {
@@ -4871,6 +4872,8 @@ fn cf_type_name(resource_name: &str) -> &'static str {
         // No native CloudFormation type; synthesize for cf_type_name totality.
         "s3.BucketVersioning" => "AWS::S3::BucketVersioning",
         // No native CloudFormation type; synthesize for cf_type_name totality.
+        "s3.BucketObjectLockConfiguration" => "AWS::S3::BucketObjectLockConfiguration",
+        // No native CloudFormation type; synthesize for cf_type_name totality.
         "s3.BucketServerSideEncryptionConfiguration" => {
             "AWS::S3::BucketServerSideEncryptionConfiguration"
         }
@@ -5378,6 +5381,53 @@ mod tests {
 
         assert!(md.contains("### `arn`"), "{md}");
         assert!(md.contains("- **Type:** IamRoleArn"), "{md}");
+    }
+
+    #[test]
+    fn markdown_marks_required_synthetic_object_lock_attribute() {
+        let model = carina_smithy::parse(
+            r##"{
+              "smithy": "2.0",
+              "shapes": {
+                "com.amazonaws.s3#PutObjectLockConfiguration": {
+                  "type": "operation",
+                  "input": {
+                    "target": "com.amazonaws.s3#PutObjectLockConfigurationRequest"
+                  },
+                  "output": { "target": "smithy.api#Unit" },
+                  "traits": {}
+                },
+                "com.amazonaws.s3#PutObjectLockConfigurationRequest": {
+                  "type": "structure",
+                  "members": {},
+                  "traits": { "smithy.api#input": {} }
+                }
+              }
+            }"##,
+        )
+        .expect("parse minimal S3 Object Lock model");
+        let resource = resource_defs::s3_resources()
+            .into_iter()
+            .find(|resource| resource.name == "s3.BucketObjectLockConfiguration")
+            .expect("missing Object Lock resource");
+
+        let markdown = generate_markdown_resource(&resource, &model).expect("markdown");
+        let object_lock_section = markdown
+            .split("### `object_lock_enabled`")
+            .nth(1)
+            .expect("object_lock_enabled section")
+            .split("### `rule`")
+            .next()
+            .unwrap();
+        assert!(
+            object_lock_section.contains("- **Required:** Yes"),
+            "{object_lock_section}"
+        );
+        let rule_section = markdown.split("### `rule`").nth(1).expect("rule section");
+        assert!(
+            rule_section.contains("must contain exactly one of `days` or `years`"),
+            "{rule_section}"
+        );
     }
 
     /// Per naming-conventions design D7 the codegen must emit a

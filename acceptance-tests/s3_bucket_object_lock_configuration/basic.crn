@@ -1,0 +1,23 @@
+# S3 BucketObjectLockConfiguration - Basic test
+#
+# Tests: enable Object Lock without a bucket-default retention rule. The
+# fixture creates no objects, so the runner can delete the empty bucket after
+# the Object Lock and versioning resources perform their state-only teardown.
+
+provider aws {
+  region = aws.Region.ap_northeast_1
+}
+
+let bucket = aws.s3.Bucket {
+  bucket = 'carina-acc-test-aws-s3-object-lock-basic-v1'
+}
+
+let versioning = aws.s3.BucketVersioning {
+  bucket = bucket.bucket
+  status = aws.s3.BucketVersioning.VersioningStatus.enabled
+}
+
+aws.s3.BucketObjectLockConfiguration {
+  bucket = versioning.bucket
+  object_lock_enabled = aws.s3.BucketObjectLockConfiguration.ObjectLockEnabled.enabled
+}

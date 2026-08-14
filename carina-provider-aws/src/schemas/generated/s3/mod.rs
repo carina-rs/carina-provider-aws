@@ -13,6 +13,7 @@ pub mod bucket_data_source;
 pub mod bucket_lifecycle_configuration;
 pub mod bucket_logging;
 pub mod bucket_notification_configuration;
+pub mod bucket_object_lock_configuration;
 pub mod bucket_ownership_controls;
 pub mod bucket_policy;
 pub mod bucket_public_access_block;

@@ -118,7 +118,14 @@ pub fn acm_certificate_config() -> AwsSchemaConfig {
     vec![("DISABLED".to_string(), "disabled".to_string()), ("ENABLED".to_string(), "enabled".to_string())],
     None,
     None,
-)).with_description("You can opt in to allow the export of your certificates by specifying ENABLED. You cannot update the value of Export after the the certificate is crea...").with_provider_name("Export")
+)).with_description("You can opt in to allow the export of your certificates by specifying ENABLED. You cannot update the value of Export after the the certificate is crea...").with_provider_name("Export"),
+                    StructField::new("validation_method", AttributeType::enum_(
+    carina_core::schema::enum_identity("ValidationMethod", Some("aws.acm.Certificate.CertificateOptions")),
+    Some(vec!["DNS".to_string(), "EMAIL".to_string(), "HTTP".to_string()]),
+    vec![("DNS".to_string(), "dns".to_string()), ("EMAIL".to_string(), "email".to_string()), ("HTTP".to_string(), "http".to_string())],
+    None,
+    None,
+)).with_description("The domain validation method for the certificate. To migrate from email to DNS validation, specify DNS.").with_provider_name("ValidationMethod")
                     ],
                 ))
                 .create_only()
