@@ -1,0 +1,29 @@
+# S3 Bucket - Basic managed-output test
+#
+# Tests bucket creation and consumes every managed read-only output through
+# tags on a second bucket. Bucket names are templated by the custom runner.
+
+provider aws {
+  region = aws.Region.ap_northeast_1
+}
+
+let source = aws.s3.Bucket {
+  bucket = '${SOURCE_BUCKET}'
+
+  tags = {
+    Environment = 'acceptance-test'
+  }
+}
+
+aws.s3.Bucket {
+  bucket = '${CONSUMER_BUCKET}'
+
+  tags = {
+    Environment          = 'acceptance-test'
+    SourceArn            = source.arn
+    SourceRegion         = source.region
+    SourceDomain         = source.bucket_domain_name
+    SourceRegionalDomain = source.bucket_regional_domain_name
+    SourceHostedZoneId   = source.hosted_zone_id
+  }
+}
