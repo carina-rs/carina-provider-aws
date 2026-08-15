@@ -11,6 +11,15 @@ use carina_core::schema::{AttributeSchema, AttributeType, ResourceSchema};
 
 const VALID_BUCKET_NAMESPACE: &[&str] = &["account-regional", "global"];
 
+pub fn arn() -> AttributeType {
+    AttributeType::refined_string(
+        Some(super::provider_type("s3", "Bucket", "Arn")),
+        Some("^arn:(aws|aws-cn|aws-us-gov):s3:::.+$".to_string()),
+        None,
+        None,
+    )
+}
+
 /// Returns the schema config for s3.Bucket (Smithy: com.amazonaws.s3)
 pub fn s3_bucket_config() -> AwsSchemaConfig {
     AwsSchemaConfig {
@@ -37,6 +46,36 @@ pub fn s3_bucket_config() -> AwsSchemaConfig {
                 .create_only()
                 .with_description("Specifies the namespace where you want to create your general purpose bucket. When you create a general purpose bucket, you can choose to create a buc...")
                 .with_provider_name("BucketNamespace"),
+        )
+        .attribute(
+            AttributeSchema::new("arn", self::arn())
+                .read_only()
+                .with_description("ARN of the bucket. (read-only)")
+                .with_provider_name("Arn"),
+        )
+        .attribute(
+            AttributeSchema::new("region", AttributeType::string())
+                .read_only()
+                .with_description("AWS region the bucket is in. (read-only)")
+                .with_provider_name("Region"),
+        )
+        .attribute(
+            AttributeSchema::new("bucket_domain_name", AttributeType::string())
+                .read_only()
+                .with_description("Bucket domain name, in the form NAME.s3.amazonaws.com. (read-only)")
+                .with_provider_name("BucketDomainName"),
+        )
+        .attribute(
+            AttributeSchema::new("bucket_regional_domain_name", AttributeType::string())
+                .read_only()
+                .with_description("Region-specific bucket domain name, in the form NAME.s3.REGION.amazonaws.com. (read-only)")
+                .with_provider_name("BucketRegionalDomainName"),
+        )
+        .attribute(
+            AttributeSchema::new("hosted_zone_id", AttributeType::string())
+                .read_only()
+                .with_description("Route 53 Hosted Zone ID for the bucket's region. (read-only)")
+                .with_provider_name("HostedZoneId"),
         )
         .attribute(
             AttributeSchema::new("tags", tags_type())

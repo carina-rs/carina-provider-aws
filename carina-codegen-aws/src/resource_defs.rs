@@ -1328,7 +1328,10 @@ pub fn s3_resources() -> Vec<ResourceDef> {
             update_ops: vec![],
             identifier: "Bucket",
             has_tags: true,
-            type_overrides: vec![],
+            // Keep Region plain: aws_region() accepts DSL spellings such as
+            // aws.Region.ap_northeast_1, while GetBucketLocation returns ap-northeast-1.
+            // Refining a provider-populated output risks validation and phantom diffs.
+            type_overrides: vec![("Region", "AttributeType::string()")],
             exclude_fields: vec![
                 "CreateBucketConfiguration",
                 "ContentMD5",
@@ -1351,8 +1354,43 @@ pub fn s3_resources() -> Vec<ResourceDef> {
             to_dsl_overrides: vec![],
             required_overrides: vec![],
             extra_read_only: vec![],
-            read_only_overrides: vec![],
-            extra_attributes: vec![],
+            // Bucket ARN + its location, DNS names, and hosted zone are read-only.
+            read_only_overrides: vec![
+                "Arn",
+                "Region",
+                "BucketDomainName",
+                "BucketRegionalDomainName",
+                "HostedZoneId",
+            ],
+            extra_attributes: vec![
+                ExtraField {
+                    name: "Arn",
+                    read_source: None,
+                    description: Some("ARN of the bucket."),
+                },
+                ExtraField {
+                    name: "Region",
+                    read_source: None,
+                    description: Some("AWS region the bucket is in."),
+                },
+                ExtraField {
+                    name: "BucketDomainName",
+                    read_source: None,
+                    description: Some("Bucket domain name, in the form NAME.s3.amazonaws.com."),
+                },
+                ExtraField {
+                    name: "BucketRegionalDomainName",
+                    read_source: None,
+                    description: Some(
+                        "Region-specific bucket domain name, in the form NAME.s3.REGION.amazonaws.com.",
+                    ),
+                },
+                ExtraField {
+                    name: "HostedZoneId",
+                    read_source: None,
+                    description: Some("Route 53 Hosted Zone ID for the bucket's region."),
+                },
+            ],
             identity_overrides: vec![],
             deferred_populate_overrides: vec![],
             deferred_populate_struct_field_overrides: vec![],
