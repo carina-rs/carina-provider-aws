@@ -72,7 +72,7 @@ pub fn s3_bucket_config() -> AwsSchemaConfig {
                 .with_provider_name("BucketRegionalDomainName"),
         )
         .attribute(
-            AttributeSchema::new("hosted_zone_id", AttributeType::string())
+            AttributeSchema::new("hosted_zone_id", super::route53_hosted_zone_id())
                 .read_only()
                 .with_description("Route 53 Hosted Zone ID for the bucket's region. (read-only)")
                 .with_provider_name("HostedZoneId"),

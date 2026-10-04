@@ -4351,6 +4351,32 @@ fn type_display_string_md<'a>(
     }
 }
 
+// Split union members without treating commas inside constructor arguments or
+// nested collection expressions as member separators.
+fn split_top_level_commas(value: &str) -> Vec<&str> {
+    let mut parts = Vec::new();
+    let mut start = 0;
+    let mut paren_depth = 0usize;
+    let mut bracket_depth = 0usize;
+
+    for (index, character) in value.char_indices() {
+        match character {
+            '(' => paren_depth += 1,
+            ')' => paren_depth = paren_depth.saturating_sub(1),
+            '[' => bracket_depth += 1,
+            ']' => bracket_depth = bracket_depth.saturating_sub(1),
+            ',' if paren_depth == 0 && bracket_depth == 0 => {
+                parts.push(&value[start..index]);
+                start = index + character.len_utf8();
+            }
+            _ => {}
+        }
+    }
+
+    parts.push(&value[start..]);
+    parts
+}
+
 /// Convert a Rust type code string to a human-readable display name.
 ///
 /// Display names use PascalCase consistently (e.g. `IamRoleArn`, not
@@ -4358,6 +4384,16 @@ fn type_display_string_md<'a>(
 /// rendered as `List<Inner>` so docs never leak Rust constructor syntax.
 fn type_code_to_display(type_code: &str) -> String {
     // Container types: AttributeType::list(...) and AttributeType::map(...)
+    if let Some(inner) = type_code
+        .strip_prefix("AttributeType::union(vec![")
+        .and_then(|s| s.strip_suffix("])"))
+    {
+        return split_top_level_commas(inner)
+            .into_iter()
+            .map(|member| type_code_to_display(member.trim()))
+            .collect::<Vec<_>>()
+            .join(" \\| ");
+    }
     if let Some(inner) = type_code
         .strip_prefix("AttributeType::list(")
         .and_then(|s| s.strip_suffix(')'))
@@ -4386,6 +4422,8 @@ fn type_code_to_display(type_code: &str) -> String {
         s if s.contains("iam_policy_arn") => "IamPolicyArn".to_string(),
         s if s.contains("iam_oidc_provider_arn") => "IamOidcProviderArn".to_string(),
         s if s.contains("iam_policy_document") => "PolicyDocument".to_string(),
+        s if s.contains("cloudfront_hosted_zone_id") => "CloudFrontHostedZoneId".to_string(),
+        s if s.contains("route53_hosted_zone_id") => "Route53HostedZoneId".to_string(),
         s if s.contains("kms_key_arn") || s.contains("kms::key::arn") => "KmsKeyArn".to_string(),
         s if s.contains("kms_key_id") || s.contains("kms::key::id") => "KmsKeyId".to_string(),
         s if s.contains("vpc_id") => "VpcId".to_string(),
@@ -4990,6 +5028,26 @@ mod tests {
         assert_eq!(
             type_code_to_display("super::iam_oidc_provider_arn()"),
             "IamOidcProviderArn"
+        );
+    }
+
+    #[test]
+    fn type_display_names_include_route53_hosted_zone_id_union() {
+        assert_eq!(
+            type_code_to_display(
+                "AttributeType::union(vec![super::cloudfront_hosted_zone_id(), super::route53_hosted_zone_id()])"
+            ),
+            "CloudFrontHostedZoneId \\| Route53HostedZoneId"
+        );
+    }
+
+    #[test]
+    fn type_display_union_splits_only_on_top_level_commas() {
+        assert_eq!(
+            type_code_to_display(
+                "AttributeType::union(vec![super::route53_hosted_zone_id(a, b), super::cloudfront_hosted_zone_id()])"
+            ),
+            "Route53HostedZoneId \\| CloudFrontHostedZoneId"
         );
     }
 

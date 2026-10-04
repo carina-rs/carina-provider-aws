@@ -120,11 +120,11 @@ pub struct ResourceDef {
     /// type_code)`. `type_code` is a Rust expression that evaluates to
     /// an `AttributeType` — typically a call into `super::config::…`.
     ///
-    /// Example: route53 `AliasTarget.HostedZoneId` accepts the
-    /// `aws.cloudfront.HostedZoneId.global` namespaced constant
-    /// (resolving to `Z2FDTNDATAQYW2`), while the top-level
-    /// `RecordSet.HostedZoneId` is the user-supplied Route 53 zone ID
-    /// and stays plain String (aws#302).
+    /// Example: route53 `AliasTarget.HostedZoneId` is a union that accepts
+    /// both the `aws.cloudfront.HostedZoneId.global` namespaced constant
+    /// (resolving to `Z2FDTNDATAQYW2`) and identified Route 53 hosted-zone
+    /// IDs, while the top-level `RecordSet.HostedZoneId` is the user's own
+    /// Route 53 zone ID and stays plain String (aws#302, aws#505).
     pub struct_field_type_overrides: Vec<(&'static str, &'static str, &'static str)>,
     /// Fields whose schema type should come from the *read structure*
     /// rather than the create input — for attributes where the AWS
@@ -1331,7 +1331,10 @@ pub fn s3_resources() -> Vec<ResourceDef> {
             // Keep Region plain: aws_region() accepts DSL spellings such as
             // aws.Region.ap_northeast_1, while GetBucketLocation returns ap-northeast-1.
             // Refining a provider-populated output risks validation and phantom diffs.
-            type_overrides: vec![("Region", "AttributeType::string()")],
+            type_overrides: vec![
+                ("Region", "AttributeType::string()"),
+                ("HostedZoneId", "super::route53_hosted_zone_id()"),
+            ],
             exclude_fields: vec![
                 "CreateBucketConfiguration",
                 "ContentMD5",
@@ -2268,7 +2271,7 @@ pub fn s3_data_sources() -> Vec<DataSourceDef> {
                     name: "hosted_zone_id",
                     provider_name: None,
                     description: "Route 53 Hosted Zone ID for the bucket's region.",
-                    type_code: "AttributeType::string()",
+                    type_code: "super::route53_hosted_zone_id()",
                 },
             ],
         },
@@ -2443,14 +2446,15 @@ pub fn route53_resources() -> Vec<ResourceDef> {
             identity_overrides: vec!["Type"],
             deferred_populate_overrides: vec![],
             deferred_populate_struct_field_overrides: vec![],
-            // `AliasTarget.HostedZoneId` accepts the `aws.cloudfront.HostedZoneId.global`
-            // namespaced constant (resolved to `Z2FDTNDATAQYW2`) in addition to literal
-            // Route 53 hosted-zone IDs. The top-level `RecordSet.HostedZoneId` (the
-            // user's own Route 53 zone) is intentionally left as plain String (aws#302).
+            // `AliasTarget.HostedZoneId` accepts both the
+            // `aws.cloudfront.HostedZoneId.global` namespaced constant (resolved to
+            // `Z2FDTNDATAQYW2`) and identified Route 53 hosted-zone IDs. The top-level
+            // `RecordSet.HostedZoneId` (the user's own Route 53 zone) is intentionally
+            // left as plain String (aws#302, aws#505).
             struct_field_type_overrides: vec![(
                 "AliasTarget",
                 "HostedZoneId",
-                "super::cloudfront_hosted_zone_id()",
+                "AttributeType::union(vec![super::cloudfront_hosted_zone_id(), super::route53_hosted_zone_id()])",
             )],
             read_shape_overrides: vec![],
             derived_attributes: vec![],

@@ -51,7 +51,7 @@ pub fn s3_bucket_data_source_config() -> AwsSchemaConfig {
                 .with_provider_name(""),
         )
         .attribute(
-            AttributeSchema::new("hosted_zone_id", AttributeType::string())
+            AttributeSchema::new("hosted_zone_id", super::route53_hosted_zone_id())
                 .with_description("Route 53 Hosted Zone ID for the bucket's region.")
                 .with_provider_name(""),
         )

@@ -509,52 +509,55 @@ impl AwsProvider {
     }
 }
 
-/// Map AWS region → S3 website-endpoint hosted zone ID.
+/// AWS region → S3 website-endpoint hosted zone ID.
 ///
 /// Source (fetched 2026-08-15):
 /// https://docs.aws.amazon.com/general/latest/gr/s3.html
 /// "Amazon S3 website endpoints and HostedZone IDs" table.
 /// Limited to commercial regions; isolated partitions (GovCloud, China)
 /// are out of scope.
+const S3_HOSTED_ZONE_IDS: &[(&str, &str)] = &[
+    ("us-east-1", "Z3AQBSTGFYJSTF"),
+    ("us-east-2", "Z2O1EMRO9K5GLX"),
+    ("us-west-1", "Z2F56UZL2M1ACD"),
+    ("us-west-2", "Z3BJ6K6RIION7M"),
+    ("af-south-1", "Z2OSFR5PIJ8TYW"),
+    ("ap-east-1", "ZNB98KWMFR0R6"),
+    ("ap-east-2", "Z064739330DAH7WJVOO93"),
+    ("ap-south-1", "Z11RGJOFQNVJUP"),
+    ("ap-south-2", "Z02976202B4EZMXIPMXF7"),
+    ("ap-northeast-1", "Z2M4EHUR26P7ZW"),
+    ("ap-northeast-2", "Z3W03O7B5YMIYP"),
+    ("ap-northeast-3", "Z2YQB5RD63NC85"),
+    ("ap-southeast-1", "Z3O0J2DXBE1FTB"),
+    ("ap-southeast-2", "Z1WCIGYICN2BYD"),
+    ("ap-southeast-3", "Z01846753K324LI26A3VV"),
+    ("ap-southeast-4", "Z0312387243XT5FE14WFO"),
+    ("ap-southeast-5", "Z08660063OXLMA7F1FJHU"),
+    ("ap-southeast-6", "Z05686083R66JX5C163TC"),
+    ("ap-southeast-7", "Z0031014GXUMRZG6I14G"),
+    ("ca-central-1", "Z1QDHH18159H29"),
+    ("ca-west-1", "Z03565811Z33SLEZTHOUL"),
+    ("eu-central-1", "Z21DNDUVLTQW6Q"),
+    ("eu-central-2", "Z030506016YDQGETNASS"),
+    ("eu-west-1", "Z1BKCTXD74EZPE"),
+    ("eu-west-2", "Z3GKZC51ZF0DB4"),
+    ("eu-west-3", "Z3R1K369G5AVDG"),
+    ("eu-north-1", "Z3BAZG2TWCNX0D"),
+    ("eu-south-1", "Z2OPA49AB41N7K"),
+    ("eu-south-2", "Z0081959F7139GRJC19J"),
+    ("il-central-1", "Z09640613K4A3MN55U7GU"),
+    ("mx-central-1", "Z057606446ZNVQJJ8WOP"),
+    ("me-central-1", "Z06143092I8HRXZRUZROF"),
+    ("me-south-1", "Z1MPMWCPA7YB62"),
+    ("sa-east-1", "Z7KQH4QJS55SO"),
+];
+
 pub(crate) fn s3_hosted_zone_id(region: &str) -> Result<&'static str, String> {
-    let id = match region {
-        "us-east-1" => "Z3AQBSTGFYJSTF",
-        "us-east-2" => "Z2O1EMRO9K5GLX",
-        "us-west-1" => "Z2F56UZL2M1ACD",
-        "us-west-2" => "Z3BJ6K6RIION7M",
-        "af-south-1" => "Z2OSFR5PIJ8TYW",
-        "ap-east-1" => "ZNB98KWMFR0R6",
-        "ap-east-2" => "Z064739330DAH7WJVOO93",
-        "ap-south-1" => "Z11RGJOFQNVJUP",
-        "ap-south-2" => "Z02976202B4EZMXIPMXF7",
-        "ap-northeast-1" => "Z2M4EHUR26P7ZW",
-        "ap-northeast-2" => "Z3W03O7B5YMIYP",
-        "ap-northeast-3" => "Z2YQB5RD63NC85",
-        "ap-southeast-1" => "Z3O0J2DXBE1FTB",
-        "ap-southeast-2" => "Z1WCIGYICN2BYD",
-        "ap-southeast-3" => "Z01846753K324LI26A3VV",
-        "ap-southeast-4" => "Z0312387243XT5FE14WFO",
-        "ap-southeast-5" => "Z08660063OXLMA7F1FJHU",
-        "ap-southeast-6" => "Z05686083R66JX5C163TC",
-        "ap-southeast-7" => "Z0031014GXUMRZG6I14G",
-        "ca-central-1" => "Z1QDHH18159H29",
-        "ca-west-1" => "Z03565811Z33SLEZTHOUL",
-        "eu-central-1" => "Z21DNDUVLTQW6Q",
-        "eu-central-2" => "Z030506016YDQGETNASS",
-        "eu-west-1" => "Z1BKCTXD74EZPE",
-        "eu-west-2" => "Z3GKZC51ZF0DB4",
-        "eu-west-3" => "Z3R1K369G5AVDG",
-        "eu-north-1" => "Z3BAZG2TWCNX0D",
-        "eu-south-1" => "Z2OPA49AB41N7K",
-        "eu-south-2" => "Z0081959F7139GRJC19J",
-        "il-central-1" => "Z09640613K4A3MN55U7GU",
-        "mx-central-1" => "Z057606446ZNVQJJ8WOP",
-        "me-central-1" => "Z06143092I8HRXZRUZROF",
-        "me-south-1" => "Z1MPMWCPA7YB62",
-        "sa-east-1" => "Z7KQH4QJS55SO",
-        _ => return Err(format!("Unknown S3 region: '{region}'")),
-    };
-    Ok(id)
+    S3_HOSTED_ZONE_IDS
+        .iter()
+        .find_map(|(candidate, hosted_zone_id)| (*candidate == region).then_some(*hosted_zone_id))
+        .ok_or_else(|| format!("Unknown S3 region: '{region}'"))
 }
 
 /// Result of classifying an S3 HeadBucket error.
@@ -809,6 +812,21 @@ mod tests {
             "Z057606446ZNVQJJ8WOP"
         );
         assert_eq!(s3_hosted_zone_id("eu-south-1").unwrap(), "Z2OPA49AB41N7K");
+    }
+
+    #[test]
+    fn every_s3_hosted_zone_id_validates_as_route53_hosted_zone_id() {
+        let schema = carina_core::schema::Schema::flat(carina_aws_types::route53_hosted_zone_id());
+        for &(region, hosted_zone_id) in S3_HOSTED_ZONE_IDS {
+            assert_eq!(s3_hosted_zone_id(region).as_deref(), Ok(hosted_zone_id));
+            let result = schema.validate(&Value::Concrete(ConcreteValue::String(
+                hosted_zone_id.to_string(),
+            )));
+            assert!(
+                result.is_ok(),
+                "{region} hosted-zone ID {hosted_zone_id} must validate: {result:?}"
+            );
+        }
     }
 
     #[test]

@@ -16,9 +16,9 @@ use carina_core::schema::AttributeType;
 /// - Namespaced identifier: `aws.cloudfront.HostedZoneId.global`
 /// - Literal AWS spelling: `Z2FDTNDATAQYW2`
 ///
-/// Any other value is a type error — `alias_target.hosted_zone_id`
-/// expects an AWS-published constant for the alias target's service,
-/// not an arbitrary string.
+/// This enum itself accepts only CloudFront's fixed value. Other Route 53
+/// alias-target zone IDs use [`crate::route53_hosted_zone_id`]; the
+/// `alias_target.hosted_zone_id` schema accepts a union of the two types.
 pub fn cloudfront_hosted_zone_id() -> AttributeType {
     AttributeType::enum_(
         carina_core::schema::enum_identity("HostedZoneId", Some("aws.cloudfront")),
