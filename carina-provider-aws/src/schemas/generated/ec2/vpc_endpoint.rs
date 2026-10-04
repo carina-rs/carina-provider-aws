@@ -15,6 +15,7 @@ const VALID_VPC_ENDPOINT_TYPE: &[&str] = &[
     "Interface",
     "Resource",
     "ServiceNetwork",
+    "Tunnel",
 ];
 
 /// Returns the schema config for ec2.VpcEndpoint (Smithy: com.amazonaws.ec2)
@@ -38,7 +39,7 @@ pub fn ec2_vpc_endpoint_config() -> AwsSchemaConfig {
         .attribute(
             AttributeSchema::new("resource_configuration_arn", super::arn())
                 .create_only()
-                .with_description("The Amazon Resource Name (ARN) of a resource configuration that will be associated with the VPC endpoint of type resource.")
+                .with_description("(Resource and Tunnel endpoints only) The Amazon Resource Name (ARN) of a resource configuration associated with the VPC endpoint. The type of resource...")
                 .with_provider_name("ResourceConfigurationArn"),
         )
         .attribute(
@@ -50,7 +51,7 @@ pub fn ec2_vpc_endpoint_config() -> AwsSchemaConfig {
         .attribute(
             AttributeSchema::new("security_group_ids", AttributeType::list(super::security_group_id()))
                 .create_only()
-                .with_description("(Interface endpoint) The IDs of the security groups to associate with the endpoint network interfaces. If this parameter is not specified, we use the ...")
+                .with_description("(Interface, Resource, ServiceNetwork, and Tunnel endpoints only) The IDs of the security groups to associate with the endpoint network interfaces. If ...")
                 .with_provider_name("SecurityGroupIds"),
         )
         .attribute(
@@ -75,19 +76,19 @@ pub fn ec2_vpc_endpoint_config() -> AwsSchemaConfig {
         .attribute(
             AttributeSchema::new("subnet_ids", AttributeType::list(super::subnet_id()))
                 .create_only()
-                .with_description("(Interface and Gateway Load Balancer endpoints) The IDs of the subnets in which to create endpoint network interfaces. For a Gateway Load Balancer end...")
+                .with_description("(Interface, Gateway Load Balancer endpoints, Resource, ServiceNetwork, and Tunnel endpoints only) The IDs of the subnets in which to create endpoint n...")
                 .with_provider_name("SubnetIds"),
         )
         .attribute(
             AttributeSchema::new("vpc_endpoint_type", AttributeType::enum_(
     carina_core::schema::enum_identity("VpcEndpointType", Some("aws.ec2.VpcEndpoint")),
-    Some(vec!["Gateway".to_string(), "GatewayLoadBalancer".to_string(), "Interface".to_string(), "Resource".to_string(), "ServiceNetwork".to_string()]),
-    vec![("Gateway".to_string(), "gateway".to_string()), ("GatewayLoadBalancer".to_string(), "gateway_load_balancer".to_string()), ("Interface".to_string(), "interface".to_string()), ("Resource".to_string(), "resource".to_string()), ("ServiceNetwork".to_string(), "service_network".to_string())],
+    Some(vec!["Gateway".to_string(), "GatewayLoadBalancer".to_string(), "Interface".to_string(), "Resource".to_string(), "ServiceNetwork".to_string(), "Tunnel".to_string()]),
+    vec![("Gateway".to_string(), "gateway".to_string()), ("GatewayLoadBalancer".to_string(), "gateway_load_balancer".to_string()), ("Interface".to_string(), "interface".to_string()), ("Resource".to_string(), "resource".to_string()), ("ServiceNetwork".to_string(), "service_network".to_string()), ("Tunnel".to_string(), "tunnel".to_string())],
     None,
     None,
 ))
                 .create_only()
-                .with_description("The type of endpoint. Default: Gateway")
+                .with_description("The type of endpoint. For more information about the types of VPC endpoints, see VPC endpoints in the Amazon Web Services PrivateLink User Guide. Defa...")
                 .with_provider_name("VpcEndpointType"),
         )
         .attribute(
@@ -132,6 +133,7 @@ pub fn enum_alias_reverse(attr_name: &str, value: &str) -> Option<&'static str> 
         ("vpc_endpoint_type", "interface") => Some("Interface"),
         ("vpc_endpoint_type", "resource") => Some("Resource"),
         ("vpc_endpoint_type", "service_network") => Some("ServiceNetwork"),
+        ("vpc_endpoint_type", "tunnel") => Some("Tunnel"),
         _ => None,
     }
 }
@@ -148,5 +150,6 @@ pub fn enum_alias_entries() -> &'static [(&'static str, &'static str, &'static s
         ("vpc_endpoint_type", "interface", "Interface"),
         ("vpc_endpoint_type", "resource", "Resource"),
         ("vpc_endpoint_type", "service_network", "ServiceNetwork"),
+        ("vpc_endpoint_type", "tunnel", "Tunnel"),
     ]
 }
