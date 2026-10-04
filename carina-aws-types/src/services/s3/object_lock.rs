@@ -154,7 +154,7 @@ mod tests {
     }
 
     #[test]
-    fn object_lock_rule_rejects_days_and_years_together() {
+    fn object_lock_rule_reports_days_and_years_as_mutually_exclusive() {
         let schema = carina_core::schema::Schema::flat(bucket_object_lock_rule());
         let both = rule(default_retention(
             Some("GOVERNANCE"),
@@ -171,20 +171,16 @@ mod tests {
 
         let errors = schema.validate_collect(&both);
         assert_eq!(errors.len(), 1, "{errors:?}");
-        assert!(matches!(
-            &errors[0].1,
-            carina_core::schema::TypeError::UnknownStructField {
-                struct_name,
-                field,
-                ..
-            } if struct_name == "RetentionDays" && field == "years"
-        ));
+        assert_eq!(
+            errors[0].1.to_string(),
+            "Expected exactly one of 'days' or 'years', but both were supplied"
+        );
         assert!(schema.validate_collect(&days_only).is_empty());
         assert!(schema.validate_collect(&years_only).is_empty());
     }
 
     #[test]
-    fn object_lock_rule_empty_period_reports_current_first_union_arm_error() {
+    fn object_lock_rule_empty_period_reports_exclusive_union_error() {
         let value = rule(default_retention(Some("GOVERNANCE"), Some(map([]))));
 
         let schema = carina_core::schema::Schema::flat(bucket_object_lock_rule());
@@ -192,7 +188,7 @@ mod tests {
         assert_eq!(errors.len(), 1, "{errors:?}");
         assert_eq!(
             errors[0].1.to_string(),
-            "Required attribute 'days' is missing"
+            "Expected exactly one of 'days' or 'years', but none were supplied"
         );
     }
 

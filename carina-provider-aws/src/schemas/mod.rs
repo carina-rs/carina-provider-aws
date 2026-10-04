@@ -78,7 +78,12 @@ mod tests {
                     return;
                 };
                 for (idx, member) in members.iter().enumerate() {
-                    collect_enum_identities(member, &format!("{path}.<union:{idx}>"), identities);
+                    let member = member.expect("generated schema union member is Ref-free");
+                    collect_enum_identities(
+                        member.as_attr(),
+                        &format!("{path}.<union:{idx}>"),
+                        identities,
+                    );
                 }
             }
             _ => {}

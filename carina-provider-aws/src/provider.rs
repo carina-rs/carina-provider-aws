@@ -3,7 +3,8 @@
 use carina_core::effect::PlanOp;
 use carina_core::provider::{
     BoxFuture, CreateOutcome, CreateRequest, DeleteRequest, Provider, ProviderError,
-    ProviderResult, ReadRequest, UpdateOutcome, UpdateRequest,
+    ProviderReadyDataSource, ProviderResult, ReadRequest, UpdateOutcome, UpdatePatch,
+    UpdateRequest,
 };
 use carina_core::resource::{DataSource, Resource, ResourceId, State};
 
@@ -113,6 +114,192 @@ impl AwsProvider {
             .for_resource(resource.id.clone())),
         }?;
         Ok(CreateOutcome::Success { state })
+    }
+
+    /// Dispatch a checked data source's provider-facing payload.
+    ///
+    /// The WASM guest bridge already receives a protocol-validated request and
+    /// cannot forge carina-core's sealed provider-readiness witness, so it
+    /// shares this body with the core [`Provider`] implementation.
+    pub async fn read_data_source_resource(&self, resource: &DataSource) -> ProviderResult<State> {
+        crate::provider_generated::dispatch_read_data_source(self, resource).await
+    }
+
+    /// Apply a checked update patch without constructing a sealed core request.
+    ///
+    /// This is also the WASM guest bridge entry point. The bridge receives the
+    /// protocol request's current state and patch separately, while native core
+    /// calls reach the same body through [`Provider::update`].
+    pub async fn update_with_patch(
+        &self,
+        id: &ResourceId,
+        identifier: &str,
+        from: &State,
+        patch: &UpdatePatch,
+    ) -> ProviderResult<UpdateOutcome> {
+        let id = id.clone();
+        // The aws provider's per-resource `update_*` methods predate the
+        // Level 3 patch contract and accept a full `to: Resource`.
+        // Reconstruct that from `(from, patch)` here so each method's
+        // existing logic continues to work without per-resource churn.
+        // Future per-resource updates can consume `patch` directly for
+        // partial-update API paths once those are wired in.
+        let to = apply_patch_to_state(from, patch);
+        let schema = self
+            .resource_schema(id.resource_type.as_str())
+            .ok_or_else(|| {
+                ProviderError::internal(format!("Unknown resource schema: {}", id.resource_type))
+                    .for_resource(id.clone())
+            })?;
+        let state = match id.resource_type.as_str() {
+            "s3.Bucket" => self.update_s3_bucket(id, identifier, from, to).await,
+            "s3.BucketPolicy" => self.update_s3_bucket_policy(id, identifier, from, to).await,
+            "s3.BucketPublicAccessBlock" => {
+                self.update_s3_bucket_public_access_block(id, identifier, from, to)
+                    .await
+            }
+            "s3.BucketVersioning" => {
+                self.update_s3_bucket_versioning(id, identifier, from, to, schema)
+                    .await
+            }
+            "s3.BucketObjectLockConfiguration" => {
+                self.update_s3_bucket_object_lock_configuration(id, identifier, from, to, schema)
+                    .await
+            }
+            "s3.BucketServerSideEncryptionConfiguration" => {
+                self.update_s3_bucket_server_side_encryption_configuration(
+                    id, identifier, from, to, schema,
+                )
+                .await
+            }
+            "s3.BucketAcl" => {
+                self.update_s3_bucket_acl(id, identifier, from, to, schema)
+                    .await
+            }
+            "s3.BucketOwnershipControls" => {
+                self.update_s3_bucket_ownership_controls(id, identifier, from, to, schema)
+                    .await
+            }
+            "s3.BucketReplicationConfiguration" => {
+                self.update_s3_bucket_replication_configuration(id, identifier, from, to, schema)
+                    .await
+            }
+            "s3.BucketLifecycleConfiguration" => {
+                self.update_s3_bucket_lifecycle_configuration(id, identifier, from, to, schema)
+                    .await
+            }
+            "s3.BucketWebsiteConfiguration" => {
+                self.update_s3_bucket_website_configuration(id, identifier, from, to, schema)
+                    .await
+            }
+            "s3.BucketCorsConfiguration" => {
+                self.update_s3_bucket_cors_configuration(id, identifier, from, to)
+                    .await
+            }
+            "s3.BucketNotificationConfiguration" => {
+                self.update_s3_bucket_notification_configuration(id, identifier, from, to)
+                    .await
+            }
+            "s3.BucketLogging" => {
+                self.update_s3_bucket_logging(id, identifier, from, to, schema)
+                    .await
+            }
+            "ec2.Eip" => self.update_ec2_eip(id, identifier, from, to, schema).await,
+            "ec2.Vpc" => self.update_ec2_vpc(id, identifier, from, to, schema).await,
+            "ec2.Subnet" => {
+                self.update_ec2_subnet(id, identifier, from, to, schema)
+                    .await
+            }
+            "ec2.InternetGateway" => {
+                self.update_ec2_internet_gateway(id, identifier, from, to)
+                    .await
+            }
+            "ec2.NatGateway" => {
+                self.update_ec2_nat_gateway(id, identifier, from, to, schema)
+                    .await
+            }
+            "ec2.RouteTable" => self.update_ec2_route_table(id, identifier, from, to).await,
+            "ec2.Route" => self.update_ec2_route(id, identifier, to).await,
+            "ec2.SecurityGroup" => {
+                self.update_ec2_security_group(id, identifier, from, to)
+                    .await
+            }
+            "ec2.SecurityGroupIngress" => {
+                self.update_ec2_security_group_ingress(id, identifier, to, schema)
+                    .await
+            }
+            "ec2.SecurityGroupEgress" => {
+                self.update_ec2_security_group_egress(id, identifier, to, schema)
+                    .await
+            }
+            "ec2.SubnetRouteTableAssociation" => {
+                self.update_ec2_subnet_route_table_association(id, identifier, to)
+                    .await
+            }
+            "ec2.FlowLog" => {
+                self.update_ec2_flow_log(id, identifier, from, to, schema)
+                    .await
+            }
+            "ec2.VpcEndpoint" => {
+                self.update_ec2_vpc_endpoint(id, identifier, from, to, schema)
+                    .await
+            }
+            "ec2.VpcGatewayAttachment" => {
+                self.update_ec2_vpc_gateway_attachment(id, identifier).await
+            }
+            "ec2.VpnGateway" => {
+                self.update_ec2_vpn_gateway(id, identifier, from, to, schema)
+                    .await
+            }
+            "ec2.TransitGateway" => {
+                self.update_ec2_transit_gateway(id, identifier, from, to, schema)
+                    .await
+            }
+            "ec2.TransitGatewayAttachment" => {
+                self.update_ec2_transit_gateway_attachment(id, identifier, from, to, schema)
+                    .await
+            }
+            "ec2.VpcPeeringConnection" => {
+                self.update_ec2_vpc_peering_connection(id, identifier, from, to)
+                    .await
+            }
+            "ec2.EgressOnlyInternetGateway" => {
+                self.update_ec2_egress_only_internet_gateway(id, identifier, from, to)
+                    .await
+            }
+            "organizations.Account" => {
+                self.update_organizations_account(id, identifier, from, to, schema)
+                    .await
+            }
+            "organizations.Organization" => {
+                // All attributes are read-only or create-only; read back current state.
+                self.read_organizations_organization(&id, Some(identifier))
+                    .await
+            }
+            "iam.Role" => self.update_iam_role(id, identifier, from, to).await,
+            "logs.LogGroup" => {
+                self.update_logs_log_group(id, identifier, from, to, schema)
+                    .await
+            }
+            "route53.RecordSet" => {
+                self.update_route53_record_set(id, identifier, to, schema)
+                    .await
+            }
+            "acm.Certificate" => {
+                self.update_acm_certificate(id, identifier, from, to, schema)
+                    .await
+            }
+            "sqs.Queue" => {
+                self.update_sqs_queue(id, identifier, from, to, schema)
+                    .await
+            }
+            _ => Err(ProviderError::internal(format!(
+                "Unknown resource type: {}",
+                id.resource_type
+            ))
+            .for_resource(id.clone())),
+        }?;
+        Ok(UpdateOutcome::Success { state })
     }
 }
 
@@ -261,11 +448,12 @@ impl Provider for AwsProvider {
         })
     }
 
-    fn read_data_source(&self, resource: &DataSource) -> BoxFuture<'_, ProviderResult<State>> {
-        let resource = resource.clone();
-        Box::pin(async move {
-            crate::provider_generated::dispatch_read_data_source(self, &resource).await
-        })
+    fn read_data_source(
+        &self,
+        resource: &ProviderReadyDataSource,
+    ) -> BoxFuture<'_, ProviderResult<State>> {
+        let resource = resource.as_data_source().clone();
+        Box::pin(async move { self.read_data_source_resource(&resource).await })
     }
 
     fn create(
@@ -273,8 +461,7 @@ impl Provider for AwsProvider {
         _id: &ResourceId,
         request: CreateRequest,
     ) -> BoxFuture<'_, ProviderResult<CreateOutcome>> {
-        let resource = request.resource;
-        Box::pin(async move { self.create_resource(resource.as_resource()).await })
+        Box::pin(async move { self.create_resource(request.resource().as_resource()).await })
     }
 
     fn update(
@@ -285,208 +472,9 @@ impl Provider for AwsProvider {
     ) -> BoxFuture<'_, ProviderResult<UpdateOutcome>> {
         let id = id.clone();
         let identifier = identifier.to_string();
-        let from = request.from.clone();
-        // The aws provider's per-resource `update_*` methods predate the
-        // Level 3 patch contract and accept a full `to: Resource`.
-        // Reconstruct that from `(from, patch)` here so each method's
-        // existing logic continues to work without per-resource churn.
-        // Future per-resource updates can read `request.patch` directly
-        // for partial-update API paths once those are wired in.
-        let to = apply_patch_to_state(&request.from, &request.patch);
         Box::pin(async move {
-            let schema = self
-                .resource_schema(id.resource_type.as_str())
-                .ok_or_else(|| {
-                    ProviderError::internal(format!(
-                        "Unknown resource schema: {}",
-                        id.resource_type
-                    ))
-                    .for_resource(id.clone())
-                })?;
-            let state = match id.resource_type.as_str() {
-                "s3.Bucket" => self.update_s3_bucket(id, &identifier, &from, to).await,
-                "s3.BucketPolicy" => {
-                    self.update_s3_bucket_policy(id, &identifier, &from, to)
-                        .await
-                }
-                "s3.BucketPublicAccessBlock" => {
-                    self.update_s3_bucket_public_access_block(id, &identifier, &from, to)
-                        .await
-                }
-                "s3.BucketVersioning" => {
-                    self.update_s3_bucket_versioning(id, &identifier, &from, to, schema)
-                        .await
-                }
-                "s3.BucketObjectLockConfiguration" => {
-                    self.update_s3_bucket_object_lock_configuration(
-                        id,
-                        &identifier,
-                        &from,
-                        to,
-                        schema,
-                    )
-                    .await
-                }
-                "s3.BucketServerSideEncryptionConfiguration" => {
-                    self.update_s3_bucket_server_side_encryption_configuration(
-                        id,
-                        &identifier,
-                        &from,
-                        to,
-                        schema,
-                    )
-                    .await
-                }
-                "s3.BucketAcl" => {
-                    self.update_s3_bucket_acl(id, &identifier, &from, to, schema)
-                        .await
-                }
-                "s3.BucketOwnershipControls" => {
-                    self.update_s3_bucket_ownership_controls(id, &identifier, &from, to, schema)
-                        .await
-                }
-                "s3.BucketReplicationConfiguration" => {
-                    self.update_s3_bucket_replication_configuration(
-                        id,
-                        &identifier,
-                        &from,
-                        to,
-                        schema,
-                    )
-                    .await
-                }
-                "s3.BucketLifecycleConfiguration" => {
-                    self.update_s3_bucket_lifecycle_configuration(
-                        id,
-                        &identifier,
-                        &from,
-                        to,
-                        schema,
-                    )
-                    .await
-                }
-                "s3.BucketWebsiteConfiguration" => {
-                    self.update_s3_bucket_website_configuration(id, &identifier, &from, to, schema)
-                        .await
-                }
-                "s3.BucketCorsConfiguration" => {
-                    self.update_s3_bucket_cors_configuration(id, &identifier, &from, to)
-                        .await
-                }
-                "s3.BucketNotificationConfiguration" => {
-                    self.update_s3_bucket_notification_configuration(id, &identifier, &from, to)
-                        .await
-                }
-                "s3.BucketLogging" => {
-                    self.update_s3_bucket_logging(id, &identifier, &from, to, schema)
-                        .await
-                }
-                "ec2.Eip" => {
-                    self.update_ec2_eip(id, &identifier, &from, to, schema)
-                        .await
-                }
-                "ec2.Vpc" => {
-                    self.update_ec2_vpc(id, &identifier, &from, to, schema)
-                        .await
-                }
-                "ec2.Subnet" => {
-                    self.update_ec2_subnet(id, &identifier, &from, to, schema)
-                        .await
-                }
-                "ec2.InternetGateway" => {
-                    self.update_ec2_internet_gateway(id, &identifier, &from, to)
-                        .await
-                }
-                "ec2.NatGateway" => {
-                    self.update_ec2_nat_gateway(id, &identifier, &from, to, schema)
-                        .await
-                }
-                "ec2.RouteTable" => {
-                    self.update_ec2_route_table(id, &identifier, &from, to)
-                        .await
-                }
-                "ec2.Route" => self.update_ec2_route(id, &identifier, to).await,
-                "ec2.SecurityGroup" => {
-                    self.update_ec2_security_group(id, &identifier, &from, to)
-                        .await
-                }
-                "ec2.SecurityGroupIngress" => {
-                    self.update_ec2_security_group_ingress(id, &identifier, to, schema)
-                        .await
-                }
-                "ec2.SecurityGroupEgress" => {
-                    self.update_ec2_security_group_egress(id, &identifier, to, schema)
-                        .await
-                }
-                "ec2.SubnetRouteTableAssociation" => {
-                    self.update_ec2_subnet_route_table_association(id, &identifier, to)
-                        .await
-                }
-                "ec2.FlowLog" => {
-                    self.update_ec2_flow_log(id, &identifier, &from, to, schema)
-                        .await
-                }
-                "ec2.VpcEndpoint" => {
-                    self.update_ec2_vpc_endpoint(id, &identifier, &from, to, schema)
-                        .await
-                }
-                "ec2.VpcGatewayAttachment" => {
-                    self.update_ec2_vpc_gateway_attachment(id, &identifier)
-                        .await
-                }
-                "ec2.VpnGateway" => {
-                    self.update_ec2_vpn_gateway(id, &identifier, &from, to, schema)
-                        .await
-                }
-                "ec2.TransitGateway" => {
-                    self.update_ec2_transit_gateway(id, &identifier, &from, to, schema)
-                        .await
-                }
-                "ec2.TransitGatewayAttachment" => {
-                    self.update_ec2_transit_gateway_attachment(id, &identifier, &from, to, schema)
-                        .await
-                }
-                "ec2.VpcPeeringConnection" => {
-                    self.update_ec2_vpc_peering_connection(id, &identifier, &from, to)
-                        .await
-                }
-                "ec2.EgressOnlyInternetGateway" => {
-                    self.update_ec2_egress_only_internet_gateway(id, &identifier, &from, to)
-                        .await
-                }
-                "organizations.Account" => {
-                    self.update_organizations_account(id, &identifier, &from, to, schema)
-                        .await
-                }
-                "organizations.Organization" => {
-                    // All attributes are read-only or create-only; read back current state
-                    self.read_organizations_organization(&id, Some(&identifier))
-                        .await
-                }
-                "iam.Role" => self.update_iam_role(id, &identifier, &from, to).await,
-                "logs.LogGroup" => {
-                    self.update_logs_log_group(id, &identifier, &from, to, schema)
-                        .await
-                }
-                "route53.RecordSet" => {
-                    self.update_route53_record_set(id, &identifier, to, schema)
-                        .await
-                }
-                "acm.Certificate" => {
-                    self.update_acm_certificate(id, &identifier, &from, to, schema)
-                        .await
-                }
-                "sqs.Queue" => {
-                    self.update_sqs_queue(id, &identifier, &from, to, schema)
-                        .await
-                }
-                _ => Err(ProviderError::internal(format!(
-                    "Unknown resource type: {}",
-                    id.resource_type
-                ))
-                .for_resource(id.clone())),
-            }?;
-            Ok(UpdateOutcome::Success { state })
+            self.update_with_patch(&id, &identifier, request.from(), request.patch())
+                .await
         })
     }
 

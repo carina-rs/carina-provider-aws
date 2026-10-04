@@ -13,9 +13,9 @@ use aws_sdk_route53::Client as Route53Client;
 use aws_sdk_s3::Client as S3Client;
 use aws_sdk_sqs::Client as SqsClient;
 use aws_sdk_sts::Client as StsClient;
-use carina_core::provider::{CreateRequest, Provider, ReadRequest};
-use carina_core::resource::{ConcreteValue, DataSource, ResolvedResource, Resource, State, Value};
-use carina_provider_aws::AwsProvider;
+use carina_core::provider::{CreateRequest, Provider, ProviderReadyDataSource, ReadRequest};
+use carina_core::resource::{ConcreteValue, DataSource, Resource, State, Value};
+use carina_provider_aws::{AwsNormalizer, AwsProvider};
 use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
@@ -137,6 +137,47 @@ fn string(value: &str) -> Value {
     Value::Concrete(ConcreteValue::String(value.to_string()))
 }
 
+fn schema_registry() -> carina_core::schema::SchemaRegistry {
+    let mut schemas = carina_core::schema::SchemaRegistry::new();
+    for schema in carina_provider_aws::schemas::all_schemas() {
+        schemas.insert("aws", schema);
+    }
+    schemas
+}
+
+async fn create_request_for_test(resource: Resource) -> CreateRequest {
+    let bindings = carina_core::binding_index::ResolvedBindings::default();
+    let module_gate = carina_core::executor::ModuleConstraintGate::new(&[]);
+    let schemas = schema_registry();
+    let preparation = carina_core::executor::ProviderPreparationContext::new(
+        &bindings,
+        &module_gate,
+        &[],
+        &AwsNormalizer,
+        &[],
+        &schemas,
+    );
+    carina_core::executor::prepare_create_request(resource, &preparation)
+        .await
+        .expect("test resource should pass checked create preparation")
+}
+
+fn ready_data_source_for_test(resource: DataSource) -> ProviderReadyDataSource {
+    let bindings = carina_core::binding_index::ResolvedBindings::default();
+    let module_gate = carina_core::executor::ModuleConstraintGate::new(&[]);
+    let schemas = schema_registry();
+    let preparation = carina_core::executor::ProviderPreparationContext::new(
+        &bindings,
+        &module_gate,
+        &[],
+        &AwsNormalizer,
+        &[],
+        &schemas,
+    );
+    carina_core::executor::prepare_provider_ready_data_source(resource, &preparation)
+        .expect("test data source should pass checked provider preparation")
+}
+
 fn assert_bucket_outputs(state: &State, bucket: &str, region: &str, hosted_zone_id: &str) {
     assert!(state.exists);
     assert_eq!(state.attributes.get("bucket"), Some(&string(bucket)));
@@ -170,14 +211,10 @@ async fn create_bucket_ignores_supplied_read_only_region_for_placement() {
     // the regression where create previously treated it as a placement override.
     resource.set_attr("region", string(supplied_read_only_region));
     let id = resource.id.clone();
+    let request = create_request_for_test(resource).await;
 
     let state = provider
-        .create(
-            &id,
-            CreateRequest {
-                resource: ResolvedResource::new(resource),
-            },
-        )
+        .create(&id, request)
         .await
         .expect("create S3 bucket")
         .into_state_for_writeback();
@@ -223,6 +260,7 @@ async fn managed_and_data_source_reads_use_head_bucket_region_without_get_bucket
 
     let mut data_source = DataSource::with_provider("aws", RESOURCE_TYPE, "lookup", None);
     data_source.set_attr("bucket", string(bucket));
+    let data_source = ready_data_source_for_test(data_source);
     let data_source_state = provider
         .read_data_source(&data_source)
         .await

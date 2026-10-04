@@ -18,10 +18,12 @@ use aws_sdk_s3::types::{
 use aws_sdk_sqs::Client as SqsClient;
 use aws_sdk_sts::Client as StsClient;
 use carina_core::provider::{
-    CreateRequest, DeleteRequest, PatchOp, PatchOpKind, Provider, ProviderError, ReadRequest,
-    UpdatePatch, UpdateRequest,
+    CreateRequest, DeleteRequest, NoopNormalizer, Provider, ProviderError, ReadRequest,
+    UpdateRequest,
 };
-use carina_core::resource::{ConcreteValue, ResolvedResource, Resource, State, Value};
+use carina_core::resource::{
+    ConcreteValue, Resource, ResourceIdentity, ResourceIdentityError, State, Value,
+};
 use carina_provider_aws::AwsProvider;
 use indexmap::IndexMap;
 use winterbaume_core::MockAws;
@@ -101,6 +103,50 @@ fn int(value: i64) -> Value {
     Value::Concrete(ConcreteValue::Int(value))
 }
 
+async fn create_request_for_test(resource: Resource) -> CreateRequest {
+    let bindings = carina_core::binding_index::ResolvedBindings::default();
+    let module_gate = carina_core::executor::ModuleConstraintGate::new(&[]);
+    let schemas = carina_core::schema::SchemaRegistry::new();
+    let preparation = carina_core::executor::ProviderPreparationContext::new(
+        &bindings,
+        &module_gate,
+        &[],
+        &NoopNormalizer,
+        &[],
+        &schemas,
+    );
+    carina_core::executor::prepare_create_request(resource, &preparation)
+        .await
+        .expect("test resource should pass checked create preparation")
+}
+
+async fn update_request_for_test(
+    resource: Resource,
+    from: State,
+    changed_attributes: &[String],
+) -> UpdateRequest {
+    let bindings = carina_core::binding_index::ResolvedBindings::default();
+    let module_gate = carina_core::executor::ModuleConstraintGate::new(&[]);
+    let schemas = carina_core::schema::SchemaRegistry::new();
+    let preparation = carina_core::executor::ProviderPreparationContext::new(
+        &bindings,
+        &module_gate,
+        &[],
+        &NoopNormalizer,
+        &[],
+        &schemas,
+    );
+    carina_core::executor::prepare_update_request(resource, from, changed_attributes, &preparation)
+        .await
+        .expect("test resource should pass checked update preparation")
+}
+
+fn resource_from_state(state: &State) -> Resource {
+    let mut resource = Resource::from_id(state.id.clone());
+    resource.attributes = state.attributes.clone().into_iter().collect();
+    resource
+}
+
 fn retention_rule(mode: &str, period_name: &'static str, period: i64) -> Value {
     map([(
         "default_retention",
@@ -112,8 +158,13 @@ fn retention_rule(mode: &str, period_name: &'static str, period: i64) -> Value {
 }
 
 fn object_lock_resource(bucket: &str, rule: Option<Value>) -> Resource {
-    let mut resource =
-        Resource::with_provider("aws", RESOURCE_TYPE, format!("lock-{bucket}"), None);
+    let identity = match ResourceIdentity::try_from(format!("lock-{bucket}")) {
+        Ok(identity) => identity,
+        Err(ResourceIdentityError::Empty) => {
+            panic!("object-lock test identity derived from a non-empty bucket cannot be empty")
+        }
+    };
+    let mut resource = Resource::with_provider("aws", RESOURCE_TYPE, identity, None);
     resource.set_attr("bucket", string(bucket));
     resource.set_attr("object_lock_enabled", string("Enabled"));
     if let Some(rule) = rule {
@@ -125,13 +176,9 @@ fn object_lock_resource(bucket: &str, rule: Option<Value>) -> Resource {
 async fn create_object_lock(provider: &AwsProvider, bucket: &str, rule: Option<Value>) -> State {
     let resource = object_lock_resource(bucket, rule);
     let id = resource.id.clone();
+    let request = create_request_for_test(resource).await;
     provider
-        .create(
-            &id,
-            CreateRequest {
-                resource: ResolvedResource::new(resource),
-            },
-        )
+        .create(&id, request)
         .await
         .expect("create Object Lock configuration")
         .into_state_for_writeback()
@@ -237,14 +284,10 @@ async fn dsl_enum_identifiers_are_canonicalized_before_create() {
         )),
     );
     let id = resource.id.clone();
+    let request = create_request_for_test(resource).await;
 
     let _state = provider
-        .create(
-            &id,
-            CreateRequest {
-                resource: ResolvedResource::new(resource),
-            },
-        )
+        .create(&id, request)
         .await
         .expect("create Object Lock configuration from DSL enum identifiers")
         .into_state_for_writeback();
@@ -346,14 +389,10 @@ async fn create_requires_versioning_with_actionable_bucket_error() {
     create_bucket(&client, bucket).await;
     let resource = object_lock_resource(bucket, None);
     let id = resource.id.clone();
+    let request = create_request_for_test(resource).await;
 
     let error = provider
-        .create(
-            &id,
-            CreateRequest {
-                resource: ResolvedResource::new(resource),
-            },
-        )
+        .create(&id, request)
         .await
         .expect_err("Object Lock create must reject a bucket without versioning");
     let message = error.to_string();
@@ -444,14 +483,8 @@ async fn create_rejects_all_reachable_invalid_rule_shapes() {
     for (case, rule, expected_message) in cases {
         let resource = object_lock_resource(bucket, Some(rule));
         let id = resource.id.clone();
-        let result = provider
-            .create(
-                &id,
-                CreateRequest {
-                    resource: ResolvedResource::new(resource),
-                },
-            )
-            .await;
+        let request = create_request_for_test(resource).await;
+        let result = provider.create(&id, request).await;
         let error = match result {
             Ok(_) => panic!("{case}: provider.create must reject the value"),
             Err(error) => error,
@@ -521,14 +554,8 @@ async fn recreate_without_rule_refuses_to_clobber_retained_compliance_rule() {
         .expect("Object Lock destroy should be a no-op");
     let resource = object_lock_resource(bucket, None);
     let id = resource.id.clone();
-    let recreate = provider
-        .create(
-            &id,
-            CreateRequest {
-                resource: ResolvedResource::new(resource),
-            },
-        )
-        .await;
+    let request = create_request_for_test(resource).await;
+    let recreate = provider.create(&id, request).await;
 
     let stored = client
         .get_object_lock_configuration()
@@ -585,22 +612,13 @@ async fn dropping_rule_is_an_in_place_update() {
     )
     .await;
     let id = created.id.clone();
+    let mut desired = resource_from_state(&created);
+    desired.attributes.shift_remove("rule");
+    let changed_attributes = ["rule".to_string()];
+    let request = update_request_for_test(desired, created, &changed_attributes).await;
 
     let updated = provider
-        .update(
-            &id,
-            bucket,
-            UpdateRequest {
-                from: created,
-                patch: UpdatePatch {
-                    ops: vec![PatchOp {
-                        kind: PatchOpKind::Remove,
-                        key: "rule".to_string(),
-                        value: None,
-                    }],
-                },
-            },
-        )
+        .update(&id, bucket, request)
         .await
         .expect("dropping rule should update in place")
         .into_state_for_writeback();
@@ -622,22 +640,13 @@ async fn retention_mode_and_period_update_in_place() {
     .await;
     let id = created.id.clone();
     let replacement_rule = retention_rule("COMPLIANCE", "years", 1);
+    let mut desired = resource_from_state(&created);
+    desired.set_attr("rule", replacement_rule);
+    let changed_attributes = ["rule".to_string()];
+    let request = update_request_for_test(desired, created, &changed_attributes).await;
 
     let updated = provider
-        .update(
-            &id,
-            bucket,
-            UpdateRequest {
-                from: created,
-                patch: UpdatePatch {
-                    ops: vec![PatchOp {
-                        kind: PatchOpKind::Replace,
-                        key: "rule".to_string(),
-                        value: Some(replacement_rule),
-                    }],
-                },
-            },
-        )
+        .update(&id, bucket, request)
         .await
         .expect("retention change should update in place")
         .into_state_for_writeback();

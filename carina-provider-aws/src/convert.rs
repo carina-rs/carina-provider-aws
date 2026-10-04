@@ -11,11 +11,13 @@ use carina_core::provider::{
 };
 use carina_core::resource::{
     ConcreteValue, DataSource as CoreDataSource, DeferredValue, Directives as CoreDirectives,
-    Resource as CoreResource, ResourceId as CoreResourceId, State as CoreState, Value as CoreValue,
+    Resource as CoreResource, ResourceId as CoreResourceId,
+    ResourceIdentity as CoreResourceIdentity, ResourceIdentityError as CoreResourceIdentityError,
+    ResourceIdentityState as CoreResourceIdentityState, State as CoreState, Value as CoreValue,
 };
 use carina_core::schema::{
     AttributeSchema as CoreAttributeSchema, AttributeType as CoreAttributeType,
-    OperationConfig as CoreOperationConfig, RawShape as CoreRawShape,
+    InputMode as CoreInputMode, OperationConfig as CoreOperationConfig, RawShape as CoreRawShape,
     ResourceSchema as CoreResourceSchema, SchemaKind as CoreSchemaKind,
     StructField as CoreStructField, UniqueNameSpec as CoreUniqueNameSpec, legacy_validator,
 };
@@ -32,10 +34,14 @@ use carina_provider_protocol::types::{
 // -- ResourceId --
 
 pub fn core_to_proto_resource_id(id: &CoreResourceId) -> ProtoResourceId {
+    let identity = match id.identity_state() {
+        CoreResourceIdentityState::Pending(_) => String::new(),
+        CoreResourceIdentityState::Resolved(identity) => identity.as_str().to_string(),
+    };
     ProtoResourceId {
         provider: id.provider.clone(),
         resource_type: id.resource_type.clone(),
-        identity: id.identity_or_empty().to_string(),
+        identity,
     }
 }
 
@@ -43,7 +49,19 @@ pub fn proto_to_core_resource_id(id: &ProtoResourceId) -> CoreResourceId {
     // `ProtoResourceId` predates carina#3038's `provider_instance` field;
     // the WIT wire format does not carry it. Pass `None` so the
     // reconstructed `CoreResourceId` routes through the default provider.
-    CoreResourceId::with_provider_name_compat(&id.provider, &id.resource_type, &id.identity, None)
+    match CoreResourceIdentity::try_from(id.identity.clone()) {
+        Ok(identity) => CoreResourceId::with_provider_identity(
+            id.provider.clone(),
+            id.resource_type.clone(),
+            identity,
+            None,
+        ),
+        Err(CoreResourceIdentityError::Empty) => CoreResourceId::pending_with_provider(
+            id.provider.clone(),
+            id.resource_type.clone(),
+            None,
+        ),
+    }
 }
 
 // -- Value --
@@ -229,8 +247,7 @@ pub fn core_to_proto_directives(l: &CoreDirectives) -> ProtoDirectives {
 // -- proto_to_core_resource (reverse of core_to_proto_resource) --
 
 pub fn proto_to_core_resource(r: &ProtoResource) -> CoreResource {
-    let mut resource =
-        CoreResource::with_provider(&r.id.provider, &r.id.resource_type, &r.id.identity, None);
+    let mut resource = CoreResource::from_id(proto_to_core_resource_id(&r.id));
     resource.attributes = r
         .attributes
         .iter()
@@ -251,8 +268,19 @@ pub fn proto_to_core_resource(r: &ProtoResource) -> CoreResource {
 /// shape; `Provider::read_data_source` consumes a `DataSource`, so a
 /// data-source read request maps to this typed projection (carina#3181).
 pub fn proto_to_core_data_source(r: &ProtoResource) -> CoreDataSource {
-    let mut data_source =
-        CoreDataSource::with_provider(&r.id.provider, &r.id.resource_type, &r.id.identity, None);
+    let mut data_source = match CoreResourceIdentity::try_from(r.id.identity.clone()) {
+        Ok(identity) => CoreDataSource::with_provider(
+            r.id.provider.clone(),
+            r.id.resource_type.clone(),
+            identity,
+            None,
+        ),
+        Err(CoreResourceIdentityError::Empty) => CoreDataSource::pending_with_provider(
+            r.id.provider.clone(),
+            r.id.resource_type.clone(),
+            None,
+        ),
+    };
     data_source.attributes = r
         .attributes
         .iter()
@@ -429,40 +457,66 @@ fn proto_to_core_attribute_type(t: &ProtoAttributeType) -> CoreAttributeType {
 }
 
 fn proto_to_core_struct_field(f: &ProtoStructField) -> CoreStructField {
+    let ProtoStructField {
+        name,
+        field_type,
+        required,
+        description,
+        block_name,
+        provider_name,
+        read_only,
+        deferred_populate,
+    } = f;
     CoreStructField {
-        name: f.name.clone(),
-        field_type: proto_to_core_attribute_type(&f.field_type),
-        required: f.required,
-        description: f.description.clone(),
-        provider_name: f.provider_name.clone(),
-        block_name: f.block_name.clone(),
-        // The WIT contract does not transmit `deferred_populate`
-        // (carina#3034). The annotation lives entirely in the host-
-        // side schema (set by codegen output in
-        // `carina-provider-aws/src/schemas/generated/`), which is
-        // loaded directly via `SchemaRegistry` rather than crossing
-        // the WASM boundary.
-        deferred_populate: false,
+        name: name.clone(),
+        field_type: proto_to_core_attribute_type(field_type),
+        input_mode: proto_input_mode_to_core(*required, *read_only),
+        description: description.clone(),
+        provider_name: provider_name.clone(),
+        block_name: block_name.clone(),
+        deferred_populate: *deferred_populate,
     }
 }
 
-fn _proto_to_core_attribute_schema(a: &ProtoAttributeSchema) -> CoreAttributeSchema {
+fn proto_input_mode_to_core(required: bool, read_only: bool) -> CoreInputMode {
+    match (required, read_only) {
+        (false, false) => CoreInputMode::Optional,
+        (true, false) => CoreInputMode::Required,
+        (false, true) => CoreInputMode::ProviderPopulated,
+        (true, true) => panic!("schema input mode cannot be both required and read-only"),
+    }
+}
+
+fn proto_to_core_attribute_schema(a: &ProtoAttributeSchema) -> CoreAttributeSchema {
+    let ProtoAttributeSchema {
+        name,
+        attr_type,
+        required,
+        default,
+        description,
+        create_only,
+        read_only,
+        write_only,
+        block_name,
+        provider_name,
+        removable,
+        identity,
+        deferred_populate,
+    } = a;
     CoreAttributeSchema {
-        name: a.name.clone(),
-        attr_type: proto_to_core_attribute_type(&a.attr_type),
-        required: a.required,
-        default: a.default.as_ref().map(proto_to_core_value),
-        description: a.description.clone(),
+        name: name.clone(),
+        attr_type: proto_to_core_attribute_type(attr_type),
+        input_mode: proto_input_mode_to_core(*required, *read_only),
+        default: default.as_ref().map(proto_to_core_value),
+        description: description.clone(),
         completions: None,
-        provider_name: a.provider_name.clone(),
-        create_only: a.create_only,
-        read_only: a.read_only,
-        removable: a.removable,
-        block_name: a.block_name.clone(),
-        write_only: a.write_only,
-        identity: a.identity,
-        // See `proto_to_core_struct_field` for the rationale.
-        deferred_populate: false,
+        provider_name: provider_name.clone(),
+        create_only: *create_only,
+        removable: *removable,
+        block_name: block_name.clone(),
+        write_only: *write_only,
+        identity: *identity,
+        deferred_populate: *deferred_populate,
     }
 }
 
@@ -472,7 +526,7 @@ pub fn proto_to_core_schema(s: &ProtoResourceSchema) -> CoreResourceSchema {
         attributes: s
             .attributes
             .iter()
-            .map(|(k, v)| (k.clone(), _proto_to_core_attribute_schema(v)))
+            .map(|(k, v)| (k.clone(), proto_to_core_attribute_schema(v)))
             .collect(),
         description: s.description.clone(),
         validator: None,
@@ -624,30 +678,67 @@ fn core_to_proto_attribute_type(t: &CoreAttributeType) -> ProtoAttributeType {
 }
 
 fn core_to_proto_struct_field(f: &CoreStructField) -> ProtoStructField {
+    let CoreStructField {
+        name,
+        field_type,
+        input_mode,
+        description,
+        provider_name,
+        block_name,
+        deferred_populate,
+    } = f;
+    let (required, read_only) = core_input_mode_to_proto(*input_mode);
     ProtoStructField {
-        name: f.name.clone(),
-        field_type: core_to_proto_attribute_type(&f.field_type),
-        required: f.required,
-        description: f.description.clone(),
-        block_name: f.block_name.clone(),
-        provider_name: f.provider_name.clone(),
+        name: name.clone(),
+        field_type: core_to_proto_attribute_type(field_type),
+        required,
+        description: description.clone(),
+        block_name: block_name.clone(),
+        provider_name: provider_name.clone(),
+        read_only,
+        deferred_populate: *deferred_populate,
     }
 }
 
 fn core_to_proto_attribute_schema(a: &CoreAttributeSchema) -> ProtoAttributeSchema {
+    let CoreAttributeSchema {
+        name,
+        attr_type,
+        input_mode,
+        default,
+        description,
+        completions: _completions,
+        provider_name,
+        create_only,
+        removable,
+        block_name,
+        write_only,
+        identity,
+        deferred_populate,
+    } = a;
+    let (required, read_only) = core_input_mode_to_proto(*input_mode);
     ProtoAttributeSchema {
-        name: a.name.clone(),
-        attr_type: core_to_proto_attribute_type(&a.attr_type),
-        required: a.required,
-        default: a.default.as_ref().map(core_to_proto_value),
-        description: a.description.clone(),
-        create_only: a.create_only,
-        read_only: a.read_only,
-        write_only: a.write_only,
-        block_name: a.block_name.clone(),
-        provider_name: a.provider_name.clone(),
-        removable: a.removable,
-        identity: a.identity,
+        name: name.clone(),
+        attr_type: core_to_proto_attribute_type(attr_type),
+        required,
+        default: default.as_ref().map(core_to_proto_value),
+        description: description.clone(),
+        create_only: *create_only,
+        read_only,
+        write_only: *write_only,
+        block_name: block_name.clone(),
+        provider_name: provider_name.clone(),
+        removable: *removable,
+        identity: *identity,
+        deferred_populate: *deferred_populate,
+    }
+}
+
+fn core_input_mode_to_proto(input_mode: CoreInputMode) -> (bool, bool) {
+    match input_mode {
+        CoreInputMode::Optional => (false, false),
+        CoreInputMode::Required => (true, false),
+        CoreInputMode::ProviderPopulated => (false, true),
     }
 }
 
@@ -897,5 +988,100 @@ mod tests {
             }
             other => panic!("Expected String, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn schema_transport_preserves_nested_input_mode_deferred_populate_and_default() {
+        let schema = CoreResourceSchema::new("acm.Certificate")
+            .attribute(CoreAttributeSchema::new(
+                "domain_validation_options",
+                CoreAttributeType::struct_(
+                    "DomainValidation",
+                    vec![
+                        CoreStructField::new("resource_record", CoreAttributeType::string())
+                            .read_only()
+                            .deferred_populate(),
+                    ],
+                ),
+            ))
+            .attribute(
+                CoreAttributeSchema::new("status", CoreAttributeType::string())
+                    .with_default(CoreValue::Concrete(ConcreteValue::String(
+                        "PENDING_VALIDATION".to_string(),
+                    )))
+                    .read_only()
+                    .deferred_populate(),
+            );
+
+        let proto = core_to_proto_schema(&schema);
+        let proto_domain_validation = &proto.attributes["domain_validation_options"];
+        let ProtoAttributeType::Struct {
+            name: proto_struct_name,
+            fields: proto_fields,
+        } = &proto_domain_validation.attr_type
+        else {
+            panic!("domain_validation_options must remain a Struct");
+        };
+        assert_eq!(proto_struct_name, "DomainValidation");
+        let proto_resource_record = &proto_fields[0];
+        assert!(!proto_resource_record.required);
+        assert!(proto_resource_record.read_only);
+        assert!(proto_resource_record.deferred_populate);
+
+        let proto_status = &proto.attributes["status"];
+        assert!(!proto_status.required);
+        assert!(proto_status.read_only);
+        assert!(proto_status.deferred_populate);
+        assert_eq!(
+            proto_status.default,
+            Some(ProtoValue::String("PENDING_VALIDATION".to_string()))
+        );
+
+        let round_tripped = proto_to_core_schema(&proto);
+        let domain_validation = &round_tripped.attributes["domain_validation_options"];
+        let CoreRawShape::Struct {
+            name: round_tripped_struct_name,
+            fields: round_tripped_fields,
+        } = domain_validation.attr_type.raw_shape()
+        else {
+            panic!("round-tripped domain_validation_options must remain a Struct");
+        };
+        assert_eq!(round_tripped_struct_name, "DomainValidation");
+        let CoreStructField {
+            name: field_name,
+            field_type: _field_type,
+            input_mode: field_input_mode,
+            description: _field_description,
+            provider_name: _field_provider_name,
+            block_name: _field_block_name,
+            deferred_populate: field_deferred_populate,
+        } = &round_tripped_fields[0];
+        assert_eq!(field_name, "resource_record");
+        assert_eq!(*field_input_mode, CoreInputMode::ProviderPopulated);
+        assert!(*field_deferred_populate);
+
+        let CoreAttributeSchema {
+            name: status_name,
+            attr_type: _status_type,
+            input_mode: status_input_mode,
+            default: status_default,
+            description: _status_description,
+            completions: _status_completions,
+            provider_name: _status_provider_name,
+            create_only: _status_create_only,
+            removable: _status_removable,
+            block_name: _status_block_name,
+            write_only: _status_write_only,
+            identity: _status_identity,
+            deferred_populate: status_deferred_populate,
+        } = &round_tripped.attributes["status"];
+        assert_eq!(status_name, "status");
+        assert_eq!(*status_input_mode, CoreInputMode::ProviderPopulated);
+        assert!(matches!(
+            status_default,
+            Some(CoreValue::Concrete(ConcreteValue::String(value)))
+                if value == "PENDING_VALIDATION"
+        ));
+        assert!(*status_deferred_populate);
     }
 }

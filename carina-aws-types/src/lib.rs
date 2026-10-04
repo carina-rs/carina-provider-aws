@@ -60,7 +60,12 @@ mod tests {
         else {
             panic!("expected Union shape");
         };
-        &members[index]
+        members
+            .iter()
+            .nth(index)
+            .flatten()
+            .unwrap_or_else(|| panic!("missing resolved Union member at index {index}"))
+            .as_attr()
     }
 
     fn string_enum_identity(attr: &AttributeType) -> String {

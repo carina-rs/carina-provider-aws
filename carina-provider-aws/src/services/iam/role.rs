@@ -504,7 +504,8 @@ fn dsl_value_to_iam_json(
             // precede String in the schema (see
             // `string_or_principal_struct`) so a Map principal is not
             // matched against the String arm.
-            for member in members {
+            for member in members.iter().flatten() {
+                let member = member.as_attr();
                 let value_matches_member = match member.shape_ref_free() {
                     Ok(shape) => match shape {
                         Shape::Struct { .. } => {

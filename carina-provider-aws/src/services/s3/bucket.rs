@@ -713,14 +713,14 @@ mod tests {
             .schema
             .attributes
             .iter()
-            .filter(|(_, attribute)| attribute.read_only)
+            .filter(|(_, attribute)| attribute.is_read_only())
             .map(|(name, _)| name.as_str())
             .collect();
 
         let data_source_config =
             crate::schemas::generated::s3::bucket_data_source::s3_bucket_data_source_config();
         assert!(
-            data_source_config.schema.attributes["bucket"].required,
+            data_source_config.schema.attributes["bucket"].is_required(),
             "data-source `bucket` must remain its required input"
         );
         // Data-source codegen does not mark outputs read-only, and `bucket` is the
