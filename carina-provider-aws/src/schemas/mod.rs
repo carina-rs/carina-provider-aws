@@ -14,9 +14,17 @@ pub fn all_schemas() -> Vec<ResourceSchema> {
 mod tests {
     use std::collections::HashMap;
 
+    use carina_core::differ::{Diff, diff};
+    use carina_core::executor::normalized::apply_desired_normalization;
+    use carina_core::provider::{ProviderFactory, ProviderNormalizer};
+    use carina_core::resource::{ConcreteValue, ResolvedResource, Resource, State, Value};
     use carina_core::schema::{
-        AttributeType, RawShape, ResourceSchema, SchemaKind, Shape, UniqueNameSpec,
+        AttributeType, RawShape, ResourceSchema, SchemaKind, SchemaRegistry, Shape,
+        ShapeWalkBudget, TypeInSchema, UniqueNameSpec,
     };
+    use indexmap::IndexMap;
+
+    use crate::{AwsNormalizer, AwsProviderFactory};
 
     #[test]
     fn configs_register_s3_bucket_under_both_kinds() {
@@ -96,6 +104,46 @@ mod tests {
             .get(name)
             .unwrap_or_else(|| panic!("missing attribute {name}"))
             .attr_type
+    }
+
+    fn struct_field_type<'a>(
+        schema: &'a ResourceSchema,
+        attr_name: &str,
+        field_name: &str,
+    ) -> &'a AttributeType {
+        let mut budget = ShapeWalkBudget::new(8);
+        &schema
+            .struct_fields_with_budget(attr_type(schema, attr_name), &mut budget)
+            .unwrap_or_else(|| panic!("{attr_name} is not a struct"))
+            .iter()
+            .find(|field| field.name == field_name)
+            .unwrap_or_else(|| panic!("missing {attr_name}.{field_name}"))
+            .field_type
+    }
+
+    fn alias_target_value(hosted_zone_id: ConcreteValue) -> Value {
+        Value::Concrete(ConcreteValue::Map(IndexMap::from([
+            (
+                "dns_name".to_string(),
+                Value::Concrete(ConcreteValue::String("target.example.com".to_string())),
+            ),
+            (
+                "evaluate_target_health".to_string(),
+                Value::Concrete(ConcreteValue::Bool(false)),
+            ),
+            (
+                "hosted_zone_id".to_string(),
+                Value::Concrete(hosted_zone_id),
+            ),
+        ])))
+    }
+
+    fn aws_schema_registry() -> SchemaRegistry {
+        let mut registry = SchemaRegistry::new();
+        for schema in super::all_schemas() {
+            registry.insert("aws", schema);
+        }
+        registry
     }
 
     fn assert_refined_string(
@@ -250,6 +298,231 @@ mod tests {
             route53_record_set.schema.unique_name,
             UniqueNameSpec::Conflicting
         );
+    }
+
+    #[test]
+    fn route53_alias_target_hosted_zone_id_enforces_assignable_source_identities() {
+        let record_set = super::generated::route53::record_set::route53_record_set_config();
+        let sink = struct_field_type(&record_set.schema, "alias_target", "hosted_zone_id");
+        assert!(matches!(record_set.schema.shape_of(sink), Shape::Union));
+
+        let route53_id = carina_aws_types::route53_hosted_zone_id();
+        assert!(
+            TypeInSchema::schemaless(&route53_id)
+                .is_assignable_to(record_set.schema.type_in_schema(sink)),
+            "Route 53 hosted-zone IDs must be assignable to alias_target.hosted_zone_id"
+        );
+
+        let cloudfront_id = carina_aws_types::cloudfront_hosted_zone_id();
+        assert!(
+            TypeInSchema::schemaless(&cloudfront_id)
+                .is_assignable_to(record_set.schema.type_in_schema(sink)),
+            "the CloudFront global hosted-zone enum must remain assignable"
+        );
+
+        let plain_string = AttributeType::string();
+        assert!(
+            !TypeInSchema::schemaless(&plain_string)
+                .is_assignable_to(record_set.schema.type_in_schema(sink)),
+            "an unrefined String source must not satisfy an identified sink"
+        );
+
+        let unrelated_id = carina_aws_types::iam_role_arn();
+        assert!(
+            !TypeInSchema::schemaless(&unrelated_id)
+                .is_assignable_to(record_set.schema.type_in_schema(sink)),
+            "an unrelated identified String must not satisfy the hosted-zone sink"
+        );
+    }
+
+    #[test]
+    fn route53_alias_target_hosted_zone_id_validates_cloudfront_and_route53_values() {
+        let record_set = super::generated::route53::record_set::route53_record_set_config();
+        let accepted = [
+            (
+                "CloudFront namespaced constant",
+                ConcreteValue::enum_identifier("aws.cloudfront.HostedZoneId.global"),
+            ),
+            (
+                "CloudFront wire literal",
+                ConcreteValue::String("Z2FDTNDATAQYW2".to_string()),
+            ),
+            (
+                "ALB hosted-zone literal",
+                ConcreteValue::String("Z14GRHDCWA56QT".to_string()),
+            ),
+            (
+                "measured Route 53 hosted-zone literal",
+                ConcreteValue::String("Z05136711ZXUHBDOA8D5O".to_string()),
+            ),
+        ];
+
+        for (label, hosted_zone_id) in accepted {
+            let attributes = HashMap::from([
+                (
+                    "alias_target".to_string(),
+                    alias_target_value(hosted_zone_id),
+                ),
+                (
+                    "name".to_string(),
+                    Value::Concrete(ConcreteValue::String("www.example.com".to_string())),
+                ),
+                (
+                    "type".to_string(),
+                    Value::Concrete(ConcreteValue::enum_identifier(
+                        "aws.route53.RecordSet.Type.a",
+                    )),
+                ),
+            ]);
+            let result = record_set.schema.validate(&attributes);
+            assert!(result.is_ok(), "{label} should validate: {result:?}");
+        }
+
+        let too_long = format!("Z{}", "A".repeat(32));
+        assert_eq!(too_long.len(), 33);
+        for (label, hosted_zone_id) in [
+            ("empty literal", ""),
+            ("bare enum member as a quoted string", "global"),
+            (
+                "qualified DSL path as a quoted string",
+                "aws.cloudfront.HostedZoneId.global",
+            ),
+            ("lowercase hosted-zone literal", "z14grhdcwa56qt"),
+            (
+                "Route 53 API path-prefixed ID",
+                "/hostedzone/Z05136711ZXUHBDOA8D5O",
+            ),
+            ("33-character hosted-zone literal", too_long.as_str()),
+        ] {
+            let attributes = HashMap::from([
+                (
+                    "alias_target".to_string(),
+                    alias_target_value(ConcreteValue::String(hosted_zone_id.to_string())),
+                ),
+                (
+                    "name".to_string(),
+                    Value::Concrete(ConcreteValue::String("www.example.com".to_string())),
+                ),
+                (
+                    "type".to_string(),
+                    Value::Concrete(ConcreteValue::enum_identifier(
+                        "aws.route53.RecordSet.Type.a",
+                    )),
+                ),
+            ]);
+            let result = record_set.schema.validate(&attributes);
+            assert!(result.is_err(), "{label} should be rejected");
+        }
+    }
+
+    async fn normalize_alias_target_hosted_zone_id_and_assert_no_change(
+        label: &str,
+        desired_hosted_zone_id: ConcreteValue,
+        read_back_hosted_zone_id: &str,
+    ) -> ConcreteValue {
+        let registry = aws_schema_registry();
+        let factories: Vec<Box<dyn ProviderFactory>> = vec![Box::new(AwsProviderFactory)];
+        let mut desired = Resource::with_provider("aws", "route53.RecordSet", "record", None);
+        desired.set_attr("alias_target", alias_target_value(desired_hosted_zone_id));
+        let id = desired.id.clone();
+
+        let normalized =
+            apply_desired_normalization(desired, &[], &AwsNormalizer, &factories, &registry).await;
+        let Some(Value::Concrete(ConcreteValue::Map(alias_target))) =
+            normalized.as_resource().get_attr("alias_target")
+        else {
+            panic!("normalized alias_target must remain a map");
+        };
+        let Some(Value::Concrete(normalized_hosted_zone_id)) = alias_target.get("hosted_zone_id")
+        else {
+            panic!("normalized hosted_zone_id must be concrete");
+        };
+        let normalized_hosted_zone_id = normalized_hosted_zone_id.clone();
+
+        let current_attributes = HashMap::from([(
+            "alias_target".to_string(),
+            alias_target_value(ConcreteValue::String(read_back_hosted_zone_id.to_string())),
+        )]);
+        let mut current_states =
+            HashMap::from([(id.clone(), State::existing(id.clone(), current_attributes))]);
+        carina_core::value::canonicalize_states_with_schemas(&mut current_states, &registry);
+        AwsNormalizer.normalize_state(&mut current_states).await;
+        let current = current_states.remove(&id).expect("current RecordSet state");
+        let schema = registry
+            .get("aws", "route53.RecordSet", SchemaKind::Resource)
+            .expect("RecordSet resource schema");
+        let result = diff(
+            &ResolvedResource::new(normalized.as_resource().clone()),
+            &current,
+            None,
+            None,
+            Some(schema),
+        );
+        assert!(
+            matches!(result, Diff::NoChange(_)),
+            "{label}: read-back wire value must not cause a phantom diff: {result:?}"
+        );
+
+        normalized_hosted_zone_id
+    }
+
+    #[tokio::test]
+    async fn route53_alias_target_cloudfront_global_normalizes_and_diffs_without_change() {
+        let hosted_zone_id = normalize_alias_target_hosted_zone_id_and_assert_no_change(
+            "CloudFront namespaced constant",
+            ConcreteValue::enum_identifier("aws.cloudfront.HostedZoneId.global"),
+            "Z2FDTNDATAQYW2",
+        )
+        .await;
+        let ConcreteValue::CanonicalEnum(canonical) = hosted_zone_id else {
+            panic!("CloudFront global must canonicalize to CanonicalEnum");
+        };
+        assert_eq!(canonical.api_value(), "Z2FDTNDATAQYW2");
+    }
+
+    #[tokio::test]
+    async fn route53_alias_target_literal_hosted_zone_ids_normalize_and_diff_without_change() {
+        for (label, hosted_zone_id) in [
+            ("ALB hosted-zone literal", "Z14GRHDCWA56QT"),
+            ("CloudFront wire literal", "Z2FDTNDATAQYW2"),
+        ] {
+            let normalized = normalize_alias_target_hosted_zone_id_and_assert_no_change(
+                label,
+                ConcreteValue::String(hosted_zone_id.to_string()),
+                hosted_zone_id,
+            )
+            .await;
+            match normalized {
+                ConcreteValue::CanonicalEnum(canonical) => {
+                    assert_eq!(canonical.api_value(), hosted_zone_id, "{label}")
+                }
+                ConcreteValue::String(value) => assert_eq!(value, hosted_zone_id, "{label}"),
+                other => panic!("{label}: unexpected normalized value: {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn s3_bucket_hosted_zone_id_outputs_are_assignable_to_route53_alias_target() {
+        let record_set = super::generated::route53::record_set::route53_record_set_config();
+        let sink = struct_field_type(&record_set.schema, "alias_target", "hosted_zone_id");
+        let bucket = super::generated::s3::bucket::s3_bucket_config();
+        let bucket_data_source =
+            super::generated::s3::bucket_data_source::s3_bucket_data_source_config();
+
+        for (label, source_schema) in [
+            ("s3.Bucket resource", &bucket.schema),
+            ("s3.Bucket data source", &bucket_data_source.schema),
+        ] {
+            let source = attr_type(source_schema, "hosted_zone_id");
+            assert_refined_string(source, "aws.route53.HostedZone.Id", Some("^Z[A-Z0-9]+$"));
+            assert!(
+                source_schema
+                    .type_in_schema(source)
+                    .is_assignable_to(record_set.schema.type_in_schema(sink)),
+                "{label} hosted_zone_id must be assignable to the Route 53 alias target"
+            );
+        }
     }
 
     #[test]

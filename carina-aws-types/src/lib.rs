@@ -1480,6 +1480,52 @@ mod tests {
     }
 
     #[test]
+    fn route53_hosted_zone_id_carries_identity_and_validates_values() {
+        let attr = route53_hosted_zone_id();
+        assert_refined_string_identity(&attr, "aws.route53.HostedZone.Id");
+        let carina_core::schema::Shape::String {
+            pattern, length, ..
+        } = attr.shape_ref_free().expect("test schema is Ref-free")
+        else {
+            panic!("expected refined String");
+        };
+        assert_eq!(pattern, Some(r"^Z[A-Z0-9]+$"));
+        assert_eq!(length, Some((None, Some(32))));
+
+        let schema = carina_core::schema::Schema::flat(attr);
+        for hosted_zone_id in ["Z05136711ZXUHBDOA8D5O", "Z2FDTNDATAQYW2", "Z14GRHDCWA56QT"] {
+            assert!(
+                schema
+                    .validate(&Value::Concrete(ConcreteValue::String(
+                        hosted_zone_id.to_string()
+                    )))
+                    .is_ok(),
+                "expected {hosted_zone_id} to validate"
+            );
+        }
+
+        let too_long = format!("Z{}", "A".repeat(32));
+        assert_eq!(too_long.len(), 33);
+        for hosted_zone_id in [
+            "",
+            "global",
+            "aws.cloudfront.HostedZoneId.global",
+            "z14grhdcwa56qt",
+            "/hostedzone/Z05136711ZXUHBDOA8D5O",
+            too_long.as_str(),
+        ] {
+            assert!(
+                schema
+                    .validate(&Value::Concrete(ConcreteValue::String(
+                        hosted_zone_id.to_string()
+                    )))
+                    .is_err(),
+                "expected {hosted_zone_id:?} to be rejected"
+            );
+        }
+    }
+
+    #[test]
     fn grantee_accepts_id_format() {
         let t = s3_grantee();
         assert_refined_string_identity(&t, "aws.s3.Grantee");
