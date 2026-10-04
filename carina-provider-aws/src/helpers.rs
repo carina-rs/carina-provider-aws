@@ -505,11 +505,7 @@ where
 /// `Directives` (directives are delete-only and are not consulted on
 /// update paths in this provider).
 pub fn apply_patch_to_state(from: &State, patch: &UpdatePatch) -> Resource {
-    let mut resource = Resource::new(
-        from.id.resource_type.clone(),
-        from.id.identity_or_empty().to_string(),
-    );
-    resource.id = from.id.clone();
+    let mut resource = Resource::from_id(from.id.clone());
     resource.attributes = from
         .attributes
         .iter()

@@ -8,7 +8,6 @@ use carina_core::provider::{
     DeleteRequest as CoreDeleteRequest, PatchOp as CorePatchOp, PatchOpKind as CorePatchOpKind,
     Provider, ProviderError as CoreProviderError, ProviderNormalizer,
     ReadRequest as CoreReadRequest, UpdatePatch as CoreUpdatePatch,
-    UpdateRequest as CoreUpdateRequest,
 };
 use carina_core::resource::{ConcreteValue, Value as CoreValue};
 use carina_core::schema::SchemaRegistry;
@@ -285,7 +284,7 @@ impl CarinaProvider for AwsProcessProvider {
         let core_data_source = convert::proto_to_core_data_source(resource);
         let result = self
             .runtime
-            .block_on(self.provider().read_data_source(&core_data_source));
+            .block_on(self.provider().read_data_source_resource(&core_data_source));
         match result {
             Ok(state) => Ok(convert::core_to_proto_state(&state)),
             Err(e) => Err(Self::convert_error(e)),
@@ -341,13 +340,12 @@ impl CarinaProvider for AwsProcessProvider {
                 })
                 .collect(),
         };
-        let core_request = CoreUpdateRequest {
-            from: core_from,
-            patch: core_patch,
-        };
-        let result =
-            self.runtime
-                .block_on(self.provider().update(&core_id, identifier, core_request));
+        let result = self.runtime.block_on(self.provider().update_with_patch(
+            &core_id,
+            identifier,
+            &core_from,
+            &core_patch,
+        ));
         match result {
             Ok(outcome) => Ok(convert::core_to_proto_update_outcome(outcome)),
             Err(e) => Err(Self::convert_error(e)),
@@ -444,6 +442,8 @@ fn assume_role_attribute_type() -> proto::AttributeType {
                 description: Some("IAM role ARN to assume.".to_string()),
                 block_name: None,
                 provider_name: None,
+                read_only: false,
+                deferred_populate: false,
             },
             proto::StructField {
                 name: "session_name".to_string(),
@@ -454,6 +454,8 @@ fn assume_role_attribute_type() -> proto::AttributeType {
                 ),
                 block_name: None,
                 provider_name: None,
+                read_only: false,
+                deferred_populate: false,
             },
             proto::StructField {
                 name: "external_id".to_string(),
@@ -464,6 +466,8 @@ fn assume_role_attribute_type() -> proto::AttributeType {
                 ),
                 block_name: None,
                 provider_name: None,
+                read_only: false,
+                deferred_populate: false,
             },
             proto::StructField {
                 name: "duration".to_string(),
@@ -474,6 +478,8 @@ fn assume_role_attribute_type() -> proto::AttributeType {
                 ),
                 block_name: None,
                 provider_name: None,
+                read_only: false,
+                deferred_populate: false,
             },
         ],
     }

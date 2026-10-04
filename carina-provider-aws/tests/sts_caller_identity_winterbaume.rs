@@ -35,9 +35,9 @@ use aws_sdk_sqs::Client as SqsClient;
 use aws_sdk_sts::Client as StsClient;
 
 use carina_core::effect::PlanOp;
-use carina_core::provider::Provider;
+use carina_core::provider::{Provider, ProviderReadyDataSource};
 use carina_core::resource::{ConcreteValue, DataSource, ResourceId, Value};
-use carina_provider_aws::AwsProvider;
+use carina_provider_aws::{AwsNormalizer, AwsProvider};
 use winterbaume_core::MockAws;
 use winterbaume_sts::StsService;
 
@@ -48,6 +48,25 @@ const TEST_REGION: &str = "us-east-1";
 /// on this string verbatim; using `sts.caller_identity` (snake_case)
 /// would fall into the default "not implemented" arm.
 const STS_CALLER_IDENTITY_TYPE: &str = "sts.CallerIdentity";
+
+fn ready_data_source_for_test(resource: DataSource) -> ProviderReadyDataSource {
+    let bindings = carina_core::binding_index::ResolvedBindings::default();
+    let module_gate = carina_core::executor::ModuleConstraintGate::new(&[]);
+    let mut schemas = carina_core::schema::SchemaRegistry::new();
+    for schema in carina_provider_aws::schemas::all_schemas() {
+        schemas.insert("aws", schema);
+    }
+    let preparation = carina_core::executor::ProviderPreparationContext::new(
+        &bindings,
+        &module_gate,
+        &[],
+        &AwsNormalizer,
+        &[],
+        &schemas,
+    );
+    carina_core::executor::prepare_provider_ready_data_source(resource, &preparation)
+        .expect("test data source should pass checked provider preparation")
+}
 
 #[tokio::test]
 async fn required_permissions_returns_empty_vec() {
@@ -105,7 +124,12 @@ async fn sts_caller_identity_data_source_returns_account_arn_user_id_from_winter
         SqsClient::new(&sdk_config),
     );
 
-    let ds = DataSource::with_provider("aws", STS_CALLER_IDENTITY_TYPE, "me", None);
+    let ds = ready_data_source_for_test(DataSource::with_provider(
+        "aws",
+        STS_CALLER_IDENTITY_TYPE,
+        "me",
+        None,
+    ));
 
     // Go through `Provider::read_data_source`, the same entry point
     // `carina apply`/`plan` uses for data sources. That runs the

@@ -77,7 +77,16 @@ impl AwsProvider {
         // group_name is required for CreateSecurityGroup API
         let group_name = match resource.get_attr("group_name") {
             Some(Value::Concrete(ConcreteValue::String(s))) => s.clone(),
-            _ => resource.id.identity_or_empty().to_string(),
+            _ => resource
+                .id
+                .identity_str()
+                .ok_or_else(|| {
+                    ProviderError::invalid_input(
+                        "security group without group_name requires a resolved resource identity",
+                    )
+                    .for_resource(resource.id.clone())
+                })?
+                .to_string(),
         };
 
         // Create Security Group
