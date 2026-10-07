@@ -92,7 +92,9 @@ async fn required_permissions_returns_empty_vec() {
     let id = ResourceId::with_provider_identity("aws", "s3.Bucket", "example", None);
 
     assert_eq!(
-        provider.required_permissions(&id, PlanOp::Create),
+        provider
+            .required_permissions(&id, PlanOp::Create)
+            .expect("required permissions should be available"),
         Vec::<String>::new()
     );
 }

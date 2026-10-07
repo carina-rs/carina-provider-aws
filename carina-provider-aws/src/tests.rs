@@ -624,7 +624,10 @@ async fn test_subnet_availability_zone_survives_normalize_desired() {
     );
     let mut resources = vec![resource];
 
-    AwsNormalizer.normalize_desired(&mut resources).await;
+    AwsNormalizer
+        .normalize_desired(&mut resources)
+        .await
+        .expect("desired normalization should succeed");
 
     assert_eq!(
         resources[0].get_attr("availability_zone"),

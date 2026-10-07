@@ -230,8 +230,8 @@ impl CarinaProvider for AwsProcessProvider {
         &self,
         _id: &proto::ResourceId,
         _op: carina_plugin_sdk::PlanOp,
-    ) -> Vec<String> {
-        Vec::new()
+    ) -> Result<Vec<String>, proto::ProviderError> {
+        Ok(Vec::new())
     }
 
     fn enum_aliases(&self) -> HashMap<String, HashMap<String, HashMap<String, String>>> {
@@ -298,15 +298,18 @@ impl CarinaProvider for AwsProcessProvider {
     ) -> Result<proto::CreateOutcome, proto::ProviderError> {
         let core_resource = convert::proto_to_core_resource(&request.resource);
         let schemas = Self::schema_registry();
-        let core_resource = self.runtime.block_on(
-            carina_core::executor::normalized::apply_desired_normalization(
-                core_resource,
-                &[],
-                &self.normalizer,
-                &[],
-                &schemas,
-            ),
-        );
+        let core_resource = self
+            .runtime
+            .block_on(
+                carina_core::executor::normalized::apply_desired_normalization(
+                    core_resource,
+                    &[],
+                    &self.normalizer,
+                    &[],
+                    &schemas,
+                ),
+            )
+            .map_err(Self::convert_error)?;
         let result = self
             .runtime
             .block_on(self.provider().create_resource(core_resource.as_resource()));
@@ -378,7 +381,10 @@ impl CarinaProvider for AwsProcessProvider {
         }
     }
 
-    fn normalize_desired(&self, resources: Vec<proto::Resource>) -> Vec<proto::Resource> {
+    fn normalize_desired(
+        &self,
+        resources: Vec<proto::Resource>,
+    ) -> Result<Vec<proto::Resource>, proto::ProviderError> {
         let mut core_resources: Vec<_> = resources
             .iter()
             .map(convert::proto_to_core_resource)
@@ -389,11 +395,12 @@ impl CarinaProvider for AwsProcessProvider {
         // runtime: the host drives the WASM call, the guest drives its
         // internal async with this runtime (carina#3112 design Non-goal).
         self.runtime
-            .block_on(self.normalizer.normalize_desired(&mut core_resources));
-        core_resources
+            .block_on(self.normalizer.normalize_desired(&mut core_resources))
+            .map_err(Self::convert_error)?;
+        Ok(core_resources
             .iter()
             .map(convert::core_to_proto_resource)
-            .collect()
+            .collect())
     }
 
     fn merge_default_tags(
@@ -401,7 +408,7 @@ impl CarinaProvider for AwsProcessProvider {
         resources: &mut Vec<proto::Resource>,
         default_tags: &HashMap<String, proto::Value>,
         proto_schemas: &Vec<proto::ResourceSchema>,
-    ) {
+    ) -> Result<(), proto::ProviderError> {
         let mut core_resources: Vec<_> = resources
             .iter()
             .map(convert::proto_to_core_resource)
@@ -414,15 +421,18 @@ impl CarinaProvider for AwsProcessProvider {
         for s in proto_schemas {
             registry.insert("aws", convert::proto_to_core_schema(s));
         }
-        self.runtime.block_on(self.normalizer.merge_default_tags(
-            &mut core_resources,
-            &core_tags,
-            &registry,
-        ));
+        self.runtime
+            .block_on(self.normalizer.merge_default_tags(
+                &mut core_resources,
+                &core_tags,
+                &registry,
+            ))
+            .map_err(Self::convert_error)?;
         *resources = core_resources
             .iter()
             .map(convert::core_to_proto_resource)
             .collect();
+        Ok(())
     }
 }
 

@@ -427,7 +427,9 @@ mod tests {
         let id = desired.id.clone();
 
         let normalized =
-            apply_desired_normalization(desired, &[], &AwsNormalizer, &factories, &registry).await;
+            apply_desired_normalization(desired, &[], &AwsNormalizer, &factories, &registry)
+                .await
+                .expect("desired normalization should succeed");
         let Some(Value::Concrete(ConcreteValue::Map(alias_target))) =
             normalized.as_resource().get_attr("alias_target")
         else {
@@ -446,7 +448,10 @@ mod tests {
         let mut current_states =
             HashMap::from([(id.clone(), State::existing(id.clone(), current_attributes))]);
         carina_core::value::canonicalize_states_with_schemas(&mut current_states, &registry);
-        AwsNormalizer.normalize_state(&mut current_states).await;
+        AwsNormalizer
+            .normalize_state(&mut current_states)
+            .await
+            .expect("state normalization should succeed");
         let current = current_states.remove(&id).expect("current RecordSet state");
         let schema = registry
             .get("aws", "route53.RecordSet", SchemaKind::Resource)
