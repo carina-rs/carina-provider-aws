@@ -4,7 +4,9 @@ use std::collections::HashMap;
 
 use indexmap::IndexMap;
 
-use carina_core::provider::{BoxFuture, ProviderFactory, ProviderNormalizer, ProviderResult};
+use carina_core::provider::{
+    BoxFuture, ProviderFactory, ProviderNormalizer, ProviderReadyConfig, ProviderResult,
+};
 use carina_core::resource::{ConcreteValue, Value};
 
 use crate::AwsProvider;
@@ -98,7 +100,7 @@ impl ProviderFactory for AwsProviderFactory {
     fn create_provider(
         &self,
         _binding: Option<&str>,
-        attributes: &IndexMap<String, Value>,
+        config: &ProviderReadyConfig,
     ) -> BoxFuture<
         '_,
         carina_core::provider::ProviderResult<Box<dyn carina_core::provider::Provider>>,
@@ -110,6 +112,7 @@ impl ProviderFactory for AwsProviderFactory {
         // factories the constructed-fresh shape is enough.
         use crate::services::sts::account_guard::extract_string_list;
         use crate::services::sts::assume_role::extract_assume_role;
+        let attributes = config.attributes();
         let region = self.extract_region(attributes);
         let allowed = extract_string_list(attributes.get("allowed_account_ids"));
         let forbidden = extract_string_list(attributes.get("forbidden_account_ids"));
@@ -131,7 +134,7 @@ impl ProviderFactory for AwsProviderFactory {
     fn create_normalizer(
         &self,
         _binding: Option<&str>,
-        _attributes: &IndexMap<String, Value>,
+        _config: &ProviderReadyConfig,
     ) -> BoxFuture<'_, ProviderResult<Box<dyn ProviderNormalizer>>> {
         Box::pin(async { Ok(Box::new(AwsNormalizer) as Box<dyn ProviderNormalizer>) })
     }
