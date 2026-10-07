@@ -4,7 +4,7 @@ use std::collections::HashMap;
 
 use indexmap::IndexMap;
 
-use carina_core::provider::{BoxFuture, ProviderFactory, ProviderNormalizer};
+use carina_core::provider::{BoxFuture, ProviderFactory, ProviderNormalizer, ProviderResult};
 use carina_core::resource::{ConcreteValue, Value};
 
 use crate::AwsProvider;
@@ -132,8 +132,8 @@ impl ProviderFactory for AwsProviderFactory {
         &self,
         _binding: Option<&str>,
         _attributes: &IndexMap<String, Value>,
-    ) -> BoxFuture<'_, Box<dyn ProviderNormalizer>> {
-        Box::pin(async { Box::new(AwsNormalizer) as Box<dyn ProviderNormalizer> })
+    ) -> BoxFuture<'_, ProviderResult<Box<dyn ProviderNormalizer>>> {
+        Box::pin(async { Ok(Box::new(AwsNormalizer) as Box<dyn ProviderNormalizer>) })
     }
 
     fn schemas(&self) -> Vec<carina_core::schema::ResourceSchema> {

@@ -4,7 +4,9 @@ use std::collections::HashMap;
 
 use indexmap::IndexMap;
 
-use carina_core::provider::{self, BoxFuture, ProviderNormalizer, SavedAttrs, ready_noop};
+use carina_core::provider::{
+    self, BoxFuture, ProviderNormalizer, ProviderResult, SavedAttrs, ready_noop,
+};
 use carina_core::resource::{Resource, ResourceId, State, Value};
 use carina_core::schema::SchemaRegistry;
 
@@ -14,18 +16,22 @@ use carina_core::schema::SchemaRegistry;
 pub struct AwsNormalizer;
 
 impl ProviderNormalizer for AwsNormalizer {
-    fn normalize_desired<'a>(&'a self, resources: &'a mut [Resource]) -> BoxFuture<'a, ()> {
+    fn normalize_desired<'a>(
+        &'a self,
+        resources: &'a mut [Resource],
+    ) -> BoxFuture<'a, ProviderResult<()>> {
         // Bodies are pure (dns-name strip — no I/O); the trait is async only
         // so the WASM host impl can `.await` the guest directly (carina#3112).
         Box::pin(async move {
             crate::services::route53::record_set::normalize_record_set_dns_names(resources);
+            Ok(())
         })
     }
 
     fn normalize_state<'a>(
         &'a self,
         _current_states: &'a mut HashMap<ResourceId, State>,
-    ) -> BoxFuture<'a, ()> {
+    ) -> BoxFuture<'a, ProviderResult<()>> {
         ready_noop()
     }
 
@@ -33,7 +39,7 @@ impl ProviderNormalizer for AwsNormalizer {
         &'a self,
         _current_states: &'a mut HashMap<ResourceId, State>,
         _saved_attrs: &'a SavedAttrs,
-    ) -> BoxFuture<'a, ()> {
+    ) -> BoxFuture<'a, ProviderResult<()>> {
         ready_noop()
     }
 
@@ -42,9 +48,10 @@ impl ProviderNormalizer for AwsNormalizer {
         resources: &'a mut [Resource],
         default_tags: &'a IndexMap<String, Value>,
         registry: &'a SchemaRegistry,
-    ) -> BoxFuture<'a, ()> {
+    ) -> BoxFuture<'a, ProviderResult<()>> {
         Box::pin(async move {
             provider::merge_default_tags_for_provider("aws", resources, default_tags, registry);
+            Ok(())
         })
     }
 }
@@ -70,7 +77,10 @@ mod tests {
         );
         let mut resources = vec![resource];
 
-        AwsNormalizer.normalize_desired(&mut resources).await;
+        AwsNormalizer
+            .normalize_desired(&mut resources)
+            .await
+            .expect("desired normalization should succeed");
 
         assert_eq!(
             resources[0].get_attr("availability_zone"),
@@ -100,7 +110,10 @@ mod tests {
         );
         let mut resources = vec![resource];
 
-        AwsNormalizer.normalize_desired(&mut resources).await;
+        AwsNormalizer
+            .normalize_desired(&mut resources)
+            .await
+            .expect("desired normalization should succeed");
 
         assert_eq!(
             resources[0].get_attr("name"),
@@ -128,7 +141,10 @@ mod tests {
         let id = Resource::with_provider("aws", "ec2.Subnet", "test-subnet", None).id;
         let mut states = HashMap::from([(id.clone(), State::existing(id, attributes))]);
 
-        AwsNormalizer.normalize_state(&mut states).await;
+        AwsNormalizer
+            .normalize_state(&mut states)
+            .await
+            .expect("state normalization should succeed");
         let state = states
             .values_mut()
             .next()

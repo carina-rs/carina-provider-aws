@@ -308,8 +308,8 @@ impl Provider for AwsProvider {
         "aws"
     }
 
-    fn required_permissions(&self, _id: &ResourceId, _op: PlanOp) -> Vec<String> {
-        Vec::new()
+    fn required_permissions(&self, _id: &ResourceId, _op: PlanOp) -> ProviderResult<Vec<String>> {
+        Ok(Vec::new())
     }
 
     fn read(
