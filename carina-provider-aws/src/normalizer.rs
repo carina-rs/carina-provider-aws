@@ -2,13 +2,10 @@
 
 use std::collections::HashMap;
 
-use indexmap::IndexMap;
-
 use carina_core::provider::{
-    self, BoxFuture, ProviderNormalizer, ProviderResult, SavedAttrs, ready_noop,
+    BoxFuture, ProviderNormalizer, ProviderResult, SavedAttrs, ready_noop,
 };
-use carina_core::resource::{Resource, ResourceId, State, Value};
-use carina_core::schema::SchemaRegistry;
+use carina_core::resource::{Resource, ResourceId, State};
 
 /// Schema extension for the AWS provider.
 ///
@@ -42,24 +39,13 @@ impl ProviderNormalizer for AwsNormalizer {
     ) -> BoxFuture<'a, ProviderResult<()>> {
         ready_noop()
     }
-
-    fn merge_default_tags<'a>(
-        &'a self,
-        resources: &'a mut [Resource],
-        default_tags: &'a IndexMap<String, Value>,
-        registry: &'a SchemaRegistry,
-    ) -> BoxFuture<'a, ProviderResult<()>> {
-        Box::pin(async move {
-            provider::merge_default_tags_for_provider("aws", resources, default_tags, registry);
-            Ok(())
-        })
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use carina_core::resource::ConcreteValue;
+    use carina_core::resource::{ConcreteValue, Value};
+    use indexmap::IndexMap;
 
     #[tokio::test]
     async fn normalize_desired_does_not_mutate_enum_typed_attributes() {
