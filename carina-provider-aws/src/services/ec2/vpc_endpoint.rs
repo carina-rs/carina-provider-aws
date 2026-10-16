@@ -88,7 +88,7 @@ impl AwsProvider {
         {
             for id_val in ids {
                 if let Value::Concrete(ConcreteValue::String(s)) = id_val {
-                    req = req.route_table_ids(s);
+                    req = req.route_table_ids(s.expose_plaintext());
                 }
             }
         }
@@ -96,7 +96,7 @@ impl AwsProvider {
         if let Some(Value::Concrete(ConcreteValue::List(ids))) = resource.get_attr("subnet_ids") {
             for id_val in ids {
                 if let Value::Concrete(ConcreteValue::String(s)) = id_val {
-                    req = req.subnet_ids(s);
+                    req = req.subnet_ids(s.expose_plaintext());
                 }
             }
         }
@@ -106,7 +106,7 @@ impl AwsProvider {
         {
             for id_val in ids {
                 if let Value::Concrete(ConcreteValue::String(s)) = id_val {
-                    req = req.security_group_ids(s);
+                    req = req.security_group_ids(s.expose_plaintext());
                 }
             }
         }
@@ -118,7 +118,7 @@ impl AwsProvider {
         if let Some(Value::Concrete(ConcreteValue::String(policy))) =
             resource.get_attr("policy_document")
         {
-            req = req.policy_document(policy);
+            req = req.policy_document(policy.expose_plaintext());
         } else if let Some(Value::Concrete(ConcreteValue::Map(map))) =
             resource.get_attr("policy_document")
         {
@@ -191,7 +191,7 @@ impl AwsProvider {
                 old.iter()
                     .filter_map(|v| {
                         if let Value::Concrete(ConcreteValue::String(s)) = v {
-                            Some(s.clone())
+                            Some(s.expose_plaintext().to_string())
                         } else {
                             None
                         }
@@ -204,7 +204,7 @@ impl AwsProvider {
                 .iter()
                 .filter_map(|v| {
                     if let Value::Concrete(ConcreteValue::String(s)) = v {
-                        Some(s.clone())
+                        Some(s.expose_plaintext().to_string())
                     } else {
                         None
                     }
@@ -233,7 +233,7 @@ impl AwsProvider {
                 old.iter()
                     .filter_map(|v| {
                         if let Value::Concrete(ConcreteValue::String(s)) = v {
-                            Some(s.clone())
+                            Some(s.expose_plaintext().to_string())
                         } else {
                             None
                         }
@@ -246,7 +246,7 @@ impl AwsProvider {
                 .iter()
                 .filter_map(|v| {
                     if let Value::Concrete(ConcreteValue::String(s)) = v {
-                        Some(s.clone())
+                        Some(s.expose_plaintext().to_string())
                     } else {
                         None
                     }
@@ -277,7 +277,7 @@ impl AwsProvider {
                 old.iter()
                     .filter_map(|v| {
                         if let Value::Concrete(ConcreteValue::String(s)) = v {
-                            Some(s.clone())
+                            Some(s.expose_plaintext().to_string())
                         } else {
                             None
                         }
@@ -290,7 +290,7 @@ impl AwsProvider {
                 .iter()
                 .filter_map(|v| {
                     if let Value::Concrete(ConcreteValue::String(s)) = v {
-                        Some(s.clone())
+                        Some(s.expose_plaintext().to_string())
                     } else {
                         None
                     }
@@ -320,7 +320,7 @@ impl AwsProvider {
         // Update policy_document
         if let Some(Value::Concrete(ConcreteValue::String(policy))) = to.get_attr("policy_document")
         {
-            req = req.policy_document(policy);
+            req = req.policy_document(policy.expose_plaintext());
             has_modifications = true;
         } else if let Some(Value::Concrete(ConcreteValue::Map(map))) =
             to.get_attr("policy_document")
@@ -406,25 +406,25 @@ impl AwsProvider {
         if let Some(v) = obj.vpc_endpoint_id() {
             attributes.insert(
                 "vpc_endpoint_id".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string())),
+                Value::Concrete(ConcreteValue::String(v.to_string().into())),
             );
         }
         if let Some(v) = obj.vpc_endpoint_type() {
             attributes.insert(
                 "vpc_endpoint_type".to_string(),
-                Value::Concrete(ConcreteValue::String(v.as_str().to_string())),
+                Value::Concrete(ConcreteValue::String(v.as_str().to_string().into())),
             );
         }
         if let Some(v) = obj.vpc_id() {
             attributes.insert(
                 "vpc_id".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string())),
+                Value::Concrete(ConcreteValue::String(v.to_string().into())),
             );
         }
         if let Some(v) = obj.service_name() {
             attributes.insert(
                 "service_name".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string())),
+                Value::Concrete(ConcreteValue::String(v.to_string().into())),
             );
         }
         if let Some(v) = obj.private_dns_enabled() {
@@ -436,7 +436,7 @@ impl AwsProvider {
         if let Some(v) = obj.policy_document() {
             // Try to parse the policy document JSON into a Value::Map.
             let policy_value = crate::services::iam::role::iam_policy_json_to_value(v)
-                .unwrap_or_else(|_| Value::Concrete(ConcreteValue::String(v.to_string())));
+                .unwrap_or_else(|_| Value::Concrete(ConcreteValue::String(v.to_string().into())));
             attributes.insert("policy_document".to_string(), policy_value);
         }
         {
@@ -444,7 +444,7 @@ impl AwsProvider {
             if !ids.is_empty() {
                 let list: Vec<Value> = ids
                     .iter()
-                    .map(|s| Value::Concrete(ConcreteValue::String(s.to_string())))
+                    .map(|s| Value::Concrete(ConcreteValue::String(s.to_string().into())))
                     .collect();
                 attributes.insert(
                     "route_table_ids".to_string(),
@@ -457,7 +457,7 @@ impl AwsProvider {
             if !ids.is_empty() {
                 let list: Vec<Value> = ids
                     .iter()
-                    .map(|s| Value::Concrete(ConcreteValue::String(s.to_string())))
+                    .map(|s| Value::Concrete(ConcreteValue::String(s.to_string().into())))
                     .collect();
                 attributes.insert(
                     "subnet_ids".to_string(),
@@ -473,7 +473,7 @@ impl AwsProvider {
                     .iter()
                     .filter_map(|g| {
                         g.group_id()
-                            .map(|id| Value::Concrete(ConcreteValue::String(id.to_string())))
+                            .map(|id| Value::Concrete(ConcreteValue::String(id.to_string().into())))
                     })
                     .collect();
                 if !list.is_empty() {

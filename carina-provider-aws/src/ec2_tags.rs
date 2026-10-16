@@ -17,7 +17,7 @@ impl AwsProvider {
             if let (Some(key), Some(value)) = (tag.key(), tag.value()) {
                 tag_map.insert(
                     key.to_string(),
-                    Value::Concrete(ConcreteValue::String(value.to_string())),
+                    Value::Concrete(ConcreteValue::String(value.to_string().into())),
                 );
             }
         }
@@ -34,7 +34,12 @@ impl AwsProvider {
         if let Value::Concrete(ConcreteValue::Map(map)) = value {
             for (key, val) in map {
                 if let Value::Concrete(ConcreteValue::String(v)) = val {
-                    tags.push(aws_sdk_ec2::types::Tag::builder().key(key).value(v).build());
+                    tags.push(
+                        aws_sdk_ec2::types::Tag::builder()
+                            .key(key)
+                            .value(v.expose_plaintext())
+                            .build(),
+                    );
                 }
             }
         }
@@ -128,7 +133,7 @@ mod tests {
             assert_eq!(
                 map.get("Name"),
                 Some(&Value::Concrete(ConcreteValue::String(
-                    "my-resource".to_string()
+                    "my-resource".to_string().into()
                 )))
             );
         } else {
@@ -153,12 +158,14 @@ mod tests {
             assert_eq!(map.len(), 2);
             assert_eq!(
                 map.get("Name"),
-                Some(&Value::Concrete(ConcreteValue::String("test".to_string())))
+                Some(&Value::Concrete(ConcreteValue::String(
+                    "test".to_string().into()
+                )))
             );
             assert_eq!(
                 map.get("Environment"),
                 Some(&Value::Concrete(ConcreteValue::String(
-                    "production".to_string()
+                    "production".to_string().into()
                 )))
             );
         } else {
@@ -180,11 +187,11 @@ mod tests {
         let value = Value::Concrete(ConcreteValue::Map(IndexMap::from([
             (
                 "Name".to_string(),
-                Value::Concrete(ConcreteValue::String("test".to_string())),
+                Value::Concrete(ConcreteValue::String("test".to_string().into())),
             ),
             (
                 "Env".to_string(),
-                Value::Concrete(ConcreteValue::String("prod".to_string())),
+                Value::Concrete(ConcreteValue::String("prod".to_string().into())),
             ),
         ])));
         let tags = AwsProvider::value_to_ec2_tags(&value);
@@ -205,7 +212,7 @@ mod tests {
 
     #[test]
     fn test_value_to_ec2_tags_non_map_value() {
-        let value = Value::Concrete(ConcreteValue::String("not a map".to_string()));
+        let value = Value::Concrete(ConcreteValue::String("not a map".to_string().into()));
         let tags = AwsProvider::value_to_ec2_tags(&value);
         assert!(tags.is_empty());
     }
@@ -215,7 +222,7 @@ mod tests {
         let value = Value::Concrete(ConcreteValue::Map(IndexMap::from([
             (
                 "Name".to_string(),
-                Value::Concrete(ConcreteValue::String("test".to_string())),
+                Value::Concrete(ConcreteValue::String("test".to_string().into())),
             ),
             ("Count".to_string(), Value::Concrete(ConcreteValue::Int(42))),
         ])));

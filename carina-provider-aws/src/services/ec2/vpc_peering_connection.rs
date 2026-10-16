@@ -84,7 +84,7 @@ impl AwsProvider {
         if let Some(Value::Concrete(ConcreteValue::String(owner_id))) =
             resource.get_attr("peer_owner_id")
         {
-            req = req.peer_owner_id(owner_id);
+            req = req.peer_owner_id(owner_id.expose_plaintext());
         }
 
         // `peer_region` is excluded from the schema (resource_defs.rs

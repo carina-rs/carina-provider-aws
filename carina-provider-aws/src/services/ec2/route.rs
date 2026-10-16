@@ -51,7 +51,7 @@ impl AwsProvider {
                     // route_table_id is not in the Route struct, add from parameter
                     attributes.insert(
                         "route_table_id".to_string(),
-                        Value::Concrete(ConcreteValue::String(route_table_id.to_string())),
+                        Value::Concrete(ConcreteValue::String(route_table_id.to_string().into())),
                     );
 
                     // Route identifier is route_table_id|destination_cidr_block
@@ -78,14 +78,14 @@ impl AwsProvider {
         // Add gateway_id if specified
         if let Some(Value::Concrete(ConcreteValue::String(gw_id))) = resource.get_attr("gateway_id")
         {
-            req = req.gateway_id(gw_id);
+            req = req.gateway_id(gw_id.expose_plaintext());
         }
 
         // Add nat_gateway_id if specified
         if let Some(Value::Concrete(ConcreteValue::String(nat_gw_id))) =
             resource.get_attr("nat_gateway_id")
         {
-            req = req.nat_gateway_id(nat_gw_id);
+            req = req.nat_gateway_id(nat_gw_id.expose_plaintext());
         }
 
         req.send().await.map_err(|e| {
@@ -109,7 +109,7 @@ impl AwsProvider {
         to: Resource,
     ) -> ProviderResult<State> {
         let route_table_id = match to.get_attr("route_table_id") {
-            Some(Value::Concrete(ConcreteValue::String(s))) => s.clone(),
+            Some(Value::Concrete(ConcreteValue::String(s))) => s.expose_plaintext().to_string(),
             _ => {
                 return Err(ProviderError::invalid_input("route_table_id is required")
                     .for_resource(id.clone()));
@@ -117,7 +117,7 @@ impl AwsProvider {
         };
 
         let destination_cidr = match to.get_attr("destination_cidr_block") {
-            Some(Value::Concrete(ConcreteValue::String(s))) => s.clone(),
+            Some(Value::Concrete(ConcreteValue::String(s))) => s.expose_plaintext().to_string(),
             _ => {
                 return Err(
                     ProviderError::invalid_input("destination_cidr_block is required")
@@ -134,14 +134,14 @@ impl AwsProvider {
 
         // Add gateway_id if specified
         if let Some(Value::Concrete(ConcreteValue::String(gw_id))) = to.get_attr("gateway_id") {
-            req = req.gateway_id(gw_id);
+            req = req.gateway_id(gw_id.expose_plaintext());
         }
 
         // Add nat_gateway_id if specified
         if let Some(Value::Concrete(ConcreteValue::String(nat_gw_id))) =
             to.get_attr("nat_gateway_id")
         {
-            req = req.nat_gateway_id(nat_gw_id);
+            req = req.nat_gateway_id(nat_gw_id.expose_plaintext());
         }
 
         req.send().await.map_err(|e| {

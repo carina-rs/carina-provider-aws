@@ -36,19 +36,19 @@ impl AwsProvider {
             if let Some(account) = response.account() {
                 attributes.insert(
                     "account_id".to_string(),
-                    Value::Concrete(ConcreteValue::String(account.to_string())),
+                    Value::Concrete(ConcreteValue::String(account.to_string().into())),
                 );
             }
             if let Some(arn) = response.arn() {
                 attributes.insert(
                     "arn".to_string(),
-                    Value::Concrete(ConcreteValue::String(arn.to_string())),
+                    Value::Concrete(ConcreteValue::String(arn.to_string().into())),
                 );
             }
             if let Some(user_id) = response.user_id() {
                 attributes.insert(
                     "user_id".to_string(),
-                    Value::Concrete(ConcreteValue::String(user_id.to_string())),
+                    Value::Concrete(ConcreteValue::String(user_id.to_string().into())),
                 );
             }
 

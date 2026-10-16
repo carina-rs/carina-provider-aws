@@ -48,16 +48,16 @@ impl AwsProvider {
                 let mut attributes = HashMap::new();
                 attributes.insert(
                     "bucket".to_string(),
-                    Value::Concrete(ConcreteValue::String(bucket.to_string())),
+                    Value::Concrete(ConcreteValue::String(bucket.to_string().into())),
                 );
                 attributes.insert(
                     "status".to_string(),
-                    Value::Concrete(ConcreteValue::String(status.as_str().to_string())),
+                    Value::Concrete(ConcreteValue::String(status.as_str().to_string().into())),
                 );
                 if let Some(mfa) = output.mfa_delete() {
                     attributes.insert(
                         "mfa_delete".to_string(),
-                        Value::Concrete(ConcreteValue::String(mfa.as_str().to_string())),
+                        Value::Concrete(ConcreteValue::String(mfa.as_str().to_string().into())),
                     );
                 }
                 Ok(State::existing(id.clone(), attributes).with_identifier(bucket.to_string()))

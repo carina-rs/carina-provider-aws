@@ -212,7 +212,9 @@ fn pack_attr(value: &Value, kind: AttrKind) -> Option<String> {
         (AttrKind::Bool, Value::Concrete(ConcreteValue::Bool(b))) => {
             Some(if *b { "true" } else { "false" }.to_string())
         }
-        (AttrKind::String, Value::Concrete(ConcreteValue::String(s))) => Some(s.clone()),
+        (AttrKind::String, Value::Concrete(ConcreteValue::String(s))) => {
+            Some(s.expose_plaintext().to_string())
+        }
         (AttrKind::IamPolicy, Value::Concrete(ConcreteValue::Map(_))) => {
             let json = policy_doc_to_json(value);
             serde_json::to_string(&json).ok()
@@ -240,7 +242,9 @@ fn unpack_attr(raw: &str, kind: AttrKind) -> Option<Value> {
             "false" => Some(Value::Concrete(ConcreteValue::Bool(false))),
             _ => None,
         },
-        AttrKind::String => Some(Value::Concrete(ConcreteValue::String(raw.to_string()))),
+        AttrKind::String => Some(Value::Concrete(ConcreteValue::String(
+            raw.to_string().into(),
+        ))),
         AttrKind::IamPolicy => {
             let json: serde_json::Value = serde_json::from_str(raw).ok()?;
             Some(json_to_policy_doc(&json))
@@ -264,7 +268,7 @@ fn redrive_policy_to_json_string(value: &Value) -> Option<String> {
         return None;
     };
     let arn = match map.get("dead_letter_target_arn") {
-        Some(Value::Concrete(ConcreteValue::String(s))) => s.clone(),
+        Some(Value::Concrete(ConcreteValue::String(s))) => s.expose_plaintext().to_string(),
         _ => return None,
     };
     let count = match map.get("max_receive_count") {
@@ -287,7 +291,7 @@ fn json_to_redrive_policy(json: &serde_json::Value) -> Option<Value> {
     let mut out = IndexMap::new();
     out.insert(
         "dead_letter_target_arn".to_string(),
-        Value::Concrete(ConcreteValue::String(arn.to_string())),
+        Value::Concrete(ConcreteValue::String(arn.to_string().into())),
     );
     out.insert(
         "max_receive_count".to_string(),
@@ -304,7 +308,7 @@ fn redrive_allow_policy_to_json_string(value: &Value) -> Option<String> {
         return None;
     };
     let permission = match map.get("redrive_permission") {
-        Some(Value::Concrete(ConcreteValue::String(s))) => s.clone(),
+        Some(Value::Concrete(ConcreteValue::String(s))) => s.expose_plaintext().to_string(),
         Some(Value::Concrete(ConcreteValue::EnumIdentifier(s))) => {
             // Raw EnumIdentifier at wire-out means the host did not
             // canonicalize it; pass it through so AWS-side rejection is
@@ -324,7 +328,7 @@ fn redrive_allow_policy_to_json_string(value: &Value) -> Option<String> {
             .iter()
             .filter_map(|v| match v {
                 Value::Concrete(ConcreteValue::String(s)) => {
-                    Some(serde_json::Value::String(s.clone()))
+                    Some(serde_json::Value::String(s.expose_plaintext().to_string()))
                 }
                 _ => None,
             })
@@ -353,7 +357,7 @@ fn json_to_redrive_allow_policy(json: &serde_json::Value) -> Option<Value> {
     let mut out = IndexMap::new();
     out.insert(
         "redrive_permission".to_string(),
-        Value::Concrete(ConcreteValue::String(permission_raw.to_string())),
+        Value::Concrete(ConcreteValue::String(permission_raw.to_string().into())),
     );
     if let Some(arns_json) = obj.get("sourceQueueArns")
         && let Some(arr) = arns_json.as_array()
@@ -362,7 +366,7 @@ fn json_to_redrive_allow_policy(json: &serde_json::Value) -> Option<Value> {
             .iter()
             .filter_map(|v| {
                 v.as_str()
-                    .map(|s| Value::Concrete(ConcreteValue::String(s.to_string())))
+                    .map(|s| Value::Concrete(ConcreteValue::String(s.to_string().into())))
             })
             .collect();
         out.insert(
@@ -419,7 +423,7 @@ impl AwsProvider {
         if let Some(name) = queue_url.rsplit('/').next() {
             attributes.insert(
                 "queue_name".to_string(),
-                Value::Concrete(ConcreteValue::String(name.to_string())),
+                Value::Concrete(ConcreteValue::String(name.to_string().into())),
             );
         }
 
@@ -449,7 +453,7 @@ impl AwsProvider {
                     for (key, val) in tags {
                         tag_map.insert(
                             key.to_string(),
-                            Value::Concrete(ConcreteValue::String(val.to_string())),
+                            Value::Concrete(ConcreteValue::String(val.to_string().into())),
                         );
                     }
                     attributes.insert(
@@ -633,7 +637,7 @@ impl AwsProvider {
                     _ => true,
                 };
                 if should_add {
-                    tags_to_add.insert(key.clone(), val.clone());
+                    tags_to_add.insert(key.clone(), val.expose_plaintext().to_string());
                 }
             }
         }
@@ -664,7 +668,7 @@ fn resource_tags_map(resource: &Resource) -> Option<HashMap<String, String>> {
     let mut out = HashMap::new();
     for (key, value) in tag_map {
         if let Value::Concrete(ConcreteValue::String(val)) = value {
-            out.insert(key.clone(), val.clone());
+            out.insert(key.clone(), val.expose_plaintext().to_string());
         }
     }
     if out.is_empty() { None } else { Some(out) }

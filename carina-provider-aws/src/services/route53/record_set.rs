@@ -98,7 +98,7 @@ fn scan_page_for_record<'a>(
 
 fn extract_string(value: &Value) -> Option<&str> {
     if let Value::Concrete(ConcreteValue::String(s)) = value {
-        Some(s.as_str())
+        Some(s.expose_plaintext())
     } else {
         None
     }
@@ -109,7 +109,10 @@ fn build_resource_records(records: &[Value]) -> Vec<ResourceRecord> {
         .iter()
         .filter_map(|v| {
             if let Value::Concrete(ConcreteValue::String(s)) = v {
-                ResourceRecord::builder().value(s.clone()).build().ok()
+                ResourceRecord::builder()
+                    .value(s.expose_plaintext())
+                    .build()
+                    .ok()
             } else {
                 None
             }
@@ -232,17 +235,19 @@ fn extract_attributes(hosted_zone_id: &str, rrs: &ResourceRecordSet) -> HashMap<
 
     attrs.insert(
         "hosted_zone_id".to_string(),
-        Value::Concrete(ConcreteValue::String(hosted_zone_id.to_string())),
+        Value::Concrete(ConcreteValue::String(hosted_zone_id.to_string().into())),
     );
 
     attrs.insert(
         "name".to_string(),
-        Value::Concrete(ConcreteValue::String(strip_trailing_dot(rrs.name()))),
+        Value::Concrete(ConcreteValue::String(strip_trailing_dot(rrs.name()).into())),
     );
 
     attrs.insert(
         "type".to_string(),
-        Value::Concrete(ConcreteValue::String(rrs.r#type().as_str().to_string())),
+        Value::Concrete(ConcreteValue::String(
+            rrs.r#type().as_str().to_string().into(),
+        )),
     );
 
     if let Some(ttl) = rrs.ttl() {
@@ -252,7 +257,7 @@ fn extract_attributes(hosted_zone_id: &str, rrs: &ResourceRecordSet) -> HashMap<
     let records: Vec<Value> = rrs
         .resource_records()
         .iter()
-        .map(|r| Value::Concrete(ConcreteValue::String(r.value().to_string())))
+        .map(|r| Value::Concrete(ConcreteValue::String(r.value().to_string().into())))
         .collect();
     if !records.is_empty() {
         attrs.insert(
@@ -265,11 +270,15 @@ fn extract_attributes(hosted_zone_id: &str, rrs: &ResourceRecordSet) -> HashMap<
         let mut alias_map: IndexMap<String, Value> = IndexMap::new();
         alias_map.insert(
             "dns_name".to_string(),
-            Value::Concrete(ConcreteValue::String(strip_trailing_dot(alias.dns_name()))),
+            Value::Concrete(ConcreteValue::String(
+                strip_trailing_dot(alias.dns_name()).into(),
+            )),
         );
         alias_map.insert(
             "hosted_zone_id".to_string(),
-            Value::Concrete(ConcreteValue::String(alias.hosted_zone_id().to_string())),
+            Value::Concrete(ConcreteValue::String(
+                alias.hosted_zone_id().to_string().into(),
+            )),
         );
         alias_map.insert(
             "evaluate_target_health".to_string(),
@@ -487,22 +496,22 @@ pub(crate) fn normalize_record_set_dns_names(resources: &mut [Resource]) {
         }
 
         if let Some(Value::Concrete(ConcreteValue::String(name))) = resource.get_attr("name")
-            && let Some(stripped) = name.strip_suffix('.')
+            && let Some(stripped) = name.expose_plaintext().strip_suffix('.')
         {
             resource.set_attr(
                 "name".to_string(),
-                Value::Concrete(ConcreteValue::String(stripped.to_string())),
+                Value::Concrete(ConcreteValue::String(stripped.to_string().into())),
             );
         }
 
         if let Some(Value::Concrete(ConcreteValue::Map(alias))) = resource.get_attr("alias_target")
             && let Some(Value::Concrete(ConcreteValue::String(dns_name))) = alias.get("dns_name")
-            && let Some(stripped) = dns_name.strip_suffix('.')
+            && let Some(stripped) = dns_name.expose_plaintext().strip_suffix('.')
         {
             let mut new_alias = alias.clone();
             new_alias.insert(
                 "dns_name".to_string(),
-                Value::Concrete(ConcreteValue::String(stripped.to_string())),
+                Value::Concrete(ConcreteValue::String(stripped.to_string().into())),
             );
             resource.set_attr(
                 "alias_target".to_string(),
@@ -521,7 +530,7 @@ mod tests {
         let mut r = Resource::with_provider("aws", "route53.RecordSet", "test-rec", None);
         r.set_attr(
             "name".to_string(),
-            Value::Concrete(ConcreteValue::String(name.to_string())),
+            Value::Concrete(ConcreteValue::String(name.to_string().into())),
         );
         r
     }
@@ -533,7 +542,7 @@ mod tests {
         assert_eq!(
             resources[0].get_attr("name"),
             Some(&Value::Concrete(ConcreteValue::String(
-                "_abc.example.com".to_string()
+                "_abc.example.com".to_string().into()
             )))
         );
     }
@@ -545,7 +554,7 @@ mod tests {
         assert_eq!(
             resources[0].get_attr("name"),
             Some(&Value::Concrete(ConcreteValue::String(
-                "_abc.example.com".to_string()
+                "_abc.example.com".to_string().into()
             )))
         );
     }
@@ -585,12 +594,12 @@ mod tests {
         alias.insert(
             "dns_name".to_string(),
             Value::Concrete(ConcreteValue::String(
-                "dualstack.elb.amazonaws.com.".to_string(),
+                "dualstack.elb.amazonaws.com.".to_string().into(),
             )),
         );
         alias.insert(
             "hosted_zone_id".to_string(),
-            Value::Concrete(ConcreteValue::String("Z35SXDOTRQ7X7K".to_string())),
+            Value::Concrete(ConcreteValue::String("Z35SXDOTRQ7X7K".to_string().into())),
         );
         alias.insert(
             "evaluate_target_health".to_string(),
@@ -609,7 +618,7 @@ mod tests {
         assert_eq!(
             out.get("dns_name"),
             Some(&Value::Concrete(ConcreteValue::String(
-                "dualstack.elb.amazonaws.com".to_string()
+                "dualstack.elb.amazonaws.com".to_string().into()
             )))
         );
     }
@@ -620,7 +629,7 @@ mod tests {
         r.set_attr(
             "name".to_string(),
             Value::Concrete(ConcreteValue::String(
-                "bucket.with.trailing.dot.".to_string(),
+                "bucket.with.trailing.dot.".to_string().into(),
             )),
         );
         let mut resources = vec![r];
@@ -628,7 +637,7 @@ mod tests {
         assert_eq!(
             resources[0].get_attr("name"),
             Some(&Value::Concrete(ConcreteValue::String(
-                "bucket.with.trailing.dot.".to_string()
+                "bucket.with.trailing.dot.".to_string().into()
             )))
         );
     }
@@ -638,7 +647,7 @@ mod tests {
         let mut r = Resource::with_provider("awscc", "route53.RecordSet", "test", None);
         r.set_attr(
             "name".to_string(),
-            Value::Concrete(ConcreteValue::String("foo.example.com.".to_string())),
+            Value::Concrete(ConcreteValue::String("foo.example.com.".to_string().into())),
         );
         let mut resources = vec![r];
         normalize_record_set_dns_names(&mut resources);
@@ -646,7 +655,7 @@ mod tests {
         assert_eq!(
             resources[0].get_attr("name"),
             Some(&Value::Concrete(ConcreteValue::String(
-                "foo.example.com.".to_string()
+                "foo.example.com.".to_string().into()
             )))
         );
     }

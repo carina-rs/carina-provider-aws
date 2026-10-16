@@ -38,13 +38,13 @@ impl AwsProvider {
                 let mut attributes = HashMap::new();
                 attributes.insert(
                     "bucket".to_string(),
-                    Value::Concrete(ConcreteValue::String(bucket.to_string())),
+                    Value::Concrete(ConcreteValue::String(bucket.to_string().into())),
                 );
                 if let Some(idx) = output.index_document() {
                     let mut m = IndexMap::new();
                     m.insert(
                         "suffix".to_string(),
-                        Value::Concrete(ConcreteValue::String(idx.suffix().to_string())),
+                        Value::Concrete(ConcreteValue::String(idx.suffix().to_string().into())),
                     );
                     attributes.insert(
                         "index_document".to_string(),
@@ -55,7 +55,7 @@ impl AwsProvider {
                     let mut m = IndexMap::new();
                     m.insert(
                         "key".to_string(),
-                        Value::Concrete(ConcreteValue::String(err.key().to_string())),
+                        Value::Concrete(ConcreteValue::String(err.key().to_string().into())),
                     );
                     attributes.insert(
                         "error_document".to_string(),
@@ -66,12 +66,12 @@ impl AwsProvider {
                     let mut m = IndexMap::new();
                     m.insert(
                         "host_name".to_string(),
-                        Value::Concrete(ConcreteValue::String(r.host_name().to_string())),
+                        Value::Concrete(ConcreteValue::String(r.host_name().to_string().into())),
                     );
                     if let Some(p) = r.protocol() {
                         m.insert(
                             "protocol".to_string(),
-                            Value::Concrete(ConcreteValue::String(p.as_str().to_string())),
+                            Value::Concrete(ConcreteValue::String(p.as_str().to_string().into())),
                         );
                     }
                     attributes.insert(
@@ -131,7 +131,7 @@ impl AwsProvider {
         if let Some(Value::Concrete(ConcreteValue::Map(map))) = resource.get_attr("index_document")
         {
             let suffix = match map.get("suffix") {
-                Some(Value::Concrete(ConcreteValue::String(s))) => s.clone(),
+                Some(Value::Concrete(ConcreteValue::String(s))) => s.expose_plaintext(),
                 _ => {
                     return Err(
                         ProviderError::invalid_input("index_document.suffix is required")
@@ -155,7 +155,7 @@ impl AwsProvider {
         if let Some(Value::Concrete(ConcreteValue::Map(map))) = resource.get_attr("error_document")
         {
             let key = match map.get("key") {
-                Some(Value::Concrete(ConcreteValue::String(s))) => s.clone(),
+                Some(Value::Concrete(ConcreteValue::String(s))) => s.expose_plaintext(),
                 _ => {
                     return Err(
                         ProviderError::invalid_input("error_document.key is required")
@@ -174,7 +174,7 @@ impl AwsProvider {
             resource.get_attr("redirect_all_requests_to")
         {
             let host_name = match map.get("host_name") {
-                Some(Value::Concrete(ConcreteValue::String(s))) => s.clone(),
+                Some(Value::Concrete(ConcreteValue::String(s))) => s.expose_plaintext(),
                 _ => {
                     return Err(ProviderError::invalid_input(
                         "redirect_all_requests_to.host_name is required",

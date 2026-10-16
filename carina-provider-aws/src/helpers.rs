@@ -20,7 +20,7 @@ use carina_core::schema::{AttributeType, ResourceSchema, Shape, ShapeWalkBudget}
 /// Borrow a `Value` as `&str` if it is a concrete string, otherwise `None`.
 pub fn value_as_str(v: &Value) -> Option<&str> {
     if let Value::Concrete(ConcreteValue::String(s)) = v {
-        Some(s.as_str())
+        Some(s.expose_plaintext())
     } else {
         None
     }
@@ -31,7 +31,7 @@ pub fn value_as_str(v: &Value) -> Option<&str> {
 /// Returns the string value or a `ProviderError` with `"{attr_name} is required"`.
 pub fn require_string_attr(resource: &Resource, attr_name: &str) -> ProviderResult<String> {
     match resource.get_attr(attr_name) {
-        Some(Value::Concrete(ConcreteValue::String(s))) => Ok(s.clone()),
+        Some(Value::Concrete(ConcreteValue::String(s))) => Ok(s.expose_plaintext().to_string()),
         _ => Err(
             ProviderError::invalid_input(format!("{} is required", attr_name))
                 .for_resource(resource.id.clone()),
@@ -141,7 +141,7 @@ pub(crate) fn optional_enum_value_at_schema_path(
             .ok()
             .map(|c| c.api_value().to_string()),
         Value::Concrete(ConcreteValue::String(s)) => resolver
-            .resolve_state_text(s)
+            .resolve_state_text(s.expose_plaintext())
             .ok()
             .map(|c| c.api_value().to_string()),
         _ => None,
@@ -243,7 +243,7 @@ pub(crate) fn optional_string_struct_field<'a>(
         return None;
     };
     match m.get(field_name)? {
-        Value::Concrete(ConcreteValue::String(s)) => Some(s.as_str()),
+        Value::Concrete(ConcreteValue::String(s)) => Some(s.expose_plaintext()),
         _ => None,
     }
 }
@@ -273,11 +273,16 @@ pub(crate) fn optional_string_list_struct_field(
         return None;
     };
     match m.get(field_name)? {
-        Value::Concrete(ConcreteValue::StringList(items)) => Some(items.clone()),
+        Value::Concrete(ConcreteValue::StringList(items)) => Some(
+            items
+                .iter()
+                .map(|item| item.expose_plaintext().to_string())
+                .collect(),
+        ),
         Value::Concrete(ConcreteValue::List(items)) => items
             .iter()
             .map(|item| match item {
-                Value::Concrete(ConcreteValue::String(s)) => Some(s.clone()),
+                Value::Concrete(ConcreteValue::String(s)) => Some(s.expose_plaintext().to_string()),
                 _ => None,
             })
             .collect(),
@@ -307,7 +312,7 @@ fn build_tag_specification_from_map(
     let mut tag_spec = TagSpecification::builder().resource_type(resource_type);
     for (key, val) in tags {
         if let Value::Concrete(ConcreteValue::String(v)) = val {
-            tag_spec = tag_spec.tags(Tag::builder().key(key).value(v).build());
+            tag_spec = tag_spec.tags(Tag::builder().key(key).value(v.expose_plaintext()).build());
         }
     }
     tag_spec.build()
@@ -569,7 +574,7 @@ mod tests {
         for (k, v) in attrs {
             resource.attributes.insert(
                 k.to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string())),
+                Value::Concrete(ConcreteValue::String(v.to_string().into())),
             );
         }
         resource
@@ -849,7 +854,7 @@ mod tests {
         let schema = acm_schema();
         let resource = make_resource_with_struct_field(
             "certificate_transparency_logging_preference",
-            Value::Concrete(ConcreteValue::String("ENABLED".to_string())),
+            Value::Concrete(ConcreteValue::String("ENABLED".to_string().into())),
         );
         assert_eq!(
             optional_enum_struct_field(
@@ -926,7 +931,7 @@ mod tests {
     fn test_optional_string_struct_field_string() {
         let resource = make_resource_with_struct_field(
             "domain_name",
-            Value::Concrete(ConcreteValue::String("example.com".to_string())),
+            Value::Concrete(ConcreteValue::String("example.com".to_string().into())),
         );
         assert_eq!(
             optional_string_struct_field(&resource, "options", "domain_name"),
@@ -938,7 +943,9 @@ mod tests {
     fn test_optional_string_list_struct_field_string_list() {
         let resource = make_resource_with_struct_field(
             "transit_gateway_cidr_blocks",
-            Value::Concrete(ConcreteValue::StringList(vec!["10.0.0.0/24".to_string()])),
+            Value::Concrete(ConcreteValue::StringList(vec![
+                "10.0.0.0/24".to_string().into(),
+            ])),
         );
         assert_eq!(
             optional_string_list_struct_field(&resource, "options", "transit_gateway_cidr_blocks"),
@@ -951,7 +958,7 @@ mod tests {
         let resource = make_resource_with_struct_field(
             "transit_gateway_cidr_blocks",
             Value::Concrete(ConcreteValue::List(vec![Value::Concrete(
-                ConcreteValue::String("10.0.0.0/24".to_string()),
+                ConcreteValue::String("10.0.0.0/24".to_string().into()),
             )])),
         );
         assert_eq!(
@@ -991,7 +998,7 @@ mod tests {
         let schema = acm_schema();
         let resource = make_resource_with_value(
             "options",
-            Value::Concrete(ConcreteValue::String("not-a-map".to_string())),
+            Value::Concrete(ConcreteValue::String("not-a-map".to_string().into())),
         );
         assert_eq!(
             optional_enum_struct_field(&resource, &schema, "options", "dns_support"),
@@ -1053,7 +1060,7 @@ mod tests {
         );
         let int_resource = make_resource_with_struct_field(
             "amazon_side_asn",
-            Value::Concrete(ConcreteValue::String("64512".to_string())),
+            Value::Concrete(ConcreteValue::String("64512".to_string().into())),
         );
         let list_resource = make_resource_with_struct_field(
             "transit_gateway_cidr_blocks",
@@ -1061,7 +1068,7 @@ mod tests {
         );
         let bool_resource = make_resource_with_struct_field(
             "enable_resource_name_dns_a_record",
-            Value::Concrete(ConcreteValue::String("true".to_string())),
+            Value::Concrete(ConcreteValue::String("true".to_string().into())),
         );
         let string_resource =
             make_resource_with_struct_field("domain_name", Value::Concrete(ConcreteValue::Int(1)));

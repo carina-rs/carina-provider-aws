@@ -40,12 +40,12 @@ impl AwsProvider {
                 let mut attributes = HashMap::new();
                 attributes.insert(
                     "bucket".to_string(),
-                    Value::Concrete(ConcreteValue::String(bucket.to_string())),
+                    Value::Concrete(ConcreteValue::String(bucket.to_string().into())),
                 );
                 if let Some(config) = output.replication_configuration() {
                     attributes.insert(
                         "role".to_string(),
-                        Value::Concrete(ConcreteValue::String(config.role().to_string())),
+                        Value::Concrete(ConcreteValue::String(config.role().to_string().into())),
                     );
                     let rules: Vec<Value> = config.rules().iter().map(rule_to_value).collect();
                     if !rules.is_empty() {
@@ -259,7 +259,7 @@ fn build_rule(
         .destination(destination);
 
     if let Some(Value::Concrete(ConcreteValue::String(s))) = map.get("id") {
-        builder = builder.id(s);
+        builder = builder.id(s.expose_plaintext());
     }
     // A V2 replication rule (one carrying a `Filter`) must declare a
     // `Priority` — S3 uses it to resolve precedence when rules overlap.
@@ -284,7 +284,7 @@ fn build_filter_tag(id: &ResourceId, value: &Value) -> ProviderResult<Tag> {
         );
     };
     let key = match map.get("key") {
-        Some(Value::Concrete(ConcreteValue::String(s))) => s.clone(),
+        Some(Value::Concrete(ConcreteValue::String(s))) => s.expose_plaintext(),
         _ => {
             return Err(
                 ProviderError::invalid_input("filter tag.key is required").for_resource(id.clone())
@@ -292,7 +292,7 @@ fn build_filter_tag(id: &ResourceId, value: &Value) -> ProviderResult<Tag> {
         }
     };
     let val = match map.get("value") {
-        Some(Value::Concrete(ConcreteValue::String(s))) => s.clone(),
+        Some(Value::Concrete(ConcreteValue::String(s))) => s.expose_plaintext(),
         _ => {
             return Err(ProviderError::invalid_input("filter tag.value is required")
                 .for_resource(id.clone()));
@@ -313,7 +313,7 @@ fn build_filter_and(id: &ResourceId, value: &Value) -> ProviderResult<Replicatio
     };
     let mut builder = ReplicationRuleAndOperator::builder();
     if let Some(Value::Concrete(ConcreteValue::String(s))) = map.get("prefix") {
-        builder = builder.prefix(s);
+        builder = builder.prefix(s.expose_plaintext());
     }
     if let Some(Value::Concrete(ConcreteValue::List(items))) = map.get("tags") {
         let tags: Vec<Tag> = items
@@ -332,7 +332,7 @@ fn build_filter(id: &ResourceId, value: &Value) -> ProviderResult<ReplicationRul
     };
     let mut builder = ReplicationRuleFilter::builder();
     if let Some(Value::Concrete(ConcreteValue::String(s))) = map.get("prefix") {
-        builder = builder.prefix(s);
+        builder = builder.prefix(s.expose_plaintext());
     }
     if let Some(v) = map.get("tag") {
         builder = builder.tag(build_filter_tag(id, v)?);
@@ -354,7 +354,7 @@ fn build_destination(
         );
     };
     let bucket = match map.get("bucket") {
-        Some(Value::Concrete(ConcreteValue::String(s))) => s.clone(),
+        Some(Value::Concrete(ConcreteValue::String(s))) => s.expose_plaintext(),
         _ => {
             return Err(
                 ProviderError::invalid_input("destination.bucket is required")
@@ -364,7 +364,7 @@ fn build_destination(
     };
     let mut builder = Destination::builder().bucket(bucket);
     if let Some(Value::Concrete(ConcreteValue::String(s))) = map.get("account") {
-        builder = builder.account(s);
+        builder = builder.account(s.expose_plaintext());
     }
     if let Some(storage_class) = map.get("storage_class").and_then(|v| {
         optional_enum_value_at_schema_path(schema, "rules", &["destination", "storage_class"], v)
@@ -384,7 +384,7 @@ fn rule_to_value(rule: &ReplicationRule) -> Value {
     {
         map.insert(
             "id".to_string(),
-            Value::Concrete(ConcreteValue::String(s.to_string())),
+            Value::Concrete(ConcreteValue::String(s.to_string().into())),
         );
     }
     // Surface priority only when non-zero. The provider defaults an
@@ -408,7 +408,9 @@ fn rule_to_value(rule: &ReplicationRule) -> Value {
     }
     map.insert(
         "status".to_string(),
-        Value::Concrete(ConcreteValue::String(rule.status().as_str().to_string())),
+        Value::Concrete(ConcreteValue::String(
+            rule.status().as_str().to_string().into(),
+        )),
     );
     // Only surface delete_marker_replication when it is Enabled. The
     // provider defaults it to Disabled, so reflecting Disabled would
@@ -420,7 +422,7 @@ fn rule_to_value(rule: &ReplicationRule) -> Value {
         let mut m = IndexMap::new();
         m.insert(
             "status".to_string(),
-            Value::Concrete(ConcreteValue::String(status.as_str().to_string())),
+            Value::Concrete(ConcreteValue::String(status.as_str().to_string().into())),
         );
         map.insert(
             "delete_marker_replication".to_string(),
@@ -431,18 +433,18 @@ fn rule_to_value(rule: &ReplicationRule) -> Value {
         let mut d = IndexMap::new();
         d.insert(
             "bucket".to_string(),
-            Value::Concrete(ConcreteValue::String(dest.bucket().to_string())),
+            Value::Concrete(ConcreteValue::String(dest.bucket().to_string().into())),
         );
         if let Some(a) = dest.account() {
             d.insert(
                 "account".to_string(),
-                Value::Concrete(ConcreteValue::String(a.to_string())),
+                Value::Concrete(ConcreteValue::String(a.to_string().into())),
             );
         }
         if let Some(sc) = dest.storage_class() {
             d.insert(
                 "storage_class".to_string(),
-                Value::Concrete(ConcreteValue::String(sc.as_str().to_string())),
+                Value::Concrete(ConcreteValue::String(sc.as_str().to_string().into())),
             );
         }
         map.insert(
@@ -458,11 +460,11 @@ fn tag_to_value(tag: &Tag) -> Value {
     let mut m = IndexMap::new();
     m.insert(
         "key".to_string(),
-        Value::Concrete(ConcreteValue::String(tag.key().to_string())),
+        Value::Concrete(ConcreteValue::String(tag.key().to_string().into())),
     );
     m.insert(
         "value".to_string(),
-        Value::Concrete(ConcreteValue::String(tag.value().to_string())),
+        Value::Concrete(ConcreteValue::String(tag.value().to_string().into())),
     );
     Value::Concrete(ConcreteValue::Map(m))
 }
@@ -476,7 +478,7 @@ fn filter_and_to_value(and: &ReplicationRuleAndOperator) -> Option<Value> {
     {
         m.insert(
             "prefix".to_string(),
-            Value::Concrete(ConcreteValue::String(p.to_string())),
+            Value::Concrete(ConcreteValue::String(p.to_string().into())),
         );
     }
     let tags = and.tags();
@@ -502,7 +504,7 @@ fn filter_to_value(filter: &ReplicationRuleFilter) -> Option<Value> {
     {
         m.insert(
             "prefix".to_string(),
-            Value::Concrete(ConcreteValue::String(p.to_string())),
+            Value::Concrete(ConcreteValue::String(p.to_string().into())),
         );
     }
     if let Some(tag) = filter.tag() {
@@ -533,7 +535,7 @@ mod tests {
     }
 
     fn str_val(s: &str) -> Value {
-        Value::Concrete(ConcreteValue::String(s.to_string()))
+        Value::Concrete(ConcreteValue::String(s.to_string().into()))
     }
 
     fn map_val(pairs: Vec<(&str, Value)>) -> Value {

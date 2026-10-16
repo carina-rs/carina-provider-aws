@@ -92,7 +92,7 @@ mod tests {
         assert!(
             schema
                 .validate(&Value::Concrete(ConcreteValue::String(
-                    accepted.to_string()
+                    accepted.to_string().into()
                 )))
                 .is_ok(),
             "expected '{accepted}' to validate"
@@ -100,7 +100,7 @@ mod tests {
         assert!(
             schema
                 .validate(&Value::Concrete(ConcreteValue::String(
-                    rejected.to_string()
+                    rejected.to_string().into()
                 )))
                 .is_err(),
             "expected '{rejected}' to be rejected"
@@ -340,14 +340,14 @@ mod tests {
         assert!(
             carina_core::schema::Schema::flat(t.clone())
                 .validate(&Value::Concrete(ConcreteValue::String(
-                    "arn:aws:s3:::my-bucket".to_string()
+                    "arn:aws:s3:::my-bucket".to_string().into()
                 )))
                 .is_ok()
         );
         assert!(
             carina_core::schema::Schema::flat(t.clone())
                 .validate(&Value::Concrete(ConcreteValue::String(
-                    "not-an-arn".to_string()
+                    "not-an-arn".to_string().into()
                 )))
                 .is_err()
         );
@@ -394,13 +394,15 @@ mod tests {
         assert!(
             carina_core::schema::Schema::flat(t.clone())
                 .validate(&Value::Concrete(ConcreteValue::String(
-                    "vpc-1a2b3c4d".to_string()
+                    "vpc-1a2b3c4d".to_string().into()
                 )))
                 .is_ok()
         );
         assert!(
             carina_core::schema::Schema::flat(t.clone())
-                .validate(&Value::Concrete(ConcreteValue::String("vpc".to_string())))
+                .validate(&Value::Concrete(ConcreteValue::String(
+                    "vpc".to_string().into()
+                )))
                 .is_err()
         );
         assert!(
@@ -425,14 +427,14 @@ mod tests {
         assert!(
             carina_core::schema::Schema::flat(t.clone())
                 .validate(&Value::Concrete(ConcreteValue::String(
-                    "vpc-cidr-assoc-12345678".to_string()
+                    "vpc-cidr-assoc-12345678".to_string().into()
                 )))
                 .is_ok()
         );
         assert!(
             carina_core::schema::Schema::flat(t.clone())
                 .validate(&Value::Concrete(ConcreteValue::String(
-                    "vpc-cidr-assoc-0123456789abcdef0".to_string()
+                    "vpc-cidr-assoc-0123456789abcdef0".to_string().into()
                 )))
                 .is_ok()
         );
@@ -444,14 +446,14 @@ mod tests {
         assert!(
             carina_core::schema::Schema::flat(t.clone())
                 .validate(&Value::Concrete(ConcreteValue::String(
-                    "vpc-12345678".to_string()
+                    "vpc-12345678".to_string().into()
                 )))
                 .is_err()
         );
         assert!(
             carina_core::schema::Schema::flat(t.clone())
                 .validate(&Value::Concrete(ConcreteValue::String(
-                    "invalid".to_string()
+                    "invalid".to_string().into()
                 )))
                 .is_err()
         );
@@ -463,14 +465,14 @@ mod tests {
         assert!(
             carina_core::schema::Schema::flat(t.clone())
                 .validate(&Value::Concrete(ConcreteValue::String(
-                    "tgw-rtb-12345678".to_string()
+                    "tgw-rtb-12345678".to_string().into()
                 )))
                 .is_ok()
         );
         assert!(
             carina_core::schema::Schema::flat(t.clone())
                 .validate(&Value::Concrete(ConcreteValue::String(
-                    "tgw-rtb-0123456789abcdef0".to_string()
+                    "tgw-rtb-0123456789abcdef0".to_string().into()
                 )))
                 .is_ok()
         );
@@ -483,7 +485,7 @@ mod tests {
         assert!(
             carina_core::schema::Schema::flat(t.clone())
                 .validate(&Value::Concrete(ConcreteValue::String(
-                    "rtb-12345678".to_string()
+                    "rtb-12345678".to_string().into()
                 )))
                 .is_err()
         );
@@ -491,14 +493,14 @@ mod tests {
         assert!(
             carina_core::schema::Schema::flat(t.clone())
                 .validate(&Value::Concrete(ConcreteValue::String(
-                    "tgw-12345678".to_string()
+                    "tgw-12345678".to_string().into()
                 )))
                 .is_err()
         );
         assert!(
             carina_core::schema::Schema::flat(t.clone())
                 .validate(&Value::Concrete(ConcreteValue::String(
-                    "invalid".to_string()
+                    "invalid".to_string().into()
                 )))
                 .is_err()
         );
@@ -544,7 +546,7 @@ mod tests {
         assert!(
             carina_core::schema::Schema::flat(az_type.clone())
                 .validate(&Value::Concrete(ConcreteValue::String(
-                    "us-east-1a".to_string()
+                    "us-east-1a".to_string().into()
                 )))
                 .is_ok()
         );
@@ -559,7 +561,9 @@ mod tests {
         assert!(
             carina_core::schema::Schema::flat(az_type.clone())
                 .validate(&Value::Concrete(ConcreteValue::String(
-                    "aws.AvailabilityZone.ZoneName.us_east_1a".to_string()
+                    "aws.AvailabilityZone.ZoneName.us_east_1a"
+                        .to_string()
+                        .into()
                 )))
                 .is_ok()
         );
@@ -571,7 +575,7 @@ mod tests {
         assert!(
             carina_core::schema::Schema::flat(az_type.clone())
                 .validate(&Value::Concrete(ConcreteValue::String(
-                    "us_east_1a".to_string()
+                    "us_east_1a".to_string().into()
                 )))
                 .is_ok()
         );
@@ -583,7 +587,7 @@ mod tests {
         assert!(
             carina_core::schema::Schema::flat(az_type.clone())
                 .validate(&Value::Concrete(ConcreteValue::String(
-                    "ZoneName.us_east_1a".to_string()
+                    "ZoneName.us_east_1a".to_string().into()
                 )))
                 .is_ok()
         );
@@ -595,7 +599,7 @@ mod tests {
         assert!(
             carina_core::schema::Schema::flat(az_type.clone())
                 .validate(&Value::Concrete(ConcreteValue::String(
-                    "invalid-zone".to_string()
+                    "invalid-zone".to_string().into()
                 )))
                 .is_err()
         );
@@ -607,7 +611,9 @@ mod tests {
         assert!(
             carina_core::schema::Schema::flat(az_type.clone())
                 .validate(&Value::Concrete(ConcreteValue::String(
-                    "gcp.AvailabilityZone.ZoneName.us_east_1a".to_string()
+                    "gcp.AvailabilityZone.ZoneName.us_east_1a"
+                        .to_string()
+                        .into()
                 )))
                 .is_err()
         );
@@ -681,14 +687,14 @@ mod tests {
         assert!(
             carina_core::schema::Schema::flat(t.clone())
                 .validate(&Value::Concrete(ConcreteValue::String(
-                    "use1-az1".to_string()
+                    "use1-az1".to_string().into()
                 )))
                 .is_ok()
         );
         assert!(
             carina_core::schema::Schema::flat(t.clone())
                 .validate(&Value::Concrete(ConcreteValue::String(
-                    "us-east-1a".to_string()
+                    "us-east-1a".to_string().into()
                 )))
                 .is_err()
         );
@@ -999,12 +1005,12 @@ mod tests {
                                 (
                                     "action".to_string(),
                                     Value::Concrete(ConcreteValue::String(
-                                        "sts:AssumeRole".to_string(),
+                                        "sts:AssumeRole".to_string().into(),
                                     )),
                                 ),
                                 (
                                     "resource".to_string(),
-                                    Value::Concrete(ConcreteValue::String("*".to_string())),
+                                    Value::Concrete(ConcreteValue::String("*".to_string().into())),
                                 ),
                             ]
                             .into_iter()
@@ -1074,11 +1080,13 @@ mod tests {
                                 ),
                                 (
                                     "action".to_string(),
-                                    Value::Concrete(ConcreteValue::String("s3:*".to_string())),
+                                    Value::Concrete(ConcreteValue::String(
+                                        "s3:*".to_string().into(),
+                                    )),
                                 ),
                                 (
                                     "resource".to_string(),
-                                    Value::Concrete(ConcreteValue::String("*".to_string())),
+                                    Value::Concrete(ConcreteValue::String("*".to_string().into())),
                                 ),
                             ]
                             .into_iter()
@@ -1122,7 +1130,7 @@ mod tests {
                                         vec![(
                                             "service".to_string(),
                                             Value::Concrete(ConcreteValue::String(
-                                                "ec2.amazonaws.com".to_string(),
+                                                "ec2.amazonaws.com".to_string().into(),
                                             )),
                                         )]
                                         .into_iter()
@@ -1132,7 +1140,7 @@ mod tests {
                                 (
                                     "action".to_string(),
                                     Value::Concrete(ConcreteValue::String(
-                                        "sts:AssumeRole".to_string(),
+                                        "sts:AssumeRole".to_string().into(),
                                     )),
                                 ),
                             ]
@@ -1175,12 +1183,12 @@ mod tests {
                                 ),
                                 (
                                     "principal".to_string(),
-                                    Value::Concrete(ConcreteValue::String("*".to_string())),
+                                    Value::Concrete(ConcreteValue::String("*".to_string().into())),
                                 ),
                                 (
                                     "action".to_string(),
                                     Value::Concrete(ConcreteValue::String(
-                                        "sts:AssumeRole".to_string(),
+                                        "sts:AssumeRole".to_string().into(),
                                     )),
                                 ),
                             ]
@@ -1316,7 +1324,7 @@ mod tests {
         assert!(
             carina_core::schema::Schema::flat(region_type.clone())
                 .validate(&Value::Concrete(ConcreteValue::String(
-                    "ap-northeast-1".to_string()
+                    "ap-northeast-1".to_string().into()
                 )))
                 .is_ok()
         );
@@ -1328,7 +1336,7 @@ mod tests {
         assert!(
             carina_core::schema::Schema::flat(region_type.clone())
                 .validate(&Value::Concrete(ConcreteValue::String(
-                    "aws.Region.ap_northeast_1".to_string()
+                    "aws.Region.ap_northeast_1".to_string().into()
                 )))
                 .is_ok()
         );
@@ -1340,7 +1348,7 @@ mod tests {
         assert!(
             carina_core::schema::Schema::flat(region_type.clone())
                 .validate(&Value::Concrete(ConcreteValue::String(
-                    "Region.ap_northeast_1".to_string()
+                    "Region.ap_northeast_1".to_string().into()
                 )))
                 .is_ok()
         );
@@ -1352,7 +1360,7 @@ mod tests {
         assert!(
             carina_core::schema::Schema::flat(region_type.clone())
                 .validate(&Value::Concrete(ConcreteValue::String(
-                    "ap_northeast_1".to_string()
+                    "ap_northeast_1".to_string().into()
                 )))
                 .is_ok()
         );
@@ -1362,7 +1370,7 @@ mod tests {
     fn region_rejects_invalid_region() {
         let region_type = aws_region();
         let result = carina_core::schema::Schema::flat(region_type.clone()).validate(
-            &Value::Concrete(ConcreteValue::String("invalid-region".to_string())),
+            &Value::Concrete(ConcreteValue::String("invalid-region".to_string().into())),
         );
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
@@ -1377,7 +1385,7 @@ mod tests {
         assert!(
             carina_core::schema::Schema::flat(region_type.clone())
                 .validate(&Value::Concrete(ConcreteValue::String(
-                    "ap-northeast-1a".to_string()
+                    "ap-northeast-1a".to_string().into()
                 )))
                 .is_err()
         );
@@ -1389,7 +1397,9 @@ mod tests {
         for (region, _) in REGIONS {
             assert!(
                 carina_core::schema::Schema::flat(region_type.clone())
-                    .validate(&Value::Concrete(ConcreteValue::String(region.to_string())))
+                    .validate(&Value::Concrete(ConcreteValue::String(
+                        region.to_string().into()
+                    )))
                     .is_ok(),
                 "Region {} should be valid",
                 region
@@ -1403,28 +1413,28 @@ mod tests {
         assert!(
             carina_core::schema::Schema::flat(region_type.clone())
                 .validate(&Value::Concrete(ConcreteValue::String(
-                    "gcp.Region.ap_northeast_1".to_string()
+                    "gcp.Region.ap_northeast_1".to_string().into()
                 )))
                 .is_err()
         );
         assert!(
             carina_core::schema::Schema::flat(region_type.clone())
                 .validate(&Value::Concrete(ConcreteValue::String(
-                    "aws.Location.ap_northeast_1".to_string()
+                    "aws.Location.ap_northeast_1".to_string().into()
                 )))
                 .is_err()
         );
         assert!(
             carina_core::schema::Schema::flat(region_type.clone())
                 .validate(&Value::Concrete(ConcreteValue::String(
-                    "foo.bar.baz.ap_northeast_1".to_string()
+                    "foo.bar.baz.ap_northeast_1".to_string().into()
                 )))
                 .is_err()
         );
         assert!(
             carina_core::schema::Schema::flat(region_type.clone())
                 .validate(&Value::Concrete(ConcreteValue::String(
-                    "Location.ap_northeast_1".to_string()
+                    "Location.ap_northeast_1".to_string().into()
                 )))
                 .is_err()
         );
@@ -1497,7 +1507,7 @@ mod tests {
             assert!(
                 schema
                     .validate(&Value::Concrete(ConcreteValue::String(
-                        hosted_zone_id.to_string()
+                        hosted_zone_id.to_string().into()
                     )))
                     .is_ok(),
                 "expected {hosted_zone_id} to validate"
@@ -1517,7 +1527,7 @@ mod tests {
             assert!(
                 schema
                     .validate(&Value::Concrete(ConcreteValue::String(
-                        hosted_zone_id.to_string()
+                        hosted_zone_id.to_string().into()
                     )))
                     .is_err(),
                 "expected {hosted_zone_id:?} to be rejected"
@@ -1534,6 +1544,7 @@ mod tests {
                 .validate(&Value::Concrete(ConcreteValue::String(
                     "id=\"79a59df900b949e55d96a1e698fbacedfd6e09d98eacf8f8d5218e7cd47ef2be\""
                         .to_string()
+                        .into()
                 )))
                 .is_ok()
         );
@@ -1545,7 +1556,7 @@ mod tests {
         assert!(
             carina_core::schema::Schema::flat(t.clone())
                 .validate(&Value::Concrete(ConcreteValue::String(
-                    "emailAddress=\"user@example.com\"".to_string()
+                    "emailAddress=\"user@example.com\"".to_string().into()
                 )))
                 .is_ok()
         );
@@ -1557,7 +1568,9 @@ mod tests {
         assert!(
             carina_core::schema::Schema::flat(t.clone())
                 .validate(&Value::Concrete(ConcreteValue::String(
-                    "uri=\"http://acs.amazonaws.com/groups/global/AllUsers\"".to_string()
+                    "uri=\"http://acs.amazonaws.com/groups/global/AllUsers\""
+                        .to_string()
+                        .into()
                 )))
                 .is_ok()
         );
@@ -1569,7 +1582,9 @@ mod tests {
         assert!(
             carina_core::schema::Schema::flat(t.clone())
                 .validate(&Value::Concrete(ConcreteValue::String(
-                    "id=\"abc123\", emailAddress=\"user@example.com\"".to_string()
+                    "id=\"abc123\", emailAddress=\"user@example.com\""
+                        .to_string()
+                        .into()
                 )))
                 .is_ok()
         );
@@ -1580,7 +1595,9 @@ mod tests {
         let t = s3_grantee();
         assert!(
             carina_core::schema::Schema::flat(t.clone())
-                .validate(&Value::Concrete(ConcreteValue::String("".to_string())))
+                .validate(&Value::Concrete(ConcreteValue::String(
+                    "".to_string().into()
+                )))
                 .is_err()
         );
     }
@@ -1589,7 +1606,7 @@ mod tests {
     fn grantee_rejects_invalid_prefix() {
         let t = s3_grantee();
         let result = carina_core::schema::Schema::flat(t.clone()).validate(&Value::Concrete(
-            ConcreteValue::String("foo=\"bar\"".to_string()),
+            ConcreteValue::String("foo=\"bar\"".to_string().into()),
         ));
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
@@ -1605,11 +1622,11 @@ mod tests {
                 [
                     (
                         "key".to_string(),
-                        Value::Concrete(ConcreteValue::String("Project".to_string())),
+                        Value::Concrete(ConcreteValue::String("Project".to_string().into())),
                     ),
                     (
                         "value".to_string(),
-                        Value::Concrete(ConcreteValue::String("carina".to_string())),
+                        Value::Concrete(ConcreteValue::String("carina".to_string().into())),
                     ),
                 ]
                 .into_iter()
@@ -1628,11 +1645,11 @@ mod tests {
                 [
                     (
                         "Key".to_string(),
-                        Value::Concrete(ConcreteValue::String("Project".to_string())),
+                        Value::Concrete(ConcreteValue::String("Project".to_string().into())),
                     ),
                     (
                         "Value".to_string(),
-                        Value::Concrete(ConcreteValue::String("carina".to_string())),
+                        Value::Concrete(ConcreteValue::String("carina".to_string().into())),
                     ),
                 ]
                 .into_iter()
@@ -1651,11 +1668,11 @@ mod tests {
                 [
                     (
                         "Project".to_string(),
-                        Value::Concrete(ConcreteValue::String("carina".to_string())),
+                        Value::Concrete(ConcreteValue::String("carina".to_string().into())),
                     ),
                     (
                         "ManagedBy".to_string(),
-                        Value::Concrete(ConcreteValue::String("carina".to_string())),
+                        Value::Concrete(ConcreteValue::String("carina".to_string().into())),
                     ),
                 ]
                 .into_iter()
@@ -1842,7 +1859,7 @@ mod tests {
                                         vec![(
                                             "aws:RequestedRegion".to_string(),
                                             Value::Concrete(ConcreteValue::String(
-                                                "us-east-1".to_string(),
+                                                "us-east-1".to_string().into(),
                                             )),
                                         )]
                                         .into_iter()
@@ -1965,7 +1982,7 @@ mod tests {
             vec![(
                 "route53:ChangeResourceRecordSetsRecordTypes".to_string(),
                 Value::Concrete(ConcreteValue::List(vec![Value::Concrete(
-                    ConcreteValue::String("NS".to_string()),
+                    ConcreteValue::String("NS".to_string().into()),
                 )])),
             )]
             .into_iter()
@@ -1980,13 +1997,13 @@ mod tests {
                 (
                     "action".to_string(),
                     Value::Concrete(ConcreteValue::String(
-                        "route53:ChangeResourceRecordSets".to_string(),
+                        "route53:ChangeResourceRecordSets".to_string().into(),
                     )),
                 ),
                 (
                     "resource".to_string(),
                     Value::Concrete(ConcreteValue::String(
-                        "arn:aws:route53:::hostedzone/ABC".to_string(),
+                        "arn:aws:route53:::hostedzone/ABC".to_string().into(),
                     )),
                 ),
                 (

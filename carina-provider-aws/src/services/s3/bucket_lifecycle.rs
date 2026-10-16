@@ -41,7 +41,7 @@ impl AwsProvider {
                 let mut attributes = HashMap::new();
                 attributes.insert(
                     "bucket".to_string(),
-                    Value::Concrete(ConcreteValue::String(bucket.to_string())),
+                    Value::Concrete(ConcreteValue::String(bucket.to_string().into())),
                 );
                 let rules: Vec<Value> = output.rules().iter().map(rule_to_value).collect();
                 if !rules.is_empty() {
@@ -207,7 +207,7 @@ fn build_rule(
     let mut builder = LifecycleRule::builder().status(ExpirationStatus::from(status_str.as_str()));
 
     if let Some(Value::Concrete(ConcreteValue::String(s))) = map.get("id") {
-        builder = builder.id(s);
+        builder = builder.id(s.expose_plaintext());
     }
     // S3 requires every V2 lifecycle rule to carry a `Filter` element.
     // Build one from the `filter` attribute, or fall back to an empty
@@ -257,7 +257,7 @@ fn build_filter_tag(id: &ResourceId, value: &Value) -> ProviderResult<Tag> {
         );
     };
     let key = match map.get("key") {
-        Some(Value::Concrete(ConcreteValue::String(s))) => s.clone(),
+        Some(Value::Concrete(ConcreteValue::String(s))) => s.expose_plaintext(),
         _ => {
             return Err(
                 ProviderError::invalid_input("filter tag.key is required").for_resource(id.clone())
@@ -265,7 +265,7 @@ fn build_filter_tag(id: &ResourceId, value: &Value) -> ProviderResult<Tag> {
         }
     };
     let val = match map.get("value") {
-        Some(Value::Concrete(ConcreteValue::String(s))) => s.clone(),
+        Some(Value::Concrete(ConcreteValue::String(s))) => s.expose_plaintext(),
         _ => {
             return Err(ProviderError::invalid_input("filter tag.value is required")
                 .for_resource(id.clone()));
@@ -286,7 +286,7 @@ fn build_filter_and(id: &ResourceId, value: &Value) -> ProviderResult<LifecycleR
     };
     let mut builder = LifecycleRuleAndOperator::builder();
     if let Some(Value::Concrete(ConcreteValue::String(s))) = map.get("prefix") {
-        builder = builder.prefix(s);
+        builder = builder.prefix(s.expose_plaintext());
     }
     if let Some(Value::Concrete(ConcreteValue::List(items))) = map.get("tags") {
         let tags: Vec<Tag> = items
@@ -313,7 +313,7 @@ fn build_filter(id: &ResourceId, value: &Value) -> ProviderResult<LifecycleRuleF
     };
     let mut builder = LifecycleRuleFilter::builder();
     if let Some(Value::Concrete(ConcreteValue::String(s))) = map.get("prefix") {
-        builder = builder.prefix(s);
+        builder = builder.prefix(s.expose_plaintext());
     }
     if let Some(v) = map.get("tag") {
         builder = builder.tag(build_filter_tag(id, v)?);
@@ -457,12 +457,14 @@ fn rule_to_value(rule: &LifecycleRule) -> Value {
     {
         map.insert(
             "id".to_string(),
-            Value::Concrete(ConcreteValue::String(s.to_string())),
+            Value::Concrete(ConcreteValue::String(s.to_string().into())),
         );
     }
     map.insert(
         "status".to_string(),
-        Value::Concrete(ConcreteValue::String(rule.status().as_str().to_string())),
+        Value::Concrete(ConcreteValue::String(
+            rule.status().as_str().to_string().into(),
+        )),
     );
     // Only surface a non-empty filter. S3 returns an empty `<Filter/>`
     // for match-all rules; reflecting that as an empty map would diff
@@ -555,11 +557,11 @@ fn tag_to_value(tag: &Tag) -> Value {
     let mut m = IndexMap::new();
     m.insert(
         "key".to_string(),
-        Value::Concrete(ConcreteValue::String(tag.key().to_string())),
+        Value::Concrete(ConcreteValue::String(tag.key().to_string().into())),
     );
     m.insert(
         "value".to_string(),
-        Value::Concrete(ConcreteValue::String(tag.value().to_string())),
+        Value::Concrete(ConcreteValue::String(tag.value().to_string().into())),
     );
     Value::Concrete(ConcreteValue::Map(m))
 }
@@ -573,7 +575,7 @@ fn filter_and_to_value(and: &LifecycleRuleAndOperator) -> Option<Value> {
     {
         m.insert(
             "prefix".to_string(),
-            Value::Concrete(ConcreteValue::String(p.to_string())),
+            Value::Concrete(ConcreteValue::String(p.to_string().into())),
         );
     }
     let tags = and.tags();
@@ -611,7 +613,7 @@ fn filter_to_value(filter: &LifecycleRuleFilter) -> Option<Value> {
     {
         m.insert(
             "prefix".to_string(),
-            Value::Concrete(ConcreteValue::String(p.to_string())),
+            Value::Concrete(ConcreteValue::String(p.to_string().into())),
         );
     }
     if let Some(tag) = filter.tag() {
@@ -652,7 +654,7 @@ fn transition_to_value(t: &Transition) -> Value {
     if let Some(sc) = t.storage_class() {
         m.insert(
             "storage_class".to_string(),
-            Value::Concrete(ConcreteValue::String(sc.as_str().to_string())),
+            Value::Concrete(ConcreteValue::String(sc.as_str().to_string().into())),
         );
     }
     Value::Concrete(ConcreteValue::Map(m))
@@ -675,7 +677,7 @@ fn ncv_transition_to_value(t: &NoncurrentVersionTransition) -> Value {
     if let Some(sc) = t.storage_class() {
         m.insert(
             "storage_class".to_string(),
-            Value::Concrete(ConcreteValue::String(sc.as_str().to_string())),
+            Value::Concrete(ConcreteValue::String(sc.as_str().to_string().into())),
         );
     }
     Value::Concrete(ConcreteValue::Map(m))
@@ -694,7 +696,7 @@ mod tests {
     }
 
     fn str_val(s: &str) -> Value {
-        Value::Concrete(ConcreteValue::String(s.to_string()))
+        Value::Concrete(ConcreteValue::String(s.to_string().into()))
     }
 
     fn map_val(pairs: Vec<(&str, Value)>) -> Value {

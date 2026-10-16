@@ -39,7 +39,7 @@ impl AwsProvider {
                 let mut attributes = HashMap::new();
                 attributes.insert(
                     "bucket".to_string(),
-                    Value::Concrete(ConcreteValue::String(bucket.to_string())),
+                    Value::Concrete(ConcreteValue::String(bucket.to_string().into())),
                 );
                 if let Some(config) = output.server_side_encryption_configuration() {
                     let rules: Vec<Value> = config.rules().iter().map(rule_to_value).collect();
@@ -233,7 +233,7 @@ fn build_by_default(
     let mut builder = ServerSideEncryptionByDefault::builder()
         .sse_algorithm(ServerSideEncryption::from(algorithm_str.as_str()));
     if let Some(Value::Concrete(ConcreteValue::String(k))) = map.get("kms_master_key_id") {
-        builder = builder.kms_master_key_id(k);
+        builder = builder.kms_master_key_id(k.expose_plaintext());
     }
     builder.build().map_err(|e| {
         ProviderError::api_error(sdk_error_message(
@@ -251,13 +251,13 @@ fn rule_to_value(rule: &ServerSideEncryptionRule) -> Value {
         inner.insert(
             "sse_algorithm".to_string(),
             Value::Concrete(ConcreteValue::String(
-                by_default.sse_algorithm().as_str().to_string(),
+                by_default.sse_algorithm().as_str().to_string().into(),
             )),
         );
         if let Some(k) = by_default.kms_master_key_id() {
             inner.insert(
                 "kms_master_key_id".to_string(),
-                Value::Concrete(ConcreteValue::String(k.to_string())),
+                Value::Concrete(ConcreteValue::String(k.to_string().into())),
             );
         }
         map.insert(

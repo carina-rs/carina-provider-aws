@@ -34,7 +34,7 @@ impl AwsProvider {
                 let mut attributes = HashMap::new();
                 attributes.insert(
                     "bucket".to_string(),
-                    Value::Concrete(ConcreteValue::String(bucket.to_string())),
+                    Value::Concrete(ConcreteValue::String(bucket.to_string().into())),
                 );
                 if let Some(controls) = output.ownership_controls()
                     && let Some(rule) = controls.rules().first()
@@ -42,7 +42,7 @@ impl AwsProvider {
                     attributes.insert(
                         "object_ownership".to_string(),
                         Value::Concrete(ConcreteValue::String(
-                            rule.object_ownership().as_str().to_string(),
+                            rule.object_ownership().as_str().to_string().into(),
                         )),
                     );
                 }

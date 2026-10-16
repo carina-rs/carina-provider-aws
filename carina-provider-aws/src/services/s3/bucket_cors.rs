@@ -27,7 +27,7 @@ impl AwsProvider {
                 let mut attributes = HashMap::new();
                 attributes.insert(
                     "bucket".to_string(),
-                    Value::Concrete(ConcreteValue::String(bucket.to_string())),
+                    Value::Concrete(ConcreteValue::String(bucket.to_string().into())),
                 );
                 let rules: Vec<Value> = output.cors_rules().iter().map(rule_to_value).collect();
                 attributes.insert(
@@ -163,7 +163,7 @@ fn build_rule(id: &ResourceId, rule_value: &Value) -> ProviderResult<CorsRule> {
         .set_allowed_origins(Some(allowed_origins));
 
     if let Some(Value::Concrete(ConcreteValue::String(s))) = map.get("id") {
-        builder = builder.id(s);
+        builder = builder.id(s.expose_plaintext());
     }
     if let Some(Value::Concrete(ConcreteValue::List(items))) = map.get("allowed_headers") {
         builder =
@@ -200,7 +200,7 @@ fn strings_from_list(id: &ResourceId, items: &[Value], field: &str) -> ProviderR
     items
         .iter()
         .map(|v| match v {
-            Value::Concrete(ConcreteValue::String(s)) => Ok(s.clone()),
+            Value::Concrete(ConcreteValue::String(s)) => Ok(s.expose_plaintext().to_string()),
             _ => Err(ProviderError::invalid_input(format!(
                 "cors_rule.{field} must be a list of strings"
             ))
@@ -216,13 +216,13 @@ fn rule_to_value(rule: &CorsRule) -> Value {
     {
         m.insert(
             "id".to_string(),
-            Value::Concrete(ConcreteValue::String(s.to_string())),
+            Value::Concrete(ConcreteValue::String(s.to_string().into())),
         );
     }
     let methods: Vec<Value> = rule
         .allowed_methods()
         .iter()
-        .map(|s| Value::Concrete(ConcreteValue::String(s.clone())))
+        .map(|s| Value::Concrete(ConcreteValue::String(s.clone().into())))
         .collect();
     m.insert(
         "allowed_methods".to_string(),
@@ -231,7 +231,7 @@ fn rule_to_value(rule: &CorsRule) -> Value {
     let origins: Vec<Value> = rule
         .allowed_origins()
         .iter()
-        .map(|s| Value::Concrete(ConcreteValue::String(s.clone())))
+        .map(|s| Value::Concrete(ConcreteValue::String(s.clone().into())))
         .collect();
     m.insert(
         "allowed_origins".to_string(),
@@ -240,7 +240,7 @@ fn rule_to_value(rule: &CorsRule) -> Value {
     let headers: Vec<Value> = rule
         .allowed_headers()
         .iter()
-        .map(|s| Value::Concrete(ConcreteValue::String(s.clone())))
+        .map(|s| Value::Concrete(ConcreteValue::String(s.clone().into())))
         .collect();
     if !headers.is_empty() {
         m.insert(
@@ -251,7 +251,7 @@ fn rule_to_value(rule: &CorsRule) -> Value {
     let expose: Vec<Value> = rule
         .expose_headers()
         .iter()
-        .map(|s| Value::Concrete(ConcreteValue::String(s.clone())))
+        .map(|s| Value::Concrete(ConcreteValue::String(s.clone().into())))
         .collect();
     if !expose.is_empty() {
         m.insert(

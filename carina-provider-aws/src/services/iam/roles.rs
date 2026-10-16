@@ -110,8 +110,8 @@ fn build_attributes(matches: &[(String, String)]) -> HashMap<String, Value> {
     let mut arns: Vec<Value> = Vec::with_capacity(matches.len());
     let mut names: Vec<Value> = Vec::with_capacity(matches.len());
     for (name, arn) in matches {
-        names.push(Value::Concrete(ConcreteValue::String(name.clone())));
-        arns.push(Value::Concrete(ConcreteValue::String(arn.clone())));
+        names.push(Value::Concrete(ConcreteValue::String(name.clone().into())));
+        arns.push(Value::Concrete(ConcreteValue::String(arn.clone().into())));
     }
 
     let mut attributes = HashMap::new();
@@ -136,7 +136,7 @@ mod tests {
                 .iter()
                 .filter_map(|i| {
                     if let Value::Concrete(ConcreteValue::String(s)) = i {
-                        Some(s.as_str())
+                        Some(s.expose_plaintext())
                     } else {
                         None
                     }

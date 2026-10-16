@@ -85,7 +85,7 @@ impl AwsProvider {
                 .iter()
                 .filter_map(|v| {
                     if let Value::Concrete(ConcreteValue::String(s)) = v {
-                        Some(s.clone())
+                        Some(s.expose_plaintext().to_string())
                     } else {
                         None
                     }
@@ -123,25 +123,25 @@ impl AwsProvider {
         if let Some(Value::Concrete(ConcreteValue::String(log_dest))) =
             resource.get_attr("log_destination")
         {
-            req = req.log_destination(log_dest);
+            req = req.log_destination(log_dest.expose_plaintext());
         }
 
         if let Some(Value::Concrete(ConcreteValue::String(log_group))) =
             resource.get_attr("log_group_name")
         {
-            req = req.log_group_name(log_group);
+            req = req.log_group_name(log_group.expose_plaintext());
         }
 
         if let Some(Value::Concrete(ConcreteValue::String(perm_arn))) =
             resource.get_attr("deliver_logs_permission_arn")
         {
-            req = req.deliver_logs_permission_arn(perm_arn);
+            req = req.deliver_logs_permission_arn(perm_arn.expose_plaintext());
         }
 
         if let Some(Value::Concrete(ConcreteValue::String(log_format))) =
             resource.get_attr("log_format")
         {
-            req = req.log_format(log_format);
+            req = req.log_format(log_format.expose_plaintext());
         }
 
         if let Some(Value::Concrete(ConcreteValue::Int(interval))) =
@@ -298,49 +298,49 @@ impl AwsProvider {
         if let Some(v) = obj.flow_log_id() {
             attributes.insert(
                 "flow_log_id".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string())),
+                Value::Concrete(ConcreteValue::String(v.to_string().into())),
             );
         }
         if let Some(v) = obj.resource_id() {
             attributes.insert(
                 "resource_id".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string())),
+                Value::Concrete(ConcreteValue::String(v.to_string().into())),
             );
         }
         if let Some(v) = obj.traffic_type() {
             attributes.insert(
                 "traffic_type".to_string(),
-                Value::Concrete(ConcreteValue::String(v.as_str().to_string())),
+                Value::Concrete(ConcreteValue::String(v.as_str().to_string().into())),
             );
         }
         if let Some(v) = obj.log_destination_type() {
             attributes.insert(
                 "log_destination_type".to_string(),
-                Value::Concrete(ConcreteValue::String(v.as_str().to_string())),
+                Value::Concrete(ConcreteValue::String(v.as_str().to_string().into())),
             );
         }
         if let Some(v) = obj.log_destination() {
             attributes.insert(
                 "log_destination".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string())),
+                Value::Concrete(ConcreteValue::String(v.to_string().into())),
             );
         }
         if let Some(v) = obj.log_group_name() {
             attributes.insert(
                 "log_group_name".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string())),
+                Value::Concrete(ConcreteValue::String(v.to_string().into())),
             );
         }
         if let Some(v) = obj.deliver_logs_permission_arn() {
             attributes.insert(
                 "deliver_logs_permission_arn".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string())),
+                Value::Concrete(ConcreteValue::String(v.to_string().into())),
             );
         }
         if let Some(v) = obj.log_format() {
             attributes.insert(
                 "log_format".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string())),
+                Value::Concrete(ConcreteValue::String(v.to_string().into())),
             );
         }
         if let Some(v) = obj.max_aggregation_interval() {
@@ -368,7 +368,9 @@ impl AwsProvider {
                 if !resource_type_str.is_empty() {
                     attributes.insert(
                         "resource_type".to_string(),
-                        Value::Concrete(ConcreteValue::String(resource_type_str.to_string())),
+                        Value::Concrete(ConcreteValue::String(
+                            resource_type_str.to_string().into(),
+                        )),
                     );
                 }
             }

@@ -24,43 +24,45 @@ impl AwsProvider {
             identifier = Some(id_string.clone());
             attributes.insert(
                 "id".to_string(),
-                Value::Concrete(ConcreteValue::String(id_string)),
+                Value::Concrete(ConcreteValue::String(id_string.into())),
             );
         }
         if let Some(arn) = account.arn() {
             attributes.insert(
                 "arn".to_string(),
-                Value::Concrete(ConcreteValue::String(arn.to_string())),
+                Value::Concrete(ConcreteValue::String(arn.to_string().into())),
             );
         }
         if let Some(name) = account.name() {
             attributes.insert(
                 "name".to_string(),
-                Value::Concrete(ConcreteValue::String(name.to_string())),
+                Value::Concrete(ConcreteValue::String(name.to_string().into())),
             );
         }
         if let Some(email) = account.email() {
             attributes.insert(
                 "email".to_string(),
-                Value::Concrete(ConcreteValue::String(email.to_string())),
+                Value::Concrete(ConcreteValue::String(email.to_string().into())),
             );
         }
         if let Some(status) = account.status() {
             attributes.insert(
                 "status".to_string(),
-                Value::Concrete(ConcreteValue::String(status.as_str().to_string())),
+                Value::Concrete(ConcreteValue::String(status.as_str().to_string().into())),
             );
         }
         if let Some(joined_method) = account.joined_method() {
             attributes.insert(
                 "joined_method".to_string(),
-                Value::Concrete(ConcreteValue::String(joined_method.as_str().to_string())),
+                Value::Concrete(ConcreteValue::String(
+                    joined_method.as_str().to_string().into(),
+                )),
             );
         }
         if let Some(joined_timestamp) = account.joined_timestamp() {
             attributes.insert(
                 "joined_timestamp".to_string(),
-                Value::Concrete(ConcreteValue::String(joined_timestamp.to_string())),
+                Value::Concrete(ConcreteValue::String(joined_timestamp.to_string().into())),
             );
         }
 
@@ -104,7 +106,7 @@ impl AwsProvider {
                     {
                         attributes.insert(
                             "parent_id".to_string(),
-                            Value::Concrete(ConcreteValue::String(parent_id.to_string())),
+                            Value::Concrete(ConcreteValue::String(parent_id.to_string().into())),
                         );
                     }
 
@@ -122,7 +124,9 @@ impl AwsProvider {
                             for tag in tags {
                                 tag_map.insert(
                                     tag.key().to_string(),
-                                    Value::Concrete(ConcreteValue::String(tag.value().to_string())),
+                                    Value::Concrete(ConcreteValue::String(
+                                        tag.value().to_string().into(),
+                                    )),
                                 );
                             }
                             if !tag_map.is_empty() {
@@ -185,7 +189,7 @@ impl AwsProvider {
         if let Some(Value::Concrete(ConcreteValue::String(role_name))) =
             resource.get_attr("role_name")
         {
-            req = req.role_name(role_name);
+            req = req.role_name(role_name.expose_plaintext());
         }
 
         if let Some(Value::Concrete(ConcreteValue::Map(tag_map))) = resource.get_attr("tags") {
@@ -193,7 +197,7 @@ impl AwsProvider {
                 if let Value::Concrete(ConcreteValue::String(val)) = value {
                     let tag = aws_sdk_organizations::types::Tag::builder()
                         .key(key)
-                        .value(val)
+                        .value(val.expose_plaintext())
                         .build()
                         .map_err(|e| {
                             ProviderError::api_error(sdk_error_message("Failed to build tag", &e))
@@ -311,7 +315,7 @@ impl AwsProvider {
                     .move_account()
                     .account_id(account_id)
                     .source_parent_id(source_parent_id)
-                    .destination_parent_id(parent_id)
+                    .destination_parent_id(parent_id.expose_plaintext())
                     .send()
                     .await
                     .map_err(|e| {
@@ -340,11 +344,11 @@ impl AwsProvider {
     ) -> ProviderResult<State> {
         // Handle parent_id change via MoveAccount
         let desired_parent = to.get_attr("parent_id").and_then(|v| match v {
-            Value::Concrete(ConcreteValue::String(s)) => Some(s.as_str()),
+            Value::Concrete(ConcreteValue::String(s)) => Some(s.expose_plaintext()),
             _ => None,
         });
         let current_parent = from.attributes.get("parent_id").and_then(|v| match v {
-            Value::Concrete(ConcreteValue::String(s)) => Some(s.as_str()),
+            Value::Concrete(ConcreteValue::String(s)) => Some(s.expose_plaintext()),
             _ => None,
         });
 
@@ -442,7 +446,7 @@ impl AwsProvider {
                 if should_add {
                     let tag = aws_sdk_organizations::types::Tag::builder()
                         .key(key)
-                        .value(val)
+                        .value(val.expose_plaintext())
                         .build()
                         .map_err(|e| {
                             ProviderError::api_error(sdk_error_message("Failed to build tag", &e))

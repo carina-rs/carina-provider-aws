@@ -247,6 +247,7 @@ fn arn_validator_for(validator: ArnValidator) -> String {
         ArnValidator::Iam { prefix, label } => format!(
             r#"|value| {{
             if let Value::Concrete(ConcreteValue::String(s)) = value {{
+                let s = s.expose_plaintext();
                 super::validate_iam_arn(s, {prefix:?})
                     .map_err(|reason| format!("Invalid {label} ARN '{{}}': {{}}", s, reason))
             }} else {{
@@ -266,6 +267,7 @@ fn arn_validator_for(validator: ArnValidator) -> String {
             format!(
                 r#"|value| {{
             if let Value::Concrete(ConcreteValue::String(s)) = value {{
+                let s = s.expose_plaintext();
                 super::validate_service_arn(s, {service:?}, {prefix_expr})
                     .map_err(|reason| format!("Invalid {label} ARN '{{}}': {{}}", s, reason))
             }} else {{
@@ -284,6 +286,7 @@ fn arn_validator_expression(choice: ArnEmitChoice) -> String {
         ArnEmitChoice::ServicePrefix(service) => format!(
             r#"|value| {{
             if let Value::Concrete(ConcreteValue::String(s)) = value {{
+                let s = s.expose_plaintext();
                 super::validate_service_arn(s, {service:?}, None)
                     .map_err(|reason| format!("Invalid {service} ARN '{{}}': {{}}", s, reason))
             }} else {{
@@ -2282,7 +2285,7 @@ fn struct_child_value_expr(
     let kind = model.shape_kind(&child_ref.target)?;
     let expr = match kind {
         ShapeKind::String => format!(
-            "Value::Concrete(ConcreteValue::String({}.to_string()))",
+            "Value::Concrete(ConcreteValue::String({}.to_string().into()))",
             value_var
         ),
         ShapeKind::Boolean => {
@@ -2294,7 +2297,7 @@ fn struct_child_value_expr(
         ShapeKind::Integer => format!("Value::Concrete(ConcreteValue::Int({} as i64))", value_var),
         ShapeKind::Long => format!("Value::Concrete(ConcreteValue::Int({}))", value_var),
         ShapeKind::Enum => format!(
-            "Value::Concrete(ConcreteValue::String({}.as_str().to_string()))",
+            "Value::Concrete(ConcreteValue::String({}.as_str().to_string().into()))",
             value_var
         ),
         ShapeKind::List => {
@@ -2308,7 +2311,7 @@ fn struct_child_value_expr(
                 return None;
             }
             format!(
-                "Value::Concrete(ConcreteValue::List({}.iter().map(|s| Value::Concrete(ConcreteValue::String(s.to_string()))).collect()))",
+                "Value::Concrete(ConcreteValue::List({}.iter().map(|s| Value::Concrete(ConcreteValue::String(s.to_string().into()))).collect()))",
                 value_var
             )
         }
@@ -2524,7 +2527,7 @@ fn generate_provider_code(
                         accessor, value_expr, default_value,
                     ));
                     code.push_str(&format!(
-                        "\x20       attributes.insert(\"{}\".to_string(), Value::Concrete(ConcreteValue::String(value)));\n",
+                        "\x20       attributes.insert(\"{}\".to_string(), Value::Concrete(ConcreteValue::String(value.into())));\n",
                         attr_snake,
                     ));
                 } else {
@@ -2533,7 +2536,7 @@ fn generate_provider_code(
                         accessor,
                     ));
                     code.push_str(&format!(
-                        "\x20           attributes.insert(\"{}\".to_string(), Value::Concrete(ConcreteValue::String({})));\n",
+                        "\x20           attributes.insert(\"{}\".to_string(), Value::Concrete(ConcreteValue::String({}.into())));\n",
                         attr_snake, value_expr,
                     ));
                     code.push_str("\x20       }\n");
@@ -2686,7 +2689,7 @@ fn generate_provider_code(
                     ));
                     code.push_str("\x20           let normalized = match value {\n");
                     code.push_str(
-                        "\x20               Value::Concrete(ConcreteValue::String(val)) => val.clone(),\n",
+                        "\x20               Value::Concrete(ConcreteValue::String(val)) => val.expose_plaintext().to_string(),\n",
                     );
                     code.push_str(
                         "\x20               Value::Concrete(ConcreteValue::EnumIdentifier(val)) => val.as_str().to_string(),\n",
@@ -2706,7 +2709,7 @@ fn generate_provider_code(
                         field.attr_snake
                     ));
                     code.push_str(&format!(
-                        "\x20           builder = builder.{}(val.as_str());\n",
+                        "\x20           builder = builder.{}(val.expose_plaintext());\n",
                         field.builder_setter
                     ));
                 }
@@ -2850,7 +2853,7 @@ fn generate_provider_code(
                 Some(ShapeKind::Enum) => {
                     if required {
                         code.push_str(&format!(
-                            "\x20       attributes.insert(\"{}\".to_string(), Value::Concrete(ConcreteValue::String(obj.{}().as_str().to_string())));\n",
+                            "\x20       attributes.insert(\"{}\".to_string(), Value::Concrete(ConcreteValue::String(obj.{}().as_str().to_string().into())));\n",
                             attr_name, accessor
                         ));
                     } else {
@@ -2859,7 +2862,7 @@ fn generate_provider_code(
                             accessor
                         ));
                         code.push_str(&format!(
-                            "\x20           attributes.insert(\"{}\".to_string(), Value::Concrete(ConcreteValue::String(v.as_str().to_string())));\n",
+                            "\x20           attributes.insert(\"{}\".to_string(), Value::Concrete(ConcreteValue::String(v.as_str().to_string().into())));\n",
                             attr_name
                         ));
                         code.push_str("\x20       }\n");
@@ -2918,7 +2921,7 @@ fn generate_provider_code(
                         code.push_str(&format!(
                             "\x20       let v = obj.{}();\n\
                              \x20       if !v.is_empty() {{\n\
-                             \x20           attributes.insert(\"{}\".to_string(), Value::Concrete(ConcreteValue::String(v.to_string())));\n\
+                             \x20           attributes.insert(\"{}\".to_string(), Value::Concrete(ConcreteValue::String(v.to_string().into())));\n\
                              \x20       }}\n",
                             accessor, attr_name
                         ));
@@ -2928,7 +2931,7 @@ fn generate_provider_code(
                             accessor
                         ));
                         code.push_str(&format!(
-                            "\x20           attributes.insert(\"{}\".to_string(), Value::Concrete(ConcreteValue::String(v.to_string())));\n",
+                            "\x20           attributes.insert(\"{}\".to_string(), Value::Concrete(ConcreteValue::String(v.to_string().into())));\n",
                             attr_name
                         ));
                         code.push_str("\x20       }\n");
@@ -2950,7 +2953,7 @@ fn generate_provider_code(
                             "\x20       {{\n\
                              \x20           let ids = obj.{}();\n\
                              \x20           if !ids.is_empty() {{\n\
-                             \x20               let list: Vec<Value> = ids.iter().map(|s| Value::Concrete(ConcreteValue::String(s.to_string()))).collect();\n\
+                             \x20               let list: Vec<Value> = ids.iter().map(|s| Value::Concrete(ConcreteValue::String(s.to_string().into()))).collect();\n\
                              \x20               attributes.insert(\"{}\".to_string(), Value::Concrete(ConcreteValue::List(list)));\n\
                              \x20           }}\n\
                              \x20       }}\n",
@@ -3045,7 +3048,7 @@ fn generate_provider_code(
                         "\x20       if let Some(addr) = obj.{}().first()\n\
                          \x20           && let Some(v) = addr.{}()\n\
                          \x20       {{\n\
-                         \x20           attributes.insert(\"{}\".to_string(), Value::Concrete(ConcreteValue::String(v.to_string())));\n\
+                         \x20           attributes.insert(\"{}\".to_string(), Value::Concrete(ConcreteValue::String(v.to_string().into())));\n\
                          \x20       }}\n",
                         list_snake, child_snake, attr_snake
                     ));
@@ -3113,7 +3116,7 @@ fn generate_provider_code(
                          \x20           if !groups.is_empty() {{\n\
                          \x20               let list: Vec<Value> = groups\n\
                          \x20                   .iter()\n\
-                         \x20                   .filter_map(|g| g.{}().map(|id| Value::Concrete(ConcreteValue::String(id.to_string()))))\n\
+                         \x20                   .filter_map(|g| g.{}().map(|id| Value::Concrete(ConcreteValue::String(id.to_string().into()))))\n\
                          \x20                   .collect();\n\
                          \x20               if !list.is_empty() {{\n\
                          \x20                   attributes.insert(\"{}\".to_string(), Value::Concrete(ConcreteValue::List(list)));\n\
@@ -5829,7 +5832,7 @@ mod tests {
         let code = provider_code_for_single_resource_with_model(res, minimal_from_struct_model());
 
         assert!(
-            code.contains("attributes.insert(\"foo_bar\".to_string(), Value::Concrete(ConcreteValue::String(v.to_string())));"),
+            code.contains("attributes.insert(\"foo_bar\".to_string(), Value::Concrete(ConcreteValue::String(v.to_string().into())));"),
             "extra_read_only FromStruct attr should emit without schema-missing panic: {code}"
         );
     }
@@ -5871,7 +5874,7 @@ mod tests {
             "must emit flat rename shape: {code}"
         );
         assert!(
-            code.contains("attributes.insert(\"vpc_id\".to_string(), Value::Concrete(ConcreteValue::String(v.to_string())));"),
+            code.contains("attributes.insert(\"vpc_id\".to_string(), Value::Concrete(ConcreteValue::String(v.to_string().into())));"),
             "must insert leaf attr directly: {code}"
         );
     }
@@ -6046,7 +6049,7 @@ mod tests {
         );
         assert!(
             code.contains(
-                "let list: Vec<Value> = ids.iter().map(|s| Value::Concrete(ConcreteValue::String(s.to_string()))).collect();"
+                "let list: Vec<Value> = ids.iter().map(|s| Value::Concrete(ConcreteValue::String(s.to_string().into()))).collect();"
             ),
             "must collect into Vec<Value>: {code}"
         );
@@ -6095,7 +6098,7 @@ mod tests {
             "dns_support must read from options map source: {code}"
         );
         assert!(
-            code.contains("fields.insert(\"dns_support\".to_string(), Value::Concrete(ConcreteValue::String(v.as_str().to_string())));"),
+            code.contains("fields.insert(\"dns_support\".to_string(), Value::Concrete(ConcreteValue::String(v.as_str().to_string().into())));"),
             "dns_support must insert inside fields map: {code}"
         );
         assert!(
@@ -6122,7 +6125,7 @@ mod tests {
             "must read .groups() as the list source: {code}"
         );
         assert!(
-            code.contains(".filter_map(|g| g.group_id().map(|id| Value::Concrete(ConcreteValue::String(id.to_string()))))"),
+            code.contains(".filter_map(|g| g.group_id().map(|id| Value::Concrete(ConcreteValue::String(id.to_string().into()))))"),
             "must filter_map child .group_id(): {code}"
         );
         assert!(
@@ -6170,7 +6173,7 @@ mod tests {
             "dns_support must read from options map source: {code}"
         );
         assert!(
-            code.contains("fields.insert(\"dns_support\".to_string(), Value::Concrete(ConcreteValue::String(v.as_str().to_string())));"),
+            code.contains("fields.insert(\"dns_support\".to_string(), Value::Concrete(ConcreteValue::String(v.as_str().to_string().into())));"),
             "dns_support must insert as enum-as-String inside fields map: {code}"
         );
         assert!(
@@ -6196,7 +6199,7 @@ mod tests {
         );
         assert!(
             code.contains(
-                "attributes.insert(\"vpc_id\".to_string(), Value::Concrete(ConcreteValue::String(v.to_string())));"
+                "attributes.insert(\"vpc_id\".to_string(), Value::Concrete(ConcreteValue::String(v.to_string().into())));"
             ),
             "requester vpc_id inserts under \"vpc_id\": {code}"
         );
@@ -6210,13 +6213,13 @@ mod tests {
         );
         assert!(
             code.contains(
-                "attributes.insert(\"peer_vpc_id\".to_string(), Value::Concrete(ConcreteValue::String(v.to_string())));"
+                "attributes.insert(\"peer_vpc_id\".to_string(), Value::Concrete(ConcreteValue::String(v.to_string().into())));"
             ),
             "accepter vpc_id inserts under \"peer_vpc_id\" (rename): {code}"
         );
         assert!(
             code.contains(
-                "attributes.insert(\"peer_owner_id\".to_string(), Value::Concrete(ConcreteValue::String(v.to_string())));"
+                "attributes.insert(\"peer_owner_id\".to_string(), Value::Concrete(ConcreteValue::String(v.to_string().into())));"
             ),
             "accepter owner_id inserts under \"peer_owner_id\": {code}"
         );
@@ -6253,7 +6256,7 @@ mod tests {
             "must walk inner hostname_type: {code}"
         );
         assert!(
-            code.contains("fields.insert(\"hostname_type\".to_string(), Value::Concrete(ConcreteValue::String(v.as_str().to_string())));"),
+            code.contains("fields.insert(\"hostname_type\".to_string(), Value::Concrete(ConcreteValue::String(v.as_str().to_string().into())));"),
             "hostname_type inserts as enum-as-String into fields: {code}"
         );
         // enable_resource_name_dns_a_record → Bool

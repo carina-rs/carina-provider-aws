@@ -39,16 +39,20 @@ impl AwsProvider {
                 let mut attributes = HashMap::new();
                 attributes.insert(
                     "bucket".to_string(),
-                    Value::Concrete(ConcreteValue::String(bucket.to_string())),
+                    Value::Concrete(ConcreteValue::String(bucket.to_string().into())),
                 );
                 if let Some(le) = output.logging_enabled() {
                     attributes.insert(
                         "target_bucket".to_string(),
-                        Value::Concrete(ConcreteValue::String(le.target_bucket().to_string())),
+                        Value::Concrete(ConcreteValue::String(
+                            le.target_bucket().to_string().into(),
+                        )),
                     );
                     attributes.insert(
                         "target_prefix".to_string(),
-                        Value::Concrete(ConcreteValue::String(le.target_prefix().to_string())),
+                        Value::Concrete(ConcreteValue::String(
+                            le.target_prefix().to_string().into(),
+                        )),
                     );
                     if let Some(fmt) = le.target_object_key_format() {
                         attributes.insert(
@@ -102,7 +106,7 @@ impl AwsProvider {
     ) -> ProviderResult<State> {
         let target_bucket = require_string_attr(resource, "target_bucket")?;
         let target_prefix = match resource.get_attr("target_prefix") {
-            Some(Value::Concrete(ConcreteValue::String(s))) => s.clone(),
+            Some(Value::Concrete(ConcreteValue::String(s))) => s.expose_plaintext().to_string(),
             None => String::new(),
             _ => {
                 return Err(
@@ -218,7 +222,7 @@ fn target_object_key_format_to_value(fmt: &TargetObjectKeyFormat) -> Value {
         if let Some(src) = pp.partition_date_source() {
             inner.insert(
                 "partition_date_source".to_string(),
-                Value::Concrete(ConcreteValue::String(src.as_str().to_string())),
+                Value::Concrete(ConcreteValue::String(src.as_str().to_string().into())),
             );
         }
         m.insert(

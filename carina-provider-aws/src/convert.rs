@@ -74,7 +74,9 @@ pub fn core_to_proto_value(v: &CoreValue) -> ProtoValue {
         // emit it as `ProtoValue::String` — identical to the `String`
         // arm. The shape distinction is consumed at the validator entry
         // before reaching this conversion.
-        CoreValue::Concrete(ConcreteValue::String(s)) => ProtoValue::String(s.clone()),
+        CoreValue::Concrete(ConcreteValue::String(s)) => {
+            ProtoValue::String(s.expose_plaintext().to_string())
+        }
         CoreValue::Concrete(ConcreteValue::EnumIdentifier(s)) => {
             ProtoValue::String(s.as_str().to_string())
         }
@@ -94,9 +96,12 @@ pub fn core_to_proto_value(v: &CoreValue) -> ProtoValue {
         CoreValue::Concrete(ConcreteValue::List(l)) => {
             ProtoValue::List(l.iter().map(core_to_proto_value).collect())
         }
-        CoreValue::Concrete(ConcreteValue::StringList(items)) => {
-            ProtoValue::StringList(items.clone())
-        }
+        CoreValue::Concrete(ConcreteValue::StringList(items)) => ProtoValue::StringList(
+            items
+                .iter()
+                .map(|item| item.expose_plaintext().to_string())
+                .collect(),
+        ),
         CoreValue::Concrete(ConcreteValue::Map(m)) => ProtoValue::Map(
             m.iter()
                 .map(|(k, v)| (k.clone(), core_to_proto_value(v)))
@@ -106,11 +111,16 @@ pub fn core_to_proto_value(v: &CoreValue) -> ProtoValue {
         // Phase 5a of RFC #2972 makes the axis explicit so we can pattern-match
         // each deferred variant individually. We do NOT fall through to
         // `format!("{v:?}")` because `Debug` on `Value::Deferred(Secret(inner))`
-        // includes the inner plaintext — a leak. Emit a redacted sentinel
-        // instead so the provider sees a clearly-bogus value rather than
-        // either the plaintext or an inner pointer / panic.
+        // includes the inner plaintext — a leak. Raw secrets retain the
+        // existing redacted-sentinel behavior. A saved-state-only
+        // `RedactedSecret` must never cross the desired provider boundary;
+        // this legacy infallible converter rejects that invariant violation
+        // by panicking rather than passing the persisted hash through.
         CoreValue::Deferred(DeferredValue::Secret(_)) => {
             ProtoValue::String("<redacted-secret>".to_string())
+        }
+        CoreValue::Deferred(DeferredValue::RedactedSecret { .. }) => {
+            panic!("redacted saved-state secret must not reach a provider")
         }
         CoreValue::Deferred(DeferredValue::ResourceRef { path }) => {
             ProtoValue::String(format!("<unresolved-ref:{}>", path.to_dot_string()))
@@ -132,16 +142,16 @@ pub fn core_to_proto_value(v: &CoreValue) -> ProtoValue {
 
 pub fn proto_to_core_value(v: &ProtoValue) -> CoreValue {
     match v {
-        ProtoValue::String(s) => CoreValue::Concrete(ConcreteValue::String(s.clone())),
+        ProtoValue::String(s) => CoreValue::Concrete(ConcreteValue::String(s.clone().into())),
         ProtoValue::Int(i) => CoreValue::Concrete(ConcreteValue::Int(*i)),
         ProtoValue::Float(f) => CoreValue::Concrete(ConcreteValue::Float(*f)),
         ProtoValue::Bool(b) => CoreValue::Concrete(ConcreteValue::Bool(*b)),
         ProtoValue::List(l) => CoreValue::Concrete(ConcreteValue::List(
             l.iter().map(proto_to_core_value).collect(),
         )),
-        ProtoValue::StringList(items) => {
-            CoreValue::Concrete(ConcreteValue::StringList(items.clone()))
-        }
+        ProtoValue::StringList(items) => CoreValue::Concrete(ConcreteValue::StringList(
+            items.iter().cloned().map(Into::into).collect(),
+        )),
         ProtoValue::Map(m) => CoreValue::Concrete(ConcreteValue::Map(
             m.iter()
                 .map(|(k, v)| (k.clone(), proto_to_core_value(v)))
@@ -785,6 +795,17 @@ mod tests {
     use super::*;
 
     #[test]
+    #[should_panic(expected = "redacted saved-state secret must not reach a provider")]
+    fn redacted_saved_state_secret_is_rejected_at_provider_boundary() {
+        let value: CoreValue = serde_json::from_value(serde_json::json!({
+            "RedactedSecret": { "hash": "00".repeat(32) }
+        }))
+        .expect("deserialize saved-state placeholder");
+
+        let _ = core_to_proto_value(&value);
+    }
+
+    #[test]
     fn test_string_enum_name_roundtrip() {
         let core_type = CoreAttributeType::enum_(
             carina_core::schema::enum_identity("VersioningStatus", Some("aws.s3.Bucket")),
@@ -1007,7 +1028,7 @@ mod tests {
             .attribute(
                 CoreAttributeSchema::new("status", CoreAttributeType::string())
                     .with_default(CoreValue::Concrete(ConcreteValue::String(
-                        "PENDING_VALIDATION".to_string(),
+                        "PENDING_VALIDATION".to_string().into(),
                     )))
                     .read_only()
                     .deferred_populate(),

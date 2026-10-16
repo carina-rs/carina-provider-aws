@@ -33,14 +33,17 @@ fn extract_string_list(value: &Value) -> Vec<String> {
             .iter()
             .filter_map(|v| {
                 if let Value::Concrete(ConcreteValue::String(s)) = v {
-                    Some(s.clone())
+                    Some(s.expose_plaintext().to_string())
                 } else {
                     None
                 }
             })
             .collect()
     } else if let Value::Concrete(ConcreteValue::StringList(items)) = value {
-        items.clone()
+        items
+            .iter()
+            .map(|item| item.expose_plaintext().to_string())
+            .collect()
     } else {
         Vec::new()
     }
@@ -78,7 +81,7 @@ fn compute_tag_diff(
             Some(Value::Concrete(ConcreteValue::String(c))) if c == val,
         );
         if !unchanged {
-            to_add.push((key.clone(), val.clone()));
+            to_add.push((key.clone(), val.expose_plaintext().to_string()));
         }
     }
     let to_remove: Vec<String> = current
@@ -160,37 +163,37 @@ fn certificate_detail_to_attributes(
     if let Some(v) = cert.domain_name() {
         attributes.insert(
             "domain_name".to_string(),
-            Value::Concrete(ConcreteValue::String(v.to_string())),
+            Value::Concrete(ConcreteValue::String(v.to_string().into())),
         );
     }
     if let Some(v) = cert.certificate_arn() {
         attributes.insert(
             "certificate_arn".to_string(),
-            Value::Concrete(ConcreteValue::String(v.to_string())),
+            Value::Concrete(ConcreteValue::String(v.to_string().into())),
         );
     }
     if let Some(v) = cert.status() {
         attributes.insert(
             "status".to_string(),
-            Value::Concrete(ConcreteValue::String(v.as_str().to_string())),
+            Value::Concrete(ConcreteValue::String(v.as_str().to_string().into())),
         );
     }
     if let Some(v) = cert.r#type() {
         attributes.insert(
             "type".to_string(),
-            Value::Concrete(ConcreteValue::String(v.as_str().to_string())),
+            Value::Concrete(ConcreteValue::String(v.as_str().to_string().into())),
         );
     }
     if let Some(v) = cert.key_algorithm() {
         attributes.insert(
             "key_algorithm".to_string(),
-            Value::Concrete(ConcreteValue::String(v.as_str().to_string())),
+            Value::Concrete(ConcreteValue::String(v.as_str().to_string().into())),
         );
     }
     if let Some(v) = cert.renewal_eligibility() {
         attributes.insert(
             "renewal_eligibility".to_string(),
-            Value::Concrete(ConcreteValue::String(v.as_str().to_string())),
+            Value::Concrete(ConcreteValue::String(v.as_str().to_string().into())),
         );
     }
     if let Some(opts) = cert.options() {
@@ -198,13 +201,13 @@ fn certificate_detail_to_attributes(
         if let Some(v) = opts.certificate_transparency_logging_preference() {
             m.insert(
                 "certificate_transparency_logging_preference".to_string(),
-                Value::Concrete(ConcreteValue::String(v.as_str().to_string())),
+                Value::Concrete(ConcreteValue::String(v.as_str().to_string().into())),
             );
         }
         if let Some(v) = opts.export() {
             m.insert(
                 "export".to_string(),
-                Value::Concrete(ConcreteValue::String(v.as_str().to_string())),
+                Value::Concrete(ConcreteValue::String(v.as_str().to_string().into())),
             );
         }
         if !m.is_empty() {
@@ -220,7 +223,7 @@ fn certificate_detail_to_attributes(
             "subject_alternative_names".to_string(),
             Value::Concrete(ConcreteValue::List(
                 sans.iter()
-                    .map(|s| Value::Concrete(ConcreteValue::String(s.clone())))
+                    .map(|s| Value::Concrete(ConcreteValue::String(s.clone().into())))
                     .collect(),
             )),
         );
@@ -240,21 +243,23 @@ fn certificate_detail_to_attributes(
             let mut m: IndexMap<String, Value> = IndexMap::new();
             m.insert(
                 "domain_name".to_string(),
-                Value::Concrete(ConcreteValue::String(dv.domain_name().to_string())),
+                Value::Concrete(ConcreteValue::String(dv.domain_name().to_string().into())),
             );
             if let Some(rr) = dv.resource_record() {
                 let mut rr_map: IndexMap<String, Value> = IndexMap::new();
                 rr_map.insert(
                     "name".to_string(),
-                    Value::Concrete(ConcreteValue::String(rr.name().to_string())),
+                    Value::Concrete(ConcreteValue::String(rr.name().to_string().into())),
                 );
                 rr_map.insert(
                     "type".to_string(),
-                    Value::Concrete(ConcreteValue::String(rr.r#type().as_str().to_string())),
+                    Value::Concrete(ConcreteValue::String(
+                        rr.r#type().as_str().to_string().into(),
+                    )),
                 );
                 rr_map.insert(
                     "value".to_string(),
-                    Value::Concrete(ConcreteValue::String(rr.value().to_string())),
+                    Value::Concrete(ConcreteValue::String(rr.value().to_string().into())),
                 );
                 m.insert(
                     "resource_record".to_string(),
@@ -264,13 +269,13 @@ fn certificate_detail_to_attributes(
             if let Some(status) = dv.validation_status() {
                 m.insert(
                     "validation_status".to_string(),
-                    Value::Concrete(ConcreteValue::String(status.as_str().to_string())),
+                    Value::Concrete(ConcreteValue::String(status.as_str().to_string().into())),
                 );
             }
             if let Some(method) = dv.validation_method() {
                 m.insert(
                     "validation_method".to_string(),
-                    Value::Concrete(ConcreteValue::String(method.as_str().to_string())),
+                    Value::Concrete(ConcreteValue::String(method.as_str().to_string().into())),
                 );
             }
             list.push(Value::Concrete(ConcreteValue::Map(m)));
@@ -290,7 +295,7 @@ fn certificate_detail_to_attributes(
     {
         attributes.insert(
             "validation_method".to_string(),
-            Value::Concrete(ConcreteValue::String(method.as_str().to_string())),
+            Value::Concrete(ConcreteValue::String(method.as_str().to_string().into())),
         );
     }
     attributes
@@ -328,11 +333,11 @@ fn partial_acm_certificate_state(
 
     attributes.insert(
         "certificate_arn".to_string(),
-        Value::Concrete(ConcreteValue::String(arn.to_string())),
+        Value::Concrete(ConcreteValue::String(arn.to_string().into())),
     );
     attributes
         .entry("domain_name".to_string())
-        .or_insert_with(|| Value::Concrete(ConcreteValue::String(domain_name.to_string())));
+        .or_insert_with(|| Value::Concrete(ConcreteValue::String(domain_name.to_string().into())));
 
     attributes.remove(DVO_MISSING_ATTRIBUTE);
 
@@ -340,13 +345,15 @@ fn partial_acm_certificate_state(
         attributes
             .entry("validation_method".to_string())
             .or_insert_with(|| {
-                Value::Concrete(ConcreteValue::String(validation_method.to_string()))
+                Value::Concrete(ConcreteValue::String(validation_method.to_string().into()))
             });
     }
     if let Some(key_algorithm) = optional_enum_attr(resource, schema, "key_algorithm") {
         attributes
             .entry("key_algorithm".to_string())
-            .or_insert_with(|| Value::Concrete(ConcreteValue::String(key_algorithm.to_string())));
+            .or_insert_with(|| {
+                Value::Concrete(ConcreteValue::String(key_algorithm.to_string().into()))
+            });
     }
     if let Some(value) = resource.get_attr("subject_alternative_names") {
         let sans = extract_string_list(value);
@@ -356,7 +363,7 @@ fn partial_acm_certificate_state(
                 .or_insert_with(|| {
                     Value::Concrete(ConcreteValue::List(
                         sans.into_iter()
-                            .map(|san| Value::Concrete(ConcreteValue::String(san)))
+                            .map(|san| Value::Concrete(ConcreteValue::String(san.into())))
                             .collect(),
                     ))
                 });
@@ -435,7 +442,7 @@ impl AwsProvider {
                 if let Value::Concrete(ConcreteValue::String(val)) = value {
                     let tag = aws_sdk_acm::types::Tag::builder()
                         .key(key)
-                        .value(val)
+                        .value(val.expose_plaintext())
                         .build()
                         .map_err(|e| {
                             ProviderError::api_error(sdk_error_message(
@@ -591,7 +598,10 @@ impl AwsProvider {
             for tag in tags {
                 if let Some(k) = Some(tag.key()) {
                     let v = tag.value().unwrap_or("").to_string();
-                    tag_map.insert(k.to_string(), Value::Concrete(ConcreteValue::String(v)));
+                    tag_map.insert(
+                        k.to_string(),
+                        Value::Concrete(ConcreteValue::String(v.into())),
+                    );
                 }
             }
             attributes.insert(
@@ -891,11 +901,11 @@ mod tests {
         let mut resource = Resource::with_provider("aws", "acm.Certificate", "test-cert", None);
         resource.set_attr(
             "domain_name".to_string(),
-            Value::Concrete(ConcreteValue::String("example.com".to_string())),
+            Value::Concrete(ConcreteValue::String("example.com".to_string().into())),
         );
         resource.set_attr(
             "validation_method".to_string(),
-            Value::Concrete(ConcreteValue::String("DNS".to_string())),
+            Value::Concrete(ConcreteValue::String("DNS".to_string().into())),
         );
         resource
     }
@@ -911,12 +921,14 @@ mod tests {
         assert_eq!(state.identifier.as_deref(), Some(arn));
         assert_eq!(
             state.attributes.get("certificate_arn"),
-            Some(&Value::Concrete(ConcreteValue::String(arn.to_string()))),
+            Some(&Value::Concrete(ConcreteValue::String(
+                arn.to_string().into()
+            ))),
         );
         assert_eq!(
             state.attributes.get("domain_name"),
             Some(&Value::Concrete(ConcreteValue::String(
-                "example.com".to_string()
+                "example.com".to_string().into()
             ))),
         );
         assert!(
@@ -961,7 +973,9 @@ mod tests {
         assert_eq!(
             attrs.get("certificate_arn"),
             Some(&Value::Concrete(ConcreteValue::String(
-                "arn:aws:acm:us-east-1:111:certificate/abc".to_string()
+                "arn:aws:acm:us-east-1:111:certificate/abc"
+                    .to_string()
+                    .into()
             ))),
             "ACM read must publish the ARN under `certificate_arn` to \
              match the schema attribute the DSL references"
@@ -976,7 +990,7 @@ mod tests {
         assert_eq!(
             attrs.get("status"),
             Some(&Value::Concrete(ConcreteValue::String(
-                "ISSUED".to_string()
+                "ISSUED".to_string().into()
             )))
         );
     }
@@ -1002,7 +1016,7 @@ mod tests {
         assert_eq!(
             options.get("certificate_transparency_logging_preference"),
             Some(&Value::Concrete(ConcreteValue::String(
-                "ENABLED".to_string()
+                "ENABLED".to_string().into()
             )))
         );
     }
@@ -1026,7 +1040,7 @@ mod tests {
         assert_eq!(
             options.get("export"),
             Some(&Value::Concrete(ConcreteValue::String(
-                "ENABLED".to_string()
+                "ENABLED".to_string().into()
             )))
         );
     }
@@ -1036,7 +1050,7 @@ mod tests {
         let mut options = IndexMap::new();
         options.insert(
             "export".to_string(),
-            Value::Concrete(ConcreteValue::String("ENABLED".to_string())),
+            Value::Concrete(ConcreteValue::String("ENABLED".to_string().into())),
         );
         let mut resource = Resource::with_provider("aws", "acm.Certificate", "test-cert", None);
         resource.set_attr(
@@ -1054,11 +1068,11 @@ mod tests {
         let mut options = IndexMap::new();
         options.insert(
             "certificate_transparency_logging_preference".to_string(),
-            Value::Concrete(ConcreteValue::String("DISABLED".to_string())),
+            Value::Concrete(ConcreteValue::String("DISABLED".to_string().into())),
         );
         options.insert(
             "export".to_string(),
-            Value::Concrete(ConcreteValue::String("ENABLED".to_string())),
+            Value::Concrete(ConcreteValue::String("ENABLED".to_string().into())),
         );
         let mut resource = Resource::with_provider("aws", "acm.Certificate", "test-cert", None);
         resource.set_attr(
@@ -1080,7 +1094,7 @@ mod tests {
         let mut options = IndexMap::new();
         options.insert(
             "certificate_transparency_logging_preference".to_string(),
-            Value::Concrete(ConcreteValue::String("DISABLED".to_string())),
+            Value::Concrete(ConcreteValue::String("DISABLED".to_string().into())),
         );
         let mut resource = Resource::with_provider("aws", "acm.Certificate", "test-cert", None);
         resource.set_attr(
@@ -1349,7 +1363,7 @@ mod tests {
         for (k, v) in pairs {
             m.insert(
                 (*k).to_string(),
-                Value::Concrete(ConcreteValue::String((*v).to_string())),
+                Value::Concrete(ConcreteValue::String((*v).to_string().into())),
             );
         }
         m
@@ -1535,7 +1549,7 @@ mod tests {
         let mut resource = Resource::with_provider("aws", "acm.Certificate", "test-cert", None);
         resource.set_attr(
             "validation_method".to_string(),
-            Value::Concrete(ConcreteValue::String("DNS".to_string())),
+            Value::Concrete(ConcreteValue::String("DNS".to_string().into())),
         );
         let schema = acm_schema();
         let parsed = crate::helpers::optional_enum_attr(&resource, &schema, "validation_method")
@@ -1552,7 +1566,7 @@ mod tests {
         desired.insert("Count".to_string(), Value::Concrete(ConcreteValue::Int(3)));
         desired.insert(
             "Env".to_string(),
-            Value::Concrete(ConcreteValue::String("dev".to_string())),
+            Value::Concrete(ConcreteValue::String("dev".to_string().into())),
         );
         let current = IndexMap::new();
         let (to_add, to_remove) = compute_tag_diff(&desired, &current);

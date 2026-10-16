@@ -188,7 +188,7 @@ impl CarinaProvider for AwsProcessProvider {
         let region = if let Some(CoreValue::Concrete(ConcreteValue::String(region))) =
             core_attrs.get("region")
         {
-            carina_core::utils::convert_region_value(region)
+            carina_core::utils::convert_region_value(region.expose_plaintext())
         } else {
             "ap-northeast-1".to_string()
         };

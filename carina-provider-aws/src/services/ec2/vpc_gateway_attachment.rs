@@ -74,11 +74,11 @@ impl AwsProvider {
                     let mut attributes = HashMap::new();
                     attributes.insert(
                         "vpc_id".to_string(),
-                        Value::Concrete(ConcreteValue::String(vpc_id.to_string())),
+                        Value::Concrete(ConcreteValue::String(vpc_id.to_string().into())),
                     );
                     attributes.insert(
                         "internet_gateway_id".to_string(),
-                        Value::Concrete(ConcreteValue::String(igw_id.to_string())),
+                        Value::Concrete(ConcreteValue::String(igw_id.to_string().into())),
                     );
 
                     return Ok(State::existing(id.clone(), attributes)
@@ -127,11 +127,11 @@ impl AwsProvider {
                         let mut attributes = HashMap::new();
                         attributes.insert(
                             "vpc_id".to_string(),
-                            Value::Concrete(ConcreteValue::String(vpc_id.to_string())),
+                            Value::Concrete(ConcreteValue::String(vpc_id.to_string().into())),
                         );
                         attributes.insert(
                             "vpn_gateway_id".to_string(),
-                            Value::Concrete(ConcreteValue::String(vgw_id.to_string())),
+                            Value::Concrete(ConcreteValue::String(vgw_id.to_string().into())),
                         );
 
                         return Ok(State::existing(id.clone(), attributes)
@@ -157,7 +157,7 @@ impl AwsProvider {
             // Attach Internet Gateway
             self.ec2_client
                 .attach_internet_gateway()
-                .internet_gateway_id(igw_id)
+                .internet_gateway_id(igw_id.expose_plaintext())
                 .vpc_id(&vpc_id)
                 .send()
                 .await
@@ -170,7 +170,7 @@ impl AwsProvider {
                     .for_resource(resource.id.clone())
                 })?;
 
-            let composite = format!("{}|{}", vpc_id, igw_id);
+            let composite = format!("{}|{}", vpc_id, igw_id.expose_plaintext());
             self.read_ec2_vpc_gateway_attachment(&resource.id, Some(&composite))
                 .await
         } else if let Some(Value::Concrete(ConcreteValue::String(vgw_id))) =
@@ -179,7 +179,7 @@ impl AwsProvider {
             // Attach VPN Gateway
             self.ec2_client
                 .attach_vpn_gateway()
-                .vpn_gateway_id(vgw_id)
+                .vpn_gateway_id(vgw_id.expose_plaintext())
                 .vpc_id(&vpc_id)
                 .send()
                 .await
@@ -188,7 +188,7 @@ impl AwsProvider {
                         .for_resource(resource.id.clone())
                 })?;
 
-            let composite = format!("{}|{}", vpc_id, vgw_id);
+            let composite = format!("{}|{}", vpc_id, vgw_id.expose_plaintext());
             self.read_ec2_vpc_gateway_attachment(&resource.id, Some(&composite))
                 .await
         } else {

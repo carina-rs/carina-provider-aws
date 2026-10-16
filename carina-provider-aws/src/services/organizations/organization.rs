@@ -21,37 +21,41 @@ impl AwsProvider {
             identifier = Some(id_string.clone());
             attributes.insert(
                 "id".to_string(),
-                Value::Concrete(ConcreteValue::String(id_string)),
+                Value::Concrete(ConcreteValue::String(id_string.into())),
             );
         }
         if let Some(arn) = org.arn() {
             attributes.insert(
                 "arn".to_string(),
-                Value::Concrete(ConcreteValue::String(arn.to_string())),
+                Value::Concrete(ConcreteValue::String(arn.to_string().into())),
             );
         }
         if let Some(feature_set) = org.feature_set() {
             attributes.insert(
                 "feature_set".to_string(),
-                Value::Concrete(ConcreteValue::String(feature_set.as_str().to_string())),
+                Value::Concrete(ConcreteValue::String(
+                    feature_set.as_str().to_string().into(),
+                )),
             );
         }
         if let Some(master_account_id) = org.master_account_id() {
             attributes.insert(
                 "master_account_id".to_string(),
-                Value::Concrete(ConcreteValue::String(master_account_id.to_string())),
+                Value::Concrete(ConcreteValue::String(master_account_id.to_string().into())),
             );
         }
         if let Some(master_account_arn) = org.master_account_arn() {
             attributes.insert(
                 "master_account_arn".to_string(),
-                Value::Concrete(ConcreteValue::String(master_account_arn.to_string())),
+                Value::Concrete(ConcreteValue::String(master_account_arn.to_string().into())),
             );
         }
         if let Some(master_account_email) = org.master_account_email() {
             attributes.insert(
                 "master_account_email".to_string(),
-                Value::Concrete(ConcreteValue::String(master_account_email.to_string())),
+                Value::Concrete(ConcreteValue::String(
+                    master_account_email.to_string().into(),
+                )),
             );
         }
 

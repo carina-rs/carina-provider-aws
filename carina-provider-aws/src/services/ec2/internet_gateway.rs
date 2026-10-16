@@ -52,7 +52,7 @@ impl AwsProvider {
             {
                 attributes.insert(
                     "vpc_id".to_string(),
-                    Value::Concrete(ConcreteValue::String(vpc_id.to_string())),
+                    Value::Concrete(ConcreteValue::String(vpc_id.to_string().into())),
                 );
             }
 
@@ -109,7 +109,7 @@ impl AwsProvider {
             self.ec2_client
                 .attach_internet_gateway()
                 .internet_gateway_id(igw_id)
-                .vpc_id(vpc_id)
+                .vpc_id(vpc_id.expose_plaintext())
                 .send()
                 .await
                 .map_err(|e| {
