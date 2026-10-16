@@ -42,7 +42,7 @@ impl AwsProvider {
                             let val = tag.value();
                             tag_map.insert(
                                 key.to_string(),
-                                Value::Concrete(ConcreteValue::String(val.to_string())),
+                                Value::Concrete(ConcreteValue::String(val.to_string().into())),
                             );
                         }
                         if !tag_map.is_empty() {
@@ -93,11 +93,11 @@ impl AwsProvider {
 
         if let Some(Value::Concrete(ConcreteValue::String(desc))) = resource.get_attr("description")
         {
-            req = req.description(desc);
+            req = req.description(desc.expose_plaintext());
         }
 
         if let Some(Value::Concrete(ConcreteValue::String(path))) = resource.get_attr("path") {
-            req = req.path(path);
+            req = req.path(path.expose_plaintext());
         }
 
         if let Some(Value::Concrete(ConcreteValue::Int(duration))) =
@@ -112,7 +112,7 @@ impl AwsProvider {
                 if let Value::Concrete(ConcreteValue::String(val)) = value {
                     let tag = aws_sdk_iam::types::Tag::builder()
                         .key(key)
-                        .value(val)
+                        .value(val.expose_plaintext())
                         .build()
                         .map_err(|e| {
                             ProviderError::api_error(sdk_error_message("Failed to build tag", &e))
@@ -163,7 +163,7 @@ impl AwsProvider {
         let mut req = self.iam_client.update_role().role_name(identifier);
 
         if let Some(Value::Concrete(ConcreteValue::String(desc))) = to.get_attr("description") {
-            req = req.description(desc);
+            req = req.description(desc.expose_plaintext());
             needs_update = true;
         }
 
@@ -257,7 +257,7 @@ impl AwsProvider {
                 if should_add {
                     let tag = aws_sdk_iam::types::Tag::builder()
                         .key(key)
-                        .value(val)
+                        .value(val.expose_plaintext())
                         .build()
                         .map_err(|e| {
                             ProviderError::api_error(sdk_error_message("Failed to build tag", &e))
@@ -301,7 +301,7 @@ impl AwsProvider {
         if !arn.is_empty() {
             attributes.insert(
                 "arn".to_string(),
-                Value::Concrete(ConcreteValue::String(arn.to_string())),
+                Value::Concrete(ConcreteValue::String(arn.to_string().into())),
             );
         }
         if let Some(v) = obj.assume_role_policy_document() {
@@ -310,14 +310,15 @@ impl AwsProvider {
             // Convert JSON string to Value::Map with snake_case keys for
             // struct comparison; fall back to the raw string if the
             // policy is malformed.
-            let policy_value = iam_policy_json_to_value(&decoded)
-                .unwrap_or_else(|_| Value::Concrete(ConcreteValue::String(decoded.into_owned())));
+            let policy_value = iam_policy_json_to_value(&decoded).unwrap_or_else(|_| {
+                Value::Concrete(ConcreteValue::String(decoded.into_owned().into()))
+            });
             attributes.insert("assume_role_policy_document".to_string(), policy_value);
         }
         if let Some(v) = obj.description() {
             attributes.insert(
                 "description".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string())),
+                Value::Concrete(ConcreteValue::String(v.to_string().into())),
             );
         }
         if let Some(v) = obj.max_session_duration() {
@@ -330,21 +331,21 @@ impl AwsProvider {
         if !path.is_empty() {
             attributes.insert(
                 "path".to_string(),
-                Value::Concrete(ConcreteValue::String(path.to_string())),
+                Value::Concrete(ConcreteValue::String(path.to_string().into())),
             );
         }
         let role_id = obj.role_id();
         if !role_id.is_empty() {
             attributes.insert(
                 "role_id".to_string(),
-                Value::Concrete(ConcreteValue::String(role_id.to_string())),
+                Value::Concrete(ConcreteValue::String(role_id.to_string().into())),
             );
         }
         let role_name = obj.role_name();
         if !role_name.is_empty() {
             attributes.insert(
                 "role_name".to_string(),
-                Value::Concrete(ConcreteValue::String(role_name.to_string())),
+                Value::Concrete(ConcreteValue::String(role_name.to_string().into())),
             );
             Some(role_name.to_string())
         } else {
@@ -378,7 +379,7 @@ pub fn value_to_iam_policy_json(value: &Value) -> Result<String, String> {
 /// unsupported type.
 pub fn resolve_iam_policy_attr(resource: &Resource, attr_name: &str) -> ProviderResult<String> {
     match resource.get_attr(attr_name) {
-        Some(Value::Concrete(ConcreteValue::String(s))) => Ok(s.clone()),
+        Some(Value::Concrete(ConcreteValue::String(s))) => Ok(s.expose_plaintext().to_string()),
         Some(value @ Value::Concrete(ConcreteValue::Map(_))) => value_to_iam_policy_json(value)
             .map_err(|e| {
                 ProviderError::invalid_input(format!("Failed to convert {}: {}", attr_name, e))
@@ -464,7 +465,7 @@ fn dsl_value_to_iam_json(
             Value::Concrete(ConcreteValue::String(s)) => {
                 let valid: Vec<&str> = values.iter().map(String::as_str).collect();
                 return serde_json::Value::String(carina_core::utils::canonicalize_enum_to_api(
-                    s.as_str(),
+                    s.expose_plaintext(),
                     &valid,
                     &dsl_map,
                 ));
@@ -534,7 +535,7 @@ fn dsl_value_to_iam_json(
             Value::Concrete(ConcreteValue::StringList(items)) => serde_json::Value::Array(
                 items
                     .iter()
-                    .map(|s| serde_json::Value::String(s.clone()))
+                    .map(|s| serde_json::Value::String(s.expose_plaintext().to_string()))
                     .collect(),
             ),
             // A scalar where the schema declares a list: emit the scalar
@@ -625,7 +626,9 @@ fn dsl_value_to_iam_json(
 /// invalid wire text visibly.
 fn scalar_to_json(value: &Value) -> serde_json::Value {
     match value {
-        Value::Concrete(ConcreteValue::String(s)) => serde_json::Value::String(s.clone()),
+        Value::Concrete(ConcreteValue::String(s)) => {
+            serde_json::Value::String(s.expose_plaintext().to_string())
+        }
         Value::Concrete(ConcreteValue::Int(n)) => serde_json::Value::Number((*n).into()),
         Value::Concrete(ConcreteValue::Float(f)) => serde_json::json!(*f),
         Value::Concrete(ConcreteValue::Bool(b)) => serde_json::Value::Bool(*b),
@@ -644,7 +647,7 @@ fn scalar_to_json(value: &Value) -> serde_json::Value {
         Value::Concrete(ConcreteValue::StringList(items)) => serde_json::Value::Array(
             items
                 .iter()
-                .map(|s| serde_json::Value::String(s.clone()))
+                .map(|s| serde_json::Value::String(s.expose_plaintext().to_string()))
                 .collect(),
         ),
         Value::Concrete(ConcreteValue::Map(map)) => {
@@ -823,14 +826,14 @@ fn json_scalar_or_passthrough_to_value(json: &serde_json::Value) -> Value {
 
 fn json_scalar_to_value(json: &serde_json::Value) -> Value {
     match json {
-        serde_json::Value::String(s) => Value::Concrete(ConcreteValue::String(s.clone())),
+        serde_json::Value::String(s) => Value::Concrete(ConcreteValue::String(s.clone().into())),
         serde_json::Value::Number(n) => {
             if let Some(i) = n.as_i64() {
                 Value::Concrete(ConcreteValue::Int(i))
             } else if let Some(f) = n.as_f64() {
                 Value::Concrete(ConcreteValue::Float(f))
             } else {
-                Value::Concrete(ConcreteValue::String(n.to_string()))
+                Value::Concrete(ConcreteValue::String(n.to_string().into()))
             }
         }
         serde_json::Value::Bool(b) => Value::Concrete(ConcreteValue::Bool(*b)),
@@ -838,7 +841,7 @@ fn json_scalar_to_value(json: &serde_json::Value) -> Value {
         // Carina counterpart (Value has no Null variant). Map to empty
         // string only as a last resort; callers should normally treat
         // null fields as absent.
-        serde_json::Value::Null => Value::Concrete(ConcreteValue::String(String::new())),
+        serde_json::Value::Null => Value::Concrete(ConcreteValue::String(String::new().into())),
         serde_json::Value::Array(_) | serde_json::Value::Object(_) => {
             json_scalar_or_passthrough_to_value(json)
         }
@@ -862,7 +865,7 @@ mod tests {
     fn resolve_iam_policy_attr_accepts_json_string_passthrough() {
         let json = r#"{"Version":"2012-10-17","Statement":[]}"#;
         let r = make_resource(Some(Value::Concrete(ConcreteValue::String(
-            json.to_string(),
+            json.to_string().into(),
         ))));
         let resolved = resolve_iam_policy_attr(&r, "policy").expect("string passthrough");
         assert_eq!(resolved, json);
@@ -885,11 +888,11 @@ mod tests {
         // continued acceptance.
         stmt.insert(
             "effect".to_string(),
-            Value::Concrete(ConcreteValue::String("Allow".to_string())),
+            Value::Concrete(ConcreteValue::String("Allow".to_string().into())),
         );
         stmt.insert(
             "action".to_string(),
-            Value::Concrete(ConcreteValue::String("s3:GetObject".to_string())),
+            Value::Concrete(ConcreteValue::String("s3:GetObject".to_string().into())),
         );
         policy.insert(
             "statement".to_string(),
@@ -917,7 +920,7 @@ mod tests {
         );
         stmt.insert(
             "action".to_string(),
-            Value::Concrete(ConcreteValue::String("s3:GetObject".to_string())),
+            Value::Concrete(ConcreteValue::String("s3:GetObject".to_string().into())),
         );
         let mut policy = IndexMap::new();
         policy.insert(
@@ -972,7 +975,7 @@ mod tests {
         );
         stmt.insert(
             "action".to_string(),
-            Value::Concrete(ConcreteValue::String("s3:GetObject".to_string())),
+            Value::Concrete(ConcreteValue::String("s3:GetObject".to_string().into())),
         );
         policy.insert(
             "statement".to_string(),
@@ -1020,26 +1023,28 @@ mod tests {
         policy.insert(
             "version".to_string(),
             Value::Concrete(ConcreteValue::String(
-                "aws.iam.PolicyDocument.Version.2012_10_17".to_string(),
+                "aws.iam.PolicyDocument.Version.2012_10_17"
+                    .to_string()
+                    .into(),
             )),
         );
         let mut stmt = IndexMap::new();
         stmt.insert(
             "sid".to_string(),
-            Value::Concrete(ConcreteValue::String("AllowRead".to_string())),
+            Value::Concrete(ConcreteValue::String("AllowRead".to_string().into())),
         );
         stmt.insert(
             "effect".to_string(),
-            Value::Concrete(ConcreteValue::String("allow".to_string())),
+            Value::Concrete(ConcreteValue::String("allow".to_string().into())),
         );
         stmt.insert(
             "action".to_string(),
-            Value::Concrete(ConcreteValue::String("s3:GetObject".to_string())),
+            Value::Concrete(ConcreteValue::String("s3:GetObject".to_string().into())),
         );
         let mut principal = IndexMap::new();
         principal.insert(
             "canonical_user".to_string(),
-            Value::Concrete(ConcreteValue::String("CANON123".to_string())),
+            Value::Concrete(ConcreteValue::String("CANON123".to_string().into())),
         );
         stmt.insert(
             "principal".to_string(),
@@ -1086,30 +1091,30 @@ mod tests {
         let mut policy = IndexMap::new();
         policy.insert(
             "version".to_string(),
-            Value::Concrete(ConcreteValue::String("2012-10-17".to_string())),
+            Value::Concrete(ConcreteValue::String("2012-10-17".to_string().into())),
         );
         // Typo / unmodeled top-level key — must NOT reach AWS.
         policy.insert(
             "statment".to_string(),
-            Value::Concrete(ConcreteValue::String("oops".to_string())),
+            Value::Concrete(ConcreteValue::String("oops".to_string().into())),
         );
         let mut stmt = IndexMap::new();
         stmt.insert(
             "effect".to_string(),
-            Value::Concrete(ConcreteValue::String("Allow".to_string())),
+            Value::Concrete(ConcreteValue::String("Allow".to_string().into())),
         );
         stmt.insert(
             "action".to_string(),
-            Value::Concrete(ConcreteValue::String("s3:GetObject".to_string())),
+            Value::Concrete(ConcreteValue::String("s3:GetObject".to_string().into())),
         );
         stmt.insert(
             "resource".to_string(),
-            Value::Concrete(ConcreteValue::String("arn:aws:s3:::b/*".to_string())),
+            Value::Concrete(ConcreteValue::String("arn:aws:s3:::b/*".to_string().into())),
         );
         // Unmodeled statement key — dropped.
         stmt.insert(
             "bogus_field".to_string(),
-            Value::Concrete(ConcreteValue::String("x".to_string())),
+            Value::Concrete(ConcreteValue::String("x".to_string().into())),
         );
         policy.insert(
             "statement".to_string(),
@@ -1215,14 +1220,14 @@ mod tests {
         principal.insert(
             "aws".to_string(),
             Value::Concrete(ConcreteValue::List(vec![Value::Concrete(
-                ConcreteValue::String("*".to_string()),
+                ConcreteValue::String("*".to_string().into()),
             )])),
         );
 
         let mut bool_inner = IndexMap::new();
         bool_inner.insert(
             "aws:SecureTransport".to_string(),
-            Value::Concrete(ConcreteValue::String("false".to_string())),
+            Value::Concrete(ConcreteValue::String("false".to_string().into())),
         );
         let mut condition = IndexMap::new();
         condition.insert(
@@ -1233,11 +1238,13 @@ mod tests {
         let mut stmt = IndexMap::new();
         stmt.insert(
             "sid".to_string(),
-            Value::Concrete(ConcreteValue::String("DenyInsecureTransport".to_string())),
+            Value::Concrete(ConcreteValue::String(
+                "DenyInsecureTransport".to_string().into(),
+            )),
         );
         stmt.insert(
             "effect".to_string(),
-            Value::Concrete(ConcreteValue::String("Deny".to_string())),
+            Value::Concrete(ConcreteValue::String("Deny".to_string().into())),
         );
         stmt.insert(
             "principal".to_string(),
@@ -1246,15 +1253,17 @@ mod tests {
         stmt.insert(
             "action".to_string(),
             Value::Concrete(ConcreteValue::List(vec![Value::Concrete(
-                ConcreteValue::String("s3:*".to_string()),
+                ConcreteValue::String("s3:*".to_string().into()),
             )])),
         );
         stmt.insert(
             "resource".to_string(),
             Value::Concrete(ConcreteValue::List(vec![
-                Value::Concrete(ConcreteValue::String("arn:aws:s3:::my-bucket".to_string())),
                 Value::Concrete(ConcreteValue::String(
-                    "arn:aws:s3:::my-bucket/*".to_string(),
+                    "arn:aws:s3:::my-bucket".to_string().into(),
+                )),
+                Value::Concrete(ConcreteValue::String(
+                    "arn:aws:s3:::my-bucket/*".to_string().into(),
                 )),
             ])),
         );
@@ -1266,7 +1275,7 @@ mod tests {
         let mut doc = IndexMap::new();
         doc.insert(
             "version".to_string(),
-            Value::Concrete(ConcreteValue::String("2012-10-17".to_string())),
+            Value::Concrete(ConcreteValue::String("2012-10-17".to_string().into())),
         );
         doc.insert(
             "statement".to_string(),
@@ -1372,20 +1381,22 @@ mod tests {
         assert_eq!(
             principal.get("aws"),
             Some(&Value::Concrete(ConcreteValue::List(vec![
-                Value::Concrete(ConcreteValue::String("*".to_string()))
+                Value::Concrete(ConcreteValue::String("*".to_string().into()))
             ])))
         );
 
         // Effect is the raw AWS-canonical String on read (aws#326).
         assert_eq!(
             stmt.get("effect"),
-            Some(&Value::Concrete(ConcreteValue::String("Deny".to_string())))
+            Some(&Value::Concrete(ConcreteValue::String(
+                "Deny".to_string().into()
+            )))
         );
         // Action scalar is wrapped to singleton list.
         assert_eq!(
             stmt.get("action"),
             Some(&Value::Concrete(ConcreteValue::List(vec![
-                Value::Concrete(ConcreteValue::String("s3:*".to_string()))
+                Value::Concrete(ConcreteValue::String("s3:*".to_string().into()))
             ])))
         );
     }
@@ -1395,11 +1406,11 @@ mod tests {
         let mut doc = IndexMap::new();
         doc.insert(
             "version".to_string(),
-            Value::Concrete(ConcreteValue::String("2012-10-17".to_string())),
+            Value::Concrete(ConcreteValue::String("2012-10-17".to_string().into())),
         );
         doc.insert(
             "id".to_string(),
-            Value::Concrete(ConcreteValue::String("MyPolicyId".to_string())),
+            Value::Concrete(ConcreteValue::String("MyPolicyId".to_string().into())),
         );
         doc.insert(
             "statement".to_string(),
@@ -1436,7 +1447,9 @@ mod tests {
         // Effect is the raw AWS-canonical String on read (aws#326).
         assert_eq!(
             stmt.get("effect"),
-            Some(&Value::Concrete(ConcreteValue::String("Allow".to_string())))
+            Some(&Value::Concrete(ConcreteValue::String(
+                "Allow".to_string().into()
+            )))
         );
     }
 
@@ -1464,7 +1477,9 @@ mod tests {
         };
         assert_eq!(
             stmt.get("principal"),
-            Some(&Value::Concrete(ConcreteValue::String("*".to_string()))),
+            Some(&Value::Concrete(ConcreteValue::String(
+                "*".to_string().into()
+            ))),
             "principal string form should pass through verbatim"
         );
     }
@@ -1478,7 +1493,7 @@ mod tests {
         inner.insert(
             "aws:TagKeys".to_string(),
             Value::Concrete(ConcreteValue::List(vec![Value::Concrete(
-                ConcreteValue::String("Environment".to_string()),
+                ConcreteValue::String("Environment".to_string().into()),
             )])),
         );
         let mut condition = IndexMap::new();
@@ -1491,12 +1506,12 @@ mod tests {
         // action singleton List (aws#326).
         stmt.insert(
             "effect".to_string(),
-            Value::Concrete(ConcreteValue::String("Allow".to_string())),
+            Value::Concrete(ConcreteValue::String("Allow".to_string().into())),
         );
         stmt.insert(
             "action".to_string(),
             Value::Concrete(ConcreteValue::List(vec![Value::Concrete(
-                ConcreteValue::String("s3:*".to_string()),
+                ConcreteValue::String("s3:*".to_string().into()),
             )])),
         );
         stmt.insert(
@@ -1506,7 +1521,7 @@ mod tests {
         let mut doc = IndexMap::new();
         doc.insert(
             "version".to_string(),
-            Value::Concrete(ConcreteValue::String("2012-10-17".to_string())),
+            Value::Concrete(ConcreteValue::String("2012-10-17".to_string().into())),
         );
         doc.insert(
             "statement".to_string(),
@@ -1534,7 +1549,7 @@ mod tests {
         let mut inner = IndexMap::new();
         inner.insert(
             "aws:PrincipalOrgID".to_string(),
-            Value::Concrete(ConcreteValue::String("o-1234567890".to_string())),
+            Value::Concrete(ConcreteValue::String("o-1234567890".to_string().into())),
         );
         let mut condition = IndexMap::new();
         condition.insert(
@@ -1546,12 +1561,12 @@ mod tests {
         // action singleton List (aws#326).
         stmt.insert(
             "effect".to_string(),
-            Value::Concrete(ConcreteValue::String("Allow".to_string())),
+            Value::Concrete(ConcreteValue::String("Allow".to_string().into())),
         );
         stmt.insert(
             "action".to_string(),
             Value::Concrete(ConcreteValue::List(vec![Value::Concrete(
-                ConcreteValue::String("s3:GetObject".to_string()),
+                ConcreteValue::String("s3:GetObject".to_string().into()),
             )])),
         );
         stmt.insert(
@@ -1561,7 +1576,7 @@ mod tests {
         let mut doc = IndexMap::new();
         doc.insert(
             "version".to_string(),
-            Value::Concrete(ConcreteValue::String("2012-10-17".to_string())),
+            Value::Concrete(ConcreteValue::String("2012-10-17".to_string().into())),
         );
         doc.insert(
             "statement".to_string(),
@@ -1607,7 +1622,7 @@ mod tests {
         assert_eq!(
             doc.get("version"),
             Some(&Value::Concrete(ConcreteValue::String(
-                "2012-10-17".to_string()
+                "2012-10-17".to_string().into()
             ))),
             "version must be raw AWS-canonical String (aws#326)"
         );
@@ -1619,7 +1634,9 @@ mod tests {
         };
         assert_eq!(
             s0.get("effect"),
-            Some(&Value::Concrete(ConcreteValue::String("Deny".to_string()))),
+            Some(&Value::Concrete(ConcreteValue::String(
+                "Deny".to_string().into()
+            ))),
             "effect must be raw AWS-canonical String (aws#326)"
         );
 

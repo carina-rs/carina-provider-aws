@@ -24,19 +24,19 @@ fn test_extract_ec2_vpc_attributes() {
     assert_eq!(
         attributes.get("vpc_id"),
         Some(&Value::Concrete(ConcreteValue::String(
-            "vpc-12345678".to_string()
+            "vpc-12345678".to_string().into()
         )))
     );
     assert_eq!(
         attributes.get("cidr_block"),
         Some(&Value::Concrete(ConcreteValue::String(
-            "10.0.0.0/16".to_string()
+            "10.0.0.0/16".to_string().into()
         )))
     );
     assert_eq!(
         attributes.get("instance_tenancy"),
         Some(&Value::Concrete(ConcreteValue::String(
-            "default".to_string()
+            "default".to_string().into()
         )))
     );
 }
@@ -67,25 +67,25 @@ fn test_extract_ec2_subnet_attributes() {
     assert_eq!(
         attributes.get("subnet_id"),
         Some(&Value::Concrete(ConcreteValue::String(
-            "subnet-12345678".to_string()
+            "subnet-12345678".to_string().into()
         )))
     );
     assert_eq!(
         attributes.get("vpc_id"),
         Some(&Value::Concrete(ConcreteValue::String(
-            "vpc-12345678".to_string()
+            "vpc-12345678".to_string().into()
         )))
     );
     assert_eq!(
         attributes.get("cidr_block"),
         Some(&Value::Concrete(ConcreteValue::String(
-            "10.0.1.0/24".to_string()
+            "10.0.1.0/24".to_string().into()
         )))
     );
     assert_eq!(
         attributes.get("availability_zone"),
         Some(&Value::Concrete(ConcreteValue::String(
-            "ap-northeast-1a".to_string()
+            "ap-northeast-1a".to_string().into()
         )))
     );
     assert_eq!(
@@ -132,7 +132,7 @@ fn test_extract_ec2_subnet_attributes_with_private_dns_name_options() {
         assert_eq!(
             fields.get("hostname_type"),
             Some(&Value::Concrete(ConcreteValue::String(
-                "ip-name".to_string()
+                "ip-name".to_string().into()
             )))
         );
         assert_eq!(
@@ -164,7 +164,7 @@ fn test_extract_ec2_internet_gateway_attributes() {
     assert_eq!(
         attributes.get("internet_gateway_id"),
         Some(&Value::Concrete(ConcreteValue::String(
-            "igw-12345678".to_string()
+            "igw-12345678".to_string().into()
         )))
     );
 }
@@ -192,13 +192,13 @@ fn test_extract_ec2_route_table_attributes() {
     assert_eq!(
         attributes.get("route_table_id"),
         Some(&Value::Concrete(ConcreteValue::String(
-            "rtb-12345678".to_string()
+            "rtb-12345678".to_string().into()
         )))
     );
     assert_eq!(
         attributes.get("vpc_id"),
         Some(&Value::Concrete(ConcreteValue::String(
-            "vpc-12345678".to_string()
+            "vpc-12345678".to_string().into()
         )))
     );
 }
@@ -226,13 +226,13 @@ fn test_extract_ec2_route_attributes() {
     assert_eq!(
         attributes.get("destination_cidr_block"),
         Some(&Value::Concrete(ConcreteValue::String(
-            "0.0.0.0/0".to_string()
+            "0.0.0.0/0".to_string().into()
         )))
     );
     assert_eq!(
         attributes.get("gateway_id"),
         Some(&Value::Concrete(ConcreteValue::String(
-            "igw-12345678".to_string()
+            "igw-12345678".to_string().into()
         )))
     );
 }
@@ -248,13 +248,13 @@ fn test_extract_ec2_route_attributes_with_nat_gateway() {
     assert_eq!(
         attributes.get("destination_cidr_block"),
         Some(&Value::Concrete(ConcreteValue::String(
-            "10.0.0.0/8".to_string()
+            "10.0.0.0/8".to_string().into()
         )))
     );
     assert_eq!(
         attributes.get("nat_gateway_id"),
         Some(&Value::Concrete(ConcreteValue::String(
-            "nat-12345678".to_string()
+            "nat-12345678".to_string().into()
         )))
     );
 }
@@ -271,7 +271,7 @@ fn test_extract_ec2_route_attributes_ignores_unsupported() {
     assert_eq!(
         attributes.get("destination_cidr_block"),
         Some(&Value::Concrete(ConcreteValue::String(
-            "172.16.0.0/12".to_string()
+            "172.16.0.0/12".to_string().into()
         )))
     );
     assert_eq!(attributes.get("transit_gateway_id"), None);
@@ -293,25 +293,25 @@ fn test_extract_ec2_security_group_attributes() {
     assert_eq!(
         attributes.get("group_id"),
         Some(&Value::Concrete(ConcreteValue::String(
-            "sg-12345678".to_string()
+            "sg-12345678".to_string().into()
         )))
     );
     assert_eq!(
         attributes.get("group_name"),
         Some(&Value::Concrete(ConcreteValue::String(
-            "test-sg".to_string()
+            "test-sg".to_string().into()
         )))
     );
     assert_eq!(
         attributes.get("description"),
         Some(&Value::Concrete(ConcreteValue::String(
-            "Test security group".to_string()
+            "Test security group".to_string().into()
         )))
     );
     assert_eq!(
         attributes.get("vpc_id"),
         Some(&Value::Concrete(ConcreteValue::String(
-            "vpc-12345678".to_string()
+            "vpc-12345678".to_string().into()
         )))
     );
 }
@@ -343,18 +343,20 @@ fn test_extract_ec2_security_group_ingress_attributes() {
     assert_eq!(
         attributes.get("security_group_rule_id"),
         Some(&Value::Concrete(ConcreteValue::String(
-            "sgr-12345678".to_string()
+            "sgr-12345678".to_string().into()
         )))
     );
     assert_eq!(
         attributes.get("group_id"),
         Some(&Value::Concrete(ConcreteValue::String(
-            "sg-12345678".to_string()
+            "sg-12345678".to_string().into()
         )))
     );
     assert_eq!(
         attributes.get("ip_protocol"),
-        Some(&Value::Concrete(ConcreteValue::String("tcp".to_string())))
+        Some(&Value::Concrete(ConcreteValue::String(
+            "tcp".to_string().into()
+        )))
     );
     assert_eq!(
         attributes.get("from_port"),
@@ -366,7 +368,9 @@ fn test_extract_ec2_security_group_ingress_attributes() {
     );
     assert_eq!(
         attributes.get("description"),
-        Some(&Value::Concrete(ConcreteValue::String("HTTPS".to_string())))
+        Some(&Value::Concrete(ConcreteValue::String(
+            "HTTPS".to_string().into()
+        )))
     );
 }
 
@@ -385,7 +389,7 @@ fn test_extract_ec2_security_group_ingress_attributes_with_prefix_list() {
     assert_eq!(
         attributes.get("source_prefix_list_id"),
         Some(&Value::Concrete(ConcreteValue::String(
-            "pl-12345678".to_string()
+            "pl-12345678".to_string().into()
         )))
     );
 }
@@ -408,12 +412,14 @@ fn test_extract_ec2_security_group_egress_attributes() {
     assert_eq!(
         attributes.get("group_id"),
         Some(&Value::Concrete(ConcreteValue::String(
-            "sg-12345678".to_string()
+            "sg-12345678".to_string().into()
         )))
     );
     assert_eq!(
         attributes.get("ip_protocol"),
-        Some(&Value::Concrete(ConcreteValue::String("-1".to_string())))
+        Some(&Value::Concrete(ConcreteValue::String(
+            "-1".to_string().into()
+        )))
     );
     assert_eq!(
         attributes.get("from_port"),
@@ -440,7 +446,7 @@ fn test_extract_ec2_security_group_egress_attributes_with_prefix_list() {
     assert_eq!(
         attributes.get("destination_prefix_list_id"),
         Some(&Value::Concrete(ConcreteValue::String(
-            "pl-87654321".to_string()
+            "pl-87654321".to_string().into()
         )))
     );
 }
@@ -459,7 +465,9 @@ fn test_extract_ec2_security_group_egress_attributes_with_ipv6() {
     AwsProvider::extract_ec2_security_group_egress_attributes(&rule, &mut attributes);
     assert_eq!(
         attributes.get("cidr_ipv6"),
-        Some(&Value::Concrete(ConcreteValue::String("::/0".to_string())))
+        Some(&Value::Concrete(ConcreteValue::String(
+            "::/0".to_string().into()
+        )))
     );
 }
 
@@ -491,13 +499,13 @@ fn test_route_table_routes_extraction() {
         if let Some(dest) = route.destination_cidr_block() {
             route_map.insert(
                 "destination".to_string(),
-                Value::Concrete(ConcreteValue::String(dest.to_string())),
+                Value::Concrete(ConcreteValue::String(dest.to_string().into())),
             );
         }
         if let Some(gw) = route.gateway_id() {
             route_map.insert(
                 "gateway_id".to_string(),
-                Value::Concrete(ConcreteValue::String(gw.to_string())),
+                Value::Concrete(ConcreteValue::String(gw.to_string().into())),
             );
         }
         if !route_map.is_empty() {
@@ -510,25 +518,27 @@ fn test_route_table_routes_extraction() {
         assert_eq!(
             map.get("destination"),
             Some(&Value::Concrete(ConcreteValue::String(
-                "10.0.0.0/16".to_string()
+                "10.0.0.0/16".to_string().into()
             )))
         );
         assert_eq!(
             map.get("gateway_id"),
-            Some(&Value::Concrete(ConcreteValue::String("local".to_string())))
+            Some(&Value::Concrete(ConcreteValue::String(
+                "local".to_string().into()
+            )))
         );
     }
     if let Value::Concrete(ConcreteValue::Map(ref map)) = routes_list[1] {
         assert_eq!(
             map.get("destination"),
             Some(&Value::Concrete(ConcreteValue::String(
-                "0.0.0.0/0".to_string()
+                "0.0.0.0/0".to_string().into()
             )))
         );
         assert_eq!(
             map.get("gateway_id"),
             Some(&Value::Concrete(ConcreteValue::String(
-                "igw-12345678".to_string()
+                "igw-12345678".to_string().into()
             )))
         );
     }
@@ -563,14 +573,14 @@ fn test_internet_gateway_attachment_extraction() {
     {
         attributes.insert(
             "vpc_id".to_string(),
-            Value::Concrete(ConcreteValue::String(vpc_id.to_string())),
+            Value::Concrete(ConcreteValue::String(vpc_id.to_string().into())),
         );
     }
 
     assert_eq!(
         attributes.get("vpc_id"),
         Some(&Value::Concrete(ConcreteValue::String(
-            "vpc-12345678".to_string()
+            "vpc-12345678".to_string().into()
         )))
     );
 }
@@ -587,7 +597,7 @@ fn test_internet_gateway_no_attachment() {
     {
         attributes.insert(
             "vpc_id".to_string(),
-            Value::Concrete(ConcreteValue::String(vpc_id.to_string())),
+            Value::Concrete(ConcreteValue::String(vpc_id.to_string().into())),
         );
     }
 
@@ -620,7 +630,7 @@ async fn test_subnet_availability_zone_survives_normalize_desired() {
         carina_core::resource::Resource::with_provider("aws", "ec2.Subnet", "test-subnet", None);
     resource.set_attr(
         "availability_zone".to_string(),
-        Value::Concrete(ConcreteValue::String("ap-northeast-1a".to_string())),
+        Value::Concrete(ConcreteValue::String("ap-northeast-1a".to_string().into())),
     );
     let mut resources = vec![resource];
 
@@ -632,7 +642,7 @@ async fn test_subnet_availability_zone_survives_normalize_desired() {
     assert_eq!(
         resources[0].get_attr("availability_zone"),
         Some(&Value::Concrete(ConcreteValue::String(
-            "ap-northeast-1a".to_string()
+            "ap-northeast-1a".to_string().into()
         )))
     );
 }
@@ -666,7 +676,7 @@ fn test_subnet_dns_options_fields_parsed_separately() {
     let mut fields = HashMap::new();
     fields.insert(
         "hostname_type".to_string(),
-        Value::Concrete(ConcreteValue::String("ip-name".to_string())),
+        Value::Concrete(ConcreteValue::String("ip-name".to_string().into())),
     );
     fields.insert(
         "enable_resource_name_dns_a_record".to_string(),
@@ -680,7 +690,7 @@ fn test_subnet_dns_options_fields_parsed_separately() {
     // Each field should be independently extractable for separate API calls
     if let Some(Value::Concrete(ConcreteValue::String(ht))) = fields.get("hostname_type") {
         assert_eq!(
-            aws_sdk_ec2::types::HostnameType::from(ht.as_str()),
+            aws_sdk_ec2::types::HostnameType::from(ht.expose_plaintext()),
             aws_sdk_ec2::types::HostnameType::IpName
         );
     } else {
@@ -719,17 +729,19 @@ fn test_extract_ec2_eip_attributes() {
     assert_eq!(
         attributes.get("allocation_id"),
         Some(&Value::Concrete(ConcreteValue::String(
-            "eipalloc-12345678".to_string()
+            "eipalloc-12345678".to_string().into()
         )))
     );
     assert_eq!(
         attributes.get("domain"),
-        Some(&Value::Concrete(ConcreteValue::String("vpc".to_string())))
+        Some(&Value::Concrete(ConcreteValue::String(
+            "vpc".to_string().into()
+        )))
     );
     assert_eq!(
         attributes.get("public_ip"),
         Some(&Value::Concrete(ConcreteValue::String(
-            "203.0.113.1".to_string()
+            "203.0.113.1".to_string().into()
         )))
     );
 }
@@ -762,25 +774,25 @@ fn test_extract_ec2_nat_gateway_attributes() {
     assert_eq!(
         attributes.get("nat_gateway_id"),
         Some(&Value::Concrete(ConcreteValue::String(
-            "nat-12345678".to_string()
+            "nat-12345678".to_string().into()
         )))
     );
     assert_eq!(
         attributes.get("subnet_id"),
         Some(&Value::Concrete(ConcreteValue::String(
-            "subnet-12345678".to_string()
+            "subnet-12345678".to_string().into()
         )))
     );
     assert_eq!(
         attributes.get("connectivity_type"),
         Some(&Value::Concrete(ConcreteValue::String(
-            "public".to_string()
+            "public".to_string().into()
         )))
     );
     assert_eq!(
         attributes.get("allocation_id"),
         Some(&Value::Concrete(ConcreteValue::String(
-            "eipalloc-12345678".to_string()
+            "eipalloc-12345678".to_string().into()
         )))
     );
 }
@@ -806,7 +818,7 @@ fn test_extract_ec2_nat_gateway_attributes_private() {
     assert_eq!(
         attributes.get("connectivity_type"),
         Some(&Value::Concrete(ConcreteValue::String(
-            "private".to_string()
+            "private".to_string().into()
         )))
     );
     // Private NAT gateways don't have allocation_id
@@ -835,25 +847,25 @@ fn test_extract_ec2_vpc_endpoint_attributes() {
     assert_eq!(
         attributes.get("vpc_endpoint_id"),
         Some(&Value::Concrete(ConcreteValue::String(
-            "vpce-12345678".to_string()
+            "vpce-12345678".to_string().into()
         )))
     );
     assert_eq!(
         attributes.get("vpc_endpoint_type"),
         Some(&Value::Concrete(ConcreteValue::String(
-            "Gateway".to_string()
+            "Gateway".to_string().into()
         )))
     );
     assert_eq!(
         attributes.get("vpc_id"),
         Some(&Value::Concrete(ConcreteValue::String(
-            "vpc-12345678".to_string()
+            "vpc-12345678".to_string().into()
         )))
     );
     assert_eq!(
         attributes.get("service_name"),
         Some(&Value::Concrete(ConcreteValue::String(
-            "com.amazonaws.ap-northeast-1.s3".to_string()
+            "com.amazonaws.ap-northeast-1.s3".to_string().into()
         )))
     );
     assert_eq!(
@@ -863,13 +875,13 @@ fn test_extract_ec2_vpc_endpoint_attributes() {
     assert_eq!(
         attributes.get("route_table_ids"),
         Some(&Value::Concrete(ConcreteValue::List(vec![
-            Value::Concrete(ConcreteValue::String("rtb-12345678".to_string()))
+            Value::Concrete(ConcreteValue::String("rtb-12345678".to_string().into()))
         ])))
     );
     assert_eq!(
         attributes.get("security_group_ids"),
         Some(&Value::Concrete(ConcreteValue::List(vec![
-            Value::Concrete(ConcreteValue::String("sg-12345678".to_string()))
+            Value::Concrete(ConcreteValue::String("sg-12345678".to_string().into()))
         ])))
     );
 }
@@ -902,7 +914,7 @@ fn test_extract_ec2_vpc_endpoint_attributes_interface() {
     assert_eq!(
         attributes.get("vpc_endpoint_type"),
         Some(&Value::Concrete(ConcreteValue::String(
-            "Interface".to_string()
+            "Interface".to_string().into()
         )))
     );
     assert_eq!(
@@ -912,7 +924,7 @@ fn test_extract_ec2_vpc_endpoint_attributes_interface() {
     assert_eq!(
         attributes.get("subnet_ids"),
         Some(&Value::Concrete(ConcreteValue::List(vec![
-            Value::Concrete(ConcreteValue::String("subnet-12345678".to_string()))
+            Value::Concrete(ConcreteValue::String("subnet-12345678".to_string().into()))
         ])))
     );
 }
@@ -936,27 +948,31 @@ fn test_extract_ec2_flow_log_attributes() {
     assert_eq!(
         attributes.get("flow_log_id"),
         Some(&Value::Concrete(ConcreteValue::String(
-            "fl-12345678".to_string()
+            "fl-12345678".to_string().into()
         )))
     );
     assert_eq!(
         attributes.get("resource_id"),
         Some(&Value::Concrete(ConcreteValue::String(
-            "vpc-12345678".to_string()
+            "vpc-12345678".to_string().into()
         )))
     );
     assert_eq!(
         attributes.get("traffic_type"),
-        Some(&Value::Concrete(ConcreteValue::String("ALL".to_string())))
+        Some(&Value::Concrete(ConcreteValue::String(
+            "ALL".to_string().into()
+        )))
     );
     assert_eq!(
         attributes.get("log_destination_type"),
-        Some(&Value::Concrete(ConcreteValue::String("s3".to_string())))
+        Some(&Value::Concrete(ConcreteValue::String(
+            "s3".to_string().into()
+        )))
     );
     assert_eq!(
         attributes.get("log_destination"),
         Some(&Value::Concrete(ConcreteValue::String(
-            "arn:aws:s3:::my-bucket".to_string()
+            "arn:aws:s3:::my-bucket".to_string().into()
         )))
     );
     assert_eq!(
@@ -965,7 +981,9 @@ fn test_extract_ec2_flow_log_attributes() {
     );
     assert_eq!(
         attributes.get("resource_type"),
-        Some(&Value::Concrete(ConcreteValue::String("VPC".to_string())))
+        Some(&Value::Concrete(ConcreteValue::String(
+            "VPC".to_string().into()
+        )))
     );
 }
 
@@ -994,19 +1012,21 @@ fn test_extract_ec2_flow_log_attributes_cloudwatch() {
     assert_eq!(
         attributes.get("log_group_name"),
         Some(&Value::Concrete(ConcreteValue::String(
-            "/aws/vpc/flow-logs".to_string()
+            "/aws/vpc/flow-logs".to_string().into()
         )))
     );
     assert_eq!(
         attributes.get("deliver_logs_permission_arn"),
         Some(&Value::Concrete(ConcreteValue::String(
-            "arn:aws:iam::123456789012:role/flow-log-role".to_string()
+            "arn:aws:iam::123456789012:role/flow-log-role"
+                .to_string()
+                .into()
         )))
     );
     assert_eq!(
         attributes.get("resource_type"),
         Some(&Value::Concrete(ConcreteValue::String(
-            "Subnet".to_string()
+            "Subnet".to_string().into()
         )))
     );
 }
@@ -1026,13 +1046,13 @@ fn test_extract_ec2_vpn_gateway_attributes() {
     assert_eq!(
         attributes.get("vpn_gateway_id"),
         Some(&Value::Concrete(ConcreteValue::String(
-            "vgw-12345678".to_string()
+            "vgw-12345678".to_string().into()
         )))
     );
     assert_eq!(
         attributes.get("type"),
         Some(&Value::Concrete(ConcreteValue::String(
-            "ipsec.1".to_string()
+            "ipsec.1".to_string().into()
         )))
     );
     assert_eq!(
@@ -1073,29 +1093,33 @@ fn test_extract_iam_role_attributes() {
     assert_eq!(
         attributes.get("role_name"),
         Some(&Value::Concrete(ConcreteValue::String(
-            "test-role".to_string()
+            "test-role".to_string().into()
         )))
     );
     assert_eq!(
         attributes.get("role_id"),
         Some(&Value::Concrete(ConcreteValue::String(
-            "AROAEXAMPLE12345".to_string()
+            "AROAEXAMPLE12345".to_string().into()
         )))
     );
     assert_eq!(
         attributes.get("arn"),
         Some(&Value::Concrete(ConcreteValue::String(
-            "arn:aws:iam::123456789012:role/test-role".to_string()
+            "arn:aws:iam::123456789012:role/test-role"
+                .to_string()
+                .into()
         )))
     );
     assert_eq!(
         attributes.get("path"),
-        Some(&Value::Concrete(ConcreteValue::String("/".to_string())))
+        Some(&Value::Concrete(ConcreteValue::String(
+            "/".to_string().into()
+        )))
     );
     assert_eq!(
         attributes.get("description"),
         Some(&Value::Concrete(ConcreteValue::String(
-            "Test role".to_string()
+            "Test role".to_string().into()
         )))
     );
     assert_eq!(
@@ -1171,13 +1195,13 @@ fn test_extract_ec2_transit_gateway_attributes() {
     assert_eq!(
         attributes.get("transit_gateway_id"),
         Some(&Value::Concrete(ConcreteValue::String(
-            "tgw-12345678".to_string()
+            "tgw-12345678".to_string().into()
         )))
     );
     assert_eq!(
         attributes.get("description"),
         Some(&Value::Concrete(ConcreteValue::String(
-            "Test TGW".to_string()
+            "Test TGW".to_string().into()
         )))
     );
     let Some(Value::Concrete(ConcreteValue::Map(options))) = attributes.get("options") else {
@@ -1190,19 +1214,19 @@ fn test_extract_ec2_transit_gateway_attributes() {
     assert_eq!(
         options.get("auto_accept_shared_attachments"),
         Some(&Value::Concrete(ConcreteValue::String(
-            "enable".to_string()
+            "enable".to_string().into()
         )))
     );
     assert_eq!(
         options.get("dns_support"),
         Some(&Value::Concrete(ConcreteValue::String(
-            "enable".to_string()
+            "enable".to_string().into()
         )))
     );
     assert_eq!(
         options.get("vpn_ecmp_support"),
         Some(&Value::Concrete(ConcreteValue::String(
-            "enable".to_string()
+            "enable".to_string().into()
         )))
     );
     assert!(!attributes.contains_key("amazon_side_asn"));
@@ -1234,26 +1258,26 @@ fn test_extract_ec2_transit_gateway_attachment_attributes() {
     assert_eq!(
         attributes.get("transit_gateway_attachment_id"),
         Some(&Value::Concrete(ConcreteValue::String(
-            "tgw-attach-12345678".to_string()
+            "tgw-attach-12345678".to_string().into()
         )))
     );
     assert_eq!(
         attributes.get("transit_gateway_id"),
         Some(&Value::Concrete(ConcreteValue::String(
-            "tgw-12345678".to_string()
+            "tgw-12345678".to_string().into()
         )))
     );
     assert_eq!(
         attributes.get("vpc_id"),
         Some(&Value::Concrete(ConcreteValue::String(
-            "vpc-12345678".to_string()
+            "vpc-12345678".to_string().into()
         )))
     );
     assert_eq!(
         attributes.get("subnet_ids"),
         Some(&Value::Concrete(ConcreteValue::List(vec![
-            Value::Concrete(ConcreteValue::String("subnet-12345678".to_string())),
-            Value::Concrete(ConcreteValue::String("subnet-87654321".to_string())),
+            Value::Concrete(ConcreteValue::String("subnet-12345678".to_string().into())),
+            Value::Concrete(ConcreteValue::String("subnet-87654321".to_string().into())),
         ])))
     );
 }
@@ -1291,25 +1315,25 @@ fn test_extract_ec2_vpc_peering_connection_attributes() {
     assert_eq!(
         attributes.get("vpc_peering_connection_id"),
         Some(&Value::Concrete(ConcreteValue::String(
-            "pcx-12345678".to_string()
+            "pcx-12345678".to_string().into()
         )))
     );
     assert_eq!(
         attributes.get("vpc_id"),
         Some(&Value::Concrete(ConcreteValue::String(
-            "vpc-11111111".to_string()
+            "vpc-11111111".to_string().into()
         )))
     );
     assert_eq!(
         attributes.get("peer_vpc_id"),
         Some(&Value::Concrete(ConcreteValue::String(
-            "vpc-22222222".to_string()
+            "vpc-22222222".to_string().into()
         )))
     );
     assert_eq!(
         attributes.get("peer_owner_id"),
         Some(&Value::Concrete(ConcreteValue::String(
-            "123456789012".to_string()
+            "123456789012".to_string().into()
         )))
     );
     assert!(
@@ -1346,13 +1370,13 @@ fn test_extract_ec2_egress_only_internet_gateway_attributes() {
     assert_eq!(
         attributes.get("egress_only_internet_gateway_id"),
         Some(&Value::Concrete(ConcreteValue::String(
-            "eigw-12345678".to_string()
+            "eigw-12345678".to_string().into()
         )))
     );
     assert_eq!(
         attributes.get("vpc_id"),
         Some(&Value::Concrete(ConcreteValue::String(
-            "vpc-12345678".to_string()
+            "vpc-12345678".to_string().into()
         )))
     );
 }
@@ -1385,35 +1409,41 @@ fn test_extract_organizations_organization_attributes() {
     assert_eq!(
         attributes.get("id"),
         Some(&Value::Concrete(ConcreteValue::String(
-            "o-abc123".to_string()
+            "o-abc123".to_string().into()
         )))
     );
     assert_eq!(
         attributes.get("arn"),
         Some(&Value::Concrete(ConcreteValue::String(
-            "arn:aws:organizations::123456789012:organization/o-abc123".to_string()
+            "arn:aws:organizations::123456789012:organization/o-abc123"
+                .to_string()
+                .into()
         )))
     );
     assert_eq!(
         attributes.get("feature_set"),
-        Some(&Value::Concrete(ConcreteValue::String("ALL".to_string())))
+        Some(&Value::Concrete(ConcreteValue::String(
+            "ALL".to_string().into()
+        )))
     );
     assert_eq!(
         attributes.get("master_account_id"),
         Some(&Value::Concrete(ConcreteValue::String(
-            "123456789012".to_string()
+            "123456789012".to_string().into()
         )))
     );
     assert_eq!(
         attributes.get("master_account_arn"),
         Some(&Value::Concrete(ConcreteValue::String(
-            "arn:aws:organizations::123456789012:account/o-abc123/123456789012".to_string()
+            "arn:aws:organizations::123456789012:account/o-abc123/123456789012"
+                .to_string()
+                .into()
         )))
     );
     assert_eq!(
         attributes.get("master_account_email"),
         Some(&Value::Concrete(ConcreteValue::String(
-            "admin@example.com".to_string()
+            "admin@example.com".to_string().into()
         )))
     );
 }
@@ -1431,7 +1461,7 @@ fn test_extract_organizations_organization_attributes_consolidated_billing() {
     assert_eq!(
         attributes.get("feature_set"),
         Some(&Value::Concrete(ConcreteValue::String(
-            "CONSOLIDATED_BILLING".to_string()
+            "CONSOLIDATED_BILLING".to_string().into()
         )))
     );
 }
@@ -1490,37 +1520,39 @@ fn test_extract_organizations_account_attributes() {
     assert_eq!(
         attributes.get("id"),
         Some(&Value::Concrete(ConcreteValue::String(
-            "123456789012".to_string()
+            "123456789012".to_string().into()
         )))
     );
     assert_eq!(
         attributes.get("arn"),
         Some(&Value::Concrete(ConcreteValue::String(
-            "arn:aws:organizations::111111111111:account/o-abc123/123456789012".to_string()
+            "arn:aws:organizations::111111111111:account/o-abc123/123456789012"
+                .to_string()
+                .into()
         )))
     );
     assert_eq!(
         attributes.get("name"),
         Some(&Value::Concrete(ConcreteValue::String(
-            "production".to_string()
+            "production".to_string().into()
         )))
     );
     assert_eq!(
         attributes.get("email"),
         Some(&Value::Concrete(ConcreteValue::String(
-            "prod@example.com".to_string()
+            "prod@example.com".to_string().into()
         )))
     );
     assert_eq!(
         attributes.get("status"),
         Some(&Value::Concrete(ConcreteValue::String(
-            "ACTIVE".to_string()
+            "ACTIVE".to_string().into()
         )))
     );
     assert_eq!(
         attributes.get("joined_method"),
         Some(&Value::Concrete(ConcreteValue::String(
-            "CREATED".to_string()
+            "CREATED".to_string().into()
         )))
     );
     assert!(attributes.contains_key("joined_timestamp"));
@@ -1550,13 +1582,13 @@ fn test_extract_organizations_account_attributes_suspended() {
     assert_eq!(
         attributes.get("status"),
         Some(&Value::Concrete(ConcreteValue::String(
-            "SUSPENDED".to_string()
+            "SUSPENDED".to_string().into()
         )))
     );
     assert_eq!(
         attributes.get("joined_method"),
         Some(&Value::Concrete(ConcreteValue::String(
-            "INVITED".to_string()
+            "INVITED".to_string().into()
         )))
     );
 }

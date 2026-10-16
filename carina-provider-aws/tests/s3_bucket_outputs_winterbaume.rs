@@ -134,7 +134,7 @@ async fn provider_with_staged_bucket(bucket: &str) -> (AwsProvider, Arc<Recordin
 }
 
 fn string(value: &str) -> Value {
-    Value::Concrete(ConcreteValue::String(value.to_string()))
+    Value::Concrete(ConcreteValue::String(value.to_string().into()))
 }
 
 fn schema_registry() -> carina_core::schema::SchemaRegistry {

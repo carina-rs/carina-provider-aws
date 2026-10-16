@@ -66,7 +66,7 @@ impl AwsProvider {
         let rule_identifier = if !rule_ids.is_empty() {
             attributes.insert(
                 "security_group_rule_id".to_string(),
-                Value::Concrete(ConcreteValue::String(rule_ids.join(","))),
+                Value::Concrete(ConcreteValue::String(rule_ids.join(",").into())),
             );
             Some(rule_ids.join(","))
         } else {
@@ -77,7 +77,7 @@ impl AwsProvider {
         if let Some(cidr_ip) = first_rule.cidr_ipv4() {
             attributes.insert(
                 "cidr_ip".to_string(),
-                Value::Concrete(ConcreteValue::String(cidr_ip.to_string())),
+                Value::Concrete(ConcreteValue::String(cidr_ip.to_string().into())),
             );
         }
 
@@ -92,7 +92,7 @@ impl AwsProvider {
             };
             attributes.insert(
                 attr_name.to_string(),
-                Value::Concrete(ConcreteValue::String(group_id.to_string())),
+                Value::Concrete(ConcreteValue::String(group_id.to_string().into())),
             );
         }
 
@@ -112,7 +112,7 @@ impl AwsProvider {
         is_ingress: bool,
     ) -> ProviderResult<State> {
         let sg_id = match resource.get_attr("group_id") {
-            Some(Value::Concrete(ConcreteValue::String(s))) => s.clone(),
+            Some(Value::Concrete(ConcreteValue::String(s))) => s.expose_plaintext().to_string(),
             _ => {
                 return Err(ProviderError::invalid_input(
                     "Security Group ID (group_id) is required",
@@ -135,17 +135,23 @@ impl AwsProvider {
         };
 
         let cidr_ip = match resource.get_attr("cidr_ip") {
-            Some(Value::Concrete(ConcreteValue::String(s))) => Some(s.clone()),
+            Some(Value::Concrete(ConcreteValue::String(s))) => {
+                Some(s.expose_plaintext().to_string())
+            }
             _ => None,
         };
 
         let cidr_ipv6 = match resource.get_attr("cidr_ipv6") {
-            Some(Value::Concrete(ConcreteValue::String(s))) => Some(s.clone()),
+            Some(Value::Concrete(ConcreteValue::String(s))) => {
+                Some(s.expose_plaintext().to_string())
+            }
             _ => None,
         };
 
         let description = match resource.get_attr("description") {
-            Some(Value::Concrete(ConcreteValue::String(s))) => Some(s.clone()),
+            Some(Value::Concrete(ConcreteValue::String(s))) => {
+                Some(s.expose_plaintext().to_string())
+            }
             _ => None,
         };
 
@@ -155,7 +161,9 @@ impl AwsProvider {
             "destination_prefix_list_id"
         };
         let prefix_list_id = match resource.get_attr(prefix_list_attr) {
-            Some(Value::Concrete(ConcreteValue::String(s))) => Some(s.clone()),
+            Some(Value::Concrete(ConcreteValue::String(s))) => {
+                Some(s.expose_plaintext().to_string())
+            }
             _ => None,
         };
 
@@ -165,7 +173,9 @@ impl AwsProvider {
             "destination_security_group_id"
         };
         let ref_security_group_id = match resource.get_attr(sg_ref_attr) {
-            Some(Value::Concrete(ConcreteValue::String(s))) => Some(s.clone()),
+            Some(Value::Concrete(ConcreteValue::String(s))) => {
+                Some(s.expose_plaintext().to_string())
+            }
             _ => None,
         };
 
@@ -414,14 +424,14 @@ mod tests {
         {
             attributes.insert(
                 "source_security_group_id".to_string(),
-                Value::Concrete(ConcreteValue::String(group_id.to_string())),
+                Value::Concrete(ConcreteValue::String(group_id.to_string().into())),
             );
         }
 
         assert_eq!(
             attributes.get("source_security_group_id"),
             Some(&Value::Concrete(ConcreteValue::String(
-                "sg-ref-12345678".to_string()
+                "sg-ref-12345678".to_string().into()
             )))
         );
     }
@@ -442,14 +452,14 @@ mod tests {
         if let Some(cidr_ip) = rule.cidr_ipv4() {
             attributes.insert(
                 "cidr_ip".to_string(),
-                Value::Concrete(ConcreteValue::String(cidr_ip.to_string())),
+                Value::Concrete(ConcreteValue::String(cidr_ip.to_string().into())),
             );
         }
 
         assert_eq!(
             attributes.get("cidr_ip"),
             Some(&Value::Concrete(ConcreteValue::String(
-                "10.0.0.0/8".to_string()
+                "10.0.0.0/8".to_string().into()
             )))
         );
     }

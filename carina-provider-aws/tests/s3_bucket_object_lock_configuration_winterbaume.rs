@@ -96,7 +96,7 @@ fn map(entries: impl IntoIterator<Item = (&'static str, Value)>) -> Value {
 }
 
 fn string(value: &str) -> Value {
-    Value::Concrete(ConcreteValue::String(value.to_string()))
+    Value::Concrete(ConcreteValue::String(value.to_string().into()))
 }
 
 fn int(value: i64) -> Value {

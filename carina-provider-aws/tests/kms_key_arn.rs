@@ -9,7 +9,7 @@ fn assert_validator_accepts(validator_name: &str, value: &str) {
 fn assert_schema_accepts(t: carina_core::schema::AttributeType, value: &str) {
     let schema = carina_core::schema::Schema::flat(t);
     let value = carina_core::resource::Value::Concrete(
-        carina_core::resource::ConcreteValue::String(value.to_string()),
+        carina_core::resource::ConcreteValue::String(value.to_string().into()),
     );
     assert!(schema.validate(&value).is_ok());
 }
@@ -17,7 +17,7 @@ fn assert_schema_accepts(t: carina_core::schema::AttributeType, value: &str) {
 fn assert_schema_rejects(t: carina_core::schema::AttributeType, value: &str) {
     let schema = carina_core::schema::Schema::flat(t);
     let value = carina_core::resource::Value::Concrete(
-        carina_core::resource::ConcreteValue::String(value.to_string()),
+        carina_core::resource::ConcreteValue::String(value.to_string().into()),
     );
     assert!(schema.validate(&value).is_err());
 }

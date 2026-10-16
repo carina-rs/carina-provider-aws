@@ -125,7 +125,9 @@ mod tests {
         Value::Concrete(ConcreteValue::Map(IndexMap::from([
             (
                 "dns_name".to_string(),
-                Value::Concrete(ConcreteValue::String("target.example.com".to_string())),
+                Value::Concrete(ConcreteValue::String(
+                    "target.example.com".to_string().into(),
+                )),
             ),
             (
                 "evaluate_target_health".to_string(),
@@ -345,15 +347,15 @@ mod tests {
             ),
             (
                 "CloudFront wire literal",
-                ConcreteValue::String("Z2FDTNDATAQYW2".to_string()),
+                ConcreteValue::String("Z2FDTNDATAQYW2".to_string().into()),
             ),
             (
                 "ALB hosted-zone literal",
-                ConcreteValue::String("Z14GRHDCWA56QT".to_string()),
+                ConcreteValue::String("Z14GRHDCWA56QT".to_string().into()),
             ),
             (
                 "measured Route 53 hosted-zone literal",
-                ConcreteValue::String("Z05136711ZXUHBDOA8D5O".to_string()),
+                ConcreteValue::String("Z05136711ZXUHBDOA8D5O".to_string().into()),
             ),
         ];
 
@@ -365,7 +367,7 @@ mod tests {
                 ),
                 (
                     "name".to_string(),
-                    Value::Concrete(ConcreteValue::String("www.example.com".to_string())),
+                    Value::Concrete(ConcreteValue::String("www.example.com".to_string().into())),
                 ),
                 (
                     "type".to_string(),
@@ -397,11 +399,11 @@ mod tests {
             let attributes = HashMap::from([
                 (
                     "alias_target".to_string(),
-                    alias_target_value(ConcreteValue::String(hosted_zone_id.to_string())),
+                    alias_target_value(ConcreteValue::String(hosted_zone_id.to_string().into())),
                 ),
                 (
                     "name".to_string(),
-                    Value::Concrete(ConcreteValue::String("www.example.com".to_string())),
+                    Value::Concrete(ConcreteValue::String("www.example.com".to_string().into())),
                 ),
                 (
                     "type".to_string(),
@@ -443,7 +445,9 @@ mod tests {
 
         let current_attributes = HashMap::from([(
             "alias_target".to_string(),
-            alias_target_value(ConcreteValue::String(read_back_hosted_zone_id.to_string())),
+            alias_target_value(ConcreteValue::String(
+                read_back_hosted_zone_id.to_string().into(),
+            )),
         )]);
         let mut current_states =
             HashMap::from([(id.clone(), State::existing(id.clone(), current_attributes))]);
@@ -493,7 +497,7 @@ mod tests {
         ] {
             let normalized = normalize_alias_target_hosted_zone_id_and_assert_no_change(
                 label,
-                ConcreteValue::String(hosted_zone_id.to_string()),
+                ConcreteValue::String(hosted_zone_id.to_string().into()),
                 hosted_zone_id,
             )
             .await;

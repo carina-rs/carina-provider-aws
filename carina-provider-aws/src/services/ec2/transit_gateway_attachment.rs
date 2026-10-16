@@ -119,7 +119,7 @@ impl AwsProvider {
                 let mut result = Vec::new();
                 for id_val in ids {
                     if let Value::Concrete(ConcreteValue::String(s)) = id_val {
-                        result.push(s.clone());
+                        result.push(s.expose_plaintext().to_string());
                     }
                 }
                 if result.is_empty() {
@@ -346,7 +346,7 @@ mod tests {
         resource_with_options(
             [(
                 field.to_string(),
-                Value::Concrete(ConcreteValue::String(value.to_string())),
+                Value::Concrete(ConcreteValue::String(value.to_string().into())),
             )]
             .into_iter()
             .collect(),
@@ -414,19 +414,19 @@ mod tests {
         assert_eq!(
             options.get("dns_support"),
             Some(&Value::Concrete(ConcreteValue::String(
-                "enable".to_string()
+                "enable".to_string().into()
             )))
         );
         assert_eq!(
             options.get("ipv6_support"),
             Some(&Value::Concrete(ConcreteValue::String(
-                "disable".to_string()
+                "disable".to_string().into()
             )))
         );
         assert_eq!(
             options.get("security_group_referencing_support"),
             Some(&Value::Concrete(ConcreteValue::String(
-                "enable".to_string()
+                "enable".to_string().into()
             )))
         );
         assert!(!attrs.contains_key("dns_support"));
@@ -438,7 +438,7 @@ mod tests {
             Resource::with_provider("aws", "ec2.TransitGatewayAttachment", "test", None);
         resource.set_attr(
             "dns_support".to_string(),
-            Value::Concrete(ConcreteValue::String("disable".to_string())),
+            Value::Concrete(ConcreteValue::String("disable".to_string().into())),
         );
         assert!(build_create_transit_gateway_attachment_options(&resource, &schema()).is_none());
     }

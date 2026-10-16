@@ -123,22 +123,24 @@ pub(crate) fn extract_identitystore_user(
 
     attributes.insert(
         "user_id".to_string(),
-        Value::Concrete(ConcreteValue::String(resp.user_id().to_string())),
+        Value::Concrete(ConcreteValue::String(resp.user_id().to_string().into())),
     );
     attributes.insert(
         "identity_store_id".to_string(),
-        Value::Concrete(ConcreteValue::String(resp.identity_store_id().to_string())),
+        Value::Concrete(ConcreteValue::String(
+            resp.identity_store_id().to_string().into(),
+        )),
     );
     if let Some(user_name) = resp.user_name() {
         attributes.insert(
             "user_name".to_string(),
-            Value::Concrete(ConcreteValue::String(user_name.to_string())),
+            Value::Concrete(ConcreteValue::String(user_name.to_string().into())),
         );
     }
     if let Some(display_name) = resp.display_name() {
         attributes.insert(
             "display_name".to_string(),
-            Value::Concrete(ConcreteValue::String(display_name.to_string())),
+            Value::Concrete(ConcreteValue::String(display_name.to_string().into())),
         );
     }
     if let Some(name) = resp.name() {
@@ -146,37 +148,37 @@ pub(crate) fn extract_identitystore_user(
         if let Some(v) = name.formatted() {
             name_fields.insert(
                 "formatted".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string())),
+                Value::Concrete(ConcreteValue::String(v.to_string().into())),
             );
         }
         if let Some(v) = name.family_name() {
             name_fields.insert(
                 "family_name".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string())),
+                Value::Concrete(ConcreteValue::String(v.to_string().into())),
             );
         }
         if let Some(v) = name.given_name() {
             name_fields.insert(
                 "given_name".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string())),
+                Value::Concrete(ConcreteValue::String(v.to_string().into())),
             );
         }
         if let Some(v) = name.middle_name() {
             name_fields.insert(
                 "middle_name".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string())),
+                Value::Concrete(ConcreteValue::String(v.to_string().into())),
             );
         }
         if let Some(v) = name.honorific_prefix() {
             name_fields.insert(
                 "honorific_prefix".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string())),
+                Value::Concrete(ConcreteValue::String(v.to_string().into())),
             );
         }
         if let Some(v) = name.honorific_suffix() {
             name_fields.insert(
                 "honorific_suffix".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string())),
+                Value::Concrete(ConcreteValue::String(v.to_string().into())),
             );
         }
         if !name_fields.is_empty() {
@@ -191,7 +193,7 @@ pub(crate) fn extract_identitystore_user(
         .iter()
         .filter_map(|e: &aws_sdk_identitystore::types::Email| {
             e.value()
-                .map(|v| Value::Concrete(ConcreteValue::String(v.to_string())))
+                .map(|v| Value::Concrete(ConcreteValue::String(v.to_string().into())))
         })
         .collect();
     if !email_values.is_empty() {
@@ -242,25 +244,25 @@ mod tests {
         assert_eq!(
             attrs.get("user_id"),
             Some(&Value::Concrete(ConcreteValue::String(
-                "37846ac8-4021-705b-1bf2-26861723348f".to_string()
+                "37846ac8-4021-705b-1bf2-26861723348f".to_string().into()
             )))
         );
         assert_eq!(
             attrs.get("identity_store_id"),
             Some(&Value::Concrete(ConcreteValue::String(
-                "d-9567916d09".to_string()
+                "d-9567916d09".to_string().into()
             )))
         );
         assert_eq!(
             attrs.get("user_name"),
             Some(&Value::Concrete(ConcreteValue::String(
-                "gosukenator@gmail.com".to_string()
+                "gosukenator@gmail.com".to_string().into()
             )))
         );
         assert_eq!(
             attrs.get("display_name"),
             Some(&Value::Concrete(ConcreteValue::String(
-                "Gosuke Miyashita".to_string()
+                "Gosuke Miyashita".to_string().into()
             )))
         );
     }
@@ -276,19 +278,19 @@ mod tests {
         assert_eq!(
             name.get("formatted"),
             Some(&Value::Concrete(ConcreteValue::String(
-                "Gosuke Miyashita".to_string()
+                "Gosuke Miyashita".to_string().into()
             )))
         );
         assert_eq!(
             name.get("family_name"),
             Some(&Value::Concrete(ConcreteValue::String(
-                "Miyashita".to_string()
+                "Miyashita".to_string().into()
             )))
         );
         assert_eq!(
             name.get("given_name"),
             Some(&Value::Concrete(ConcreteValue::String(
-                "Gosuke".to_string()
+                "Gosuke".to_string().into()
             )))
         );
         // Unset optional fields must not appear in the map.
@@ -307,7 +309,9 @@ mod tests {
         assert_eq!(emails.len(), 1);
         assert_eq!(
             emails[0],
-            Value::Concrete(ConcreteValue::String("gosukenator@gmail.com".to_string()))
+            Value::Concrete(ConcreteValue::String(
+                "gosukenator@gmail.com".to_string().into()
+            ))
         );
     }
 
@@ -324,12 +328,14 @@ mod tests {
         assert_eq!(
             attrs.get("user_id"),
             Some(&Value::Concrete(ConcreteValue::String(
-                "uid-min".to_string()
+                "uid-min".to_string().into()
             )))
         );
         assert_eq!(
             attrs.get("identity_store_id"),
-            Some(&Value::Concrete(ConcreteValue::String("d-min".to_string())))
+            Some(&Value::Concrete(ConcreteValue::String(
+                "d-min".to_string().into()
+            )))
         );
         assert!(!attrs.contains_key("user_name"));
         assert!(!attrs.contains_key("display_name"));
@@ -356,7 +362,7 @@ mod tests {
         assert_eq!(
             name.get("given_name"),
             Some(&Value::Concrete(ConcreteValue::String(
-                "Gosuke".to_string()
+                "Gosuke".to_string().into()
             )))
         );
         assert!(!name.contains_key("formatted"));

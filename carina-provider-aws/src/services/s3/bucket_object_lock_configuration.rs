@@ -433,7 +433,7 @@ fn default_retention_to_value(
 }
 
 fn string_value(value: &str) -> Value {
-    Value::Concrete(ConcreteValue::String(value.to_string()))
+    Value::Concrete(ConcreteValue::String(value.to_string().into()))
 }
 
 fn write_destroy_warning(mut writer: impl Write, bucket: &str) -> io::Result<()> {

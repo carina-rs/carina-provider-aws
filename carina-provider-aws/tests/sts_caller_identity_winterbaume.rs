@@ -153,7 +153,7 @@ async fn sts_caller_identity_data_source_returns_account_arn_user_id_from_winter
         match value {
             Value::Concrete(ConcreteValue::String(s)) => {
                 assert!(
-                    !s.is_empty(),
+                    !s.expose_plaintext().is_empty(),
                     "attribute `{attr}` came back as an empty string",
                 );
             }

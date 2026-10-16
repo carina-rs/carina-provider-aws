@@ -164,19 +164,19 @@ impl AwsProvider {
         if let Some(v) = obj.cidr_block() {
             attributes.insert(
                 "cidr_block".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string())),
+                Value::Concrete(ConcreteValue::String(v.to_string().into())),
             );
         }
         if let Some(v) = obj.instance_tenancy() {
             attributes.insert(
                 "instance_tenancy".to_string(),
-                Value::Concrete(ConcreteValue::String(v.as_str().to_string())),
+                Value::Concrete(ConcreteValue::String(v.as_str().to_string().into())),
             );
         }
         if let Some(v) = obj.vpc_id() {
             attributes.insert(
                 "vpc_id".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string())),
+                Value::Concrete(ConcreteValue::String(v.to_string().into())),
             );
         }
         obj.vpc_id().map(String::from)
@@ -196,19 +196,19 @@ impl AwsProvider {
         if let Some(v) = obj.availability_zone() {
             attributes.insert(
                 "availability_zone".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string())),
+                Value::Concrete(ConcreteValue::String(v.to_string().into())),
             );
         }
         if let Some(v) = obj.availability_zone_id() {
             attributes.insert(
                 "availability_zone_id".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string())),
+                Value::Concrete(ConcreteValue::String(v.to_string().into())),
             );
         }
         if let Some(v) = obj.cidr_block() {
             attributes.insert(
                 "cidr_block".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string())),
+                Value::Concrete(ConcreteValue::String(v.to_string().into())),
             );
         }
         if let Some(v) = obj.enable_dns64() {
@@ -238,19 +238,19 @@ impl AwsProvider {
         if let Some(v) = obj.outpost_arn() {
             attributes.insert(
                 "outpost_arn".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string())),
+                Value::Concrete(ConcreteValue::String(v.to_string().into())),
             );
         }
         if let Some(v) = obj.subnet_id() {
             attributes.insert(
                 "subnet_id".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string())),
+                Value::Concrete(ConcreteValue::String(v.to_string().into())),
             );
         }
         if let Some(v) = obj.vpc_id() {
             attributes.insert(
                 "vpc_id".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string())),
+                Value::Concrete(ConcreteValue::String(v.to_string().into())),
             );
         }
         if let Some(dns_opts) = obj.private_dns_name_options_on_launch() {
@@ -258,7 +258,7 @@ impl AwsProvider {
             if let Some(v) = dns_opts.hostname_type() {
                 fields.insert(
                     "hostname_type".to_string(),
-                    Value::Concrete(ConcreteValue::String(v.as_str().to_string())),
+                    Value::Concrete(ConcreteValue::String(v.as_str().to_string().into())),
                 );
             }
             if let Some(v) = dns_opts.enable_resource_name_dns_a_record() {
@@ -291,7 +291,7 @@ impl AwsProvider {
         if let Some(v) = obj.internet_gateway_id() {
             attributes.insert(
                 "internet_gateway_id".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string())),
+                Value::Concrete(ConcreteValue::String(v.to_string().into())),
             );
         }
         obj.internet_gateway_id().map(String::from)
@@ -305,13 +305,13 @@ impl AwsProvider {
         if let Some(v) = obj.route_table_id() {
             attributes.insert(
                 "route_table_id".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string())),
+                Value::Concrete(ConcreteValue::String(v.to_string().into())),
             );
         }
         if let Some(v) = obj.vpc_id() {
             attributes.insert(
                 "vpc_id".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string())),
+                Value::Concrete(ConcreteValue::String(v.to_string().into())),
             );
         }
         obj.route_table_id().map(String::from)
@@ -325,19 +325,19 @@ impl AwsProvider {
         if let Some(v) = obj.destination_cidr_block() {
             attributes.insert(
                 "destination_cidr_block".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string())),
+                Value::Concrete(ConcreteValue::String(v.to_string().into())),
             );
         }
         if let Some(v) = obj.gateway_id() {
             attributes.insert(
                 "gateway_id".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string())),
+                Value::Concrete(ConcreteValue::String(v.to_string().into())),
             );
         }
         if let Some(v) = obj.nat_gateway_id() {
             attributes.insert(
                 "nat_gateway_id".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string())),
+                Value::Concrete(ConcreteValue::String(v.to_string().into())),
             );
         }
         None
@@ -351,25 +351,25 @@ impl AwsProvider {
         if let Some(v) = obj.description() {
             attributes.insert(
                 "description".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string())),
+                Value::Concrete(ConcreteValue::String(v.to_string().into())),
             );
         }
         if let Some(v) = obj.group_id() {
             attributes.insert(
                 "group_id".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string())),
+                Value::Concrete(ConcreteValue::String(v.to_string().into())),
             );
         }
         if let Some(v) = obj.group_name() {
             attributes.insert(
                 "group_name".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string())),
+                Value::Concrete(ConcreteValue::String(v.to_string().into())),
             );
         }
         if let Some(v) = obj.vpc_id() {
             attributes.insert(
                 "vpc_id".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string())),
+                Value::Concrete(ConcreteValue::String(v.to_string().into())),
             );
         }
         obj.group_id().map(String::from)
@@ -383,13 +383,13 @@ impl AwsProvider {
         if let Some(v) = obj.cidr_ipv6() {
             attributes.insert(
                 "cidr_ipv6".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string())),
+                Value::Concrete(ConcreteValue::String(v.to_string().into())),
             );
         }
         if let Some(v) = obj.description() {
             attributes.insert(
                 "description".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string())),
+                Value::Concrete(ConcreteValue::String(v.to_string().into())),
             );
         }
         if let Some(v) = obj.from_port() {
@@ -401,25 +401,25 @@ impl AwsProvider {
         if let Some(v) = obj.group_id() {
             attributes.insert(
                 "group_id".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string())),
+                Value::Concrete(ConcreteValue::String(v.to_string().into())),
             );
         }
         if let Some(v) = obj.ip_protocol() {
             attributes.insert(
                 "ip_protocol".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string())),
+                Value::Concrete(ConcreteValue::String(v.to_string().into())),
             );
         }
         if let Some(v) = obj.security_group_rule_id() {
             attributes.insert(
                 "security_group_rule_id".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string())),
+                Value::Concrete(ConcreteValue::String(v.to_string().into())),
             );
         }
         if let Some(v) = obj.prefix_list_id() {
             attributes.insert(
                 "source_prefix_list_id".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string())),
+                Value::Concrete(ConcreteValue::String(v.to_string().into())),
             );
         }
         if let Some(v) = obj.to_port() {
@@ -439,19 +439,19 @@ impl AwsProvider {
         if let Some(v) = obj.cidr_ipv6() {
             attributes.insert(
                 "cidr_ipv6".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string())),
+                Value::Concrete(ConcreteValue::String(v.to_string().into())),
             );
         }
         if let Some(v) = obj.description() {
             attributes.insert(
                 "description".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string())),
+                Value::Concrete(ConcreteValue::String(v.to_string().into())),
             );
         }
         if let Some(v) = obj.prefix_list_id() {
             attributes.insert(
                 "destination_prefix_list_id".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string())),
+                Value::Concrete(ConcreteValue::String(v.to_string().into())),
             );
         }
         if let Some(v) = obj.from_port() {
@@ -463,19 +463,19 @@ impl AwsProvider {
         if let Some(v) = obj.group_id() {
             attributes.insert(
                 "group_id".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string())),
+                Value::Concrete(ConcreteValue::String(v.to_string().into())),
             );
         }
         if let Some(v) = obj.ip_protocol() {
             attributes.insert(
                 "ip_protocol".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string())),
+                Value::Concrete(ConcreteValue::String(v.to_string().into())),
             );
         }
         if let Some(v) = obj.security_group_rule_id() {
             attributes.insert(
                 "security_group_rule_id".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string())),
+                Value::Concrete(ConcreteValue::String(v.to_string().into())),
             );
         }
         if let Some(v) = obj.to_port() {
@@ -495,7 +495,7 @@ impl AwsProvider {
         if let Some(v) = obj.egress_only_internet_gateway_id() {
             attributes.insert(
                 "egress_only_internet_gateway_id".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string())),
+                Value::Concrete(ConcreteValue::String(v.to_string().into())),
             );
         }
         if let Some(addr) = obj.attachments().first()
@@ -503,7 +503,7 @@ impl AwsProvider {
         {
             attributes.insert(
                 "vpc_id".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string())),
+                Value::Concrete(ConcreteValue::String(v.to_string().into())),
             );
         }
         obj.egress_only_internet_gateway_id().map(String::from)
@@ -517,25 +517,25 @@ impl AwsProvider {
         if let Some(v) = obj.allocation_id() {
             attributes.insert(
                 "allocation_id".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string())),
+                Value::Concrete(ConcreteValue::String(v.to_string().into())),
             );
         }
         if let Some(v) = obj.domain() {
             attributes.insert(
                 "domain".to_string(),
-                Value::Concrete(ConcreteValue::String(v.as_str().to_string())),
+                Value::Concrete(ConcreteValue::String(v.as_str().to_string().into())),
             );
         }
         if let Some(v) = obj.public_ip() {
             attributes.insert(
                 "public_ip".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string())),
+                Value::Concrete(ConcreteValue::String(v.to_string().into())),
             );
         }
         if let Some(v) = obj.public_ipv4_pool() {
             attributes.insert(
                 "public_ipv4_pool".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string())),
+                Value::Concrete(ConcreteValue::String(v.to_string().into())),
             );
         }
         obj.allocation_id().map(String::from)
@@ -549,31 +549,31 @@ impl AwsProvider {
         if let Some(v) = obj.availability_mode() {
             attributes.insert(
                 "availability_mode".to_string(),
-                Value::Concrete(ConcreteValue::String(v.as_str().to_string())),
+                Value::Concrete(ConcreteValue::String(v.as_str().to_string().into())),
             );
         }
         if let Some(v) = obj.connectivity_type() {
             attributes.insert(
                 "connectivity_type".to_string(),
-                Value::Concrete(ConcreteValue::String(v.as_str().to_string())),
+                Value::Concrete(ConcreteValue::String(v.as_str().to_string().into())),
             );
         }
         if let Some(v) = obj.nat_gateway_id() {
             attributes.insert(
                 "nat_gateway_id".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string())),
+                Value::Concrete(ConcreteValue::String(v.to_string().into())),
             );
         }
         if let Some(v) = obj.subnet_id() {
             attributes.insert(
                 "subnet_id".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string())),
+                Value::Concrete(ConcreteValue::String(v.to_string().into())),
             );
         }
         if let Some(v) = obj.vpc_id() {
             attributes.insert(
                 "vpc_id".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string())),
+                Value::Concrete(ConcreteValue::String(v.to_string().into())),
             );
         }
         if let Some(addr) = obj.nat_gateway_addresses().first()
@@ -581,7 +581,7 @@ impl AwsProvider {
         {
             attributes.insert(
                 "allocation_id".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string())),
+                Value::Concrete(ConcreteValue::String(v.to_string().into())),
             );
         }
         obj.nat_gateway_id().map(String::from)
@@ -595,19 +595,19 @@ impl AwsProvider {
         if let Some(v) = obj.public_ipv4_pool() {
             attributes.insert(
                 "public_ipv4_pool".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string())),
+                Value::Concrete(ConcreteValue::String(v.to_string().into())),
             );
         }
         if let Some(v) = obj.route_table_id() {
             attributes.insert(
                 "route_table_id".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string())),
+                Value::Concrete(ConcreteValue::String(v.to_string().into())),
             );
         }
         if let Some(v) = obj.subnet_id() {
             attributes.insert(
                 "subnet_id".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string())),
+                Value::Concrete(ConcreteValue::String(v.to_string().into())),
             );
         }
         None
@@ -621,13 +621,13 @@ impl AwsProvider {
         if let Some(v) = obj.description() {
             attributes.insert(
                 "description".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string())),
+                Value::Concrete(ConcreteValue::String(v.to_string().into())),
             );
         }
         if let Some(v) = obj.transit_gateway_id() {
             attributes.insert(
                 "transit_gateway_id".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string())),
+                Value::Concrete(ConcreteValue::String(v.to_string().into())),
             );
         }
         if let Some(dns_opts) = obj.options() {
@@ -641,37 +641,37 @@ impl AwsProvider {
             if let Some(v) = dns_opts.auto_accept_shared_attachments() {
                 fields.insert(
                     "auto_accept_shared_attachments".to_string(),
-                    Value::Concrete(ConcreteValue::String(v.as_str().to_string())),
+                    Value::Concrete(ConcreteValue::String(v.as_str().to_string().into())),
                 );
             }
             if let Some(v) = dns_opts.default_route_table_association() {
                 fields.insert(
                     "default_route_table_association".to_string(),
-                    Value::Concrete(ConcreteValue::String(v.as_str().to_string())),
+                    Value::Concrete(ConcreteValue::String(v.as_str().to_string().into())),
                 );
             }
             if let Some(v) = dns_opts.default_route_table_propagation() {
                 fields.insert(
                     "default_route_table_propagation".to_string(),
-                    Value::Concrete(ConcreteValue::String(v.as_str().to_string())),
+                    Value::Concrete(ConcreteValue::String(v.as_str().to_string().into())),
                 );
             }
             if let Some(v) = dns_opts.dns_support() {
                 fields.insert(
                     "dns_support".to_string(),
-                    Value::Concrete(ConcreteValue::String(v.as_str().to_string())),
+                    Value::Concrete(ConcreteValue::String(v.as_str().to_string().into())),
                 );
             }
             if let Some(v) = dns_opts.multicast_support() {
                 fields.insert(
                     "multicast_support".to_string(),
-                    Value::Concrete(ConcreteValue::String(v.as_str().to_string())),
+                    Value::Concrete(ConcreteValue::String(v.as_str().to_string().into())),
                 );
             }
             if let Some(v) = dns_opts.security_group_referencing_support() {
                 fields.insert(
                     "security_group_referencing_support".to_string(),
-                    Value::Concrete(ConcreteValue::String(v.as_str().to_string())),
+                    Value::Concrete(ConcreteValue::String(v.as_str().to_string().into())),
                 );
             }
             {
@@ -681,7 +681,9 @@ impl AwsProvider {
                         "transit_gateway_cidr_blocks".to_string(),
                         Value::Concrete(ConcreteValue::List(
                             v.iter()
-                                .map(|s| Value::Concrete(ConcreteValue::String(s.to_string())))
+                                .map(|s| {
+                                    Value::Concrete(ConcreteValue::String(s.to_string().into()))
+                                })
                                 .collect(),
                         )),
                     );
@@ -690,7 +692,7 @@ impl AwsProvider {
             if let Some(v) = dns_opts.vpn_ecmp_support() {
                 fields.insert(
                     "vpn_ecmp_support".to_string(),
-                    Value::Concrete(ConcreteValue::String(v.as_str().to_string())),
+                    Value::Concrete(ConcreteValue::String(v.as_str().to_string().into())),
                 );
             }
             if !fields.is_empty() {
@@ -713,7 +715,7 @@ impl AwsProvider {
             if !ids.is_empty() {
                 let list: Vec<Value> = ids
                     .iter()
-                    .map(|s| Value::Concrete(ConcreteValue::String(s.to_string())))
+                    .map(|s| Value::Concrete(ConcreteValue::String(s.to_string().into())))
                     .collect();
                 attributes.insert(
                     "subnet_ids".to_string(),
@@ -724,19 +726,19 @@ impl AwsProvider {
         if let Some(v) = obj.transit_gateway_attachment_id() {
             attributes.insert(
                 "transit_gateway_attachment_id".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string())),
+                Value::Concrete(ConcreteValue::String(v.to_string().into())),
             );
         }
         if let Some(v) = obj.transit_gateway_id() {
             attributes.insert(
                 "transit_gateway_id".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string())),
+                Value::Concrete(ConcreteValue::String(v.to_string().into())),
             );
         }
         if let Some(v) = obj.vpc_id() {
             attributes.insert(
                 "vpc_id".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string())),
+                Value::Concrete(ConcreteValue::String(v.to_string().into())),
             );
         }
         if let Some(dns_opts) = obj.options() {
@@ -744,25 +746,25 @@ impl AwsProvider {
             if let Some(v) = dns_opts.appliance_mode_support() {
                 fields.insert(
                     "appliance_mode_support".to_string(),
-                    Value::Concrete(ConcreteValue::String(v.as_str().to_string())),
+                    Value::Concrete(ConcreteValue::String(v.as_str().to_string().into())),
                 );
             }
             if let Some(v) = dns_opts.dns_support() {
                 fields.insert(
                     "dns_support".to_string(),
-                    Value::Concrete(ConcreteValue::String(v.as_str().to_string())),
+                    Value::Concrete(ConcreteValue::String(v.as_str().to_string().into())),
                 );
             }
             if let Some(v) = dns_opts.ipv6_support() {
                 fields.insert(
                     "ipv6_support".to_string(),
-                    Value::Concrete(ConcreteValue::String(v.as_str().to_string())),
+                    Value::Concrete(ConcreteValue::String(v.as_str().to_string().into())),
                 );
             }
             if let Some(v) = dns_opts.security_group_referencing_support() {
                 fields.insert(
                     "security_group_referencing_support".to_string(),
-                    Value::Concrete(ConcreteValue::String(v.as_str().to_string())),
+                    Value::Concrete(ConcreteValue::String(v.as_str().to_string().into())),
                 );
             }
             if !fields.is_empty() {
@@ -783,7 +785,7 @@ impl AwsProvider {
         if let Some(v) = obj.vpc_peering_connection_id() {
             attributes.insert(
                 "vpc_peering_connection_id".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string())),
+                Value::Concrete(ConcreteValue::String(v.to_string().into())),
             );
         }
         if let Some(opts) = obj.requester_vpc_info()
@@ -791,7 +793,7 @@ impl AwsProvider {
         {
             attributes.insert(
                 "vpc_id".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string())),
+                Value::Concrete(ConcreteValue::String(v.to_string().into())),
             );
         }
         if let Some(opts) = obj.accepter_vpc_info()
@@ -799,7 +801,7 @@ impl AwsProvider {
         {
             attributes.insert(
                 "peer_vpc_id".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string())),
+                Value::Concrete(ConcreteValue::String(v.to_string().into())),
             );
         }
         if let Some(opts) = obj.accepter_vpc_info()
@@ -807,7 +809,7 @@ impl AwsProvider {
         {
             attributes.insert(
                 "peer_owner_id".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string())),
+                Value::Concrete(ConcreteValue::String(v.to_string().into())),
             );
         }
         obj.vpc_peering_connection_id().map(String::from)
@@ -827,19 +829,19 @@ impl AwsProvider {
         if let Some(v) = obj.availability_zone() {
             attributes.insert(
                 "availability_zone".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string())),
+                Value::Concrete(ConcreteValue::String(v.to_string().into())),
             );
         }
         if let Some(v) = obj.r#type() {
             attributes.insert(
                 "type".to_string(),
-                Value::Concrete(ConcreteValue::String(v.as_str().to_string())),
+                Value::Concrete(ConcreteValue::String(v.as_str().to_string().into())),
             );
         }
         if let Some(v) = obj.vpn_gateway_id() {
             attributes.insert(
                 "vpn_gateway_id".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string())),
+                Value::Concrete(ConcreteValue::String(v.to_string().into())),
             );
         }
         obj.vpn_gateway_id().map(String::from)
@@ -854,7 +856,7 @@ impl AwsProvider {
         if !v.is_empty() {
             attributes.insert(
                 "name".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string())),
+                Value::Concrete(ConcreteValue::String(v.to_string().into())),
             );
         }
         Some(obj.name().to_string())
@@ -874,19 +876,19 @@ impl AwsProvider {
         if let Some(v) = obj.kms_key_id() {
             attributes.insert(
                 "kms_key_id".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string())),
+                Value::Concrete(ConcreteValue::String(v.to_string().into())),
             );
         }
         if let Some(v) = obj.log_group_class() {
             attributes.insert(
                 "log_group_class".to_string(),
-                Value::Concrete(ConcreteValue::String(v.as_str().to_string())),
+                Value::Concrete(ConcreteValue::String(v.as_str().to_string().into())),
             );
         }
         if let Some(v) = obj.log_group_name() {
             attributes.insert(
                 "log_group_name".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string())),
+                Value::Concrete(ConcreteValue::String(v.to_string().into())),
             );
         }
         if let Some(v) = obj.retention_in_days() {
@@ -906,31 +908,31 @@ impl AwsProvider {
         if let Some(v) = obj.certificate_arn() {
             attributes.insert(
                 "certificate_arn".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string())),
+                Value::Concrete(ConcreteValue::String(v.to_string().into())),
             );
         }
         if let Some(v) = obj.domain_name() {
             attributes.insert(
                 "domain_name".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string())),
+                Value::Concrete(ConcreteValue::String(v.to_string().into())),
             );
         }
         if let Some(v) = obj.key_algorithm() {
             attributes.insert(
                 "key_algorithm".to_string(),
-                Value::Concrete(ConcreteValue::String(v.as_str().to_string())),
+                Value::Concrete(ConcreteValue::String(v.as_str().to_string().into())),
             );
         }
         if let Some(v) = obj.renewal_eligibility() {
             attributes.insert(
                 "renewal_eligibility".to_string(),
-                Value::Concrete(ConcreteValue::String(v.as_str().to_string())),
+                Value::Concrete(ConcreteValue::String(v.as_str().to_string().into())),
             );
         }
         if let Some(v) = obj.status() {
             attributes.insert(
                 "status".to_string(),
-                Value::Concrete(ConcreteValue::String(v.as_str().to_string())),
+                Value::Concrete(ConcreteValue::String(v.as_str().to_string().into())),
             );
         }
         {
@@ -938,7 +940,7 @@ impl AwsProvider {
             if !ids.is_empty() {
                 let list: Vec<Value> = ids
                     .iter()
-                    .map(|s| Value::Concrete(ConcreteValue::String(s.to_string())))
+                    .map(|s| Value::Concrete(ConcreteValue::String(s.to_string().into())))
                     .collect();
                 attributes.insert(
                     "subject_alternative_names".to_string(),
@@ -949,7 +951,7 @@ impl AwsProvider {
         if let Some(v) = obj.r#type() {
             attributes.insert(
                 "type".to_string(),
-                Value::Concrete(ConcreteValue::String(v.as_str().to_string())),
+                Value::Concrete(ConcreteValue::String(v.as_str().to_string().into())),
             );
         }
         obj.certificate_arn().map(String::from)

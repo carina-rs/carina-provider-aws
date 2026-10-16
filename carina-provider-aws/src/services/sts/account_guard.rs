@@ -51,7 +51,7 @@ pub fn extract_string_list(value: Option<&Value>) -> Vec<String> {
         Some(Value::Concrete(ConcreteValue::List(items))) => items
             .iter()
             .filter_map(|v| match v {
-                Value::Concrete(ConcreteValue::String(s)) => Some(s.clone()),
+                Value::Concrete(ConcreteValue::String(s)) => Some(s.expose_plaintext().to_string()),
                 _ => None,
             })
             .collect(),

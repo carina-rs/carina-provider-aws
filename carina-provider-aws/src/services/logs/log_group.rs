@@ -42,14 +42,14 @@ impl AwsProvider {
             if let Some(name) = lg.log_group_name() {
                 attributes.insert(
                     "log_group_name".to_string(),
-                    Value::Concrete(ConcreteValue::String(name.to_string())),
+                    Value::Concrete(ConcreteValue::String(name.to_string().into())),
                 );
             }
 
             if let Some(arn) = lg.arn() {
                 attributes.insert(
                     "arn".to_string(),
-                    Value::Concrete(ConcreteValue::String(arn.to_string())),
+                    Value::Concrete(ConcreteValue::String(arn.to_string().into())),
                 );
             }
 
@@ -63,14 +63,14 @@ impl AwsProvider {
             if let Some(kms_key) = lg.kms_key_id() {
                 attributes.insert(
                     "kms_key_id".to_string(),
-                    Value::Concrete(ConcreteValue::String(kms_key.to_string())),
+                    Value::Concrete(ConcreteValue::String(kms_key.to_string().into())),
                 );
             }
 
             if let Some(class) = lg.log_group_class() {
                 attributes.insert(
                     "log_group_class".to_string(),
-                    Value::Concrete(ConcreteValue::String(class.as_str().to_string())),
+                    Value::Concrete(ConcreteValue::String(class.as_str().to_string().into())),
                 );
             }
 
@@ -91,7 +91,7 @@ impl AwsProvider {
                         for (key, val) in tags {
                             tag_map.insert(
                                 key.to_string(),
-                                Value::Concrete(ConcreteValue::String(val.to_string())),
+                                Value::Concrete(ConcreteValue::String(val.to_string().into())),
                             );
                         }
                         attributes.insert(
@@ -128,7 +128,7 @@ impl AwsProvider {
         if let Some(Value::Concrete(ConcreteValue::String(kms_key))) =
             resource.get_attr("kms_key_id")
         {
-            req = req.kms_key_id(kms_key);
+            req = req.kms_key_id(kms_key.expose_plaintext());
         }
 
         if let Some(class) = optional_enum_attr(resource, schema, "log_group_class") {
@@ -140,7 +140,7 @@ impl AwsProvider {
             let mut tags = HashMap::new();
             for (key, value) in tag_map {
                 if let Value::Concrete(ConcreteValue::String(val)) = value {
-                    tags.insert(key.clone(), val.clone());
+                    tags.insert(key.clone(), val.expose_plaintext().to_string());
                 }
             }
             req = req.set_tags(Some(tags));
@@ -226,7 +226,7 @@ impl AwsProvider {
             self.logs_client
                 .associate_kms_key()
                 .log_group_name(identifier)
-                .kms_key_id(kms_key)
+                .kms_key_id(kms_key.expose_plaintext())
                 .send()
                 .await
                 .map_err(|e| {
@@ -327,7 +327,7 @@ impl AwsProvider {
                     _ => true,
                 };
                 if should_add {
-                    tags_to_add.insert(key.clone(), val.clone());
+                    tags_to_add.insert(key.clone(), val.expose_plaintext().to_string());
                 }
             }
         }

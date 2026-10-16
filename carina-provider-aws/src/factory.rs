@@ -92,7 +92,7 @@ impl ProviderFactory for AwsProviderFactory {
 
     fn extract_region(&self, attributes: &IndexMap<String, Value>) -> String {
         if let Some(Value::Concrete(ConcreteValue::String(region))) = attributes.get("region") {
-            return carina_core::utils::convert_region_value(region);
+            return carina_core::utils::convert_region_value(region.expose_plaintext());
         }
         "ap-northeast-1".to_string()
     }

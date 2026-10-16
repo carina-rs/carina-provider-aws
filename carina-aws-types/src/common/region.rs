@@ -124,6 +124,7 @@ pub fn aws_region() -> AttributeType {
         vec![],
         Some(legacy_validator(|value| {
             if let Value::Concrete(ConcreteValue::String(s)) = value {
+                let s = s.expose_plaintext();
                 let id = provider_bare_type(&[], "Region");
                 validate_enum_namespace(s, &id)
                     .map_err(|reason| format!("Invalid region '{}': {}", s, reason))?;

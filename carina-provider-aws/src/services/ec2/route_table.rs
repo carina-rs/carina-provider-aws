@@ -54,13 +54,13 @@ impl AwsProvider {
                 if let Some(dest) = route.destination_cidr_block() {
                     route_map.insert(
                         "destination".to_string(),
-                        Value::Concrete(ConcreteValue::String(dest.to_string())),
+                        Value::Concrete(ConcreteValue::String(dest.to_string().into())),
                     );
                 }
                 if let Some(gw) = route.gateway_id() {
                     route_map.insert(
                         "gateway_id".to_string(),
-                        Value::Concrete(ConcreteValue::String(gw.to_string())),
+                        Value::Concrete(ConcreteValue::String(gw.to_string().into())),
                     );
                 }
                 if !route_map.is_empty() {
@@ -144,8 +144,8 @@ impl AwsProvider {
                         self.ec2_client
                             .create_route()
                             .route_table_id(rt_id)
-                            .destination_cidr_block(dest)
-                            .gateway_id(gw_id)
+                            .destination_cidr_block(dest.expose_plaintext())
+                            .gateway_id(gw_id.expose_plaintext())
                             .send()
                             .await
                             .map_err(|e| {

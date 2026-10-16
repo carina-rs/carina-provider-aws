@@ -66,13 +66,13 @@ mod tests {
         let mut resource = Resource::with_provider("aws", "ec2.Subnet", "test-subnet", None);
         resource.set_attr(
             "availability_zone".to_string(),
-            Value::Concrete(ConcreteValue::String("ap-northeast-1a".to_string())),
+            Value::Concrete(ConcreteValue::String("ap-northeast-1a".to_string().into())),
         );
         resource.set_attr(
             "private_dns_name_options_on_launch".to_string(),
             Value::Concrete(ConcreteValue::Map(IndexMap::from([(
                 "hostname_type".to_string(),
-                Value::Concrete(ConcreteValue::String("ip-name".to_string())),
+                Value::Concrete(ConcreteValue::String("ip-name".to_string().into())),
             )]))),
         );
         let mut resources = vec![resource];
@@ -85,7 +85,7 @@ mod tests {
         assert_eq!(
             resources[0].get_attr("availability_zone"),
             Some(&Value::Concrete(ConcreteValue::String(
-                "ap-northeast-1a".to_string()
+                "ap-northeast-1a".to_string().into()
             )))
         );
         let Some(Value::Concrete(ConcreteValue::Map(fields))) =
@@ -96,7 +96,7 @@ mod tests {
         assert_eq!(
             fields.get("hostname_type"),
             Some(&Value::Concrete(ConcreteValue::String(
-                "ip-name".to_string()
+                "ip-name".to_string().into()
             )))
         );
     }
@@ -106,7 +106,9 @@ mod tests {
         let mut resource = Resource::with_provider("aws", "route53.RecordSet", "test-rec", None);
         resource.set_attr(
             "name".to_string(),
-            Value::Concrete(ConcreteValue::String("_abc.example.com.".to_string())),
+            Value::Concrete(ConcreteValue::String(
+                "_abc.example.com.".to_string().into(),
+            )),
         );
         let mut resources = vec![resource];
 
@@ -118,7 +120,7 @@ mod tests {
         assert_eq!(
             resources[0].get_attr("name"),
             Some(&Value::Concrete(ConcreteValue::String(
-                "_abc.example.com".to_string()
+                "_abc.example.com".to_string().into()
             )))
         );
     }
@@ -128,7 +130,7 @@ mod tests {
         let mut inner = IndexMap::new();
         inner.insert(
             "hostname_type".to_string(),
-            Value::Concrete(ConcreteValue::String("ip-name".to_string())),
+            Value::Concrete(ConcreteValue::String("ip-name".to_string().into())),
         );
         inner.insert(
             "enable_resource_name_dns_a_record".to_string(),
@@ -157,7 +159,7 @@ mod tests {
             assert_eq!(
                 fields.get("hostname_type"),
                 Some(&Value::Concrete(ConcreteValue::String(
-                    "ip-name".to_string()
+                    "ip-name".to_string().into()
                 )))
             );
             assert_eq!(

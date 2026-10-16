@@ -86,20 +86,20 @@ pub fn extract_assume_role(value: Option<&Value>) -> Result<Option<AssumeRoleCon
     };
 
     let role_arn = match map.get("role_arn") {
-        Some(Value::Concrete(ConcreteValue::String(s))) => s.clone(),
+        Some(Value::Concrete(ConcreteValue::String(s))) => s.expose_plaintext().to_string(),
         Some(_) => return Err("assume_role.role_arn must be a string".to_string()),
         None => return Err("assume_role.role_arn is required".to_string()),
     };
 
     let session_name = match map.get("session_name") {
         None => None,
-        Some(Value::Concrete(ConcreteValue::String(s))) => Some(s.clone()),
+        Some(Value::Concrete(ConcreteValue::String(s))) => Some(s.expose_plaintext().to_string()),
         Some(_) => return Err("assume_role.session_name must be a string".to_string()),
     };
 
     let external_id = match map.get("external_id") {
         None => None,
-        Some(Value::Concrete(ConcreteValue::String(s))) => Some(s.clone()),
+        Some(Value::Concrete(ConcreteValue::String(s))) => Some(s.expose_plaintext().to_string()),
         Some(_) => return Err("assume_role.external_id must be a string".to_string()),
     };
 
@@ -137,7 +137,7 @@ mod tests {
     use std::collections::HashMap;
 
     fn val_str(s: &str) -> Value {
-        Value::Concrete(ConcreteValue::String(s.to_string()))
+        Value::Concrete(ConcreteValue::String(s.to_string().into()))
     }
 
     fn val_map(items: &[(&str, Value)]) -> Value {

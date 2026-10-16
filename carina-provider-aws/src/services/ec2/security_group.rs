@@ -70,13 +70,13 @@ impl AwsProvider {
         let vpc_id = require_string_attr(resource, "vpc_id")?;
 
         let description = match resource.get_attr("description") {
-            Some(Value::Concrete(ConcreteValue::String(s))) => s.clone(),
+            Some(Value::Concrete(ConcreteValue::String(s))) => s.expose_plaintext().to_string(),
             _ => String::new(),
         };
 
         // group_name is required for CreateSecurityGroup API
         let group_name = match resource.get_attr("group_name") {
-            Some(Value::Concrete(ConcreteValue::String(s))) => s.clone(),
+            Some(Value::Concrete(ConcreteValue::String(s))) => s.expose_plaintext().to_string(),
             _ => resource
                 .id
                 .identity_str()

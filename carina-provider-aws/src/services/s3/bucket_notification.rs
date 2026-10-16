@@ -36,7 +36,7 @@ impl AwsProvider {
                 let mut attributes = HashMap::new();
                 attributes.insert(
                     "bucket".to_string(),
-                    Value::Concrete(ConcreteValue::String(bucket.to_string())),
+                    Value::Concrete(ConcreteValue::String(bucket.to_string().into())),
                 );
 
                 let topics: Vec<Value> = output
@@ -234,7 +234,7 @@ fn build_topic(id: &ResourceId, value: &Value) -> ProviderResult<TopicConfigurat
         .topic_arn(topic_arn)
         .set_events(Some(events));
     if let Some(Value::Concrete(ConcreteValue::String(s))) = map.get("id") {
-        builder = builder.id(s);
+        builder = builder.id(s.expose_plaintext());
     }
     if let Some(filter) = build_filter(id, map, "topic_configurations")? {
         builder = builder.filter(filter);
@@ -259,7 +259,7 @@ fn build_queue(id: &ResourceId, value: &Value) -> ProviderResult<QueueConfigurat
         .queue_arn(queue_arn)
         .set_events(Some(events));
     if let Some(Value::Concrete(ConcreteValue::String(s))) = map.get("id") {
-        builder = builder.id(s);
+        builder = builder.id(s.expose_plaintext());
     }
     if let Some(filter) = build_filter(id, map, "queue_configurations")? {
         builder = builder.filter(filter);
@@ -289,7 +289,7 @@ fn build_lambda(id: &ResourceId, value: &Value) -> ProviderResult<LambdaFunction
         .lambda_function_arn(lambda_arn)
         .set_events(Some(events));
     if let Some(Value::Concrete(ConcreteValue::String(s))) = map.get("id") {
-        builder = builder.id(s);
+        builder = builder.id(s.expose_plaintext());
     }
     if let Some(filter) = build_filter(id, map, "lambda_function_configurations")? {
         builder = builder.filter(filter);
@@ -310,7 +310,7 @@ fn require_string_field(
     parent: &str,
 ) -> ProviderResult<String> {
     match map.get(field) {
-        Some(Value::Concrete(ConcreteValue::String(s))) => Ok(s.clone()),
+        Some(Value::Concrete(ConcreteValue::String(s))) => Ok(s.expose_plaintext().to_string()),
         _ => Err(
             ProviderError::invalid_input(format!("{parent}.{field} is required"))
                 .for_resource(id.clone()),
@@ -327,7 +327,7 @@ fn build_events(
         Some(Value::Concrete(ConcreteValue::List(items))) => items
             .iter()
             .map(|v| match v {
-                Value::Concrete(ConcreteValue::String(s)) => Ok(Event::from(s.as_str())),
+                Value::Concrete(ConcreteValue::String(s)) => Ok(Event::from(s.expose_plaintext())),
                 _ => Err(ProviderError::invalid_input(format!(
                     "{parent}.events must be a list of strings"
                 ))
@@ -384,12 +384,12 @@ fn topic_to_value(t: &TopicConfiguration) -> Value {
     if let Some(s) = t.id() {
         m.insert(
             "id".to_string(),
-            Value::Concrete(ConcreteValue::String(s.to_string())),
+            Value::Concrete(ConcreteValue::String(s.to_string().into())),
         );
     }
     m.insert(
         "topic_arn".to_string(),
-        Value::Concrete(ConcreteValue::String(t.topic_arn().to_string())),
+        Value::Concrete(ConcreteValue::String(t.topic_arn().to_string().into())),
     );
     m.insert("events".to_string(), events_to_value(t.events()));
     if let Some(f) = t.filter() {
@@ -403,12 +403,12 @@ fn queue_to_value(q: &QueueConfiguration) -> Value {
     if let Some(s) = q.id() {
         m.insert(
             "id".to_string(),
-            Value::Concrete(ConcreteValue::String(s.to_string())),
+            Value::Concrete(ConcreteValue::String(s.to_string().into())),
         );
     }
     m.insert(
         "queue_arn".to_string(),
-        Value::Concrete(ConcreteValue::String(q.queue_arn().to_string())),
+        Value::Concrete(ConcreteValue::String(q.queue_arn().to_string().into())),
     );
     m.insert("events".to_string(), events_to_value(q.events()));
     if let Some(f) = q.filter() {
@@ -422,12 +422,14 @@ fn lambda_to_value(l: &LambdaFunctionConfiguration) -> Value {
     if let Some(s) = l.id() {
         m.insert(
             "id".to_string(),
-            Value::Concrete(ConcreteValue::String(s.to_string())),
+            Value::Concrete(ConcreteValue::String(s.to_string().into())),
         );
     }
     m.insert(
         "lambda_function_arn".to_string(),
-        Value::Concrete(ConcreteValue::String(l.lambda_function_arn().to_string())),
+        Value::Concrete(ConcreteValue::String(
+            l.lambda_function_arn().to_string().into(),
+        )),
     );
     m.insert("events".to_string(), events_to_value(l.events()));
     if let Some(f) = l.filter() {
@@ -440,7 +442,7 @@ fn events_to_value(events: &[Event]) -> Value {
     Value::Concrete(ConcreteValue::List(
         events
             .iter()
-            .map(|e| Value::Concrete(ConcreteValue::String(e.as_str().to_string())))
+            .map(|e| Value::Concrete(ConcreteValue::String(e.as_str().to_string().into())))
             .collect(),
     ))
 }
@@ -456,13 +458,13 @@ fn filter_to_value(f: &NotificationConfigurationFilter) -> Value {
                 if let Some(n) = r.name() {
                     m.insert(
                         "name".to_string(),
-                        Value::Concrete(ConcreteValue::String(n.as_str().to_string())),
+                        Value::Concrete(ConcreteValue::String(n.as_str().to_string().into())),
                     );
                 }
                 if let Some(v) = r.value() {
                     m.insert(
                         "value".to_string(),
-                        Value::Concrete(ConcreteValue::String(v.to_string())),
+                        Value::Concrete(ConcreteValue::String(v.to_string().into())),
                     );
                 }
                 Value::Concrete(ConcreteValue::Map(m))

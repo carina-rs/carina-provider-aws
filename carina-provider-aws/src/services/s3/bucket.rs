@@ -27,19 +27,21 @@ impl S3BucketReadOnlyOutputs {
         let mut attributes = HashMap::from([
             (
                 "arn".to_string(),
-                Value::Concrete(ConcreteValue::String(self.arn)),
+                Value::Concrete(ConcreteValue::String(self.arn.into())),
             ),
             (
                 "region".to_string(),
-                Value::Concrete(ConcreteValue::String(self.region)),
+                Value::Concrete(ConcreteValue::String(self.region.into())),
             ),
             (
                 "bucket_domain_name".to_string(),
-                Value::Concrete(ConcreteValue::String(self.bucket_domain_name)),
+                Value::Concrete(ConcreteValue::String(self.bucket_domain_name.into())),
             ),
             (
                 "bucket_regional_domain_name".to_string(),
-                Value::Concrete(ConcreteValue::String(self.bucket_regional_domain_name)),
+                Value::Concrete(ConcreteValue::String(
+                    self.bucket_regional_domain_name.into(),
+                )),
             ),
         ]);
 
@@ -49,7 +51,7 @@ impl S3BucketReadOnlyOutputs {
         if let Some(hosted_zone_id) = self.hosted_zone_id {
             attributes.insert(
                 "hosted_zone_id".to_string(),
-                Value::Concrete(ConcreteValue::String(hosted_zone_id)),
+                Value::Concrete(ConcreteValue::String(hosted_zone_id.into())),
             );
         }
 
@@ -107,7 +109,7 @@ impl AwsProvider {
                 let mut attributes = s3_bucket_read_only_outputs(name, &region).into_attributes();
                 attributes.insert(
                     "bucket".to_string(),
-                    Value::Concrete(ConcreteValue::String(name.to_string())),
+                    Value::Concrete(ConcreteValue::String(name.to_string().into())),
                 );
 
                 // Get tags
@@ -150,7 +152,7 @@ impl AwsProvider {
     /// Create an S3 bucket
     pub(crate) async fn create_s3_bucket(&self, resource: &Resource) -> ProviderResult<State> {
         let bucket_name = match resource.get_attr("bucket") {
-            Some(Value::Concrete(ConcreteValue::String(s))) => s.clone(),
+            Some(Value::Concrete(ConcreteValue::String(s))) => s.expose_plaintext().to_string(),
             _ => {
                 return Err(ProviderError::invalid_input("Bucket name is required")
                     .for_resource(resource.id.clone()));
@@ -368,7 +370,7 @@ impl AwsProvider {
                 for tag in output.tag_set() {
                     tag_map.insert(
                         tag.key().to_string(),
-                        Value::Concrete(ConcreteValue::String(tag.value().to_string())),
+                        Value::Concrete(ConcreteValue::String(tag.value().to_string().into())),
                     );
                 }
                 if !tag_map.is_empty() {
@@ -405,7 +407,13 @@ impl AwsProvider {
                 .iter()
                 .filter_map(|(k, v)| {
                     if let Value::Concrete(ConcreteValue::String(val)) = v {
-                        Some(Tag::builder().key(k).value(val).build().ok()?)
+                        Some(
+                            Tag::builder()
+                                .key(k)
+                                .value(val.expose_plaintext())
+                                .build()
+                                .ok()?,
+                        )
                     } else {
                         None
                     }
@@ -450,7 +458,7 @@ impl AwsProvider {
         let resource = resource.clone();
         Box::pin(async move {
             let bucket = match resource.get_attr("bucket") {
-                Some(Value::Concrete(ConcreteValue::String(s))) => s.clone(),
+                Some(Value::Concrete(ConcreteValue::String(s))) => s.expose_plaintext().to_string(),
                 _ => {
                     return Err(ProviderError::invalid_input("`bucket` is required")
                         .for_resource(resource.id.clone()));
@@ -501,7 +509,7 @@ impl AwsProvider {
             let mut attrs = s3_bucket_read_only_outputs(&bucket, &region).into_attributes();
             attrs.insert(
                 "bucket".into(),
-                Value::Concrete(ConcreteValue::String(bucket.clone())),
+                Value::Concrete(ConcreteValue::String(bucket.clone().into())),
             );
 
             Ok(State::existing(resource.id.clone(), attrs).with_identifier(&bucket))
@@ -603,7 +611,7 @@ mod tests {
 
     fn concrete_string<'a>(attributes: &'a HashMap<String, Value>, name: &str) -> &'a str {
         match attributes.get(name) {
-            Some(Value::Concrete(ConcreteValue::String(value))) => value,
+            Some(Value::Concrete(ConcreteValue::String(value))) => value.expose_plaintext(),
             other => panic!("expected concrete string attribute `{name}`, got {other:?}"),
         }
     }
@@ -820,7 +828,7 @@ mod tests {
         for &(region, hosted_zone_id) in S3_HOSTED_ZONE_IDS {
             assert_eq!(s3_hosted_zone_id(region).as_deref(), Ok(hosted_zone_id));
             let result = schema.validate(&Value::Concrete(ConcreteValue::String(
-                hosted_zone_id.to_string(),
+                hosted_zone_id.to_string().into(),
             )));
             assert!(
                 result.is_ok(),

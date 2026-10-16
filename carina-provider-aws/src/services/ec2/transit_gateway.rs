@@ -153,7 +153,7 @@ impl AwsProvider {
 
         if let Some(Value::Concrete(ConcreteValue::String(desc))) = resource.get_attr("description")
         {
-            req = req.description(desc);
+            req = req.description(desc.expose_plaintext());
         }
 
         if let Some(options) = build_create_transit_gateway_options(resource, schema) {
@@ -385,7 +385,7 @@ mod tests {
     fn create_reads_nested_options_vpn_ecmp_support() {
         let resource = one_enum_option(
             "vpn_ecmp_support",
-            Value::Concrete(ConcreteValue::String("enable".to_string())),
+            Value::Concrete(ConcreteValue::String("enable".to_string().into())),
         );
         let options = build_create_transit_gateway_options(&resource, &schema()).expect("options");
         assert_eq!(
@@ -398,7 +398,7 @@ mod tests {
     fn create_reads_nested_options_multicast_support() {
         let resource = one_enum_option(
             "multicast_support",
-            Value::Concrete(ConcreteValue::String("enable".to_string())),
+            Value::Concrete(ConcreteValue::String("enable".to_string().into())),
         );
         let options = build_create_transit_gateway_options(&resource, &schema()).expect("options");
         assert_eq!(
@@ -411,7 +411,7 @@ mod tests {
     fn create_reads_nested_options_security_group_referencing_support() {
         let resource = one_enum_option(
             "security_group_referencing_support",
-            Value::Concrete(ConcreteValue::String("enable".to_string())),
+            Value::Concrete(ConcreteValue::String("enable".to_string().into())),
         );
         let options = build_create_transit_gateway_options(&resource, &schema()).expect("options");
         assert_eq!(
@@ -424,7 +424,7 @@ mod tests {
     fn create_reads_nested_options_auto_accept_shared_attachments() {
         let resource = one_enum_option(
             "auto_accept_shared_attachments",
-            Value::Concrete(ConcreteValue::String("enable".to_string())),
+            Value::Concrete(ConcreteValue::String("enable".to_string().into())),
         );
         let options = build_create_transit_gateway_options(&resource, &schema()).expect("options");
         assert_eq!(
@@ -437,7 +437,7 @@ mod tests {
     fn create_reads_nested_options_default_route_table_association() {
         let resource = one_enum_option(
             "default_route_table_association",
-            Value::Concrete(ConcreteValue::String("disable".to_string())),
+            Value::Concrete(ConcreteValue::String("disable".to_string().into())),
         );
         let options = build_create_transit_gateway_options(&resource, &schema()).expect("options");
         assert_eq!(
@@ -450,7 +450,7 @@ mod tests {
     fn create_reads_nested_options_default_route_table_propagation() {
         let resource = one_enum_option(
             "default_route_table_propagation",
-            Value::Concrete(ConcreteValue::String("disable".to_string())),
+            Value::Concrete(ConcreteValue::String("disable".to_string().into())),
         );
         let options = build_create_transit_gateway_options(&resource, &schema()).expect("options");
         assert_eq!(
@@ -479,7 +479,7 @@ mod tests {
             [(
                 "transit_gateway_cidr_blocks".to_string(),
                 Value::Concrete(ConcreteValue::List(vec![Value::Concrete(
-                    ConcreteValue::String("10.0.0.0/24".to_string()),
+                    ConcreteValue::String("10.0.0.0/24".to_string().into()),
                 )])),
             )]
             .into_iter()
@@ -527,19 +527,19 @@ mod tests {
         assert_eq!(
             options.get("dns_support"),
             Some(&Value::Concrete(ConcreteValue::String(
-                "enable".to_string()
+                "enable".to_string().into()
             )))
         );
         assert_eq!(
             options.get("vpn_ecmp_support"),
             Some(&Value::Concrete(ConcreteValue::String(
-                "disable".to_string()
+                "disable".to_string().into()
             )))
         );
         assert_eq!(
             options.get("transit_gateway_cidr_blocks"),
             Some(&Value::Concrete(ConcreteValue::List(vec![
-                Value::Concrete(ConcreteValue::String("10.0.0.0/24".to_string()))
+                Value::Concrete(ConcreteValue::String("10.0.0.0/24".to_string().into()))
             ])))
         );
         assert!(!attrs.contains_key("dns_support"));
@@ -550,7 +550,7 @@ mod tests {
         let mut resource = Resource::with_provider("aws", "ec2.TransitGateway", "test", None);
         resource.set_attr(
             "dns_support".to_string(),
-            Value::Concrete(ConcreteValue::String("disable".to_string())),
+            Value::Concrete(ConcreteValue::String("disable".to_string().into())),
         );
         assert!(build_create_transit_gateway_options(&resource, &schema()).is_none());
     }

@@ -54,20 +54,20 @@ impl AwsProvider {
 
                     attributes.insert(
                         "association_id".to_string(),
-                        Value::Concrete(ConcreteValue::String(association_id.to_string())),
+                        Value::Concrete(ConcreteValue::String(association_id.to_string().into())),
                     );
 
                     if let Some(rt_id) = assoc.route_table_id() {
                         attributes.insert(
                             "route_table_id".to_string(),
-                            Value::Concrete(ConcreteValue::String(rt_id.to_string())),
+                            Value::Concrete(ConcreteValue::String(rt_id.to_string().into())),
                         );
                     }
 
                     if let Some(sid) = assoc.subnet_id() {
                         attributes.insert(
                             "subnet_id".to_string(),
-                            Value::Concrete(ConcreteValue::String(sid.to_string())),
+                            Value::Concrete(ConcreteValue::String(sid.to_string().into())),
                         );
                     }
 
@@ -134,7 +134,7 @@ impl AwsProvider {
         };
 
         let route_table_id = match to.get_attr("route_table_id") {
-            Some(Value::Concrete(ConcreteValue::String(s))) => s.clone(),
+            Some(Value::Concrete(ConcreteValue::String(s))) => s.expose_plaintext().to_string(),
             _ => {
                 return Err(ProviderError::invalid_input("route_table_id is required")
                     .for_resource(id.clone()));

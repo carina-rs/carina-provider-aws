@@ -75,6 +75,7 @@ pub fn availability_zone() -> AttributeType {
         vec![],
         Some(legacy_validator(|value| {
             if let Value::Concrete(ConcreteValue::String(s)) = value {
+                let s = s.expose_plaintext();
                 let id = provider_bare_type(&["AvailabilityZone"], "ZoneName");
                 validate_enum_namespace(s, &id)
                     .map_err(|reason| format!("Invalid availability zone '{}': {}", s, reason))?;

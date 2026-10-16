@@ -120,13 +120,13 @@ impl AwsProvider {
                 let mut attributes = HashMap::new();
                 attributes.insert(
                     "bucket".to_string(),
-                    Value::Concrete(ConcreteValue::String(bucket.to_string())),
+                    Value::Concrete(ConcreteValue::String(bucket.to_string().into())),
                 );
                 let owner_id = output.owner().and_then(|o| o.id());
                 if let Some(canned) = infer_canned_acl_from_grants(output.grants(), owner_id) {
                     attributes.insert(
                         "acl".to_string(),
-                        Value::Concrete(ConcreteValue::String(canned.to_string())),
+                        Value::Concrete(ConcreteValue::String(canned.to_string().into())),
                     );
                 }
                 Ok(State::existing(id.clone(), attributes).with_identifier(bucket.to_string()))
