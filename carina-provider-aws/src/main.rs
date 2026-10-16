@@ -402,38 +402,6 @@ impl CarinaProvider for AwsProcessProvider {
             .map(convert::core_to_proto_resource)
             .collect())
     }
-
-    fn merge_default_tags(
-        &self,
-        resources: &mut Vec<proto::Resource>,
-        default_tags: &HashMap<String, proto::Value>,
-        proto_schemas: &Vec<proto::ResourceSchema>,
-    ) -> Result<(), proto::ProviderError> {
-        let mut core_resources: Vec<_> = resources
-            .iter()
-            .map(convert::proto_to_core_resource)
-            .collect();
-        let core_tags: indexmap::IndexMap<String, _> = default_tags
-            .iter()
-            .map(|(k, v)| (k.clone(), convert::proto_to_core_value(v)))
-            .collect();
-        let mut registry = SchemaRegistry::new();
-        for s in proto_schemas {
-            registry.insert("aws", convert::proto_to_core_schema(s));
-        }
-        self.runtime
-            .block_on(self.normalizer.merge_default_tags(
-                &mut core_resources,
-                &core_tags,
-                &registry,
-            ))
-            .map_err(Self::convert_error)?;
-        *resources = core_resources
-            .iter()
-            .map(convert::core_to_proto_resource)
-            .collect();
-        Ok(())
-    }
 }
 
 /// Schema for the provider-level `assume_role` block. Mirrors the

@@ -17,9 +17,9 @@ use carina_core::resource::{
 };
 use carina_core::schema::{
     AttributeSchema as CoreAttributeSchema, AttributeType as CoreAttributeType,
-    InputMode as CoreInputMode, OperationConfig as CoreOperationConfig, RawShape as CoreRawShape,
-    ResourceSchema as CoreResourceSchema, SchemaKind as CoreSchemaKind,
-    StructField as CoreStructField, UniqueNameSpec as CoreUniqueNameSpec, legacy_validator,
+    InputMode as CoreInputMode, RawShape as CoreRawShape, ResourceSchema as CoreResourceSchema,
+    SchemaKind as CoreSchemaKind, StructField as CoreStructField,
+    UniqueNameSpec as CoreUniqueNameSpec,
 };
 use carina_provider_protocol::types::{
     AttributeSchema as ProtoAttributeSchema, AttributeType as ProtoAttributeType,
@@ -308,275 +308,6 @@ pub fn proto_to_core_data_source(r: &ProtoResource) -> CoreDataSource {
 
 // -- AttributeType --
 
-fn proto_to_core_attribute_type(t: &ProtoAttributeType) -> CoreAttributeType {
-    match t {
-        ProtoAttributeType::String {
-            pattern,
-            length,
-            to_dsl,
-            identity,
-            ..
-        } => CoreAttributeType::refined_string(
-            identity
-                .as_deref()
-                .filter(|s| !s.is_empty())
-                .map(carina_core::schema::TypeIdentity::from_dotted),
-            pattern.clone(),
-            *length,
-            to_dsl.clone(),
-        ),
-        ProtoAttributeType::Int { range, identity } => CoreAttributeType::refined_int(
-            identity
-                .as_deref()
-                .filter(|s| !s.is_empty())
-                .map(carina_core::schema::TypeIdentity::from_dotted),
-            *range,
-        ),
-        ProtoAttributeType::Float { range, identity } => CoreAttributeType::refined_float(
-            identity
-                .as_deref()
-                .filter(|s| !s.is_empty())
-                .map(carina_core::schema::TypeIdentity::from_dotted),
-            *range,
-        ),
-        ProtoAttributeType::Bool => CoreAttributeType::bool(),
-        ProtoAttributeType::Duration => CoreAttributeType::duration(),
-        ProtoAttributeType::StringEnum {
-            values,
-            name,
-            namespace,
-            dsl_aliases,
-        } => CoreAttributeType::enum_(
-            // Lift the wire-form flat dotted prefix into the
-            // structured `TypeIdentity` the core schema carries
-            // post-#3222.
-            namespace
-                .as_deref()
-                .filter(|s| !s.is_empty())
-                .map(|ns| carina_core::schema::enum_identity(name, Some(ns)))
-                .unwrap_or_else(|| carina_core::schema::enum_identity(name, None)),
-            Some(values.clone()),
-            // Thread the alias data through the WASM boundary so the host
-            // validator's `matches_alias` arm can accept DSL spellings —
-            // a `fn` pointer cannot survive proto serialization
-            // (carina#2831 / aws#247).
-            dsl_aliases.clone(),
-            None,
-            None,
-        ),
-        ProtoAttributeType::List {
-            element_type,
-            ordered,
-            length,
-            ..
-        } => {
-            let inner_t = proto_to_core_attribute_type(element_type);
-            if *ordered {
-                CoreAttributeType::refined_list(
-                    inner_t,
-                    true,
-                    *length,
-                    legacy_validator(|_| Ok(())),
-                )
-            } else {
-                CoreAttributeType::refined_list(
-                    inner_t,
-                    false,
-                    *length,
-                    legacy_validator(|_| Ok(())),
-                )
-            }
-        }
-        ProtoAttributeType::Map { inner, key } => CoreAttributeType::map_with_key(
-            proto_to_core_attribute_type(key),
-            proto_to_core_attribute_type(inner),
-        ),
-        ProtoAttributeType::Struct { name, fields } => CoreAttributeType::struct_(
-            name.clone(),
-            fields.iter().map(proto_to_core_struct_field).collect(),
-        ),
-        ProtoAttributeType::Union { members } => {
-            CoreAttributeType::union(members.iter().map(proto_to_core_attribute_type).collect())
-        }
-        ProtoAttributeType::Custom {
-            name,
-            base,
-            pattern,
-            length,
-            to_dsl,
-            ..
-        } => {
-            let identity = if name.is_empty() {
-                None
-            } else {
-                Some(carina_core::schema::TypeIdentity::from_dotted(name))
-            };
-            let base = proto_to_core_attribute_type(base);
-            match base.raw_shape() {
-                CoreRawShape::String { .. } => CoreAttributeType::refined_string(
-                    identity,
-                    pattern.clone(),
-                    *length,
-                    to_dsl.clone(),
-                ),
-                CoreRawShape::Int { .. } => CoreAttributeType::refined_int(
-                    identity,
-                    length.map(|(min, max)| (min.map(|v| v as i64), max.map(|v| v as i64))),
-                ),
-                CoreRawShape::Float { .. } => CoreAttributeType::refined_float(identity, None),
-                CoreRawShape::List {
-                    element_type,
-                    ordered,
-                    ..
-                } => {
-                    let _ = (identity, pattern);
-                    CoreAttributeType::refined_list(
-                        element_type.clone(),
-                        ordered,
-                        *length,
-                        legacy_validator(|_| Ok(())),
-                    )
-                }
-                other => panic!("unsupported Custom base in provider protocol: {other:?}"),
-            }
-        }
-        // CustomEnum: carries a mandatory identity, lifted from the
-        // wire-form flat `(name, namespace)` pair via the
-        // `enum_identity` helper. Matches the post-#3222 core
-        // schema split — enum-shaped Customs expand the namespaced
-        // shorthand before the validator runs.
-        ProtoAttributeType::CustomEnum {
-            name,
-            base,
-            namespace,
-            dsl_transform,
-        } => CoreAttributeType::enum_with_base(
-            carina_core::schema::enum_identity(name, Some(namespace.as_str())),
-            proto_to_core_attribute_type(base),
-            None,
-            vec![],
-            None,
-            dsl_transform.clone(),
-        ),
-        // Cyclic CFN struct reference (carina#3340). The host's
-        // structural counterpart is `AttributeType::ref_`; the matching
-        // `ResourceSchema.defs` map is converted alongside in
-        // `proto_to_core_schema` so resolution at walk-sites succeeds.
-        ProtoAttributeType::Ref { name } => CoreAttributeType::ref_(name.clone()),
-    }
-}
-
-fn proto_to_core_struct_field(f: &ProtoStructField) -> CoreStructField {
-    let ProtoStructField {
-        name,
-        field_type,
-        required,
-        description,
-        block_name,
-        provider_name,
-        read_only,
-        deferred_populate,
-    } = f;
-    CoreStructField {
-        name: name.clone(),
-        field_type: proto_to_core_attribute_type(field_type),
-        input_mode: proto_input_mode_to_core(*required, *read_only),
-        description: description.clone(),
-        provider_name: provider_name.clone(),
-        block_name: block_name.clone(),
-        deferred_populate: *deferred_populate,
-    }
-}
-
-fn proto_input_mode_to_core(required: bool, read_only: bool) -> CoreInputMode {
-    match (required, read_only) {
-        (false, false) => CoreInputMode::Optional,
-        (true, false) => CoreInputMode::Required,
-        (false, true) => CoreInputMode::ProviderPopulated,
-        (true, true) => panic!("schema input mode cannot be both required and read-only"),
-    }
-}
-
-fn proto_to_core_attribute_schema(a: &ProtoAttributeSchema) -> CoreAttributeSchema {
-    let ProtoAttributeSchema {
-        name,
-        attr_type,
-        required,
-        default,
-        description,
-        create_only,
-        read_only,
-        write_only,
-        block_name,
-        provider_name,
-        removable,
-        identity,
-        deferred_populate,
-    } = a;
-    CoreAttributeSchema {
-        name: name.clone(),
-        attr_type: proto_to_core_attribute_type(attr_type),
-        input_mode: proto_input_mode_to_core(*required, *read_only),
-        default: default.as_ref().map(proto_to_core_value),
-        description: description.clone(),
-        completions: None,
-        provider_name: provider_name.clone(),
-        create_only: *create_only,
-        removable: *removable,
-        block_name: block_name.clone(),
-        write_only: *write_only,
-        identity: *identity,
-        deferred_populate: *deferred_populate,
-    }
-}
-
-pub fn proto_to_core_schema(s: &ProtoResourceSchema) -> CoreResourceSchema {
-    CoreResourceSchema {
-        resource_type: s.resource_type.clone(),
-        attributes: s
-            .attributes
-            .iter()
-            .map(|(k, v)| (k.clone(), proto_to_core_attribute_schema(v)))
-            .collect(),
-        description: s.description.clone(),
-        validator: None,
-        kind: proto_to_core_schema_kind(s.kind),
-        unique_name: proto_to_core_unique_name(&s.unique_name),
-        operation_config: s.operation_config.as_ref().map(|c| CoreOperationConfig {
-            delete_timeout_secs: c.delete_timeout_secs,
-            delete_max_retries: c.delete_max_retries,
-            create_timeout_secs: c.create_timeout_secs,
-            create_max_retries: c.create_max_retries,
-        }),
-        exclusive_required: s.exclusive_required.clone(),
-        default_wait_timeout: None,
-        default_wait_interval: None,
-        // Cyclic CFN struct definitions reachable via Ref (carina#3340).
-        defs: s
-            .defs
-            .iter()
-            .map(|(k, v)| (k.clone(), proto_to_core_attribute_type(v)))
-            .collect(),
-    }
-}
-
-fn proto_to_core_unique_name(spec: &ProtoUniqueNameSpec) -> CoreUniqueNameSpec {
-    match spec {
-        ProtoUniqueNameSpec::Attribute(attribute) => {
-            CoreUniqueNameSpec::Attribute(attribute.clone())
-        }
-        ProtoUniqueNameSpec::Coexisting => CoreUniqueNameSpec::Coexisting,
-        ProtoUniqueNameSpec::Conflicting => CoreUniqueNameSpec::Conflicting,
-    }
-}
-
-fn proto_to_core_schema_kind(k: ProtoSchemaKind) -> CoreSchemaKind {
-    match k {
-        ProtoSchemaKind::Managed => CoreSchemaKind::Resource,
-        ProtoSchemaKind::DataSource => CoreSchemaKind::DataSource,
-    }
-}
-
 fn core_to_proto_schema_kind(k: CoreSchemaKind) -> ProtoSchemaKind {
     match k {
         CoreSchemaKind::Resource => ProtoSchemaKind::Managed,
@@ -806,7 +537,7 @@ mod tests {
     }
 
     #[test]
-    fn test_string_enum_name_roundtrip() {
+    fn test_string_enum_name_transport() {
         let core_type = CoreAttributeType::enum_(
             carina_core::schema::enum_identity("VersioningStatus", Some("aws.s3.Bucket")),
             Some(vec!["Enabled".to_string(), "Suspended".to_string()]),
@@ -841,28 +572,14 @@ mod tests {
             }
             _ => panic!("Expected StringEnum"),
         }
-        let roundtrip = proto_to_core_attribute_type(&proto_type);
-        if let CoreRawShape::Enum {
-            identity,
-            values: Some(values),
-            ..
-        } = roundtrip.raw_shape()
-        {
-            assert_eq!(identity.kind, "VersioningStatus");
-            assert_eq!(values, &["Enabled", "Suspended"]);
-        } else {
-            panic!("Expected enum");
-        }
     }
 
     /// Regression for aws#395 / carina#3364: a refined string attribute's schema
-    /// `pattern` and `length` constraints MUST cross the WASM boundary in
-    /// BOTH directions. If they are dropped, `carina validate` cannot
-    /// enforce them and a violating value only fails at `apply`. Asserts
-    /// the constraints reach the proto wire form and survive the
-    /// proto -> core round-trip.
+    /// `pattern` and `length` constraints MUST cross the WASM boundary. If they
+    /// are dropped, `carina validate` cannot enforce them and a violating value
+    /// only fails at `apply`.
     #[test]
-    fn refined_string_pattern_and_length_cross_proto_boundary_both_ways() {
+    fn refined_string_pattern_and_length_cross_proto_boundary() {
         let pattern = "^[a-z]+$";
         let length = (Some(1u64), Some(256u64));
         let core_type = CoreAttributeType::refined_string(
@@ -874,7 +591,6 @@ mod tests {
             None,
         );
 
-        // core -> proto: the constraint must reach the wire form.
         let proto_type = core_to_proto_attribute_type(&core_type);
         match &proto_type {
             ProtoAttributeType::String {
@@ -892,29 +608,10 @@ mod tests {
             }
             other => panic!("Expected String, got {other:?}"),
         }
-
-        // proto -> core round-trip: the constraint must survive.
-        let roundtripped = proto_to_core_attribute_type(&proto_type);
-        match roundtripped.raw_shape() {
-            CoreRawShape::String {
-                identity,
-                pattern: rt_pattern,
-                length: rt_length,
-                ..
-            } => {
-                assert_eq!(
-                    identity.map(|id| id.to_string()).as_deref(),
-                    Some("aws.example.Resource.SomeConstrained")
-                );
-                assert_eq!(rt_pattern, Some(pattern));
-                assert_eq!(rt_length, Some(length));
-            }
-            other => panic!("Expected String, got {other:?}"),
-        }
     }
 
     #[test]
-    fn custom_enum_dsl_transform_crosses_proto_boundary_both_ways() {
+    fn custom_enum_dsl_transform_crosses_proto_boundary() {
         let core_type = CoreAttributeType::enum_with_base(
             carina_core::schema::enum_identity("Region", Some("aws")),
             CoreAttributeType::string(),
@@ -934,17 +631,6 @@ mod tests {
             }
             other => panic!("Expected CustomEnum, got {other:?}"),
         }
-
-        let roundtripped = proto_to_core_attribute_type(&proto_type);
-        match roundtripped.raw_shape() {
-            CoreRawShape::Enum { to_dsl, .. } => {
-                assert_eq!(
-                    to_dsl,
-                    Some(&carina_core::schema::DslTransform::HyphenToUnderscore)
-                );
-            }
-            other => panic!("Expected Enum, got {other:?}"),
-        }
     }
 
     /// An anonymous pattern-only refined string (`identity: None`, no `length`)
@@ -958,54 +644,16 @@ mod tests {
         let core_type =
             CoreAttributeType::refined_string(None, Some(pattern.to_string()), None, None);
 
-        let proto_type = core_to_proto_attribute_type(&core_type);
-        let roundtripped = proto_to_core_attribute_type(&proto_type);
-        match roundtripped.raw_shape() {
-            CoreRawShape::String {
+        match core_to_proto_attribute_type(&core_type) {
+            ProtoAttributeType::String {
                 identity,
-                pattern: rt_pattern,
-                length: rt_length,
+                pattern: proto_pattern,
+                length: proto_length,
                 ..
             } => {
                 assert!(identity.is_none(), "anonymous custom stays anonymous");
-                assert_eq!(rt_pattern, Some(pattern));
-                assert_eq!(rt_length, None);
-            }
-            other => panic!("Expected String, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn old_custom_string_wire_payload_converts_to_refined_string() {
-        let proto_type = ProtoAttributeType::Custom {
-            name: "aws.example.Resource.Legacy".to_string(),
-            base: Box::new(ProtoAttributeType::String {
-                pattern: None,
-                length: None,
-                validate: None,
-                to_dsl: None,
-                identity: None,
-            }),
-            pattern: Some("^[a-z]+$".to_string()),
-            length: Some((Some(1), Some(9))),
-            validate: None,
-            to_dsl: None,
-        };
-
-        let core_type = proto_to_core_attribute_type(&proto_type);
-        match core_type.raw_shape() {
-            CoreRawShape::String {
-                identity,
-                pattern,
-                length,
-                ..
-            } => {
-                assert_eq!(
-                    identity.map(|id| id.to_string()).as_deref(),
-                    Some("aws.example.Resource.Legacy")
-                );
-                assert_eq!(pattern, Some("^[a-z]+$"));
-                assert_eq!(length, Some((Some(1), Some(9))));
+                assert_eq!(proto_pattern.as_deref(), Some(pattern));
+                assert_eq!(proto_length, None);
             }
             other => panic!("Expected String, got {other:?}"),
         }
@@ -1057,52 +705,5 @@ mod tests {
             proto_status.default,
             Some(ProtoValue::String("PENDING_VALIDATION".to_string()))
         );
-
-        let round_tripped = proto_to_core_schema(&proto);
-        let domain_validation = &round_tripped.attributes["domain_validation_options"];
-        let CoreRawShape::Struct {
-            name: round_tripped_struct_name,
-            fields: round_tripped_fields,
-        } = domain_validation.attr_type.raw_shape()
-        else {
-            panic!("round-tripped domain_validation_options must remain a Struct");
-        };
-        assert_eq!(round_tripped_struct_name, "DomainValidation");
-        let CoreStructField {
-            name: field_name,
-            field_type: _field_type,
-            input_mode: field_input_mode,
-            description: _field_description,
-            provider_name: _field_provider_name,
-            block_name: _field_block_name,
-            deferred_populate: field_deferred_populate,
-        } = &round_tripped_fields[0];
-        assert_eq!(field_name, "resource_record");
-        assert_eq!(*field_input_mode, CoreInputMode::ProviderPopulated);
-        assert!(*field_deferred_populate);
-
-        let CoreAttributeSchema {
-            name: status_name,
-            attr_type: _status_type,
-            input_mode: status_input_mode,
-            default: status_default,
-            description: _status_description,
-            completions: _status_completions,
-            provider_name: _status_provider_name,
-            create_only: _status_create_only,
-            removable: _status_removable,
-            block_name: _status_block_name,
-            write_only: _status_write_only,
-            identity: _status_identity,
-            deferred_populate: status_deferred_populate,
-        } = &round_tripped.attributes["status"];
-        assert_eq!(status_name, "status");
-        assert_eq!(*status_input_mode, CoreInputMode::ProviderPopulated);
-        assert!(matches!(
-            status_default,
-            Some(CoreValue::Concrete(ConcreteValue::String(value)))
-                if value == "PENDING_VALIDATION"
-        ));
-        assert!(*status_deferred_populate);
     }
 }
