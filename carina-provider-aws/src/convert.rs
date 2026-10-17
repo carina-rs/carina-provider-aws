@@ -528,10 +528,11 @@ mod tests {
     #[test]
     #[should_panic(expected = "redacted saved-state secret must not reach a provider")]
     fn redacted_saved_state_secret_is_rejected_at_provider_boundary() {
-        let value: CoreValue = serde_json::from_value(serde_json::json!({
-            "RedactedSecret": { "hash": "00".repeat(32) }
-        }))
-        .expect("deserialize saved-state placeholder");
+        let secret = CoreValue::Deferred(DeferredValue::Secret(Box::new(CoreValue::Concrete(
+            ConcreteValue::String("boundary-test-secret".into()),
+        ))));
+        let value = carina_core::value::redact_secrets_in_value(&secret)
+            .expect("redact saved-state placeholder");
 
         let _ = core_to_proto_value(&value);
     }
