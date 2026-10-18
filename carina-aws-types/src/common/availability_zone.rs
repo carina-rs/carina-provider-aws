@@ -1,6 +1,5 @@
 use carina_core::resource::{ConcreteValue, Value};
 use carina_core::schema::{AttributeType, DslTransform, legacy_validator};
-use carina_core::utils::validate_enum_namespace;
 
 use super::provider_bare_type;
 
@@ -56,18 +55,11 @@ pub fn validate_availability_zone(az: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn strip_availability_zone_prefix(value: &str) -> &str {
-    value
-        .strip_prefix("aws.AvailabilityZone.ZoneName.")
-        .or_else(|| value.strip_prefix("ZoneName."))
-        .unwrap_or(value)
-}
-
-/// Availability zone type with validation (e.g., "us-east-1a")
-/// Accepts:
-/// - DSL format: aws.AvailabilityZone.ZoneName.us_east_1a
-/// - AWS string format: "us-east-1a"
-/// - Shorthand: us_east_1a
+/// Availability zone type with provider-facing API-spelling validation.
+///
+/// Enum identifiers are resolved to API spelling by the host before this
+/// validator runs. Quoted strings are literal and must already use the AWS
+/// spelling (for example, `"us-east-1a"`).
 pub fn availability_zone() -> AttributeType {
     AttributeType::enum_(
         provider_bare_type(&["AvailabilityZone"], "ZoneName"),
@@ -76,12 +68,7 @@ pub fn availability_zone() -> AttributeType {
         Some(legacy_validator(|value| {
             if let Value::Concrete(ConcreteValue::String(s)) = value {
                 let s = s.expose_plaintext();
-                let id = provider_bare_type(&["AvailabilityZone"], "ZoneName");
-                validate_enum_namespace(s, &id)
-                    .map_err(|reason| format!("Invalid availability zone '{}': {}", s, reason))?;
-                let extracted = strip_availability_zone_prefix(s);
-                let normalized = extracted.replace('_', "-");
-                validate_availability_zone(&normalized)
+                validate_availability_zone(s)
                     .map_err(|reason| format!("Invalid availability zone '{}': {}", s, reason))
             } else {
                 Err("Expected string".to_string())

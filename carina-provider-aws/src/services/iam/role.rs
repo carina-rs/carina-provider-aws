@@ -432,14 +432,10 @@ fn lookup_snake(
 /// `iam_policy_document()` schema.
 ///
 /// This is the apply-path serializer (reached via `resolve_iam_policy_attr`
-/// from `s3.BucketPolicy` / `iam.Role` / `sqs.Queue`). Being schema-typed
-/// is the root fix for aws#315: `StringEnum` leaves (`version`, `effect`)
-/// are canonicalized to the AWS wire form here via `DslMap::api_for`,
-/// regardless of whether the upstream plan-time normalizer ran. The
-/// previous hand-written serializer was schema-blind and depended on the
-/// normalizer having canonicalized enums first — which the apply path
-/// does not do (carina#3060), so the DSL spelling reached AWS and was
-/// rejected with `MalformedPolicy`.
+/// from `s3.BucketPolicy` / `iam.Role` / `sqs.Queue`). The host has already
+/// resolved every enum leaf to its API spelling before this code runs. A
+/// guest-side `String` is therefore serialized literally, while a native
+/// `CanonicalEnum` contributes its `api_value`.
 ///
 /// Mirrors awscc's `dsl_value_to_aws`. Field key casing comes from the
 /// schema's `with_provider_name(...)`; condition operator keys are still
@@ -457,26 +453,12 @@ fn dsl_value_to_iam_json(
     attr_type: &carina_core::schema::AttributeType,
     attr_name: &str,
 ) -> serde_json::Value {
-    // StringEnum leaf: canonicalize the DSL spelling to the AWS wire
-    // form. Accepts `String` and `EnumIdentifier` (same text payload;
-    // the WIT boundary collapses `EnumIdentifier` to `String` anyway).
-    if let Some((_, Some(values), _, _, dsl_map)) = attr_type.enum_parts() {
+    // Enum leaves are already in API spelling. Do not strip, fold, or
+    // reinterpret strings that merely resemble DSL identifiers.
+    if attr_type.enum_parts().is_some() {
         match value {
             Value::Concrete(ConcreteValue::String(s)) => {
-                let valid: Vec<&str> = values.iter().map(String::as_str).collect();
-                return serde_json::Value::String(carina_core::utils::canonicalize_enum_to_api(
-                    s.expose_plaintext(),
-                    &valid,
-                    &dsl_map,
-                ));
-            }
-            Value::Concrete(ConcreteValue::EnumIdentifier(s)) => {
-                let valid: Vec<&str> = values.iter().map(String::as_str).collect();
-                return serde_json::Value::String(carina_core::utils::canonicalize_enum_to_api(
-                    s.as_str(),
-                    &valid,
-                    &dsl_map,
-                ));
+                return serde_json::Value::String(s.expose_plaintext().to_string());
             }
             Value::Concrete(ConcreteValue::CanonicalEnum(c)) => {
                 return serde_json::Value::String(c.api_value().to_string());
@@ -619,11 +601,8 @@ fn dsl_value_to_iam_json(
     }
 }
 
-/// Terminal scalar conversion. No enum handling here — `StringEnum`
-/// leaves are canonicalized in `dsl_value_to_iam_json` before reaching
-/// this point. An `EnumIdentifier` only lands here for a non-schema
-/// position or schema desync, so serialize it verbatim and let AWS reject
-/// invalid wire text visibly.
+/// Terminal scalar conversion. Enum leaves are handled in
+/// `dsl_value_to_iam_json` before reaching this point.
 fn scalar_to_json(value: &Value) -> serde_json::Value {
     match value {
         Value::Concrete(ConcreteValue::String(s)) => {
@@ -632,14 +611,11 @@ fn scalar_to_json(value: &Value) -> serde_json::Value {
         Value::Concrete(ConcreteValue::Int(n)) => serde_json::Value::Number((*n).into()),
         Value::Concrete(ConcreteValue::Float(f)) => serde_json::json!(*f),
         Value::Concrete(ConcreteValue::Bool(b)) => serde_json::Value::Bool(*b),
-        Value::Concrete(ConcreteValue::EnumIdentifier(id)) => {
-            // Raw EnumIdentifier at wire-out means the host did not
-            // canonicalize it; pass it through so AWS-side rejection is
-            // visible instead of silently mis-splitting.
-            serde_json::Value::String(id.as_str().to_string())
-        }
         Value::Concrete(ConcreteValue::CanonicalEnum(c)) => {
             serde_json::Value::String(c.api_value().to_string())
+        }
+        Value::Concrete(ConcreteValue::EnumIdentifier(_)) => {
+            unreachable!("unresolved enum identifier must not reach IAM JSON serialization")
         }
         Value::Concrete(ConcreteValue::List(items)) => {
             serde_json::Value::Array(items.iter().map(scalar_to_json).collect())
@@ -853,6 +829,12 @@ mod tests {
     use super::*;
     use indexmap::IndexMap;
 
+    #[test]
+    #[should_panic(expected = "unresolved enum identifier must not reach IAM JSON serialization")]
+    fn scalar_to_json_rejects_unresolved_enum_identifier() {
+        scalar_to_json(&Value::Concrete(ConcreteValue::enum_identifier("allow")));
+    }
+
     fn make_resource(policy: Option<Value>) -> Resource {
         let mut r = Resource::new("test.Type", "test");
         if let Some(v) = policy {
@@ -876,16 +858,11 @@ mod tests {
         let mut policy = IndexMap::new();
         policy.insert(
             "version".to_string(),
-            Value::Concrete(ConcreteValue::enum_identifier("2012_10_17")),
+            Value::Concrete(ConcreteValue::String("2012-10-17".into())),
         );
         let mut stmt = IndexMap::new();
-        // `effect` is a StringEnum. The read path now emits raw
-        // AWS-canonical `String` (aws#326), but the *serializer* must
-        // still accept `EnumIdentifier` because carina-core's
-        // saved-state lift produces `EnumIdentifier("allow")` for the
-        // desired-equivalent state; `scalar_to_json` maps it back to
-        // the PascalCase wire form (`"Allow"`). This test pins that
-        // continued acceptance.
+        // Enum strings crossing the guest boundary are already in API
+        // spelling and are serialized literally.
         stmt.insert(
             "effect".to_string(),
             Value::Concrete(ConcreteValue::String("Allow".to_string().into())),
@@ -916,7 +893,7 @@ mod tests {
         let mut stmt = IndexMap::new();
         stmt.insert(
             "effect".to_string(),
-            Value::Concrete(ConcreteValue::enum_identifier("allow")),
+            Value::Concrete(ConcreteValue::String("Allow".into())),
         );
         stmt.insert(
             "action".to_string(),
@@ -925,7 +902,7 @@ mod tests {
         let mut policy = IndexMap::new();
         policy.insert(
             "version".to_string(),
-            Value::Concrete(ConcreteValue::enum_identifier("2012_10_17")),
+            Value::Concrete(ConcreteValue::String("2012-10-17".into())),
         );
         policy.insert(
             "statement".to_string(),
@@ -934,7 +911,7 @@ mod tests {
             )])),
         );
         let schema = carina_core::schema::Schema::flat(carina_aws_types::iam_policy_document());
-        let canonical = schema.canonicalize(Value::Concrete(ConcreteValue::Map(policy)));
+        let canonical = schema.canonicalize_state(Value::Concrete(ConcreteValue::Map(policy)));
         assert!(
             matches!(canonical, Value::Concrete(ConcreteValue::Map(_))),
             "policy should canonicalize to a map"
@@ -958,20 +935,16 @@ mod tests {
     }
 
     #[test]
-    fn resolve_iam_policy_attr_canonicalizes_schema_typed_enum_identifier() {
+    fn resolve_iam_policy_attr_keeps_schema_typed_strings_literal() {
         let mut policy = IndexMap::new();
         policy.insert(
             "version".to_string(),
-            Value::Concrete(ConcreteValue::enum_identifier(
-                "aws.iam.PolicyDocument.Version.2012_10_17",
-            )),
+            Value::Concrete(ConcreteValue::String("2012_10_17".into())),
         );
         let mut stmt = IndexMap::new();
         stmt.insert(
             "effect".to_string(),
-            Value::Concrete(ConcreteValue::enum_identifier(
-                "aws.iam.PolicyDocument.Statement.Effect.allow",
-            )),
+            Value::Concrete(ConcreteValue::String("allow".into())),
         );
         stmt.insert(
             "action".to_string(),
@@ -988,45 +961,23 @@ mod tests {
         let resolved = resolve_iam_policy_attr(&r, "policy").expect("map -> JSON");
 
         assert!(
-            resolved.contains(r#""Version":"2012-10-17""#),
-            "version EnumIdentifier must canonicalize at schema-typed position, got: {resolved}"
+            resolved.contains(r#""Version":"2012_10_17""#),
+            "version String must be serialized literally, got: {resolved}"
         );
         assert!(
-            resolved.contains(r#""Effect":"Allow""#),
-            "effect EnumIdentifier must canonicalize at schema-typed position, got: {resolved}"
+            resolved.contains(r#""Effect":"allow""#),
+            "effect String must be serialized literally, got: {resolved}"
         );
     }
 
+    /// Provider-ready policy strings arrive in API spelling. This also pins
+    /// that the schema-driven key walk keeps every modeled Principal field.
     #[test]
-    fn scalar_to_json_raw_enum_identifier_passes_through_verbatim() {
-        let raw = "aws.iam.PolicyDocument.Version.2012_10_17";
-        let json = scalar_to_json(&Value::Concrete(ConcreteValue::enum_identifier(raw)));
-
-        assert_eq!(json, serde_json::Value::String(raw.to_string()));
-    }
-
-    /// Real aws#315 reproduction (root cause: carina#3060). At apply
-    /// time `resolve_resource_with_source` re-resolves the policy from
-    /// the *un-normalized* source and the WIT boundary collapses
-    /// `EnumIdentifier` to a plain `String`. So the serializer — the
-    /// path that actually reaches AWS — receives `version` /
-    /// `effect` as a `String` carrying the namespaced DSL spelling
-    /// (`aws.iam.PolicyDocument.Version.2012_10_17`) or the bare DSL
-    /// alias (`allow`), NOT an already-canonical value and NOT an
-    /// `EnumIdentifier`. The schema-type-driven serializer must
-    /// canonicalize these to the AWS wire form regardless of the
-    /// upstream normalizer, so `aws.s3.BucketPolicy` apply stops
-    /// failing with `MalformedPolicy`.
-    #[test]
-    fn resolve_iam_policy_attr_canonicalizes_unnormalized_dsl_string() {
+    fn resolve_iam_policy_attr_serializes_provider_ready_strings() {
         let mut policy = IndexMap::new();
         policy.insert(
             "version".to_string(),
-            Value::Concrete(ConcreteValue::String(
-                "aws.iam.PolicyDocument.Version.2012_10_17"
-                    .to_string()
-                    .into(),
-            )),
+            Value::Concrete(ConcreteValue::String("2012-10-17".into())),
         );
         let mut stmt = IndexMap::new();
         stmt.insert(
@@ -1035,7 +986,7 @@ mod tests {
         );
         stmt.insert(
             "effect".to_string(),
-            Value::Concrete(ConcreteValue::String("allow".to_string().into())),
+            Value::Concrete(ConcreteValue::String("Allow".to_string().into())),
         );
         stmt.insert(
             "action".to_string(),
@@ -1066,11 +1017,7 @@ mod tests {
         );
         assert!(
             resolved.contains(r#""Effect":"Allow""#),
-            "effect must be AWS-canonical, got: {resolved}"
-        );
-        assert!(
-            !resolved.contains("2012_10_17") && !resolved.contains(r#""allow""#),
-            "non-canonical enum spelling must not reach IAM JSON, got: {resolved}"
+            "effect API spelling must be preserved, got: {resolved}"
         );
         // Constraint A regression: canonical_user Principal must not be
         // silently dropped by the schema-driven walk.
@@ -1162,22 +1109,14 @@ mod tests {
         let parsed =
             carina_core::parser::parse(src, &carina_core::parser::ProviderContext::default())
                 .expect("parse fixture");
-        let mut resource = parsed.resources[0].clone();
+        let resource = parsed.resources[0].clone();
         let schema = crate::schemas::generated::iam::role::iam_role_config().schema;
-        let policy_attr = &schema
-            .attributes
-            .get("assume_role_policy_document")
-            .expect("policy attr")
-            .attr_type;
-        let policy = resource
-            .get_attr("assume_role_policy_document")
-            .expect("policy")
-            .clone();
-        let policy_schema = carina_core::schema::Schema::flat(policy_attr.clone());
-        resource.set_attr(
-            "assume_role_policy_document",
-            policy_schema.canonicalize(policy),
-        );
+        let mut registry = carina_core::schema::SchemaRegistry::new();
+        registry.insert("aws", schema);
+        let mut resources = vec![resource];
+        carina_core::value::canonicalize_resources_with_schemas(&mut resources, &registry)
+            .expect("host desired canonicalization");
+        let resource = resources.pop().expect("canonicalized IAM role");
 
         let resolved =
             resolve_iam_policy_attr(&resource, "assume_role_policy_document").expect("map -> JSON");
@@ -1599,10 +1538,8 @@ mod tests {
     /// DSL-alias `EnumIdentifier`). Pins (1) the new read shape and
     /// (2) that this `String` form serializes straight back to the
     /// identical AWS wire form — so the read→serialize round-trip needs
-    /// no `json_*_to_enum_identifier` step. Reconciliation against the
-    /// parsed-desired alias side is carina-core's job (saved-state
-    /// `lift_string_enum_leaves` + the differ's spelling-agnostic
-    /// `StringEnum` arm), not this read path's.
+    /// no `json_*_to_enum_identifier` step. Host state canonicalization
+    /// reconciles it with the already-canonical desired side.
     #[test]
     fn read_path_emits_raw_canonical_string_and_round_trips() {
         let aws_json = r#"{

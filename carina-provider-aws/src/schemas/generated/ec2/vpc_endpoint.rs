@@ -123,33 +123,3 @@ pub fn enum_valid_values() -> (
         &[("vpc_endpoint_type", VALID_VPC_ENDPOINT_TYPE)],
     )
 }
-
-/// Maps DSL alias values back to canonical AWS values for this module.
-/// e.g., ("ip_protocol", "all") -> Some("-1")
-pub fn enum_alias_reverse(attr_name: &str, value: &str) -> Option<&'static str> {
-    match (attr_name, value) {
-        ("vpc_endpoint_type", "gateway") => Some("Gateway"),
-        ("vpc_endpoint_type", "gateway_load_balancer") => Some("GatewayLoadBalancer"),
-        ("vpc_endpoint_type", "interface") => Some("Interface"),
-        ("vpc_endpoint_type", "resource") => Some("Resource"),
-        ("vpc_endpoint_type", "service_network") => Some("ServiceNetwork"),
-        ("vpc_endpoint_type", "tunnel") => Some("Tunnel"),
-        _ => None,
-    }
-}
-
-/// Returns all enum alias entries as (attr_name, alias, canonical) tuples.
-pub fn enum_alias_entries() -> &'static [(&'static str, &'static str, &'static str)] {
-    &[
-        ("vpc_endpoint_type", "gateway", "Gateway"),
-        (
-            "vpc_endpoint_type",
-            "gateway_load_balancer",
-            "GatewayLoadBalancer",
-        ),
-        ("vpc_endpoint_type", "interface", "Interface"),
-        ("vpc_endpoint_type", "resource", "Resource"),
-        ("vpc_endpoint_type", "service_network", "ServiceNetwork"),
-        ("vpc_endpoint_type", "tunnel", "Tunnel"),
-    ]
-}

@@ -5,9 +5,10 @@ use std::collections::HashMap;
 use indexmap::IndexMap;
 
 use carina_core::provider::{
-    BoxFuture, ProviderFactory, ProviderNormalizer, ProviderReadyConfig, ProviderResult,
+    BoxFuture, CanonicalCustomTypeValue, CanonicalProviderConfigAttributes, ProviderFactory,
+    ProviderNormalizer, ProviderReadyConfig, ProviderResult,
 };
-use carina_core::resource::{ConcreteValue, Value};
+use carina_core::resource::Value;
 
 use crate::AwsProvider;
 use crate::normalizer::AwsNormalizer;
@@ -74,7 +75,10 @@ impl ProviderFactory for AwsProviderFactory {
         types
     }
 
-    fn validate_config(&self, attributes: &IndexMap<String, Value>) -> Result<(), String> {
+    fn validate_config(
+        &self,
+        attributes: &CanonicalProviderConfigAttributes,
+    ) -> Result<(), String> {
         // Cross-account guardrail: when `assume_role.role_arn` parses to
         // an account id that is not in `allowed_account_ids` (when that
         // list is configured), refuse the configuration. Avoids the
@@ -90,11 +94,16 @@ impl ProviderFactory for AwsProviderFactory {
         Ok(())
     }
 
+    fn validate_custom_type(
+        &self,
+        identity: &carina_core::schema::TypeIdentity,
+        value: &CanonicalCustomTypeValue,
+    ) -> Result<(), String> {
+        crate::schemas::config::validate_aws_custom_type(identity, value.as_str())
+    }
+
     fn extract_region(&self, attributes: &IndexMap<String, Value>) -> String {
-        if let Some(Value::Concrete(ConcreteValue::String(region))) = attributes.get("region") {
-            return carina_core::utils::convert_region_value(region.expose_plaintext());
-        }
-        "ap-northeast-1".to_string()
+        carina_core::utils::extract_region_from_attrs(attributes, "ap-northeast-1")
     }
 
     fn create_provider(
@@ -155,16 +164,6 @@ impl ProviderFactory for AwsProviderFactory {
             carina_aws_types::region_completions("aws"),
         )])
     }
-
-    fn get_enum_alias_reverse(
-        &self,
-        resource_type: &str,
-        attr_name: &str,
-        value: &str,
-    ) -> Option<String> {
-        crate::schemas::generated::get_enum_alias_reverse(resource_type, attr_name, value)
-            .map(|s| s.to_string())
-    }
 }
 
 /// Schema for the provider-level `assume_role` block. Mirrors the
@@ -188,4 +187,67 @@ fn assume_role_attribute_type() -> carina_core::schema::AttributeType {
                 .with_description("Assumed-role session duration (e.g., 30min, 1h, 15s)."),
         ],
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use carina_core::resource::ConcreteValue;
+    use carina_core::schema::Schema;
+
+    #[test]
+    fn extract_region_reads_provider_ready_canonical_enum() {
+        let factory = AwsProviderFactory;
+        let region_type = factory
+            .provider_config_attribute_types()
+            .remove("region")
+            .expect("region provider config type");
+        let region = Schema::flat(region_type)
+            .canonicalize_state(Value::Concrete(ConcreteValue::String("us-west-2".into())));
+        assert!(matches!(
+            &region,
+            Value::Concrete(ConcreteValue::CanonicalEnum(value))
+                if value.api_value() == "us-west-2"
+        ));
+        let attributes = IndexMap::from([("region".to_string(), region)]);
+
+        assert_eq!(factory.extract_region(&attributes), "us-west-2");
+    }
+
+    #[test]
+    fn extract_region_keeps_string_literal() {
+        let factory = AwsProviderFactory;
+        let attributes = IndexMap::from([(
+            "region".to_string(),
+            Value::Concrete(ConcreteValue::String("aws.Region.us_west_2".into())),
+        )]);
+
+        assert_eq!(factory.extract_region(&attributes), "aws.Region.us_west_2");
+    }
+
+    #[test]
+    fn validate_custom_type_uses_structured_availability_zone_identity() {
+        let identity = carina_aws_types::provider_bare_type(&["AvailabilityZone"], "ZoneName");
+        let zone = Schema::flat(carina_aws_types::availability_zone()).canonicalize_state(
+            Value::Concrete(ConcreteValue::String("ap-northeast-1a".into())),
+        );
+        assert!(matches!(
+            &zone,
+            Value::Concrete(ConcreteValue::CanonicalEnum(value))
+                if value.api_value() == "ap-northeast-1a"
+        ));
+
+        let factories: Vec<Box<dyn ProviderFactory>> = vec![Box::new(AwsProviderFactory)];
+        let validate = carina_core::executor::provider_custom_type_lookup(&factories);
+
+        validate(&identity, &zone).expect("canonical API spelling should validate");
+        assert!(
+            validate(
+                &identity,
+                &Value::Concrete(ConcreteValue::String("not-an-az".into()))
+            )
+            .is_err(),
+            "the host entry point must find the structured AZ validator"
+        );
+    }
 }

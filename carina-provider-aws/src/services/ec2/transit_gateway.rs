@@ -367,7 +367,7 @@ mod tests {
             None,
         );
         Schema::flat(attr_type)
-            .canonicalize(Value::Concrete(ConcreteValue::enum_identifier(api_value)))
+            .canonicalize_state(Value::Concrete(ConcreteValue::String(api_value.into())))
     }
 
     fn one_enum_option(field: &str, value: Value) -> Resource {

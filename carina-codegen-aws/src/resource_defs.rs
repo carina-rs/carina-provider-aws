@@ -1328,9 +1328,8 @@ pub fn s3_resources() -> Vec<ResourceDef> {
             update_ops: vec![],
             identifier: "Bucket",
             has_tags: true,
-            // Keep Region plain: aws_region() accepts DSL spellings such as
-            // aws.Region.ap_northeast_1, while GetBucketLocation returns ap-northeast-1.
-            // Refining a provider-populated output risks validation and phantom diffs.
+            // Keep Region plain: GetBucketLocation returns a provider-populated
+            // region code, and refining that output risks validation and phantom diffs.
             type_overrides: vec![
                 ("Region", "AttributeType::string()"),
                 ("HostedZoneId", "super::route53_hosted_zone_id()"),

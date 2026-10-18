@@ -1,5 +1,5 @@
 use carina_core::schema::RawShape;
-use carina_provider_aws::schemas::{config::aws_validators, generated::iam};
+use carina_provider_aws::schemas::{config::validate_aws_custom_type, generated::iam};
 
 #[test]
 fn policy_arn_identity_is_provider_scoped() {
@@ -15,7 +15,6 @@ fn policy_arn_identity_is_provider_scoped() {
 
 #[test]
 fn policy_arn_rejects_role_arn() {
-    let validators = aws_validators();
-    let validate = validators.get("iam_policy_arn").unwrap();
-    assert!(validate("arn:aws:iam::123456789012:role/MyRole").is_err());
+    let identity = carina_aws_types::provider_type("iam", "Policy", "Arn");
+    assert!(validate_aws_custom_type(&identity, "arn:aws:iam::123456789012:role/MyRole").is_err());
 }

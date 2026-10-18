@@ -93,17 +93,3 @@ pub fn enum_valid_values() -> (
 ) {
     ("s3.Bucket", &[("bucket_namespace", VALID_BUCKET_NAMESPACE)])
 }
-
-/// Maps DSL alias values back to canonical AWS values for this module.
-/// e.g., ("ip_protocol", "all") -> Some("-1")
-pub fn enum_alias_reverse(attr_name: &str, value: &str) -> Option<&'static str> {
-    match (attr_name, value) {
-        ("bucket_namespace", "account_regional") => Some("account-regional"),
-        _ => None,
-    }
-}
-
-/// Returns all enum alias entries as (attr_name, alias, canonical) tuples.
-pub fn enum_alias_entries() -> &'static [(&'static str, &'static str, &'static str)] {
-    &[("bucket_namespace", "account_regional", "account-regional")]
-}
