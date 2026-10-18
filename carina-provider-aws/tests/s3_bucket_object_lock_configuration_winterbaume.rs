@@ -503,7 +503,7 @@ async fn create_rejects_all_reachable_invalid_rule_shapes() {
             matches!(&error, ProviderError::InvalidInput(_)),
             "{case}: expected InvalidInput, got {error:?}"
         );
-        assert_eq!(error.message(), expected_message, "{case}");
+        assert_eq!(error.detail().context(), expected_message, "{case}");
     }
 }
 

@@ -6,14 +6,76 @@
 
 use indexmap::IndexMap;
 use std::collections::HashMap;
+use std::fmt;
 
+use aws_sdk_identitystore::operation::describe_user::DescribeUserError;
+use aws_sdk_identitystore::operation::get_user_id::GetUserIdError;
 use aws_sdk_identitystore::types::{AlternateIdentifier, UniqueAttribute};
 use carina_core::provider::{BoxFuture, ProviderError, ProviderResult};
 use carina_core::resource::{ConcreteValue, DataSource, State, Value};
 
 use crate::AwsProvider;
-use crate::error_helpers::api_error_with_meta;
+use crate::error_helpers::{AwsSdkError, api_error_with_meta_and_subject};
 use crate::helpers::{sdk_error_message, value_as_str};
+
+#[derive(Debug)]
+enum IdentityStoreUserSubject {
+    UserId {
+        user_id: String,
+        identity_store_id: String,
+    },
+    UserName {
+        user_name: String,
+        identity_store_id: String,
+    },
+}
+
+impl fmt::Display for IdentityStoreUserSubject {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::UserId {
+                user_id,
+                identity_store_id,
+            } => write!(f, "user '{user_id}' in store '{identity_store_id}'"),
+            Self::UserName {
+                user_name,
+                identity_store_id,
+            } => write!(f, "user_name '{user_name}' in store '{identity_store_id}'"),
+        }
+    }
+}
+
+fn describe_user_api_error(
+    user_id: &str,
+    identity_store_id: &str,
+    error: AwsSdkError<DescribeUserError>,
+) -> ProviderError {
+    api_error_with_meta_and_subject(
+        "Failed to describe identitystore user",
+        "identitystore.DescribeUser",
+        IdentityStoreUserSubject::UserId {
+            user_id: user_id.to_string(),
+            identity_store_id: identity_store_id.to_string(),
+        },
+        error,
+    )
+}
+
+fn lookup_user_id_api_error(
+    user_name: &str,
+    identity_store_id: &str,
+    error: AwsSdkError<GetUserIdError>,
+) -> ProviderError {
+    api_error_with_meta_and_subject(
+        "Failed to look up identitystore user_id",
+        "identitystore.GetUserId",
+        IdentityStoreUserSubject::UserName {
+            user_name: user_name.to_string(),
+            identity_store_id: identity_store_id.to_string(),
+        },
+        error,
+    )
+}
 
 impl AwsProvider {
     /// Read `identitystore.user` given a `DataSource` with user-supplied
@@ -44,12 +106,8 @@ impl AwsProvider {
                 .send()
                 .await
                 .map_err(|e| {
-                    api_error_with_meta(
-                        format!("Failed to describe identitystore user '{user_id}' in store '{identity_store_id}'"),
-                        "identitystore.DescribeUser",
-                        e,
-                    )
-                    .for_resource(resource.id.clone())
+                    describe_user_api_error(&user_id, identity_store_id, e)
+                        .for_resource(resource.id.clone())
                 })?;
 
             let attributes = extract_identitystore_user(&describe);
@@ -102,12 +160,8 @@ async fn resolve_user_id(
         .send()
         .await
         .map_err(|e| {
-            api_error_with_meta(
-                format!("Failed to look up user_id for user_name '{user_name}' in store '{identity_store_id}'"),
-                "identitystore.GetUserId",
-                e,
-            )
-            .for_resource(resource.id.clone())
+            lookup_user_id_api_error(user_name, identity_store_id, e)
+                .for_resource(resource.id.clone())
         })?;
 
     Ok(resp.user_id().to_string())
@@ -209,8 +263,47 @@ pub(crate) fn extract_identitystore_user(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aws_sdk_identitystore::operation::describe_user::DescribeUserOutput;
+    use aws_sdk_identitystore::error::SdkError;
+    use aws_sdk_identitystore::operation::describe_user::{DescribeUserError, DescribeUserOutput};
+    use aws_sdk_identitystore::types::error::AccessDeniedException;
     use aws_sdk_identitystore::types::{Email, Name};
+    use aws_smithy_runtime_api::http::{Response, StatusCode};
+    use aws_smithy_types::body::SdkBody;
+    use aws_smithy_types::error::metadata::ErrorMetadata;
+
+    #[test]
+    fn describe_user_error_renders_typed_subject_once() {
+        const USER_ID: &str = "user-123";
+        const IDENTITY_STORE_ID: &str = "d-store-456";
+        const AWS_MESSAGE: &str = "not authorized to describe this user";
+
+        let inner = DescribeUserError::AccessDeniedException(
+            AccessDeniedException::builder()
+                .meta(
+                    ErrorMetadata::builder()
+                        .code("AccessDeniedException")
+                        .message(AWS_MESSAGE)
+                        .build(),
+                )
+                .build(),
+        );
+        let raw = Response::new(StatusCode::try_from(403).unwrap(), SdkBody::empty());
+        let sdk_error = SdkError::service_error(inner, raw);
+
+        let rendered = describe_user_api_error(USER_ID, IDENTITY_STORE_ID, sdk_error).to_string();
+
+        assert_eq!(
+            rendered.lines().next(),
+            Some("Failed to describe identitystore user")
+        );
+        for expected in [USER_ID, IDENTITY_STORE_ID, AWS_MESSAGE] {
+            assert_eq!(
+                rendered.matches(expected).count(),
+                1,
+                "{expected:?} must appear exactly once: {rendered}"
+            );
+        }
+    }
 
     fn name_block() -> Name {
         Name::builder()

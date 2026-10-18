@@ -13,7 +13,7 @@ use carina_core::resource::{
     ConcreteValue, DataSource as CoreDataSource, DeferredValue, Directives as CoreDirectives,
     Resource as CoreResource, ResourceId as CoreResourceId,
     ResourceIdentity as CoreResourceIdentity, ResourceIdentityError as CoreResourceIdentityError,
-    ResourceIdentityState as CoreResourceIdentityState, State as CoreState, Value as CoreValue,
+    State as CoreState, Value as CoreValue,
 };
 use carina_core::schema::{
     AttributeSchema as CoreAttributeSchema, AttributeType as CoreAttributeType,
@@ -32,18 +32,6 @@ use carina_provider_protocol::types::{
 };
 
 // -- ResourceId --
-
-pub fn core_to_proto_resource_id(id: &CoreResourceId) -> ProtoResourceId {
-    let identity = match id.identity_state() {
-        CoreResourceIdentityState::Pending(_) => String::new(),
-        CoreResourceIdentityState::Resolved(identity) => identity.as_str().to_string(),
-    };
-    ProtoResourceId {
-        provider: id.provider.clone(),
-        resource_type: id.resource_type.clone(),
-        identity,
-    }
-}
 
 pub fn proto_to_core_resource_id(id: &ProtoResourceId) -> CoreResourceId {
     // `ProtoResourceId` predates carina#3038's `provider_instance` field;
@@ -174,7 +162,7 @@ pub fn proto_to_core_value_map(m: &HashMap<String, ProtoValue>) -> HashMap<Strin
 
 pub fn core_to_proto_state(s: &CoreState) -> ProtoState {
     ProtoState {
-        id: core_to_proto_resource_id(&s.id),
+        id: s.id.to_wire(),
         identifier: s.identifier.clone(),
         attributes: core_to_proto_value_map(&s.attributes),
         exists: s.exists,
@@ -236,7 +224,7 @@ pub fn core_to_proto_update_outcome(outcome: CoreUpdateOutcome) -> ProtoUpdateOu
 
 pub fn core_to_proto_resource(r: &CoreResource) -> ProtoResource {
     ProtoResource {
-        id: core_to_proto_resource_id(&r.id),
+        id: r.id.to_wire(),
         attributes: core_to_proto_value_map(&r.resolved_attributes()),
         directives: core_to_proto_directives(&r.directives),
     }

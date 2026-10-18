@@ -27,6 +27,7 @@
 //! promoting it to `pub` here.
 
 use carina_core::provider::ProviderError;
+use thiserror::Error;
 
 /// Type alias for the `aws-sdk-*` family's `SdkError` shape with the
 /// HTTP-response generic pinned. Every `aws-sdk-*` crate's
@@ -40,37 +41,100 @@ pub(crate) type AwsSdkError<E> = aws_smithy_runtime_api::client::result::SdkErro
     aws_smithy_runtime_api::client::orchestrator::HttpResponse,
 >;
 
+#[derive(Debug)]
+struct AwsServiceMessage(Option<String>);
+
+impl AwsServiceMessage {
+    fn new<E>(message: Option<String>, source: &AwsSdkError<E>) -> Self
+    where
+        E: std::error::Error + 'static,
+    {
+        Self(message.filter(|message| !error_chain_contains(source, message)))
+    }
+}
+
+impl std::fmt::Display for AwsServiceMessage {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self.0 {
+            Some(message) => f.write_str(message),
+            None => f.write_str("AWS SDK request failed"),
+        }
+    }
+}
+
+fn error_chain_contains(mut error: &(dyn std::error::Error + 'static), needle: &str) -> bool {
+    loop {
+        if error.to_string().contains(needle) {
+            return true;
+        }
+        match error.source() {
+            Some(source) => error = source,
+            None => return false,
+        }
+    }
+}
+
+/// AWS diagnostic attached beneath the operation-specific provider context.
+///
+/// The SDK error remains a source because transport and modeled service details
+/// live in its source chain. The wrapper renders the AWS-side message only when
+/// that chain does not already render it; `ProviderError` owns the traversal.
+#[derive(Debug, Error)]
+#[error("{message}")]
+struct AwsServiceErrorCause<E>
+where
+    E: std::error::Error + 'static,
+{
+    message: AwsServiceMessage,
+    #[source]
+    source: AwsSdkError<E>,
+}
+
+/// AWS diagnostic with dynamic typed subject data below a static context.
+#[derive(Debug, Error)]
+#[error("{subject}: {message}")]
+struct AwsServiceErrorWithSubjectCause<E, Subject>
+where
+    E: std::error::Error + 'static,
+    Subject: std::fmt::Debug + std::fmt::Display,
+{
+    subject: Subject,
+    message: AwsServiceMessage,
+    #[source]
+    source: AwsSdkError<E>,
+}
+
 /// Build a structured `ProviderError::ApiError` from an AWS SDK error.
 ///
 /// Extracts HTTP status, AWS error code, AWS-side message, and request
 /// id via the SDK's `ProvideErrorMetadata` + `RequestId` traits. The
 /// host renderer (carina-rs/carina#3247) then surfaces them as labeled
-/// lines:
+/// lines followed by the typed cause:
 ///
 /// ```text
-/// [iam.Roles.admin_access_roles] Failed to list IAM roles: User is not authorized...
+/// Failed to list IAM roles
 ///   operation: iam.ListRoles
 ///   status: 403 AccessDenied
-///   request_id: 997aa923-...
+///   request_id: test-request-id
+///   cause: User: arn:aws:sts::... is not authorized to perform: iam:ListRoles: service error: ServiceFailureException: ServiceFailureException
 /// ```
 ///
 /// `context` is the per-operation human-readable header (the same
 /// string the legacy `sdk_error_message` used, e.g. `"Failed to list
-/// IAM roles"`). The AWS-side message is appended to it as
-/// `"<context>: <aws-message>"` so the header line carries both —
-/// PR-1's design (carina#3242 D6) keeps the message in the header,
-/// not as a separate labeled line.
+/// IAM roles"`). It remains the first-line `ProviderError` context.
+/// The AWS-side message lives in the typed cause and is omitted there
+/// when the SDK source chain already renders it.
 ///
 /// `operation` is the service-qualified API operation
 /// (e.g. `"iam.ListRoles"`, `"s3.HeadBucket"`) so the operator can
 /// grep CI logs by operation without re-parsing the message.
 ///
-/// The SDK error is preserved as `ProviderError.cause` so
+/// The SDK error is preserved as the typed cause's source so
 /// transport-level diagnostics (DNS, TLS, network timeouts — none of
 /// which populate the HTTP-response fields) still reach the operator
 /// via the renderer's appended `cause:` line.
 pub fn api_error_with_meta<E, S>(
-    context: impl Into<String>,
+    context: &'static str,
     operation: S,
     err: AwsSdkError<E>,
 ) -> ProviderError
@@ -82,24 +146,68 @@ where
         + Sync
         + 'static,
 {
+    api_error_with_meta_cause(context, operation, err, |message, source| {
+        AwsServiceErrorCause { message, source }
+    })
+}
+
+/// Build a structured AWS error whose cause also carries a dynamic typed
+/// subject. The `context` remains static and first-line; subject data is
+/// rendered exactly once below it.
+pub(crate) fn api_error_with_meta_and_subject<E, S, Subject>(
+    context: &'static str,
+    operation: S,
+    subject: Subject,
+    err: AwsSdkError<E>,
+) -> ProviderError
+where
+    S: Into<String>,
+    Subject: std::fmt::Debug + std::fmt::Display + Send + Sync + 'static,
+    E: std::error::Error
+        + aws_smithy_types::error::metadata::ProvideErrorMetadata
+        + Send
+        + Sync
+        + 'static,
+{
+    api_error_with_meta_cause(context, operation, err, |message, source| {
+        AwsServiceErrorWithSubjectCause {
+            subject,
+            message,
+            source,
+        }
+    })
+}
+
+fn api_error_with_meta_cause<E, S, Cause>(
+    context: &'static str,
+    operation: S,
+    err: AwsSdkError<E>,
+    make_cause: impl FnOnce(AwsServiceMessage, AwsSdkError<E>) -> Cause,
+) -> ProviderError
+where
+    S: Into<String>,
+    Cause: std::error::Error + Send + Sync + 'static,
+    E: std::error::Error
+        + aws_smithy_types::error::metadata::ProvideErrorMetadata
+        + Send
+        + Sync
+        + 'static,
+{
     use aws_smithy_types::error::metadata::ProvideErrorMetadata;
     use aws_types::request_id::RequestId;
 
-    let status = err.raw_response().map(|r| r.status().as_u16());
+    let status = err
+        .raw_response()
+        .map(|response| response.status().as_u16());
     let code = err.code().map(str::to_owned);
-    let aws_message = err.message().map(str::to_owned);
+    let aws_message = AwsServiceMessage::new(err.message().map(str::to_owned), &err);
     let request_id = err.request_id().map(str::to_owned);
-
-    let context = context.into();
-    let header = match aws_message {
-        Some(m) => format!("{context}: {m}"),
-        None => context,
-    };
+    let cause = make_cause(aws_message, err);
 
     let mut pe = if code.as_deref().is_some_and(is_not_found_error_code) || status == Some(404) {
-        ProviderError::not_found(header)
+        ProviderError::not_found_caused_by(context, cause)
     } else {
-        ProviderError::api_error(header)
+        ProviderError::api_error_caused_by(context, cause)
     }
     .with_operation(operation);
     if let Some(s) = status {
@@ -111,7 +219,7 @@ where
     if let Some(id) = request_id {
         pe = pe.with_request_id(id);
     }
-    pe.with_cause(err)
+    pe
 }
 
 fn is_not_found_error_code(code: &str) -> bool {
@@ -174,7 +282,9 @@ mod tests {
                 .meta(meta.build())
                 .build(),
         );
-        let raw = Response::new(StatusCode::try_from(status).unwrap(), SdkBody::empty());
+        let mut raw = Response::new(StatusCode::try_from(status).unwrap(), SdkBody::empty());
+        raw.headers_mut()
+            .insert("x-amzn-requestid", "test-request-id");
         SdkError::service_error(inner, raw)
     }
 
@@ -184,11 +294,10 @@ mod tests {
     /// against a real AWS SDK error type, not just a synthetic mock.
     #[test]
     fn api_error_with_meta_extracts_response_metadata() {
-        let sdk_err = list_roles_service_error_with_meta(
-            403,
-            Some("AccessDenied"),
-            Some("User: arn:aws:sts::... is not authorized to perform: iam:ListRoles"),
-        );
+        const AWS_MESSAGE: &str =
+            "User: arn:aws:sts::... is not authorized to perform: iam:ListRoles";
+        let sdk_err =
+            list_roles_service_error_with_meta(403, Some("AccessDenied"), Some(AWS_MESSAGE));
 
         let pe = api_error_with_meta("Failed to list IAM roles", "iam.ListRoles", sdk_err);
         let CoreProviderError::ApiError(detail) = &pe else {
@@ -198,24 +307,82 @@ mod tests {
         assert_eq!(detail.operation.as_deref(), Some("iam.ListRoles"));
         assert_eq!(detail.status, Some(403));
         assert_eq!(detail.code.as_deref(), Some("AccessDenied"));
-        assert!(
-            detail.message.contains("Failed to list IAM roles"),
-            "header must keep per-operation context, got: {}",
-            detail.message
+        assert_eq!(detail.request_id.as_deref(), Some("test-request-id"));
+        assert_eq!(detail.context(), "Failed to list IAM roles");
+        assert!(detail.cause().is_some());
+
+        let rendered = pe.to_string();
+        assert_eq!(
+            rendered,
+            format!(
+                "Failed to list IAM roles\n  operation: iam.ListRoles\n  status: 403 AccessDenied\n  request_id: test-request-id\n  cause: {AWS_MESSAGE}: service error: ServiceFailureException: ServiceFailureException"
+            )
         );
-        assert!(
-            detail.message.contains("User: arn:aws:sts::"),
-            "header must fold in AWS-side message, got: {}",
-            detail.message
+        assert_eq!(
+            rendered.matches(AWS_MESSAGE).count(),
+            1,
+            "rendered error must include the AWS message exactly once: {rendered}"
+        );
+
+        let wire = pe.to_wire();
+        assert_eq!(
+            wire.kind,
+            carina_provider_protocol::types::ProviderErrorKind::ApiError
+        );
+        assert_eq!(wire.status, Some(403));
+        assert_eq!(wire.code.as_deref(), Some("AccessDenied"));
+        assert_eq!(wire.request_id.as_deref(), Some("test-request-id"));
+        let wire_rendered = format!(
+            "{}: {}",
+            wire.message,
+            wire.cause.as_deref().unwrap_or_default()
+        );
+        assert!(wire_rendered.contains("Failed to list IAM roles"));
+        assert_eq!(
+            wire_rendered.matches(AWS_MESSAGE).count(),
+            1,
+            "wire error must include the AWS message exactly once: {wire_rendered}"
+        );
+    }
+
+    #[test]
+    fn api_error_with_meta_does_not_repeat_message_from_sdk_source_chain() {
+        const AWS_MESSAGE: &str = "message already rendered by the SDK source chain";
+        let inner = ListRolesError::generic(
+            ErrorMetadata::builder()
+                .code("AccessDenied")
+                .message(AWS_MESSAGE)
+                .build(),
+        );
+        let raw = Response::new(StatusCode::try_from(403).unwrap(), SdkBody::empty());
+        let sdk_err = SdkError::service_error(inner, raw);
+
+        let pe = api_error_with_meta("Failed to list IAM roles", "iam.ListRoles", sdk_err);
+        let rendered = pe.to_string();
+        assert_eq!(
+            rendered.matches(AWS_MESSAGE).count(),
+            1,
+            "rendered error must not repeat an SDK-rendered message: {rendered}"
+        );
+
+        let wire = pe.to_wire();
+        let wire_rendered = format!(
+            "{}: {}",
+            wire.message,
+            wire.cause.as_deref().unwrap_or_default()
+        );
+        assert_eq!(
+            wire_rendered.matches(AWS_MESSAGE).count(),
+            1,
+            "wire error must not repeat an SDK-rendered message: {wire_rendered}"
         );
     }
 
     /// carina#3241: when the SDK error carries no metadata (rare —
     /// usually a transport-level failure that doesn't reach the
-    /// service-error path), the header stays as the per-operation
-    /// context only and structured fields are left `None` — letting
-    /// the renderer's fallback chain walker surface the underlying
-    /// error via the `cause:` line (design D5).
+    /// service-error path), structured response fields are left `None`
+    /// and the typed cause keeps both the per-operation context and the
+    /// underlying transport diagnostic.
     #[test]
     fn api_error_with_meta_preserves_context_when_no_metadata() {
         // A `ConstructionFailure` is the closest representable shape
@@ -227,14 +394,18 @@ mod tests {
             panic!("expected ApiError, got {:?}", pe);
         };
 
-        assert_eq!(detail.message, "Failed to list IAM roles");
+        assert_eq!(detail.context(), "Failed to list IAM roles");
         assert_eq!(detail.operation.as_deref(), Some("iam.ListRoles"));
         assert_eq!(detail.status, None);
         assert_eq!(detail.code, None);
         assert_eq!(detail.request_id, None);
         // Cause is preserved so the renderer's fallback path surfaces
         // the transport-level diagnostic.
-        assert!(detail.cause.is_some());
+        assert!(detail.cause().is_some());
+        assert_eq!(
+            pe.to_string(),
+            "Failed to list IAM roles\n  operation: iam.ListRoles\n  cause: AWS SDK request failed: failed to construct request: dns lookup failed"
+        );
     }
 
     #[test]

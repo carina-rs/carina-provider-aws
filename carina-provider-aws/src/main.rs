@@ -43,28 +43,7 @@ impl AwsProcessProvider {
     }
 
     fn convert_error(e: CoreProviderError) -> proto::ProviderError {
-        let kind = match e {
-            CoreProviderError::InvalidInput(_) => proto::ProviderErrorKind::InvalidInput,
-            CoreProviderError::ApiError(_) => proto::ProviderErrorKind::ApiError,
-            CoreProviderError::NotFound(_) => proto::ProviderErrorKind::NotFound,
-            CoreProviderError::Timeout(_) => proto::ProviderErrorKind::Timeout,
-            CoreProviderError::Internal(_) => proto::ProviderErrorKind::Internal,
-        };
-        let detail = e.detail();
-        proto::ProviderError {
-            kind,
-            message: detail.message.clone(),
-            resource_id: detail
-                .resource_id
-                .as_ref()
-                .map(|id| convert::core_to_proto_resource_id(id)),
-            cause: detail.cause.as_ref().map(|c| c.to_string()),
-            provider_name: detail.provider_name.clone(),
-            operation: detail.operation.clone(),
-            status: detail.status,
-            code: detail.code.clone(),
-            request_id: detail.request_id.clone(),
-        }
+        e.to_wire()
     }
 
     fn provider(&self) -> &AwsProvider {
