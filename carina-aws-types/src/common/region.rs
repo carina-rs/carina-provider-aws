@@ -1,6 +1,5 @@
 use carina_core::resource::{ConcreteValue, Value};
 use carina_core::schema::{AttributeType, CompletionValue, DslTransform, legacy_validator};
-use carina_core::utils::validate_enum_namespace;
 
 use super::provider_bare_type;
 
@@ -72,11 +71,17 @@ pub fn valid_regions_display() -> String {
         .join(", ")
 }
 
-fn strip_region_prefix(value: &str) -> &str {
-    value
-        .strip_prefix("aws.Region.")
-        .or_else(|| value.strip_prefix("Region."))
-        .unwrap_or(value)
+/// Validate an AWS region in provider-facing API spelling.
+pub fn validate_aws_region(region: &str) -> Result<(), String> {
+    if is_valid_region(region) {
+        Ok(())
+    } else {
+        Err(format!(
+            "Invalid region '{}', expected one of: {}",
+            region,
+            valid_regions_display()
+        ))
+    }
 }
 
 /// Region API spelling -> DSL spelling pairs for the carina-core /
@@ -112,11 +117,11 @@ pub fn region_completions(prefix: &str) -> Vec<CompletionValue> {
         .collect()
 }
 
-/// AWS region type with custom validation
-/// Accepts:
-/// - DSL format: aws.Region.ap_northeast_1
-/// - AWS string format: "ap-northeast-1"
-/// - Shorthand: ap_northeast_1
+/// AWS region type with provider-facing API-spelling validation.
+///
+/// Enum identifiers are resolved to API spelling by the host before this
+/// validator runs. Quoted strings are literal and must already use the AWS
+/// spelling (for example, `"ap-northeast-1"`).
 pub fn aws_region() -> AttributeType {
     AttributeType::enum_(
         provider_bare_type(&[], "Region"),
@@ -125,20 +130,7 @@ pub fn aws_region() -> AttributeType {
         Some(legacy_validator(|value| {
             if let Value::Concrete(ConcreteValue::String(s)) = value {
                 let s = s.expose_plaintext();
-                let id = provider_bare_type(&[], "Region");
-                validate_enum_namespace(s, &id)
-                    .map_err(|reason| format!("Invalid region '{}': {}", s, reason))?;
-                // Normalize the input to AWS format (hyphens)
-                let normalized = strip_region_prefix(s).replace('_', "-");
-                if is_valid_region(&normalized) {
-                    Ok(())
-                } else {
-                    Err(format!(
-                        "Invalid region '{}', expected one of: {} or DSL format like aws.Region.ap_northeast_1",
-                        s,
-                        valid_regions_display()
-                    ))
-                }
+                validate_aws_region(s)
             } else {
                 Err("Expected string".to_string())
             }

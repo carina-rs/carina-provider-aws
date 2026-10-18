@@ -1127,9 +1127,8 @@ fn test_extract_iam_role_attributes() {
         Some(&Value::Concrete(ConcreteValue::Int(7200)))
     );
     // Verify that the assume_role_policy_document is converted to a Map
-    // with snake_case keys. `version` lands as `EnumIdentifier` carrying
-    // the underscore DSL alias (`2012_10_17`); the read-side helper maps
-    // AWS's canonical `"2012-10-17"` to the alias for plan-verify parity.
+    // with snake_case keys. Read-back values retain AWS's API spelling as
+    // plain strings; host state canonicalization owns any typed lifting.
     let policy_doc = attributes
         .get("assume_role_policy_document")
         .expect("assume_role_policy_document should be present");
@@ -1622,6 +1621,7 @@ fn test_security_group_egress_schema_keeps_all_as_alias_only() {
         .expect("ip_protocol attribute not found");
     if let carina_core::schema::Shape::Enum {
         values: Some(values),
+        dsl_aliases,
         ..
     } = config.schema.shape_of(&ip_protocol.attr_type)
     {
@@ -1630,13 +1630,11 @@ fn test_security_group_egress_schema_keeps_all_as_alias_only() {
             "enum values must include '-1' and exclude alias 'all': {:?}",
             values
         );
-        assert_eq!(
-            crate::schemas::generated::get_enum_alias_reverse(
-                "ec2.SecurityGroupEgress",
-                "ip_protocol",
-                "all"
-            ),
-            Some("-1")
+        assert!(
+            dsl_aliases
+                .iter()
+                .any(|(api, dsl)| api == "-1" && dsl == "all"),
+            "enum dsl_aliases must retain all -> -1: {dsl_aliases:?}"
         );
     } else {
         panic!("ip_protocol should be enum");
@@ -1654,6 +1652,7 @@ fn test_security_group_ingress_schema_keeps_all_as_alias_only() {
         .expect("ip_protocol attribute not found");
     if let carina_core::schema::Shape::Enum {
         values: Some(values),
+        dsl_aliases,
         ..
     } = config.schema.shape_of(&ip_protocol.attr_type)
     {
@@ -1662,13 +1661,11 @@ fn test_security_group_ingress_schema_keeps_all_as_alias_only() {
             "enum values must include '-1' and exclude alias 'all': {:?}",
             values
         );
-        assert_eq!(
-            crate::schemas::generated::get_enum_alias_reverse(
-                "ec2.SecurityGroupIngress",
-                "ip_protocol",
-                "all"
-            ),
-            Some("-1")
+        assert!(
+            dsl_aliases
+                .iter()
+                .any(|(api, dsl)| api == "-1" && dsl == "all"),
+            "enum dsl_aliases must retain all -> -1: {dsl_aliases:?}"
         );
     } else {
         panic!("ip_protocol should be enum");
@@ -1677,83 +1674,73 @@ fn test_security_group_ingress_schema_keeps_all_as_alias_only() {
 
 // --- Issue #247: D7 snake_case enum DSL spelling ---
 
-/// Per naming-conventions design D7, every `StringEnum` emitted by codegen
-/// must carry a `to_dsl` closure that maps each canonical AWS value to its
-/// snake_case DSL alias. The validator's `matches_alias` path then accepts
-/// the snake_case form alongside the canonical form.
+/// Per naming-conventions design D7, every enum emitted by codegen must carry
+/// a `dsl_aliases` entry that maps each canonical AWS value to its snake_case
+/// DSL alias. The host resolves either authored spelling before the provider
+/// boundary.
 #[test]
-fn test_organization_feature_set_validates_snake_case_alias() {
-    use carina_core::resource::{ConcreteValue, Value};
+fn test_organization_feature_set_host_canonicalizes_snake_case_alias() {
+    use carina_core::resource::{ConcreteValue, Resource, Value};
 
     let config =
         crate::schemas::generated::organizations::organization::organizations_organization_config();
-    let feature_set = config
-        .schema
-        .attributes
-        .get("feature_set")
-        .expect("feature_set attribute not found");
+    let mut registry = carina_core::schema::SchemaRegistry::new();
+    registry.insert("aws", config.schema);
 
-    // Phase 4 of carina#2986: enum attributes accept only
-    // `EnumIdentifier` shape; a `ConcreteValue::String` here would route
-    // to `StringLiteralExpectedEnum`. Both the API form (`ALL`) and the
-    // DSL form (`all`) are identifier-shape inputs in real DSL — the
-    // parser would emit `EnumIdentifier` for both. Mirror that here.
-    let schema = carina_core::schema::Schema::flat(feature_set.attr_type.clone());
-    schema
-        .validate(&Value::Concrete(ConcreteValue::enum_identifier("ALL")))
-        .expect("API spelling ALL should be accepted");
-    schema
-        .validate(&Value::Concrete(ConcreteValue::enum_identifier("all")))
-        .expect("DSL spelling all should be accepted");
-    schema
-        .validate(&Value::Concrete(ConcreteValue::enum_identifier(
-            "CONSOLIDATED_BILLING",
-        )))
-        .expect("API spelling CONSOLIDATED_BILLING should be accepted");
-    schema
-        .validate(&Value::Concrete(ConcreteValue::enum_identifier(
-            "consolidated_billing",
-        )))
-        .expect("DSL spelling consolidated_billing should be accepted");
-    // Bogus values still rejected.
+    for (authored, api) in [
+        ("all", "ALL"),
+        ("consolidated_billing", "CONSOLIDATED_BILLING"),
+    ] {
+        let mut resource =
+            Resource::with_provider("aws", "organizations.Organization", authored, None);
+        resource.set_attr(
+            "feature_set",
+            Value::Concrete(ConcreteValue::enum_identifier(authored)),
+        );
+        let mut resources = vec![resource];
+        carina_core::value::canonicalize_resources_with_schemas(&mut resources, &registry)
+            .unwrap_or_else(|error| panic!("{authored} should canonicalize: {error}"));
+        assert!(matches!(
+            resources[0].get_attr("feature_set"),
+            Some(Value::Concrete(ConcreteValue::CanonicalEnum(value)))
+                if value.api_value() == api
+        ));
+    }
+
+    let mut invalid = Resource::with_provider("aws", "organizations.Organization", "invalid", None);
+    invalid.set_attr(
+        "feature_set",
+        Value::Concrete(ConcreteValue::enum_identifier("not_a_value")),
+    );
     assert!(
-        schema
-            .validate(&Value::Concrete(ConcreteValue::enum_identifier(
-                "not_a_value"
-            )))
-            .is_err(),
-        "unknown values must still be rejected"
+        carina_core::value::canonicalize_resources_with_schemas(&mut [invalid], &registry).is_err(),
+        "unknown values must still be rejected by the host"
     );
 }
 
 /// Sibling check for a PascalCase StringEnum: route53.RecordSet's `Type`
-/// should accept both `A`, `AAAA`, ... (the API spellings, which happen to
-/// be SHOUTY) and their lowercase DSL aliases.
+/// should retain lowercase DSL aliases for the SHOUTY AWS API spellings.
 #[test]
-fn test_route53_record_type_validates_snake_case_alias() {
-    use carina_core::resource::{ConcreteValue, Value};
+fn test_route53_record_type_host_canonicalizes_snake_case_alias() {
+    use carina_core::resource::{ConcreteValue, Resource, Value};
 
     let config = crate::schemas::generated::route53::record_set::route53_record_set_config();
-    let type_attr = config
-        .schema
-        .attributes
-        .get("type")
-        .expect("type attribute not found");
+    let mut registry = carina_core::schema::SchemaRegistry::new();
+    registry.insert("aws", config.schema);
 
-    // Phase 4 of carina#2986: use `EnumIdentifier` shape to reach the
-    // variant-match path. A `ConcreteValue::String` here would route
-    // to `StringLiteralExpectedEnum`.
-    let schema = carina_core::schema::Schema::flat(type_attr.attr_type.clone());
-    schema
-        .validate(&Value::Concrete(ConcreteValue::enum_identifier("A")))
-        .expect("API spelling A should be accepted");
-    schema
-        .validate(&Value::Concrete(ConcreteValue::enum_identifier("a")))
-        .expect("DSL spelling a should be accepted");
-    schema
-        .validate(&Value::Concrete(ConcreteValue::enum_identifier("CNAME")))
-        .expect("API spelling CNAME should be accepted");
-    schema
-        .validate(&Value::Concrete(ConcreteValue::enum_identifier("cname")))
-        .expect("DSL spelling cname should be accepted");
+    for (authored, api) in [("a", "A"), ("cname", "CNAME")] {
+        let mut resource = Resource::with_provider("aws", "route53.RecordSet", authored, None);
+        resource.set_attr(
+            "type",
+            Value::Concrete(ConcreteValue::enum_identifier(authored)),
+        );
+        let mut resources = vec![resource];
+        carina_core::value::canonicalize_resources_with_schemas(&mut resources, &registry)
+            .unwrap_or_else(|error| panic!("{authored} should canonicalize: {error}"));
+        assert!(matches!(
+            resources[0].get_attr("type"),
+            Some(Value::Concrete(ConcreteValue::CanonicalEnum(value)))
+                if value.api_value() == api
+        ));
+    }
 }

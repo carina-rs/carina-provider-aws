@@ -9,7 +9,6 @@ use carina_core::provider::{
     Provider, ProviderError as CoreProviderError, ProviderNormalizer,
     ReadRequest as CoreReadRequest, UpdatePatch as CoreUpdatePatch,
 };
-use carina_core::resource::{ConcreteValue, Value as CoreValue};
 use carina_core::schema::SchemaRegistry;
 
 use carina_provider_aws::AwsNormalizer;
@@ -184,14 +183,10 @@ impl CarinaProvider for AwsProcessProvider {
     fn initialize(&mut self, attrs: &HashMap<String, proto::Value>) -> Result<(), String> {
         use carina_provider_aws::services::sts::account_guard::extract_string_list;
         use carina_provider_aws::services::sts::assume_role::extract_assume_role;
-        let core_attrs = convert::proto_to_core_value_map(attrs);
-        let region = if let Some(CoreValue::Concrete(ConcreteValue::String(region))) =
-            core_attrs.get("region")
-        {
-            carina_core::utils::convert_region_value(region.expose_plaintext())
-        } else {
-            "ap-northeast-1".to_string()
-        };
+        let core_attrs: indexmap::IndexMap<_, _> = convert::proto_to_core_value_map(attrs)
+            .into_iter()
+            .collect();
+        let region = carina_core::utils::extract_region_from_attrs(&core_attrs, "ap-northeast-1");
         let allowed = extract_string_list(core_attrs.get("allowed_account_ids"));
         let forbidden = extract_string_list(core_attrs.get("forbidden_account_ids"));
         let assume_role = extract_assume_role(core_attrs.get("assume_role"))?;
@@ -234,31 +229,17 @@ impl CarinaProvider for AwsProcessProvider {
         Ok(Vec::new())
     }
 
-    fn enum_aliases(&self) -> HashMap<String, HashMap<String, HashMap<String, String>>> {
-        carina_provider_aws::schemas::generated::build_enum_aliases_map()
-    }
-
     fn validate_custom_type(
         &self,
         identity: &carina_plugin_sdk::types::TypeIdentity,
         value: &str,
     ) -> Result<(), String> {
-        use carina_provider_aws::schemas::config::aws_validators;
-        use std::sync::OnceLock;
-        type ValidatorMap = HashMap<String, Box<dyn Fn(&str) -> Result<(), String> + Send + Sync>>;
-        static VALIDATORS: OnceLock<ValidatorMap> = OnceLock::new();
-        let validators = VALIDATORS.get_or_init(aws_validators);
-        // Inner lookup map is still snake_case-keyed; convert the
-        // structured identity's `kind` to snake at this single
-        // boundary. Provider-axis collisions are already filtered by
-        // the host before the call reaches us — the SDK only routes
-        // identities scoped to this provider here.
-        let key = carina_core::parser::pascal_to_snake(&identity.kind);
-        if let Some(validator) = validators.get(&key) {
-            validator(value)
-        } else {
-            Ok(())
-        }
+        let core_identity = carina_core::schema::TypeIdentity::new(
+            (!identity.provider.is_empty()).then_some(identity.provider.as_str()),
+            identity.segments.iter().map(String::as_str),
+            identity.kind.as_str(),
+        );
+        carina_provider_aws::schemas::config::validate_aws_custom_type(&core_identity, value)
     }
 
     fn read(
@@ -305,7 +286,6 @@ impl CarinaProvider for AwsProcessProvider {
                     core_resource,
                     &[],
                     &self.normalizer,
-                    &[],
                     &schemas,
                 ),
             )
@@ -489,19 +469,14 @@ mod tests {
     use super::*;
     use carina_plugin_sdk::types::{TypeIdentity, ValidatorType};
 
-    /// Test helper: build a structured identity whose dotted display
-    /// round-trips back to the legacy snake-cased semantic name via
-    /// `pascal_to_snake(identity.kind)`. The production
-    /// `validate_custom_type` impl looks the validator up in
-    /// `aws_validators`, which is still keyed on snake-cased semantic
-    /// names — so a bare identity with the PascalCase kind hits the
-    /// same map entry. Migrating `aws_validators` itself to a
-    /// structured-identity map is S2.5c follow-up work.
-    fn ident(legacy_snake: &str) -> TypeIdentity {
+    fn ident(segments: &[&str], kind: &str) -> TypeIdentity {
         TypeIdentity {
-            provider: String::new(),
-            segments: vec![],
-            kind: carina_core::parser::snake_to_pascal(legacy_snake),
+            provider: "aws".to_string(),
+            segments: segments
+                .iter()
+                .map(|segment| (*segment).to_string())
+                .collect(),
+            kind: kind.to_string(),
         }
     }
 
@@ -559,7 +534,7 @@ mod tests {
         let provider = AwsProcessProvider::new();
         assert!(
             provider
-                .validate_custom_type(&ident("vpc_id"), "vpc-12345678")
+                .validate_custom_type(&ident(&["ec2", "Vpc"], "Id"), "vpc-12345678")
                 .is_ok()
         );
     }
@@ -569,7 +544,7 @@ mod tests {
         let provider = AwsProcessProvider::new();
         assert!(
             provider
-                .validate_custom_type(&ident("vpc_id"), "subnet-12345678")
+                .validate_custom_type(&ident(&["ec2", "Vpc"], "Id"), "subnet-12345678")
                 .is_err()
         );
     }
@@ -579,7 +554,7 @@ mod tests {
         let provider = AwsProcessProvider::new();
         assert!(
             provider
-                .validate_custom_type(&ident("arn"), "arn:aws:s3:::my-bucket")
+                .validate_custom_type(&ident(&[], "Arn"), "arn:aws:s3:::my-bucket")
                 .is_ok()
         );
     }
@@ -589,7 +564,7 @@ mod tests {
         let provider = AwsProcessProvider::new();
         assert!(
             provider
-                .validate_custom_type(&ident("arn"), "not-an-arn")
+                .validate_custom_type(&ident(&[], "Arn"), "not-an-arn")
                 .is_err()
         );
     }
@@ -599,8 +574,26 @@ mod tests {
         let provider = AwsProcessProvider::new();
         assert!(
             provider
-                .validate_custom_type(&ident("unknown_type"), "any-value")
+                .validate_custom_type(&ident(&[], "UnknownType"), "any-value")
                 .is_ok()
+        );
+    }
+
+    #[test]
+    fn validate_custom_type_uses_structured_availability_zone_identity() {
+        let provider = AwsProcessProvider::new();
+        let identity = ident(&["AvailabilityZone"], "ZoneName");
+
+        assert!(
+            provider
+                .validate_custom_type(&identity, "ap-northeast-1a")
+                .is_ok()
+        );
+        assert!(
+            provider
+                .validate_custom_type(&identity, "not-an-az")
+                .is_err(),
+            "the guest provider entry point must find the structured AZ validator"
         );
     }
 
@@ -634,7 +627,7 @@ mod tests {
         assert!(
             provider
                 .validate_custom_type(
-                    &ident("iam_role_arn"),
+                    &ident(&["iam", "Role"], "Arn"),
                     "arn:aws:iam::123456789012:role/my-role"
                 )
                 .is_ok()
@@ -647,7 +640,7 @@ mod tests {
         assert!(
             provider
                 .validate_custom_type(
-                    &ident("iam_role_arn"),
+                    &ident(&["iam", "Role"], "Arn"),
                     "arn:aws:iam::123456789012:policy/my-policy"
                 )
                 .is_err()

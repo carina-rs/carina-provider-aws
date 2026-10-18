@@ -670,11 +670,9 @@ fn main() -> Result<()> {
                     .with_context(|| format!("Failed to write {}", output_path.display()))?;
                 eprintln!("Generated: {}", output_path.display());
                 generated_modules.push(GeneratedModule {
-                    dsl_name: res.name.to_string(),
                     service: service.to_string(),
                     file_stem: resource_snake.clone(),
                     config_fn: format!("{}_config", module_name(res.name)),
-                    is_data_source: false,
                 });
             }
 
@@ -696,11 +694,9 @@ fn main() -> Result<()> {
                     .with_context(|| format!("Failed to write {}", output_path.display()))?;
                 eprintln!("Generated: {}", output_path.display());
                 generated_modules.push(GeneratedModule {
-                    dsl_name: ds.name.to_string(),
                     service: service.to_string(),
                     file_stem,
                     config_fn: format!("{}{}_config", module_name(ds.name), suffix),
-                    is_data_source: true,
                 });
             }
 
@@ -1283,8 +1279,8 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
     // Generate enum constants.
     //
     // The constant lists only canonical AWS wire values. DSL spellings live
-    // in `dsl_aliases` / `enum_alias_entries`; mixing aliases into this list
-    // makes the host treat them as already API-canonical.
+    // in schema `dsl_aliases`; mixing aliases into this list makes the host
+    // treat them as already API-canonical.
     for (prop_name, enum_info) in &all_enums {
         let const_name = format!("VALID_{}", prop_name.to_snake_case().to_uppercase());
         let values_str = enum_info
@@ -1479,76 +1475,6 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
             res.name,
             entries.join("\n")
         ));
-    }
-    code.push_str("}\n");
-
-    // Collect all alias entries: explicit aliases + to_dsl reverse mappings.
-    let mut alias_entries: Vec<(String, String, String)> = Vec::new();
-    let mut seen: HashSet<(String, String)> = HashSet::new();
-
-    // Add explicit aliases from resource definition
-    for (attr, alias, canonical) in &res.enum_aliases {
-        if seen.insert((attr.to_string(), alias.to_string())) {
-            alias_entries.push((attr.to_string(), alias.to_string(), canonical.to_string()));
-        }
-    }
-
-    // Add auto-derived DSL aliases for every enum value.
-    //
-    // Per naming-conventions design D7, the DSL spelling is the snake_case
-    // form of the API value (`Enabled` → `enabled`, `BucketOwnerEnforced` →
-    // `bucket_owner_enforced`, etc.). The runtime uses these entries to
-    // rewrite SDK responses into DSL-flavored values for state diffing.
-    for (prop_name, enum_info) in &all_enums {
-        let attr_name = prop_name.to_snake_case();
-        for value in &enum_info.values {
-            let dsl_form = dsl_enum_value(value);
-            if dsl_form != *value && seen.insert((attr_name.clone(), dsl_form.clone())) {
-                alias_entries.push((attr_name.clone(), dsl_form, value.clone()));
-            }
-        }
-    }
-
-    // Generate enum_alias_reverse()
-    code.push_str(
-        "\n/// Maps DSL alias values back to canonical AWS values for this module.\n\
-         /// e.g., (\"ip_protocol\", \"all\") -> Some(\"-1\")\n\
-         pub fn enum_alias_reverse(attr_name: &str, value: &str) -> Option<&'static str> {\n",
-    );
-    if alias_entries.is_empty() {
-        code.push_str("    let _ = (attr_name, value);\n    None\n");
-    } else {
-        let match_arms: Vec<String> = alias_entries
-            .iter()
-            .map(|(attr, alias, canonical)| {
-                format!(
-                    "        (\"{}\", \"{}\") => Some(\"{}\")",
-                    attr, alias, canonical
-                )
-            })
-            .collect();
-        code.push_str(&format!(
-            "    match (attr_name, value) {{\n{},\n        _ => None\n    }}\n",
-            match_arms.join(",\n")
-        ));
-    }
-    code.push_str("}\n");
-
-    // Generate enum_alias_entries()
-    code.push_str(
-        "\n/// Returns all enum alias entries as (attr_name, alias, canonical) tuples.\n\
-         pub fn enum_alias_entries() -> &'static [(&'static str, &'static str, &'static str)] {\n",
-    );
-    if alias_entries.is_empty() {
-        code.push_str("    &[]\n");
-    } else {
-        let entry_strs: Vec<String> = alias_entries
-            .iter()
-            .map(|(attr, alias, canonical)| {
-                format!("        (\"{}\", \"{}\", \"{}\")", attr, alias, canonical)
-            })
-            .collect();
-        code.push_str(&format!("    &[\n{}\n    ]\n", entry_strs.join(",\n")));
     }
     code.push_str("}\n");
 
@@ -1868,9 +1794,6 @@ fn get_int_range(model: &SmithyModel, target: &str, field_name: &str) -> Option<
 /// Tracks one generated schema module (Managed resource or DataSource).
 #[derive(Debug, Clone)]
 struct GeneratedModule {
-    /// DSL resource name (e.g. "s3.Bucket"). Same value for the Managed and
-    /// DataSource entries when a type is dual-registered.
-    dsl_name: String,
     /// Service segment (e.g. "s3").
     service: String,
     /// File stem inside the service directory: "bucket" for the Managed
@@ -1879,7 +1802,6 @@ struct GeneratedModule {
     file_stem: String,
     /// `<file_stem>::<config_fn>()` is the entry point for `configs()`.
     config_fn: String,
-    is_data_source: bool,
 }
 
 fn generate_virtual_helper_modules(
@@ -1925,18 +1847,14 @@ fn generate_virtual_helper_modules(
         .with_context(|| format!("Failed to write {}", kms_key_path.display()))?;
 
     modules.push(GeneratedModule {
-        dsl_name: "iam.Policy".to_string(),
         service: "iam".to_string(),
         file_stem: "policy".to_string(),
         config_fn: String::new(),
-        is_data_source: false,
     });
     modules.push(GeneratedModule {
-        dsl_name: "kms.Key".to_string(),
         service: "kms".to_string(),
         file_stem: "key".to_string(),
         config_fn: String::new(),
-        is_data_source: false,
     });
 
     Ok(())
@@ -2074,20 +1992,16 @@ fn generate_mod_rs(modules: &[GeneratedModule], output_dir: &std::path::Path) ->
     // emitted text is stable across runs.
     #[derive(Debug, Clone)]
     struct Entry {
-        dsl_name: String,
         service: String,
         file_stem: String,
         config_fn: String,
-        is_data_source: bool,
     }
     let mut entries: Vec<Entry> = modules
         .iter()
         .map(|m| Entry {
-            dsl_name: m.dsl_name.clone(),
             service: m.service.clone(),
             file_stem: m.file_stem.clone(),
             config_fn: m.config_fn.clone(),
-            is_data_source: m.is_data_source,
         })
         .collect();
     for orphan in orphaned {
@@ -2095,11 +2009,9 @@ fn generate_mod_rs(modules: &[GeneratedModule], output_dir: &std::path::Path) ->
         let (service, resource) = split_service_resource(&orphan);
         let resource_snake = pascal_to_snake(resource);
         entries.push(Entry {
-            dsl_name: orphan.clone(),
             service: service.to_string(),
             file_stem: resource_snake.clone(),
             config_fn: format!("{}_{}_config", service, resource_snake),
-            is_data_source: false,
         });
     }
     entries.sort_by(|a, b| {
@@ -2172,52 +2084,6 @@ fn generate_mod_rs(modules: &[GeneratedModule], output_dir: &std::path::Path) ->
          \x20   None\n\
          }\n\n",
     );
-
-    // get_enum_alias_reverse() — only the Managed entry contributes; DataSource
-    // entries share the DSL name and would emit a duplicate `if` arm whose
-    // alias_reverse stub returns None anyway.
-    code.push_str(
-        "/// Maps DSL alias values back to canonical AWS values.\n\
-         /// Dispatches to per-module enum_alias_reverse() functions.\n\
-         pub fn get_enum_alias_reverse(resource_type: &str, attr_name: &str, value: &str) -> Option<&'static str> {\n",
-    );
-    for e in &entries {
-        if e.is_data_source || e.config_fn.is_empty() {
-            continue;
-        }
-        code.push_str(&format!(
-            "\x20   if resource_type == \"{}\" {{\n\
-             \x20       return {}::{}::enum_alias_reverse(attr_name, value);\n\
-             \x20   }}\n",
-            e.dsl_name, e.service, e.file_stem
-        ));
-    }
-    code.push_str("    None\n}\n\n");
-
-    // build_enum_aliases_map() — same Managed-only filter as above.
-    code.push_str(
-        "/// Build a complete enum aliases map for all resource types.\n\
-         /// Returns: resource_type -> attr_name -> alias -> canonical_value.\n\
-         /// Used by CarinaProvider::enum_aliases() for the WASM host cache.\n\
-         pub fn build_enum_aliases_map() -> std::collections::HashMap<String, std::collections::HashMap<String, std::collections::HashMap<String, String>>> {\n\
-         \x20   let mut map = std::collections::HashMap::new();\n",
-    );
-    for e in &entries {
-        if e.is_data_source || e.config_fn.is_empty() {
-            continue;
-        }
-        code.push_str(&format!(
-            "\x20   for (attr, alias, canonical) in {}::{}::enum_alias_entries() {{\n\
-             \x20       map.entry(\"{}\".to_string())\n\
-             \x20           .or_insert_with(std::collections::HashMap::new)\n\
-             \x20           .entry(attr.to_string())\n\
-             \x20           .or_insert_with(std::collections::HashMap::new)\n\
-             \x20           .insert(alias.to_string(), canonical.to_string());\n\
-             \x20   }}\n",
-            e.service, e.file_stem, e.dsl_name
-        ));
-    }
-    code.push_str("    map\n}\n");
 
     code
 }
@@ -2690,9 +2556,6 @@ fn generate_provider_code(
                     code.push_str("\x20           let normalized = match value {\n");
                     code.push_str(
                         "\x20               Value::Concrete(ConcreteValue::String(val)) => val.expose_plaintext().to_string(),\n",
-                    );
-                    code.push_str(
-                        "\x20               Value::Concrete(ConcreteValue::EnumIdentifier(val)) => val.as_str().to_string(),\n",
                     );
                     code.push_str(
                         "\x20               Value::Concrete(ConcreteValue::CanonicalEnum(val)) => val.api_value().to_string(),\n",
@@ -4129,21 +3992,11 @@ fn generate_data_source(
 
     code.push_str("    }\n}\n\n");
 
-    // Enum stubs
+    // Enum values stub
     code.push_str(&format!(
         "/// Returns the resource type name and all enum valid values for this module\n\
          pub fn enum_valid_values() -> (&'static str, &'static [(&'static str, &'static [&'static str])]) {{\n\
          \x20   (\"{}\", &[])\n\
-         }}\n\n\
-         /// Maps DSL alias values back to canonical AWS values for this module.\n\
-         /// e.g., (\"ip_protocol\", \"all\") -> Some(\"-1\")\n\
-         pub fn enum_alias_reverse(attr_name: &str, value: &str) -> Option<&'static str> {{\n\
-         \x20   let _ = (attr_name, value);\n\
-         \x20   None\n\
-         }}\n\n\
-         /// Returns all enum alias entries as (attr_name, alias, canonical) tuples.\n\
-         pub fn enum_alias_entries() -> &'static [(&'static str, &'static str, &'static str)] {{\n\
-         \x20   &[]\n\
          }}\n",
         ds.name,
     ));
@@ -5498,7 +5351,7 @@ mod tests {
     /// a snake_case alias (`a`, `aaaa`, `cname`) so users can write
     /// `aws.route53.RecordSet.Type.a`.
     #[test]
-    fn generate_resource_emits_dsl_aliases_and_alias_entries_for_pascal_enum() {
+    fn generate_resource_emits_dsl_aliases_for_pascal_enum() {
         let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../carina-provider-aws/tests/fixtures/smithy/route53.json");
         if !fixture.exists() {
@@ -5519,7 +5372,7 @@ mod tests {
         let generated = generate_resource(&resource, &model).expect("failed to generate resource");
 
         // The validator's allow-list (VALID_TYPE) must stay API-canonical;
-        // DSL spellings are carried by dsl_aliases / enum_alias_entries.
+        // DSL spellings are carried by schema dsl_aliases.
         let valid_type_line = generated
             .lines()
             .find(|line| line.starts_with("const VALID_TYPE:"))
@@ -5541,15 +5394,13 @@ mod tests {
             generated.contains("(\"CNAME\".to_string(), \"cname\".to_string())"),
             "dsl_aliases should include (CNAME, cname): {generated}"
         );
-        // The runtime alias table must include the same pairs so state
-        // normalization rewrites SDK responses into DSL spellings.
         assert!(
-            generated.contains("(\"type\", \"a\") => Some(\"A\")"),
-            "enum_alias_reverse should map (type, a) -> A: {generated}"
+            !generated.contains("enum_alias_reverse"),
+            "provider-side reverse alias lookup must not be generated: {generated}"
         );
         assert!(
-            generated.contains("(\"type\", \"cname\", \"CNAME\")"),
-            "enum_alias_entries should include (type, cname, CNAME): {generated}"
+            !generated.contains("enum_alias_entries"),
+            "provider-side alias tables must not be generated: {generated}"
         );
     }
 
@@ -6306,11 +6157,9 @@ mod tests {
         std::fs::write(logs_dir.join("mod.rs"), "pub mod log_group;").unwrap();
 
         let known = vec![GeneratedModule {
-            dsl_name: "ec2.Vpc".to_string(),
             service: "ec2".to_string(),
             file_stem: "vpc".to_string(),
             config_fn: "ec2_vpc_config".to_string(),
-            is_data_source: false,
         }];
         let orphaned = scan_orphaned_modules(output_dir, &known);
 
@@ -6329,11 +6178,9 @@ mod tests {
 
         // Generate with a different known resource (ec2.Vpc)
         let known = vec![GeneratedModule {
-            dsl_name: "ec2.Vpc".to_string(),
             service: "ec2".to_string(),
             file_stem: "vpc".to_string(),
             config_fn: "ec2_vpc_config".to_string(),
-            is_data_source: false,
         }];
         let generated = generate_mod_rs(&known, output_dir);
 
@@ -6346,8 +6193,8 @@ mod tests {
             "orphaned iam.Role config should be included: {generated}"
         );
         assert!(
-            generated.contains("if resource_type == \"iam.Role\""),
-            "orphaned iam.Role enum_alias_reverse should be included: {generated}"
+            generated.contains("iam::role::enum_valid_values()"),
+            "orphaned iam.Role enum values should be included: {generated}"
         );
     }
 
@@ -6357,32 +6204,21 @@ mod tests {
         let output_dir = tmp.path();
         let known = vec![
             GeneratedModule {
-                dsl_name: "s3.Bucket".to_string(),
                 service: "s3".to_string(),
                 file_stem: "bucket".to_string(),
                 config_fn: "s3_bucket_config".to_string(),
-                is_data_source: false,
             },
             GeneratedModule {
-                dsl_name: "s3.Bucket".to_string(),
                 service: "s3".to_string(),
                 file_stem: "bucket_data_source".to_string(),
                 config_fn: "s3_bucket_data_source_config".to_string(),
-                is_data_source: true,
             },
         ];
         let generated = generate_mod_rs(&known, output_dir);
         assert!(generated.contains("s3::bucket::s3_bucket_config()"));
         assert!(generated.contains("s3::bucket_data_source::s3_bucket_data_source_config()"));
-        // Only one enum_alias_reverse arm for s3.Bucket (the Managed entry).
-        let enum_arms: Vec<_> = generated
-            .match_indices("if resource_type == \"s3.Bucket\"")
-            .collect();
-        assert_eq!(
-            enum_arms.len(),
-            1,
-            "data source must not duplicate alias arm: {generated}"
-        );
+        assert!(!generated.contains("get_enum_alias_reverse"));
+        assert!(!generated.contains("build_enum_aliases_map"));
     }
 
     #[test]

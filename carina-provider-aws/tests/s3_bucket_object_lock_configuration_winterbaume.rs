@@ -258,7 +258,7 @@ async fn rule_with_years_round_trips() {
 }
 
 #[tokio::test]
-async fn dsl_enum_identifiers_are_canonicalized_before_create() {
+async fn host_canonicalizes_dsl_enum_identifiers_before_create() {
     let (provider, client) = provider_with_s3().await;
     let bucket = "carina-object-lock-dsl-enums";
     create_bucket(&client, bucket).await;
@@ -283,6 +283,15 @@ async fn dsl_enum_identifiers_are_canonicalized_before_create() {
             "aws.s3.BucketObjectLockConfiguration.ObjectLockEnabled.enabled",
         )),
     );
+    let mut registry = carina_core::schema::SchemaRegistry::new();
+    for schema in carina_provider_aws::schemas::all_schemas() {
+        registry.insert("aws", schema);
+    }
+    carina_core::value::canonicalize_resources_with_schemas(
+        std::slice::from_mut(&mut resource),
+        &registry,
+    )
+    .expect("host should resolve authored enum identifiers");
     let id = resource.id.clone();
     let request = create_request_for_test(resource).await;
 

@@ -1437,13 +1437,9 @@ mod tests {
         assert_eq!(to_remove, vec!["Project".to_string()]);
     }
 
-    /// carina-provider-aws#440: `validation_method = dns` was reaching AWS
-    /// as `EMAIL` (default) because the host canonicalize pass wraps the
-    /// schema-typed enum string as `CanonicalEnum("DNS")` before it crosses
-    /// the WIT boundary. Inside the provider, `apply_desired_normalization`
-    /// runs `canonicalize_resources_with_schemas` again, so by the time
-    /// `create_acm_certificate` reads `validation_method`, the value is
-    /// `ConcreteValue::CanonicalEnum`, not `ConcreteValue::String`.
+    /// carina-provider-aws#440: native provider-ready resources carry
+    /// schema-known enum values as `CanonicalEnum`, while the guest wire
+    /// carries their API spelling as `String`.
     ///
     /// The old local string extractor matched only `ConcreteValue::String`, so the
     /// `validation_method(...)` call was silently skipped on the SDK
@@ -1452,13 +1448,8 @@ mod tests {
     /// `EMAIL → DNS (forces replacement)` diff. The replacement-created
     /// cert hit the same bug, so the loop never converged.
     ///
-    /// The fix is at the helper layer: a request-side extractor for an
-    /// enum-typed attribute must accept the three variants the
-    /// canonicalize pipeline can produce — `String` (e.g. via a quoted
-    /// DSL spelling `validation_method = 'DNS'`), `EnumIdentifier`
-    /// (raw, when canonicalize didn't resolve), and `CanonicalEnum`
-    /// (the typed witness the canonicalize pass produces for schema-known
-    /// values). This test pins all three.
+    /// The request-side extractor must therefore accept both provider-facing
+    /// shapes without trying to resolve DSL spelling itself.
     ///
     /// This assertion goes through the production
     /// `helpers::optional_enum_attr` path so helper regressions are caught here.
@@ -1483,14 +1474,12 @@ mod tests {
         );
         let schema = Schema::flat(attr_type);
 
-        // DSL-side enum identifier `validation_method = dns` reaches the
-        // schema-typed canonicalize pass as `EnumIdentifier("dns")`.
-        let canonical = schema.canonicalize(Value::Concrete(ConcreteValue::enum_identifier("dns")));
+        let canonical =
+            schema.canonicalize_state(Value::Concrete(ConcreteValue::String("DNS".into())));
         assert!(
             matches!(&canonical, Value::Concrete(ConcreteValue::CanonicalEnum(c))
                 if c.api_value() == "DNS"),
-            "schema canonicalize must produce CanonicalEnum(DNS) from \
-             EnumIdentifier(\"dns\"); got {canonical:?}"
+            "state API spelling must produce CanonicalEnum(DNS); got {canonical:?}"
         );
 
         // The fix: extracting the validation method from a Resource whose
@@ -1511,36 +1500,7 @@ mod tests {
         );
     }
 
-    /// Sibling shape: post-#3463 raw enum identifier carrying the bare
-    /// DSL alias spelling (`dns`) may reach the provider without
-    /// canonicalization when host-side resolution fails for any reason.
-    /// The extract→parse chain must still recover the validation method
-    /// rather than silently dropping it.
-    ///
-    /// This assertion goes through the production
-    /// `helpers::optional_enum_attr` path so helper regressions are caught here.
-    #[test]
-    fn validation_method_enum_identifier_reaches_request() {
-        let mut resource = Resource::with_provider("aws", "acm.Certificate", "test-cert", None);
-        resource.set_attr(
-            "validation_method".to_string(),
-            Value::Concrete(ConcreteValue::enum_identifier("dns")),
-        );
-        let schema = acm_schema();
-        let parsed = crate::helpers::optional_enum_attr(&resource, &schema, "validation_method")
-            .and_then(parse_validation_method);
-        assert_eq!(
-            parsed,
-            Some(ValidationMethod::Dns),
-            "validation_method EnumIdentifier(\"dns\") must extract to \
-             ValidationMethod::Dns; the parser-emitted enum identifier \
-             shape must not be silently dropped"
-        );
-    }
-
-    /// Quoted-string DSL form `validation_method = 'DNS'` continues to
-    /// work — pin it so the enum-variant additions above can't regress
-    /// the documented example in `examples/acm_certificate/main.crn`.
+    /// The guest receives the same API spelling as a plain wire string.
     ///
     /// This assertion goes through the production
     /// `helpers::optional_enum_attr` path so helper regressions are caught here.

@@ -1,10 +1,9 @@
-use carina_provider_aws::schemas::config::aws_validators;
+use carina_provider_aws::schemas::config::validate_aws_custom_type;
 
 #[test]
 fn arn_rejects_non_role_iam_arn() {
-    let validators = aws_validators();
-    let validate = validators.get("iam_role_arn").unwrap();
-    assert!(validate("arn:aws:iam::123456789012:policy/Foo").is_err());
+    let identity = carina_aws_types::provider_type("iam", "Role", "Arn");
+    assert!(validate_aws_custom_type(&identity, "arn:aws:iam::123456789012:policy/Foo").is_err());
 }
 
 #[test]
@@ -21,7 +20,6 @@ fn arn_identity_is_provider_scoped() {
 
 #[test]
 fn arn_accepts_valid_role_arn() {
-    let validators = aws_validators();
-    let validate = validators.get("iam_role_arn").unwrap();
-    assert!(validate("arn:aws:iam::123456789012:role/MyRole").is_ok());
+    let identity = carina_aws_types::provider_type("iam", "Role", "Arn");
+    assert!(validate_aws_custom_type(&identity, "arn:aws:iam::123456789012:role/MyRole").is_ok());
 }

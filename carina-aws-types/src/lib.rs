@@ -553,11 +553,8 @@ mod tests {
     }
 
     #[test]
-    fn az_accepts_dsl_format() {
+    fn az_rejects_quoted_dsl_format() {
         let az_type = availability_zone();
-        // The full DSL form for the zone-name variant carries the
-        // `ZoneName` kind segment — `aws.AvailabilityZone.ZoneName.<v>` —
-        // matching the structured identity's dotted display.
         assert!(
             carina_core::schema::Schema::flat(az_type.clone())
                 .validate(&Value::Concrete(ConcreteValue::String(
@@ -565,31 +562,24 @@ mod tests {
                         .to_string()
                         .into()
                 )))
-                .is_ok()
+                .is_err()
         );
     }
 
     #[test]
-    fn az_accepts_shorthand_format() {
-        let az_type = availability_zone();
-        assert!(
-            carina_core::schema::Schema::flat(az_type.clone())
-                .validate(&Value::Concrete(ConcreteValue::String(
-                    "us_east_1a".to_string().into()
-                )))
-                .is_ok()
-        );
+    fn az_validator_rejects_dsl_spelling() {
+        assert!(validate_availability_zone("us_east_1a").is_err());
     }
 
     #[test]
-    fn az_accepts_kind_shorthand_format() {
+    fn az_rejects_quoted_kind_shorthand_format() {
         let az_type = availability_zone();
         assert!(
             carina_core::schema::Schema::flat(az_type.clone())
                 .validate(&Value::Concrete(ConcreteValue::String(
                     "ZoneName.us_east_1a".to_string().into()
                 )))
-                .is_ok()
+                .is_err()
         );
     }
 
@@ -1331,38 +1321,43 @@ mod tests {
     }
 
     #[test]
-    fn region_accepts_dsl_format() {
+    fn region_rejects_quoted_dsl_format() {
         let region_type = aws_region();
         assert!(
             carina_core::schema::Schema::flat(region_type.clone())
                 .validate(&Value::Concrete(ConcreteValue::String(
                     "aws.Region.ap_northeast_1".to_string().into()
                 )))
-                .is_ok()
+                .is_err()
         );
     }
 
     #[test]
-    fn region_accepts_dsl_format_without_aws_prefix() {
+    fn region_rejects_quoted_dsl_format_without_aws_prefix() {
         let region_type = aws_region();
         assert!(
             carina_core::schema::Schema::flat(region_type.clone())
                 .validate(&Value::Concrete(ConcreteValue::String(
                     "Region.ap_northeast_1".to_string().into()
                 )))
-                .is_ok()
+                .is_err()
         );
     }
 
     #[test]
-    fn region_accepts_bare_dsl_value() {
+    fn region_validator_rejects_dsl_spelling() {
+        assert!(validate_aws_region("ap_northeast_1").is_err());
+    }
+
+    #[test]
+    fn region_rejects_quoted_canonical_namespace_literal() {
         let region_type = aws_region();
         assert!(
-            carina_core::schema::Schema::flat(region_type.clone())
+            carina_core::schema::Schema::flat(region_type)
                 .validate(&Value::Concrete(ConcreteValue::String(
-                    "ap_northeast_1".to_string().into()
+                    "aws.Region.us_west_2".to_string().into()
                 )))
-                .is_ok()
+                .is_err()
         );
     }
 

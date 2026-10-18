@@ -575,7 +575,7 @@ mod tests {
         );
         let schema = Schema::flat(attr_type);
         let canonical =
-            schema.canonicalize(Value::Concrete(ConcreteValue::enum_identifier("aaaa")));
+            schema.canonicalize_state(Value::Concrete(ConcreteValue::String("AAAA".into())));
 
         let mut r = record_set("registry.example.com");
         r.set_attr("type".to_string(), canonical);

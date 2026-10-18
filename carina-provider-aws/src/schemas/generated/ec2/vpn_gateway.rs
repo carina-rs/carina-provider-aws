@@ -66,17 +66,3 @@ pub fn enum_valid_values() -> (
 ) {
     ("ec2.VpnGateway", &[("type", VALID_TYPE)])
 }
-
-/// Maps DSL alias values back to canonical AWS values for this module.
-/// e.g., ("ip_protocol", "all") -> Some("-1")
-pub fn enum_alias_reverse(attr_name: &str, value: &str) -> Option<&'static str> {
-    match (attr_name, value) {
-        ("type", "ipsec_1") => Some("ipsec.1"),
-        _ => None,
-    }
-}
-
-/// Returns all enum alias entries as (attr_name, alias, canonical) tuples.
-pub fn enum_alias_entries() -> &'static [(&'static str, &'static str, &'static str)] {
-    &[("type", "ipsec_1", "ipsec.1")]
-}

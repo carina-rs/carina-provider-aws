@@ -4,12 +4,10 @@
 # `carina-aws-types/src/lib.rs` that ship with an empty `dsl_aliases`
 # argument (`vec![]`).
 #
-# `AwsNormalizer::api_canonicalize_recursive` relies on the alias table
-# to rewrite DSL spellings (e.g. `aes256`) to the AWS API canonical
-# (`AES256`) before the wire call. An enum whose alias table is
-# empty silently forwards the raw alias spelling to the AWS SDK and
-# triggers `MalformedXML` / `Unknown(...)` errors at apply time —
-# unit tests pass, acceptance tests fail against real AWS.
+# The host relies on schema `dsl_aliases` to resolve authored DSL spellings
+# (e.g. `aes256`) to the AWS API spelling (`AES256`) before the provider
+# boundary. An enum whose schema alias table is empty rejects valid authored
+# DSL or cannot produce the provider-ready canonical value.
 #
 # The fix is to construct hand-written enums via the
 # `enum_with_dsl_aliases(name, values, identity)` helper in

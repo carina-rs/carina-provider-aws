@@ -70,23 +70,3 @@ pub fn enum_valid_values() -> (
 ) {
     ("s3.BucketAcl", &[("acl", VALID_ACL)])
 }
-
-/// Maps DSL alias values back to canonical AWS values for this module.
-/// e.g., ("ip_protocol", "all") -> Some("-1")
-pub fn enum_alias_reverse(attr_name: &str, value: &str) -> Option<&'static str> {
-    match (attr_name, value) {
-        ("acl", "authenticated_read") => Some("authenticated-read"),
-        ("acl", "public_read") => Some("public-read"),
-        ("acl", "public_read_write") => Some("public-read-write"),
-        _ => None,
-    }
-}
-
-/// Returns all enum alias entries as (attr_name, alias, canonical) tuples.
-pub fn enum_alias_entries() -> &'static [(&'static str, &'static str, &'static str)] {
-    &[
-        ("acl", "authenticated_read", "authenticated-read"),
-        ("acl", "public_read", "public-read"),
-        ("acl", "public_read_write", "public-read-write"),
-    ]
-}

@@ -1,9 +1,8 @@
-use carina_provider_aws::schemas::config::aws_validators;
+use carina_provider_aws::schemas::config::validate_aws_custom_type;
 
-fn assert_validator_accepts(validator_name: &str, value: &str) {
-    let validators = aws_validators();
-    let validate = validators.get(validator_name).unwrap();
-    assert!(validate(value).is_ok());
+fn assert_kms_key_id_validator_accepts(value: &str) {
+    let identity = carina_aws_types::provider_type("kms", "Key", "Id");
+    assert!(validate_aws_custom_type(&identity, value).is_ok());
 }
 
 fn assert_schema_accepts(t: carina_core::schema::AttributeType, value: &str) {
@@ -44,16 +43,12 @@ fn arn_accepts_only_kms_key_arn() {
 
 #[test]
 fn id_accepts_kms_key_identifier_forms() {
-    assert_validator_accepts(
-        "kms_key_id",
+    assert_kms_key_id_validator_accepts(
         "arn:aws:kms:us-east-1:123456789012:key/1234abcd-12ab-34cd-56ef-1234567890ab",
     );
-    assert_validator_accepts(
-        "kms_key_id",
-        "arn:aws:kms:us-east-1:123456789012:alias/my-key",
-    );
-    assert_validator_accepts("kms_key_id", "alias/my-key");
-    assert_validator_accepts("kms_key_id", "1234abcd-12ab-34cd-56ef-1234567890ab");
+    assert_kms_key_id_validator_accepts("arn:aws:kms:us-east-1:123456789012:alias/my-key");
+    assert_kms_key_id_validator_accepts("alias/my-key");
+    assert_kms_key_id_validator_accepts("1234abcd-12ab-34cd-56ef-1234567890ab");
 }
 
 #[test]

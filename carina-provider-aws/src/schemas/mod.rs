@@ -16,7 +16,7 @@ mod tests {
 
     use carina_core::differ::{Diff, diff};
     use carina_core::executor::normalized::apply_desired_normalization;
-    use carina_core::provider::{ProviderFactory, ProviderNormalizer};
+    use carina_core::provider::ProviderNormalizer;
     use carina_core::resource::{ConcreteValue, ResolvedResource, Resource, State, Value};
     use carina_core::schema::{
         AttributeType, RawShape, ResourceSchema, SchemaKind, SchemaRegistry, Shape,
@@ -24,7 +24,7 @@ mod tests {
     };
     use indexmap::IndexMap;
 
-    use crate::{AwsNormalizer, AwsProviderFactory};
+    use crate::AwsNormalizer;
 
     #[test]
     fn configs_register_s3_bucket_under_both_kinds() {
@@ -423,15 +423,13 @@ mod tests {
         read_back_hosted_zone_id: &str,
     ) -> ConcreteValue {
         let registry = aws_schema_registry();
-        let factories: Vec<Box<dyn ProviderFactory>> = vec![Box::new(AwsProviderFactory)];
         let mut desired = Resource::with_provider("aws", "route53.RecordSet", "record", None);
         desired.set_attr("alias_target", alias_target_value(desired_hosted_zone_id));
         let id = desired.id.clone();
 
-        let normalized =
-            apply_desired_normalization(desired, &[], &AwsNormalizer, &factories, &registry)
-                .await
-                .expect("desired normalization should succeed");
+        let normalized = apply_desired_normalization(desired, &[], &AwsNormalizer, &registry)
+            .await
+            .expect("desired normalization should succeed");
         let Some(Value::Concrete(ConcreteValue::Map(alias_target))) =
             normalized.as_resource().get_attr("alias_target")
         else {
@@ -535,45 +533,45 @@ mod tests {
     }
 
     #[test]
-    fn security_group_ip_protocol_values_are_canonical_and_aliases_reverse() {
+    fn security_group_ip_protocol_values_are_canonical_and_keep_dsl_alias() {
         for resource_type in ["ec2.SecurityGroupIngress", "ec2.SecurityGroupEgress"] {
-            let values = super::generated::get_enum_valid_values(resource_type, "ip_protocol")
-                .unwrap_or_else(|| panic!("{resource_type}.ip_protocol values should exist"));
+            let config = super::generated::configs()
+                .into_iter()
+                .find(|config| config.resource_type_name == resource_type)
+                .unwrap_or_else(|| panic!("{resource_type} config should exist"));
+            let attr_type = &config
+                .schema
+                .attributes
+                .get("ip_protocol")
+                .unwrap_or_else(|| panic!("{resource_type}.ip_protocol should exist"))
+                .attr_type;
+            let Shape::Enum {
+                values: Some(values),
+                dsl_aliases,
+                ..
+            } = config.schema.shape_of(attr_type)
+            else {
+                panic!("{resource_type}.ip_protocol should be an enum");
+            };
 
             assert!(
-                values.contains(&"tcp")
-                    && values.contains(&"udp")
-                    && values.contains(&"icmp")
-                    && values.contains(&"icmpv6")
-                    && values.contains(&"-1"),
+                values.iter().any(|value| value == "tcp")
+                    && values.iter().any(|value| value == "udp")
+                    && values.iter().any(|value| value == "icmp")
+                    && values.iter().any(|value| value == "icmpv6")
+                    && values.iter().any(|value| value == "-1"),
                 "{resource_type}.ip_protocol should include canonical wire values: {values:?}"
             );
             assert!(
-                !values.contains(&"all") && !values.contains(&"_1"),
+                !values.iter().any(|value| value == "all")
+                    && !values.iter().any(|value| value == "_1"),
                 "{resource_type}.ip_protocol values must not include DSL aliases: {values:?}"
             );
-
-            assert_eq!(
-                super::generated::get_enum_alias_reverse(resource_type, "ip_protocol", "all"),
-                Some("-1")
-            );
-            assert_eq!(
-                super::generated::get_enum_alias_reverse(resource_type, "ip_protocol", "_1"),
-                Some("-1")
-            );
-
-            let aliases = super::generated::build_enum_aliases_map();
-            let ip_protocol_aliases = aliases
-                .get(resource_type)
-                .and_then(|attrs| attrs.get("ip_protocol"))
-                .unwrap_or_else(|| panic!("{resource_type}.ip_protocol aliases should exist"));
-            assert_eq!(
-                ip_protocol_aliases.get("all").map(String::as_str),
-                Some("-1")
-            );
-            assert_eq!(
-                ip_protocol_aliases.get("_1").map(String::as_str),
-                Some("-1")
+            assert!(
+                dsl_aliases
+                    .iter()
+                    .any(|(api, dsl)| api == "-1" && dsl == "all"),
+                "{resource_type}.ip_protocol must retain the all -> -1 schema alias: {dsl_aliases:?}"
             );
         }
     }
