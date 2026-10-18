@@ -117,7 +117,7 @@ impl AwsProvider {
     ) -> ProviderResult<State> {
         let mut req = self.organizations_client.create_organization();
 
-        if let Some(feature_set) = optional_enum_attr(resource, schema, "feature_set") {
+        if let Some(feature_set) = optional_enum_attr(resource, schema, "feature_set")? {
             let fs = aws_sdk_organizations::types::OrganizationFeatureSet::from(feature_set);
             req = req.feature_set(fs);
         }

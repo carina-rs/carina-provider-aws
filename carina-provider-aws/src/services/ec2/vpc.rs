@@ -103,7 +103,7 @@ impl AwsProvider {
         let mut create_vpc_builder = self.ec2_client.create_vpc().cidr_block(&cidr_block);
 
         // Handle instance_tenancy if specified
-        if let Some(tenancy) = optional_enum_attr(resource, schema, "instance_tenancy") {
+        if let Some(tenancy) = optional_enum_attr(resource, schema, "instance_tenancy")? {
             let tenancy_enum = match tenancy {
                 "dedicated" => aws_sdk_ec2::types::Tenancy::Dedicated,
                 "host" => aws_sdk_ec2::types::Tenancy::Host,

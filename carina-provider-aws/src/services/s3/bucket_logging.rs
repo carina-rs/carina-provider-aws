@@ -5,15 +5,16 @@ use aws_sdk_s3::types::{
     TargetObjectKeyFormat,
 };
 use carina_core::provider::{ProviderError, ProviderResult};
-use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
+use carina_core::resource::{
+    ConcreteValue, Resource, ResourceId, State, Value, enum_attr_at_schema_path,
+};
 use carina_core::schema::ResourceSchema;
 use indexmap::IndexMap;
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
 use crate::helpers::{
-    RetryPolicy, optional_enum_value_at_schema_path, require_string_attr, retry_aws_operation,
-    sdk_error_message,
+    RetryPolicy, enum_attr_error, require_string_attr, retry_aws_operation, sdk_error_message,
 };
 use crate::services::s3::bucket::is_s3_not_configured_error;
 
@@ -189,22 +190,38 @@ fn build_key_format(
     };
 
     let mut builder = TargetObjectKeyFormat::builder();
-    if map.contains_key("simple_prefix") {
-        builder = builder.simple_prefix(SimplePrefix::builder().build());
+    match map.get("simple_prefix") {
+        Some(Value::Concrete(ConcreteValue::Map(_))) => {
+            builder = builder.simple_prefix(SimplePrefix::builder().build());
+        }
+        Some(_) => {
+            return Err(ProviderError::invalid_input("simple_prefix must be a map")
+                .for_resource(id.clone()));
+        }
+        None => {}
     }
-    if let Some(Value::Concrete(ConcreteValue::Map(pp))) = map.get("partitioned_prefix") {
-        let mut pb = PartitionedPrefix::builder();
-        if let Some(source) = pp.get("partition_date_source").and_then(|v| {
-            optional_enum_value_at_schema_path(
+    match map.get("partitioned_prefix") {
+        Some(Value::Concrete(ConcreteValue::Map(pp))) => {
+            let mut pb = PartitionedPrefix::builder();
+            if let Some(source) = enum_attr_at_schema_path(
                 schema,
                 "target_object_key_format",
                 &["partitioned_prefix", "partition_date_source"],
-                v,
+                pp.get("partition_date_source"),
             )
-        }) {
-            pb = pb.partition_date_source(PartitionDateSource::from(source.as_str()));
+            .map_err(|error| enum_attr_error(id, error))?
+            {
+                pb = pb.partition_date_source(PartitionDateSource::from(source.api_value()));
+            }
+            builder = builder.partitioned_prefix(pb.build());
         }
-        builder = builder.partitioned_prefix(pb.build());
+        Some(_) => {
+            return Err(
+                ProviderError::invalid_input("partitioned_prefix must be a map")
+                    .for_resource(id.clone()),
+            );
+        }
+        None => {}
     }
     Ok(builder.build())
 }
@@ -231,4 +248,70 @@ fn target_object_key_format_to_value(fmt: &TargetObjectKeyFormat) -> Value {
         );
     }
     Value::Concrete(ConcreteValue::Map(m))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn id() -> ResourceId {
+        ResourceId::with_identity("s3.bucket_logging", "test")
+    }
+
+    fn schema() -> ResourceSchema {
+        crate::schemas::generated::s3::bucket_logging::s3_bucket_logging_config().schema
+    }
+
+    #[test]
+    fn invalid_partition_date_source_is_rejected() {
+        let value = Value::Concrete(ConcreteValue::Map(
+            [(
+                "partitioned_prefix".to_string(),
+                Value::Concrete(ConcreteValue::Map(
+                    [(
+                        "partition_date_source".to_string(),
+                        Value::Concrete(ConcreteValue::String("eventtime".into())),
+                    )]
+                    .into_iter()
+                    .collect(),
+                )),
+            )]
+            .into_iter()
+            .collect(),
+        ));
+
+        build_key_format(&id(), &schema(), &value)
+            .expect_err("a non-exact closed-enum leaf must be rejected");
+    }
+
+    #[test]
+    fn non_map_partitioned_prefix_is_rejected() {
+        let value = Value::Concrete(ConcreteValue::Map(
+            [(
+                "partitioned_prefix".to_string(),
+                Value::Concrete(ConcreteValue::Bool(true)),
+            )]
+            .into_iter()
+            .collect(),
+        ));
+
+        build_key_format(&id(), &schema(), &value)
+            .expect_err("a present partitioned_prefix must be a map");
+    }
+
+    #[test]
+    fn non_map_simple_prefix_is_rejected() {
+        let value = Value::Concrete(ConcreteValue::Map(
+            [(
+                "simple_prefix".to_string(),
+                Value::Concrete(ConcreteValue::Bool(true)),
+            )]
+            .into_iter()
+            .collect(),
+        ));
+
+        let error = build_key_format(&id(), &schema(), &value)
+            .expect_err("a present simple_prefix must be a map");
+        assert!(error.to_string().contains("simple_prefix must be a map"));
+    }
 }

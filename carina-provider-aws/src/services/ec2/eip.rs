@@ -67,7 +67,7 @@ impl AwsProvider {
     ) -> ProviderResult<State> {
         let mut req = self.ec2_client.allocate_address();
 
-        if let Some(domain) = optional_enum_attr(resource, schema, "domain") {
+        if let Some(domain) = optional_enum_attr(resource, schema, "domain")? {
             use aws_sdk_ec2::types::DomainType;
             req = req.domain(DomainType::from(domain));
         } else {

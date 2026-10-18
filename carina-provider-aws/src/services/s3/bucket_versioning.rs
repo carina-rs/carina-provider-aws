@@ -109,7 +109,7 @@ impl AwsProvider {
         let status = BucketVersioningStatus::from(status_str.as_str());
 
         let mut config_builder = VersioningConfiguration::builder().status(status);
-        if let Some(s) = optional_enum_attr(resource, schema, "mfa_delete") {
+        if let Some(s) = optional_enum_attr(resource, schema, "mfa_delete")? {
             config_builder = config_builder.mfa_delete(MfaDelete::from(s));
         }
 

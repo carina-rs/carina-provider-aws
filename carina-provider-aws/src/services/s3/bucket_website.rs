@@ -126,78 +126,7 @@ impl AwsProvider {
         resource: &Resource,
         schema: &ResourceSchema,
     ) -> ProviderResult<State> {
-        let mut config_builder = WebsiteConfiguration::builder();
-
-        if let Some(Value::Concrete(ConcreteValue::Map(map))) = resource.get_attr("index_document")
-        {
-            let suffix = match map.get("suffix") {
-                Some(Value::Concrete(ConcreteValue::String(s))) => s.expose_plaintext(),
-                _ => {
-                    return Err(
-                        ProviderError::invalid_input("index_document.suffix is required")
-                            .for_resource(id.clone()),
-                    );
-                }
-            };
-            config_builder = config_builder.index_document(
-                IndexDocument::builder()
-                    .suffix(suffix)
-                    .build()
-                    .map_err(|e| {
-                        ProviderError::api_error(sdk_error_message(
-                            "Failed to build IndexDocument",
-                            &e,
-                        ))
-                        .for_resource(id.clone())
-                    })?,
-            );
-        }
-        if let Some(Value::Concrete(ConcreteValue::Map(map))) = resource.get_attr("error_document")
-        {
-            let key = match map.get("key") {
-                Some(Value::Concrete(ConcreteValue::String(s))) => s.expose_plaintext(),
-                _ => {
-                    return Err(
-                        ProviderError::invalid_input("error_document.key is required")
-                            .for_resource(id.clone()),
-                    );
-                }
-            };
-            config_builder = config_builder.error_document(
-                ErrorDocument::builder().key(key).build().map_err(|e| {
-                    ProviderError::api_error(sdk_error_message("Failed to build ErrorDocument", &e))
-                        .for_resource(id.clone())
-                })?,
-            );
-        }
-        if let Some(Value::Concrete(ConcreteValue::Map(map))) =
-            resource.get_attr("redirect_all_requests_to")
-        {
-            let host_name = match map.get("host_name") {
-                Some(Value::Concrete(ConcreteValue::String(s))) => s.expose_plaintext(),
-                _ => {
-                    return Err(ProviderError::invalid_input(
-                        "redirect_all_requests_to.host_name is required",
-                    )
-                    .for_resource(id.clone()));
-                }
-            };
-            let mut rb = RedirectAllRequestsTo::builder().host_name(host_name);
-            if let Some(protocol) =
-                optional_enum_struct_field(resource, schema, "redirect_all_requests_to", "protocol")
-            {
-                rb = rb.protocol(Protocol::from(protocol));
-            }
-            config_builder = config_builder.redirect_all_requests_to(rb.build().map_err(|e| {
-                ProviderError::api_error(sdk_error_message(
-                    "Failed to build RedirectAllRequestsTo",
-                    &e,
-                ))
-                .for_resource(id.clone())
-            })?);
-        }
-
-        let config = config_builder.build();
+        let config = build_website_configuration(id, resource, schema)?;
 
         self.s3_client
             .put_bucket_website()
@@ -246,5 +175,151 @@ impl AwsProvider {
             )
             .for_resource(id.clone())),
         }
+    }
+}
+
+fn build_website_configuration(
+    id: &ResourceId,
+    resource: &Resource,
+    schema: &ResourceSchema,
+) -> ProviderResult<WebsiteConfiguration> {
+    let mut config_builder = WebsiteConfiguration::builder();
+
+    match resource.get_attr("index_document") {
+        Some(Value::Concrete(ConcreteValue::Map(map))) => {
+            let suffix = match map.get("suffix") {
+                Some(Value::Concrete(ConcreteValue::String(s))) => s.expose_plaintext(),
+                _ => {
+                    return Err(
+                        ProviderError::invalid_input("index_document.suffix is required")
+                            .for_resource(id.clone()),
+                    );
+                }
+            };
+            config_builder = config_builder.index_document(
+                IndexDocument::builder()
+                    .suffix(suffix)
+                    .build()
+                    .map_err(|e| {
+                        ProviderError::api_error(sdk_error_message(
+                            "Failed to build IndexDocument",
+                            &e,
+                        ))
+                        .for_resource(id.clone())
+                    })?,
+            );
+        }
+        Some(_) => {
+            return Err(ProviderError::invalid_input("index_document must be a map")
+                .for_resource(id.clone()));
+        }
+        None => {}
+    }
+
+    match resource.get_attr("error_document") {
+        Some(Value::Concrete(ConcreteValue::Map(map))) => {
+            let key = match map.get("key") {
+                Some(Value::Concrete(ConcreteValue::String(s))) => s.expose_plaintext(),
+                _ => {
+                    return Err(
+                        ProviderError::invalid_input("error_document.key is required")
+                            .for_resource(id.clone()),
+                    );
+                }
+            };
+            config_builder = config_builder.error_document(
+                ErrorDocument::builder().key(key).build().map_err(|e| {
+                    ProviderError::api_error(sdk_error_message("Failed to build ErrorDocument", &e))
+                        .for_resource(id.clone())
+                })?,
+            );
+        }
+        Some(_) => {
+            return Err(ProviderError::invalid_input("error_document must be a map")
+                .for_resource(id.clone()));
+        }
+        None => {}
+    }
+
+    match resource.get_attr("redirect_all_requests_to") {
+        Some(Value::Concrete(ConcreteValue::Map(map))) => {
+            let host_name = match map.get("host_name") {
+                Some(Value::Concrete(ConcreteValue::String(s))) => s.expose_plaintext(),
+                _ => {
+                    return Err(ProviderError::invalid_input(
+                        "redirect_all_requests_to.host_name is required",
+                    )
+                    .for_resource(id.clone()));
+                }
+            };
+            let mut rb = RedirectAllRequestsTo::builder().host_name(host_name);
+            if let Some(protocol) = optional_enum_struct_field(
+                resource,
+                schema,
+                "redirect_all_requests_to",
+                "protocol",
+            )? {
+                rb = rb.protocol(Protocol::from(protocol));
+            }
+            config_builder = config_builder.redirect_all_requests_to(rb.build().map_err(|e| {
+                ProviderError::api_error(sdk_error_message(
+                    "Failed to build RedirectAllRequestsTo",
+                    &e,
+                ))
+                .for_resource(id.clone())
+            })?);
+        }
+        Some(_) => {
+            return Err(
+                ProviderError::invalid_input("redirect_all_requests_to must be a map")
+                    .for_resource(id.clone()),
+            );
+        }
+        None => {}
+    }
+
+    Ok(config_builder.build())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn schema() -> ResourceSchema {
+        crate::schemas::generated::s3::bucket_website_configuration::s3_bucket_website_configuration_config().schema
+    }
+
+    fn resource_with(attr: &str, value: Value) -> Resource {
+        let mut resource =
+            Resource::with_provider("aws", "s3.BucketWebsiteConfiguration", "test", None);
+        resource.set_attr(attr.to_string(), value);
+        resource
+    }
+
+    #[test]
+    fn non_map_index_document_is_rejected() {
+        let resource = resource_with("index_document", Value::Concrete(ConcreteValue::Bool(true)));
+
+        build_website_configuration(&resource.id, &resource, &schema())
+            .expect_err("a present index_document must be a map");
+    }
+
+    #[test]
+    fn non_map_error_document_is_rejected() {
+        let resource = resource_with("error_document", Value::Concrete(ConcreteValue::Bool(true)));
+
+        build_website_configuration(&resource.id, &resource, &schema())
+            .expect_err("a present error_document must be a map");
+    }
+
+    #[test]
+    fn non_map_redirect_all_requests_to_is_rejected() {
+        let resource = resource_with(
+            "redirect_all_requests_to",
+            Value::Concrete(ConcreteValue::Bool(true)),
+        );
+
+        build_website_configuration(&resource.id, &resource, &schema())
+            .expect_err("a present redirect_all_requests_to must be a map");
     }
 }

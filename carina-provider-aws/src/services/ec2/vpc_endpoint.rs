@@ -78,7 +78,7 @@ impl AwsProvider {
             .vpc_id(&vpc_id)
             .service_name(&service_name);
 
-        if let Some(ep_type) = optional_enum_attr(resource, schema, "vpc_endpoint_type") {
+        if let Some(ep_type) = optional_enum_attr(resource, schema, "vpc_endpoint_type")? {
             use aws_sdk_ec2::types::VpcEndpointType;
             req = req.vpc_endpoint_type(VpcEndpointType::from(ep_type));
         }

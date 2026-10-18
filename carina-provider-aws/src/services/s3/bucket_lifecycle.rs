@@ -7,15 +7,16 @@ use aws_sdk_s3::types::{
     TransitionStorageClass,
 };
 use carina_core::provider::{ProviderError, ProviderResult};
-use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
+use carina_core::resource::{
+    ConcreteValue, Resource, ResourceId, State, Value, enum_attr_at_schema_path,
+};
 use carina_core::schema::ResourceSchema;
 use indexmap::IndexMap;
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
 use crate::helpers::{
-    RetryPolicy, optional_enum_value_at_schema_path, require_string_attr, retry_aws_operation,
-    sdk_error_message,
+    RetryPolicy, enum_attr_error, require_string_attr, retry_aws_operation, sdk_error_message,
 };
 use crate::services::s3::bucket::is_s3_not_configured_error;
 
@@ -192,19 +193,13 @@ fn build_rule(
         );
     };
 
-    let status_str = match map
-        .get("status")
-        .and_then(|v| optional_enum_value_at_schema_path(schema, "rules", &["status"], v))
-    {
-        Some(s) => s,
-        _ => {
-            return Err(
-                ProviderError::invalid_input("rule.status is required").for_resource(id.clone())
-            );
-        }
-    };
+    let status = enum_attr_at_schema_path(schema, "rules", &["status"], map.get("status"))
+        .map_err(|error| enum_attr_error(id, error))?
+        .ok_or_else(|| {
+            ProviderError::invalid_input("rule.status is required").for_resource(id.clone())
+        })?;
 
-    let mut builder = LifecycleRule::builder().status(ExpirationStatus::from(status_str.as_str()));
+    let mut builder = LifecycleRule::builder().status(ExpirationStatus::from(status.api_value()));
 
     if let Some(Value::Concrete(ConcreteValue::String(s))) = map.get("id") {
         builder = builder.id(s.expose_plaintext());
@@ -220,24 +215,39 @@ fn build_rule(
     if let Some(v) = map.get("expiration") {
         builder = builder.expiration(build_expiration(id, v)?);
     }
-    if let Some(Value::Concrete(ConcreteValue::List(items))) = map.get("transitions") {
-        let transitions: Vec<Transition> = items
-            .iter()
-            .map(|v| build_transition(id, schema, v))
-            .collect::<ProviderResult<Vec<_>>>()?;
-        builder = builder.set_transitions(Some(transitions));
+    match map.get("transitions") {
+        Some(Value::Concrete(ConcreteValue::List(items))) => {
+            let transitions: Vec<Transition> = items
+                .iter()
+                .map(|v| build_transition(id, schema, v))
+                .collect::<ProviderResult<Vec<_>>>()?;
+            builder = builder.set_transitions(Some(transitions));
+        }
+        Some(_) => {
+            return Err(
+                ProviderError::invalid_input("transitions must be a list").for_resource(id.clone())
+            );
+        }
+        None => {}
     }
     if let Some(v) = map.get("noncurrent_version_expiration") {
         builder = builder.noncurrent_version_expiration(build_ncv_expiration(id, v)?);
     }
-    if let Some(Value::Concrete(ConcreteValue::List(items))) =
-        map.get("noncurrent_version_transitions")
-    {
-        let transitions: Vec<NoncurrentVersionTransition> = items
-            .iter()
-            .map(|v| build_ncv_transition(id, schema, v))
-            .collect::<ProviderResult<Vec<_>>>()?;
-        builder = builder.set_noncurrent_version_transitions(Some(transitions));
+    match map.get("noncurrent_version_transitions") {
+        Some(Value::Concrete(ConcreteValue::List(items))) => {
+            let transitions: Vec<NoncurrentVersionTransition> = items
+                .iter()
+                .map(|v| build_ncv_transition(id, schema, v))
+                .collect::<ProviderResult<Vec<_>>>()?;
+            builder = builder.set_noncurrent_version_transitions(Some(transitions));
+        }
+        Some(_) => {
+            return Err(ProviderError::invalid_input(
+                "noncurrent_version_transitions must be a list",
+            )
+            .for_resource(id.clone()));
+        }
+        None => {}
     }
     if let Some(v) = map.get("abort_incomplete_multipart_upload") {
         builder = builder.abort_incomplete_multipart_upload(build_abort_multipart(id, v)?);
@@ -288,12 +298,21 @@ fn build_filter_and(id: &ResourceId, value: &Value) -> ProviderResult<LifecycleR
     if let Some(Value::Concrete(ConcreteValue::String(s))) = map.get("prefix") {
         builder = builder.prefix(s.expose_plaintext());
     }
-    if let Some(Value::Concrete(ConcreteValue::List(items))) = map.get("tags") {
-        let tags: Vec<Tag> = items
-            .iter()
-            .map(|v| build_filter_tag(id, v))
-            .collect::<ProviderResult<Vec<_>>>()?;
-        builder = builder.set_tags(Some(tags));
+    match map.get("tags") {
+        Some(Value::Concrete(ConcreteValue::List(items))) => {
+            let tags: Vec<Tag> = items
+                .iter()
+                .map(|v| build_filter_tag(id, v))
+                .collect::<ProviderResult<Vec<_>>>()?;
+            builder = builder.set_tags(Some(tags));
+        }
+        Some(_) => {
+            return Err(
+                ProviderError::invalid_input("filter.and.tags must be a list")
+                    .for_resource(id.clone()),
+            );
+        }
+        None => {}
     }
     if let Some(Value::Concrete(ConcreteValue::Int(n))) = map.get("object_size_greater_than") {
         builder = builder.object_size_greater_than(*n);
@@ -356,19 +375,19 @@ fn build_transition(
             ProviderError::invalid_input("transition must be a map").for_resource(id.clone())
         );
     };
-    let storage_class_str = match map.get("storage_class").and_then(|v| {
-        optional_enum_value_at_schema_path(schema, "rules", &["transitions", "storage_class"], v)
-    }) {
-        Some(s) => s,
-        _ => {
-            return Err(
-                ProviderError::invalid_input("transition.storage_class is required")
-                    .for_resource(id.clone()),
-            );
-        }
-    };
+    let storage_class = enum_attr_at_schema_path(
+        schema,
+        "rules",
+        &["transitions", "storage_class"],
+        map.get("storage_class"),
+    )
+    .map_err(|error| enum_attr_error(id, error))?
+    .ok_or_else(|| {
+        ProviderError::invalid_input("transition.storage_class is required")
+            .for_resource(id.clone())
+    })?;
     let mut builder = Transition::builder()
-        .storage_class(TransitionStorageClass::from(storage_class_str.as_str()));
+        .storage_class(TransitionStorageClass::from(storage_class.api_value()));
     if let Some(Value::Concrete(ConcreteValue::Int(d))) = map.get("days") {
         builder = builder.days(*d as i32);
     }
@@ -406,24 +425,19 @@ fn build_ncv_transition(
                 .for_resource(id.clone()),
         );
     };
-    let storage_class_str = match map.get("storage_class").and_then(|v| {
-        optional_enum_value_at_schema_path(
-            schema,
-            "rules",
-            &["noncurrent_version_transitions", "storage_class"],
-            v,
-        )
-    }) {
-        Some(s) => s,
-        _ => {
-            return Err(ProviderError::invalid_input(
-                "noncurrent_version_transition.storage_class is required",
-            )
-            .for_resource(id.clone()));
-        }
-    };
+    let storage_class = enum_attr_at_schema_path(
+        schema,
+        "rules",
+        &["noncurrent_version_transitions", "storage_class"],
+        map.get("storage_class"),
+    )
+    .map_err(|error| enum_attr_error(id, error))?
+    .ok_or_else(|| {
+        ProviderError::invalid_input("noncurrent_version_transition.storage_class is required")
+            .for_resource(id.clone())
+    })?;
     let mut builder = NoncurrentVersionTransition::builder()
-        .storage_class(TransitionStorageClass::from(storage_class_str.as_str()));
+        .storage_class(TransitionStorageClass::from(storage_class.api_value()));
     if let Some(Value::Concrete(ConcreteValue::Int(d))) = map.get("noncurrent_days") {
         builder = builder.noncurrent_days(*d as i32);
     }
@@ -708,6 +722,38 @@ mod tests {
     }
 
     #[test]
+    fn invalid_rule_status_is_rejected() {
+        let rule_value = map_val(vec![("status", str_val("enabled"))]);
+
+        build_rule(&rid(), &schema(), &rule_value)
+            .expect_err("a non-exact closed-enum leaf must be rejected");
+    }
+
+    #[test]
+    fn non_list_transitions_are_rejected() {
+        let rule_value = map_val(vec![
+            ("status", str_val("Enabled")),
+            ("transitions", Value::Concrete(ConcreteValue::Bool(true))),
+        ]);
+
+        build_rule(&rid(), &schema(), &rule_value).expect_err("present transitions must be a list");
+    }
+
+    #[test]
+    fn non_list_noncurrent_version_transitions_are_rejected() {
+        let rule_value = map_val(vec![
+            ("status", str_val("Enabled")),
+            (
+                "noncurrent_version_transitions",
+                Value::Concrete(ConcreteValue::Bool(true)),
+            ),
+        ]);
+
+        build_rule(&rid(), &schema(), &rule_value)
+            .expect_err("present noncurrent_version_transitions must be a list");
+    }
+
+    #[test]
     fn rule_without_filter_gets_empty_filter() {
         // Reproduces carina-rs/carina-provider-aws#273: a rule with no
         // `filter` must still emit a `Filter` element, otherwise S3
@@ -786,6 +832,24 @@ mod tests {
         assert_eq!(and.prefix(), Some("data/"));
         assert_eq!(and.object_size_greater_than(), Some(1024));
         assert_eq!(and.tags().len(), 1);
+    }
+
+    #[test]
+    fn non_list_filter_and_tags_are_rejected() {
+        let rule_value = map_val(vec![
+            ("status", str_val("Enabled")),
+            (
+                "filter",
+                map_val(vec![(
+                    "and",
+                    map_val(vec![("tags", Value::Concrete(ConcreteValue::Bool(true)))]),
+                )]),
+            ),
+        ]);
+
+        let error = build_rule(&rid(), &schema(), &rule_value)
+            .expect_err("present filter.and.tags must be a list");
+        assert!(error.to_string().contains("filter.and.tags must be a list"));
     }
 
     #[test]

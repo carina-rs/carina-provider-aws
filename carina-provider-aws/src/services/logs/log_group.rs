@@ -131,7 +131,7 @@ impl AwsProvider {
             req = req.kms_key_id(kms_key.expose_plaintext());
         }
 
-        if let Some(class) = optional_enum_attr(resource, schema, "log_group_class") {
+        if let Some(class) = optional_enum_attr(resource, schema, "log_group_class")? {
             use aws_sdk_cloudwatchlogs::types::LogGroupClass;
             req = req.log_group_class(LogGroupClass::from(class));
         }

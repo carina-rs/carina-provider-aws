@@ -5,15 +5,16 @@ use aws_sdk_s3::types::{
     ServerSideEncryptionRule,
 };
 use carina_core::provider::{ProviderError, ProviderResult};
-use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
+use carina_core::resource::{
+    ConcreteValue, Resource, ResourceId, State, Value, enum_attr_at_schema_path,
+};
 use carina_core::schema::ResourceSchema;
 use indexmap::IndexMap;
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
 use crate::helpers::{
-    RetryPolicy, optional_enum_value_at_schema_path, require_string_attr, retry_aws_operation,
-    sdk_error_message,
+    RetryPolicy, enum_attr_error, require_string_attr, retry_aws_operation, sdk_error_message,
 };
 use crate::services::s3::bucket::is_s3_not_configured_error;
 
@@ -215,23 +216,18 @@ fn build_by_default(
         )
         .for_resource(id.clone()));
     };
-    let algorithm_str = match map.get("sse_algorithm").and_then(|v| {
-        optional_enum_value_at_schema_path(
-            schema,
-            "rules",
-            &["apply_server_side_encryption_by_default", "sse_algorithm"],
-            v,
-        )
-    }) {
-        Some(s) => s,
-        _ => {
-            return Err(
-                ProviderError::invalid_input("sse_algorithm is required").for_resource(id.clone())
-            );
-        }
-    };
+    let algorithm = enum_attr_at_schema_path(
+        schema,
+        "rules",
+        &["apply_server_side_encryption_by_default", "sse_algorithm"],
+        map.get("sse_algorithm"),
+    )
+    .map_err(|error| enum_attr_error(id, error))?
+    .ok_or_else(|| {
+        ProviderError::invalid_input("sse_algorithm is required").for_resource(id.clone())
+    })?;
     let mut builder = ServerSideEncryptionByDefault::builder()
-        .sse_algorithm(ServerSideEncryption::from(algorithm_str.as_str()));
+        .sse_algorithm(ServerSideEncryption::from(algorithm.api_value()));
     if let Some(Value::Concrete(ConcreteValue::String(k))) = map.get("kms_master_key_id") {
         builder = builder.kms_master_key_id(k.expose_plaintext());
     }
@@ -272,4 +268,27 @@ fn rule_to_value(rule: &ServerSideEncryptionRule) -> Value {
         );
     }
     Value::Concrete(ConcreteValue::Map(map))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn invalid_sse_algorithm_is_rejected() {
+        let id =
+            ResourceId::with_identity("s3.bucket_server_side_encryption_configuration", "test");
+        let schema = crate::schemas::generated::s3::bucket_server_side_encryption_configuration::s3_bucket_server_side_encryption_configuration_config().schema;
+        let value = Value::Concrete(ConcreteValue::Map(
+            [(
+                "sse_algorithm".to_string(),
+                Value::Concrete(ConcreteValue::String("aes256".into())),
+            )]
+            .into_iter()
+            .collect(),
+        ));
+
+        build_by_default(&id, &schema, &value)
+            .expect_err("a non-exact closed-enum leaf must be rejected");
+    }
 }
