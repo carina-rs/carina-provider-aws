@@ -89,7 +89,7 @@ impl AwsProvider {
             req = req.allocation_id(alloc_id.expose_plaintext());
         }
 
-        if let Some(conn_type) = optional_enum_attr(resource, schema, "connectivity_type") {
+        if let Some(conn_type) = optional_enum_attr(resource, schema, "connectivity_type")? {
             use aws_sdk_ec2::types::ConnectivityType;
             req = req.connectivity_type(ConnectivityType::from(conn_type));
         }

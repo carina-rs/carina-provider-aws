@@ -6,15 +6,16 @@ use aws_sdk_s3::types::{
     StorageClass, Tag,
 };
 use carina_core::provider::{ProviderError, ProviderResult};
-use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
+use carina_core::resource::{
+    ConcreteValue, Resource, ResourceId, State, Value, enum_attr_at_schema_path,
+};
 use carina_core::schema::ResourceSchema;
 use indexmap::IndexMap;
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
 use crate::helpers::{
-    RetryPolicy, optional_enum_value_at_schema_path, require_string_attr, retry_aws_operation,
-    sdk_error_message,
+    RetryPolicy, enum_attr_error, require_string_attr, retry_aws_operation, sdk_error_message,
 };
 use crate::services::s3::bucket::is_s3_not_configured_error;
 
@@ -196,17 +197,11 @@ fn build_rule(
         );
     };
 
-    let status_str = match map
-        .get("status")
-        .and_then(|v| optional_enum_value_at_schema_path(schema, "rules", &["status"], v))
-    {
-        Some(s) => s,
-        _ => {
-            return Err(
-                ProviderError::invalid_input("rule.status is required").for_resource(id.clone())
-            );
-        }
-    };
+    let status = enum_attr_at_schema_path(schema, "rules", &["status"], map.get("status"))
+        .map_err(|error| enum_attr_error(id, error))?
+        .ok_or_else(|| {
+            ProviderError::invalid_input("rule.status is required").for_resource(id.clone())
+        })?;
     let destination = match map.get("destination") {
         Some(v) => build_destination(id, schema, v)?,
         None => {
@@ -226,30 +221,29 @@ fn build_rule(
     // A `Filter`-based rule must also declare `DeleteMarkerReplication`.
     // Default to `Disabled` when the DSL omits it.
     let delete_marker_status = match map.get("delete_marker_replication") {
-        Some(Value::Concrete(ConcreteValue::Map(dm))) => match dm.get("status") {
-            Some(v) => optional_enum_value_at_schema_path(
-                schema,
-                "rules",
-                &["delete_marker_replication", "status"],
-                v,
-            )
-            .map(|s| DeleteMarkerReplicationStatus::from(s.as_str()))
-            .ok_or_else(|| {
-                ProviderError::invalid_input("delete_marker_replication.status is required")
-                    .for_resource(id.clone())
-            })?,
-            _ => {
-                return Err(ProviderError::invalid_input(
-                    "delete_marker_replication.status is required",
-                )
-                .for_resource(id.clone()));
-            }
-        },
-        _ => DeleteMarkerReplicationStatus::Disabled,
+        Some(Value::Concrete(ConcreteValue::Map(dm))) => enum_attr_at_schema_path(
+            schema,
+            "rules",
+            &["delete_marker_replication", "status"],
+            dm.get("status"),
+        )
+        .map_err(|error| enum_attr_error(id, error))?
+        .map(|attr| DeleteMarkerReplicationStatus::from(attr.api_value()))
+        .ok_or_else(|| {
+            ProviderError::invalid_input("delete_marker_replication.status is required")
+                .for_resource(id.clone())
+        })?,
+        Some(_) => {
+            return Err(
+                ProviderError::invalid_input("delete_marker_replication must be a map")
+                    .for_resource(id.clone()),
+            );
+        }
+        None => DeleteMarkerReplicationStatus::Disabled,
     };
 
     let mut builder = ReplicationRule::builder()
-        .status(ReplicationRuleStatus::from(status_str.as_str()))
+        .status(ReplicationRuleStatus::from(status.api_value()))
         .filter(filter)
         .delete_marker_replication(
             DeleteMarkerReplication::builder()
@@ -315,12 +309,21 @@ fn build_filter_and(id: &ResourceId, value: &Value) -> ProviderResult<Replicatio
     if let Some(Value::Concrete(ConcreteValue::String(s))) = map.get("prefix") {
         builder = builder.prefix(s.expose_plaintext());
     }
-    if let Some(Value::Concrete(ConcreteValue::List(items))) = map.get("tags") {
-        let tags: Vec<Tag> = items
-            .iter()
-            .map(|v| build_filter_tag(id, v))
-            .collect::<ProviderResult<Vec<_>>>()?;
-        builder = builder.set_tags(Some(tags));
+    match map.get("tags") {
+        Some(Value::Concrete(ConcreteValue::List(items))) => {
+            let tags: Vec<Tag> = items
+                .iter()
+                .map(|v| build_filter_tag(id, v))
+                .collect::<ProviderResult<Vec<_>>>()?;
+            builder = builder.set_tags(Some(tags));
+        }
+        Some(_) => {
+            return Err(
+                ProviderError::invalid_input("filter.and.tags must be a list")
+                    .for_resource(id.clone()),
+            );
+        }
+        None => {}
     }
     Ok(builder.build())
 }
@@ -366,10 +369,15 @@ fn build_destination(
     if let Some(Value::Concrete(ConcreteValue::String(s))) = map.get("account") {
         builder = builder.account(s.expose_plaintext());
     }
-    if let Some(storage_class) = map.get("storage_class").and_then(|v| {
-        optional_enum_value_at_schema_path(schema, "rules", &["destination", "storage_class"], v)
-    }) {
-        builder = builder.storage_class(StorageClass::from(storage_class.as_str()));
+    if let Some(storage_class) = enum_attr_at_schema_path(
+        schema,
+        "rules",
+        &["destination", "storage_class"],
+        map.get("storage_class"),
+    )
+    .map_err(|error| enum_attr_error(id, error))?
+    {
+        builder = builder.storage_class(StorageClass::from(storage_class.api_value()));
     }
     builder.build().map_err(|e| {
         ProviderError::api_error(sdk_error_message("Failed to build Destination", &e))
@@ -551,6 +559,47 @@ mod tests {
     }
 
     #[test]
+    fn invalid_rule_status_is_rejected() {
+        let rule_value = map_val(vec![
+            ("status", str_val("enabled")),
+            ("destination", dest()),
+        ]);
+
+        build_rule(&rid(), &schema(), &rule_value)
+            .expect_err("a non-exact closed-enum leaf must be rejected");
+    }
+
+    #[test]
+    fn invalid_delete_marker_replication_status_is_rejected() {
+        let rule_value = map_val(vec![
+            ("status", str_val("Enabled")),
+            ("destination", dest()),
+            (
+                "delete_marker_replication",
+                map_val(vec![("status", str_val("enabled"))]),
+            ),
+        ]);
+
+        build_rule(&rid(), &schema(), &rule_value)
+            .expect_err("a non-exact nested closed-enum leaf must be rejected");
+    }
+
+    #[test]
+    fn non_map_delete_marker_replication_is_rejected() {
+        let rule_value = map_val(vec![
+            ("status", str_val("Enabled")),
+            ("destination", dest()),
+            (
+                "delete_marker_replication",
+                Value::Concrete(ConcreteValue::Bool(true)),
+            ),
+        ]);
+
+        build_rule(&rid(), &schema(), &rule_value)
+            .expect_err("a present delete_marker_replication must be a map");
+    }
+
+    #[test]
     fn rule_without_filter_gets_empty_filter() {
         // Reproduces carina-rs/carina-provider-aws#273: a V2 replication
         // rule with no `filter` must still emit a `Filter` element,
@@ -638,6 +687,25 @@ mod tests {
         let and = rule.filter().and_then(|f| f.and()).expect("and set");
         assert_eq!(and.prefix(), Some("data/"));
         assert_eq!(and.tags().len(), 1);
+    }
+
+    #[test]
+    fn non_list_filter_and_tags_are_rejected() {
+        let rule_value = map_val(vec![
+            ("status", str_val("Enabled")),
+            ("destination", dest()),
+            (
+                "filter",
+                map_val(vec![(
+                    "and",
+                    map_val(vec![("tags", Value::Concrete(ConcreteValue::Bool(true)))]),
+                )]),
+            ),
+        ]);
+
+        let error = build_rule(&rid(), &schema(), &rule_value)
+            .expect_err("present filter.and.tags must be a list");
+        assert!(error.to_string().contains("filter.and.tags must be a list"));
     }
 
     #[test]

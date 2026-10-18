@@ -180,7 +180,7 @@ impl AwsProvider {
             .email(&email);
 
         if let Some(iam_billing) =
-            optional_enum_attr(resource, schema, "iam_user_access_to_billing")
+            optional_enum_attr(resource, schema, "iam_user_access_to_billing")?
         {
             let val = aws_sdk_organizations::types::IamUserAccessToBilling::from(iam_billing);
             req = req.iam_user_access_to_billing(val);

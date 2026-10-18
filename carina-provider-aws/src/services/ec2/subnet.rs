@@ -19,6 +19,26 @@ use aws_sdk_ec2::types::{AttributeBooleanValue, HostnameType};
 // spelling at the schema position; provider read paths must not re-derive
 // an authored DSL spelling.
 
+#[derive(Debug)]
+struct ModifySubnetEnumAttrs {
+    hostname_type: Option<HostnameType>,
+}
+
+fn resolve_modify_subnet_enum_attrs(
+    resource: &Resource,
+    schema: &ResourceSchema,
+) -> ProviderResult<ModifySubnetEnumAttrs> {
+    Ok(ModifySubnetEnumAttrs {
+        hostname_type: optional_enum_struct_field(
+            resource,
+            schema,
+            "private_dns_name_options_on_launch",
+            "hostname_type",
+        )?
+        .map(HostnameType::from),
+    })
+}
+
 impl AwsProvider {
     /// Read an EC2 Subnet
     pub(crate) async fn read_ec2_subnet(
@@ -78,6 +98,7 @@ impl AwsProvider {
     ) -> ProviderResult<State> {
         let cidr_block = require_string_attr(resource, "cidr_block")?;
         let vpc_id = require_string_attr(resource, "vpc_id")?;
+        let modify_enum_attrs = resolve_modify_subnet_enum_attrs(resource, schema)?;
 
         let mut req = self
             .ec2_client
@@ -85,7 +106,7 @@ impl AwsProvider {
             .vpc_id(&vpc_id)
             .cidr_block(&cidr_block);
 
-        if let Some(az) = optional_enum_attr(resource, schema, "availability_zone") {
+        if let Some(az) = optional_enum_attr(resource, schema, "availability_zone")? {
             req = req.availability_zone(az);
         }
 
@@ -105,7 +126,7 @@ impl AwsProvider {
             .await?;
 
         // Apply subnet attributes that require ModifySubnetAttribute
-        self.modify_subnet_attributes(&resource.id, subnet_id, resource, schema)
+        self.modify_subnet_attributes(&resource.id, subnet_id, resource, &modify_enum_attrs)
             .await?;
 
         // Read back using subnet ID (reliable identifier)
@@ -121,9 +142,11 @@ impl AwsProvider {
         to: Resource,
         schema: &ResourceSchema,
     ) -> ProviderResult<State> {
+        let modify_enum_attrs = resolve_modify_subnet_enum_attrs(&to, schema)?;
+
         // Apply subnet attributes that require ModifySubnetAttribute
         let attrs = to.resolved_attributes();
-        self.modify_subnet_attributes(&id, identifier, &to, schema)
+        self.modify_subnet_attributes(&id, identifier, &to, &modify_enum_attrs)
             .await?;
 
         // Update tags
@@ -140,7 +163,7 @@ impl AwsProvider {
         id: &ResourceId,
         subnet_id: &str,
         resource: &Resource,
-        schema: &ResourceSchema,
+        enum_attrs: &ModifySubnetEnumAttrs,
     ) -> ProviderResult<()> {
         if let Some(enabled) = optional_bool_attr(resource, "map_public_ip_on_launch") {
             self.ec2_client
@@ -197,16 +220,11 @@ impl AwsProvider {
 
         // The ModifySubnetAttribute API only allows modifying one attribute at a time.
         // Each private_dns_name_options_on_launch field must be a separate API call.
-        if let Some(ht) = optional_enum_struct_field(
-            resource,
-            schema,
-            "private_dns_name_options_on_launch",
-            "hostname_type",
-        ) {
+        if let Some(ht) = enum_attrs.hostname_type.as_ref() {
             self.ec2_client
                 .modify_subnet_attribute()
                 .subnet_id(subnet_id)
-                .private_dns_hostname_type_on_launch(HostnameType::from(ht))
+                .private_dns_hostname_type_on_launch(ht.clone())
                 .send()
                 .await
                 .map_err(|e| {
@@ -266,5 +284,30 @@ impl AwsProvider {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use carina_core::resource::{ConcreteValue, Value};
+    use indexmap::IndexMap;
+
+    #[test]
+    fn invalid_hostname_type_is_rejected_during_pre_send_resolution() {
+        let schema = crate::schemas::generated::ec2::subnet::ec2_subnet_config().schema;
+        let mut resource = Resource::with_provider("aws", "ec2.Subnet", "test", None);
+        let mut options = IndexMap::new();
+        options.insert(
+            "hostname_type".to_string(),
+            Value::Concrete(ConcreteValue::String("IP-NAME".into())),
+        );
+        resource.set_attr(
+            "private_dns_name_options_on_launch".to_string(),
+            Value::Concrete(ConcreteValue::Map(options)),
+        );
+
+        resolve_modify_subnet_enum_attrs(&resource, &schema)
+            .expect_err("invalid hostname_type must fail before any EC2 mutation");
     }
 }

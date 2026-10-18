@@ -14,7 +14,7 @@ use crate::helpers::{
 fn build_create_transit_gateway_options(
     resource: &Resource,
     schema: &ResourceSchema,
-) -> Option<aws_sdk_ec2::types::TransitGatewayRequestOptions> {
+) -> ProviderResult<Option<aws_sdk_ec2::types::TransitGatewayRequestOptions>> {
     use aws_sdk_ec2::types::{
         AutoAcceptSharedAttachmentsValue, DefaultRouteTableAssociationValue,
         DefaultRouteTablePropagationValue, DnsSupportValue, MulticastSupportValue,
@@ -33,7 +33,7 @@ fn build_create_transit_gateway_options(
         schema,
         "options",
         "auto_accept_shared_attachments",
-    ) {
+    )? {
         options = options.auto_accept_shared_attachments(AutoAcceptSharedAttachmentsValue::from(v));
         has_options = true;
     }
@@ -42,7 +42,7 @@ fn build_create_transit_gateway_options(
         schema,
         "options",
         "default_route_table_association",
-    ) {
+    )? {
         options =
             options.default_route_table_association(DefaultRouteTableAssociationValue::from(v));
         has_options = true;
@@ -52,16 +52,16 @@ fn build_create_transit_gateway_options(
         schema,
         "options",
         "default_route_table_propagation",
-    ) {
+    )? {
         options =
             options.default_route_table_propagation(DefaultRouteTablePropagationValue::from(v));
         has_options = true;
     }
-    if let Some(v) = optional_enum_struct_field(resource, schema, "options", "dns_support") {
+    if let Some(v) = optional_enum_struct_field(resource, schema, "options", "dns_support")? {
         options = options.dns_support(DnsSupportValue::from(v));
         has_options = true;
     }
-    if let Some(v) = optional_enum_struct_field(resource, schema, "options", "multicast_support") {
+    if let Some(v) = optional_enum_struct_field(resource, schema, "options", "multicast_support")? {
         options = options.multicast_support(MulticastSupportValue::from(v));
         has_options = true;
     }
@@ -70,7 +70,7 @@ fn build_create_transit_gateway_options(
         schema,
         "options",
         "security_group_referencing_support",
-    ) {
+    )? {
         options = options
             .security_group_referencing_support(SecurityGroupReferencingSupportValue::from(v));
         has_options = true;
@@ -82,12 +82,12 @@ fn build_create_transit_gateway_options(
         options = options.set_transit_gateway_cidr_blocks(Some(blocks));
         has_options = true;
     }
-    if let Some(v) = optional_enum_struct_field(resource, schema, "options", "vpn_ecmp_support") {
+    if let Some(v) = optional_enum_struct_field(resource, schema, "options", "vpn_ecmp_support")? {
         options = options.vpn_ecmp_support(VpnEcmpSupportValue::from(v));
         has_options = true;
     }
 
-    has_options.then(|| options.build())
+    Ok(has_options.then(|| options.build()))
 }
 
 impl AwsProvider {
@@ -156,7 +156,7 @@ impl AwsProvider {
             req = req.description(desc.expose_plaintext());
         }
 
-        if let Some(options) = build_create_transit_gateway_options(resource, schema) {
+        if let Some(options) = build_create_transit_gateway_options(resource, schema)? {
             req = req.options(options);
         }
 
@@ -377,7 +377,9 @@ mod tests {
     #[test]
     fn create_reads_nested_options_dns_support_canonical_enum() {
         let resource = one_enum_option("dns_support", canonical_dns_support("disable"));
-        let options = build_create_transit_gateway_options(&resource, &schema()).expect("options");
+        let options = build_create_transit_gateway_options(&resource, &schema())
+            .expect("valid options")
+            .expect("options");
         assert_eq!(options.dns_support(), Some(&DnsSupportValue::Disable));
     }
 
@@ -387,7 +389,9 @@ mod tests {
             "vpn_ecmp_support",
             Value::Concrete(ConcreteValue::String("enable".to_string().into())),
         );
-        let options = build_create_transit_gateway_options(&resource, &schema()).expect("options");
+        let options = build_create_transit_gateway_options(&resource, &schema())
+            .expect("valid options")
+            .expect("options");
         assert_eq!(
             options.vpn_ecmp_support(),
             Some(&VpnEcmpSupportValue::Enable)
@@ -400,7 +404,9 @@ mod tests {
             "multicast_support",
             Value::Concrete(ConcreteValue::String("enable".to_string().into())),
         );
-        let options = build_create_transit_gateway_options(&resource, &schema()).expect("options");
+        let options = build_create_transit_gateway_options(&resource, &schema())
+            .expect("valid options")
+            .expect("options");
         assert_eq!(
             options.multicast_support(),
             Some(&MulticastSupportValue::Enable)
@@ -413,7 +419,9 @@ mod tests {
             "security_group_referencing_support",
             Value::Concrete(ConcreteValue::String("enable".to_string().into())),
         );
-        let options = build_create_transit_gateway_options(&resource, &schema()).expect("options");
+        let options = build_create_transit_gateway_options(&resource, &schema())
+            .expect("valid options")
+            .expect("options");
         assert_eq!(
             options.security_group_referencing_support(),
             Some(&SecurityGroupReferencingSupportValue::Enable)
@@ -426,7 +434,9 @@ mod tests {
             "auto_accept_shared_attachments",
             Value::Concrete(ConcreteValue::String("enable".to_string().into())),
         );
-        let options = build_create_transit_gateway_options(&resource, &schema()).expect("options");
+        let options = build_create_transit_gateway_options(&resource, &schema())
+            .expect("valid options")
+            .expect("options");
         assert_eq!(
             options.auto_accept_shared_attachments(),
             Some(&AutoAcceptSharedAttachmentsValue::Enable)
@@ -439,7 +449,9 @@ mod tests {
             "default_route_table_association",
             Value::Concrete(ConcreteValue::String("disable".to_string().into())),
         );
-        let options = build_create_transit_gateway_options(&resource, &schema()).expect("options");
+        let options = build_create_transit_gateway_options(&resource, &schema())
+            .expect("valid options")
+            .expect("options");
         assert_eq!(
             options.default_route_table_association(),
             Some(&DefaultRouteTableAssociationValue::Disable)
@@ -452,7 +464,9 @@ mod tests {
             "default_route_table_propagation",
             Value::Concrete(ConcreteValue::String("disable".to_string().into())),
         );
-        let options = build_create_transit_gateway_options(&resource, &schema()).expect("options");
+        let options = build_create_transit_gateway_options(&resource, &schema())
+            .expect("valid options")
+            .expect("options");
         assert_eq!(
             options.default_route_table_propagation(),
             Some(&DefaultRouteTablePropagationValue::Disable)
@@ -469,7 +483,9 @@ mod tests {
             .into_iter()
             .collect(),
         );
-        let options = build_create_transit_gateway_options(&resource, &schema()).expect("options");
+        let options = build_create_transit_gateway_options(&resource, &schema())
+            .expect("valid options")
+            .expect("options");
         assert_eq!(options.amazon_side_asn(), Some(64512));
     }
 
@@ -485,7 +501,9 @@ mod tests {
             .into_iter()
             .collect(),
         );
-        let options = build_create_transit_gateway_options(&resource, &schema()).expect("options");
+        let options = build_create_transit_gateway_options(&resource, &schema())
+            .expect("valid options")
+            .expect("options");
         assert_eq!(options.transit_gateway_cidr_blocks(), ["10.0.0.0/24"]);
     }
 
@@ -501,7 +519,9 @@ mod tests {
         );
 
         assert!(
-            build_create_transit_gateway_options(&resource, &schema()).is_none(),
+            build_create_transit_gateway_options(&resource, &schema())
+                .expect("valid options")
+                .is_none(),
             "an empty CIDR list must not cause the SDK request to carry options"
         );
     }
@@ -552,6 +572,10 @@ mod tests {
             "dns_support".to_string(),
             Value::Concrete(ConcreteValue::String("disable".to_string().into())),
         );
-        assert!(build_create_transit_gateway_options(&resource, &schema()).is_none());
+        assert!(
+            build_create_transit_gateway_options(&resource, &schema())
+                .expect("valid options")
+                .is_none()
+        );
     }
 }

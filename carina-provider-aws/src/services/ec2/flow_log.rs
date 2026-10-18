@@ -110,12 +110,12 @@ impl AwsProvider {
                 resource_type_val.as_str(),
             ));
 
-        if let Some(traffic_type) = optional_enum_attr(resource, schema, "traffic_type") {
+        if let Some(traffic_type) = optional_enum_attr(resource, schema, "traffic_type")? {
             use aws_sdk_ec2::types::TrafficType;
             req = req.traffic_type(TrafficType::from(traffic_type));
         }
 
-        if let Some(log_dest_type) = optional_enum_attr(resource, schema, "log_destination_type") {
+        if let Some(log_dest_type) = optional_enum_attr(resource, schema, "log_destination_type")? {
             use aws_sdk_ec2::types::LogDestinationType;
             req = req.log_destination_type(LogDestinationType::from(log_dest_type));
         }

@@ -10,13 +10,15 @@ use aws_sdk_s3::types::{
     ObjectLockRetentionMode, ObjectLockRule,
 };
 use carina_core::provider::{ProviderError, ProviderResult};
-use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
+use carina_core::resource::{
+    ConcreteValue, Resource, ResourceId, State, Value, enum_attr_at_schema_path,
+};
 use carina_core::schema::ResourceSchema;
 use indexmap::IndexMap;
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
-use crate::helpers::{optional_enum_value_at_schema_path, require_enum_attr, require_string_attr};
+use crate::helpers::{enum_attr_error, require_enum_attr, require_string_attr};
 use crate::services::s3::bucket::is_s3_not_configured_error;
 use crate::services::s3::{InvalidBucketStateReason, classify_invalid_bucket_state};
 
@@ -301,20 +303,16 @@ fn build_default_retention(
         );
     };
 
-    let mode = default_retention
-        .get("mode")
-        .and_then(|value| {
-            optional_enum_value_at_schema_path(
-                schema,
-                "rule",
-                &["default_retention", "mode"],
-                value,
-            )
-        })
-        .ok_or_else(|| {
-            ProviderError::invalid_input("default_retention.mode is required")
-                .for_resource(id.clone())
-        })?;
+    let mode = enum_attr_at_schema_path(
+        schema,
+        "rule",
+        &["default_retention", "mode"],
+        default_retention.get("mode"),
+    )
+    .map_err(|error| enum_attr_error(id, error))?
+    .ok_or_else(|| {
+        ProviderError::invalid_input("default_retention.mode is required").for_resource(id.clone())
+    })?;
     let Value::Concrete(ConcreteValue::Map(period)) =
         default_retention.get("retention_period").ok_or_else(|| {
             ProviderError::invalid_input("default_retention.retention_period is required")
@@ -330,7 +328,7 @@ fn build_default_retention(
     let days = optional_i32(id, period, "days")?;
     let years = optional_i32(id, period, "years")?;
     let mut builder =
-        DefaultRetention::builder().mode(ObjectLockRetentionMode::from(mode.as_str()));
+        DefaultRetention::builder().mode(ObjectLockRetentionMode::from(mode.api_value()));
     // Both invalid concrete shapes are reachable through Provider::create:
     // two literal integers reach `(Some, Some)`, and an empty map reaches
     // `(None, None)`. Provider-level tests exercise those exact values.
@@ -460,6 +458,22 @@ mod tests {
 
     fn object_lock_id() -> ResourceId {
         ResourceId::with_provider_identity("aws", "s3.BucketObjectLockConfiguration", "test", None)
+    }
+
+    #[test]
+    fn invalid_default_retention_mode_is_rejected() {
+        let schema = crate::schemas::generated::s3::bucket_object_lock_configuration::s3_bucket_object_lock_configuration_config().schema;
+        let value = Value::Concrete(ConcreteValue::Map(
+            [(
+                "mode".to_string(),
+                Value::Concrete(ConcreteValue::String("governance".into())),
+            )]
+            .into_iter()
+            .collect(),
+        ));
+
+        build_default_retention(&object_lock_id(), &schema, &value)
+            .expect_err("a non-exact closed-enum leaf must be rejected");
     }
 
     fn assert_original_put_error(error: &ProviderError, expected_code: &str, expected: &str) {
