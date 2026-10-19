@@ -19,6 +19,7 @@ pub fn ec2_eip_config() -> AwsSchemaConfig {
         has_tags: true,
         schema: ResourceSchema::new("ec2.Eip")
         .with_description("Describes an Elastic IP address, or a carrier IP address.")
+        .with_conflicting_replacement()
         .attribute(
             AttributeSchema::new("address", AttributeType::string())
                 .create_only()

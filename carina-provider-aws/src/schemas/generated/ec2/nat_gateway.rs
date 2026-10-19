@@ -21,6 +21,7 @@ pub fn ec2_nat_gateway_config() -> AwsSchemaConfig {
         has_tags: true,
         schema: ResourceSchema::new("ec2.NatGateway")
         .with_description("Describes a NAT gateway.")
+        .with_conflicting_replacement()
         .attribute(
             AttributeSchema::new("allocation_id", super::allocation_id())
                 .create_only()

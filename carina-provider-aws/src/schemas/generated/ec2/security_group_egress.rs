@@ -17,6 +17,7 @@ pub fn ec2_security_group_egress_config() -> AwsSchemaConfig {
         has_tags: false,
         schema: ResourceSchema::new("ec2.SecurityGroupEgress")
             .with_description("Describes a security group rule.")
+            .with_conflicting_replacement()
             .attribute(
                 AttributeSchema::new("cidr_ip", types::ipv4_cidr())
                     .create_only()

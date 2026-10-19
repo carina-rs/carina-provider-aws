@@ -456,7 +456,9 @@ fn emit_replacement_builder(
         ReplacementClass::Coexisting => {
             code.push_str("\x20       .with_coexisting_replacement()\n");
         }
-        ReplacementClass::Conflicting => {}
+        ReplacementClass::Conflicting => {
+            code.push_str("\x20       .with_conflicting_replacement()\n");
+        }
     }
 
     Ok(())
@@ -4902,7 +4904,10 @@ mod tests {
             emitted(ReplacementClass::Coexisting, &[]).unwrap(),
             "\x20       .with_coexisting_replacement()\n"
         );
-        assert_eq!(emitted(ReplacementClass::Conflicting, &[]).unwrap(), "");
+        assert_eq!(
+            emitted(ReplacementClass::Conflicting, &[]).unwrap(),
+            "\x20       .with_conflicting_replacement()\n"
+        );
     }
 
     #[test]

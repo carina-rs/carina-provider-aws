@@ -20,6 +20,7 @@ pub fn route53_record_set_config() -> AwsSchemaConfig {
         has_tags: false,
         schema: ResourceSchema::new("route53.RecordSet")
         .with_description("Information about the resource record set to create or delete.")
+        .with_conflicting_replacement()
         .attribute(
             AttributeSchema::new("alias_target", AttributeType::struct_(
                     "AliasTarget".to_string(),

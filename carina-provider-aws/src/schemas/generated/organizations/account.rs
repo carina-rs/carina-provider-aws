@@ -32,6 +32,7 @@ pub fn organizations_account_config() -> AwsSchemaConfig {
         has_tags: true,
         schema: ResourceSchema::new("organizations.Account")
         .with_description("Contains information about an Amazon Web Services account that is a member of an organization.")
+        .with_conflicting_replacement()
         .attribute(
             AttributeSchema::new("account_name", AttributeType::string())
                 .required()
