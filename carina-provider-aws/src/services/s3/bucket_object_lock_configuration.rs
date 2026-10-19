@@ -486,9 +486,13 @@ mod tests {
             Some("s3.PutObjectLockConfiguration")
         );
         assert_eq!(detail.code.as_deref(), Some(expected_code));
-        assert!(detail.message.contains(expected), "{}", detail.message);
+        let rendered = error.to_string();
         assert!(
-            detail.cause.is_some(),
+            rendered.contains(expected),
+            "original AWS message must be rendered: {rendered}"
+        );
+        assert!(
+            detail.cause().is_some(),
             "original SDK error must be retained"
         );
         assert!(
@@ -512,7 +516,7 @@ mod tests {
 
         assert!(matches!(&error, ProviderError::Internal(_)));
         assert_eq!(
-            error.message(),
+            error.detail().context(),
             "S3 returned Object Lock default retention with both days and years"
         );
     }
@@ -528,7 +532,7 @@ mod tests {
 
         assert!(matches!(&error, ProviderError::Internal(_)));
         assert_eq!(
-            error.message(),
+            error.detail().context(),
             "S3 returned Object Lock default retention without days or years"
         );
     }

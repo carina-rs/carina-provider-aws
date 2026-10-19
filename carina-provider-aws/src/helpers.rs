@@ -40,8 +40,7 @@ pub fn require_string_attr(resource: &Resource, attr_name: &str) -> ProviderResu
 }
 
 pub(crate) fn enum_attr_error(id: &ResourceId, error: EnumAttrError) -> ProviderError {
-    ProviderError::invalid_input("rejected enum attribute value")
-        .with_cause(error)
+    ProviderError::invalid_input_caused_by("rejected enum attribute value", error)
         .for_resource(id.clone())
 }
 
@@ -725,8 +724,6 @@ mod tests {
 
     #[test]
     fn test_optional_enum_attr_invalid_closed_enum_is_err() {
-        use std::error::Error as _;
-
         let schema = acm_schema();
         let resource = make_test_resource(vec![("validation_method", "dns")]);
         let error = optional_enum_attr(&resource, &schema, "validation_method")
@@ -744,7 +741,7 @@ mod tests {
             "enum rejection reason must appear exactly once: {rendered}"
         );
         assert!(
-            error.source().is_some(),
+            error.detail().cause().is_some(),
             "typed enum error must be retained"
         );
     }
