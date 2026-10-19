@@ -5,13 +5,15 @@
 #   env AWS_PROFILE="<profile>" ./run.sh [filter]
 #
 # Tests:
-#   ec2_vpc - Replacement succeeds for a name-free coexisting resource
+#   ec2_vpc - Replacement is rejected for a conflicting resource
+#   ec2_security_group - Replacement succeeds with a temporary unique name
 #
 # Filter (optional): substring to match test names (e.g. "ec2_vpc")
 #
-# This ec2_vpc case covers the name-free CBD semantics implemented for
-# carina-rs/carina#3667: ec2.Vpc is declared Coexisting, so replacement can
-# create the new VPC before deleting the old one without a temporary name.
+# This ec2_vpc case verifies that a Conflicting replacement is rejected at plan
+# time because the replacement cannot safely coexist with the original.
+# The ec2_security_group case verifies that a UniqueName resource can coexist
+# with its original by using a temporary group_name during replacement.
 #
 # AWS authentication:
 #   Set AWS_PROFILE to one of the carina-test-00X profiles. The script
@@ -217,20 +219,27 @@ run_plan_expect_replace() {
     return 0
 }
 
-assert_ec2_vpc_state() {
+assert_ec2_security_group_state() {
     local work_dir="$1"
     local description="$2"
-    local expected_cidr="$3"
+    local base_group_name="$3"
+    local expected_description="$4"
 
     printf "  %-55s " "$description"
 
     local summary
-    if ! summary=$(jq -r --arg cidr "$expected_cidr" '
-        [.resources[] | select(.resource_type == "ec2.Vpc")] as $vpcs
-        | if (($vpcs | length) == 1 and $vpcs[0].attributes.cidr_block == $cidr) then
+    if ! summary=$(jq -r \
+        --arg base_group_name "$base_group_name" \
+        --arg expected_description "$expected_description" '
+        [.resources[] | select(.resource_type == "ec2.SecurityGroup")] as $security_groups
+        | ($base_group_name + "-") as $temporary_name_prefix
+        | if (($security_groups | length) == 1
+            and (($security_groups[0].attributes.group_name // "") | startswith($temporary_name_prefix))
+            and ($security_groups[0].attributes.group_name != $base_group_name)
+            and ($security_groups[0].attributes.description == $expected_description)) then
             "ok"
           else
-            "count=\($vpcs | length) cidrs=\($vpcs | map(.attributes.cidr_block // "<missing>") | join(","))"
+            "count=\($security_groups | length) group_names=\($security_groups | map(.attributes.group_name // "<missing>") | join(",")) descriptions=\($security_groups | map(.attributes.description // "<missing>") | join(","))"
           end
     ' "$work_dir/carina.state.json" 2>&1); then
         echo "FAIL"
@@ -247,7 +256,7 @@ assert_ec2_vpc_state() {
     fi
 
     echo "FAIL"
-    echo "  ERROR: expected exactly 1 ec2.Vpc with cidr_block=$expected_cidr, got $summary"
+    echo "  ERROR: expected exactly 1 ec2.SecurityGroup with a temporary name based on $base_group_name and description '$expected_description', got $summary"
     TOTAL_FAILED=$((TOTAL_FAILED + 1))
     return 1
 }
@@ -383,8 +392,8 @@ run_test() {
             return 1
         fi
 
-        # Restore the applied config so destroy uses the same resource identity
-        # that created the initial VPC.
+        # Restore the applied config so destroy uses the same resource identities
+        # as the initial apply.
         swap_crn "$step1" "$work_dir"
 
         if ! destroy_work_dir "$work_dir"; then
@@ -430,8 +439,12 @@ run_test() {
         return 1
     fi
 
-    # Assert final state has only the replacement VPC
-    if [ "$test_name" = "ec2_vpc" ] && ! assert_ec2_vpc_state "$work_dir" "assert: one VPC with new CIDR" "10.201.0.0/16"; then
+    # Assert the Security Group replacement kept its temporary unique name.
+    if [ "$test_name" = "ec2_security_group" ] && ! assert_ec2_security_group_state \
+        "$work_dir" \
+        "assert: one SG with temporary name" \
+        "carina-acc-test-cbd-sg" \
+        "Carina create_before_destroy replacement security group"; then
         destroy_work_dir "$work_dir"
         rm -rf "$work_dir"
         ACTIVE_WORK_DIR=""
@@ -465,12 +478,19 @@ echo "create_before_destroy multi-step acceptance tests (AWS)"
 echo "════════════════════════════════════════"
 echo ""
 
-# Test 1: EC2 VPC - CBD succeeds for Coexisting name-free replacement
-# ec2.Vpc has no unique-name attribute, but replacements can coexist.
+# Test 1: EC2 VPC - CBD fails for a Conflicting replacement
 run_test "ec2_vpc" \
     "$SCRIPT_DIR/ec2_vpc_step1.crn" \
     "$SCRIPT_DIR/ec2_vpc_step2.crn" \
-    "Test 1: EC2 VPC (coexisting name-free replacement)"
+    "Test 1: EC2 VPC (conflicting replacement rejected)" \
+    "resource type 'ec2.Vpc' does not support create_before_destroy: the replacement cannot coexist with the original" || true
+
+# Test 2: EC2 Security Group - CBD succeeds with a temporary unique name
+# group_name is unique within a VPC, so the replacement uses a temporary name.
+run_test "ec2_security_group" \
+    "$SCRIPT_DIR/ec2_security_group_step1.crn" \
+    "$SCRIPT_DIR/ec2_security_group_step2.crn" \
+    "Test 2: EC2 Security Group (temporary unique name)" || true
 
 echo "════════════════════════════════════════"
 echo "Total: $TOTAL_PASSED passed, $TOTAL_FAILED failed"

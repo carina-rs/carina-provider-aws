@@ -27,10 +27,23 @@ pub struct ReadOp {
     pub defaults: Vec<(&'static str, &'static str)>,
 }
 
+/// How a create_before_destroy replacement relates to the original
+/// (maps to carina_core::schema::UniqueNameSpec).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReplacementClass {
+    /// Smithy member name of the user-chosen unique-name attribute (matched via snake_case).
+    UniqueName(&'static str),
+    Coexisting,
+    Conflicting,
+}
+
 /// Defines how to map an AWS API resource to a Carina schema.
 pub struct ResourceDef {
     /// Carina DSL resource name (e.g., "ec2.Vpc")
     pub name: &'static str,
+    /// Explicit replacement behavior. Deliberately required so every new
+    /// resource must make a create_before_destroy safety decision.
+    pub replacement: ReplacementClass,
     /// Smithy service namespace (e.g., "com.amazonaws.ec2")
     pub service_namespace: &'static str,
     /// Smithy structure to derive writable fields from, instead of the create op input.
@@ -337,6 +350,11 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
         // ec2.vpc
         ResourceDef {
             name: "ec2.Vpc",
+            // With ipv4_ipam_pool_id and an explicit cidr_block, a replacement driven
+            // by another create-only change (e.g. instance_tenancy) requests the same
+            // CIDR from the pool while the original still holds the allocation; IPAM
+            // rejects overlapping allocations in a pool.
+            replacement: ReplacementClass::Conflicting,
             service_namespace: "com.amazonaws.ec2",
             schema_structure: None,
             simple_delete: true,
@@ -380,6 +398,8 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
         // ec2.subnet
         ResourceDef {
             name: "ec2.Subnet",
+            // An availability-zone replacement can retain an overlapping CIDR.
+            replacement: ReplacementClass::Conflicting,
             service_namespace: "com.amazonaws.ec2",
             schema_structure: None,
             simple_delete: true,
@@ -432,6 +452,8 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
         // ec2.internet_gateway
         ResourceDef {
             name: "ec2.InternetGateway",
+            // A replacement changes the create-only VPC attachment target.
+            replacement: ReplacementClass::Coexisting,
             service_namespace: "com.amazonaws.ec2",
             schema_structure: None,
             simple_delete: false,
@@ -468,6 +490,8 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
         // ec2.route_table
         ResourceDef {
             name: "ec2.RouteTable",
+            // Route tables have no uniqueness constraint between instances.
+            replacement: ReplacementClass::Coexisting,
             service_namespace: "com.amazonaws.ec2",
             schema_structure: None,
             simple_delete: true,
@@ -498,6 +522,8 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
         // ec2.route
         ResourceDef {
             name: "ec2.Route",
+            // Route table ID and destination CIDR form the uniqueness key.
+            replacement: ReplacementClass::Coexisting,
             service_namespace: "com.amazonaws.ec2",
             schema_structure: None,
             simple_delete: false,
@@ -546,6 +572,8 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
         // ec2.security_group
         ResourceDef {
             name: "ec2.SecurityGroup",
+            // Group names are user-chosen and unique within a VPC.
+            replacement: ReplacementClass::UniqueName("GroupName"),
             service_namespace: "com.amazonaws.ec2",
             schema_structure: None,
             simple_delete: true,
@@ -576,6 +604,8 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
         // ec2.security_group_ingress
         ResourceDef {
             name: "ec2.SecurityGroupIngress",
+            // A description-only replacement would duplicate the rule tuple.
+            replacement: ReplacementClass::Conflicting,
             service_namespace: "com.amazonaws.ec2",
             schema_structure: None,
             simple_delete: false,
@@ -634,6 +664,8 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
         // ec2.security_group_egress
         ResourceDef {
             name: "ec2.SecurityGroupEgress",
+            // A description-only replacement would duplicate the rule tuple.
+            replacement: ReplacementClass::Conflicting,
             service_namespace: "com.amazonaws.ec2",
             schema_structure: None,
             simple_delete: false,
@@ -692,6 +724,8 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
         // ec2.egress_only_internet_gateway
         ResourceDef {
             name: "ec2.EgressOnlyInternetGateway",
+            // A replacement changes the create-only VPC attachment target.
+            replacement: ReplacementClass::Coexisting,
             service_namespace: "com.amazonaws.ec2",
             schema_structure: None,
             simple_delete: true,
@@ -730,6 +764,10 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
         // ec2.eip
         ResourceDef {
             name: "ec2.Eip",
+            // address is a user-chosen create-only value; with it pinned, a
+            // domain/public_ipv4_pool change re-allocates an address the original
+            // still holds.
+            replacement: ReplacementClass::Conflicting,
             service_namespace: "com.amazonaws.ec2",
             schema_structure: None,
             simple_delete: true,
@@ -766,6 +804,8 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
         // ec2.flow_log
         ResourceDef {
             name: "ec2.FlowLog",
+            // Coexistence on the same resource and destination is unverified.
+            replacement: ReplacementClass::Conflicting,
             service_namespace: "com.amazonaws.ec2",
             schema_structure: None,
             simple_delete: true,
@@ -803,6 +843,8 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
         // ec2.nat_gateway
         ResourceDef {
             name: "ec2.NatGateway",
+            // An Elastic IP allocation can back only one NAT gateway.
+            replacement: ReplacementClass::Conflicting,
             service_namespace: "com.amazonaws.ec2",
             schema_structure: None,
             simple_delete: true,
@@ -849,6 +891,8 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
         // ec2.subnet_route_table_association
         ResourceDef {
             name: "ec2.SubnetRouteTableAssociation",
+            // A subnet can have only one route table association.
+            replacement: ReplacementClass::Conflicting,
             service_namespace: "com.amazonaws.ec2",
             schema_structure: None,
             simple_delete: true,
@@ -879,6 +923,8 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
         // ec2.transit_gateway
         ResourceDef {
             name: "ec2.TransitGateway",
+            // Transit gateways have no uniqueness constraint between instances.
+            replacement: ReplacementClass::Coexisting,
             service_namespace: "com.amazonaws.ec2",
             schema_structure: None,
             simple_delete: true,
@@ -930,6 +976,10 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
         // ec2.transit_gateway_attachment
         ResourceDef {
             name: "ec2.TransitGatewayAttachment",
+            // subnet_ids/options are also create-only, so a replacement can keep
+            // the same (transit gateway, VPC) pair, and AWS rejects a second
+            // non-deleted attachment for the same VPC on the same transit gateway.
+            replacement: ReplacementClass::Conflicting,
             service_namespace: "com.amazonaws.ec2",
             schema_structure: None,
             simple_delete: true,
@@ -971,6 +1021,8 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
         // ec2.vpc_endpoint
         ResourceDef {
             name: "ec2.VpcEndpoint",
+            // Duplicate service endpoints can conflict on private DNS or routes.
+            replacement: ReplacementClass::Conflicting,
             service_namespace: "com.amazonaws.ec2",
             schema_structure: None,
             simple_delete: true,
@@ -1021,6 +1073,8 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
         // ec2.vpc_gateway_attachment
         ResourceDef {
             name: "ec2.VpcGatewayAttachment",
+            // A VPC can have only one internet gateway attached.
+            replacement: ReplacementClass::Conflicting,
             service_namespace: "com.amazonaws.ec2",
             schema_structure: None,
             simple_delete: false,
@@ -1062,6 +1116,9 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
         // ec2.vpc_peering_connection
         ResourceDef {
             name: "ec2.VpcPeeringConnection",
+            // A peer_owner_id-only change keeps the same VPC pair, and AWS allows
+            // one active peering per pair.
+            replacement: ReplacementClass::Conflicting,
             service_namespace: "com.amazonaws.ec2",
             schema_structure: None,
             simple_delete: true,
@@ -1119,6 +1176,8 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
         // ec2.vpn_gateway
         ResourceDef {
             name: "ec2.VpnGateway",
+            // VPN gateways have no uniqueness constraint between instances.
+            replacement: ReplacementClass::Coexisting,
             service_namespace: "com.amazonaws.ec2",
             schema_structure: None,
             simple_delete: true,
@@ -1238,6 +1297,8 @@ pub fn organizations_resources() -> Vec<ResourceDef> {
         // organizations.organization
         ResourceDef {
             name: "organizations.Organization",
+            // An AWS account can belong to only one organization.
+            replacement: ReplacementClass::Conflicting,
             service_namespace: "com.amazonaws.organizations",
             schema_structure: None,
             simple_delete: true,
@@ -1273,6 +1334,8 @@ pub fn organizations_resources() -> Vec<ResourceDef> {
         // organizations.account
         ResourceDef {
             name: "organizations.Account",
+            // Email is globally unique, and account removal is not a plain delete.
+            replacement: ReplacementClass::Conflicting,
             service_namespace: "com.amazonaws.organizations",
             schema_structure: None,
             simple_delete: false,
@@ -1314,6 +1377,11 @@ pub fn s3_resources() -> Vec<ResourceDef> {
         // s3.bucket
         ResourceDef {
             name: "s3.Bucket",
+            // bucket_namespace is create-only; account-regional bucket names must end in
+            // "-<account-id>-<region>-an" (AWS S3 user guide "Namespaces for general
+            // purpose buckets"), and the temporary name appends "-<suffix>", breaking it.
+            // Suffix-aware temporary names are tracked in carina-rs/carina#3902.
+            replacement: ReplacementClass::Conflicting,
             service_namespace: "com.amazonaws.s3",
             schema_structure: None,
             simple_delete: false, // manually implemented to support lifecycle.force_delete
@@ -1405,6 +1473,8 @@ pub fn s3_resources() -> Vec<ResourceDef> {
         // DeleteBucketPolicy.
         ResourceDef {
             name: "s3.BucketPolicy",
+            // Bucket is a parent reference; replacement targets another bucket.
+            replacement: ReplacementClass::Coexisting,
             service_namespace: "com.amazonaws.s3",
             schema_structure: None,
             // Delete is hand-written in services/s3/bucket_policy.rs as
@@ -1453,6 +1523,8 @@ pub fn s3_resources() -> Vec<ResourceDef> {
         // PutBucketVersioning with Status=Suspended.
         ResourceDef {
             name: "s3.BucketVersioning",
+            // Bucket is a parent reference; replacement targets another bucket.
+            replacement: ReplacementClass::Coexisting,
             service_namespace: "com.amazonaws.s3",
             schema_structure: None,
             simple_delete: false,
@@ -1535,6 +1607,8 @@ pub fn s3_resources() -> Vec<ResourceDef> {
         // GetObjectLockConfiguration. AWS exposes no disable or delete API.
         ResourceDef {
             name: "s3.BucketObjectLockConfiguration",
+            // Bucket is a parent reference; replacement targets another bucket.
+            replacement: ReplacementClass::Coexisting,
             service_namespace: "com.amazonaws.s3",
             schema_structure: None,
             // Read / Create / Update / Delete are hand-written because the
@@ -1606,6 +1680,8 @@ pub fn s3_resources() -> Vec<ResourceDef> {
         // API; "destroying" the resource resets the ACL to "private".
         ResourceDef {
             name: "s3.BucketAcl",
+            // Bucket is a parent reference; replacement targets another bucket.
+            replacement: ReplacementClass::Coexisting,
             service_namespace: "com.amazonaws.s3",
             schema_structure: None,
             simple_delete: false,
@@ -1657,6 +1733,8 @@ pub fn s3_resources() -> Vec<ResourceDef> {
         // GetBucketOwnershipControls / DeleteBucketOwnershipControls.
         ResourceDef {
             name: "s3.BucketOwnershipControls",
+            // Bucket is a parent reference; replacement targets another bucket.
+            replacement: ReplacementClass::Coexisting,
             service_namespace: "com.amazonaws.s3",
             schema_structure: None,
             simple_delete: false,
@@ -1715,6 +1793,8 @@ pub fn s3_resources() -> Vec<ResourceDef> {
         // GetBucketEncryption / DeleteBucketEncryption.
         ResourceDef {
             name: "s3.BucketServerSideEncryptionConfiguration",
+            // Bucket is a parent reference; replacement targets another bucket.
+            replacement: ReplacementClass::Coexisting,
             service_namespace: "com.amazonaws.s3",
             schema_structure: None,
             simple_delete: false,
@@ -1768,6 +1848,8 @@ pub fn s3_resources() -> Vec<ResourceDef> {
         // GetBucketReplication / DeleteBucketReplication.
         ResourceDef {
             name: "s3.BucketReplicationConfiguration",
+            // Bucket is a parent reference; replacement targets another bucket.
+            replacement: ReplacementClass::Coexisting,
             service_namespace: "com.amazonaws.s3",
             schema_structure: None,
             simple_delete: false,
@@ -1824,6 +1906,8 @@ pub fn s3_resources() -> Vec<ResourceDef> {
         // DeleteBucketLifecycle.
         ResourceDef {
             name: "s3.BucketLifecycleConfiguration",
+            // Bucket is a parent reference; replacement targets another bucket.
+            replacement: ReplacementClass::Coexisting,
             service_namespace: "com.amazonaws.s3",
             schema_structure: None,
             simple_delete: false,
@@ -1870,6 +1954,8 @@ pub fn s3_resources() -> Vec<ResourceDef> {
         // Maps to PutBucketWebsite / GetBucketWebsite / DeleteBucketWebsite.
         ResourceDef {
             name: "s3.BucketWebsiteConfiguration",
+            // Bucket is a parent reference; replacement targets another bucket.
+            replacement: ReplacementClass::Coexisting,
             service_namespace: "com.amazonaws.s3",
             schema_structure: None,
             simple_delete: false,
@@ -1937,6 +2023,8 @@ pub fn s3_resources() -> Vec<ResourceDef> {
         // S3 bucket. Maps to PutBucketCors / GetBucketCors / DeleteBucketCors.
         ResourceDef {
             name: "s3.BucketCorsConfiguration",
+            // Bucket is a parent reference; replacement targets another bucket.
+            replacement: ReplacementClass::Coexisting,
             service_namespace: "com.amazonaws.s3",
             schema_structure: None,
             simple_delete: false,
@@ -1986,6 +2074,8 @@ pub fn s3_resources() -> Vec<ResourceDef> {
         // empty configuration (Terraform parity).
         ResourceDef {
             name: "s3.BucketNotificationConfiguration",
+            // Bucket is a parent reference; replacement targets another bucket.
+            replacement: ReplacementClass::Coexisting,
             service_namespace: "com.amazonaws.s3",
             schema_structure: None,
             simple_delete: false,
@@ -2075,6 +2165,8 @@ pub fn s3_resources() -> Vec<ResourceDef> {
         // BucketLoggingStatus (Terraform parity).
         ResourceDef {
             name: "s3.BucketLogging",
+            // Bucket is a parent reference; replacement targets another bucket.
+            replacement: ReplacementClass::Coexisting,
             service_namespace: "com.amazonaws.s3",
             schema_structure: None,
             simple_delete: false,
@@ -2138,6 +2230,8 @@ pub fn s3_resources() -> Vec<ResourceDef> {
         // GetPublicAccessBlock / DeletePublicAccessBlock.
         ResourceDef {
             name: "s3.BucketPublicAccessBlock",
+            // Bucket is a parent reference; replacement targets another bucket.
+            replacement: ReplacementClass::Coexisting,
             service_namespace: "com.amazonaws.s3",
             schema_structure: None,
             // simple_delete: false because delete is hand-written
@@ -2287,6 +2381,10 @@ pub fn s3_data_sources() -> Vec<DataSourceDef> {
 pub fn acm_resources() -> Vec<ResourceDef> {
     vec![ResourceDef {
         name: "acm.Certificate",
+        // Reusing create-only idempotency_token within one hour returns the
+        // existing certificate ARN, so CBD create and old delete can target
+        // the same certificate.
+        replacement: ReplacementClass::Conflicting,
         service_namespace: "com.amazonaws.acm",
         schema_structure: None,
         simple_delete: true,
@@ -2398,6 +2496,10 @@ pub fn route53_resources() -> Vec<ResourceDef> {
         // in a nested ChangeBatch, not as top-level input parameters.
         ResourceDef {
             name: "route53.RecordSet",
+            // Create is UPSERT and names compare case-insensitively and without
+            // a trailing dot, so an equivalent name overwrites the original and
+            // the old DELETE removes it.
+            replacement: ReplacementClass::Conflicting,
             service_namespace: "com.amazonaws.route53",
             schema_structure: Some("ResourceRecordSet"),
             simple_delete: false,
@@ -2503,6 +2605,8 @@ pub fn iam_data_sources() -> Vec<DataSourceDef> {
 pub fn iam_resources() -> Vec<ResourceDef> {
     vec![ResourceDef {
         name: "iam.Role",
+        // RoleName is the user-chosen name, unique within the account.
+        replacement: ReplacementClass::UniqueName("RoleName"),
         service_namespace: "com.amazonaws.iam",
         schema_structure: None,
         simple_delete: true,
@@ -2545,6 +2649,8 @@ pub fn iam_resources() -> Vec<ResourceDef> {
 pub fn logs_resources() -> Vec<ResourceDef> {
     vec![ResourceDef {
         name: "logs.LogGroup",
+        // LogGroupName is the user-chosen unique log group name.
+        replacement: ReplacementClass::UniqueName("LogGroupName"),
         service_namespace: "com.amazonaws.cloudwatchlogs",
         schema_structure: None,
         simple_delete: true,
@@ -2609,6 +2715,10 @@ pub fn logs_resources() -> Vec<ResourceDef> {
 pub fn sqs_resources() -> Vec<ResourceDef> {
     vec![ResourceDef {
         name: "sqs.Queue",
+        // Temporary-name generation appends "-<suffix>" without preserving the
+        // mandatory ".fifo" suffix, so CreateQueue rejects the replacement;
+        // suffix-aware temporary names are tracked in carina-rs/carina#3902.
+        replacement: ReplacementClass::Conflicting,
         service_namespace: "com.amazonaws.sqs",
         schema_structure: None,
         simple_delete: true,

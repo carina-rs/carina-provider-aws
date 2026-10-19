@@ -17,6 +17,7 @@ pub fn ec2_egress_only_internet_gateway_config() -> AwsSchemaConfig {
         has_tags: true,
         schema: ResourceSchema::new("ec2.EgressOnlyInternetGateway")
             .with_description("Describes an egress-only internet gateway.")
+            .with_coexisting_replacement()
             .attribute(
                 AttributeSchema::new("vpc_id", super::vpc_id())
                     .required()

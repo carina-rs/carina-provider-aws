@@ -27,7 +27,6 @@ pub fn s3_bucket_config() -> AwsSchemaConfig {
         resource_type_name: "s3.Bucket",
         has_tags: true,
         schema: ResourceSchema::new("s3.Bucket")
-        .with_unique_name_attribute("bucket")
         .attribute(
             AttributeSchema::new("bucket", AttributeType::string())
                 .required()

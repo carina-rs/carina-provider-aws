@@ -31,6 +31,7 @@ pub fn ec2_transit_gateway_config() -> AwsSchemaConfig {
         has_tags: true,
         schema: ResourceSchema::new("ec2.TransitGateway")
         .with_description("Describes a transit gateway.")
+        .with_coexisting_replacement()
         .attribute(
             AttributeSchema::new("description", AttributeType::string())
                 .with_description("A description of the transit gateway.")

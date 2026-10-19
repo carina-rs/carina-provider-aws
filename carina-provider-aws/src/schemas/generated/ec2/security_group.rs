@@ -17,6 +17,7 @@ pub fn ec2_security_group_config() -> AwsSchemaConfig {
         has_tags: true,
         schema: ResourceSchema::new("ec2.SecurityGroup")
         .with_description("Describes a security group.")
+        .with_unique_name_attribute("group_name")
         .attribute(
             AttributeSchema::new("description", AttributeType::string())
                 .required()

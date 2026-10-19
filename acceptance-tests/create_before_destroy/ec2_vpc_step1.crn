@@ -1,10 +1,8 @@
-# EC2 VPC - create_before_destroy positive test (step 1: initial)
+# EC2 VPC - create_before_destroy conflict test (step 1: initial)
 #
-# Seeds a stable, let-bound VPC for the step-2 replacement attempt. Anonymous
-# resource identities include create-only attributes, so changing cidr_block
-# would route the diff to independent Create+Delete instead of replacement and
-# never exercise the replacement path. ec2.Vpc is declared Coexisting per
-# carina-rs/carina#3667; replacement coexists, so no temporary name is needed.
+# Seeds a stable, let-bound VPC for the step-2 replacement attempt. ec2.Vpc is
+# Conflicting because not every combination of create-only changes can coexist;
+# step 2 verifies that create_before_destroy is rejected at plan time.
 
 provider aws {
   region = aws.Region.ap_northeast_1

@@ -17,6 +17,7 @@ pub fn ec2_route_table_config() -> AwsSchemaConfig {
         has_tags: true,
         schema: ResourceSchema::new("ec2.RouteTable")
             .with_description("Describes a route table.")
+            .with_coexisting_replacement()
             .attribute(
                 AttributeSchema::new("vpc_id", super::vpc_id())
                     .required()

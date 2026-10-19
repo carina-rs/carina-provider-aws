@@ -275,7 +275,13 @@ mod tests {
     }
 
     #[test]
-    fn generated_resource_unique_name_specs_follow_writable_identifiers_and_overrides() {
+    fn generated_resource_unique_name_specs_follow_explicit_replacement_classes() {
+        let acm_certificate = super::generated::acm::certificate::acm_certificate_config();
+        assert_eq!(
+            acm_certificate.schema.unique_name,
+            UniqueNameSpec::Conflicting
+        );
+
         let iam_role = super::generated::iam::role::iam_role_config();
         assert_eq!(
             iam_role.schema.unique_name,
@@ -283,10 +289,16 @@ mod tests {
         );
 
         let ec2_vpc = super::generated::ec2::vpc::ec2_vpc_config();
-        assert_eq!(ec2_vpc.schema.unique_name, UniqueNameSpec::Coexisting);
+        assert_eq!(ec2_vpc.schema.unique_name, UniqueNameSpec::Conflicting);
 
         let ec2_route = super::generated::ec2::route::ec2_route_config();
-        assert_eq!(ec2_route.schema.unique_name, UniqueNameSpec::Conflicting);
+        assert_eq!(ec2_route.schema.unique_name, UniqueNameSpec::Coexisting);
+
+        let ec2_security_group = super::generated::ec2::security_group::ec2_security_group_config();
+        assert_eq!(
+            ec2_security_group.schema.unique_name,
+            UniqueNameSpec::Attribute("group_name".to_string())
+        );
 
         let ec2_vpc_gateway_attachment =
             super::generated::ec2::vpc_gateway_attachment::ec2_vpc_gateway_attachment_config();
@@ -295,11 +307,30 @@ mod tests {
             UniqueNameSpec::Conflicting
         );
 
+        let ec2_vpc_peering_connection =
+            super::generated::ec2::vpc_peering_connection::ec2_vpc_peering_connection_config();
+        assert_eq!(
+            ec2_vpc_peering_connection.schema.unique_name,
+            UniqueNameSpec::Conflicting
+        );
+
         let route53_record_set = super::generated::route53::record_set::route53_record_set_config();
         assert_eq!(
             route53_record_set.schema.unique_name,
             UniqueNameSpec::Conflicting
         );
+
+        let s3_bucket_policy = super::generated::s3::bucket_policy::s3_bucket_policy_config();
+        assert_eq!(
+            s3_bucket_policy.schema.unique_name,
+            UniqueNameSpec::Coexisting
+        );
+
+        let s3_bucket = super::generated::s3::bucket::s3_bucket_config();
+        assert_eq!(s3_bucket.schema.unique_name, UniqueNameSpec::Conflicting);
+
+        let sqs_queue = super::generated::sqs::queue::sqs_queue_config();
+        assert_eq!(sqs_queue.schema.unique_name, UniqueNameSpec::Conflicting);
     }
 
     #[test]

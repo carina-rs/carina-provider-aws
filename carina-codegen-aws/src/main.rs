@@ -16,35 +16,9 @@ use clap::Parser;
 use heck::ToSnakeCase;
 
 use carina_aws_types::dsl_enum_value;
-use carina_codegen_aws::resource_defs::{self, ResourceDef};
+use carina_codegen_aws::resource_defs::{self, ReplacementClass, ResourceDef};
 
 const PLAIN_STRING_TYPE_CODE: &str = "AttributeType::string()";
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum UniqueNameReplacementClass {
-    Coexisting,
-}
-
-const UNIQUE_NAME_REPLACEMENT_CLASSES: &[(&str, UniqueNameReplacementClass)] = &[
-    ("ec2.Vpc", UniqueNameReplacementClass::Coexisting),
-    // TransitGatewayAttachment replacements are driven by create-only
-    // transit_gateway_id/vpc_id changes. Any reachable replacement targets a
-    // different (transit gateway, VPC) pair than the original; AWS allows a VPC
-    // to attach to multiple transit gateways simultaneously, so the new
-    // attachment can coexist during create_before_destroy. Cascade-driven
-    // replacements also change the pair because the upstream TGW/VPC id changes.
-    (
-        "ec2.TransitGatewayAttachment",
-        UniqueNameReplacementClass::Coexisting,
-    ),
-];
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum UniqueNameEmission {
-    Attribute(String),
-    Coexisting,
-    Conflicting,
-}
 
 #[derive(Parser, Debug)]
 #[command(name = "smithy-codegen")]
@@ -406,7 +380,7 @@ fn build_dsl_aliases_code(
 struct AttrInfo {
     /// Snake_case attribute name (e.g., "cidr_block")
     snake_name: String,
-    /// PascalCase provider name (e.g., "CidrBlock")
+    /// Smithy provider name (usually PascalCase, but sometimes lowerCamelCase)
     provider_name: String,
     /// Rust code for the attribute type
     type_code: String,
@@ -439,78 +413,53 @@ fn is_plain_smithy_string(model: &SmithyModel, target: &str) -> bool {
     }
 }
 
-fn derive_unique_name_attribute(
-    identifier: &str,
-    attrs: &[AttrInfo],
-    is_data_source: bool,
-) -> Option<String> {
-    if is_data_source || identifier.is_empty() {
-        return None;
-    }
-    if attrs.iter().any(|attr| attr.is_identity) {
-        // awscc emits unique_name_attribute only when primary_ids.len() == 1.
-        // In this Smithy codegen, identity_overrides mark extra identity
-        // components beyond ResourceDef::identifier, so the identifier alone is
-        // not the resource's unique name.
-        return None;
-    }
-    let identifier_snake = identifier.to_snake_case();
-
-    attrs
-        .iter()
-        .find(|attr| {
-            (attr.provider_name == identifier
-                || attr.provider_name.to_snake_case() == identifier_snake)
-                && !attr.is_read_only
-                && attr.is_plain_string
-                // create_before_destroy temporary-name generation only makes sense
-                // for user-chosen names. Resource IDs, ARNs, CIDRs, and other
-                // inferred/overridden string subtypes are references to existing
-                // server-generated values; suffixing them would produce invalid
-                // temporary inputs. This matches awscc's outcome for resources
-                // whose real primary identity is composite.
-                && attr.type_code == PLAIN_STRING_TYPE_CODE
-        })
-        .map(|attr| attr.snake_name.clone())
-}
-
-fn unique_name_replacement_class(resource_type_name: &str) -> Option<UniqueNameReplacementClass> {
-    UNIQUE_NAME_REPLACEMENT_CLASSES
-        .iter()
-        .find_map(|(name, class)| (*name == resource_type_name).then_some(*class))
-}
-
-fn derive_unique_name_emission(
+fn emit_replacement_builder(
+    code: &mut String,
     resource_type_name: &str,
-    identifier: &str,
+    replacement: ReplacementClass,
     attrs: &[AttrInfo],
-    is_data_source: bool,
-) -> UniqueNameEmission {
-    if is_data_source {
-        return UniqueNameEmission::Conflicting;
-    }
-
-    match unique_name_replacement_class(resource_type_name) {
-        Some(UniqueNameReplacementClass::Coexisting) => UniqueNameEmission::Coexisting,
-        None => derive_unique_name_attribute(identifier, attrs, false)
-            .map(UniqueNameEmission::Attribute)
-            .unwrap_or(UniqueNameEmission::Conflicting),
-    }
-}
-
-fn emit_unique_name_builder(code: &mut String, emission: UniqueNameEmission) {
-    match emission {
-        UniqueNameEmission::Attribute(unique_name_attribute) => {
+) -> Result<()> {
+    match replacement {
+        ReplacementClass::UniqueName(provider_name) => {
+            let provider_name_snake = provider_name.to_snake_case();
+            let attr = attrs
+                .iter()
+                .find(|attr| attr.provider_name.to_snake_case() == provider_name_snake);
+            let attr = if attrs.iter().any(|attr| attr.is_identity) {
+                Err("on a resource with a composite identity")
+            } else {
+                match attr {
+                    None => Err("missing"),
+                    Some(attr) if attr.is_read_only => Err("read-only"),
+                    Some(attr)
+                        if !attr.is_plain_string || attr.type_code != PLAIN_STRING_TYPE_CODE =>
+                    {
+                        Err("not a plain string")
+                    }
+                    Some(attr) => Ok(attr),
+                }
+            };
+            let attr = match attr {
+                Ok(attr) => attr,
+                Err(reason) => anyhow::bail!(
+                    "{} replacement unique-name attribute {} is {}",
+                    resource_type_name,
+                    provider_name,
+                    reason
+                ),
+            };
             code.push_str(&format!(
                 "\x20       .with_unique_name_attribute(\"{}\")\n",
-                unique_name_attribute
+                attr.snake_name
             ));
         }
-        UniqueNameEmission::Coexisting => {
+        ReplacementClass::Coexisting => {
             code.push_str("\x20       .with_coexisting_replacement()\n");
         }
-        UniqueNameEmission::Conflicting => {}
+        ReplacementClass::Conflicting => {}
     }
+
+    Ok(())
 }
 
 /// Integer range constraint (supports one-sided ranges)
@@ -1339,10 +1288,7 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
         code.push_str("\x20       .as_data_source()\n");
     }
 
-    emit_unique_name_builder(
-        &mut code,
-        derive_unique_name_emission(res.name, res.identifier, &attrs, is_data_source),
-    );
+    emit_replacement_builder(&mut code, res.name, res.replacement, &attrs)?;
 
     // Generate attributes
     for attr in &attrs {
@@ -4932,10 +4878,16 @@ mod tests {
     }
 
     #[test]
-    fn derive_unique_name_attribute_requires_writable_plain_string_identifier() {
+    fn replacement_emission_covers_unique_name_coexisting_and_conflicting() {
+        fn emitted(replacement: ReplacementClass, attrs: &[AttrInfo]) -> Result<String> {
+            let mut code = String::new();
+            emit_replacement_builder(&mut code, "test.Resource", replacement, attrs)?;
+            Ok(code)
+        }
+
         let attrs = vec![test_attr(
-            "RoleName",
-            "role_name",
+            "DBInstanceIdentifier",
+            "db_instance_identifier",
             PLAIN_STRING_TYPE_CODE,
             false,
             true,
@@ -4943,161 +4895,91 @@ mod tests {
             None,
         )];
         assert_eq!(
-            derive_unique_name_attribute("RoleName", &attrs, false),
-            Some("role_name".to_string())
+            emitted(ReplacementClass::UniqueName("DbInstanceIdentifier"), &attrs).unwrap(),
+            "\x20       .with_unique_name_attribute(\"db_instance_identifier\")\n"
         );
-
-        let attrs = vec![test_attr(
-            "logGroupName",
-            "log_group_name",
-            PLAIN_STRING_TYPE_CODE,
-            false,
-            true,
-            false,
-            None,
-        )];
         assert_eq!(
-            derive_unique_name_attribute("LogGroupName", &attrs, false),
-            Some("log_group_name".to_string())
+            emitted(ReplacementClass::Coexisting, &[]).unwrap(),
+            "\x20       .with_coexisting_replacement()\n"
         );
+        assert_eq!(emitted(ReplacementClass::Conflicting, &[]).unwrap(), "");
+    }
 
-        let attrs = vec![test_attr(
-            "VpcId",
-            "vpc_id",
-            PLAIN_STRING_TYPE_CODE,
-            true,
-            true,
-            false,
-            None,
-        )];
-        assert_eq!(derive_unique_name_attribute("VpcId", &attrs, false), None);
+    #[test]
+    fn unique_name_replacement_requires_present_writable_plain_string_attribute() {
+        fn error_for(attrs: &[AttrInfo]) -> String {
+            emit_replacement_builder(
+                &mut String::new(),
+                "test.Resource",
+                ReplacementClass::UniqueName("RoleName"),
+                attrs,
+            )
+            .unwrap_err()
+            .to_string()
+        }
 
-        let attrs = vec![test_attr(
-            "VpcId",
-            "vpc_id",
-            "super::vpc_id()",
-            false,
-            true,
-            false,
-            None,
-        )];
-        assert_eq!(derive_unique_name_attribute("VpcId", &attrs, false), None);
-
-        let attrs = vec![test_attr(
-            "DocumentName",
-            "document_name",
-            PLAIN_STRING_TYPE_CODE,
-            false,
-            false,
-            false,
-            None,
-        )];
         assert_eq!(
-            derive_unique_name_attribute("DocumentName", &attrs, false),
-            None
+            error_for(&[]),
+            "test.Resource replacement unique-name attribute RoleName is missing"
         );
-
-        let attrs = vec![
-            test_attr(
-                "Name",
-                "name",
+        assert_eq!(
+            error_for(&[test_attr(
+                "RoleName",
+                "role_name",
                 PLAIN_STRING_TYPE_CODE,
+                true,
+                true,
+                false,
+                None,
+            )]),
+            "test.Resource replacement unique-name attribute RoleName is read-only"
+        );
+        assert_eq!(
+            error_for(&[test_attr(
+                "RoleName",
+                "role_name",
+                "super::iam_role_name()",
                 false,
                 true,
                 false,
                 None,
-            ),
-            test_attr("Type", "type", "/* enum */", false, false, true, None),
-        ];
-        assert_eq!(derive_unique_name_attribute("Name", &attrs, false), None);
-
-        let attrs = vec![test_attr(
-            "Bucket",
-            "bucket",
-            PLAIN_STRING_TYPE_CODE,
-            false,
-            true,
-            false,
-            None,
-        )];
-        assert_eq!(derive_unique_name_attribute("Bucket", &attrs, true), None);
-    }
-
-    #[test]
-    fn unique_name_emission_covers_attribute_coexisting_and_conflicting() {
-        fn emitted(emission: UniqueNameEmission) -> String {
-            let mut code = String::new();
-            emit_unique_name_builder(&mut code, emission);
-            code
-        }
-
+            )]),
+            "test.Resource replacement unique-name attribute RoleName is not a plain string"
+        );
         assert_eq!(
-            UNIQUE_NAME_REPLACEMENT_CLASSES,
-            &[
-                ("ec2.Vpc", UniqueNameReplacementClass::Coexisting),
-                (
-                    "ec2.TransitGatewayAttachment",
-                    UniqueNameReplacementClass::Coexisting
+            error_for(&[test_attr(
+                "RoleName",
+                "role_name",
+                PLAIN_STRING_TYPE_CODE,
+                false,
+                false,
+                false,
+                None,
+            )]),
+            "test.Resource replacement unique-name attribute RoleName is not a plain string"
+        );
+        assert_eq!(
+            error_for(&[
+                test_attr(
+                    "RoleName",
+                    "role_name",
+                    PLAIN_STRING_TYPE_CODE,
+                    false,
+                    true,
+                    false,
+                    None,
                 ),
-            ]
-        );
-
-        let attr_attrs = vec![test_attr(
-            "RoleName",
-            "role_name",
-            PLAIN_STRING_TYPE_CODE,
-            false,
-            true,
-            false,
-            None,
-        )];
-        let attr_emission = derive_unique_name_emission("iam.Role", "RoleName", &attr_attrs, false);
-        assert_eq!(
-            attr_emission,
-            UniqueNameEmission::Attribute("role_name".to_string())
-        );
-        assert_eq!(
-            emitted(attr_emission),
-            "\x20       .with_unique_name_attribute(\"role_name\")\n"
-        );
-
-        let vpc_attrs = vec![test_attr(
-            "VpcId",
-            "vpc_id",
-            "super::vpc_id()",
-            true,
-            true,
-            false,
-            None,
-        )];
-        let coexisting_emission =
-            derive_unique_name_emission("ec2.Vpc", "VpcId", &vpc_attrs, false);
-        assert_eq!(coexisting_emission, UniqueNameEmission::Coexisting);
-        assert_eq!(
-            emitted(coexisting_emission),
-            "\x20       .with_coexisting_replacement()\n"
-        );
-
-        let tgw_attachment_emission = derive_unique_name_emission(
-            "ec2.TransitGatewayAttachment",
-            "TransitGatewayAttachmentId",
-            &[],
-            false,
-        );
-        assert_eq!(tgw_attachment_emission, UniqueNameEmission::Coexisting);
-        assert_eq!(
-            emitted(tgw_attachment_emission),
-            "\x20       .with_coexisting_replacement()\n"
-        );
-
-        let conflicting_emission =
-            derive_unique_name_emission("ec2.Route", "RouteTableId", &[], false);
-        assert_eq!(conflicting_emission, UniqueNameEmission::Conflicting);
-        assert_eq!(emitted(conflicting_emission), "");
-
-        assert_eq!(
-            derive_unique_name_emission("ec2.Vpc", "VpcId", &vpc_attrs, true),
-            UniqueNameEmission::Conflicting
+                test_attr(
+                    "Path",
+                    "path",
+                    PLAIN_STRING_TYPE_CODE,
+                    false,
+                    true,
+                    true,
+                    None,
+                ),
+            ]),
+            "test.Resource replacement unique-name attribute RoleName is on a resource with a composite identity"
         );
     }
 
@@ -5561,6 +5443,8 @@ mod tests {
     ) -> ResourceDef {
         ResourceDef {
             name: "ec2.FromStructFixture",
+            // Synthetic fixture does not exercise replacement behavior.
+            replacement: ReplacementClass::Conflicting,
             service_namespace: "com.amazonaws.ec2",
             schema_structure: None,
             simple_delete: false,

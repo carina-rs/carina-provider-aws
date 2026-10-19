@@ -17,6 +17,7 @@ pub fn ec2_internet_gateway_config() -> AwsSchemaConfig {
         has_tags: true,
         schema: ResourceSchema::new("ec2.InternetGateway")
         .with_description("Describes an internet gateway.")
+        .with_coexisting_replacement()
         .attribute(
             AttributeSchema::new("vpc_id", super::vpc_id())
                 .create_only()
