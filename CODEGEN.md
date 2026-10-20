@@ -66,6 +66,7 @@ pub fn organizations_resources() -> Vec<ResourceDef> {
     vec![
         ResourceDef {
             name: "organizations.organization",
+            replacement: ReplacementClass::Conflicting,
             service_namespace: "com.amazonaws.organizations",
             create_op: "CreateOrganization",
             read_structure: Some("Organization"),
@@ -83,6 +84,7 @@ Key `ResourceDef` fields:
 | Field | Description |
 |---|---|
 | `name` | DSL resource name (e.g., `"ec2.vpc"`) |
+| `replacement` | `UniqueName("SmithyMemberName")` takes the Smithy member name (matched case-insensitively via `snake_case`); codegen fails if the attribute is missing, read-only, not a plain string, or the resource has a composite identity (`identity_overrides`). Use `Coexisting` only if the replacement can coexist with the original under every combination of create-only changes; use `Conflicting` otherwise. |
 | `service_namespace` | Smithy namespace (e.g., `"com.amazonaws.ec2"`) |
 | `create_op` | Create operation name from Smithy model |
 | `read_structure` | Smithy structure name for read state |

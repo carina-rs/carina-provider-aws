@@ -17,6 +17,7 @@ pub fn sqs_queue_config() -> AwsSchemaConfig {
         has_tags: true,
         schema: ResourceSchema::new("sqs.Queue")
         .with_description("")
+        .with_conflicting_replacement()
         .attribute(
             AttributeSchema::new("queue_name", AttributeType::string())
                 .required()

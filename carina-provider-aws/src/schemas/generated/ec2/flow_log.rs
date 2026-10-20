@@ -30,6 +30,7 @@ pub fn ec2_flow_log_config() -> AwsSchemaConfig {
         has_tags: true,
         schema: ResourceSchema::new("ec2.FlowLog")
         .with_description("Describes a flow log.")
+        .with_conflicting_replacement()
         .attribute(
             AttributeSchema::new("deliver_logs_permission_arn", super::super::iam::role::arn())
                 .create_only()

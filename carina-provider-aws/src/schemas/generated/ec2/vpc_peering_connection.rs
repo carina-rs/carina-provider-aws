@@ -17,6 +17,7 @@ pub fn ec2_vpc_peering_connection_config() -> AwsSchemaConfig {
         has_tags: true,
         schema: ResourceSchema::new("ec2.VpcPeeringConnection")
         .with_description("Describes a VPC peering connection.")
+        .with_conflicting_replacement()
         .attribute(
             AttributeSchema::new("peer_owner_id", super::aws_account_id())
                 .create_only()

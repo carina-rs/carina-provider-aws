@@ -76,6 +76,7 @@ pub fn acm_certificate_config() -> AwsSchemaConfig {
         has_tags: true,
         schema: ResourceSchema::new("acm.Certificate")
         .with_description("Contains metadata about an ACM certificate. This structure is returned in the response to a DescribeCertificate request.")
+        .with_conflicting_replacement()
         .attribute(
             AttributeSchema::new("domain_name", AttributeType::string())
                 .required()

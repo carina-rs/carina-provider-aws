@@ -1,0 +1,27 @@
+# EC2 Security Group - create_before_destroy positive test (step 2: replacement)
+#
+# group_name is unique within a VPC. The temporary group_name lets this
+# replacement coexist with the original and avoids EC2 InvalidGroup.Duplicate.
+
+provider aws {
+  region = aws.Region.ap_northeast_1
+}
+
+let cbd_security_group_vpc = aws.ec2.Vpc {
+  cidr_block = '10.201.0.0/16'
+
+  tags = {
+    Name        = 'carina-acc-test-cbd-sg-vpc'
+    Environment = 'acceptance-test'
+  }
+}
+
+let cbd_security_group = aws.ec2.SecurityGroup {
+  group_name  = 'carina-acc-test-cbd-sg'
+  description = 'Carina create_before_destroy replacement security group'
+  vpc_id      = cbd_security_group_vpc.vpc_id
+
+  directives {
+    create_before_destroy = true
+  }
+}

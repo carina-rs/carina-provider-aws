@@ -14,7 +14,7 @@ pub fn s3_bucket_object_lock_configuration_config() -> AwsSchemaConfig {
         resource_type_name: "s3.BucketObjectLockConfiguration",
         has_tags: false,
         schema: ResourceSchema::new("s3.BucketObjectLockConfiguration")
-        .with_unique_name_attribute("bucket")
+        .with_coexisting_replacement()
         .attribute(
             AttributeSchema::new("bucket", AttributeType::string())
                 .required()

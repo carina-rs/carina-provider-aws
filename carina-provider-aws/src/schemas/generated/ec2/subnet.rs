@@ -19,6 +19,7 @@ pub fn ec2_subnet_config() -> AwsSchemaConfig {
         has_tags: true,
         schema: ResourceSchema::new("ec2.Subnet")
         .with_description("Describes a subnet.")
+        .with_conflicting_replacement()
         .attribute(
             AttributeSchema::new("assign_ipv6_address_on_creation", AttributeType::bool())
                 .with_description("Indicates whether a network interface created in this subnet (including a network interface created by RunInstances) receives an IPv6 address.")
