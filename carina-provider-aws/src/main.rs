@@ -285,7 +285,16 @@ impl CarinaProvider for AwsProcessProvider {
         request: proto::UpdateRequest,
     ) -> Result<proto::UpdateOutcome, proto::ProviderError> {
         let core_id = convert::proto_to_core_resource_id(id);
-        let core_from = convert::proto_to_core_state(&request.from);
+        let state_after_patch = request.state_after_patch();
+        let core_from = convert::proto_to_core_persisted_state(&request.from).map_err(|error| {
+            Self::convert_error(
+                CoreProviderError::internal_caused_by(
+                    "failed to decode persisted update state",
+                    error,
+                )
+                .for_resource(core_id.clone()),
+            )
+        })?;
         let core_patch = CoreUpdatePatch {
             ops: request
                 .patch
@@ -309,7 +318,10 @@ impl CarinaProvider for AwsProcessProvider {
             &core_patch,
         ));
         match result {
-            Ok(outcome) => Ok(convert::core_to_proto_update_outcome(outcome)),
+            Ok(outcome) => Ok(convert::core_to_proto_update_outcome(
+                outcome,
+                state_after_patch,
+            )),
             Err(e) => Err(Self::convert_error(e)),
         }
     }

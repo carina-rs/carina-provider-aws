@@ -11,7 +11,7 @@ use carina_core::provider::{
 };
 use carina_core::resource::{
     ConcreteValue, DataSource as CoreDataSource, DeferredValue, Directives as CoreDirectives,
-    Resource as CoreResource, ResourceId as CoreResourceId,
+    RedactedSecretHash, Resource as CoreResource, ResourceId as CoreResourceId,
     ResourceIdentity as CoreResourceIdentity, ResourceIdentityError as CoreResourceIdentityError,
     State as CoreState, Value as CoreValue,
 };
@@ -25,11 +25,16 @@ use carina_provider_protocol::types::{
     AttributeSchema as ProtoAttributeSchema, AttributeType as ProtoAttributeType,
     CreateOutcome as ProtoCreateOutcome, Directives as ProtoDirectives,
     OperationConfig as ProtoOperationConfig, PartialReadDiagnostic as ProtoPartialReadDiagnostic,
+    PersistedState as ProtoPersistedState, PersistedValue as ProtoPersistedValue,
     Resource as ProtoResource, ResourceId as ProtoResourceId,
     ResourceSchema as ProtoResourceSchema, SchemaKind as ProtoSchemaKind, State as ProtoState,
     StructField as ProtoStructField, UniqueNameSpec as ProtoUniqueNameSpec,
     UpdateOutcome as ProtoUpdateOutcome, Value as ProtoValue,
 };
+
+#[derive(Debug, thiserror::Error)]
+#[error("persisted state contains an invalid redacted-secret digest")]
+pub struct PersistedValueDecodeError;
 
 // -- ResourceId --
 
@@ -120,6 +125,12 @@ pub fn core_to_proto_value(v: &CoreValue) -> ProtoValue {
         CoreValue::Deferred(DeferredValue::FunctionCall { name, .. }) => {
             ProtoValue::String(format!("<unresolved-fn:{name}>"))
         }
+        CoreValue::Deferred(DeferredValue::ResolvedFunctionCall { function, .. }) => {
+            ProtoValue::String(format!("<unresolved-fn:{}>", function.name))
+        }
+        CoreValue::Deferred(DeferredValue::Access(_)) => {
+            ProtoValue::String("<unresolved-access>".to_string())
+        }
         CoreValue::Deferred(DeferredValue::Unknown(_)) => {
             ProtoValue::String("<unknown>".to_string())
         }
@@ -158,6 +169,124 @@ pub fn proto_to_core_value_map(m: &HashMap<String, ProtoValue>) -> HashMap<Strin
         .collect()
 }
 
+/// Convert a core value at a persisted-state position.
+///
+/// This is deliberately separate from [`core_to_proto_value`]: only this
+/// typed position may carry a redacted-secret digest.
+pub fn core_to_proto_persisted_value(v: &CoreValue) -> ProtoPersistedValue {
+    match v {
+        CoreValue::Concrete(ConcreteValue::String(s)) => {
+            ProtoPersistedValue::String(s.expose_plaintext().to_string())
+        }
+        CoreValue::Concrete(ConcreteValue::EnumIdentifier(_)) => {
+            unreachable!("unresolved enum identifier must not reach protocol conversion")
+        }
+        CoreValue::Concrete(ConcreteValue::CanonicalEnum(c)) => {
+            ProtoPersistedValue::String(c.api_value().to_string())
+        }
+        CoreValue::Concrete(ConcreteValue::Int(i)) => ProtoPersistedValue::Int(*i),
+        CoreValue::Concrete(ConcreteValue::Float(f)) => ProtoPersistedValue::Float(*f),
+        CoreValue::Concrete(ConcreteValue::Bool(b)) => ProtoPersistedValue::Bool(*b),
+        CoreValue::Concrete(ConcreteValue::Duration(d)) => {
+            ProtoPersistedValue::Int(d.as_secs() as i64)
+        }
+        CoreValue::Concrete(ConcreteValue::List(l)) => {
+            ProtoPersistedValue::List(l.iter().map(core_to_proto_persisted_value).collect())
+        }
+        CoreValue::Concrete(ConcreteValue::StringList(items)) => ProtoPersistedValue::StringList(
+            items
+                .iter()
+                .map(|item| item.expose_plaintext().to_string())
+                .collect(),
+        ),
+        CoreValue::Concrete(ConcreteValue::Map(m)) => ProtoPersistedValue::Map(
+            m.iter()
+                .map(|(k, v)| (k.clone(), core_to_proto_persisted_value(v)))
+                .collect(),
+        ),
+        CoreValue::Deferred(DeferredValue::Secret(_)) => {
+            panic!("live secret must be redacted before persisted-state conversion")
+        }
+        CoreValue::Deferred(DeferredValue::RedactedSecret { hash }) => {
+            ProtoPersistedValue::RedactedSecret(hash.encoded_digest())
+        }
+        CoreValue::Deferred(DeferredValue::ResourceRef { .. }) => {
+            panic!("unresolved resource reference must not reach persisted-state conversion")
+        }
+        CoreValue::Deferred(DeferredValue::BindingRef { .. }) => {
+            panic!("unresolved binding reference must not reach persisted-state conversion")
+        }
+        CoreValue::Deferred(DeferredValue::Interpolation(_)) => {
+            panic!("unresolved interpolation must not reach persisted-state conversion")
+        }
+        CoreValue::Deferred(DeferredValue::FunctionCall { .. }) => {
+            panic!("unresolved built-in function call must not reach persisted-state conversion")
+        }
+        CoreValue::Deferred(DeferredValue::ResolvedFunctionCall { .. }) => {
+            panic!("unresolved user function call must not reach persisted-state conversion")
+        }
+        CoreValue::Deferred(DeferredValue::Access(_)) => {
+            panic!("unresolved access expression must not reach persisted-state conversion")
+        }
+        CoreValue::Deferred(DeferredValue::Unknown(_)) => {
+            panic!("unknown value must not reach persisted-state conversion")
+        }
+    }
+}
+
+fn core_to_proto_persisted_value_map(
+    m: &HashMap<String, CoreValue>,
+) -> HashMap<String, ProtoPersistedValue> {
+    m.iter()
+        .map(|(k, v)| (k.clone(), core_to_proto_persisted_value(v)))
+        .collect()
+}
+
+/// Decode a value from a persisted-state position.
+///
+/// Ordinary strings are always strings. Only the protocol's structural
+/// `RedactedSecret` variant gains secret semantics.
+pub fn proto_to_core_persisted_value(
+    v: &ProtoPersistedValue,
+) -> Result<CoreValue, PersistedValueDecodeError> {
+    match v {
+        ProtoPersistedValue::String(s) => {
+            Ok(CoreValue::Concrete(ConcreteValue::String(s.clone().into())))
+        }
+        ProtoPersistedValue::RedactedSecret(digest) => {
+            let hash =
+                RedactedSecretHash::from_encoded_digest(digest).ok_or(PersistedValueDecodeError)?;
+            Ok(CoreValue::Deferred(DeferredValue::RedactedSecret { hash }))
+        }
+        ProtoPersistedValue::Int(i) => Ok(CoreValue::Concrete(ConcreteValue::Int(*i))),
+        ProtoPersistedValue::Float(f) => Ok(CoreValue::Concrete(ConcreteValue::Float(*f))),
+        ProtoPersistedValue::Bool(b) => Ok(CoreValue::Concrete(ConcreteValue::Bool(*b))),
+        ProtoPersistedValue::List(l) => l
+            .iter()
+            .map(proto_to_core_persisted_value)
+            .collect::<Result<Vec<_>, _>>()
+            .map(ConcreteValue::List)
+            .map(CoreValue::Concrete),
+        ProtoPersistedValue::StringList(items) => Ok(CoreValue::Concrete(
+            ConcreteValue::StringList(items.iter().cloned().map(Into::into).collect()),
+        )),
+        ProtoPersistedValue::Map(m) => m
+            .iter()
+            .map(|(k, v)| proto_to_core_persisted_value(v).map(|value| (k.clone(), value)))
+            .collect::<Result<indexmap::IndexMap<_, _>, _>>()
+            .map(ConcreteValue::Map)
+            .map(CoreValue::Concrete),
+    }
+}
+
+fn proto_to_core_persisted_value_map(
+    m: &HashMap<String, ProtoPersistedValue>,
+) -> Result<HashMap<String, CoreValue>, PersistedValueDecodeError> {
+    m.iter()
+        .map(|(k, v)| proto_to_core_persisted_value(v).map(|value| (k.clone(), value)))
+        .collect()
+}
+
 // -- State --
 
 pub fn core_to_proto_state(s: &CoreState) -> ProtoState {
@@ -169,16 +298,27 @@ pub fn core_to_proto_state(s: &CoreState) -> ProtoState {
     }
 }
 
-pub fn proto_to_core_state(s: &ProtoState) -> CoreState {
+pub fn core_to_proto_persisted_state(s: &CoreState) -> ProtoPersistedState {
+    ProtoPersistedState {
+        id: s.id.to_wire(),
+        identifier: s.identifier.clone(),
+        attributes: core_to_proto_persisted_value_map(&s.attributes),
+        exists: s.exists,
+    }
+}
+
+pub fn proto_to_core_persisted_state(
+    s: &ProtoPersistedState,
+) -> Result<CoreState, PersistedValueDecodeError> {
     let id = proto_to_core_resource_id(&s.id);
     if s.exists {
-        let mut state = CoreState::existing(id, proto_to_core_value_map(&s.attributes));
+        let mut state = CoreState::existing(id, proto_to_core_persisted_value_map(&s.attributes)?);
         if let Some(ref ident) = s.identifier {
             state = state.with_identifier(ident);
         }
-        state
+        Ok(state)
     } else {
-        CoreState::not_found(id)
+        Ok(CoreState::not_found(id))
     }
 }
 
@@ -203,14 +343,30 @@ pub fn core_to_proto_create_outcome(outcome: CoreCreateOutcome) -> ProtoCreateOu
 
 // -- UpdateOutcome --
 
-pub fn core_to_proto_update_outcome(outcome: CoreUpdateOutcome) -> ProtoUpdateOutcome {
+fn core_to_proto_update_state(
+    state: &CoreState,
+    mut state_after_patch: ProtoPersistedState,
+) -> ProtoPersistedState {
+    let mut returned = core_to_proto_persisted_state(state);
+    if returned.exists {
+        for (key, value) in state_after_patch.attributes.drain() {
+            returned.attributes.entry(key).or_insert(value);
+        }
+    }
+    returned
+}
+
+pub fn core_to_proto_update_outcome(
+    outcome: CoreUpdateOutcome,
+    state_after_patch: ProtoPersistedState,
+) -> ProtoUpdateOutcome {
     match outcome {
         CoreUpdateOutcome::Success { state } => ProtoUpdateOutcome::Success {
-            state: core_to_proto_state(&state),
+            state: core_to_proto_update_state(&state, state_after_patch),
         },
         CoreUpdateOutcome::PartialSuccess { state, diagnostic } => {
             ProtoUpdateOutcome::PartialSuccess {
-                state: core_to_proto_state(&state),
+                state: core_to_proto_update_state(&state, state_after_patch),
                 diagnostic: ProtoPartialReadDiagnostic {
                     reason: diagnostic.reason().to_string(),
                     missing_attributes: diagnostic.missing_attributes().to_vec(),
@@ -529,6 +685,82 @@ mod tests {
             .expect("redact saved-state placeholder");
 
         let _ = core_to_proto_value(&value);
+    }
+
+    #[test]
+    fn update_outcome_carries_unpatched_redacted_secret_as_persisted_value() {
+        let secret = CoreValue::Deferred(DeferredValue::Secret(Box::new(CoreValue::Concrete(
+            ConcreteValue::String("stored-write-only-secret".into()),
+        ))));
+        let redacted = carina_core::value::redact_secrets_in_value(&secret)
+            .expect("redact saved-state placeholder");
+        let CoreValue::Deferred(DeferredValue::RedactedSecret { hash }) = &redacted else {
+            panic!("expected a redacted secret")
+        };
+        let digest = hash.encoded_digest();
+        let id = ProtoResourceId {
+            provider: "aws".into(),
+            resource_type: "test.Resource".into(),
+            identity: "example".into(),
+        };
+        let request = carina_provider_protocol::types::UpdateRequest {
+            from: ProtoPersistedState {
+                id: id.clone(),
+                identifier: Some("resource-id".into()),
+                attributes: HashMap::from([
+                    (
+                        "token".into(),
+                        ProtoPersistedValue::RedactedSecret(digest.clone()),
+                    ),
+                    ("color".into(), ProtoPersistedValue::String("red".into())),
+                ]),
+                exists: true,
+            },
+            patch: carina_provider_protocol::types::UpdatePatch {
+                ops: vec![carina_provider_protocol::types::PatchOp {
+                    kind: carina_provider_protocol::types::PatchOpKind::Replace,
+                    key: "color".into(),
+                    value: Some(ProtoValue::String("blue".into())),
+                }],
+            },
+        };
+
+        let core_from = proto_to_core_persisted_state(&request.from)
+            .expect("decode structurally persisted current state");
+        assert!(matches!(
+            core_from.attributes.get("token"),
+            Some(CoreValue::Deferred(DeferredValue::RedactedSecret { .. }))
+        ));
+
+        // Simulate an AWS read-back that omits the write-only token. The
+        // protocol-level state-after-patch baseline must keep that untouched
+        // persisted value in the outcome without presenting it to the cloud.
+        let provider_state = CoreState::existing(
+            proto_to_core_resource_id(&id),
+            HashMap::from([(
+                "color".into(),
+                CoreValue::Concrete(ConcreteValue::String("blue".into())),
+            )]),
+        )
+        .with_identifier("resource-id");
+        let outcome = core_to_proto_update_outcome(
+            CoreUpdateOutcome::Success {
+                state: provider_state,
+            },
+            request.state_after_patch(),
+        );
+
+        let ProtoUpdateOutcome::Success { state } = outcome else {
+            panic!("expected a successful update outcome")
+        };
+        assert_eq!(
+            state.attributes.get("token"),
+            Some(&ProtoPersistedValue::RedactedSecret(digest))
+        );
+        assert_eq!(
+            state.attributes.get("color"),
+            Some(&ProtoPersistedValue::String("blue".into()))
+        );
     }
 
     #[test]

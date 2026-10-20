@@ -20,8 +20,8 @@ fn string_or_list_of_strings() -> AttributeType {
 /// (Service, AWS, Federated) whose values are string or list of strings.
 fn string_or_principal_struct() -> AttributeType {
     // Struct must come before String because Union tries members in order,
-    // and dsl_value_to_aws's fallthrough to value_to_json would match
-    // Value::Map against String incorrectly.
+    // and the permissive String fallback would otherwise accept Value::Map
+    // before the structured principal schema can validate it.
     AttributeType::union(vec![
         AttributeType::struct_(
             "Principal".to_string(),
