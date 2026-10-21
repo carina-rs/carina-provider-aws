@@ -153,25 +153,6 @@ impl AwsProvider {
         self.read_ec2_nat_gateway(&id, Some(identifier)).await
     }
 
-    /// Delete an EC2 NAT Gateway
-    pub(crate) async fn delete_ec2_nat_gateway_start(
-        &self,
-        id: ResourceId,
-        identifier: &str,
-    ) -> ProviderResult<()> {
-        self.ec2_client
-            .delete_nat_gateway()
-            .nat_gateway_id(identifier)
-            .send()
-            .await
-            .map_err(|e| {
-                api_error_with_meta("Failed to delete NAT gateway", "ec2.DeleteNatGateway", e)
-                    .for_resource(id.clone())
-            })?;
-
-        Ok(())
-    }
-
     /// Perform one describe call for a pending NAT gateway create.
     pub(crate) async fn poll_ec2_nat_gateway_create(
         &self,

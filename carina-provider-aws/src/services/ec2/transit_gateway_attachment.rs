@@ -211,29 +211,6 @@ impl AwsProvider {
             .await
     }
 
-    /// Delete an EC2 Transit Gateway VPC Attachment
-    pub(crate) async fn delete_ec2_transit_gateway_attachment_start(
-        &self,
-        id: ResourceId,
-        identifier: &str,
-    ) -> ProviderResult<()> {
-        self.ec2_client
-            .delete_transit_gateway_vpc_attachment()
-            .transit_gateway_attachment_id(identifier)
-            .send()
-            .await
-            .map_err(|e| {
-                api_error_with_meta(
-                    "Failed to delete transit gateway VPC attachment",
-                    "ec2.DeleteTransitGatewayVpcAttachment",
-                    e,
-                )
-                .for_resource(id.clone())
-            })?;
-
-        Ok(())
-    }
-
     /// Perform one describe call for a pending transit gateway attachment create.
     pub(crate) async fn poll_ec2_transit_gateway_attachment_create(
         &self,

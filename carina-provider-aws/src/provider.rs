@@ -572,24 +572,22 @@ impl AwsProvider {
     ) -> ProviderResult<AwsDeleteStep> {
         let id = id.clone();
         match id.resource_type.as_str() {
-            "ec2.NatGateway" => self
-                .delete_ec2_nat_gateway_start(id, identifier)
-                .await
-                .map(|()| {
-                    delete_pending(AwsDeleteToken::NatGateway {
-                        nat_gateway_id: identifier.to_string(),
+            "ec2.NatGateway" => self.delete_ec2_nat_gateway(id, identifier).await.map(|()| {
+                delete_pending(AwsDeleteToken::NatGateway {
+                    nat_gateway_id: identifier.to_string(),
+                })
+            }),
+            "ec2.TransitGateway" => {
+                self.delete_ec2_transit_gateway(id, identifier)
+                    .await
+                    .map(|()| {
+                        delete_pending(AwsDeleteToken::TransitGateway {
+                            transit_gateway_id: identifier.to_string(),
+                        })
                     })
-                }),
-            "ec2.TransitGateway" => self
-                .delete_ec2_transit_gateway_start(id, identifier)
-                .await
-                .map(|()| {
-                    delete_pending(AwsDeleteToken::TransitGateway {
-                        transit_gateway_id: identifier.to_string(),
-                    })
-                }),
+            }
             "ec2.TransitGatewayAttachment" => self
-                .delete_ec2_transit_gateway_attachment_start(id, identifier)
+                .delete_ec2_transit_gateway_attachment(id, identifier)
                 .await
                 .map(|()| {
                     delete_pending(AwsDeleteToken::TransitGatewayAttachment {
