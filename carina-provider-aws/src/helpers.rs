@@ -258,16 +258,24 @@ fn build_tag_specification_from_map(
     tag_spec.build()
 }
 
-/// Represents the state returned by a poll function for `wait_for_ec2_state`.
-pub enum PollState {
-    /// The resource reached the desired state.
-    Ready,
-    /// The resource reached a terminal failure state.
-    Failed,
-    /// The resource no longer exists (useful for delete waits).
-    Gone,
+/// Result of one resource-state describe call during creation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CreatePoll<T> {
     /// The resource is still transitioning.
     Pending,
+    /// The resource reached the desired state and produced its completion value.
+    Ready(T),
+    /// The resource reached a terminal failure state.
+    Failed,
+}
+
+/// Result of one resource-state describe call during deletion.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeletePoll {
+    /// The resource is still transitioning.
+    Pending,
+    /// The resource no longer exists.
+    Gone,
 }
 
 /// Format an AWS SDK error with the full error chain.
@@ -469,40 +477,6 @@ pub fn apply_patch_to_state(from: &State, patch: &UpdatePatch) -> Resource {
         }
     }
     resource
-}
-
-/// Generic wait/poll loop for EC2 resources.
-///
-/// Polls at 5-second intervals for up to `max_iterations` iterations.
-///
-/// - `poll_fn`: An async function that describes the resource and returns its `PollState`.
-/// - `max_iterations`: Maximum number of poll iterations (each 5 seconds apart).
-/// - `timeout_msg`: Error message if the loop times out.
-/// - `failure_msg`: Error message if the resource reaches a failed state.
-pub async fn wait_for_ec2_state<F, Fut>(
-    id: &ResourceId,
-    poll_fn: F,
-    max_iterations: u32,
-    timeout_msg: &str,
-    failure_msg: &str,
-) -> ProviderResult<()>
-where
-    F: Fn() -> Fut,
-    Fut: Future<Output = ProviderResult<PollState>>,
-{
-    for _ in 0..max_iterations {
-        match poll_fn().await? {
-            PollState::Ready => return Ok(()),
-            PollState::Gone => return Ok(()),
-            PollState::Failed => {
-                return Err(ProviderError::api_error(failure_msg).for_resource(id.clone()));
-            }
-            PollState::Pending => {}
-        }
-        sleep(Duration::from_secs(5)).await;
-    }
-
-    Err(ProviderError::timeout(timeout_msg).for_resource(id.clone()))
 }
 
 #[cfg(test)]

@@ -7,9 +7,24 @@ use carina_core::schema::ResourceSchema;
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
 use crate::helpers::{
-    PollState, build_tag_specification, optional_enum_struct_field, optional_int_struct_field,
-    optional_string_list_struct_field, wait_for_ec2_state,
+    CreatePoll, DeletePoll, build_tag_specification, optional_enum_struct_field,
+    optional_int_struct_field, optional_string_list_struct_field,
 };
+
+fn transit_gateway_create_poll_state(state: Option<&str>) -> CreatePoll<()> {
+    match state {
+        Some("available") => CreatePoll::Ready(()),
+        Some("failed" | "deleted") => CreatePoll::Failed,
+        _ => CreatePoll::Pending,
+    }
+}
+
+fn transit_gateway_delete_poll_state(state: Option<&str>) -> DeletePoll {
+    match state {
+        Some("deleted") | None => DeletePoll::Gone,
+        _ => DeletePoll::Pending,
+    }
+}
 
 fn build_create_transit_gateway_options(
     resource: &Resource,
@@ -144,11 +159,11 @@ impl AwsProvider {
     }
 
     /// Create an EC2 Transit Gateway
-    pub(crate) async fn create_ec2_transit_gateway(
+    pub(crate) async fn create_ec2_transit_gateway_start(
         &self,
         resource: &Resource,
         schema: &ResourceSchema,
-    ) -> ProviderResult<State> {
+    ) -> ProviderResult<String> {
         let mut req = self.ec2_client.create_transit_gateway();
 
         if let Some(Value::Concrete(ConcreteValue::String(desc))) = resource.get_attr("description")
@@ -184,13 +199,7 @@ impl AwsProvider {
                     .for_resource(resource.id.clone())
             })?;
 
-        // Wait for transit gateway to become available
-        self.wait_for_transit_gateway_available(&resource.id, tgw_id)
-            .await?;
-
-        // Read back
-        self.read_ec2_transit_gateway(&resource.id, Some(tgw_id))
-            .await
+        Ok(tgw_id.to_string())
     }
 
     /// Update an EC2 Transit Gateway (tags only for now)
@@ -213,7 +222,7 @@ impl AwsProvider {
     }
 
     /// Delete an EC2 Transit Gateway
-    pub(crate) async fn delete_ec2_transit_gateway(
+    pub(crate) async fn delete_ec2_transit_gateway_start(
         &self,
         id: ResourceId,
         identifier: &str,
@@ -232,97 +241,65 @@ impl AwsProvider {
                 .for_resource(id.clone())
             })?;
 
-        // Wait for transit gateway to be deleted
-        self.wait_for_transit_gateway_deleted(&id, identifier)
-            .await?;
-
         Ok(())
     }
 
-    /// Wait for a transit gateway to reach the "available" state
-    async fn wait_for_transit_gateway_available(
+    /// Perform one describe call for a pending transit gateway create.
+    pub(crate) async fn poll_ec2_transit_gateway_create(
         &self,
         id: &ResourceId,
         transit_gateway_id: &str,
-    ) -> ProviderResult<()> {
-        let ec2 = &self.ec2_client;
-        let rid = id.clone();
-        wait_for_ec2_state(
-            id,
-            || async {
-                let result = ec2
-                    .describe_transit_gateways()
-                    .transit_gateway_ids(transit_gateway_id)
-                    .send()
-                    .await
-                    .map_err(|e| {
-                        api_error_with_meta(
-                            "Failed to describe transit gateway",
-                            "ec2.DescribeTransitGateways",
-                            e,
-                        )
-                        .for_resource(rid.clone())
-                    })?;
-                Ok(
-                    if let Some(tgw) = result.transit_gateways().first()
-                        && let Some(state) = tgw.state()
-                    {
-                        match state.as_str() {
-                            "available" => PollState::Ready,
-                            "failed" | "deleted" => PollState::Failed,
-                            _ => PollState::Pending,
-                        }
-                    } else {
-                        PollState::Pending
-                    },
+    ) -> ProviderResult<CreatePoll<()>> {
+        let result = self
+            .ec2_client
+            .describe_transit_gateways()
+            .transit_gateway_ids(transit_gateway_id)
+            .send()
+            .await
+            .map_err(|e| {
+                api_error_with_meta(
+                    "Failed to describe transit gateway",
+                    "ec2.DescribeTransitGateways",
+                    e,
                 )
-            },
-            60,
-            "Timeout waiting for transit gateway to become available",
-            "Transit gateway creation failed",
-        )
-        .await
+                .for_resource(id.clone())
+            })?;
+        Ok(transit_gateway_create_poll_state(
+            result
+                .transit_gateways()
+                .first()
+                .and_then(|tgw| tgw.state())
+                .map(|state| state.as_str()),
+        ))
     }
 
-    /// Wait for a transit gateway to be deleted
-    async fn wait_for_transit_gateway_deleted(
+    /// Perform one describe call for a pending transit gateway delete.
+    pub(crate) async fn poll_ec2_transit_gateway_delete(
         &self,
         id: &ResourceId,
         transit_gateway_id: &str,
-    ) -> ProviderResult<()> {
-        let ec2 = &self.ec2_client;
-        let rid = id.clone();
-        wait_for_ec2_state(
-            id,
-            || async {
-                let result = ec2
-                    .describe_transit_gateways()
-                    .transit_gateway_ids(transit_gateway_id)
-                    .send()
-                    .await
-                    .map_err(|e| {
-                        api_error_with_meta(
-                            "Failed to describe transit gateway",
-                            "ec2.DescribeTransitGateways",
-                            e,
-                        )
-                        .for_resource(rid.clone())
-                    })?;
-                Ok(if let Some(tgw) = result.transit_gateways().first() {
-                    if tgw.state().map(|s| s.as_str()) == Some("deleted") {
-                        PollState::Gone
-                    } else {
-                        PollState::Pending
-                    }
-                } else {
-                    PollState::Gone
-                })
-            },
-            60,
-            "Timeout waiting for transit gateway to be deleted",
-            "Transit gateway deletion failed",
-        )
-        .await
+    ) -> ProviderResult<DeletePoll> {
+        let result = self
+            .ec2_client
+            .describe_transit_gateways()
+            .transit_gateway_ids(transit_gateway_id)
+            .send()
+            .await
+            .map_err(|e| {
+                api_error_with_meta(
+                    "Failed to describe transit gateway",
+                    "ec2.DescribeTransitGateways",
+                    e,
+                )
+                .for_resource(id.clone())
+            })?;
+        Ok(transit_gateway_delete_poll_state(
+            result
+                .transit_gateways()
+                .first()
+                .and_then(|tgw| tgw.state())
+                .map(|state| state.as_str()),
+        ))
     }
 }
 
@@ -336,6 +313,44 @@ mod tests {
         VpnEcmpSupportValue,
     };
     use indexmap::IndexMap;
+
+    #[test]
+    fn create_poll_preserves_waiter_state_semantics() {
+        assert_eq!(
+            transit_gateway_create_poll_state(Some("available")),
+            CreatePoll::Ready(())
+        );
+        assert_eq!(
+            transit_gateway_create_poll_state(Some("failed")),
+            CreatePoll::Failed
+        );
+        assert_eq!(
+            transit_gateway_create_poll_state(Some("deleted")),
+            CreatePoll::Failed
+        );
+        assert_eq!(
+            transit_gateway_create_poll_state(Some("pending")),
+            CreatePoll::Pending
+        );
+        assert_eq!(transit_gateway_create_poll_state(None), CreatePoll::Pending);
+    }
+
+    #[test]
+    fn delete_poll_preserves_waiter_state_semantics() {
+        assert_eq!(
+            transit_gateway_delete_poll_state(Some("deleted")),
+            DeletePoll::Gone
+        );
+        assert_eq!(transit_gateway_delete_poll_state(None), DeletePoll::Gone);
+        assert_eq!(
+            transit_gateway_delete_poll_state(Some("available")),
+            DeletePoll::Pending
+        );
+        assert_eq!(
+            transit_gateway_delete_poll_state(Some("failed")),
+            DeletePoll::Pending
+        );
+    }
 
     fn schema() -> ResourceSchema {
         crate::schemas::generated::ec2::transit_gateway::ec2_transit_gateway_config().schema
