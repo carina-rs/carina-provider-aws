@@ -9,9 +9,24 @@ use aws_sdk_ec2::types::NatGatewayState;
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
 use crate::helpers::{
-    PollState, RetryPolicy, optional_enum_attr, require_string_attr, retry_aws_operation,
-    wait_for_ec2_state,
+    CreatePoll, DeletePoll, RetryPolicy, optional_enum_attr, require_string_attr,
+    retry_aws_operation,
 };
+
+fn nat_gateway_create_poll_state(state: Option<&NatGatewayState>) -> CreatePoll<()> {
+    match state {
+        Some(NatGatewayState::Available) => CreatePoll::Ready(()),
+        Some(NatGatewayState::Failed) => CreatePoll::Failed,
+        _ => CreatePoll::Pending,
+    }
+}
+
+fn nat_gateway_delete_poll_state(state: Option<&NatGatewayState>) -> DeletePoll {
+    match state {
+        Some(NatGatewayState::Deleted) | None => DeletePoll::Gone,
+        _ => DeletePoll::Pending,
+    }
+}
 
 impl AwsProvider {
     /// Read an EC2 NAT Gateway
@@ -74,11 +89,11 @@ impl AwsProvider {
     }
 
     /// Create an EC2 NAT Gateway
-    pub(crate) async fn create_ec2_nat_gateway(
+    pub(crate) async fn create_ec2_nat_gateway_start(
         &self,
         resource: &Resource,
         schema: &ResourceSchema,
-    ) -> ProviderResult<State> {
+    ) -> ProviderResult<String> {
         let subnet_id = require_string_attr(resource, "subnet_id")?;
 
         let mut req = self.ec2_client.create_nat_gateway().subnet_id(&subnet_id);
@@ -116,13 +131,7 @@ impl AwsProvider {
         // Apply tags
         self.apply_ec2_tags(&resource.id, ngw_id, &resource.resolved_attributes(), None)
             .await?;
-
-        // Wait for NAT gateway to become available
-        self.wait_for_nat_gateway_available(&resource.id, ngw_id)
-            .await?;
-
-        // Read back using NAT gateway ID
-        self.read_ec2_nat_gateway(&resource.id, Some(ngw_id)).await
+        Ok(ngw_id.to_string())
     }
 
     /// Update an EC2 NAT Gateway (tags only)
@@ -144,114 +153,88 @@ impl AwsProvider {
         self.read_ec2_nat_gateway(&id, Some(identifier)).await
     }
 
-    /// Delete an EC2 NAT Gateway
-    pub(crate) async fn delete_ec2_nat_gateway(
+    /// Perform one describe call for a pending NAT gateway create.
+    pub(crate) async fn poll_ec2_nat_gateway_create(
         &self,
-        id: ResourceId,
-        identifier: &str,
-    ) -> ProviderResult<()> {
-        self.ec2_client
-            .delete_nat_gateway()
-            .nat_gateway_id(identifier)
+        id: &ResourceId,
+        nat_gateway_id: &str,
+    ) -> ProviderResult<CreatePoll<()>> {
+        let result = self
+            .ec2_client
+            .describe_nat_gateways()
+            .nat_gateway_ids(nat_gateway_id)
             .send()
             .await
             .map_err(|e| {
-                api_error_with_meta("Failed to delete NAT gateway", "ec2.DeleteNatGateway", e)
-                    .for_resource(id.clone())
-            })?;
-
-        // Wait for NAT gateway to be deleted
-        self.wait_for_nat_gateway_deleted(&id, identifier).await?;
-
-        Ok(())
-    }
-
-    /// Wait for a NAT gateway to reach the "available" state
-    async fn wait_for_nat_gateway_available(
-        &self,
-        id: &ResourceId,
-        nat_gateway_id: &str,
-    ) -> ProviderResult<()> {
-        let ec2 = &self.ec2_client;
-        let rid = id.clone();
-        wait_for_ec2_state(
-            id,
-            || async {
-                let result = ec2
-                    .describe_nat_gateways()
-                    .nat_gateway_ids(nat_gateway_id)
-                    .send()
-                    .await
-                    .map_err(|e| {
-                        api_error_with_meta(
-                            "Failed to describe NAT gateway",
-                            "ec2.DescribeNatGateways",
-                            e,
-                        )
-                        .for_resource(rid.clone())
-                    })?;
-                Ok(
-                    if let Some(ngw) = result.nat_gateways().first()
-                        && let Some(state) = ngw.state()
-                    {
-                        if *state == NatGatewayState::Available {
-                            PollState::Ready
-                        } else if *state == NatGatewayState::Failed {
-                            PollState::Failed
-                        } else {
-                            PollState::Pending
-                        }
-                    } else {
-                        PollState::Pending
-                    },
+                api_error_with_meta(
+                    "Failed to describe NAT gateway",
+                    "ec2.DescribeNatGateways",
+                    e,
                 )
-            },
-            60,
-            "Timeout waiting for NAT gateway to become available",
-            "NAT gateway creation failed",
-        )
-        .await
+                .for_resource(id.clone())
+            })?;
+        Ok(nat_gateway_create_poll_state(
+            result.nat_gateways().first().and_then(|ngw| ngw.state()),
+        ))
     }
 
-    /// Wait for a NAT gateway to be deleted
-    async fn wait_for_nat_gateway_deleted(
+    /// Perform one describe call for a pending NAT gateway delete.
+    pub(crate) async fn poll_ec2_nat_gateway_delete(
         &self,
         id: &ResourceId,
         nat_gateway_id: &str,
-    ) -> ProviderResult<()> {
-        let ec2 = &self.ec2_client;
-        let rid = id.clone();
-        // NAT Gateways can take 5+ minutes to delete; use 90 iterations (7.5 min).
-        wait_for_ec2_state(
-            id,
-            || async {
-                let result = ec2
-                    .describe_nat_gateways()
-                    .nat_gateway_ids(nat_gateway_id)
-                    .send()
-                    .await
-                    .map_err(|e| {
-                        api_error_with_meta(
-                            "Failed to describe NAT gateway",
-                            "ec2.DescribeNatGateways",
-                            e,
-                        )
-                        .for_resource(rid.clone())
-                    })?;
-                Ok(if let Some(ngw) = result.nat_gateways().first() {
-                    if ngw.state() == Some(&NatGatewayState::Deleted) {
-                        PollState::Gone
-                    } else {
-                        PollState::Pending
-                    }
-                } else {
-                    PollState::Gone
-                })
-            },
-            90,
-            "Timeout waiting for NAT gateway to be deleted",
-            "NAT gateway deletion failed",
-        )
-        .await
+    ) -> ProviderResult<DeletePoll> {
+        let result = self
+            .ec2_client
+            .describe_nat_gateways()
+            .nat_gateway_ids(nat_gateway_id)
+            .send()
+            .await
+            .map_err(|e| {
+                api_error_with_meta(
+                    "Failed to describe NAT gateway",
+                    "ec2.DescribeNatGateways",
+                    e,
+                )
+                .for_resource(id.clone())
+            })?;
+        Ok(nat_gateway_delete_poll_state(
+            result.nat_gateways().first().and_then(|ngw| ngw.state()),
+        ))
+    }
+}
+
+#[cfg(test)]
+mod pending_tests {
+    use super::*;
+
+    #[test]
+    fn create_poll_maps_pending_ready_and_failed_states() {
+        assert_eq!(
+            nat_gateway_create_poll_state(Some(&NatGatewayState::Pending)),
+            CreatePoll::Pending
+        );
+        assert_eq!(
+            nat_gateway_create_poll_state(Some(&NatGatewayState::Available)),
+            CreatePoll::Ready(())
+        );
+        assert_eq!(
+            nat_gateway_create_poll_state(Some(&NatGatewayState::Failed)),
+            CreatePoll::Failed
+        );
+        assert_eq!(nat_gateway_create_poll_state(None), CreatePoll::Pending);
+    }
+
+    #[test]
+    fn delete_poll_maps_pending_and_gone_states() {
+        assert_eq!(
+            nat_gateway_delete_poll_state(Some(&NatGatewayState::Deleting)),
+            DeletePoll::Pending
+        );
+        assert_eq!(
+            nat_gateway_delete_poll_state(Some(&NatGatewayState::Deleted)),
+            DeletePoll::Gone
+        );
+        assert_eq!(nat_gateway_delete_poll_state(None), DeletePoll::Gone);
     }
 }

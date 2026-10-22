@@ -18,6 +18,7 @@ mod tests;
 
 pub use factory::AwsProviderFactory;
 pub use normalizer::AwsNormalizer;
+pub use provider::{AwsCreateToken, AwsDeleteToken};
 
 use aws_config::Region;
 use aws_sdk_acm::Client as AcmClient;

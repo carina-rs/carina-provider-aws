@@ -24,12 +24,12 @@ use carina_core::schema::{
 use carina_provider_protocol::types::{
     AttributeSchema as ProtoAttributeSchema, AttributeType as ProtoAttributeType,
     CreateOutcome as ProtoCreateOutcome, Directives as ProtoDirectives,
-    OperationConfig as ProtoOperationConfig, PartialReadDiagnostic as ProtoPartialReadDiagnostic,
-    PersistedState as ProtoPersistedState, PersistedValue as ProtoPersistedValue,
-    Resource as ProtoResource, ResourceId as ProtoResourceId,
-    ResourceSchema as ProtoResourceSchema, SchemaKind as ProtoSchemaKind, State as ProtoState,
-    StructField as ProtoStructField, UniqueNameSpec as ProtoUniqueNameSpec,
-    UpdateOutcome as ProtoUpdateOutcome, Value as ProtoValue,
+    PartialReadDiagnostic as ProtoPartialReadDiagnostic, PersistedState as ProtoPersistedState,
+    PersistedValue as ProtoPersistedValue, Resource as ProtoResource,
+    ResourceId as ProtoResourceId, ResourceSchema as ProtoResourceSchema,
+    SchemaKind as ProtoSchemaKind, State as ProtoState, StructField as ProtoStructField,
+    UniqueNameSpec as ProtoUniqueNameSpec, UpdateOutcome as ProtoUpdateOutcome,
+    Value as ProtoValue,
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -636,12 +636,7 @@ pub fn core_to_proto_schema(s: &CoreResourceSchema) -> ProtoResourceSchema {
         description: s.description.clone(),
         kind: core_to_proto_schema_kind(s.kind),
         unique_name: core_to_proto_unique_name(&s.unique_name),
-        operation_config: s.operation_config.as_ref().map(|c| ProtoOperationConfig {
-            delete_timeout_secs: c.delete_timeout_secs,
-            delete_max_retries: c.delete_max_retries,
-            create_timeout_secs: c.create_timeout_secs,
-            create_max_retries: c.create_max_retries,
-        }),
+        operation_config: s.operation_config.clone(),
         validators: vec![],
         exclusive_required: s.exclusive_required.clone(),
         // Cyclic CFN struct definitions reachable via Ref (carina#3340).
@@ -666,6 +661,26 @@ fn core_to_proto_unique_name(spec: &CoreUniqueNameSpec) -> ProtoUniqueNameSpec {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn schema_transport_clones_the_shared_operation_config() {
+        let mut schema =
+            carina_provider_aws::schemas::generated::ec2::nat_gateway::ec2_nat_gateway_config()
+                .schema;
+        let operation_config = carina_core::schema::OperationConfig {
+            create_timeout_secs: Some(11),
+            update_timeout_secs: Some(22),
+            delete_timeout_secs: Some(33),
+            create_max_retries: Some(4),
+            delete_max_retries: Some(5),
+        };
+        schema.operation_config = Some(operation_config.clone());
+
+        assert_eq!(
+            core_to_proto_schema(&schema).operation_config,
+            Some(operation_config)
+        );
+    }
 
     #[test]
     #[should_panic(expected = "unresolved enum identifier must not reach protocol conversion")]

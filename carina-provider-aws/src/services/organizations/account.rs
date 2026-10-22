@@ -7,9 +7,25 @@ use carina_core::schema::ResourceSchema;
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
-use crate::helpers::{
-    PollState, optional_enum_attr, require_string_attr, sdk_error_message, wait_for_ec2_state,
-};
+use crate::helpers::{CreatePoll, optional_enum_attr, require_string_attr, sdk_error_message};
+
+fn organizations_account_create_poll_state(
+    status: Option<&aws_sdk_organizations::types::CreateAccountStatus>,
+    id: &ResourceId,
+) -> ProviderResult<CreatePoll<String>> {
+    match status.and_then(|status| status.state()) {
+        Some(aws_sdk_organizations::types::CreateAccountState::Succeeded) => status
+            .and_then(|status| status.account_id())
+            .map(str::to_string)
+            .map(CreatePoll::Ready)
+            .ok_or_else(|| {
+                ProviderError::api_error("CreateAccount succeeded but no account ID returned")
+                    .for_resource(id.clone())
+            }),
+        Some(aws_sdk_organizations::types::CreateAccountState::Failed) => Ok(CreatePoll::Failed),
+        _ => Ok(CreatePoll::Pending),
+    }
+}
 
 impl AwsProvider {
     /// Extract attributes from an Organizations Account object
@@ -165,11 +181,11 @@ impl AwsProvider {
     }
 
     /// Create an Organizations account
-    pub(crate) async fn create_organizations_account(
+    pub(crate) async fn create_organizations_account_start(
         &self,
         resource: &Resource,
         schema: &ResourceSchema,
-    ) -> ProviderResult<State> {
+    ) -> ProviderResult<String> {
         let name = require_string_attr(resource, "account_name")?;
         let email = require_string_attr(resource, "email")?;
 
@@ -223,48 +239,16 @@ impl AwsProvider {
                 .for_resource(resource.id.clone())
         })?;
 
-        // Poll for completion
-        let resource_id = resource.id.clone();
-        let request_id_owned = request_id.to_string();
-        wait_for_ec2_state(
-            &resource_id,
-            || async {
-                let result = self
-                    .organizations_client
-                    .describe_create_account_status()
-                    .create_account_request_id(&request_id_owned)
-                    .send()
-                    .await
-                    .map_err(|e| {
-                        api_error_with_meta(
-                            "Failed to describe create account status",
-                            "organizations.DescribeCreateAccountStatus",
-                            e,
-                        )
-                        .for_resource(resource_id.clone())
-                    })?;
-                if let Some(status) = result.create_account_status() {
-                    match status.state() {
-                        Some(aws_sdk_organizations::types::CreateAccountState::Succeeded) => {
-                            Ok(PollState::Ready)
-                        }
-                        Some(aws_sdk_organizations::types::CreateAccountState::Failed) => {
-                            Ok(PollState::Failed)
-                        }
-                        _ => Ok(PollState::Pending),
-                    }
-                } else {
-                    Ok(PollState::Pending)
-                }
-            },
-            120,
-            "Timeout waiting for account creation to complete",
-            "Account creation failed",
-        )
-        .await?;
+        Ok(request_id.to_string())
+    }
 
-        // Get the account ID from the final status
-        let final_status = self
+    /// Perform one describe call for a pending Organizations account create.
+    pub(crate) async fn poll_organizations_account_create(
+        &self,
+        id: &ResourceId,
+        request_id: &str,
+    ) -> ProviderResult<CreatePoll<String>> {
+        let result = self
             .organizations_client
             .describe_create_account_status()
             .create_account_request_id(request_id)
@@ -272,21 +256,21 @@ impl AwsProvider {
             .await
             .map_err(|e| {
                 api_error_with_meta(
-                    "Failed to get final create account status",
+                    "Failed to describe create account status",
                     "organizations.DescribeCreateAccountStatus",
                     e,
                 )
-                .for_resource(resource.id.clone())
+                .for_resource(id.clone())
             })?;
+        organizations_account_create_poll_state(result.create_account_status(), id)
+    }
 
-        let account_id = final_status
-            .create_account_status()
-            .and_then(|s| s.account_id())
-            .ok_or_else(|| {
-                ProviderError::api_error("CreateAccount succeeded but no account ID returned")
-                    .for_resource(resource.id.clone())
-            })?;
-
+    /// Complete post-create handling after the account status becomes ready.
+    pub(crate) async fn finish_organizations_account_create(
+        &self,
+        resource: &Resource,
+        account_id: &str,
+    ) -> ProviderResult<State> {
         // Move to parent OU if specified
         if let Some(Value::Concrete(ConcreteValue::String(parent_id))) =
             resource.get_attr("parent_id")
@@ -471,5 +455,69 @@ impl AwsProvider {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod pending_tests {
+    use super::*;
+    use aws_sdk_organizations::types::{CreateAccountState, CreateAccountStatus};
+
+    fn id() -> ResourceId {
+        ResourceId::with_provider_identity("aws", "organizations.Account", "example", None)
+    }
+
+    fn status(state: CreateAccountState, account_id: Option<&str>) -> CreateAccountStatus {
+        CreateAccountStatus::builder()
+            .state(state)
+            .set_account_id(account_id.map(str::to_string))
+            .build()
+    }
+
+    #[test]
+    fn create_poll_maps_pending_ready_and_failed_states() {
+        assert_eq!(
+            organizations_account_create_poll_state(None, &id()).unwrap(),
+            CreatePoll::Pending
+        );
+        assert_eq!(
+            organizations_account_create_poll_state(
+                Some(&status(CreateAccountState::InProgress, None)),
+                &id(),
+            )
+            .unwrap(),
+            CreatePoll::Pending
+        );
+        assert_eq!(
+            organizations_account_create_poll_state(
+                Some(&status(CreateAccountState::Succeeded, Some("123456789012"))),
+                &id(),
+            )
+            .unwrap(),
+            CreatePoll::Ready("123456789012".to_string())
+        );
+        assert_eq!(
+            organizations_account_create_poll_state(
+                Some(&status(CreateAccountState::Failed, None)),
+                &id(),
+            )
+            .unwrap(),
+            CreatePoll::Failed
+        );
+    }
+
+    #[test]
+    fn create_poll_rejects_succeeded_status_without_account_id() {
+        let error = organizations_account_create_poll_state(
+            Some(&status(CreateAccountState::Succeeded, None)),
+            &id(),
+        )
+        .expect_err("Succeeded without an account id must be invalid");
+
+        assert_eq!(error.variant_name(), "api_error");
+        assert_eq!(
+            error.to_wire().message,
+            "CreateAccount succeeded but no account ID returned"
+        );
     }
 }

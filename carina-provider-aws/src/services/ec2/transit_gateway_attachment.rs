@@ -7,9 +7,24 @@ use carina_core::schema::ResourceSchema;
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
 use crate::helpers::{
-    PollState, build_tag_specification, optional_enum_struct_field, require_string_attr,
-    wait_for_ec2_state,
+    CreatePoll, DeletePoll, build_tag_specification, optional_enum_struct_field,
+    require_string_attr,
 };
+
+fn transit_gateway_attachment_create_poll_state(state: Option<&str>) -> CreatePoll<()> {
+    match state {
+        Some("available") => CreatePoll::Ready(()),
+        Some("failed" | "deleted") => CreatePoll::Failed,
+        _ => CreatePoll::Pending,
+    }
+}
+
+fn transit_gateway_attachment_delete_poll_state(state: Option<&str>) -> DeletePoll {
+    match state {
+        Some("deleted") | None => DeletePoll::Gone,
+        _ => DeletePoll::Pending,
+    }
+}
 
 fn build_create_transit_gateway_attachment_options(
     resource: &Resource,
@@ -106,11 +121,11 @@ impl AwsProvider {
     }
 
     /// Create an EC2 Transit Gateway VPC Attachment
-    pub(crate) async fn create_ec2_transit_gateway_attachment(
+    pub(crate) async fn create_ec2_transit_gateway_attachment_start(
         &self,
         resource: &Resource,
         schema: &ResourceSchema,
-    ) -> ProviderResult<State> {
+    ) -> ProviderResult<String> {
         let transit_gateway_id = require_string_attr(resource, "transit_gateway_id")?;
         let vpc_id = require_string_attr(resource, "vpc_id")?;
 
@@ -173,13 +188,7 @@ impl AwsProvider {
                     .for_resource(resource.id.clone())
             })?;
 
-        // Wait for attachment to become available
-        self.wait_for_transit_gateway_attachment_available(&resource.id, att_id)
-            .await?;
-
-        // Read back
-        self.read_ec2_transit_gateway_attachment(&resource.id, Some(att_id))
-            .await
+        Ok(att_id.to_string())
     }
 
     /// Update an EC2 Transit Gateway VPC Attachment (tags only)
@@ -202,119 +211,62 @@ impl AwsProvider {
             .await
     }
 
-    /// Delete an EC2 Transit Gateway VPC Attachment
-    pub(crate) async fn delete_ec2_transit_gateway_attachment(
+    /// Perform one describe call for a pending transit gateway attachment create.
+    pub(crate) async fn poll_ec2_transit_gateway_attachment_create(
         &self,
-        id: ResourceId,
-        identifier: &str,
-    ) -> ProviderResult<()> {
-        self.ec2_client
-            .delete_transit_gateway_vpc_attachment()
-            .transit_gateway_attachment_id(identifier)
+        id: &ResourceId,
+        attachment_id: &str,
+    ) -> ProviderResult<CreatePoll<()>> {
+        let result = self
+            .ec2_client
+            .describe_transit_gateway_vpc_attachments()
+            .transit_gateway_attachment_ids(attachment_id)
             .send()
             .await
             .map_err(|e| {
                 api_error_with_meta(
-                    "Failed to delete transit gateway VPC attachment",
-                    "ec2.DeleteTransitGatewayVpcAttachment",
+                    "Failed to describe transit gateway VPC attachment",
+                    "ec2.DescribeTransitGatewayVpcAttachments",
                     e,
                 )
                 .for_resource(id.clone())
             })?;
-
-        // Wait for attachment to be deleted
-        self.wait_for_transit_gateway_attachment_deleted(&id, identifier)
-            .await?;
-
-        Ok(())
+        Ok(transit_gateway_attachment_create_poll_state(
+            result
+                .transit_gateway_vpc_attachments()
+                .first()
+                .and_then(|att| att.state())
+                .map(|state| state.as_str()),
+        ))
     }
 
-    /// Wait for a transit gateway attachment to reach the "available" state
-    async fn wait_for_transit_gateway_attachment_available(
+    /// Perform one describe call for a pending transit gateway attachment delete.
+    pub(crate) async fn poll_ec2_transit_gateway_attachment_delete(
         &self,
         id: &ResourceId,
         attachment_id: &str,
-    ) -> ProviderResult<()> {
-        let ec2 = &self.ec2_client;
-        let rid = id.clone();
-        wait_for_ec2_state(
-            id,
-            || async {
-                let result = ec2
-                    .describe_transit_gateway_vpc_attachments()
-                    .transit_gateway_attachment_ids(attachment_id)
-                    .send()
-                    .await
-                    .map_err(|e| {
-                        api_error_with_meta(
-                            "Failed to describe transit gateway VPC attachment",
-                            "ec2.DescribeTransitGatewayVpcAttachments",
-                            e,
-                        )
-                        .for_resource(rid.clone())
-                    })?;
-                Ok(
-                    if let Some(att) = result.transit_gateway_vpc_attachments().first()
-                        && let Some(state) = att.state()
-                    {
-                        match state.as_str() {
-                            "available" => PollState::Ready,
-                            "failed" | "deleted" => PollState::Failed,
-                            _ => PollState::Pending,
-                        }
-                    } else {
-                        PollState::Pending
-                    },
+    ) -> ProviderResult<DeletePoll> {
+        let result = self
+            .ec2_client
+            .describe_transit_gateway_vpc_attachments()
+            .transit_gateway_attachment_ids(attachment_id)
+            .send()
+            .await
+            .map_err(|e| {
+                api_error_with_meta(
+                    "Failed to describe transit gateway VPC attachment",
+                    "ec2.DescribeTransitGatewayVpcAttachments",
+                    e,
                 )
-            },
-            60,
-            "Timeout waiting for transit gateway attachment to become available",
-            "Transit gateway attachment creation failed",
-        )
-        .await
-    }
-
-    /// Wait for a transit gateway attachment to be deleted
-    async fn wait_for_transit_gateway_attachment_deleted(
-        &self,
-        id: &ResourceId,
-        attachment_id: &str,
-    ) -> ProviderResult<()> {
-        let ec2 = &self.ec2_client;
-        let rid = id.clone();
-        wait_for_ec2_state(
-            id,
-            || async {
-                let result = ec2
-                    .describe_transit_gateway_vpc_attachments()
-                    .transit_gateway_attachment_ids(attachment_id)
-                    .send()
-                    .await
-                    .map_err(|e| {
-                        api_error_with_meta(
-                            "Failed to describe transit gateway VPC attachment",
-                            "ec2.DescribeTransitGatewayVpcAttachments",
-                            e,
-                        )
-                        .for_resource(rid.clone())
-                    })?;
-                Ok(
-                    if let Some(att) = result.transit_gateway_vpc_attachments().first() {
-                        if att.state().map(|s| s.as_str()) == Some("deleted") {
-                            PollState::Gone
-                        } else {
-                            PollState::Pending
-                        }
-                    } else {
-                        PollState::Gone
-                    },
-                )
-            },
-            60,
-            "Timeout waiting for transit gateway attachment to be deleted",
-            "Transit gateway attachment deletion failed",
-        )
-        .await
+                .for_resource(id.clone())
+            })?;
+        Ok(transit_gateway_attachment_delete_poll_state(
+            result
+                .transit_gateway_vpc_attachments()
+                .first()
+                .and_then(|att| att.state())
+                .map(|state| state.as_str()),
+        ))
     }
 }
 
@@ -327,6 +279,50 @@ mod tests {
         TransitGatewayVpcAttachmentOptions,
     };
     use indexmap::IndexMap;
+
+    #[test]
+    fn create_poll_preserves_waiter_state_semantics() {
+        assert_eq!(
+            transit_gateway_attachment_create_poll_state(Some("available")),
+            CreatePoll::Ready(())
+        );
+        assert_eq!(
+            transit_gateway_attachment_create_poll_state(Some("failed")),
+            CreatePoll::Failed
+        );
+        assert_eq!(
+            transit_gateway_attachment_create_poll_state(Some("deleted")),
+            CreatePoll::Failed
+        );
+        assert_eq!(
+            transit_gateway_attachment_create_poll_state(Some("pending")),
+            CreatePoll::Pending
+        );
+        assert_eq!(
+            transit_gateway_attachment_create_poll_state(None),
+            CreatePoll::Pending
+        );
+    }
+
+    #[test]
+    fn delete_poll_preserves_waiter_state_semantics() {
+        assert_eq!(
+            transit_gateway_attachment_delete_poll_state(Some("deleted")),
+            DeletePoll::Gone
+        );
+        assert_eq!(
+            transit_gateway_attachment_delete_poll_state(None),
+            DeletePoll::Gone
+        );
+        assert_eq!(
+            transit_gateway_attachment_delete_poll_state(Some("available")),
+            DeletePoll::Pending
+        );
+        assert_eq!(
+            transit_gateway_attachment_delete_poll_state(Some("failed")),
+            DeletePoll::Pending
+        );
+    }
 
     fn schema() -> ResourceSchema {
         crate::schemas::generated::ec2::transit_gateway_attachment::ec2_transit_gateway_attachment_config().schema

@@ -91,6 +91,68 @@ impl AwsProvider {
         Ok(())
     }
 
+    /// Delete ec2.NatGateway (generated)
+    pub(crate) async fn delete_ec2_nat_gateway(
+        &self,
+        id: ResourceId,
+        identifier: &str,
+    ) -> ProviderResult<()> {
+        self.ec2_client
+            .delete_nat_gateway()
+            .nat_gateway_id(identifier)
+            .send()
+            .await
+            .map_err(|e| {
+                api_error_with_meta("Failed to delete nat gateway", "ec2.DeleteNatGateway", e)
+                    .for_resource(id.clone())
+            })?;
+        Ok(())
+    }
+
+    /// Delete ec2.TransitGateway (generated)
+    pub(crate) async fn delete_ec2_transit_gateway(
+        &self,
+        id: ResourceId,
+        identifier: &str,
+    ) -> ProviderResult<()> {
+        self.ec2_client
+            .delete_transit_gateway()
+            .transit_gateway_id(identifier)
+            .send()
+            .await
+            .map_err(|e| {
+                api_error_with_meta(
+                    "Failed to delete transit gateway",
+                    "ec2.DeleteTransitGateway",
+                    e,
+                )
+                .for_resource(id.clone())
+            })?;
+        Ok(())
+    }
+
+    /// Delete ec2.TransitGatewayAttachment (generated)
+    pub(crate) async fn delete_ec2_transit_gateway_attachment(
+        &self,
+        id: ResourceId,
+        identifier: &str,
+    ) -> ProviderResult<()> {
+        self.ec2_client
+            .delete_transit_gateway_vpc_attachment()
+            .transit_gateway_attachment_id(identifier)
+            .send()
+            .await
+            .map_err(|e| {
+                api_error_with_meta(
+                    "Failed to delete transit gateway attachment",
+                    "ec2.DeleteTransitGatewayVpcAttachment",
+                    e,
+                )
+                .for_resource(id.clone())
+            })?;
+        Ok(())
+    }
+
     /// Update ec2.InternetGateway: apply tag changes and read back (generated)
     pub(crate) async fn update_ec2_internet_gateway(
         &self,
