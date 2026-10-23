@@ -9,6 +9,7 @@ use aws_sdk_s3::types::{
     BucketVersioningStatus, DefaultRetention, ObjectLockConfiguration, ObjectLockEnabled,
     ObjectLockRetentionMode, ObjectLockRule,
 };
+use carina_core::provider::{AppliedIdentifier, CreateOutcome, ReadOutcome};
 use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{
     ConcreteValue, Resource, ResourceId, State, Value, enum_attr_at_schema_path,
@@ -26,11 +27,10 @@ impl AwsProvider {
     pub(crate) async fn read_s3_bucket_object_lock_configuration(
         &self,
         id: &ResourceId,
-        identifier: Option<&str>,
-    ) -> ProviderResult<State> {
-        let Some(bucket) = identifier else {
-            return Ok(State::not_found(id.clone()));
-        };
+        identifier: &AppliedIdentifier,
+    ) -> ProviderResult<ReadOutcome> {
+        let applied_identifier = identifier;
+        let bucket = identifier.as_str();
 
         let result = self
             .s3_client
@@ -42,10 +42,10 @@ impl AwsProvider {
         match result {
             Ok(output) => {
                 let Some(configuration) = output.object_lock_configuration() else {
-                    return Ok(State::not_found(id.clone()));
+                    return Ok(ReadOutcome::not_found(id.clone()));
                 };
                 let Some(enabled) = configuration.object_lock_enabled() else {
-                    return Ok(State::not_found(id.clone()));
+                    return Ok(ReadOutcome::not_found(id.clone()));
                 };
                 let mut attributes = HashMap::new();
                 attributes.insert("bucket".to_string(), string_value(bucket));
@@ -57,13 +57,17 @@ impl AwsProvider {
                     attributes.insert("rule".to_string(), rule_to_value(id, rule)?);
                 }
 
-                Ok(State::existing(id.clone(), attributes).with_identifier(bucket.to_string()))
+                Ok(crate::helpers::found_read(
+                    id,
+                    applied_identifier,
+                    attributes,
+                ))
             }
             Err(error)
                 if is_s3_not_configured_error(&error, "ObjectLockConfigurationNotFoundError")
                     || is_s3_not_configured_error(&error, "NoSuchBucket") =>
             {
-                Ok(State::not_found(id.clone()))
+                Ok(ReadOutcome::not_found(id.clone()))
             }
             Err(error) => Err(api_error_with_meta(
                 "Failed to get bucket Object Lock configuration",
@@ -78,12 +82,24 @@ impl AwsProvider {
         &self,
         resource: &Resource,
         schema: &ResourceSchema,
-    ) -> ProviderResult<State> {
+    ) -> ProviderResult<CreateOutcome> {
         let bucket = require_string_attr(resource, "bucket")?;
-        self.ensure_create_does_not_omit_existing_rule(&resource.id, &bucket, resource)
+        let identifier = crate::helpers::applied_identifier(
+            &resource.id,
+            "s3.PutObjectLockConfiguration",
+            bucket,
+        )?;
+        self.ensure_create_does_not_omit_existing_rule(&resource.id, identifier.as_str(), resource)
             .await?;
-        self.put_s3_bucket_object_lock_configuration(&resource.id, &bucket, resource, schema)
-            .await
+        let outcome = self
+            .put_s3_bucket_object_lock_configuration(&resource.id, &identifier, resource, schema)
+            .await?;
+        Ok(self.create_outcome_from_read(
+            &resource.id,
+            identifier,
+            resource.resolved_attributes(),
+            outcome,
+        ))
     }
 
     async fn ensure_create_does_not_omit_existing_rule(
@@ -139,11 +155,11 @@ impl AwsProvider {
     pub(crate) async fn update_s3_bucket_object_lock_configuration(
         &self,
         id: ResourceId,
-        identifier: &str,
+        identifier: &AppliedIdentifier,
         _from: &State,
         to: Resource,
         schema: &ResourceSchema,
-    ) -> ProviderResult<State> {
+    ) -> ProviderResult<ProviderResult<ReadOutcome>> {
         self.put_s3_bucket_object_lock_configuration(&id, identifier, &to, schema)
             .await
     }
@@ -151,10 +167,12 @@ impl AwsProvider {
     async fn put_s3_bucket_object_lock_configuration(
         &self,
         id: &ResourceId,
-        bucket: &str,
+        bucket: &AppliedIdentifier,
         resource: &Resource,
         schema: &ResourceSchema,
-    ) -> ProviderResult<State> {
+    ) -> ProviderResult<ProviderResult<ReadOutcome>> {
+        let applied_identifier = bucket;
+        let bucket = bucket.as_str();
         self.ensure_object_lock_versioning_enabled(id, bucket)
             .await?;
 
@@ -185,8 +203,9 @@ impl AwsProvider {
         // GOVERNANCE/Days=30 -> COMPLIANCE/Years=1 both converged in place.
         // Measured in us-east-1 on 2026-08-14, with no-op and changed update
         // directions checked. Always read back the authoritative result.
-        self.read_s3_bucket_object_lock_configuration(id, Some(bucket))
-            .await
+        Ok(self
+            .read_s3_bucket_object_lock_configuration(id, applied_identifier)
+            .await)
     }
 
     async fn ensure_object_lock_versioning_enabled(
@@ -222,8 +241,9 @@ impl AwsProvider {
     pub(crate) async fn delete_s3_bucket_object_lock_configuration_noop(
         &self,
         _id: ResourceId,
-        identifier: &str,
+        identifier: &AppliedIdentifier,
     ) -> ProviderResult<()> {
+        let identifier = identifier.as_str();
         // Object Lock enablement proved irreversible: after enabling it,
         // PutBucketVersioning Status=Suspended returned InvalidBucketState.
         // Measured in us-east-1 on 2026-08-14; direction checked was Object

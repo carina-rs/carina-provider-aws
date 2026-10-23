@@ -2,8 +2,9 @@
 
 use std::collections::HashMap;
 
+use carina_core::provider::{AppliedIdentifier, CreateOutcome, ReadOutcome};
 use carina_core::provider::{ProviderError, ProviderResult};
-use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
+use carina_core::resource::{ConcreteValue, Resource, ResourceId, Value};
 use carina_core::schema::ResourceSchema;
 
 use crate::AwsProvider;
@@ -117,12 +118,11 @@ impl AwsProvider {
     pub(crate) async fn read_ec2_security_group_rule(
         &self,
         id: &ResourceId,
-        identifier: Option<&str>,
+        identifier: &AppliedIdentifier,
         is_ingress: bool,
-    ) -> ProviderResult<State> {
-        let Some(identifier) = identifier else {
-            return Ok(State::not_found(id.clone()));
-        };
+    ) -> ProviderResult<ReadOutcome> {
+        let applied_identifier = identifier;
+        let identifier = identifier.as_str();
 
         // Look up by rule IDs (may be comma-separated)
         let rule_ids: Vec<&str> = identifier.split(',').collect();
@@ -146,7 +146,7 @@ impl AwsProvider {
             .collect();
 
         if rules.is_empty() {
-            return Ok(State::not_found(id.clone()));
+            return Ok(ReadOutcome::not_found(id.clone()));
         }
 
         // Use the first rule for common attributes
@@ -165,15 +165,12 @@ impl AwsProvider {
             .iter()
             .filter_map(|r| r.security_group_rule_id().map(String::from))
             .collect();
-        let rule_identifier = if !rule_ids.is_empty() {
+        if !rule_ids.is_empty() {
             attributes.insert(
                 "security_group_rule_id".to_string(),
                 Value::Concrete(ConcreteValue::String(rule_ids.join(",").into())),
             );
-            Some(rule_ids.join(","))
-        } else {
-            None
-        };
+        }
 
         // IPv4 CIDR (CidrIp in schema maps to CidrIpv4 in SDK)
         if let Some(cidr_ip) = first_rule.cidr_ipv4() {
@@ -198,12 +195,11 @@ impl AwsProvider {
             );
         }
 
-        let state = State::existing(id.clone(), attributes);
-        Ok(if let Some(id_str) = rule_identifier {
-            state.with_identifier(id_str)
-        } else {
-            state
-        })
+        Ok(crate::helpers::found_read(
+            id,
+            applied_identifier,
+            attributes,
+        ))
     }
 
     /// Create an EC2 Security Group Rule (shared between ingress and egress)
@@ -212,11 +208,18 @@ impl AwsProvider {
         resource: &Resource,
         schema: &ResourceSchema,
         is_ingress: bool,
-    ) -> ProviderResult<State> {
+    ) -> ProviderResult<CreateOutcome> {
         let sg_id = require_security_group_rule_group_id(resource)?;
         let permission = build_security_group_rule_permission(resource, schema, is_ingress)?;
-        self.create_ec2_security_group_rule_with_permission(resource, sg_id, permission, is_ingress)
-            .await
+        let (identifier, outcome) = self
+            .create_ec2_security_group_rule_with_permission(resource, sg_id, permission, is_ingress)
+            .await?;
+        Ok(self.create_outcome_from_read(
+            &resource.id,
+            identifier,
+            resource.resolved_attributes(),
+            outcome,
+        ))
     }
 
     async fn create_ec2_security_group_rule_with_permission(
@@ -225,7 +228,7 @@ impl AwsProvider {
         sg_id: String,
         permission: aws_sdk_ec2::types::IpPermission,
         is_ingress: bool,
-    ) -> ProviderResult<State> {
+    ) -> ProviderResult<(AppliedIdentifier, ProviderResult<ReadOutcome>)> {
         let rule_ids: Vec<String> = if is_ingress {
             let result = self
                 .ec2_client
@@ -274,27 +277,30 @@ impl AwsProvider {
 
         // Read back using rule IDs (reliable identifier)
         let identifier = rule_ids.join(",");
-        self.read_ec2_security_group_rule(
-            &resource.id,
-            if identifier.is_empty() {
-                None
-            } else {
-                Some(&identifier)
-            },
-            is_ingress,
-        )
-        .await
+        let operation = if is_ingress {
+            "ec2.AuthorizeSecurityGroupIngress"
+        } else {
+            "ec2.AuthorizeSecurityGroupEgress"
+        };
+        for rule_id in &rule_ids {
+            crate::helpers::applied_identifier(&resource.id, operation, rule_id)?;
+        }
+        let identifier = crate::helpers::applied_identifier(&resource.id, operation, identifier)?;
+        let outcome = self
+            .read_ec2_security_group_rule(&resource.id, &identifier, is_ingress)
+            .await;
+        Ok((identifier, outcome))
     }
 
     /// Update an EC2 Security Group Rule (rules are immutable, so recreate)
     pub(crate) async fn update_ec2_security_group_rule(
         &self,
         id: ResourceId,
-        identifier: &str,
+        identifier: &AppliedIdentifier,
         to: Resource,
         schema: &ResourceSchema,
         is_ingress: bool,
-    ) -> ProviderResult<State> {
+    ) -> ProviderResult<ProviderResult<ReadOutcome>> {
         // Validate and build every fallible local input before deleting the
         // existing immutable rule. An invalid replacement must leave it intact.
         let sg_id = require_security_group_rule_group_id(&to)?;
@@ -302,17 +308,20 @@ impl AwsProvider {
 
         self.delete_ec2_security_group_rule(id.clone(), identifier, is_ingress)
             .await?;
-        self.create_ec2_security_group_rule_with_permission(&to, sg_id, permission, is_ingress)
-            .await
+        let (_, outcome) = self
+            .create_ec2_security_group_rule_with_permission(&to, sg_id, permission, is_ingress)
+            .await?;
+        Ok(outcome)
     }
 
     /// Delete an EC2 Security Group Rule (deletes all rules by identifier)
     pub(crate) async fn delete_ec2_security_group_rule(
         &self,
         id: ResourceId,
-        identifier: &str,
+        identifier: &AppliedIdentifier,
         is_ingress: bool,
     ) -> ProviderResult<()> {
+        let identifier = identifier.as_str();
         // identifier is comma-separated rule IDs (e.g., "sgr-123,sgr-456")
         let rule_ids: Vec<&str> = identifier.split(',').collect();
 

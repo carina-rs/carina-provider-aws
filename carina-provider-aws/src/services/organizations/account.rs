@@ -1,6 +1,7 @@
 use indexmap::IndexMap;
 use std::collections::HashMap;
 
+use carina_core::provider::{AppliedIdentifier, CreateOutcome, ReadOutcome};
 use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
 use carina_core::schema::ResourceSchema;
@@ -89,11 +90,10 @@ impl AwsProvider {
     pub(crate) async fn read_organizations_account(
         &self,
         id: &ResourceId,
-        identifier: Option<&str>,
-    ) -> ProviderResult<State> {
-        let Some(identifier) = identifier else {
-            return Ok(State::not_found(id.clone()));
-        };
+        identifier: &AppliedIdentifier,
+    ) -> ProviderResult<ReadOutcome> {
+        let applied_identifier = identifier;
+        let identifier = identifier.as_str();
 
         // DescribeAccount
         let account_result = self
@@ -107,7 +107,7 @@ impl AwsProvider {
             Ok(response) => {
                 if let Some(account) = response.account() {
                     let mut attributes = HashMap::new();
-                    let account_id =
+                    let _account_id =
                         Self::extract_organizations_account_attributes(account, &mut attributes);
 
                     // ListParents for parent_id
@@ -154,21 +154,20 @@ impl AwsProvider {
                         }
                     }
 
-                    let state = State::existing(id.clone(), attributes);
-                    Ok(if let Some(account_id) = account_id {
-                        state.with_identifier(account_id)
-                    } else {
-                        state
-                    })
+                    Ok(crate::helpers::found_read(
+                        id,
+                        applied_identifier,
+                        attributes,
+                    ))
                 } else {
-                    Ok(State::not_found(id.clone()))
+                    Ok(ReadOutcome::not_found(id.clone()))
                 }
             }
             Err(e) => {
                 if let Some(service_err) = e.as_service_error()
                     && service_err.is_account_not_found_exception()
                 {
-                    return Ok(State::not_found(id.clone()));
+                    return Ok(ReadOutcome::not_found(id.clone()));
                 }
                 Err(api_error_with_meta(
                     "Failed to describe account",
@@ -270,7 +269,7 @@ impl AwsProvider {
         &self,
         resource: &Resource,
         account_id: &str,
-    ) -> ProviderResult<State> {
+    ) -> ProviderResult<CreateOutcome> {
         // Move to parent OU if specified
         if let Some(Value::Concrete(ConcreteValue::String(parent_id))) =
             resource.get_attr("parent_id")
@@ -313,19 +312,31 @@ impl AwsProvider {
             }
         }
 
-        self.read_organizations_account(&resource.id, Some(account_id))
-            .await
+        let identifier = crate::helpers::applied_identifier(
+            &resource.id,
+            "organizations.CreateAccount",
+            account_id,
+        )?;
+        let outcome = self
+            .read_organizations_account(&resource.id, &identifier)
+            .await;
+        Ok(self.create_outcome_from_read(
+            &resource.id,
+            identifier,
+            resource.resolved_attributes(),
+            outcome,
+        ))
     }
 
     /// Update an Organizations account
     pub(crate) async fn update_organizations_account(
         &self,
         id: ResourceId,
-        identifier: &str,
+        identifier: &AppliedIdentifier,
         from: &State,
         to: Resource,
         _schema: &ResourceSchema,
-    ) -> ProviderResult<State> {
+    ) -> ProviderResult<ProviderResult<ReadOutcome>> {
         // Handle parent_id change via MoveAccount
         let desired_parent = to.get_attr("parent_id").and_then(|v| match v {
             Value::Concrete(ConcreteValue::String(s)) => Some(s.expose_plaintext()),
@@ -341,7 +352,7 @@ impl AwsProvider {
         {
             self.organizations_client
                 .move_account()
-                .account_id(identifier)
+                .account_id(identifier.as_str())
                 .source_parent_id(src)
                 .destination_parent_id(dest)
                 .send()
@@ -355,21 +366,22 @@ impl AwsProvider {
         // Handle tag changes
         self.apply_organizations_tags(
             &id,
-            identifier,
+            identifier.as_str(),
             &to.resolved_attributes(),
             Some(&from.attributes),
         )
         .await?;
 
-        self.read_organizations_account(&id, Some(identifier)).await
+        Ok(self.read_organizations_account(&id, identifier).await)
     }
 
     /// Delete (close) an Organizations account
     pub(crate) async fn delete_organizations_account(
         &self,
         id: ResourceId,
-        identifier: &str,
+        identifier: &AppliedIdentifier,
     ) -> ProviderResult<()> {
+        let identifier = identifier.as_str();
         self.organizations_client
             .close_account()
             .account_id(identifier)

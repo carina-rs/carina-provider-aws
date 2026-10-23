@@ -7,7 +7,8 @@
 use std::collections::HashMap;
 
 use carina_core::provider::{
-    CreateOutcome as CoreCreateOutcome, UpdateOutcome as CoreUpdateOutcome,
+    AppliedState as CoreAppliedState, CreateOutcome as CoreCreateOutcome,
+    ReadOutcome as CoreReadOutcome, UpdateOutcome as CoreUpdateOutcome,
 };
 use carina_core::resource::{
     ConcreteValue, DataSource as CoreDataSource, DeferredValue, Directives as CoreDirectives,
@@ -22,14 +23,15 @@ use carina_core::schema::{
     UniqueNameSpec as CoreUniqueNameSpec,
 };
 use carina_provider_protocol::types::{
+    AppliedPersistedState as ProtoAppliedPersistedState, AppliedState as ProtoAppliedState,
     AttributeSchema as ProtoAttributeSchema, AttributeType as ProtoAttributeType,
     CreateOutcome as ProtoCreateOutcome, Directives as ProtoDirectives,
     PartialReadDiagnostic as ProtoPartialReadDiagnostic, PersistedState as ProtoPersistedState,
-    PersistedValue as ProtoPersistedValue, Resource as ProtoResource,
-    ResourceId as ProtoResourceId, ResourceSchema as ProtoResourceSchema,
-    SchemaKind as ProtoSchemaKind, State as ProtoState, StructField as ProtoStructField,
-    UniqueNameSpec as ProtoUniqueNameSpec, UpdateOutcome as ProtoUpdateOutcome,
-    Value as ProtoValue,
+    PersistedValue as ProtoPersistedValue, ReadOutcome as ProtoReadOutcome,
+    Resource as ProtoResource, ResourceId as ProtoResourceId,
+    ResourceSchema as ProtoResourceSchema, SchemaKind as ProtoSchemaKind, State as ProtoState,
+    StructField as ProtoStructField, UniqueNameSpec as ProtoUniqueNameSpec,
+    UpdateOutcome as ProtoUpdateOutcome, Value as ProtoValue,
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -298,12 +300,20 @@ pub fn core_to_proto_state(s: &CoreState) -> ProtoState {
     }
 }
 
-pub fn core_to_proto_persisted_state(s: &CoreState) -> ProtoPersistedState {
-    ProtoPersistedState {
-        id: s.id.to_wire(),
-        identifier: s.identifier.clone(),
-        attributes: core_to_proto_persisted_value_map(&s.attributes),
-        exists: s.exists,
+pub fn core_to_proto_applied_state(s: &CoreAppliedState) -> ProtoAppliedState {
+    ProtoAppliedState {
+        id: s.id().to_wire(),
+        identifier: s.identifier().clone(),
+        attributes: core_to_proto_value_map(s.attributes()),
+    }
+}
+
+pub fn core_to_proto_read_outcome(outcome: CoreReadOutcome) -> ProtoReadOutcome {
+    match outcome {
+        CoreReadOutcome::NotFound { id } => ProtoReadOutcome::NotFound { id: id.to_wire() },
+        CoreReadOutcome::Found { state } => ProtoReadOutcome::Found {
+            state: core_to_proto_applied_state(&state),
+        },
     }
 }
 
@@ -327,11 +337,11 @@ pub fn proto_to_core_persisted_state(
 pub fn core_to_proto_create_outcome(outcome: CoreCreateOutcome) -> ProtoCreateOutcome {
     match outcome {
         CoreCreateOutcome::Success { state } => ProtoCreateOutcome::Success {
-            state: core_to_proto_state(&state),
+            state: core_to_proto_applied_state(&state),
         },
         CoreCreateOutcome::PartialSuccess { state, diagnostic } => {
             ProtoCreateOutcome::PartialSuccess {
-                state: core_to_proto_state(&state),
+                state: core_to_proto_applied_state(&state),
                 diagnostic: ProtoPartialReadDiagnostic {
                     reason: diagnostic.reason().to_string(),
                     missing_attributes: diagnostic.missing_attributes().to_vec(),
@@ -344,16 +354,18 @@ pub fn core_to_proto_create_outcome(outcome: CoreCreateOutcome) -> ProtoCreateOu
 // -- UpdateOutcome --
 
 fn core_to_proto_update_state(
-    state: &CoreState,
+    state: &CoreAppliedState,
     mut state_after_patch: ProtoPersistedState,
-) -> ProtoPersistedState {
-    let mut returned = core_to_proto_persisted_state(state);
-    if returned.exists {
-        for (key, value) in state_after_patch.attributes.drain() {
-            returned.attributes.entry(key).or_insert(value);
-        }
+) -> ProtoAppliedPersistedState {
+    let mut attributes = core_to_proto_persisted_value_map(state.attributes());
+    for (key, value) in state_after_patch.attributes.drain() {
+        attributes.entry(key).or_insert(value);
     }
-    returned
+    ProtoAppliedPersistedState {
+        id: state.id().to_wire(),
+        identifier: state.identifier().clone(),
+        attributes,
+    }
 }
 
 pub fn core_to_proto_update_outcome(
@@ -750,14 +762,15 @@ mod tests {
         // Simulate an AWS read-back that omits the write-only token. The
         // protocol-level state-after-patch baseline must keep that untouched
         // persisted value in the outcome without presenting it to the cloud.
-        let provider_state = CoreState::existing(
+        let provider_state = CoreAppliedState::new(
             proto_to_core_resource_id(&id),
+            "resource-id",
             HashMap::from([(
                 "color".into(),
                 CoreValue::Concrete(ConcreteValue::String("blue".into())),
             )]),
         )
-        .with_identifier("resource-id");
+        .expect("test provider identifier must be non-empty");
         let outcome = core_to_proto_update_outcome(
             CoreUpdateOutcome::Success {
                 state: provider_state,

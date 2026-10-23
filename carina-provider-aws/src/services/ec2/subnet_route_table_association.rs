@@ -1,7 +1,8 @@
 use std::collections::HashMap;
 
+use carina_core::provider::{AppliedIdentifier, CreateOutcome, ReadOutcome};
 use carina_core::provider::{ProviderError, ProviderResult};
-use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
+use carina_core::resource::{ConcreteValue, Resource, ResourceId, Value};
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
@@ -12,15 +13,14 @@ impl AwsProvider {
     pub(crate) async fn read_ec2_subnet_route_table_association(
         &self,
         id: &ResourceId,
-        identifier: Option<&str>,
-    ) -> ProviderResult<State> {
-        let Some(identifier) = identifier else {
-            return Ok(State::not_found(id.clone()));
-        };
+        identifier: &AppliedIdentifier,
+    ) -> ProviderResult<ReadOutcome> {
+        let applied_identifier = identifier;
+        let identifier = identifier.as_str();
 
         // Parse composite identifier: association_id|subnet_id
-        let Some((association_id, subnet_id)) = identifier.split_once('|') else {
-            return Ok(State::not_found(id.clone()));
+        let Some((association_id, _subnet_id)) = identifier.split_once('|') else {
+            return Ok(ReadOutcome::not_found(id.clone()));
         };
 
         // Describe route tables filtered by association ID
@@ -71,20 +71,23 @@ impl AwsProvider {
                         );
                     }
 
-                    let composite = format!("{}|{}", association_id, subnet_id);
-                    return Ok(State::existing(id.clone(), attributes).with_identifier(composite));
+                    return Ok(crate::helpers::found_read(
+                        id,
+                        applied_identifier,
+                        attributes,
+                    ));
                 }
             }
         }
 
-        Ok(State::not_found(id.clone()))
+        Ok(ReadOutcome::not_found(id.clone()))
     }
 
     /// Create an EC2 Subnet Route Table Association
     pub(crate) async fn create_ec2_subnet_route_table_association(
         &self,
         resource: &Resource,
-    ) -> ProviderResult<State> {
+    ) -> ProviderResult<CreateOutcome> {
         let route_table_id = require_string_attr(resource, "route_table_id")?;
         let subnet_id = require_string_attr(resource, "subnet_id")?;
 
@@ -110,22 +113,33 @@ impl AwsProvider {
             )
             .for_resource(resource.id.clone())
         })?;
+        let assoc_id =
+            crate::helpers::applied_identifier(&resource.id, "ec2.AssociateRouteTable", assoc_id)?;
 
         // Composite identifier: association_id|subnet_id
-        let composite = format!("{}|{}", assoc_id, subnet_id);
-        self.read_ec2_subnet_route_table_association(&resource.id, Some(&composite))
-            .await
+        let composite = format!("{}|{}", assoc_id.as_str(), subnet_id);
+        let identifier =
+            crate::helpers::applied_identifier(&resource.id, "ec2.AssociateRouteTable", composite)?;
+        let outcome = self
+            .read_ec2_subnet_route_table_association(&resource.id, &identifier)
+            .await;
+        Ok(self.create_outcome_from_read(
+            &resource.id,
+            identifier,
+            resource.resolved_attributes(),
+            outcome,
+        ))
     }
 
     /// Update an EC2 Subnet Route Table Association (replace association)
     pub(crate) async fn update_ec2_subnet_route_table_association(
         &self,
         id: ResourceId,
-        identifier: &str,
+        identifier: &AppliedIdentifier,
         to: Resource,
-    ) -> ProviderResult<State> {
+    ) -> ProviderResult<ProviderResult<ReadOutcome>> {
         // Parse composite identifier: association_id|subnet_id
-        let Some((association_id, subnet_id)) = identifier.split_once('|') else {
+        let Some((association_id, subnet_id)) = identifier.as_str().split_once('|') else {
             return Err(ProviderError::invalid_input(format!(
                 "Invalid association identifier: {}",
                 identifier
@@ -164,18 +178,27 @@ impl AwsProvider {
             )
             .for_resource(id.clone())
         })?;
+        let new_assoc_id = crate::helpers::applied_identifier(
+            &id,
+            "ec2.ReplaceRouteTableAssociation",
+            new_assoc_id,
+        )?;
 
-        let composite = format!("{}|{}", new_assoc_id, subnet_id);
-        self.read_ec2_subnet_route_table_association(&id, Some(&composite))
-            .await
+        let composite = format!("{}|{}", new_assoc_id.as_str(), subnet_id);
+        let identifier =
+            crate::helpers::applied_identifier(&id, "ec2.ReplaceRouteTableAssociation", composite)?;
+        Ok(self
+            .read_ec2_subnet_route_table_association(&id, &identifier)
+            .await)
     }
 
     /// Delete an EC2 Subnet Route Table Association
     pub(crate) async fn delete_ec2_subnet_route_table_association(
         &self,
         id: ResourceId,
-        identifier: &str,
+        identifier: &AppliedIdentifier,
     ) -> ProviderResult<()> {
+        let identifier = identifier.as_str();
         // Parse composite identifier: association_id|subnet_id
         let Some((association_id, _subnet_id)) = identifier.split_once('|') else {
             return Err(ProviderError::invalid_input(format!(

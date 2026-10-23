@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use aws_sdk_s3::types::{
     ErrorDocument, IndexDocument, Protocol, RedirectAllRequestsTo, WebsiteConfiguration,
 };
+use carina_core::provider::{AppliedIdentifier, CreateOutcome, ReadOutcome};
 use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
 use carina_core::schema::ResourceSchema;
@@ -20,11 +21,10 @@ impl AwsProvider {
     pub(crate) async fn read_s3_bucket_website_configuration(
         &self,
         id: &ResourceId,
-        identifier: Option<&str>,
-    ) -> ProviderResult<State> {
-        let Some(bucket) = identifier else {
-            return Ok(State::not_found(id.clone()));
-        };
+        identifier: &AppliedIdentifier,
+    ) -> ProviderResult<ReadOutcome> {
+        let applied_identifier = identifier;
+        let bucket = identifier.as_str();
 
         let result = self
             .s3_client
@@ -79,13 +79,17 @@ impl AwsProvider {
                         Value::Concrete(ConcreteValue::Map(m)),
                     );
                 }
-                Ok(State::existing(id.clone(), attributes).with_identifier(bucket.to_string()))
+                Ok(crate::helpers::found_read(
+                    id,
+                    applied_identifier,
+                    attributes,
+                ))
             }
             Err(e) => {
                 if is_s3_not_configured_error(&e, "NoSuchWebsiteConfiguration")
                     || is_s3_not_configured_error(&e, "NoSuchBucket")
                 {
-                    return Ok(State::not_found(id.clone()));
+                    return Ok(ReadOutcome::not_found(id.clone()));
                 }
                 Err(api_error_with_meta(
                     "Failed to get bucket website configuration",
@@ -101,20 +105,29 @@ impl AwsProvider {
         &self,
         resource: &Resource,
         schema: &ResourceSchema,
-    ) -> ProviderResult<State> {
+    ) -> ProviderResult<CreateOutcome> {
         let bucket = require_string_attr(resource, "bucket")?;
-        self.put_s3_bucket_website(&resource.id, &bucket, resource, schema)
-            .await
+        let identifier =
+            crate::helpers::applied_identifier(&resource.id, "s3.PutBucketWebsite", bucket)?;
+        let outcome = self
+            .put_s3_bucket_website(&resource.id, &identifier, resource, schema)
+            .await?;
+        Ok(self.create_outcome_from_read(
+            &resource.id,
+            identifier,
+            resource.resolved_attributes(),
+            outcome,
+        ))
     }
 
     pub(crate) async fn update_s3_bucket_website_configuration(
         &self,
         id: ResourceId,
-        identifier: &str,
+        identifier: &AppliedIdentifier,
         _from: &State,
         to: Resource,
         schema: &ResourceSchema,
-    ) -> ProviderResult<State> {
+    ) -> ProviderResult<ProviderResult<ReadOutcome>> {
         self.put_s3_bucket_website(&id, identifier, &to, schema)
             .await
     }
@@ -122,10 +135,12 @@ impl AwsProvider {
     async fn put_s3_bucket_website(
         &self,
         id: &ResourceId,
-        bucket: &str,
+        bucket: &AppliedIdentifier,
         resource: &Resource,
         schema: &ResourceSchema,
-    ) -> ProviderResult<State> {
+    ) -> ProviderResult<ProviderResult<ReadOutcome>> {
+        let applied_identifier = bucket;
+        let bucket = bucket.as_str();
         let config = build_website_configuration(id, resource, schema)?;
 
         self.s3_client
@@ -139,15 +154,17 @@ impl AwsProvider {
                     .for_resource(id.clone())
             })?;
 
-        self.read_s3_bucket_website_configuration(id, Some(bucket))
-            .await
+        Ok(self
+            .read_s3_bucket_website_configuration(id, applied_identifier)
+            .await)
     }
 
     pub(crate) async fn delete_s3_bucket_website_configuration_idempotent(
         &self,
         id: ResourceId,
-        identifier: &str,
+        identifier: &AppliedIdentifier,
     ) -> ProviderResult<()> {
+        let identifier = identifier.as_str();
         let result = retry_aws_operation("delete bucket website", RetryPolicy::default(), || {
             let client = &self.s3_client;
             async move {

@@ -13,9 +13,13 @@ use aws_sdk_route53::Client as Route53Client;
 use aws_sdk_s3::Client as S3Client;
 use aws_sdk_sqs::Client as SqsClient;
 use aws_sdk_sts::Client as StsClient;
-use carina_core::provider::{CreateRequest, Provider, ProviderReadyDataSource, ReadRequest};
+use carina_core::provider::{
+    AppliedIdentifier, CreateOutcome, CreateRequest, Provider, ProviderReadyDataSource,
+    ReadRequest, UpdateOutcome, UpdateRequest,
+};
 use carina_core::resource::{ConcreteValue, DataSource, Resource, State, Value};
 use carina_provider_aws::{AwsNormalizer, AwsProvider};
+use indexmap::IndexMap;
 use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
@@ -34,6 +38,56 @@ const RESOURCE_TYPE: &str = "s3.Bucket";
 struct RecordingS3Service {
     inner: Arc<S3Service>,
     get_bucket_location_calls: AtomicUsize,
+}
+
+struct NotFoundHeadS3Service {
+    inner: Arc<S3Service>,
+}
+
+struct ErrorHeadS3Service {
+    inner: Arc<S3Service>,
+}
+
+impl MockService for NotFoundHeadS3Service {
+    fn service_name(&self) -> &str {
+        self.inner.service_name()
+    }
+
+    fn url_patterns(&self) -> Vec<&str> {
+        self.inner.url_patterns()
+    }
+
+    fn handle(
+        &self,
+        request: MockRequest,
+    ) -> Pin<Box<dyn Future<Output = MockResponse> + Send + '_>> {
+        if request.method == "HEAD" {
+            let response = MockResponse::error(404, "NoSuchBucket", "bucket not found");
+            return Box::pin(async move { response });
+        }
+        self.inner.handle(request)
+    }
+}
+
+impl MockService for ErrorHeadS3Service {
+    fn service_name(&self) -> &str {
+        self.inner.service_name()
+    }
+
+    fn url_patterns(&self) -> Vec<&str> {
+        self.inner.url_patterns()
+    }
+
+    fn handle(
+        &self,
+        request: MockRequest,
+    ) -> Pin<Box<dyn Future<Output = MockResponse> + Send + '_>> {
+        if request.method == "HEAD" {
+            let response = MockResponse::error(400, "InvalidRequest", "scripted read-back failure");
+            return Box::pin(async move { response });
+        }
+        self.inner.handle(request)
+    }
 }
 
 impl RecordingS3Service {
@@ -133,6 +187,64 @@ async fn provider_with_staged_bucket(bucket: &str) -> (AwsProvider, Arc<Recordin
     (provider_from_config(&sdk_config), recording_service)
 }
 
+async fn provider_with_not_found_read_back(staged_bucket: Option<&str>) -> AwsProvider {
+    let s3_service = Arc::new(S3Service::new());
+    if let Some(bucket) = staged_bucket {
+        s3_service
+            .restore(
+                default_account_id(),
+                PROVIDER_REGION,
+                S3StateView {
+                    buckets: HashMap::from([(
+                        bucket.to_string(),
+                        BucketStateView {
+                            name: bucket.to_string(),
+                            region: PROVIDER_REGION.to_string(),
+                            ..Default::default()
+                        },
+                    )]),
+                },
+            )
+            .await
+            .expect("stage S3 bucket for update");
+    }
+
+    let mock = MockAws::builder()
+        .with_service(Arc::new(NotFoundHeadS3Service { inner: s3_service }))
+        .build();
+    let sdk_config = mock.sdk_config(PROVIDER_REGION).await;
+    provider_from_config(&sdk_config)
+}
+
+async fn provider_with_error_read_back(staged_bucket: Option<&str>) -> AwsProvider {
+    let s3_service = Arc::new(S3Service::new());
+    if let Some(bucket) = staged_bucket {
+        s3_service
+            .restore(
+                default_account_id(),
+                PROVIDER_REGION,
+                S3StateView {
+                    buckets: HashMap::from([(
+                        bucket.to_string(),
+                        BucketStateView {
+                            name: bucket.to_string(),
+                            region: PROVIDER_REGION.to_string(),
+                            ..Default::default()
+                        },
+                    )]),
+                },
+            )
+            .await
+            .expect("stage S3 bucket for update");
+    }
+
+    let mock = MockAws::builder()
+        .with_service(Arc::new(ErrorHeadS3Service { inner: s3_service }))
+        .build();
+    let sdk_config = mock.sdk_config(PROVIDER_REGION).await;
+    provider_from_config(&sdk_config)
+}
+
 fn string(value: &str) -> Value {
     Value::Concrete(ConcreteValue::String(value.to_string().into()))
 }
@@ -160,6 +272,31 @@ async fn create_request_for_test(resource: Resource) -> CreateRequest {
     carina_core::executor::prepare_create_request(resource, &preparation)
         .await
         .expect("test resource should pass checked create preparation")
+}
+
+async fn update_request_for_test(
+    resource: Resource,
+    from: State,
+    changed_attributes: &[String],
+) -> UpdateRequest {
+    let bindings = carina_core::binding_index::ResolvedBindings::default();
+    let module_gate = carina_core::executor::ModuleConstraintGate::new(&[]);
+    let schemas = schema_registry();
+    let preparation = carina_core::executor::ProviderPreparationContext::new(
+        &bindings,
+        &module_gate,
+        &[],
+        &AwsNormalizer,
+        &[],
+        &schemas,
+    );
+    carina_core::executor::prepare_update_request(resource, from, changed_attributes, &preparation)
+        .await
+        .expect("test resource should pass checked update preparation")
+}
+
+fn applied_identifier(value: &str) -> AppliedIdentifier {
+    AppliedIdentifier::new(value).expect("test provider identifier must be non-empty")
 }
 
 fn ready_data_source_for_test(resource: DataSource) -> ProviderReadyDataSource {
@@ -242,6 +379,120 @@ async fn create_bucket_ignores_supplied_read_only_region_for_placement() {
 }
 
 #[tokio::test]
+async fn create_bucket_read_back_not_found_is_partial_success_with_created_identifier() {
+    let provider = provider_with_not_found_read_back(None).await;
+    let bucket = "carina-bucket-create-read-back-not-found";
+    let mut resource = Resource::with_provider("aws", RESOURCE_TYPE, "partial-create", None);
+    resource.set_attr("bucket", string(bucket));
+    let id = resource.id.clone();
+    let request = create_request_for_test(resource).await;
+
+    let outcome = provider
+        .create(&id, request)
+        .await
+        .expect("the create API succeeded, so a missing read-back must stay successful");
+
+    let CreateOutcome::PartialSuccess { state, diagnostic } = outcome else {
+        panic!("expected partial create success, got {outcome:?}");
+    };
+    assert_eq!(state.identifier().as_str(), bucket);
+    assert!(diagnostic.reason().contains("post-create read-back"));
+    assert!(!diagnostic.missing_attributes().is_empty());
+}
+
+#[tokio::test]
+async fn update_bucket_read_back_not_found_is_partial_success_with_updated_identifier() {
+    let bucket = "carina-bucket-update-read-back-not-found";
+    let provider = provider_with_not_found_read_back(Some(bucket)).await;
+    let id = Resource::with_provider("aws", RESOURCE_TYPE, "partial-update", None).id;
+    let from = State::existing(
+        id.clone(),
+        HashMap::from([("bucket".to_string(), string(bucket))]),
+    )
+    .with_identifier(bucket);
+    let mut desired = Resource::from_id(id.clone());
+    desired.set_attr("bucket", string(bucket));
+    desired.set_attr(
+        "tags",
+        Value::Concrete(ConcreteValue::Map(IndexMap::from([(
+            "purpose".to_string(),
+            string("partial-update-test"),
+        )]))),
+    );
+    let request = update_request_for_test(desired, from, &["tags".to_string()]).await;
+
+    let outcome = provider
+        .update(&id, &applied_identifier(bucket), request)
+        .await
+        .expect("the update API succeeded, so a missing read-back must stay successful");
+
+    let UpdateOutcome::PartialSuccess { state, diagnostic } = outcome else {
+        panic!("expected partial update success, got {outcome:?}");
+    };
+    assert_eq!(state.identifier().as_str(), bucket);
+    assert!(diagnostic.reason().contains("post-update read-back"));
+    assert!(!diagnostic.missing_attributes().is_empty());
+}
+
+#[tokio::test]
+async fn create_bucket_read_back_error_is_partial_success_with_created_identifier() {
+    let provider = provider_with_error_read_back(None).await;
+    let bucket = "carina-bucket-create-read-back-error";
+    let mut resource = Resource::with_provider("aws", RESOURCE_TYPE, "partial-create-error", None);
+    resource.set_attr("bucket", string(bucket));
+    let id = resource.id.clone();
+    let request = create_request_for_test(resource).await;
+
+    let outcome = provider
+        .create(&id, request)
+        .await
+        .expect("the create API succeeded, so a failed read-back must stay successful");
+
+    let CreateOutcome::PartialSuccess { state, diagnostic } = outcome else {
+        panic!("expected partial create success, got {outcome:?}");
+    };
+    assert_eq!(state.identifier().as_str(), bucket);
+    assert!(diagnostic.reason().contains("post-create read-back"));
+    assert!(diagnostic.reason().contains("Failed to read bucket"));
+    assert!(!diagnostic.missing_attributes().is_empty());
+}
+
+#[tokio::test]
+async fn update_bucket_read_back_error_is_partial_success_with_updated_identifier() {
+    let bucket = "carina-bucket-update-read-back-error";
+    let provider = provider_with_error_read_back(Some(bucket)).await;
+    let id = Resource::with_provider("aws", RESOURCE_TYPE, "partial-update-error", None).id;
+    let from = State::existing(
+        id.clone(),
+        HashMap::from([("bucket".to_string(), string(bucket))]),
+    )
+    .with_identifier(bucket);
+    let mut desired = Resource::from_id(id.clone());
+    desired.set_attr("bucket", string(bucket));
+    desired.set_attr(
+        "tags",
+        Value::Concrete(ConcreteValue::Map(IndexMap::from([(
+            "purpose".to_string(),
+            string("partial-update-error-test"),
+        )]))),
+    );
+    let request = update_request_for_test(desired, from, &["tags".to_string()]).await;
+
+    let outcome = provider
+        .update(&id, &applied_identifier(bucket), request)
+        .await
+        .expect("the update API succeeded, so a failed read-back must stay successful");
+
+    let UpdateOutcome::PartialSuccess { state, diagnostic } = outcome else {
+        panic!("expected partial update success, got {outcome:?}");
+    };
+    assert_eq!(state.identifier().as_str(), bucket);
+    assert!(diagnostic.reason().contains("post-update read-back"));
+    assert!(diagnostic.reason().contains("Failed to read bucket"));
+    assert!(!diagnostic.missing_attributes().is_empty());
+}
+
+#[tokio::test]
 async fn managed_and_data_source_reads_use_head_bucket_region_without_get_bucket_location() {
     assert_ne!(
         PROVIDER_REGION, BUCKET_REGION,
@@ -253,9 +504,10 @@ async fn managed_and_data_source_reads_use_head_bucket_region_without_get_bucket
 
     let managed_id = Resource::with_provider("aws", RESOURCE_TYPE, "managed", None).id;
     let managed_state = provider
-        .read(&managed_id, Some(bucket), ReadRequest)
+        .read(&managed_id, &applied_identifier(bucket), ReadRequest)
         .await
-        .expect("read managed S3 bucket");
+        .expect("read managed S3 bucket")
+        .into_state();
     assert_bucket_outputs(&managed_state, bucket, BUCKET_REGION, "Z2M4EHUR26P7ZW");
 
     let mut data_source = DataSource::with_provider("aws", RESOURCE_TYPE, "lookup", None);

@@ -1,5 +1,6 @@
 use carina_core::provider::ProviderResult;
-use carina_core::resource::{Resource, ResourceId, State};
+use carina_core::provider::{AppliedIdentifier, CreateOutcome, ReadOutcome};
+use carina_core::resource::{Resource, ResourceId};
 use carina_core::schema::ResourceSchema;
 
 use crate::AwsProvider;
@@ -9,8 +10,8 @@ impl AwsProvider {
     pub(crate) async fn read_ec2_security_group_ingress(
         &self,
         id: &ResourceId,
-        identifier: Option<&str>,
-    ) -> ProviderResult<State> {
+        identifier: &AppliedIdentifier,
+    ) -> ProviderResult<ReadOutcome> {
         self.read_ec2_security_group_rule(id, identifier, true)
             .await
     }
@@ -20,7 +21,7 @@ impl AwsProvider {
         &self,
         resource: &Resource,
         schema: &ResourceSchema,
-    ) -> ProviderResult<State> {
+    ) -> ProviderResult<CreateOutcome> {
         self.create_ec2_security_group_rule(resource, schema, true)
             .await
     }
@@ -29,10 +30,10 @@ impl AwsProvider {
     pub(crate) async fn update_ec2_security_group_ingress(
         &self,
         id: ResourceId,
-        identifier: &str,
+        identifier: &AppliedIdentifier,
         to: Resource,
         schema: &ResourceSchema,
-    ) -> ProviderResult<State> {
+    ) -> ProviderResult<ProviderResult<ReadOutcome>> {
         self.update_ec2_security_group_rule(id, identifier, to, schema, true)
             .await
     }
@@ -41,7 +42,7 @@ impl AwsProvider {
     pub(crate) async fn delete_ec2_security_group_ingress(
         &self,
         id: ResourceId,
-        identifier: &str,
+        identifier: &AppliedIdentifier,
     ) -> ProviderResult<()> {
         self.delete_ec2_security_group_rule(id, identifier, true)
             .await

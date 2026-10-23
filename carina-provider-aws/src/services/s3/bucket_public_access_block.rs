@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use aws_sdk_s3::types::PublicAccessBlockConfiguration;
 use carina_core::provider::ProviderResult;
+use carina_core::provider::{AppliedIdentifier, CreateOutcome, ReadOutcome};
 use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
 
 use crate::AwsProvider;
@@ -12,17 +13,16 @@ use crate::services::s3::bucket::is_s3_not_configured_error;
 impl AwsProvider {
     /// Read an S3 BucketPublicAccessBlock.
     ///
-    /// `identifier` is the bucket name. Returns `State::not_found` when no
+    /// `identifier` is the bucket name. Returns `ReadOutcome::NotFound` when no
     /// PublicAccessBlock configuration exists on the bucket
     /// (`NoSuchPublicAccessBlockConfiguration`).
     pub(crate) async fn read_s3_bucket_public_access_block(
         &self,
         id: &ResourceId,
-        identifier: Option<&str>,
-    ) -> ProviderResult<State> {
-        let Some(bucket) = identifier else {
-            return Ok(State::not_found(id.clone()));
-        };
+        identifier: &AppliedIdentifier,
+    ) -> ProviderResult<ReadOutcome> {
+        let applied_identifier = identifier;
+        let bucket = identifier.as_str();
 
         let result = self
             .s3_client
@@ -66,11 +66,15 @@ impl AwsProvider {
                     }
                 }
 
-                Ok(State::existing(id.clone(), attributes).with_identifier(bucket.to_string()))
+                Ok(crate::helpers::found_read(
+                    id,
+                    applied_identifier,
+                    attributes,
+                ))
             }
             Err(e) => {
                 if is_s3_not_configured_error(&e, "NoSuchPublicAccessBlockConfiguration") {
-                    return Ok(State::not_found(id.clone()));
+                    return Ok(ReadOutcome::not_found(id.clone()));
                 }
                 Err(api_error_with_meta(
                     "Failed to get public access block",
@@ -85,19 +89,28 @@ impl AwsProvider {
     pub(crate) async fn create_s3_bucket_public_access_block(
         &self,
         resource: &Resource,
-    ) -> ProviderResult<State> {
+    ) -> ProviderResult<CreateOutcome> {
         let bucket = require_string_attr(resource, "bucket")?;
-        self.put_s3_bucket_public_access_block(&resource.id, &bucket, resource)
-            .await
+        let identifier =
+            crate::helpers::applied_identifier(&resource.id, "s3.PutPublicAccessBlock", bucket)?;
+        let outcome = self
+            .put_s3_bucket_public_access_block(&resource.id, &identifier, resource)
+            .await?;
+        Ok(self.create_outcome_from_read(
+            &resource.id,
+            identifier,
+            resource.resolved_attributes(),
+            outcome,
+        ))
     }
 
     pub(crate) async fn update_s3_bucket_public_access_block(
         &self,
         id: ResourceId,
-        identifier: &str,
+        identifier: &AppliedIdentifier,
         _from: &State,
         to: Resource,
-    ) -> ProviderResult<State> {
+    ) -> ProviderResult<ProviderResult<ReadOutcome>> {
         self.put_s3_bucket_public_access_block(&id, identifier, &to)
             .await
     }
@@ -105,9 +118,11 @@ impl AwsProvider {
     async fn put_s3_bucket_public_access_block(
         &self,
         id: &ResourceId,
-        bucket: &str,
+        bucket: &AppliedIdentifier,
         resource: &Resource,
-    ) -> ProviderResult<State> {
+    ) -> ProviderResult<ProviderResult<ReadOutcome>> {
+        let applied_identifier = bucket;
+        let bucket = bucket.as_str();
         let mut builder = PublicAccessBlockConfiguration::builder();
         if let Some(v) = optional_bool_attr(resource, "block_public_acls") {
             builder = builder.block_public_acls(v);
@@ -138,8 +153,9 @@ impl AwsProvider {
                 .for_resource(id.clone())
             })?;
 
-        self.read_s3_bucket_public_access_block(id, Some(bucket))
-            .await
+        Ok(self
+            .read_s3_bucket_public_access_block(id, applied_identifier)
+            .await)
     }
 
     /// Delete an S3 BucketPublicAccessBlock idempotently.
@@ -149,8 +165,9 @@ impl AwsProvider {
     pub(crate) async fn delete_s3_bucket_public_access_block_idempotent(
         &self,
         id: ResourceId,
-        identifier: &str,
+        identifier: &AppliedIdentifier,
     ) -> ProviderResult<()> {
+        let identifier = identifier.as_str();
         let result =
             retry_aws_operation("delete public access block", RetryPolicy::default(), || {
                 let client = &self.s3_client;

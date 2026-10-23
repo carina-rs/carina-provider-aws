@@ -1,6 +1,7 @@
 use indexmap::IndexMap;
 use std::collections::HashMap;
 
+use carina_core::provider::{AppliedIdentifier, CreateOutcome, ReadOutcome};
 use carina_core::provider::{BoxFuture, ProviderError, ProviderResult};
 use carina_core::resource::{
     ConcreteValue, DataSource, Directives, Resource, ResourceId, State, Value,
@@ -93,11 +94,10 @@ impl AwsProvider {
     pub(crate) async fn read_s3_bucket(
         &self,
         id: &ResourceId,
-        identifier: Option<&str>,
-    ) -> ProviderResult<State> {
-        let Some(name) = identifier else {
-            return Ok(State::not_found(id.clone()));
-        };
+        identifier: &AppliedIdentifier,
+    ) -> ProviderResult<ReadOutcome> {
+        let applied_identifier = identifier;
+        let name = identifier.as_str();
 
         match self.s3_client.head_bucket().bucket(name).send().await {
             Ok(output) => {
@@ -116,7 +116,11 @@ impl AwsProvider {
                 self.read_s3_bucket_tags(id, name, &mut attributes).await?;
 
                 // S3 bucket identifier is the bucket name
-                Ok(State::existing(id.clone(), attributes).with_identifier(name))
+                Ok(crate::helpers::found_read(
+                    id,
+                    applied_identifier,
+                    attributes,
+                ))
             }
             Err(err) => {
                 // Handle bucket not found
@@ -131,7 +135,7 @@ impl AwsProvider {
                 };
 
                 match error_kind {
-                    HeadBucketErrorKind::NotFound => Ok(State::not_found(id.clone())),
+                    HeadBucketErrorKind::NotFound => Ok(ReadOutcome::not_found(id.clone())),
                     HeadBucketErrorKind::AccessDenied => Err(ProviderError::api_error(format!(
                         "Access denied for bucket '{}'. This may indicate insufficient IAM \
                          permissions or the bucket is owned by a different AWS account.",
@@ -150,7 +154,10 @@ impl AwsProvider {
     }
 
     /// Create an S3 bucket
-    pub(crate) async fn create_s3_bucket(&self, resource: &Resource) -> ProviderResult<State> {
+    pub(crate) async fn create_s3_bucket(
+        &self,
+        resource: &Resource,
+    ) -> ProviderResult<CreateOutcome> {
         let bucket_name = match resource.get_attr("bucket") {
             Some(Value::Concrete(ConcreteValue::String(s))) => s.expose_plaintext().to_string(),
             _ => {
@@ -158,6 +165,11 @@ impl AwsProvider {
                     .for_resource(resource.id.clone()));
             }
         };
+        let identifier = crate::helpers::applied_identifier(
+            &resource.id,
+            "s3.CreateBucket",
+            bucket_name.clone(),
+        )?;
 
         // Create bucket
         let mut req = self.s3_client.create_bucket().bucket(&bucket_name);
@@ -198,18 +210,24 @@ impl AwsProvider {
             .await?;
 
         // Return state after creation
-        self.read_s3_bucket(&resource.id, Some(&bucket_name)).await
+        let outcome = self.read_s3_bucket(&resource.id, &identifier).await;
+        Ok(self.create_outcome_from_read(
+            &resource.id,
+            identifier,
+            resource.resolved_attributes(),
+            outcome,
+        ))
     }
 
     /// Update an S3 bucket
     pub(crate) async fn update_s3_bucket(
         &self,
         id: ResourceId,
-        identifier: &str,
+        identifier: &AppliedIdentifier,
         from: &State,
         to: Resource,
-    ) -> ProviderResult<State> {
-        let bucket_name = identifier.to_string();
+    ) -> ProviderResult<ProviderResult<ReadOutcome>> {
+        let bucket_name = identifier.as_str();
 
         let attrs = to.resolved_attributes();
 
@@ -217,7 +235,7 @@ impl AwsProvider {
         if from.attributes.contains_key("tags") && !to.attributes.contains_key("tags") {
             self.s3_client
                 .delete_bucket_tagging()
-                .bucket(&bucket_name)
+                .bucket(bucket_name)
                 .send()
                 .await
                 .map_err(|e| {
@@ -225,19 +243,20 @@ impl AwsProvider {
                         .for_resource(id.clone())
                 })?;
         } else {
-            self.write_s3_bucket_tags(&id, &bucket_name, &attrs).await?;
+            self.write_s3_bucket_tags(&id, bucket_name, &attrs).await?;
         }
 
-        self.read_s3_bucket(&id, Some(&bucket_name)).await
+        Ok(self.read_s3_bucket(&id, identifier).await)
     }
 
     /// Delete an S3 bucket, honoring lifecycle.force_delete
     pub(crate) async fn delete_s3_bucket(
         &self,
         id: ResourceId,
-        identifier: &str,
+        identifier: &AppliedIdentifier,
         directives: &Directives,
     ) -> ProviderResult<()> {
+        let identifier = identifier.as_str();
         // If force_delete is enabled, empty the bucket before deletion
         if directives.force_delete {
             self.empty_s3_bucket(&id, identifier).await?;
@@ -469,7 +488,7 @@ impl AwsProvider {
             //    classifier so the access-denied / not-found / other split
             //    is consistent. For a DataSource lookup the user explicitly
             //    asked to read this bucket, so missing bucket is an error
-            //    (unlike read_s3_bucket which returns State::not_found).
+            //    (unlike read_s3_bucket which returns ReadOutcome::NotFound).
             let output = self
                 .s3_client
                 .head_bucket()

@@ -1,7 +1,8 @@
 use std::collections::HashMap;
 
+use carina_core::provider::{AppliedIdentifier, CreateOutcome, ReadOutcome};
 use carina_core::provider::{ProviderError, ProviderResult};
-use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
+use carina_core::resource::{ConcreteValue, Resource, ResourceId, Value};
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
@@ -12,15 +13,14 @@ impl AwsProvider {
     pub(crate) async fn read_ec2_route(
         &self,
         id: &ResourceId,
-        identifier: Option<&str>,
-    ) -> ProviderResult<State> {
+        identifier: &AppliedIdentifier,
+    ) -> ProviderResult<ReadOutcome> {
         // Parse composite identifier: route_table_id|destination_cidr_block
-        let Some(identifier) = identifier else {
-            return Ok(State::not_found(id.clone()));
-        };
+        let applied_identifier = identifier;
+        let identifier = identifier.as_str();
 
         let Some((route_table_id, destination_cidr_block)) = identifier.split_once('|') else {
-            return Ok(State::not_found(id.clone()));
+            return Ok(ReadOutcome::not_found(id.clone()));
         };
 
         // Describe the route table to get its routes
@@ -55,17 +55,23 @@ impl AwsProvider {
                     );
 
                     // Route identifier is route_table_id|destination_cidr_block
-                    let composite = format!("{}|{}", route_table_id, destination_cidr_block);
-                    return Ok(State::existing(id.clone(), attributes).with_identifier(composite));
+                    return Ok(crate::helpers::found_read(
+                        id,
+                        applied_identifier,
+                        attributes,
+                    ));
                 }
             }
         }
 
-        Ok(State::not_found(id.clone()))
+        Ok(ReadOutcome::not_found(id.clone()))
     }
 
     /// Create an EC2 Route
-    pub(crate) async fn create_ec2_route(&self, resource: &Resource) -> ProviderResult<State> {
+    pub(crate) async fn create_ec2_route(
+        &self,
+        resource: &Resource,
+    ) -> ProviderResult<CreateOutcome> {
         let route_table_id = require_string_attr(resource, "route_table_id")?;
         let destination_cidr = require_string_attr(resource, "destination_cidr_block")?;
 
@@ -95,19 +101,24 @@ impl AwsProvider {
 
         // Route identifier is route_table_id|destination_cidr_block
         let identifier = format!("{}|{}", route_table_id, destination_cidr);
-        Ok(
-            State::existing(resource.id.clone(), resource.resolved_attributes())
-                .with_identifier(identifier),
-        )
+        let identifier =
+            crate::helpers::applied_identifier(&resource.id, "ec2.CreateRoute", identifier)?;
+        let outcome = self.read_ec2_route(&resource.id, &identifier).await;
+        Ok(self.create_outcome_from_read(
+            &resource.id,
+            identifier,
+            resource.resolved_attributes(),
+            outcome,
+        ))
     }
 
     /// Update an EC2 Route (replace the route)
     pub(crate) async fn update_ec2_route(
         &self,
         id: ResourceId,
-        _identifier: &str,
+        _identifier: &AppliedIdentifier,
         to: Resource,
-    ) -> ProviderResult<State> {
+    ) -> ProviderResult<ProviderResult<ReadOutcome>> {
         let route_table_id = match to.get_attr("route_table_id") {
             Some(Value::Concrete(ConcreteValue::String(s))) => s.expose_plaintext().to_string(),
             _ => {
@@ -151,15 +162,17 @@ impl AwsProvider {
 
         // Route identifier is route_table_id|destination_cidr_block
         let identifier = format!("{}|{}", route_table_id, destination_cidr);
-        Ok(State::existing(id, to.resolved_attributes()).with_identifier(identifier))
+        let identifier = crate::helpers::applied_identifier(&id, "ec2.ReplaceRoute", identifier)?;
+        Ok(self.read_ec2_route(&id, &identifier).await)
     }
 
     /// Delete an EC2 Route
     pub(crate) async fn delete_ec2_route(
         &self,
         id: ResourceId,
-        identifier: &str,
+        identifier: &AppliedIdentifier,
     ) -> ProviderResult<()> {
+        let identifier = identifier.as_str();
         // Parse composite identifier: route_table_id|destination_cidr_block
         let Some((route_table_id, destination_cidr_block)) = identifier.split_once('|') else {
             return Err(ProviderError::invalid_input(format!(

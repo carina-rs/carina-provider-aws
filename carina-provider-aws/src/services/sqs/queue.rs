@@ -11,6 +11,7 @@ use aws_sdk_sqs::types::QueueAttributeName;
 use indexmap::IndexMap;
 use std::collections::HashMap;
 
+use carina_core::provider::{AppliedIdentifier, CreateOutcome, ReadOutcome};
 use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
 use carina_core::schema::ResourceSchema;
@@ -379,11 +380,10 @@ impl AwsProvider {
     pub(crate) async fn read_sqs_queue(
         &self,
         id: &ResourceId,
-        identifier: Option<&str>,
-    ) -> ProviderResult<State> {
-        let Some(queue_url) = identifier else {
-            return Ok(State::not_found(id.clone()));
-        };
+        identifier: &AppliedIdentifier,
+    ) -> ProviderResult<ReadOutcome> {
+        let applied_identifier = identifier;
+        let queue_url = identifier.as_str();
 
         // Use the `All` meta-name so SQS returns every queue attribute
         // applicable to this queue (standard queues reject explicit
@@ -403,7 +403,7 @@ impl AwsProvider {
                 if let Some(svc_err) = err.as_service_error()
                     && svc_err.is_queue_does_not_exist()
                 {
-                    return Ok(State::not_found(id.clone()));
+                    return Ok(ReadOutcome::not_found(id.clone()));
                 }
                 return Err(api_error_with_meta(
                     "Failed to get queue attributes",
@@ -466,8 +466,11 @@ impl AwsProvider {
             }
         }
 
-        let state = State::existing(id.clone(), attributes);
-        Ok(state.with_identifier(queue_url.to_string()))
+        Ok(crate::helpers::found_read(
+            id,
+            applied_identifier,
+            attributes,
+        ))
     }
 
     /// Create an SQS Queue and return its post-create state.
@@ -475,7 +478,7 @@ impl AwsProvider {
         &self,
         resource: &Resource,
         _schema: &ResourceSchema,
-    ) -> ProviderResult<State> {
+    ) -> ProviderResult<CreateOutcome> {
         let queue_name = require_string_attr(resource, "queue_name")?;
 
         // Pack every writable attribute the user actually set.
@@ -511,18 +514,26 @@ impl AwsProvider {
                 .for_resource(resource.id.clone())
         })?;
 
-        self.read_sqs_queue(&resource.id, Some(queue_url)).await
+        let identifier =
+            crate::helpers::applied_identifier(&resource.id, "sqs.CreateQueue", queue_url)?;
+        let outcome = self.read_sqs_queue(&resource.id, &identifier).await;
+        Ok(self.create_outcome_from_read(
+            &resource.id,
+            identifier,
+            resource.resolved_attributes(),
+            outcome,
+        ))
     }
 
     /// Update an existing SQS Queue.
     pub(crate) async fn update_sqs_queue(
         &self,
         id: ResourceId,
-        identifier: &str,
+        identifier: &AppliedIdentifier,
         from: &State,
         to: Resource,
         _schema: &ResourceSchema,
-    ) -> ProviderResult<State> {
+    ) -> ProviderResult<ProviderResult<ReadOutcome>> {
         // Build a partial map of attributes whose value changed.
         // Create-only attributes (FifoQueue / FifoThroughputLimit /
         // DeduplicationScope) are dropped — schema marks them
@@ -547,7 +558,7 @@ impl AwsProvider {
         if !attr_map.is_empty() {
             self.sqs_client
                 .set_queue_attributes()
-                .queue_url(identifier)
+                .queue_url(identifier.as_str())
                 .set_attributes(Some(attr_map))
                 .send()
                 .await
@@ -563,21 +574,22 @@ impl AwsProvider {
 
         self.apply_sqs_tags(
             &id,
-            identifier,
+            identifier.as_str(),
             &to.resolved_attributes(),
             Some(&from.attributes),
         )
         .await?;
 
-        self.read_sqs_queue(&id, Some(identifier)).await
+        Ok(self.read_sqs_queue(&id, identifier).await)
     }
 
     /// Delete an SQS Queue.
     pub(crate) async fn delete_sqs_queue(
         &self,
         id: ResourceId,
-        identifier: &str,
+        identifier: &AppliedIdentifier,
     ) -> ProviderResult<()> {
+        let identifier = identifier.as_str();
         self.sqs_client
             .delete_queue()
             .queue_url(identifier)

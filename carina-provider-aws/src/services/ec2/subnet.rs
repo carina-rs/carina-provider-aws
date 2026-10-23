@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use carina_core::provider::{AppliedIdentifier, CreateOutcome, ReadOutcome};
 use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{Resource, ResourceId, State};
 use carina_core::schema::ResourceSchema;
@@ -44,13 +45,12 @@ impl AwsProvider {
     pub(crate) async fn read_ec2_subnet(
         &self,
         id: &ResourceId,
-        identifier: Option<&str>,
-    ) -> ProviderResult<State> {
+        identifier: &AppliedIdentifier,
+    ) -> ProviderResult<ReadOutcome> {
         use aws_sdk_ec2::types::Filter;
 
-        let Some(identifier) = identifier else {
-            return Ok(State::not_found(id.clone()));
-        };
+        let applied_identifier = identifier;
+        let identifier = identifier.as_str();
 
         let filter = Filter::builder()
             .name("subnet-id")
@@ -72,21 +72,20 @@ impl AwsProvider {
             let mut attributes = HashMap::new();
 
             // Auto-generated attribute extraction
-            let identifier_value = Self::extract_ec2_subnet_attributes(subnet, &mut attributes);
+            let _identifier_value = Self::extract_ec2_subnet_attributes(subnet, &mut attributes);
 
             // Extract user-defined tags
             if let Some(tags_value) = Self::ec2_tags_to_value(subnet.tags()) {
                 attributes.insert("tags".to_string(), tags_value);
             }
 
-            let state = State::existing(id.clone(), attributes);
-            Ok(if let Some(id_val) = identifier_value {
-                state.with_identifier(id_val)
-            } else {
-                state
-            })
+            Ok(crate::helpers::found_read(
+                id,
+                applied_identifier,
+                attributes,
+            ))
         } else {
-            Ok(State::not_found(id.clone()))
+            Ok(ReadOutcome::not_found(id.clone()))
         }
     }
 
@@ -95,7 +94,7 @@ impl AwsProvider {
         &self,
         resource: &Resource,
         schema: &ResourceSchema,
-    ) -> ProviderResult<State> {
+    ) -> ProviderResult<CreateOutcome> {
         let cidr_block = require_string_attr(resource, "cidr_block")?;
         let vpc_id = require_string_attr(resource, "vpc_id")?;
         let modify_enum_attrs = resolve_modify_subnet_enum_attrs(resource, schema)?;
@@ -130,30 +129,38 @@ impl AwsProvider {
             .await?;
 
         // Read back using subnet ID (reliable identifier)
-        self.read_ec2_subnet(&resource.id, Some(subnet_id)).await
+        let identifier =
+            crate::helpers::applied_identifier(&resource.id, "ec2.CreateSubnet", subnet_id)?;
+        let outcome = self.read_ec2_subnet(&resource.id, &identifier).await;
+        Ok(self.create_outcome_from_read(
+            &resource.id,
+            identifier,
+            resource.resolved_attributes(),
+            outcome,
+        ))
     }
 
     /// Update an EC2 Subnet
     pub(crate) async fn update_ec2_subnet(
         &self,
         id: ResourceId,
-        identifier: &str,
+        identifier: &AppliedIdentifier,
         from: &State,
         to: Resource,
         schema: &ResourceSchema,
-    ) -> ProviderResult<State> {
+    ) -> ProviderResult<ProviderResult<ReadOutcome>> {
         let modify_enum_attrs = resolve_modify_subnet_enum_attrs(&to, schema)?;
 
         // Apply subnet attributes that require ModifySubnetAttribute
         let attrs = to.resolved_attributes();
-        self.modify_subnet_attributes(&id, identifier, &to, &modify_enum_attrs)
+        self.modify_subnet_attributes(&id, identifier.as_str(), &to, &modify_enum_attrs)
             .await?;
 
         // Update tags
-        self.apply_ec2_tags(&id, identifier, &attrs, Some(&from.attributes))
+        self.apply_ec2_tags(&id, identifier.as_str(), &attrs, Some(&from.attributes))
             .await?;
 
-        self.read_ec2_subnet(&id, Some(identifier)).await
+        Ok(self.read_ec2_subnet(&id, identifier).await)
     }
 
     /// Apply boolean subnet attributes via ModifySubnetAttribute API.

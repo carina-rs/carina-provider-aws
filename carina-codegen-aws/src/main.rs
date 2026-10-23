@@ -2150,7 +2150,9 @@ fn generate_provider_code(
          //!   ./carina-provider-aws/scripts/generate-provider.sh\n\n\
          use indexmap::IndexMap;\n\
          use std::collections::HashMap;\n\n\
-         use carina_core::provider::{BoxFuture, ProviderError, ProviderResult};\n\
+         use carina_core::provider::{\n\
+         \x20   AppliedIdentifier, BoxFuture, ProviderError, ProviderResult, ReadOutcome,\n\
+         };\n\
          use carina_core::resource::{\n\
          \x20   ConcreteValue, DataSource, Resource, ResourceId, State, Value,\n\
          };\n\
@@ -2204,9 +2206,9 @@ fn generate_provider_code(
              \x20   pub(crate) async fn {}(\n\
              \x20       &self,\n\
              \x20       id: ResourceId,\n\
-             \x20       identifier: &str,\n\
+             \x20       identifier: &AppliedIdentifier,\n\
              \x20   ) -> ProviderResult<()> {{\n\
-             \x20       self.{}.{}().{}(identifier).send().await.map_err(|e| {{\n\
+             \x20       self.{}.{}().{}(identifier.as_str()).send().await.map_err(|e| {{\n\
              \x20           api_error_with_meta(\"Failed to delete {}\", \"{}\", e)\n\
              \x20               .for_resource(id.clone())\n\
              \x20       }})?;\n\
@@ -2231,13 +2233,13 @@ fn generate_provider_code(
                  \x20   pub(crate) async fn {}(\n\
                  \x20       &self,\n\
                  \x20       id: ResourceId,\n\
-                 \x20       identifier: &str,\n\
+                 \x20       identifier: &AppliedIdentifier,\n\
                  \x20       from: &State,\n\
                  \x20       to: Resource,\n\
-                 \x20   ) -> ProviderResult<State> {{\n\
-                 \x20       self.apply_ec2_tags(&id, identifier, &to.resolved_attributes(), Some(&from.attributes))\n\
+                 \x20   ) -> ProviderResult<ProviderResult<ReadOutcome>> {{\n\
+                 \x20       self.apply_ec2_tags(&id, identifier.as_str(), &to.resolved_attributes(), Some(&from.attributes))\n\
                  \x20           .await?;\n\
-                 \x20       self.{}(&id, Some(identifier)).await\n\
+                 \x20       Ok(self.{}(&id, identifier).await)\n\
                  \x20   }}\n\n",
                 res.name, method_name, read_method,
             ));
@@ -2247,10 +2249,10 @@ fn generate_provider_code(
                  \x20   pub(crate) async fn {}(\n\
                  \x20       &self,\n\
                  \x20       id: ResourceId,\n\
-                 \x20       identifier: &str,\n\
+                 \x20       identifier: &AppliedIdentifier,\n\
                  \x20       _to: Resource,\n\
-                 \x20   ) -> ProviderResult<State> {{\n\
-                 \x20       self.{}(&id, Some(identifier)).await\n\
+                 \x20   ) -> ProviderResult<ProviderResult<ReadOutcome>> {{\n\
+                 \x20       Ok(self.{}(&id, identifier).await)\n\
                  \x20   }}\n\n",
                 res.name, method_name, read_method,
             ));

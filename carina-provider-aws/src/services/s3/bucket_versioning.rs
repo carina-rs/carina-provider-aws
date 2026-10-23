@@ -15,6 +15,7 @@ use aws_sdk_s3::operation::put_bucket_versioning::{
 };
 use aws_sdk_s3::types::{BucketVersioningStatus, MfaDelete, VersioningConfiguration};
 use carina_core::provider::ProviderResult;
+use carina_core::provider::{AppliedIdentifier, CreateOutcome, ReadOutcome};
 use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
 use carina_core::schema::ResourceSchema;
 
@@ -27,11 +28,10 @@ impl AwsProvider {
     pub(crate) async fn read_s3_bucket_versioning(
         &self,
         id: &ResourceId,
-        identifier: Option<&str>,
-    ) -> ProviderResult<State> {
-        let Some(bucket) = identifier else {
-            return Ok(State::not_found(id.clone()));
-        };
+        identifier: &AppliedIdentifier,
+    ) -> ProviderResult<ReadOutcome> {
+        let applied_identifier = identifier;
+        let bucket = identifier.as_str();
 
         let result = self
             .s3_client
@@ -43,7 +43,7 @@ impl AwsProvider {
         match result {
             Ok(output) => {
                 let Some(status) = output.status() else {
-                    return Ok(State::not_found(id.clone()));
+                    return Ok(ReadOutcome::not_found(id.clone()));
                 };
                 let mut attributes = HashMap::new();
                 attributes.insert(
@@ -60,11 +60,15 @@ impl AwsProvider {
                         Value::Concrete(ConcreteValue::String(mfa.as_str().to_string().into())),
                     );
                 }
-                Ok(State::existing(id.clone(), attributes).with_identifier(bucket.to_string()))
+                Ok(crate::helpers::found_read(
+                    id,
+                    applied_identifier,
+                    attributes,
+                ))
             }
             Err(e) => {
                 if is_s3_not_configured_error(&e, "NoSuchBucket") {
-                    return Ok(State::not_found(id.clone()));
+                    return Ok(ReadOutcome::not_found(id.clone()));
                 }
                 Err(api_error_with_meta(
                     "Failed to get bucket versioning",
@@ -80,20 +84,29 @@ impl AwsProvider {
         &self,
         resource: &Resource,
         schema: &ResourceSchema,
-    ) -> ProviderResult<State> {
+    ) -> ProviderResult<CreateOutcome> {
         let bucket = require_string_attr(resource, "bucket")?;
-        self.put_s3_bucket_versioning(&resource.id, &bucket, resource, schema)
-            .await
+        let identifier =
+            crate::helpers::applied_identifier(&resource.id, "s3.PutBucketVersioning", bucket)?;
+        let outcome = self
+            .put_s3_bucket_versioning(&resource.id, &identifier, resource, schema)
+            .await?;
+        Ok(self.create_outcome_from_read(
+            &resource.id,
+            identifier,
+            resource.resolved_attributes(),
+            outcome,
+        ))
     }
 
     pub(crate) async fn update_s3_bucket_versioning(
         &self,
         id: ResourceId,
-        identifier: &str,
+        identifier: &AppliedIdentifier,
         _from: &State,
         to: Resource,
         schema: &ResourceSchema,
-    ) -> ProviderResult<State> {
+    ) -> ProviderResult<ProviderResult<ReadOutcome>> {
         self.put_s3_bucket_versioning(&id, identifier, &to, schema)
             .await
     }
@@ -101,10 +114,12 @@ impl AwsProvider {
     async fn put_s3_bucket_versioning(
         &self,
         id: &ResourceId,
-        bucket: &str,
+        bucket: &AppliedIdentifier,
         resource: &Resource,
         schema: &ResourceSchema,
-    ) -> ProviderResult<State> {
+    ) -> ProviderResult<ProviderResult<ReadOutcome>> {
+        let applied_identifier = bucket;
+        let bucket = bucket.as_str();
         let status_str = require_enum_attr(resource, schema, "status")?;
         let status = BucketVersioningStatus::from(status_str.as_str());
 
@@ -128,7 +143,7 @@ impl AwsProvider {
                 .for_resource(id.clone())
             })?;
 
-        self.read_s3_bucket_versioning(id, Some(bucket)).await
+        Ok(self.read_s3_bucket_versioning(id, applied_identifier).await)
     }
 
     /// "Delete" an S3 BucketVersioning by suspending it.
@@ -140,8 +155,9 @@ impl AwsProvider {
     pub(crate) async fn delete_s3_bucket_versioning_suspend(
         &self,
         id: ResourceId,
-        identifier: &str,
+        identifier: &AppliedIdentifier,
     ) -> ProviderResult<()> {
+        let identifier = identifier.as_str();
         delete_s3_bucket_versioning_suspend_with(id, identifier, || {
             let client = &self.s3_client;
             async move {

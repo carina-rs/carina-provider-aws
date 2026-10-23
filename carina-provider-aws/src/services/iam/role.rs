@@ -1,6 +1,7 @@
 use indexmap::IndexMap;
 use std::collections::HashMap;
 
+use carina_core::provider::{AppliedIdentifier, CreateOutcome, ReadOutcome};
 use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
 
@@ -13,11 +14,10 @@ impl AwsProvider {
     pub(crate) async fn read_iam_role(
         &self,
         id: &ResourceId,
-        identifier: Option<&str>,
-    ) -> ProviderResult<State> {
-        let Some(identifier) = identifier else {
-            return Ok(State::not_found(id.clone()));
-        };
+        identifier: &AppliedIdentifier,
+    ) -> ProviderResult<ReadOutcome> {
+        let applied_identifier = identifier;
+        let identifier = identifier.as_str();
 
         let result = self
             .iam_client
@@ -31,7 +31,8 @@ impl AwsProvider {
                 if let Some(role) = output.role() {
                     let mut attributes = HashMap::new();
 
-                    let identifier_value = Self::extract_iam_role_attributes(role, &mut attributes);
+                    let _identifier_value =
+                        Self::extract_iam_role_attributes(role, &mut attributes);
 
                     // Extract tags
                     let tags = role.tags();
@@ -53,14 +54,13 @@ impl AwsProvider {
                         }
                     }
 
-                    let state = State::existing(id.clone(), attributes);
-                    Ok(if let Some(id_val) = identifier_value {
-                        state.with_identifier(id_val)
-                    } else {
-                        state
-                    })
+                    Ok(crate::helpers::found_read(
+                        id,
+                        applied_identifier,
+                        attributes,
+                    ))
                 } else {
-                    Ok(State::not_found(id.clone()))
+                    Ok(ReadOutcome::not_found(id.clone()))
                 }
             }
             Err(e) => {
@@ -68,7 +68,7 @@ impl AwsProvider {
                 if let Some(service_err) = e.as_service_error()
                     && service_err.is_no_such_entity_exception()
                 {
-                    return Ok(State::not_found(id.clone()));
+                    return Ok(ReadOutcome::not_found(id.clone()));
                 }
                 Err(
                     api_error_with_meta("Failed to get IAM role", "iam.GetRole", e)
@@ -79,7 +79,10 @@ impl AwsProvider {
     }
 
     /// Create an IAM Role
-    pub(crate) async fn create_iam_role(&self, resource: &Resource) -> ProviderResult<State> {
+    pub(crate) async fn create_iam_role(
+        &self,
+        resource: &Resource,
+    ) -> ProviderResult<CreateOutcome> {
         let role_name = require_string_attr(resource, "role_name")?;
 
         let assume_role_policy_document =
@@ -128,23 +131,31 @@ impl AwsProvider {
                 .for_resource(resource.id.clone())
         })?;
 
-        self.read_iam_role(&resource.id, Some(&role_name)).await
+        let identifier =
+            crate::helpers::applied_identifier(&resource.id, "iam.CreateRole", role_name)?;
+        let outcome = self.read_iam_role(&resource.id, &identifier).await;
+        Ok(self.create_outcome_from_read(
+            &resource.id,
+            identifier,
+            resource.resolved_attributes(),
+            outcome,
+        ))
     }
 
     /// Update an IAM Role
     pub(crate) async fn update_iam_role(
         &self,
         id: ResourceId,
-        identifier: &str,
+        identifier: &AppliedIdentifier,
         from: &State,
         to: Resource,
-    ) -> ProviderResult<State> {
+    ) -> ProviderResult<ProviderResult<ReadOutcome>> {
         // Update assume role policy document
         if to.get_attr("assume_role_policy_document").is_some() {
             let policy_doc = resolve_iam_policy_attr(&to, "assume_role_policy_document")?;
             self.iam_client
                 .update_assume_role_policy()
-                .role_name(identifier)
+                .role_name(identifier.as_str())
                 .policy_document(&policy_doc)
                 .send()
                 .await
@@ -160,7 +171,7 @@ impl AwsProvider {
 
         // Update description and max_session_duration via update_role
         let mut needs_update = false;
-        let mut req = self.iam_client.update_role().role_name(identifier);
+        let mut req = self.iam_client.update_role().role_name(identifier.as_str());
 
         if let Some(Value::Concrete(ConcreteValue::String(desc))) = to.get_attr("description") {
             req = req.description(desc.expose_plaintext());
@@ -184,21 +195,22 @@ impl AwsProvider {
         // Update tags
         self.apply_iam_tags(
             &id,
-            identifier,
+            identifier.as_str(),
             &to.resolved_attributes(),
             Some(&from.attributes),
         )
         .await?;
 
-        self.read_iam_role(&id, Some(identifier)).await
+        Ok(self.read_iam_role(&id, identifier).await)
     }
 
     /// Delete an IAM Role
     pub(crate) async fn delete_iam_role(
         &self,
         id: ResourceId,
-        identifier: &str,
+        identifier: &AppliedIdentifier,
     ) -> ProviderResult<()> {
+        let identifier = identifier.as_str();
         self.iam_client
             .delete_role()
             .role_name(identifier)
