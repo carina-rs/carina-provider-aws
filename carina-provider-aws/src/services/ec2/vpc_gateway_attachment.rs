@@ -1,7 +1,8 @@
 use std::collections::HashMap;
 
+use carina_core::provider::{AppliedIdentifier, CreateOutcome, ReadOutcome};
 use carina_core::provider::{ProviderError, ProviderResult};
-use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
+use carina_core::resource::{ConcreteValue, Resource, ResourceId, Value};
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
@@ -14,27 +15,26 @@ impl AwsProvider {
     pub(crate) async fn read_ec2_vpc_gateway_attachment(
         &self,
         id: &ResourceId,
-        identifier: Option<&str>,
-    ) -> ProviderResult<State> {
-        let Some(identifier) = identifier else {
-            return Ok(State::not_found(id.clone()));
-        };
+        identifier: &AppliedIdentifier,
+    ) -> ProviderResult<ReadOutcome> {
+        let applied_identifier = identifier;
+        let identifier = identifier.as_str();
 
         // Parse composite identifier: vpc_id|gateway_id
         let Some((vpc_id, gateway_id)) = identifier.split_once('|') else {
-            return Ok(State::not_found(id.clone()));
+            return Ok(ReadOutcome::not_found(id.clone()));
         };
 
         if gateway_id.starts_with("igw-") {
             // Internet Gateway attachment
-            self.read_igw_attachment(id, vpc_id, gateway_id, identifier)
+            self.read_igw_attachment(id, vpc_id, gateway_id, applied_identifier)
                 .await
         } else if gateway_id.starts_with("vgw-") {
             // VPN Gateway attachment
-            self.read_vgw_attachment(id, vpc_id, gateway_id, identifier)
+            self.read_vgw_attachment(id, vpc_id, gateway_id, applied_identifier)
                 .await
         } else {
-            Ok(State::not_found(id.clone()))
+            Ok(ReadOutcome::not_found(id.clone()))
         }
     }
 
@@ -43,8 +43,8 @@ impl AwsProvider {
         id: &ResourceId,
         vpc_id: &str,
         igw_id: &str,
-        composite: &str,
-    ) -> ProviderResult<State> {
+        identifier: &AppliedIdentifier,
+    ) -> ProviderResult<ReadOutcome> {
         use aws_sdk_ec2::types::Filter;
 
         let filter = Filter::builder()
@@ -81,13 +81,12 @@ impl AwsProvider {
                         Value::Concrete(ConcreteValue::String(igw_id.to_string().into())),
                     );
 
-                    return Ok(State::existing(id.clone(), attributes)
-                        .with_identifier(composite.to_string()));
+                    return Ok(crate::helpers::found_read(id, identifier, attributes));
                 }
             }
         }
 
-        Ok(State::not_found(id.clone()))
+        Ok(ReadOutcome::not_found(id.clone()))
     }
 
     async fn read_vgw_attachment(
@@ -95,8 +94,8 @@ impl AwsProvider {
         id: &ResourceId,
         vpc_id: &str,
         vgw_id: &str,
-        composite: &str,
-    ) -> ProviderResult<State> {
+        identifier: &AppliedIdentifier,
+    ) -> ProviderResult<ReadOutcome> {
         use aws_sdk_ec2::types::Filter;
 
         let filter = Filter::builder()
@@ -134,21 +133,20 @@ impl AwsProvider {
                             Value::Concrete(ConcreteValue::String(vgw_id.to_string().into())),
                         );
 
-                        return Ok(State::existing(id.clone(), attributes)
-                            .with_identifier(composite.to_string()));
+                        return Ok(crate::helpers::found_read(id, identifier, attributes));
                     }
                 }
             }
         }
 
-        Ok(State::not_found(id.clone()))
+        Ok(ReadOutcome::not_found(id.clone()))
     }
 
     /// Create an EC2 VPC Gateway Attachment
     pub(crate) async fn create_ec2_vpc_gateway_attachment(
         &self,
         resource: &Resource,
-    ) -> ProviderResult<State> {
+    ) -> ProviderResult<CreateOutcome> {
         let vpc_id = require_string_attr(resource, "vpc_id")?;
 
         if let Some(Value::Concrete(ConcreteValue::String(igw_id))) =
@@ -171,8 +169,20 @@ impl AwsProvider {
                 })?;
 
             let composite = format!("{}|{}", vpc_id, igw_id.expose_plaintext());
-            self.read_ec2_vpc_gateway_attachment(&resource.id, Some(&composite))
-                .await
+            let identifier = crate::helpers::applied_identifier(
+                &resource.id,
+                "ec2.AttachInternetGateway",
+                composite,
+            )?;
+            let outcome = self
+                .read_ec2_vpc_gateway_attachment(&resource.id, &identifier)
+                .await;
+            Ok(self.create_outcome_from_read(
+                &resource.id,
+                identifier,
+                resource.resolved_attributes(),
+                outcome,
+            ))
         } else if let Some(Value::Concrete(ConcreteValue::String(vgw_id))) =
             resource.get_attr("vpn_gateway_id")
         {
@@ -189,8 +199,20 @@ impl AwsProvider {
                 })?;
 
             let composite = format!("{}|{}", vpc_id, vgw_id.expose_plaintext());
-            self.read_ec2_vpc_gateway_attachment(&resource.id, Some(&composite))
-                .await
+            let identifier = crate::helpers::applied_identifier(
+                &resource.id,
+                "ec2.AttachVpnGateway",
+                composite,
+            )?;
+            let outcome = self
+                .read_ec2_vpc_gateway_attachment(&resource.id, &identifier)
+                .await;
+            Ok(self.create_outcome_from_read(
+                &resource.id,
+                identifier,
+                resource.resolved_attributes(),
+                outcome,
+            ))
         } else {
             Err(ProviderError::invalid_input(
                 "Either internet_gateway_id or vpn_gateway_id is required",
@@ -203,20 +225,20 @@ impl AwsProvider {
     pub(crate) async fn update_ec2_vpc_gateway_attachment(
         &self,
         id: ResourceId,
-        identifier: &str,
-    ) -> ProviderResult<State> {
+        identifier: &AppliedIdentifier,
+    ) -> ProviderResult<ProviderResult<ReadOutcome>> {
         // VPC Gateway Attachment attributes are all create_only,
         // so updates should not occur. Read back the current state.
-        self.read_ec2_vpc_gateway_attachment(&id, Some(identifier))
-            .await
+        Ok(self.read_ec2_vpc_gateway_attachment(&id, identifier).await)
     }
 
     /// Delete an EC2 VPC Gateway Attachment
     pub(crate) async fn delete_ec2_vpc_gateway_attachment(
         &self,
         id: ResourceId,
-        identifier: &str,
+        identifier: &AppliedIdentifier,
     ) -> ProviderResult<()> {
+        let identifier = identifier.as_str();
         let Some((vpc_id, gateway_id)) = identifier.split_once('|') else {
             return Err(ProviderError::invalid_input(format!(
                 "Invalid gateway attachment identifier: {}",

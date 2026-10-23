@@ -1,8 +1,9 @@
 use indexmap::IndexMap;
 use std::collections::HashMap;
 
+use carina_core::provider::{AppliedIdentifier, CreateOutcome, ReadOutcome};
 use carina_core::provider::{ProviderError, ProviderResult};
-use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
+use carina_core::resource::{ConcreteValue, Resource, ResourceId, Value};
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
@@ -13,13 +14,12 @@ impl AwsProvider {
     pub(crate) async fn read_ec2_route_table(
         &self,
         id: &ResourceId,
-        identifier: Option<&str>,
-    ) -> ProviderResult<State> {
+        identifier: &AppliedIdentifier,
+    ) -> ProviderResult<ReadOutcome> {
         use aws_sdk_ec2::types::Filter;
 
-        let Some(identifier) = identifier else {
-            return Ok(State::not_found(id.clone()));
-        };
+        let applied_identifier = identifier;
+        let identifier = identifier.as_str();
 
         let filter = Filter::builder()
             .name("route-table-id")
@@ -45,7 +45,7 @@ impl AwsProvider {
             let mut attributes = HashMap::new();
 
             // Auto-generated attribute extraction
-            let identifier_value = Self::extract_ec2_route_table_attributes(rt, &mut attributes);
+            let _identifier_value = Self::extract_ec2_route_table_attributes(rt, &mut attributes);
 
             // Convert routes to list (complex nested structure)
             let mut routes_list = Vec::new();
@@ -79,14 +79,13 @@ impl AwsProvider {
                 attributes.insert("tags".to_string(), tags_value);
             }
 
-            let state = State::existing(id.clone(), attributes);
-            Ok(if let Some(id_val) = identifier_value {
-                state.with_identifier(id_val)
-            } else {
-                state
-            })
+            Ok(crate::helpers::found_read(
+                id,
+                applied_identifier,
+                attributes,
+            ))
         } else {
-            Ok(State::not_found(id.clone()))
+            Ok(ReadOutcome::not_found(id.clone()))
         }
     }
 
@@ -94,7 +93,7 @@ impl AwsProvider {
     pub(crate) async fn create_ec2_route_table(
         &self,
         resource: &Resource,
-    ) -> ProviderResult<State> {
+    ) -> ProviderResult<CreateOutcome> {
         let vpc_id = require_string_attr(resource, "vpc_id")?;
 
         // Create Route Table
@@ -158,6 +157,14 @@ impl AwsProvider {
         }
 
         // Read back using route table ID (reliable identifier)
-        self.read_ec2_route_table(&resource.id, Some(rt_id)).await
+        let identifier =
+            crate::helpers::applied_identifier(&resource.id, "ec2.CreateRouteTable", rt_id)?;
+        let outcome = self.read_ec2_route_table(&resource.id, &identifier).await;
+        Ok(self.create_outcome_from_read(
+            &resource.id,
+            identifier,
+            resource.resolved_attributes(),
+            outcome,
+        ))
     }
 }

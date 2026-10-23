@@ -5,9 +5,9 @@ use std::time::Duration;
 
 use carina_core::effect::PlanOp;
 use carina_core::provider::{
-    BoxFuture, CreateOutcome, CreateRequest, DeleteRequest, Provider, ProviderError,
-    ProviderReadyDataSource, ProviderResult, ReadRequest, UpdateOutcome, UpdatePatch,
-    UpdateRequest,
+    AppliedIdentifier, AppliedState, BoxFuture, CreateOutcome, CreateRequest, DeleteRequest,
+    Provider, ProviderError, ProviderReadyDataSource, ProviderResult, ReadOutcome, ReadRequest,
+    UpdateOutcome, UpdatePatch, UpdateRequest,
 };
 use carina_core::resource::{DataSource, Resource, ResourceId, State};
 use carina_provider_protocol::{
@@ -24,19 +24,33 @@ const POLL_AFTER_SECS: u32 = 5;
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "phase", rename_all = "snake_case")]
 pub enum AwsCreateToken {
-    NatGateway { nat_gateway_id: String },
-    TransitGateway { transit_gateway_id: String },
-    TransitGatewayAttachment { attachment_id: String },
-    OrganizationsAccount { create_account_request_id: String },
+    NatGateway {
+        nat_gateway_id: AppliedIdentifier,
+    },
+    TransitGateway {
+        transit_gateway_id: AppliedIdentifier,
+    },
+    TransitGatewayAttachment {
+        attachment_id: AppliedIdentifier,
+    },
+    OrganizationsAccount {
+        create_account_request_id: String,
+    },
 }
 
 /// Continuation phases for AWS delete operations that wait on cloud state.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "phase", rename_all = "snake_case")]
 pub enum AwsDeleteToken {
-    NatGateway { nat_gateway_id: String },
-    TransitGateway { transit_gateway_id: String },
-    TransitGatewayAttachment { attachment_id: String },
+    NatGateway {
+        nat_gateway_id: AppliedIdentifier,
+    },
+    TransitGateway {
+        transit_gateway_id: AppliedIdentifier,
+    },
+    TransitGatewayAttachment {
+        attachment_id: AppliedIdentifier,
+    },
 }
 
 pub type AwsCreateStep = OperationStep<CreateOutcome, AwsCreateToken>;
@@ -49,8 +63,8 @@ fn create_pending(token: AwsCreateToken) -> AwsCreateStep {
     }
 }
 
-fn create_done(state: State) -> AwsCreateStep {
-    OperationStep::Done(CreateOutcome::Success { state })
+fn create_done(outcome: CreateOutcome) -> AwsCreateStep {
+    OperationStep::Done(outcome)
 }
 
 fn delete_pending(token: AwsDeleteToken) -> AwsDeleteStep {
@@ -101,6 +115,60 @@ impl AwsProvider {
         self.resource_schema(resource_type)
             .and_then(|schema| schema.operation_config.as_ref())
             .map_or(DEFAULT_OPERATION_BUDGET, |config| config.budget(kind))
+    }
+
+    fn read_back_diagnostic(
+        &self,
+        id: &ResourceId,
+        reason: impl Into<String>,
+    ) -> (String, Vec<String>) {
+        let mut missing_attributes = self
+            .resource_schema(id.resource_type.as_str())
+            .map(|schema| schema.attributes.keys().cloned().collect::<Vec<_>>())
+            .unwrap_or_default();
+        missing_attributes.sort();
+        if missing_attributes.is_empty() {
+            missing_attributes.push("state".to_string());
+        }
+        (reason.into(), missing_attributes)
+    }
+
+    pub(crate) fn create_outcome_from_read(
+        &self,
+        id: &ResourceId,
+        identifier: AppliedIdentifier,
+        attributes: std::collections::HashMap<String, carina_core::resource::Value>,
+        outcome: ProviderResult<ReadOutcome>,
+    ) -> CreateOutcome {
+        let reason = match outcome {
+            Ok(ReadOutcome::Found { state }) => return CreateOutcome::Success { state },
+            Ok(ReadOutcome::NotFound { .. }) => {
+                "post-create read-back did not find the created resource".to_string()
+            }
+            Err(error) => format!("post-create read-back failed: {error}"),
+        };
+        let state = AppliedState::from_identifier(id.clone(), identifier, attributes);
+        let (reason, missing_attributes) = self.read_back_diagnostic(id, reason);
+        CreateOutcome::partial_success(state, reason, missing_attributes)
+    }
+
+    fn update_outcome_from_read(
+        &self,
+        id: &ResourceId,
+        identifier: AppliedIdentifier,
+        attributes: std::collections::HashMap<String, carina_core::resource::Value>,
+        outcome: ProviderResult<ReadOutcome>,
+    ) -> UpdateOutcome {
+        let reason = match outcome {
+            Ok(ReadOutcome::Found { state }) => return UpdateOutcome::Success { state },
+            Ok(ReadOutcome::NotFound { .. }) => {
+                "post-update read-back did not find the updated resource".to_string()
+            }
+            Err(error) => format!("post-update read-back failed: {error}"),
+        };
+        let state = AppliedState::from_identifier(id.clone(), identifier, attributes);
+        let (reason, missing_attributes) = self.read_back_diagnostic(id, reason);
+        UpdateOutcome::partial_success(state, reason, missing_attributes)
     }
 
     /// Perform the initial, non-blocking create step.
@@ -285,13 +353,18 @@ impl AwsProvider {
         match token {
             AwsCreateToken::NatGateway { nat_gateway_id } => {
                 match self
-                    .poll_ec2_nat_gateway_create(id, &nat_gateway_id)
+                    .poll_ec2_nat_gateway_create(id, nat_gateway_id.as_str())
                     .await?
                 {
-                    CreatePoll::Ready(()) => self
-                        .read_ec2_nat_gateway(id, Some(&nat_gateway_id))
-                        .await
-                        .map(create_done),
+                    CreatePoll::Ready(()) => {
+                        let outcome = self.read_ec2_nat_gateway(id, &nat_gateway_id).await;
+                        Ok(create_done(self.create_outcome_from_read(
+                            id,
+                            nat_gateway_id,
+                            resource.resolved_attributes(),
+                            outcome,
+                        )))
+                    }
                     CreatePoll::Failed => {
                         Err(ProviderError::api_error("NAT gateway creation failed")
                             .for_resource(id.clone()))
@@ -303,13 +376,18 @@ impl AwsProvider {
             }
             AwsCreateToken::TransitGateway { transit_gateway_id } => {
                 match self
-                    .poll_ec2_transit_gateway_create(id, &transit_gateway_id)
+                    .poll_ec2_transit_gateway_create(id, transit_gateway_id.as_str())
                     .await?
                 {
-                    CreatePoll::Ready(()) => self
-                        .read_ec2_transit_gateway(id, Some(&transit_gateway_id))
-                        .await
-                        .map(create_done),
+                    CreatePoll::Ready(()) => {
+                        let outcome = self.read_ec2_transit_gateway(id, &transit_gateway_id).await;
+                        Ok(create_done(self.create_outcome_from_read(
+                            id,
+                            transit_gateway_id,
+                            resource.resolved_attributes(),
+                            outcome,
+                        )))
+                    }
                     CreatePoll::Failed => {
                         Err(ProviderError::api_error("Transit gateway creation failed")
                             .for_resource(id.clone()))
@@ -321,13 +399,20 @@ impl AwsProvider {
             }
             AwsCreateToken::TransitGatewayAttachment { attachment_id } => {
                 match self
-                    .poll_ec2_transit_gateway_attachment_create(id, &attachment_id)
+                    .poll_ec2_transit_gateway_attachment_create(id, attachment_id.as_str())
                     .await?
                 {
-                    CreatePoll::Ready(()) => self
-                        .read_ec2_transit_gateway_attachment(id, Some(&attachment_id))
-                        .await
-                        .map(create_done),
+                    CreatePoll::Ready(()) => {
+                        let outcome = self
+                            .read_ec2_transit_gateway_attachment(id, &attachment_id)
+                            .await;
+                        Ok(create_done(self.create_outcome_from_read(
+                            id,
+                            attachment_id,
+                            resource.resolved_attributes(),
+                            outcome,
+                        )))
+                    }
                     CreatePoll::Failed => Err(ProviderError::api_error(
                         "Transit gateway attachment creation failed",
                     )
@@ -394,7 +479,7 @@ impl AwsProvider {
     pub async fn update_with_patch(
         &self,
         id: &ResourceId,
-        identifier: &str,
+        identifier: &AppliedIdentifier,
         from: &State,
         patch: &UpdatePatch,
     ) -> ProviderResult<UpdateOutcome> {
@@ -406,13 +491,15 @@ impl AwsProvider {
         // Future per-resource updates can consume `patch` directly for
         // partial-update API paths once those are wired in.
         let to = apply_patch_to_state(from, patch);
+        let partial_attributes = to.resolved_attributes();
+        let outcome_id = id.clone();
         let schema = self
             .resource_schema(id.resource_type.as_str())
             .ok_or_else(|| {
                 ProviderError::internal(format!("Unknown resource schema: {}", id.resource_type))
                     .for_resource(id.clone())
             })?;
-        let state = match id.resource_type.as_str() {
+        let read_back = match id.resource_type.as_str() {
             "s3.Bucket" => self.update_s3_bucket(id, identifier, from, to).await,
             "s3.BucketPolicy" => self.update_s3_bucket_policy(id, identifier, from, to).await,
             "s3.BucketPublicAccessBlock" => {
@@ -534,8 +621,7 @@ impl AwsProvider {
             }
             "organizations.Organization" => {
                 // All attributes are read-only or create-only; read back current state.
-                self.read_organizations_organization(&id, Some(identifier))
-                    .await
+                Ok(self.read_organizations_organization(&id, identifier).await)
             }
             "iam.Role" => self.update_iam_role(id, identifier, from, to).await,
             "logs.LogGroup" => {
@@ -560,21 +646,26 @@ impl AwsProvider {
             ))
             .for_resource(id.clone())),
         }?;
-        Ok(UpdateOutcome::Success { state })
+        Ok(self.update_outcome_from_read(
+            &outcome_id,
+            identifier.clone(),
+            partial_attributes,
+            read_back,
+        ))
     }
 
     /// Perform the initial, non-blocking delete step.
     pub async fn delete_step(
         &self,
         id: &ResourceId,
-        identifier: &str,
+        identifier: &AppliedIdentifier,
         request: &DeleteRequest,
     ) -> ProviderResult<AwsDeleteStep> {
         let id = id.clone();
         match id.resource_type.as_str() {
             "ec2.NatGateway" => self.delete_ec2_nat_gateway(id, identifier).await.map(|()| {
                 delete_pending(AwsDeleteToken::NatGateway {
-                    nat_gateway_id: identifier.to_string(),
+                    nat_gateway_id: identifier.clone(),
                 })
             }),
             "ec2.TransitGateway" => {
@@ -582,7 +673,7 @@ impl AwsProvider {
                     .await
                     .map(|()| {
                         delete_pending(AwsDeleteToken::TransitGateway {
-                            transit_gateway_id: identifier.to_string(),
+                            transit_gateway_id: identifier.clone(),
                         })
                     })
             }
@@ -591,7 +682,7 @@ impl AwsProvider {
                 .await
                 .map(|()| {
                     delete_pending(AwsDeleteToken::TransitGatewayAttachment {
-                        attachment_id: identifier.to_string(),
+                        attachment_id: identifier.clone(),
                     })
                 }),
             "s3.Bucket" => self
@@ -744,7 +835,7 @@ impl AwsProvider {
         match token {
             AwsDeleteToken::NatGateway { nat_gateway_id } => {
                 match self
-                    .poll_ec2_nat_gateway_delete(id, &nat_gateway_id)
+                    .poll_ec2_nat_gateway_delete(id, nat_gateway_id.as_str())
                     .await?
                 {
                     DeletePoll::Gone => Ok(OperationStep::Done(())),
@@ -755,7 +846,7 @@ impl AwsProvider {
             }
             AwsDeleteToken::TransitGateway { transit_gateway_id } => {
                 match self
-                    .poll_ec2_transit_gateway_delete(id, &transit_gateway_id)
+                    .poll_ec2_transit_gateway_delete(id, transit_gateway_id.as_str())
                     .await?
                 {
                     DeletePoll::Gone => Ok(OperationStep::Done(())),
@@ -766,7 +857,7 @@ impl AwsProvider {
             }
             AwsDeleteToken::TransitGatewayAttachment { attachment_id } => {
                 match self
-                    .poll_ec2_transit_gateway_attachment_delete(id, &attachment_id)
+                    .poll_ec2_transit_gateway_attachment_delete(id, attachment_id.as_str())
                     .await?
                 {
                     DeletePoll::Gone => Ok(OperationStep::Done(())),
@@ -793,128 +884,99 @@ impl Provider for AwsProvider {
     fn read(
         &self,
         id: &ResourceId,
-        identifier: Option<&str>,
+        identifier: &AppliedIdentifier,
         _request: ReadRequest,
-    ) -> BoxFuture<'_, ProviderResult<State>> {
+    ) -> BoxFuture<'_, ProviderResult<ReadOutcome>> {
         let id = id.clone();
-        let identifier = identifier.map(|s| s.to_string());
+        let identifier = identifier.clone();
         Box::pin(async move {
             let state = match id.resource_type.as_str() {
-                "s3.Bucket" => self.read_s3_bucket(&id, identifier.as_deref()).await,
-                "s3.BucketPolicy" => self.read_s3_bucket_policy(&id, identifier.as_deref()).await,
+                "s3.Bucket" => self.read_s3_bucket(&id, &identifier).await,
+                "s3.BucketPolicy" => self.read_s3_bucket_policy(&id, &identifier).await,
                 "s3.BucketPublicAccessBlock" => {
-                    self.read_s3_bucket_public_access_block(&id, identifier.as_deref())
+                    self.read_s3_bucket_public_access_block(&id, &identifier)
                         .await
                 }
-                "s3.BucketVersioning" => {
-                    self.read_s3_bucket_versioning(&id, identifier.as_deref())
-                        .await
-                }
+                "s3.BucketVersioning" => self.read_s3_bucket_versioning(&id, &identifier).await,
                 "s3.BucketObjectLockConfiguration" => {
-                    self.read_s3_bucket_object_lock_configuration(&id, identifier.as_deref())
+                    self.read_s3_bucket_object_lock_configuration(&id, &identifier)
                         .await
                 }
                 "s3.BucketServerSideEncryptionConfiguration" => {
-                    self.read_s3_bucket_server_side_encryption_configuration(
-                        &id,
-                        identifier.as_deref(),
-                    )
-                    .await
+                    self.read_s3_bucket_server_side_encryption_configuration(&id, &identifier)
+                        .await
                 }
-                "s3.BucketAcl" => self.read_s3_bucket_acl(&id, identifier.as_deref()).await,
+                "s3.BucketAcl" => self.read_s3_bucket_acl(&id, &identifier).await,
                 "s3.BucketOwnershipControls" => {
-                    self.read_s3_bucket_ownership_controls(&id, identifier.as_deref())
+                    self.read_s3_bucket_ownership_controls(&id, &identifier)
                         .await
                 }
                 "s3.BucketReplicationConfiguration" => {
-                    self.read_s3_bucket_replication_configuration(&id, identifier.as_deref())
+                    self.read_s3_bucket_replication_configuration(&id, &identifier)
                         .await
                 }
                 "s3.BucketLifecycleConfiguration" => {
-                    self.read_s3_bucket_lifecycle_configuration(&id, identifier.as_deref())
+                    self.read_s3_bucket_lifecycle_configuration(&id, &identifier)
                         .await
                 }
                 "s3.BucketWebsiteConfiguration" => {
-                    self.read_s3_bucket_website_configuration(&id, identifier.as_deref())
+                    self.read_s3_bucket_website_configuration(&id, &identifier)
                         .await
                 }
                 "s3.BucketCorsConfiguration" => {
-                    self.read_s3_bucket_cors_configuration(&id, identifier.as_deref())
+                    self.read_s3_bucket_cors_configuration(&id, &identifier)
                         .await
                 }
                 "s3.BucketNotificationConfiguration" => {
-                    self.read_s3_bucket_notification_configuration(&id, identifier.as_deref())
+                    self.read_s3_bucket_notification_configuration(&id, &identifier)
                         .await
                 }
-                "s3.BucketLogging" => {
-                    self.read_s3_bucket_logging(&id, identifier.as_deref())
-                        .await
-                }
-                "ec2.Eip" => self.read_ec2_eip(&id, identifier.as_deref()).await,
-                "ec2.Vpc" => self.read_ec2_vpc(&id, identifier.as_deref()).await,
-                "ec2.Subnet" => self.read_ec2_subnet(&id, identifier.as_deref()).await,
-                "ec2.InternetGateway" => {
-                    self.read_ec2_internet_gateway(&id, identifier.as_deref())
-                        .await
-                }
-                "ec2.NatGateway" => self.read_ec2_nat_gateway(&id, identifier.as_deref()).await,
-                "ec2.RouteTable" => self.read_ec2_route_table(&id, identifier.as_deref()).await,
-                "ec2.Route" => self.read_ec2_route(&id, identifier.as_deref()).await,
-                "ec2.SecurityGroup" => {
-                    self.read_ec2_security_group(&id, identifier.as_deref())
-                        .await
-                }
+                "s3.BucketLogging" => self.read_s3_bucket_logging(&id, &identifier).await,
+                "ec2.Eip" => self.read_ec2_eip(&id, &identifier).await,
+                "ec2.Vpc" => self.read_ec2_vpc(&id, &identifier).await,
+                "ec2.Subnet" => self.read_ec2_subnet(&id, &identifier).await,
+                "ec2.InternetGateway" => self.read_ec2_internet_gateway(&id, &identifier).await,
+                "ec2.NatGateway" => self.read_ec2_nat_gateway(&id, &identifier).await,
+                "ec2.RouteTable" => self.read_ec2_route_table(&id, &identifier).await,
+                "ec2.Route" => self.read_ec2_route(&id, &identifier).await,
+                "ec2.SecurityGroup" => self.read_ec2_security_group(&id, &identifier).await,
                 "ec2.SecurityGroupIngress" => {
-                    self.read_ec2_security_group_ingress(&id, identifier.as_deref())
-                        .await
+                    self.read_ec2_security_group_ingress(&id, &identifier).await
                 }
                 "ec2.SecurityGroupEgress" => {
-                    self.read_ec2_security_group_egress(&id, identifier.as_deref())
-                        .await
+                    self.read_ec2_security_group_egress(&id, &identifier).await
                 }
                 "ec2.SubnetRouteTableAssociation" => {
-                    self.read_ec2_subnet_route_table_association(&id, identifier.as_deref())
+                    self.read_ec2_subnet_route_table_association(&id, &identifier)
                         .await
                 }
-                "ec2.FlowLog" => self.read_ec2_flow_log(&id, identifier.as_deref()).await,
-                "ec2.VpcEndpoint" => self.read_ec2_vpc_endpoint(&id, identifier.as_deref()).await,
+                "ec2.FlowLog" => self.read_ec2_flow_log(&id, &identifier).await,
+                "ec2.VpcEndpoint" => self.read_ec2_vpc_endpoint(&id, &identifier).await,
                 "ec2.VpcGatewayAttachment" => {
-                    self.read_ec2_vpc_gateway_attachment(&id, identifier.as_deref())
-                        .await
+                    self.read_ec2_vpc_gateway_attachment(&id, &identifier).await
                 }
-                "ec2.VpnGateway" => self.read_ec2_vpn_gateway(&id, identifier.as_deref()).await,
-                "ec2.TransitGateway" => {
-                    self.read_ec2_transit_gateway(&id, identifier.as_deref())
-                        .await
-                }
+                "ec2.VpnGateway" => self.read_ec2_vpn_gateway(&id, &identifier).await,
+                "ec2.TransitGateway" => self.read_ec2_transit_gateway(&id, &identifier).await,
                 "ec2.TransitGatewayAttachment" => {
-                    self.read_ec2_transit_gateway_attachment(&id, identifier.as_deref())
+                    self.read_ec2_transit_gateway_attachment(&id, &identifier)
                         .await
                 }
                 "ec2.VpcPeeringConnection" => {
-                    self.read_ec2_vpc_peering_connection(&id, identifier.as_deref())
-                        .await
+                    self.read_ec2_vpc_peering_connection(&id, &identifier).await
                 }
                 "ec2.EgressOnlyInternetGateway" => {
-                    self.read_ec2_egress_only_internet_gateway(&id, identifier.as_deref())
+                    self.read_ec2_egress_only_internet_gateway(&id, &identifier)
                         .await
                 }
-                "organizations.Account" => {
-                    self.read_organizations_account(&id, identifier.as_deref())
-                        .await
-                }
+                "organizations.Account" => self.read_organizations_account(&id, &identifier).await,
                 "organizations.Organization" => {
-                    self.read_organizations_organization(&id, identifier.as_deref())
-                        .await
+                    self.read_organizations_organization(&id, &identifier).await
                 }
-                "iam.Role" => self.read_iam_role(&id, identifier.as_deref()).await,
-                "logs.LogGroup" => self.read_logs_log_group(&id, identifier.as_deref()).await,
-                "route53.RecordSet" => {
-                    self.read_route53_record_set(&id, identifier.as_deref())
-                        .await
-                }
-                "acm.Certificate" => self.read_acm_certificate(&id, identifier.as_deref()).await,
-                "sqs.Queue" => self.read_sqs_queue(&id, identifier.as_deref()).await,
+                "iam.Role" => self.read_iam_role(&id, &identifier).await,
+                "logs.LogGroup" => self.read_logs_log_group(&id, &identifier).await,
+                "route53.RecordSet" => self.read_route53_record_set(&id, &identifier).await,
+                "acm.Certificate" => self.read_acm_certificate(&id, &identifier).await,
+                "sqs.Queue" => self.read_sqs_queue(&id, &identifier).await,
                 _ => Err(ProviderError::internal(format!(
                     "Unknown resource type: {}",
                     id.resource_type
@@ -945,11 +1007,11 @@ impl Provider for AwsProvider {
     fn update(
         &self,
         id: &ResourceId,
-        identifier: &str,
+        identifier: &AppliedIdentifier,
         request: UpdateRequest,
     ) -> BoxFuture<'_, ProviderResult<UpdateOutcome>> {
         let id = id.clone();
-        let identifier = identifier.to_string();
+        let identifier = identifier.clone();
         Box::pin(async move {
             self.update_with_patch(&id, &identifier, request.from(), request.patch())
                 .await
@@ -959,11 +1021,11 @@ impl Provider for AwsProvider {
     fn delete(
         &self,
         id: &ResourceId,
-        identifier: &str,
+        identifier: &AppliedIdentifier,
         request: DeleteRequest,
     ) -> BoxFuture<'_, ProviderResult<()>> {
         let id = id.clone();
-        let identifier = identifier.to_string();
+        let identifier = identifier.clone();
         Box::pin(async move {
             let budget = self.operation_budget(id.resource_type.as_str(), OperationKind::Delete);
             drive_operation(
@@ -981,6 +1043,7 @@ impl Provider for AwsProvider {
 
 #[cfg(test)]
 mod pending_operation_tests {
+    use std::collections::HashMap;
     use std::future::ready;
     use std::time::Duration;
 
@@ -988,17 +1051,21 @@ mod pending_operation_tests {
 
     use super::*;
 
+    fn identifier(value: &str) -> AppliedIdentifier {
+        AppliedIdentifier::new(value).expect("test identifier must be non-empty")
+    }
+
     #[test]
     fn pending_tokens_round_trip_without_resource_attributes() {
         let create_tokens = [
             AwsCreateToken::NatGateway {
-                nat_gateway_id: "nat-0123456789".to_string(),
+                nat_gateway_id: identifier("nat-0123456789"),
             },
             AwsCreateToken::TransitGateway {
-                transit_gateway_id: "tgw-0123456789".to_string(),
+                transit_gateway_id: identifier("tgw-0123456789"),
             },
             AwsCreateToken::TransitGatewayAttachment {
-                attachment_id: "tgw-attach-0123456789".to_string(),
+                attachment_id: identifier("tgw-attach-0123456789"),
             },
             AwsCreateToken::OrganizationsAccount {
                 create_account_request_id: "car-0123456789".to_string(),
@@ -1022,13 +1089,13 @@ mod pending_operation_tests {
 
         let delete_tokens = [
             AwsDeleteToken::NatGateway {
-                nat_gateway_id: "nat-0123456789".to_string(),
+                nat_gateway_id: identifier("nat-0123456789"),
             },
             AwsDeleteToken::TransitGateway {
-                transit_gateway_id: "tgw-0123456789".to_string(),
+                transit_gateway_id: identifier("tgw-0123456789"),
             },
             AwsDeleteToken::TransitGatewayAttachment {
-                attachment_id: "tgw-attach-0123456789".to_string(),
+                attachment_id: identifier("tgw-attach-0123456789"),
             },
         ];
         for token in delete_tokens {
@@ -1051,8 +1118,8 @@ mod pending_operation_tests {
     #[tokio::test]
     async fn drive_operation_returns_done_value_from_poll() {
         let id = ResourceId::with_provider_identity("aws", "ec2.NatGateway", "example", None);
-        let expected = State::existing(id.clone(), Default::default())
-            .with_identifier("nat-read-back".to_string());
+        let expected =
+            AppliedState::from_identifier(id.clone(), identifier("nat-read-back"), HashMap::new());
         let mut done = Some(CreateOutcome::Success {
             state: expected.clone(),
         });
@@ -1063,7 +1130,7 @@ mod pending_operation_tests {
             Duration::from_secs(30),
             ready(Ok(OperationStep::Pending {
                 pending: AwsCreateToken::NatGateway {
-                    nat_gateway_id: "nat-123".to_string(),
+                    nat_gateway_id: identifier("nat-123"),
                 },
                 poll_after_secs: 5,
             })),
@@ -1088,7 +1155,7 @@ mod pending_operation_tests {
             Duration::ZERO,
             ready(Ok(OperationStep::Pending {
                 pending: AwsCreateToken::NatGateway {
-                    nat_gateway_id: "nat-123".to_string(),
+                    nat_gateway_id: identifier("nat-123"),
                 },
                 poll_after_secs: 5,
             })),

@@ -2,6 +2,7 @@ use indexmap::IndexMap;
 use std::collections::HashMap;
 
 use carina_core::provider::ProviderResult;
+use carina_core::provider::{AppliedIdentifier, CreateOutcome, ReadOutcome};
 use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
 use carina_core::schema::ResourceSchema;
 
@@ -14,11 +15,10 @@ impl AwsProvider {
     pub(crate) async fn read_logs_log_group(
         &self,
         id: &ResourceId,
-        identifier: Option<&str>,
-    ) -> ProviderResult<State> {
-        let Some(identifier) = identifier else {
-            return Ok(State::not_found(id.clone()));
-        };
+        identifier: &AppliedIdentifier,
+    ) -> ProviderResult<ReadOutcome> {
+        let applied_identifier = identifier;
+        let identifier = identifier.as_str();
 
         let result = self
             .logs_client
@@ -105,10 +105,13 @@ impl AwsProvider {
                 }
             }
 
-            let state = State::existing(id.clone(), attributes);
-            Ok(state.with_identifier(identifier.to_string()))
+            Ok(crate::helpers::found_read(
+                id,
+                applied_identifier,
+                attributes,
+            ))
         } else {
-            Ok(State::not_found(id.clone()))
+            Ok(ReadOutcome::not_found(id.clone()))
         }
     }
 
@@ -117,7 +120,7 @@ impl AwsProvider {
         &self,
         resource: &Resource,
         schema: &ResourceSchema,
-    ) -> ProviderResult<State> {
+    ) -> ProviderResult<CreateOutcome> {
         let log_group_name = require_string_attr(resource, "log_group_name")?;
 
         let mut req = self
@@ -171,25 +174,35 @@ impl AwsProvider {
                 })?;
         }
 
-        self.read_logs_log_group(&resource.id, Some(&log_group_name))
-            .await
+        let identifier = crate::helpers::applied_identifier(
+            &resource.id,
+            "logs.CreateLogGroup",
+            log_group_name,
+        )?;
+        let outcome = self.read_logs_log_group(&resource.id, &identifier).await;
+        Ok(self.create_outcome_from_read(
+            &resource.id,
+            identifier,
+            resource.resolved_attributes(),
+            outcome,
+        ))
     }
 
     /// Update a CloudWatch Logs Log Group
     pub(crate) async fn update_logs_log_group(
         &self,
         id: ResourceId,
-        identifier: &str,
+        identifier: &AppliedIdentifier,
         from: &State,
         to: Resource,
         _schema: &ResourceSchema,
-    ) -> ProviderResult<State> {
+    ) -> ProviderResult<ProviderResult<ReadOutcome>> {
         // Update retention
         match to.get_attr("retention_in_days") {
             Some(Value::Concrete(ConcreteValue::Int(days))) => {
                 self.logs_client
                     .put_retention_policy()
-                    .log_group_name(identifier)
+                    .log_group_name(identifier.as_str())
                     .retention_in_days(*days as i32)
                     .send()
                     .await
@@ -206,7 +219,7 @@ impl AwsProvider {
                 // If retention was previously set but now removed, delete the policy
                 self.logs_client
                     .delete_retention_policy()
-                    .log_group_name(identifier)
+                    .log_group_name(identifier.as_str())
                     .send()
                     .await
                     .map_err(|e| {
@@ -225,7 +238,7 @@ impl AwsProvider {
         if let Some(Value::Concrete(ConcreteValue::String(kms_key))) = to.get_attr("kms_key_id") {
             self.logs_client
                 .associate_kms_key()
-                .log_group_name(identifier)
+                .log_group_name(identifier.as_str())
                 .kms_key_id(kms_key.expose_plaintext())
                 .send()
                 .await
@@ -236,7 +249,7 @@ impl AwsProvider {
         } else if from.attributes.contains_key("kms_key_id") {
             self.logs_client
                 .disassociate_kms_key()
-                .log_group_name(identifier)
+                .log_group_name(identifier.as_str())
                 .send()
                 .await
                 .map_err(|e| {
@@ -252,21 +265,22 @@ impl AwsProvider {
         // Update tags
         self.apply_logs_tags(
             &id,
-            identifier,
+            identifier.as_str(),
             &to.resolved_attributes(),
             Some(&from.attributes),
         )
         .await?;
 
-        self.read_logs_log_group(&id, Some(identifier)).await
+        Ok(self.read_logs_log_group(&id, identifier).await)
     }
 
     /// Delete a CloudWatch Logs Log Group
     pub(crate) async fn delete_logs_log_group(
         &self,
         id: ResourceId,
-        identifier: &str,
+        identifier: &AppliedIdentifier,
     ) -> ProviderResult<()> {
+        let identifier = identifier.as_str();
         self.logs_client
             .delete_log_group()
             .log_group_name(identifier)

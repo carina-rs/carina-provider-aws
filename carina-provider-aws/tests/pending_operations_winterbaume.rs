@@ -20,7 +20,9 @@ use aws_sdk_route53::Client as Route53Client;
 use aws_sdk_s3::Client as S3Client;
 use aws_sdk_sqs::Client as SqsClient;
 use aws_sdk_sts::Client as StsClient;
-use carina_core::provider::{CreateOutcome, CreateRequest, DeleteRequest, Provider};
+use carina_core::provider::{
+    AppliedIdentifier, AppliedState, CreateOutcome, CreateRequest, DeleteRequest, Provider,
+};
 use carina_core::resource::{ConcreteValue, Resource, ResourceId, Value};
 use carina_provider_aws::{AwsCreateToken, AwsDeleteToken, AwsNormalizer, AwsProvider};
 use carina_provider_protocol::OperationStep;
@@ -109,10 +111,16 @@ impl ScriptedEc2Service {
             "DescribeNatGateways" => {
                 self.describe_nat_gateways_calls
                     .fetch_add(1, Ordering::Relaxed);
-                MockResponse::xml(
-                    200,
-                    describe_nat_gateways_response(&self.next_describe_state()),
-                )
+                let state = self.next_describe_state();
+                if state == "read_error" {
+                    MockResponse::error(
+                        400,
+                        "InvalidParameterValue",
+                        "scripted NAT gateway read-back failure",
+                    )
+                } else {
+                    MockResponse::xml(200, describe_nat_gateways_response(&state))
+                }
             }
             "DeleteNatGateway" => {
                 self.delete_nat_gateway_calls
@@ -165,6 +173,14 @@ fn create_nat_gateway_response() -> String {
 }
 
 fn describe_nat_gateways_response(state: &str) -> String {
+    if state == "not_found" {
+        return r#"<?xml version="1.0" encoding="UTF-8"?>
+<DescribeNatGatewaysResponse xmlns="http://ec2.amazonaws.com/doc/2016-11-15/">
+  <requestId>00000000-0000-0000-0000-000000000002</requestId>
+  <natGatewaySet/>
+</DescribeNatGatewaysResponse>"#
+            .to_string();
+    }
     format!(
         r#"<?xml version="1.0" encoding="UTF-8"?>
 <DescribeNatGatewaysResponse xmlns="http://ec2.amazonaws.com/doc/2016-11-15/">
@@ -269,7 +285,7 @@ fn expect_create_pending(step: OperationStep<CreateOutcome, AwsCreateToken>) -> 
             assert_eq!(
                 pending,
                 AwsCreateToken::NatGateway {
-                    nat_gateway_id: NAT_GATEWAY_ID.to_string(),
+                    nat_gateway_id: applied_identifier(NAT_GATEWAY_ID),
                 }
             );
             pending
@@ -288,7 +304,7 @@ fn expect_delete_pending(step: OperationStep<(), AwsDeleteToken>) -> AwsDeleteTo
             assert_eq!(
                 pending,
                 AwsDeleteToken::NatGateway {
-                    nat_gateway_id: NAT_GATEWAY_ID.to_string(),
+                    nat_gateway_id: applied_identifier(NAT_GATEWAY_ID),
                 }
             );
             pending
@@ -297,9 +313,12 @@ fn expect_delete_pending(step: OperationStep<(), AwsDeleteToken>) -> AwsDeleteTo
     }
 }
 
-fn assert_nat_gateway_state_identifier(state: &carina_core::resource::State) {
-    assert!(state.exists);
-    assert_eq!(state.identifier.as_deref(), Some(NAT_GATEWAY_ID));
+fn applied_identifier(value: &str) -> AppliedIdentifier {
+    AppliedIdentifier::new(value).expect("test provider identifier must be non-empty")
+}
+
+fn assert_nat_gateway_state_identifier(state: &AppliedState) {
+    assert_eq!(state.identifier().as_str(), NAT_GATEWAY_ID);
 }
 
 #[tokio::test]
@@ -351,6 +370,61 @@ async fn nat_gateway_create_steps_issue_once_poll_once_and_read_back() {
 }
 
 #[tokio::test]
+async fn nat_gateway_create_read_back_not_found_is_partial_success_with_created_identifier() {
+    let (provider, service) = provider_with_ec2(&["available", "not_found"]).await;
+    let resource = nat_gateway_resource();
+    let token = expect_create_pending(
+        provider
+            .create_step(&resource)
+            .await
+            .expect("start NAT gateway create"),
+    );
+
+    let outcome = provider
+        .poll_create_step(&resource, token)
+        .await
+        .expect("the create API succeeded, so a missing read-back must stay successful");
+    let OperationStep::Done(CreateOutcome::PartialSuccess { state, diagnostic }) = outcome else {
+        panic!("expected partial create success, got {outcome:?}");
+    };
+    assert_nat_gateway_state_identifier(&state);
+    assert!(diagnostic.reason().contains("post-create read-back"));
+    assert!(!diagnostic.missing_attributes().is_empty());
+    assert_eq!(service.create_nat_gateway_calls(), 1);
+    assert_eq!(service.describe_nat_gateways_calls(), 2);
+}
+
+#[tokio::test]
+async fn nat_gateway_create_read_back_error_is_partial_success_with_created_identifier() {
+    let (provider, service) = provider_with_ec2(&["available", "read_error"]).await;
+    let resource = nat_gateway_resource();
+    let token = expect_create_pending(
+        provider
+            .create_step(&resource)
+            .await
+            .expect("start NAT gateway create"),
+    );
+
+    let outcome = provider
+        .poll_create_step(&resource, token)
+        .await
+        .expect("the create API succeeded, so a failed read-back must stay successful");
+    let OperationStep::Done(CreateOutcome::PartialSuccess { state, diagnostic }) = outcome else {
+        panic!("expected partial create success, got {outcome:?}");
+    };
+    assert_nat_gateway_state_identifier(&state);
+    assert!(diagnostic.reason().contains("post-create read-back"));
+    assert!(
+        diagnostic
+            .reason()
+            .contains("Failed to describe NAT gateway")
+    );
+    assert!(!diagnostic.missing_attributes().is_empty());
+    assert_eq!(service.create_nat_gateway_calls(), 1);
+    assert_eq!(service.describe_nat_gateways_calls(), 2);
+}
+
+#[tokio::test]
 async fn nat_gateway_failed_create_poll_returns_api_error() {
     let (provider, service) = provider_with_ec2(&["failed"]).await;
     let resource = nat_gateway_resource();
@@ -379,7 +453,7 @@ async fn nat_gateway_delete_steps_issue_once_and_poll_to_gone() {
 
     let mut token = expect_delete_pending(
         provider
-            .delete_step(&id, NAT_GATEWAY_ID, &request)
+            .delete_step(&id, &applied_identifier(NAT_GATEWAY_ID), &request)
             .await
             .expect("start NAT gateway delete"),
     );
@@ -418,7 +492,7 @@ async fn native_provider_create_drives_nat_gateway_to_read_back_state() {
         .expect("drive native NAT gateway create")
         .into_state_for_writeback();
 
-    assert_nat_gateway_state_identifier(&state);
+    assert_eq!(state.identifier.as_deref(), Some(NAT_GATEWAY_ID));
     assert_eq!(service.create_nat_gateway_calls(), 1);
     assert_eq!(service.create_tags_calls(), 1);
     assert_eq!(service.describe_nat_gateways_calls(), 4);

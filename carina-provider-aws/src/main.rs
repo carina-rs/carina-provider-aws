@@ -231,15 +231,15 @@ impl CarinaProvider for AwsProcessProvider {
     fn read(
         &self,
         id: &proto::ResourceId,
-        identifier: Option<&str>,
+        identifier: &proto::AppliedIdentifier,
         _request: proto::ReadRequest,
-    ) -> Result<proto::State, proto::ProviderError> {
+    ) -> Result<proto::ReadOutcome, proto::ProviderError> {
         let core_id = convert::proto_to_core_resource_id(id);
         let result =
             self.runtime
                 .block_on(self.provider().read(&core_id, identifier, CoreReadRequest));
         match result {
-            Ok(state) => Ok(convert::core_to_proto_state(&state)),
+            Ok(outcome) => Ok(convert::core_to_proto_read_outcome(outcome)),
             Err(e) => Err(Self::convert_error(e)),
         }
     }
@@ -335,7 +335,7 @@ impl CarinaProvider for AwsProcessProvider {
     fn update(
         &self,
         id: &proto::ResourceId,
-        identifier: &str,
+        identifier: &proto::AppliedIdentifier,
         request: proto::UpdateRequest,
     ) -> Result<SdkUpdateOutcome<Self::UpdateToken>, proto::ProviderError> {
         let core_id = convert::proto_to_core_resource_id(id);
@@ -382,7 +382,7 @@ impl CarinaProvider for AwsProcessProvider {
     fn poll_update(
         &self,
         _id: &proto::ResourceId,
-        _identifier: &str,
+        _identifier: &proto::AppliedIdentifier,
         _request: proto::UpdateRequest,
         pending: Pending<Self::UpdateToken>,
     ) -> Result<SdkUpdateOutcome<Self::UpdateToken>, proto::ProviderError> {
@@ -392,7 +392,7 @@ impl CarinaProvider for AwsProcessProvider {
     fn delete(
         &self,
         id: &proto::ResourceId,
-        identifier: &str,
+        identifier: &proto::AppliedIdentifier,
         request: proto::DeleteRequest,
     ) -> Result<SdkDeleteOutcome<Self::DeleteToken>, proto::ProviderError> {
         let core_id = convert::proto_to_core_resource_id(id);
@@ -427,7 +427,7 @@ impl CarinaProvider for AwsProcessProvider {
     fn poll_delete(
         &self,
         id: &proto::ResourceId,
-        _identifier: &str,
+        _identifier: &proto::AppliedIdentifier,
         _request: proto::DeleteRequest,
         pending: Pending<Self::DeleteToken>,
     ) -> Result<SdkDeleteOutcome<Self::DeleteToken>, proto::ProviderError> {

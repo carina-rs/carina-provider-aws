@@ -10,8 +10,9 @@ use aws_sdk_route53::types::{
     AliasTarget, Change, ChangeAction, ChangeBatch, ResourceRecord, ResourceRecordSet, RrType,
 };
 
+use carina_core::provider::{AppliedIdentifier, CreateOutcome, ReadOutcome};
 use carina_core::provider::{ProviderError, ProviderResult};
-use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
+use carina_core::resource::{ConcreteValue, Resource, ResourceId, Value};
 use carina_core::schema::ResourceSchema;
 
 use crate::AwsProvider;
@@ -297,13 +298,12 @@ impl AwsProvider {
     pub(crate) async fn read_route53_record_set(
         &self,
         id: &ResourceId,
-        identifier: Option<&str>,
-    ) -> ProviderResult<State> {
-        let Some(identifier) = identifier else {
-            return Ok(State::not_found(id.clone()));
-        };
+        identifier: &AppliedIdentifier,
+    ) -> ProviderResult<ReadOutcome> {
+        let applied_identifier = identifier;
+        let identifier = identifier.as_str();
         let Some((zone_id, name, record_type)) = parse_identifier(identifier) else {
-            return Ok(State::not_found(id.clone()));
+            return Ok(ReadOutcome::not_found(id.clone()));
         };
 
         let normalized_name = normalize_dns_name(name);
@@ -343,11 +343,9 @@ impl AwsProvider {
             {
                 PageScan::Found(rrs) => {
                     let attrs = extract_attributes(zone_id, rrs);
-                    return Ok(
-                        State::existing(id.clone(), attrs).with_identifier(identifier.to_string())
-                    );
+                    return Ok(crate::helpers::found_read(id, applied_identifier, attrs));
                 }
-                PageScan::StopNotFound => return Ok(State::not_found(id.clone())),
+                PageScan::StopNotFound => return Ok(ReadOutcome::not_found(id.clone())),
                 PageScan::KeepPaging => {}
             }
 
@@ -362,7 +360,7 @@ impl AwsProvider {
                     start_type = result.next_record_type().cloned();
                     start_identifier = result.next_record_identifier().map(str::to_string);
                 }
-                _ => return Ok(State::not_found(id.clone())),
+                _ => return Ok(ReadOutcome::not_found(id.clone())),
             }
         }
     }
@@ -371,7 +369,7 @@ impl AwsProvider {
         &self,
         resource: &Resource,
         schema: &ResourceSchema,
-    ) -> ProviderResult<State> {
+    ) -> ProviderResult<CreateOutcome> {
         let hosted_zone_id = require_string_attr(resource, "hosted_zone_id")?;
         let name = require_string_attr(resource, "name")?;
         let record_type = require_enum_attr(resource, schema, "type")?;
@@ -387,17 +385,29 @@ impl AwsProvider {
         .await?;
 
         let identifier = make_identifier(&hosted_zone_id, &name, &record_type);
-        self.read_route53_record_set(&resource.id, Some(&identifier))
-            .await
+        let identifier = crate::helpers::applied_identifier(
+            &resource.id,
+            "route53.ChangeResourceRecordSets",
+            identifier,
+        )?;
+        let outcome = self
+            .read_route53_record_set(&resource.id, &identifier)
+            .await;
+        Ok(self.create_outcome_from_read(
+            &resource.id,
+            identifier,
+            resource.resolved_attributes(),
+            outcome,
+        ))
     }
 
     pub(crate) async fn update_route53_record_set(
         &self,
         id: ResourceId,
-        _identifier: &str,
+        _identifier: &AppliedIdentifier,
         to: Resource,
         schema: &ResourceSchema,
-    ) -> ProviderResult<State> {
+    ) -> ProviderResult<ProviderResult<ReadOutcome>> {
         let hosted_zone_id = require_string_attr(&to, "hosted_zone_id")?;
         let name = require_string_attr(&to, "name")?;
         let record_type = require_enum_attr(&to, schema, "type")?;
@@ -413,14 +423,21 @@ impl AwsProvider {
         .await?;
 
         let identifier = make_identifier(&hosted_zone_id, &name, &record_type);
-        self.read_route53_record_set(&id, Some(&identifier)).await
+        let identifier = crate::helpers::applied_identifier(
+            &id,
+            "route53.ChangeResourceRecordSets",
+            identifier,
+        )?;
+        Ok(self.read_route53_record_set(&id, &identifier).await)
     }
 
     pub(crate) async fn delete_route53_record_set(
         &self,
         id: ResourceId,
-        identifier: &str,
+        identifier: &AppliedIdentifier,
     ) -> ProviderResult<()> {
+        let applied_identifier = identifier;
+        let identifier = identifier.as_str();
         let Some((zone_id, name, record_type)) = parse_identifier(identifier) else {
             return Err(ProviderError::invalid_input(format!(
                 "Invalid record set identifier: {}",
@@ -431,28 +448,31 @@ impl AwsProvider {
 
         // Read current state to get the exact record for deletion.
         // Route 53 DELETE requires the record to match exactly.
-        let current = self.read_route53_record_set(&id, Some(identifier)).await?;
-        if current.attributes.is_empty() {
+        let ReadOutcome::Found { state: current } = self
+            .read_route53_record_set(&id, applied_identifier)
+            .await?
+        else {
             return Ok(());
-        }
+        };
+        let current_attributes = current.attributes();
 
         let normalized_name = normalize_dns_name(name);
         let mut builder = ResourceRecordSet::builder()
             .name(&normalized_name)
             .r#type(RrType::from(record_type));
 
-        if let Some(Value::Concrete(ConcreteValue::Int(ttl))) = current.attributes.get("ttl") {
+        if let Some(Value::Concrete(ConcreteValue::Int(ttl))) = current_attributes.get("ttl") {
             builder = builder.ttl(*ttl);
         }
 
         if let Some(Value::Concrete(ConcreteValue::List(records))) =
-            current.attributes.get("resource_records")
+            current_attributes.get("resource_records")
         {
             builder = builder.set_resource_records(Some(build_resource_records(records)));
         }
 
         if let Some(Value::Concrete(ConcreteValue::Map(alias))) =
-            current.attributes.get("alias_target")
+            current_attributes.get("alias_target")
         {
             builder = builder.alias_target(build_alias_target_from_map(alias, &id)?);
         }

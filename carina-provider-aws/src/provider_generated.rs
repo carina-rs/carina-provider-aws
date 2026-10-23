@@ -8,7 +8,9 @@ use std::collections::HashMap;
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
-use carina_core::provider::{BoxFuture, ProviderError, ProviderResult};
+use carina_core::provider::{
+    AppliedIdentifier, BoxFuture, ProviderError, ProviderResult, ReadOutcome,
+};
 use carina_core::resource::{ConcreteValue, DataSource, Resource, ResourceId, State, Value};
 
 // ===== Generated Methods on AwsProvider =====
@@ -19,11 +21,11 @@ impl AwsProvider {
     pub(crate) async fn delete_ec2_vpc(
         &self,
         id: ResourceId,
-        identifier: &str,
+        identifier: &AppliedIdentifier,
     ) -> ProviderResult<()> {
         self.ec2_client
             .delete_vpc()
-            .vpc_id(identifier)
+            .vpc_id(identifier.as_str())
             .send()
             .await
             .map_err(|e| {
@@ -37,11 +39,11 @@ impl AwsProvider {
     pub(crate) async fn delete_ec2_subnet(
         &self,
         id: ResourceId,
-        identifier: &str,
+        identifier: &AppliedIdentifier,
     ) -> ProviderResult<()> {
         self.ec2_client
             .delete_subnet()
-            .subnet_id(identifier)
+            .subnet_id(identifier.as_str())
             .send()
             .await
             .map_err(|e| {
@@ -55,11 +57,11 @@ impl AwsProvider {
     pub(crate) async fn delete_ec2_route_table(
         &self,
         id: ResourceId,
-        identifier: &str,
+        identifier: &AppliedIdentifier,
     ) -> ProviderResult<()> {
         self.ec2_client
             .delete_route_table()
-            .route_table_id(identifier)
+            .route_table_id(identifier.as_str())
             .send()
             .await
             .map_err(|e| {
@@ -73,11 +75,11 @@ impl AwsProvider {
     pub(crate) async fn delete_ec2_security_group(
         &self,
         id: ResourceId,
-        identifier: &str,
+        identifier: &AppliedIdentifier,
     ) -> ProviderResult<()> {
         self.ec2_client
             .delete_security_group()
-            .group_id(identifier)
+            .group_id(identifier.as_str())
             .send()
             .await
             .map_err(|e| {
@@ -95,11 +97,11 @@ impl AwsProvider {
     pub(crate) async fn delete_ec2_nat_gateway(
         &self,
         id: ResourceId,
-        identifier: &str,
+        identifier: &AppliedIdentifier,
     ) -> ProviderResult<()> {
         self.ec2_client
             .delete_nat_gateway()
-            .nat_gateway_id(identifier)
+            .nat_gateway_id(identifier.as_str())
             .send()
             .await
             .map_err(|e| {
@@ -113,11 +115,11 @@ impl AwsProvider {
     pub(crate) async fn delete_ec2_transit_gateway(
         &self,
         id: ResourceId,
-        identifier: &str,
+        identifier: &AppliedIdentifier,
     ) -> ProviderResult<()> {
         self.ec2_client
             .delete_transit_gateway()
-            .transit_gateway_id(identifier)
+            .transit_gateway_id(identifier.as_str())
             .send()
             .await
             .map_err(|e| {
@@ -135,11 +137,11 @@ impl AwsProvider {
     pub(crate) async fn delete_ec2_transit_gateway_attachment(
         &self,
         id: ResourceId,
-        identifier: &str,
+        identifier: &AppliedIdentifier,
     ) -> ProviderResult<()> {
         self.ec2_client
             .delete_transit_gateway_vpc_attachment()
-            .transit_gateway_attachment_id(identifier)
+            .transit_gateway_attachment_id(identifier.as_str())
             .send()
             .await
             .map_err(|e| {
@@ -157,65 +159,64 @@ impl AwsProvider {
     pub(crate) async fn update_ec2_internet_gateway(
         &self,
         id: ResourceId,
-        identifier: &str,
+        identifier: &AppliedIdentifier,
         from: &State,
         to: Resource,
-    ) -> ProviderResult<State> {
+    ) -> ProviderResult<ProviderResult<ReadOutcome>> {
         self.apply_ec2_tags(
             &id,
-            identifier,
+            identifier.as_str(),
             &to.resolved_attributes(),
             Some(&from.attributes),
         )
         .await?;
-        self.read_ec2_internet_gateway(&id, Some(identifier)).await
+        Ok(self.read_ec2_internet_gateway(&id, identifier).await)
     }
 
     /// Update ec2.RouteTable: apply tag changes and read back (generated)
     pub(crate) async fn update_ec2_route_table(
         &self,
         id: ResourceId,
-        identifier: &str,
+        identifier: &AppliedIdentifier,
         from: &State,
         to: Resource,
-    ) -> ProviderResult<State> {
+    ) -> ProviderResult<ProviderResult<ReadOutcome>> {
         self.apply_ec2_tags(
             &id,
-            identifier,
+            identifier.as_str(),
             &to.resolved_attributes(),
             Some(&from.attributes),
         )
         .await?;
-        self.read_ec2_route_table(&id, Some(identifier)).await
+        Ok(self.read_ec2_route_table(&id, identifier).await)
     }
 
     /// Update ec2.SecurityGroup: apply tag changes and read back (generated)
     pub(crate) async fn update_ec2_security_group(
         &self,
         id: ResourceId,
-        identifier: &str,
+        identifier: &AppliedIdentifier,
         from: &State,
         to: Resource,
-    ) -> ProviderResult<State> {
+    ) -> ProviderResult<ProviderResult<ReadOutcome>> {
         self.apply_ec2_tags(
             &id,
-            identifier,
+            identifier.as_str(),
             &to.resolved_attributes(),
             Some(&from.attributes),
         )
         .await?;
-        self.read_ec2_security_group(&id, Some(identifier)).await
+        Ok(self.read_ec2_security_group(&id, identifier).await)
     }
 
     /// Update organizations.Organization (no-op, just read back current state) (generated)
     pub(crate) async fn update_organizations_organization(
         &self,
         id: ResourceId,
-        identifier: &str,
+        identifier: &AppliedIdentifier,
         _to: Resource,
-    ) -> ProviderResult<State> {
-        self.read_organizations_organization(&id, Some(identifier))
-            .await
+    ) -> ProviderResult<ProviderResult<ReadOutcome>> {
+        Ok(self.read_organizations_organization(&id, identifier).await)
     }
 
     /// Extract ec2.Vpc attributes from SDK response type (generated)

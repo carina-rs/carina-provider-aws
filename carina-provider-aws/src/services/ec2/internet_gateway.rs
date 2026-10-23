@@ -1,7 +1,8 @@
 use std::collections::HashMap;
 
+use carina_core::provider::{AppliedIdentifier, CreateOutcome, ReadOutcome};
 use carina_core::provider::{ProviderError, ProviderResult};
-use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
+use carina_core::resource::{ConcreteValue, Resource, ResourceId, Value};
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
@@ -11,13 +12,12 @@ impl AwsProvider {
     pub(crate) async fn read_ec2_internet_gateway(
         &self,
         id: &ResourceId,
-        identifier: Option<&str>,
-    ) -> ProviderResult<State> {
+        identifier: &AppliedIdentifier,
+    ) -> ProviderResult<ReadOutcome> {
         use aws_sdk_ec2::types::Filter;
 
-        let Some(identifier) = identifier else {
-            return Ok(State::not_found(id.clone()));
-        };
+        let applied_identifier = identifier;
+        let identifier = identifier.as_str();
 
         let filter = Filter::builder()
             .name("internet-gateway-id")
@@ -43,7 +43,7 @@ impl AwsProvider {
             let mut attributes = HashMap::new();
 
             // Auto-generated attribute extraction
-            let identifier_value =
+            let _identifier_value =
                 Self::extract_ec2_internet_gateway_attributes(igw, &mut attributes);
 
             // Store attached VPC ID (from Attachments, not a direct member)
@@ -61,14 +61,13 @@ impl AwsProvider {
                 attributes.insert("tags".to_string(), tags_value);
             }
 
-            let state = State::existing(id.clone(), attributes);
-            Ok(if let Some(id_val) = identifier_value {
-                state.with_identifier(id_val)
-            } else {
-                state
-            })
+            Ok(crate::helpers::found_read(
+                id,
+                applied_identifier,
+                attributes,
+            ))
         } else {
-            Ok(State::not_found(id.clone()))
+            Ok(ReadOutcome::not_found(id.clone()))
         }
     }
 
@@ -76,7 +75,7 @@ impl AwsProvider {
     pub(crate) async fn create_ec2_internet_gateway(
         &self,
         resource: &Resource,
-    ) -> ProviderResult<State> {
+    ) -> ProviderResult<CreateOutcome> {
         // Create Internet Gateway
         let result = self
             .ec2_client
@@ -123,16 +122,26 @@ impl AwsProvider {
         }
 
         // Read back using IGW ID (reliable identifier)
-        self.read_ec2_internet_gateway(&resource.id, Some(igw_id))
-            .await
+        let identifier =
+            crate::helpers::applied_identifier(&resource.id, "ec2.CreateInternetGateway", igw_id)?;
+        let outcome = self
+            .read_ec2_internet_gateway(&resource.id, &identifier)
+            .await;
+        Ok(self.create_outcome_from_read(
+            &resource.id,
+            identifier,
+            resource.resolved_attributes(),
+            outcome,
+        ))
     }
 
     /// Delete an EC2 Internet Gateway
     pub(crate) async fn delete_ec2_internet_gateway(
         &self,
         id: ResourceId,
-        identifier: &str,
+        identifier: &AppliedIdentifier,
     ) -> ProviderResult<()> {
+        let identifier = identifier.as_str();
         // Look up the IGW to check for VPC attachments before deleting
         let result = self
             .ec2_client

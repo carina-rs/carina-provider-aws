@@ -1,7 +1,8 @@
 use std::collections::HashMap;
 
+use carina_core::provider::{AppliedIdentifier, CreateOutcome, ReadOutcome};
 use carina_core::provider::{ProviderError, ProviderResult};
-use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
+use carina_core::resource::{ConcreteValue, Resource, ResourceId, Value};
 use carina_core::schema::ResourceSchema;
 
 use crate::AwsProvider;
@@ -66,11 +67,10 @@ impl AwsProvider {
     pub(crate) async fn read_organizations_organization(
         &self,
         id: &ResourceId,
-        identifier: Option<&str>,
-    ) -> ProviderResult<State> {
-        let Some(_identifier) = identifier else {
-            return Ok(State::not_found(id.clone()));
-        };
+        identifier: &AppliedIdentifier,
+    ) -> ProviderResult<ReadOutcome> {
+        let applied_identifier = identifier;
+        let _identifier = identifier.as_str();
 
         match self
             .organizations_client
@@ -81,23 +81,22 @@ impl AwsProvider {
             Ok(response) => {
                 if let Some(org) = response.organization() {
                     let mut attributes = HashMap::new();
-                    let org_id =
+                    let _org_id =
                         Self::extract_organizations_organization_attributes(org, &mut attributes);
-                    let state = State::existing(id.clone(), attributes);
-                    Ok(if let Some(org_id) = org_id {
-                        state.with_identifier(org_id)
-                    } else {
-                        state
-                    })
+                    Ok(crate::helpers::found_read(
+                        id,
+                        applied_identifier,
+                        attributes,
+                    ))
                 } else {
-                    Ok(State::not_found(id.clone()))
+                    Ok(ReadOutcome::not_found(id.clone()))
                 }
             }
             Err(e) => {
                 if let Some(service_err) = e.as_service_error()
                     && service_err.is_aws_organizations_not_in_use_exception()
                 {
-                    return Ok(State::not_found(id.clone()));
+                    return Ok(ReadOutcome::not_found(id.clone()));
                 }
                 Err(api_error_with_meta(
                     "Failed to describe organization",
@@ -114,7 +113,7 @@ impl AwsProvider {
         &self,
         resource: &Resource,
         schema: &ResourceSchema,
-    ) -> ProviderResult<State> {
+    ) -> ProviderResult<CreateOutcome> {
         let mut req = self.organizations_client.create_organization();
 
         if let Some(feature_set) = optional_enum_attr(resource, schema, "feature_set")? {
@@ -133,13 +132,23 @@ impl AwsProvider {
 
         if let Some(org) = response.organization() {
             let mut attributes = HashMap::new();
-            let org_id = Self::extract_organizations_organization_attributes(org, &mut attributes);
-            let state = State::existing(resource.id.clone(), attributes);
-            Ok(if let Some(org_id) = org_id {
-                state.with_identifier(org_id)
-            } else {
-                state
-            })
+            let org_id = Self::extract_organizations_organization_attributes(org, &mut attributes)
+                .ok_or_else(|| {
+                    ProviderError::api_error(
+                        "organizations.CreateOrganization returned an organization with an empty provider identifier",
+                    )
+                    .for_resource(resource.id.clone())
+                    .with_operation("organizations.CreateOrganization")
+                })?;
+            let identifier = crate::helpers::applied_identifier(
+                &resource.id,
+                "organizations.CreateOrganization",
+                org_id,
+            )?;
+            let outcome = self
+                .read_organizations_organization(&resource.id, &identifier)
+                .await;
+            Ok(self.create_outcome_from_read(&resource.id, identifier, attributes, outcome))
         } else {
             Err(
                 ProviderError::api_error("CreateOrganization returned no organization")
@@ -152,7 +161,7 @@ impl AwsProvider {
     pub(crate) async fn delete_organizations_organization(
         &self,
         id: ResourceId,
-        _identifier: &str,
+        _identifier: &AppliedIdentifier,
     ) -> ProviderResult<()> {
         self.organizations_client
             .delete_organization()

@@ -13,9 +13,42 @@ use aws_smithy_types::error::metadata::ProvideErrorMetadata;
 use aws_smithy_types::retry::ProvideErrorKind;
 use tokio::time::sleep;
 
-use carina_core::provider::{PatchOpKind, ProviderError, ProviderResult, UpdatePatch};
+use carina_core::provider::{
+    AppliedIdentifier, AppliedState, PatchOpKind, ProviderError, ProviderResult, ReadOutcome,
+    UpdatePatch,
+};
 use carina_core::resource::{ConcreteValue, EnumAttrError, Resource, ResourceId, State, Value};
 use carina_core::schema::ResourceSchema;
+
+/// Validate an identifier returned by an AWS create API before it can cross a
+/// managed-resource boundary.
+pub(crate) fn applied_identifier(
+    id: &ResourceId,
+    operation: &'static str,
+    identifier: impl Into<String>,
+) -> ProviderResult<AppliedIdentifier> {
+    AppliedIdentifier::new(identifier).map_err(|_| {
+        ProviderError::api_error(format!(
+            "{operation} returned an empty provider identifier for {id}"
+        ))
+        .for_resource(id.clone())
+        .with_operation(operation)
+    })
+}
+
+/// Build the present branch of a managed read from its already validated
+/// provider identifier.
+pub(crate) fn found_read(
+    id: &ResourceId,
+    identifier: &AppliedIdentifier,
+    attributes: std::collections::HashMap<String, Value>,
+) -> ReadOutcome {
+    ReadOutcome::found(AppliedState::from_identifier(
+        id.clone(),
+        identifier.clone(),
+        attributes,
+    ))
+}
 
 /// Borrow a `Value` as `&str` if it is a concrete string, otherwise `None`.
 pub fn value_as_str(v: &Value) -> Option<&str> {

@@ -18,8 +18,8 @@ use aws_sdk_s3::types::{
 use aws_sdk_sqs::Client as SqsClient;
 use aws_sdk_sts::Client as StsClient;
 use carina_core::provider::{
-    CreateRequest, DeleteRequest, NoopNormalizer, Provider, ProviderError, ReadRequest,
-    UpdateRequest,
+    AppliedIdentifier, CreateRequest, DeleteRequest, NoopNormalizer, Provider, ProviderError,
+    ReadRequest, UpdateRequest,
 };
 use carina_core::resource::{
     ConcreteValue, Resource, ResourceIdentity, ResourceIdentityError, State, Value,
@@ -31,6 +31,10 @@ use winterbaume_s3::S3Service;
 
 const TEST_REGION: &str = "us-east-1";
 const RESOURCE_TYPE: &str = "s3.BucketObjectLockConfiguration";
+
+fn applied_identifier(value: &str) -> AppliedIdentifier {
+    AppliedIdentifier::new(value).expect("test provider identifier must be non-empty")
+}
 
 fn provider_from_config(sdk_config: &aws_types::SdkConfig) -> AwsProvider {
     AwsProvider::from_clients(
@@ -333,9 +337,10 @@ async fn read_maps_object_lock_configuration_not_found_to_not_found() {
     let id = object_lock_resource(bucket, None).id;
 
     let state = provider
-        .read(&id, Some(bucket), ReadRequest)
+        .read(&id, &applied_identifier(bucket), ReadRequest)
         .await
-        .expect("not-configured read should succeed");
+        .expect("not-configured read should succeed")
+        .into_state();
 
     assert!(!state.exists);
 }
@@ -347,9 +352,10 @@ async fn read_maps_no_such_bucket_to_not_found() {
     let id = object_lock_resource(bucket, None).id;
 
     let state = provider
-        .read(&id, Some(bucket), ReadRequest)
+        .read(&id, &applied_identifier(bucket), ReadRequest)
         .await
-        .expect("missing-bucket read should succeed");
+        .expect("missing-bucket read should succeed")
+        .into_state();
 
     assert!(!state.exists);
 }
@@ -383,9 +389,10 @@ async fn read_treats_rule_without_required_enabled_as_not_found() {
     let id = object_lock_resource(bucket, None).id;
 
     let state = provider
-        .read(&id, Some(bucket), ReadRequest)
+        .read(&id, &applied_identifier(bucket), ReadRequest)
         .await
-        .expect("rule-only read should succeed");
+        .expect("rule-only read should succeed")
+        .into_state();
 
     assert!(!state.exists);
     assert!(state.attributes.is_empty(), "{state:?}");
@@ -514,7 +521,7 @@ async fn destroy_succeeds_when_no_s3_service_is_registered() {
     let id = object_lock_resource(bucket, None).id;
 
     provider
-        .delete(&id, bucket, DeleteRequest::default())
+        .delete(&id, &applied_identifier(bucket), DeleteRequest::default())
         .await
         .expect("destroy must be a local state-only operation");
 }
@@ -533,13 +540,18 @@ async fn destroy_preserves_remote_configuration_for_later_read() {
     .await;
 
     provider
-        .delete(&created.id, bucket, DeleteRequest::default())
+        .delete(
+            &created.id,
+            &applied_identifier(bucket),
+            DeleteRequest::default(),
+        )
         .await
         .expect("Object Lock destroy should be a no-op");
     let reread = provider
-        .read(&created.id, Some(bucket), ReadRequest)
+        .read(&created.id, &applied_identifier(bucket), ReadRequest)
         .await
-        .expect("read after no-op destroy");
+        .expect("read after no-op destroy")
+        .into_state();
 
     assert_retention(&reread, "GOVERNANCE", "days", 30);
 }
@@ -558,7 +570,11 @@ async fn recreate_without_rule_refuses_to_clobber_retained_compliance_rule() {
     .await;
 
     provider
-        .delete(&created.id, bucket, DeleteRequest::default())
+        .delete(
+            &created.id,
+            &applied_identifier(bucket),
+            DeleteRequest::default(),
+        )
         .await
         .expect("Object Lock destroy should be a no-op");
     let resource = object_lock_resource(bucket, None);
@@ -627,7 +643,7 @@ async fn dropping_rule_is_an_in_place_update() {
     let request = update_request_for_test(desired, created, &changed_attributes).await;
 
     let updated = provider
-        .update(&id, bucket, request)
+        .update(&id, &applied_identifier(bucket), request)
         .await
         .expect("dropping rule should update in place")
         .into_state_for_writeback();
@@ -655,7 +671,7 @@ async fn retention_mode_and_period_update_in_place() {
     let request = update_request_for_test(desired, created, &changed_attributes).await;
 
     let updated = provider
-        .update(&id, bucket, request)
+        .update(&id, &applied_identifier(bucket), request)
         .await
         .expect("retention change should update in place")
         .into_state_for_writeback();

@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use carina_core::provider::{AppliedIdentifier, CreateOutcome, ReadOutcome};
 use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
 use carina_core::schema::ResourceSchema;
@@ -15,13 +16,12 @@ impl AwsProvider {
     pub(crate) async fn read_ec2_vpc(
         &self,
         id: &ResourceId,
-        identifier: Option<&str>,
-    ) -> ProviderResult<State> {
+        identifier: &AppliedIdentifier,
+    ) -> ProviderResult<ReadOutcome> {
         use aws_sdk_ec2::types::Filter;
 
-        let Some(identifier) = identifier else {
-            return Ok(State::not_found(id.clone()));
-        };
+        let applied_identifier = identifier;
+        let identifier = identifier.as_str();
 
         let filter = Filter::builder().name("vpc-id").values(identifier).build();
 
@@ -40,7 +40,7 @@ impl AwsProvider {
             let mut attributes = HashMap::new();
 
             // Auto-generated attribute extraction
-            let identifier_value = Self::extract_ec2_vpc_attributes(vpc, &mut attributes);
+            let _identifier_value = Self::extract_ec2_vpc_attributes(vpc, &mut attributes);
 
             // Extract user-defined tags (excluding Name)
             if let Some(tags_value) = Self::ec2_tags_to_value(vpc.tags()) {
@@ -80,14 +80,13 @@ impl AwsProvider {
                 }
             }
 
-            let state = State::existing(id.clone(), attributes);
-            Ok(if let Some(id_val) = identifier_value {
-                state.with_identifier(id_val)
-            } else {
-                state
-            })
+            Ok(crate::helpers::found_read(
+                id,
+                applied_identifier,
+                attributes,
+            ))
         } else {
-            Ok(State::not_found(id.clone()))
+            Ok(ReadOutcome::not_found(id.clone()))
         }
     }
 
@@ -96,7 +95,7 @@ impl AwsProvider {
         &self,
         resource: &Resource,
         schema: &ResourceSchema,
-    ) -> ProviderResult<State> {
+    ) -> ProviderResult<CreateOutcome> {
         let cidr_block = require_string_attr(resource, "cidr_block")?;
 
         // Create VPC with optional instance_tenancy
@@ -169,18 +168,25 @@ impl AwsProvider {
         }
 
         // Read back using VPC ID (reliable identifier)
-        self.read_ec2_vpc(&resource.id, Some(vpc_id)).await
+        let identifier = crate::helpers::applied_identifier(&resource.id, "ec2.CreateVpc", vpc_id)?;
+        let outcome = self.read_ec2_vpc(&resource.id, &identifier).await;
+        Ok(self.create_outcome_from_read(
+            &resource.id,
+            identifier,
+            resource.resolved_attributes(),
+            outcome,
+        ))
     }
 
     /// Update an EC2 VPC
     pub(crate) async fn update_ec2_vpc(
         &self,
         id: ResourceId,
-        identifier: &str,
+        identifier: &AppliedIdentifier,
         from: &State,
         to: Resource,
         _schema: &ResourceSchema,
-    ) -> ProviderResult<State> {
+    ) -> ProviderResult<ProviderResult<ReadOutcome>> {
         // identifier is the VPC ID (e.g., vpc-12345678)
         let vpc_id = identifier.to_string();
 
@@ -233,6 +239,6 @@ impl AwsProvider {
         )
         .await?;
 
-        self.read_ec2_vpc(&id, Some(identifier)).await
+        Ok(self.read_ec2_vpc(&id, identifier).await)
     }
 }

@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use carina_core::provider::{AppliedIdentifier, CreateOutcome, ReadOutcome};
 use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
 use carina_core::schema::ResourceSchema;
@@ -13,13 +14,12 @@ impl AwsProvider {
     pub(crate) async fn read_ec2_flow_log(
         &self,
         id: &ResourceId,
-        identifier: Option<&str>,
-    ) -> ProviderResult<State> {
+        identifier: &AppliedIdentifier,
+    ) -> ProviderResult<ReadOutcome> {
         use aws_sdk_ec2::types::Filter;
 
-        let Some(identifier) = identifier else {
-            return Ok(State::not_found(id.clone()));
-        };
+        let applied_identifier = identifier;
+        let identifier = identifier.as_str();
 
         let filter = Filter::builder()
             .name("flow-log-id")
@@ -40,7 +40,7 @@ impl AwsProvider {
         if let Some(fl) = result.flow_logs().first() {
             let mut attributes = HashMap::new();
 
-            let identifier_value = Self::extract_ec2_flow_log_attributes(fl, &mut attributes);
+            let _identifier_value = Self::extract_ec2_flow_log_attributes(fl, &mut attributes);
 
             // Convert the SDK's singular `resource_id` back into the schema's
             // `resource_ids` list. AWS's CreateFlowLogs input takes a list; the
@@ -63,14 +63,13 @@ impl AwsProvider {
                 attributes.insert("tags".to_string(), tags_value);
             }
 
-            let state = State::existing(id.clone(), attributes);
-            Ok(if let Some(id_val) = identifier_value {
-                state.with_identifier(id_val)
-            } else {
-                state
-            })
+            Ok(crate::helpers::found_read(
+                id,
+                applied_identifier,
+                attributes,
+            ))
         } else {
-            Ok(State::not_found(id.clone()))
+            Ok(ReadOutcome::not_found(id.clone()))
         }
     }
 
@@ -79,7 +78,7 @@ impl AwsProvider {
         &self,
         resource: &Resource,
         schema: &ResourceSchema,
-    ) -> ProviderResult<State> {
+    ) -> ProviderResult<CreateOutcome> {
         let resource_ids_val: Vec<String> = match resource.get_attr("resource_ids") {
             Some(Value::Concrete(ConcreteValue::List(items))) => items
                 .iter()
@@ -227,35 +226,43 @@ impl AwsProvider {
         })?;
 
         // Read back
-        self.read_ec2_flow_log(&resource.id, Some(flow_log_id))
-            .await
+        let identifier =
+            crate::helpers::applied_identifier(&resource.id, "ec2.CreateFlowLogs", flow_log_id)?;
+        let outcome = self.read_ec2_flow_log(&resource.id, &identifier).await;
+        Ok(self.create_outcome_from_read(
+            &resource.id,
+            identifier,
+            resource.resolved_attributes(),
+            outcome,
+        ))
     }
 
     /// Update an EC2 Flow Log (tags only - all other attributes are create_only)
     pub(crate) async fn update_ec2_flow_log(
         &self,
         id: ResourceId,
-        identifier: &str,
+        identifier: &AppliedIdentifier,
         from: &State,
         to: Resource,
         _schema: &ResourceSchema,
-    ) -> ProviderResult<State> {
+    ) -> ProviderResult<ProviderResult<ReadOutcome>> {
         self.apply_ec2_tags(
             &id,
-            identifier,
+            identifier.as_str(),
             &to.resolved_attributes(),
             Some(&from.attributes),
         )
         .await?;
-        self.read_ec2_flow_log(&id, Some(identifier)).await
+        Ok(self.read_ec2_flow_log(&id, identifier).await)
     }
 
     /// Delete an EC2 Flow Log
     pub(crate) async fn delete_ec2_flow_log(
         &self,
         id: ResourceId,
-        identifier: &str,
+        identifier: &AppliedIdentifier,
     ) -> ProviderResult<()> {
+        let identifier = identifier.as_str();
         let result = self
             .ec2_client
             .delete_flow_logs()

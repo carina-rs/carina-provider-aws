@@ -16,6 +16,7 @@ use aws_sdk_acm::operation::request_certificate::RequestCertificateInput;
 use aws_sdk_acm::types::{CertificateStatus, KeyAlgorithm, ValidationMethod};
 use indexmap::IndexMap;
 
+use carina_core::provider::{AppliedIdentifier, AppliedState, ReadOutcome};
 use carina_core::provider::{CreateOutcome, ProviderError, ProviderResult};
 use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
 use carina_core::schema::ResourceSchema;
@@ -385,19 +386,20 @@ fn failed_certificate_reason(cert: &aws_sdk_acm::types::CertificateDetail) -> Op
 
 fn partial_acm_certificate_state(
     id: &ResourceId,
-    arn: &str,
+    arn: &AppliedIdentifier,
     domain_name: &str,
     resource: &Resource,
     request_enums: &CertificateRequestEnums,
     cert: Option<&aws_sdk_acm::types::CertificateDetail>,
-) -> State {
+) -> AppliedState {
+    let arn_value = arn.as_str();
     let mut attributes = cert
         .map(certificate_detail_to_attributes)
         .unwrap_or_default();
 
     attributes.insert(
         "certificate_arn".to_string(),
-        Value::Concrete(ConcreteValue::String(arn.to_string().into())),
+        Value::Concrete(ConcreteValue::String(arn_value.to_string().into())),
     );
     attributes
         .entry("domain_name".to_string())
@@ -448,12 +450,12 @@ fn partial_acm_certificate_state(
             .or_insert_with(|| tags.clone());
     }
 
-    State::existing(id.clone(), attributes).with_identifier(arn)
+    AppliedState::from_identifier(id.clone(), arn.clone(), attributes)
 }
 
 fn partial_acm_certificate_create_outcome(
     id: &ResourceId,
-    arn: &str,
+    arn: &AppliedIdentifier,
     domain_name: &str,
     resource: &Resource,
     request_enums: &CertificateRequestEnums,
@@ -512,13 +514,11 @@ impl AwsProvider {
                 .for_resource(id.clone())
         })?;
 
-        let arn = output
-            .certificate_arn()
-            .ok_or_else(|| {
-                ProviderError::api_error("RequestCertificate returned no certificate_arn")
-                    .for_resource(id.clone())
-            })?
-            .to_string();
+        let arn = output.certificate_arn().ok_or_else(|| {
+            ProviderError::api_error("RequestCertificate returned no certificate_arn")
+                .for_resource(id.clone())
+        })?;
+        let arn = crate::helpers::applied_identifier(&id, "acm.RequestCertificate", arn)?;
 
         // DNS validation populates DomainValidationOptions[].ResourceRecord
         // asynchronously after RequestCertificate. Wait so the post-create
@@ -549,13 +549,29 @@ impl AwsProvider {
                 6,
                 std::time::Duration::from_secs(5),
             )
-            .await?;
+            .await;
+            let dvo_outcome = match dvo_outcome {
+                Ok(outcome) => outcome,
+                Err(error) => {
+                    return Ok(self.create_outcome_from_read(
+                        &id,
+                        arn,
+                        resource.resolved_attributes(),
+                        Err(error),
+                    ));
+                }
+            };
             return match dvo_outcome {
                 DvoWaitOutcome::Populated(cert) => {
-                    let state = self
+                    let outcome = self
                         .read_acm_certificate_from_detail(&id, &arn, Some(&cert))
-                        .await?;
-                    Ok(CreateOutcome::Success { state })
+                        .await;
+                    Ok(self.create_outcome_from_read(
+                        &id,
+                        arn,
+                        resource.resolved_attributes(),
+                        outcome,
+                    ))
                 }
                 DvoWaitOutcome::Incomplete {
                     certificate,
@@ -574,19 +590,18 @@ impl AwsProvider {
 
         // Read back so the State carries every server-side attribute the
         // user might wait on (`status`, `domain_validation_options`, ...).
-        let state = self.read_acm_certificate(&id, Some(&arn)).await?;
-        Ok(CreateOutcome::Success { state })
+        let outcome = self.read_acm_certificate(&id, &arn).await;
+        Ok(self.create_outcome_from_read(&id, arn, resource.resolved_attributes(), outcome))
     }
 
     /// Read an ACM certificate via `DescribeCertificate`.
     pub(crate) async fn read_acm_certificate(
         &self,
         id: &ResourceId,
-        identifier: Option<&str>,
-    ) -> ProviderResult<State> {
-        let Some(arn) = identifier else {
-            return Ok(State::not_found(id.clone()));
-        };
+        identifier: &AppliedIdentifier,
+    ) -> ProviderResult<ReadOutcome> {
+        let applied_identifier = identifier;
+        let arn = identifier.as_str();
         let output = self
             .acm_client
             .describe_certificate()
@@ -597,7 +612,7 @@ impl AwsProvider {
                 api_error_with_meta("DescribeCertificate failed", "acm.DescribeCertificate", e)
                     .for_resource(id.clone())
             })?;
-        self.read_acm_certificate_from_detail(id, arn, output.certificate())
+        self.read_acm_certificate_from_detail(id, applied_identifier, output.certificate())
             .await
     }
 
@@ -610,12 +625,13 @@ impl AwsProvider {
     pub(crate) async fn read_acm_certificate_from_detail(
         &self,
         id: &ResourceId,
-        arn: &str,
+        identifier: &AppliedIdentifier,
         cert: Option<&aws_sdk_acm::types::CertificateDetail>,
-    ) -> ProviderResult<State> {
+    ) -> ProviderResult<ReadOutcome> {
         let Some(cert) = cert else {
-            return Ok(State::not_found(id.clone()));
+            return Ok(ReadOutcome::not_found(id.clone()));
         };
+        let arn = identifier.as_str();
 
         let mut attributes = certificate_detail_to_attributes(cert);
 
@@ -652,7 +668,7 @@ impl AwsProvider {
             );
         }
 
-        Ok(State::existing(id.clone(), attributes).with_identifier(arn))
+        Ok(crate::helpers::found_read(id, identifier, attributes))
     }
 
     /// Update an ACM certificate. Only `CertificateTransparencyLoggingPreference`
@@ -662,15 +678,15 @@ impl AwsProvider {
     pub(crate) async fn update_acm_certificate(
         &self,
         id: ResourceId,
-        identifier: &str,
+        identifier: &AppliedIdentifier,
         from: &State,
         to: Resource,
         schema: &ResourceSchema,
-    ) -> ProviderResult<State> {
+    ) -> ProviderResult<ProviderResult<ReadOutcome>> {
         if let Some(options) = build_update_certificate_options(&to, schema)? {
             self.acm_client
                 .update_certificate_options()
-                .certificate_arn(identifier)
+                .certificate_arn(identifier.as_str())
                 .options(options)
                 .send()
                 .await
@@ -683,9 +699,10 @@ impl AwsProvider {
                     .for_resource(id.clone())
                 })?;
         }
-        self.apply_acm_tags(&id, identifier, &to, from).await?;
+        self.apply_acm_tags(&id, identifier.as_str(), &to, from)
+            .await?;
 
-        self.read_acm_certificate(&id, Some(identifier)).await
+        Ok(self.read_acm_certificate(&id, identifier).await)
     }
 
     /// Reconcile tags on an existing certificate by issuing
@@ -769,8 +786,9 @@ impl AwsProvider {
     pub(crate) async fn delete_acm_certificate(
         &self,
         id: ResourceId,
-        identifier: &str,
+        identifier: &AppliedIdentifier,
     ) -> ProviderResult<()> {
+        let identifier = identifier.as_str();
         self.acm_client
             .delete_certificate()
             .certificate_arn(identifier)
@@ -874,6 +892,10 @@ mod tests {
         ResourceId::with_provider_identity("aws", "acm.Certificate", "test-cert", None)
     }
 
+    fn applied_identifier(value: &str) -> AppliedIdentifier {
+        AppliedIdentifier::new(value).expect("test provider identifier must be non-empty")
+    }
+
     fn dv_without_rr(domain: &str) -> DomainValidation {
         DomainValidation::builder()
             .domain_name(domain)
@@ -960,21 +982,21 @@ mod tests {
         let CreateOutcome::PartialSuccess { state, diagnostic } = outcome else {
             panic!("expected partial create outcome");
         };
-        assert_eq!(state.identifier.as_deref(), Some(arn));
+        assert_eq!(state.identifier().as_str(), arn);
         assert_eq!(
-            state.attributes.get("certificate_arn"),
+            state.attributes().get("certificate_arn"),
             Some(&Value::Concrete(ConcreteValue::String(
                 arn.to_string().into()
             ))),
         );
         assert_eq!(
-            state.attributes.get("domain_name"),
+            state.attributes().get("domain_name"),
             Some(&Value::Concrete(ConcreteValue::String(
                 "example.com".to_string().into()
             ))),
         );
         assert!(
-            !state.attributes.contains_key(DVO_MISSING_ATTRIBUTE),
+            !state.attributes().contains_key(DVO_MISSING_ATTRIBUTE),
             "partial state must not publish incomplete DVO as complete state",
         );
         assert_eq!(
@@ -1306,7 +1328,7 @@ mod tests {
             .expect("valid request enums");
         let outcome = partial_acm_certificate_create_outcome(
             &id(),
-            arn,
+            &applied_identifier(arn),
             "example.com",
             &resource,
             &request_enums,
@@ -1360,7 +1382,7 @@ mod tests {
             .expect("valid request enums");
         let outcome = partial_acm_certificate_create_outcome(
             &id(),
-            arn,
+            &applied_identifier(arn),
             "example.com",
             &resource,
             &request_enums,

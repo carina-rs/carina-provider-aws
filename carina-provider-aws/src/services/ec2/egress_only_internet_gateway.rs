@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use carina_core::provider::{AppliedIdentifier, CreateOutcome, ReadOutcome};
 use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{Resource, ResourceId, State};
 
@@ -12,11 +13,10 @@ impl AwsProvider {
     pub(crate) async fn read_ec2_egress_only_internet_gateway(
         &self,
         id: &ResourceId,
-        identifier: Option<&str>,
-    ) -> ProviderResult<State> {
-        let Some(identifier) = identifier else {
-            return Ok(State::not_found(id.clone()));
-        };
+        identifier: &AppliedIdentifier,
+    ) -> ProviderResult<ReadOutcome> {
+        let applied_identifier = identifier;
+        let identifier = identifier.as_str();
 
         let result = self
             .ec2_client
@@ -36,7 +36,7 @@ impl AwsProvider {
         if let Some(eigw) = result.egress_only_internet_gateways().first() {
             let mut attributes = HashMap::new();
 
-            let identifier_value =
+            let _identifier_value =
                 Self::extract_ec2_egress_only_internet_gateway_attributes(eigw, &mut attributes);
 
             // Extract user-defined tags
@@ -44,14 +44,13 @@ impl AwsProvider {
                 attributes.insert("tags".to_string(), tags_value);
             }
 
-            let state = State::existing(id.clone(), attributes);
-            Ok(if let Some(id_val) = identifier_value {
-                state.with_identifier(id_val)
-            } else {
-                state
-            })
+            Ok(crate::helpers::found_read(
+                id,
+                applied_identifier,
+                attributes,
+            ))
         } else {
-            Ok(State::not_found(id.clone()))
+            Ok(ReadOutcome::not_found(id.clone()))
         }
     }
 
@@ -59,7 +58,7 @@ impl AwsProvider {
     pub(crate) async fn create_ec2_egress_only_internet_gateway(
         &self,
         resource: &Resource,
-    ) -> ProviderResult<State> {
+    ) -> ProviderResult<CreateOutcome> {
         let vpc_id = require_string_attr(resource, "vpc_id")?;
 
         let mut req = self
@@ -93,35 +92,49 @@ impl AwsProvider {
             })?;
 
         // Read back
-        self.read_ec2_egress_only_internet_gateway(&resource.id, Some(eigw_id))
-            .await
+        let identifier = crate::helpers::applied_identifier(
+            &resource.id,
+            "ec2.CreateEgressOnlyInternetGateway",
+            eigw_id,
+        )?;
+        let outcome = self
+            .read_ec2_egress_only_internet_gateway(&resource.id, &identifier)
+            .await;
+        Ok(self.create_outcome_from_read(
+            &resource.id,
+            identifier,
+            resource.resolved_attributes(),
+            outcome,
+        ))
     }
 
     /// Update an EC2 Egress-Only Internet Gateway (tags only)
     pub(crate) async fn update_ec2_egress_only_internet_gateway(
         &self,
         id: ResourceId,
-        identifier: &str,
+        identifier: &AppliedIdentifier,
         from: &State,
         to: Resource,
-    ) -> ProviderResult<State> {
+    ) -> ProviderResult<ProviderResult<ReadOutcome>> {
         self.apply_ec2_tags(
             &id,
-            identifier,
+            identifier.as_str(),
             &to.resolved_attributes(),
             Some(&from.attributes),
         )
         .await?;
-        self.read_ec2_egress_only_internet_gateway(&id, Some(identifier))
-            .await
+        Ok(self
+            .read_ec2_egress_only_internet_gateway(&id, identifier)
+            .await)
     }
 
     /// Delete an EC2 Egress-Only Internet Gateway
     pub(crate) async fn delete_ec2_egress_only_internet_gateway(
         &self,
         id: ResourceId,
-        identifier: &str,
+        identifier: &AppliedIdentifier,
     ) -> ProviderResult<()> {
+        let identifier = identifier.as_str();
         self.ec2_client
             .delete_egress_only_internet_gateway()
             .egress_only_internet_gateway_id(identifier)

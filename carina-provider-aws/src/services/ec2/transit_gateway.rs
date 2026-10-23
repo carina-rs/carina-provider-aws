@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use carina_core::provider::{AppliedIdentifier, ReadOutcome};
 use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
 use carina_core::schema::ResourceSchema;
@@ -110,11 +111,10 @@ impl AwsProvider {
     pub(crate) async fn read_ec2_transit_gateway(
         &self,
         id: &ResourceId,
-        identifier: Option<&str>,
-    ) -> ProviderResult<State> {
-        let Some(identifier) = identifier else {
-            return Ok(State::not_found(id.clone()));
-        };
+        identifier: &AppliedIdentifier,
+    ) -> ProviderResult<ReadOutcome> {
+        let applied_identifier = identifier;
+        let identifier = identifier.as_str();
 
         let result = self
             .ec2_client
@@ -134,12 +134,12 @@ impl AwsProvider {
         if let Some(tgw) = result.transit_gateways().first() {
             // Skip deleted transit gateways
             if tgw.state().map(|s| s.as_str()) == Some("deleted") {
-                return Ok(State::not_found(id.clone()));
+                return Ok(ReadOutcome::not_found(id.clone()));
             }
 
             let mut attributes = HashMap::new();
 
-            let identifier_value =
+            let _identifier_value =
                 Self::extract_ec2_transit_gateway_attributes(tgw, &mut attributes);
 
             // Extract user-defined tags
@@ -147,14 +147,13 @@ impl AwsProvider {
                 attributes.insert("tags".to_string(), tags_value);
             }
 
-            let state = State::existing(id.clone(), attributes);
-            Ok(if let Some(id_val) = identifier_value {
-                state.with_identifier(id_val)
-            } else {
-                state
-            })
+            Ok(crate::helpers::found_read(
+                id,
+                applied_identifier,
+                attributes,
+            ))
         } else {
-            Ok(State::not_found(id.clone()))
+            Ok(ReadOutcome::not_found(id.clone()))
         }
     }
 
@@ -163,7 +162,7 @@ impl AwsProvider {
         &self,
         resource: &Resource,
         schema: &ResourceSchema,
-    ) -> ProviderResult<String> {
+    ) -> ProviderResult<AppliedIdentifier> {
         let mut req = self.ec2_client.create_transit_gateway();
 
         if let Some(Value::Concrete(ConcreteValue::String(desc))) = resource.get_attr("description")
@@ -199,26 +198,26 @@ impl AwsProvider {
                     .for_resource(resource.id.clone())
             })?;
 
-        Ok(tgw_id.to_string())
+        crate::helpers::applied_identifier(&resource.id, "ec2.CreateTransitGateway", tgw_id)
     }
 
     /// Update an EC2 Transit Gateway (tags only for now)
     pub(crate) async fn update_ec2_transit_gateway(
         &self,
         id: ResourceId,
-        identifier: &str,
+        identifier: &AppliedIdentifier,
         from: &State,
         to: Resource,
         _schema: &ResourceSchema,
-    ) -> ProviderResult<State> {
+    ) -> ProviderResult<ProviderResult<ReadOutcome>> {
         self.apply_ec2_tags(
             &id,
-            identifier,
+            identifier.as_str(),
             &to.resolved_attributes(),
             Some(&from.attributes),
         )
         .await?;
-        self.read_ec2_transit_gateway(&id, Some(identifier)).await
+        Ok(self.read_ec2_transit_gateway(&id, identifier).await)
     }
 
     /// Perform one describe call for a pending transit gateway create.
