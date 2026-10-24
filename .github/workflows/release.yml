@@ -4,6 +4,7 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
 
 concurrency:
   group: release-${{ github.ref }}
@@ -14,6 +15,7 @@ permissions:
 jobs:
   build:
     name: Build ${{ matrix.target }}
+    if: github.event_name == 'push'
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -60,6 +62,7 @@ jobs:
 
   build-wasm:
     name: Build WASM
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -93,6 +96,7 @@ jobs:
   release:
     name: Create Release
     needs: [build, build-wasm]
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -108,3 +112,242 @@ jobs:
             carina-provider-aws-*.tar.gz
             carina-provider-aws-*.wasm
           generate_release_notes: true
+
+  publish:
+    name: Publish to Carina Registry
+    needs: [release]
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      id-token: write
+    env:
+      REGISTRY_AUDIENCE: registry-dev.carina-rs.dev
+      REGISTRY_PUBLISH_URL: https://publish.registry-dev.carina-rs.dev/v1/publish
+    steps:
+      - name: Validate Release Tag
+        run: |
+          set -euo pipefail
+
+          version="${GITHUB_REF_NAME#v}"
+          if [ -z "$version" ] || [ "$GITHUB_REF" != "refs/tags/v${version}" ]; then
+            printf 'Expected GITHUB_REF to be exactly refs/tags/v{version} with a non-empty version; got GITHUB_REF=%s and GITHUB_REF_NAME=%s\n' "$GITHUB_REF" "$GITHUB_REF_NAME" >&2
+            exit 1
+          fi
+          printf 'VERSION=%s\n' "$version" >> "$GITHUB_ENV"
+
+      - name: Download WASM Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: carina-provider-aws-wasm
+
+      # Pin v2.6.5: the registry requires Rekor v1's SET; Rekor v2 issues no SET,
+      # and cosign v3 defaults to signing-config, which routes to Rekor v2.
+      - name: Install cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        with:
+          cosign-release: 'v2.6.5'
+
+      - name: Sign WASM Artifact (keyless)
+        run: |
+          set -euo pipefail
+
+          for attempt in 1 2 3; do
+            if cosign sign-blob "carina-provider-aws-${GITHUB_REF_NAME}.wasm" \
+              --bundle sigstore-bundle.json \
+              --new-bundle-format=true \
+              --yes; then
+              break
+            fi
+
+            printf 'Signing attempt %s failed\n' "$attempt" >&2
+            if [ "$attempt" -lt 3 ]; then
+              sleep 10
+              continue
+            fi
+            printf 'Signing failed after 3 attempts\n' >&2
+            exit 1
+          done
+
+      - name: Publish to Carina Registry
+        # For a 403 claim_mismatch, verify that the trusted-publisher policy uses the
+        # release-tag-environment mode, environment `release`, and points to
+        # .github/workflows/release.yml.
+        run: |
+          set -euo pipefail
+
+          if ! jq -e 'type == "object"' sigstore-bundle.json >/dev/null; then
+            echo "sigstore-bundle.json is missing or not a JSON object" >&2
+            exit 1
+          fi
+
+          version="$VERSION"
+          asset_url="https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/carina-provider-aws-${GITHUB_REF_NAME}.wasm"
+          payload=$(jq -n \
+            --arg version "$version" \
+            --arg asset_url "$asset_url" \
+            --slurpfile bundle sigstore-bundle.json \
+            '{
+              namespace: "carina-rs",
+              name: "aws",
+              version: $version,
+              candidate_download_url: $asset_url,
+              sigstore_bundle: $bundle[0]
+            }')
+          response_file=$(mktemp)
+          trap 'rm -f "$response_file"' EXIT
+
+          # The Fulcio cert from the sign step lives ~10 minutes and must still be valid
+          # when the registry verifies a new version's bundle; this loop's worst case
+          # (3 x (60s token + 120s POST) + 2 x 10s sleep) nearly exhausts it, so do not
+          # add attempts, sleeps, or timeout headroom here.
+          for attempt in 1 2 3; do
+            if ! token=$(curl -sS \
+              --connect-timeout 10 \
+              --max-time 60 \
+              -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+              "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=${REGISTRY_AUDIENCE}" \
+              | jq -er .value) || [ -z "$token" ]; then
+              printf 'Failed to obtain OIDC token on attempt %s\n' "$attempt" >&2
+              if [ "$attempt" -lt 3 ]; then
+                sleep 10
+                continue
+              fi
+              printf 'Publish failed after 3 attempts while obtaining OIDC token\n' >&2
+              exit 1
+            fi
+
+            : > "$response_file"
+            if ! status=$(curl -sS \
+              --connect-timeout 10 \
+              --max-time 120 \
+              -o "$response_file" \
+              -w '%{http_code}' \
+              -X POST \
+              -H "Authorization: Bearer $token" \
+              -H 'Content-Type: application/json' \
+              --data "$payload" \
+              "$REGISTRY_PUBLISH_URL"); then
+              status=000
+            fi
+
+            printf 'Publish attempt %s returned HTTP %s\n' "$attempt" "$status"
+            sed 's/^/  /' "$response_file"
+            printf '\n'
+
+            case "$status" in
+              200|201)
+                exit 0
+                ;;
+              000|429|5??)
+                if [ "$attempt" -lt 3 ]; then
+                  sleep 10
+                  continue
+                fi
+                printf 'Publish failed after 3 attempts (last status: %s)\n' "$status" >&2
+                exit 1
+                ;;
+              4??)
+                printf 'Publish failed with non-retryable status %s\n' "$status" >&2
+                exit 1
+                ;;
+              *)
+                printf 'Publish failed with unexpected status %s\n' "$status" >&2
+                exit 1
+                ;;
+            esac
+          done
+
+  yank:
+    name: Yank from Carina Registry
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      id-token: write
+    env:
+      REGISTRY_AUDIENCE: registry-dev.carina-rs.dev
+      REGISTRY_YANK_URL: https://publish.registry-dev.carina-rs.dev/v1/yank
+    steps:
+      - name: Validate Release Tag
+        run: |
+          set -euo pipefail
+
+          version="${GITHUB_REF_NAME#v}"
+          if [ -z "$version" ] || [ "$GITHUB_REF" != "refs/tags/v${version}" ]; then
+            printf 'Expected GITHUB_REF to be exactly refs/tags/v{version} with a non-empty version; got GITHUB_REF=%s and GITHUB_REF_NAME=%s\n' "$GITHUB_REF" "$GITHUB_REF_NAME" >&2
+            exit 1
+          fi
+          printf 'VERSION=%s\n' "$version" >> "$GITHUB_ENV"
+
+      - name: Yank from Carina Registry
+        run: |
+          set -euo pipefail
+
+          version="$VERSION"
+          payload=$(jq -n \
+            --arg version "$version" \
+            '{
+              namespace: "carina-rs",
+              name: "aws",
+              version: $version
+            }')
+          response_file=$(mktemp)
+          trap 'rm -f "$response_file"' EXIT
+
+          for attempt in 1 2 3; do
+            if ! token=$(curl -sS \
+              --connect-timeout 10 \
+              --max-time 60 \
+              -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+              "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=${REGISTRY_AUDIENCE}" \
+              | jq -er .value) || [ -z "$token" ]; then
+              printf 'Failed to obtain OIDC token on attempt %s\n' "$attempt" >&2
+              if [ "$attempt" -lt 3 ]; then
+                sleep 10
+                continue
+              fi
+              printf 'Yank failed after 3 attempts while obtaining OIDC token\n' >&2
+              exit 1
+            fi
+
+            : > "$response_file"
+            if ! status=$(curl -sS \
+              --connect-timeout 10 \
+              --max-time 120 \
+              -o "$response_file" \
+              -w '%{http_code}' \
+              -X POST \
+              -H "Authorization: Bearer $token" \
+              -H 'Content-Type: application/json' \
+              --data "$payload" \
+              "$REGISTRY_YANK_URL"); then
+              status=000
+            fi
+
+            printf 'Yank attempt %s returned HTTP %s\n' "$attempt" "$status"
+            sed 's/^/  /' "$response_file"
+            printf '\n'
+
+            case "$status" in
+              200|201)
+                exit 0
+                ;;
+              000|429|5??)
+                if [ "$attempt" -lt 3 ]; then
+                  sleep 10
+                  continue
+                fi
+                printf 'Yank failed after 3 attempts (last status: %s)\n' "$status" >&2
+                exit 1
+                ;;
+              4??)
+                printf 'Yank failed with non-retryable status %s\n' "$status" >&2
+                exit 1
+                ;;
+              *)
+                printf 'Yank failed with unexpected status %s\n' "$status" >&2
+                exit 1
+                ;;
+            esac
+          done
