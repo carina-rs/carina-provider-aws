@@ -17,15 +17,26 @@ use crate::helpers::{
 fn nat_gateway_create_poll_state(state: Option<&NatGatewayState>) -> CreatePoll<()> {
     match state {
         Some(NatGatewayState::Available) => CreatePoll::Ready(()),
-        Some(NatGatewayState::Failed) => CreatePoll::Failed,
-        _ => CreatePoll::Pending,
+        Some(NatGatewayState::Failed | NatGatewayState::Deleted) => CreatePoll::Failed,
+        Some(NatGatewayState::Pending | NatGatewayState::Deleting) | None => CreatePoll::Pending,
+        // The SDK enum is non-exhaustive. An unrecognized state is not proof
+        // that AWS either finished or discarded the create, so retain it.
+        Some(_unrecognized_state) => CreatePoll::Pending,
     }
 }
 
 fn nat_gateway_delete_poll_state(state: Option<&NatGatewayState>) -> DeletePoll {
     match state {
         Some(NatGatewayState::Deleted) | None => DeletePoll::Gone,
-        _ => DeletePoll::Pending,
+        Some(
+            NatGatewayState::Available
+            | NatGatewayState::Deleting
+            | NatGatewayState::Failed
+            | NatGatewayState::Pending,
+        ) => DeletePoll::Pending,
+        // The SDK enum is non-exhaustive. An unknown future state does not
+        // prove that the gateway is gone.
+        Some(_unrecognized_state) => DeletePoll::Pending,
     }
 }
 
@@ -41,6 +52,11 @@ impl AwsProvider {
         let applied_identifier = identifier;
         let identifier = identifier.as_str();
 
+        // Measured with account carina-test-009 in ap-northeast-1 on
+        // 2026-10-24: `aws ec2 describe-nat-gateways --filters
+        // Name=nat-gateway-id,Values=<well-formed-unknown>` returned an empty
+        // list. Use the filter form so an absent gateway is an ordinary
+        // ReadOutcome::NotFound rather than a service error.
         let filter = Filter::builder()
             .name("nat-gateway-id")
             .values(identifier)
@@ -129,14 +145,6 @@ impl AwsProvider {
         let identifier =
             crate::helpers::applied_identifier(&resource.id, "ec2.CreateNatGateway", ngw_id)?;
 
-        // Apply tags
-        self.apply_ec2_tags(
-            &resource.id,
-            identifier.as_str(),
-            &resource.resolved_attributes(),
-            None,
-        )
-        .await?;
         Ok(identifier)
     }
 
@@ -165,6 +173,12 @@ impl AwsProvider {
         id: &ResourceId,
         nat_gateway_id: &str,
     ) -> ProviderResult<CreatePoll<()>> {
+        // Measured with account carina-test-009 in ap-northeast-1 on
+        // 2026-10-24: `aws ec2 describe-nat-gateways --nat-gateway-ids
+        // <well-formed-unknown>` returned NatGatewayNotFound, while a malformed
+        // id returned NatGatewayMalformed. The issued-create caller keeps
+        // either error pending: EC2 can briefly hide a just-created gateway,
+        // and discarding the record here would risk a duplicate create.
         let result = self
             .ec2_client
             .describe_nat_gateways()
@@ -216,19 +230,26 @@ mod pending_tests {
 
     #[test]
     fn create_poll_maps_pending_ready_and_failed_states() {
+        for state in NatGatewayState::values() {
+            let expected = match *state {
+                "available" => CreatePoll::Ready(()),
+                "failed" | "deleted" => CreatePoll::Failed,
+                "pending" | "deleting" => CreatePoll::Pending,
+                new_known_state => {
+                    panic!("classify new SDK NAT gateway state {new_known_state}")
+                }
+            };
+            assert_eq!(
+                nat_gateway_create_poll_state(Some(&NatGatewayState::from(*state))),
+                expected,
+                "state {state}"
+            );
+        }
+        assert_eq!(nat_gateway_create_poll_state(None), CreatePoll::Pending);
         assert_eq!(
-            nat_gateway_create_poll_state(Some(&NatGatewayState::Pending)),
+            nat_gateway_create_poll_state(Some(&NatGatewayState::from("future-state"))),
             CreatePoll::Pending
         );
-        assert_eq!(
-            nat_gateway_create_poll_state(Some(&NatGatewayState::Available)),
-            CreatePoll::Ready(())
-        );
-        assert_eq!(
-            nat_gateway_create_poll_state(Some(&NatGatewayState::Failed)),
-            CreatePoll::Failed
-        );
-        assert_eq!(nat_gateway_create_poll_state(None), CreatePoll::Pending);
     }
 
     #[test]

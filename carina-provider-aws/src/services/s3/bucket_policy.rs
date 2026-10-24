@@ -1,12 +1,13 @@
 use std::collections::HashMap;
 
-use carina_core::provider::{AppliedIdentifier, CreateOutcome, ReadOutcome};
+use carina_core::provider::{AppliedIdentifier, ReadOutcome};
 use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
 use crate::helpers::{RetryPolicy, require_string_attr, retry_aws_operation};
+use crate::provider::CreateCompletion;
 use crate::services::iam::role::{iam_policy_json_to_value, resolve_iam_policy_attr};
 use crate::services::s3::bucket::is_s3_not_configured_error;
 
@@ -71,7 +72,7 @@ impl AwsProvider {
     pub(crate) async fn create_s3_bucket_policy(
         &self,
         resource: &Resource,
-    ) -> ProviderResult<CreateOutcome> {
+    ) -> ProviderResult<CreateCompletion> {
         let bucket = require_string_attr(resource, "bucket")?;
         let identifier =
             crate::helpers::applied_identifier(&resource.id, "s3.PutBucketPolicy", bucket)?;

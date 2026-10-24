@@ -1,7 +1,7 @@
 use indexmap::IndexMap;
 use std::collections::HashMap;
 
-use carina_core::provider::{AppliedIdentifier, CreateOutcome, ReadOutcome};
+use carina_core::provider::{AppliedIdentifier, ReadOutcome};
 use carina_core::provider::{BoxFuture, ProviderError, ProviderResult};
 use carina_core::resource::{
     ConcreteValue, DataSource, Directives, Resource, ResourceId, State, Value,
@@ -10,6 +10,7 @@ use carina_core::resource::{
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
 use crate::helpers::{RetryPolicy, retry_aws_operation, sdk_error_message};
+use crate::provider::AwsCreateAttempt;
 
 /// The complete read-only projection shared by managed and data-source
 /// reads of an S3 bucket.
@@ -154,22 +155,28 @@ impl AwsProvider {
     }
 
     /// Create an S3 bucket
-    pub(crate) async fn create_s3_bucket(
+    pub(crate) async fn create_s3_bucket<A: AwsCreateAttempt>(
         &self,
         resource: &Resource,
-    ) -> ProviderResult<CreateOutcome> {
+        attempt: A,
+    ) -> Result<A::Step, A::Verdict> {
         let bucket_name = match resource.get_attr("bucket") {
             Some(Value::Concrete(ConcreteValue::String(s))) => s.expose_plaintext().to_string(),
             _ => {
-                return Err(ProviderError::invalid_input("Bucket name is required")
-                    .for_resource(resource.id.clone()));
+                return Err(attempt.untracked(
+                    ProviderError::invalid_input("Bucket name is required")
+                        .for_resource(resource.id.clone()),
+                ));
             }
         };
-        let identifier = crate::helpers::applied_identifier(
+        let identifier = match crate::helpers::applied_identifier(
             &resource.id,
             "s3.CreateBucket",
             bucket_name.clone(),
-        )?;
+        ) {
+            Ok(identifier) => identifier,
+            Err(error) => return Err(attempt.untracked(error)),
+        };
 
         // Create bucket
         let mut req = self.s3_client.create_bucket().bucket(&bucket_name);
@@ -194,29 +201,37 @@ impl AwsProvider {
         // S3 returns when CreateBucket races a recent DeleteBucket for the
         // same name — the control plane clears after ~60–90s. See #156.
         let rid = resource.id.clone();
-        retry_aws_operation("create S3 bucket", RetryPolicy::default(), || {
+        let result = retry_aws_operation("create S3 bucket", RetryPolicy::default(), || {
             let req = req.clone();
             async move { req.send().await }
         })
-        .await
-        .map_err(|e| {
-            api_error_with_meta("Failed to create bucket", "s3.CreateBucket", e)
-                .for_resource(rid.clone())
-        })?;
+        .await;
+        if let Err(error) = result {
+            return Err(attempt.untracked(
+                api_error_with_meta("Failed to create bucket", "s3.CreateBucket", error)
+                    .for_resource(rid),
+            ));
+        }
+        let issued = attempt.issued(identifier.clone(), Self::sent_only(resource, &["bucket"]));
 
         // Set tags
         let attrs = resource.resolved_attributes();
-        self.write_s3_bucket_tags(&resource.id, &bucket_name, &attrs)
-            .await?;
+        if let Err(error) = self
+            .write_s3_bucket_tags(&resource.id, &bucket_name, &attrs)
+            .await
+        {
+            return Err(self.failed_issued(&resource.id, issued, error).await);
+        }
 
         // Return state after creation
         let outcome = self.read_s3_bucket(&resource.id, &identifier).await;
-        Ok(self.create_outcome_from_read(
+        let completion = self.create_outcome_from_read(
             &resource.id,
             identifier,
             resource.resolved_attributes(),
             outcome,
-        ))
+        );
+        Ok(self.finish_issued(issued, completion))
     }
 
     /// Update an S3 bucket

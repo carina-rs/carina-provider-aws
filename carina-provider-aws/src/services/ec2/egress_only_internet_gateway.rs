@@ -1,12 +1,13 @@
 use std::collections::HashMap;
 
-use carina_core::provider::{AppliedIdentifier, CreateOutcome, ReadOutcome};
+use carina_core::provider::{AppliedIdentifier, ReadOutcome};
 use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{Resource, ResourceId, State};
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
 use crate::helpers::{build_tag_specification, require_string_attr};
+use crate::provider::CreateCompletion;
 
 impl AwsProvider {
     /// Read an EC2 Egress-Only Internet Gateway
@@ -58,7 +59,7 @@ impl AwsProvider {
     pub(crate) async fn create_ec2_egress_only_internet_gateway(
         &self,
         resource: &Resource,
-    ) -> ProviderResult<CreateOutcome> {
+    ) -> ProviderResult<CreateCompletion> {
         let vpc_id = require_string_attr(resource, "vpc_id")?;
 
         let mut req = self

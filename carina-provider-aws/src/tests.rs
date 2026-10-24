@@ -6,8 +6,24 @@ use indexmap::IndexMap;
 
 use carina_core::provider::ProviderNormalizer;
 use carina_core::resource::{ConcreteValue, Value};
+use carina_core::schema::Shape;
 
 use crate::{AwsNormalizer, AwsProvider};
+
+#[test]
+fn flow_log_resource_ids_are_order_insensitive() {
+    let config = crate::schemas::generated::ec2::flow_log::ec2_flow_log_config();
+    let resource_ids = config
+        .schema
+        .attributes
+        .get("resource_ids")
+        .expect("resource_ids attribute");
+
+    assert!(matches!(
+        config.schema.shape_of(&resource_ids.attr_type),
+        Shape::List { ordered: false, .. }
+    ));
+}
 
 // --- extract_ec2_vpc_attributes tests ---
 

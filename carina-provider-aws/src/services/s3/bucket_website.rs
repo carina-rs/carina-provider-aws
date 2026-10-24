@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use aws_sdk_s3::types::{
     ErrorDocument, IndexDocument, Protocol, RedirectAllRequestsTo, WebsiteConfiguration,
 };
-use carina_core::provider::{AppliedIdentifier, CreateOutcome, ReadOutcome};
+use carina_core::provider::{AppliedIdentifier, ReadOutcome};
 use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
 use carina_core::schema::ResourceSchema;
@@ -15,6 +15,7 @@ use crate::helpers::{
     RetryPolicy, optional_enum_struct_field, require_string_attr, retry_aws_operation,
     sdk_error_message,
 };
+use crate::provider::CreateCompletion;
 use crate::services::s3::bucket::is_s3_not_configured_error;
 
 impl AwsProvider {
@@ -105,7 +106,7 @@ impl AwsProvider {
         &self,
         resource: &Resource,
         schema: &ResourceSchema,
-    ) -> ProviderResult<CreateOutcome> {
+    ) -> ProviderResult<CreateCompletion> {
         let bucket = require_string_attr(resource, "bucket")?;
         let identifier =
             crate::helpers::applied_identifier(&resource.id, "s3.PutBucketWebsite", bucket)?;

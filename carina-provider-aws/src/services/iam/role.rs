@@ -1,13 +1,14 @@
 use indexmap::IndexMap;
 use std::collections::HashMap;
 
-use carina_core::provider::{AppliedIdentifier, CreateOutcome, ReadOutcome};
+use carina_core::provider::{AppliedIdentifier, ReadOutcome};
 use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
 use crate::helpers::{require_string_attr, sdk_error_message};
+use crate::provider::CreateCompletion;
 
 impl AwsProvider {
     /// Read an IAM Role
@@ -82,7 +83,7 @@ impl AwsProvider {
     pub(crate) async fn create_iam_role(
         &self,
         resource: &Resource,
-    ) -> ProviderResult<CreateOutcome> {
+    ) -> ProviderResult<CreateCompletion> {
         let role_name = require_string_attr(resource, "role_name")?;
 
         let assume_role_policy_document =

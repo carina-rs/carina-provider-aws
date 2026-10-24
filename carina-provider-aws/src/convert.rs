@@ -7,8 +7,8 @@
 use std::collections::HashMap;
 
 use carina_core::provider::{
-    AppliedState as CoreAppliedState, CreateOutcome as CoreCreateOutcome,
-    ReadOutcome as CoreReadOutcome, UpdateOutcome as CoreUpdateOutcome,
+    AppliedState as CoreAppliedState, ReadOutcome as CoreReadOutcome,
+    UpdateOutcome as CoreUpdateOutcome,
 };
 use carina_core::resource::{
     ConcreteValue, DataSource as CoreDataSource, DeferredValue, Directives as CoreDirectives,
@@ -25,10 +25,9 @@ use carina_core::schema::{
 use carina_provider_protocol::types::{
     AppliedPersistedState as ProtoAppliedPersistedState, AppliedState as ProtoAppliedState,
     AttributeSchema as ProtoAttributeSchema, AttributeType as ProtoAttributeType,
-    CreateOutcome as ProtoCreateOutcome, Directives as ProtoDirectives,
-    PartialReadDiagnostic as ProtoPartialReadDiagnostic, PersistedState as ProtoPersistedState,
-    PersistedValue as ProtoPersistedValue, ReadOutcome as ProtoReadOutcome,
-    Resource as ProtoResource, ResourceId as ProtoResourceId,
+    Directives as ProtoDirectives, PartialReadDiagnostic as ProtoPartialReadDiagnostic,
+    PersistedState as ProtoPersistedState, PersistedValue as ProtoPersistedValue,
+    ReadOutcome as ProtoReadOutcome, Resource as ProtoResource, ResourceId as ProtoResourceId,
     ResourceSchema as ProtoResourceSchema, SchemaKind as ProtoSchemaKind, State as ProtoState,
     StructField as ProtoStructField, UniqueNameSpec as ProtoUniqueNameSpec,
     UpdateOutcome as ProtoUpdateOutcome, Value as ProtoValue,
@@ -329,25 +328,6 @@ pub fn proto_to_core_persisted_state(
         Ok(state)
     } else {
         Ok(CoreState::not_found(id))
-    }
-}
-
-// -- CreateOutcome --
-
-pub fn core_to_proto_create_outcome(outcome: CoreCreateOutcome) -> ProtoCreateOutcome {
-    match outcome {
-        CoreCreateOutcome::Success { state } => ProtoCreateOutcome::Success {
-            state: core_to_proto_applied_state(&state),
-        },
-        CoreCreateOutcome::PartialSuccess { state, diagnostic } => {
-            ProtoCreateOutcome::PartialSuccess {
-                state: core_to_proto_applied_state(&state),
-                diagnostic: ProtoPartialReadDiagnostic {
-                    reason: diagnostic.reason().to_string(),
-                    missing_attributes: diagnostic.missing_attributes().to_vec(),
-                },
-            }
-        }
     }
 }
 

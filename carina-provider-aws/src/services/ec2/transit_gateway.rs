@@ -5,6 +5,8 @@ use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
 use carina_core::schema::ResourceSchema;
 
+use aws_sdk_ec2::types::TransitGatewayState;
+
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
 use crate::helpers::{
@@ -12,18 +14,37 @@ use crate::helpers::{
     optional_int_struct_field, optional_string_list_struct_field,
 };
 
-fn transit_gateway_create_poll_state(state: Option<&str>) -> CreatePoll<()> {
+fn transit_gateway_create_poll_state(state: Option<&TransitGatewayState>) -> CreatePoll<()> {
     match state {
-        Some("available") => CreatePoll::Ready(()),
-        Some("failed" | "deleted") => CreatePoll::Failed,
-        _ => CreatePoll::Pending,
+        Some(TransitGatewayState::Available) => CreatePoll::Ready(()),
+        Some(TransitGatewayState::Deleted) => CreatePoll::Failed,
+        // The current SDK has no named Failed variant, but preserve the
+        // protocol contract if AWS adds or returns that terminal spelling.
+        Some(state) if state.as_str() == "failed" => CreatePoll::Failed,
+        Some(
+            TransitGatewayState::Pending
+            | TransitGatewayState::Modifying
+            | TransitGatewayState::Deleting,
+        )
+        | None => CreatePoll::Pending,
+        // The SDK enum is non-exhaustive. Other future states are not proof
+        // that AWS finished or discarded the create, so retain the record.
+        Some(_unrecognized_state) => CreatePoll::Pending,
     }
 }
 
-fn transit_gateway_delete_poll_state(state: Option<&str>) -> DeletePoll {
+fn transit_gateway_delete_poll_state(state: Option<&TransitGatewayState>) -> DeletePoll {
     match state {
-        Some("deleted") | None => DeletePoll::Gone,
-        _ => DeletePoll::Pending,
+        Some(TransitGatewayState::Deleted) | None => DeletePoll::Gone,
+        Some(
+            TransitGatewayState::Available
+            | TransitGatewayState::Deleting
+            | TransitGatewayState::Modifying
+            | TransitGatewayState::Pending,
+        ) => DeletePoll::Pending,
+        // The SDK enum is non-exhaustive. An unknown future state does not
+        // prove that the transit gateway is gone.
+        Some(_unrecognized_state) => DeletePoll::Pending,
     }
 }
 
@@ -116,6 +137,10 @@ impl AwsProvider {
         let applied_identifier = identifier;
         let identifier = identifier.as_str();
 
+        // Measured with account carina-test-009 in ap-northeast-1 on
+        // 2026-10-24: `aws ec2 describe-transit-gateways
+        // --transit-gateway-ids <unknown>` returned
+        // InvalidTransitGatewayID.NotFound.
         let result = self
             .ec2_client
             .describe_transit_gateways()
@@ -133,7 +158,7 @@ impl AwsProvider {
 
         if let Some(tgw) = result.transit_gateways().first() {
             // Skip deleted transit gateways
-            if tgw.state().map(|s| s.as_str()) == Some("deleted") {
+            if tgw.state() == Some(&TransitGatewayState::Deleted) {
                 return Ok(ReadOutcome::not_found(id.clone()));
             }
 
@@ -226,6 +251,11 @@ impl AwsProvider {
         id: &ResourceId,
         transit_gateway_id: &str,
     ) -> ProviderResult<CreatePoll<()>> {
+        // The same 2026-10-24 ap-northeast-1 command above returns
+        // InvalidTransitGatewayID.NotFound for an unknown id. On poll/resume
+        // of an issued record the caller deliberately keeps that error
+        // pending: EC2 can briefly hide a just-created resource, and
+        // discarding the record would risk a duplicate create.
         let result = self
             .ec2_client
             .describe_transit_gateways()
@@ -244,8 +274,7 @@ impl AwsProvider {
             result
                 .transit_gateways()
                 .first()
-                .and_then(|tgw| tgw.state())
-                .map(|state| state.as_str()),
+                .and_then(|tgw| tgw.state()),
         ))
     }
 
@@ -273,8 +302,7 @@ impl AwsProvider {
             result
                 .transit_gateways()
                 .first()
-                .and_then(|tgw| tgw.state())
-                .map(|state| state.as_str()),
+                .and_then(|tgw| tgw.state()),
         ))
     }
 }
@@ -292,38 +320,45 @@ mod tests {
 
     #[test]
     fn create_poll_preserves_waiter_state_semantics() {
+        for state in TransitGatewayState::values() {
+            let expected = match *state {
+                "available" => CreatePoll::Ready(()),
+                "deleted" => CreatePoll::Failed,
+                "pending" | "modifying" | "deleting" => CreatePoll::Pending,
+                new_known_state => {
+                    panic!("classify new SDK transit gateway state {new_known_state}")
+                }
+            };
+            assert_eq!(
+                transit_gateway_create_poll_state(Some(&TransitGatewayState::from(*state))),
+                expected,
+                "state {state}"
+            );
+        }
+        assert_eq!(transit_gateway_create_poll_state(None), CreatePoll::Pending);
         assert_eq!(
-            transit_gateway_create_poll_state(Some("available")),
-            CreatePoll::Ready(())
-        );
-        assert_eq!(
-            transit_gateway_create_poll_state(Some("failed")),
+            transit_gateway_create_poll_state(Some(&TransitGatewayState::from("failed"))),
             CreatePoll::Failed
         );
         assert_eq!(
-            transit_gateway_create_poll_state(Some("deleted")),
-            CreatePoll::Failed
-        );
-        assert_eq!(
-            transit_gateway_create_poll_state(Some("pending")),
+            transit_gateway_create_poll_state(Some(&TransitGatewayState::from("future-state"))),
             CreatePoll::Pending
         );
-        assert_eq!(transit_gateway_create_poll_state(None), CreatePoll::Pending);
     }
 
     #[test]
     fn delete_poll_preserves_waiter_state_semantics() {
         assert_eq!(
-            transit_gateway_delete_poll_state(Some("deleted")),
+            transit_gateway_delete_poll_state(Some(&TransitGatewayState::Deleted)),
             DeletePoll::Gone
         );
         assert_eq!(transit_gateway_delete_poll_state(None), DeletePoll::Gone);
         assert_eq!(
-            transit_gateway_delete_poll_state(Some("available")),
+            transit_gateway_delete_poll_state(Some(&TransitGatewayState::Available)),
             DeletePoll::Pending
         );
         assert_eq!(
-            transit_gateway_delete_poll_state(Some("failed")),
+            transit_gateway_delete_poll_state(Some(&TransitGatewayState::from("failed"))),
             DeletePoll::Pending
         );
     }

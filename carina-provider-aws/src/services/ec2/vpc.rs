@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use carina_core::provider::{AppliedIdentifier, CreateOutcome, ReadOutcome};
+use carina_core::provider::{AppliedIdentifier, ReadOutcome};
 use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
 use carina_core::schema::ResourceSchema;
@@ -10,6 +10,7 @@ use crate::error_helpers::api_error_with_meta;
 use crate::helpers::{
     RetryPolicy, optional_bool_attr, optional_enum_attr, require_string_attr, retry_aws_operation,
 };
+use crate::provider::AwsCreateAttempt;
 
 impl AwsProvider {
     /// Read an EC2 VPC
@@ -91,18 +92,26 @@ impl AwsProvider {
     }
 
     /// Create an EC2 VPC
-    pub(crate) async fn create_ec2_vpc(
+    pub(crate) async fn create_ec2_vpc<A: AwsCreateAttempt>(
         &self,
         resource: &Resource,
         schema: &ResourceSchema,
-    ) -> ProviderResult<CreateOutcome> {
-        let cidr_block = require_string_attr(resource, "cidr_block")?;
+        attempt: A,
+    ) -> Result<A::Step, A::Verdict> {
+        let cidr_block = match require_string_attr(resource, "cidr_block") {
+            Ok(cidr_block) => cidr_block,
+            Err(error) => return Err(attempt.untracked(error)),
+        };
 
         // Create VPC with optional instance_tenancy
         let mut create_vpc_builder = self.ec2_client.create_vpc().cidr_block(&cidr_block);
 
         // Handle instance_tenancy if specified
-        if let Some(tenancy) = optional_enum_attr(resource, schema, "instance_tenancy")? {
+        let tenancy = match optional_enum_attr(resource, schema, "instance_tenancy") {
+            Ok(tenancy) => tenancy,
+            Err(error) => return Err(attempt.untracked(error)),
+        };
+        if let Some(tenancy) = tenancy {
             let tenancy_enum = match tenancy {
                 "dedicated" => aws_sdk_ec2::types::Tenancy::Dedicated,
                 "host" => aws_sdk_ec2::types::Tenancy::Host,
@@ -112,28 +121,52 @@ impl AwsProvider {
         }
 
         let rid = resource.id.clone();
-        let result = retry_aws_operation("create VPC", RetryPolicy::default(), || {
+        let result = match retry_aws_operation("create VPC", RetryPolicy::default(), || {
             let builder = create_vpc_builder.clone();
             async move { builder.send().await }
         })
         .await
-        .map_err(|e| {
-            api_error_with_meta("Failed to create VPC", "ec2.CreateVpc", e)
-                .for_resource(rid.clone())
-        })?;
+        {
+            Ok(result) => result,
+            Err(error) => {
+                return Err(attempt.untracked(
+                    api_error_with_meta("Failed to create VPC", "ec2.CreateVpc", error)
+                        .for_resource(rid),
+                ));
+            }
+        };
 
-        let vpc_id = result.vpc().and_then(|v| v.vpc_id()).ok_or_else(|| {
-            ProviderError::api_error("VPC created but no ID returned")
-                .for_resource(resource.id.clone())
-        })?;
+        let vpc_id = match result.vpc().and_then(|v| v.vpc_id()) {
+            Some(vpc_id) => vpc_id,
+            None => {
+                return Err(attempt.untracked(
+                    ProviderError::api_error("VPC created but no ID returned")
+                        .for_resource(resource.id.clone()),
+                ));
+            }
+        };
+        let identifier =
+            match crate::helpers::applied_identifier(&resource.id, "ec2.CreateVpc", vpc_id) {
+                Ok(identifier) => identifier,
+                Err(error) => return Err(attempt.untracked(error)),
+            };
+        let issued = attempt.issued(
+            identifier.clone(),
+            Self::sent_only(resource, &["cidr_block", "instance_tenancy"]),
+        );
 
         // Apply tags
-        self.apply_ec2_tags(&resource.id, vpc_id, &resource.resolved_attributes(), None)
-            .await?;
+        if let Err(error) = self
+            .apply_ec2_tags(&resource.id, vpc_id, &resource.resolved_attributes(), None)
+            .await
+        {
+            return Err(self.failed_issued(&resource.id, issued, error).await);
+        }
 
         // Configure DNS support
         if let Some(enabled) = optional_bool_attr(resource, "enable_dns_support") {
-            self.ec2_client
+            let result = self
+                .ec2_client
                 .modify_vpc_attribute()
                 .vpc_id(vpc_id)
                 .enable_dns_support(
@@ -142,16 +175,22 @@ impl AwsProvider {
                         .build(),
                 )
                 .send()
-                .await
-                .map_err(|e| {
-                    api_error_with_meta("Failed to set DNS support", "ec2.ModifyVpcAttribute", e)
-                        .for_resource(resource.id.clone())
-                })?;
+                .await;
+            if let Err(error) = result {
+                let error = api_error_with_meta(
+                    "Failed to set DNS support",
+                    "ec2.ModifyVpcAttribute",
+                    error,
+                )
+                .for_resource(resource.id.clone());
+                return Err(self.failed_issued(&resource.id, issued, error).await);
+            }
         }
 
         // Configure DNS hostnames
         if let Some(enabled) = optional_bool_attr(resource, "enable_dns_hostnames") {
-            self.ec2_client
+            let result = self
+                .ec2_client
                 .modify_vpc_attribute()
                 .vpc_id(vpc_id)
                 .enable_dns_hostnames(
@@ -160,22 +199,27 @@ impl AwsProvider {
                         .build(),
                 )
                 .send()
-                .await
-                .map_err(|e| {
-                    api_error_with_meta("Failed to set DNS hostnames", "ec2.ModifyVpcAttribute", e)
-                        .for_resource(resource.id.clone())
-                })?;
+                .await;
+            if let Err(error) = result {
+                let error = api_error_with_meta(
+                    "Failed to set DNS hostnames",
+                    "ec2.ModifyVpcAttribute",
+                    error,
+                )
+                .for_resource(resource.id.clone());
+                return Err(self.failed_issued(&resource.id, issued, error).await);
+            }
         }
 
         // Read back using VPC ID (reliable identifier)
-        let identifier = crate::helpers::applied_identifier(&resource.id, "ec2.CreateVpc", vpc_id)?;
         let outcome = self.read_ec2_vpc(&resource.id, &identifier).await;
-        Ok(self.create_outcome_from_read(
+        let completion = self.create_outcome_from_read(
             &resource.id,
             identifier,
             resource.resolved_attributes(),
             outcome,
-        ))
+        );
+        Ok(self.finish_issued(issued, completion))
     }
 
     /// Update an EC2 VPC

@@ -14,7 +14,7 @@ use aws_sdk_s3::Client as S3Client;
 use aws_sdk_sqs::Client as SqsClient;
 use aws_sdk_sts::Client as StsClient;
 use carina_core::provider::{
-    AppliedIdentifier, CreateOutcome, CreateRequest, Provider, ProviderReadyDataSource,
+    AppliedIdentifier, CreateOutcomeKind, CreateRequest, Provider, ProviderReadyDataSource,
     ReadRequest, UpdateOutcome, UpdateRequest,
 };
 use carina_core::resource::{ConcreteValue, DataSource, Resource, State, Value};
@@ -350,8 +350,7 @@ async fn create_bucket_ignores_supplied_read_only_region_for_placement() {
     let id = resource.id.clone();
     let request = create_request_for_test(resource).await;
 
-    let state = provider
-        .create(&id, request)
+    let state = carina_core::executor::dispatch_create(&provider, &id, request)
         .await
         .expect("create S3 bucket")
         .into_state_for_writeback();
@@ -387,13 +386,12 @@ async fn create_bucket_read_back_not_found_is_partial_success_with_created_ident
     let id = resource.id.clone();
     let request = create_request_for_test(resource).await;
 
-    let outcome = provider
-        .create(&id, request)
+    let outcome = carina_core::executor::dispatch_create(&provider, &id, request)
         .await
         .expect("the create API succeeded, so a missing read-back must stay successful");
 
-    let CreateOutcome::PartialSuccess { state, diagnostic } = outcome else {
-        panic!("expected partial create success, got {outcome:?}");
+    let CreateOutcomeKind::PartialSuccess { state, diagnostic } = outcome.into_kind() else {
+        panic!("expected partial create success");
     };
     assert_eq!(state.identifier().as_str(), bucket);
     assert!(diagnostic.reason().contains("post-create read-back"));
@@ -443,13 +441,12 @@ async fn create_bucket_read_back_error_is_partial_success_with_created_identifie
     let id = resource.id.clone();
     let request = create_request_for_test(resource).await;
 
-    let outcome = provider
-        .create(&id, request)
+    let outcome = carina_core::executor::dispatch_create(&provider, &id, request)
         .await
         .expect("the create API succeeded, so a failed read-back must stay successful");
 
-    let CreateOutcome::PartialSuccess { state, diagnostic } = outcome else {
-        panic!("expected partial create success, got {outcome:?}");
+    let CreateOutcomeKind::PartialSuccess { state, diagnostic } = outcome.into_kind() else {
+        panic!("expected partial create success");
     };
     assert_eq!(state.identifier().as_str(), bucket);
     assert!(diagnostic.reason().contains("post-create read-back"));

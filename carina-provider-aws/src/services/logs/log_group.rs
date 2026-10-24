@@ -2,13 +2,14 @@ use indexmap::IndexMap;
 use std::collections::HashMap;
 
 use carina_core::provider::ProviderResult;
-use carina_core::provider::{AppliedIdentifier, CreateOutcome, ReadOutcome};
+use carina_core::provider::{AppliedIdentifier, ReadOutcome};
 use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
 use carina_core::schema::ResourceSchema;
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
 use crate::helpers::{optional_enum_attr, require_string_attr};
+use crate::provider::AwsCreateAttempt;
 
 impl AwsProvider {
     /// Read a CloudWatch Logs Log Group
@@ -116,12 +117,24 @@ impl AwsProvider {
     }
 
     /// Create a CloudWatch Logs Log Group
-    pub(crate) async fn create_logs_log_group(
+    pub(crate) async fn create_logs_log_group<A: AwsCreateAttempt>(
         &self,
         resource: &Resource,
         schema: &ResourceSchema,
-    ) -> ProviderResult<CreateOutcome> {
-        let log_group_name = require_string_attr(resource, "log_group_name")?;
+        attempt: A,
+    ) -> Result<A::Step, A::Verdict> {
+        let log_group_name = match require_string_attr(resource, "log_group_name") {
+            Ok(log_group_name) => log_group_name,
+            Err(error) => return Err(attempt.untracked(error)),
+        };
+        let identifier = match crate::helpers::applied_identifier(
+            &resource.id,
+            "logs.CreateLogGroup",
+            log_group_name.clone(),
+        ) {
+            Ok(identifier) => identifier,
+            Err(error) => return Err(attempt.untracked(error)),
+        };
 
         let mut req = self
             .logs_client
@@ -134,7 +147,11 @@ impl AwsProvider {
             req = req.kms_key_id(kms_key.expose_plaintext());
         }
 
-        if let Some(class) = optional_enum_attr(resource, schema, "log_group_class")? {
+        let log_group_class = match optional_enum_attr(resource, schema, "log_group_class") {
+            Ok(log_group_class) => log_group_class,
+            Err(error) => return Err(attempt.untracked(error)),
+        };
+        if let Some(class) = log_group_class {
             use aws_sdk_cloudwatchlogs::types::LogGroupClass;
             req = req.log_group_class(LogGroupClass::from(class));
         }
@@ -149,43 +166,50 @@ impl AwsProvider {
             req = req.set_tags(Some(tags));
         }
 
-        req.send().await.map_err(|e| {
-            api_error_with_meta("Failed to create log group", "logs.CreateLogGroup", e)
-                .for_resource(resource.id.clone())
-        })?;
+        if let Err(error) = req.send().await {
+            return Err(attempt.untracked(
+                api_error_with_meta("Failed to create log group", "logs.CreateLogGroup", error)
+                    .for_resource(resource.id.clone()),
+            ));
+        }
+        let issued = attempt.issued(
+            identifier.clone(),
+            Self::sent_only(
+                resource,
+                &["log_group_name", "kms_key_id", "log_group_class", "tags"],
+            ),
+        );
 
         // Set retention if specified
         if let Some(Value::Concrete(ConcreteValue::Int(days))) =
             resource.get_attr("retention_in_days")
         {
-            self.logs_client
+            let result = self
+                .logs_client
                 .put_retention_policy()
                 .log_group_name(&log_group_name)
                 .retention_in_days(*days as i32)
                 .send()
-                .await
-                .map_err(|e| {
-                    api_error_with_meta(
-                        "Failed to set retention policy",
-                        "logs.PutRetentionPolicy",
-                        e,
-                    )
-                    .for_resource(resource.id.clone())
-                })?;
+                .await;
+            if let Err(error) = result {
+                let error = api_error_with_meta(
+                    "Failed to set retention policy",
+                    "logs.PutRetentionPolicy",
+                    error,
+                )
+                .for_resource(resource.id.clone());
+                return Err(self.failed_issued(&resource.id, issued, error).await);
+            }
         }
 
-        let identifier = crate::helpers::applied_identifier(
-            &resource.id,
-            "logs.CreateLogGroup",
-            log_group_name,
-        )?;
         let outcome = self.read_logs_log_group(&resource.id, &identifier).await;
-        Ok(self.create_outcome_from_read(
+        let completion = self.create_outcome_from_read(
             &resource.id,
             identifier,
             resource.resolved_attributes(),
             outcome,
-        ))
+        );
+        Ok(self.finish_issued(issued, completion))
     }
 
     /// Update a CloudWatch Logs Log Group

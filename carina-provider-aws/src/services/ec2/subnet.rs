@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use carina_core::provider::{AppliedIdentifier, CreateOutcome, ReadOutcome};
+use carina_core::provider::{AppliedIdentifier, ReadOutcome};
 use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{Resource, ResourceId, State};
 use carina_core::schema::ResourceSchema;
@@ -11,6 +11,7 @@ use crate::helpers::{
     optional_bool_attr, optional_bool_struct_field, optional_enum_attr, optional_enum_struct_field,
     require_string_attr,
 };
+use crate::provider::AwsCreateAttempt;
 use aws_sdk_ec2::types::{AttributeBooleanValue, HostnameType};
 
 // `read_ec2_subnet` must store `availability_zone` as the AWS canonical
@@ -90,14 +91,24 @@ impl AwsProvider {
     }
 
     /// Create an EC2 Subnet
-    pub(crate) async fn create_ec2_subnet(
+    pub(crate) async fn create_ec2_subnet<A: AwsCreateAttempt>(
         &self,
         resource: &Resource,
         schema: &ResourceSchema,
-    ) -> ProviderResult<CreateOutcome> {
-        let cidr_block = require_string_attr(resource, "cidr_block")?;
-        let vpc_id = require_string_attr(resource, "vpc_id")?;
-        let modify_enum_attrs = resolve_modify_subnet_enum_attrs(resource, schema)?;
+        attempt: A,
+    ) -> Result<A::Step, A::Verdict> {
+        let cidr_block = match require_string_attr(resource, "cidr_block") {
+            Ok(cidr_block) => cidr_block,
+            Err(error) => return Err(attempt.untracked(error)),
+        };
+        let vpc_id = match require_string_attr(resource, "vpc_id") {
+            Ok(vpc_id) => vpc_id,
+            Err(error) => return Err(attempt.untracked(error)),
+        };
+        let modify_enum_attrs = match resolve_modify_subnet_enum_attrs(resource, schema) {
+            Ok(attributes) => attributes,
+            Err(error) => return Err(attempt.untracked(error)),
+        };
 
         let mut req = self
             .ec2_client
@@ -105,39 +116,69 @@ impl AwsProvider {
             .vpc_id(&vpc_id)
             .cidr_block(&cidr_block);
 
-        if let Some(az) = optional_enum_attr(resource, schema, "availability_zone")? {
+        let availability_zone = match optional_enum_attr(resource, schema, "availability_zone") {
+            Ok(availability_zone) => availability_zone,
+            Err(error) => return Err(attempt.untracked(error)),
+        };
+        if let Some(az) = availability_zone {
             req = req.availability_zone(az);
         }
 
-        let result = req.send().await.map_err(|e| {
-            api_error_with_meta("Failed to create subnet", "ec2.CreateSubnet", e)
-                .for_resource(resource.id.clone())
-        })?;
+        let result = match req.send().await {
+            Ok(result) => result,
+            Err(error) => {
+                return Err(attempt.untracked(
+                    api_error_with_meta("Failed to create subnet", "ec2.CreateSubnet", error)
+                        .for_resource(resource.id.clone()),
+                ));
+            }
+        };
 
-        let subnet_id = result.subnet().and_then(|s| s.subnet_id()).ok_or_else(|| {
-            ProviderError::api_error("Subnet created but no ID returned")
-                .for_resource(resource.id.clone())
-        })?;
+        let subnet_id = match result.subnet().and_then(|s| s.subnet_id()) {
+            Some(subnet_id) => subnet_id,
+            None => {
+                return Err(attempt.untracked(
+                    ProviderError::api_error("Subnet created but no ID returned")
+                        .for_resource(resource.id.clone()),
+                ));
+            }
+        };
+        let identifier =
+            match crate::helpers::applied_identifier(&resource.id, "ec2.CreateSubnet", subnet_id) {
+                Ok(identifier) => identifier,
+                Err(error) => return Err(attempt.untracked(error)),
+            };
+        let issued = attempt.issued(
+            identifier.clone(),
+            Self::sent_only(resource, &["vpc_id", "cidr_block", "availability_zone"]),
+        );
 
         // Apply tags
         let attrs = resource.resolved_attributes();
-        self.apply_ec2_tags(&resource.id, subnet_id, &attrs, None)
-            .await?;
+        if let Err(error) = self
+            .apply_ec2_tags(&resource.id, subnet_id, &attrs, None)
+            .await
+        {
+            return Err(self.failed_issued(&resource.id, issued, error).await);
+        }
 
         // Apply subnet attributes that require ModifySubnetAttribute
-        self.modify_subnet_attributes(&resource.id, subnet_id, resource, &modify_enum_attrs)
-            .await?;
+        if let Err(error) = self
+            .modify_subnet_attributes(&resource.id, subnet_id, resource, &modify_enum_attrs)
+            .await
+        {
+            return Err(self.failed_issued(&resource.id, issued, error).await);
+        }
 
         // Read back using subnet ID (reliable identifier)
-        let identifier =
-            crate::helpers::applied_identifier(&resource.id, "ec2.CreateSubnet", subnet_id)?;
         let outcome = self.read_ec2_subnet(&resource.id, &identifier).await;
-        Ok(self.create_outcome_from_read(
+        let completion = self.create_outcome_from_read(
             &resource.id,
             identifier,
             resource.resolved_attributes(),
             outcome,
-        ))
+        );
+        Ok(self.finish_issued(issued, completion))
     }
 
     /// Update an EC2 Subnet

@@ -17,7 +17,7 @@ use aws_sdk_acm::types::{CertificateStatus, KeyAlgorithm, ValidationMethod};
 use indexmap::IndexMap;
 
 use carina_core::provider::{AppliedIdentifier, AppliedState, ReadOutcome};
-use carina_core::provider::{CreateOutcome, ProviderError, ProviderResult};
+use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
 use carina_core::schema::ResourceSchema;
 
@@ -26,6 +26,7 @@ use crate::error_helpers::api_error_with_meta;
 use crate::helpers::{
     optional_enum_attr, optional_enum_struct_field, require_string_attr, sdk_error_message,
 };
+use crate::provider::CreateCompletion;
 
 const DVO_MISSING_ATTRIBUTE: &str = "domain_validation_options";
 
@@ -461,9 +462,9 @@ fn partial_acm_certificate_create_outcome(
     request_enums: &CertificateRequestEnums,
     cert: Option<&aws_sdk_acm::types::CertificateDetail>,
     reason: String,
-) -> CreateOutcome {
+) -> CreateCompletion {
     let state = partial_acm_certificate_state(id, arn, domain_name, resource, request_enums, cert);
-    CreateOutcome::partial_success(state, reason, vec![DVO_MISSING_ATTRIBUTE.to_string()])
+    CreateCompletion::partial(state, reason, vec![DVO_MISSING_ATTRIBUTE.to_string()])
 }
 
 impl AwsProvider {
@@ -476,7 +477,7 @@ impl AwsProvider {
         &self,
         resource: &Resource,
         schema: &ResourceSchema,
-    ) -> ProviderResult<CreateOutcome> {
+    ) -> ProviderResult<CreateCompletion> {
         let id = resource.id.clone();
         let request = build_request_certificate(resource, schema)?;
         let domain_name = request.domain_name.clone().ok_or_else(|| {
@@ -975,39 +976,42 @@ mod tests {
     }
 
     fn assert_partial_outcome_records_arn(
-        outcome: CreateOutcome,
+        outcome: CreateCompletion,
         arn: &str,
         expected_reason_parts: &[&str],
     ) {
-        let CreateOutcome::PartialSuccess { state, diagnostic } = outcome else {
+        let CreateCompletion::Partial {
+            identifier,
+            attributes,
+            reason,
+            missing_attributes,
+        } = outcome
+        else {
             panic!("expected partial create outcome");
         };
-        assert_eq!(state.identifier().as_str(), arn);
+        assert_eq!(identifier.as_str(), arn);
         assert_eq!(
-            state.attributes().get("certificate_arn"),
+            attributes.get("certificate_arn"),
             Some(&Value::Concrete(ConcreteValue::String(
                 arn.to_string().into()
             ))),
         );
         assert_eq!(
-            state.attributes().get("domain_name"),
+            attributes.get("domain_name"),
             Some(&Value::Concrete(ConcreteValue::String(
                 "example.com".to_string().into()
             ))),
         );
         assert!(
-            !state.attributes().contains_key(DVO_MISSING_ATTRIBUTE),
+            !attributes.contains_key(DVO_MISSING_ATTRIBUTE),
             "partial state must not publish incomplete DVO as complete state",
         );
-        assert_eq!(
-            diagnostic.missing_attributes(),
-            &[DVO_MISSING_ATTRIBUTE.to_string()],
-        );
+        assert_eq!(missing_attributes, &[DVO_MISSING_ATTRIBUTE.to_string()],);
         for part in expected_reason_parts {
             assert!(
-                diagnostic.reason().contains(part),
+                reason.contains(part),
                 "diagnostic reason must contain {part:?}; got: {}",
-                diagnostic.reason(),
+                reason,
             );
         }
     }
