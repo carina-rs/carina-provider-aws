@@ -1,11 +1,9 @@
 //! AWS Provider normalizer
 
-use std::collections::HashMap;
-
 use carina_core::provider::{
-    BoxFuture, ProviderNormalizer, ProviderResult, SavedAttrs, ready_noop,
+    BoxFuture, ProviderNormalizer, ProviderResult, SavedAttrs, StateTransformMap, ready_noop,
 };
-use carina_core::resource::{Resource, ResourceId, State};
+use carina_core::resource::Resource;
 
 /// Schema extension for the AWS provider.
 ///
@@ -27,14 +25,14 @@ impl ProviderNormalizer for AwsNormalizer {
 
     fn normalize_state<'a>(
         &'a self,
-        _current_states: &'a mut HashMap<ResourceId, State>,
+        _current_states: &'a mut StateTransformMap,
     ) -> BoxFuture<'a, ProviderResult<()>> {
         ready_noop()
     }
 
     fn hydrate_read_state<'a>(
         &'a self,
-        _current_states: &'a mut HashMap<ResourceId, State>,
+        _current_states: &'a mut StateTransformMap,
         _saved_attrs: &'a SavedAttrs,
     ) -> BoxFuture<'a, ProviderResult<()>> {
         ready_noop()
@@ -44,7 +42,10 @@ impl ProviderNormalizer for AwsNormalizer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use carina_core::resource::{ConcreteValue, Value};
+    use std::collections::HashMap;
+
+    use carina_core::provider::normalize_provider_states;
+    use carina_core::resource::{ConcreteValue, State, Value};
     use indexmap::IndexMap;
 
     #[tokio::test]
@@ -129,8 +130,7 @@ mod tests {
         let id = Resource::with_provider("aws", "ec2.Subnet", "test-subnet", None).id;
         let mut states = HashMap::from([(id.clone(), State::existing(id, attributes))]);
 
-        AwsNormalizer
-            .normalize_state(&mut states)
+        normalize_provider_states(&AwsNormalizer, &mut states)
             .await
             .expect("state normalization should succeed");
         let state = states

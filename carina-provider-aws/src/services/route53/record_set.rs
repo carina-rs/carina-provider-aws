@@ -10,7 +10,7 @@ use aws_sdk_route53::types::{
     AliasTarget, Change, ChangeAction, ChangeBatch, ResourceRecord, ResourceRecordSet, RrType,
 };
 
-use carina_core::provider::{AppliedIdentifier, CreateOutcome, ReadOutcome};
+use carina_core::provider::{AppliedIdentifier, ReadOutcome};
 use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{ConcreteValue, Resource, ResourceId, Value};
 use carina_core::schema::ResourceSchema;
@@ -18,6 +18,7 @@ use carina_core::schema::ResourceSchema;
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
 use crate::helpers::{require_enum_attr, require_string_attr, sdk_error_message};
+use crate::provider::CreateCompletion;
 
 /// Composite identifier format: `hosted_zone_id|name|type`
 fn make_identifier(hosted_zone_id: &str, name: &str, record_type: &str) -> String {
@@ -369,7 +370,7 @@ impl AwsProvider {
         &self,
         resource: &Resource,
         schema: &ResourceSchema,
-    ) -> ProviderResult<CreateOutcome> {
+    ) -> ProviderResult<CreateCompletion> {
         let hosted_zone_id = require_string_attr(resource, "hosted_zone_id")?;
         let name = require_string_attr(resource, "name")?;
         let record_type = require_enum_attr(resource, schema, "type")?;

@@ -74,7 +74,7 @@ pub fn ec2_flow_log_config() -> AwsSchemaConfig {
                 .with_provider_name("MaxAggregationInterval"),
         )
         .attribute(
-            AttributeSchema::new("resource_ids", AttributeType::list(AttributeType::string()))
+            AttributeSchema::new("resource_ids", AttributeType::unordered_list(AttributeType::string()))
                 .required()
                 .create_only()
                 .with_description("The IDs of the resources to monitor. For example, if the resource type is VPC, specify the IDs of the VPCs. Constraints: Maximum of 25 for transit gat...")

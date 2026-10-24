@@ -1,12 +1,13 @@
 use std::collections::HashMap;
 
-use carina_core::provider::{AppliedIdentifier, CreateOutcome, ReadOutcome};
+use carina_core::provider::{AppliedIdentifier, ReadOutcome};
 use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{ConcreteValue, Resource, ResourceId, Value};
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
 use crate::helpers::require_string_attr;
+use crate::provider::CreateCompletion;
 
 impl AwsProvider {
     /// Read an EC2 Route (routes are identified by route_table_id + destination)
@@ -71,7 +72,7 @@ impl AwsProvider {
     pub(crate) async fn create_ec2_route(
         &self,
         resource: &Resource,
-    ) -> ProviderResult<CreateOutcome> {
+    ) -> ProviderResult<CreateCompletion> {
         let route_table_id = require_string_attr(resource, "route_table_id")?;
         let destination_cidr = require_string_attr(resource, "destination_cidr_block")?;
 

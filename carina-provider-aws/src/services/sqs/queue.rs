@@ -11,7 +11,7 @@ use aws_sdk_sqs::types::QueueAttributeName;
 use indexmap::IndexMap;
 use std::collections::HashMap;
 
-use carina_core::provider::{AppliedIdentifier, CreateOutcome, ReadOutcome};
+use carina_core::provider::{AppliedIdentifier, ReadOutcome};
 use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
 use carina_core::schema::ResourceSchema;
@@ -19,6 +19,7 @@ use carina_core::schema::ResourceSchema;
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
 use crate::helpers::require_string_attr;
+use crate::provider::CreateCompletion;
 // IAM policy doc Struct↔JSON converters are borrowed via pub(crate)
 // from services/iam/role.rs until aws#286 extracts them into a shared
 // module. SQS's Policy and RedriveAllowPolicy are IAM-shaped.
@@ -478,7 +479,7 @@ impl AwsProvider {
         &self,
         resource: &Resource,
         _schema: &ResourceSchema,
-    ) -> ProviderResult<CreateOutcome> {
+    ) -> ProviderResult<CreateCompletion> {
         let queue_name = require_string_attr(resource, "queue_name")?;
 
         // Pack every writable attribute the user actually set.

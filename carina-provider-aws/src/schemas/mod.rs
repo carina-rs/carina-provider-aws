@@ -16,8 +16,8 @@ mod tests {
 
     use carina_core::differ::{Diff, diff};
     use carina_core::executor::normalized::apply_desired_normalization;
-    use carina_core::provider::ProviderNormalizer;
-    use carina_core::resource::{ConcreteValue, ResolvedResource, Resource, State, Value};
+    use carina_core::provider::normalize_provider_states;
+    use carina_core::resource::{ConcreteValue, Current, ResolvedResource, Resource, State, Value};
     use carina_core::schema::{
         AttributeType, RawShape, ResourceSchema, SchemaKind, SchemaRegistry, Shape,
         ShapeWalkBudget, TypeInSchema, UniqueNameSpec,
@@ -480,12 +480,22 @@ mod tests {
         )]);
         let mut current_states =
             HashMap::from([(id.clone(), State::existing(id.clone(), current_attributes))]);
-        carina_core::value::canonicalize_states_with_schemas(&mut current_states, &registry);
-        AwsNormalizer
-            .normalize_state(&mut current_states)
+        normalize_provider_states(&AwsNormalizer, &mut current_states)
             .await
             .expect("state normalization should succeed");
-        let current = current_states.remove(&id).expect("current RecordSet state");
+        let mut current_states = current_states
+            .into_iter()
+            .map(|(id, state)| (id, Current::from_state(state)))
+            .collect();
+        carina_core::value::canonicalize_states_with_schemas(&mut current_states, &registry);
+        let current = match current_states.remove(&id).expect("current RecordSet state") {
+            Current::Absent(state) => state.into_state(),
+            Current::Present(present) => present.into_parts().0,
+            Current::CreateInFlight(_pending) => {
+                panic!("test fixture must not become an in-flight create")
+            }
+            Current::MissingIdentifier(state) => state.into_state(),
+        };
         let schema = registry
             .get("aws", "route53.RecordSet", SchemaKind::Resource)
             .expect("RecordSet resource schema");

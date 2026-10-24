@@ -7,6 +7,7 @@ use crate::error_helpers::api_error_with_meta;
 use crate::helpers::{
     RetryPolicy, optional_enum_attr, require_enum_attr, require_string_attr, retry_aws_operation,
 };
+use crate::provider::CreateCompletion;
 use crate::services::s3::bucket::is_s3_not_configured_error;
 use crate::services::s3::{InvalidBucketStateReason, classify_invalid_bucket_state};
 use aws_sdk_s3::error::{ProvideErrorMetadata, SdkError};
@@ -15,7 +16,7 @@ use aws_sdk_s3::operation::put_bucket_versioning::{
 };
 use aws_sdk_s3::types::{BucketVersioningStatus, MfaDelete, VersioningConfiguration};
 use carina_core::provider::ProviderResult;
-use carina_core::provider::{AppliedIdentifier, CreateOutcome, ReadOutcome};
+use carina_core::provider::{AppliedIdentifier, ReadOutcome};
 use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
 use carina_core::schema::ResourceSchema;
 
@@ -84,7 +85,7 @@ impl AwsProvider {
         &self,
         resource: &Resource,
         schema: &ResourceSchema,
-    ) -> ProviderResult<CreateOutcome> {
+    ) -> ProviderResult<CreateCompletion> {
         let bucket = require_string_attr(resource, "bucket")?;
         let identifier =
             crate::helpers::applied_identifier(&resource.id, "s3.PutBucketVersioning", bucket)?;

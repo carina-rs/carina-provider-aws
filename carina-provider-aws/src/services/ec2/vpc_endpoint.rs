@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use carina_core::provider::{AppliedIdentifier, CreateOutcome, ReadOutcome};
+use carina_core::provider::{AppliedIdentifier, ReadOutcome};
 use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
 use carina_core::schema::ResourceSchema;
@@ -10,6 +10,7 @@ use crate::error_helpers::api_error_with_meta;
 use crate::helpers::{
     RetryPolicy, optional_bool_attr, optional_enum_attr, require_string_attr, retry_aws_operation,
 };
+use crate::provider::AwsCreateAttempt;
 
 impl AwsProvider {
     /// Read an EC2 VPC Endpoint
@@ -63,13 +64,20 @@ impl AwsProvider {
     }
 
     /// Create an EC2 VPC Endpoint
-    pub(crate) async fn create_ec2_vpc_endpoint(
+    pub(crate) async fn create_ec2_vpc_endpoint<A: AwsCreateAttempt>(
         &self,
         resource: &Resource,
         schema: &ResourceSchema,
-    ) -> ProviderResult<CreateOutcome> {
-        let vpc_id = require_string_attr(resource, "vpc_id")?;
-        let service_name = require_string_attr(resource, "service_name")?;
+        attempt: A,
+    ) -> Result<A::Step, A::Verdict> {
+        let vpc_id = match require_string_attr(resource, "vpc_id") {
+            Ok(vpc_id) => vpc_id,
+            Err(error) => return Err(attempt.untracked(error)),
+        };
+        let service_name = match require_string_attr(resource, "service_name") {
+            Ok(service_name) => service_name,
+            Err(error) => return Err(attempt.untracked(error)),
+        };
 
         let mut req = self
             .ec2_client
@@ -77,7 +85,11 @@ impl AwsProvider {
             .vpc_id(&vpc_id)
             .service_name(&service_name);
 
-        if let Some(ep_type) = optional_enum_attr(resource, schema, "vpc_endpoint_type")? {
+        let endpoint_type = match optional_enum_attr(resource, schema, "vpc_endpoint_type") {
+            Ok(endpoint_type) => endpoint_type,
+            Err(error) => return Err(attempt.untracked(error)),
+        };
+        if let Some(ep_type) = endpoint_type {
             use aws_sdk_ec2::types::VpcEndpointType;
             req = req.vpc_endpoint_type(VpcEndpointType::from(ep_type));
         }
@@ -122,54 +134,99 @@ impl AwsProvider {
             resource.get_attr("policy_document")
         {
             // Convert Value::Map to JSON string for the API
-            let json_str = crate::services::iam::role::value_to_iam_policy_json(&Value::Concrete(
-                ConcreteValue::Map(map.clone()),
-            ))
-            .map_err(|e| {
-                ProviderError::internal(format!("Failed to serialize policy_document: {}", e))
-                    .for_resource(resource.id.clone())
-            })?;
+            let json_str = match crate::services::iam::role::value_to_iam_policy_json(
+                &Value::Concrete(ConcreteValue::Map(map.clone())),
+            ) {
+                Ok(json) => json,
+                Err(error) => {
+                    return Err(attempt.untracked(
+                        ProviderError::internal(format!(
+                            "Failed to serialize policy_document: {error}"
+                        ))
+                        .for_resource(resource.id.clone()),
+                    ));
+                }
+            };
             req = req.policy_document(&json_str);
         }
 
         let rid = resource.id.clone();
-        let result = retry_aws_operation("create VPC endpoint", RetryPolicy::default(), || {
-            let req = req.clone();
-            async move { req.send().await }
-        })
-        .await
-        .map_err(|e| {
-            api_error_with_meta("Failed to create VPC endpoint", "ec2.CreateVpcEndpoint", e)
-                .for_resource(rid.clone())
-        })?;
+        let result =
+            match retry_aws_operation("create VPC endpoint", RetryPolicy::default(), || {
+                let req = req.clone();
+                async move { req.send().await }
+            })
+            .await
+            {
+                Ok(result) => result,
+                Err(error) => {
+                    return Err(attempt.untracked(
+                        api_error_with_meta(
+                            "Failed to create VPC endpoint",
+                            "ec2.CreateVpcEndpoint",
+                            error,
+                        )
+                        .for_resource(rid),
+                    ));
+                }
+            };
 
-        let endpoint_id = result
-            .vpc_endpoint()
-            .and_then(|ep| ep.vpc_endpoint_id())
-            .ok_or_else(|| {
-                ProviderError::api_error("VPC Endpoint created but no ID returned")
-                    .for_resource(resource.id.clone())
-            })?;
+        let endpoint_id = match result.vpc_endpoint().and_then(|ep| ep.vpc_endpoint_id()) {
+            Some(endpoint_id) => endpoint_id,
+            None => {
+                return Err(attempt.untracked(
+                    ProviderError::api_error("VPC Endpoint created but no ID returned")
+                        .for_resource(resource.id.clone()),
+                ));
+            }
+        };
+        let identifier = match crate::helpers::applied_identifier(
+            &resource.id,
+            "ec2.CreateVpcEndpoint",
+            endpoint_id,
+        ) {
+            Ok(identifier) => identifier,
+            Err(error) => return Err(attempt.untracked(error)),
+        };
+        let issued = attempt.issued(
+            identifier.clone(),
+            Self::sent_only(
+                resource,
+                &[
+                    "vpc_id",
+                    "service_name",
+                    "vpc_endpoint_type",
+                    "route_table_ids",
+                    "subnet_ids",
+                    "security_group_ids",
+                    "private_dns_enabled",
+                    "policy_document",
+                ],
+            ),
+        );
 
         // Apply tags
-        self.apply_ec2_tags(
-            &resource.id,
-            endpoint_id,
-            &resource.resolved_attributes(),
-            None,
-        )
-        .await?;
+        if let Err(error) = self
+            .apply_ec2_tags(
+                &resource.id,
+                endpoint_id,
+                &resource.resolved_attributes(),
+                None,
+            )
+            .await
+        {
+            return Err(self.failed_issued(&resource.id, issued, error).await);
+        }
 
         // Read back
-        let identifier =
-            crate::helpers::applied_identifier(&resource.id, "ec2.CreateVpcEndpoint", endpoint_id)?;
         let outcome = self.read_ec2_vpc_endpoint(&resource.id, &identifier).await;
-        Ok(self.create_outcome_from_read(
+        let completion = self.create_outcome_from_read(
             &resource.id,
             identifier,
             resource.resolved_attributes(),
             outcome,
-        ))
+        );
+        Ok(self.finish_issued(issued, completion))
     }
 
     /// Update an EC2 VPC Endpoint

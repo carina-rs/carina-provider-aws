@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use carina_core::provider::{AppliedIdentifier, CreateOutcome, ReadOutcome};
+use carina_core::provider::{AppliedIdentifier, ReadOutcome};
 use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{ConcreteValue, Resource, ResourceId, Value};
 use carina_core::schema::ResourceSchema;
@@ -10,6 +10,7 @@ use carina_core::schema::ResourceSchema;
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
 use crate::helpers::require_enum_attr;
+use crate::provider::CreateCompletion;
 
 fn build_security_group_rule_permission(
     resource: &Resource,
@@ -208,7 +209,7 @@ impl AwsProvider {
         resource: &Resource,
         schema: &ResourceSchema,
         is_ingress: bool,
-    ) -> ProviderResult<CreateOutcome> {
+    ) -> ProviderResult<CreateCompletion> {
         let sg_id = require_security_group_rule_group_id(resource)?;
         let permission = build_security_group_rule_permission(resource, schema, is_ingress)?;
         let (identifier, outcome) = self

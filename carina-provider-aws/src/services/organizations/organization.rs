@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use carina_core::provider::{AppliedIdentifier, CreateOutcome, ReadOutcome};
+use carina_core::provider::{AppliedIdentifier, ReadOutcome};
 use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{ConcreteValue, Resource, ResourceId, Value};
 use carina_core::schema::ResourceSchema;
@@ -8,6 +8,7 @@ use carina_core::schema::ResourceSchema;
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
 use crate::helpers::optional_enum_attr;
+use crate::provider::CreateCompletion;
 
 impl AwsProvider {
     /// Extract attributes from an Organizations Organization object
@@ -113,7 +114,7 @@ impl AwsProvider {
         &self,
         resource: &Resource,
         schema: &ResourceSchema,
-    ) -> ProviderResult<CreateOutcome> {
+    ) -> ProviderResult<CreateCompletion> {
         let mut req = self.organizations_client.create_organization();
 
         if let Some(feature_set) = optional_enum_attr(resource, schema, "feature_set")? {

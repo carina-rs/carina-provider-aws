@@ -1,12 +1,13 @@
 use std::collections::HashMap;
 
-use carina_core::provider::{AppliedIdentifier, CreateOutcome, ReadOutcome};
+use carina_core::provider::{AppliedIdentifier, ReadOutcome};
 use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{ConcreteValue, Resource, ResourceId, Value};
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
 use crate::helpers::require_string_attr;
+use crate::provider::CreateCompletion;
 
 impl AwsProvider {
     /// Read an EC2 Subnet Route Table Association
@@ -87,7 +88,7 @@ impl AwsProvider {
     pub(crate) async fn create_ec2_subnet_route_table_association(
         &self,
         resource: &Resource,
-    ) -> ProviderResult<CreateOutcome> {
+    ) -> ProviderResult<CreateCompletion> {
         let route_table_id = require_string_attr(resource, "route_table_id")?;
         let subnet_id = require_string_attr(resource, "subnet_id")?;
 

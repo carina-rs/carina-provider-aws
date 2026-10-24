@@ -181,8 +181,7 @@ async fn create_object_lock(provider: &AwsProvider, bucket: &str, rule: Option<V
     let resource = object_lock_resource(bucket, rule);
     let id = resource.id.clone();
     let request = create_request_for_test(resource).await;
-    provider
-        .create(&id, request)
+    carina_core::executor::dispatch_create(provider, &id, request)
         .await
         .expect("create Object Lock configuration")
         .into_state_for_writeback()
@@ -299,8 +298,7 @@ async fn host_canonicalizes_dsl_enum_identifiers_before_create() {
     let id = resource.id.clone();
     let request = create_request_for_test(resource).await;
 
-    let _state = provider
-        .create(&id, request)
+    let _state = carina_core::executor::dispatch_create(&provider, &id, request)
         .await
         .expect("create Object Lock configuration from DSL enum identifiers")
         .into_state_for_writeback();
@@ -407,11 +405,10 @@ async fn create_requires_versioning_with_actionable_bucket_error() {
     let id = resource.id.clone();
     let request = create_request_for_test(resource).await;
 
-    let error = provider
-        .create(&id, request)
+    let error = carina_core::executor::dispatch_create(&provider, &id, request)
         .await
         .expect_err("Object Lock create must reject a bucket without versioning");
-    let message = error.to_string();
+    let message = error.provider_error().to_string();
 
     assert!(message.contains(bucket), "{message}");
     assert!(
@@ -500,17 +497,21 @@ async fn create_rejects_all_reachable_invalid_rule_shapes() {
         let resource = object_lock_resource(bucket, Some(rule));
         let id = resource.id.clone();
         let request = create_request_for_test(resource).await;
-        let result = provider.create(&id, request).await;
+        let result = carina_core::executor::dispatch_create(&provider, &id, request).await;
         let error = match result {
             Ok(_) => panic!("{case}: provider.create must reject the value"),
             Err(error) => error,
         };
 
         assert!(
-            matches!(&error, ProviderError::InvalidInput(_)),
+            matches!(error.provider_error(), ProviderError::InvalidInput(_)),
             "{case}: expected InvalidInput, got {error:?}"
         );
-        assert_eq!(error.detail().context(), expected_message, "{case}");
+        assert_eq!(
+            error.provider_error().detail().context(),
+            expected_message,
+            "{case}"
+        );
     }
 }
 
@@ -580,7 +581,7 @@ async fn recreate_without_rule_refuses_to_clobber_retained_compliance_rule() {
     let resource = object_lock_resource(bucket, None);
     let id = resource.id.clone();
     let request = create_request_for_test(resource).await;
-    let recreate = provider.create(&id, request).await;
+    let recreate = carina_core::executor::dispatch_create(&provider, &id, request).await;
 
     let stored = client
         .get_object_lock_configuration()
@@ -600,7 +601,7 @@ async fn recreate_without_rule_refuses_to_clobber_retained_compliance_rule() {
     assert_eq!(retention.years(), Some(5));
 
     let error = recreate.expect_err("re-create without rule must be rejected");
-    let message = error.to_string();
+    let message = error.provider_error().to_string();
     assert!(message.contains(bucket), "{message}");
     assert!(message.contains("already has"), "{message}");
     assert!(message.contains("Import/adopt"), "{message}");

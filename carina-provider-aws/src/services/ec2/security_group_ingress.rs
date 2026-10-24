@@ -1,9 +1,10 @@
 use carina_core::provider::ProviderResult;
-use carina_core::provider::{AppliedIdentifier, CreateOutcome, ReadOutcome};
+use carina_core::provider::{AppliedIdentifier, ReadOutcome};
 use carina_core::resource::{Resource, ResourceId};
 use carina_core::schema::ResourceSchema;
 
 use crate::AwsProvider;
+use crate::provider::CreateCompletion;
 
 impl AwsProvider {
     /// Read an EC2 Security Group Ingress Rule
@@ -21,7 +22,7 @@ impl AwsProvider {
         &self,
         resource: &Resource,
         schema: &ResourceSchema,
-    ) -> ProviderResult<CreateOutcome> {
+    ) -> ProviderResult<CreateCompletion> {
         self.create_ec2_security_group_rule(resource, schema, true)
             .await
     }

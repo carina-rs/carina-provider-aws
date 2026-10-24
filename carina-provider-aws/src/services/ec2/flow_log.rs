@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use carina_core::provider::{AppliedIdentifier, CreateOutcome, ReadOutcome};
+use carina_core::provider::{AppliedIdentifier, ReadOutcome};
 use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
 use carina_core::schema::ResourceSchema;
@@ -8,6 +8,7 @@ use carina_core::schema::ResourceSchema;
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
 use crate::helpers::{build_tag_specification, optional_enum_attr, require_enum_attr};
+use crate::provider::AwsCreateAttempt;
 
 impl AwsProvider {
     /// Read an EC2 Flow Log
@@ -16,20 +17,23 @@ impl AwsProvider {
         id: &ResourceId,
         identifier: &AppliedIdentifier,
     ) -> ProviderResult<ReadOutcome> {
-        use aws_sdk_ec2::types::Filter;
-
         let applied_identifier = identifier;
-        let identifier = identifier.as_str();
+        let flow_log_ids = identifier
+            .as_str()
+            .split(',')
+            .map(str::to_string)
+            .collect::<Vec<_>>();
 
-        let filter = Filter::builder()
-            .name("flow-log-id")
-            .values(identifier)
-            .build();
-
+        // Measured with account carina-test-009 in ap-northeast-1 on
+        // 2026-10-24: both
+        // `aws ec2 describe-flow-logs --flow-log-ids <unknown>` and
+        // `aws ec2 describe-flow-logs --filters Name=flow-log-id,Values=<unknown>`
+        // returned `{"FlowLogs": []}`. An empty response is therefore the
+        // service's not-found signal for this read.
         let result = self
             .ec2_client
             .describe_flow_logs()
-            .filter(filter)
+            .set_flow_log_ids(Some(flow_log_ids))
             .send()
             .await
             .map_err(|e| {
@@ -42,19 +46,22 @@ impl AwsProvider {
 
             let _identifier_value = Self::extract_ec2_flow_log_attributes(fl, &mut attributes);
 
-            // Convert the SDK's singular `resource_id` back into the schema's
-            // `resource_ids` list. AWS's CreateFlowLogs input takes a list; the
-            // describe response exposes one resource_id per FlowLog entity. The
-            // generated extractor inserts the singular key, so replace it here
-            // with a one-element list matching the schema.
-            if let Some(Value::Concrete(ConcreteValue::String(rid))) =
-                attributes.remove("resource_id")
-            {
+            // A single CreateFlowLogs request can create one flow log per
+            // requested resource. Preserve the complete set under one provider
+            // identifier and reconstruct the schema's plural resource_ids.
+            attributes.remove("resource_id");
+            let resource_ids = result
+                .flow_logs()
+                .iter()
+                .filter_map(|flow_log| flow_log.resource_id())
+                .map(|resource_id| {
+                    Value::Concrete(ConcreteValue::String(resource_id.to_string().into()))
+                })
+                .collect::<Vec<_>>();
+            if !resource_ids.is_empty() {
                 attributes.insert(
                     "resource_ids".to_string(),
-                    Value::Concrete(ConcreteValue::List(vec![Value::Concrete(
-                        ConcreteValue::String(rid),
-                    )])),
+                    Value::Concrete(ConcreteValue::List(resource_ids)),
                 );
             }
 
@@ -74,11 +81,12 @@ impl AwsProvider {
     }
 
     /// Create an EC2 Flow Log
-    pub(crate) async fn create_ec2_flow_log(
+    pub(crate) async fn create_ec2_flow_log<A: AwsCreateAttempt>(
         &self,
         resource: &Resource,
         schema: &ResourceSchema,
-    ) -> ProviderResult<CreateOutcome> {
+        attempt: A,
+    ) -> Result<A::Step, A::Verdict> {
         let resource_ids_val: Vec<String> = match resource.get_attr("resource_ids") {
             Some(Value::Concrete(ConcreteValue::List(items))) => items
                 .iter()
@@ -93,13 +101,18 @@ impl AwsProvider {
             _ => Vec::new(),
         };
         if resource_ids_val.is_empty() {
-            return Err(ProviderError::invalid_input(
-                "resource_ids must be a non-empty list of resource identifiers",
-            )
-            .for_resource(resource.id.clone()));
+            return Err(attempt.untracked(
+                ProviderError::invalid_input(
+                    "resource_ids must be a non-empty list of resource identifiers",
+                )
+                .for_resource(resource.id.clone()),
+            ));
         }
 
-        let resource_type_val = require_enum_attr(resource, schema, "resource_type")?;
+        let resource_type_val = match require_enum_attr(resource, schema, "resource_type") {
+            Ok(resource_type) => resource_type,
+            Err(error) => return Err(attempt.untracked(error)),
+        };
 
         let mut req = self
             .ec2_client
@@ -109,12 +122,21 @@ impl AwsProvider {
                 resource_type_val.as_str(),
             ));
 
-        if let Some(traffic_type) = optional_enum_attr(resource, schema, "traffic_type")? {
+        let traffic_type = match optional_enum_attr(resource, schema, "traffic_type") {
+            Ok(traffic_type) => traffic_type,
+            Err(error) => return Err(attempt.untracked(error)),
+        };
+        if let Some(traffic_type) = traffic_type {
             use aws_sdk_ec2::types::TrafficType;
             req = req.traffic_type(TrafficType::from(traffic_type));
         }
 
-        if let Some(log_dest_type) = optional_enum_attr(resource, schema, "log_destination_type")? {
+        let log_destination_type =
+            match optional_enum_attr(resource, schema, "log_destination_type") {
+                Ok(destination_type) => destination_type,
+                Err(error) => return Err(attempt.untracked(error)),
+            };
+        if let Some(log_dest_type) = log_destination_type {
             use aws_sdk_ec2::types::LogDestinationType;
             req = req.log_destination_type(LogDestinationType::from(log_dest_type));
         }
@@ -159,15 +181,14 @@ impl AwsProvider {
         // Retry loop for IAM eventual consistency: newly created IAM roles may
         // not be usable immediately by create_flow_logs.
         let mut last_error = String::new();
-        let mut result = None;
-        for attempt in 0..12 {
-            if attempt > 0 {
+        for retry_index in 0..12 {
+            if retry_index > 0 {
                 tokio::time::sleep(std::time::Duration::from_secs(5)).await;
             }
             let resp = match req.clone().send().await {
                 Ok(resp) => resp,
-                Err(e) => {
-                    let err_str = format!("{:?}", e);
+                Err(error) => {
+                    let err_str = format!("{error:?}");
                     last_error = err_str.clone();
                     // Retry on IAM propagation errors (check both Display and Debug output)
                     if err_str.contains("Unable to assume")
@@ -176,23 +197,78 @@ impl AwsProvider {
                     {
                         continue;
                     }
-                    return Err(api_error_with_meta(
-                        "Failed to create flow logs",
-                        "ec2.CreateFlowLogs",
-                        e,
-                    )
-                    .for_resource(resource.id.clone()));
+                    return Err(attempt.untracked(
+                        api_error_with_meta(
+                            "Failed to create flow logs",
+                            "ec2.CreateFlowLogs",
+                            error,
+                        )
+                        .for_resource(resource.id.clone()),
+                    ));
                 }
             };
 
-            // Check for unsuccessful items
-            if let Some(err) = resp.unsuccessful().first() {
-                let msg = err
+            let mut flow_log_ids = resp.flow_log_ids().to_vec();
+            flow_log_ids.sort();
+            flow_log_ids.dedup();
+            let unsuccessful = resp.unsuccessful().first();
+
+            if !flow_log_ids.is_empty() {
+                let identifier_text = flow_log_ids.join(",");
+                let identifier = match crate::helpers::applied_identifier(
+                    &resource.id,
+                    "ec2.CreateFlowLogs",
+                    identifier_text,
+                ) {
+                    Ok(identifier) => identifier,
+                    Err(error) => return Err(attempt.untracked(error)),
+                };
+                let sent = if unsuccessful.is_some() {
+                    carina_core::provider::Sent::only(
+                        resource
+                            .attributes
+                            .keys()
+                            .filter(|name| name.as_str() != "resource_ids"),
+                    )
+                } else {
+                    carina_core::provider::Sent::AllRequestAttributes
+                };
+                let issued = attempt.issued(identifier.clone(), sent);
+                if let Some(error_item) = unsuccessful {
+                    let message = error_item
+                        .error()
+                        .and_then(|error| error.message())
+                        .map_or("unknown error", |message| message);
+                    let error = ProviderError::api_error(format!(
+                        "CreateFlowLogs created {} flow log(s), but another item failed: {message}",
+                        flow_log_ids.len(),
+                    ))
+                    .for_resource(resource.id.clone());
+                    return Err(self.failed_issued(&resource.id, issued, error).await);
+                }
+
+                let outcome = self.read_ec2_flow_log(&resource.id, &identifier).await;
+                let completion = self.create_outcome_from_read(
+                    &resource.id,
+                    identifier,
+                    resource.resolved_attributes(),
+                    outcome,
+                );
+                return Ok(self.finish_issued(issued, completion));
+            }
+
+            // With no returned ids, AWS proved that this response created no
+            // trackable flow logs, so retrying an IAM propagation failure is safe.
+            if let Some(error_item) = unsuccessful {
+                let msg = error_item
                     .error()
-                    .and_then(|e| e.message())
-                    .unwrap_or("unknown error");
-                let code = err.error().and_then(|e| e.code()).unwrap_or("");
-                last_error = format!("{} ({})", msg, code);
+                    .and_then(|error| error.message())
+                    .map_or("unknown error", |message| message);
+                let code = error_item
+                    .error()
+                    .and_then(|error| error.code())
+                    .map_or("", |code| code);
+                last_error = format!("{msg} ({code})");
                 // Retry on IAM propagation errors
                 if msg.contains("Unable to assume IAM role")
                     || msg.contains("Not authorized")
@@ -201,39 +277,23 @@ impl AwsProvider {
                 {
                     continue;
                 }
-                return Err(ProviderError::api_error(format!(
-                    "Failed to create flow log: {}",
-                    msg
-                ))
-                .for_resource(resource.id.clone()));
+                return Err(attempt.untracked(
+                    ProviderError::api_error(format!("Failed to create flow log: {msg}"))
+                        .for_resource(resource.id.clone()),
+                ));
             }
 
-            result = Some(resp);
-            break;
+            return Err(attempt.untracked(
+                ProviderError::api_error("CreateFlowLogs returned no flow log IDs")
+                    .for_resource(resource.id.clone()),
+            ));
         }
 
-        let result = result.ok_or_else(|| {
+        Err(attempt.untracked(
             ProviderError::api_error(format!(
-                "Failed to create flow log after retries: {}",
-                last_error
+                "Failed to create flow log after retries: {last_error}"
             ))
-            .for_resource(resource.id.clone())
-        })?;
-
-        let flow_log_id = result.flow_log_ids().first().ok_or_else(|| {
-            ProviderError::api_error("Flow Log created but no ID returned")
-                .for_resource(resource.id.clone())
-        })?;
-
-        // Read back
-        let identifier =
-            crate::helpers::applied_identifier(&resource.id, "ec2.CreateFlowLogs", flow_log_id)?;
-        let outcome = self.read_ec2_flow_log(&resource.id, &identifier).await;
-        Ok(self.create_outcome_from_read(
-            &resource.id,
-            identifier,
-            resource.resolved_attributes(),
-            outcome,
+            .for_resource(resource.id.clone()),
         ))
     }
 
@@ -246,13 +306,15 @@ impl AwsProvider {
         to: Resource,
         _schema: &ResourceSchema,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
-        self.apply_ec2_tags(
-            &id,
-            identifier.as_str(),
-            &to.resolved_attributes(),
-            Some(&from.attributes),
-        )
-        .await?;
+        for flow_log_id in identifier.as_str().split(',') {
+            self.apply_ec2_tags(
+                &id,
+                flow_log_id,
+                &to.resolved_attributes(),
+                Some(&from.attributes),
+            )
+            .await?;
+        }
         Ok(self.read_ec2_flow_log(&id, identifier).await)
     }
 
@@ -262,11 +324,15 @@ impl AwsProvider {
         id: ResourceId,
         identifier: &AppliedIdentifier,
     ) -> ProviderResult<()> {
-        let identifier = identifier.as_str();
+        let flow_log_ids = identifier
+            .as_str()
+            .split(',')
+            .map(str::to_string)
+            .collect::<Vec<_>>();
         let result = self
             .ec2_client
             .delete_flow_logs()
-            .flow_log_ids(identifier)
+            .set_flow_log_ids(Some(flow_log_ids))
             .send()
             .await
             .map_err(|e| {
@@ -279,7 +345,7 @@ impl AwsProvider {
             let msg = err
                 .error()
                 .and_then(|e| e.message())
-                .unwrap_or("unknown error");
+                .map_or("unknown error", |message| message);
             return Err(
                 ProviderError::api_error(format!("Failed to delete flow log: {}", msg))
                     .for_resource(id.clone()),

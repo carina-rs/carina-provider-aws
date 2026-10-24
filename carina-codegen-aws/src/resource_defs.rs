@@ -817,7 +817,14 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             update_ops: vec![],
             identifier: "FlowLogId",
             has_tags: true,
-            type_overrides: vec![],
+            // DescribeFlowLogs can return the per-resource flow logs in a
+            // different order from CreateFlowLogs' ResourceIds. Observed in
+            // ap-northeast-1 on 2026-10-24; positional equality is not
+            // meaningful for this attribute.
+            type_overrides: vec![(
+                "ResourceIds",
+                "AttributeType::unordered_list(AttributeType::string())",
+            )],
             exclude_fields: vec![
                 "DryRun",
                 "TagSpecifications",

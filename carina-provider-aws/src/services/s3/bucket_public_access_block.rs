@@ -2,12 +2,13 @@ use std::collections::HashMap;
 
 use aws_sdk_s3::types::PublicAccessBlockConfiguration;
 use carina_core::provider::ProviderResult;
-use carina_core::provider::{AppliedIdentifier, CreateOutcome, ReadOutcome};
+use carina_core::provider::{AppliedIdentifier, ReadOutcome};
 use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
 use crate::helpers::{RetryPolicy, optional_bool_attr, require_string_attr, retry_aws_operation};
+use crate::provider::CreateCompletion;
 use crate::services::s3::bucket::is_s3_not_configured_error;
 
 impl AwsProvider {
@@ -89,7 +90,7 @@ impl AwsProvider {
     pub(crate) async fn create_s3_bucket_public_access_block(
         &self,
         resource: &Resource,
-    ) -> ProviderResult<CreateOutcome> {
+    ) -> ProviderResult<CreateCompletion> {
         let bucket = require_string_attr(resource, "bucket")?;
         let identifier =
             crate::helpers::applied_identifier(&resource.id, "s3.PutPublicAccessBlock", bucket)?;

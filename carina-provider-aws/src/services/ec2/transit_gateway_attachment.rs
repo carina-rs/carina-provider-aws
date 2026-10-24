@@ -5,6 +5,8 @@ use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
 use carina_core::schema::ResourceSchema;
 
+use aws_sdk_ec2::types::TransitGatewayAttachmentState;
+
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
 use crate::helpers::{
@@ -12,18 +14,56 @@ use crate::helpers::{
     require_string_attr,
 };
 
-fn transit_gateway_attachment_create_poll_state(state: Option<&str>) -> CreatePoll<()> {
+fn transit_gateway_attachment_create_poll_state(
+    state: Option<&TransitGatewayAttachmentState>,
+) -> CreatePoll<()> {
     match state {
-        Some("available") => CreatePoll::Ready(()),
-        Some("failed" | "deleted") => CreatePoll::Failed,
-        _ => CreatePoll::Pending,
+        Some(TransitGatewayAttachmentState::Available) => CreatePoll::Ready(()),
+        Some(
+            TransitGatewayAttachmentState::Failed
+            | TransitGatewayAttachmentState::Rejected
+            | TransitGatewayAttachmentState::Deleted,
+        ) => CreatePoll::Failed,
+        Some(
+            TransitGatewayAttachmentState::Pending
+            | TransitGatewayAttachmentState::Modifying
+            | TransitGatewayAttachmentState::Deleting
+            | TransitGatewayAttachmentState::Failing
+            | TransitGatewayAttachmentState::Initiating
+            | TransitGatewayAttachmentState::InitiatingRequest
+            | TransitGatewayAttachmentState::PendingAcceptance
+            | TransitGatewayAttachmentState::Rejecting
+            | TransitGatewayAttachmentState::RollingBack,
+        )
+        | None => CreatePoll::Pending,
+        // The SDK enum is non-exhaustive. Other future states are not proof
+        // that AWS finished or discarded the create, so retain the record.
+        Some(_unrecognized_state) => CreatePoll::Pending,
     }
 }
 
-fn transit_gateway_attachment_delete_poll_state(state: Option<&str>) -> DeletePoll {
+fn transit_gateway_attachment_delete_poll_state(
+    state: Option<&TransitGatewayAttachmentState>,
+) -> DeletePoll {
     match state {
-        Some("deleted") | None => DeletePoll::Gone,
-        _ => DeletePoll::Pending,
+        Some(TransitGatewayAttachmentState::Deleted) | None => DeletePoll::Gone,
+        Some(
+            TransitGatewayAttachmentState::Available
+            | TransitGatewayAttachmentState::Deleting
+            | TransitGatewayAttachmentState::Failed
+            | TransitGatewayAttachmentState::Failing
+            | TransitGatewayAttachmentState::Initiating
+            | TransitGatewayAttachmentState::InitiatingRequest
+            | TransitGatewayAttachmentState::Modifying
+            | TransitGatewayAttachmentState::Pending
+            | TransitGatewayAttachmentState::PendingAcceptance
+            | TransitGatewayAttachmentState::Rejected
+            | TransitGatewayAttachmentState::Rejecting
+            | TransitGatewayAttachmentState::RollingBack,
+        ) => DeletePoll::Pending,
+        // The SDK enum is non-exhaustive. An unknown future state does not
+        // prove that the attachment is gone.
+        Some(_unrecognized_state) => DeletePoll::Pending,
     }
 }
 
@@ -78,6 +118,10 @@ impl AwsProvider {
         let applied_identifier = identifier;
         let identifier = identifier.as_str();
 
+        // Measured with account carina-test-009 in ap-northeast-1 on
+        // 2026-10-24: `aws ec2 describe-transit-gateway-vpc-attachments
+        // --transit-gateway-attachment-ids <unknown>` returned
+        // InvalidTransitGatewayAttachmentID.NotFound.
         let result = self
             .ec2_client
             .describe_transit_gateway_vpc_attachments()
@@ -95,7 +139,7 @@ impl AwsProvider {
 
         if let Some(att) = result.transit_gateway_vpc_attachments().first() {
             // Skip deleted attachments
-            if att.state().map(|s| s.as_str()) == Some("deleted") {
+            if att.state() == Some(&TransitGatewayAttachmentState::Deleted) {
                 return Ok(ReadOutcome::not_found(id.clone()));
             }
 
@@ -221,6 +265,11 @@ impl AwsProvider {
         id: &ResourceId,
         attachment_id: &str,
     ) -> ProviderResult<CreatePoll<()>> {
+        // The same 2026-10-24 ap-northeast-1 command above returns
+        // InvalidTransitGatewayAttachmentID.NotFound for an unknown id. On
+        // poll/resume of an issued record the caller deliberately keeps that
+        // error pending: EC2 can briefly hide a just-created resource, and
+        // discarding the record would risk a duplicate create.
         let result = self
             .ec2_client
             .describe_transit_gateway_vpc_attachments()
@@ -239,8 +288,7 @@ impl AwsProvider {
             result
                 .transit_gateway_vpc_attachments()
                 .first()
-                .and_then(|att| att.state())
-                .map(|state| state.as_str()),
+                .and_then(|att| att.state()),
         ))
     }
 
@@ -268,8 +316,7 @@ impl AwsProvider {
             result
                 .transit_gateway_vpc_attachments()
                 .first()
-                .and_then(|att| att.state())
-                .map(|state| state.as_str()),
+                .and_then(|att| att.state()),
         ))
     }
 }
@@ -286,24 +333,34 @@ mod tests {
 
     #[test]
     fn create_poll_preserves_waiter_state_semantics() {
+        for state in TransitGatewayAttachmentState::values() {
+            let expected = match *state {
+                "available" => CreatePoll::Ready(()),
+                "failed" | "rejected" | "deleted" => CreatePoll::Failed,
+                "pending" | "modifying" | "deleting" | "failing" | "initiating"
+                | "initiatingRequest" | "pendingAcceptance" | "rejecting" | "rollingBack" => {
+                    CreatePoll::Pending
+                }
+                new_known_state => {
+                    panic!("classify new SDK transit gateway attachment state {new_known_state}")
+                }
+            };
+            assert_eq!(
+                transit_gateway_attachment_create_poll_state(Some(
+                    &TransitGatewayAttachmentState::from(*state),
+                )),
+                expected,
+                "state {state}"
+            );
+        }
         assert_eq!(
-            transit_gateway_attachment_create_poll_state(Some("available")),
-            CreatePoll::Ready(())
-        );
-        assert_eq!(
-            transit_gateway_attachment_create_poll_state(Some("failed")),
-            CreatePoll::Failed
-        );
-        assert_eq!(
-            transit_gateway_attachment_create_poll_state(Some("deleted")),
-            CreatePoll::Failed
-        );
-        assert_eq!(
-            transit_gateway_attachment_create_poll_state(Some("pending")),
+            transit_gateway_attachment_create_poll_state(None),
             CreatePoll::Pending
         );
         assert_eq!(
-            transit_gateway_attachment_create_poll_state(None),
+            transit_gateway_attachment_create_poll_state(Some(
+                &TransitGatewayAttachmentState::from("future-state"),
+            )),
             CreatePoll::Pending
         );
     }
@@ -311,7 +368,9 @@ mod tests {
     #[test]
     fn delete_poll_preserves_waiter_state_semantics() {
         assert_eq!(
-            transit_gateway_attachment_delete_poll_state(Some("deleted")),
+            transit_gateway_attachment_delete_poll_state(Some(
+                &TransitGatewayAttachmentState::Deleted,
+            )),
             DeletePoll::Gone
         );
         assert_eq!(
@@ -319,11 +378,15 @@ mod tests {
             DeletePoll::Gone
         );
         assert_eq!(
-            transit_gateway_attachment_delete_poll_state(Some("available")),
+            transit_gateway_attachment_delete_poll_state(Some(
+                &TransitGatewayAttachmentState::Available,
+            )),
             DeletePoll::Pending
         );
         assert_eq!(
-            transit_gateway_attachment_delete_poll_state(Some("failed")),
+            transit_gateway_attachment_delete_poll_state(Some(
+                &TransitGatewayAttachmentState::Failed,
+            )),
             DeletePoll::Pending
         );
     }
