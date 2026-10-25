@@ -13,7 +13,7 @@ pub use services::*;
 #[cfg(test)]
 mod tests {
     use carina_core::resource::{ConcreteValue, Value};
-    use carina_core::schema::{AttributeType, DslTransform};
+    use carina_core::schema::{AttributeSchema, AttributeType, DslTransform, ResourceSchema};
 
     use crate::*;
 
@@ -68,6 +68,29 @@ mod tests {
             .as_attr()
     }
 
+    fn assert_union_string_list_is_unordered(attr: &AttributeType, field_path: &str) {
+        let mut budget = carina_core::schema::ShapeWalkBudget::new(8);
+        let Some(members) = attr
+            .union_members_ref_free_with_budget(&mut budget)
+            .expect("test schema is Ref-free")
+        else {
+            panic!("expected Union shape for {field_path}");
+        };
+        let ordered = members
+            .iter()
+            .flatten()
+            .map(|member| member.as_attr())
+            .find_map(
+                |member| match member.shape_ref_free().expect("test schema is Ref-free") {
+                    carina_core::schema::Shape::List { ordered, .. } => Some(ordered),
+                    _ => None,
+                },
+            )
+            .unwrap_or_else(|| panic!("missing List Union member for {field_path}"));
+
+        assert!(!ordered, "expected {field_path} List to be unordered");
+    }
+
     fn string_enum_identity(attr: &AttributeType) -> String {
         let carina_core::schema::Shape::Enum { identity, .. } =
             attr.shape_ref_free().expect("test schema is Ref-free")
@@ -119,6 +142,156 @@ mod tests {
         assert_eq!(
             string_enum_identity(&iam_policy_effect()),
             "aws.iam.PolicyDocument.Statement.Effect"
+        );
+    }
+
+    #[test]
+    fn iam_policy_string_lists_are_unordered_but_statements_remain_ordered() {
+        let policy_document = iam_policy_document();
+        let statement_type = field_type(&policy_document, "statement");
+        let carina_core::schema::Shape::List {
+            element_type: policy_statement,
+            ordered: statements_ordered,
+            ..
+        } = statement_type
+            .shape_ref_free()
+            .expect("test schema is Ref-free")
+        else {
+            panic!("expected statement List shape");
+        };
+        assert!(statements_ordered, "statement List must remain ordered");
+
+        for field_name in ["action", "not_action", "resource", "not_resource"] {
+            assert_union_string_list_is_unordered(
+                field_type(policy_statement, field_name),
+                field_name,
+            );
+        }
+
+        for principal_field in ["principal", "not_principal"] {
+            let principal = union_member(field_type(policy_statement, principal_field), 0);
+            for member_field in ["service", "aws", "federated", "canonical_user"] {
+                assert_union_string_list_is_unordered(
+                    field_type(principal, member_field),
+                    &format!("{principal_field}.{member_field}"),
+                );
+            }
+        }
+
+        let carina_core::schema::Shape::Map {
+            value: condition_keys,
+            ..
+        } = field_type(policy_statement, "condition")
+            .shape_ref_free()
+            .expect("test schema is Ref-free")
+        else {
+            panic!("expected condition Map shape");
+        };
+        let carina_core::schema::Shape::Map {
+            value: condition_value,
+            ..
+        } = condition_keys
+            .shape_ref_free()
+            .expect("test schema is Ref-free")
+        else {
+            panic!("expected condition-key Map shape");
+        };
+        assert_union_string_list_is_unordered(condition_value, "condition value");
+    }
+
+    #[test]
+    fn iam_policy_document_resource_comparison_treats_string_lists_as_unordered() {
+        fn string_list(values: &[&str]) -> Value {
+            Value::Concrete(ConcreteValue::List(
+                values
+                    .iter()
+                    .map(|value| {
+                        Value::Concrete(ConcreteValue::String((*value).to_string().into()))
+                    })
+                    .collect(),
+            ))
+        }
+
+        fn policy_document(actions: &[&str], principal_arns: &[&str]) -> Value {
+            Value::Concrete(ConcreteValue::Map(
+                vec![
+                    (
+                        "version".to_string(),
+                        Value::Concrete(ConcreteValue::enum_identifier("2012_10_17")),
+                    ),
+                    (
+                        "statement".to_string(),
+                        Value::Concrete(ConcreteValue::List(vec![Value::Concrete(
+                            ConcreteValue::Map(
+                                vec![
+                                    (
+                                        "effect".to_string(),
+                                        Value::Concrete(ConcreteValue::enum_identifier("allow")),
+                                    ),
+                                    ("action".to_string(), string_list(actions)),
+                                    (
+                                        "principal".to_string(),
+                                        Value::Concrete(ConcreteValue::Map(
+                                            vec![("aws".to_string(), string_list(principal_arns))]
+                                                .into_iter()
+                                                .collect(),
+                                        )),
+                                    ),
+                                ]
+                                .into_iter()
+                                .collect(),
+                            ),
+                        )])),
+                    ),
+                ]
+                .into_iter()
+                .collect(),
+            ))
+        }
+
+        let schema = ResourceSchema::new("aws.iam.Role").attribute(AttributeSchema::new(
+            "assume_role_policy_document",
+            iam_policy_document(),
+        ));
+        let original = policy_document(
+            &["sts:AssumeRole", "sts:TagSession"],
+            &[
+                "arn:aws:iam::111122223333:root",
+                "arn:aws:iam::444455556666:root",
+            ],
+        );
+        let reordered = policy_document(
+            &["sts:TagSession", "sts:AssumeRole"],
+            &[
+                "arn:aws:iam::444455556666:root",
+                "arn:aws:iam::111122223333:root",
+            ],
+        );
+        let changed = policy_document(
+            &["sts:TagSession", "sts:AssumeRole"],
+            &[
+                "arn:aws:iam::444455556666:root",
+                "arn:aws:iam::777788889999:root",
+            ],
+        );
+
+        assert!(
+            carina_core::diff_helpers::resource_attribute_values_equal(
+                &original,
+                &reordered,
+                Some(&schema),
+                "assume_role_policy_document",
+            ),
+            "IAM action and principal ARN order must not produce a diff"
+        );
+        assert!(
+            !carina_core::diff_helpers::resource_attribute_values_equal(
+                &original,
+                &changed,
+                Some(&schema),
+                "assume_role_policy_document",
+            ),
+            "a changed principal ARN must produce a diff"
         );
     }
 
