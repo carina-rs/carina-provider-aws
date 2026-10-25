@@ -1149,10 +1149,12 @@ async fn native_provider_create_drives_nat_gateway_to_read_back_state() {
     let id = resource.id.clone();
     let request = create_request_for_test(resource).await;
 
-    let state = carina_core::executor::dispatch_create(&provider, &id, request)
-        .await
-        .expect("drive native NAT gateway create")
-        .into_state_for_writeback();
+    let state = carina_core::executor::complete_create_for_writeback(
+        carina_core::executor::dispatch_create(&provider, &id, request)
+            .await
+            .expect("drive native NAT gateway create"),
+    )
+    .0;
 
     assert_eq!(state.identifier.as_deref(), Some(NAT_GATEWAY_ID));
     assert_eq!(service.create_nat_gateway_calls(), 1);

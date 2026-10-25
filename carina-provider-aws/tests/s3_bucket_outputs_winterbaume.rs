@@ -350,10 +350,12 @@ async fn create_bucket_ignores_supplied_read_only_region_for_placement() {
     let id = resource.id.clone();
     let request = create_request_for_test(resource).await;
 
-    let state = carina_core::executor::dispatch_create(&provider, &id, request)
-        .await
-        .expect("create S3 bucket")
-        .into_state_for_writeback();
+    let state = carina_core::executor::complete_create_for_writeback(
+        carina_core::executor::dispatch_create(&provider, &id, request)
+            .await
+            .expect("create S3 bucket"),
+    )
+    .0;
 
     let raw_location = client
         .get_bucket_location()

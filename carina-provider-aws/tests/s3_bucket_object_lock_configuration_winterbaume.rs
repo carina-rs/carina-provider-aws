@@ -181,10 +181,12 @@ async fn create_object_lock(provider: &AwsProvider, bucket: &str, rule: Option<V
     let resource = object_lock_resource(bucket, rule);
     let id = resource.id.clone();
     let request = create_request_for_test(resource).await;
-    carina_core::executor::dispatch_create(provider, &id, request)
-        .await
-        .expect("create Object Lock configuration")
-        .into_state_for_writeback()
+    carina_core::executor::complete_create_for_writeback(
+        carina_core::executor::dispatch_create(provider, &id, request)
+            .await
+            .expect("create Object Lock configuration"),
+    )
+    .0
 }
 
 fn assert_enabled_without_rule(state: &State) {
@@ -298,10 +300,12 @@ async fn host_canonicalizes_dsl_enum_identifiers_before_create() {
     let id = resource.id.clone();
     let request = create_request_for_test(resource).await;
 
-    let _state = carina_core::executor::dispatch_create(&provider, &id, request)
-        .await
-        .expect("create Object Lock configuration from DSL enum identifiers")
-        .into_state_for_writeback();
+    let _state = carina_core::executor::complete_create_for_writeback(
+        carina_core::executor::dispatch_create(&provider, &id, request)
+            .await
+            .expect("create Object Lock configuration from DSL enum identifiers"),
+    )
+    .0;
 
     let stored = client
         .get_object_lock_configuration()
