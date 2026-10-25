@@ -74,8 +74,8 @@ jobs:
     permissions:
       id-token: write
     env:
-      REGISTRY_AUDIENCE: registry-dev.carina-rs.dev
-      REGISTRY_PUBLISH_URL: https://publish.registry-dev.carina-rs.dev/v1/publish
+      REGISTRY_AUDIENCE: registry.carina-rs.dev
+      REGISTRY_PUBLISH_URL: https://publish.registry.carina-rs.dev/v1/publish
     steps:
       - name: Validate Release Tag
         run: |
@@ -218,8 +218,8 @@ jobs:
     permissions:
       id-token: write
     env:
-      REGISTRY_AUDIENCE: registry-dev.carina-rs.dev
-      REGISTRY_YANK_URL: https://publish.registry-dev.carina-rs.dev/v1/yank
+      REGISTRY_AUDIENCE: registry.carina-rs.dev
+      REGISTRY_YANK_URL: https://publish.registry.carina-rs.dev/v1/yank
     steps:
       - name: Validate Release Tag
         run: |
