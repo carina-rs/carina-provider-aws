@@ -13,7 +13,7 @@ pub use services::*;
 #[cfg(test)]
 mod tests {
     use carina_core::resource::{ConcreteValue, Value};
-    use carina_core::schema::{AttributeType, DslTransform};
+    use carina_core::schema::{AttributeSchema, AttributeType, DslTransform, ResourceSchema};
 
     use crate::*;
 
@@ -197,6 +197,102 @@ mod tests {
             panic!("expected condition-key Map shape");
         };
         assert_union_string_list_is_unordered(condition_value, "condition value");
+    }
+
+    #[test]
+    fn iam_policy_document_resource_comparison_treats_string_lists_as_unordered() {
+        fn string_list(values: &[&str]) -> Value {
+            Value::Concrete(ConcreteValue::List(
+                values
+                    .iter()
+                    .map(|value| {
+                        Value::Concrete(ConcreteValue::String((*value).to_string().into()))
+                    })
+                    .collect(),
+            ))
+        }
+
+        fn policy_document(actions: &[&str], principal_arns: &[&str]) -> Value {
+            Value::Concrete(ConcreteValue::Map(
+                vec![
+                    (
+                        "version".to_string(),
+                        Value::Concrete(ConcreteValue::enum_identifier("2012_10_17")),
+                    ),
+                    (
+                        "statement".to_string(),
+                        Value::Concrete(ConcreteValue::List(vec![Value::Concrete(
+                            ConcreteValue::Map(
+                                vec![
+                                    (
+                                        "effect".to_string(),
+                                        Value::Concrete(ConcreteValue::enum_identifier("allow")),
+                                    ),
+                                    ("action".to_string(), string_list(actions)),
+                                    (
+                                        "principal".to_string(),
+                                        Value::Concrete(ConcreteValue::Map(
+                                            vec![("aws".to_string(), string_list(principal_arns))]
+                                                .into_iter()
+                                                .collect(),
+                                        )),
+                                    ),
+                                ]
+                                .into_iter()
+                                .collect(),
+                            ),
+                        )])),
+                    ),
+                ]
+                .into_iter()
+                .collect(),
+            ))
+        }
+
+        let schema = ResourceSchema::new("aws.iam.Role").attribute(AttributeSchema::new(
+            "assume_role_policy_document",
+            iam_policy_document(),
+        ));
+        let original = policy_document(
+            &["sts:AssumeRole", "sts:TagSession"],
+            &[
+                "arn:aws:iam::111122223333:root",
+                "arn:aws:iam::444455556666:root",
+            ],
+        );
+        let reordered = policy_document(
+            &["sts:TagSession", "sts:AssumeRole"],
+            &[
+                "arn:aws:iam::444455556666:root",
+                "arn:aws:iam::111122223333:root",
+            ],
+        );
+        let changed = policy_document(
+            &["sts:TagSession", "sts:AssumeRole"],
+            &[
+                "arn:aws:iam::444455556666:root",
+                "arn:aws:iam::777788889999:root",
+            ],
+        );
+
+        assert!(
+            carina_core::diff_helpers::resource_attribute_values_equal(
+                &original,
+                &reordered,
+                Some(&schema),
+                "assume_role_policy_document",
+            ),
+            "IAM action and principal ARN order must not produce a diff"
+        );
+        assert!(
+            !carina_core::diff_helpers::resource_attribute_values_equal(
+                &original,
+                &changed,
+                Some(&schema),
+                "assume_role_policy_document",
+            ),
+            "a changed principal ARN must produce a diff"
+        );
     }
 
     #[test]
