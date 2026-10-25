@@ -68,6 +68,29 @@ mod tests {
             .as_attr()
     }
 
+    fn assert_union_string_list_is_unordered(attr: &AttributeType, field_path: &str) {
+        let mut budget = carina_core::schema::ShapeWalkBudget::new(8);
+        let Some(members) = attr
+            .union_members_ref_free_with_budget(&mut budget)
+            .expect("test schema is Ref-free")
+        else {
+            panic!("expected Union shape for {field_path}");
+        };
+        let ordered = members
+            .iter()
+            .flatten()
+            .map(|member| member.as_attr())
+            .find_map(
+                |member| match member.shape_ref_free().expect("test schema is Ref-free") {
+                    carina_core::schema::Shape::List { ordered, .. } => Some(ordered),
+                    _ => None,
+                },
+            )
+            .unwrap_or_else(|| panic!("missing List Union member for {field_path}"));
+
+        assert!(!ordered, "expected {field_path} List to be unordered");
+    }
+
     fn string_enum_identity(attr: &AttributeType) -> String {
         let carina_core::schema::Shape::Enum { identity, .. } =
             attr.shape_ref_free().expect("test schema is Ref-free")
@@ -120,6 +143,60 @@ mod tests {
             string_enum_identity(&iam_policy_effect()),
             "aws.iam.PolicyDocument.Statement.Effect"
         );
+    }
+
+    #[test]
+    fn iam_policy_string_lists_are_unordered_but_statements_remain_ordered() {
+        let policy_document = iam_policy_document();
+        let statement_type = field_type(&policy_document, "statement");
+        let carina_core::schema::Shape::List {
+            element_type: policy_statement,
+            ordered: statements_ordered,
+            ..
+        } = statement_type
+            .shape_ref_free()
+            .expect("test schema is Ref-free")
+        else {
+            panic!("expected statement List shape");
+        };
+        assert!(statements_ordered, "statement List must remain ordered");
+
+        for field_name in ["action", "not_action", "resource", "not_resource"] {
+            assert_union_string_list_is_unordered(
+                field_type(policy_statement, field_name),
+                field_name,
+            );
+        }
+
+        for principal_field in ["principal", "not_principal"] {
+            let principal = union_member(field_type(policy_statement, principal_field), 0);
+            for member_field in ["service", "aws", "federated", "canonical_user"] {
+                assert_union_string_list_is_unordered(
+                    field_type(principal, member_field),
+                    &format!("{principal_field}.{member_field}"),
+                );
+            }
+        }
+
+        let carina_core::schema::Shape::Map {
+            value: condition_keys,
+            ..
+        } = field_type(policy_statement, "condition")
+            .shape_ref_free()
+            .expect("test schema is Ref-free")
+        else {
+            panic!("expected condition Map shape");
+        };
+        let carina_core::schema::Shape::Map {
+            value: condition_value,
+            ..
+        } = condition_keys
+            .shape_ref_free()
+            .expect("test schema is Ref-free")
+        else {
+            panic!("expected condition-key Map shape");
+        };
+        assert_union_string_list_is_unordered(condition_value, "condition value");
     }
 
     #[test]

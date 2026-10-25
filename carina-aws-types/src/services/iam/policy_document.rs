@@ -7,11 +7,14 @@ use super::condition_operator::{all_condition_operator_snake_forms, validate_con
 
 // ========== IAM Policy Document ==========
 
-/// String or list of strings type — for IAM policy fields like action, resource
+/// String or list of strings type — for IAM policy fields like action and resource.
+///
+/// IAM treats these values as order-insensitive and does not return them in stable
+/// order, so the list member is unordered. See carina-rs/carina-provider-aws#535.
 fn string_or_list_of_strings() -> AttributeType {
     AttributeType::union(vec![
         AttributeType::string(),
-        AttributeType::list(AttributeType::string()),
+        AttributeType::unordered_list(AttributeType::string()),
     ])
 }
 
