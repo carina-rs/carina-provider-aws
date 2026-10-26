@@ -56,11 +56,15 @@ for DOC_FILE in "$DOCS_DIR"/*/*.md; do
     # Use the PascalCase resource name from the DSL title (e.g. "Bucket" from
     # "aws.s3.Bucket") so the description text matches the title casing.
     RESOURCE_DISPLAY=$(echo "$DSL_NAME" | awk -F'.' '{print $NF}')
+    REFERENCE_KIND="resource"
+    case "$(basename "$DOC_FILE")" in
+        *_data_source.md) REFERENCE_KIND="data source" ;;
+    esac
     FRONTMATTER_TMPFILE=$(mktemp)
     {
         echo "---"
         echo "title: \"$DSL_NAME\""
-        echo "description: \"AWS $SERVICE_DISPLAY $RESOURCE_DISPLAY resource reference\""
+        echo "description: \"AWS $SERVICE_DISPLAY $RESOURCE_DISPLAY $REFERENCE_KIND reference\""
         echo "---"
         echo ""
         # Strip H1 line (Starlight renders frontmatter title as heading)
@@ -87,11 +91,16 @@ for DOC_FILE in "$DOCS_DIR"/*/*.md; do
             echo '```'
             echo ""
         } > "$EXAMPLE_TMPFILE"
-        # Insert the example block before "## Argument Reference"
+        # Insert the example before the first resource or data-source reference section.
         MERGED_TMPFILE=$(mktemp)
+        EXAMPLE_INSERTED=false
         while IFS= read -r line || [ -n "$line" ]; do
-            if [ "$line" = "## Argument Reference" ]; then
+            if [ "$EXAMPLE_INSERTED" = false ] && \
+                { [ "$line" = "## Argument Reference" ] || \
+                  [ "$line" = "## Lookup Inputs" ] || \
+                  [ "$line" = "## Attributes" ]; }; then
                 cat "$EXAMPLE_TMPFILE"
+                EXAMPLE_INSERTED=true
             fi
             printf '%s\n' "$line"
         done < "$DOC_FILE" > "$MERGED_TMPFILE"

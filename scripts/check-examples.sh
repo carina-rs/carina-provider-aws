@@ -21,7 +21,7 @@ RESOURCE_TYPES=(
     "ec2_vpc"
     "s3_bucket"
     "sqs_queue"
-    "sts_caller_identity"
+    "sts_caller_identity_data_source"
 )
 
 MISSING=()

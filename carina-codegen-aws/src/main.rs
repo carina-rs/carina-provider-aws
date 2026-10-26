@@ -513,6 +513,12 @@ fn split_service_resource_snake(name: &str) -> (&str, String) {
     (service, pascal_to_snake(resource))
 }
 
+/// Build a markdown filename whose suffix unambiguously identifies its kind.
+fn markdown_file_name(resource: &str, data_source: bool) -> String {
+    let suffix = if data_source { "_data_source" } else { "" };
+    format!("{}{suffix}.md", pascal_to_snake(resource))
+}
+
 /// Escape Rust reserved keywords with the raw identifier prefix `r#`.
 ///
 /// AWS SDK method names are snake_case and may collide with Rust keywords
@@ -673,17 +679,14 @@ fn main() -> Result<()> {
             eprintln!("Generated: {}", output_path.display());
         }
         "markdown" | "md" => {
-            let managed_md_names: std::collections::HashSet<&str> =
-                resources.iter().map(|r| r.name).collect();
             for res in &resources {
                 let model = models.get(res.service_namespace).unwrap();
                 let md = generate_markdown_resource(res, model)?;
 
                 let (service, resource) = split_service_resource(res.name);
-                let resource = pascal_to_snake(resource);
                 let service_dir = args.output_dir.join(service);
                 std::fs::create_dir_all(&service_dir)?;
-                let output_path = service_dir.join(format!("{}.md", resource));
+                let output_path = service_dir.join(markdown_file_name(resource, false));
                 std::fs::write(&output_path, &md)
                     .with_context(|| format!("Failed to write {}", output_path.display()))?;
                 eprintln!("Generated: {}", output_path.display());
@@ -693,15 +696,9 @@ fn main() -> Result<()> {
                 let md = generate_markdown_data_source(ds, model)?;
 
                 let (service, resource) = split_service_resource(ds.name);
-                let resource = pascal_to_snake(resource);
                 let service_dir = args.output_dir.join(service);
                 std::fs::create_dir_all(&service_dir)?;
-                let suffix = if managed_md_names.contains(ds.name) {
-                    "_data_source"
-                } else {
-                    ""
-                };
-                let output_path = service_dir.join(format!("{}{}.md", resource, suffix));
+                let output_path = service_dir.join(markdown_file_name(resource, true));
                 std::fs::write(&output_path, &md)
                     .with_context(|| format!("Failed to write {}", output_path.display()))?;
                 eprintln!("Generated: {}", output_path.display());
@@ -4803,6 +4800,17 @@ fn truncate_str(s: &str, max_len: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn markdown_output_names_encode_data_source_kind() {
+        assert_eq!(markdown_file_name("Bucket", false), "bucket.md");
+        assert_eq!(markdown_file_name("Bucket", true), "bucket_data_source.md");
+        assert_eq!(
+            markdown_file_name("CallerIdentity", true),
+            "caller_identity_data_source.md"
+        );
+        assert_eq!(markdown_file_name("Roles", true), "roles_data_source.md");
+    }
 
     #[test]
     fn emit_arn_helper_uses_shared_iam_constructors() {
