@@ -28,4 +28,4 @@ let bucket = aws.s3.Bucket {
 | `role_arn` | String | Yes | IAM role ARN to assume. |
 | `session_name` | String | No | STS session name for the assumed-role session. |
 | `external_id` | String | No | External ID required by the role's trust policy. |
-| `duration` | Duration | No | Session duration, such as `30min`, `1h`, or `15s`. |
+| `duration` | Duration | No | Session duration, such as `30min` or `1h`. STS accepts 15 minutes up to the role's maximum session duration. |
