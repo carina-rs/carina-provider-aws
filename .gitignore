@@ -2,3 +2,4 @@
 generated-docs/
 carina-provider-aws/tests/fixtures/smithy/
 .cargo/
+__pycache__/
