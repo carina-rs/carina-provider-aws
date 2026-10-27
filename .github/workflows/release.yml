@@ -178,8 +178,8 @@ jobs:
           sign_blob "carina-provider-aws-${GITHUB_REF_NAME}.wasm" sigstore-bundle.json
 
       - name: Publish to Carina Registry
-        # Sending `docs` in this payload waits for carina-rs/registry#107; an
-        # older registry would ignore it and permanently lose this version's docs.
+        # If publishing fails, re-run only this failed job. Re-running the whole workflow
+        # rebuilds docs with a different digest, which the registry rejects with a 409.
         # For a 403 claim_mismatch, verify that the trusted-publisher policy uses the
         # release-tag-environment mode, environment `release`, and points to
         # .github/workflows/release.yml.
@@ -193,17 +193,34 @@ jobs:
 
           version="$VERSION"
           asset_url="https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/carina-provider-aws-${GITHUB_REF_NAME}.wasm"
+          docs=null
+          if [[ "${version%%+*}" != *-* ]]; then
+            if ! jq -e 'type == "object"' docs-sigstore-bundle.json >/dev/null; then
+              echo "docs-sigstore-bundle.json is missing or not a JSON object" >&2
+              exit 1
+            fi
+
+            docs_asset_url="https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/carina-provider-aws-${GITHUB_REF_NAME}-docs.tar.gz"
+            docs=$(jq -n \
+              --arg asset_url "$docs_asset_url" \
+              --slurpfile bundle docs-sigstore-bundle.json \
+              '{
+                candidate_download_url: $asset_url,
+                sigstore_bundle: $bundle[0]
+              }')
+          fi
           payload=$(jq -n \
             --arg version "$version" \
             --arg asset_url "$asset_url" \
             --slurpfile bundle sigstore-bundle.json \
+            --argjson docs "$docs" \
             '{
               namespace: "carina-rs",
               name: "aws",
               version: $version,
               candidate_download_url: $asset_url,
               sigstore_bundle: $bundle[0]
-            }')
+            } + if $docs == null then {} else {docs: $docs} end')
           response_file=$(mktemp)
           trap 'rm -f "$response_file"' EXIT
 
