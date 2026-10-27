@@ -17,9 +17,11 @@ use carina_core::resource::{
     State as CoreState, Value as CoreValue,
 };
 use carina_core::schema::{
-    AttributeSchema as CoreAttributeSchema, AttributeType as CoreAttributeType,
-    InputMode as CoreInputMode, RawShape as CoreRawShape, ResourceSchema as CoreResourceSchema,
-    SchemaKind as CoreSchemaKind, StructField as CoreStructField,
+    AttributeSchema as CoreAttributeSchema, AttributeSchemaParts as CoreAttributeSchemaParts,
+    AttributeType as CoreAttributeType, InputMode as CoreInputMode, RawShape as CoreRawShape,
+    ResourceSchema as CoreResourceSchema, ResourceSchemaParts as CoreResourceSchemaParts,
+    ResourceValidation as CoreResourceValidation, SchemaKind as CoreSchemaKind,
+    StructField as CoreStructField, StructFieldParts as CoreStructFieldParts,
     UniqueNameSpec as CoreUniqueNameSpec,
 };
 use carina_provider_protocol::types::{
@@ -561,7 +563,7 @@ fn core_to_proto_attribute_type(t: &CoreAttributeType) -> ProtoAttributeType {
 }
 
 fn core_to_proto_struct_field(f: &CoreStructField) -> ProtoStructField {
-    let CoreStructField {
+    let CoreStructFieldParts {
         name,
         field_type,
         input_mode,
@@ -569,27 +571,30 @@ fn core_to_proto_struct_field(f: &CoreStructField) -> ProtoStructField {
         provider_name,
         block_name,
         deferred_populate,
-    } = f;
-    let (required, read_only) = core_input_mode_to_proto(*input_mode);
+        write_only,
+    } = f.parts();
+    let (required, read_only) = core_input_mode_to_proto(input_mode);
     ProtoStructField {
-        name: name.clone(),
+        name: name.to_string(),
         field_type: core_to_proto_attribute_type(field_type),
         required,
-        description: description.clone(),
-        block_name: block_name.clone(),
-        provider_name: provider_name.clone(),
+        description: description.map(str::to_owned),
+        block_name: block_name.map(str::to_owned),
+        provider_name: provider_name.map(str::to_owned),
         read_only,
-        deferred_populate: *deferred_populate,
+        write_only,
+        deferred_populate,
     }
 }
 
 fn core_to_proto_attribute_schema(a: &CoreAttributeSchema) -> ProtoAttributeSchema {
-    let CoreAttributeSchema {
+    let CoreAttributeSchemaParts {
         name,
         attr_type,
         input_mode,
         default,
         description,
+        // The protocol has no field for completions.
         completions: _completions,
         provider_name,
         create_only,
@@ -598,22 +603,22 @@ fn core_to_proto_attribute_schema(a: &CoreAttributeSchema) -> ProtoAttributeSche
         write_only,
         identity,
         deferred_populate,
-    } = a;
-    let (required, read_only) = core_input_mode_to_proto(*input_mode);
+    } = a.parts();
+    let (required, read_only) = core_input_mode_to_proto(input_mode);
     ProtoAttributeSchema {
-        name: name.clone(),
+        name: name.to_string(),
         attr_type: core_to_proto_attribute_type(attr_type),
         required,
-        default: default.as_ref().map(core_to_proto_value),
-        description: description.clone(),
-        create_only: *create_only,
+        default: default.map(core_to_proto_value),
+        description: description.map(str::to_owned),
+        create_only,
         read_only,
-        write_only: *write_only,
-        block_name: block_name.clone(),
-        provider_name: provider_name.clone(),
-        removable: *removable,
-        identity: *identity,
-        deferred_populate: *deferred_populate,
+        write_only,
+        block_name: block_name.map(str::to_owned),
+        provider_name: provider_name.map(str::to_owned),
+        removable,
+        identity,
+        deferred_populate,
     }
 }
 
@@ -626,22 +631,40 @@ fn core_input_mode_to_proto(input_mode: CoreInputMode) -> (bool, bool) {
 }
 
 pub fn core_to_proto_schema(s: &CoreResourceSchema) -> ProtoResourceSchema {
+    let CoreResourceSchemaParts {
+        resource_type,
+        attributes,
+        description,
+        validation,
+        kind,
+        unique_name,
+        operation_config,
+        exclusive_required,
+        // The protocol has no fields for wait defaults.
+        default_wait_timeout: _default_wait_timeout,
+        default_wait_interval: _default_wait_interval,
+        defs,
+    } = s.parts();
+
     ProtoResourceSchema {
-        resource_type: s.resource_type.clone(),
-        attributes: s
-            .attributes
+        resource_type: resource_type.to_string(),
+        attributes: attributes
             .iter()
             .map(|(k, v)| (k.clone(), core_to_proto_attribute_schema(v)))
             .collect(),
-        description: s.description.clone(),
-        kind: core_to_proto_schema_kind(s.kind),
-        unique_name: core_to_proto_unique_name(&s.unique_name),
-        operation_config: s.operation_config.clone(),
-        validators: vec![],
-        exclusive_required: s.exclusive_required.clone(),
+        description: description.map(str::to_owned),
+        kind: core_to_proto_schema_kind(kind),
+        unique_name: core_to_proto_unique_name(unique_name),
+        operation_config: operation_config.cloned(),
+        validators: match validation {
+            CoreResourceValidation::Declared(validators) => validators.clone(),
+            CoreResourceValidation::None => vec![],
+            // Native callbacks are not portable across the protocol.
+            CoreResourceValidation::InProcess(_native_callback) => vec![],
+        },
+        exclusive_required: exclusive_required.to_vec(),
         // Cyclic CFN struct definitions reachable via Ref (carina#3340).
-        defs: s
-            .defs
+        defs: defs
             .iter()
             .map(|(k, v)| (k.clone(), core_to_proto_attribute_type(v)))
             .collect(),
@@ -664,7 +687,7 @@ mod tests {
 
     #[test]
     fn schema_transport_clones_the_shared_operation_config() {
-        let mut schema =
+        let schema =
             carina_provider_aws::schemas::generated::ec2::nat_gateway::ec2_nat_gateway_config()
                 .schema;
         let operation_config = carina_core::schema::OperationConfig {
@@ -674,12 +697,31 @@ mod tests {
             create_max_retries: Some(4),
             delete_max_retries: Some(5),
         };
-        schema.operation_config = Some(operation_config.clone());
+        let schema = schema.with_operation_config(operation_config.clone());
 
         assert_eq!(
             core_to_proto_schema(&schema).operation_config,
             Some(operation_config)
         );
+    }
+
+    #[test]
+    fn nested_struct_field_write_only_round_trips_to_protocol() {
+        let fields = [
+            (
+                CoreStructField::new("client_secret", CoreAttributeType::string()).write_only(),
+                true,
+            ),
+            (
+                CoreStructField::new("client_id", CoreAttributeType::string()),
+                false,
+            ),
+        ];
+
+        for (field, expected) in fields {
+            let protocol = core_to_proto_struct_field(&field);
+            assert_eq!(protocol.write_only, expected, "field {}", field.name());
+        }
     }
 
     #[test]

@@ -27,11 +27,11 @@ mod tests {
         else {
             panic!("expected Struct shape");
         };
-        &fields
+        fields
             .iter()
-            .find(|field| field.name == field_name)
+            .find(|field| field.name() == field_name)
             .unwrap_or_else(|| panic!("missing field {field_name}"))
-            .field_type
+            .field_type()
     }
 
     fn list_inner(attr: &AttributeType) -> &AttributeType {
@@ -2329,9 +2329,9 @@ mod tests {
         };
         let protocol = fields
             .iter()
-            .find(|f| f.name == "protocol")
+            .find(|f| f.name() == "protocol")
             .expect("RedirectAllRequestsTo must have a `protocol` field")
-            .field_type
+            .field_type()
             .clone();
         let carina_core::schema::Shape::Enum {
             identity,

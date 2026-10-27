@@ -437,7 +437,7 @@ where
 impl AwsProvider {
     fn operation_budget(&self, resource_type: &str, kind: OperationKind) -> Duration {
         self.resource_schema(resource_type)
-            .and_then(|schema| schema.operation_config.as_ref())
+            .and_then(|schema| schema.operation_config())
             .map_or(DEFAULT_OPERATION_BUDGET, |config| config.budget(kind))
     }
 
@@ -448,7 +448,7 @@ impl AwsProvider {
     ) -> (String, Vec<String>) {
         let mut missing_attributes = self
             .resource_schema(id.resource_type.as_str())
-            .map(|schema| schema.attributes.keys().cloned().collect::<Vec<_>>())
+            .map(|schema| schema.attributes().keys().cloned().collect::<Vec<_>>())
             .unwrap_or_default();
         missing_attributes.sort();
         if missing_attributes.is_empty() {

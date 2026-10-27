@@ -566,17 +566,16 @@ fn dsl_value_to_iam_json(
             // the malformed key to AWS.
             let mut obj = serde_json::Map::new();
             for field in fields {
-                let Some(fv) = map.get(&field.name) else {
+                let Some(fv) = map.get(field.name()) else {
                     continue;
                 };
                 let key = field
-                    .provider_name
-                    .as_deref()
-                    .unwrap_or(&field.name)
+                    .provider_name()
+                    .unwrap_or_else(|| field.name())
                     .to_string();
                 obj.insert(
                     key,
-                    dsl_value_to_iam_json(fv, &field.field_type, &field.name),
+                    dsl_value_to_iam_json(fv, field.field_type(), field.name()),
                 );
             }
             serde_json::Value::Object(obj)
