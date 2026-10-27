@@ -789,6 +789,7 @@ fn assume_role_attribute_type() -> proto::AttributeType {
                 block_name: None,
                 provider_name: None,
                 read_only: false,
+                write_only: false,
                 deferred_populate: false,
             },
             proto::StructField {
@@ -801,6 +802,7 @@ fn assume_role_attribute_type() -> proto::AttributeType {
                 block_name: None,
                 provider_name: None,
                 read_only: false,
+                write_only: false,
                 deferred_populate: false,
             },
             proto::StructField {
@@ -813,6 +815,7 @@ fn assume_role_attribute_type() -> proto::AttributeType {
                 block_name: None,
                 provider_name: None,
                 read_only: false,
+                write_only: false,
                 deferred_populate: false,
             },
             proto::StructField {
@@ -825,6 +828,7 @@ fn assume_role_attribute_type() -> proto::AttributeType {
                 block_name: None,
                 provider_name: None,
                 read_only: false,
+                write_only: false,
                 deferred_populate: false,
             },
         ],

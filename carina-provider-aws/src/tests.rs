@@ -15,12 +15,12 @@ fn flow_log_resource_ids_are_order_insensitive() {
     let config = crate::schemas::generated::ec2::flow_log::ec2_flow_log_config();
     let resource_ids = config
         .schema
-        .attributes
+        .attributes()
         .get("resource_ids")
         .expect("resource_ids attribute");
 
     assert!(matches!(
-        config.schema.shape_of(&resource_ids.attr_type),
+        config.schema.shape_of(resource_ids.attr_type()),
         Shape::List { ordered: false, .. }
     ));
 }
@@ -1497,13 +1497,13 @@ fn test_organizations_organization_schema_feature_set_enum() {
         crate::schemas::generated::organizations::organization::organizations_organization_config();
     let feature_set = config
         .schema
-        .attributes
+        .attributes()
         .get("feature_set")
         .expect("feature_set attribute not found");
     if let carina_core::schema::Shape::Enum {
         values: Some(values),
         ..
-    } = config.schema.shape_of(&feature_set.attr_type)
+    } = config.schema.shape_of(feature_set.attr_type())
     {
         assert!(values.contains(&"ALL".to_string()));
         assert!(values.contains(&"CONSOLIDATED_BILLING".to_string()));
@@ -1613,13 +1613,13 @@ fn test_organizations_account_schema_attributes() {
     let config = crate::schemas::generated::organizations::account::organizations_account_config();
     let schema = &config.schema;
     // Verify key attributes exist
-    assert!(schema.attributes.contains_key("account_name"));
-    assert!(schema.attributes.contains_key("email"));
-    assert!(schema.attributes.contains_key("id"));
-    assert!(schema.attributes.contains_key("arn"));
-    assert!(schema.attributes.contains_key("status"));
-    assert!(schema.attributes.contains_key("name"));
-    assert!(schema.attributes.contains_key("tags"));
+    assert!(schema.attributes().contains_key("account_name"));
+    assert!(schema.attributes().contains_key("email"));
+    assert!(schema.attributes().contains_key("id"));
+    assert!(schema.attributes().contains_key("arn"));
+    assert!(schema.attributes().contains_key("status"));
+    assert!(schema.attributes().contains_key("name"));
+    assert!(schema.attributes().contains_key("tags"));
     // Verify has_tags
     assert!(config.has_tags);
 }
@@ -1632,14 +1632,14 @@ fn test_security_group_egress_schema_keeps_all_as_alias_only() {
         crate::schemas::generated::ec2::security_group_egress::ec2_security_group_egress_config();
     let ip_protocol = config
         .schema
-        .attributes
+        .attributes()
         .get("ip_protocol")
         .expect("ip_protocol attribute not found");
     if let carina_core::schema::Shape::Enum {
         values: Some(values),
         dsl_aliases,
         ..
-    } = config.schema.shape_of(&ip_protocol.attr_type)
+    } = config.schema.shape_of(ip_protocol.attr_type())
     {
         assert!(
             values.contains(&"-1".to_string()) && !values.contains(&"all".to_string()),
@@ -1663,14 +1663,14 @@ fn test_security_group_ingress_schema_keeps_all_as_alias_only() {
         crate::schemas::generated::ec2::security_group_ingress::ec2_security_group_ingress_config();
     let ip_protocol = config
         .schema
-        .attributes
+        .attributes()
         .get("ip_protocol")
         .expect("ip_protocol attribute not found");
     if let carina_core::schema::Shape::Enum {
         values: Some(values),
         dsl_aliases,
         ..
-    } = config.schema.shape_of(&ip_protocol.attr_type)
+    } = config.schema.shape_of(ip_protocol.attr_type())
     {
         assert!(
             values.contains(&"-1".to_string()) && !values.contains(&"all".to_string()),

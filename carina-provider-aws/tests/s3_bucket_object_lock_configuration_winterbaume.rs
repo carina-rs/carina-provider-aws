@@ -629,15 +629,15 @@ async fn recreate_without_rule_refuses_to_clobber_retained_compliance_rule() {
 fn served_schema_keeps_rule_updatable() {
     let schema = carina_provider_aws::schemas::all_schemas()
         .into_iter()
-        .find(|schema| schema.resource_type == RESOURCE_TYPE)
+        .find(|schema| schema.resource_type() == RESOURCE_TYPE)
         .expect("served Object Lock schema");
 
     assert!(
         !schema
-            .attributes
+            .attributes()
             .get("rule")
             .expect("rule attribute")
-            .create_only,
+            .is_create_only(),
         "served rule attribute must not force replacement"
     );
 }

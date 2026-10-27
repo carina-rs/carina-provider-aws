@@ -29,11 +29,11 @@ mod tests {
     #[test]
     fn configs_register_s3_bucket_under_both_kinds() {
         let configs = super::generated::configs();
-        let managed = configs
-            .iter()
-            .find(|c| c.resource_type_name == "s3.Bucket" && c.schema.kind == SchemaKind::Resource);
+        let managed = configs.iter().find(|c| {
+            c.resource_type_name == "s3.Bucket" && c.schema.kind() == SchemaKind::Resource
+        });
         let data_source = configs.iter().find(|c| {
-            c.resource_type_name == "s3.Bucket" && c.schema.kind == SchemaKind::DataSource
+            c.resource_type_name == "s3.Bucket" && c.schema.kind() == SchemaKind::DataSource
         });
         assert!(
             managed.is_some(),
@@ -71,8 +71,8 @@ mod tests {
                 };
                 for field in fields {
                     collect_enum_identities(
-                        &field.field_type,
-                        &format!("{path}.{}", field.name),
+                        field.field_type(),
+                        &format!("{path}.{}", field.name()),
                         identities,
                     );
                 }
@@ -99,11 +99,11 @@ mod tests {
     }
 
     fn attr_type<'a>(schema: &'a ResourceSchema, name: &str) -> &'a AttributeType {
-        &schema
-            .attributes
+        schema
+            .attributes()
             .get(name)
             .unwrap_or_else(|| panic!("missing attribute {name}"))
-            .attr_type
+            .attr_type()
     }
 
     fn struct_field_type<'a>(
@@ -112,13 +112,13 @@ mod tests {
         field_name: &str,
     ) -> &'a AttributeType {
         let mut budget = ShapeWalkBudget::new(8);
-        &schema
+        schema
             .struct_fields_with_budget(attr_type(schema, attr_name), &mut budget)
             .unwrap_or_else(|| panic!("{attr_name} is not a struct"))
             .iter()
-            .find(|field| field.name == field_name)
+            .find(|field| field.name() == field_name)
             .unwrap_or_else(|| panic!("missing {attr_name}.{field_name}"))
-            .field_type
+            .field_type()
     }
 
     fn alias_target_value(hosted_zone_id: ConcreteValue) -> Value {
@@ -177,8 +177,8 @@ mod tests {
     fn acm_certificate_nested_string_enum_identities_are_structural_and_unique() {
         let config = super::generated::acm::certificate::acm_certificate_config();
         let mut identities = Vec::new();
-        for (name, attr) in &config.schema.attributes {
-            collect_enum_identities(&attr.attr_type, name, &mut identities);
+        for (name, attr) in config.schema.attributes() {
+            collect_enum_identities(attr.attr_type(), name, &mut identities);
         }
 
         let mut by_identity: HashMap<&str, Vec<&str>> = HashMap::new();
@@ -278,59 +278,59 @@ mod tests {
     fn generated_resource_unique_name_specs_follow_explicit_replacement_classes() {
         let acm_certificate = super::generated::acm::certificate::acm_certificate_config();
         assert_eq!(
-            acm_certificate.schema.unique_name,
-            UniqueNameSpec::Conflicting
+            acm_certificate.schema.unique_name(),
+            &UniqueNameSpec::Conflicting
         );
 
         let iam_role = super::generated::iam::role::iam_role_config();
         assert_eq!(
-            iam_role.schema.unique_name,
-            UniqueNameSpec::Attribute("role_name".to_string())
+            iam_role.schema.unique_name(),
+            &UniqueNameSpec::Attribute("role_name".to_string())
         );
 
         let ec2_vpc = super::generated::ec2::vpc::ec2_vpc_config();
-        assert_eq!(ec2_vpc.schema.unique_name, UniqueNameSpec::Conflicting);
+        assert_eq!(ec2_vpc.schema.unique_name(), &UniqueNameSpec::Conflicting);
 
         let ec2_route = super::generated::ec2::route::ec2_route_config();
-        assert_eq!(ec2_route.schema.unique_name, UniqueNameSpec::Coexisting);
+        assert_eq!(ec2_route.schema.unique_name(), &UniqueNameSpec::Coexisting);
 
         let ec2_security_group = super::generated::ec2::security_group::ec2_security_group_config();
         assert_eq!(
-            ec2_security_group.schema.unique_name,
-            UniqueNameSpec::Attribute("group_name".to_string())
+            ec2_security_group.schema.unique_name(),
+            &UniqueNameSpec::Attribute("group_name".to_string())
         );
 
         let ec2_vpc_gateway_attachment =
             super::generated::ec2::vpc_gateway_attachment::ec2_vpc_gateway_attachment_config();
         assert_eq!(
-            ec2_vpc_gateway_attachment.schema.unique_name,
-            UniqueNameSpec::Conflicting
+            ec2_vpc_gateway_attachment.schema.unique_name(),
+            &UniqueNameSpec::Conflicting
         );
 
         let ec2_vpc_peering_connection =
             super::generated::ec2::vpc_peering_connection::ec2_vpc_peering_connection_config();
         assert_eq!(
-            ec2_vpc_peering_connection.schema.unique_name,
-            UniqueNameSpec::Conflicting
+            ec2_vpc_peering_connection.schema.unique_name(),
+            &UniqueNameSpec::Conflicting
         );
 
         let route53_record_set = super::generated::route53::record_set::route53_record_set_config();
         assert_eq!(
-            route53_record_set.schema.unique_name,
-            UniqueNameSpec::Conflicting
+            route53_record_set.schema.unique_name(),
+            &UniqueNameSpec::Conflicting
         );
 
         let s3_bucket_policy = super::generated::s3::bucket_policy::s3_bucket_policy_config();
         assert_eq!(
-            s3_bucket_policy.schema.unique_name,
-            UniqueNameSpec::Coexisting
+            s3_bucket_policy.schema.unique_name(),
+            &UniqueNameSpec::Coexisting
         );
 
         let s3_bucket = super::generated::s3::bucket::s3_bucket_config();
-        assert_eq!(s3_bucket.schema.unique_name, UniqueNameSpec::Conflicting);
+        assert_eq!(s3_bucket.schema.unique_name(), &UniqueNameSpec::Conflicting);
 
         let sqs_queue = super::generated::sqs::queue::sqs_queue_config();
-        assert_eq!(sqs_queue.schema.unique_name, UniqueNameSpec::Conflicting);
+        assert_eq!(sqs_queue.schema.unique_name(), &UniqueNameSpec::Conflicting);
     }
 
     #[test]
@@ -499,10 +499,11 @@ mod tests {
         let schema = registry
             .get("aws", "route53.RecordSet", SchemaKind::Resource)
             .expect("RecordSet resource schema");
+        let saved_attrs = carina_core::provider::RawSavedAttrs::default().lift(&registry);
         let result = diff(
             &ResolvedResource::new(normalized.as_resource().clone()),
             &current,
-            None,
+            &saved_attrs,
             None,
             Some(schema),
         );
@@ -580,12 +581,12 @@ mod tests {
                 .into_iter()
                 .find(|config| config.resource_type_name == resource_type)
                 .unwrap_or_else(|| panic!("{resource_type} config should exist"));
-            let attr_type = &config
+            let attr_type = config
                 .schema
-                .attributes
+                .attributes()
                 .get("ip_protocol")
                 .unwrap_or_else(|| panic!("{resource_type}.ip_protocol should exist"))
-                .attr_type;
+                .attr_type();
             let Shape::Enum {
                 values: Some(values),
                 dsl_aliases,
