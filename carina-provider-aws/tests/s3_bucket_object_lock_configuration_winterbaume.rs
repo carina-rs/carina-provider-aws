@@ -107,6 +107,14 @@ fn int(value: i64) -> Value {
     Value::Concrete(ConcreteValue::Int(value))
 }
 
+fn schema_registry() -> carina_core::schema::SchemaRegistry {
+    let mut schemas = carina_core::schema::SchemaRegistry::new();
+    for schema in carina_provider_aws::schemas::all_schemas() {
+        schemas.insert("aws", schema);
+    }
+    schemas
+}
+
 async fn create_request_for_test(resource: Resource) -> CreateRequest {
     let bindings = carina_core::binding_index::ResolvedBindings::default();
     let module_gate = carina_core::executor::ModuleConstraintGate::new(&[]);
@@ -125,13 +133,18 @@ async fn create_request_for_test(resource: Resource) -> CreateRequest {
 }
 
 async fn update_request_for_test(
-    resource: Resource,
+    mut resource: Resource,
     from: State,
     changed_attributes: &[String],
 ) -> UpdateRequest {
     let bindings = carina_core::binding_index::ResolvedBindings::default();
     let module_gate = carina_core::executor::ModuleConstraintGate::new(&[]);
-    let schemas = carina_core::schema::SchemaRegistry::new();
+    let schemas = schema_registry();
+    carina_core::value::canonicalize_normalized_resources_with_schemas(
+        std::slice::from_mut(&mut resource),
+        &schemas,
+    )
+    .expect("test provider/state values should canonicalize for update preparation");
     let preparation = carina_core::executor::ProviderPreparationContext::new(
         &bindings,
         &module_gate,

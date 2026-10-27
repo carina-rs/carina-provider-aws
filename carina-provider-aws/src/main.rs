@@ -23,9 +23,8 @@ use carina_provider_protocol::types as proto;
 use carina_core::provider::{
     AppliedIdentifier as CoreAppliedIdentifier, AppliedState as CoreAppliedState,
     DeleteRequest as CoreDeleteRequest, Observation as CoreObservation, PatchOp as CorePatchOp,
-    PatchOpKind as CorePatchOpKind, Provider, ProviderError as CoreProviderError,
-    ProviderNormalizer, ReadRequest as CoreReadRequest, Sent as CoreSent,
-    UpdatePatch as CoreUpdatePatch,
+    Provider, ProviderError as CoreProviderError, ProviderNormalizer,
+    ReadRequest as CoreReadRequest, Sent as CoreSent, UpdatePatch as CoreUpdatePatch,
 };
 #[cfg(any(target_arch = "wasm32", test))]
 use carina_core::resource::Value as CoreValue;
@@ -647,14 +646,20 @@ impl CarinaProvider for AwsProcessProvider {
                 .patch
                 .ops
                 .iter()
-                .map(|op| CorePatchOp {
-                    kind: match op.kind {
-                        proto::PatchOpKind::Add => CorePatchOpKind::Add,
-                        proto::PatchOpKind::Replace => CorePatchOpKind::Replace,
-                        proto::PatchOpKind::Remove => CorePatchOpKind::Remove,
+                .map(|op| match op {
+                    proto::PatchOp::Add { key, value } => CorePatchOp::Add {
+                        key: key.clone(),
+                        value: convert::proto_to_core_value(value),
                     },
-                    key: op.key.clone(),
-                    value: op.value.as_ref().map(convert::proto_to_core_value),
+                    proto::PatchOp::Replace { key, value } => CorePatchOp::Replace {
+                        key: key.clone(),
+                        value: convert::proto_to_core_value(value),
+                    },
+                    proto::PatchOp::Reassert { key, value } => CorePatchOp::Reassert {
+                        key: key.clone(),
+                        value: convert::proto_to_core_value(value),
+                    },
+                    proto::PatchOp::Remove { key } => CorePatchOp::Remove { key: key.clone() },
                 })
                 .collect(),
         };

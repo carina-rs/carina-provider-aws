@@ -732,10 +732,9 @@ mod tests {
                 exists: true,
             },
             patch: carina_provider_protocol::types::UpdatePatch {
-                ops: vec![carina_provider_protocol::types::PatchOp {
-                    kind: carina_provider_protocol::types::PatchOpKind::Replace,
+                ops: vec![carina_provider_protocol::types::PatchOp::Replace {
                     key: "color".into(),
-                    value: Some(ProtoValue::String("blue".into())),
+                    value: ProtoValue::String("blue".into()),
                 }],
             },
         };

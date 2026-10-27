@@ -14,7 +14,7 @@ use aws_smithy_types::retry::ProvideErrorKind;
 use tokio::time::sleep;
 
 use carina_core::provider::{
-    AppliedIdentifier, AppliedState, PatchOpKind, ProviderError, ProviderResult, ReadOutcome,
+    AppliedIdentifier, AppliedState, PatchOp, ProviderError, ProviderResult, ReadOutcome,
     UpdatePatch,
 };
 use carina_core::resource::{ConcreteValue, EnumAttrError, Resource, ResourceId, State, Value};
@@ -477,9 +477,11 @@ where
 /// `to: Resource` (a full desired state). The Level 3 `Provider::update`
 /// signature replaces `to` with `(from: State, patch: UpdatePatch)`, so
 /// this adapter rebuilds an equivalent desired `Resource` by applying
-/// each [`PatchOpKind`] on top of `from`'s attributes:
+/// each [`PatchOp`] on top of `from`'s attributes:
 ///
 /// - `Add` / `Replace` set the attribute to the patch value.
+/// - `Reassert` sets an unchanged desired write-only value that core re-sends
+///   alongside a user change.
 /// - `Remove` deletes the attribute from the resulting resource.
 ///
 /// This is a faithful translation: the result mirrors what the user's
@@ -498,14 +500,14 @@ pub fn apply_patch_to_state(from: &State, patch: &UpdatePatch) -> Resource {
         .map(|(k, v)| (k.clone(), v.clone()))
         .collect();
     for op in &patch.ops {
-        match op.kind {
-            PatchOpKind::Add | PatchOpKind::Replace => {
-                if let Some(ref v) = op.value {
-                    resource.attributes.insert(op.key.clone(), v.clone());
-                }
+        match op {
+            PatchOp::Add { key, value }
+            | PatchOp::Replace { key, value }
+            | PatchOp::Reassert { key, value } => {
+                resource.attributes.insert(key.clone(), value.clone());
             }
-            PatchOpKind::Remove => {
-                resource.attributes.shift_remove(&op.key);
+            PatchOp::Remove { key } => {
+                resource.attributes.shift_remove(key);
             }
         }
     }
@@ -584,11 +586,11 @@ mod tests {
     }
 
     #[test]
-    fn test_apply_patch_to_state_add_replace_remove() {
-        use carina_core::provider::{PatchOp, PatchOpKind, UpdatePatch};
+    fn test_apply_patch_to_state_add_replace_reassert_remove() {
+        use carina_core::provider::{PatchOp, UpdatePatch};
         use std::collections::HashMap;
 
-        // from-state has two attrs; patch adds one, replaces one, removes one.
+        // The patch adds one attribute, replaces one, reasserts one, and removes one.
         let id = ResourceId::with_provider_identity("aws", "ec2.Vpc", "test", None);
         let mut from_attrs: HashMap<String, Value> = HashMap::new();
         from_attrs.insert(
@@ -606,34 +608,39 @@ mod tests {
                 .collect(),
             )),
         );
+        from_attrs.insert(
+            "write_only_token".into(),
+            Value::Concrete(ConcreteValue::String("saved-placeholder".into())),
+        );
         let from = State::existing(id, from_attrs);
 
         let patch = UpdatePatch {
             ops: vec![
                 // Add a brand-new attribute
-                PatchOp {
-                    kind: PatchOpKind::Add,
+                PatchOp::Add {
                     key: "instance_tenancy".into(),
-                    value: Some(Value::Concrete(ConcreteValue::String("default".into()))),
+                    value: Value::Concrete(ConcreteValue::String("default".into())),
                 },
                 // Replace the existing tags
-                PatchOp {
-                    kind: PatchOpKind::Replace,
+                PatchOp::Replace {
                     key: "tags".into(),
-                    value: Some(Value::Concrete(ConcreteValue::Map(
+                    value: Value::Concrete(ConcreteValue::Map(
                         [(
                             "Name".to_string(),
                             Value::Concrete(ConcreteValue::String("new".into())),
                         )]
                         .into_iter()
                         .collect(),
-                    ))),
+                    )),
+                },
+                // Reassert a desired write-only value over its saved-state placeholder.
+                PatchOp::Reassert {
+                    key: "write_only_token".into(),
+                    value: Value::Concrete(ConcreteValue::String("secret".into())),
                 },
                 // Remove cidr_block
-                PatchOp {
-                    kind: PatchOpKind::Remove,
+                PatchOp::Remove {
                     key: "cidr_block".into(),
-                    value: None,
                 },
             ],
         };
@@ -648,6 +655,11 @@ mod tests {
             to.attributes.get("instance_tenancy"),
             Some(&Value::Concrete(ConcreteValue::String("default".into()))),
             "Add op should insert the new value"
+        );
+        assert_eq!(
+            to.attributes.get("write_only_token"),
+            Some(&Value::Concrete(ConcreteValue::String("secret".into()))),
+            "Reassert op should insert the sent write-only value"
         );
         match to.attributes.get("tags") {
             Some(Value::Concrete(ConcreteValue::Map(m))) => {
