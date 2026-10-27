@@ -123,8 +123,11 @@ pub fn core_to_proto_value(v: &CoreValue) -> ProtoValue {
         CoreValue::Deferred(DeferredValue::Interpolation(_)) => {
             ProtoValue::String("<unresolved-interpolation>".to_string())
         }
-        CoreValue::Deferred(DeferredValue::FunctionCall { name, .. }) => {
-            ProtoValue::String(format!("<unresolved-fn:{name}>"))
+        CoreValue::Deferred(
+            DeferredValue::FunctionCall { name, .. } | DeferredValue::Unavailable { name, .. },
+        ) => ProtoValue::String(format!("<unresolved-fn:{name}>")),
+        CoreValue::Deferred(DeferredValue::Coalesce { .. }) => {
+            ProtoValue::String("<unresolved-coalesce>".to_string())
         }
         CoreValue::Deferred(DeferredValue::ResolvedFunctionCall { function, .. }) => {
             ProtoValue::String(format!("<unresolved-fn:{}>", function.name))
@@ -220,8 +223,13 @@ pub fn core_to_proto_persisted_value(v: &CoreValue) -> ProtoPersistedValue {
         CoreValue::Deferred(DeferredValue::Interpolation(_)) => {
             panic!("unresolved interpolation must not reach persisted-state conversion")
         }
-        CoreValue::Deferred(DeferredValue::FunctionCall { .. }) => {
+        CoreValue::Deferred(
+            DeferredValue::FunctionCall { .. } | DeferredValue::Unavailable { .. },
+        ) => {
             panic!("unresolved built-in function call must not reach persisted-state conversion")
+        }
+        CoreValue::Deferred(DeferredValue::Coalesce { .. }) => {
+            panic!("unresolved coalesce expression must not reach persisted-state conversion")
         }
         CoreValue::Deferred(DeferredValue::ResolvedFunctionCall { .. }) => {
             panic!("unresolved user function call must not reach persisted-state conversion")
