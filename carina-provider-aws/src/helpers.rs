@@ -2,18 +2,16 @@
 //!
 //! These reduce boilerplate across EC2 (and other) service implementations.
 
-use std::future::Future;
 use std::time::Duration;
 
 use aws_sdk_ec2::types::{ResourceType, Tag, TagSpecification};
-use aws_smithy_runtime_api::client::orchestrator::HttpResponse;
 use aws_smithy_runtime_api::client::result::SdkError;
 use aws_smithy_types::error::display::DisplayErrorContext;
 use aws_smithy_types::error::metadata::ProvideErrorMetadata;
 use aws_smithy_types::retry::ProvideErrorKind;
 use tokio::time::sleep;
 
-use carina_aws_types::{Idempotency, SendOutcome};
+use carina_aws_types::SendOutcome;
 use carina_core::provider::{
     AppliedIdentifier, AppliedState, PatchOp, ProviderError, ProviderResult, ReadOutcome,
     UpdatePatch,
@@ -22,8 +20,8 @@ use carina_core::resource::{ConcreteValue, EnumAttrError, Resource, ResourceId, 
 use carina_core::schema::ResourceSchema;
 
 use crate::aws_operation::{
-    AwsOperation, ClientToken, EC2_CREATE_TOKEN_TAG, NoToken, TokenBearing, TokenOperation,
-    WithToken,
+    AwsOperation, ClientToken, DecidedSend, EC2_CREATE_TOKEN_TAG, NoToken, TokenBearing,
+    TokenOperation, WithToken,
 };
 use crate::ec2_tags::value_to_ec2_tags;
 use crate::error_helpers::SendFailure;
@@ -400,14 +398,7 @@ where
     B: AwsOperation<Resend = NoToken>,
     B::Error: ProvideErrorKind + ProvideErrorMetadata + std::error::Error + 'static,
 {
-    retry_aws_builder(
-        policy,
-        builder,
-        |request| AwsOperation::send(request),
-        B::NAME,
-        B::IDEMPOTENCY,
-    )
-    .await
+    retry_aws_builder(policy, builder, || ()).await
 }
 
 /// Retry a generated token-bearing AWS builder with one invocation token.
@@ -424,14 +415,7 @@ where
     B: AwsOperation<Resend = WithToken> + TokenBearing,
     B::Error: ProvideErrorKind + ProvideErrorMetadata + std::error::Error + 'static,
 {
-    retry_aws_builder(
-        policy,
-        builder,
-        |request| request.send_with_token(token, TokenSendPermit::new()),
-        B::NAME,
-        B::IDEMPOTENCY,
-    )
-    .await
+    retry_aws_builder(policy, builder, || (token, TokenSendPermit::new())).await
 }
 
 /// Send a generated token-bearing AWS builder exactly once.
@@ -446,8 +430,7 @@ where
     B: AwsOperation<Resend = WithToken> + TokenBearing,
     B::Error: ProvideErrorKind + ProvideErrorMetadata,
 {
-    builder
-        .send_with_token(token, TokenSendPermit::new())
+    DecidedSend::send(builder, (token, TokenSendPermit::new()))
         .await
         .map_err(|error| {
             let outcome = SendOutcome::classify(&error);
@@ -455,36 +438,34 @@ where
         })
 }
 
-async fn retry_aws_builder<F, S, B, Fut, O, E>(
+async fn retry_aws_builder<F, C, B, Context>(
     policy: RetryPolicy,
     builder: F,
-    send: S,
-    operation_name: &'static str,
-    idempotency: Idempotency,
-) -> Result<O, SendFailure<E>>
+    context: C,
+) -> Result<B::Output, SendFailure<B::Error>>
 where
     F: Fn() -> B,
-    S: Fn(B) -> Fut,
-    Fut: Future<Output = Result<O, SdkError<E, HttpResponse>>>,
-    E: ProvideErrorKind + ProvideErrorMetadata + std::error::Error + 'static,
+    C: Fn() -> Context,
+    B: DecidedSend<Context>,
+    B::Error: ProvideErrorKind + ProvideErrorMetadata + std::error::Error + 'static,
 {
     let mut attempt = 0;
     let mut maybe_sent = false;
     loop {
         attempt += 1;
-        match send(builder()).await {
+        match DecidedSend::send(builder(), context()).await {
             Ok(result) => return Ok(result),
             Err(error) => {
                 let outcome = SendOutcome::classify(&error);
                 maybe_sent |= outcome == SendOutcome::MaybeSent;
                 if attempt < policy.max_attempts
-                    && outcome.resend_is_safe(idempotency)
+                    && outcome.resend_is_safe(B::IDEMPOTENCY)
                     && is_retryable_sdk_error(&error)
                 {
                     let delay = policy.delay_secs(attempt);
                     eprintln!(
                         "  Retrying {} (attempt {}/{}): {}",
-                        operation_name,
+                        B::NAME,
                         attempt,
                         policy.max_attempts,
                         DisplayErrorContext(&error)

@@ -17,6 +17,7 @@ cd "$PROJECT_ROOT"
 cargo run -p carina-codegen-aws --bin smithy-codegen -- \
   --model-dir "$SCRIPT_DIR/../carina-provider-aws/tests/fixtures/smithy" \
   --output-dir "$SCRIPT_DIR/../carina-provider-aws/src" \
+  --clippy-config "$PROJECT_ROOT/clippy.toml" \
   --format provider
 
 # Format

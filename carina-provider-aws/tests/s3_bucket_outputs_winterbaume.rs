@@ -130,6 +130,9 @@ fn provider_from_config(sdk_config: aws_types::SdkConfig) -> AwsProvider {
     )
 }
 
+// This test-only raw client stages and inspects winterbaume state outside the
+// provider; provider operations still use the generated guarded wrapper.
+#[allow(clippy::disallowed_methods)]
 async fn provider_with_s3() -> (AwsProvider, S3Client) {
     let mock = MockAws::builder().with_service(S3Service::new()).build();
     let sdk_config = mock.sdk_config(PROVIDER_REGION).await;

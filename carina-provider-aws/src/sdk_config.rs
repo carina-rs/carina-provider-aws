@@ -28,8 +28,40 @@ impl BoundedSdkConfig {
         )
     }
 
+    /// Borrow the shared configuration for generated guarded-client constructors.
+    ///
+    /// Raw SDK client constructors are denied workspace-wide by the generated
+    /// Clippy policy, so handwritten provider code cannot use this accessor to
+    /// bypass the generated wrappers.
     pub(crate) fn sdk_config(&self) -> &aws_config::SdkConfig {
         &self.0
+    }
+
+    /// Build a bounded configuration around a test HTTP client while retaining
+    /// the production timeout and retry policy.
+    #[cfg(test)]
+    pub(crate) fn for_test_http_client(
+        http_client: aws_smithy_runtime_api::client::http::SharedHttpClient,
+        endpoint_url: &'static str,
+    ) -> Self {
+        let credentials = aws_credential_types::Credentials::new(
+            "test",
+            "test",
+            None,
+            None,
+            "bounded-sdk-config-test",
+        );
+        Self::new(
+            aws_config::SdkConfig::builder()
+                .region(Region::new("us-east-1"))
+                .endpoint_url(endpoint_url)
+                .credentials_provider(
+                    aws_credential_types::provider::SharedCredentialsProvider::new(credentials),
+                )
+                .http_client(http_client)
+                .sleep_impl(aws_smithy_async::rt::sleep::TokioSleep::new())
+                .build(),
+        )
     }
 
     /// Load a bounded SDK configuration for the region and optional assumed role.

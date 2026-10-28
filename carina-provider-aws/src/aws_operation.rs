@@ -46,6 +46,40 @@ pub(crate) trait AwsOperation {
     ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send;
 }
 
+/// A request whose send implementation and generated resend decision are tied
+/// to the same concrete builder type.
+pub(crate) trait DecidedSend<C> {
+    type Output;
+    type Error;
+
+    const NAME: &'static str;
+    const IDEMPOTENCY: Idempotency;
+
+    fn send(
+        self,
+        context: C,
+    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send;
+}
+
+impl<B> DecidedSend<()> for B
+where
+    B: AwsOperation<Resend = NoToken>,
+{
+    type Output = B::Output;
+    type Error = B::Error;
+
+    const NAME: &'static str = B::NAME;
+    const IDEMPOTENCY: Idempotency = B::IDEMPOTENCY;
+
+    fn send(
+        self,
+        (): (),
+    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send
+    {
+        AwsOperation::send(self)
+    }
+}
+
 /// Operation identity and resend semantics carried by a decided SDK error type.
 ///
 /// Generated implementations make it impossible to attach the wrong service or
@@ -92,12 +126,31 @@ where
     ///
     /// [`crate::helpers::TokenSendPermit`] can only be constructed by the
     /// token-aware helper entry points.
-    pub(crate) async fn send_with_token(
+    pub(crate) fn send_with_token(
         self,
         token: &ClientToken,
         _permit: crate::helpers::TokenSendPermit,
-    ) -> Result<B::Output, SdkError<B::Error, HttpResponse>> {
-        AwsOperation::send(self.inner.with_client_token(token)).await
+    ) -> impl Future<Output = Result<B::Output, SdkError<B::Error, HttpResponse>>> + Send {
+        AwsOperation::send(self.inner.with_client_token(token))
+    }
+}
+
+impl<'a, B> DecidedSend<(&'a ClientToken, crate::helpers::TokenSendPermit)> for TokenOperation<B>
+where
+    B: AwsOperation<Resend = WithToken> + TokenBearing,
+{
+    type Output = B::Output;
+    type Error = B::Error;
+
+    const NAME: &'static str = B::NAME;
+    const IDEMPOTENCY: Idempotency = B::IDEMPOTENCY;
+
+    fn send(
+        self,
+        (token, permit): (&'a ClientToken, crate::helpers::TokenSendPermit),
+    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send
+    {
+        self.send_with_token(token, permit)
     }
 }
 
