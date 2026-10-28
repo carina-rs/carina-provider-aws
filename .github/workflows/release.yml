@@ -16,7 +16,7 @@ jobs:
   build:
     name: Build
     if: github.event_name == 'push'
-    uses: carina-rs/provider-release/.github/workflows/build.yml@4f6c8230416e78ac063d8771b9cccafff1b0c281
+    uses: carina-rs/provider-release/.github/workflows/build.yml@08d946d62183b1fd0beb6e68afd1d792d62bf4a6
     with:
       provider: carina-provider-aws
       # Pinned to 1.95.0: current stable's rust-lld SIGSEGVs on wasm targets
@@ -40,7 +40,7 @@ jobs:
       contents: write
     steps:
       - name: Create Release
-        uses: carina-rs/provider-release/github-release@4f6c8230416e78ac063d8771b9cccafff1b0c281
+        uses: carina-rs/provider-release/github-release@08d946d62183b1fd0beb6e68afd1d792d62bf4a6
         with:
           provider: carina-provider-aws
 
@@ -57,7 +57,7 @@ jobs:
         # Signing/publish intentionally stay in this job so OIDC job_workflow_ref and the
         # Fulcio SAN remain this release.yml (the registry's trusted-publisher policy points
         # here); bump the SHA only after reviewing the provider-release diff.
-        uses: carina-rs/provider-release/publish@4f6c8230416e78ac063d8771b9cccafff1b0c281
+        uses: carina-rs/provider-release/publish@08d946d62183b1fd0beb6e68afd1d792d62bf4a6
         with:
           provider: carina-provider-aws
           name: aws
@@ -72,7 +72,7 @@ jobs:
       id-token: write
     steps:
       - name: Yank from Carina Registry
-        uses: carina-rs/provider-release/yank@4f6c8230416e78ac063d8771b9cccafff1b0c281
+        uses: carina-rs/provider-release/yank@08d946d62183b1fd0beb6e68afd1d792d62bf4a6
         with:
           name: aws
           namespace: carina-rs
