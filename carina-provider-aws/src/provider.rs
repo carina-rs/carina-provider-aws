@@ -21,17 +21,20 @@ use serde::{Deserialize, Serialize};
 
 use crate::AwsProvider;
 use crate::aws_operation::{ClientToken, DecidedOperationError, EC2_CREATE_TOKEN_TAG};
+use crate::error_helpers::{IntoSendFailure, SendFailure};
 use crate::helpers::{CreatePoll, DeletePoll, apply_patch_to_state};
 
 pub(crate) const POLL_AFTER_SECS: u32 = 5;
-/// Six describe calls after delays totaling 185 seconds. The pinned host
-/// gives an operation 15 minutes by default and clamps `poll_after` to 1–300
-/// seconds. In production WASM, attempt and operation timeouts are observed
-/// only between synchronous HTTP attempts, so one SDK call can take about 90
-/// seconds. The initial create plus six describes cost at most 7 * 90 = 630
-/// seconds; adding 185 seconds of sleeps gives 815 seconds and leaves an
-/// 85-second margin inside the 900-second operation budget.
-pub(crate) const TAGGED_EC2_DISCOVERY_ATTEMPTS: u8 = 6;
+/// Four describe attempts after delays totaling 65 seconds. Each paginated
+/// describe is capped at two pages, because in production WASM an individual
+/// synchronous HTTP call can take about 90 seconds before the host observes a
+/// timeout. The initial create plus eight describe-page calls therefore cost
+/// at most 9 * 90 = 810 seconds; adding 65 seconds of sleeps gives 875 seconds,
+/// below the host's 900-second default operation budget. Once discovery finds
+/// an identifier, continuation work is returned as another pending step so a
+/// later WASM poll receives a fresh operation budget.
+pub(crate) const TAGGED_EC2_DISCOVERY_ATTEMPTS: u8 = 4;
+pub(crate) const TAGGED_EC2_DISCOVERY_MAX_PAGES: u8 = 2;
 pub(crate) const TAGGED_EC2_INITIAL_DELAY_SECS: u32 = 5;
 
 fn next_tagged_ec2_delay(current: u32) -> u32 {
@@ -65,7 +68,8 @@ fn create_token_poll_after(token: &AwsCreateToken) -> u32 {
         AwsCreateToken::TaggedEc2 {
             next_delay_secs, ..
         } => *next_delay_secs,
-        AwsCreateToken::NatGateway { .. }
+        AwsCreateToken::TaggedEc2Found { .. }
+        | AwsCreateToken::NatGateway { .. }
         | AwsCreateToken::TransitGateway { .. }
         | AwsCreateToken::TransitGatewayAttachment { .. }
         | AwsCreateToken::OrganizationsAccount { .. } => POLL_AFTER_SECS,
@@ -93,6 +97,10 @@ pub enum AwsCreateToken {
         create_token: ClientToken,
         attempts_remaining: u8,
         next_delay_secs: u32,
+    },
+    TaggedEc2Found {
+        kind: Ec2TaggedResourceKind,
+        identifier: AppliedIdentifier,
     },
 }
 
@@ -229,14 +237,29 @@ impl Ec2TaggedResourceKind {
     ) -> ProviderResult<Vec<String>> {
         macro_rules! describe_ids {
             ($request:expr, $items:ident, $identifier:ident, paginated) => {{
-                let pages = $request
-                    .into_paginator()
-                    .send()
-                    .collect::<Result<Vec<_>, _>>()
-                    .await
-                    .map_err(|error| {
+                let mut stream = $request.into_paginator().send();
+                let mut pages = Vec::new();
+                for _ in 0..TAGGED_EC2_DISCOVERY_MAX_PAGES {
+                    let Some(page) = stream.try_next().await.map_err(|error| {
                         AwsProvider::tagged_ec2_discovery_call_error(id, self, error)
-                    })?;
+                    })?
+                    else {
+                        break;
+                    };
+                    pages.push(page);
+                }
+                if pages
+                    .last()
+                    .and_then(|page| page.next_token())
+                    .is_some_and(|token| !token.is_empty())
+                {
+                    return Err(ProviderError::api_error(format!(
+                        "{} discovery exceeded the bounded {}-page scan",
+                        self.create_operation(),
+                        TAGGED_EC2_DISCOVERY_MAX_PAGES,
+                    ))
+                    .for_resource(id.clone()));
+                }
                 describe_ids_from_pages(
                     &pages,
                     |output| output.$items(),
@@ -960,7 +983,7 @@ impl AwsProvider {
         kind: Ec2TaggedResourceKind,
         create_token: &ClientToken,
         sent: Sent,
-        error: crate::error_helpers::AwsSdkError<E>,
+        error: SendFailure<E>,
     ) -> Result<A::Step, A::Verdict>
     where
         A: AwsCreateAttempt,
@@ -972,7 +995,7 @@ impl AwsProvider {
             + Sync
             + 'static,
     {
-        if SendOutcome::classify(&error) == SendOutcome::MaybeSent {
+        if error.outcome() == SendOutcome::MaybeSent {
             return Self::pending_tagged_ec2(attempt, kind, create_token, sent);
         }
         Err(attempt.untracked(
@@ -981,17 +1004,18 @@ impl AwsProvider {
         ))
     }
 
-    pub(crate) async fn finish_tagged_ec2_create<A, E, O, Identifier>(
+    pub(crate) async fn finish_tagged_ec2_create<A, O, Failure, Identifier>(
         &self,
         resource: &Resource,
         attempt: A,
         context: TaggedEc2CreateContext<'_>,
-        result: Result<O, crate::error_helpers::AwsSdkError<E>>,
+        result: Result<O, Failure>,
         identifier: Identifier,
     ) -> Result<A::Step, A::Verdict>
     where
         A: AwsCreateAttempt,
-        E: std::error::Error
+        Failure: IntoSendFailure,
+        Failure::Error: std::error::Error
             + DecidedOperationError
             + aws_smithy_types::error::metadata::ProvideErrorMetadata
             + aws_smithy_types::retry::ProvideErrorKind
@@ -1014,7 +1038,7 @@ impl AwsProvider {
                     kind,
                     create_token,
                     sent,
-                    error,
+                    error.into_send_failure(),
                 );
             }
         };
@@ -1832,10 +1856,20 @@ impl AwsProvider {
                             AwsCreatePoll::Unissued(attempt) => attempt.issued(identifier.clone()),
                             AwsCreatePoll::Issued(issued) => issued,
                         };
-                        self.finish_tagged_ec2_issued(resource, kind, identifier, issued)
-                            .await
+                        issued.pending(
+                            AwsCreateToken::TaggedEc2Found { kind, identifier },
+                            POLL_AFTER_SECS,
+                        )
                     }
                 }
+            }
+            AwsCreateToken::TaggedEc2Found { kind, identifier } => {
+                let issued = match poll {
+                    AwsCreatePoll::Unissued(attempt) => attempt.issued(identifier.clone()),
+                    AwsCreatePoll::Issued(issued) => issued,
+                };
+                self.finish_tagged_ec2_issued(resource, kind, identifier, issued)
+                    .await
             }
         }
     }
@@ -2174,10 +2208,20 @@ impl AwsProvider {
                             }
                             AwsCreateResume::Issued(resumed) => resumed,
                         };
-                        self.finish_tagged_ec2_resumed(resource, kind, identifier, resumed)
-                            .await
+                        resumed.pending(
+                            AwsCreateToken::TaggedEc2Found { kind, identifier },
+                            POLL_AFTER_SECS,
+                        )
                     }
                 }
+            }
+            AwsCreateToken::TaggedEc2Found { kind, identifier } => {
+                let resumed = match resume {
+                    AwsCreateResume::Unissued(attempt) => attempt.issued(identifier.clone()),
+                    AwsCreateResume::Issued(resumed) => resumed,
+                };
+                self.finish_tagged_ec2_resumed(resource, kind, identifier, resumed)
+                    .await
             }
         }
     }
@@ -2836,6 +2880,113 @@ mod pending_operation_tests {
         AppliedIdentifier::new(value).expect("test identifier must be non-empty")
     }
 
+    struct PendingOnlyAttempt;
+
+    struct UnusedIssued;
+
+    impl AwsCreateAttempt for PendingOnlyAttempt {
+        type Step = AwsCreateToken;
+        type Verdict = ProviderError;
+        type Issued = UnusedIssued;
+
+        fn untracked(self, error: ProviderError) -> Self::Verdict {
+            error
+        }
+
+        fn issued(self, _identifier: AppliedIdentifier, _sent: Sent) -> Self::Issued {
+            UnusedIssued
+        }
+
+        fn pending(
+            self,
+            token: AwsCreateToken,
+            _sent: Sent,
+            _poll_after_secs: u32,
+        ) -> Result<Self::Step, Self::Verdict> {
+            Ok(token)
+        }
+    }
+
+    impl AwsIssuedCreate for UnusedIssued {
+        type Step = AwsCreateToken;
+        type Verdict = ProviderError;
+
+        fn identifier(&self) -> &AppliedIdentifier {
+            unreachable!("the pending-only test never issues a create")
+        }
+
+        fn succeeded(self, _attributes: HashMap<String, Value>) -> Self::Step {
+            unreachable!("the pending-only test never succeeds")
+        }
+
+        fn partial(
+            self,
+            _attributes: HashMap<String, Value>,
+            _reason: String,
+            _missing_attributes: Vec<String>,
+        ) -> Self::Step {
+            unreachable!("the pending-only test never completes partially")
+        }
+
+        fn failed(self, _observation: Observation, error: ProviderError) -> Self::Verdict {
+            error
+        }
+
+        fn discarded(self, error: ProviderError) -> Self::Verdict {
+            error
+        }
+
+        fn pending(
+            self,
+            token: AwsCreateToken,
+            _poll_after_secs: u32,
+        ) -> Result<Self::Step, Self::Verdict> {
+            Ok(token)
+        }
+    }
+
+    #[test]
+    fn sticky_maybe_sent_failure_keeps_tagged_create_pending() {
+        use aws_sdk_ec2::operation::create_nat_gateway::CreateNatGatewayError;
+        use aws_smithy_runtime_api::client::orchestrator::HttpResponse;
+        use aws_smithy_runtime_api::client::result::SdkError;
+        use aws_smithy_types::body::SdkBody;
+        use aws_smithy_types::error::ErrorMetadata;
+
+        let error = CreateNatGatewayError::generic(
+            ErrorMetadata::builder()
+                .code("RequestLimitExceeded")
+                .message("throttled after an earlier timeout")
+                .build(),
+        );
+        let response = HttpResponse::new(429.try_into().expect("valid status"), SdkBody::empty());
+        let failure = SendFailure::new(
+            SendOutcome::MaybeSent,
+            SdkError::service_error(error, response),
+        );
+        let create_token = ClientToken::new();
+        let id = ResourceId::with_provider_identity("aws", "ec2.NatGateway", "test", None);
+
+        let pending = AwsProvider::tagged_ec2_send_error(
+            PendingOnlyAttempt,
+            &id,
+            Ec2TaggedResourceKind::NatGateway,
+            &create_token,
+            Sent::AllRequestAttributes,
+            failure,
+        )
+        .expect("sticky maybe-sent outcome must remain pending");
+
+        assert!(matches!(
+            pending,
+            AwsCreateToken::TaggedEc2 {
+                kind: Ec2TaggedResourceKind::NatGateway,
+                create_token: token,
+                ..
+            } if token == create_token
+        ));
+    }
+
     #[test]
     fn pending_tokens_round_trip_without_resource_attributes() {
         let create_tokens = [
@@ -2929,12 +3080,14 @@ mod pending_operation_tests {
             delay = next_tagged_ec2_delay(delay);
         }
 
-        assert_eq!(delays, [5, 10, 20, 30, 60, 60]);
-        assert_eq!(delays.iter().sum::<u32>(), 185);
+        assert_eq!(delays, [5, 10, 20, 30]);
+        assert_eq!(delays.iter().sum::<u32>(), 65);
         assert!(delays.iter().all(|delay| *delay <= 300));
         let worst_case_secs = u64::from(delays.iter().sum::<u32>())
-            + (u64::from(TAGGED_EC2_DISCOVERY_ATTEMPTS) + 1) * 90;
-        assert_eq!(worst_case_secs, 815);
+            + (1 + u64::from(TAGGED_EC2_DISCOVERY_ATTEMPTS)
+                * u64::from(TAGGED_EC2_DISCOVERY_MAX_PAGES))
+                * 90;
+        assert_eq!(worst_case_secs, 875);
         assert!(worst_case_secs < DEFAULT_OPERATION_BUDGET.as_secs());
         assert_eq!(
             create_token_poll_after(&AwsCreateToken::TaggedEc2 {
@@ -2946,6 +3099,17 @@ mod pending_operation_tests {
             60,
             "native resume must preserve the same backoff as host polling"
         );
+
+        let continuation = AwsCreateToken::TaggedEc2Found {
+            kind: Ec2TaggedResourceKind::Subnet,
+            identifier: identifier("subnet-found"),
+        };
+        let json = serde_json::to_string(&continuation).expect("continuation should serialize");
+        assert_eq!(
+            serde_json::from_str::<AwsCreateToken>(&json).expect("continuation should deserialize"),
+            continuation
+        );
+        assert_eq!(create_token_poll_after(&continuation), POLL_AFTER_SECS);
     }
 
     fn vpc_page(ids: &[&str]) -> aws_sdk_ec2::operation::describe_vpcs::DescribeVpcsOutput {

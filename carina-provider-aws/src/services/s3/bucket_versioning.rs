@@ -2,14 +2,14 @@ use std::collections::HashMap;
 use std::io::{self, Write};
 
 use crate::AwsProvider;
-use crate::error_helpers::api_error_with_meta;
+use crate::error_helpers::{IntoSendFailure, api_error_with_meta};
 use crate::helpers::{
     RetryPolicy, optional_enum_attr, require_enum_attr, require_string_attr, retry_aws_operation,
 };
 use crate::provider::CreateCompletion;
 use crate::services::s3::bucket::is_s3_not_configured_error;
 use crate::services::s3::{InvalidBucketStateReason, classify_invalid_bucket_state};
-use aws_sdk_s3::error::{ProvideErrorMetadata, SdkError};
+use aws_sdk_s3::error::ProvideErrorMetadata;
 use aws_sdk_s3::operation::put_bucket_versioning::PutBucketVersioningError;
 use aws_sdk_s3::types::{BucketVersioningStatus, MfaDelete, VersioningConfiguration};
 use carina_core::provider::ProviderResult;
@@ -185,34 +185,40 @@ fn classify_suspension_error(code: Option<&str>, message: Option<&str>) -> Suspe
     }
 }
 
-fn finish_s3_bucket_versioning_suspend(
+fn finish_s3_bucket_versioning_suspend<Failure>(
     id: ResourceId,
     identifier: &str,
     result: Result<
         aws_sdk_s3::operation::put_bucket_versioning::PutBucketVersioningOutput,
-        SdkError<PutBucketVersioningError>,
+        Failure,
     >,
-) -> ProviderResult<()> {
+) -> ProviderResult<()>
+where
+    Failure: IntoSendFailure<Error = PutBucketVersioningError>,
+{
     match result {
         Ok(_) => Ok(()),
-        Err(error) => match classify_suspension_error(error.code(), error.message()) {
-            SuspensionErrorKind::BucketMissing => Ok(()),
-            SuspensionErrorKind::ObjectLockPresent => {
-                // Once Object Lock was enabled, PutBucketVersioning with
-                // Status=Suspended returned InvalidBucketState. Measured in
-                // us-east-1 on 2026-08-14; direction checked was Object Lock
-                // enabled -> versioning suspension rejected. Ignore this
-                // suspension failure so destroy can continue to the parent;
-                // parent deletion can still fail when retained versions exist.
-                let _ = write_suspension_warning(io::stderr().lock(), identifier);
-                Ok(())
+        Err(error) => {
+            let error = error.into_send_failure();
+            match classify_suspension_error(error.code(), error.message()) {
+                SuspensionErrorKind::BucketMissing => Ok(()),
+                SuspensionErrorKind::ObjectLockPresent => {
+                    // Once Object Lock was enabled, PutBucketVersioning with
+                    // Status=Suspended returned InvalidBucketState. Measured in
+                    // us-east-1 on 2026-08-14; direction checked was Object Lock
+                    // enabled -> versioning suspension rejected. Ignore this
+                    // suspension failure so destroy can continue to the parent;
+                    // parent deletion can still fail when retained versions exist.
+                    let _ = write_suspension_warning(io::stderr().lock(), identifier);
+                    Ok(())
+                }
+                SuspensionErrorKind::Other => Err(api_error_with_meta(
+                    "Failed to suspend bucket versioning",
+                    error,
+                )
+                .for_resource(id)),
             }
-            SuspensionErrorKind::Other => Err(api_error_with_meta(
-                "Failed to suspend bucket versioning",
-                error,
-            )
-            .for_resource(id)),
-        },
+        }
     }
 }
 
@@ -226,6 +232,7 @@ fn write_suspension_warning(mut writer: impl Write, bucket: &str) -> io::Result<
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aws_sdk_s3::error::SdkError;
     use aws_smithy_runtime_api::client::orchestrator::HttpResponse;
     use aws_smithy_types::body::SdkBody;
     use aws_smithy_types::error::ErrorMetadata;

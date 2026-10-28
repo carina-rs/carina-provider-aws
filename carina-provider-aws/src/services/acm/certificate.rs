@@ -23,7 +23,7 @@ use carina_core::schema::ResourceSchema;
 
 use crate::AwsProvider;
 use crate::aws_operation::ClientToken;
-use crate::error_helpers::{AwsSdkError, api_error_with_meta};
+use crate::error_helpers::{SendFailure, api_error_with_meta};
 use crate::helpers::{
     optional_enum_attr, optional_enum_struct_field, require_string_attr, sdk_error_message,
     send_aws_operation_with_token,
@@ -34,9 +34,9 @@ const DVO_MISSING_ATTRIBUTE: &str = "domain_validation_options";
 
 fn request_certificate_error(
     id: &ResourceId,
-    error: AwsSdkError<aws_sdk_acm::operation::request_certificate::RequestCertificateError>,
+    error: SendFailure<aws_sdk_acm::operation::request_certificate::RequestCertificateError>,
 ) -> ProviderError {
-    if carina_aws_types::SendOutcome::classify(&error) == carina_aws_types::SendOutcome::MaybeSent {
+    if error.outcome() == carina_aws_types::SendOutcome::MaybeSent {
         // ACM has no request-certificate lookup by idempotency token or tag.
         // Keep this create untracked, but make the possible remote side effect
         // explicit so an operator checks ACM before applying again.
@@ -877,6 +877,10 @@ mod tests {
     use super::*;
     use aws_sdk_acm::error::SdkError;
     use aws_sdk_acm::operation::request_certificate::RequestCertificateError;
+    use aws_smithy_runtime_api::client::orchestrator::HttpResponse;
+    use aws_smithy_types::body::SdkBody;
+    use aws_smithy_types::error::ErrorMetadata;
+    use carina_aws_types::SendOutcome;
 
     fn acm_schema() -> ResourceSchema {
         crate::schemas::generated::acm::certificate::acm_certificate_config().schema
@@ -898,11 +902,18 @@ mod tests {
 
     #[test]
     fn maybe_sent_request_certificate_uses_acm_specific_outcome_unknown_message() {
+        let service_error = RequestCertificateError::generic(
+            ErrorMetadata::builder()
+                .code("ThrottlingException")
+                .message("final attempt throttled")
+                .build(),
+        );
+        let response = HttpResponse::new(429.try_into().expect("valid status"), SdkBody::empty());
         let error: SdkError<RequestCertificateError> =
-            SdkError::timeout_error("response timed out");
+            SdkError::service_error(service_error, response);
         let id = id();
 
-        let error = request_certificate_error(&id, error);
+        let error = request_certificate_error(&id, SendFailure::new(SendOutcome::MaybeSent, error));
 
         assert_eq!(
             error.to_wire().message,
@@ -916,7 +927,7 @@ mod tests {
                 .map(|resource_id| resource_id.identity.as_str()),
             Some("test-cert")
         );
-        assert!(error.to_string().contains("response timed out"));
+        assert!(error.to_string().contains("final attempt throttled"));
     }
 
     fn dv_without_rr(domain: &str) -> DomainValidation {

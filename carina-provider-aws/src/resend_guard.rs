@@ -5,9 +5,12 @@ use std::io;
 use aws_smithy_runtime_api::box_error::BoxError;
 use aws_smithy_runtime_api::client::interceptors::Intercept;
 use aws_smithy_runtime_api::client::interceptors::context::{
-    BeforeTransmitInterceptorContextRef, FinalizerInterceptorContextRef,
+    BeforeTransmitInterceptorContextRef, FinalizerInterceptorContextMut,
+    FinalizerInterceptorContextRef,
 };
+use aws_smithy_runtime_api::client::interceptors::error::ContextAttachedError;
 use aws_smithy_runtime_api::client::orchestrator::Metadata;
+use aws_smithy_runtime_api::client::orchestrator::OrchestratorError;
 use aws_smithy_runtime_api::client::retries::RequestAttempts;
 use aws_smithy_runtime_api::client::runtime_components::RuntimeComponents;
 use aws_smithy_types::config_bag::{ConfigBag, Storable, StoreReplace};
@@ -21,6 +24,42 @@ struct PreviousAttempt {
 
 impl Storable for PreviousAttempt {
     type Storer = StoreReplace<Self>;
+}
+
+#[derive(Debug, Clone, Copy)]
+struct MaybeSentAttempt;
+
+impl Storable for MaybeSentAttempt {
+    type Storer = StoreReplace<Self>;
+}
+
+fn rendered_failure(
+    error: &(dyn std::error::Error + 'static),
+    response: Option<&aws_smithy_runtime_api::client::orchestrator::HttpResponse>,
+) -> String {
+    let mut rendered = error.to_string();
+    let mut source = error.source();
+    while let Some(error) = source {
+        rendered.push_str(": ");
+        rendered.push_str(&error.to_string());
+        source = error.source();
+    }
+    if let Some(response) = response {
+        rendered.push_str(&format!("; status: {}", response.status().as_u16()));
+        for header in [
+            "x-amzn-requestid",
+            "x-amzn-request-id",
+            "x-amz-request-id",
+            "x-amz-id-2",
+        ] {
+            if let Some(request_id) = response.headers().get(header) {
+                rendered.push_str("; request_id: ");
+                rendered.push_str(request_id);
+                break;
+            }
+        }
+    }
+    rendered
 }
 
 /// Associates one service client's SDK metadata with generated resend policy.
@@ -91,46 +130,61 @@ impl Intercept for ResendGuard {
         let outcome = match context.output_or_error() {
             Some(Ok(_)) => {
                 cfg.interceptor_state().unset::<PreviousAttempt>();
+                cfg.interceptor_state().unset::<MaybeSentAttempt>();
                 return Ok(());
             }
             Some(Err(_)) | None => {
                 SendOutcome::classify_orchestrator(context.inner(), runtime_components)
             }
         };
+        if outcome == SendOutcome::MaybeSent {
+            cfg.interceptor_state().store_put(MaybeSentAttempt);
+        }
         // The interceptor only lends us the SDK error, and `SdkError` is not
         // `Clone`. A later refusal can therefore carry the previous failure
         // only as rendered source-chain text rather than as the typed error.
-        let mut failure = context
+        let failure = context
             .output_or_error()
             .and_then(Result::err)
-            .map(|error| {
-                let mut rendered = error.to_string();
-                let mut source = std::error::Error::source(error);
-                while let Some(error) = source {
-                    rendered.push_str(": ");
-                    rendered.push_str(&error.to_string());
-                    source = error.source();
-                }
-                rendered
-            })
+            .map(|error| rendered_failure(error, context.response()))
             .unwrap_or_else(|| "failure details unavailable".to_string());
-        if let Some(response) = context.response() {
-            failure.push_str(&format!("; status: {}", response.status().as_u16()));
-            for header in [
-                "x-amzn-requestid",
-                "x-amzn-request-id",
-                "x-amz-request-id",
-                "x-amz-id-2",
-            ] {
-                if let Some(request_id) = response.headers().get(header) {
-                    failure.push_str("; request_id: ");
-                    failure.push_str(request_id);
-                    break;
-                }
-            }
-        }
         cfg.interceptor_state()
             .store_put(PreviousAttempt { outcome, failure });
+        Ok(())
+    }
+
+    fn modify_before_completion(
+        &self,
+        context: &mut FinalizerInterceptorContextMut<'_>,
+        runtime_components: &RuntimeComponents,
+        cfg: &mut ConfigBag,
+    ) -> Result<(), BoxError> {
+        if cfg.load::<MaybeSentAttempt>().is_none()
+            || context
+                .output_or_error()
+                .is_none_or(|result| result.is_ok())
+            || SendOutcome::classify_orchestrator(context.inner(), runtime_components)
+                == SendOutcome::MaybeSent
+        {
+            return Ok(());
+        }
+
+        let failure = context
+            .output_or_error()
+            .and_then(Result::err)
+            .map(|error| rendered_failure(error, context.response()))
+            .unwrap_or_else(|| "failure details unavailable".to_string());
+        let Some(Err(error)) = context.output_or_error_mut() else {
+            return Ok(());
+        };
+        let original = std::mem::replace(
+            error,
+            OrchestratorError::other(io::Error::other("replacing final send failure")),
+        );
+        *error = OrchestratorError::other(ContextAttachedError::new(
+            format!("an earlier attempt may have reached AWS; final attempt failed: {failure}"),
+            original,
+        ));
         Ok(())
     }
 }
@@ -149,6 +203,7 @@ mod tests {
     use aws_smithy_runtime_api::client::orchestrator::{HttpRequest, HttpResponse};
     use aws_smithy_runtime_api::client::result::ConnectorError;
     use aws_smithy_types::body::SdkBody;
+    use carina_aws_types::SendOutcome;
 
     use crate::{AwsProvider, BoundedSdkConfig};
 
@@ -367,6 +422,46 @@ mod tests {
         let requests = connector.requests();
         assert_eq!(requests.len(), 2);
         assert!(requests.iter().all(|request| request.contains(token)));
+    }
+
+    #[tokio::test]
+    async fn token_send_keeps_maybe_sent_after_final_throttling() {
+        let connector = ScriptedConnector::new([
+            Action::Timeout,
+            Action::Response {
+                status: 429,
+                body: THROTTLED,
+            },
+            Action::ResponseWithRequestId {
+                status: 429,
+                body: THROTTLED,
+                request_id: "final-throttling-request-id",
+            },
+        ]);
+        let provider = provider(connector.clone());
+
+        let error = provider
+            .ec2_client
+            .create_nat_gateway()
+            .subnet_id("subnet-123")
+            .client_token("stable-client-token")
+            .send()
+            .await
+            .expect_err("all three SDK attempts should fail");
+        let rendered = crate::helpers::sdk_error_message("CreateNatGateway failed", &error);
+
+        assert_eq!(connector.requests().len(), 3);
+        assert!(matches!(
+            &error,
+            aws_smithy_runtime_api::client::result::SdkError::ResponseError(_)
+        ));
+        assert_eq!(SendOutcome::classify(&error), SendOutcome::MaybeSent);
+        assert!(rendered.contains("throttled"), "{rendered}");
+        assert!(rendered.contains("status: 429"), "{rendered}");
+        assert!(
+            rendered.contains("final-throttling-request-id"),
+            "{rendered}"
+        );
     }
 
     #[tokio::test]

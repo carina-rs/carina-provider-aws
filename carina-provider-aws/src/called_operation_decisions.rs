@@ -151,10 +151,44 @@ fn strip_cfg_test_items(source: &str) -> String {
     production
 }
 
+fn rustc_host() -> String {
+    let rustc = std::env::var_os("RUSTC").unwrap_or_else(|| "rustc".into());
+    let version = std::process::Command::new(rustc)
+        .arg("-vV")
+        .output()
+        .expect("run rustc -vV to determine the host platform");
+    assert!(
+        version.status.success(),
+        "rustc -vV failed: {}",
+        String::from_utf8_lossy(&version.stderr)
+    );
+    String::from_utf8(version.stdout)
+        .expect("rustc -vV output should be UTF-8")
+        .lines()
+        .find_map(|line| line.strip_prefix("host: "))
+        .map(str::to_owned)
+        .expect("rustc -vV output should contain a host triple")
+}
+
+fn metadata_arguments(host: &str) -> Vec<String> {
+    [
+        "metadata",
+        "--locked",
+        "--filter-platform",
+        host,
+        "--format-version",
+        "1",
+    ]
+    .into_iter()
+    .map(str::to_owned)
+    .collect()
+}
+
 fn locked_sdk_operations() -> Vec<(String, String)> {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let host = rustc_host();
     let metadata = std::process::Command::new(env!("CARGO"))
-        .args(["metadata", "--locked", "--offline", "--format-version", "1"])
+        .args(metadata_arguments(&host))
         .current_dir(manifest_dir)
         .env("RUSTC_WRAPPER", "")
         .output()
@@ -205,6 +239,19 @@ fn locked_sdk_operations() -> Vec<(String, String)> {
     operations.sort();
     operations.dedup();
     operations
+}
+
+#[test]
+fn metadata_is_locked_and_filtered_to_the_host_without_forcing_offline() {
+    let arguments = metadata_arguments("aarch64-apple-darwin");
+
+    assert!(arguments.iter().any(|argument| argument == "--locked"));
+    assert!(
+        arguments
+            .windows(2)
+            .any(|pair| pair[0] == "--filter-platform" && pair[1] == "aarch64-apple-darwin")
+    );
+    assert!(!arguments.iter().any(|argument| argument == "--offline"));
 }
 
 #[test]

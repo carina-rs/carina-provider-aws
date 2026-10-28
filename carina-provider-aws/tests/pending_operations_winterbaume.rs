@@ -453,6 +453,8 @@ impl PartialFlowLogEc2Service {
 struct TaggedVpcEc2Service {
     identifiers: Vec<String>,
     discovery_error: bool,
+    repeat_next_token: bool,
+    describe_calls: Arc<AtomicUsize>,
 }
 
 impl MockService for TaggedVpcEc2Service {
@@ -470,6 +472,7 @@ impl MockService for TaggedVpcEc2Service {
     ) -> Pin<Box<dyn Future<Output = MockResponse> + Send + '_>> {
         let response = match query_action(&request) {
             "DescribeVpcs" => {
+                self.describe_calls.fetch_add(1, Ordering::Relaxed);
                 if self.discovery_error {
                     return Box::pin(async {
                         MockResponse::xml(
@@ -483,10 +486,15 @@ impl MockService for TaggedVpcEc2Service {
                     .iter()
                     .map(|identifier| format!("<item><vpcId>{identifier}</vpcId><cidrBlock>10.0.0.0/16</cidrBlock><state>available</state></item>"))
                     .collect::<String>();
+                let next_token = if self.repeat_next_token {
+                    "<nextToken>another-page</nextToken>"
+                } else {
+                    ""
+                };
                 MockResponse::xml(
                     200,
                     format!(
-                        r#"<DescribeVpcsResponse xmlns="http://ec2.amazonaws.com/doc/2016-11-15/"><requestId>request-id</requestId><vpcSet>{items}</vpcSet></DescribeVpcsResponse>"#
+                        r#"<DescribeVpcsResponse xmlns="http://ec2.amazonaws.com/doc/2016-11-15/"><requestId>request-id</requestId><vpcSet>{items}</vpcSet>{next_token}</DescribeVpcsResponse>"#
                     ),
                 )
             }
@@ -679,6 +687,7 @@ async fn provider_without_services() -> AwsProvider {
 }
 
 async fn provider_with_tagged_vpcs(identifiers: &[&str]) -> AwsProvider {
+    let describe_calls = Arc::new(AtomicUsize::new(0));
     let mock = MockAws::builder()
         .with_service(TaggedVpcEc2Service {
             identifiers: identifiers
@@ -686,19 +695,40 @@ async fn provider_with_tagged_vpcs(identifiers: &[&str]) -> AwsProvider {
                 .map(|value| (*value).to_string())
                 .collect(),
             discovery_error: false,
+            repeat_next_token: false,
+            describe_calls,
         })
         .build();
     provider_from_config(mock.sdk_config(REGION).await)
 }
 
 async fn provider_with_tagged_vpc_discovery_error() -> AwsProvider {
+    let describe_calls = Arc::new(AtomicUsize::new(0));
     let mock = MockAws::builder()
         .with_service(TaggedVpcEc2Service {
             identifiers: Vec::new(),
             discovery_error: true,
+            repeat_next_token: false,
+            describe_calls,
         })
         .build();
     provider_from_config(mock.sdk_config(REGION).await)
+}
+
+async fn provider_with_unbounded_tagged_vpc_pages() -> (AwsProvider, Arc<AtomicUsize>) {
+    let describe_calls = Arc::new(AtomicUsize::new(0));
+    let mock = MockAws::builder()
+        .with_service(TaggedVpcEc2Service {
+            identifiers: Vec::new(),
+            discovery_error: false,
+            repeat_next_token: true,
+            describe_calls: Arc::clone(&describe_calls),
+        })
+        .build();
+    (
+        provider_from_config(mock.sdk_config(REGION).await),
+        describe_calls,
+    )
 }
 
 async fn provider_with_post_send_failure(
@@ -912,7 +942,7 @@ async fn create_vpc_post_send_failure_becomes_unissued_pending() {
         token,
         AwsCreateToken::TaggedEc2 {
             kind: Ec2TaggedResourceKind::Vpc,
-            attempts_remaining: 6,
+            attempts_remaining: 4,
             next_delay_secs: 5,
             ..
         }
@@ -940,7 +970,7 @@ async fn token_bearing_route_table_post_send_failure_enters_tagged_discovery() {
         TestCreateStep::Pending {
             token: AwsCreateToken::TaggedEc2 {
                 kind: Ec2TaggedResourceKind::RouteTable,
-                attempts_remaining: 6,
+                attempts_remaining: 4,
                 next_delay_secs: 5,
                 ..
             },
@@ -956,17 +986,47 @@ async fn token_bearing_route_table_post_send_failure_enters_tagged_discovery() {
 }
 
 #[tokio::test]
-async fn tagged_vpc_poll_with_one_match_runs_normal_continuation() {
+async fn tagged_vpc_poll_with_one_match_hands_continuation_to_next_poll() {
     let provider = provider_with_tagged_vpcs(&["vpc-0553"]).await;
     let resource = vpc_resource();
 
     let step = provider
-        .poll_create_step(&resource, tagged_vpc_token(8, 5), poll_attempt(&resource))
+        .poll_create_step(&resource, tagged_vpc_token(4, 5), poll_attempt(&resource))
         .await
-        .expect("one discovered VPC must continue and complete");
+        .expect("one discovered VPC must become an issued continuation");
+
+    let TestCreateStep::Pending {
+        token,
+        identifier: Some(identifier),
+        poll_after_secs: 5,
+    } = step
+    else {
+        panic!("one discovered VPC must hand continuation to a later poll");
+    };
+    assert_eq!(identifier.as_str(), "vpc-0553");
+    assert!(matches!(
+        &token,
+        AwsCreateToken::TaggedEc2Found {
+            kind: Ec2TaggedResourceKind::Vpc,
+            identifier: found,
+        } if found == &identifier
+    ));
+
+    let step = provider
+        .poll_create_step::<TestPollAttempt>(
+            &resource,
+            token,
+            AwsCreatePoll::Issued(TestIssuedCreate {
+                id: resource.id.clone(),
+                identifier,
+                sent: Sent::AllRequestAttributes,
+            }),
+        )
+        .await
+        .expect("the later poll must run the normal continuation");
 
     let TestCreateStep::Success(state) = step else {
-        panic!("one discovered VPC must complete through the normal continuation");
+        panic!("the continuation poll must complete the VPC");
     };
     assert_eq!(state.identifier().as_str(), "vpc-0553");
 }
@@ -976,16 +1036,8 @@ async fn tagged_vpc_poll_with_no_match_uses_full_window_then_is_undetermined() {
     let provider = provider_with_tagged_vpcs(&[]).await;
     let resource = vpc_resource();
 
-    let mut token = tagged_vpc_token(8, 5);
-    for (remaining, expected_delay) in [
-        (7, 10),
-        (6, 20),
-        (5, 30),
-        (4, 60),
-        (3, 60),
-        (2, 60),
-        (1, 60),
-    ] {
+    let mut token = tagged_vpc_token(4, 5);
+    for (remaining, expected_delay) in [(3, 10), (2, 20), (1, 30)] {
         let step = provider
             .poll_create_step(&resource, token, poll_attempt(&resource))
             .await
@@ -1022,6 +1074,31 @@ async fn tagged_vpc_poll_with_no_match_uses_full_window_then_is_undetermined() {
             "ec2.Vpc may have been created with tag carina:create-token={TAGGED_VPC_CREATE_TOKEN}; check before re-applying"
         )
     );
+}
+
+#[tokio::test]
+async fn tagged_vpc_discovery_stops_after_the_bounded_page_count() {
+    let (provider, describe_calls) = provider_with_unbounded_tagged_vpc_pages().await;
+    let resource = vpc_resource();
+
+    let step = provider
+        .poll_create_step(&resource, tagged_vpc_token(4, 5), poll_attempt(&resource))
+        .await
+        .expect("a page-bound error inside the discovery window must re-pend");
+
+    assert_eq!(describe_calls.load(Ordering::Relaxed), 2);
+    assert!(matches!(
+        step,
+        TestCreateStep::Pending {
+            token: AwsCreateToken::TaggedEc2 {
+                attempts_remaining: 3,
+                next_delay_secs: 10,
+                ..
+            },
+            identifier: None,
+            poll_after_secs: 10,
+        }
+    ));
 }
 
 #[tokio::test]
@@ -1082,7 +1159,7 @@ async fn tagged_vpc_poll_with_two_matches_is_undetermined() {
     let resource = vpc_resource();
 
     let verdict = provider
-        .poll_create_step(&resource, tagged_vpc_token(8, 5), poll_attempt(&resource))
+        .poll_create_step(&resource, tagged_vpc_token(4, 5), poll_attempt(&resource))
         .await
         .expect_err("multiple matches cannot choose an identifier safely");
 

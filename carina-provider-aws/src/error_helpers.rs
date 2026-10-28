@@ -48,6 +48,68 @@ pub(crate) type AwsSdkError<E> = aws_smithy_runtime_api::client::result::SdkErro
     aws_smithy_runtime_api::client::orchestrator::HttpResponse,
 >;
 
+/// A failed send together with the outcome accumulated across every attempt.
+///
+/// The SDK error is boxed so retry wrapper results keep a small `Err` variant
+/// even when generated service errors make `SdkError` large.
+#[derive(Debug)]
+pub(crate) struct SendFailure<E> {
+    outcome: SendOutcome,
+    error: Box<AwsSdkError<E>>,
+}
+
+impl<E> SendFailure<E> {
+    pub(crate) fn new(outcome: SendOutcome, error: AwsSdkError<E>) -> Self {
+        Self {
+            outcome,
+            error: Box::new(error),
+        }
+    }
+
+    pub(crate) fn outcome(&self) -> SendOutcome {
+        self.outcome
+    }
+
+    pub(crate) fn into_parts(self) -> (SendOutcome, AwsSdkError<E>) {
+        (self.outcome, *self.error)
+    }
+}
+
+impl<E> std::ops::Deref for SendFailure<E> {
+    type Target = AwsSdkError<E>;
+
+    fn deref(&self) -> &Self::Target {
+        self.error.as_ref()
+    }
+}
+
+pub(crate) trait IntoSendFailure {
+    type Error;
+
+    fn into_send_failure(self) -> SendFailure<Self::Error>;
+}
+
+impl<E> IntoSendFailure for SendFailure<E> {
+    type Error = E;
+
+    fn into_send_failure(self) -> SendFailure<E> {
+        self
+    }
+}
+
+impl<E> IntoSendFailure for AwsSdkError<E>
+where
+    E: aws_smithy_types::error::metadata::ProvideErrorMetadata
+        + aws_smithy_types::retry::ProvideErrorKind,
+{
+    type Error = E;
+
+    fn into_send_failure(self) -> SendFailure<E> {
+        let outcome = SendOutcome::classify(&self);
+        SendFailure::new(outcome, self)
+    }
+}
+
 #[derive(Debug)]
 struct AwsServiceMessage(Option<String>);
 
@@ -146,9 +208,10 @@ where
 /// transport-level diagnostics (DNS, TLS, network timeouts — none of
 /// which populate the HTTP-response fields) still reach the operator
 /// via the renderer's appended `cause:` line.
-pub(crate) fn api_error_with_meta<E>(context: &'static str, err: AwsSdkError<E>) -> ProviderError
+pub(crate) fn api_error_with_meta<F>(context: &'static str, failure: F) -> ProviderError
 where
-    E: std::error::Error
+    F: IntoSendFailure,
+    F::Error: std::error::Error
         + DecidedOperationError
         + aws_smithy_types::error::metadata::ProvideErrorMetadata
         + aws_smithy_types::retry::ProvideErrorKind
@@ -156,9 +219,9 @@ where
         + Sync
         + 'static,
 {
-    api_error_with_meta_cause(context, err, |message, source| AwsServiceErrorCause {
-        message,
-        source,
+    let (outcome, error) = failure.into_send_failure().into_parts();
+    api_error_with_meta_cause(context, outcome, error, |message, source| {
+        AwsServiceErrorCause { message, source }
     })
 }
 
@@ -180,7 +243,8 @@ where
         + Sync
         + 'static,
 {
-    api_error_with_meta_cause(context, err, |message, source| {
+    let outcome = SendOutcome::classify(&err);
+    api_error_with_meta_cause(context, outcome, err, |message, source| {
         AwsServiceErrorWithSubjectCause {
             subject,
             message,
@@ -191,6 +255,7 @@ where
 
 fn api_error_with_meta_cause<E, Cause>(
     context: &'static str,
+    outcome: SendOutcome,
     err: AwsSdkError<E>,
     make_cause: impl FnOnce(AwsServiceMessage, AwsSdkError<E>) -> Cause,
 ) -> ProviderError
@@ -207,7 +272,6 @@ where
     use aws_smithy_types::error::metadata::ProvideErrorMetadata;
     use aws_types::request_id::RequestId;
 
-    let outcome = SendOutcome::classify(&err);
     let operation = E::NAME.to_string();
     let append_outcome_unknown =
         outcome == SendOutcome::MaybeSent && E::IDEMPOTENCY == Idempotency::NotIdempotent;
@@ -493,6 +557,33 @@ mod tests {
         assert!(rendered.starts_with("Failed to create VPC"), "{rendered}");
         assert!(rendered.contains(OUTCOME_UNKNOWN_NOTE), "{rendered}");
         assert!(rendered.contains("response timed out"), "{rendered}");
+    }
+
+    #[test]
+    fn api_error_with_meta_uses_sticky_outcome_from_provider_retries() {
+        use aws_sdk_ec2::operation::create_vpc::CreateVpcError;
+
+        let service_error = CreateVpcError::generic(
+            ErrorMetadata::builder()
+                .code("RequestLimitExceeded")
+                .message("final attempt throttled")
+                .build(),
+        );
+        let raw = Response::new(
+            StatusCode::try_from(429).expect("valid status"),
+            SdkBody::empty(),
+        );
+        let failure = SendFailure::new(
+            SendOutcome::MaybeSent,
+            SdkError::service_error(service_error, raw),
+        );
+
+        let error = api_error_with_meta("Failed to create VPC", failure);
+        let rendered = error.to_string();
+
+        assert!(rendered.contains(OUTCOME_UNKNOWN_NOTE), "{rendered}");
+        assert_eq!(error.detail().status, Some(429));
+        assert_eq!(error.detail().code.as_deref(), Some("RequestLimitExceeded"));
     }
 
     #[test]

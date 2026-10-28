@@ -5,7 +5,6 @@
 use std::time::Duration;
 
 use aws_sdk_ec2::types::{ResourceType, Tag, TagSpecification};
-use aws_smithy_runtime_api::client::orchestrator::HttpResponse;
 use aws_smithy_runtime_api::client::result::SdkError;
 use aws_smithy_types::error::display::DisplayErrorContext;
 use aws_smithy_types::error::metadata::ProvideErrorMetadata;
@@ -24,6 +23,7 @@ use crate::aws_operation::{
     AwsOperation, ClientToken, EC2_CREATE_TOKEN_TAG, NoToken, TokenBearing, WithToken,
 };
 use crate::ec2_tags::value_to_ec2_tags;
+use crate::error_helpers::SendFailure;
 
 /// Validate an identifier returned by an AWS create API before it can cross a
 /// managed-resource boundary.
@@ -378,7 +378,7 @@ impl Default for RetryPolicy {
 pub(crate) async fn retry_aws_operation<F, B>(
     policy: RetryPolicy,
     builder: F,
-) -> Result<B::Output, SdkError<B::Error, HttpResponse>>
+) -> Result<B::Output, SendFailure<B::Error>>
 where
     F: Fn() -> B,
     B: AwsOperation<Resend = NoToken>,
@@ -395,7 +395,7 @@ pub(crate) async fn retry_aws_operation_with_token<F, B>(
     token: &ClientToken,
     policy: RetryPolicy,
     builder: F,
-) -> Result<B::Output, SdkError<B::Error, HttpResponse>>
+) -> Result<B::Output, SendFailure<B::Error>>
 where
     F: Fn() -> B,
     B: AwsOperation<Resend = WithToken> + TokenBearing,
@@ -411,18 +411,26 @@ where
 pub(crate) async fn send_aws_operation_with_token<B>(
     token: &ClientToken,
     builder: B,
-) -> Result<B::Output, SdkError<B::Error, HttpResponse>>
+) -> Result<B::Output, SendFailure<B::Error>>
 where
     B: AwsOperation<Resend = WithToken> + TokenBearing,
+    B::Error: ProvideErrorKind + ProvideErrorMetadata,
 {
-    builder.with_client_token(token).send().await
+    builder
+        .with_client_token(token)
+        .send()
+        .await
+        .map_err(|error| {
+            let outcome = SendOutcome::classify(&error);
+            SendFailure::new(outcome, error)
+        })
 }
 
 async fn retry_aws_builder<F, P, B>(
     policy: RetryPolicy,
     builder: F,
     prepare: P,
-) -> Result<B::Output, SdkError<B::Error, HttpResponse>>
+) -> Result<B::Output, SendFailure<B::Error>>
 where
     F: Fn() -> B,
     P: Fn(B) -> B,
@@ -430,26 +438,36 @@ where
     B::Error: ProvideErrorKind + ProvideErrorMetadata + std::error::Error + 'static,
 {
     let mut attempt = 0;
+    let mut maybe_sent = false;
     loop {
         attempt += 1;
         match prepare(builder()).send().await {
             Ok(result) => return Ok(result),
-            Err(error)
+            Err(error) => {
+                let outcome = SendOutcome::classify(&error);
+                maybe_sent |= outcome == SendOutcome::MaybeSent;
                 if attempt < policy.max_attempts
-                    && SendOutcome::classify(&error).resend_is_safe(B::IDEMPOTENCY)
-                    && is_retryable_sdk_error(&error) =>
-            {
-                let delay = policy.delay_secs(attempt);
-                eprintln!(
-                    "  Retrying {} (attempt {}/{}): {}",
-                    B::NAME,
-                    attempt,
-                    policy.max_attempts,
-                    DisplayErrorContext(&error)
-                );
-                sleep(Duration::from_secs(delay)).await;
+                    && outcome.resend_is_safe(B::IDEMPOTENCY)
+                    && is_retryable_sdk_error(&error)
+                {
+                    let delay = policy.delay_secs(attempt);
+                    eprintln!(
+                        "  Retrying {} (attempt {}/{}): {}",
+                        B::NAME,
+                        attempt,
+                        policy.max_attempts,
+                        DisplayErrorContext(&error)
+                    );
+                    sleep(Duration::from_secs(delay)).await;
+                    continue;
+                }
+                let outcome = if maybe_sent {
+                    SendOutcome::MaybeSent
+                } else {
+                    outcome
+                };
+                return Err(SendFailure::new(outcome, error));
             }
-            Err(error) => return Err(error),
         }
     }
 }
@@ -1310,14 +1328,20 @@ mod tests {
     #[derive(Clone)]
     struct MockCall {
         attempts: std::sync::Arc<std::sync::atomic::AtomicU32>,
-        failure: MockFailure,
+        failures: std::sync::Arc<std::sync::Mutex<std::collections::VecDeque<MockFailure>>>,
     }
 
     impl MockCall {
         fn new(failure: MockFailure) -> Self {
+            Self::scripted([failure])
+        }
+
+        fn scripted(failures: impl IntoIterator<Item = MockFailure>) -> Self {
             Self {
                 attempts: std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0)),
-                failure,
+                failures: std::sync::Arc::new(std::sync::Mutex::new(
+                    failures.into_iter().collect(),
+                )),
             }
         }
 
@@ -1327,13 +1351,17 @@ mod tests {
 
         #[allow(clippy::result_large_err)]
         fn execute(&self) -> Result<&'static str, SdkError<MockServiceError, HttpResponse>> {
-            let attempt = self
-                .attempts
+            self.attempts
                 .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            if attempt > 0 {
+            let failure = self
+                .failures
+                .lock()
+                .expect("failure script lock")
+                .pop_front();
+            let Some(failure) = failure else {
                 return Ok("success");
-            }
-            match self.failure {
+            };
+            match failure {
                 MockFailure::Timeout => Err(SdkError::timeout_error("hit deadline")),
                 MockFailure::Service { code, retryable } => Err(service_err(code, retryable)),
             }
@@ -1537,6 +1565,39 @@ mod tests {
         assert_eq!(
             seen_tokens.lock().expect("token lock").as_slice(),
             [token.as_str(), token.as_str()]
+        );
+    }
+
+    #[tokio::test]
+    async fn provider_retry_keeps_maybe_sent_after_throttling_exhaustion() {
+        let call = MockCall::scripted([
+            MockFailure::Timeout,
+            MockFailure::Service {
+                code: "RequestLimitExceeded",
+                retryable: Some(ErrorKind::ThrottlingError),
+            },
+            MockFailure::Service {
+                code: "RequestLimitExceeded",
+                retryable: Some(ErrorKind::ThrottlingError),
+            },
+        ]);
+        let seen_tokens = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let token = ClientToken::new();
+
+        let error =
+            retry_aws_operation_with_token(&token, test_policy(3), || MockCreateNatGateway {
+                call: call.clone(),
+                token: None,
+                seen_tokens: seen_tokens.clone(),
+            })
+            .await
+            .expect_err("all provider attempts should fail");
+
+        assert_eq!(call.attempts(), 3);
+        assert_eq!(error.outcome(), SendOutcome::MaybeSent);
+        assert_eq!(
+            seen_tokens.lock().expect("token lock").as_slice(),
+            [token.as_str(), token.as_str(), token.as_str()]
         );
     }
 

@@ -184,6 +184,13 @@ mod tests {
         assert_bounded_policy(bounded.0.timeout_config(), bounded.0.retry_config());
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
+    #[tokio::test]
+    async fn load_applies_bounded_policy() {
+        let bounded = BoundedSdkConfig::load("us-east-1", None).await;
+        assert_bounded_policy(bounded.0.timeout_config(), bounded.0.retry_config());
+    }
+
     #[tokio::test]
     async fn every_provider_client_has_the_resend_guard() {
         let mock = winterbaume_core::MockAws::builder().build();

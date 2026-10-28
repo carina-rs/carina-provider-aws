@@ -8,7 +8,7 @@ use carina_core::schema::ResourceSchema;
 
 use crate::AwsProvider;
 use crate::aws_operation::ClientToken;
-use crate::error_helpers::api_error_with_meta;
+use crate::error_helpers::{SendFailure, api_error_with_meta};
 use crate::helpers::{
     build_tag_specification_with_create_token, optional_enum_attr, require_enum_attr,
     send_aws_operation_with_token,
@@ -67,6 +67,24 @@ impl FlowLogCreateRejection {
         Some(Self { message, code })
     }
 
+    fn from_failure(
+        failure: &SendFailure<aws_sdk_ec2::operation::create_flow_logs::CreateFlowLogsError>,
+    ) -> Option<Self> {
+        use aws_smithy_types::error::metadata::ProvideErrorMetadata;
+
+        if failure.outcome() != SendOutcome::Rejected {
+            return None;
+        }
+        let service_error = failure.as_service_error()?;
+        Some(Self {
+            message: service_error
+                .message()
+                .unwrap_or("unknown error")
+                .to_string(),
+            code: service_error.code().unwrap_or("").to_string(),
+        })
+    }
+
     fn is_iam_propagation(&self) -> bool {
         self.message.contains("Unable to assume IAM role")
             || self.message.contains("Not authorized")
@@ -83,12 +101,8 @@ impl FlowLogCreateRejection {
 struct FlowLogMaybeSent;
 
 impl FlowLogMaybeSent {
-    fn from_error<E>(error: &crate::error_helpers::AwsSdkError<E>) -> Option<Self>
-    where
-        E: aws_smithy_types::error::metadata::ProvideErrorMetadata
-            + aws_smithy_types::retry::ProvideErrorKind,
-    {
-        (SendOutcome::classify(error) == SendOutcome::MaybeSent).then_some(Self)
+    fn from_failure<E>(failure: &SendFailure<E>) -> Option<Self> {
+        (failure.outcome() == SendOutcome::MaybeSent).then_some(Self)
     }
 }
 
@@ -273,7 +287,7 @@ impl AwsProvider {
             {
                 Ok(resp) => resp,
                 Err(error) => {
-                    if let Some(maybe_sent) = FlowLogMaybeSent::from_error(&error) {
+                    if let Some(maybe_sent) = FlowLogMaybeSent::from_failure(&error) {
                         let discovery_token = request_token.preserve_after(maybe_sent);
                         return Self::tagged_ec2_send_error(
                             attempt,
@@ -283,6 +297,13 @@ impl AwsProvider {
                             carina_core::provider::Sent::AllRequestAttributes,
                             error,
                         );
+                    }
+                    if let Some(rejection) = FlowLogCreateRejection::from_failure(&error)
+                        && rejection.is_iam_propagation()
+                    {
+                        last_error = rejection.rendered();
+                        request_token = request_token.rotate_after(&rejection);
+                        continue;
                     }
                     return Self::tagged_ec2_send_error(
                         attempt,
@@ -535,6 +556,9 @@ mod tests {
     use aws_sdk_ec2::error::SdkError;
     use aws_sdk_ec2::operation::create_flow_logs::CreateFlowLogsError;
     use aws_sdk_ec2::types::{UnsuccessfulItem, UnsuccessfulItemError};
+    use aws_smithy_runtime_api::client::orchestrator::HttpResponse;
+    use aws_smithy_types::body::SdkBody;
+    use aws_smithy_types::error::ErrorMetadata;
 
     #[test]
     fn proven_rejection_rotates_the_flow_log_client_token() {
@@ -561,12 +585,46 @@ mod tests {
     }
 
     #[test]
-    fn maybe_sent_flow_log_failure_preserves_the_client_token() {
+    fn rejected_iam_service_failure_rotates_the_flow_log_client_token() {
         let invocation_token = ClientToken::new();
         let attempt_token = FlowLogRequestToken::from_invocation(&invocation_token);
-        let error: SdkError<CreateFlowLogsError> = SdkError::timeout_error("response timed out");
-        let maybe_sent = FlowLogMaybeSent::from_error(&error)
-            .expect("a timeout cannot prove that AWS rejected the request");
+        let service_error = CreateFlowLogsError::generic(
+            ErrorMetadata::builder()
+                .code("UnauthorizedOperation")
+                .message("Unable to assume IAM role")
+                .build(),
+        );
+        let response = HttpResponse::new(400.try_into().expect("valid status"), SdkBody::empty());
+        let failure = crate::error_helpers::SendFailure::new(
+            SendOutcome::Rejected,
+            SdkError::service_error(service_error, response),
+        );
+        let rejection = FlowLogCreateRejection::from_failure(&failure)
+            .expect("a rejected IAM propagation error is safe to retry");
+
+        let next = attempt_token.rotate_after(&rejection);
+
+        assert!(rejection.is_iam_propagation());
+        assert_ne!(next.as_client_token(), &invocation_token);
+    }
+
+    #[test]
+    fn sticky_maybe_sent_flow_log_failure_preserves_the_client_token() {
+        let invocation_token = ClientToken::new();
+        let attempt_token = FlowLogRequestToken::from_invocation(&invocation_token);
+        let service_error = CreateFlowLogsError::generic(
+            ErrorMetadata::builder()
+                .code("RequestLimitExceeded")
+                .message("final attempt throttled")
+                .build(),
+        );
+        let response = HttpResponse::new(429.try_into().expect("valid status"), SdkBody::empty());
+        let failure = crate::error_helpers::SendFailure::new(
+            SendOutcome::MaybeSent,
+            SdkError::service_error(service_error, response),
+        );
+        let maybe_sent = FlowLogMaybeSent::from_failure(&failure)
+            .expect("the sticky outcome must override the final throttling rejection");
 
         let discovery_token = attempt_token.preserve_after(maybe_sent);
 
