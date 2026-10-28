@@ -22,8 +22,40 @@ async fn provider_clients_have_bounded_sdk_policy() {
         provider.s3_client.config().retry_config(),
     );
     assert_bounded_policy(
+        provider.ec2_client.config().timeout_config(),
+        provider.ec2_client.config().retry_config(),
+    );
+    assert_bounded_policy(
+        provider.iam_client.config().timeout_config(),
+        provider.iam_client.config().retry_config(),
+    );
+    assert_bounded_policy(
+        provider.logs_client.config().timeout_config(),
+        provider.logs_client.config().retry_config(),
+    );
+    assert_bounded_policy(
         provider.sts_client.config().timeout_config(),
         provider.sts_client.config().retry_config(),
+    );
+    assert_bounded_policy(
+        provider.organizations_client.config().timeout_config(),
+        provider.organizations_client.config().retry_config(),
+    );
+    assert_bounded_policy(
+        provider.identitystore_client.config().timeout_config(),
+        provider.identitystore_client.config().retry_config(),
+    );
+    assert_bounded_policy(
+        provider.route53_client.config().timeout_config(),
+        provider.route53_client.config().retry_config(),
+    );
+    assert_bounded_policy(
+        provider.acm_client.config().timeout_config(),
+        provider.acm_client.config().retry_config(),
+    );
+    assert_bounded_policy(
+        provider.sqs_client.config().timeout_config(),
+        provider.sqs_client.config().retry_config(),
     );
 }
 

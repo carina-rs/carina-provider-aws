@@ -36,8 +36,11 @@ impl BoundedSdkConfig {
 
     /// Load a bounded SDK configuration for the region and optional assumed role.
     pub(crate) async fn load(region: &str, assume_role: Option<AssumeRoleConfig>) -> Self {
+        // Give the loader the policy too so invalid AWS retry settings cannot panic first.
         let loader = aws_config::defaults(aws_config::BehaviorVersion::latest())
-            .region(Region::new(region.to_string()));
+            .region(Region::new(region.to_string()))
+            .timeout_config(timeout_config())
+            .retry_config(retry_config());
         #[cfg(target_arch = "wasm32")]
         let loader = loader.http_client(carina_plugin_sdk::wasi_http::WasiHttpClient::new());
         let base = Self::new(loader.load().await);
@@ -68,11 +71,12 @@ impl BoundedSdkConfig {
     }
 }
 
-/// Sets read and per-attempt timeouts to the host's 30-second wasi:http per-request
-/// cap and a 60-second ceiling for one SDK call (all attempts and backoff). In WASM
-/// the HTTP client sends synchronously, so the attempt timeout is enforced through
-/// connector read/connect timeouts passed by the SDK to wasi:http; the operation
-/// timeout fires between attempts.
+/// Sets read and per-attempt timeouts to the host's 30-second `wasi:http` per-request
+/// cap (`HTTP_API_REQUEST_TIMEOUT` in `carina-plugin-host`), so WASM requests get no
+/// shorter deadline than the host already enforces. The operation timeout caps one
+/// SDK call at 60 seconds natively. In WASM the HTTP client sends synchronously, so
+/// connect/read timeouts reach `wasi:http`, but attempt/operation timeouts are checked
+/// only between attempts and one call can overrun 60 seconds by up to one attempt.
 fn timeout_config() -> TimeoutConfig {
     TimeoutConfig::builder()
         .connect_timeout(Duration::from_millis(3_100))
@@ -82,9 +86,8 @@ fn timeout_config() -> TimeoutConfig {
         .build()
 }
 
-/// Uses standard retry mode with three total attempts. With `retry_aws_operation`,
-/// 8 attempts plus 395 seconds of backoff take at most 8 * 60 + 395 = 875 seconds,
-/// below the host's 20-minute per-guest-call backstop.
+/// Uses standard retry mode with three total attempts, overriding `AWS_MAX_ATTEMPTS`,
+/// `AWS_RETRY_MODE`, and profile settings.
 fn retry_config() -> RetryConfig {
     RetryConfig::standard().with_max_attempts(3)
 }
@@ -156,6 +159,13 @@ mod tests {
             .build();
 
         let bounded = BoundedSdkConfig::new(input);
+        assert_bounded_policy(bounded.0.timeout_config(), bounded.0.retry_config());
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[tokio::test]
+    async fn load_applies_bounded_policy() {
+        let bounded = BoundedSdkConfig::load("us-east-1", None).await;
         assert_bounded_policy(bounded.0.timeout_config(), bounded.0.retry_config());
     }
 }
