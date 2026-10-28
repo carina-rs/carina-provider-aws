@@ -8,7 +8,24 @@ use carina_core::provider::ProviderNormalizer;
 use carina_core::resource::{ConcreteValue, Value};
 use carina_core::schema::Shape;
 
-use crate::{AwsNormalizer, AwsProvider};
+use crate::sdk_config::assert_bounded_policy;
+use crate::{AwsNormalizer, AwsProvider, BoundedSdkConfig};
+
+#[tokio::test]
+async fn provider_clients_have_bounded_sdk_policy() {
+    let mock = winterbaume_core::MockAws::builder().build();
+    let config = BoundedSdkConfig::new(mock.sdk_config("us-east-1").await);
+    let provider = AwsProvider::from_sdk_config("us-east-1".into(), vec![], vec![], &config);
+
+    assert_bounded_policy(
+        provider.s3_client.config().timeout_config(),
+        provider.s3_client.config().retry_config(),
+    );
+    assert_bounded_policy(
+        provider.sts_client.config().timeout_config(),
+        provider.sts_client.config().retry_config(),
+    );
+}
 
 #[test]
 fn flow_log_resource_ids_are_order_insensitive() {

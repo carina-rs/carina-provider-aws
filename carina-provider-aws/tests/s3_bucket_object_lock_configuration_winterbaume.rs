@@ -3,20 +3,11 @@
 
 #![cfg(not(target_arch = "wasm32"))]
 
-use aws_sdk_acm::Client as AcmClient;
-use aws_sdk_cloudwatchlogs::Client as CloudWatchLogsClient;
-use aws_sdk_ec2::Client as Ec2Client;
-use aws_sdk_iam::Client as IamClient;
-use aws_sdk_identitystore::Client as IdentityStoreClient;
-use aws_sdk_organizations::Client as OrganizationsClient;
-use aws_sdk_route53::Client as Route53Client;
 use aws_sdk_s3::Client as S3Client;
 use aws_sdk_s3::types::{
     BucketVersioningStatus, DefaultRetention, ObjectLockConfiguration, ObjectLockRetentionMode,
     ObjectLockRule, VersioningConfiguration,
 };
-use aws_sdk_sqs::Client as SqsClient;
-use aws_sdk_sts::Client as StsClient;
 use carina_core::provider::{
     AppliedIdentifier, CreateRequest, DeleteRequest, NoopNormalizer, Provider, ProviderError,
     ReadRequest, UpdateRequest,
@@ -24,7 +15,7 @@ use carina_core::provider::{
 use carina_core::resource::{
     ConcreteValue, Resource, ResourceIdentity, ResourceIdentityError, State, Value,
 };
-use carina_provider_aws::AwsProvider;
+use carina_provider_aws::{AwsProvider, BoundedSdkConfig};
 use indexmap::IndexMap;
 use winterbaume_core::MockAws;
 use winterbaume_s3::S3Service;
@@ -36,21 +27,12 @@ fn applied_identifier(value: &str) -> AppliedIdentifier {
     AppliedIdentifier::new(value).expect("test provider identifier must be non-empty")
 }
 
-fn provider_from_config(sdk_config: &aws_types::SdkConfig) -> AwsProvider {
-    AwsProvider::from_clients(
+fn provider_from_config(sdk_config: aws_types::SdkConfig) -> AwsProvider {
+    AwsProvider::from_sdk_config(
         TEST_REGION.to_string(),
-        Vec::new(),
-        Vec::new(),
-        S3Client::new(sdk_config),
-        Ec2Client::new(sdk_config),
-        IamClient::new(sdk_config),
-        CloudWatchLogsClient::new(sdk_config),
-        StsClient::new(sdk_config),
-        OrganizationsClient::new(sdk_config),
-        IdentityStoreClient::new(sdk_config),
-        Route53Client::new(sdk_config),
-        AcmClient::new(sdk_config),
-        SqsClient::new(sdk_config),
+        vec![],
+        vec![],
+        &BoundedSdkConfig::new(sdk_config),
     )
 }
 
@@ -58,13 +40,13 @@ async fn provider_with_s3() -> (AwsProvider, S3Client) {
     let mock = MockAws::builder().with_service(S3Service::new()).build();
     let sdk_config = mock.sdk_config(TEST_REGION).await;
     let s3_client = S3Client::new(&sdk_config);
-    (provider_from_config(&sdk_config), s3_client)
+    (provider_from_config(sdk_config), s3_client)
 }
 
 async fn provider_without_services() -> AwsProvider {
     let mock = MockAws::builder().build();
     let sdk_config = mock.sdk_config(TEST_REGION).await;
-    provider_from_config(&sdk_config)
+    provider_from_config(sdk_config)
 }
 
 async fn create_bucket(client: &S3Client, bucket: &str) {

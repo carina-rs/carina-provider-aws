@@ -4,7 +4,7 @@
 //! This is the first foothold for winterbaume coverage in
 //! `carina-provider-aws` (#355). It proves:
 //!
-//! - The `AwsProvider::from_clients(...)` injection seam works end to end.
+//! - The `AwsProvider::from_sdk_config(...)` injection seam works end to end.
 //! - The full production read path runs:
 //!   `Provider::read_data_source` → codegen-generated
 //!   `dispatch_read_data_source` → `DataSourceLookups`
@@ -13,7 +13,7 @@
 //! - `winterbaume-sts`'s `GetCallerIdentity` handler is wire-compatible
 //!   with `aws-sdk-sts` and our provider's response unwrapping.
 //!
-//! Follow-ups will reuse the same `from_clients` seam to test the CRUD
+//! Follow-ups will reuse the same `from_sdk_config` seam to test the CRUD
 //! surfaces of managed resources (s3 bucket, ec2 vpc, etc.).
 
 // winterbaume is a host-process AWS emulator and does not build under
@@ -23,22 +23,17 @@
 // wasm32-*` does not try to compile imports it cannot resolve.
 #![cfg(not(target_arch = "wasm32"))]
 
-use aws_sdk_acm::Client as AcmClient;
-use aws_sdk_cloudwatchlogs::Client as CloudWatchLogsClient;
-use aws_sdk_ec2::Client as Ec2Client;
-use aws_sdk_iam::Client as IamClient;
-use aws_sdk_identitystore::Client as IdentityStoreClient;
-use aws_sdk_organizations::Client as OrganizationsClient;
-use aws_sdk_route53::Client as Route53Client;
-use aws_sdk_s3::Client as S3Client;
-use aws_sdk_sqs::Client as SqsClient;
-use aws_sdk_sts::Client as StsClient;
+use std::future::Future;
+use std::pin::Pin;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
+use aws_smithy_types::retry::RetryConfig;
 use carina_core::effect::PlanOp;
 use carina_core::provider::{Provider, ProviderReadyDataSource};
 use carina_core::resource::{ConcreteValue, DataSource, ResourceId, Value};
-use carina_provider_aws::{AwsNormalizer, AwsProvider};
-use winterbaume_core::MockAws;
+use carina_provider_aws::{AwsNormalizer, AwsProvider, BoundedSdkConfig};
+use winterbaume_core::{MockAws, MockRequest, MockResponse, MockService};
 use winterbaume_sts::StsService;
 
 const TEST_REGION: &str = "us-east-1";
@@ -48,6 +43,44 @@ const TEST_REGION: &str = "us-east-1";
 /// on this string verbatim; using `sts.caller_identity` (snake_case)
 /// would fall into the default "not implemented" arm.
 const STS_CALLER_IDENTITY_TYPE: &str = "sts.CallerIdentity";
+
+struct AlwaysUnavailableStsService {
+    inner: Arc<StsService>,
+    calls: AtomicUsize,
+}
+
+impl AlwaysUnavailableStsService {
+    fn new(inner: Arc<StsService>) -> Self {
+        Self {
+            inner,
+            calls: AtomicUsize::new(0),
+        }
+    }
+
+    fn calls(&self) -> usize {
+        self.calls.load(Ordering::Relaxed)
+    }
+}
+
+impl MockService for AlwaysUnavailableStsService {
+    fn service_name(&self) -> &str {
+        self.inner.service_name()
+    }
+
+    fn url_patterns(&self) -> Vec<&str> {
+        self.inner.url_patterns()
+    }
+
+    fn handle(
+        &self,
+        _request: MockRequest,
+    ) -> Pin<Box<dyn Future<Output = MockResponse> + Send + '_>> {
+        self.calls.fetch_add(1, Ordering::Relaxed);
+        Box::pin(async {
+            MockResponse::error(503, "ServiceUnavailable", "scripted retryable failure")
+        })
+    }
+}
 
 fn ready_data_source_for_test(resource: DataSource) -> ProviderReadyDataSource {
     let bindings = carina_core::binding_index::ResolvedBindings::default();
@@ -73,20 +106,11 @@ async fn required_permissions_returns_empty_vec() {
     let mock = MockAws::builder().with_service(StsService::new()).build();
     let sdk_config = mock.sdk_config(TEST_REGION).await;
 
-    let provider = AwsProvider::from_clients(
+    let provider = AwsProvider::from_sdk_config(
         TEST_REGION.to_string(),
-        Vec::new(),
-        Vec::new(),
-        S3Client::new(&sdk_config),
-        Ec2Client::new(&sdk_config),
-        IamClient::new(&sdk_config),
-        CloudWatchLogsClient::new(&sdk_config),
-        StsClient::new(&sdk_config),
-        OrganizationsClient::new(&sdk_config),
-        IdentityStoreClient::new(&sdk_config),
-        Route53Client::new(&sdk_config),
-        AcmClient::new(&sdk_config),
-        SqsClient::new(&sdk_config),
+        vec![],
+        vec![],
+        &BoundedSdkConfig::new(sdk_config),
     );
 
     let id = ResourceId::with_provider_identity("aws", "s3.Bucket", "example", None);
@@ -101,29 +125,18 @@ async fn required_permissions_returns_empty_vec() {
 
 #[tokio::test]
 async fn sts_caller_identity_data_source_returns_account_arn_user_id_from_winterbaume() {
-    // `from_clients` requires all 10 SDK clients (see its doc-comment in
-    // `lib.rs` for the type-safety rationale). This test only calls STS,
-    // so we register `StsService` in the mock and wire the other 9
-    // clients to the same `sdk_config`. They are never invoked here; a
-    // future fan-out to an unregistered service would surface as a
-    // loud winterbaume error rather than passing silently.
+    // This test only calls STS, so only `StsService` is registered. All
+    // provider clients still share the same bounded mock configuration;
+    // a future fan-out to an unregistered service would surface as a loud
+    // winterbaume error rather than passing silently.
     let mock = MockAws::builder().with_service(StsService::new()).build();
     let sdk_config = mock.sdk_config(TEST_REGION).await;
 
-    let provider = AwsProvider::from_clients(
+    let provider = AwsProvider::from_sdk_config(
         TEST_REGION.to_string(),
-        Vec::new(),
-        Vec::new(),
-        S3Client::new(&sdk_config),
-        Ec2Client::new(&sdk_config),
-        IamClient::new(&sdk_config),
-        CloudWatchLogsClient::new(&sdk_config),
-        StsClient::new(&sdk_config),
-        OrganizationsClient::new(&sdk_config),
-        IdentityStoreClient::new(&sdk_config),
-        Route53Client::new(&sdk_config),
-        AcmClient::new(&sdk_config),
-        SqsClient::new(&sdk_config),
+        vec![],
+        vec![],
+        &BoundedSdkConfig::new(sdk_config),
     );
 
     let ds = ready_data_source_for_test(DataSource::with_provider(
@@ -160,4 +173,39 @@ async fn sts_caller_identity_data_source_returns_account_arn_user_id_from_winter
             other => panic!("attribute `{attr}` expected to be a String, got {other:?}"),
         }
     }
+}
+
+#[tokio::test(start_paused = true)]
+async fn bounded_config_limits_sdk_retries_to_three_attempts() {
+    let service = Arc::new(AlwaysUnavailableStsService::new(
+        Arc::new(StsService::new()),
+    ));
+    let mock = MockAws::builder()
+        .with_service(Arc::clone(&service))
+        .build();
+    let sdk_config = mock
+        .sdk_config(TEST_REGION)
+        .await
+        .into_builder()
+        .retry_config(RetryConfig::standard().with_max_attempts(10))
+        .build();
+    let provider = AwsProvider::from_sdk_config(
+        TEST_REGION.to_string(),
+        vec![],
+        vec![],
+        &BoundedSdkConfig::new(sdk_config),
+    );
+    let data_source = ready_data_source_for_test(DataSource::with_provider(
+        "aws",
+        STS_CALLER_IDENTITY_TYPE,
+        "retry-bound",
+        None,
+    ));
+
+    provider
+        .read_data_source(&data_source)
+        .await
+        .expect_err("an always-503 STS service should fail");
+
+    assert_eq!(service.calls(), 3);
 }
