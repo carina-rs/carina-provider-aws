@@ -7,23 +7,11 @@ use aws_smithy_types::retry::RetryConfig;
 use aws_smithy_types::timeout::TimeoutConfig;
 
 use crate::AwsProvider;
-use crate::resend_guard::ResendGuard;
 use crate::resend_safety_generated::{
-    acm_idempotency, cloudwatchlogs_idempotency, ec2_idempotency, iam_idempotency,
-    identitystore_idempotency, organizations_idempotency, route53_idempotency, s3_idempotency,
-    sqs_idempotency, sts_idempotency,
+    AcmClient, CloudWatchLogsClient, Ec2Client, IamClient, IdentityStoreClient,
+    OrganizationsClient, Route53Client, S3Client, SqsClient, StsClient,
 };
 use crate::services::sts::assume_role::AssumeRoleConfig;
-
-macro_rules! guarded_client {
-    ($sdk:ident, $config:expr, $idempotency:path) => {
-        $sdk::Client::from_conf(
-            $sdk::config::Builder::from(&$config.0)
-                .interceptor(ResendGuard::new($idempotency))
-                .build(),
-        )
-    };
-}
 
 /// An AWS SDK configuration with the provider's timeout and retry policy applied.
 pub struct BoundedSdkConfig(aws_config::SdkConfig);
@@ -36,6 +24,42 @@ impl BoundedSdkConfig {
                 .into_builder()
                 .timeout_config(timeout_config())
                 .retry_config(retry_config())
+                .build(),
+        )
+    }
+
+    /// Borrow the shared configuration for generated guarded-client constructors.
+    ///
+    /// Raw SDK client constructors are denied workspace-wide by the generated
+    /// Clippy policy, so handwritten provider code cannot use this accessor to
+    /// bypass the generated wrappers.
+    pub(crate) fn sdk_config(&self) -> &aws_config::SdkConfig {
+        &self.0
+    }
+
+    /// Build a bounded configuration around a test HTTP client while retaining
+    /// the production timeout and retry policy.
+    #[cfg(test)]
+    pub(crate) fn for_test_http_client(
+        http_client: aws_smithy_runtime_api::client::http::SharedHttpClient,
+        endpoint_url: &'static str,
+    ) -> Self {
+        let credentials = aws_credential_types::Credentials::new(
+            "test",
+            "test",
+            None,
+            None,
+            "bounded-sdk-config-test",
+        );
+        Self::new(
+            aws_config::SdkConfig::builder()
+                .region(Region::new("us-east-1"))
+                .endpoint_url(endpoint_url)
+                .credentials_provider(
+                    aws_credential_types::provider::SharedCredentialsProvider::new(credentials),
+                )
+                .http_client(http_client)
+                .sleep_impl(aws_smithy_async::rt::sleep::TokioSleep::new())
                 .build(),
         )
     }
@@ -133,28 +157,16 @@ impl AwsProvider {
         config: &BoundedSdkConfig,
     ) -> Self {
         Self {
-            s3_client: guarded_client!(aws_sdk_s3, config, s3_idempotency),
-            ec2_client: guarded_client!(aws_sdk_ec2, config, ec2_idempotency),
-            iam_client: guarded_client!(aws_sdk_iam, config, iam_idempotency),
-            logs_client: guarded_client!(
-                aws_sdk_cloudwatchlogs,
-                config,
-                cloudwatchlogs_idempotency
-            ),
-            sts_client: guarded_client!(aws_sdk_sts, config, sts_idempotency),
-            organizations_client: guarded_client!(
-                aws_sdk_organizations,
-                config,
-                organizations_idempotency
-            ),
-            identitystore_client: guarded_client!(
-                aws_sdk_identitystore,
-                config,
-                identitystore_idempotency
-            ),
-            route53_client: guarded_client!(aws_sdk_route53, config, route53_idempotency),
-            acm_client: guarded_client!(aws_sdk_acm, config, acm_idempotency),
-            sqs_client: guarded_client!(aws_sdk_sqs, config, sqs_idempotency),
+            s3_client: S3Client::from_bounded_config(config),
+            ec2_client: Ec2Client::from_bounded_config(config),
+            iam_client: IamClient::from_bounded_config(config),
+            logs_client: CloudWatchLogsClient::from_bounded_config(config),
+            sts_client: StsClient::from_bounded_config(config),
+            organizations_client: OrganizationsClient::from_bounded_config(config),
+            identitystore_client: IdentityStoreClient::from_bounded_config(config),
+            route53_client: Route53Client::from_bounded_config(config),
+            acm_client: AcmClient::from_bounded_config(config),
+            sqs_client: SqsClient::from_bounded_config(config),
             schema_registry: Self::schema_registry(),
             region,
             allowed_account_ids,
@@ -182,6 +194,49 @@ mod tests {
 
         let bounded = BoundedSdkConfig::new(input);
         assert_bounded_policy(bounded.0.timeout_config(), bounded.0.retry_config());
+    }
+
+    #[test]
+    fn every_aws_sdk_dependency_has_a_wrapper_and_constructor_bans() {
+        let manifest = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/Cargo.toml"));
+        let generated = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/src/resend_safety_generated.rs"
+        ));
+        let clippy = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../clippy.toml"));
+        let mut services = std::collections::BTreeSet::new();
+        for line in manifest.lines() {
+            let mut declaration = line.split('#').next().unwrap_or_default();
+            while let Some(prefix) = declaration.find("aws-sdk-") {
+                let candidate = &declaration[prefix + "aws-sdk-".len()..];
+                let length = candidate
+                    .find(|character: char| {
+                        !character.is_ascii_lowercase()
+                            && !character.is_ascii_digit()
+                            && character != '-'
+                    })
+                    .unwrap_or(candidate.len());
+                if length != 0 {
+                    services.insert(&candidate[..length]);
+                }
+                declaration = &candidate[length..];
+            }
+        }
+
+        assert!(!services.is_empty(), "expected AWS SDK dependencies");
+        for service in services {
+            let rust_service = service.replace('-', "_");
+            assert!(
+                generated.contains(&format!("inner: aws_sdk_{rust_service}::Client,")),
+                "aws-sdk-{service} has no generated wrapper; add resend decisions before adding the dependency"
+            );
+            for constructor in ["new", "from_conf"] {
+                assert!(
+                    clippy.contains(&format!("aws_sdk_{rust_service}::Client::{constructor}")),
+                    "aws-sdk-{service} is missing the {constructor} constructor ban"
+                );
+            }
+        }
     }
 
     #[cfg(not(target_arch = "wasm32"))]

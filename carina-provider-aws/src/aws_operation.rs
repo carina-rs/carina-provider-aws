@@ -1,4 +1,4 @@
-//! Types that bind AWS fluent builders to their generated resend policy.
+//! Types that bind AWS operation builders to their generated resend policy.
 
 use std::future::Future;
 
@@ -40,9 +40,14 @@ pub(crate) trait AwsOperation {
 
     const NAME: &'static str;
     const IDEMPOTENCY: Idempotency;
+}
 
+/// A request whose send implementation and generated resend decision are tied
+/// to the same concrete builder type.
+pub(crate) trait DecidedSend<C>: AwsOperation {
     fn send(
         self,
+        context: C,
     ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send;
 }
 
@@ -55,9 +60,73 @@ pub(crate) trait DecidedOperationError {
     const IDEMPOTENCY: Idempotency;
 }
 
-/// An operation builder with a generated idempotency-token setter.
+/// An operation input builder with a generated idempotency-token setter.
 pub(crate) trait TokenBearing {
     fn with_client_token(self, token: &ClientToken) -> Self;
+}
+
+/// A token-bearing SDK input builder and its guarded client.
+///
+/// Both fields are deliberately private and cannot be extracted. Request fields
+/// can only be changed through [`TokenOperation::configure`], and the input
+/// builder has no direct `send` or `customize` method.
+#[derive(Clone)]
+pub(crate) struct TokenOperation<B, C> {
+    input: B,
+    client: C,
+}
+
+impl<B, C> TokenOperation<B, C> {
+    /// Wrap a generated token-bearing input builder and guarded client.
+    pub(crate) fn new(input: B, client: C) -> Self {
+        Self { input, client }
+    }
+
+    /// Configure request fields while keeping the input and client private.
+    ///
+    /// The closure receives a plain SDK input builder. It can set request
+    /// fields, but has no direct `send` or `customize` method; the guarded
+    /// client remains inside this wrapper.
+    pub(crate) fn configure(self, configure: impl FnOnce(B) -> B) -> Self {
+        Self {
+            input: configure(self.input),
+            client: self.client,
+        }
+    }
+}
+
+impl<B, C> AwsOperation for TokenOperation<B, C>
+where
+    B: AwsOperation<Resend = WithToken>,
+{
+    type Resend = WithToken;
+    type Output = B::Output;
+    type Error = B::Error;
+
+    const NAME: &'static str = B::NAME;
+    const IDEMPOTENCY: Idempotency = B::IDEMPOTENCY;
+}
+
+impl<B, C> TokenOperation<B, C>
+where
+    B: AwsOperation<Resend = WithToken> + TokenBearing,
+{
+    /// Apply the invocation token before invoking a generated concrete sender.
+    ///
+    /// [`crate::helpers::TokenSendPermit`] can only be constructed by the
+    /// token-aware helper entry points.
+    pub(crate) fn send_with_token_using<F, Fut>(
+        self,
+        token: &ClientToken,
+        _permit: crate::helpers::TokenSendPermit,
+        send: F,
+    ) -> Fut
+    where
+        F: FnOnce(B, C) -> Fut,
+        Fut: Future<Output = Result<B::Output, SdkError<B::Error, HttpResponse>>> + Send,
+    {
+        send(self.input.with_client_token(token), self.client)
+    }
 }
 
 #[cfg(test)]

@@ -69,12 +69,15 @@ impl AwsProvider {
         let req = self
             .ec2_client
             .create_egress_only_internet_gateway()
-            .vpc_id(&vpc_id)
-            .tag_specifications(build_tag_specification_with_create_token(
-                resource,
-                aws_sdk_ec2::types::ResourceType::EgressOnlyInternetGateway,
-                client_token,
-            ));
+            .configure(|builder| {
+                builder.vpc_id(&vpc_id).tag_specifications(
+                    build_tag_specification_with_create_token(
+                        resource,
+                        aws_sdk_ec2::types::ResourceType::EgressOnlyInternetGateway,
+                        client_token,
+                    ),
+                )
+            });
         let result = send_aws_operation_with_token(client_token, req).await;
 
         self.finish_tagged_ec2_create(

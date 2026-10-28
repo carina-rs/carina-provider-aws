@@ -210,13 +210,13 @@ impl AwsProvider {
             Err(error) => return Err(attempt.untracked(error)),
         };
 
-        let mut req = self
-            .ec2_client
-            .create_flow_logs()
-            .set_resource_ids(Some(resource_ids_val.clone()))
-            .resource_type(aws_sdk_ec2::types::FlowLogsResourceType::from(
-                resource_type_val.as_str(),
-            ));
+        let mut req = self.ec2_client.create_flow_logs().configure(|builder| {
+            builder
+                .set_resource_ids(Some(resource_ids_val.clone()))
+                .resource_type(aws_sdk_ec2::types::FlowLogsResourceType::from(
+                    resource_type_val.as_str(),
+                ))
+        });
 
         let traffic_type = match optional_enum_attr(resource, schema, "traffic_type") {
             Ok(traffic_type) => traffic_type,
@@ -224,7 +224,7 @@ impl AwsProvider {
         };
         if let Some(traffic_type) = traffic_type {
             use aws_sdk_ec2::types::TrafficType;
-            req = req.traffic_type(TrafficType::from(traffic_type));
+            req = req.configure(|builder| builder.traffic_type(TrafficType::from(traffic_type)));
         }
 
         let log_destination_type =
@@ -234,37 +234,41 @@ impl AwsProvider {
             };
         if let Some(log_dest_type) = log_destination_type {
             use aws_sdk_ec2::types::LogDestinationType;
-            req = req.log_destination_type(LogDestinationType::from(log_dest_type));
+            req = req.configure(|builder| {
+                builder.log_destination_type(LogDestinationType::from(log_dest_type))
+            });
         }
 
         if let Some(Value::Concrete(ConcreteValue::String(log_dest))) =
             resource.get_attr("log_destination")
         {
-            req = req.log_destination(log_dest.expose_plaintext());
+            req = req.configure(|builder| builder.log_destination(log_dest.expose_plaintext()));
         }
 
         if let Some(Value::Concrete(ConcreteValue::String(log_group))) =
             resource.get_attr("log_group_name")
         {
-            req = req.log_group_name(log_group.expose_plaintext());
+            req = req.configure(|builder| builder.log_group_name(log_group.expose_plaintext()));
         }
 
         if let Some(Value::Concrete(ConcreteValue::String(perm_arn))) =
             resource.get_attr("deliver_logs_permission_arn")
         {
-            req = req.deliver_logs_permission_arn(perm_arn.expose_plaintext());
+            req = req.configure(|builder| {
+                builder.deliver_logs_permission_arn(perm_arn.expose_plaintext())
+            });
         }
 
         if let Some(Value::Concrete(ConcreteValue::String(log_format))) =
             resource.get_attr("log_format")
         {
-            req = req.log_format(log_format.expose_plaintext());
+            req = req.configure(|builder| builder.log_format(log_format.expose_plaintext()));
         }
 
         if let Some(Value::Concrete(ConcreteValue::Int(interval))) =
             resource.get_attr("max_aggregation_interval")
         {
-            req = req.max_aggregation_interval(*interval as i32);
+            req = req.configure(|builder| builder.max_aggregation_interval(*interval as i32));
         }
 
         // Retry loop for IAM eventual consistency: newly created IAM roles may
@@ -275,13 +279,13 @@ impl AwsProvider {
             if retry_index > 0 {
                 tokio::time::sleep(std::time::Duration::from_secs(5)).await;
             }
-            let request =
-                req.clone()
-                    .tag_specifications(build_tag_specification_with_create_token(
-                        resource,
-                        aws_sdk_ec2::types::ResourceType::VpcFlowLog,
-                        request_token.as_client_token(),
-                    ));
+            let request = req.clone().configure(|builder| {
+                builder.tag_specifications(build_tag_specification_with_create_token(
+                    resource,
+                    aws_sdk_ec2::types::ResourceType::VpcFlowLog,
+                    request_token.as_client_token(),
+                ))
+            });
             let resp = match send_aws_operation_with_token(request_token.as_client_token(), request)
                 .await
             {

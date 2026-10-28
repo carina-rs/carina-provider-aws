@@ -209,10 +209,6 @@ mod tests {
     use std::sync::{Arc, Mutex};
     use std::time::Duration;
 
-    use aws_config::Region;
-    use aws_credential_types::Credentials;
-    use aws_credential_types::provider::SharedCredentialsProvider;
-    use aws_smithy_async::rt::sleep::TokioSleep;
     use aws_smithy_runtime_api::client::http::{
         HttpConnector, HttpConnectorFuture, SharedHttpConnector, http_client_fn,
     };
@@ -220,14 +216,11 @@ mod tests {
     use aws_smithy_runtime_api::client::result::ConnectorError;
     use aws_smithy_types::body::SdkBody;
     use aws_smithy_types::error::metadata::ProvideErrorMetadata;
-    use aws_smithy_types::retry::RetryConfig;
-    use aws_smithy_types::timeout::TimeoutConfig;
     use carina_aws_types::SendOutcome;
 
-    use crate::resend_safety_generated::ec2_idempotency;
+    use crate::aws_operation::ClientToken;
+    use crate::helpers::send_aws_operation_with_token;
     use crate::{AwsProvider, BoundedSdkConfig};
-
-    use super::ResendGuard;
 
     #[derive(Debug)]
     enum Action {
@@ -341,46 +334,8 @@ mod tests {
     fn provider(connector: ScriptedConnector) -> AwsProvider {
         let selected = connector.clone();
         let http_client = http_client_fn(move |_, _| SharedHttpConnector::new(selected.clone()));
-        let credentials = Credentials::new("test", "test", None, None, "resend-guard-test");
-        let config = aws_config::SdkConfig::builder()
-            .region(Region::new("us-east-1"))
-            .endpoint_url("https://example.test")
-            .credentials_provider(SharedCredentialsProvider::new(credentials))
-            .http_client(http_client)
-            .build();
-        let bounded = BoundedSdkConfig::new(config);
+        let bounded = BoundedSdkConfig::for_test_http_client(http_client, "https://example.test");
         AwsProvider::from_sdk_config("us-east-1".to_string(), Vec::new(), Vec::new(), &bounded)
-    }
-
-    fn ec2_client_with_attempt_timeout(
-        connector: ScriptedConnector,
-        operation_attempt_timeout: Duration,
-    ) -> aws_sdk_ec2::Client {
-        let selected = connector.clone();
-        let http_client = http_client_fn(move |_, _| SharedHttpConnector::new(selected.clone()));
-        let credentials = Credentials::new("test", "test", None, None, "resend-guard-test");
-        let config = aws_config::SdkConfig::builder()
-            .region(Region::new("us-east-1"))
-            .endpoint_url("https://example.test")
-            .credentials_provider(SharedCredentialsProvider::new(credentials))
-            .http_client(http_client)
-            .sleep_impl(TokioSleep::new())
-            .timeout_config(
-                TimeoutConfig::builder()
-                    .operation_attempt_timeout(operation_attempt_timeout)
-                    .build(),
-            )
-            .retry_config(
-                RetryConfig::standard()
-                    .with_max_attempts(2)
-                    .with_initial_backoff(Duration::from_millis(1)),
-            )
-            .build();
-        aws_sdk_ec2::Client::from_conf(
-            aws_sdk_ec2::config::Builder::from(&config)
-                .interceptor(ResendGuard::new(ec2_idempotency))
-                .build(),
-        )
     }
 
     const CREATE_VPC_OK: &str = r#"<CreateVpcResponse xmlns="http://ec2.amazonaws.com/doc/2016-11-15/">
@@ -514,20 +469,23 @@ mod tests {
             },
         ]);
         let provider = provider(connector.clone());
-        let token = "stable-client-token";
-
-        provider
+        let token = ClientToken::new();
+        let request = provider
             .ec2_client
             .create_nat_gateway()
-            .subnet_id("subnet-123")
-            .client_token(token)
-            .send()
+            .configure(|builder| builder.subnet_id("subnet-123"));
+
+        send_aws_operation_with_token(&token, request)
             .await
             .expect("token-bearing request should be retried");
 
         let requests = connector.requests();
         assert_eq!(requests.len(), 2);
-        assert!(requests.iter().all(|request| request.contains(token)));
+        assert!(
+            requests
+                .iter()
+                .all(|request| request.contains(token.as_str()))
+        );
     }
 
     #[tokio::test]
@@ -545,23 +503,23 @@ mod tests {
             },
         ]);
         let provider = provider(connector.clone());
-
-        let error = provider
+        let token = ClientToken::new();
+        let request = provider
             .ec2_client
             .create_nat_gateway()
-            .subnet_id("subnet-123")
-            .client_token("stable-client-token")
-            .send()
+            .configure(|builder| builder.subnet_id("subnet-123"));
+
+        let error = send_aws_operation_with_token(&token, request)
             .await
             .expect_err("all three SDK attempts should fail");
-        let rendered = crate::helpers::sdk_error_message("CreateNatGateway failed", &error);
+        let rendered = crate::helpers::sdk_error_message("CreateNatGateway failed", &*error);
 
         assert_eq!(connector.requests().len(), 3);
         assert!(matches!(
-            &error,
+            &*error,
             aws_smithy_runtime_api::client::result::SdkError::ResponseError(_)
         ));
-        assert_eq!(SendOutcome::classify(&error), SendOutcome::MaybeSent);
+        assert_eq!(error.outcome(), SendOutcome::MaybeSent);
         assert!(
             rendered.contains("an earlier attempt of this send may have reached AWS"),
             "{rendered}"
@@ -584,28 +542,33 @@ mod tests {
         );
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn token_send_keeps_maybe_sent_after_sdk_attempt_timeout() {
         let connector = ScriptedConnector::new([
-            Action::DelayedTimeout(Duration::from_secs(1)),
+            Action::DelayedTimeout(Duration::from_secs(31)),
+            Action::Response {
+                status: 429,
+                body: THROTTLED,
+            },
             Action::Response {
                 status: 429,
                 body: THROTTLED,
             },
         ]);
-        let client = ec2_client_with_attempt_timeout(connector.clone(), Duration::from_millis(20));
-
-        let error = client
+        let provider = provider(connector.clone());
+        let token = ClientToken::new();
+        let request = provider
+            .ec2_client
             .create_nat_gateway()
-            .subnet_id("subnet-123")
-            .client_token("stable-client-token")
-            .send()
-            .await
-            .expect_err("both SDK attempts should fail");
+            .configure(|builder| builder.subnet_id("subnet-123"));
 
-        assert_eq!(connector.requests().len(), 2);
+        let error = send_aws_operation_with_token(&token, request)
+            .await
+            .expect_err("all three SDK attempts should fail");
+
+        assert_eq!(connector.requests().len(), 3);
         assert_eq!(connector.completed_delayed_timeouts(), 0);
-        assert_eq!(SendOutcome::classify(&error), SendOutcome::MaybeSent);
+        assert_eq!(error.outcome(), SendOutcome::MaybeSent);
     }
 
     #[tokio::test]

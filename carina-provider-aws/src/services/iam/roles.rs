@@ -14,6 +14,7 @@ use regex::Regex;
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
 use crate::helpers::value_as_str;
+use crate::resend_safety_generated::IamClient;
 
 impl AwsProvider {
     /// Read `iam.Roles` given a `DataSource` with optional `path_prefix` /
@@ -56,7 +57,7 @@ impl AwsProvider {
 /// `name` matches `name_filter` (if any). `path_prefix` is applied server-
 /// side; the regex is applied per page so unmatched roles never accumulate.
 async fn list_matching_roles(
-    client: &aws_sdk_iam::Client,
+    client: &IamClient,
     path_prefix: Option<&str>,
     name_filter: Option<&Regex>,
     resource: &DataSource,

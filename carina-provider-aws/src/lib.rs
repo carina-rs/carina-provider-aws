@@ -3,8 +3,6 @@
 //! AWS Provider implementation
 
 mod aws_operation;
-#[cfg(test)]
-mod called_operation_decisions;
 mod data_source_lookups;
 mod ec2_security_group_rules;
 mod ec2_tags;
@@ -34,17 +32,11 @@ pub use provider::{
 pub use provider::{AwsCreateToken, AwsDeleteToken, Ec2TaggedResourceKind};
 pub use sdk_config::BoundedSdkConfig;
 
-use aws_sdk_acm::Client as AcmClient;
-use aws_sdk_cloudwatchlogs::Client as CloudWatchLogsClient;
-use aws_sdk_ec2::Client as Ec2Client;
-use aws_sdk_iam::Client as IamClient;
-use aws_sdk_identitystore::Client as IdentityStoreClient;
-use aws_sdk_organizations::Client as OrganizationsClient;
-use aws_sdk_route53::Client as Route53Client;
-use aws_sdk_s3::Client as S3Client;
-use aws_sdk_sqs::Client as SqsClient;
-use aws_sdk_sts::Client as StsClient;
 use carina_core::schema::{ResourceSchema, SchemaKind, SchemaRegistry};
+use resend_safety_generated::{
+    AcmClient, CloudWatchLogsClient, Ec2Client, IamClient, IdentityStoreClient,
+    OrganizationsClient, Route53Client, S3Client, SqsClient, StsClient,
+};
 
 /// AWS Provider
 pub struct AwsProvider {

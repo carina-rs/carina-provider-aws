@@ -39,6 +39,10 @@ struct Args {
     /// Output format: rust (default) or markdown (for documentation)
     #[arg(long, default_value = "rust")]
     format: String,
+
+    /// Workspace Clippy configuration generated with provider resend safety.
+    #[arg(long)]
+    clippy_config: Option<PathBuf>,
 }
 
 /// Unified type override for resource-scoped property overrides.
@@ -686,6 +690,15 @@ fn main() -> Result<()> {
             std::fs::write(&resend_safety_path, resend_safety)
                 .with_context(|| format!("Failed to write {}", resend_safety_path.display()))?;
             eprintln!("Generated: {}", resend_safety_path.display());
+
+            if let Some(clippy_config_path) = &args.clippy_config {
+                let clippy_config = carina_codegen_aws::resend_safety::generate_clippy_config(
+                    carina_codegen_aws::resend_safety::OVERRIDES,
+                );
+                std::fs::write(clippy_config_path, clippy_config)
+                    .with_context(|| format!("Failed to write {}", clippy_config_path.display()))?;
+                eprintln!("Generated: {}", clippy_config_path.display());
+            }
         }
         "markdown" | "md" => {
             for res in &resources {

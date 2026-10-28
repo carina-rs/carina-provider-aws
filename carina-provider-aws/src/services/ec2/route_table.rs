@@ -101,15 +101,15 @@ impl AwsProvider {
         };
 
         // Create Route Table
-        let req = self
-            .ec2_client
-            .create_route_table()
-            .vpc_id(&vpc_id)
-            .tag_specifications(build_tag_specification_with_create_token(
-                resource,
-                aws_sdk_ec2::types::ResourceType::RouteTable,
-                client_token,
-            ));
+        let req = self.ec2_client.create_route_table().configure(|builder| {
+            builder
+                .vpc_id(&vpc_id)
+                .tag_specifications(build_tag_specification_with_create_token(
+                    resource,
+                    aws_sdk_ec2::types::ResourceType::RouteTable,
+                    client_token,
+                ))
+        });
         let result = send_aws_operation_with_token(client_token, req).await;
         let sent = Self::sent_only(resource, &["vpc_id", "tags"]);
 

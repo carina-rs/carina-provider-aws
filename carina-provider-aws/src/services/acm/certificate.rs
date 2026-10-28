@@ -500,15 +500,15 @@ impl AwsProvider {
         let id = resource.id.clone();
         let request = build_request_certificate(resource, schema)?;
 
-        let req = self
-            .acm_client
-            .request_certificate()
-            .set_domain_name(request.domain_name)
-            .set_validation_method(request.validation_method)
-            .set_subject_alternative_names(request.subject_alternative_names)
-            .set_options(request.options)
-            .set_tags(request.tags)
-            .set_key_algorithm(request.key_algorithm);
+        let req = self.acm_client.request_certificate().configure(|builder| {
+            builder
+                .set_domain_name(request.domain_name)
+                .set_validation_method(request.validation_method)
+                .set_subject_alternative_names(request.subject_alternative_names)
+                .set_options(request.options)
+                .set_tags(request.tags)
+                .set_key_algorithm(request.key_algorithm)
+        });
         // RequestCertificate accepts tags inline, avoiding a follow-up
         // AddTagsToCertificate round-trip on the create path.
         // The previous request-side `domain_validation_options`
