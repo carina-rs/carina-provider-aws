@@ -1809,6 +1809,8 @@ impl
     >
 {
     // The permit proves the invocation token was applied before this network send.
+    // The error is the SDK's SdkError passed through unchanged.
+    #[allow(clippy::result_large_err)]
     fn send_with_token(
         self,
         token: &ClientToken,
@@ -2425,6 +2427,8 @@ impl TokenBearing for aws_sdk_ec2::operation::create_egress_only_internet_gatewa
 
 impl TokenOperation<aws_sdk_ec2::operation::create_egress_only_internet_gateway::builders::CreateEgressOnlyInternetGatewayInputBuilder, aws_sdk_ec2::Client> {
     // The permit proves the invocation token was applied before this network send.
+    // The error is the SDK's SdkError passed through unchanged.
+    #[allow(clippy::result_large_err)]
     fn send_with_token(
         self,
         token: &ClientToken,
@@ -2477,6 +2481,8 @@ impl
     >
 {
     // The permit proves the invocation token was applied before this network send.
+    // The error is the SDK's SdkError passed through unchanged.
+    #[allow(clippy::result_large_err)]
     fn send_with_token(
         self,
         token: &ClientToken,
@@ -2566,6 +2572,8 @@ impl
     >
 {
     // The permit proves the invocation token was applied before this network send.
+    // The error is the SDK's SdkError passed through unchanged.
+    #[allow(clippy::result_large_err)]
     fn send_with_token(
         self,
         token: &ClientToken,
@@ -2654,6 +2662,8 @@ impl
     >
 {
     // The permit proves the invocation token was applied before this network send.
+    // The error is the SDK's SdkError passed through unchanged.
+    #[allow(clippy::result_large_err)]
     fn send_with_token(
         self,
         token: &ClientToken,
@@ -2880,6 +2890,8 @@ impl
     >
 {
     // The permit proves the invocation token was applied before this network send.
+    // The error is the SDK's SdkError passed through unchanged.
+    #[allow(clippy::result_large_err)]
     fn send_with_token(
         self,
         token: &ClientToken,

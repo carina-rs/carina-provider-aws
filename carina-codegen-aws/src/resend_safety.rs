@@ -1308,6 +1308,8 @@ pub fn generate_provider_module(
                      }}\n\n\
                      impl TokenOperation<{builder}, aws_sdk_{}::Client> {{\n\
                      \x20   // The permit proves the invocation token was applied before this network send.\n\
+                     \x20   // The error is the SDK's SdkError passed through unchanged.\n\
+                     \x20   #[allow(clippy::result_large_err)]\n\
                      \x20   fn send_with_token(\n\
                      \x20       self,\n\
                      \x20       token: &ClientToken,\n\
@@ -1682,6 +1684,10 @@ mod tests {
         ));
         assert!(generated.contains("input.send_with(&client).await"));
         assert!(!generated.contains("CreateThingFluentBuilder"));
+        assert!(generated.contains(
+            "// The error is the SDK's SdkError passed through unchanged.\n    #[allow(clippy::result_large_err)]\n    fn send_with_token("
+        ));
+        assert_eq!(generated.matches("clippy::result_large_err").count(), 1);
         assert!(!generated.contains("#![allow(clippy::disallowed_methods)]"));
         assert_eq!(
             generated

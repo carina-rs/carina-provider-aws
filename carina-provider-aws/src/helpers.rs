@@ -1447,6 +1447,8 @@ mod tests {
     }
 
     impl MockCreateNatGateway {
+        // The error is the SDK's SdkError passed through unchanged.
+        #[allow(clippy::result_large_err)]
         fn send(
             self,
         ) -> impl std::future::Future<
