@@ -801,6 +801,9 @@ dependencies = [
 name = "carina-aws-types"
 version = "0.4.0"
 dependencies = [
+ "aws-runtime",
+ "aws-smithy-runtime-api",
+ "aws-smithy-types",
  "carina-core",
  "heck",
  "indexmap",
