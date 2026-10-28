@@ -168,16 +168,12 @@ impl AwsProvider {
         identifier: &AppliedIdentifier,
     ) -> ProviderResult<()> {
         let identifier = identifier.as_str();
-        let result = retry_aws_operation("clear bucket logging", RetryPolicy::default(), || {
+        let result = retry_aws_operation(RetryPolicy::default(), || {
             let client = &self.s3_client;
-            async move {
-                client
-                    .put_bucket_logging()
-                    .bucket(identifier)
-                    .bucket_logging_status(BucketLoggingStatus::builder().build())
-                    .send()
-                    .await
-            }
+            client
+                .put_bucket_logging()
+                .bucket(identifier)
+                .bucket_logging_status(BucketLoggingStatus::builder().build())
         })
         .await;
 

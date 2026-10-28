@@ -211,21 +211,13 @@ impl AwsProvider {
         identifier: &AppliedIdentifier,
     ) -> ProviderResult<()> {
         let identifier = identifier.as_str();
-        let result = retry_aws_operation(
-            "clear bucket notification configuration",
-            RetryPolicy::default(),
-            || {
-                let client = &self.s3_client;
-                async move {
-                    client
-                        .put_bucket_notification_configuration()
-                        .bucket(identifier)
-                        .notification_configuration(NotificationConfiguration::builder().build())
-                        .send()
-                        .await
-                }
-            },
-        )
+        let result = retry_aws_operation(RetryPolicy::default(), || {
+            let client = &self.s3_client;
+            client
+                .put_bucket_notification_configuration()
+                .bucket(identifier)
+                .notification_configuration(NotificationConfiguration::builder().build())
+        })
         .await;
 
         match result {

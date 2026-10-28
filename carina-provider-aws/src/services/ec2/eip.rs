@@ -1,14 +1,15 @@
 use std::collections::HashMap;
 
+use carina_core::provider::ProviderResult;
 use carina_core::provider::{AppliedIdentifier, ReadOutcome};
-use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{Resource, ResourceId, State};
 use carina_core::schema::ResourceSchema;
 
 use crate::AwsProvider;
+use crate::aws_operation::ClientToken;
 use crate::error_helpers::api_error_with_meta;
-use crate::helpers::optional_enum_attr;
-use crate::provider::AwsCreateAttempt;
+use crate::helpers::{build_tag_specification_with_create_token, optional_enum_attr};
+use crate::provider::{AwsCreateAttempt, Ec2TaggedResourceKind};
 
 impl AwsProvider {
     /// Read an EC2 Elastic IP
@@ -64,9 +65,16 @@ impl AwsProvider {
         &self,
         resource: &Resource,
         schema: &ResourceSchema,
+        client_token: &ClientToken,
         attempt: A,
     ) -> Result<A::Step, A::Verdict> {
-        let mut req = self.ec2_client.allocate_address();
+        let mut req = self.ec2_client.allocate_address().tag_specifications(
+            build_tag_specification_with_create_token(
+                resource,
+                aws_sdk_ec2::types::ResourceType::ElasticIp,
+                client_token,
+            ),
+        );
 
         let domain = match optional_enum_attr(resource, schema, "domain") {
             Ok(domain) => domain,
@@ -80,55 +88,17 @@ impl AwsProvider {
             req = req.domain(aws_sdk_ec2::types::DomainType::Vpc);
         }
 
-        let result = match req.send().await {
-            Ok(result) => result,
-            Err(error) => {
-                return Err(attempt.untracked(
-                    api_error_with_meta("Failed to allocate address", "ec2.AllocateAddress", error)
-                        .for_resource(resource.id.clone()),
-                ));
-            }
-        };
+        let sent = Self::sent_only(resource, &["domain", "tags"]);
+        let result = req.send().await;
 
-        let alloc_id = match result.allocation_id() {
-            Some(alloc_id) => alloc_id,
-            None => {
-                return Err(attempt.untracked(
-                    ProviderError::api_error("EIP allocated but no allocation ID returned")
-                        .for_resource(resource.id.clone()),
-                ));
-            }
-        };
-        let identifier =
-            match crate::helpers::applied_identifier(&resource.id, "ec2.AllocateAddress", alloc_id)
-            {
-                Ok(identifier) => identifier,
-                Err(error) => return Err(attempt.untracked(error)),
-            };
-        let issued = attempt.issued(identifier.clone(), Self::sent_only(resource, &["domain"]));
-
-        // Apply tags
-        if let Err(error) = self
-            .apply_ec2_tags(
-                &resource.id,
-                alloc_id,
-                &resource.resolved_attributes(),
-                None,
-            )
-            .await
-        {
-            return Err(self.failed_issued(&resource.id, issued, error).await);
-        }
-
-        // Read back using allocation ID
-        let outcome = self.read_ec2_eip(&resource.id, &identifier).await;
-        let completion = self.create_outcome_from_read(
-            &resource.id,
-            identifier,
-            resource.resolved_attributes(),
-            outcome,
-        );
-        Ok(self.finish_issued(issued, completion))
+        self.finish_tagged_ec2_create(
+            resource,
+            attempt,
+            Ec2TaggedResourceKind::Address.create_context(client_token, sent),
+            result,
+            |output| output.allocation_id().map(str::to_owned),
+        )
+        .await
     }
 
     /// Update an EC2 Elastic IP (tags only)

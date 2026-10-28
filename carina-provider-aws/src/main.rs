@@ -100,6 +100,10 @@ impl AwsPollAttempt for GuestPollAttempt {
         self.0.untracked(error.to_wire())
     }
 
+    fn undetermined(self, _token: AwsCreateToken, error: CoreProviderError) -> Self::Verdict {
+        self.0.undetermined(error.to_wire())
+    }
+
     fn issued(self, identifier: CoreAppliedIdentifier) -> Self::Issued {
         GuestPolledIssuedCreate(self.0.issued(identifier))
     }

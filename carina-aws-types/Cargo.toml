@@ -11,6 +11,7 @@ description = "AWS type definitions for Carina infrastructure management tool"
 doctest = false
 
 [dev-dependencies]
+aws-smithy-runtime-api = { version = "1", features = ["client", "test-util"] }
 indexmap = "2"
 
 [dependencies]

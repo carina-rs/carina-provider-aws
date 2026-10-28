@@ -201,11 +201,7 @@ impl AwsProvider {
         // S3 returns when CreateBucket races a recent DeleteBucket for the
         // same name — the control plane clears after ~60–90s. See #156.
         let rid = resource.id.clone();
-        let result = retry_aws_operation("create S3 bucket", RetryPolicy::default(), || {
-            let req = req.clone();
-            async move { req.send().await }
-        })
-        .await;
+        let result = retry_aws_operation(RetryPolicy::default(), || req.clone()).await;
         if let Err(error) = result {
             return Err(attempt.untracked(
                 api_error_with_meta("Failed to create bucket", "s3.CreateBucket", error)
@@ -277,9 +273,9 @@ impl AwsProvider {
             self.empty_s3_bucket(&id, identifier).await?;
         }
 
-        retry_aws_operation("delete S3 bucket", RetryPolicy::default(), || {
+        retry_aws_operation(RetryPolicy::default(), || {
             let client = &self.s3_client;
-            async move { client.delete_bucket().bucket(identifier).send().await }
+            client.delete_bucket().bucket(identifier)
         })
         .await
         .map_err(|e| {

@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::time::Duration;
 
+use carina_aws_types::SendOutcome;
 use carina_core::effect::PlanOp;
 use carina_core::provider::{
     AppliedIdentifier, AppliedState, BoxFuture, CreateAttempt, CreateFailure, CreateOutcome,
@@ -19,9 +20,37 @@ use carina_provider_protocol::{
 use serde::{Deserialize, Serialize};
 
 use crate::AwsProvider;
+use crate::aws_operation::{ClientToken, EC2_CREATE_TOKEN_TAG};
 use crate::helpers::{CreatePoll, DeletePoll, apply_patch_to_state};
 
-const POLL_AFTER_SECS: u32 = 5;
+pub(crate) const POLL_AFTER_SECS: u32 = 5;
+/// Eight describe calls after delays totaling 305 seconds. The pinned host
+/// gives an operation 15 minutes by default and clamps `poll_after` to 1–300
+/// seconds. This provider caps each SDK operation at 60 seconds (individual
+/// WASM HTTP attempts are capped at 30 seconds), so the initial create plus
+/// all eight describes and sleeps consume at most 845 seconds. That leaves a
+/// 55-second margin inside the 900-second operation budget.
+pub(crate) const TAGGED_EC2_DISCOVERY_ATTEMPTS: u8 = 8;
+pub(crate) const TAGGED_EC2_INITIAL_DELAY_SECS: u32 = 5;
+
+fn next_tagged_ec2_delay(current: u32) -> u32 {
+    match current {
+        0..=4 => 5,
+        5..=9 => 10,
+        10..=19 => 20,
+        20..=29 => 30,
+        _ => 60,
+    }
+}
+
+fn create_token_poll_after(token: &AwsCreateToken) -> u32 {
+    match token {
+        AwsCreateToken::TaggedEc2 {
+            next_delay_secs, ..
+        } => *next_delay_secs,
+        _ => POLL_AFTER_SECS,
+    }
+}
 
 /// Continuation phases for AWS create operations that wait on cloud state.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -39,6 +68,300 @@ pub enum AwsCreateToken {
     OrganizationsAccount {
         create_account_request_id: String,
     },
+    TaggedEc2 {
+        kind: Ec2TaggedResourceKind,
+        create_token: ClientToken,
+        attempts_remaining: u8,
+        next_delay_secs: u32,
+    },
+}
+
+/// EC2 resource kinds discoverable by the provider-managed create token tag.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Ec2TaggedResourceKind {
+    Vpc,
+    Subnet,
+    RouteTable,
+    SecurityGroup,
+    InternetGateway,
+    EgressOnlyInternetGateway,
+    VpnGateway,
+    VpcPeeringConnection,
+    Address,
+    NatGateway,
+    VpcEndpoint,
+    FlowLog,
+    TransitGateway,
+    TransitGatewayVpcAttachment,
+}
+
+/// Inputs shared by every tag-discoverable EC2 create result handler.
+pub(crate) struct TaggedEc2CreateContext<'a> {
+    kind: Ec2TaggedResourceKind,
+    create_token: &'a ClientToken,
+    sent: Sent,
+}
+
+impl Ec2TaggedResourceKind {
+    pub(crate) fn create_context(
+        self,
+        create_token: &ClientToken,
+        sent: Sent,
+    ) -> TaggedEc2CreateContext<'_> {
+        TaggedEc2CreateContext {
+            kind: self,
+            create_token,
+            sent,
+        }
+    }
+
+    fn create_operation(self) -> &'static str {
+        match self {
+            Self::Vpc => "ec2.CreateVpc",
+            Self::Subnet => "ec2.CreateSubnet",
+            Self::RouteTable => "ec2.CreateRouteTable",
+            Self::SecurityGroup => "ec2.CreateSecurityGroup",
+            Self::InternetGateway => "ec2.CreateInternetGateway",
+            Self::EgressOnlyInternetGateway => "ec2.CreateEgressOnlyInternetGateway",
+            Self::VpnGateway => "ec2.CreateVpnGateway",
+            Self::VpcPeeringConnection => "ec2.CreateVpcPeeringConnection",
+            Self::Address => "ec2.AllocateAddress",
+            Self::NatGateway => "ec2.CreateNatGateway",
+            Self::VpcEndpoint => "ec2.CreateVpcEndpoint",
+            Self::FlowLog => "ec2.CreateFlowLogs",
+            Self::TransitGateway => "ec2.CreateTransitGateway",
+            Self::TransitGatewayVpcAttachment => "ec2.CreateTransitGatewayVpcAttachment",
+        }
+    }
+
+    fn resource_type(self) -> &'static str {
+        match self {
+            Self::Vpc => "ec2.Vpc",
+            Self::Subnet => "ec2.Subnet",
+            Self::RouteTable => "ec2.RouteTable",
+            Self::SecurityGroup => "ec2.SecurityGroup",
+            Self::InternetGateway => "ec2.InternetGateway",
+            Self::EgressOnlyInternetGateway => "ec2.EgressOnlyInternetGateway",
+            Self::VpnGateway => "ec2.VpnGateway",
+            Self::VpcPeeringConnection => "ec2.VpcPeeringConnection",
+            Self::Address => "ec2.Eip",
+            Self::NatGateway => "ec2.NatGateway",
+            Self::VpcEndpoint => "ec2.VpcEndpoint",
+            Self::FlowLog => "ec2.FlowLog",
+            Self::TransitGateway => "ec2.TransitGateway",
+            Self::TransitGatewayVpcAttachment => "ec2.TransitGatewayAttachment",
+        }
+    }
+
+    fn create_error_context(self) -> &'static str {
+        match self {
+            Self::Vpc => "Failed to create VPC",
+            Self::Subnet => "Failed to create subnet",
+            Self::RouteTable => "Failed to create route table",
+            Self::SecurityGroup => "Failed to create security group",
+            Self::InternetGateway => "Failed to create internet gateway",
+            Self::EgressOnlyInternetGateway => "Failed to create egress-only internet gateway",
+            Self::VpnGateway => "Failed to create VPN gateway",
+            Self::VpcPeeringConnection => "Failed to create VPC peering connection",
+            Self::Address => "Failed to allocate address",
+            Self::NatGateway => "Failed to create NAT gateway",
+            Self::VpcEndpoint => "Failed to create VPC endpoint",
+            Self::FlowLog => "Failed to create flow logs",
+            Self::TransitGateway => "Failed to create transit gateway",
+            Self::TransitGatewayVpcAttachment => "Failed to create transit gateway VPC attachment",
+        }
+    }
+
+    fn describe_operation(self) -> &'static str {
+        match self {
+            Self::Vpc => "ec2.DescribeVpcs",
+            Self::Subnet => "ec2.DescribeSubnets",
+            Self::RouteTable => "ec2.DescribeRouteTables",
+            Self::SecurityGroup => "ec2.DescribeSecurityGroups",
+            Self::InternetGateway => "ec2.DescribeInternetGateways",
+            Self::EgressOnlyInternetGateway => "ec2.DescribeEgressOnlyInternetGateways",
+            Self::VpnGateway => "ec2.DescribeVpnGateways",
+            Self::VpcPeeringConnection => "ec2.DescribeVpcPeeringConnections",
+            Self::Address => "ec2.DescribeAddresses",
+            Self::NatGateway => "ec2.DescribeNatGateways",
+            Self::VpcEndpoint => "ec2.DescribeVpcEndpoints",
+            Self::FlowLog => "ec2.DescribeFlowLogs",
+            Self::TransitGateway => "ec2.DescribeTransitGateways",
+            Self::TransitGatewayVpcAttachment => "ec2.DescribeTransitGatewayVpcAttachments",
+        }
+    }
+
+    fn discovery_error_context(self) -> &'static str {
+        match self {
+            Self::Vpc => "Failed to discover VPC by create token",
+            Self::Subnet => "Failed to discover subnet by create token",
+            Self::RouteTable => "Failed to discover route table by create token",
+            Self::SecurityGroup => "Failed to discover security group by create token",
+            Self::InternetGateway => "Failed to discover internet gateway by create token",
+            Self::EgressOnlyInternetGateway => {
+                "Failed to discover egress-only internet gateway by create token"
+            }
+            Self::VpnGateway => "Failed to discover VPN gateway by create token",
+            Self::VpcPeeringConnection => {
+                "Failed to discover VPC peering connection by create token"
+            }
+            Self::Address => "Failed to discover address by create token",
+            Self::NatGateway => "Failed to discover NAT gateway by create token",
+            Self::VpcEndpoint => "Failed to discover VPC endpoint by create token",
+            Self::FlowLog => "Failed to discover flow logs by create token",
+            Self::TransitGateway => "Failed to discover transit gateway by create token",
+            Self::TransitGatewayVpcAttachment => {
+                "Failed to discover transit gateway attachment by create token"
+            }
+        }
+    }
+
+    /// Issue the kind-specific EC2 describe-by-tag request and normalize its
+    /// identifier field. Keeping this dispatch beside the operation metadata
+    /// leaves the discovery state machine independent of individual EC2 shapes.
+    async fn describe_by_tag(
+        self,
+        provider: &AwsProvider,
+        id: &ResourceId,
+        filter: aws_sdk_ec2::types::Filter,
+    ) -> ProviderResult<Vec<String>> {
+        macro_rules! describe_ids {
+            ($request:expr, $items:ident, $identifier:ident) => {{
+                let output = $request.send().await.map_err(|error| {
+                    AwsProvider::tagged_ec2_discovery_call_error(id, self, error)
+                })?;
+                output
+                    .$items()
+                    .iter()
+                    .filter_map(|resource| resource.$identifier().map(str::to_owned))
+                    .collect::<Vec<_>>()
+            }};
+        }
+
+        let mut identifiers = match self {
+            Self::Vpc => describe_ids!(
+                provider.ec2_client.describe_vpcs().filters(filter),
+                vpcs,
+                vpc_id
+            ),
+            Self::Subnet => describe_ids!(
+                provider.ec2_client.describe_subnets().filters(filter),
+                subnets,
+                subnet_id
+            ),
+            Self::RouteTable => describe_ids!(
+                provider.ec2_client.describe_route_tables().filters(filter),
+                route_tables,
+                route_table_id
+            ),
+            Self::SecurityGroup => describe_ids!(
+                provider
+                    .ec2_client
+                    .describe_security_groups()
+                    .filters(filter),
+                security_groups,
+                group_id
+            ),
+            Self::InternetGateway => describe_ids!(
+                provider
+                    .ec2_client
+                    .describe_internet_gateways()
+                    .filters(filter),
+                internet_gateways,
+                internet_gateway_id
+            ),
+            Self::EgressOnlyInternetGateway => describe_ids!(
+                provider
+                    .ec2_client
+                    .describe_egress_only_internet_gateways()
+                    .filters(filter),
+                egress_only_internet_gateways,
+                egress_only_internet_gateway_id
+            ),
+            Self::VpnGateway => describe_ids!(
+                provider.ec2_client.describe_vpn_gateways().filters(filter),
+                vpn_gateways,
+                vpn_gateway_id
+            ),
+            Self::VpcPeeringConnection => describe_ids!(
+                provider
+                    .ec2_client
+                    .describe_vpc_peering_connections()
+                    .filters(filter),
+                vpc_peering_connections,
+                vpc_peering_connection_id
+            ),
+            Self::Address => describe_ids!(
+                provider.ec2_client.describe_addresses().filters(filter),
+                addresses,
+                allocation_id
+            ),
+            Self::NatGateway => describe_ids!(
+                provider.ec2_client.describe_nat_gateways().filter(filter),
+                nat_gateways,
+                nat_gateway_id
+            ),
+            Self::VpcEndpoint => describe_ids!(
+                provider.ec2_client.describe_vpc_endpoints().filters(filter),
+                vpc_endpoints,
+                vpc_endpoint_id
+            ),
+            Self::FlowLog => describe_ids!(
+                provider.ec2_client.describe_flow_logs().filter(filter),
+                flow_logs,
+                flow_log_id
+            ),
+            Self::TransitGateway => describe_ids!(
+                provider
+                    .ec2_client
+                    .describe_transit_gateways()
+                    .filters(filter),
+                transit_gateways,
+                transit_gateway_id
+            ),
+            Self::TransitGatewayVpcAttachment => describe_ids!(
+                provider
+                    .ec2_client
+                    .describe_transit_gateway_vpc_attachments()
+                    .filters(filter),
+                transit_gateway_vpc_attachments,
+                transit_gateway_attachment_id
+            ),
+        };
+
+        if self == Self::FlowLog {
+            identifiers.sort();
+            identifiers.dedup();
+            if !identifiers.is_empty() {
+                identifiers = vec![identifiers.join(",")];
+            }
+        }
+        Ok(identifiers)
+    }
+}
+
+#[derive(Debug)]
+enum TaggedDiscovery {
+    Retry {
+        token: AwsCreateToken,
+        poll_after_secs: u32,
+    },
+    Found(AppliedIdentifier),
+    Exhausted {
+        token: AwsCreateToken,
+        error: ProviderError,
+    },
+    Ambiguous {
+        token: AwsCreateToken,
+        error: ProviderError,
+    },
+}
+
+#[derive(Debug)]
+enum TaggedEc2Continuation {
+    Complete(CreateCompletion),
+    Pending(AwsCreateToken),
 }
 
 /// Continuation phases for AWS delete operations that wait on cloud state.
@@ -138,6 +461,7 @@ pub trait AwsPollAttempt {
     type Issued: AwsIssuedCreate<Step = Self::Step, Verdict = Self::Verdict>;
 
     fn untracked(self, error: ProviderError) -> Self::Verdict;
+    fn undetermined(self, token: AwsCreateToken, error: ProviderError) -> Self::Verdict;
     fn issued(self, identifier: AppliedIdentifier) -> Self::Issued;
     fn pending(
         self,
@@ -253,6 +577,16 @@ impl AwsPollAttempt for PollAttempt {
 
     fn untracked(self, error: ProviderError) -> Self::Verdict {
         self.untracked(error)
+    }
+
+    fn undetermined(self, token: AwsCreateToken, error: ProviderError) -> Self::Verdict {
+        // The pinned native core API predates the protocol's distinct
+        // undetermined verdict. Keep the continuation in flight rather than
+        // degrading it to untracked state, which could authorize a duplicate.
+        match encode_create_token(&token) {
+            Ok(token) => self.pending(token, POLL_AFTER_SECS).preserve(error),
+            Err(message) => self.untracked(ProviderError::internal(message)),
+        }
     }
 
     fn issued(self, identifier: AppliedIdentifier) -> Self::Issued {
@@ -572,12 +906,405 @@ impl AwsProvider {
         issued.failed(observation, error)
     }
 
+    pub(crate) fn pending_tagged_ec2<A: AwsCreateAttempt>(
+        attempt: A,
+        kind: Ec2TaggedResourceKind,
+        create_token: &ClientToken,
+        sent: Sent,
+    ) -> Result<A::Step, A::Verdict> {
+        attempt.pending(
+            AwsCreateToken::TaggedEc2 {
+                kind,
+                create_token: create_token.clone(),
+                attempts_remaining: TAGGED_EC2_DISCOVERY_ATTEMPTS,
+                next_delay_secs: TAGGED_EC2_INITIAL_DELAY_SECS,
+            },
+            sent,
+            TAGGED_EC2_INITIAL_DELAY_SECS,
+        )
+    }
+
+    pub(crate) fn tagged_ec2_send_error<A, E>(
+        attempt: A,
+        id: &ResourceId,
+        kind: Ec2TaggedResourceKind,
+        create_token: &ClientToken,
+        sent: Sent,
+        error: crate::error_helpers::AwsSdkError<E>,
+    ) -> Result<A::Step, A::Verdict>
+    where
+        A: AwsCreateAttempt,
+        E: std::error::Error
+            + aws_smithy_types::error::metadata::ProvideErrorMetadata
+            + aws_smithy_types::retry::ProvideErrorKind
+            + Send
+            + Sync
+            + 'static,
+    {
+        if SendOutcome::classify(&error) == SendOutcome::MaybeSent {
+            return Self::pending_tagged_ec2(attempt, kind, create_token, sent);
+        }
+        Err(attempt.untracked(
+            crate::error_helpers::api_error_with_meta(
+                kind.create_error_context(),
+                kind.create_operation(),
+                error,
+            )
+            .for_resource(id.clone()),
+        ))
+    }
+
+    pub(crate) async fn finish_tagged_ec2_create<A, E, O, Identifier>(
+        &self,
+        resource: &Resource,
+        attempt: A,
+        context: TaggedEc2CreateContext<'_>,
+        result: Result<O, crate::error_helpers::AwsSdkError<E>>,
+        identifier: Identifier,
+    ) -> Result<A::Step, A::Verdict>
+    where
+        A: AwsCreateAttempt,
+        E: std::error::Error
+            + aws_smithy_types::error::metadata::ProvideErrorMetadata
+            + aws_smithy_types::retry::ProvideErrorKind
+            + Send
+            + Sync
+            + 'static,
+        Identifier: FnOnce(&O) -> Option<String>,
+    {
+        let TaggedEc2CreateContext {
+            kind,
+            create_token,
+            sent,
+        } = context;
+        let output = match result {
+            Ok(output) => output,
+            Err(error) => {
+                return Self::tagged_ec2_send_error(
+                    attempt,
+                    &resource.id,
+                    kind,
+                    create_token,
+                    sent,
+                    error,
+                );
+            }
+        };
+        let Some(identifier) = identifier(&output) else {
+            return Self::pending_tagged_ec2(attempt, kind, create_token, sent);
+        };
+        let identifier = match crate::helpers::applied_identifier(
+            &resource.id,
+            kind.create_operation(),
+            &identifier,
+        ) {
+            Ok(identifier) => identifier,
+            Err(error) => return Err(attempt.untracked(error)),
+        };
+        let issued = attempt.issued(identifier.clone(), sent);
+        self.finish_tagged_ec2_issued(resource, kind, identifier, issued)
+            .await
+    }
+
+    fn tagged_ec2_discovery_call_error<E>(
+        id: &ResourceId,
+        kind: Ec2TaggedResourceKind,
+        error: crate::error_helpers::AwsSdkError<E>,
+    ) -> ProviderError
+    where
+        E: std::error::Error
+            + aws_smithy_types::error::metadata::ProvideErrorMetadata
+            + aws_smithy_types::retry::ProvideErrorKind
+            + Send
+            + Sync
+            + 'static,
+    {
+        crate::error_helpers::api_error_with_meta(
+            kind.discovery_error_context(),
+            kind.describe_operation(),
+            error,
+        )
+        .for_resource(id.clone())
+    }
+
+    async fn discover_tagged_ec2_resources(
+        &self,
+        id: &ResourceId,
+        kind: Ec2TaggedResourceKind,
+        create_token: &ClientToken,
+    ) -> ProviderResult<Vec<AppliedIdentifier>> {
+        let filter = aws_sdk_ec2::types::Filter::builder()
+            .name(format!("tag:{EC2_CREATE_TOKEN_TAG}"))
+            .values(create_token.as_str())
+            .build();
+        let raw_identifiers = kind.describe_by_tag(self, id, filter).await?;
+
+        raw_identifiers
+            .into_iter()
+            .map(|value| {
+                crate::helpers::applied_identifier(id, kind.create_operation(), value.as_str())
+            })
+            .collect()
+    }
+
+    async fn read_tagged_ec2_resource(
+        &self,
+        id: &ResourceId,
+        kind: Ec2TaggedResourceKind,
+        identifier: &AppliedIdentifier,
+    ) -> ProviderResult<ReadOutcome> {
+        match kind {
+            Ec2TaggedResourceKind::Vpc => self.read_ec2_vpc(id, identifier).await,
+            Ec2TaggedResourceKind::Subnet => self.read_ec2_subnet(id, identifier).await,
+            Ec2TaggedResourceKind::RouteTable => self.read_ec2_route_table(id, identifier).await,
+            Ec2TaggedResourceKind::SecurityGroup => {
+                self.read_ec2_security_group(id, identifier).await
+            }
+            Ec2TaggedResourceKind::InternetGateway => {
+                self.read_ec2_internet_gateway(id, identifier).await
+            }
+            Ec2TaggedResourceKind::EgressOnlyInternetGateway => {
+                self.read_ec2_egress_only_internet_gateway(id, identifier)
+                    .await
+            }
+            Ec2TaggedResourceKind::VpnGateway => self.read_ec2_vpn_gateway(id, identifier).await,
+            Ec2TaggedResourceKind::VpcPeeringConnection => {
+                self.read_ec2_vpc_peering_connection(id, identifier).await
+            }
+            Ec2TaggedResourceKind::Address => self.read_ec2_eip(id, identifier).await,
+            Ec2TaggedResourceKind::NatGateway => self.read_ec2_nat_gateway(id, identifier).await,
+            Ec2TaggedResourceKind::VpcEndpoint => self.read_ec2_vpc_endpoint(id, identifier).await,
+            Ec2TaggedResourceKind::FlowLog => self.read_ec2_flow_log(id, identifier).await,
+            Ec2TaggedResourceKind::TransitGateway => {
+                self.read_ec2_transit_gateway(id, identifier).await
+            }
+            Ec2TaggedResourceKind::TransitGatewayVpcAttachment => {
+                self.read_ec2_transit_gateway_attachment(id, identifier)
+                    .await
+            }
+        }
+    }
+
+    fn tagged_ec2_outcome_unknown_message(
+        kind: Ec2TaggedResourceKind,
+        create_token: &ClientToken,
+    ) -> String {
+        format!(
+            "{} may have been created with tag {EC2_CREATE_TOKEN_TAG}={}; check before re-applying",
+            kind.resource_type(),
+            create_token.as_str()
+        )
+    }
+
+    fn tagged_ec2_outcome_unknown_error(
+        _id: &ResourceId,
+        kind: Ec2TaggedResourceKind,
+        create_token: &ClientToken,
+        discovery_error: Option<ProviderError>,
+    ) -> ProviderError {
+        let message = Self::tagged_ec2_outcome_unknown_message(kind, create_token);
+        match discovery_error {
+            None => ProviderError::api_error(message),
+            Some(cause) => {
+                // ProviderError's typed-cause constructor deliberately takes a
+                // static context. This terminal path is rare and bounded by the
+                // discovery window; leaking this one diagnostic string lets us
+                // preserve the typed discovery error instead of flattening its
+                // AWS status/code/request-id chain.
+                let context: &'static str = Box::leak(message.into_boxed_str());
+                ProviderError::api_error_caused_by(context, cause)
+            }
+        }
+    }
+
+    fn tagged_ec2_ambiguous_error(
+        id: &ResourceId,
+        kind: Ec2TaggedResourceKind,
+        identifiers: &[AppliedIdentifier],
+    ) -> ProviderError {
+        let identifiers = identifiers
+            .iter()
+            .map(AppliedIdentifier::as_str)
+            .collect::<Vec<_>>()
+            .join(", ");
+        ProviderError::api_error(format!(
+            "outcome unknown: {} matched multiple resources by create token: {identifiers}",
+            kind.create_operation()
+        ))
+        .for_resource(id.clone())
+    }
+
+    async fn tagged_ec2_discovery(
+        &self,
+        id: &ResourceId,
+        kind: Ec2TaggedResourceKind,
+        create_token: ClientToken,
+        attempts_remaining: u8,
+        next_delay_secs: u32,
+    ) -> TaggedDiscovery {
+        let result = self
+            .discover_tagged_ec2_resources(id, kind, &create_token)
+            .await;
+        let token = || AwsCreateToken::TaggedEc2 {
+            kind,
+            create_token: create_token.clone(),
+            attempts_remaining,
+            next_delay_secs,
+        };
+
+        match result {
+            Ok(mut identifiers) if identifiers.len() == 1 => {
+                TaggedDiscovery::Found(identifiers.remove(0))
+            }
+            Ok(identifiers) if identifiers.len() > 1 => TaggedDiscovery::Ambiguous {
+                token: token(),
+                error: Self::tagged_ec2_ambiguous_error(id, kind, &identifiers),
+            },
+            Ok(_) | Err(_) if attempts_remaining > 1 => {
+                let poll_after_secs = next_tagged_ec2_delay(next_delay_secs);
+                TaggedDiscovery::Retry {
+                    token: AwsCreateToken::TaggedEc2 {
+                        kind,
+                        create_token,
+                        attempts_remaining: attempts_remaining - 1,
+                        next_delay_secs: poll_after_secs,
+                    },
+                    poll_after_secs,
+                }
+            }
+            Ok(_) => TaggedDiscovery::Exhausted {
+                token: token(),
+                error: Self::tagged_ec2_outcome_unknown_error(id, kind, &create_token, None),
+            },
+            Err(discovery_error) => TaggedDiscovery::Exhausted {
+                token: token(),
+                error: Self::tagged_ec2_outcome_unknown_error(
+                    id,
+                    kind,
+                    &create_token,
+                    Some(discovery_error),
+                ),
+            },
+        }
+    }
+
+    async fn continue_tagged_ec2_create(
+        &self,
+        resource: &Resource,
+        kind: Ec2TaggedResourceKind,
+        identifier: AppliedIdentifier,
+    ) -> ProviderResult<TaggedEc2Continuation> {
+        match kind {
+            Ec2TaggedResourceKind::Vpc => {
+                self.continue_ec2_vpc_create(resource, identifier.as_str())
+                    .await?;
+            }
+            Ec2TaggedResourceKind::Subnet => {
+                let schema = self
+                    .resource_schema(resource.id.resource_type.as_str())
+                    .ok_or_else(|| {
+                        ProviderError::internal("missing EC2 subnet schema")
+                            .for_resource(resource.id.clone())
+                    })?;
+                self.continue_ec2_subnet_create(resource, schema, identifier.as_str())
+                    .await?;
+            }
+            Ec2TaggedResourceKind::RouteTable => {
+                self.continue_ec2_route_table_create(resource, identifier.as_str())
+                    .await?;
+            }
+            Ec2TaggedResourceKind::InternetGateway => {
+                self.continue_ec2_internet_gateway_create(resource, identifier.as_str())
+                    .await?;
+            }
+            Ec2TaggedResourceKind::VpcEndpoint => {
+                self.apply_ec2_tags(
+                    &resource.id,
+                    identifier.as_str(),
+                    &resource.resolved_attributes(),
+                    None,
+                )
+                .await?;
+            }
+            _ => {}
+        }
+
+        let pending = match kind {
+            Ec2TaggedResourceKind::NatGateway => Some(AwsCreateToken::NatGateway {
+                nat_gateway_id: identifier.clone(),
+            }),
+            Ec2TaggedResourceKind::TransitGateway => Some(AwsCreateToken::TransitGateway {
+                transit_gateway_id: identifier.clone(),
+            }),
+            Ec2TaggedResourceKind::TransitGatewayVpcAttachment => {
+                Some(AwsCreateToken::TransitGatewayAttachment {
+                    attachment_id: identifier.clone(),
+                })
+            }
+            _ => None,
+        };
+        if let Some(token) = pending {
+            return Ok(TaggedEc2Continuation::Pending(token));
+        }
+
+        let outcome = self
+            .read_tagged_ec2_resource(&resource.id, kind, &identifier)
+            .await;
+        Ok(TaggedEc2Continuation::Complete(
+            self.create_outcome_from_read(
+                &resource.id,
+                identifier,
+                resource.resolved_attributes(),
+                outcome,
+            ),
+        ))
+    }
+
+    pub(crate) async fn finish_tagged_ec2_issued<I: AwsIssuedCreate>(
+        &self,
+        resource: &Resource,
+        kind: Ec2TaggedResourceKind,
+        identifier: AppliedIdentifier,
+        issued: I,
+    ) -> Result<I::Step, I::Verdict> {
+        match self
+            .continue_tagged_ec2_create(resource, kind, identifier)
+            .await
+        {
+            Ok(TaggedEc2Continuation::Complete(completion)) => {
+                Ok(self.finish_issued(issued, completion))
+            }
+            Ok(TaggedEc2Continuation::Pending(token)) => issued.pending(token, POLL_AFTER_SECS),
+            Err(error) => Err(self.failed_issued(&resource.id, issued, error).await),
+        }
+    }
+
+    async fn finish_tagged_ec2_resumed<R: AwsResumedCreate>(
+        &self,
+        resource: &Resource,
+        kind: Ec2TaggedResourceKind,
+        identifier: AppliedIdentifier,
+        resumed: R,
+    ) -> Result<R::Step, R::Verdict> {
+        match self
+            .continue_tagged_ec2_create(resource, kind, identifier)
+            .await
+        {
+            Ok(TaggedEc2Continuation::Complete(completion)) => {
+                self.finish_resumed_completion(&resource.id, resumed, completion)
+            }
+            Ok(TaggedEc2Continuation::Pending(token)) => resumed.pending(token, POLL_AFTER_SECS),
+            Err(error) => Err(self.failed_resumed(&resource.id, resumed, error).await),
+        }
+    }
+
     /// Perform the initial, non-blocking create step.
     pub async fn create_step<A: AwsCreateAttempt>(
         &self,
         resource: &Resource,
         attempt: A,
     ) -> Result<A::Step, A::Verdict> {
+        let client_token = crate::aws_operation::ClientToken::new();
         let schema = match self.resource_schema(resource.id.resource_type.as_str()) {
             Some(schema) => schema,
             None => {
@@ -592,54 +1319,21 @@ impl AwsProvider {
         };
         match resource.id.resource_type.as_str() {
             "ec2.NatGateway" => {
-                let identifier = match self.create_ec2_nat_gateway_start(resource, schema).await {
-                    Ok(identifier) => identifier,
-                    Err(error) => return Err(attempt.untracked(error)),
-                };
-                let sent = Self::sent_only(
-                    resource,
-                    &["subnet_id", "allocation_id", "connectivity_type"],
-                );
-                attempt.issued(identifier.clone(), sent).pending(
-                    AwsCreateToken::NatGateway {
-                        nat_gateway_id: identifier,
-                    },
-                    POLL_AFTER_SECS,
-                )
+                self.create_ec2_nat_gateway_start(resource, schema, &client_token, attempt)
+                    .await
             }
             "ec2.TransitGateway" => {
-                let identifier = match self
-                    .create_ec2_transit_gateway_start(resource, schema)
+                self.create_ec2_transit_gateway_start(resource, schema, &client_token, attempt)
                     .await
-                {
-                    Ok(identifier) => identifier,
-                    Err(error) => return Err(attempt.untracked(error)),
-                };
-                attempt
-                    .issued(identifier.clone(), Sent::AllRequestAttributes)
-                    .pending(
-                        AwsCreateToken::TransitGateway {
-                            transit_gateway_id: identifier,
-                        },
-                        POLL_AFTER_SECS,
-                    )
             }
             "ec2.TransitGatewayAttachment" => {
-                let identifier = match self
-                    .create_ec2_transit_gateway_attachment_start(resource, schema)
-                    .await
-                {
-                    Ok(identifier) => identifier,
-                    Err(error) => return Err(attempt.untracked(error)),
-                };
-                attempt
-                    .issued(identifier.clone(), Sent::AllRequestAttributes)
-                    .pending(
-                        AwsCreateToken::TransitGatewayAttachment {
-                            attachment_id: identifier,
-                        },
-                        POLL_AFTER_SECS,
-                    )
+                self.create_ec2_transit_gateway_attachment_start(
+                    resource,
+                    schema,
+                    &client_token,
+                    attempt,
+                )
+                .await
             }
             "organizations.Account" => {
                 let request_id = match self
@@ -670,7 +1364,8 @@ impl AwsProvider {
             "acm.Certificate" => self.finish_create(
                 attempt,
                 Sent::AllRequestAttributes,
-                self.create_acm_certificate(resource, schema).await,
+                self.create_acm_certificate(resource, schema, &client_token)
+                    .await,
             ),
             "s3.Bucket" => self.create_s3_bucket(resource, attempt).await,
             "s3.BucketPolicy" => self.finish_create(
@@ -745,17 +1440,35 @@ impl AwsProvider {
                 Sent::AllRequestAttributes,
                 self.create_s3_bucket_logging(resource, schema).await,
             ),
-            "ec2.Eip" => self.create_ec2_eip(resource, schema, attempt).await,
-            "ec2.Vpc" => self.create_ec2_vpc(resource, schema, attempt).await,
-            "ec2.Subnet" => self.create_ec2_subnet(resource, schema, attempt).await,
-            "ec2.InternetGateway" => self.create_ec2_internet_gateway(resource, attempt).await,
-            "ec2.RouteTable" => self.create_ec2_route_table(resource, attempt).await,
+            "ec2.Eip" => {
+                self.create_ec2_eip(resource, schema, &client_token, attempt)
+                    .await
+            }
+            "ec2.Vpc" => {
+                self.create_ec2_vpc(resource, schema, &client_token, attempt)
+                    .await
+            }
+            "ec2.Subnet" => {
+                self.create_ec2_subnet(resource, schema, &client_token, attempt)
+                    .await
+            }
+            "ec2.InternetGateway" => {
+                self.create_ec2_internet_gateway(resource, &client_token, attempt)
+                    .await
+            }
+            "ec2.RouteTable" => {
+                self.create_ec2_route_table(resource, &client_token, attempt)
+                    .await
+            }
             "ec2.Route" => self.finish_create(
                 attempt,
                 Sent::AllRequestAttributes,
                 self.create_ec2_route(resource).await,
             ),
-            "ec2.SecurityGroup" => self.create_ec2_security_group(resource, attempt).await,
+            "ec2.SecurityGroup" => {
+                self.create_ec2_security_group(resource, &client_token, attempt)
+                    .await
+            }
             "ec2.SecurityGroupIngress" => self.finish_create(
                 attempt,
                 Sent::AllRequestAttributes,
@@ -774,9 +1487,12 @@ impl AwsProvider {
                 self.create_ec2_subnet_route_table_association(resource)
                     .await,
             ),
-            "ec2.FlowLog" => self.create_ec2_flow_log(resource, schema, attempt).await,
+            "ec2.FlowLog" => {
+                self.create_ec2_flow_log(resource, schema, &client_token, attempt)
+                    .await
+            }
             "ec2.VpcEndpoint" => {
-                self.create_ec2_vpc_endpoint(resource, schema, attempt)
+                self.create_ec2_vpc_endpoint(resource, schema, &client_token, attempt)
                     .await
             }
             "ec2.VpcGatewayAttachment" => self.finish_create(
@@ -784,17 +1500,18 @@ impl AwsProvider {
                 Sent::AllRequestAttributes,
                 self.create_ec2_vpc_gateway_attachment(resource).await,
             ),
-            "ec2.VpnGateway" => self.create_ec2_vpn_gateway(resource, schema, attempt).await,
-            "ec2.VpcPeeringConnection" => self.finish_create(
-                attempt,
-                Sent::AllRequestAttributes,
-                self.create_ec2_vpc_peering_connection(resource).await,
-            ),
-            "ec2.EgressOnlyInternetGateway" => self.finish_create(
-                attempt,
-                Sent::AllRequestAttributes,
-                self.create_ec2_egress_only_internet_gateway(resource).await,
-            ),
+            "ec2.VpnGateway" => {
+                self.create_ec2_vpn_gateway(resource, schema, &client_token, attempt)
+                    .await
+            }
+            "ec2.VpcPeeringConnection" => {
+                self.create_ec2_vpc_peering_connection(resource, &client_token, attempt)
+                    .await
+            }
+            "ec2.EgressOnlyInternetGateway" => {
+                self.create_ec2_egress_only_internet_gateway(resource, &client_token, attempt)
+                    .await
+            }
             "organizations.Organization" => self.finish_create(
                 attempt,
                 Sent::AllRequestAttributes,
@@ -1027,6 +1744,50 @@ impl AwsProvider {
                     },
                 }
             }
+            AwsCreateToken::TaggedEc2 {
+                kind,
+                create_token,
+                attempts_remaining,
+                next_delay_secs,
+            } => {
+                match self
+                    .tagged_ec2_discovery(
+                        id,
+                        kind,
+                        create_token,
+                        attempts_remaining,
+                        next_delay_secs,
+                    )
+                    .await
+                {
+                    TaggedDiscovery::Retry {
+                        token,
+                        poll_after_secs,
+                    } => match poll {
+                        AwsCreatePoll::Unissued(attempt) => attempt.pending(token, poll_after_secs),
+                        AwsCreatePoll::Issued(issued) => issued.pending(token, poll_after_secs),
+                    },
+                    TaggedDiscovery::Exhausted { token, error }
+                    | TaggedDiscovery::Ambiguous { token, error } => match poll {
+                        AwsCreatePoll::Unissued(attempt) => Err(attempt.undetermined(token, error)),
+                        AwsCreatePoll::Issued(issued) => Err(issued.failed(
+                            Observation::ReadFailed(
+                                ProviderError::api_error("tagged EC2 discovery was inconclusive")
+                                    .for_resource(id.clone()),
+                            ),
+                            error,
+                        )),
+                    },
+                    TaggedDiscovery::Found(identifier) => {
+                        let issued = match poll {
+                            AwsCreatePoll::Unissued(attempt) => attempt.issued(identifier.clone()),
+                            AwsCreatePoll::Issued(issued) => issued,
+                        };
+                        self.finish_tagged_ec2_issued(resource, kind, identifier, issued)
+                            .await
+                    }
+                }
+            }
         }
     }
 
@@ -1120,12 +1881,10 @@ impl AwsProvider {
         token: AwsCreateToken,
         outcome: ProviderResult<ReadOutcome>,
     ) -> Result<R::Step, R::Verdict> {
-        // Issued EC2 creates can be briefly absent immediately after the
-        // create response. The service-specific measurements at the EC2 read
-        // and poll sites show that absence is reported either as an empty list
-        // or a NotFound error. Keep both (and other transient read failures)
-        // pending during resume; discarding the persisted record would let the
-        // next apply issue a duplicate create.
+        // EC2 describe APIs are eventually consistent after a create. Keep an
+        // absent resource and transient read failures pending during resume;
+        // discarding the persisted record could let the next apply issue a
+        // duplicate create.
         match outcome {
             Ok(ReadOutcome::Found { state }) => Ok(resumed.completed(state)),
             Ok(ReadOutcome::NotFound { id: _ }) | Err(_) => resumed.pending(token, POLL_AFTER_SECS),
@@ -1323,6 +2082,54 @@ impl AwsProvider {
                     },
                 }
             }
+            AwsCreateToken::TaggedEc2 {
+                kind,
+                create_token,
+                attempts_remaining,
+                next_delay_secs,
+            } => {
+                match self
+                    .tagged_ec2_discovery(
+                        id,
+                        kind,
+                        create_token,
+                        attempts_remaining,
+                        next_delay_secs,
+                    )
+                    .await
+                {
+                    TaggedDiscovery::Retry {
+                        token,
+                        poll_after_secs,
+                    } => match resume {
+                        AwsCreateResume::Unissued(attempt) => {
+                            attempt.pending(token, poll_after_secs)
+                        }
+                        AwsCreateResume::Issued(resumed) => resumed.pending(token, poll_after_secs),
+                    },
+                    TaggedDiscovery::Exhausted { error, .. }
+                    | TaggedDiscovery::Ambiguous { error, .. } => match resume {
+                        AwsCreateResume::Unissued(attempt) => Err(attempt.undetermined(error)),
+                        AwsCreateResume::Issued(resumed) => Err(resumed.failed(
+                            Observation::ReadFailed(
+                                ProviderError::api_error("tagged EC2 discovery was inconclusive")
+                                    .for_resource(id.clone()),
+                            ),
+                            error,
+                        )),
+                    },
+                    TaggedDiscovery::Found(identifier) => {
+                        let resumed = match resume {
+                            AwsCreateResume::Unissued(attempt) => {
+                                attempt.issued(identifier.clone())
+                            }
+                            AwsCreateResume::Issued(resumed) => resumed,
+                        };
+                        self.finish_tagged_ec2_resumed(resource, kind, identifier, resumed)
+                            .await
+                    }
+                }
+            }
         }
     }
 
@@ -1358,13 +2165,15 @@ impl AwsProvider {
                     .for_resource(resource.id.clone()),
                 ));
             }
-            let remaining = budget.saturating_sub(started.elapsed());
-            let delay = Duration::from_secs(u64::from(POLL_AFTER_SECS)).min(remaining);
-            tokio::time::sleep(delay).await;
             let token = match decode_create_token(next.token()) {
                 Ok(token) => token,
                 Err(error) => return Err(next.preserve(error)),
             };
+            let remaining = budget.saturating_sub(started.elapsed());
+            let delay =
+                Duration::from_secs(u64::from(create_token_poll_after(&token).clamp(1, 300)))
+                    .min(remaining);
+            tokio::time::sleep(delay).await;
             let resume = match next {
                 Resume::Unissued(attempt) => AwsCreateResume::Unissued(attempt),
                 Resume::Issued(resumed) => AwsCreateResume::Issued(resumed),
@@ -2035,6 +2844,58 @@ mod pending_operation_tests {
             assert_eq!(object.len(), 2, "token must contain only phase and one id");
             assert!(object.contains_key("phase"));
         }
+    }
+
+    #[test]
+    fn tagged_ec2_token_round_trips_with_kind_token_attempts_and_next_delay() {
+        let token = AwsCreateToken::TaggedEc2 {
+            kind: Ec2TaggedResourceKind::Vpc,
+            create_token: crate::aws_operation::ClientToken::new(),
+            attempts_remaining: 8,
+            next_delay_secs: 5,
+        };
+
+        let json = serde_json::to_string(&token).expect("tagged EC2 token should serialize");
+        assert_eq!(
+            serde_json::from_str::<AwsCreateToken>(&json)
+                .expect("tagged EC2 token should deserialize"),
+            token
+        );
+        let object =
+            serde_json::from_str::<serde_json::Value>(&json).expect("tagged EC2 token JSON");
+        assert_eq!(object["phase"], "tagged_ec2");
+        assert_eq!(object["kind"], "vpc");
+        assert_eq!(object["attempts_remaining"], 8);
+        assert_eq!(object["next_delay_secs"], 5);
+        assert!(object["create_token"].as_str().is_some());
+    }
+
+    #[test]
+    fn tagged_ec2_discovery_backoff_spans_about_five_minutes() {
+        let mut delay = TAGGED_EC2_INITIAL_DELAY_SECS;
+        let mut delays = Vec::new();
+        for _ in 0..TAGGED_EC2_DISCOVERY_ATTEMPTS {
+            delays.push(delay);
+            delay = next_tagged_ec2_delay(delay);
+        }
+
+        assert_eq!(delays, [5, 10, 20, 30, 60, 60, 60, 60]);
+        assert_eq!(delays.iter().sum::<u32>(), 305);
+        assert!(delays.iter().all(|delay| *delay <= 300));
+        let worst_case_secs = u64::from(delays.iter().sum::<u32>())
+            + (u64::from(TAGGED_EC2_DISCOVERY_ATTEMPTS) + 1) * 60;
+        assert_eq!(worst_case_secs, 845);
+        assert!(worst_case_secs < DEFAULT_OPERATION_BUDGET.as_secs());
+        assert_eq!(
+            create_token_poll_after(&AwsCreateToken::TaggedEc2 {
+                kind: Ec2TaggedResourceKind::Vpc,
+                create_token: ClientToken::new(),
+                attempts_remaining: 4,
+                next_delay_secs: 60,
+            }),
+            60,
+            "native resume must preserve the same backoff as host polling"
+        );
     }
 
     #[tokio::test]

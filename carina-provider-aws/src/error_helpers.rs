@@ -29,6 +29,11 @@
 use carina_core::provider::ProviderError;
 use thiserror::Error;
 
+use carina_aws_types::{Idempotency, SendOutcome};
+
+const OUTCOME_UNKNOWN_NOTE: &str =
+    "outcome unknown: the request may have been applied; check before re-applying";
+
 /// Type alias for the `aws-sdk-*` family's `SdkError` shape with the
 /// HTTP-response generic pinned. Every `aws-sdk-*` crate's
 /// `error::SdkError<E>` re-exports the same smithy
@@ -104,6 +109,16 @@ where
     source: AwsSdkError<E>,
 }
 
+#[derive(Debug, Error)]
+#[error("{OUTCOME_UNKNOWN_NOTE}")]
+struct OutcomeUnknownCause<C>
+where
+    C: std::error::Error + 'static,
+{
+    #[source]
+    source: C,
+}
+
 /// Build a structured `ProviderError::ApiError` from an AWS SDK error.
 ///
 /// Extracts HTTP status, AWS error code, AWS-side message, and request
@@ -142,6 +157,7 @@ where
     S: Into<String>,
     E: std::error::Error
         + aws_smithy_types::error::metadata::ProvideErrorMetadata
+        + aws_smithy_types::retry::ProvideErrorKind
         + Send
         + Sync
         + 'static,
@@ -165,6 +181,7 @@ where
     Subject: std::fmt::Debug + std::fmt::Display + Send + Sync + 'static,
     E: std::error::Error
         + aws_smithy_types::error::metadata::ProvideErrorMetadata
+        + aws_smithy_types::retry::ProvideErrorKind
         + Send
         + Sync
         + 'static,
@@ -189,6 +206,7 @@ where
     Cause: std::error::Error + Send + Sync + 'static,
     E: std::error::Error
         + aws_smithy_types::error::metadata::ProvideErrorMetadata
+        + aws_smithy_types::retry::ProvideErrorKind
         + Send
         + Sync
         + 'static,
@@ -196,6 +214,11 @@ where
     use aws_smithy_types::error::metadata::ProvideErrorMetadata;
     use aws_types::request_id::RequestId;
 
+    let outcome = SendOutcome::classify(&err);
+    let operation = operation.into();
+    let append_outcome_unknown = outcome == SendOutcome::MaybeSent
+        && crate::resend_safety_generated::operation_idempotency(&operation)
+            == Idempotency::NotIdempotent;
     let status = err
         .raw_response()
         .map(|response| response.status().as_u16());
@@ -204,7 +227,15 @@ where
     let request_id = err.request_id().map(str::to_owned);
     let cause = make_cause(aws_message, err);
 
-    let mut pe = if code.as_deref().is_some_and(is_not_found_error_code) || status == Some(404) {
+    let not_found = code.as_deref().is_some_and(is_not_found_error_code) || status == Some(404);
+    let mut pe = if append_outcome_unknown {
+        let cause = OutcomeUnknownCause { source: cause };
+        if not_found {
+            ProviderError::not_found_caused_by(context, cause)
+        } else {
+            ProviderError::api_error_caused_by(context, cause)
+        }
+    } else if not_found {
         ProviderError::not_found_caused_by(context, cause)
     } else {
         ProviderError::api_error_caused_by(context, cause)
@@ -406,6 +437,58 @@ mod tests {
             pe.to_string(),
             "Failed to list IAM roles\n  operation: iam.ListRoles\n  cause: AWS SDK request failed: failed to construct request: dns lookup failed"
         );
+    }
+
+    #[test]
+    fn api_error_with_meta_keeps_readonly_context_without_outcome_unknown_note() {
+        let sdk_err: SdkError<ListRolesError> = SdkError::timeout_error("response timed out");
+
+        let pe = api_error_with_meta("Failed to list IAM roles", "iam.ListRoles", sdk_err);
+        let rendered = pe.to_string();
+
+        assert!(
+            rendered.starts_with("Failed to list IAM roles"),
+            "{rendered}"
+        );
+        assert!(!rendered.contains("may have been applied"), "{rendered}");
+        assert!(rendered.contains("iam.ListRoles"), "{rendered}");
+    }
+
+    #[test]
+    fn api_error_with_meta_appends_outcome_unknown_only_for_non_idempotent_operation() {
+        let sdk_err: SdkError<ListRolesError> = SdkError::timeout_error("response timed out");
+
+        let pe = api_error_with_meta("Failed to create VPC", "ec2.CreateVpc", sdk_err);
+        let rendered = pe.to_string();
+
+        assert_eq!(pe.detail().context(), "Failed to create VPC");
+        assert!(rendered.starts_with("Failed to create VPC"), "{rendered}");
+        assert!(rendered.contains(OUTCOME_UNKNOWN_NOTE), "{rendered}");
+        assert!(rendered.contains("response timed out"), "{rendered}");
+    }
+
+    #[test]
+    fn api_error_with_meta_does_not_mark_token_bearing_create_as_outcome_unknown() {
+        let sdk_err: SdkError<ListRolesError> = SdkError::timeout_error("response timed out");
+
+        let pe = api_error_with_meta(
+            "Failed to create NAT gateway",
+            "ec2.CreateNatGateway",
+            sdk_err,
+        );
+
+        assert_eq!(pe.detail().context(), "Failed to create NAT gateway");
+        assert!(!pe.to_string().contains("may have been applied"));
+    }
+
+    #[test]
+    fn api_error_with_meta_treats_unknown_operation_as_non_idempotent() {
+        let sdk_err: SdkError<ListRolesError> = SdkError::timeout_error("response timed out");
+
+        let pe = api_error_with_meta("Failed custom call", "custom.Unknown", sdk_err);
+
+        assert_eq!(pe.detail().context(), "Failed custom call");
+        assert!(pe.to_string().contains(OUTCOME_UNKNOWN_NOTE));
     }
 
     #[test]

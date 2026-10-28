@@ -1,18 +1,20 @@
 use std::collections::HashMap;
 
-use carina_core::provider::{AppliedIdentifier, ReadOutcome};
-use carina_core::provider::{ProviderError, ProviderResult};
+use carina_core::provider::ProviderResult;
+use carina_core::provider::{AppliedIdentifier, ReadOutcome, Sent};
 use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
 use carina_core::schema::ResourceSchema;
 
 use aws_sdk_ec2::types::TransitGatewayState;
 
 use crate::AwsProvider;
+use crate::aws_operation::ClientToken;
 use crate::error_helpers::api_error_with_meta;
 use crate::helpers::{
-    CreatePoll, DeletePoll, build_tag_specification, optional_enum_struct_field,
+    CreatePoll, DeletePoll, build_tag_specification_with_create_token, optional_enum_struct_field,
     optional_int_struct_field, optional_string_list_struct_field,
 };
+use crate::provider::{AwsCreateAttempt, Ec2TaggedResourceKind};
 
 fn transit_gateway_create_poll_state(state: Option<&TransitGatewayState>) -> CreatePoll<()> {
     match state {
@@ -183,11 +185,13 @@ impl AwsProvider {
     }
 
     /// Create an EC2 Transit Gateway
-    pub(crate) async fn create_ec2_transit_gateway_start(
+    pub(crate) async fn create_ec2_transit_gateway_start<A: AwsCreateAttempt>(
         &self,
         resource: &Resource,
         schema: &ResourceSchema,
-    ) -> ProviderResult<AppliedIdentifier> {
+        client_token: &ClientToken,
+        attempt: A,
+    ) -> Result<A::Step, A::Verdict> {
         let mut req = self.ec2_client.create_transit_gateway();
 
         if let Some(Value::Concrete(ConcreteValue::String(desc))) = resource.get_attr("description")
@@ -195,35 +199,36 @@ impl AwsProvider {
             req = req.description(desc.expose_plaintext());
         }
 
-        if let Some(options) = build_create_transit_gateway_options(resource, schema)? {
+        let options = match build_create_transit_gateway_options(resource, schema) {
+            Ok(options) => options,
+            Err(error) => return Err(attempt.untracked(error)),
+        };
+        if let Some(options) = options {
             req = req.options(options);
         }
 
-        // Apply tags via TagSpecifications
-        if let Some(tag_spec) =
-            build_tag_specification(resource, aws_sdk_ec2::types::ResourceType::TransitGateway)
-        {
-            req = req.tag_specifications(tag_spec);
-        }
+        req = req.tag_specifications(build_tag_specification_with_create_token(
+            resource,
+            aws_sdk_ec2::types::ResourceType::TransitGateway,
+            client_token,
+        ));
 
-        let result = req.send().await.map_err(|e| {
-            api_error_with_meta(
-                "Failed to create transit gateway",
-                "ec2.CreateTransitGateway",
-                e,
-            )
-            .for_resource(resource.id.clone())
-        })?;
+        let result = req.send().await;
 
-        let tgw_id = result
-            .transit_gateway()
-            .and_then(|tgw| tgw.transit_gateway_id())
-            .ok_or_else(|| {
-                ProviderError::api_error("Transit Gateway created but no ID returned")
-                    .for_resource(resource.id.clone())
-            })?;
-
-        crate::helpers::applied_identifier(&resource.id, "ec2.CreateTransitGateway", tgw_id)
+        self.finish_tagged_ec2_create(
+            resource,
+            attempt,
+            Ec2TaggedResourceKind::TransitGateway
+                .create_context(client_token, Sent::AllRequestAttributes),
+            result,
+            |output| {
+                output
+                    .transit_gateway()
+                    .and_then(|gateway| gateway.transit_gateway_id())
+                    .map(str::to_owned)
+            },
+        )
+        .await
     }
 
     /// Update an EC2 Transit Gateway (tags only for now)

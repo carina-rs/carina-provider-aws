@@ -22,13 +22,33 @@ use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
 use carina_core::schema::ResourceSchema;
 
 use crate::AwsProvider;
-use crate::error_helpers::api_error_with_meta;
+use crate::aws_operation::ClientToken;
+use crate::error_helpers::{AwsSdkError, api_error_with_meta};
 use crate::helpers::{
     optional_enum_attr, optional_enum_struct_field, require_string_attr, sdk_error_message,
 };
 use crate::provider::CreateCompletion;
 
 const DVO_MISSING_ATTRIBUTE: &str = "domain_validation_options";
+
+fn request_certificate_error(
+    id: &ResourceId,
+    error: AwsSdkError<aws_sdk_acm::operation::request_certificate::RequestCertificateError>,
+) -> ProviderError {
+    if carina_aws_types::SendOutcome::classify(&error) == carina_aws_types::SendOutcome::MaybeSent {
+        // ACM has no request-certificate lookup by idempotency token or tag.
+        // Keep this create untracked, but make the possible remote side effect
+        // explicit so an operator checks ACM before applying again.
+        api_error_with_meta(
+            "acm.Certificate may have been created; check before re-applying",
+            "acm.RequestCertificate",
+            error,
+        )
+    } else {
+        api_error_with_meta("RequestCertificate failed", "acm.RequestCertificate", error)
+            .for_resource(id.clone())
+    }
+}
 
 fn extract_string_list(value: &Value) -> Vec<String> {
     if let Value::Concrete(ConcreteValue::List(items)) = value {
@@ -477,6 +497,7 @@ impl AwsProvider {
         &self,
         resource: &Resource,
         schema: &ResourceSchema,
+        client_token: &ClientToken,
     ) -> ProviderResult<CreateCompletion> {
         let id = resource.id.clone();
         let request = build_request_certificate(resource, schema)?;
@@ -497,7 +518,8 @@ impl AwsProvider {
             .set_subject_alternative_names(request.subject_alternative_names)
             .set_options(request.options)
             .set_tags(request.tags)
-            .set_key_algorithm(request.key_algorithm);
+            .set_key_algorithm(request.key_algorithm)
+            .idempotency_token(client_token.as_str());
         // RequestCertificate accepts tags inline, avoiding a follow-up
         // AddTagsToCertificate round-trip on the create path.
         // The previous request-side `domain_validation_options`
@@ -510,10 +532,10 @@ impl AwsProvider {
         // feature; the common DNS-validation path is unaffected.
         // carina-rs/carina-provider-aws#296.
 
-        let output = req.send().await.map_err(|e| {
-            api_error_with_meta("RequestCertificate failed", "acm.RequestCertificate", e)
-                .for_resource(id.clone())
-        })?;
+        let output = req
+            .send()
+            .await
+            .map_err(|error| request_certificate_error(&id, error))?;
 
         let arn = output.certificate_arn().ok_or_else(|| {
             ProviderError::api_error("RequestCertificate returned no certificate_arn")
@@ -878,6 +900,8 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aws_sdk_acm::error::SdkError;
+    use aws_sdk_acm::operation::request_certificate::RequestCertificateError;
 
     fn acm_schema() -> ResourceSchema {
         crate::schemas::generated::acm::certificate::acm_certificate_config().schema
@@ -895,6 +919,20 @@ mod tests {
 
     fn applied_identifier(value: &str) -> AppliedIdentifier {
         AppliedIdentifier::new(value).expect("test provider identifier must be non-empty")
+    }
+
+    #[test]
+    fn maybe_sent_request_certificate_uses_acm_specific_outcome_unknown_message() {
+        let error: SdkError<RequestCertificateError> =
+            SdkError::timeout_error("response timed out");
+
+        let error = request_certificate_error(&id(), error);
+
+        assert_eq!(
+            error.to_wire().message,
+            "acm.Certificate may have been created; check before re-applying"
+        );
+        assert!(error.to_string().contains("response timed out"));
     }
 
     fn dv_without_rr(domain: &str) -> DomainValidation {

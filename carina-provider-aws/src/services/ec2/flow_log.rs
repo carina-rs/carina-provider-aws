@@ -6,9 +6,12 @@ use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
 use carina_core::schema::ResourceSchema;
 
 use crate::AwsProvider;
+use crate::aws_operation::ClientToken;
 use crate::error_helpers::api_error_with_meta;
-use crate::helpers::{build_tag_specification, optional_enum_attr, require_enum_attr};
-use crate::provider::AwsCreateAttempt;
+use crate::helpers::{
+    build_tag_specification_with_create_token, optional_enum_attr, require_enum_attr,
+};
+use crate::provider::{AwsCreateAttempt, Ec2TaggedResourceKind};
 
 impl AwsProvider {
     /// Read an EC2 Flow Log
@@ -85,6 +88,7 @@ impl AwsProvider {
         &self,
         resource: &Resource,
         schema: &ResourceSchema,
+        client_token: &ClientToken,
         attempt: A,
     ) -> Result<A::Step, A::Verdict> {
         let resource_ids_val: Vec<String> = match resource.get_attr("resource_ids") {
@@ -118,6 +122,7 @@ impl AwsProvider {
             .ec2_client
             .create_flow_logs()
             .set_resource_ids(Some(resource_ids_val.clone()))
+            .client_token(client_token.as_str())
             .resource_type(aws_sdk_ec2::types::FlowLogsResourceType::from(
                 resource_type_val.as_str(),
             ));
@@ -171,12 +176,11 @@ impl AwsProvider {
             req = req.max_aggregation_interval(*interval as i32);
         }
 
-        // Apply tags via TagSpecifications
-        if let Some(tag_spec) =
-            build_tag_specification(resource, aws_sdk_ec2::types::ResourceType::VpcFlowLog)
-        {
-            req = req.tag_specifications(tag_spec);
-        }
+        req = req.tag_specifications(build_tag_specification_with_create_token(
+            resource,
+            aws_sdk_ec2::types::ResourceType::VpcFlowLog,
+            client_token,
+        ));
 
         // Retry loop for IAM eventual consistency: newly created IAM roles may
         // not be usable immediately by create_flow_logs.
@@ -197,14 +201,14 @@ impl AwsProvider {
                     {
                         continue;
                     }
-                    return Err(attempt.untracked(
-                        api_error_with_meta(
-                            "Failed to create flow logs",
-                            "ec2.CreateFlowLogs",
-                            error,
-                        )
-                        .for_resource(resource.id.clone()),
-                    ));
+                    return Self::tagged_ec2_send_error(
+                        attempt,
+                        &resource.id,
+                        Ec2TaggedResourceKind::FlowLog,
+                        client_token,
+                        carina_core::provider::Sent::AllRequestAttributes,
+                        error,
+                    );
                 }
             };
 
@@ -247,14 +251,14 @@ impl AwsProvider {
                     return Err(self.failed_issued(&resource.id, issued, error).await);
                 }
 
-                let outcome = self.read_ec2_flow_log(&resource.id, &identifier).await;
-                let completion = self.create_outcome_from_read(
-                    &resource.id,
-                    identifier,
-                    resource.resolved_attributes(),
-                    outcome,
-                );
-                return Ok(self.finish_issued(issued, completion));
+                return self
+                    .finish_tagged_ec2_issued(
+                        resource,
+                        Ec2TaggedResourceKind::FlowLog,
+                        identifier,
+                        issued,
+                    )
+                    .await;
             }
 
             // With no returned ids, AWS proved that this response created no
@@ -283,10 +287,12 @@ impl AwsProvider {
                 ));
             }
 
-            return Err(attempt.untracked(
-                ProviderError::api_error("CreateFlowLogs returned no flow log IDs")
-                    .for_resource(resource.id.clone()),
-            ));
+            return Self::pending_tagged_ec2(
+                attempt,
+                Ec2TaggedResourceKind::FlowLog,
+                client_token,
+                carina_core::provider::Sent::AllRequestAttributes,
+            );
         }
 
         Err(attempt.untracked(

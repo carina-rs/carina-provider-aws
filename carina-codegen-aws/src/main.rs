@@ -677,6 +677,15 @@ fn main() -> Result<()> {
             std::fs::write(&output_path, &code)
                 .with_context(|| format!("Failed to write {}", output_path.display()))?;
             eprintln!("Generated: {}", output_path.display());
+
+            let resend_safety = carina_codegen_aws::resend_safety::generate_provider_module(
+                &models,
+                carina_codegen_aws::resend_safety::OVERRIDES,
+            )?;
+            let resend_safety_path = args.output_dir.join("resend_safety_generated.rs");
+            std::fs::write(&resend_safety_path, resend_safety)
+                .with_context(|| format!("Failed to write {}", resend_safety_path.display()))?;
+            eprintln!("Generated: {}", resend_safety_path.display());
         }
         "markdown" | "md" => {
             for res in &resources {

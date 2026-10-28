@@ -1,14 +1,15 @@
 use std::collections::HashMap;
 
+use carina_core::provider::ProviderResult;
 use carina_core::provider::{AppliedIdentifier, ReadOutcome};
-use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
 use carina_core::schema::ResourceSchema;
 
 use crate::AwsProvider;
+use crate::aws_operation::ClientToken;
 use crate::error_helpers::api_error_with_meta;
-use crate::helpers::require_enum_attr;
-use crate::provider::AwsCreateAttempt;
+use crate::helpers::{build_tag_specification_with_create_token, require_enum_attr};
+use crate::provider::{AwsCreateAttempt, Ec2TaggedResourceKind};
 
 impl AwsProvider {
     /// Read an EC2 VPN Gateway
@@ -72,6 +73,7 @@ impl AwsProvider {
         &self,
         resource: &Resource,
         schema: &ResourceSchema,
+        client_token: &ClientToken,
         attempt: A,
     ) -> Result<A::Step, A::Verdict> {
         let gw_type = match require_enum_attr(resource, schema, "type") {
@@ -82,66 +84,34 @@ impl AwsProvider {
         let mut req = self
             .ec2_client
             .create_vpn_gateway()
-            .r#type(aws_sdk_ec2::types::GatewayType::from(gw_type.as_str()));
+            .r#type(aws_sdk_ec2::types::GatewayType::from(gw_type.as_str()))
+            .tag_specifications(build_tag_specification_with_create_token(
+                resource,
+                aws_sdk_ec2::types::ResourceType::VpnGateway,
+                client_token,
+            ));
 
         if let Some(Value::Concrete(ConcreteValue::Int(asn))) = resource.get_attr("amazon_side_asn")
         {
             req = req.amazon_side_asn(*asn);
         }
 
-        let result = match req.send().await {
-            Ok(result) => result,
-            Err(error) => {
-                return Err(attempt.untracked(
-                    api_error_with_meta(
-                        "Failed to create VPN gateway",
-                        "ec2.CreateVpnGateway",
-                        error,
-                    )
-                    .for_resource(resource.id.clone()),
-                ));
-            }
-        };
+        let sent = Self::sent_only(resource, &["type", "amazon_side_asn", "tags"]);
+        let result = req.send().await;
 
-        let vgw_id = match result.vpn_gateway().and_then(|vgw| vgw.vpn_gateway_id()) {
-            Some(vgw_id) => vgw_id,
-            None => {
-                return Err(attempt.untracked(
-                    ProviderError::api_error("VPN Gateway created but no ID returned")
-                        .for_resource(resource.id.clone()),
-                ));
-            }
-        };
-        let identifier = match crate::helpers::applied_identifier(
-            &resource.id,
-            "ec2.CreateVpnGateway",
-            vgw_id,
-        ) {
-            Ok(identifier) => identifier,
-            Err(error) => return Err(attempt.untracked(error)),
-        };
-        let issued = attempt.issued(
-            identifier.clone(),
-            Self::sent_only(resource, &["type", "amazon_side_asn"]),
-        );
-
-        // Apply tags
-        if let Err(error) = self
-            .apply_ec2_tags(&resource.id, vgw_id, &resource.resolved_attributes(), None)
-            .await
-        {
-            return Err(self.failed_issued(&resource.id, issued, error).await);
-        }
-
-        // Read back
-        let outcome = self.read_ec2_vpn_gateway(&resource.id, &identifier).await;
-        let completion = self.create_outcome_from_read(
-            &resource.id,
-            identifier,
-            resource.resolved_attributes(),
-            outcome,
-        );
-        Ok(self.finish_issued(issued, completion))
+        self.finish_tagged_ec2_create(
+            resource,
+            attempt,
+            Ec2TaggedResourceKind::VpnGateway.create_context(client_token, sent),
+            result,
+            |output| {
+                output
+                    .vpn_gateway()
+                    .and_then(|gateway| gateway.vpn_gateway_id())
+                    .map(str::to_owned)
+            },
+        )
+        .await
     }
 
     /// Update an EC2 VPN Gateway (tags only)

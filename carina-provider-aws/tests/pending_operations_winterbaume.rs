@@ -10,6 +10,7 @@ use std::str;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
+use aws_smithy_runtime_api::client::http::{SharedHttpConnector, http_client_fn};
 use carina_core::provider::{
     AppliedIdentifier, AppliedState, CreateRequest, DeleteRequest, Observation, ProviderError,
     ReadOutcome, Sent,
@@ -18,7 +19,7 @@ use carina_core::resource::{ConcreteValue, Resource, ResourceId, Value};
 use carina_provider_aws::{
     AwsCreateAttempt, AwsCreatePoll, AwsCreateResume, AwsCreateToken, AwsDeleteToken,
     AwsIssuedCreate, AwsNormalizer, AwsPollAttempt, AwsProvider, AwsResumeAttempt,
-    AwsResumedCreate, BoundedSdkConfig,
+    AwsResumedCreate, BoundedSdkConfig, Ec2TaggedResourceKind,
 };
 use carina_provider_protocol::OperationStep;
 use indexmap::IndexMap;
@@ -43,12 +44,14 @@ enum TestCreateStep {
     Pending {
         token: AwsCreateToken,
         identifier: Option<AppliedIdentifier>,
+        poll_after_secs: u32,
     },
 }
 
 #[derive(Debug)]
 enum TestCreateVerdict {
     Untracked(ProviderError),
+    Undetermined(ProviderError),
     Created(Box<TestCreatedVerdict>),
     Discarded(ProviderError),
 }
@@ -64,7 +67,7 @@ struct TestCreatedVerdict {
 impl TestCreateVerdict {
     fn provider_error(&self) -> &ProviderError {
         match self {
-            Self::Untracked(error) | Self::Discarded(error) => error,
+            Self::Untracked(error) | Self::Undetermined(error) | Self::Discarded(error) => error,
             Self::Created(created) => &created.error,
         }
     }
@@ -105,11 +108,12 @@ impl AwsCreateAttempt for TestCreateAttempt {
         self,
         token: AwsCreateToken,
         _sent: Sent,
-        _poll_after_secs: u32,
+        poll_after_secs: u32,
     ) -> Result<Self::Step, Self::Verdict> {
         Ok(TestCreateStep::Pending {
             token,
             identifier: None,
+            poll_after_secs,
         })
     }
 }
@@ -123,6 +127,10 @@ impl AwsPollAttempt for TestPollAttempt {
         TestCreateVerdict::Untracked(error)
     }
 
+    fn undetermined(self, _token: AwsCreateToken, error: ProviderError) -> Self::Verdict {
+        TestCreateVerdict::Undetermined(error)
+    }
+
     fn issued(self, identifier: AppliedIdentifier) -> Self::Issued {
         TestIssuedCreate {
             id: self.id,
@@ -134,11 +142,12 @@ impl AwsPollAttempt for TestPollAttempt {
     fn pending(
         self,
         token: AwsCreateToken,
-        _poll_after_secs: u32,
+        poll_after_secs: u32,
     ) -> Result<Self::Step, Self::Verdict> {
         Ok(TestCreateStep::Pending {
             token,
             identifier: None,
+            poll_after_secs,
         })
     }
 }
@@ -188,11 +197,12 @@ impl AwsIssuedCreate for TestIssuedCreate {
     fn pending(
         self,
         token: AwsCreateToken,
-        _poll_after_secs: u32,
+        poll_after_secs: u32,
     ) -> Result<Self::Step, Self::Verdict> {
         Ok(TestCreateStep::Pending {
             token,
             identifier: Some(self.identifier),
+            poll_after_secs,
         })
     }
 }
@@ -203,6 +213,7 @@ enum TestResumeStep {
     Pending {
         token: AwsCreateToken,
         identifier: Option<AppliedIdentifier>,
+        poll_after_secs: u32,
     },
 }
 
@@ -251,11 +262,12 @@ impl AwsResumeAttempt for TestResumeAttempt {
     fn pending(
         self,
         token: AwsCreateToken,
-        _poll_after_secs: u32,
+        poll_after_secs: u32,
     ) -> Result<Self::Step, Self::Verdict> {
         Ok(TestResumeStep::Pending {
             token,
             identifier: None,
+            poll_after_secs,
         })
     }
 }
@@ -283,11 +295,12 @@ impl AwsResumedCreate for TestResumedCreate {
     fn pending(
         self,
         token: AwsCreateToken,
-        _poll_after_secs: u32,
+        poll_after_secs: u32,
     ) -> Result<Self::Step, Self::Verdict> {
         Ok(TestResumeStep::Pending {
             token,
             identifier: Some(self.identifier),
+            poll_after_secs,
         })
     }
 }
@@ -434,6 +447,82 @@ impl PartialFlowLogEc2Service {
             "DescribeFlowLogs" => MockResponse::xml(200, empty_describe_flow_logs_response()),
             action => panic!("unexpected EC2 action {action}: {:?}", request.body),
         }
+    }
+}
+
+struct TaggedVpcEc2Service {
+    identifiers: Vec<String>,
+    discovery_error: bool,
+}
+
+impl MockService for TaggedVpcEc2Service {
+    fn service_name(&self) -> &str {
+        "ec2"
+    }
+
+    fn url_patterns(&self) -> Vec<&str> {
+        vec![r"^https://ec2\.[^/]+\.amazonaws\.com"]
+    }
+
+    fn handle(
+        &self,
+        request: MockRequest,
+    ) -> Pin<Box<dyn Future<Output = MockResponse> + Send + '_>> {
+        let response = match query_action(&request) {
+            "DescribeVpcs" => {
+                if self.discovery_error {
+                    return Box::pin(async {
+                        MockResponse::xml(
+                            403,
+                            r#"<Response><Errors><Error><Code>UnauthorizedOperation</Code><Message>scripted discovery denial</Message></Error></Errors><RequestID>discovery-request-id</RequestID></Response>"#,
+                        )
+                    });
+                }
+                let items = self
+                    .identifiers
+                    .iter()
+                    .map(|identifier| format!("<item><vpcId>{identifier}</vpcId><cidrBlock>10.0.0.0/16</cidrBlock><state>available</state></item>"))
+                    .collect::<String>();
+                MockResponse::xml(
+                    200,
+                    format!(
+                        r#"<DescribeVpcsResponse xmlns="http://ec2.amazonaws.com/doc/2016-11-15/"><requestId>request-id</requestId><vpcSet>{items}</vpcSet></DescribeVpcsResponse>"#
+                    ),
+                )
+            }
+            "DescribeVpcAttribute" => MockResponse::xml(
+                200,
+                r#"<DescribeVpcAttributeResponse xmlns="http://ec2.amazonaws.com/doc/2016-11-15/"><requestId>request-id</requestId><enableDnsSupport><value>true</value></enableDnsSupport><enableDnsHostnames><value>false</value></enableDnsHostnames></DescribeVpcAttributeResponse>"#,
+            ),
+            action => panic!("unexpected EC2 action {action}: {:?}", request.body),
+        };
+        Box::pin(async move { response })
+    }
+}
+
+#[derive(Clone, Debug)]
+struct PostSendVpcFailure {
+    calls: Arc<AtomicUsize>,
+    expected_action: &'static str,
+}
+
+impl aws_smithy_runtime_api::client::http::HttpConnector for PostSendVpcFailure {
+    fn call(
+        &self,
+        request: aws_smithy_runtime_api::client::orchestrator::HttpRequest,
+    ) -> aws_smithy_runtime_api::client::http::HttpConnectorFuture {
+        let body = request.body().bytes().unwrap_or_default();
+        assert!(
+            str::from_utf8(body)
+                .expect("EC2 Query body")
+                .contains(self.expected_action)
+        );
+        self.calls.fetch_add(1, Ordering::Relaxed);
+        aws_smithy_runtime_api::client::http::HttpConnectorFuture::new(async {
+            Err(aws_smithy_runtime_api::client::result::ConnectorError::io(
+                std::io::Error::other("connection reset after request send").into(),
+            ))
+        })
     }
 }
 
@@ -589,6 +678,44 @@ async fn provider_without_services() -> AwsProvider {
     provider_from_config(sdk_config)
 }
 
+async fn provider_with_tagged_vpcs(identifiers: &[&str]) -> AwsProvider {
+    let mock = MockAws::builder()
+        .with_service(TaggedVpcEc2Service {
+            identifiers: identifiers
+                .iter()
+                .map(|value| (*value).to_string())
+                .collect(),
+            discovery_error: false,
+        })
+        .build();
+    provider_from_config(mock.sdk_config(REGION).await)
+}
+
+async fn provider_with_tagged_vpc_discovery_error() -> AwsProvider {
+    let mock = MockAws::builder()
+        .with_service(TaggedVpcEc2Service {
+            identifiers: Vec::new(),
+            discovery_error: true,
+        })
+        .build();
+    provider_from_config(mock.sdk_config(REGION).await)
+}
+
+async fn provider_with_post_send_failure(
+    expected_action: &'static str,
+) -> (AwsProvider, Arc<AtomicUsize>) {
+    let calls = Arc::new(AtomicUsize::new(0));
+    let connector = PostSendVpcFailure {
+        calls: Arc::clone(&calls),
+        expected_action,
+    };
+    let selected = connector.clone();
+    let http_client = http_client_fn(move |_, _| SharedHttpConnector::new(selected.clone()));
+    let base = MockAws::builder().build().sdk_config(REGION).await;
+    let config = base.into_builder().http_client(http_client).build();
+    (provider_from_config(config), calls)
+}
+
 fn string(value: &str) -> Value {
     Value::Concrete(ConcreteValue::String(value.to_string().into()))
 }
@@ -620,6 +747,31 @@ fn flow_log_resource() -> Resource {
     resource
 }
 
+fn vpc_resource() -> Resource {
+    let mut resource = Resource::with_provider("aws", "ec2.Vpc", "outcome-unknown", None);
+    resource.set_attr("cidr_block", string("10.0.0.0/16"));
+    resource
+}
+
+fn route_table_resource() -> Resource {
+    let mut resource = Resource::with_provider("aws", "ec2.RouteTable", "outcome-unknown", None);
+    resource.set_attr("vpc_id", string("vpc-0123456789abcdef0"));
+    resource
+}
+
+const TAGGED_VPC_CREATE_TOKEN: &str = "0123456789abcdef0123456789abcdef";
+
+fn tagged_vpc_token(attempts_remaining: u8, next_delay_secs: u32) -> AwsCreateToken {
+    serde_json::from_value(serde_json::json!({
+        "phase": "tagged_ec2",
+        "kind": "vpc",
+        "create_token": TAGGED_VPC_CREATE_TOKEN,
+        "attempts_remaining": attempts_remaining,
+        "next_delay_secs": next_delay_secs
+    }))
+    .expect("valid tagged VPC token")
+}
+
 fn schema_registry() -> carina_core::schema::SchemaRegistry {
     let mut schemas = carina_core::schema::SchemaRegistry::new();
     for schema in carina_provider_aws::schemas::all_schemas() {
@@ -647,7 +799,9 @@ async fn create_request_for_test(resource: Resource) -> CreateRequest {
 
 fn expect_create_pending(step: TestCreateStep) -> AwsCreateToken {
     match step {
-        TestCreateStep::Pending { token, identifier } => {
+        TestCreateStep::Pending {
+            token, identifier, ..
+        } => {
             assert_eq!(
                 token,
                 AwsCreateToken::NatGateway {
@@ -733,6 +887,202 @@ async fn rejected_create_is_untracked() {
 }
 
 #[tokio::test]
+async fn create_vpc_post_send_failure_becomes_unissued_pending() {
+    let (provider, calls) = provider_with_post_send_failure("Action=CreateVpc").await;
+    let resource = vpc_resource();
+
+    let step = provider
+        .create_step(
+            &resource,
+            TestCreateAttempt {
+                id: resource.id.clone(),
+            },
+        )
+        .await
+        .expect("an ambiguous create must be persisted for discovery");
+
+    let TestCreateStep::Pending {
+        token, identifier, ..
+    } = step
+    else {
+        panic!("expected unissued pending create");
+    };
+    assert_eq!(identifier, None);
+    assert!(matches!(
+        token,
+        AwsCreateToken::TaggedEc2 {
+            kind: Ec2TaggedResourceKind::Vpc,
+            attempts_remaining: 8,
+            next_delay_secs: 5,
+            ..
+        }
+    ));
+    assert_eq!(calls.load(Ordering::Relaxed), 1);
+}
+
+#[tokio::test]
+async fn token_bearing_route_table_post_send_failure_enters_tagged_discovery() {
+    let (provider, calls) = provider_with_post_send_failure("Action=CreateRouteTable").await;
+    let resource = route_table_resource();
+
+    let step = provider
+        .create_step(
+            &resource,
+            TestCreateAttempt {
+                id: resource.id.clone(),
+            },
+        )
+        .await
+        .expect("a maybe-sent route-table create must stay pending");
+
+    assert!(matches!(
+        step,
+        TestCreateStep::Pending {
+            token: AwsCreateToken::TaggedEc2 {
+                kind: Ec2TaggedResourceKind::RouteTable,
+                attempts_remaining: 8,
+                next_delay_secs: 5,
+                ..
+            },
+            identifier: None,
+            poll_after_secs: 5,
+        }
+    ));
+    assert_eq!(
+        calls.load(Ordering::Relaxed),
+        3,
+        "the SDK may safely retry a token-bearing create before discovery"
+    );
+}
+
+#[tokio::test]
+async fn tagged_vpc_poll_with_one_match_runs_normal_continuation() {
+    let provider = provider_with_tagged_vpcs(&["vpc-0553"]).await;
+    let resource = vpc_resource();
+
+    let step = provider
+        .poll_create_step(&resource, tagged_vpc_token(8, 5), poll_attempt(&resource))
+        .await
+        .expect("one discovered VPC must continue and complete");
+
+    let TestCreateStep::Success(state) = step else {
+        panic!("one discovered VPC must complete through the normal continuation");
+    };
+    assert_eq!(state.identifier().as_str(), "vpc-0553");
+}
+
+#[tokio::test]
+async fn tagged_vpc_poll_with_no_match_uses_full_window_then_is_undetermined() {
+    let provider = provider_with_tagged_vpcs(&[]).await;
+    let resource = vpc_resource();
+
+    let mut token = tagged_vpc_token(8, 5);
+    for (remaining, expected_delay) in [
+        (7, 10),
+        (6, 20),
+        (5, 30),
+        (4, 60),
+        (3, 60),
+        (2, 60),
+        (1, 60),
+    ] {
+        let step = provider
+            .poll_create_step(&resource, token, poll_attempt(&resource))
+            .await
+            .expect("the discovery window must remain pending");
+        let TestCreateStep::Pending {
+            token: next,
+            identifier,
+            poll_after_secs,
+        } = step
+        else {
+            panic!("an empty discovery result inside the window must re-pend");
+        };
+        assert_eq!(identifier, None);
+        assert_eq!(poll_after_secs, expected_delay);
+        assert!(matches!(
+            next,
+            AwsCreateToken::TaggedEc2 {
+                attempts_remaining,
+                next_delay_secs,
+                ..
+            } if attempts_remaining == remaining && next_delay_secs == expected_delay
+        ));
+        token = next;
+    }
+
+    let verdict = provider
+        .poll_create_step(&resource, token, poll_attempt(&resource))
+        .await
+        .expect_err("exhaustion cannot prove the create was not applied");
+    assert!(matches!(verdict, TestCreateVerdict::Undetermined(_)));
+    assert_eq!(
+        verdict.provider_error().to_wire().message,
+        format!(
+            "ec2.Vpc may have been created with tag carina:create-token={TAGGED_VPC_CREATE_TOKEN}; check before re-applying"
+        )
+    );
+}
+
+#[tokio::test]
+async fn tagged_vpc_resume_with_no_match_at_exhaustion_is_undetermined() {
+    let provider = provider_with_tagged_vpcs(&[]).await;
+    let resource = vpc_resource();
+
+    let verdict = provider
+        .resume_create_step(
+            &resource,
+            tagged_vpc_token(1, 60),
+            AwsCreateResume::Unissued(TestResumeAttempt),
+        )
+        .await
+        .expect_err("resume exhaustion must preserve the in-flight create");
+
+    assert!(matches!(verdict, TestResumeVerdict::Undetermined(_)));
+    assert_eq!(
+        verdict.provider_error().to_wire().message,
+        format!(
+            "ec2.Vpc may have been created with tag carina:create-token={TAGGED_VPC_CREATE_TOKEN}; check before re-applying"
+        )
+    );
+}
+
+#[tokio::test]
+async fn tagged_vpc_discovery_error_consumes_final_attempt_and_keeps_cause() {
+    let provider = provider_with_tagged_vpc_discovery_error().await;
+    let resource = vpc_resource();
+
+    let verdict = provider
+        .poll_create_step(&resource, tagged_vpc_token(1, 60), poll_attempt(&resource))
+        .await
+        .expect_err("a final discovery error must not re-pend forever");
+
+    assert!(matches!(verdict, TestCreateVerdict::Undetermined(_)));
+    let rendered = verdict.provider_error().to_string();
+    assert!(rendered.starts_with(&format!(
+        "ec2.Vpc may have been created with tag carina:create-token={TAGGED_VPC_CREATE_TOKEN}; check before re-applying"
+    )));
+    assert!(rendered.contains("UnauthorizedOperation"), "{rendered}");
+    assert!(rendered.contains("scripted discovery denial"), "{rendered}");
+}
+
+#[tokio::test]
+async fn tagged_vpc_poll_with_two_matches_is_undetermined() {
+    let provider = provider_with_tagged_vpcs(&["vpc-0553-a", "vpc-0553-b"]).await;
+    let resource = vpc_resource();
+
+    let verdict = provider
+        .poll_create_step(&resource, tagged_vpc_token(8, 5), poll_attempt(&resource))
+        .await
+        .expect_err("multiple matches cannot choose an identifier safely");
+
+    assert!(matches!(verdict, TestCreateVerdict::Undetermined(_)));
+    let rendered = verdict.provider_error().to_string();
+    assert!(rendered.contains("vpc-0553-a"), "{rendered}");
+    assert!(rendered.contains("vpc-0553-b"), "{rendered}");
+}
+
+#[tokio::test]
 async fn accepted_create_then_transient_waiter_failure_stays_in_flight_with_identifier() {
     let (provider, _service) = provider_with_ec2(&["read_error"]).await;
     let resource = nat_gateway_resource();
@@ -760,6 +1110,7 @@ async fn accepted_create_then_transient_waiter_failure_stays_in_flight_with_iden
     let TestCreateStep::Pending {
         token: repended,
         identifier,
+        ..
     } = step
     else {
         panic!("expected the transient waiter failure to stay pending");
@@ -893,12 +1244,14 @@ async fn resume_of_issued_create_still_creating_repends_with_same_identifier() {
     let TestResumeStep::Pending {
         token: repended,
         identifier,
+        poll_after_secs,
     } = step
     else {
         panic!("expected resumed NAT gateway to remain pending");
     };
     assert_eq!(repended, token);
     assert_eq!(identifier, Some(applied_identifier(NAT_GATEWAY_ID)));
+    assert_eq!(poll_after_secs, 5);
 }
 
 #[tokio::test]

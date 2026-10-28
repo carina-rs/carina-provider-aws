@@ -2,6 +2,9 @@
 //!
 //! AWS Provider implementation
 
+mod aws_operation;
+#[cfg(test)]
+mod called_operation_decisions;
 mod data_source_lookups;
 mod ec2_security_group_rules;
 mod ec2_tags;
@@ -11,12 +14,16 @@ pub(crate) mod helpers;
 mod normalizer;
 mod provider;
 pub mod provider_generated;
+mod resend_guard;
+mod resend_safety_generated;
 pub mod schemas;
 mod sdk_config;
 pub mod services;
 #[cfg(test)]
 mod tests;
 
+#[doc(hidden)]
+pub use aws_operation::ClientToken;
 pub use factory::AwsProviderFactory;
 pub use normalizer::AwsNormalizer;
 #[doc(hidden)]
@@ -24,7 +31,7 @@ pub use provider::{
     AwsCreateAttempt, AwsCreatePoll, AwsCreateResume, AwsIssuedCreate, AwsPollAttempt,
     AwsResumeAttempt, AwsResumedCreate,
 };
-pub use provider::{AwsCreateToken, AwsDeleteToken};
+pub use provider::{AwsCreateToken, AwsDeleteToken, Ec2TaggedResourceKind};
 pub use sdk_config::BoundedSdkConfig;
 
 use aws_sdk_acm::Client as AcmClient;

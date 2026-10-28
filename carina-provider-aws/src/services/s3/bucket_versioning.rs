@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::future::Future;
 use std::io::{self, Write};
 
 use crate::AwsProvider;
@@ -11,9 +10,7 @@ use crate::provider::CreateCompletion;
 use crate::services::s3::bucket::is_s3_not_configured_error;
 use crate::services::s3::{InvalidBucketStateReason, classify_invalid_bucket_state};
 use aws_sdk_s3::error::{ProvideErrorMetadata, SdkError};
-use aws_sdk_s3::operation::put_bucket_versioning::{
-    PutBucketVersioningError, PutBucketVersioningOutput,
-};
+use aws_sdk_s3::operation::put_bucket_versioning::PutBucketVersioningError;
 use aws_sdk_s3::types::{BucketVersioningStatus, MfaDelete, VersioningConfiguration};
 use carina_core::provider::ProviderResult;
 use carina_core::provider::{AppliedIdentifier, ReadOutcome};
@@ -159,22 +156,19 @@ impl AwsProvider {
         identifier: &AppliedIdentifier,
     ) -> ProviderResult<()> {
         let identifier = identifier.as_str();
-        delete_s3_bucket_versioning_suspend_with(id, identifier, || {
+        let result = retry_aws_operation(RetryPolicy::default(), || {
             let client = &self.s3_client;
-            async move {
-                client
-                    .put_bucket_versioning()
-                    .bucket(identifier)
-                    .versioning_configuration(
-                        VersioningConfiguration::builder()
-                            .status(BucketVersioningStatus::Suspended)
-                            .build(),
-                    )
-                    .send()
-                    .await
-            }
+            client
+                .put_bucket_versioning()
+                .bucket(identifier)
+                .versioning_configuration(
+                    VersioningConfiguration::builder()
+                        .status(BucketVersioningStatus::Suspended)
+                        .build(),
+                )
         })
-        .await
+        .await;
+        finish_s3_bucket_versioning_suspend(id, identifier, result)
     }
 }
 
@@ -200,18 +194,14 @@ fn classify_suspension_error(code: Option<&str>, message: Option<&str>) -> Suspe
     }
 }
 
-async fn delete_s3_bucket_versioning_suspend_with<F, Fut>(
+fn finish_s3_bucket_versioning_suspend(
     id: ResourceId,
     identifier: &str,
-    suspend: F,
-) -> ProviderResult<()>
-where
-    F: Fn() -> Fut,
-    Fut: Future<Output = Result<PutBucketVersioningOutput, SdkError<PutBucketVersioningError>>>,
-{
-    let result =
-        retry_aws_operation("suspend bucket versioning", RetryPolicy::default(), suspend).await;
-
+    result: Result<
+        aws_sdk_s3::operation::put_bucket_versioning::PutBucketVersioningOutput,
+        SdkError<PutBucketVersioningError>,
+    >,
+) -> ProviderResult<()> {
     match result {
         Ok(_) => Ok(()),
         Err(error) => match classify_suspension_error(error.code(), error.message()) {
@@ -282,35 +272,29 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn object_lock_invalid_bucket_state_allows_versioning_teardown_to_continue() {
-        delete_s3_bucket_versioning_suspend_with(
+    #[test]
+    fn object_lock_invalid_bucket_state_allows_versioning_teardown_to_continue() {
+        finish_s3_bucket_versioning_suspend(
             versioning_id(),
             "locked-bucket",
-            || async {
-                Err(suspension_service_error(
-                    "InvalidBucketState",
-                    "An Object Lock configuration is present on this bucket, so the versioning state cannot be changed.",
-                ))
-            },
+            Err(suspension_service_error(
+                "InvalidBucketState",
+                "An Object Lock configuration is present on this bucket, so the versioning state cannot be changed.",
+            )),
         )
-        .await
         .expect("Object Lock must not block versioning resource teardown");
     }
 
-    #[tokio::test]
-    async fn unrelated_invalid_bucket_state_still_fails_versioning_teardown() {
-        let error = delete_s3_bucket_versioning_suspend_with(
+    #[test]
+    fn unrelated_invalid_bucket_state_still_fails_versioning_teardown() {
+        let error = finish_s3_bucket_versioning_suspend(
             versioning_id(),
             "unlocked-bucket",
-            || async {
-                Err(suspension_service_error(
-                    "InvalidBucketState",
-                    "another invalid bucket state",
-                ))
-            },
+            Err(suspension_service_error(
+                "InvalidBucketState",
+                "another invalid bucket state",
+            )),
         )
-        .await
         .expect_err("unrelated InvalidBucketState must remain an error");
 
         assert!(

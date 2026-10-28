@@ -169,20 +169,10 @@ impl AwsProvider {
         identifier: &AppliedIdentifier,
     ) -> ProviderResult<()> {
         let identifier = identifier.as_str();
-        let result = retry_aws_operation(
-            "delete bucket lifecycle configuration",
-            RetryPolicy::default(),
-            || {
-                let client = &self.s3_client;
-                async move {
-                    client
-                        .delete_bucket_lifecycle()
-                        .bucket(identifier)
-                        .send()
-                        .await
-                }
-            },
-        )
+        let result = retry_aws_operation(RetryPolicy::default(), || {
+            let client = &self.s3_client;
+            client.delete_bucket_lifecycle().bucket(identifier)
+        })
         .await;
 
         match result {
