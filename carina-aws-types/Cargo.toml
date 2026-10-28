@@ -14,5 +14,8 @@ doctest = false
 indexmap = "2"
 
 [dependencies]
+aws-runtime = { version = "1" }
+aws-smithy-runtime-api = { version = "1", features = ["client"] }
+aws-smithy-types = { version = "1" }
 carina-core = { git = "https://github.com/carina-rs/carina", rev = "acd9ae1e" }
 heck = "0.5"
