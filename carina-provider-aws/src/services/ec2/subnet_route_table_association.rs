@@ -39,12 +39,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                api_error_with_meta(
-                    "Failed to describe route tables",
-                    "ec2.DescribeRouteTables",
-                    e,
-                )
-                .for_resource(id.clone())
+                api_error_with_meta("Failed to describe route tables", e).for_resource(id.clone())
             })?;
 
         if let Some(rt) = result.route_tables().first() {
@@ -100,12 +95,8 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                api_error_with_meta(
-                    "Failed to associate route table",
-                    "ec2.AssociateRouteTable",
-                    e,
-                )
-                .for_resource(resource.id.clone())
+                api_error_with_meta("Failed to associate route table", e)
+                    .for_resource(resource.id.clone())
             })?;
 
         let assoc_id = result.association_id().ok_or_else(|| {
@@ -165,12 +156,8 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                api_error_with_meta(
-                    "Failed to replace route table association",
-                    "ec2.ReplaceRouteTableAssociation",
-                    e,
-                )
-                .for_resource(id.clone())
+                api_error_with_meta("Failed to replace route table association", e)
+                    .for_resource(id.clone())
             })?;
 
         let new_assoc_id = result.new_association_id().ok_or_else(|| {
@@ -215,12 +202,8 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                api_error_with_meta(
-                    "Failed to disassociate route table",
-                    "ec2.DisassociateRouteTable",
-                    e,
-                )
-                .for_resource(id.clone())
+                api_error_with_meta("Failed to disassociate route table", e)
+                    .for_resource(id.clone())
             })?;
 
         Ok(())

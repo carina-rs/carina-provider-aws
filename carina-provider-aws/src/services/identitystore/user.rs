@@ -52,7 +52,6 @@ fn describe_user_api_error(
 ) -> ProviderError {
     api_error_with_meta_and_subject(
         "Failed to describe identitystore user",
-        "identitystore.DescribeUser",
         IdentityStoreUserSubject::UserId {
             user_id: user_id.to_string(),
             identity_store_id: identity_store_id.to_string(),
@@ -68,7 +67,6 @@ fn lookup_user_id_api_error(
 ) -> ProviderError {
     api_error_with_meta_and_subject(
         "Failed to look up identitystore user_id",
-        "identitystore.GetUserId",
         IdentityStoreUserSubject::UserName {
             user_name: user_name.to_string(),
             identity_store_id: identity_store_id.to_string(),

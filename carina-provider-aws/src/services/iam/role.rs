@@ -71,10 +71,7 @@ impl AwsProvider {
                 {
                     return Ok(ReadOutcome::not_found(id.clone()));
                 }
-                Err(
-                    api_error_with_meta("Failed to get IAM role", "iam.GetRole", e)
-                        .for_resource(id.clone()),
-                )
+                Err(api_error_with_meta("Failed to get IAM role", e).for_resource(id.clone()))
             }
         }
     }
@@ -128,8 +125,7 @@ impl AwsProvider {
         }
 
         req.send().await.map_err(|e| {
-            api_error_with_meta("Failed to create IAM role", "iam.CreateRole", e)
-                .for_resource(resource.id.clone())
+            api_error_with_meta("Failed to create IAM role", e).for_resource(resource.id.clone())
         })?;
 
         let identifier =
@@ -161,12 +157,8 @@ impl AwsProvider {
                 .send()
                 .await
                 .map_err(|e| {
-                    api_error_with_meta(
-                        "Failed to update assume role policy",
-                        "iam.UpdateAssumeRolePolicy",
-                        e,
-                    )
-                    .for_resource(id.clone())
+                    api_error_with_meta("Failed to update assume role policy", e)
+                        .for_resource(id.clone())
                 })?;
         }
 
@@ -188,8 +180,7 @@ impl AwsProvider {
 
         if needs_update {
             req.send().await.map_err(|e| {
-                api_error_with_meta("Failed to update IAM role", "iam.UpdateRole", e)
-                    .for_resource(id.clone())
+                api_error_with_meta("Failed to update IAM role", e).for_resource(id.clone())
             })?;
         }
 
@@ -218,8 +209,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                api_error_with_meta("Failed to delete IAM role", "iam.DeleteRole", e)
-                    .for_resource(id.clone())
+                api_error_with_meta("Failed to delete IAM role", e).for_resource(id.clone())
             })?;
         Ok(())
     }
@@ -254,8 +244,7 @@ impl AwsProvider {
                 req = req.tag_keys(key);
             }
             req.send().await.map_err(|e| {
-                api_error_with_meta("Failed to untag IAM role", "iam.UntagRole", e)
-                    .for_resource(id.clone())
+                api_error_with_meta("Failed to untag IAM role", e).for_resource(id.clone())
             })?;
         }
 
@@ -287,8 +276,7 @@ impl AwsProvider {
                 req = req.tags(tag);
             }
             req.send().await.map_err(|e| {
-                api_error_with_meta("Failed to tag IAM role", "iam.TagRole", e)
-                    .for_resource(id.clone())
+                api_error_with_meta("Failed to tag IAM role", e).for_resource(id.clone())
             })?;
         }
 

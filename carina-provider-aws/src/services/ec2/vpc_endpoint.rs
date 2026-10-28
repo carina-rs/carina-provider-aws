@@ -6,11 +6,13 @@ use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
 use carina_core::schema::ResourceSchema;
 
 use crate::AwsProvider;
+use crate::aws_operation::ClientToken;
 use crate::error_helpers::api_error_with_meta;
 use crate::helpers::{
-    RetryPolicy, optional_bool_attr, optional_enum_attr, require_string_attr, retry_aws_operation,
+    RetryPolicy, build_tag_specification_with_create_token, optional_bool_attr, optional_enum_attr,
+    require_string_attr, retry_aws_operation_with_token,
 };
-use crate::provider::AwsCreateAttempt;
+use crate::provider::{AwsCreateAttempt, Ec2TaggedResourceKind};
 
 impl AwsProvider {
     /// Read an EC2 VPC Endpoint
@@ -29,12 +31,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                api_error_with_meta(
-                    "Failed to describe VPC endpoints",
-                    "ec2.DescribeVpcEndpoints",
-                    e,
-                )
-                .for_resource(id.clone())
+                api_error_with_meta("Failed to describe VPC endpoints", e).for_resource(id.clone())
             })?;
 
         if let Some(endpoint) = result.vpc_endpoints().first() {
@@ -68,6 +65,7 @@ impl AwsProvider {
         &self,
         resource: &Resource,
         schema: &ResourceSchema,
+        client_token: &ClientToken,
         attempt: A,
     ) -> Result<A::Step, A::Verdict> {
         let vpc_id = match require_string_attr(resource, "vpc_id") {
@@ -83,7 +81,12 @@ impl AwsProvider {
             .ec2_client
             .create_vpc_endpoint()
             .vpc_id(&vpc_id)
-            .service_name(&service_name);
+            .service_name(&service_name)
+            .tag_specifications(build_tag_specification_with_create_token(
+                resource,
+                aws_sdk_ec2::types::ResourceType::VpcEndpoint,
+                client_token,
+            ));
 
         let endpoint_type = match optional_enum_attr(resource, schema, "vpc_endpoint_type") {
             Ok(endpoint_type) => endpoint_type,
@@ -150,83 +153,37 @@ impl AwsProvider {
             req = req.policy_document(&json_str);
         }
 
-        let rid = resource.id.clone();
         let result =
-            match retry_aws_operation("create VPC endpoint", RetryPolicy::default(), || {
-                let req = req.clone();
-                async move { req.send().await }
-            })
-            .await
-            {
-                Ok(result) => result,
-                Err(error) => {
-                    return Err(attempt.untracked(
-                        api_error_with_meta(
-                            "Failed to create VPC endpoint",
-                            "ec2.CreateVpcEndpoint",
-                            error,
-                        )
-                        .for_resource(rid),
-                    ));
-                }
-            };
-
-        let endpoint_id = match result.vpc_endpoint().and_then(|ep| ep.vpc_endpoint_id()) {
-            Some(endpoint_id) => endpoint_id,
-            None => {
-                return Err(attempt.untracked(
-                    ProviderError::api_error("VPC Endpoint created but no ID returned")
-                        .for_resource(resource.id.clone()),
-                ));
-            }
-        };
-        let identifier = match crate::helpers::applied_identifier(
-            &resource.id,
-            "ec2.CreateVpcEndpoint",
-            endpoint_id,
-        ) {
-            Ok(identifier) => identifier,
-            Err(error) => return Err(attempt.untracked(error)),
-        };
-        let issued = attempt.issued(
-            identifier.clone(),
-            Self::sent_only(
-                resource,
-                &[
-                    "vpc_id",
-                    "service_name",
-                    "vpc_endpoint_type",
-                    "route_table_ids",
-                    "subnet_ids",
-                    "security_group_ids",
-                    "private_dns_enabled",
-                    "policy_document",
-                ],
-            ),
+            retry_aws_operation_with_token(client_token, RetryPolicy::default(), || req.clone())
+                .await;
+        let sent = Self::sent_only(
+            resource,
+            &[
+                "vpc_id",
+                "service_name",
+                "vpc_endpoint_type",
+                "route_table_ids",
+                "subnet_ids",
+                "security_group_ids",
+                "private_dns_enabled",
+                "policy_document",
+                "tags",
+            ],
         );
 
-        // Apply tags
-        if let Err(error) = self
-            .apply_ec2_tags(
-                &resource.id,
-                endpoint_id,
-                &resource.resolved_attributes(),
-                None,
-            )
-            .await
-        {
-            return Err(self.failed_issued(&resource.id, issued, error).await);
-        }
-
-        // Read back
-        let outcome = self.read_ec2_vpc_endpoint(&resource.id, &identifier).await;
-        let completion = self.create_outcome_from_read(
-            &resource.id,
-            identifier,
-            resource.resolved_attributes(),
-            outcome,
-        );
-        Ok(self.finish_issued(issued, completion))
+        self.finish_tagged_ec2_create(
+            resource,
+            attempt,
+            Ec2TaggedResourceKind::VpcEndpoint.create_context(client_token, sent),
+            result,
+            |output| {
+                output
+                    .vpc_endpoint()
+                    .and_then(|endpoint| endpoint.vpc_endpoint_id())
+                    .map(str::to_owned)
+            },
+        )
+        .await
     }
 
     /// Update an EC2 VPC Endpoint
@@ -401,8 +358,7 @@ impl AwsProvider {
 
         if has_modifications {
             req.send().await.map_err(|e| {
-                api_error_with_meta("Failed to modify VPC endpoint", "ec2.ModifyVpcEndpoint", e)
-                    .for_resource(id.clone())
+                api_error_with_meta("Failed to modify VPC endpoint", e).for_resource(id.clone())
             })?;
         }
 
@@ -432,8 +388,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                api_error_with_meta("Failed to delete VPC endpoint", "ec2.DeleteVpcEndpoints", e)
-                    .for_resource(id.clone())
+                api_error_with_meta("Failed to delete VPC endpoint", e).for_resource(id.clone())
             })?;
 
         // Check for unsuccessful items

@@ -1,18 +1,20 @@
 use std::collections::HashMap;
 
+use carina_core::provider::ProviderResult;
 use carina_core::provider::{AppliedIdentifier, ReadOutcome};
-use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
 use carina_core::schema::ResourceSchema;
 
 use aws_sdk_ec2::types::NatGatewayState;
 
 use crate::AwsProvider;
+use crate::aws_operation::ClientToken;
 use crate::error_helpers::api_error_with_meta;
 use crate::helpers::{
-    CreatePoll, DeletePoll, RetryPolicy, optional_enum_attr, require_string_attr,
-    retry_aws_operation,
+    CreatePoll, DeletePoll, RetryPolicy, build_tag_specification_with_create_token,
+    optional_enum_attr, require_string_attr, retry_aws_operation_with_token,
 };
+use crate::provider::{AwsCreateAttempt, Ec2TaggedResourceKind};
 
 fn nat_gateway_create_poll_state(state: Option<&NatGatewayState>) -> CreatePoll<()> {
     match state {
@@ -69,12 +71,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                api_error_with_meta(
-                    "Failed to describe NAT gateways",
-                    "ec2.DescribeNatGateways",
-                    e,
-                )
-                .for_resource(id.clone())
+                api_error_with_meta("Failed to describe NAT gateways", e).for_resource(id.clone())
             })?;
 
         if let Some(ngw) = result.nat_gateways().first() {
@@ -104,14 +101,27 @@ impl AwsProvider {
     }
 
     /// Create an EC2 NAT Gateway
-    pub(crate) async fn create_ec2_nat_gateway_start(
+    pub(crate) async fn create_ec2_nat_gateway_start<A: AwsCreateAttempt>(
         &self,
         resource: &Resource,
         schema: &ResourceSchema,
-    ) -> ProviderResult<AppliedIdentifier> {
-        let subnet_id = require_string_attr(resource, "subnet_id")?;
+        client_token: &ClientToken,
+        attempt: A,
+    ) -> Result<A::Step, A::Verdict> {
+        let subnet_id = match require_string_attr(resource, "subnet_id") {
+            Ok(subnet_id) => subnet_id,
+            Err(error) => return Err(attempt.untracked(error)),
+        };
 
-        let mut req = self.ec2_client.create_nat_gateway().subnet_id(&subnet_id);
+        let mut req = self
+            .ec2_client
+            .create_nat_gateway()
+            .subnet_id(&subnet_id)
+            .tag_specifications(build_tag_specification_with_create_token(
+                resource,
+                aws_sdk_ec2::types::ResourceType::Natgateway,
+                client_token,
+            ));
 
         if let Some(Value::Concrete(ConcreteValue::String(alloc_id))) =
             resource.get_attr("allocation_id")
@@ -119,33 +129,36 @@ impl AwsProvider {
             req = req.allocation_id(alloc_id.expose_plaintext());
         }
 
-        if let Some(conn_type) = optional_enum_attr(resource, schema, "connectivity_type")? {
+        let connectivity_type = match optional_enum_attr(resource, schema, "connectivity_type") {
+            Ok(connectivity_type) => connectivity_type,
+            Err(error) => return Err(attempt.untracked(error)),
+        };
+        if let Some(conn_type) = connectivity_type {
             use aws_sdk_ec2::types::ConnectivityType;
             req = req.connectivity_type(ConnectivityType::from(conn_type));
         }
 
-        let rid = resource.id.clone();
-        let result = retry_aws_operation("create NAT gateway", RetryPolicy::default(), || {
-            let req = req.clone();
-            async move { req.send().await }
-        })
+        let result =
+            retry_aws_operation_with_token(client_token, RetryPolicy::default(), || req.clone())
+                .await;
+        let sent = Self::sent_only(
+            resource,
+            &["subnet_id", "allocation_id", "connectivity_type", "tags"],
+        );
+
+        self.finish_tagged_ec2_create(
+            resource,
+            attempt,
+            Ec2TaggedResourceKind::NatGateway.create_context(client_token, sent),
+            result,
+            |output| {
+                output
+                    .nat_gateway()
+                    .and_then(|gateway| gateway.nat_gateway_id())
+                    .map(str::to_owned)
+            },
+        )
         .await
-        .map_err(|e| {
-            api_error_with_meta("Failed to create NAT gateway", "ec2.CreateNatGateway", e)
-                .for_resource(rid.clone())
-        })?;
-
-        let ngw_id = result
-            .nat_gateway()
-            .and_then(|ngw| ngw.nat_gateway_id())
-            .ok_or_else(|| {
-                ProviderError::api_error("NAT Gateway created but no ID returned")
-                    .for_resource(resource.id.clone())
-            })?;
-        let identifier =
-            crate::helpers::applied_identifier(&resource.id, "ec2.CreateNatGateway", ngw_id)?;
-
-        Ok(identifier)
     }
 
     /// Update an EC2 NAT Gateway (tags only)
@@ -186,12 +199,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                api_error_with_meta(
-                    "Failed to describe NAT gateway",
-                    "ec2.DescribeNatGateways",
-                    e,
-                )
-                .for_resource(id.clone())
+                api_error_with_meta("Failed to describe NAT gateway", e).for_resource(id.clone())
             })?;
         Ok(nat_gateway_create_poll_state(
             result.nat_gateways().first().and_then(|ngw| ngw.state()),
@@ -211,12 +219,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                api_error_with_meta(
-                    "Failed to describe NAT gateway",
-                    "ec2.DescribeNatGateways",
-                    e,
-                )
-                .for_resource(id.clone())
+                api_error_with_meta("Failed to describe NAT gateway", e).for_resource(id.clone())
             })?;
         Ok(nat_gateway_delete_poll_state(
             result.nat_gateways().first().and_then(|ngw| ngw.state()),

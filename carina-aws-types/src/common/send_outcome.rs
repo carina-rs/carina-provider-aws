@@ -1,6 +1,11 @@
 use aws_runtime::retries::classifiers::THROTTLING_ERRORS;
+use aws_smithy_runtime_api::client::interceptors::context::InterceptorContext;
 use aws_smithy_runtime_api::client::orchestrator::HttpResponse;
 use aws_smithy_runtime_api::client::result::SdkError;
+use aws_smithy_runtime_api::client::retries::classifiers::{
+    ClassifyRetry, RetryAction, RetryReason,
+};
+use aws_smithy_runtime_api::client::runtime_components::RuntimeComponents;
 use aws_smithy_types::error::metadata::ProvideErrorMetadata;
 use aws_smithy_types::retry::{ErrorKind, ProvideErrorKind};
 
@@ -63,12 +68,13 @@ impl SendOutcome {
 
                 if is_throttling {
                     Self::Rejected
-                } else if code == Some("RequestTimeoutException") {
+                } else if matches!(code, Some("RequestTimeout" | "RequestTimeoutException")) {
+                    // AWS's effective retry guard classifies both codes as
+                    // transient. Treat the 400 S3 RequestTimeout
+                    // conservatively too: the service response does not prove
+                    // a mutating request was unapplied.
                     Self::MaybeSent
                 } else if context.raw().status().is_client_error() {
-                    // S3 `RequestTimeout` means "the socket was not read from
-                    // or written to within the timeout period", so the request
-                    // was never fully received and remains rejected here.
                     Self::Rejected
                 } else {
                     Self::MaybeSent
@@ -77,6 +83,51 @@ impl SendOutcome {
             // `SdkError` is non-exhaustive. Unknown future failures must fail
             // closed because they may represent a request that reached AWS.
             _ => Self::MaybeSent,
+        }
+    }
+
+    /// Classifies a type-erased failed SDK attempt from an interceptor hook.
+    ///
+    /// The effective configured retry classification preserves modeled
+    /// throttling and timeout semantics even though the operation error is
+    /// type-erased at this layer. Unknown future classifier results fail
+    /// closed as [`SendOutcome::MaybeSent`].
+    pub fn classify_orchestrator(
+        context: &InterceptorContext,
+        runtime_components: &RuntimeComponents,
+    ) -> SendOutcome {
+        let mut effective_kind = None;
+        for classifier in runtime_components.retry_classifiers() {
+            match classifier.classify_retry(context) {
+                RetryAction::NoActionIndicated => {}
+                RetryAction::RetryForbidden => {
+                    effective_kind = None;
+                    break;
+                }
+                RetryAction::RetryIndicated(RetryReason::RetryableError { kind, .. }) => {
+                    effective_kind = Some(kind);
+                }
+                // `RetryReason` is non-exhaustive. A future reason cannot
+                // prove that AWS rejected the request.
+                RetryAction::RetryIndicated(_) => return Self::MaybeSent,
+                // `RetryAction` is non-exhaustive. A future action cannot
+                // prove that AWS rejected the request.
+                _ => return Self::MaybeSent,
+            }
+        }
+
+        match effective_kind {
+            Some(ErrorKind::ThrottlingError) | Some(ErrorKind::ClientError) => Self::Rejected,
+            // This covers the known transient/server kinds and fails closed for
+            // future variants because `ErrorKind` is non-exhaustive.
+            Some(_) => Self::MaybeSent,
+            None if context
+                .response()
+                .is_some_and(|response| response.status().is_client_error()) =>
+            {
+                Self::Rejected
+            }
+            None => Self::MaybeSent,
         }
     }
 
@@ -262,10 +313,10 @@ mod tests {
     }
 
     #[test]
-    fn s3_request_timeout_is_rejected() {
+    fn s3_request_timeout_may_have_been_sent() {
         let error = service_error("RequestTimeout", None, 400);
 
-        assert_eq!(SendOutcome::classify(&error), SendOutcome::Rejected);
+        assert_eq!(SendOutcome::classify(&error), SendOutcome::MaybeSent);
     }
 
     #[test]
@@ -273,6 +324,41 @@ mod tests {
         let error = service_error("RequestTimeoutException", None, 400);
 
         assert_eq!(SendOutcome::classify(&error), SendOutcome::MaybeSent);
+    }
+
+    #[test]
+    fn direct_and_orchestrator_classifiers_agree_on_service_failures() {
+        use aws_runtime::retries::classifiers::AwsErrorCodeClassifier;
+        use aws_smithy_runtime_api::client::interceptors::context::{
+            Error, Input, InterceptorContext,
+        };
+        use aws_smithy_runtime_api::client::orchestrator::OrchestratorError;
+        use aws_smithy_runtime_api::client::runtime_components::RuntimeComponentsBuilder;
+
+        let runtime_components = RuntimeComponentsBuilder::for_tests()
+            .with_retry_classifier(AwsErrorCodeClassifier::<MockServiceError>::new())
+            .build()
+            .expect("test runtime components");
+        let cases = [
+            ("Throttling", Some(ErrorKind::ThrottlingError), 400),
+            ("SlowDown", None, 503),
+            ("ValidationException", None, 400),
+            ("InternalError", Some(ErrorKind::ServerError), 500),
+            ("RequestTimeout", None, 400),
+            ("RequestTimeoutException", None, 400),
+        ];
+
+        for (code, retryable, status) in cases {
+            let direct = SendOutcome::classify(&service_error(code, retryable, status));
+            let mut context = InterceptorContext::new(Input::doesnt_matter());
+            context.set_response(http_response(status));
+            context.set_output_or_error(Err(OrchestratorError::operation(Error::erase(
+                MockServiceError::new(code, retryable),
+            ))));
+            let orchestrated = SendOutcome::classify_orchestrator(&context, &runtime_components);
+
+            assert_eq!(direct, orchestrated, "classifiers disagreed for {code}");
+        }
     }
 
     #[test]

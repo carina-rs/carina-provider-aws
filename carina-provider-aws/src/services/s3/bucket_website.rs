@@ -92,12 +92,10 @@ impl AwsProvider {
                 {
                     return Ok(ReadOutcome::not_found(id.clone()));
                 }
-                Err(api_error_with_meta(
-                    "Failed to get bucket website configuration",
-                    "s3.GetBucketWebsite",
-                    e,
+                Err(
+                    api_error_with_meta("Failed to get bucket website configuration", e)
+                        .for_resource(id.clone()),
                 )
-                .for_resource(id.clone()))
             }
         }
     }
@@ -151,8 +149,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                api_error_with_meta("Failed to put bucket website", "s3.PutBucketWebsite", e)
-                    .for_resource(id.clone())
+                api_error_with_meta("Failed to put bucket website", e).for_resource(id.clone())
             })?;
 
         Ok(self
@@ -166,15 +163,9 @@ impl AwsProvider {
         identifier: &AppliedIdentifier,
     ) -> ProviderResult<()> {
         let identifier = identifier.as_str();
-        let result = retry_aws_operation("delete bucket website", RetryPolicy::default(), || {
+        let result = retry_aws_operation(RetryPolicy::default(), || {
             let client = &self.s3_client;
-            async move {
-                client
-                    .delete_bucket_website()
-                    .bucket(identifier)
-                    .send()
-                    .await
-            }
+            client.delete_bucket_website().bucket(identifier)
         })
         .await;
 
@@ -186,12 +177,10 @@ impl AwsProvider {
             {
                 Ok(())
             }
-            Err(e) => Err(api_error_with_meta(
-                "Failed to delete bucket website",
-                "s3.DeleteBucketWebsite",
-                e,
-            )
-            .for_resource(id.clone())),
+            Err(e) => {
+                Err(api_error_with_meta("Failed to delete bucket website", e)
+                    .for_resource(id.clone()))
+            }
         }
     }
 }

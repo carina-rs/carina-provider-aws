@@ -2,8 +2,6 @@
 //!
 //! These reduce boilerplate across EC2 (and other) service implementations.
 
-use indexmap::IndexMap;
-use std::future::Future;
 use std::time::Duration;
 
 use aws_sdk_ec2::types::{ResourceType, Tag, TagSpecification};
@@ -13,12 +11,19 @@ use aws_smithy_types::error::metadata::ProvideErrorMetadata;
 use aws_smithy_types::retry::ProvideErrorKind;
 use tokio::time::sleep;
 
+use carina_aws_types::SendOutcome;
 use carina_core::provider::{
     AppliedIdentifier, AppliedState, PatchOp, ProviderError, ProviderResult, ReadOutcome,
     UpdatePatch,
 };
 use carina_core::resource::{ConcreteValue, EnumAttrError, Resource, ResourceId, State, Value};
 use carina_core::schema::ResourceSchema;
+
+use crate::aws_operation::{
+    AwsOperation, ClientToken, EC2_CREATE_TOKEN_TAG, NoToken, TokenBearing, WithToken,
+};
+use crate::ec2_tags::value_to_ec2_tags;
+use crate::error_helpers::SendFailure;
 
 /// Validate an identifier returned by an AWS create API before it can cross a
 /// managed-resource boundary.
@@ -263,32 +268,26 @@ pub(crate) fn optional_string_list_struct_field(
     }
 }
 
-/// Build an EC2 `TagSpecification` from DSL tags for a given resource type.
-///
-/// Returns `None` if the resource has no `tags` attribute.
-pub fn build_tag_specification(
+/// Build the create-time EC2 tags, including the provider discovery token.
+pub(crate) fn build_tag_specification_with_create_token(
     resource: &Resource,
     resource_type: ResourceType,
-) -> Option<TagSpecification> {
-    if let Some(Value::Concrete(ConcreteValue::Map(tags))) = resource.get_attr("tags") {
-        Some(build_tag_specification_from_map(tags, resource_type))
-    } else {
-        None
-    }
-}
-
-/// Build an EC2 `TagSpecification` from a tag map.
-fn build_tag_specification_from_map(
-    tags: &IndexMap<String, Value>,
-    resource_type: ResourceType,
+    token: &ClientToken,
 ) -> TagSpecification {
     let mut tag_spec = TagSpecification::builder().resource_type(resource_type);
-    for (key, val) in tags {
-        if let Value::Concrete(ConcreteValue::String(v)) = val {
-            tag_spec = tag_spec.tags(Tag::builder().key(key).value(v.expose_plaintext()).build());
+    if let Some(tags) = resource.get_attr("tags") {
+        for tag in value_to_ec2_tags(tags) {
+            tag_spec = tag_spec.tags(tag);
         }
     }
-    tag_spec.build()
+    tag_spec
+        .tags(
+            Tag::builder()
+                .key(EC2_CREATE_TOKEN_TAG)
+                .value(token.as_str())
+                .build(),
+        )
+        .build()
 }
 
 /// Result of one resource-state describe call during creation.
@@ -366,45 +365,109 @@ impl Default for RetryPolicy {
     }
 }
 
-/// Retry an AWS SDK operation with exponential backoff on transient errors.
+/// Retry a generated non-token AWS builder with exponential backoff.
 ///
-/// Whether an error is retried is decided by [`is_retryable_sdk_error`],
-/// which consults the SDK's own classification (`ProvideErrorKind`) plus
-/// an explicit carve-out for the [`S3_RETRYABLE_ERROR_CODES`] that the
-/// AWS docs call transient but the S3 SDK model does not flag.
+/// A rebuilt request is sent only when both the failure classification and
+/// the generated operation policy prove that resending cannot duplicate an
+/// applied effect. The builder type supplies the operation name and policy;
+/// callers cannot pass a token-bearing operation to this entry point.
 ///
-/// - `operation_name`: Human-readable name for log messages.
 /// - `policy`: The [`RetryPolicy`] budget — production callers pass
 ///   [`RetryPolicy::default()`].
-/// - `f`: A closure that returns a `Future` producing the SDK result.
-pub async fn retry_aws_operation<F, Fut, T, E, R>(
-    operation_name: &str,
+/// - `builder`: A factory that rebuilds the SDK fluent builder per attempt.
+pub(crate) async fn retry_aws_operation<F, B>(
     policy: RetryPolicy,
-    f: F,
-) -> Result<T, SdkError<E, R>>
+    builder: F,
+) -> Result<B::Output, SendFailure<B::Error>>
 where
-    F: Fn() -> Fut,
-    Fut: Future<Output = Result<T, SdkError<E, R>>>,
-    E: ProvideErrorKind + ProvideErrorMetadata + std::error::Error + 'static,
-    R: std::fmt::Debug,
+    F: Fn() -> B,
+    B: AwsOperation<Resend = NoToken>,
+    B::Error: ProvideErrorKind + ProvideErrorMetadata + std::error::Error + 'static,
+{
+    retry_aws_builder(policy, builder, |request| request).await
+}
+
+/// Retry a generated token-bearing AWS builder with one invocation token.
+///
+/// The wrapper applies `token` after every rebuild, so provider-level resends
+/// cannot accidentally ask the SDK to synthesize a different token.
+pub(crate) async fn retry_aws_operation_with_token<F, B>(
+    token: &ClientToken,
+    policy: RetryPolicy,
+    builder: F,
+) -> Result<B::Output, SendFailure<B::Error>>
+where
+    F: Fn() -> B,
+    B: AwsOperation<Resend = WithToken> + TokenBearing,
+    B::Error: ProvideErrorKind + ProvideErrorMetadata + std::error::Error + 'static,
+{
+    retry_aws_builder(policy, builder, |request| request.with_client_token(token)).await
+}
+
+/// Send a generated token-bearing AWS builder exactly once.
+///
+/// Keeping even one-shot sends behind this entry point makes applying the
+/// invocation token a type-checked invariant instead of call-site convention.
+pub(crate) async fn send_aws_operation_with_token<B>(
+    token: &ClientToken,
+    builder: B,
+) -> Result<B::Output, SendFailure<B::Error>>
+where
+    B: AwsOperation<Resend = WithToken> + TokenBearing,
+    B::Error: ProvideErrorKind + ProvideErrorMetadata,
+{
+    builder
+        .with_client_token(token)
+        .send()
+        .await
+        .map_err(|error| {
+            let outcome = SendOutcome::classify(&error);
+            SendFailure::new(outcome, error)
+        })
+}
+
+async fn retry_aws_builder<F, P, B>(
+    policy: RetryPolicy,
+    builder: F,
+    prepare: P,
+) -> Result<B::Output, SendFailure<B::Error>>
+where
+    F: Fn() -> B,
+    P: Fn(B) -> B,
+    B: AwsOperation,
+    B::Error: ProvideErrorKind + ProvideErrorMetadata + std::error::Error + 'static,
 {
     let mut attempt = 0;
+    let mut maybe_sent = false;
     loop {
         attempt += 1;
-        match f().await {
+        match prepare(builder()).send().await {
             Ok(result) => return Ok(result),
-            Err(e) if attempt < policy.max_attempts && is_retryable_sdk_error(&e) => {
-                let delay = policy.delay_secs(attempt);
-                eprintln!(
-                    "  Retrying {} (attempt {}/{}): {}",
-                    operation_name,
-                    attempt,
-                    policy.max_attempts,
-                    DisplayErrorContext(&e)
-                );
-                sleep(Duration::from_secs(delay)).await;
+            Err(error) => {
+                let outcome = SendOutcome::classify(&error);
+                maybe_sent |= outcome == SendOutcome::MaybeSent;
+                if attempt < policy.max_attempts
+                    && outcome.resend_is_safe(B::IDEMPOTENCY)
+                    && is_retryable_sdk_error(&error)
+                {
+                    let delay = policy.delay_secs(attempt);
+                    eprintln!(
+                        "  Retrying {} (attempt {}/{}): {}",
+                        B::NAME,
+                        attempt,
+                        policy.max_attempts,
+                        DisplayErrorContext(&error)
+                    );
+                    sleep(Duration::from_secs(delay)).await;
+                    continue;
+                }
+                let outcome = if maybe_sent {
+                    SendOutcome::MaybeSent
+                } else {
+                    outcome
+                };
+                return Err(SendFailure::new(outcome, error));
             }
-            Err(e) => return Err(e),
         }
     }
 }
@@ -438,10 +501,9 @@ const S3_RETRYABLE_ERROR_CODES: &[&str] = &["RequestTimeout", "SlowDown", "Opera
 /// 2. An explicit carve-out for [`S3_RETRYABLE_ERROR_CODES`] — S3 codes
 ///    the AWS docs call transient but the SDK model does not flag.
 ///
-/// Transport-layer failures (`TimeoutError`, `DispatchFailure`,
-/// `ResponseError`, `ConstructionFailure`) are always transient — the
-/// HTTP exchange did not complete, so a retry is safe for idempotent
-/// operations (which is what all carina provider operations are).
+/// Transport-layer failures are worth retrying, but this function does not
+/// decide whether resending is safe. The typed wrappers combine this result
+/// with [`SendOutcome`] and the generated operation idempotency.
 pub fn is_retryable_sdk_error<E, R>(err: &SdkError<E, R>) -> bool
 where
     E: ProvideErrorKind + ProvideErrorMetadata,
@@ -517,6 +579,7 @@ pub fn apply_patch_to_state(from: &State, patch: &UpdatePatch) -> Resource {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use indexmap::IndexMap;
 
     fn make_test_resource(attrs: Vec<(&str, &str)>) -> Resource {
         let mut resource = Resource::new("acm.Certificate", "test");
@@ -1147,6 +1210,42 @@ mod tests {
         );
     }
 
+    #[test]
+    fn create_discovery_tag_specification_is_always_stamped() {
+        let resource = Resource::with_provider("aws", "ec2.Vpc", "example", None).with_attribute(
+            "tags",
+            Value::Concrete(ConcreteValue::Map(IndexMap::from([
+                (
+                    crate::aws_operation::EC2_CREATE_TOKEN_TAG.to_string(),
+                    Value::Concrete(ConcreteValue::String("user-value".into())),
+                ),
+                (
+                    "Name".to_string(),
+                    Value::Concrete(ConcreteValue::String("example".into())),
+                ),
+            ]))),
+        );
+        let token = ClientToken::new();
+
+        let tag_spec =
+            build_tag_specification_with_create_token(&resource, ResourceType::Vpc, &token);
+
+        assert_eq!(tag_spec.resource_type(), Some(&ResourceType::Vpc));
+        let discovery_tags = tag_spec
+            .tags()
+            .iter()
+            .filter(|tag| tag.key() == Some(crate::aws_operation::EC2_CREATE_TOKEN_TAG))
+            .collect::<Vec<_>>();
+        assert_eq!(discovery_tags.len(), 1);
+        assert_eq!(discovery_tags[0].value(), Some(token.as_str()));
+        assert!(
+            tag_spec
+                .tags()
+                .iter()
+                .any(|tag| tag.key() == Some("Name") && tag.value() == Some("example"))
+        );
+    }
+
     // Mock service-error type for testing the retry classifier. Implements
     // the minimum traits the helper requires: `ProvideErrorKind` (for
     // SDK-modeled retryability) and `ProvideErrorMetadata` (for the S3
@@ -1157,6 +1256,8 @@ mod tests {
     use aws_smithy_types::error::ErrorMetadata;
     use aws_smithy_types::error::metadata::ProvideErrorMetadata;
     use aws_smithy_types::retry::{ErrorKind, ProvideErrorKind};
+
+    use crate::aws_operation::{AwsOperation, ClientToken, NoToken, TokenBearing, WithToken};
 
     #[derive(Debug)]
     struct MockServiceError {
@@ -1194,18 +1295,157 @@ mod tests {
         }
     }
 
-    fn empty_http_response() -> HttpResponse {
-        HttpResponse::new(500.try_into().unwrap(), SdkBody::empty())
+    fn http_response(status: u16) -> HttpResponse {
+        HttpResponse::new(status.try_into().unwrap(), SdkBody::empty())
     }
 
     fn service_err(
         code: &str,
         retryable: Option<ErrorKind>,
     ) -> SdkError<MockServiceError, HttpResponse> {
+        let status = match code {
+            "OperationAborted" => 409,
+            "RequestTimeout" => 400,
+            "SlowDown" | "InternalError" => 503,
+            "Throttling" | "RequestLimitExceeded" => 429,
+            _ => 500,
+        };
         SdkError::service_error(
             MockServiceError::new(code, retryable),
-            empty_http_response(),
+            http_response(status),
         )
+    }
+
+    #[derive(Debug, Clone, Copy)]
+    enum MockFailure {
+        Timeout,
+        Service {
+            code: &'static str,
+            retryable: Option<ErrorKind>,
+        },
+    }
+
+    #[derive(Clone)]
+    struct MockCall {
+        attempts: std::sync::Arc<std::sync::atomic::AtomicU32>,
+        failures: std::sync::Arc<std::sync::Mutex<std::collections::VecDeque<MockFailure>>>,
+    }
+
+    impl MockCall {
+        fn new(failure: MockFailure) -> Self {
+            Self::scripted([failure])
+        }
+
+        fn scripted(failures: impl IntoIterator<Item = MockFailure>) -> Self {
+            Self {
+                attempts: std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0)),
+                failures: std::sync::Arc::new(std::sync::Mutex::new(
+                    failures.into_iter().collect(),
+                )),
+            }
+        }
+
+        fn attempts(&self) -> u32 {
+            self.attempts.load(std::sync::atomic::Ordering::SeqCst)
+        }
+
+        #[allow(clippy::result_large_err)]
+        fn execute(&self) -> Result<&'static str, SdkError<MockServiceError, HttpResponse>> {
+            self.attempts
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let failure = self
+                .failures
+                .lock()
+                .expect("failure script lock")
+                .pop_front();
+            let Some(failure) = failure else {
+                return Ok("success");
+            };
+            match failure {
+                MockFailure::Timeout => Err(SdkError::timeout_error("hit deadline")),
+                MockFailure::Service { code, retryable } => Err(service_err(code, retryable)),
+            }
+        }
+    }
+
+    macro_rules! mock_no_token_operation {
+        ($builder:ident, $name:literal, $idempotency:expr) => {
+            #[derive(Clone)]
+            struct $builder(MockCall);
+
+            impl AwsOperation for $builder {
+                type Resend = NoToken;
+                type Output = &'static str;
+                type Error = MockServiceError;
+
+                const NAME: &'static str = $name;
+                const IDEMPOTENCY: carina_aws_types::Idempotency = $idempotency;
+
+                #[allow(clippy::manual_async_fn)]
+                fn send(
+                    self,
+                ) -> impl std::future::Future<
+                    Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>,
+                > + Send {
+                    async move { self.0.execute() }
+                }
+            }
+        };
+    }
+
+    mock_no_token_operation!(
+        MockCreateVpc,
+        "ec2.CreateVpc",
+        carina_aws_types::Idempotency::NotIdempotent
+    );
+    mock_no_token_operation!(
+        MockDescribeVpcs,
+        "ec2.DescribeVpcs",
+        carina_aws_types::Idempotency::ReadOnly
+    );
+    mock_no_token_operation!(
+        MockCreateBucket,
+        "s3.CreateBucket",
+        carina_aws_types::Idempotency::NotIdempotent
+    );
+
+    #[derive(Clone)]
+    struct MockCreateNatGateway {
+        call: MockCall,
+        token: Option<String>,
+        seen_tokens: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
+    }
+
+    impl AwsOperation for MockCreateNatGateway {
+        type Resend = WithToken;
+        type Output = &'static str;
+        type Error = MockServiceError;
+
+        const NAME: &'static str = "ec2.CreateNatGateway";
+        const IDEMPOTENCY: carina_aws_types::Idempotency =
+            carina_aws_types::Idempotency::IdempotencyToken;
+
+        #[allow(clippy::manual_async_fn)]
+        fn send(
+            self,
+        ) -> impl std::future::Future<
+            Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>,
+        > + Send {
+            async move {
+                self.seen_tokens
+                    .lock()
+                    .expect("token lock")
+                    .push(self.token.expect("wrapper must apply the token"));
+                self.call.execute()
+            }
+        }
+    }
+
+    impl TokenBearing for MockCreateNatGateway {
+        fn with_client_token(mut self, token: &ClientToken) -> Self {
+            self.token = Some(token.as_str().to_string());
+            self
+        }
     }
 
     #[test]
@@ -1270,7 +1510,8 @@ mod tests {
 
     #[test]
     fn transport_failures_retry() {
-        // No HTTP response received → safe to retry idempotent operations.
+        // A transport failure is worth retrying when the operation's
+        // generated resend policy permits it.
         let timeout: SdkError<MockServiceError, HttpResponse> =
             SdkError::timeout_error("hit deadline");
         assert!(is_retryable_sdk_error(&timeout));
@@ -1286,84 +1527,131 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn retry_aws_operation_succeeds_first_try() {
-        let result: Result<&str, SdkError<MockServiceError, HttpResponse>> =
-            retry_aws_operation("test op", test_policy(3), || async { Ok("success") }).await;
-        assert_eq!(result.unwrap(), "success");
-    }
+    async fn provider_retry_does_not_resend_non_idempotent_timeout() {
+        let call = MockCall::new(MockFailure::Timeout);
 
-    #[tokio::test]
-    async fn retry_aws_operation_retries_transient_then_succeeds() {
-        // Models the bug from #260: a transient RequestTimeout is followed
-        // by a successful retry once the SDK's retryable flag is honored.
-        let attempt_count = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
-        let counter = attempt_count.clone();
-        let result: Result<&str, SdkError<MockServiceError, HttpResponse>> =
-            retry_aws_operation("delete bucket sub-resource", test_policy(3), || {
-                let counter = counter.clone();
-                async move {
-                    let n = counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                    if n == 0 {
-                        Err(service_err(
-                            "RequestTimeout",
-                            Some(ErrorKind::TransientError),
-                        ))
-                    } else {
-                        Ok("deleted")
-                    }
-                }
-            })
-            .await;
-        assert_eq!(result.unwrap(), "deleted");
-        assert_eq!(
-            attempt_count.load(std::sync::atomic::Ordering::SeqCst),
-            2,
-            "should retry once after a transient RequestTimeout"
-        );
-    }
+        let result = retry_aws_operation(test_policy(3), || MockCreateVpc(call.clone())).await;
 
-    #[tokio::test]
-    async fn retry_aws_operation_non_retryable_fails_immediately() {
-        let attempt_count = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
-        let counter = attempt_count.clone();
-        let result: Result<&str, SdkError<MockServiceError, HttpResponse>> =
-            retry_aws_operation("test op", test_policy(3), || {
-                let counter = counter.clone();
-                async move {
-                    counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                    Err(service_err("ValidationException", None))
-                }
-            })
-            .await;
         assert!(result.is_err());
+        assert_eq!(call.attempts(), 1);
+    }
+
+    #[tokio::test]
+    async fn provider_retry_resends_readonly_timeout() {
+        let call = MockCall::new(MockFailure::Timeout);
+
+        let result = retry_aws_operation(test_policy(3), || MockDescribeVpcs(call.clone())).await;
+
+        assert_eq!(result.expect("read-only resend succeeds"), "success");
+        assert_eq!(call.attempts(), 2);
+    }
+
+    #[tokio::test]
+    async fn provider_retry_applies_the_same_token_to_every_rebuilt_request() {
+        let call = MockCall::new(MockFailure::Timeout);
+        let seen_tokens = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let token = ClientToken::new();
+
+        let result =
+            retry_aws_operation_with_token(&token, test_policy(3), || MockCreateNatGateway {
+                call: call.clone(),
+                token: None,
+                seen_tokens: seen_tokens.clone(),
+            })
+            .await;
+
+        assert_eq!(result.expect("token resend succeeds"), "success");
+        assert_eq!(call.attempts(), 2);
         assert_eq!(
-            attempt_count.load(std::sync::atomic::Ordering::SeqCst),
-            1,
-            "non-retryable errors must terminate after one attempt"
+            seen_tokens.lock().expect("token lock").as_slice(),
+            [token.as_str(), token.as_str()]
         );
     }
 
     #[tokio::test]
-    async fn retry_aws_operation_exhausts_policy_budget() {
-        // A transient error that never clears must retry exactly
-        // max_attempts times, then surface the error.
-        let attempt_count = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
-        let counter = attempt_count.clone();
-        let result: Result<&str, SdkError<MockServiceError, HttpResponse>> =
-            retry_aws_operation("create S3 bucket", test_policy(8), || {
-                let counter = counter.clone();
-                async move {
-                    counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                    Err(service_err("OperationAborted", None))
-                }
+    async fn provider_retry_keeps_maybe_sent_after_throttling_exhaustion() {
+        let call = MockCall::scripted([
+            MockFailure::Timeout,
+            MockFailure::Service {
+                code: "RequestLimitExceeded",
+                retryable: Some(ErrorKind::ThrottlingError),
+            },
+            MockFailure::Service {
+                code: "RequestLimitExceeded",
+                retryable: Some(ErrorKind::ThrottlingError),
+            },
+        ]);
+        let seen_tokens = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let token = ClientToken::new();
+
+        let error =
+            retry_aws_operation_with_token(&token, test_policy(3), || MockCreateNatGateway {
+                call: call.clone(),
+                token: None,
+                seen_tokens: seen_tokens.clone(),
             })
-            .await;
-        assert!(result.is_err());
+            .await
+            .expect_err("all provider attempts should fail");
+
+        assert_eq!(call.attempts(), 3);
+        assert_eq!(error.outcome(), SendOutcome::MaybeSent);
         assert_eq!(
-            attempt_count.load(std::sync::atomic::Ordering::SeqCst),
-            8,
-            "a never-clearing transient error must use the full budget"
+            seen_tokens.lock().expect("token lock").as_slice(),
+            [token.as_str(), token.as_str(), token.as_str()]
         );
+    }
+
+    #[tokio::test]
+    async fn provider_single_send_applies_the_token() {
+        let call = MockCall::new(MockFailure::Timeout);
+        let seen_tokens = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let token = ClientToken::new();
+
+        let result = send_aws_operation_with_token(
+            &token,
+            MockCreateNatGateway {
+                call: call.clone(),
+                token: None,
+                seen_tokens: seen_tokens.clone(),
+            },
+        )
+        .await;
+
+        assert!(result.is_err());
+        assert_eq!(call.attempts(), 1);
+        assert_eq!(
+            seen_tokens.lock().expect("token lock").as_slice(),
+            [token.as_str()]
+        );
+    }
+
+    #[tokio::test]
+    async fn provider_retry_resends_rejected_throttling() {
+        let call = MockCall::new(MockFailure::Service {
+            code: "RequestLimitExceeded",
+            retryable: Some(ErrorKind::ThrottlingError),
+        });
+
+        let result = retry_aws_operation(test_policy(3), || MockCreateVpc(call.clone())).await;
+
+        assert_eq!(result.expect("throttled resend succeeds"), "success");
+        assert_eq!(call.attempts(), 2);
+    }
+
+    #[tokio::test]
+    async fn provider_retry_preserves_s3_operation_aborted_carve_out() {
+        let call = MockCall::new(MockFailure::Service {
+            code: "OperationAborted",
+            retryable: None,
+        });
+
+        let result = retry_aws_operation(test_policy(3), || MockCreateBucket(call.clone())).await;
+
+        assert_eq!(
+            result.expect("OperationAborted means AWS rejected the create"),
+            "success"
+        );
+        assert_eq!(call.attempts(), 2);
     }
 
     #[test]

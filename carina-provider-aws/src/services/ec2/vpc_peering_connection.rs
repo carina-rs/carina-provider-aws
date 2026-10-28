@@ -1,13 +1,14 @@
 use std::collections::HashMap;
 
 use carina_core::provider::{AppliedIdentifier, ReadOutcome};
-use carina_core::provider::{ProviderError, ProviderResult};
+use carina_core::provider::{ProviderResult, Sent};
 use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
 
 use crate::AwsProvider;
+use crate::aws_operation::ClientToken;
 use crate::error_helpers::api_error_with_meta;
-use crate::helpers::{build_tag_specification, require_string_attr};
-use crate::provider::CreateCompletion;
+use crate::helpers::{build_tag_specification_with_create_token, require_string_attr};
+use crate::provider::{AwsCreateAttempt, Ec2TaggedResourceKind};
 
 impl AwsProvider {
     /// Read an EC2 VPC Peering Connection
@@ -26,12 +27,8 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                api_error_with_meta(
-                    "Failed to describe VPC peering connections",
-                    "ec2.DescribeVpcPeeringConnections",
-                    e,
-                )
-                .for_resource(id.clone())
+                api_error_with_meta("Failed to describe VPC peering connections", e)
+                    .for_resource(id.clone())
             })?;
 
         if let Some(pcx) = result.vpc_peering_connections().first() {
@@ -68,12 +65,20 @@ impl AwsProvider {
     }
 
     /// Create an EC2 VPC Peering Connection
-    pub(crate) async fn create_ec2_vpc_peering_connection(
+    pub(crate) async fn create_ec2_vpc_peering_connection<A: AwsCreateAttempt>(
         &self,
         resource: &Resource,
-    ) -> ProviderResult<CreateCompletion> {
-        let vpc_id = require_string_attr(resource, "vpc_id")?;
-        let peer_vpc_id = require_string_attr(resource, "peer_vpc_id")?;
+        client_token: &ClientToken,
+        attempt: A,
+    ) -> Result<A::Step, A::Verdict> {
+        let vpc_id = match require_string_attr(resource, "vpc_id") {
+            Ok(value) => value,
+            Err(error) => return Err(attempt.untracked(error)),
+        };
+        let peer_vpc_id = match require_string_attr(resource, "peer_vpc_id") {
+            Ok(value) => value,
+            Err(error) => return Err(attempt.untracked(error)),
+        };
 
         let mut req = self
             .ec2_client
@@ -94,46 +99,28 @@ impl AwsProvider {
         // schema attribute + a matching read-side projection;
         // carina-provider-aws#447.
 
-        // Apply tags via TagSpecifications
-        if let Some(tag_spec) = build_tag_specification(
+        req = req.tag_specifications(build_tag_specification_with_create_token(
             resource,
             aws_sdk_ec2::types::ResourceType::VpcPeeringConnection,
-        ) {
-            req = req.tag_specifications(tag_spec);
-        }
+            client_token,
+        ));
 
-        let result = req.send().await.map_err(|e| {
-            api_error_with_meta(
-                "Failed to create VPC peering connection",
-                "ec2.CreateVpcPeeringConnection",
-                e,
-            )
-            .for_resource(resource.id.clone())
-        })?;
+        let sent = Sent::AllRequestAttributes;
+        let result = req.send().await;
 
-        let pcx_id = result
-            .vpc_peering_connection()
-            .and_then(|pcx| pcx.vpc_peering_connection_id())
-            .ok_or_else(|| {
-                ProviderError::api_error("VPC Peering Connection created but no ID returned")
-                    .for_resource(resource.id.clone())
-            })?;
-
-        // Read back
-        let identifier = crate::helpers::applied_identifier(
-            &resource.id,
-            "ec2.CreateVpcPeeringConnection",
-            pcx_id,
-        )?;
-        let outcome = self
-            .read_ec2_vpc_peering_connection(&resource.id, &identifier)
-            .await;
-        Ok(self.create_outcome_from_read(
-            &resource.id,
-            identifier,
-            resource.resolved_attributes(),
-            outcome,
-        ))
+        self.finish_tagged_ec2_create(
+            resource,
+            attempt,
+            Ec2TaggedResourceKind::VpcPeeringConnection.create_context(client_token, sent),
+            result,
+            |output| {
+                output
+                    .vpc_peering_connection()
+                    .and_then(|connection| connection.vpc_peering_connection_id())
+                    .map(str::to_owned)
+            },
+        )
+        .await
     }
 
     /// Update an EC2 VPC Peering Connection (tags only)
@@ -167,12 +154,8 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                api_error_with_meta(
-                    "Failed to delete VPC peering connection",
-                    "ec2.DeleteVpcPeeringConnection",
-                    e,
-                )
-                .for_resource(id.clone())
+                api_error_with_meta("Failed to delete VPC peering connection", e)
+                    .for_resource(id.clone())
             })?;
         Ok(())
     }

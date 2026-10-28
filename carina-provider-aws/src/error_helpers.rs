@@ -29,6 +29,13 @@
 use carina_core::provider::ProviderError;
 use thiserror::Error;
 
+use carina_aws_types::{Idempotency, SendOutcome};
+
+use crate::aws_operation::DecidedOperationError;
+
+const OUTCOME_UNKNOWN_NOTE: &str =
+    "outcome unknown: the request may have been applied; check before re-applying";
+
 /// Type alias for the `aws-sdk-*` family's `SdkError` shape with the
 /// HTTP-response generic pinned. Every `aws-sdk-*` crate's
 /// `error::SdkError<E>` re-exports the same smithy
@@ -40,6 +47,68 @@ pub(crate) type AwsSdkError<E> = aws_smithy_runtime_api::client::result::SdkErro
     E,
     aws_smithy_runtime_api::client::orchestrator::HttpResponse,
 >;
+
+/// A failed send together with the outcome accumulated across every attempt.
+///
+/// The SDK error is boxed so retry wrapper results keep a small `Err` variant
+/// even when generated service errors make `SdkError` large.
+#[derive(Debug)]
+pub(crate) struct SendFailure<E> {
+    outcome: SendOutcome,
+    error: Box<AwsSdkError<E>>,
+}
+
+impl<E> SendFailure<E> {
+    pub(crate) fn new(outcome: SendOutcome, error: AwsSdkError<E>) -> Self {
+        Self {
+            outcome,
+            error: Box::new(error),
+        }
+    }
+
+    pub(crate) fn outcome(&self) -> SendOutcome {
+        self.outcome
+    }
+
+    pub(crate) fn into_parts(self) -> (SendOutcome, AwsSdkError<E>) {
+        (self.outcome, *self.error)
+    }
+}
+
+impl<E> std::ops::Deref for SendFailure<E> {
+    type Target = AwsSdkError<E>;
+
+    fn deref(&self) -> &Self::Target {
+        self.error.as_ref()
+    }
+}
+
+pub(crate) trait IntoSendFailure {
+    type Error;
+
+    fn into_send_failure(self) -> SendFailure<Self::Error>;
+}
+
+impl<E> IntoSendFailure for SendFailure<E> {
+    type Error = E;
+
+    fn into_send_failure(self) -> SendFailure<E> {
+        self
+    }
+}
+
+impl<E> IntoSendFailure for AwsSdkError<E>
+where
+    E: aws_smithy_types::error::metadata::ProvideErrorMetadata
+        + aws_smithy_types::retry::ProvideErrorKind,
+{
+    type Error = E;
+
+    fn into_send_failure(self) -> SendFailure<E> {
+        let outcome = SendOutcome::classify(&self);
+        SendFailure::new(outcome, self)
+    }
+}
 
 #[derive(Debug)]
 struct AwsServiceMessage(Option<String>);
@@ -104,6 +173,16 @@ where
     source: AwsSdkError<E>,
 }
 
+#[derive(Debug, Error)]
+#[error("{OUTCOME_UNKNOWN_NOTE}")]
+struct OutcomeUnknownCause<C>
+where
+    C: std::error::Error + 'static,
+{
+    #[source]
+    source: C,
+}
+
 /// Build a structured `ProviderError::ApiError` from an AWS SDK error.
 ///
 /// Extracts HTTP status, AWS error code, AWS-side message, and request
@@ -125,28 +204,23 @@ where
 /// The AWS-side message lives in the typed cause and is omitted there
 /// when the SDK source chain already renders it.
 ///
-/// `operation` is the service-qualified API operation
-/// (e.g. `"iam.ListRoles"`, `"s3.HeadBucket"`) so the operator can
-/// grep CI logs by operation without re-parsing the message.
-///
 /// The SDK error is preserved as the typed cause's source so
 /// transport-level diagnostics (DNS, TLS, network timeouts — none of
 /// which populate the HTTP-response fields) still reach the operator
 /// via the renderer's appended `cause:` line.
-pub fn api_error_with_meta<E, S>(
-    context: &'static str,
-    operation: S,
-    err: AwsSdkError<E>,
-) -> ProviderError
+pub(crate) fn api_error_with_meta<F>(context: &'static str, failure: F) -> ProviderError
 where
-    S: Into<String>,
-    E: std::error::Error
+    F: IntoSendFailure,
+    F::Error: std::error::Error
+        + DecidedOperationError
         + aws_smithy_types::error::metadata::ProvideErrorMetadata
+        + aws_smithy_types::retry::ProvideErrorKind
         + Send
         + Sync
         + 'static,
 {
-    api_error_with_meta_cause(context, operation, err, |message, source| {
+    let (outcome, error) = failure.into_send_failure().into_parts();
+    api_error_with_meta_cause(context, outcome, error, |message, source| {
         AwsServiceErrorCause { message, source }
     })
 }
@@ -154,22 +228,23 @@ where
 /// Build a structured AWS error whose cause also carries a dynamic typed
 /// subject. The `context` remains static and first-line; subject data is
 /// rendered exactly once below it.
-pub(crate) fn api_error_with_meta_and_subject<E, S, Subject>(
+pub(crate) fn api_error_with_meta_and_subject<E, Subject>(
     context: &'static str,
-    operation: S,
     subject: Subject,
     err: AwsSdkError<E>,
 ) -> ProviderError
 where
-    S: Into<String>,
     Subject: std::fmt::Debug + std::fmt::Display + Send + Sync + 'static,
     E: std::error::Error
+        + DecidedOperationError
         + aws_smithy_types::error::metadata::ProvideErrorMetadata
+        + aws_smithy_types::retry::ProvideErrorKind
         + Send
         + Sync
         + 'static,
 {
-    api_error_with_meta_cause(context, operation, err, |message, source| {
+    let outcome = SendOutcome::classify(&err);
+    api_error_with_meta_cause(context, outcome, err, |message, source| {
         AwsServiceErrorWithSubjectCause {
             subject,
             message,
@@ -178,17 +253,18 @@ where
     })
 }
 
-fn api_error_with_meta_cause<E, S, Cause>(
+fn api_error_with_meta_cause<E, Cause>(
     context: &'static str,
-    operation: S,
+    outcome: SendOutcome,
     err: AwsSdkError<E>,
     make_cause: impl FnOnce(AwsServiceMessage, AwsSdkError<E>) -> Cause,
 ) -> ProviderError
 where
-    S: Into<String>,
     Cause: std::error::Error + Send + Sync + 'static,
     E: std::error::Error
+        + DecidedOperationError
         + aws_smithy_types::error::metadata::ProvideErrorMetadata
+        + aws_smithy_types::retry::ProvideErrorKind
         + Send
         + Sync
         + 'static,
@@ -196,6 +272,9 @@ where
     use aws_smithy_types::error::metadata::ProvideErrorMetadata;
     use aws_types::request_id::RequestId;
 
+    let operation = E::NAME.to_string();
+    let append_outcome_unknown =
+        outcome == SendOutcome::MaybeSent && E::IDEMPOTENCY == Idempotency::NotIdempotent;
     let status = err
         .raw_response()
         .map(|response| response.status().as_u16());
@@ -204,7 +283,15 @@ where
     let request_id = err.request_id().map(str::to_owned);
     let cause = make_cause(aws_message, err);
 
-    let mut pe = if code.as_deref().is_some_and(is_not_found_error_code) || status == Some(404) {
+    let not_found = code.as_deref().is_some_and(is_not_found_error_code) || status == Some(404);
+    let mut pe = if append_outcome_unknown {
+        let cause = OutcomeUnknownCause { source: cause };
+        if not_found {
+            ProviderError::not_found_caused_by(context, cause)
+        } else {
+            ProviderError::api_error_caused_by(context, cause)
+        }
+    } else if not_found {
         ProviderError::not_found_caused_by(context, cause)
     } else {
         ProviderError::api_error_caused_by(context, cause)
@@ -288,6 +375,23 @@ mod tests {
         SdkError::service_error(inner, raw)
     }
 
+    fn operation_service_error_with_meta<E>(
+        status: u16,
+        code: Option<&str>,
+        message: Option<&str>,
+        make_error: impl FnOnce(ErrorMetadata) -> E,
+    ) -> AwsSdkError<E> {
+        let mut meta = ErrorMetadata::builder();
+        if let Some(code) = code {
+            meta = meta.code(code);
+        }
+        if let Some(message) = message {
+            meta = meta.message(message);
+        }
+        let raw = Response::new(StatusCode::try_from(status).unwrap(), SdkBody::empty());
+        SdkError::service_error(make_error(meta.build()), raw)
+    }
+
     /// carina#3241: a real `SdkError::service_error(...)` round-trip
     /// through `api_error_with_meta` populates the structured fields
     /// the renderer surfaces — proving the extraction wiring works
@@ -299,7 +403,7 @@ mod tests {
         let sdk_err =
             list_roles_service_error_with_meta(403, Some("AccessDenied"), Some(AWS_MESSAGE));
 
-        let pe = api_error_with_meta("Failed to list IAM roles", "iam.ListRoles", sdk_err);
+        let pe = api_error_with_meta("Failed to list IAM roles", sdk_err);
         let CoreProviderError::ApiError(detail) = &pe else {
             panic!("expected ApiError, got {:?}", pe);
         };
@@ -357,7 +461,7 @@ mod tests {
         let raw = Response::new(StatusCode::try_from(403).unwrap(), SdkBody::empty());
         let sdk_err = SdkError::service_error(inner, raw);
 
-        let pe = api_error_with_meta("Failed to list IAM roles", "iam.ListRoles", sdk_err);
+        let pe = api_error_with_meta("Failed to list IAM roles", sdk_err);
         let rendered = pe.to_string();
         assert_eq!(
             rendered.matches(AWS_MESSAGE).count(),
@@ -389,7 +493,7 @@ mod tests {
         // for "no HTTP response landed". Use a simple `&str` cause.
         let sdk_err: SdkError<ListRolesError> = SdkError::construction_failure("dns lookup failed");
 
-        let pe = api_error_with_meta("Failed to list IAM roles", "iam.ListRoles", sdk_err);
+        let pe = api_error_with_meta("Failed to list IAM roles", sdk_err);
         let CoreProviderError::ApiError(detail) = &pe else {
             panic!("expected ApiError, got {:?}", pe);
         };
@@ -409,18 +513,104 @@ mod tests {
     }
 
     #[test]
+    fn api_error_with_meta_keeps_readonly_context_without_outcome_unknown_note() {
+        let sdk_err: SdkError<ListRolesError> = SdkError::timeout_error("response timed out");
+
+        let pe = api_error_with_meta("Failed to list IAM roles", sdk_err);
+        let rendered = pe.to_string();
+
+        assert!(
+            rendered.starts_with("Failed to list IAM roles"),
+            "{rendered}"
+        );
+        assert!(!rendered.contains("may have been applied"), "{rendered}");
+        assert!(rendered.contains("iam.ListRoles"), "{rendered}");
+    }
+
+    #[test]
+    fn api_error_with_meta_uses_operation_identity_from_the_error_type() {
+        use aws_sdk_cloudwatchlogs::operation::describe_log_groups::DescribeLogGroupsError;
+
+        let sdk_err: aws_sdk_cloudwatchlogs::error::SdkError<DescribeLogGroupsError> =
+            aws_sdk_cloudwatchlogs::error::SdkError::timeout_error("response timed out");
+
+        let pe = api_error_with_meta("Failed to describe log groups", sdk_err);
+
+        assert_eq!(
+            pe.detail().operation.as_deref(),
+            Some("cloudwatchlogs.DescribeLogGroups")
+        );
+        assert!(!pe.to_string().contains(OUTCOME_UNKNOWN_NOTE));
+    }
+
+    #[test]
+    fn api_error_with_meta_appends_outcome_unknown_only_for_non_idempotent_operation() {
+        use aws_sdk_ec2::operation::create_vpc::CreateVpcError;
+
+        let sdk_err: aws_sdk_ec2::error::SdkError<CreateVpcError> =
+            aws_sdk_ec2::error::SdkError::timeout_error("response timed out");
+
+        let pe = api_error_with_meta("Failed to create VPC", sdk_err);
+        let rendered = pe.to_string();
+
+        assert_eq!(pe.detail().context(), "Failed to create VPC");
+        assert!(rendered.starts_with("Failed to create VPC"), "{rendered}");
+        assert!(rendered.contains(OUTCOME_UNKNOWN_NOTE), "{rendered}");
+        assert!(rendered.contains("response timed out"), "{rendered}");
+    }
+
+    #[test]
+    fn api_error_with_meta_uses_sticky_outcome_from_provider_retries() {
+        use aws_sdk_ec2::operation::create_vpc::CreateVpcError;
+
+        let service_error = CreateVpcError::generic(
+            ErrorMetadata::builder()
+                .code("RequestLimitExceeded")
+                .message("final attempt throttled")
+                .build(),
+        );
+        let raw = Response::new(
+            StatusCode::try_from(429).expect("valid status"),
+            SdkBody::empty(),
+        );
+        let failure = SendFailure::new(
+            SendOutcome::MaybeSent,
+            SdkError::service_error(service_error, raw),
+        );
+
+        let error = api_error_with_meta("Failed to create VPC", failure);
+        let rendered = error.to_string();
+
+        assert!(rendered.contains(OUTCOME_UNKNOWN_NOTE), "{rendered}");
+        assert_eq!(error.detail().status, Some(429));
+        assert_eq!(error.detail().code.as_deref(), Some("RequestLimitExceeded"));
+    }
+
+    #[test]
+    fn api_error_with_meta_does_not_mark_token_bearing_create_as_outcome_unknown() {
+        use aws_sdk_ec2::operation::create_nat_gateway::CreateNatGatewayError;
+
+        let sdk_err: aws_sdk_ec2::error::SdkError<CreateNatGatewayError> =
+            aws_sdk_ec2::error::SdkError::timeout_error("response timed out");
+
+        let pe = api_error_with_meta("Failed to create NAT gateway", sdk_err);
+
+        assert_eq!(pe.detail().context(), "Failed to create NAT gateway");
+        assert!(!pe.to_string().contains("may have been applied"));
+    }
+
+    #[test]
     fn api_error_with_meta_returns_not_found_for_acm_resource_not_found() {
-        let sdk_err = list_roles_service_error_with_meta(
+        use aws_sdk_acm::operation::describe_certificate::DescribeCertificateError;
+
+        let sdk_err = operation_service_error_with_meta(
             400,
             Some("ResourceNotFoundException"),
             Some("resource not found"),
+            DescribeCertificateError::generic,
         );
 
-        let pe = api_error_with_meta(
-            "Failed to describe ACM certificate",
-            "acm.DescribeCertificate",
-            sdk_err,
-        );
+        let pe = api_error_with_meta("Failed to describe ACM certificate", sdk_err);
         let CoreProviderError::NotFound(detail) = &pe else {
             panic!("expected NotFound, got {:?}", pe);
         };
@@ -432,10 +622,16 @@ mod tests {
 
     #[test]
     fn api_error_with_meta_returns_not_found_for_iam_no_such_entity() {
-        let sdk_err =
-            list_roles_service_error_with_meta(404, Some("NoSuchEntity"), Some("role not found"));
+        use aws_sdk_iam::operation::get_role::GetRoleError;
 
-        let pe = api_error_with_meta("Failed to get IAM role", "iam.GetRole", sdk_err);
+        let sdk_err = operation_service_error_with_meta(
+            404,
+            Some("NoSuchEntity"),
+            Some("role not found"),
+            GetRoleError::generic,
+        );
+
+        let pe = api_error_with_meta("Failed to get IAM role", sdk_err);
         let CoreProviderError::NotFound(detail) = &pe else {
             panic!("expected NotFound, got {:?}", pe);
         };
@@ -447,17 +643,16 @@ mod tests {
 
     #[test]
     fn api_error_with_meta_returns_not_found_for_ec2_invalid_group() {
-        let sdk_err = list_roles_service_error_with_meta(
+        use aws_sdk_ec2::operation::describe_security_groups::DescribeSecurityGroupsError;
+
+        let sdk_err = operation_service_error_with_meta(
             400,
             Some("InvalidGroup.NotFound"),
             Some("security group not found"),
+            DescribeSecurityGroupsError::generic,
         );
 
-        let pe = api_error_with_meta(
-            "Failed to describe security groups",
-            "ec2.DescribeSecurityGroups",
-            sdk_err,
-        );
+        let pe = api_error_with_meta("Failed to describe security groups", sdk_err);
         let CoreProviderError::NotFound(detail) = &pe else {
             panic!("expected NotFound, got {:?}", pe);
         };
@@ -478,7 +673,7 @@ mod tests {
             Some("invalid input"),
         );
 
-        let pe = api_error_with_meta("Failed to list IAM roles", "iam.ListRoles", sdk_err);
+        let pe = api_error_with_meta("Failed to list IAM roles", sdk_err);
         let CoreProviderError::ApiError(detail) = &pe else {
             panic!("expected ApiError, got {:?}", pe);
         };
@@ -490,10 +685,16 @@ mod tests {
 
     #[test]
     fn api_error_with_meta_returns_not_found_for_http_404() {
-        let sdk_err =
-            list_roles_service_error_with_meta(404, None, Some("not found without a code"));
+        use aws_sdk_s3::operation::head_bucket::HeadBucketError;
 
-        let pe = api_error_with_meta("Failed to head S3 bucket", "s3.HeadBucket", sdk_err);
+        let sdk_err = operation_service_error_with_meta(
+            404,
+            None,
+            Some("not found without a code"),
+            HeadBucketError::generic,
+        );
+
+        let pe = api_error_with_meta("Failed to head S3 bucket", sdk_err);
         let CoreProviderError::NotFound(detail) = &pe else {
             panic!("expected NotFound, got {:?}", pe);
         };

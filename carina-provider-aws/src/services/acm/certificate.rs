@@ -12,7 +12,9 @@
 
 use std::collections::HashMap;
 
-use aws_sdk_acm::operation::request_certificate::RequestCertificateInput;
+use aws_sdk_acm::operation::request_certificate::{
+    RequestCertificateError, RequestCertificateInput,
+};
 use aws_sdk_acm::types::{CertificateStatus, KeyAlgorithm, ValidationMethod};
 use indexmap::IndexMap;
 
@@ -22,13 +24,33 @@ use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
 use carina_core::schema::ResourceSchema;
 
 use crate::AwsProvider;
-use crate::error_helpers::api_error_with_meta;
+use crate::aws_operation::ClientToken;
+use crate::error_helpers::{SendFailure, api_error_with_meta};
 use crate::helpers::{
     optional_enum_attr, optional_enum_struct_field, require_string_attr, sdk_error_message,
+    send_aws_operation_with_token,
 };
 use crate::provider::CreateCompletion;
 
 const DVO_MISSING_ATTRIBUTE: &str = "domain_validation_options";
+
+pub(crate) fn request_certificate_error(
+    id: &ResourceId,
+    error: SendFailure<RequestCertificateError>,
+) -> ProviderError {
+    api_error_with_meta("RequestCertificate failed", error).for_resource(id.clone())
+}
+
+pub(crate) fn request_certificate_outcome_unknown_error(
+    id: &ResourceId,
+    error: SendFailure<RequestCertificateError>,
+) -> ProviderError {
+    api_error_with_meta(
+        "acm.Certificate may have been created; check before re-applying",
+        error,
+    )
+    .for_resource(id.clone())
+}
 
 fn extract_string_list(value: &Value) -> Vec<String> {
     if let Value::Concrete(ConcreteValue::List(items)) = value {
@@ -468,26 +490,15 @@ fn partial_acm_certificate_create_outcome(
 }
 
 impl AwsProvider {
-    /// Create an ACM certificate by issuing a `RequestCertificate`
-    /// call. The returned state carries the cert's ARN as identifier;
-    /// the validation status is `PENDING_VALIDATION` until the user
-    /// satisfies the DNS / EMAIL challenge — typically wired via a
-    /// `wait` construct on `cert.status`.
-    pub(crate) async fn create_acm_certificate(
+    /// Issue one `RequestCertificate` call with the caller's stable token.
+    pub(crate) async fn request_acm_certificate(
         &self,
         resource: &Resource,
         schema: &ResourceSchema,
-    ) -> ProviderResult<CreateCompletion> {
+        client_token: &ClientToken,
+    ) -> ProviderResult<Result<AppliedIdentifier, SendFailure<RequestCertificateError>>> {
         let id = resource.id.clone();
         let request = build_request_certificate(resource, schema)?;
-        let domain_name = request.domain_name.clone().ok_or_else(|| {
-            ProviderError::internal("built RequestCertificate input has no domain_name")
-                .for_resource(id.clone())
-        })?;
-        let request_enums = CertificateRequestEnums {
-            validation_method: request.validation_method.clone(),
-            key_algorithm: request.key_algorithm.clone(),
-        };
 
         let req = self
             .acm_client
@@ -510,16 +521,36 @@ impl AwsProvider {
         // feature; the common DNS-validation path is unaffected.
         // carina-rs/carina-provider-aws#296.
 
-        let output = req.send().await.map_err(|e| {
-            api_error_with_meta("RequestCertificate failed", "acm.RequestCertificate", e)
-                .for_resource(id.clone())
-        })?;
+        let output = match send_aws_operation_with_token(client_token, req).await {
+            Ok(output) => output,
+            Err(error) => return Ok(Err(error)),
+        };
 
         let arn = output.certificate_arn().ok_or_else(|| {
             ProviderError::api_error("RequestCertificate returned no certificate_arn")
                 .for_resource(id.clone())
         })?;
         let arn = crate::helpers::applied_identifier(&id, "acm.RequestCertificate", arn)?;
+        Ok(Ok(arn))
+    }
+
+    /// Continue an issued ACM create through its normal read-back path.
+    pub(crate) async fn continue_acm_certificate_create(
+        &self,
+        resource: &Resource,
+        schema: &ResourceSchema,
+        arn: AppliedIdentifier,
+    ) -> ProviderResult<CreateCompletion> {
+        let id = resource.id.clone();
+        let request = build_request_certificate(resource, schema)?;
+        let domain_name = request.domain_name.clone().ok_or_else(|| {
+            ProviderError::internal("built RequestCertificate input has no domain_name")
+                .for_resource(id.clone())
+        })?;
+        let request_enums = CertificateRequestEnums {
+            validation_method: request.validation_method,
+            key_algorithm: request.key_algorithm,
+        };
 
         // DNS validation populates DomainValidationOptions[].ResourceRecord
         // asynchronously after RequestCertificate. Wait so the post-create
@@ -538,12 +569,8 @@ impl AwsProvider {
                         .send()
                         .await
                         .map_err(|e| {
-                            api_error_with_meta(
-                                "DescribeCertificate failed",
-                                "acm.DescribeCertificate",
-                                e,
-                            )
-                            .for_resource(id.clone())
+                            api_error_with_meta("DescribeCertificate failed", e)
+                                .for_resource(id.clone())
                         })
                         .map(|out| out.certificate().cloned())
                 },
@@ -610,8 +637,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                api_error_with_meta("DescribeCertificate failed", "acm.DescribeCertificate", e)
-                    .for_resource(id.clone())
+                api_error_with_meta("DescribeCertificate failed", e).for_resource(id.clone())
             })?;
         self.read_acm_certificate_from_detail(id, applied_identifier, output.certificate())
             .await
@@ -644,12 +670,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                api_error_with_meta(
-                    "ListTagsForCertificate failed",
-                    "acm.ListTagsForCertificate",
-                    e,
-                )
-                .for_resource(id.clone())
+                api_error_with_meta("ListTagsForCertificate failed", e).for_resource(id.clone())
             })?;
         let tags = tag_output.tags();
         if !tags.is_empty() {
@@ -692,12 +713,8 @@ impl AwsProvider {
                 .send()
                 .await
                 .map_err(|e| {
-                    api_error_with_meta(
-                        "UpdateCertificateOptions failed",
-                        "acm.UpdateCertificateOptions",
-                        e,
-                    )
-                    .for_resource(id.clone())
+                    api_error_with_meta("UpdateCertificateOptions failed", e)
+                        .for_resource(id.clone())
                 })?;
         }
         self.apply_acm_tags(&id, identifier.as_str(), &to, from)
@@ -746,8 +763,7 @@ impl AwsProvider {
                 req = req.tags(tag);
             }
             req.send().await.map_err(|e| {
-                api_error_with_meta("AddTagsToCertificate failed", "acm.AddTagsToCertificate", e)
-                    .for_resource(id.clone())
+                api_error_with_meta("AddTagsToCertificate failed", e).for_resource(id.clone())
             })?;
         }
 
@@ -771,12 +787,7 @@ impl AwsProvider {
                 req = req.tags(tag);
             }
             req.send().await.map_err(|e| {
-                api_error_with_meta(
-                    "RemoveTagsFromCertificate failed",
-                    "acm.RemoveTagsFromCertificate",
-                    e,
-                )
-                .for_resource(id.clone())
+                api_error_with_meta("RemoveTagsFromCertificate failed", e).for_resource(id.clone())
             })?;
         }
 
@@ -795,10 +806,7 @@ impl AwsProvider {
             .certificate_arn(identifier)
             .send()
             .await
-            .map_err(|e| {
-                api_error_with_meta("DeleteCertificate failed", "acm.DeleteCertificate", e)
-                    .for_resource(id)
-            })?;
+            .map_err(|e| api_error_with_meta("DeleteCertificate failed", e).for_resource(id))?;
         Ok(())
     }
 }
@@ -878,6 +886,11 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aws_sdk_acm::error::SdkError;
+    use aws_smithy_runtime_api::client::orchestrator::HttpResponse;
+    use aws_smithy_types::body::SdkBody;
+    use aws_smithy_types::error::ErrorMetadata;
+    use carina_aws_types::SendOutcome;
 
     fn acm_schema() -> ResourceSchema {
         crate::schemas::generated::acm::certificate::acm_certificate_config().schema
@@ -895,6 +908,39 @@ mod tests {
 
     fn applied_identifier(value: &str) -> AppliedIdentifier {
         AppliedIdentifier::new(value).expect("test provider identifier must be non-empty")
+    }
+
+    #[test]
+    fn maybe_sent_request_certificate_uses_acm_specific_outcome_unknown_message() {
+        let service_error = RequestCertificateError::generic(
+            ErrorMetadata::builder()
+                .code("ThrottlingException")
+                .message("final attempt throttled")
+                .build(),
+        );
+        let response = HttpResponse::new(429.try_into().expect("valid status"), SdkBody::empty());
+        let error: SdkError<RequestCertificateError> =
+            SdkError::service_error(service_error, response);
+        let id = id();
+
+        let error = request_certificate_outcome_unknown_error(
+            &id,
+            SendFailure::new(SendOutcome::MaybeSent, error),
+        );
+
+        assert_eq!(
+            error.to_wire().message,
+            "acm.Certificate may have been created; check before re-applying"
+        );
+        assert_eq!(
+            error
+                .to_wire()
+                .resource_id
+                .as_ref()
+                .map(|resource_id| resource_id.identity.as_str()),
+            Some("test-cert")
+        );
+        assert!(error.to_string().contains("final attempt throttled"));
     }
 
     fn dv_without_rr(domain: &str) -> DomainValidation {

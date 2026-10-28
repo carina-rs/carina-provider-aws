@@ -1,14 +1,17 @@
 use indexmap::IndexMap;
 use std::collections::HashMap;
 
+use carina_core::provider::ProviderResult;
 use carina_core::provider::{AppliedIdentifier, ReadOutcome};
-use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{ConcreteValue, Resource, ResourceId, Value};
 
 use crate::AwsProvider;
+use crate::aws_operation::ClientToken;
 use crate::error_helpers::api_error_with_meta;
-use crate::helpers::require_string_attr;
-use crate::provider::AwsCreateAttempt;
+use crate::helpers::{
+    build_tag_specification_with_create_token, require_string_attr, send_aws_operation_with_token,
+};
+use crate::provider::{AwsCreateAttempt, Ec2TaggedResourceKind};
 
 impl AwsProvider {
     /// Read an EC2 Route Table
@@ -34,12 +37,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                api_error_with_meta(
-                    "Failed to describe route tables",
-                    "ec2.DescribeRouteTables",
-                    e,
-                )
-                .for_resource(id.clone())
+                api_error_with_meta("Failed to describe route tables", e).for_resource(id.clone())
             })?;
 
         if let Some(rt) = result.route_tables().first() {
@@ -94,6 +92,7 @@ impl AwsProvider {
     pub(crate) async fn create_ec2_route_table<A: AwsCreateAttempt>(
         &self,
         resource: &Resource,
+        client_token: &ClientToken,
         attempt: A,
     ) -> Result<A::Step, A::Verdict> {
         let vpc_id = match require_string_attr(resource, "vpc_id") {
@@ -102,50 +101,38 @@ impl AwsProvider {
         };
 
         // Create Route Table
-        let result = match self
+        let req = self
             .ec2_client
             .create_route_table()
             .vpc_id(&vpc_id)
-            .send()
-            .await
-        {
-            Ok(result) => result,
-            Err(error) => {
-                return Err(attempt.untracked(
-                    api_error_with_meta(
-                        "Failed to create route table",
-                        "ec2.CreateRouteTable",
-                        error,
-                    )
-                    .for_resource(resource.id.clone()),
-                ));
-            }
-        };
+            .tag_specifications(build_tag_specification_with_create_token(
+                resource,
+                aws_sdk_ec2::types::ResourceType::RouteTable,
+                client_token,
+            ));
+        let result = send_aws_operation_with_token(client_token, req).await;
+        let sent = Self::sent_only(resource, &["vpc_id", "tags"]);
 
-        let rt_id = match result.route_table().and_then(|rt| rt.route_table_id()) {
-            Some(rt_id) => rt_id,
-            None => {
-                return Err(attempt.untracked(
-                    ProviderError::api_error("Route Table created but no ID returned")
-                        .for_resource(resource.id.clone()),
-                ));
-            }
-        };
-        let identifier =
-            match crate::helpers::applied_identifier(&resource.id, "ec2.CreateRouteTable", rt_id) {
-                Ok(identifier) => identifier,
-                Err(error) => return Err(attempt.untracked(error)),
-            };
-        let issued = attempt.issued(identifier.clone(), Self::sent_only(resource, &["vpc_id"]));
+        self.finish_tagged_ec2_create(
+            resource,
+            attempt,
+            Ec2TaggedResourceKind::RouteTable.create_context(client_token, sent),
+            result,
+            |output| {
+                output
+                    .route_table()
+                    .and_then(|table| table.route_table_id())
+                    .map(str::to_owned)
+            },
+        )
+        .await
+    }
 
-        // Apply tags
-        if let Err(error) = self
-            .apply_ec2_tags(&resource.id, rt_id, &resource.resolved_attributes(), None)
-            .await
-        {
-            return Err(self.failed_issued(&resource.id, issued, error).await);
-        }
-
+    pub(crate) async fn continue_ec2_route_table_create(
+        &self,
+        resource: &Resource,
+        rt_id: &str,
+    ) -> ProviderResult<()> {
         // Add routes
         if let Some(Value::Concrete(ConcreteValue::List(routes))) = resource.get_attr("routes") {
             for route in routes {
@@ -175,27 +162,15 @@ impl AwsProvider {
                             .send()
                             .await;
                         if let Err(error) = result {
-                            let error = api_error_with_meta(
-                                "Failed to create route",
-                                "ec2.CreateRoute",
-                                error,
-                            )
-                            .for_resource(resource.id.clone());
-                            return Err(self.failed_issued(&resource.id, issued, error).await);
+                            let error = api_error_with_meta("Failed to create route", error)
+                                .for_resource(resource.id.clone());
+                            return Err(error);
                         }
                     }
                 }
             }
         }
 
-        // Read back using route table ID (reliable identifier)
-        let outcome = self.read_ec2_route_table(&resource.id, &identifier).await;
-        let completion = self.create_outcome_from_read(
-            &resource.id,
-            identifier,
-            resource.resolved_attributes(),
-            outcome,
-        );
-        Ok(self.finish_issued(issued, completion))
+        Ok(())
     }
 }

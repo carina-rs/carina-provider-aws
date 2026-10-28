@@ -69,12 +69,8 @@ impl AwsProvider {
                 {
                     return Ok(ReadOutcome::not_found(id.clone()));
                 }
-                Err(api_error_with_meta(
-                    "Failed to get bucket replication",
-                    "s3.GetBucketReplication",
-                    e,
-                )
-                .for_resource(id.clone()))
+                Err(api_error_with_meta("Failed to get bucket replication", e)
+                    .for_resource(id.clone()))
             }
         }
     }
@@ -154,12 +150,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                api_error_with_meta(
-                    "Failed to put bucket replication",
-                    "s3.PutBucketReplication",
-                    e,
-                )
-                .for_resource(id.clone())
+                api_error_with_meta("Failed to put bucket replication", e).for_resource(id.clone())
             })?;
 
         Ok(self
@@ -173,18 +164,11 @@ impl AwsProvider {
         identifier: &AppliedIdentifier,
     ) -> ProviderResult<()> {
         let identifier = identifier.as_str();
-        let result =
-            retry_aws_operation("delete bucket replication", RetryPolicy::default(), || {
-                let client = &self.s3_client;
-                async move {
-                    client
-                        .delete_bucket_replication()
-                        .bucket(identifier)
-                        .send()
-                        .await
-                }
-            })
-            .await;
+        let result = retry_aws_operation(RetryPolicy::default(), || {
+            let client = &self.s3_client;
+            client.delete_bucket_replication().bucket(identifier)
+        })
+        .await;
 
         match result {
             Ok(_) => Ok(()),
@@ -194,12 +178,10 @@ impl AwsProvider {
             {
                 Ok(())
             }
-            Err(e) => Err(api_error_with_meta(
-                "Failed to delete bucket replication",
-                "s3.DeleteBucketReplication",
-                e,
-            )
-            .for_resource(id.clone())),
+            Err(e) => Err(
+                api_error_with_meta("Failed to delete bucket replication", e)
+                    .for_resource(id.clone()),
+            ),
         }
     }
 }

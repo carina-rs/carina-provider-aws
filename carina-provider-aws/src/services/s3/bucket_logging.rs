@@ -73,10 +73,7 @@ impl AwsProvider {
                 if is_s3_not_configured_error(&e, "NoSuchBucket") {
                     return Ok(ReadOutcome::not_found(id.clone()));
                 }
-                Err(
-                    api_error_with_meta("Failed to get bucket logging", "s3.GetBucketLogging", e)
-                        .for_resource(id.clone()),
-                )
+                Err(api_error_with_meta("Failed to get bucket logging", e).for_resource(id.clone()))
             }
         }
     }
@@ -155,8 +152,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                api_error_with_meta("Failed to put bucket logging", "s3.PutBucketLogging", e)
-                    .for_resource(id.clone())
+                api_error_with_meta("Failed to put bucket logging", e).for_resource(id.clone())
             })?;
 
         Ok(self.read_s3_bucket_logging(id, applied_identifier).await)
@@ -168,16 +164,12 @@ impl AwsProvider {
         identifier: &AppliedIdentifier,
     ) -> ProviderResult<()> {
         let identifier = identifier.as_str();
-        let result = retry_aws_operation("clear bucket logging", RetryPolicy::default(), || {
+        let result = retry_aws_operation(RetryPolicy::default(), || {
             let client = &self.s3_client;
-            async move {
-                client
-                    .put_bucket_logging()
-                    .bucket(identifier)
-                    .bucket_logging_status(BucketLoggingStatus::builder().build())
-                    .send()
-                    .await
-            }
+            client
+                .put_bucket_logging()
+                .bucket(identifier)
+                .bucket_logging_status(BucketLoggingStatus::builder().build())
         })
         .await;
 
@@ -185,10 +177,8 @@ impl AwsProvider {
             Ok(_) => Ok(()),
             Err(e) if is_s3_not_configured_error(&e, "NoSuchBucket") => Ok(()),
             Err(e) => {
-                Err(
-                    api_error_with_meta("Failed to clear bucket logging", "s3.PutBucketLogging", e)
-                        .for_resource(id.clone()),
-                )
+                Err(api_error_with_meta("Failed to clear bucket logging", e)
+                    .for_resource(id.clone()))
             }
         }
     }

@@ -1,13 +1,16 @@
 use std::collections::HashMap;
 
-use carina_core::provider::{AppliedIdentifier, ReadOutcome};
-use carina_core::provider::{ProviderError, ProviderResult};
+use carina_core::provider::ProviderResult;
+use carina_core::provider::{AppliedIdentifier, ReadOutcome, Sent};
 use carina_core::resource::{Resource, ResourceId, State};
 
 use crate::AwsProvider;
+use crate::aws_operation::ClientToken;
 use crate::error_helpers::api_error_with_meta;
-use crate::helpers::{build_tag_specification, require_string_attr};
-use crate::provider::CreateCompletion;
+use crate::helpers::{
+    build_tag_specification_with_create_token, require_string_attr, send_aws_operation_with_token,
+};
+use crate::provider::{AwsCreateAttempt, Ec2TaggedResourceKind};
 
 impl AwsProvider {
     /// Read an EC2 Egress-Only Internet Gateway
@@ -26,12 +29,8 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                api_error_with_meta(
-                    "Failed to describe egress-only internet gateways",
-                    "ec2.DescribeEgressOnlyInternetGateways",
-                    e,
-                )
-                .for_resource(id.clone())
+                api_error_with_meta("Failed to describe egress-only internet gateways", e)
+                    .for_resource(id.clone())
             })?;
 
         if let Some(eigw) = result.egress_only_internet_gateways().first() {
@@ -56,57 +55,42 @@ impl AwsProvider {
     }
 
     /// Create an EC2 Egress-Only Internet Gateway
-    pub(crate) async fn create_ec2_egress_only_internet_gateway(
+    pub(crate) async fn create_ec2_egress_only_internet_gateway<A: AwsCreateAttempt>(
         &self,
         resource: &Resource,
-    ) -> ProviderResult<CreateCompletion> {
-        let vpc_id = require_string_attr(resource, "vpc_id")?;
+        client_token: &ClientToken,
+        attempt: A,
+    ) -> Result<A::Step, A::Verdict> {
+        let vpc_id = match require_string_attr(resource, "vpc_id") {
+            Ok(vpc_id) => vpc_id,
+            Err(error) => return Err(attempt.untracked(error)),
+        };
 
-        let mut req = self
+        let req = self
             .ec2_client
             .create_egress_only_internet_gateway()
-            .vpc_id(&vpc_id);
+            .vpc_id(&vpc_id)
+            .tag_specifications(build_tag_specification_with_create_token(
+                resource,
+                aws_sdk_ec2::types::ResourceType::EgressOnlyInternetGateway,
+                client_token,
+            ));
+        let result = send_aws_operation_with_token(client_token, req).await;
 
-        // Apply tags via TagSpecifications
-        if let Some(tag_spec) = build_tag_specification(
+        self.finish_tagged_ec2_create(
             resource,
-            aws_sdk_ec2::types::ResourceType::EgressOnlyInternetGateway,
-        ) {
-            req = req.tag_specifications(tag_spec);
-        }
-
-        let result = req.send().await.map_err(|e| {
-            api_error_with_meta(
-                "Failed to create egress-only internet gateway",
-                "ec2.CreateEgressOnlyInternetGateway",
-                e,
-            )
-            .for_resource(resource.id.clone())
-        })?;
-
-        let eigw_id = result
-            .egress_only_internet_gateway()
-            .and_then(|eigw| eigw.egress_only_internet_gateway_id())
-            .ok_or_else(|| {
-                ProviderError::api_error("Egress-Only Internet Gateway created but no ID returned")
-                    .for_resource(resource.id.clone())
-            })?;
-
-        // Read back
-        let identifier = crate::helpers::applied_identifier(
-            &resource.id,
-            "ec2.CreateEgressOnlyInternetGateway",
-            eigw_id,
-        )?;
-        let outcome = self
-            .read_ec2_egress_only_internet_gateway(&resource.id, &identifier)
-            .await;
-        Ok(self.create_outcome_from_read(
-            &resource.id,
-            identifier,
-            resource.resolved_attributes(),
-            outcome,
-        ))
+            attempt,
+            Ec2TaggedResourceKind::EgressOnlyInternetGateway
+                .create_context(client_token, Sent::AllRequestAttributes),
+            result,
+            |output| {
+                output
+                    .egress_only_internet_gateway()
+                    .and_then(|gateway| gateway.egress_only_internet_gateway_id())
+                    .map(str::to_owned)
+            },
+        )
+        .await
     }
 
     /// Update an EC2 Egress-Only Internet Gateway (tags only)
@@ -142,12 +126,8 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                api_error_with_meta(
-                    "Failed to delete egress-only internet gateway",
-                    "ec2.DeleteEgressOnlyInternetGateway",
-                    e,
-                )
-                .for_resource(id.clone())
+                api_error_with_meta("Failed to delete egress-only internet gateway", e)
+                    .for_resource(id.clone())
             })?;
         Ok(())
     }

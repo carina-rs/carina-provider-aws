@@ -1,12 +1,14 @@
 use std::collections::HashMap;
 
+use carina_core::provider::ProviderResult;
 use carina_core::provider::{AppliedIdentifier, ReadOutcome};
-use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{ConcreteValue, Resource, ResourceId, Value};
 
 use crate::AwsProvider;
+use crate::aws_operation::ClientToken;
 use crate::error_helpers::api_error_with_meta;
-use crate::provider::AwsCreateAttempt;
+use crate::helpers::build_tag_specification_with_create_token;
+use crate::provider::{AwsCreateAttempt, Ec2TaggedResourceKind};
 
 impl AwsProvider {
     /// Read an EC2 Internet Gateway
@@ -32,12 +34,8 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                api_error_with_meta(
-                    "Failed to describe internet gateways",
-                    "ec2.DescribeInternetGateways",
-                    e,
-                )
-                .for_resource(id.clone())
+                api_error_with_meta("Failed to describe internet gateways", e)
+                    .for_resource(id.clone())
             })?;
 
         if let Some(igw) = result.internet_gateways().first() {
@@ -76,53 +74,42 @@ impl AwsProvider {
     pub(crate) async fn create_ec2_internet_gateway<A: AwsCreateAttempt>(
         &self,
         resource: &Resource,
+        client_token: &ClientToken,
         attempt: A,
     ) -> Result<A::Step, A::Verdict> {
         // Create Internet Gateway
-        let result = match self.ec2_client.create_internet_gateway().send().await {
-            Ok(result) => result,
-            Err(error) => {
-                return Err(attempt.untracked(
-                    api_error_with_meta(
-                        "Failed to create internet gateway",
-                        "ec2.CreateInternetGateway",
-                        error,
-                    )
-                    .for_resource(resource.id.clone()),
-                ));
-            }
-        };
+        let sent = Self::sent_only(resource, &["tags"]);
+        let result = self
+            .ec2_client
+            .create_internet_gateway()
+            .tag_specifications(build_tag_specification_with_create_token(
+                resource,
+                aws_sdk_ec2::types::ResourceType::InternetGateway,
+                client_token,
+            ))
+            .send()
+            .await;
 
-        let igw_id = match result
-            .internet_gateway()
-            .and_then(|igw| igw.internet_gateway_id())
-        {
-            Some(igw_id) => igw_id,
-            None => {
-                return Err(attempt.untracked(
-                    ProviderError::api_error("Internet Gateway created but no ID returned")
-                        .for_resource(resource.id.clone()),
-                ));
-            }
-        };
-        let identifier = match crate::helpers::applied_identifier(
-            &resource.id,
-            "ec2.CreateInternetGateway",
-            igw_id,
-        ) {
-            Ok(identifier) => identifier,
-            Err(error) => return Err(attempt.untracked(error)),
-        };
-        let issued = attempt.issued(identifier.clone(), Self::sent_only(resource, &[]));
+        self.finish_tagged_ec2_create(
+            resource,
+            attempt,
+            Ec2TaggedResourceKind::InternetGateway.create_context(client_token, sent),
+            result,
+            |output| {
+                output
+                    .internet_gateway()
+                    .and_then(|gateway| gateway.internet_gateway_id())
+                    .map(str::to_owned)
+            },
+        )
+        .await
+    }
 
-        // Apply tags
-        if let Err(error) = self
-            .apply_ec2_tags(&resource.id, igw_id, &resource.resolved_attributes(), None)
-            .await
-        {
-            return Err(self.failed_issued(&resource.id, issued, error).await);
-        }
-
+    pub(crate) async fn continue_ec2_internet_gateway_create(
+        &self,
+        resource: &Resource,
+        igw_id: &str,
+    ) -> ProviderResult<()> {
         // Attach to VPC if specified
         if let Some(Value::Concrete(ConcreteValue::String(vpc_id))) = resource.get_attr("vpc_id") {
             let result = self
@@ -133,27 +120,12 @@ impl AwsProvider {
                 .send()
                 .await;
             if let Err(error) = result {
-                let error = api_error_with_meta(
-                    "Failed to attach internet gateway",
-                    "ec2.AttachInternetGateway",
-                    error,
-                )
-                .for_resource(resource.id.clone());
-                return Err(self.failed_issued(&resource.id, issued, error).await);
+                let error = api_error_with_meta("Failed to attach internet gateway", error)
+                    .for_resource(resource.id.clone());
+                return Err(error);
             }
         }
-
-        // Read back using IGW ID (reliable identifier)
-        let outcome = self
-            .read_ec2_internet_gateway(&resource.id, &identifier)
-            .await;
-        let completion = self.create_outcome_from_read(
-            &resource.id,
-            identifier,
-            resource.resolved_attributes(),
-            outcome,
-        );
-        Ok(self.finish_issued(issued, completion))
+        Ok(())
     }
 
     /// Delete an EC2 Internet Gateway
@@ -171,12 +143,8 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                api_error_with_meta(
-                    "Failed to describe internet gateway",
-                    "ec2.DescribeInternetGateways",
-                    e,
-                )
-                .for_resource(id.clone())
+                api_error_with_meta("Failed to describe internet gateway", e)
+                    .for_resource(id.clone())
             })?;
 
         if let Some(igw) = result.internet_gateways().first() {
@@ -191,12 +159,8 @@ impl AwsProvider {
                     .send()
                     .await
                     .map_err(|e| {
-                        api_error_with_meta(
-                            "Failed to detach internet gateway",
-                            "ec2.DetachInternetGateway",
-                            e,
-                        )
-                        .for_resource(id.clone())
+                        api_error_with_meta("Failed to detach internet gateway", e)
+                            .for_resource(id.clone())
                     })?;
             }
         }
@@ -208,12 +172,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                api_error_with_meta(
-                    "Failed to delete internet gateway",
-                    "ec2.DeleteInternetGateway",
-                    e,
-                )
-                .for_resource(id.clone())
+                api_error_with_meta("Failed to delete internet gateway", e).for_resource(id.clone())
             })?;
 
         Ok(())

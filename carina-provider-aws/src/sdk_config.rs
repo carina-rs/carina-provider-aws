@@ -3,21 +3,27 @@
 use std::time::Duration;
 
 use aws_config::Region;
-use aws_sdk_acm::Client as AcmClient;
-use aws_sdk_cloudwatchlogs::Client as CloudWatchLogsClient;
-use aws_sdk_ec2::Client as Ec2Client;
-use aws_sdk_iam::Client as IamClient;
-use aws_sdk_identitystore::Client as IdentityStoreClient;
-use aws_sdk_organizations::Client as OrganizationsClient;
-use aws_sdk_route53::Client as Route53Client;
-use aws_sdk_s3::Client as S3Client;
-use aws_sdk_sqs::Client as SqsClient;
-use aws_sdk_sts::Client as StsClient;
 use aws_smithy_types::retry::RetryConfig;
 use aws_smithy_types::timeout::TimeoutConfig;
 
 use crate::AwsProvider;
+use crate::resend_guard::ResendGuard;
+use crate::resend_safety_generated::{
+    acm_idempotency, cloudwatchlogs_idempotency, ec2_idempotency, iam_idempotency,
+    identitystore_idempotency, organizations_idempotency, route53_idempotency, s3_idempotency,
+    sqs_idempotency, sts_idempotency,
+};
 use crate::services::sts::assume_role::AssumeRoleConfig;
+
+macro_rules! guarded_client {
+    ($sdk:ident, $config:expr, $idempotency:path) => {
+        $sdk::Client::from_conf(
+            $sdk::config::Builder::from(&$config.0)
+                .interceptor(ResendGuard::new($idempotency))
+                .build(),
+        )
+    };
+}
 
 /// An AWS SDK configuration with the provider's timeout and retry policy applied.
 pub struct BoundedSdkConfig(aws_config::SdkConfig);
@@ -76,7 +82,8 @@ impl BoundedSdkConfig {
 /// shorter deadline than the host already enforces. The operation timeout caps one
 /// SDK call at 60 seconds natively. In WASM the HTTP client sends synchronously, so
 /// connect/read timeouts reach `wasi:http`, but attempt/operation timeouts are checked
-/// only between attempts and one call can overrun 60 seconds by up to one attempt.
+/// only between attempts and one call can overrun 60 seconds by one 30-second attempt,
+/// taking about 90 seconds in the worst case.
 fn timeout_config() -> TimeoutConfig {
     TimeoutConfig::builder()
         .connect_timeout(Duration::from_millis(3_100))
@@ -126,16 +133,28 @@ impl AwsProvider {
         config: &BoundedSdkConfig,
     ) -> Self {
         Self {
-            s3_client: S3Client::new(&config.0),
-            ec2_client: Ec2Client::new(&config.0),
-            iam_client: IamClient::new(&config.0),
-            logs_client: CloudWatchLogsClient::new(&config.0),
-            sts_client: StsClient::new(&config.0),
-            organizations_client: OrganizationsClient::new(&config.0),
-            identitystore_client: IdentityStoreClient::new(&config.0),
-            route53_client: Route53Client::new(&config.0),
-            acm_client: AcmClient::new(&config.0),
-            sqs_client: SqsClient::new(&config.0),
+            s3_client: guarded_client!(aws_sdk_s3, config, s3_idempotency),
+            ec2_client: guarded_client!(aws_sdk_ec2, config, ec2_idempotency),
+            iam_client: guarded_client!(aws_sdk_iam, config, iam_idempotency),
+            logs_client: guarded_client!(
+                aws_sdk_cloudwatchlogs,
+                config,
+                cloudwatchlogs_idempotency
+            ),
+            sts_client: guarded_client!(aws_sdk_sts, config, sts_idempotency),
+            organizations_client: guarded_client!(
+                aws_sdk_organizations,
+                config,
+                organizations_idempotency
+            ),
+            identitystore_client: guarded_client!(
+                aws_sdk_identitystore,
+                config,
+                identitystore_idempotency
+            ),
+            route53_client: guarded_client!(aws_sdk_route53, config, route53_idempotency),
+            acm_client: guarded_client!(aws_sdk_acm, config, acm_idempotency),
+            sqs_client: guarded_client!(aws_sdk_sqs, config, sqs_idempotency),
             schema_registry: Self::schema_registry(),
             region,
             allowed_account_ids,
@@ -146,8 +165,11 @@ impl AwsProvider {
 
 #[cfg(test)]
 mod tests {
+    use aws_smithy_runtime_api::client::interceptors::Intercept;
     use aws_smithy_types::retry::RetryConfig;
     use aws_smithy_types::timeout::TimeoutConfig;
+
+    use crate::AwsProvider;
 
     use super::{BoundedSdkConfig, assert_bounded_policy};
 
@@ -167,5 +189,53 @@ mod tests {
     async fn load_applies_bounded_policy() {
         let bounded = BoundedSdkConfig::load("us-east-1", None).await;
         assert_bounded_policy(bounded.0.timeout_config(), bounded.0.retry_config());
+    }
+
+    #[tokio::test]
+    async fn every_provider_client_has_the_resend_guard() {
+        let mock = winterbaume_core::MockAws::builder().build();
+        let config = BoundedSdkConfig::new(mock.sdk_config("us-east-1").await);
+        let provider =
+            AwsProvider::from_sdk_config("us-east-1".to_string(), Vec::new(), Vec::new(), &config);
+        let AwsProvider {
+            s3_client,
+            ec2_client,
+            iam_client,
+            logs_client,
+            sts_client,
+            organizations_client,
+            identitystore_client,
+            route53_client,
+            acm_client,
+            sqs_client,
+            schema_registry: _,
+            region: _,
+            allowed_account_ids: _,
+            forbidden_account_ids: _,
+        } = provider;
+
+        macro_rules! assert_guard {
+            ($client:expr) => {
+                assert!(
+                    $client
+                        .config()
+                        .interceptors()
+                        .any(|interceptor| interceptor.name() == "carina.ResendGuard"),
+                    "{} has no resend guard",
+                    stringify!($client)
+                );
+            };
+        }
+
+        assert_guard!(s3_client);
+        assert_guard!(ec2_client);
+        assert_guard!(iam_client);
+        assert_guard!(logs_client);
+        assert_guard!(sts_client);
+        assert_guard!(organizations_client);
+        assert_guard!(identitystore_client);
+        assert_guard!(route53_client);
+        assert_guard!(acm_client);
+        assert_guard!(sqs_client);
     }
 }

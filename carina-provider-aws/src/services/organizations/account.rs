@@ -171,12 +171,7 @@ impl AwsProvider {
                 {
                     return Ok(ReadOutcome::not_found(id.clone()));
                 }
-                Err(api_error_with_meta(
-                    "Failed to describe account",
-                    "organizations.DescribeAccount",
-                    e,
-                )
-                .for_resource(id.clone()))
+                Err(api_error_with_meta("Failed to describe account", e).for_resource(id.clone()))
             }
         }
     }
@@ -226,8 +221,7 @@ impl AwsProvider {
         }
 
         let response = req.send().await.map_err(|e| {
-            api_error_with_meta("Failed to create account", "organizations.CreateAccount", e)
-                .for_resource(resource.id.clone())
+            api_error_with_meta("Failed to create account", e).for_resource(resource.id.clone())
         })?;
 
         let create_status = response.create_account_status().ok_or_else(|| {
@@ -256,12 +250,8 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                api_error_with_meta(
-                    "Failed to describe create account status",
-                    "organizations.DescribeCreateAccountStatus",
-                    e,
-                )
-                .for_resource(id.clone())
+                api_error_with_meta("Failed to describe create account status", e)
+                    .for_resource(id.clone())
             })?;
         Ok(organizations_account_create_poll_state(
             result.create_account_status(),
@@ -286,12 +276,8 @@ impl AwsProvider {
                 .send()
                 .await
                 .map_err(|e| {
-                    api_error_with_meta(
-                        "Failed to list parents for new account",
-                        "organizations.ListParents",
-                        e,
-                    )
-                    .for_resource(resource.id.clone())
+                    api_error_with_meta("Failed to list parents for new account", e)
+                        .for_resource(resource.id.clone())
                 })?;
 
             if let Some(current_parent) = parents_response.parents().first()
@@ -306,12 +292,8 @@ impl AwsProvider {
                     .send()
                     .await
                     .map_err(|e| {
-                        api_error_with_meta(
-                            "Failed to move account to parent",
-                            "organizations.MoveAccount",
-                            e,
-                        )
-                        .for_resource(resource.id.clone())
+                        api_error_with_meta("Failed to move account to parent", e)
+                            .for_resource(resource.id.clone())
                     })?;
             }
         }
@@ -362,8 +344,7 @@ impl AwsProvider {
                 .send()
                 .await
                 .map_err(|e| {
-                    api_error_with_meta("Failed to move account", "organizations.MoveAccount", e)
-                        .for_resource(id.clone())
+                    api_error_with_meta("Failed to move account", e).for_resource(id.clone())
                 })?;
         }
 
@@ -392,8 +373,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                api_error_with_meta("Failed to close account", "organizations.CloseAccount", e)
-                    .for_resource(id.clone())
+                api_error_with_meta("Failed to close account", e).for_resource(id.clone())
             })?;
         Ok(())
     }
@@ -430,8 +410,7 @@ impl AwsProvider {
                 .send()
                 .await
                 .map_err(|e| {
-                    api_error_with_meta("Failed to untag account", "organizations.UntagResource", e)
-                        .for_resource(id.clone())
+                    api_error_with_meta("Failed to untag account", e).for_resource(id.clone())
                 })?;
         }
 
@@ -465,8 +444,7 @@ impl AwsProvider {
                 .send()
                 .await
                 .map_err(|e| {
-                    api_error_with_meta("Failed to tag account", "organizations.TagResource", e)
-                        .for_resource(id.clone())
+                    api_error_with_meta("Failed to tag account", e).for_resource(id.clone())
                 })?;
         }
 

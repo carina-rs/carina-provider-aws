@@ -5,9 +5,13 @@ use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{ConcreteValue, Resource, ResourceId, Value};
 
 use crate::AwsProvider;
+use crate::aws_operation::ClientToken;
 use crate::error_helpers::api_error_with_meta;
-use crate::helpers::{RetryPolicy, require_string_attr, retry_aws_operation};
-use crate::provider::AwsCreateAttempt;
+use crate::helpers::{
+    RetryPolicy, build_tag_specification_with_create_token, require_string_attr,
+    retry_aws_operation,
+};
+use crate::provider::{AwsCreateAttempt, Ec2TaggedResourceKind};
 
 impl AwsProvider {
     /// Read an EC2 Security Group
@@ -33,12 +37,8 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                api_error_with_meta(
-                    "Failed to describe security groups",
-                    "ec2.DescribeSecurityGroups",
-                    e,
-                )
-                .for_resource(id.clone())
+                api_error_with_meta("Failed to describe security groups", e)
+                    .for_resource(id.clone())
             })?;
 
         if let Some(sg) = result.security_groups().first() {
@@ -67,6 +67,7 @@ impl AwsProvider {
     pub(crate) async fn create_ec2_security_group<A: AwsCreateAttempt>(
         &self,
         resource: &Resource,
+        client_token: &ClientToken,
         attempt: A,
     ) -> Result<A::Step, A::Verdict> {
         let vpc_id = match require_string_attr(resource, "vpc_id") {
@@ -97,76 +98,31 @@ impl AwsProvider {
 
         // Create Security Group
         let ec2 = &self.ec2_client;
-        let rid = resource.id.clone();
-        let result =
-            match retry_aws_operation("create security group", RetryPolicy::default(), || {
-                let group_name = group_name.clone();
-                let description = description.clone();
-                let vpc_id = vpc_id.clone();
-                async move {
-                    ec2.create_security_group()
-                        .group_name(&group_name)
-                        .description(&description)
-                        .vpc_id(&vpc_id)
-                        .send()
-                        .await
-                }
-            })
-            .await
-            {
-                Ok(result) => result,
-                Err(error) => {
-                    return Err(attempt.untracked(
-                        api_error_with_meta(
-                            "Failed to create security group",
-                            "ec2.CreateSecurityGroup",
-                            error,
-                        )
-                        .for_resource(rid),
-                    ));
-                }
-            };
-
-        let sg_id = match result.group_id() {
-            Some(sg_id) => sg_id,
-            None => {
-                return Err(attempt.untracked(
-                    ProviderError::api_error("Security Group created but no ID returned")
-                        .for_resource(resource.id.clone()),
-                ));
-            }
-        };
-        let identifier = match crate::helpers::applied_identifier(
-            &resource.id,
-            "ec2.CreateSecurityGroup",
-            sg_id,
-        ) {
-            Ok(identifier) => identifier,
-            Err(error) => return Err(attempt.untracked(error)),
-        };
-        let issued = attempt.issued(
-            identifier.clone(),
-            Self::sent_only(resource, &["vpc_id", "description", "group_name"]),
+        let tag_specification = build_tag_specification_with_create_token(
+            resource,
+            aws_sdk_ec2::types::ResourceType::SecurityGroup,
+            client_token,
         );
+        let sent = Self::sent_only(resource, &["vpc_id", "description", "group_name", "tags"]);
+        let result = retry_aws_operation(RetryPolicy::default(), || {
+            let group_name = group_name.clone();
+            let description = description.clone();
+            let vpc_id = vpc_id.clone();
+            ec2.create_security_group()
+                .group_name(&group_name)
+                .description(&description)
+                .vpc_id(&vpc_id)
+                .tag_specifications(tag_specification.clone())
+        })
+        .await;
 
-        // Apply tags
-        if let Err(error) = self
-            .apply_ec2_tags(&resource.id, sg_id, &resource.resolved_attributes(), None)
-            .await
-        {
-            return Err(self.failed_issued(&resource.id, issued, error).await);
-        }
-
-        // Read back using security group ID (reliable identifier)
-        let outcome = self
-            .read_ec2_security_group(&resource.id, &identifier)
-            .await;
-        let completion = self.create_outcome_from_read(
-            &resource.id,
-            identifier,
-            resource.resolved_attributes(),
-            outcome,
-        );
-        Ok(self.finish_issued(issued, completion))
+        self.finish_tagged_ec2_create(
+            resource,
+            attempt,
+            Ec2TaggedResourceKind::SecurityGroup.create_context(client_token, sent),
+            result,
+            |output| output.group_id().map(str::to_owned),
+        )
+        .await
     }
 }

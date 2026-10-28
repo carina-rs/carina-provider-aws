@@ -60,12 +60,8 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                api_error_with_meta(
-                    "Failed to describe internet gateways",
-                    "ec2.DescribeInternetGateways",
-                    e,
-                )
-                .for_resource(id.clone())
+                api_error_with_meta("Failed to describe internet gateways", e)
+                    .for_resource(id.clone())
             })?;
 
         if let Some(igw) = result.internet_gateways().first() {
@@ -111,12 +107,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                api_error_with_meta(
-                    "Failed to describe VPN gateways",
-                    "ec2.DescribeVpnGateways",
-                    e,
-                )
-                .for_resource(id.clone())
+                api_error_with_meta("Failed to describe VPN gateways", e).for_resource(id.clone())
             })?;
 
         if let Some(vgw) = result.vpn_gateways().first() {
@@ -161,12 +152,8 @@ impl AwsProvider {
                 .send()
                 .await
                 .map_err(|e| {
-                    api_error_with_meta(
-                        "Failed to attach internet gateway",
-                        "ec2.AttachInternetGateway",
-                        e,
-                    )
-                    .for_resource(resource.id.clone())
+                    api_error_with_meta("Failed to attach internet gateway", e)
+                        .for_resource(resource.id.clone())
                 })?;
 
             let composite = format!("{}|{}", vpc_id, igw_id.expose_plaintext());
@@ -195,7 +182,7 @@ impl AwsProvider {
                 .send()
                 .await
                 .map_err(|e| {
-                    api_error_with_meta("Failed to attach VPN gateway", "ec2.AttachVpnGateway", e)
+                    api_error_with_meta("Failed to attach VPN gateway", e)
                         .for_resource(resource.id.clone())
                 })?;
 
@@ -256,12 +243,8 @@ impl AwsProvider {
                 .send()
                 .await
                 .map_err(|e| {
-                    api_error_with_meta(
-                        "Failed to detach internet gateway",
-                        "ec2.DetachInternetGateway",
-                        e,
-                    )
-                    .for_resource(id.clone())
+                    api_error_with_meta("Failed to detach internet gateway", e)
+                        .for_resource(id.clone())
                 })?;
         } else if gateway_id.starts_with("vgw-") {
             self.ec2_client
@@ -271,8 +254,7 @@ impl AwsProvider {
                 .send()
                 .await
                 .map_err(|e| {
-                    api_error_with_meta("Failed to detach VPN gateway", "ec2.DetachVpnGateway", e)
-                        .for_resource(id.clone())
+                    api_error_with_meta("Failed to detach VPN gateway", e).for_resource(id.clone())
                 })?;
         } else {
             return Err(ProviderError::invalid_input(format!(

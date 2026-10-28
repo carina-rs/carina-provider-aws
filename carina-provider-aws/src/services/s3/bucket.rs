@@ -144,10 +144,8 @@ impl AwsProvider {
                     ))
                     .for_resource(id.clone())),
                     HeadBucketErrorKind::Other => {
-                        Err(
-                            api_error_with_meta("Failed to read bucket", "s3.HeadBucket", err)
-                                .for_resource(id.clone()),
-                        )
+                        Err(api_error_with_meta("Failed to read bucket", err)
+                            .for_resource(id.clone()))
                     }
                 }
             }
@@ -201,15 +199,10 @@ impl AwsProvider {
         // S3 returns when CreateBucket races a recent DeleteBucket for the
         // same name — the control plane clears after ~60–90s. See #156.
         let rid = resource.id.clone();
-        let result = retry_aws_operation("create S3 bucket", RetryPolicy::default(), || {
-            let req = req.clone();
-            async move { req.send().await }
-        })
-        .await;
+        let result = retry_aws_operation(RetryPolicy::default(), || req.clone()).await;
         if let Err(error) = result {
             return Err(attempt.untracked(
-                api_error_with_meta("Failed to create bucket", "s3.CreateBucket", error)
-                    .for_resource(rid),
+                api_error_with_meta("Failed to create bucket", error).for_resource(rid),
             ));
         }
         let issued = attempt.issued(identifier.clone(), Self::sent_only(resource, &["bucket"]));
@@ -254,8 +247,7 @@ impl AwsProvider {
                 .send()
                 .await
                 .map_err(|e| {
-                    api_error_with_meta("Failed to delete bucket tags", "s3.DeleteBucketTagging", e)
-                        .for_resource(id.clone())
+                    api_error_with_meta("Failed to delete bucket tags", e).for_resource(id.clone())
                 })?;
         } else {
             self.write_s3_bucket_tags(&id, bucket_name, &attrs).await?;
@@ -277,15 +269,12 @@ impl AwsProvider {
             self.empty_s3_bucket(&id, identifier).await?;
         }
 
-        retry_aws_operation("delete S3 bucket", RetryPolicy::default(), || {
+        retry_aws_operation(RetryPolicy::default(), || {
             let client = &self.s3_client;
-            async move { client.delete_bucket().bucket(identifier).send().await }
+            client.delete_bucket().bucket(identifier)
         })
         .await
-        .map_err(|e| {
-            api_error_with_meta("Failed to delete bucket", "s3.DeleteBucket", e)
-                .for_resource(id.clone())
-        })?;
+        .map_err(|e| api_error_with_meta("Failed to delete bucket", e).for_resource(id.clone()))?;
         Ok(())
     }
 
@@ -308,8 +297,7 @@ impl AwsProvider {
             }
 
             let response = req.send().await.map_err(|e| {
-                api_error_with_meta("Failed to list object versions", "s3.ListObjectVersions", e)
-                    .for_resource(id.clone())
+                api_error_with_meta("Failed to list object versions", e).for_resource(id.clone())
             })?;
 
             let mut objects_to_delete = Vec::new();
@@ -369,8 +357,7 @@ impl AwsProvider {
                     .send()
                     .await
                     .map_err(|e| {
-                        api_error_with_meta("Failed to delete objects", "s3.DeleteObjects", e)
-                            .for_resource(id.clone())
+                        api_error_with_meta("Failed to delete objects", e).for_resource(id.clone())
                     })?;
             }
 
@@ -416,12 +403,8 @@ impl AwsProvider {
             }
             Err(err) => {
                 if !is_s3_not_configured_error(&err, "NoSuchTagSet") {
-                    return Err(api_error_with_meta(
-                        "Failed to read bucket tagging",
-                        "s3.GetBucketTagging",
-                        err,
-                    )
-                    .for_resource(id.clone()));
+                    return Err(api_error_with_meta("Failed to read bucket tagging", err)
+                        .for_resource(id.clone()));
                 }
             }
         }
@@ -469,8 +452,7 @@ impl AwsProvider {
                 .send()
                 .await
                 .map_err(|e| {
-                    api_error_with_meta("Failed to put bucket tags", "s3.PutBucketTagging", e)
-                        .for_resource(id.clone())
+                    api_error_with_meta("Failed to put bucket tags", e).for_resource(id.clone())
                 })?;
         }
 
@@ -531,7 +513,7 @@ impl AwsProvider {
                         ))
                         .for_resource(resource.id.clone()),
                         HeadBucketErrorKind::Other => {
-                            api_error_with_meta("Failed to head bucket", "s3.HeadBucket", err)
+                            api_error_with_meta("Failed to head bucket", err)
                                 .for_resource(resource.id.clone())
                         }
                     }

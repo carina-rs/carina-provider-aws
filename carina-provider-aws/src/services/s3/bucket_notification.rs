@@ -90,12 +90,10 @@ impl AwsProvider {
                 if is_s3_not_configured_error(&e, "NoSuchBucket") {
                     return Ok(ReadOutcome::not_found(id.clone()));
                 }
-                Err(api_error_with_meta(
-                    "Failed to get bucket notification configuration",
-                    "s3.GetBucketNotificationConfiguration",
-                    e,
+                Err(
+                    api_error_with_meta("Failed to get bucket notification configuration", e)
+                        .for_resource(id.clone()),
                 )
-                .for_resource(id.clone()))
             }
         }
     }
@@ -192,12 +190,8 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                api_error_with_meta(
-                    "Failed to put bucket notification configuration",
-                    "s3.PutBucketNotificationConfiguration",
-                    e,
-                )
-                .for_resource(id.clone())
+                api_error_with_meta("Failed to put bucket notification configuration", e)
+                    .for_resource(id.clone())
             })?;
 
         Ok(self
@@ -211,21 +205,13 @@ impl AwsProvider {
         identifier: &AppliedIdentifier,
     ) -> ProviderResult<()> {
         let identifier = identifier.as_str();
-        let result = retry_aws_operation(
-            "clear bucket notification configuration",
-            RetryPolicy::default(),
-            || {
-                let client = &self.s3_client;
-                async move {
-                    client
-                        .put_bucket_notification_configuration()
-                        .bucket(identifier)
-                        .notification_configuration(NotificationConfiguration::builder().build())
-                        .send()
-                        .await
-                }
-            },
-        )
+        let result = retry_aws_operation(RetryPolicy::default(), || {
+            let client = &self.s3_client;
+            client
+                .put_bucket_notification_configuration()
+                .bucket(identifier)
+                .notification_configuration(NotificationConfiguration::builder().build())
+        })
         .await;
 
         match result {
@@ -233,7 +219,6 @@ impl AwsProvider {
             Err(e) if is_s3_not_configured_error(&e, "NoSuchBucket") => Ok(()),
             Err(e) => Err(api_error_with_meta(
                 "Failed to clear bucket notification configuration",
-                "s3.PutBucketNotificationConfiguration",
                 e,
             )
             .for_resource(id.clone())),

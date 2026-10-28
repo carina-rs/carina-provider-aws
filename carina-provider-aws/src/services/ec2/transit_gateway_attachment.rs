@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use carina_core::provider::{AppliedIdentifier, ReadOutcome};
+use carina_core::provider::{AppliedIdentifier, ReadOutcome, Sent};
 use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
 use carina_core::schema::ResourceSchema;
@@ -8,11 +8,13 @@ use carina_core::schema::ResourceSchema;
 use aws_sdk_ec2::types::TransitGatewayAttachmentState;
 
 use crate::AwsProvider;
+use crate::aws_operation::ClientToken;
 use crate::error_helpers::api_error_with_meta;
 use crate::helpers::{
-    CreatePoll, DeletePoll, build_tag_specification, optional_enum_struct_field,
+    CreatePoll, DeletePoll, build_tag_specification_with_create_token, optional_enum_struct_field,
     require_string_attr,
 };
+use crate::provider::{AwsCreateAttempt, Ec2TaggedResourceKind};
 
 fn transit_gateway_attachment_create_poll_state(
     state: Option<&TransitGatewayAttachmentState>,
@@ -129,12 +131,8 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                api_error_with_meta(
-                    "Failed to describe transit gateway VPC attachments",
-                    "ec2.DescribeTransitGatewayVpcAttachments",
-                    e,
-                )
-                .for_resource(id.clone())
+                api_error_with_meta("Failed to describe transit gateway VPC attachments", e)
+                    .for_resource(id.clone())
             })?;
 
         if let Some(att) = result.transit_gateway_vpc_attachments().first() {
@@ -164,13 +162,21 @@ impl AwsProvider {
     }
 
     /// Create an EC2 Transit Gateway VPC Attachment
-    pub(crate) async fn create_ec2_transit_gateway_attachment_start(
+    pub(crate) async fn create_ec2_transit_gateway_attachment_start<A: AwsCreateAttempt>(
         &self,
         resource: &Resource,
         schema: &ResourceSchema,
-    ) -> ProviderResult<AppliedIdentifier> {
-        let transit_gateway_id = require_string_attr(resource, "transit_gateway_id")?;
-        let vpc_id = require_string_attr(resource, "vpc_id")?;
+        client_token: &ClientToken,
+        attempt: A,
+    ) -> Result<A::Step, A::Verdict> {
+        let transit_gateway_id = match require_string_attr(resource, "transit_gateway_id") {
+            Ok(value) => value,
+            Err(error) => return Err(attempt.untracked(error)),
+        };
+        let vpc_id = match require_string_attr(resource, "vpc_id") {
+            Ok(value) => value,
+            Err(error) => return Err(attempt.untracked(error)),
+        };
 
         let subnet_ids = match resource.get_attr("subnet_ids") {
             Some(Value::Concrete(ConcreteValue::List(ids))) => {
@@ -181,14 +187,18 @@ impl AwsProvider {
                     }
                 }
                 if result.is_empty() {
-                    return Err(ProviderError::invalid_input("subnet_ids must not be empty")
-                        .for_resource(resource.id.clone()));
+                    return Err(attempt.untracked(
+                        ProviderError::invalid_input("subnet_ids must not be empty")
+                            .for_resource(resource.id.clone()),
+                    ));
                 }
                 result
             }
             _ => {
-                return Err(ProviderError::invalid_input("subnet_ids is required")
-                    .for_resource(resource.id.clone()));
+                return Err(attempt.untracked(
+                    ProviderError::invalid_input("subnet_ids is required")
+                        .for_resource(resource.id.clone()),
+                ));
             }
         };
 
@@ -202,40 +212,36 @@ impl AwsProvider {
             req = req.subnet_ids(subnet_id);
         }
 
-        if let Some(options) = build_create_transit_gateway_attachment_options(resource, schema)? {
+        let options = match build_create_transit_gateway_attachment_options(resource, schema) {
+            Ok(options) => options,
+            Err(error) => return Err(attempt.untracked(error)),
+        };
+        if let Some(options) = options {
             req = req.options(options);
         }
 
-        // Apply tags via TagSpecifications
-        if let Some(tag_spec) = build_tag_specification(
+        req = req.tag_specifications(build_tag_specification_with_create_token(
             resource,
             aws_sdk_ec2::types::ResourceType::TransitGatewayAttachment,
-        ) {
-            req = req.tag_specifications(tag_spec);
-        }
+            client_token,
+        ));
 
-        let result = req.send().await.map_err(|e| {
-            api_error_with_meta(
-                "Failed to create transit gateway VPC attachment",
-                "ec2.CreateTransitGatewayVpcAttachment",
-                e,
-            )
-            .for_resource(resource.id.clone())
-        })?;
+        let result = req.send().await;
 
-        let att_id = result
-            .transit_gateway_vpc_attachment()
-            .and_then(|att| att.transit_gateway_attachment_id())
-            .ok_or_else(|| {
-                ProviderError::api_error("Transit Gateway Attachment created but no ID returned")
-                    .for_resource(resource.id.clone())
-            })?;
-
-        crate::helpers::applied_identifier(
-            &resource.id,
-            "ec2.CreateTransitGatewayVpcAttachment",
-            att_id,
+        self.finish_tagged_ec2_create(
+            resource,
+            attempt,
+            Ec2TaggedResourceKind::TransitGatewayVpcAttachment
+                .create_context(client_token, Sent::AllRequestAttributes),
+            result,
+            |output| {
+                output
+                    .transit_gateway_vpc_attachment()
+                    .and_then(|attachment| attachment.transit_gateway_attachment_id())
+                    .map(str::to_owned)
+            },
         )
+        .await
     }
 
     /// Update an EC2 Transit Gateway VPC Attachment (tags only)
@@ -277,12 +283,8 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                api_error_with_meta(
-                    "Failed to describe transit gateway VPC attachment",
-                    "ec2.DescribeTransitGatewayVpcAttachments",
-                    e,
-                )
-                .for_resource(id.clone())
+                api_error_with_meta("Failed to describe transit gateway VPC attachment", e)
+                    .for_resource(id.clone())
             })?;
         Ok(transit_gateway_attachment_create_poll_state(
             result
@@ -305,12 +307,8 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                api_error_with_meta(
-                    "Failed to describe transit gateway VPC attachment",
-                    "ec2.DescribeTransitGatewayVpcAttachments",
-                    e,
-                )
-                .for_resource(id.clone())
+                api_error_with_meta("Failed to describe transit gateway VPC attachment", e)
+                    .for_resource(id.clone())
             })?;
         Ok(transit_gateway_attachment_delete_poll_state(
             result

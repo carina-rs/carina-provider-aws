@@ -32,12 +32,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                api_error_with_meta(
-                    "Failed to describe route table",
-                    "ec2.DescribeRouteTables",
-                    e,
-                )
-                .for_resource(id.clone())
+                api_error_with_meta("Failed to describe route table", e).for_resource(id.clone())
             })?;
 
         if let Some(rt) = result.route_tables().first() {
@@ -96,8 +91,7 @@ impl AwsProvider {
         }
 
         req.send().await.map_err(|e| {
-            api_error_with_meta("Failed to create route", "ec2.CreateRoute", e)
-                .for_resource(resource.id.clone())
+            api_error_with_meta("Failed to create route", e).for_resource(resource.id.clone())
         })?;
 
         // Route identifier is route_table_id|destination_cidr_block
@@ -157,8 +151,7 @@ impl AwsProvider {
         }
 
         req.send().await.map_err(|e| {
-            api_error_with_meta("Failed to update route", "ec2.ReplaceRoute", e)
-                .for_resource(id.clone())
+            api_error_with_meta("Failed to update route", e).for_resource(id.clone())
         })?;
 
         // Route identifier is route_table_id|destination_cidr_block
@@ -189,9 +182,7 @@ impl AwsProvider {
             .destination_cidr_block(destination_cidr_block)
             .send()
             .await
-            .map_err(|e| {
-                api_error_with_meta("Failed to delete route", "ec2.DeleteRoute", e).for_resource(id)
-            })?;
+            .map_err(|e| api_error_with_meta("Failed to delete route", e).for_resource(id))?;
 
         Ok(())
     }

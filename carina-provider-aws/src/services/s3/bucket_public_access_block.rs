@@ -77,12 +77,8 @@ impl AwsProvider {
                 if is_s3_not_configured_error(&e, "NoSuchPublicAccessBlockConfiguration") {
                     return Ok(ReadOutcome::not_found(id.clone()));
                 }
-                Err(api_error_with_meta(
-                    "Failed to get public access block",
-                    "s3.GetPublicAccessBlock",
-                    e,
-                )
-                .for_resource(id.clone()))
+                Err(api_error_with_meta("Failed to get public access block", e)
+                    .for_resource(id.clone()))
             }
         }
     }
@@ -146,12 +142,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                api_error_with_meta(
-                    "Failed to put public access block",
-                    "s3.PutPublicAccessBlock",
-                    e,
-                )
-                .for_resource(id.clone())
+                api_error_with_meta("Failed to put public access block", e).for_resource(id.clone())
             })?;
 
         Ok(self
@@ -169,18 +160,11 @@ impl AwsProvider {
         identifier: &AppliedIdentifier,
     ) -> ProviderResult<()> {
         let identifier = identifier.as_str();
-        let result =
-            retry_aws_operation("delete public access block", RetryPolicy::default(), || {
-                let client = &self.s3_client;
-                async move {
-                    client
-                        .delete_public_access_block()
-                        .bucket(identifier)
-                        .send()
-                        .await
-                }
-            })
-            .await;
+        let result = retry_aws_operation(RetryPolicy::default(), || {
+            let client = &self.s3_client;
+            client.delete_public_access_block().bucket(identifier)
+        })
+        .await;
 
         match result {
             Ok(_) => Ok(()),
@@ -190,12 +174,10 @@ impl AwsProvider {
             {
                 Ok(())
             }
-            Err(e) => Err(api_error_with_meta(
-                "Failed to delete public access block",
-                "s3.DeletePublicAccessBlock",
-                e,
-            )
-            .for_resource(id.clone())),
+            Err(e) => Err(
+                api_error_with_meta("Failed to delete public access block", e)
+                    .for_resource(id.clone()),
+            ),
         }
     }
 }

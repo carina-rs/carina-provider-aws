@@ -73,8 +73,7 @@ async fn list_matching_roles(
             req = req.marker(m);
         }
         let resp = req.send().await.map_err(|e| {
-            api_error_with_meta("Failed to list IAM roles", "iam.ListRoles", e)
-                .for_resource(resource.id.clone())
+            api_error_with_meta("Failed to list IAM roles", e).for_resource(resource.id.clone())
         })?;
 
         matches.extend(filter_page(resp.roles(), name_filter));

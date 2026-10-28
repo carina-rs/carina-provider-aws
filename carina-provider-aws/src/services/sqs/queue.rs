@@ -406,12 +406,8 @@ impl AwsProvider {
                 {
                     return Ok(ReadOutcome::not_found(id.clone()));
                 }
-                return Err(api_error_with_meta(
-                    "Failed to get queue attributes",
-                    "sqs.GetQueueAttributes",
-                    err,
-                )
-                .for_resource(id.clone()));
+                return Err(api_error_with_meta("Failed to get queue attributes", err)
+                    .for_resource(id.clone()));
             }
         };
 
@@ -506,8 +502,7 @@ impl AwsProvider {
         }
 
         let result = req.send().await.map_err(|e| {
-            api_error_with_meta("Failed to create SQS queue", "sqs.CreateQueue", e)
-                .for_resource(resource.id.clone())
+            api_error_with_meta("Failed to create SQS queue", e).for_resource(resource.id.clone())
         })?;
 
         let queue_url = result.queue_url().ok_or_else(|| {
@@ -564,12 +559,8 @@ impl AwsProvider {
                 .send()
                 .await
                 .map_err(|e| {
-                    api_error_with_meta(
-                        "Failed to set queue attributes",
-                        "sqs.SetQueueAttributes",
-                        e,
-                    )
-                    .for_resource(id.clone())
+                    api_error_with_meta("Failed to set queue attributes", e)
+                        .for_resource(id.clone())
                 })?;
         }
 
@@ -597,8 +588,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                api_error_with_meta("Failed to delete SQS queue", "sqs.DeleteQueue", e)
-                    .for_resource(id.clone())
+                api_error_with_meta("Failed to delete SQS queue", e).for_resource(id.clone())
             })?;
         Ok(())
     }
@@ -634,8 +624,7 @@ impl AwsProvider {
                 .send()
                 .await
                 .map_err(|e| {
-                    api_error_with_meta("Failed to untag SQS queue", "sqs.UntagQueue", e)
-                        .for_resource(id.clone())
+                    api_error_with_meta("Failed to untag SQS queue", e).for_resource(id.clone())
                 })?;
         }
 
@@ -660,8 +649,7 @@ impl AwsProvider {
                 .send()
                 .await
                 .map_err(|e| {
-                    api_error_with_meta("Failed to tag SQS queue", "sqs.TagQueue", e)
-                        .for_resource(id.clone())
+                    api_error_with_meta("Failed to tag SQS queue", e).for_resource(id.clone())
                 })?;
         }
 

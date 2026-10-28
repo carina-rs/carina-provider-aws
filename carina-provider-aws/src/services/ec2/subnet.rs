@@ -1,17 +1,18 @@
 use std::collections::HashMap;
 
+use carina_core::provider::ProviderResult;
 use carina_core::provider::{AppliedIdentifier, ReadOutcome};
-use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{Resource, ResourceId, State};
 use carina_core::schema::ResourceSchema;
 
 use crate::AwsProvider;
+use crate::aws_operation::ClientToken;
 use crate::error_helpers::api_error_with_meta;
 use crate::helpers::{
-    optional_bool_attr, optional_bool_struct_field, optional_enum_attr, optional_enum_struct_field,
-    require_string_attr,
+    build_tag_specification_with_create_token, optional_bool_attr, optional_bool_struct_field,
+    optional_enum_attr, optional_enum_struct_field, require_string_attr,
 };
-use crate::provider::AwsCreateAttempt;
+use crate::provider::{AwsCreateAttempt, Ec2TaggedResourceKind};
 use aws_sdk_ec2::types::{AttributeBooleanValue, HostnameType};
 
 // `read_ec2_subnet` must store `availability_zone` as the AWS canonical
@@ -65,8 +66,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                api_error_with_meta("Failed to describe subnets", "ec2.DescribeSubnets", e)
-                    .for_resource(id.clone())
+                api_error_with_meta("Failed to describe subnets", e).for_resource(id.clone())
             })?;
 
         if let Some(subnet) = result.subnets().first() {
@@ -95,6 +95,7 @@ impl AwsProvider {
         &self,
         resource: &Resource,
         schema: &ResourceSchema,
+        client_token: &ClientToken,
         attempt: A,
     ) -> Result<A::Step, A::Verdict> {
         let cidr_block = match require_string_attr(resource, "cidr_block") {
@@ -105,16 +106,21 @@ impl AwsProvider {
             Ok(vpc_id) => vpc_id,
             Err(error) => return Err(attempt.untracked(error)),
         };
-        let modify_enum_attrs = match resolve_modify_subnet_enum_attrs(resource, schema) {
-            Ok(attributes) => attributes,
+        match resolve_modify_subnet_enum_attrs(resource, schema) {
+            Ok(_) => {}
             Err(error) => return Err(attempt.untracked(error)),
-        };
+        }
 
         let mut req = self
             .ec2_client
             .create_subnet()
             .vpc_id(&vpc_id)
-            .cidr_block(&cidr_block);
+            .cidr_block(&cidr_block)
+            .tag_specifications(build_tag_specification_with_create_token(
+                resource,
+                aws_sdk_ec2::types::ResourceType::Subnet,
+                client_token,
+            ));
 
         let availability_zone = match optional_enum_attr(resource, schema, "availability_zone") {
             Ok(availability_zone) => availability_zone,
@@ -124,61 +130,37 @@ impl AwsProvider {
             req = req.availability_zone(az);
         }
 
-        let result = match req.send().await {
-            Ok(result) => result,
-            Err(error) => {
-                return Err(attempt.untracked(
-                    api_error_with_meta("Failed to create subnet", "ec2.CreateSubnet", error)
-                        .for_resource(resource.id.clone()),
-                ));
-            }
-        };
-
-        let subnet_id = match result.subnet().and_then(|s| s.subnet_id()) {
-            Some(subnet_id) => subnet_id,
-            None => {
-                return Err(attempt.untracked(
-                    ProviderError::api_error("Subnet created but no ID returned")
-                        .for_resource(resource.id.clone()),
-                ));
-            }
-        };
-        let identifier =
-            match crate::helpers::applied_identifier(&resource.id, "ec2.CreateSubnet", subnet_id) {
-                Ok(identifier) => identifier,
-                Err(error) => return Err(attempt.untracked(error)),
-            };
-        let issued = attempt.issued(
-            identifier.clone(),
-            Self::sent_only(resource, &["vpc_id", "cidr_block", "availability_zone"]),
+        let sent = Self::sent_only(
+            resource,
+            &["vpc_id", "cidr_block", "availability_zone", "tags"],
         );
+        let result = req.send().await;
 
-        // Apply tags
-        let attrs = resource.resolved_attributes();
-        if let Err(error) = self
-            .apply_ec2_tags(&resource.id, subnet_id, &attrs, None)
-            .await
-        {
-            return Err(self.failed_issued(&resource.id, issued, error).await);
-        }
+        self.finish_tagged_ec2_create(
+            resource,
+            attempt,
+            Ec2TaggedResourceKind::Subnet.create_context(client_token, sent),
+            result,
+            |output| {
+                output
+                    .subnet()
+                    .and_then(|subnet| subnet.subnet_id())
+                    .map(str::to_owned)
+            },
+        )
+        .await
+    }
 
+    pub(crate) async fn continue_ec2_subnet_create(
+        &self,
+        resource: &Resource,
+        schema: &ResourceSchema,
+        subnet_id: &str,
+    ) -> ProviderResult<()> {
+        let modify_enum_attrs = resolve_modify_subnet_enum_attrs(resource, schema)?;
         // Apply subnet attributes that require ModifySubnetAttribute
-        if let Err(error) = self
-            .modify_subnet_attributes(&resource.id, subnet_id, resource, &modify_enum_attrs)
+        self.modify_subnet_attributes(&resource.id, subnet_id, resource, &modify_enum_attrs)
             .await
-        {
-            return Err(self.failed_issued(&resource.id, issued, error).await);
-        }
-
-        // Read back using subnet ID (reliable identifier)
-        let outcome = self.read_ec2_subnet(&resource.id, &identifier).await;
-        let completion = self.create_outcome_from_read(
-            &resource.id,
-            identifier,
-            resource.resolved_attributes(),
-            outcome,
-        );
-        Ok(self.finish_issued(issued, completion))
     }
 
     /// Update an EC2 Subnet
@@ -221,12 +203,8 @@ impl AwsProvider {
                 .send()
                 .await
                 .map_err(|e| {
-                    api_error_with_meta(
-                        "Failed to set map_public_ip_on_launch",
-                        "ec2.ModifySubnetAttribute",
-                        e,
-                    )
-                    .for_resource(id.clone())
+                    api_error_with_meta("Failed to set map_public_ip_on_launch", e)
+                        .for_resource(id.clone())
                 })?;
         }
 
@@ -240,12 +218,8 @@ impl AwsProvider {
                 .send()
                 .await
                 .map_err(|e| {
-                    api_error_with_meta(
-                        "Failed to set assign_ipv6_address_on_creation",
-                        "ec2.ModifySubnetAttribute",
-                        e,
-                    )
-                    .for_resource(id.clone())
+                    api_error_with_meta("Failed to set assign_ipv6_address_on_creation", e)
+                        .for_resource(id.clone())
                 })?;
         }
 
@@ -257,12 +231,7 @@ impl AwsProvider {
                 .send()
                 .await
                 .map_err(|e| {
-                    api_error_with_meta(
-                        "Failed to set enable_dns64",
-                        "ec2.ModifySubnetAttribute",
-                        e,
-                    )
-                    .for_resource(id.clone())
+                    api_error_with_meta("Failed to set enable_dns64", e).for_resource(id.clone())
                 })?;
         }
 
@@ -278,7 +247,6 @@ impl AwsProvider {
                 .map_err(|e| {
                     api_error_with_meta(
                         "Failed to set private_dns_name_options_on_launch.hostname_type",
-                        "ec2.ModifySubnetAttribute",
                         e,
                     )
                     .for_resource(id.clone())
@@ -301,7 +269,6 @@ impl AwsProvider {
                 .map_err(|e| {
                     api_error_with_meta(
                         "Failed to set private_dns_name_options_on_launch.enable_resource_name_dns_a_record",
-                        "ec2.ModifySubnetAttribute",
                         e,
                     )
                     .for_resource(id.clone())
@@ -324,7 +291,6 @@ impl AwsProvider {
                 .map_err(|e| {
                     api_error_with_meta(
                         "Failed to set private_dns_name_options_on_launch.enable_resource_name_dns_aaaa_record",
-                        "ec2.ModifySubnetAttribute",
                         e,
                     )
                     .for_resource(id.clone())

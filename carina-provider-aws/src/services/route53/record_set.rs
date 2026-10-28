@@ -220,12 +220,7 @@ async fn change_record_set(
         .send()
         .await
         .map_err(|e| {
-            api_error_with_meta(
-                "ChangeResourceRecordSets failed",
-                "route53.ChangeResourceRecordSets",
-                e,
-            )
-            .for_resource(id.clone())
+            api_error_with_meta("ChangeResourceRecordSets failed", e).for_resource(id.clone())
         })?;
 
     Ok(())
@@ -332,12 +327,7 @@ impl AwsProvider {
             }
 
             let result = request.send().await.map_err(|e| {
-                api_error_with_meta(
-                    "Failed to list record sets",
-                    "route53.ListResourceRecordSets",
-                    e,
-                )
-                .for_resource(id.clone())
+                api_error_with_meta("Failed to list record sets", e).for_resource(id.clone())
             })?;
 
             match scan_page_for_record(result.resource_record_sets(), &normalized_name, record_type)
