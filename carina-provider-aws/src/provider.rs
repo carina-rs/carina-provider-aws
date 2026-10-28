@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 use std::future::Future;
+use std::num::NonZeroU8;
 use std::time::Duration;
 
 use carina_aws_types::SendOutcome;
@@ -36,11 +37,15 @@ pub(crate) const POLL_AFTER_SECS: u32 = 5;
 pub(crate) const TAGGED_EC2_DISCOVERY_ATTEMPTS: u8 = 4;
 pub(crate) const TAGGED_EC2_DISCOVERY_MAX_PAGES: u8 = 2;
 pub(crate) const TAGGED_EC2_INITIAL_DELAY_SECS: u32 = 5;
-const ACM_REQUEST_CERTIFICATE_POLL_ATTEMPTS: u8 = 3;
+const ACM_REQUEST_CERTIFICATE_POLL_ATTEMPTS: NonZeroU8 = NonZeroU8::new(3).unwrap();
 const ACM_IDEMPOTENCY_WINDOW_SECS: u64 = 60 * 60;
-const ACM_IDEMPOTENCY_SAFETY_MARGIN_SECS: u64 = 5 * 60;
+// This margin is the cross-host clock-skew budget between the process that
+// first sends the token and a later process that polls or resumes it.
+const ACM_IDEMPOTENCY_SAFETY_MARGIN_SECS: u64 = 15 * 60;
 const ACM_REQUEST_CERTIFICATE_OUTCOME_UNKNOWN: &str =
     "acm.Certificate may have been created; check before re-applying";
+const ACM_REQUEST_CERTIFICATE_ISSUED_HANDLE_ERROR: &str =
+    "ACM request-certificate token cannot be paired with an issued create handle";
 
 fn next_tagged_ec2_delay(current: u32) -> u32 {
     match current {
@@ -97,6 +102,34 @@ fn acm_client_token_can_be_resent(first_used_at_unix_secs: u64, now_unix_secs: u
         .is_some_and(|elapsed| {
             elapsed < ACM_IDEMPOTENCY_WINDOW_SECS - ACM_IDEMPOTENCY_SAFETY_MARGIN_SECS
         })
+}
+
+/// Proof that the ACM idempotency token is still inside the conservative
+/// resend window at the clock reading used by this transition.
+struct FreshAcmClientToken {
+    client_token: ClientToken,
+    first_used_at_unix_secs: u64,
+}
+
+fn fresh_acm_client_token(
+    client_token: ClientToken,
+    first_used_at_unix_secs: u64,
+    now_unix_secs: u64,
+) -> Option<FreshAcmClientToken> {
+    acm_client_token_can_be_resent(first_used_at_unix_secs, now_unix_secs).then_some(
+        FreshAcmClientToken {
+            client_token,
+            first_used_at_unix_secs,
+        },
+    )
+}
+
+fn acm_request_certificate_outcome_unknown(id: &ResourceId) -> ProviderError {
+    ProviderError::api_error(ACM_REQUEST_CERTIFICATE_OUTCOME_UNKNOWN).for_resource(id.clone())
+}
+
+fn acm_request_certificate_issued_handle_error(id: &ResourceId) -> ProviderError {
+    ProviderError::internal(ACM_REQUEST_CERTIFICATE_ISSUED_HANDLE_ERROR).for_resource(id.clone())
 }
 
 /// Secret-free AWS metadata retained when a create's send outcome is ambiguous.
@@ -492,10 +525,17 @@ enum TaggedDiscovery {
 enum AcmRequestTransition {
     Issued(AppliedIdentifier),
     Pending(AwsCreateToken),
-    Undetermined {
-        token: AwsCreateToken,
-        error: ProviderError,
-    },
+    Undetermined(ProviderError),
+    Untracked(ProviderError),
+}
+
+/// The initial request always has at least one later attempt available, so a
+/// maybe-sent result has a pending continuation rather than an undetermined
+/// outcome.
+#[derive(Debug)]
+enum InitialAcmRequestTransition {
+    Issued(AppliedIdentifier),
+    Pending(AwsCreateToken),
     Untracked(ProviderError),
 }
 
@@ -993,10 +1033,13 @@ impl AwsProvider {
         &self,
         resource: &Resource,
         schema: &carina_core::schema::ResourceSchema,
-        client_token: ClientToken,
-        first_used_at_unix_secs: u64,
+        fresh_client_token: FreshAcmClientToken,
         attempts_remaining: u8,
     ) -> AcmRequestTransition {
+        let FreshAcmClientToken {
+            client_token,
+            first_used_at_unix_secs,
+        } = fresh_client_token;
         let token = |attempts_remaining| AwsCreateToken::AcmRequestCertificate {
             client_token: client_token.clone(),
             first_used_at_unix_secs,
@@ -1011,14 +1054,12 @@ impl AwsProvider {
                 SendOutcome::MaybeSent if attempts_remaining > 1 => {
                     AcmRequestTransition::Pending(token(attempts_remaining - 1))
                 }
-                SendOutcome::MaybeSent => AcmRequestTransition::Undetermined {
-                    token: token(attempts_remaining),
-                    error:
-                        crate::services::acm::certificate::request_certificate_outcome_unknown_error(
-                            &resource.id,
-                            error,
-                        ),
-                },
+                SendOutcome::MaybeSent => AcmRequestTransition::Undetermined(
+                    crate::services::acm::certificate::request_certificate_outcome_unknown_error(
+                        &resource.id,
+                        error,
+                    ),
+                ),
                 SendOutcome::NotSent | SendOutcome::Rejected => AcmRequestTransition::Untracked(
                     crate::services::acm::certificate::request_certificate_error(
                         &resource.id,
@@ -1027,6 +1068,42 @@ impl AwsProvider {
                 ),
             },
             Err(error) => AcmRequestTransition::Untracked(error),
+        }
+    }
+
+    async fn request_initial_acm_certificate_transition(
+        &self,
+        resource: &Resource,
+        schema: &carina_core::schema::ResourceSchema,
+        fresh_client_token: FreshAcmClientToken,
+        attempts_after_request: NonZeroU8,
+    ) -> InitialAcmRequestTransition {
+        let FreshAcmClientToken {
+            client_token,
+            first_used_at_unix_secs,
+        } = fresh_client_token;
+        let pending_token = AwsCreateToken::AcmRequestCertificate {
+            client_token: client_token.clone(),
+            first_used_at_unix_secs,
+            attempts_remaining: attempts_after_request.get(),
+        };
+        match self
+            .request_acm_certificate(resource, schema, &client_token)
+            .await
+        {
+            Ok(Ok(identifier)) => InitialAcmRequestTransition::Issued(identifier),
+            Ok(Err(error)) => match error.outcome() {
+                SendOutcome::MaybeSent => InitialAcmRequestTransition::Pending(pending_token),
+                SendOutcome::NotSent | SendOutcome::Rejected => {
+                    InitialAcmRequestTransition::Untracked(
+                        crate::services::acm::certificate::request_certificate_error(
+                            &resource.id,
+                            error,
+                        ),
+                    )
+                }
+            },
+            Err(error) => InitialAcmRequestTransition::Untracked(error),
         }
     }
 
@@ -1664,29 +1741,39 @@ impl AwsProvider {
                         return Err(attempt.untracked(error.for_resource(resource.id.clone())));
                     }
                 };
+                let fresh_client_token = match fresh_acm_client_token(
+                    client_token,
+                    first_used_at_unix_secs,
+                    first_used_at_unix_secs,
+                ) {
+                    Some(fresh_client_token) => fresh_client_token,
+                    None => {
+                        return Err(attempt.untracked(
+                            ProviderError::internal(
+                                "new ACM client token is outside its idempotency window",
+                            )
+                            .for_resource(resource.id.clone()),
+                        ));
+                    }
+                };
                 match self
-                    .request_acm_certificate_transition(
+                    .request_initial_acm_certificate_transition(
                         resource,
                         schema,
-                        client_token,
-                        first_used_at_unix_secs,
-                        ACM_REQUEST_CERTIFICATE_POLL_ATTEMPTS + 1,
+                        fresh_client_token,
+                        ACM_REQUEST_CERTIFICATE_POLL_ATTEMPTS,
                     )
                     .await
                 {
-                    AcmRequestTransition::Issued(identifier) => {
+                    InitialAcmRequestTransition::Issued(identifier) => {
                         let issued = attempt.issued(identifier.clone(), Sent::AllRequestAttributes);
                         self.finish_acm_certificate_issued(resource, schema, identifier, issued)
                             .await
                     }
-                    AcmRequestTransition::Pending(token) => {
+                    InitialAcmRequestTransition::Pending(token) => {
                         attempt.pending(token, Sent::AllRequestAttributes, POLL_AFTER_SECS)
                     }
-                    AcmRequestTransition::Untracked(error) => Err(attempt.untracked(error)),
-                    AcmRequestTransition::Undetermined {
-                        token,
-                        error: _error,
-                    } => attempt.pending(token, Sent::AllRequestAttributes, POLL_AFTER_SECS),
+                    InitialAcmRequestTransition::Untracked(error) => Err(attempt.untracked(error)),
                 }
             }
             "s3.Bucket" => self.create_s3_bucket(resource, attempt).await,
@@ -1877,59 +1964,70 @@ impl AwsProvider {
                 first_used_at_unix_secs,
                 attempts_remaining,
             } => {
+                let attempt = match poll {
+                    AwsCreatePoll::Unissued(attempt) => attempt,
+                    AwsCreatePoll::Issued(issued) => {
+                        return Err(issued.failed(
+                            Observation::ReadFailed(acm_request_certificate_issued_handle_error(
+                                id,
+                            )),
+                            acm_request_certificate_issued_handle_error(id),
+                        ));
+                    }
+                };
+                let pending_token = AwsCreateToken::AcmRequestCertificate {
+                    client_token: client_token.clone(),
+                    first_used_at_unix_secs,
+                    attempts_remaining,
+                };
+                let now_unix_secs = match unix_timestamp_now() {
+                    Ok(timestamp) => timestamp,
+                    Err(error) => {
+                        return Err(
+                            attempt.undetermined(pending_token, error.for_resource(id.clone()))
+                        );
+                    }
+                };
+                let fresh_client_token = match fresh_acm_client_token(
+                    client_token,
+                    first_used_at_unix_secs,
+                    now_unix_secs,
+                ) {
+                    Some(fresh_client_token) => fresh_client_token,
+                    None => {
+                        return Err(attempt.undetermined(
+                            pending_token,
+                            acm_request_certificate_outcome_unknown(id),
+                        ));
+                    }
+                };
                 let schema = match self.resource_schema(resource.id.resource_type.as_str()) {
                     Some(schema) => schema,
                     None => {
                         let error = ProviderError::internal("missing ACM certificate schema")
                             .for_resource(id.clone());
-                        return match poll {
-                            AwsCreatePoll::Unissued(attempt) => Err(attempt.untracked(error)),
-                            AwsCreatePoll::Issued(issued) => {
-                                Err(self.failed_issued(id, issued, error).await)
-                            }
-                        };
+                        return Err(attempt.untracked(error));
                     }
                 };
                 match self
                     .request_acm_certificate_transition(
                         resource,
                         schema,
-                        client_token,
-                        first_used_at_unix_secs,
+                        fresh_client_token,
                         attempts_remaining,
                     )
                     .await
                 {
                     AcmRequestTransition::Issued(identifier) => {
-                        let issued = match poll {
-                            AwsCreatePoll::Unissued(attempt) => attempt.issued(identifier.clone()),
-                            AwsCreatePoll::Issued(issued) => issued,
-                        };
+                        let issued = attempt.issued(identifier.clone());
                         self.finish_acm_certificate_issued(resource, schema, identifier, issued)
                             .await
                     }
-                    AcmRequestTransition::Pending(token) => match poll {
-                        AwsCreatePoll::Unissued(attempt) => attempt.pending(token, POLL_AFTER_SECS),
-                        AwsCreatePoll::Issued(issued) => issued.pending(token, POLL_AFTER_SECS),
-                    },
-                    AcmRequestTransition::Undetermined { token, error } => match poll {
-                        AwsCreatePoll::Unissued(attempt) => Err(attempt.undetermined(token, error)),
-                        AwsCreatePoll::Issued(issued) => Err(issued.failed(
-                            Observation::ReadFailed(
-                                ProviderError::api_error(
-                                    "ACM certificate request outcome is unknown",
-                                )
-                                .for_resource(id.clone()),
-                            ),
-                            error,
-                        )),
-                    },
-                    AcmRequestTransition::Untracked(error) => match poll {
-                        AwsCreatePoll::Unissued(attempt) => Err(attempt.untracked(error)),
-                        AwsCreatePoll::Issued(issued) => {
-                            Err(self.failed_issued(id, issued, error).await)
-                        }
-                    },
+                    AcmRequestTransition::Pending(token) => attempt.pending(token, POLL_AFTER_SECS),
+                    AcmRequestTransition::Undetermined(error) => {
+                        Err(attempt.undetermined(pending_token, error))
+                    }
+                    AcmRequestTransition::Untracked(error) => Err(attempt.untracked(error)),
                 }
             }
             AwsCreateToken::NatGateway { nat_gateway_id } => {
@@ -2299,93 +2397,61 @@ impl AwsProvider {
                 first_used_at_unix_secs,
                 attempts_remaining,
             } => {
-                let token = || AwsCreateToken::AcmRequestCertificate {
-                    client_token: client_token.clone(),
-                    first_used_at_unix_secs,
-                    attempts_remaining,
+                let attempt = match resume {
+                    AwsCreateResume::Unissued(attempt) => attempt,
+                    AwsCreateResume::Issued(resumed) => {
+                        return Err(resumed.failed(
+                            Observation::ReadFailed(acm_request_certificate_issued_handle_error(
+                                id,
+                            )),
+                            acm_request_certificate_issued_handle_error(id),
+                        ));
+                    }
                 };
                 let now_unix_secs = match unix_timestamp_now() {
                     Ok(timestamp) => timestamp,
                     Err(error) => {
                         let error = error.for_resource(id.clone());
-                        return match resume {
-                            AwsCreateResume::Unissued(attempt) => Err(attempt.undetermined(error)),
-                            AwsCreateResume::Issued(resumed) => {
-                                resumed.pending(token(), POLL_AFTER_SECS)
-                            }
-                        };
+                        return Err(attempt.undetermined(error));
                     }
                 };
-                if !acm_client_token_can_be_resent(first_used_at_unix_secs, now_unix_secs) {
-                    let error = ProviderError::api_error(ACM_REQUEST_CERTIFICATE_OUTCOME_UNKNOWN)
-                        .for_resource(id.clone());
-                    return match resume {
-                        AwsCreateResume::Unissued(attempt) => Err(attempt.undetermined(error)),
-                        AwsCreateResume::Issued(resumed) => {
-                            resumed.pending(token(), POLL_AFTER_SECS)
-                        }
-                    };
-                }
+                let fresh_client_token = match fresh_acm_client_token(
+                    client_token,
+                    first_used_at_unix_secs,
+                    now_unix_secs,
+                ) {
+                    Some(fresh_client_token) => fresh_client_token,
+                    None => {
+                        return Err(
+                            attempt.undetermined(acm_request_certificate_outcome_unknown(id))
+                        );
+                    }
+                };
                 let schema = match self.resource_schema(resource.id.resource_type.as_str()) {
                     Some(schema) => schema,
                     None => {
                         let error = ProviderError::internal("missing ACM certificate schema")
                             .for_resource(id.clone());
-                        return match resume {
-                            AwsCreateResume::Unissued(attempt) => Err(attempt.untracked(error)),
-                            AwsCreateResume::Issued(resumed) => {
-                                Err(self.failed_resumed(id, resumed, error).await)
-                            }
-                        };
+                        return Err(attempt.untracked(error));
                     }
                 };
                 match self
                     .request_acm_certificate_transition(
                         resource,
                         schema,
-                        client_token,
-                        first_used_at_unix_secs,
+                        fresh_client_token,
                         attempts_remaining,
                     )
                     .await
                 {
                     AcmRequestTransition::Issued(identifier) => {
-                        let resumed = match resume {
-                            AwsCreateResume::Unissued(attempt) => {
-                                attempt.issued(identifier.clone())
-                            }
-                            AwsCreateResume::Issued(resumed) => resumed,
-                        };
+                        let resumed = attempt.issued(identifier.clone());
                         self.finish_acm_certificate_resumed(resource, schema, identifier, resumed)
                             .await
                     }
-                    AcmRequestTransition::Pending(token) => match resume {
-                        AwsCreateResume::Unissued(attempt) => {
-                            attempt.pending(token, POLL_AFTER_SECS)
-                        }
-                        AwsCreateResume::Issued(resumed) => resumed.pending(token, POLL_AFTER_SECS),
-                    },
-                    AcmRequestTransition::Undetermined {
-                        token: _pending_token,
-                        error,
-                    } => match resume {
-                        AwsCreateResume::Unissued(attempt) => Err(attempt.undetermined(error)),
-                        AwsCreateResume::Issued(resumed) => Err(resumed.failed(
-                            Observation::ReadFailed(
-                                ProviderError::api_error(
-                                    "ACM certificate request outcome is unknown",
-                                )
-                                .for_resource(id.clone()),
-                            ),
-                            error,
-                        )),
-                    },
-                    AcmRequestTransition::Untracked(error) => match resume {
-                        AwsCreateResume::Unissued(attempt) => Err(attempt.untracked(error)),
-                        AwsCreateResume::Issued(resumed) => {
-                            Err(self.failed_resumed(id, resumed, error).await)
-                        }
-                    },
+                    AcmRequestTransition::Pending(token) => attempt.pending(token, POLL_AFTER_SECS),
+                    AcmRequestTransition::Undetermined(error) => Err(attempt.undetermined(error)),
+                    AcmRequestTransition::Untracked(error) => Err(attempt.untracked(error)),
                 }
             }
             AwsCreateToken::NatGateway { nat_gateway_id } => {
@@ -3535,7 +3601,7 @@ mod pending_operation_tests {
         let token = AwsCreateToken::AcmRequestCertificate {
             client_token: ClientToken::new(),
             first_used_at_unix_secs: 10_000,
-            attempts_remaining: ACM_REQUEST_CERTIFICATE_POLL_ATTEMPTS,
+            attempts_remaining: ACM_REQUEST_CERTIFICATE_POLL_ATTEMPTS.get(),
         };
         let json = serde_json::to_string(&token).expect("ACM request token should serialize");
         assert_eq!(
@@ -3549,6 +3615,7 @@ mod pending_operation_tests {
         assert_eq!(object.as_object().map(|object| object.len()), Some(4));
 
         let safe_window = ACM_IDEMPOTENCY_WINDOW_SECS - ACM_IDEMPOTENCY_SAFETY_MARGIN_SECS;
+        assert_eq!(safe_window, 45 * 60);
         let now = 20_000;
         assert!(acm_client_token_can_be_resent(now - safe_window + 1, now));
         assert!(!acm_client_token_can_be_resent(now - safe_window, now));

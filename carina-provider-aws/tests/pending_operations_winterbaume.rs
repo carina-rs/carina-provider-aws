@@ -1070,7 +1070,7 @@ fn expect_create_pending(step: TestCreateStep) -> AwsCreateToken {
             assert_eq!(identifier, Some(applied_identifier(NAT_GATEWAY_ID)));
             token
         }
-        outcome => panic!("expected pending create, got {outcome:?}"),
+        _ => panic!("expected pending create"),
     }
 }
 
@@ -1090,7 +1090,7 @@ fn expect_delete_pending(step: OperationStep<(), ProviderError, AwsDeleteToken>)
             pending
         }
         OperationStep::Done(()) => panic!("expected pending delete"),
-        OperationStep::Verdict(error) => panic!("expected pending delete, got {error:?}"),
+        OperationStep::Verdict(_) => panic!("expected pending delete, got a verdict"),
     }
 }
 
@@ -1351,6 +1351,82 @@ async fn maybe_sent_request_certificate_poll_exhaustion_is_undetermined() {
 }
 
 #[tokio::test]
+async fn expired_request_certificate_poll_is_undetermined_without_resending() {
+    let (provider, request_bodies) = provider_with_recording_post_send_failure("example.com").await;
+    let resource = acm_certificate_resource();
+
+    let verdict = provider
+        .poll_create_step(
+            &resource,
+            acm_request_token(unix_now().saturating_sub(45 * 60), 3),
+            poll_attempt(&resource),
+        )
+        .await
+        .expect_err("an expired ACM token must not be resent by poll");
+
+    match &verdict {
+        TestCreateVerdict::Undetermined(error) => assert_eq!(
+            error.to_wire().message,
+            "acm.Certificate may have been created; check before re-applying"
+        ),
+        TestCreateVerdict::Untracked(_) => {
+            panic!("expired poll was untracked")
+        }
+        TestCreateVerdict::Created(_) => {
+            panic!("expired poll was classified as created")
+        }
+        TestCreateVerdict::Discarded(_) => {
+            panic!("expired poll was discarded")
+        }
+    }
+    assert!(
+        request_bodies
+            .lock()
+            .expect("recorded request-body lock")
+            .is_empty(),
+        "expiry must be checked before poll rebuilds or sends the request"
+    );
+}
+
+#[tokio::test]
+async fn request_certificate_token_with_issued_poll_fails_without_resending() {
+    let (provider, request_bodies) = provider_with_acm(AcmRequestResult::Success).await;
+    let resource = acm_certificate_resource();
+
+    let verdict = provider
+        .poll_create_step(
+            &resource,
+            acm_request_token(unix_now(), 3),
+            issued_poll(&resource, Sent::AllRequestAttributes),
+        )
+        .await
+        .expect_err("an ACM request token cannot have an issued poll handle");
+
+    match &verdict {
+        TestCreateVerdict::Created(created) => assert_eq!(
+            created.error.to_wire().message,
+            "ACM request-certificate token cannot be paired with an issued create handle"
+        ),
+        TestCreateVerdict::Untracked(_) => {
+            panic!("impossible issued poll was untracked")
+        }
+        TestCreateVerdict::Undetermined(_) => {
+            panic!("impossible issued poll was undetermined")
+        }
+        TestCreateVerdict::Discarded(_) => {
+            panic!("impossible issued poll was discarded")
+        }
+    }
+    assert!(
+        request_bodies
+            .lock()
+            .expect("ACM request-body lock")
+            .is_empty(),
+        "an impossible issued poll pairing must fail before resending"
+    );
+}
+
+#[tokio::test]
 async fn rejected_request_certificate_poll_is_untracked() {
     let (provider, request_bodies) = provider_with_acm(AcmRequestResult::Rejected).await;
     let resource = acm_certificate_resource();
@@ -1424,6 +1500,40 @@ async fn expired_request_certificate_resume_is_undetermined_without_resending() 
             .expect("recorded request-body lock")
             .is_empty(),
         "expiry must be checked before rebuilding or sending the request"
+    );
+}
+
+#[tokio::test]
+async fn request_certificate_token_with_issued_resume_fails_without_resending() {
+    let (provider, request_bodies) = provider_with_acm(AcmRequestResult::Success).await;
+    let resource = acm_certificate_resource();
+
+    let verdict = provider
+        .resume_create_step(&resource, acm_request_token(unix_now(), 3), issued_resume())
+        .await
+        .expect_err("an ACM request token cannot have an issued resume handle");
+
+    match &verdict {
+        TestResumeVerdict::Created(error) => assert_eq!(
+            error.to_wire().message,
+            "ACM request-certificate token cannot be paired with an issued create handle"
+        ),
+        TestResumeVerdict::Untracked(_) => {
+            panic!("impossible issued resume was untracked")
+        }
+        TestResumeVerdict::Undetermined(_) => {
+            panic!("impossible issued resume was undetermined")
+        }
+        TestResumeVerdict::Discarded(_) => {
+            panic!("impossible issued resume was discarded")
+        }
+    }
+    assert!(
+        request_bodies
+            .lock()
+            .expect("ACM request-body lock")
+            .is_empty(),
+        "an impossible issued resume pairing must fail before resending"
     );
 }
 
@@ -1591,8 +1701,14 @@ async fn tagged_vpc_discovery_error_consumes_final_attempt_and_keeps_cause() {
         Some("outcome-unknown")
     );
     let rendered = verdict.provider_error().to_string();
-    assert!(rendered.contains("UnauthorizedOperation"), "{rendered}");
-    assert!(rendered.contains("scripted discovery denial"), "{rendered}");
+    assert!(
+        rendered.contains("UnauthorizedOperation"),
+        "rendered discovery error should include the AWS error code"
+    );
+    assert!(
+        rendered.contains("scripted discovery denial"),
+        "rendered discovery error should include the AWS error message"
+    );
 }
 
 #[tokio::test]
@@ -1611,12 +1727,21 @@ async fn tagged_vpc_exhaustion_keeps_the_original_send_failure_summary() {
 
     assert!(matches!(verdict, TestCreateVerdict::Undetermined(_)));
     let rendered = verdict.provider_error().to_string();
-    assert!(rendered.contains("ec2.CreateVpc"), "{rendered}");
-    assert!(rendered.contains("status=503"), "{rendered}");
-    assert!(rendered.contains("code=InternalError"), "{rendered}");
+    assert!(
+        rendered.contains("ec2.CreateVpc"),
+        "rendered create error should include the operation name"
+    );
+    assert!(
+        rendered.contains("status=503"),
+        "rendered create error should include the status code"
+    );
+    assert!(
+        rendered.contains("code=InternalError"),
+        "rendered create error should include the AWS error code"
+    );
     assert!(
         rendered.contains("request_id=original-create-request-id"),
-        "{rendered}"
+        "rendered create error should include the request ID"
     );
 }
 
@@ -1661,8 +1786,14 @@ async fn tagged_vpc_poll_with_two_matches_is_undetermined() {
 
     assert!(matches!(verdict, TestCreateVerdict::Undetermined(_)));
     let rendered = verdict.provider_error().to_string();
-    assert!(rendered.contains("vpc-0553-a"), "{rendered}");
-    assert!(rendered.contains("vpc-0553-b"), "{rendered}");
+    assert!(
+        rendered.contains("vpc-0553-a"),
+        "rendered discovery error should include the first matching identifier"
+    );
+    assert!(
+        rendered.contains("vpc-0553-b"),
+        "rendered discovery error should include the second matching identifier"
+    );
 }
 
 #[tokio::test]
@@ -1915,7 +2046,7 @@ async fn nat_gateway_create_steps_issue_once_poll_once_and_read_back() {
         .expect("available NAT gateway create poll")
     {
         TestCreateStep::Success(state) => state,
-        other => panic!("expected completed NAT gateway create, got {other:?}"),
+        _ => panic!("expected completed NAT gateway create"),
     };
     assert_nat_gateway_state_identifier(&state);
     assert_eq!(
@@ -1953,7 +2084,7 @@ async fn nat_gateway_create_read_back_not_found_is_partial_success_with_created_
         missing_attributes,
     } = outcome
     else {
-        panic!("expected partial create success, got {outcome:?}");
+        panic!("expected partial create success");
     };
     assert_nat_gateway_state_identifier(&state);
     assert!(reason.contains("post-create read-back"));
@@ -1988,7 +2119,7 @@ async fn nat_gateway_create_read_back_error_is_partial_success_with_created_iden
         missing_attributes,
     } = outcome
     else {
-        panic!("expected partial create success, got {outcome:?}");
+        panic!("expected partial create success");
     };
     assert_nat_gateway_state_identifier(&state);
     assert!(reason.contains("post-create read-back"));
