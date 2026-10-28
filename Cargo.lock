@@ -811,7 +811,7 @@ dependencies = [
 
 [[package]]
 name = "carina-codegen-aws"
-version = "0.7.3"
+version = "0.7.4"
 dependencies = [
  "anyhow",
  "carina-aws-types",
@@ -866,7 +866,7 @@ dependencies = [
 
 [[package]]
 name = "carina-provider-aws"
-version = "0.7.3"
+version = "0.7.4"
 dependencies = [
  "aws-config",
  "aws-credential-types",
@@ -915,7 +915,7 @@ dependencies = [
 
 [[package]]
 name = "carina-smithy"
-version = "0.7.3"
+version = "0.7.4"
 dependencies = [
  "serde",
  "serde_json",
