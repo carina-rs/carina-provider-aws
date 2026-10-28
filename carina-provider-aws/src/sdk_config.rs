@@ -196,6 +196,49 @@ mod tests {
         assert_bounded_policy(bounded.0.timeout_config(), bounded.0.retry_config());
     }
 
+    #[test]
+    fn every_aws_sdk_dependency_has_a_wrapper_and_constructor_bans() {
+        let manifest = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/Cargo.toml"));
+        let generated = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/src/resend_safety_generated.rs"
+        ));
+        let clippy = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../clippy.toml"));
+        let mut services = std::collections::BTreeSet::new();
+        for line in manifest.lines() {
+            let mut declaration = line.split('#').next().unwrap_or_default();
+            while let Some(prefix) = declaration.find("aws-sdk-") {
+                let candidate = &declaration[prefix + "aws-sdk-".len()..];
+                let length = candidate
+                    .find(|character: char| {
+                        !character.is_ascii_lowercase()
+                            && !character.is_ascii_digit()
+                            && character != '-'
+                    })
+                    .unwrap_or(candidate.len());
+                if length != 0 {
+                    services.insert(&candidate[..length]);
+                }
+                declaration = &candidate[length..];
+            }
+        }
+
+        assert!(!services.is_empty(), "expected AWS SDK dependencies");
+        for service in services {
+            let rust_service = service.replace('-', "_");
+            assert!(
+                generated.contains(&format!("inner: aws_sdk_{rust_service}::Client,")),
+                "aws-sdk-{service} has no generated wrapper; add resend decisions before adding the dependency"
+            );
+            for constructor in ["new", "from_conf"] {
+                assert!(
+                    clippy.contains(&format!("aws_sdk_{rust_service}::Client::{constructor}")),
+                    "aws-sdk-{service} is missing the {constructor} constructor ban"
+                );
+            }
+        }
+    }
+
     #[cfg(not(target_arch = "wasm32"))]
     #[tokio::test]
     async fn load_applies_bounded_policy() {

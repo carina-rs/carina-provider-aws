@@ -40,44 +40,15 @@ pub(crate) trait AwsOperation {
 
     const NAME: &'static str;
     const IDEMPOTENCY: Idempotency;
-
-    fn send(
-        self,
-    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send;
 }
 
 /// A request whose send implementation and generated resend decision are tied
 /// to the same concrete builder type.
-pub(crate) trait DecidedSend<C> {
-    type Output;
-    type Error;
-
-    const NAME: &'static str;
-    const IDEMPOTENCY: Idempotency;
-
+pub(crate) trait DecidedSend<C>: AwsOperation {
     fn send(
         self,
         context: C,
     ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send;
-}
-
-impl<B> DecidedSend<()> for B
-where
-    B: AwsOperation<Resend = NoToken>,
-{
-    type Output = B::Output;
-    type Error = B::Error;
-
-    const NAME: &'static str = B::NAME;
-    const IDEMPOTENCY: Idempotency = B::IDEMPOTENCY;
-
-    fn send(
-        self,
-        (): (),
-    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send
-    {
-        AwsOperation::send(self)
-    }
 }
 
 /// Operation identity and resend semantics carried by a decided SDK error type.
@@ -111,6 +82,10 @@ impl<B> TokenOperation<B> {
     }
 
     /// Configure request fields while keeping the builder inside this wrapper.
+    ///
+    /// The closure must only set request fields. Sending or customizing a
+    /// token-bearing builder from the closure is rejected by the generated
+    /// Clippy policy.
     pub(crate) fn configure(self, configure: impl FnOnce(B) -> B) -> Self {
         Self {
             inner: configure(self.inner),
@@ -118,39 +93,37 @@ impl<B> TokenOperation<B> {
     }
 }
 
-impl<B> TokenOperation<B>
+impl<B> AwsOperation for TokenOperation<B>
 where
-    B: AwsOperation<Resend = WithToken> + TokenBearing,
+    B: AwsOperation<Resend = WithToken>,
 {
-    /// Apply the invocation token and send the inner SDK builder.
-    ///
-    /// [`crate::helpers::TokenSendPermit`] can only be constructed by the
-    /// token-aware helper entry points.
-    pub(crate) fn send_with_token(
-        self,
-        token: &ClientToken,
-        _permit: crate::helpers::TokenSendPermit,
-    ) -> impl Future<Output = Result<B::Output, SdkError<B::Error, HttpResponse>>> + Send {
-        AwsOperation::send(self.inner.with_client_token(token))
-    }
-}
-
-impl<'a, B> DecidedSend<(&'a ClientToken, crate::helpers::TokenSendPermit)> for TokenOperation<B>
-where
-    B: AwsOperation<Resend = WithToken> + TokenBearing,
-{
+    type Resend = WithToken;
     type Output = B::Output;
     type Error = B::Error;
 
     const NAME: &'static str = B::NAME;
     const IDEMPOTENCY: Idempotency = B::IDEMPOTENCY;
+}
 
-    fn send(
+impl<B> TokenOperation<B>
+where
+    B: AwsOperation<Resend = WithToken> + TokenBearing,
+{
+    /// Apply the invocation token before invoking a generated concrete sender.
+    ///
+    /// [`crate::helpers::TokenSendPermit`] can only be constructed by the
+    /// token-aware helper entry points.
+    pub(crate) fn send_with_token_using<F, Fut>(
         self,
-        (token, permit): (&'a ClientToken, crate::helpers::TokenSendPermit),
-    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send
+        token: &ClientToken,
+        _permit: crate::helpers::TokenSendPermit,
+        send: F,
+    ) -> Fut
+    where
+        F: FnOnce(B) -> Fut,
+        Fut: Future<Output = Result<B::Output, SdkError<B::Error, HttpResponse>>> + Send,
     {
-        self.send_with_token(token, permit)
+        send(self.inner.with_client_token(token))
     }
 }
 

@@ -395,7 +395,7 @@ pub(crate) async fn retry_aws_operation<F, B>(
 ) -> Result<B::Output, SendFailure<B::Error>>
 where
     F: Fn() -> B,
-    B: AwsOperation<Resend = NoToken>,
+    B: AwsOperation<Resend = NoToken> + DecidedSend<()>,
     B::Error: ProvideErrorKind + ProvideErrorMetadata + std::error::Error + 'static,
 {
     retry_aws_builder(policy, builder, || ()).await
@@ -405,14 +405,16 @@ where
 ///
 /// The wrapper applies `token` after every rebuild, so provider-level resends
 /// cannot accidentally ask the SDK to synthesize a different token.
-pub(crate) async fn retry_aws_operation_with_token<F, B>(
-    token: &ClientToken,
+pub(crate) async fn retry_aws_operation_with_token<'a, F, B>(
+    token: &'a ClientToken,
     policy: RetryPolicy,
     builder: F,
 ) -> Result<B::Output, SendFailure<B::Error>>
 where
     F: Fn() -> TokenOperation<B>,
     B: AwsOperation<Resend = WithToken> + TokenBearing,
+    TokenOperation<B>: DecidedSend<(&'a ClientToken, TokenSendPermit)>
+        + AwsOperation<Output = B::Output, Error = B::Error>,
     B::Error: ProvideErrorKind + ProvideErrorMetadata + std::error::Error + 'static,
 {
     retry_aws_builder(policy, builder, || (token, TokenSendPermit::new())).await
@@ -422,12 +424,14 @@ where
 ///
 /// Keeping even one-shot sends behind this entry point makes applying the
 /// invocation token a type-checked invariant instead of call-site convention.
-pub(crate) async fn send_aws_operation_with_token<B>(
-    token: &ClientToken,
+pub(crate) async fn send_aws_operation_with_token<'a, B>(
+    token: &'a ClientToken,
     builder: TokenOperation<B>,
 ) -> Result<B::Output, SendFailure<B::Error>>
 where
     B: AwsOperation<Resend = WithToken> + TokenBearing,
+    TokenOperation<B>: DecidedSend<(&'a ClientToken, TokenSendPermit)>
+        + AwsOperation<Output = B::Output, Error = B::Error>,
     B::Error: ProvideErrorKind + ProvideErrorMetadata,
 {
     DecidedSend::send(builder, (token, TokenSendPermit::new()))
@@ -1270,7 +1274,7 @@ mod tests {
     use aws_smithy_types::retry::{ErrorKind, ProvideErrorKind};
 
     use crate::aws_operation::{
-        AwsOperation, ClientToken, NoToken, TokenBearing, TokenOperation, WithToken,
+        AwsOperation, ClientToken, DecidedSend, NoToken, TokenBearing, TokenOperation, WithToken,
     };
 
     #[derive(Debug)]
@@ -1394,14 +1398,16 @@ mod tests {
 
                 const NAME: &'static str = $name;
                 const IDEMPOTENCY: carina_aws_types::Idempotency = $idempotency;
+            }
 
-                #[allow(clippy::manual_async_fn)]
+            impl DecidedSend<()> for $builder {
                 fn send(
                     self,
+                    (): (),
                 ) -> impl std::future::Future<
                     Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>,
                 > + Send {
-                    async move { self.0.execute() }
+                    std::future::ready(self.0.execute())
                 }
             }
         };
@@ -1438,20 +1444,24 @@ mod tests {
         const NAME: &'static str = "ec2.CreateNatGateway";
         const IDEMPOTENCY: carina_aws_types::Idempotency =
             carina_aws_types::Idempotency::IdempotencyToken;
+    }
 
-        #[allow(clippy::manual_async_fn)]
+    impl MockCreateNatGateway {
         fn send(
             self,
         ) -> impl std::future::Future<
-            Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>,
+            Output = Result<
+                <Self as AwsOperation>::Output,
+                SdkError<<Self as AwsOperation>::Error, HttpResponse>,
+            >,
         > + Send {
-            async move {
+            std::future::ready({
                 self.seen_tokens
                     .lock()
                     .expect("token lock")
                     .push(self.token.expect("wrapper must apply the token"));
                 self.call.execute()
-            }
+            })
         }
     }
 
@@ -1459,6 +1469,17 @@ mod tests {
         fn with_client_token(mut self, token: &ClientToken) -> Self {
             self.token = Some(token.as_str().to_string());
             self
+        }
+    }
+
+    impl<'a> DecidedSend<(&'a ClientToken, TokenSendPermit)> for TokenOperation<MockCreateNatGateway> {
+        fn send(
+            self,
+            (token, permit): (&'a ClientToken, TokenSendPermit),
+        ) -> impl std::future::Future<
+            Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>,
+        > + Send {
+            self.send_with_token_using(token, permit, MockCreateNatGateway::send)
         }
     }
 
