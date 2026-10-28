@@ -405,15 +405,15 @@ where
 ///
 /// The wrapper applies `token` after every rebuild, so provider-level resends
 /// cannot accidentally ask the SDK to synthesize a different token.
-pub(crate) async fn retry_aws_operation_with_token<'a, F, B>(
+pub(crate) async fn retry_aws_operation_with_token<'a, F, B, C>(
     token: &'a ClientToken,
     policy: RetryPolicy,
     builder: F,
 ) -> Result<B::Output, SendFailure<B::Error>>
 where
-    F: Fn() -> TokenOperation<B>,
+    F: Fn() -> TokenOperation<B, C>,
     B: AwsOperation<Resend = WithToken> + TokenBearing,
-    TokenOperation<B>: DecidedSend<(&'a ClientToken, TokenSendPermit)>
+    TokenOperation<B, C>: DecidedSend<(&'a ClientToken, TokenSendPermit)>
         + AwsOperation<Output = B::Output, Error = B::Error>,
     B::Error: ProvideErrorKind + ProvideErrorMetadata + std::error::Error + 'static,
 {
@@ -424,13 +424,13 @@ where
 ///
 /// Keeping even one-shot sends behind this entry point makes applying the
 /// invocation token a type-checked invariant instead of call-site convention.
-pub(crate) async fn send_aws_operation_with_token<'a, B>(
+pub(crate) async fn send_aws_operation_with_token<'a, B, C>(
     token: &'a ClientToken,
-    builder: TokenOperation<B>,
+    builder: TokenOperation<B, C>,
 ) -> Result<B::Output, SendFailure<B::Error>>
 where
     B: AwsOperation<Resend = WithToken> + TokenBearing,
-    TokenOperation<B>: DecidedSend<(&'a ClientToken, TokenSendPermit)>
+    TokenOperation<B, C>: DecidedSend<(&'a ClientToken, TokenSendPermit)>
         + AwsOperation<Output = B::Output, Error = B::Error>,
     B::Error: ProvideErrorKind + ProvideErrorMetadata,
 {
@@ -1472,14 +1472,16 @@ mod tests {
         }
     }
 
-    impl<'a> DecidedSend<(&'a ClientToken, TokenSendPermit)> for TokenOperation<MockCreateNatGateway> {
+    impl<'a> DecidedSend<(&'a ClientToken, TokenSendPermit)>
+        for TokenOperation<MockCreateNatGateway, ()>
+    {
         fn send(
             self,
             (token, permit): (&'a ClientToken, TokenSendPermit),
         ) -> impl std::future::Future<
             Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>,
         > + Send {
-            self.send_with_token_using(token, permit, MockCreateNatGateway::send)
+            self.send_with_token_using(token, permit, |builder, ()| builder.send())
         }
     }
 
@@ -1588,11 +1590,14 @@ mod tests {
         let token = ClientToken::new();
 
         let result = retry_aws_operation_with_token(&token, test_policy(3), || {
-            TokenOperation::new(MockCreateNatGateway {
-                call: call.clone(),
-                token: None,
-                seen_tokens: seen_tokens.clone(),
-            })
+            TokenOperation::new(
+                MockCreateNatGateway {
+                    call: call.clone(),
+                    token: None,
+                    seen_tokens: seen_tokens.clone(),
+                },
+                (),
+            )
         })
         .await;
 
@@ -1621,11 +1626,14 @@ mod tests {
         let token = ClientToken::new();
 
         let error = retry_aws_operation_with_token(&token, test_policy(3), || {
-            TokenOperation::new(MockCreateNatGateway {
-                call: call.clone(),
-                token: None,
-                seen_tokens: seen_tokens.clone(),
-            })
+            TokenOperation::new(
+                MockCreateNatGateway {
+                    call: call.clone(),
+                    token: None,
+                    seen_tokens: seen_tokens.clone(),
+                },
+                (),
+            )
         })
         .await
         .expect_err("all provider attempts should fail");
@@ -1646,11 +1654,14 @@ mod tests {
 
         let result = send_aws_operation_with_token(
             &token,
-            TokenOperation::new(MockCreateNatGateway {
-                call: call.clone(),
-                token: None,
-                seen_tokens: seen_tokens.clone(),
-            }),
+            TokenOperation::new(
+                MockCreateNatGateway {
+                    call: call.clone(),
+                    token: None,
+                    seen_tokens: seen_tokens.clone(),
+                },
+                (),
+            ),
         )
         .await;
 

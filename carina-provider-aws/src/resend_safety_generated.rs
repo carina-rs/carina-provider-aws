@@ -15,6 +15,13 @@ use crate::helpers::TokenSendPermit;
 use crate::resend_guard::ResendGuard;
 use crate::sdk_config::BoundedSdkConfig;
 
+/// Guarded AWS service client with a closed, generated operation API.
+///
+/// Methods exist only for operations decided in
+/// `carina-codegen-aws/src/resend_safety.rs` (`OVERRIDES`). To call a new AWS
+/// operation, add a decision there and run `scripts/generate-provider.sh`.
+/// Token-bearing operations return `TokenOperation` and must be sent via
+/// `retry_aws_operation_with_token` or `send_aws_operation_with_token`.
 pub(crate) struct AcmClient {
     inner: aws_sdk_acm::Client,
 }
@@ -77,9 +84,10 @@ impl AcmClient {
     pub(crate) fn request_certificate(
         &self,
     ) -> TokenOperation<
-        aws_sdk_acm::operation::request_certificate::builders::RequestCertificateFluentBuilder,
+        aws_sdk_acm::operation::request_certificate::builders::RequestCertificateInputBuilder,
+        aws_sdk_acm::Client,
     > {
-        TokenOperation::new(self.inner.request_certificate())
+        TokenOperation::new(aws_sdk_acm::operation::request_certificate::builders::RequestCertificateInputBuilder::default(), self.inner.clone())
     }
 
     /// UpdateCertificateOptions: replaces the requested certificate option values keyed by certificate ARN
@@ -101,6 +109,13 @@ pub(crate) fn acm_idempotency(operation: &str) -> Idempotency {
     }
 }
 
+/// Guarded AWS service client with a closed, generated operation API.
+///
+/// Methods exist only for operations decided in
+/// `carina-codegen-aws/src/resend_safety.rs` (`OVERRIDES`). To call a new AWS
+/// operation, add a decision there and run `scripts/generate-provider.sh`.
+/// Token-bearing operations return `TokenOperation` and must be sent via
+/// `retry_aws_operation_with_token` or `send_aws_operation_with_token`.
 pub(crate) struct CloudWatchLogsClient {
     inner: aws_sdk_cloudwatchlogs::Client,
 }
@@ -230,6 +245,13 @@ pub(crate) fn cloudwatchlogs_idempotency(operation: &str) -> Idempotency {
     }
 }
 
+/// Guarded AWS service client with a closed, generated operation API.
+///
+/// Methods exist only for operations decided in
+/// `carina-codegen-aws/src/resend_safety.rs` (`OVERRIDES`). To call a new AWS
+/// operation, add a decision there and run `scripts/generate-provider.sh`.
+/// Token-bearing operations return `TokenOperation` and must be sent via
+/// `retry_aws_operation_with_token` or `send_aws_operation_with_token`.
 pub(crate) struct Ec2Client {
     inner: aws_sdk_ec2::Client,
 }
@@ -296,17 +318,22 @@ impl Ec2Client {
     }
 
     /// CreateEgressOnlyInternetGateway: ClientToken identifies one gateway creation request
-    pub(crate) fn create_egress_only_internet_gateway(&self) -> TokenOperation<aws_sdk_ec2::operation::create_egress_only_internet_gateway::builders::CreateEgressOnlyInternetGatewayFluentBuilder>{
-        TokenOperation::new(self.inner.create_egress_only_internet_gateway())
+    pub(crate) fn create_egress_only_internet_gateway(&self) -> TokenOperation<aws_sdk_ec2::operation::create_egress_only_internet_gateway::builders::CreateEgressOnlyInternetGatewayInputBuilder, aws_sdk_ec2::Client>{
+        TokenOperation::new(aws_sdk_ec2::operation::create_egress_only_internet_gateway::builders::CreateEgressOnlyInternetGatewayInputBuilder::default(), self.inner.clone())
     }
 
     /// CreateFlowLogs: ClientToken identifies one flow-log creation request
     pub(crate) fn create_flow_logs(
         &self,
     ) -> TokenOperation<
-        aws_sdk_ec2::operation::create_flow_logs::builders::CreateFlowLogsFluentBuilder,
+        aws_sdk_ec2::operation::create_flow_logs::builders::CreateFlowLogsInputBuilder,
+        aws_sdk_ec2::Client,
     > {
-        TokenOperation::new(self.inner.create_flow_logs())
+        TokenOperation::new(
+            aws_sdk_ec2::operation::create_flow_logs::builders::CreateFlowLogsInputBuilder::default(
+            ),
+            self.inner.clone(),
+        )
     }
 
     /// CreateInternetGateway: each successful call creates a new gateway and the API has no client token
@@ -321,9 +348,10 @@ impl Ec2Client {
     pub(crate) fn create_nat_gateway(
         &self,
     ) -> TokenOperation<
-        aws_sdk_ec2::operation::create_nat_gateway::builders::CreateNatGatewayFluentBuilder,
+        aws_sdk_ec2::operation::create_nat_gateway::builders::CreateNatGatewayInputBuilder,
+        aws_sdk_ec2::Client,
     > {
-        TokenOperation::new(self.inner.create_nat_gateway())
+        TokenOperation::new(aws_sdk_ec2::operation::create_nat_gateway::builders::CreateNatGatewayInputBuilder::default(), self.inner.clone())
     }
 
     /// CreateRoute: creates a route without an idempotency token
@@ -337,9 +365,10 @@ impl Ec2Client {
     pub(crate) fn create_route_table(
         &self,
     ) -> TokenOperation<
-        aws_sdk_ec2::operation::create_route_table::builders::CreateRouteTableFluentBuilder,
+        aws_sdk_ec2::operation::create_route_table::builders::CreateRouteTableInputBuilder,
+        aws_sdk_ec2::Client,
     > {
-        TokenOperation::new(self.inner.create_route_table())
+        TokenOperation::new(aws_sdk_ec2::operation::create_route_table::builders::CreateRouteTableInputBuilder::default(), self.inner.clone())
     }
 
     /// CreateSecurityGroup: creates a security group without an idempotency token
@@ -388,9 +417,10 @@ impl Ec2Client {
     pub(crate) fn create_vpc_endpoint(
         &self,
     ) -> TokenOperation<
-        aws_sdk_ec2::operation::create_vpc_endpoint::builders::CreateVpcEndpointFluentBuilder,
+        aws_sdk_ec2::operation::create_vpc_endpoint::builders::CreateVpcEndpointInputBuilder,
+        aws_sdk_ec2::Client,
     > {
-        TokenOperation::new(self.inner.create_vpc_endpoint())
+        TokenOperation::new(aws_sdk_ec2::operation::create_vpc_endpoint::builders::CreateVpcEndpointInputBuilder::default(), self.inner.clone())
     }
 
     /// CreateVpcPeeringConnection: creates a peering connection without an idempotency token
@@ -753,6 +783,13 @@ pub(crate) fn ec2_idempotency(operation: &str) -> Idempotency {
     }
 }
 
+/// Guarded AWS service client with a closed, generated operation API.
+///
+/// Methods exist only for operations decided in
+/// `carina-codegen-aws/src/resend_safety.rs` (`OVERRIDES`). To call a new AWS
+/// operation, add a decision there and run `scripts/generate-provider.sh`.
+/// Token-bearing operations return `TokenOperation` and must be sent via
+/// `retry_aws_operation_with_token` or `send_aws_operation_with_token`.
 pub(crate) struct IamClient {
     inner: aws_sdk_iam::Client,
 }
@@ -847,6 +884,13 @@ pub(crate) fn iam_idempotency(operation: &str) -> Idempotency {
     }
 }
 
+/// Guarded AWS service client with a closed, generated operation API.
+///
+/// Methods exist only for operations decided in
+/// `carina-codegen-aws/src/resend_safety.rs` (`OVERRIDES`). To call a new AWS
+/// operation, add a decision there and run `scripts/generate-provider.sh`.
+/// Token-bearing operations return `TokenOperation` and must be sent via
+/// `retry_aws_operation_with_token` or `send_aws_operation_with_token`.
 pub(crate) struct IdentityStoreClient {
     inner: aws_sdk_identitystore::Client,
 }
@@ -895,6 +939,13 @@ pub(crate) fn identitystore_idempotency(operation: &str) -> Idempotency {
     }
 }
 
+/// Guarded AWS service client with a closed, generated operation API.
+///
+/// Methods exist only for operations decided in
+/// `carina-codegen-aws/src/resend_safety.rs` (`OVERRIDES`). To call a new AWS
+/// operation, add a decision there and run `scripts/generate-provider.sh`.
+/// Token-bearing operations return `TokenOperation` and must be sent via
+/// `retry_aws_operation_with_token` or `send_aws_operation_with_token`.
 pub(crate) struct OrganizationsClient {
     inner: aws_sdk_organizations::Client,
 }
@@ -1016,6 +1067,13 @@ pub(crate) fn organizations_idempotency(operation: &str) -> Idempotency {
     }
 }
 
+/// Guarded AWS service client with a closed, generated operation API.
+///
+/// Methods exist only for operations decided in
+/// `carina-codegen-aws/src/resend_safety.rs` (`OVERRIDES`). To call a new AWS
+/// operation, add a decision there and run `scripts/generate-provider.sh`.
+/// Token-bearing operations return `TokenOperation` and must be sent via
+/// `retry_aws_operation_with_token` or `send_aws_operation_with_token`.
 pub(crate) struct Route53Client {
     inner: aws_sdk_route53::Client,
 }
@@ -1066,6 +1124,13 @@ pub(crate) fn route53_idempotency(operation: &str) -> Idempotency {
     }
 }
 
+/// Guarded AWS service client with a closed, generated operation API.
+///
+/// Methods exist only for operations decided in
+/// `carina-codegen-aws/src/resend_safety.rs` (`OVERRIDES`). To call a new AWS
+/// operation, add a decision there and run `scripts/generate-provider.sh`.
+/// Token-bearing operations return `TokenOperation` and must be sent via
+/// `retry_aws_operation_with_token` or `send_aws_operation_with_token`.
 pub(crate) struct S3Client {
     inner: aws_sdk_s3::Client,
 }
@@ -1423,6 +1488,13 @@ pub(crate) fn s3_idempotency(operation: &str) -> Idempotency {
     }
 }
 
+/// Guarded AWS service client with a closed, generated operation API.
+///
+/// Methods exist only for operations decided in
+/// `carina-codegen-aws/src/resend_safety.rs` (`OVERRIDES`). To call a new AWS
+/// operation, add a decision there and run `scripts/generate-provider.sh`.
+/// Token-bearing operations return `TokenOperation` and must be sent via
+/// `retry_aws_operation_with_token` or `send_aws_operation_with_token`.
 pub(crate) struct SqsClient {
     inner: aws_sdk_sqs::Client,
 }
@@ -1513,6 +1585,13 @@ pub(crate) fn sqs_idempotency(operation: &str) -> Idempotency {
     }
 }
 
+/// Guarded AWS service client with a closed, generated operation API.
+///
+/// Methods exist only for operations decided in
+/// `carina-codegen-aws/src/resend_safety.rs` (`OVERRIDES`). To call a new AWS
+/// operation, add a decision there and run `scripts/generate-provider.sh`.
+/// Token-bearing operations return `TokenOperation` and must be sent via
+/// `retry_aws_operation_with_token` or `send_aws_operation_with_token`.
 pub(crate) struct StsClient {
     inner: aws_sdk_sts::Client,
 }
@@ -1698,7 +1777,7 @@ impl DecidedSend<()> for aws_sdk_acm::operation::remove_tags_from_certificate::b
 
 /// RequestCertificate: the IdempotencyToken identifies one certificate request within ACM's token window
 impl AwsOperation
-    for aws_sdk_acm::operation::request_certificate::builders::RequestCertificateFluentBuilder
+    for aws_sdk_acm::operation::request_certificate::builders::RequestCertificateInputBuilder
 {
     type Resend = WithToken;
     type Output = aws_sdk_acm::operation::request_certificate::RequestCertificateOutput;
@@ -1711,12 +1790,12 @@ impl AwsOperation
 impl DecidedOperationError
     for aws_sdk_acm::operation::request_certificate::RequestCertificateError
 {
-    const NAME: &'static str = <aws_sdk_acm::operation::request_certificate::builders::RequestCertificateFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_acm::operation::request_certificate::builders::RequestCertificateFluentBuilder as AwsOperation>::IDEMPOTENCY;
+    const NAME: &'static str = <aws_sdk_acm::operation::request_certificate::builders::RequestCertificateInputBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_acm::operation::request_certificate::builders::RequestCertificateInputBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
 impl TokenBearing
-    for aws_sdk_acm::operation::request_certificate::builders::RequestCertificateFluentBuilder
+    for aws_sdk_acm::operation::request_certificate::builders::RequestCertificateInputBuilder
 {
     fn with_client_token(self, token: &ClientToken) -> Self {
         self.idempotency_token(token.as_str())
@@ -1725,11 +1804,11 @@ impl TokenBearing
 
 impl
     TokenOperation<
-        aws_sdk_acm::operation::request_certificate::builders::RequestCertificateFluentBuilder,
+        aws_sdk_acm::operation::request_certificate::builders::RequestCertificateInputBuilder,
+        aws_sdk_acm::Client,
     >
 {
-    // The permit proves the invocation token was applied before this sole raw send.
-    #[allow(clippy::disallowed_methods)]
+    // The permit proves the invocation token was applied before this network send.
     fn send_with_token(
         self,
         token: &ClientToken,
@@ -1740,13 +1819,16 @@ impl
             SdkError<<Self as AwsOperation>::Error, HttpResponse>,
         >,
     > + Send {
-        self.send_with_token_using(token, permit, |builder| builder.send())
+        self.send_with_token_using(token, permit, |input, client| async move {
+            input.send_with(&client).await
+        })
     }
 }
 
 impl<'a> DecidedSend<(&'a ClientToken, TokenSendPermit)>
     for TokenOperation<
-        aws_sdk_acm::operation::request_certificate::builders::RequestCertificateFluentBuilder,
+        aws_sdk_acm::operation::request_certificate::builders::RequestCertificateInputBuilder,
+        aws_sdk_acm::Client,
     >
 {
     fn send(
@@ -2321,7 +2403,7 @@ impl DecidedSend<()> for aws_sdk_ec2::operation::authorize_security_group_ingres
 }
 
 /// CreateEgressOnlyInternetGateway: ClientToken identifies one gateway creation request
-impl AwsOperation for aws_sdk_ec2::operation::create_egress_only_internet_gateway::builders::CreateEgressOnlyInternetGatewayFluentBuilder {
+impl AwsOperation for aws_sdk_ec2::operation::create_egress_only_internet_gateway::builders::CreateEgressOnlyInternetGatewayInputBuilder {
     type Resend = WithToken;
     type Output = aws_sdk_ec2::operation::create_egress_only_internet_gateway::CreateEgressOnlyInternetGatewayOutput;
     type Error = aws_sdk_ec2::operation::create_egress_only_internet_gateway::CreateEgressOnlyInternetGatewayError;
@@ -2331,29 +2413,30 @@ impl AwsOperation for aws_sdk_ec2::operation::create_egress_only_internet_gatewa
 }
 
 impl DecidedOperationError for aws_sdk_ec2::operation::create_egress_only_internet_gateway::CreateEgressOnlyInternetGatewayError {
-    const NAME: &'static str = <aws_sdk_ec2::operation::create_egress_only_internet_gateway::builders::CreateEgressOnlyInternetGatewayFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::create_egress_only_internet_gateway::builders::CreateEgressOnlyInternetGatewayFluentBuilder as AwsOperation>::IDEMPOTENCY;
+    const NAME: &'static str = <aws_sdk_ec2::operation::create_egress_only_internet_gateway::builders::CreateEgressOnlyInternetGatewayInputBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::create_egress_only_internet_gateway::builders::CreateEgressOnlyInternetGatewayInputBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl TokenBearing for aws_sdk_ec2::operation::create_egress_only_internet_gateway::builders::CreateEgressOnlyInternetGatewayFluentBuilder {
+impl TokenBearing for aws_sdk_ec2::operation::create_egress_only_internet_gateway::builders::CreateEgressOnlyInternetGatewayInputBuilder {
     fn with_client_token(self, token: &ClientToken) -> Self {
         self.client_token(token.as_str())
     }
 }
 
-impl TokenOperation<aws_sdk_ec2::operation::create_egress_only_internet_gateway::builders::CreateEgressOnlyInternetGatewayFluentBuilder> {
-    // The permit proves the invocation token was applied before this sole raw send.
-    #[allow(clippy::disallowed_methods)]
+impl TokenOperation<aws_sdk_ec2::operation::create_egress_only_internet_gateway::builders::CreateEgressOnlyInternetGatewayInputBuilder, aws_sdk_ec2::Client> {
+    // The permit proves the invocation token was applied before this network send.
     fn send_with_token(
         self,
         token: &ClientToken,
         permit: TokenSendPermit,
     ) -> impl Future<Output = Result<<Self as AwsOperation>::Output, SdkError<<Self as AwsOperation>::Error, HttpResponse>>> + Send {
-        self.send_with_token_using(token, permit, |builder| builder.send())
+        self.send_with_token_using(token, permit, |input, client| async move {
+            input.send_with(&client).await
+        })
     }
 }
 
-impl<'a> DecidedSend<(&'a ClientToken, TokenSendPermit)> for TokenOperation<aws_sdk_ec2::operation::create_egress_only_internet_gateway::builders::CreateEgressOnlyInternetGatewayFluentBuilder> {
+impl<'a> DecidedSend<(&'a ClientToken, TokenSendPermit)> for TokenOperation<aws_sdk_ec2::operation::create_egress_only_internet_gateway::builders::CreateEgressOnlyInternetGatewayInputBuilder, aws_sdk_ec2::Client> {
     fn send(
         self,
         (token, permit): (&'a ClientToken, TokenSendPermit),
@@ -2364,7 +2447,7 @@ impl<'a> DecidedSend<(&'a ClientToken, TokenSendPermit)> for TokenOperation<aws_
 
 /// CreateFlowLogs: ClientToken identifies one flow-log creation request
 impl AwsOperation
-    for aws_sdk_ec2::operation::create_flow_logs::builders::CreateFlowLogsFluentBuilder
+    for aws_sdk_ec2::operation::create_flow_logs::builders::CreateFlowLogsInputBuilder
 {
     type Resend = WithToken;
     type Output = aws_sdk_ec2::operation::create_flow_logs::CreateFlowLogsOutput;
@@ -2375,12 +2458,12 @@ impl AwsOperation
 }
 
 impl DecidedOperationError for aws_sdk_ec2::operation::create_flow_logs::CreateFlowLogsError {
-    const NAME: &'static str = <aws_sdk_ec2::operation::create_flow_logs::builders::CreateFlowLogsFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::create_flow_logs::builders::CreateFlowLogsFluentBuilder as AwsOperation>::IDEMPOTENCY;
+    const NAME: &'static str = <aws_sdk_ec2::operation::create_flow_logs::builders::CreateFlowLogsInputBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::create_flow_logs::builders::CreateFlowLogsInputBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
 impl TokenBearing
-    for aws_sdk_ec2::operation::create_flow_logs::builders::CreateFlowLogsFluentBuilder
+    for aws_sdk_ec2::operation::create_flow_logs::builders::CreateFlowLogsInputBuilder
 {
     fn with_client_token(self, token: &ClientToken) -> Self {
         self.client_token(token.as_str())
@@ -2388,10 +2471,12 @@ impl TokenBearing
 }
 
 impl
-    TokenOperation<aws_sdk_ec2::operation::create_flow_logs::builders::CreateFlowLogsFluentBuilder>
+    TokenOperation<
+        aws_sdk_ec2::operation::create_flow_logs::builders::CreateFlowLogsInputBuilder,
+        aws_sdk_ec2::Client,
+    >
 {
-    // The permit proves the invocation token was applied before this sole raw send.
-    #[allow(clippy::disallowed_methods)]
+    // The permit proves the invocation token was applied before this network send.
     fn send_with_token(
         self,
         token: &ClientToken,
@@ -2402,13 +2487,16 @@ impl
             SdkError<<Self as AwsOperation>::Error, HttpResponse>,
         >,
     > + Send {
-        self.send_with_token_using(token, permit, |builder| builder.send())
+        self.send_with_token_using(token, permit, |input, client| async move {
+            input.send_with(&client).await
+        })
     }
 }
 
 impl<'a> DecidedSend<(&'a ClientToken, TokenSendPermit)>
     for TokenOperation<
-        aws_sdk_ec2::operation::create_flow_logs::builders::CreateFlowLogsFluentBuilder,
+        aws_sdk_ec2::operation::create_flow_logs::builders::CreateFlowLogsInputBuilder,
+        aws_sdk_ec2::Client,
     >
 {
     fn send(
@@ -2448,7 +2536,7 @@ impl DecidedSend<()> for aws_sdk_ec2::operation::create_internet_gateway::builde
 
 /// CreateNatGateway: the model's ClientToken identifies one NAT-gateway creation request
 impl AwsOperation
-    for aws_sdk_ec2::operation::create_nat_gateway::builders::CreateNatGatewayFluentBuilder
+    for aws_sdk_ec2::operation::create_nat_gateway::builders::CreateNatGatewayInputBuilder
 {
     type Resend = WithToken;
     type Output = aws_sdk_ec2::operation::create_nat_gateway::CreateNatGatewayOutput;
@@ -2459,12 +2547,12 @@ impl AwsOperation
 }
 
 impl DecidedOperationError for aws_sdk_ec2::operation::create_nat_gateway::CreateNatGatewayError {
-    const NAME: &'static str = <aws_sdk_ec2::operation::create_nat_gateway::builders::CreateNatGatewayFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::create_nat_gateway::builders::CreateNatGatewayFluentBuilder as AwsOperation>::IDEMPOTENCY;
+    const NAME: &'static str = <aws_sdk_ec2::operation::create_nat_gateway::builders::CreateNatGatewayInputBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::create_nat_gateway::builders::CreateNatGatewayInputBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
 impl TokenBearing
-    for aws_sdk_ec2::operation::create_nat_gateway::builders::CreateNatGatewayFluentBuilder
+    for aws_sdk_ec2::operation::create_nat_gateway::builders::CreateNatGatewayInputBuilder
 {
     fn with_client_token(self, token: &ClientToken) -> Self {
         self.client_token(token.as_str())
@@ -2473,11 +2561,11 @@ impl TokenBearing
 
 impl
     TokenOperation<
-        aws_sdk_ec2::operation::create_nat_gateway::builders::CreateNatGatewayFluentBuilder,
+        aws_sdk_ec2::operation::create_nat_gateway::builders::CreateNatGatewayInputBuilder,
+        aws_sdk_ec2::Client,
     >
 {
-    // The permit proves the invocation token was applied before this sole raw send.
-    #[allow(clippy::disallowed_methods)]
+    // The permit proves the invocation token was applied before this network send.
     fn send_with_token(
         self,
         token: &ClientToken,
@@ -2488,13 +2576,16 @@ impl
             SdkError<<Self as AwsOperation>::Error, HttpResponse>,
         >,
     > + Send {
-        self.send_with_token_using(token, permit, |builder| builder.send())
+        self.send_with_token_using(token, permit, |input, client| async move {
+            input.send_with(&client).await
+        })
     }
 }
 
 impl<'a> DecidedSend<(&'a ClientToken, TokenSendPermit)>
     for TokenOperation<
-        aws_sdk_ec2::operation::create_nat_gateway::builders::CreateNatGatewayFluentBuilder,
+        aws_sdk_ec2::operation::create_nat_gateway::builders::CreateNatGatewayInputBuilder,
+        aws_sdk_ec2::Client,
     >
 {
     fn send(
@@ -2533,7 +2624,7 @@ impl DecidedSend<()> for aws_sdk_ec2::operation::create_route::builders::CreateR
 
 /// CreateRouteTable: the model's ClientToken identifies one route-table creation request
 impl AwsOperation
-    for aws_sdk_ec2::operation::create_route_table::builders::CreateRouteTableFluentBuilder
+    for aws_sdk_ec2::operation::create_route_table::builders::CreateRouteTableInputBuilder
 {
     type Resend = WithToken;
     type Output = aws_sdk_ec2::operation::create_route_table::CreateRouteTableOutput;
@@ -2544,12 +2635,12 @@ impl AwsOperation
 }
 
 impl DecidedOperationError for aws_sdk_ec2::operation::create_route_table::CreateRouteTableError {
-    const NAME: &'static str = <aws_sdk_ec2::operation::create_route_table::builders::CreateRouteTableFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::create_route_table::builders::CreateRouteTableFluentBuilder as AwsOperation>::IDEMPOTENCY;
+    const NAME: &'static str = <aws_sdk_ec2::operation::create_route_table::builders::CreateRouteTableInputBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::create_route_table::builders::CreateRouteTableInputBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
 impl TokenBearing
-    for aws_sdk_ec2::operation::create_route_table::builders::CreateRouteTableFluentBuilder
+    for aws_sdk_ec2::operation::create_route_table::builders::CreateRouteTableInputBuilder
 {
     fn with_client_token(self, token: &ClientToken) -> Self {
         self.client_token(token.as_str())
@@ -2558,11 +2649,11 @@ impl TokenBearing
 
 impl
     TokenOperation<
-        aws_sdk_ec2::operation::create_route_table::builders::CreateRouteTableFluentBuilder,
+        aws_sdk_ec2::operation::create_route_table::builders::CreateRouteTableInputBuilder,
+        aws_sdk_ec2::Client,
     >
 {
-    // The permit proves the invocation token was applied before this sole raw send.
-    #[allow(clippy::disallowed_methods)]
+    // The permit proves the invocation token was applied before this network send.
     fn send_with_token(
         self,
         token: &ClientToken,
@@ -2573,13 +2664,16 @@ impl
             SdkError<<Self as AwsOperation>::Error, HttpResponse>,
         >,
     > + Send {
-        self.send_with_token_using(token, permit, |builder| builder.send())
+        self.send_with_token_using(token, permit, |input, client| async move {
+            input.send_with(&client).await
+        })
     }
 }
 
 impl<'a> DecidedSend<(&'a ClientToken, TokenSendPermit)>
     for TokenOperation<
-        aws_sdk_ec2::operation::create_route_table::builders::CreateRouteTableFluentBuilder,
+        aws_sdk_ec2::operation::create_route_table::builders::CreateRouteTableInputBuilder,
+        aws_sdk_ec2::Client,
     >
 {
     fn send(
@@ -2756,7 +2850,7 @@ impl DecidedSend<()> for aws_sdk_ec2::operation::create_vpc::builders::CreateVpc
 
 /// CreateVpcEndpoint: ClientToken identifies one endpoint creation request
 impl AwsOperation
-    for aws_sdk_ec2::operation::create_vpc_endpoint::builders::CreateVpcEndpointFluentBuilder
+    for aws_sdk_ec2::operation::create_vpc_endpoint::builders::CreateVpcEndpointInputBuilder
 {
     type Resend = WithToken;
     type Output = aws_sdk_ec2::operation::create_vpc_endpoint::CreateVpcEndpointOutput;
@@ -2767,12 +2861,12 @@ impl AwsOperation
 }
 
 impl DecidedOperationError for aws_sdk_ec2::operation::create_vpc_endpoint::CreateVpcEndpointError {
-    const NAME: &'static str = <aws_sdk_ec2::operation::create_vpc_endpoint::builders::CreateVpcEndpointFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::create_vpc_endpoint::builders::CreateVpcEndpointFluentBuilder as AwsOperation>::IDEMPOTENCY;
+    const NAME: &'static str = <aws_sdk_ec2::operation::create_vpc_endpoint::builders::CreateVpcEndpointInputBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::create_vpc_endpoint::builders::CreateVpcEndpointInputBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
 impl TokenBearing
-    for aws_sdk_ec2::operation::create_vpc_endpoint::builders::CreateVpcEndpointFluentBuilder
+    for aws_sdk_ec2::operation::create_vpc_endpoint::builders::CreateVpcEndpointInputBuilder
 {
     fn with_client_token(self, token: &ClientToken) -> Self {
         self.client_token(token.as_str())
@@ -2781,11 +2875,11 @@ impl TokenBearing
 
 impl
     TokenOperation<
-        aws_sdk_ec2::operation::create_vpc_endpoint::builders::CreateVpcEndpointFluentBuilder,
+        aws_sdk_ec2::operation::create_vpc_endpoint::builders::CreateVpcEndpointInputBuilder,
+        aws_sdk_ec2::Client,
     >
 {
-    // The permit proves the invocation token was applied before this sole raw send.
-    #[allow(clippy::disallowed_methods)]
+    // The permit proves the invocation token was applied before this network send.
     fn send_with_token(
         self,
         token: &ClientToken,
@@ -2796,13 +2890,16 @@ impl
             SdkError<<Self as AwsOperation>::Error, HttpResponse>,
         >,
     > + Send {
-        self.send_with_token_using(token, permit, |builder| builder.send())
+        self.send_with_token_using(token, permit, |input, client| async move {
+            input.send_with(&client).await
+        })
     }
 }
 
 impl<'a> DecidedSend<(&'a ClientToken, TokenSendPermit)>
     for TokenOperation<
-        aws_sdk_ec2::operation::create_vpc_endpoint::builders::CreateVpcEndpointFluentBuilder,
+        aws_sdk_ec2::operation::create_vpc_endpoint::builders::CreateVpcEndpointInputBuilder,
+        aws_sdk_ec2::Client,
     >
 {
     fn send(

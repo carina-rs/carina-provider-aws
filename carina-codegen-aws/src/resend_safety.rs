@@ -1172,7 +1172,14 @@ pub fn generate_provider_module(
 
         let client_name = client_type_name(service_shape_id, service_shape);
         code.push_str(&format!(
-            "pub(crate) struct {client_name} {{\n\
+            "/// Guarded AWS service client with a closed, generated operation API.\n\
+             ///\n\
+             /// Methods exist only for operations decided in\n\
+             /// `carina-codegen-aws/src/resend_safety.rs` (`OVERRIDES`). To call a new AWS\n\
+             /// operation, add a decision there and run `scripts/generate-provider.sh`.\n\
+             /// Token-bearing operations return `TokenOperation` and must be sent via\n\
+             /// `retry_aws_operation_with_token` or `send_aws_operation_with_token`.\n\
+             pub(crate) struct {client_name} {{\n\
              \x20   inner: aws_sdk_{service_name}::Client,\n\
              }}\n\n\
              // Decisions can outlive their current call sites; every decided operation remains\n\
@@ -1197,18 +1204,26 @@ pub fn generate_provider_module(
         ));
         for entry in &operations {
             let operation_method = entry.operation.to_snake_case();
-            let builder = format!(
+            let fluent_builder = format!(
                 "aws_sdk_{service_name}::operation::{operation_method}::builders::{}FluentBuilder",
                 entry.operation
             );
             let operation = format!("self.inner.{operation_method}()");
             let (return_type, body) = match entry.decision {
-                Decision::Token(_) => (
-                    format!("TokenOperation<{builder}>"),
-                    format!("TokenOperation::new({operation})"),
-                ),
+                Decision::Token(_) => {
+                    let input_builder = format!(
+                        "aws_sdk_{service_name}::operation::{operation_method}::builders::{}InputBuilder",
+                        entry.operation
+                    );
+                    (
+                        format!("TokenOperation<{input_builder}, aws_sdk_{service_name}::Client>"),
+                        format!(
+                            "TokenOperation::new({input_builder}::default(), self.inner.clone())"
+                        ),
+                    )
+                }
                 Decision::ReadOnly | Decision::Idempotent | Decision::NotIdempotent => {
-                    (builder, operation)
+                    (fluent_builder, operation)
                 }
             };
             code.push_str(&format!(
@@ -1238,13 +1253,21 @@ pub fn generate_provider_module(
     ordered_overrides.sort_by_key(|entry| (entry.service, entry.operation));
     for entry in &ordered_overrides {
         let operation_module = entry.operation.to_snake_case();
-        let builder = format!(
-            "aws_sdk_{}::operation::{operation_module}::builders::{}FluentBuilder",
-            entry.service, entry.operation
-        );
-        let marker = match entry.decision {
-            Decision::Token(_) => "WithToken",
-            Decision::ReadOnly | Decision::Idempotent | Decision::NotIdempotent => "NoToken",
+        let (builder, marker) = match entry.decision {
+            Decision::Token(_) => (
+                format!(
+                    "aws_sdk_{}::operation::{operation_module}::builders::{}InputBuilder",
+                    entry.service, entry.operation
+                ),
+                "WithToken",
+            ),
+            Decision::ReadOnly | Decision::Idempotent | Decision::NotIdempotent => (
+                format!(
+                    "aws_sdk_{}::operation::{operation_module}::builders::{}FluentBuilder",
+                    entry.service, entry.operation
+                ),
+                "NoToken",
+            ),
         };
         let idempotency = render_decision(entry.decision);
 
@@ -1283,25 +1306,27 @@ pub fn generate_provider_module(
                      \x20       self.{setter}(token.as_str())\n\
                      \x20   }}\n\
                      }}\n\n\
-                     impl TokenOperation<{builder}> {{\n\
-                     \x20   // The permit proves the invocation token was applied before this sole raw send.\n\
-                     \x20   #[allow(clippy::disallowed_methods)]\n\
+                     impl TokenOperation<{builder}, aws_sdk_{}::Client> {{\n\
+                     \x20   // The permit proves the invocation token was applied before this network send.\n\
                      \x20   fn send_with_token(\n\
                      \x20       self,\n\
                      \x20       token: &ClientToken,\n\
                      \x20       permit: TokenSendPermit,\n\
                      \x20   ) -> impl Future<Output = Result<<Self as AwsOperation>::Output, SdkError<<Self as AwsOperation>::Error, HttpResponse>>> + Send {{\n\
-                     \x20       self.send_with_token_using(token, permit, |builder| builder.send())\n\
+                     \x20       self.send_with_token_using(token, permit, |input, client| async move {{\n\
+                     \x20           input.send_with(&client).await\n\
+                     \x20       }})\n\
                      \x20   }}\n\
                      }}\n\n\
-                     impl<'a> DecidedSend<(&'a ClientToken, TokenSendPermit)> for TokenOperation<{builder}> {{\n\
+                     impl<'a> DecidedSend<(&'a ClientToken, TokenSendPermit)> for TokenOperation<{builder}, aws_sdk_{}::Client> {{\n\
                      \x20   fn send(\n\
                      \x20       self,\n\
                      \x20       (token, permit): (&'a ClientToken, TokenSendPermit),\n\
                      \x20   ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {{\n\
                      \x20       self.send_with_token(token, permit)\n\
                      \x20   }}\n\
-                     }}\n\n"
+                     }}\n\n",
+                    entry.service, entry.service,
                 ));
             }
             Decision::ReadOnly | Decision::Idempotent | Decision::NotIdempotent => {
@@ -1343,21 +1368,6 @@ pub fn generate_clippy_config(overrides: &[Override]) -> String {
         }
     }
 
-    let mut token_operations = overrides
-        .iter()
-        .filter(|entry| matches!(entry.decision, Decision::Token(_)))
-        .collect::<Vec<_>>();
-    token_operations.sort_by_key(|entry| (entry.service, entry.operation));
-    for entry in token_operations {
-        let operation = entry.operation.to_snake_case();
-        let builder = entry.operation;
-        let service = entry.service;
-        for method in ["send", "customize"] {
-            code.push_str(&format!(
-                "    {{ path = \"aws_sdk_{service}::operation::{operation}::builders::{builder}FluentBuilder::{method}\", reason = \"send token-bearing operations through TokenOperation and the token-aware helpers\" }},\n"
-            ));
-        }
-    }
     code.push_str("]\n");
     code
 }
@@ -1632,7 +1642,7 @@ mod tests {
     }
 
     #[test]
-    fn generated_impl_binds_builder_types_and_token_setter() {
+    fn generated_impl_binds_input_builder_client_and_token_setter() {
         let model = model("CreateThing", "", "ClientToken");
         let models = models(model);
         let overrides = [entry("CreateThing", Decision::Token("ClientToken"))];
@@ -1640,7 +1650,7 @@ mod tests {
         let generated = generate_provider_module(&models, &overrides).expect("generation succeeds");
 
         assert!(generated.contains(
-            "impl AwsOperation for aws_sdk_test::operation::create_thing::builders::CreateThingFluentBuilder"
+            "impl AwsOperation for aws_sdk_test::operation::create_thing::builders::CreateThingInputBuilder"
         ));
         assert!(generated.contains("type Resend = WithToken;"));
         assert!(
@@ -1657,7 +1667,7 @@ mod tests {
             generated.contains("const IDEMPOTENCY: Idempotency = Idempotency::IdempotencyToken;")
         );
         let metadata_start = generated
-            .find("impl AwsOperation for aws_sdk_test::operation::create_thing::builders::CreateThingFluentBuilder")
+            .find("impl AwsOperation for aws_sdk_test::operation::create_thing::builders::CreateThingInputBuilder")
             .expect("generated metadata impl");
         let metadata_end = generated[metadata_start..]
             .find("impl DecidedOperationError")
@@ -1668,29 +1678,37 @@ mod tests {
         ));
         assert!(generated.contains("impl<'a> DecidedSend<"));
         assert!(generated.contains(
-            "for TokenOperation<aws_sdk_test::operation::create_thing::builders::CreateThingFluentBuilder>"
+            "for TokenOperation<aws_sdk_test::operation::create_thing::builders::CreateThingInputBuilder, aws_sdk_test::Client>"
         ));
-        assert!(generated.contains("builder.send()"));
+        assert!(generated.contains("input.send_with(&client).await"));
+        assert!(!generated.contains("CreateThingFluentBuilder"));
         assert!(!generated.contains("#![allow(clippy::disallowed_methods)]"));
         assert_eq!(
             generated
                 .matches("#[allow(clippy::disallowed_methods)]")
                 .count(),
-            2
+            1
         );
         assert!(generated.contains(
             "impl DecidedOperationError for aws_sdk_test::operation::create_thing::CreateThingError"
         ));
         assert!(generated.contains(
-            "const NAME: &'static str = <aws_sdk_test::operation::create_thing::builders::CreateThingFluentBuilder as AwsOperation>::NAME;"
+            "const NAME: &'static str = <aws_sdk_test::operation::create_thing::builders::CreateThingInputBuilder as AwsOperation>::NAME;"
         ));
         assert!(generated.contains(
-            "const IDEMPOTENCY: Idempotency = <aws_sdk_test::operation::create_thing::builders::CreateThingFluentBuilder as AwsOperation>::IDEMPOTENCY;"
+            "const IDEMPOTENCY: Idempotency = <aws_sdk_test::operation::create_thing::builders::CreateThingInputBuilder as AwsOperation>::IDEMPOTENCY;"
         ));
-        assert!(generated.contains("impl TokenBearing for aws_sdk_test::operation::create_thing::builders::CreateThingFluentBuilder"));
+        assert!(generated.contains("impl TokenBearing for aws_sdk_test::operation::create_thing::builders::CreateThingInputBuilder"));
         assert!(generated.contains("self.client_token(token.as_str())"));
         assert!(generated.contains("pub(crate) struct TestClient"));
         assert!(generated.contains("inner: aws_sdk_test::Client"));
+        assert!(generated.contains(
+            "Methods exist only for operations decided in\n/// `carina-codegen-aws/src/resend_safety.rs` (`OVERRIDES`)."
+        ));
+        assert!(
+            generated
+                .contains("Token-bearing operations return `TokenOperation` and must be sent via")
+        );
         assert!(
             generated
                 .contains("pub(crate) fn from_bounded_config(config: &BoundedSdkConfig) -> Self")
@@ -1699,9 +1717,11 @@ mod tests {
         assert!(generated.contains(".interceptor(ResendGuard::new(test_idempotency))"));
         assert!(!generated.contains("pub(crate) fn from_conf("));
         assert!(generated.contains(
-            "pub(crate) fn create_thing(&self) -> TokenOperation<aws_sdk_test::operation::create_thing::builders::CreateThingFluentBuilder>"
+            "pub(crate) fn create_thing(&self) -> TokenOperation<aws_sdk_test::operation::create_thing::builders::CreateThingInputBuilder, aws_sdk_test::Client>"
         ));
-        assert!(generated.contains("TokenOperation::new(self.inner.create_thing())"));
+        assert!(generated.contains(
+            "TokenOperation::new(aws_sdk_test::operation::create_thing::builders::CreateThingInputBuilder::default(), self.inner.clone())"
+        ));
         assert!(!generated.contains("DECIDED_OPERATIONS"));
         assert!(!generated.contains("TOKEN_OPERATIONS"));
     }
@@ -1754,7 +1774,7 @@ mod tests {
     }
 
     #[test]
-    fn generated_clippy_config_denies_raw_clients_and_token_escape_methods() {
+    fn generated_clippy_config_denies_only_raw_client_constructors() {
         let overrides = [
             entry("CreateThing", Decision::Token("ClientToken")),
             entry("GetThing", Decision::ReadOnly),
@@ -1765,22 +1785,8 @@ mod tests {
         assert!(generated.contains("disallowed-methods = ["));
         assert!(generated.contains("aws_sdk_test::Client::new"));
         assert!(generated.contains("aws_sdk_test::Client::from_conf"));
-        assert!(generated.contains(
-            "aws_sdk_test::operation::create_thing::builders::CreateThingFluentBuilder::send"
-        ));
-        assert!(generated.contains(
-            "aws_sdk_test::operation::create_thing::builders::CreateThingFluentBuilder::customize"
-        ));
-        assert!(
-            !generated.contains(
-                "aws_sdk_test::operation::get_thing::builders::GetThingFluentBuilder::send"
-            )
-        );
-        assert!(!generated.contains(
-            "aws_sdk_test::operation::get_thing::builders::GetThingFluentBuilder::customize"
-        ));
         assert_eq!(generated.matches("aws_sdk_test::Client::").count(), 2);
-        assert_eq!(generated.matches("FluentBuilder::send").count(), 1);
-        assert_eq!(generated.matches("FluentBuilder::customize").count(), 1);
+        assert!(!generated.contains("FluentBuilder::send"));
+        assert!(!generated.contains("FluentBuilder::customize"));
     }
 }
