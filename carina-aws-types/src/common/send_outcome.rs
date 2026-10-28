@@ -25,7 +25,11 @@ pub enum Idempotency {
     /// The input has an `@idempotencyToken` member.
     ///
     /// Resending is safe only when every resend carries the same token as the
-    /// original request.
+    /// original request. Within one SDK `send()`, the SDK's idempotency-token
+    /// interceptor fills the token once before its retry loop, so SDK-internal
+    /// resends carry the same token. A provider-level resend that rebuilds the
+    /// request must set the token explicitly; the AWS provider's typed retry
+    /// wrapper does this.
     IdempotencyToken,
     /// The operation has none of the resend-safety traits above.
     NotIdempotent,
@@ -47,21 +51,27 @@ impl SendOutcome {
     {
         match error {
             SdkError::ConstructionFailure(_) => Self::NotSent,
-            SdkError::TimeoutError(_) | SdkError::ResponseError(_) => Self::MaybeSent,
-            SdkError::DispatchFailure(_) => Self::MaybeSent,
+            SdkError::TimeoutError(_)
+            | SdkError::ResponseError(_)
+            | SdkError::DispatchFailure(_) => Self::MaybeSent,
             SdkError::ServiceError(context) => {
                 let service_error = context.err();
+                let code = ProvideErrorMetadata::code(service_error);
                 let is_throttling = service_error.retryable_error_kind()
                     == Some(ErrorKind::ThrottlingError)
-                    || ProvideErrorMetadata::code(service_error)
-                        .is_some_and(|code| THROTTLING_ERRORS.contains(&code));
+                    || code.is_some_and(|code| THROTTLING_ERRORS.contains(&code));
 
                 if is_throttling {
                     Self::Rejected
-                } else if context.raw().status().is_server_error() {
+                } else if code == Some("RequestTimeoutException") {
                     Self::MaybeSent
-                } else {
+                } else if context.raw().status().is_client_error() {
+                    // S3 `RequestTimeout` means "the socket was not read from
+                    // or written to within the timeout period", so the request
+                    // was never fully received and remains rejected here.
                     Self::Rejected
+                } else {
+                    Self::MaybeSent
                 }
             }
             // `SdkError` is non-exhaustive. Unknown future failures must fail
@@ -231,6 +241,13 @@ mod tests {
     }
 
     #[test]
+    fn internal_error_with_success_status_may_have_been_sent() {
+        let error = service_error("InternalError", None, 200);
+
+        assert_eq!(SendOutcome::classify(&error), SendOutcome::MaybeSent);
+    }
+
+    #[test]
     fn validation_exception_is_rejected() {
         let error = service_error("ValidationException", None, 400);
 
@@ -249,6 +266,13 @@ mod tests {
         let error = service_error("RequestTimeout", None, 400);
 
         assert_eq!(SendOutcome::classify(&error), SendOutcome::Rejected);
+    }
+
+    #[test]
+    fn generic_request_timeout_exception_may_have_been_sent() {
+        let error = service_error("RequestTimeoutException", None, 400);
+
+        assert_eq!(SendOutcome::classify(&error), SendOutcome::MaybeSent);
     }
 
     #[test]
