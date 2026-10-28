@@ -9,6 +9,7 @@ use std::pin::Pin;
 use std::str;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use aws_smithy_runtime_api::client::http::{SharedHttpConnector, http_client_fn};
 use carina_core::provider::{
@@ -32,6 +33,9 @@ const RESOURCE_TYPE: &str = "ec2.NatGateway";
 const FLOW_LOG_ID: &str = "fl-0123456789abcdef0";
 const FLOW_LOG_RESOURCE_ID: &str = "vpc-0123456789abcdef0";
 const REJECTED_FLOW_LOG_RESOURCE_ID: &str = "vpc-0fedcba9876543210";
+const ACM_CERTIFICATE_ARN: &str =
+    "arn:aws:acm:us-east-1:123456789012:certificate/01234567-89ab-cdef-0123-456789abcdef";
+const ACM_CLIENT_TOKEN: &str = "abcdef0123456789abcdef0123456789";
 
 #[derive(Debug)]
 enum TestCreateStep {
@@ -450,6 +454,136 @@ impl PartialFlowLogEc2Service {
     }
 }
 
+struct TaggedFlowLogEc2Service {
+    identifiers: Vec<String>,
+}
+
+impl MockService for TaggedFlowLogEc2Service {
+    fn service_name(&self) -> &str {
+        "ec2"
+    }
+
+    fn url_patterns(&self) -> Vec<&str> {
+        vec![r"^https://ec2\.[^/]+\.amazonaws\.com"]
+    }
+
+    fn handle(
+        &self,
+        request: MockRequest,
+    ) -> Pin<Box<dyn Future<Output = MockResponse> + Send + '_>> {
+        assert_eq!(query_action(&request), "DescribeFlowLogs");
+        let items = self
+            .identifiers
+            .iter()
+            .enumerate()
+            .map(|(index, identifier)| {
+                format!(
+                    "<item><flowLogId>{identifier}</flowLogId><resourceId>vpc-{index:017x}</resourceId><flowLogStatus>ACTIVE</flowLogStatus></item>"
+                )
+            })
+            .collect::<String>();
+        let response = MockResponse::xml(
+            200,
+            format!(
+                r#"<DescribeFlowLogsResponse xmlns="http://ec2.amazonaws.com/doc/2016-11-15/"><requestId>flow-log-discovery</requestId><flowLogSet>{items}</flowLogSet></DescribeFlowLogsResponse>"#
+            ),
+        );
+        Box::pin(async move { response })
+    }
+}
+
+#[derive(Clone, Copy)]
+enum AcmRequestResult {
+    Success,
+    Rejected,
+}
+
+struct ScriptedAcmService {
+    request_result: AcmRequestResult,
+    request_bodies: Arc<Mutex<Vec<String>>>,
+}
+
+impl MockService for ScriptedAcmService {
+    fn service_name(&self) -> &str {
+        "acm"
+    }
+
+    fn url_patterns(&self) -> Vec<&str> {
+        vec![r"^https://acm\.[^/]+\.amazonaws\.com"]
+    }
+
+    fn handle(
+        &self,
+        request: MockRequest,
+    ) -> Pin<Box<dyn Future<Output = MockResponse> + Send + '_>> {
+        let target = request
+            .headers
+            .get("x-amz-target")
+            .and_then(|value| value.to_str().ok())
+            .expect("ACM request should carry x-amz-target");
+        let response = match target {
+            "CertificateManager.RequestCertificate" => {
+                self.request_bodies
+                    .lock()
+                    .expect("ACM request-body lock")
+                    .push(
+                        str::from_utf8(&request.body)
+                            .expect("ACM request body should be UTF-8")
+                            .to_string(),
+                    );
+                match self.request_result {
+                    AcmRequestResult::Success => MockResponse::json(
+                        200,
+                        format!(r#"{{"CertificateArn":"{ACM_CERTIFICATE_ARN}"}}"#),
+                    ),
+                    AcmRequestResult::Rejected => MockResponse::json(
+                        400,
+                        r#"{"__type":"InvalidParameterException","message":"scripted ACM rejection"}"#,
+                    ),
+                }
+            }
+            "CertificateManager.DescribeCertificate" => MockResponse::json(
+                200,
+                format!(
+                    r#"{{"Certificate":{{"CertificateArn":"{ACM_CERTIFICATE_ARN}","DomainName":"example.com","Status":"PENDING_VALIDATION","Type":"AMAZON_ISSUED","KeyAlgorithm":"RSA_2048"}}}}"#
+                ),
+            ),
+            "CertificateManager.ListTagsForCertificate" => {
+                MockResponse::json(200, r#"{"Tags":[]}"#)
+            }
+            operation => panic!("unexpected ACM operation {operation}"),
+        };
+        Box::pin(async move { response })
+    }
+}
+
+#[derive(Clone, Debug)]
+struct RecordingPostSendFailure {
+    expected_body_fragment: &'static str,
+    request_bodies: Arc<Mutex<Vec<String>>>,
+}
+
+impl aws_smithy_runtime_api::client::http::HttpConnector for RecordingPostSendFailure {
+    fn call(
+        &self,
+        request: aws_smithy_runtime_api::client::orchestrator::HttpRequest,
+    ) -> aws_smithy_runtime_api::client::http::HttpConnectorFuture {
+        let body = str::from_utf8(request.body().bytes().unwrap_or_default())
+            .expect("AWS request body should be UTF-8")
+            .to_string();
+        assert!(body.contains(self.expected_body_fragment), "{body}");
+        self.request_bodies
+            .lock()
+            .expect("recorded request-body lock")
+            .push(body);
+        aws_smithy_runtime_api::client::http::HttpConnectorFuture::new(async {
+            Err(aws_smithy_runtime_api::client::result::ConnectorError::io(
+                std::io::Error::other("connection reset after request send").into(),
+            ))
+        })
+    }
+}
+
 struct TaggedVpcEc2Service {
     identifiers: Vec<String>,
     discovery_error: bool,
@@ -680,6 +814,49 @@ async fn provider_with_partial_flow_log() -> AwsProvider {
     provider_from_config(sdk_config)
 }
 
+async fn provider_with_tagged_flow_logs(identifiers: &[&str]) -> AwsProvider {
+    let mock = MockAws::builder()
+        .with_service(TaggedFlowLogEc2Service {
+            identifiers: identifiers
+                .iter()
+                .map(|identifier| (*identifier).to_string())
+                .collect(),
+        })
+        .build();
+    provider_from_config(mock.sdk_config(REGION).await)
+}
+
+async fn provider_with_acm(
+    request_result: AcmRequestResult,
+) -> (AwsProvider, Arc<Mutex<Vec<String>>>) {
+    let request_bodies = Arc::new(Mutex::new(Vec::new()));
+    let mock = MockAws::builder()
+        .with_service(ScriptedAcmService {
+            request_result,
+            request_bodies: Arc::clone(&request_bodies),
+        })
+        .build();
+    (
+        provider_from_config(mock.sdk_config(REGION).await),
+        request_bodies,
+    )
+}
+
+async fn provider_with_recording_post_send_failure(
+    expected_body_fragment: &'static str,
+) -> (AwsProvider, Arc<Mutex<Vec<String>>>) {
+    let request_bodies = Arc::new(Mutex::new(Vec::new()));
+    let connector = RecordingPostSendFailure {
+        expected_body_fragment,
+        request_bodies: Arc::clone(&request_bodies),
+    };
+    let selected = connector.clone();
+    let http_client = http_client_fn(move |_, _| SharedHttpConnector::new(selected.clone()));
+    let base = MockAws::builder().build().sdk_config(REGION).await;
+    let config = base.into_builder().http_client(http_client).build();
+    (provider_from_config(config), request_bodies)
+}
+
 async fn provider_without_services() -> AwsProvider {
     let mock = MockAws::builder().build();
     let sdk_config = mock.sdk_config(REGION).await;
@@ -777,6 +954,13 @@ fn flow_log_resource() -> Resource {
     resource
 }
 
+fn acm_certificate_resource() -> Resource {
+    let mut resource = Resource::with_provider("aws", "acm.Certificate", "retry", None);
+    resource.set_attr("domain_name", string("example.com"));
+    resource.set_attr("validation_method", string("EMAIL"));
+    resource
+}
+
 fn vpc_resource() -> Resource {
     let mut resource = Resource::with_provider("aws", "ec2.Vpc", "outcome-unknown", None);
     resource.set_attr("cidr_block", string("10.0.0.0/16"));
@@ -800,6 +984,51 @@ fn tagged_vpc_token(attempts_remaining: u8, next_delay_secs: u32) -> AwsCreateTo
         "next_delay_secs": next_delay_secs
     }))
     .expect("valid tagged VPC token")
+}
+
+fn tagged_vpc_token_with_original_failure() -> AwsCreateToken {
+    serde_json::from_value(serde_json::json!({
+        "phase": "tagged_ec2",
+        "kind": "vpc",
+        "create_token": TAGGED_VPC_CREATE_TOKEN,
+        "attempts_remaining": 1,
+        "next_delay_secs": 60,
+        "original_failure": {
+            "operation": "ec2.CreateVpc",
+            "status": 503,
+            "code": "InternalError",
+            "request_id": "original-create-request-id"
+        }
+    }))
+    .expect("valid tagged VPC token with an original failure")
+}
+
+fn tagged_flow_log_token(attempts_remaining: u8, next_delay_secs: u32) -> AwsCreateToken {
+    serde_json::from_value(serde_json::json!({
+        "phase": "tagged_ec2",
+        "kind": "flow_log",
+        "create_token": TAGGED_VPC_CREATE_TOKEN,
+        "attempts_remaining": attempts_remaining,
+        "next_delay_secs": next_delay_secs
+    }))
+    .expect("valid tagged flow-log token")
+}
+
+fn acm_request_token(first_used_at_unix_secs: u64, attempts_remaining: u8) -> AwsCreateToken {
+    serde_json::from_value(serde_json::json!({
+        "phase": "acm_request_certificate",
+        "client_token": ACM_CLIENT_TOKEN,
+        "first_used_at_unix_secs": first_used_at_unix_secs,
+        "attempts_remaining": attempts_remaining
+    }))
+    .expect("valid ACM request token")
+}
+
+fn unix_now() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("test clock should be after Unix epoch")
+        .as_secs()
 }
 
 fn schema_registry() -> carina_core::schema::SchemaRegistry {
@@ -986,6 +1215,219 @@ async fn token_bearing_route_table_post_send_failure_enters_tagged_discovery() {
 }
 
 #[tokio::test]
+async fn maybe_sent_request_certificate_becomes_secret_free_pending_with_same_token() {
+    let (provider, request_bodies) = provider_with_recording_post_send_failure("example.com").await;
+    let resource = acm_certificate_resource();
+    let before = unix_now();
+
+    let step = provider
+        .create_step(
+            &resource,
+            TestCreateAttempt {
+                id: resource.id.clone(),
+            },
+        )
+        .await
+        .expect("a maybe-sent certificate request must remain pending");
+    let after = unix_now();
+    let TestCreateStep::Pending {
+        token,
+        identifier: None,
+        poll_after_secs: 5,
+    } = step
+    else {
+        panic!("expected an unissued ACM pending step");
+    };
+    let token_json = serde_json::to_value(&token).expect("ACM token should serialize");
+    assert_eq!(token_json["phase"], "acm_request_certificate");
+    assert_eq!(token_json["attempts_remaining"], 3);
+    assert!(
+        token_json["first_used_at_unix_secs"]
+            .as_u64()
+            .is_some_and(|timestamp| (before..=after).contains(&timestamp))
+    );
+    assert!(
+        !token_json.to_string().contains("example.com"),
+        "the pending token must not copy desired resource data"
+    );
+
+    let client_token = token_json["client_token"]
+        .as_str()
+        .expect("ACM pending token should carry a client token");
+    let request_bodies = request_bodies.lock().expect("recorded request-body lock");
+    assert_eq!(request_bodies.len(), 3, "the SDK uses its bounded retries");
+    for body in request_bodies.iter() {
+        let request: serde_json::Value =
+            serde_json::from_str(body).expect("RequestCertificate body should be JSON");
+        assert_eq!(request["IdempotencyToken"], client_token);
+    }
+}
+
+#[tokio::test]
+async fn request_certificate_poll_success_issues_arn_and_runs_normal_continuation() {
+    let (provider, request_bodies) = provider_with_acm(AcmRequestResult::Success).await;
+    let resource = acm_certificate_resource();
+
+    let step = provider
+        .poll_create_step(
+            &resource,
+            acm_request_token(unix_now(), 3),
+            poll_attempt(&resource),
+        )
+        .await
+        .expect("resending the same ACM token should recover the ARN");
+
+    let TestCreateStep::Success(state) = step else {
+        panic!("successful ACM resend should complete normal create continuation");
+    };
+    assert_eq!(state.identifier().as_str(), ACM_CERTIFICATE_ARN);
+    let request_bodies = request_bodies.lock().expect("ACM request-body lock");
+    assert_eq!(request_bodies.len(), 1);
+    let request: serde_json::Value =
+        serde_json::from_str(&request_bodies[0]).expect("RequestCertificate body should be JSON");
+    assert_eq!(request["DomainName"], "example.com");
+    assert_eq!(request["IdempotencyToken"], ACM_CLIENT_TOKEN);
+}
+
+#[tokio::test]
+async fn maybe_sent_request_certificate_poll_repends_with_a_bounded_attempt() {
+    let (provider, request_bodies) = provider_with_recording_post_send_failure("example.com").await;
+    let resource = acm_certificate_resource();
+    let first_used_at_unix_secs = unix_now();
+
+    let step = provider
+        .poll_create_step(
+            &resource,
+            acm_request_token(first_used_at_unix_secs, 2),
+            poll_attempt(&resource),
+        )
+        .await
+        .expect("a maybe-sent resend inside the poll budget must remain pending");
+
+    let TestCreateStep::Pending {
+        token,
+        identifier: None,
+        poll_after_secs: 5,
+    } = step
+    else {
+        panic!("expected a repended ACM request");
+    };
+    let token_json = serde_json::to_value(token).expect("ACM token should serialize");
+    assert_eq!(token_json["client_token"], ACM_CLIENT_TOKEN);
+    assert_eq!(
+        token_json["first_used_at_unix_secs"],
+        first_used_at_unix_secs
+    );
+    assert_eq!(token_json["attempts_remaining"], 1);
+    assert_eq!(
+        request_bodies
+            .lock()
+            .expect("recorded request-body lock")
+            .len(),
+        3
+    );
+}
+
+#[tokio::test]
+async fn maybe_sent_request_certificate_poll_exhaustion_is_undetermined() {
+    let (provider, _request_bodies) =
+        provider_with_recording_post_send_failure("example.com").await;
+    let resource = acm_certificate_resource();
+
+    let verdict = provider
+        .poll_create_step(
+            &resource,
+            acm_request_token(unix_now(), 1),
+            poll_attempt(&resource),
+        )
+        .await
+        .expect_err("the bounded ACM resend budget must end as undetermined");
+
+    assert!(matches!(verdict, TestCreateVerdict::Undetermined(_)));
+    assert_eq!(
+        verdict.provider_error().to_wire().message,
+        "acm.Certificate may have been created; check before re-applying"
+    );
+}
+
+#[tokio::test]
+async fn rejected_request_certificate_poll_is_untracked() {
+    let (provider, request_bodies) = provider_with_acm(AcmRequestResult::Rejected).await;
+    let resource = acm_certificate_resource();
+
+    let verdict = provider
+        .poll_create_step(
+            &resource,
+            acm_request_token(unix_now(), 3),
+            poll_attempt(&resource),
+        )
+        .await
+        .expect_err("an explicit ACM rejection must be untracked");
+
+    assert!(matches!(verdict, TestCreateVerdict::Untracked(_)));
+    assert_eq!(
+        verdict.provider_error().to_wire().message,
+        "RequestCertificate failed"
+    );
+    assert_eq!(
+        request_bodies.lock().expect("ACM request-body lock").len(),
+        1
+    );
+}
+
+#[tokio::test]
+async fn request_certificate_resume_within_window_resends_the_same_token() {
+    let (provider, request_bodies) = provider_with_acm(AcmRequestResult::Success).await;
+    let resource = acm_certificate_resource();
+
+    let step = provider
+        .resume_create_step(
+            &resource,
+            acm_request_token(unix_now(), 3),
+            AwsCreateResume::Unissued(TestResumeAttempt),
+        )
+        .await
+        .expect("an in-window resume should recover the certificate ARN");
+
+    let TestResumeStep::Completed(state) = step else {
+        panic!("successful ACM resume should complete the create");
+    };
+    assert_eq!(state.identifier().as_str(), ACM_CERTIFICATE_ARN);
+    let request_bodies = request_bodies.lock().expect("ACM request-body lock");
+    let request: serde_json::Value =
+        serde_json::from_str(&request_bodies[0]).expect("RequestCertificate body should be JSON");
+    assert_eq!(request["IdempotencyToken"], ACM_CLIENT_TOKEN);
+}
+
+#[tokio::test]
+async fn expired_request_certificate_resume_is_undetermined_without_resending() {
+    let (provider, request_bodies) = provider_with_recording_post_send_failure("example.com").await;
+    let resource = acm_certificate_resource();
+
+    let verdict = provider
+        .resume_create_step(
+            &resource,
+            acm_request_token(unix_now().saturating_sub(3_600), 3),
+            AwsCreateResume::Unissued(TestResumeAttempt),
+        )
+        .await
+        .expect_err("an expired ACM token must not be resent");
+
+    assert!(matches!(verdict, TestResumeVerdict::Undetermined(_)));
+    assert_eq!(
+        verdict.provider_error().to_wire().message,
+        "acm.Certificate may have been created; check before re-applying"
+    );
+    assert!(
+        request_bodies
+            .lock()
+            .expect("recorded request-body lock")
+            .is_empty(),
+        "expiry must be checked before rebuilding or sending the request"
+    );
+}
+
+#[tokio::test]
 async fn tagged_vpc_poll_with_one_match_hands_continuation_to_next_poll() {
     let provider = provider_with_tagged_vpcs(&["vpc-0553"]).await;
     let resource = vpc_resource();
@@ -1151,6 +1593,60 @@ async fn tagged_vpc_discovery_error_consumes_final_attempt_and_keeps_cause() {
     let rendered = verdict.provider_error().to_string();
     assert!(rendered.contains("UnauthorizedOperation"), "{rendered}");
     assert!(rendered.contains("scripted discovery denial"), "{rendered}");
+}
+
+#[tokio::test]
+async fn tagged_vpc_exhaustion_keeps_the_original_send_failure_summary() {
+    let provider = provider_with_tagged_vpcs(&[]).await;
+    let resource = vpc_resource();
+
+    let verdict = provider
+        .poll_create_step(
+            &resource,
+            tagged_vpc_token_with_original_failure(),
+            poll_attempt(&resource),
+        )
+        .await
+        .expect_err("final discovery must retain the ambiguous send metadata");
+
+    assert!(matches!(verdict, TestCreateVerdict::Undetermined(_)));
+    let rendered = verdict.provider_error().to_string();
+    assert!(rendered.contains("ec2.CreateVpc"), "{rendered}");
+    assert!(rendered.contains("status=503"), "{rendered}");
+    assert!(rendered.contains("code=InternalError"), "{rendered}");
+    assert!(
+        rendered.contains("request_id=original-create-request-id"),
+        "{rendered}"
+    );
+}
+
+#[tokio::test]
+async fn partial_flow_log_discovery_keeps_polling_for_every_requested_resource_id() {
+    let provider = provider_with_tagged_flow_logs(&[FLOW_LOG_ID]).await;
+    let resource = flow_log_resource();
+
+    let step = provider
+        .poll_create_step(
+            &resource,
+            tagged_flow_log_token(4, 5),
+            poll_attempt(&resource),
+        )
+        .await
+        .expect("one of two requested flow logs is still a partial discovery");
+
+    assert!(matches!(
+        step,
+        TestCreateStep::Pending {
+            token: AwsCreateToken::TaggedEc2 {
+                kind: Ec2TaggedResourceKind::FlowLog,
+                attempts_remaining: 3,
+                next_delay_secs: 10,
+                ..
+            },
+            identifier: None,
+            poll_after_secs: 10,
+        }
+    ));
 }
 
 #[tokio::test]

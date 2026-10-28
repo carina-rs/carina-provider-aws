@@ -188,11 +188,6 @@ impl Intercept for ResendGuard {
             return Ok(());
         }
 
-        let failure = context
-            .output_or_error()
-            .and_then(Result::err)
-            .map(|error| rendered_failure(error, context.response()))
-            .unwrap_or_else(|| "failure details unavailable".to_string());
         let Some(Err(error)) = context.output_or_error_mut() else {
             return Ok(());
         };
@@ -201,7 +196,7 @@ impl Intercept for ResendGuard {
             OrchestratorError::other(io::Error::other("replacing final send failure")),
         );
         *error = OrchestratorError::other(ContextAttachedError::new(
-            format!("an earlier attempt may have reached AWS; final attempt failed: {failure}"),
+            "an earlier attempt of this send may have reached AWS",
             original,
         ));
         Ok(())
@@ -567,11 +562,25 @@ mod tests {
             aws_smithy_runtime_api::client::result::SdkError::ResponseError(_)
         ));
         assert_eq!(SendOutcome::classify(&error), SendOutcome::MaybeSent);
-        assert!(rendered.contains("throttled"), "{rendered}");
-        assert!(rendered.contains("status: 429"), "{rendered}");
         assert!(
-            rendered.contains("final-throttling-request-id"),
+            rendered.contains("an earlier attempt of this send may have reached AWS"),
             "{rendered}"
+        );
+        let readable_chain = rendered
+            .split(" (ResponseError")
+            .next()
+            .expect("rendered error has a readable source chain");
+        assert!(readable_chain.contains("throttled"), "{rendered}");
+        assert!(
+            readable_chain.contains("final-throttling-request-id"),
+            "{rendered}"
+        );
+        assert_eq!(
+            readable_chain
+                .matches("final-throttling-request-id")
+                .count(),
+            1,
+            "the attached source must render the final failure details exactly once: {rendered}"
         );
     }
 

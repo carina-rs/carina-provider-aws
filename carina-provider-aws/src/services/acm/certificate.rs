@@ -12,7 +12,9 @@
 
 use std::collections::HashMap;
 
-use aws_sdk_acm::operation::request_certificate::RequestCertificateInput;
+use aws_sdk_acm::operation::request_certificate::{
+    RequestCertificateError, RequestCertificateInput,
+};
 use aws_sdk_acm::types::{CertificateStatus, KeyAlgorithm, ValidationMethod};
 use indexmap::IndexMap;
 
@@ -32,22 +34,22 @@ use crate::provider::CreateCompletion;
 
 const DVO_MISSING_ATTRIBUTE: &str = "domain_validation_options";
 
-fn request_certificate_error(
+pub(crate) fn request_certificate_error(
     id: &ResourceId,
-    error: SendFailure<aws_sdk_acm::operation::request_certificate::RequestCertificateError>,
+    error: SendFailure<RequestCertificateError>,
 ) -> ProviderError {
-    if error.outcome() == carina_aws_types::SendOutcome::MaybeSent {
-        // ACM has no request-certificate lookup by idempotency token or tag.
-        // Keep this create untracked, but make the possible remote side effect
-        // explicit so an operator checks ACM before applying again.
-        api_error_with_meta(
-            "acm.Certificate may have been created; check before re-applying",
-            error,
-        )
-        .for_resource(id.clone())
-    } else {
-        api_error_with_meta("RequestCertificate failed", error).for_resource(id.clone())
-    }
+    api_error_with_meta("RequestCertificate failed", error).for_resource(id.clone())
+}
+
+pub(crate) fn request_certificate_outcome_unknown_error(
+    id: &ResourceId,
+    error: SendFailure<RequestCertificateError>,
+) -> ProviderError {
+    api_error_with_meta(
+        "acm.Certificate may have been created; check before re-applying",
+        error,
+    )
+    .for_resource(id.clone())
 }
 
 fn extract_string_list(value: &Value) -> Vec<String> {
@@ -488,27 +490,15 @@ fn partial_acm_certificate_create_outcome(
 }
 
 impl AwsProvider {
-    /// Create an ACM certificate by issuing a `RequestCertificate`
-    /// call. The returned state carries the cert's ARN as identifier;
-    /// the validation status is `PENDING_VALIDATION` until the user
-    /// satisfies the DNS / EMAIL challenge — typically wired via a
-    /// `wait` construct on `cert.status`.
-    pub(crate) async fn create_acm_certificate(
+    /// Issue one `RequestCertificate` call with the caller's stable token.
+    pub(crate) async fn request_acm_certificate(
         &self,
         resource: &Resource,
         schema: &ResourceSchema,
         client_token: &ClientToken,
-    ) -> ProviderResult<CreateCompletion> {
+    ) -> ProviderResult<Result<AppliedIdentifier, SendFailure<RequestCertificateError>>> {
         let id = resource.id.clone();
         let request = build_request_certificate(resource, schema)?;
-        let domain_name = request.domain_name.clone().ok_or_else(|| {
-            ProviderError::internal("built RequestCertificate input has no domain_name")
-                .for_resource(id.clone())
-        })?;
-        let request_enums = CertificateRequestEnums {
-            validation_method: request.validation_method.clone(),
-            key_algorithm: request.key_algorithm.clone(),
-        };
 
         let req = self
             .acm_client
@@ -531,15 +521,36 @@ impl AwsProvider {
         // feature; the common DNS-validation path is unaffected.
         // carina-rs/carina-provider-aws#296.
 
-        let output = send_aws_operation_with_token(client_token, req)
-            .await
-            .map_err(|error| request_certificate_error(&id, error))?;
+        let output = match send_aws_operation_with_token(client_token, req).await {
+            Ok(output) => output,
+            Err(error) => return Ok(Err(error)),
+        };
 
         let arn = output.certificate_arn().ok_or_else(|| {
             ProviderError::api_error("RequestCertificate returned no certificate_arn")
                 .for_resource(id.clone())
         })?;
         let arn = crate::helpers::applied_identifier(&id, "acm.RequestCertificate", arn)?;
+        Ok(Ok(arn))
+    }
+
+    /// Continue an issued ACM create through its normal read-back path.
+    pub(crate) async fn continue_acm_certificate_create(
+        &self,
+        resource: &Resource,
+        schema: &ResourceSchema,
+        arn: AppliedIdentifier,
+    ) -> ProviderResult<CreateCompletion> {
+        let id = resource.id.clone();
+        let request = build_request_certificate(resource, schema)?;
+        let domain_name = request.domain_name.clone().ok_or_else(|| {
+            ProviderError::internal("built RequestCertificate input has no domain_name")
+                .for_resource(id.clone())
+        })?;
+        let request_enums = CertificateRequestEnums {
+            validation_method: request.validation_method,
+            key_algorithm: request.key_algorithm,
+        };
 
         // DNS validation populates DomainValidationOptions[].ResourceRecord
         // asynchronously after RequestCertificate. Wait so the post-create
@@ -876,7 +887,6 @@ where
 mod tests {
     use super::*;
     use aws_sdk_acm::error::SdkError;
-    use aws_sdk_acm::operation::request_certificate::RequestCertificateError;
     use aws_smithy_runtime_api::client::orchestrator::HttpResponse;
     use aws_smithy_types::body::SdkBody;
     use aws_smithy_types::error::ErrorMetadata;
@@ -913,7 +923,10 @@ mod tests {
             SdkError::service_error(service_error, response);
         let id = id();
 
-        let error = request_certificate_error(&id, SendFailure::new(SendOutcome::MaybeSent, error));
+        let error = request_certificate_outcome_unknown_error(
+            &id,
+            SendFailure::new(SendOutcome::MaybeSent, error),
+        );
 
         assert_eq!(
             error.to_wire().message,

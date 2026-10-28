@@ -28,8 +28,8 @@ pub use factory::AwsProviderFactory;
 pub use normalizer::AwsNormalizer;
 #[doc(hidden)]
 pub use provider::{
-    AwsCreateAttempt, AwsCreatePoll, AwsCreateResume, AwsIssuedCreate, AwsPollAttempt,
-    AwsResumeAttempt, AwsResumedCreate,
+    AwsCreateAttempt, AwsCreatePoll, AwsCreateResume, AwsFailureSummary, AwsIssuedCreate,
+    AwsPollAttempt, AwsResumeAttempt, AwsResumedCreate,
 };
 pub use provider::{AwsCreateToken, AwsDeleteToken, Ec2TaggedResourceKind};
 pub use sdk_config::BoundedSdkConfig;
