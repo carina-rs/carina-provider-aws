@@ -13,98 +13,36 @@ permissions:
   contents: read
 
 jobs:
-  build-wasm:
-    name: Build WASM
+  build:
+    name: Build
     if: github.event_name == 'push'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          submodules: recursive
-
+    uses: carina-rs/provider-release/.github/workflows/build.yml@4f6c8230416e78ac063d8771b9cccafff1b0c281
+    with:
+      provider: carina-provider-aws
       # Pinned to 1.95.0: current stable's rust-lld SIGSEGVs on wasm targets
       # (rust-lang/rust#150227). Revert to @stable once fixed upstream.
-      - uses: dtolnay/rust-toolchain@1.95.0
-        with:
-          targets: wasm32-wasip2
-
-      - name: Build
-        run: cargo build --release --target wasm32-wasip2 --bin carina-provider-aws
-
-      - name: Optimize WASM with vela
-        run: |
-          cargo install --git https://github.com/mizzy/vela --rev 4611418f8a84426b4b79077cae3f59357ca09ff7 vela-cli --quiet
-          vela optimize target/wasm32-wasip2/release/carina-provider-aws.wasm -o target/wasm32-wasip2/release/carina-provider-aws.wasm
-
-      - name: Package
-        run: |
-          cp target/wasm32-wasip2/release/carina-provider-aws.wasm carina-provider-aws-${{ github.ref_name }}.wasm
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: carina-provider-aws-wasm
-          path: carina-provider-aws-${{ github.ref_name }}.wasm
-
-  build-docs:
-    name: Build Docs Bundle
-    if: github.event_name == 'push'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          submodules: recursive
-
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt
-
-      - name: Run schema codegen
-        run: ./scripts/generate-schemas-smithy.sh
-
-      - name: Run provider codegen
-        run: ./scripts/generate-provider.sh
-
-      - name: Verify generated code is current
-        run: |
-          if ! git diff --exit-code; then
-            echo "::error::Codegen produced uncommitted changes. Upstream Smithy models no longer match the committed schemas; regenerate and commit them before releasing."
-            exit 1
-          fi
-
-      - name: Generate documentation
-        run: ./scripts/generate-docs.sh
-
-      - name: Build documentation bundle
-        run: |
-          python3 scripts/docs-bundle.py build carina-provider-aws-${{ github.ref_name }}-docs.tar.gz
-          python3 scripts/docs-bundle.py check carina-provider-aws-${{ github.ref_name }}-docs.tar.gz
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: carina-provider-aws-docs
-          path: carina-provider-aws-${{ github.ref_name }}-docs.tar.gz
+      wasm-toolchain: 1.95.0
+      docs-generate: |
+        ./scripts/generate-schemas-smithy.sh
+        ./scripts/generate-provider.sh
+        if ! git diff --exit-code; then
+          echo "::error::Codegen produced uncommitted changes. Upstream Smithy models no longer match the committed schemas; regenerate and commit them before releasing."
+          exit 1
+        fi
+        ./scripts/generate-docs.sh
 
   release:
     name: Create Release
-    needs: [build-wasm, build-docs]
+    needs: [build]
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
-        with:
-          merge-multiple: true
-
       - name: Create Release
-        uses: softprops/action-gh-release@v2
+        uses: carina-rs/provider-release/github-release@4f6c8230416e78ac063d8771b9cccafff1b0c281
         with:
-          files: |
-            carina-provider-aws-*.wasm
-            carina-provider-aws-*-docs.tar.gz
-          generate_release_notes: true
+          provider: carina-provider-aws
 
   publish:
     name: Publish to Carina Registry
@@ -114,176 +52,16 @@ jobs:
     environment: release
     permissions:
       id-token: write
-    env:
-      REGISTRY_AUDIENCE: registry.carina-rs.dev
-      REGISTRY_PUBLISH_URL: https://publish.registry.carina-rs.dev/v1/publish
     steps:
-      - name: Validate Release Tag
-        run: |
-          set -euo pipefail
-
-          version="${GITHUB_REF_NAME#v}"
-          if [ -z "$version" ] || [ "$GITHUB_REF" != "refs/tags/v${version}" ]; then
-            printf 'Expected GITHUB_REF to be exactly refs/tags/v{version} with a non-empty version; got GITHUB_REF=%s and GITHUB_REF_NAME=%s\n' "$GITHUB_REF" "$GITHUB_REF_NAME" >&2
-            exit 1
-          fi
-          printf 'VERSION=%s\n' "$version" >> "$GITHUB_ENV"
-
-      - name: Download WASM Artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: carina-provider-aws-wasm
-
-      - name: Download Docs Artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: carina-provider-aws-docs
-
-      # Pin v2.6.5: the registry requires Rekor v1's SET; Rekor v2 issues no SET,
-      # and cosign v3 defaults to signing-config, which routes to Rekor v2.
-      - name: Install cosign
-        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
-        with:
-          cosign-release: 'v2.6.5'
-
-      # The registry requires the WASM and docs certificates to share the run
-      # invocation URI, so both artifacts must be signed in this job.
-      - name: Sign release artifacts (keyless)
-        run: |
-          set -euo pipefail
-
-          sign_blob() {
-            artifact=$1
-            bundle=$2
-            for attempt in 1 2 3; do
-              if cosign sign-blob "$artifact" \
-                --bundle "$bundle" \
-                --new-bundle-format=true \
-                --yes; then
-                return
-              fi
-
-              printf 'Signing %s attempt %s failed\n' "$artifact" "$attempt" >&2
-              if [ "$attempt" -lt 3 ]; then
-                sleep 10
-                continue
-              fi
-              printf 'Signing %s failed after 3 attempts\n' "$artifact" >&2
-              exit 1
-            done
-          }
-
-          # Sign docs first so the WASM certificate stays freshest for the publish retry loop.
-          sign_blob "carina-provider-aws-${GITHUB_REF_NAME}-docs.tar.gz" docs-sigstore-bundle.json
-          sign_blob "carina-provider-aws-${GITHUB_REF_NAME}.wasm" sigstore-bundle.json
-
       - name: Publish to Carina Registry
-        # If publishing fails, re-run only this failed job. Re-running the whole workflow
-        # rebuilds docs with a different digest, which the registry rejects with a 409.
-        # For a 403 claim_mismatch, verify that the trusted-publisher policy uses the
-        # release-tag-environment mode, environment `release`, and points to
-        # .github/workflows/release.yml.
-        run: |
-          set -euo pipefail
-
-          if ! jq -e 'type == "object"' sigstore-bundle.json >/dev/null; then
-            echo "sigstore-bundle.json is missing or not a JSON object" >&2
-            exit 1
-          fi
-
-          version="$VERSION"
-          asset_url="https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/carina-provider-aws-${GITHUB_REF_NAME}.wasm"
-          docs=null
-          if [[ "${version%%+*}" != *-* ]]; then
-            if ! jq -e 'type == "object"' docs-sigstore-bundle.json >/dev/null; then
-              echo "docs-sigstore-bundle.json is missing or not a JSON object" >&2
-              exit 1
-            fi
-
-            docs_asset_url="https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/carina-provider-aws-${GITHUB_REF_NAME}-docs.tar.gz"
-            docs=$(jq -n \
-              --arg asset_url "$docs_asset_url" \
-              --slurpfile bundle docs-sigstore-bundle.json \
-              '{
-                candidate_download_url: $asset_url,
-                sigstore_bundle: $bundle[0]
-              }')
-          fi
-          payload=$(jq -n \
-            --arg version "$version" \
-            --arg asset_url "$asset_url" \
-            --slurpfile bundle sigstore-bundle.json \
-            --argjson docs "$docs" \
-            '{
-              namespace: "carina-rs",
-              name: "aws",
-              version: $version,
-              candidate_download_url: $asset_url,
-              sigstore_bundle: $bundle[0]
-            } + if $docs == null then {} else {docs: $docs} end')
-          response_file=$(mktemp)
-          trap 'rm -f "$response_file"' EXIT
-
-          # The Fulcio cert from the sign step lives ~10 minutes and must still be valid
-          # when the registry verifies a new version's bundle; this loop's worst case
-          # (3 x (60s token + 120s POST) + 2 x 10s sleep) nearly exhausts it, so do not
-          # add attempts, sleeps, or timeout headroom here.
-          for attempt in 1 2 3; do
-            if ! token=$(curl -sS \
-              --connect-timeout 10 \
-              --max-time 60 \
-              -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
-              "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=${REGISTRY_AUDIENCE}" \
-              | jq -er .value) || [ -z "$token" ]; then
-              printf 'Failed to obtain OIDC token on attempt %s\n' "$attempt" >&2
-              if [ "$attempt" -lt 3 ]; then
-                sleep 10
-                continue
-              fi
-              printf 'Publish failed after 3 attempts while obtaining OIDC token\n' >&2
-              exit 1
-            fi
-
-            : > "$response_file"
-            if ! status=$(curl -sS \
-              --connect-timeout 10 \
-              --max-time 120 \
-              -o "$response_file" \
-              -w '%{http_code}' \
-              -X POST \
-              -H "Authorization: Bearer $token" \
-              -H 'Content-Type: application/json' \
-              --data "$payload" \
-              "$REGISTRY_PUBLISH_URL"); then
-              status=000
-            fi
-
-            printf 'Publish attempt %s returned HTTP %s\n' "$attempt" "$status"
-            sed 's/^/  /' "$response_file"
-            printf '\n'
-
-            case "$status" in
-              200|201)
-                exit 0
-                ;;
-              000|429|5??)
-                if [ "$attempt" -lt 3 ]; then
-                  sleep 10
-                  continue
-                fi
-                printf 'Publish failed after 3 attempts (last status: %s)\n' "$status" >&2
-                exit 1
-                ;;
-              4??)
-                printf 'Publish failed with non-retryable status %s\n' "$status" >&2
-                exit 1
-                ;;
-              *)
-                printf 'Publish failed with unexpected status %s\n' "$status" >&2
-                exit 1
-                ;;
-            esac
-          done
+        # Signing/publish intentionally stay in this job so OIDC job_workflow_ref and the
+        # Fulcio SAN remain this release.yml (the registry's trusted-publisher policy points
+        # here); bump the SHA only after reviewing the provider-release diff.
+        uses: carina-rs/provider-release/publish@4f6c8230416e78ac063d8771b9cccafff1b0c281
+        with:
+          provider: carina-provider-aws
+          name: aws
+          namespace: carina-rs
 
   yank:
     name: Yank from Carina Registry
@@ -292,89 +70,9 @@ jobs:
     environment: release
     permissions:
       id-token: write
-    env:
-      REGISTRY_AUDIENCE: registry.carina-rs.dev
-      REGISTRY_YANK_URL: https://publish.registry.carina-rs.dev/v1/yank
     steps:
-      - name: Validate Release Tag
-        run: |
-          set -euo pipefail
-
-          version="${GITHUB_REF_NAME#v}"
-          if [ -z "$version" ] || [ "$GITHUB_REF" != "refs/tags/v${version}" ]; then
-            printf 'Expected GITHUB_REF to be exactly refs/tags/v{version} with a non-empty version; got GITHUB_REF=%s and GITHUB_REF_NAME=%s\n' "$GITHUB_REF" "$GITHUB_REF_NAME" >&2
-            exit 1
-          fi
-          printf 'VERSION=%s\n' "$version" >> "$GITHUB_ENV"
-
       - name: Yank from Carina Registry
-        run: |
-          set -euo pipefail
-
-          version="$VERSION"
-          payload=$(jq -n \
-            --arg version "$version" \
-            '{
-              namespace: "carina-rs",
-              name: "aws",
-              version: $version
-            }')
-          response_file=$(mktemp)
-          trap 'rm -f "$response_file"' EXIT
-
-          for attempt in 1 2 3; do
-            if ! token=$(curl -sS \
-              --connect-timeout 10 \
-              --max-time 60 \
-              -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
-              "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=${REGISTRY_AUDIENCE}" \
-              | jq -er .value) || [ -z "$token" ]; then
-              printf 'Failed to obtain OIDC token on attempt %s\n' "$attempt" >&2
-              if [ "$attempt" -lt 3 ]; then
-                sleep 10
-                continue
-              fi
-              printf 'Yank failed after 3 attempts while obtaining OIDC token\n' >&2
-              exit 1
-            fi
-
-            : > "$response_file"
-            if ! status=$(curl -sS \
-              --connect-timeout 10 \
-              --max-time 120 \
-              -o "$response_file" \
-              -w '%{http_code}' \
-              -X POST \
-              -H "Authorization: Bearer $token" \
-              -H 'Content-Type: application/json' \
-              --data "$payload" \
-              "$REGISTRY_YANK_URL"); then
-              status=000
-            fi
-
-            printf 'Yank attempt %s returned HTTP %s\n' "$attempt" "$status"
-            sed 's/^/  /' "$response_file"
-            printf '\n'
-
-            case "$status" in
-              200|201)
-                exit 0
-                ;;
-              000|429|5??)
-                if [ "$attempt" -lt 3 ]; then
-                  sleep 10
-                  continue
-                fi
-                printf 'Yank failed after 3 attempts (last status: %s)\n' "$status" >&2
-                exit 1
-                ;;
-              4??)
-                printf 'Yank failed with non-retryable status %s\n' "$status" >&2
-                exit 1
-                ;;
-              *)
-                printf 'Yank failed with unexpected status %s\n' "$status" >&2
-                exit 1
-                ;;
-            esac
-          done
+        uses: carina-rs/provider-release/yank@4f6c8230416e78ac063d8771b9cccafff1b0c281
+        with:
+          name: aws
+          namespace: carina-rs
