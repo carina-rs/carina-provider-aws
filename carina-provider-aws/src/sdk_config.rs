@@ -7,23 +7,11 @@ use aws_smithy_types::retry::RetryConfig;
 use aws_smithy_types::timeout::TimeoutConfig;
 
 use crate::AwsProvider;
-use crate::resend_guard::ResendGuard;
 use crate::resend_safety_generated::{
-    acm_idempotency, cloudwatchlogs_idempotency, ec2_idempotency, iam_idempotency,
-    identitystore_idempotency, organizations_idempotency, route53_idempotency, s3_idempotency,
-    sqs_idempotency, sts_idempotency,
+    AcmClient, CloudWatchLogsClient, Ec2Client, IamClient, IdentityStoreClient,
+    OrganizationsClient, Route53Client, S3Client, SqsClient, StsClient,
 };
 use crate::services::sts::assume_role::AssumeRoleConfig;
-
-macro_rules! guarded_client {
-    ($sdk:ident, $config:expr, $idempotency:path) => {
-        $sdk::Client::from_conf(
-            $sdk::config::Builder::from(&$config.0)
-                .interceptor(ResendGuard::new($idempotency))
-                .build(),
-        )
-    };
-}
 
 /// An AWS SDK configuration with the provider's timeout and retry policy applied.
 pub struct BoundedSdkConfig(aws_config::SdkConfig);
@@ -38,6 +26,10 @@ impl BoundedSdkConfig {
                 .retry_config(retry_config())
                 .build(),
         )
+    }
+
+    pub(crate) fn sdk_config(&self) -> &aws_config::SdkConfig {
+        &self.0
     }
 
     /// Load a bounded SDK configuration for the region and optional assumed role.
@@ -133,28 +125,16 @@ impl AwsProvider {
         config: &BoundedSdkConfig,
     ) -> Self {
         Self {
-            s3_client: guarded_client!(aws_sdk_s3, config, s3_idempotency),
-            ec2_client: guarded_client!(aws_sdk_ec2, config, ec2_idempotency),
-            iam_client: guarded_client!(aws_sdk_iam, config, iam_idempotency),
-            logs_client: guarded_client!(
-                aws_sdk_cloudwatchlogs,
-                config,
-                cloudwatchlogs_idempotency
-            ),
-            sts_client: guarded_client!(aws_sdk_sts, config, sts_idempotency),
-            organizations_client: guarded_client!(
-                aws_sdk_organizations,
-                config,
-                organizations_idempotency
-            ),
-            identitystore_client: guarded_client!(
-                aws_sdk_identitystore,
-                config,
-                identitystore_idempotency
-            ),
-            route53_client: guarded_client!(aws_sdk_route53, config, route53_idempotency),
-            acm_client: guarded_client!(aws_sdk_acm, config, acm_idempotency),
-            sqs_client: guarded_client!(aws_sdk_sqs, config, sqs_idempotency),
+            s3_client: S3Client::from_bounded_config(config),
+            ec2_client: Ec2Client::from_bounded_config(config),
+            iam_client: IamClient::from_bounded_config(config),
+            logs_client: CloudWatchLogsClient::from_bounded_config(config),
+            sts_client: StsClient::from_bounded_config(config),
+            organizations_client: OrganizationsClient::from_bounded_config(config),
+            identitystore_client: IdentityStoreClient::from_bounded_config(config),
+            route53_client: Route53Client::from_bounded_config(config),
+            acm_client: AcmClient::from_bounded_config(config),
+            sqs_client: SqsClient::from_bounded_config(config),
             schema_registry: Self::schema_registry(),
             region,
             allowed_account_ids,

@@ -19,6 +19,7 @@ use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
 use crate::helpers::{require_enum_attr, require_string_attr, sdk_error_message};
 use crate::provider::CreateCompletion;
+use crate::resend_safety_generated::Route53Client;
 
 /// Composite identifier format: `hosted_zone_id|name|type`
 fn make_identifier(hosted_zone_id: &str, name: &str, record_type: &str) -> String {
@@ -190,7 +191,7 @@ fn build_record_set(
 
 /// Execute a ChangeResourceRecordSets UPSERT or DELETE.
 async fn change_record_set(
-    client: &aws_sdk_route53::Client,
+    client: &Route53Client,
     hosted_zone_id: &str,
     action: ChangeAction,
     record_set: ResourceRecordSet,

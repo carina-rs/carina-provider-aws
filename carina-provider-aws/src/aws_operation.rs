@@ -60,6 +60,47 @@ pub(crate) trait TokenBearing {
     fn with_client_token(self, token: &ClientToken) -> Self;
 }
 
+/// A token-bearing SDK builder that cannot be sent without the provider's
+/// invocation token.
+///
+/// The inner builder is deliberately private and cannot be extracted. Request
+/// fields can only be changed through [`TokenOperation::configure`].
+#[derive(Clone)]
+pub(crate) struct TokenOperation<B> {
+    inner: B,
+}
+
+impl<B> TokenOperation<B> {
+    /// Wrap a generated token-bearing builder.
+    pub(crate) fn new(inner: B) -> Self {
+        Self { inner }
+    }
+
+    /// Configure request fields while keeping the builder inside this wrapper.
+    pub(crate) fn configure(self, configure: impl FnOnce(B) -> B) -> Self {
+        Self {
+            inner: configure(self.inner),
+        }
+    }
+}
+
+impl<B> TokenOperation<B>
+where
+    B: AwsOperation<Resend = WithToken> + TokenBearing,
+{
+    /// Apply the invocation token and send the inner SDK builder.
+    ///
+    /// [`crate::helpers::TokenSendPermit`] can only be constructed by the
+    /// token-aware helper entry points.
+    pub(crate) async fn send_with_token(
+        self,
+        token: &ClientToken,
+        _permit: crate::helpers::TokenSendPermit,
+    ) -> Result<B::Output, SdkError<B::Error, HttpResponse>> {
+        AwsOperation::send(self.inner.with_client_token(token)).await
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::ClientToken;

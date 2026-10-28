@@ -77,16 +77,16 @@ impl AwsProvider {
             Err(error) => return Err(attempt.untracked(error)),
         };
 
-        let mut req = self
-            .ec2_client
-            .create_vpc_endpoint()
-            .vpc_id(&vpc_id)
-            .service_name(&service_name)
-            .tag_specifications(build_tag_specification_with_create_token(
-                resource,
-                aws_sdk_ec2::types::ResourceType::VpcEndpoint,
-                client_token,
-            ));
+        let mut req = self.ec2_client.create_vpc_endpoint().configure(|builder| {
+            builder
+                .vpc_id(&vpc_id)
+                .service_name(&service_name)
+                .tag_specifications(build_tag_specification_with_create_token(
+                    resource,
+                    aws_sdk_ec2::types::ResourceType::VpcEndpoint,
+                    client_token,
+                ))
+        });
 
         let endpoint_type = match optional_enum_attr(resource, schema, "vpc_endpoint_type") {
             Ok(endpoint_type) => endpoint_type,
@@ -94,7 +94,8 @@ impl AwsProvider {
         };
         if let Some(ep_type) = endpoint_type {
             use aws_sdk_ec2::types::VpcEndpointType;
-            req = req.vpc_endpoint_type(VpcEndpointType::from(ep_type));
+            req =
+                req.configure(|builder| builder.vpc_endpoint_type(VpcEndpointType::from(ep_type)));
         }
 
         if let Some(Value::Concrete(ConcreteValue::List(ids))) =
@@ -102,7 +103,7 @@ impl AwsProvider {
         {
             for id_val in ids {
                 if let Value::Concrete(ConcreteValue::String(s)) = id_val {
-                    req = req.route_table_ids(s.expose_plaintext());
+                    req = req.configure(|builder| builder.route_table_ids(s.expose_plaintext()));
                 }
             }
         }
@@ -110,7 +111,7 @@ impl AwsProvider {
         if let Some(Value::Concrete(ConcreteValue::List(ids))) = resource.get_attr("subnet_ids") {
             for id_val in ids {
                 if let Value::Concrete(ConcreteValue::String(s)) = id_val {
-                    req = req.subnet_ids(s.expose_plaintext());
+                    req = req.configure(|builder| builder.subnet_ids(s.expose_plaintext()));
                 }
             }
         }
@@ -120,19 +121,19 @@ impl AwsProvider {
         {
             for id_val in ids {
                 if let Value::Concrete(ConcreteValue::String(s)) = id_val {
-                    req = req.security_group_ids(s.expose_plaintext());
+                    req = req.configure(|builder| builder.security_group_ids(s.expose_plaintext()));
                 }
             }
         }
 
         if let Some(v) = optional_bool_attr(resource, "private_dns_enabled") {
-            req = req.private_dns_enabled(v);
+            req = req.configure(|builder| builder.private_dns_enabled(v));
         }
 
         if let Some(Value::Concrete(ConcreteValue::String(policy))) =
             resource.get_attr("policy_document")
         {
-            req = req.policy_document(policy.expose_plaintext());
+            req = req.configure(|builder| builder.policy_document(policy.expose_plaintext()));
         } else if let Some(Value::Concrete(ConcreteValue::Map(map))) =
             resource.get_attr("policy_document")
         {
@@ -150,7 +151,7 @@ impl AwsProvider {
                     ));
                 }
             };
-            req = req.policy_document(&json_str);
+            req = req.configure(|builder| builder.policy_document(&json_str));
         }
 
         let result =

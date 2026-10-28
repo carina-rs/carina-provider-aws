@@ -4,7 +4,7 @@ use std::collections::{HashMap, HashSet};
 
 use anyhow::{Context, Result, bail};
 use carina_smithy::{Shape, SmithyModel};
-use heck::ToSnakeCase;
+use heck::{ToSnakeCase, ToUpperCamelCase};
 
 const TRAIT_READONLY: &str = "smithy.api#readonly";
 const TRAIT_IDEMPOTENT: &str = "smithy.api#idempotent";
@@ -1154,7 +1154,9 @@ pub fn generate_provider_module(
          use aws_smithy_runtime_api::client::orchestrator::HttpResponse;\n\
          use aws_smithy_runtime_api::client::result::SdkError;\n\
          use carina_aws_types::Idempotency;\n\n\
-         use crate::aws_operation::{AwsOperation, ClientToken, DecidedOperationError, NoToken, TokenBearing, WithToken};\n\n",
+         use crate::aws_operation::{AwsOperation, ClientToken, DecidedOperationError, NoToken, TokenBearing, TokenOperation, WithToken};\n\
+         use crate::resend_guard::ResendGuard;\n\
+         use crate::sdk_config::BoundedSdkConfig;\n\n",
     );
 
     for service_name in &services {
@@ -1169,10 +1171,61 @@ pub fn generate_provider_module(
             .collect::<Vec<_>>();
         operations.sort_by_key(|entry| entry.operation);
 
+        let client_name = client_type_name(service_name);
+        code.push_str(&format!(
+            "pub(crate) struct {client_name} {{\n\
+             \x20   inner: aws_sdk_{service_name}::Client,\n\
+             }}\n\n\
+             // Decisions can outlive their current call sites; every decided operation remains\n\
+             // available through the closed generated client API.\n\
+             #[allow(dead_code)]\n\
+             impl {client_name} {{\n\
+             \x20   pub(crate) fn from_bounded_config(config: &BoundedSdkConfig) -> Self {{\n\
+             \x20       Self {{\n\
+             \x20           inner: aws_sdk_{service_name}::Client::from_conf(\n\
+             \x20               aws_sdk_{service_name}::config::Builder::from(config.sdk_config())\n\
+             \x20                   .interceptor(ResendGuard::new({service_name}_idempotency))\n\
+             \x20                   .build(),\n\
+             \x20           ),\n\
+             \x20       }}\n\
+             \x20   }}\n\n\
+             \x20   #[cfg(test)]\n\
+             \x20   pub(crate) fn config(&self) -> &aws_sdk_{service_name}::Config {{\n\
+             \x20       self.inner.config()\n\
+             \x20   }}\n\n"
+        ));
+        for entry in &operations {
+            let operation_module = entry.operation.to_snake_case();
+            let builder = format!(
+                "aws_sdk_{service_name}::operation::{operation_module}::builders::{}FluentBuilder",
+                entry.operation
+            );
+            let return_type = if matches!(entry.decision, Decision::Token(_)) {
+                format!("TokenOperation<{builder}>")
+            } else {
+                builder
+            };
+            let operation_method = entry.operation.to_snake_case();
+            let operation = format!("self.inner.{operation_method}()");
+            let operation = if matches!(entry.decision, Decision::Token(_)) {
+                format!("TokenOperation::new({operation})")
+            } else {
+                operation
+            };
+            code.push_str(&format!(
+                "    /// {}\n\
+                 \x20   pub(crate) fn {operation_method}(&self) -> {return_type} {{\n\
+                 \x20       {operation}\n\
+                 \x20   }}\n\n",
+                entry.justification
+            ));
+        }
+        code.push_str("}\n\n");
+
         code.push_str(&format!(
             "pub(crate) fn {service_name}_idempotency(operation: &str) -> Idempotency {{\n    match operation {{\n"
         ));
-        for entry in operations {
+        for entry in &operations {
             let operation_name = entry.operation;
             let idempotency = render_decision(entry.decision);
             code.push_str(&format!("        \"{operation_name}\" => {idempotency},\n"));
@@ -1239,30 +1292,18 @@ pub fn generate_provider_module(
         }
     }
 
-    code.push_str("#[cfg(test)]\npub(crate) const DECIDED_OPERATIONS: &[(&str, &str)] = &[\n");
-    for entry in &ordered_overrides {
-        code.push_str(&format!(
-            "    (\"{}\", \"{}\"),\n",
-            entry.service,
-            entry.operation.to_snake_case()
-        ));
-    }
-    code.push_str("];\n\n");
-
-    code.push_str("#[cfg(test)]\npub(crate) const TOKEN_OPERATIONS: &[(&str, &str)] = &[\n");
-    for entry in ordered_overrides
-        .iter()
-        .filter(|entry| matches!(entry.decision, Decision::Token(_)))
-    {
-        code.push_str(&format!(
-            "    (\"{}\", \"{}\"),\n",
-            entry.service,
-            entry.operation.to_snake_case()
-        ));
-    }
-    code.push_str("];\n");
-
     Ok(code)
+}
+
+fn client_type_name(service: &str) -> String {
+    let service_words = if service == "cloudwatchlogs" {
+        "cloud_watch_logs"
+    } else if service == "identitystore" {
+        "identity_store"
+    } else {
+        service
+    };
+    format!("{}Client", service_words.to_upper_camel_case())
 }
 
 fn render_decision(decision: Decision) -> &'static str {
@@ -1541,8 +1582,38 @@ mod tests {
         assert!(generated.contains(
             "const IDEMPOTENCY: Idempotency = <aws_sdk_test::operation::create_thing::builders::CreateThingFluentBuilder as AwsOperation>::IDEMPOTENCY;"
         ));
-        assert!(generated.contains("pub(crate) const TOKEN_OPERATIONS: &[(&str, &str)]"));
         assert!(generated.contains("impl TokenBearing for aws_sdk_test::operation::create_thing::builders::CreateThingFluentBuilder"));
         assert!(generated.contains("self.client_token(token.as_str())"));
+        assert!(generated.contains("pub(crate) struct TestClient"));
+        assert!(generated.contains("inner: aws_sdk_test::Client"));
+        assert!(
+            generated
+                .contains("pub(crate) fn from_bounded_config(config: &BoundedSdkConfig) -> Self")
+        );
+        assert!(generated.contains("aws_sdk_test::config::Builder::from(config.sdk_config())"));
+        assert!(generated.contains(".interceptor(ResendGuard::new(test_idempotency))"));
+        assert!(!generated.contains("pub(crate) fn from_conf("));
+        assert!(generated.contains(
+            "pub(crate) fn create_thing(&self) -> TokenOperation<aws_sdk_test::operation::create_thing::builders::CreateThingFluentBuilder>"
+        ));
+        assert!(generated.contains("TokenOperation::new(self.inner.create_thing())"));
+        assert!(!generated.contains("DECIDED_OPERATIONS"));
+        assert!(!generated.contains("TOKEN_OPERATIONS"));
+    }
+
+    #[test]
+    fn generated_client_returns_raw_builder_only_for_decided_non_token_operation() {
+        let model = model("GetThing", r#""smithy.api#readonly": {}"#, "");
+        let models = models(model);
+        let overrides = [entry("GetThing", Decision::ReadOnly)];
+
+        let generated = generate_provider_module(&models, &overrides).expect("generation succeeds");
+
+        assert!(generated.contains("pub(crate) struct TestClient"));
+        assert!(generated.contains(
+            "pub(crate) fn get_thing(&self) -> aws_sdk_test::operation::get_thing::builders::GetThingFluentBuilder"
+        ));
+        assert!(generated.contains("self.inner.get_thing()"));
+        assert!(!generated.contains("pub(crate) fn create_thing(&self)"));
     }
 }

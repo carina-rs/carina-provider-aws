@@ -17,6 +17,7 @@ use carina_core::resource::{ConcreteValue, DataSource, State, Value};
 use crate::AwsProvider;
 use crate::error_helpers::{AwsSdkError, api_error_with_meta_and_subject};
 use crate::helpers::{sdk_error_message, value_as_str};
+use crate::resend_safety_generated::IdentityStoreClient;
 
 #[derive(Debug)]
 enum IdentityStoreUserSubject {
@@ -120,7 +121,7 @@ impl AwsProvider {
 ///
 /// All returned errors are already tagged with `resource.id`.
 async fn resolve_user_id(
-    client: &aws_sdk_identitystore::Client,
+    client: &IdentityStoreClient,
     identity_store_id: &str,
     resource: &DataSource,
 ) -> Result<String, ProviderError> {

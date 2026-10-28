@@ -352,9 +352,10 @@ mod tests {
         AwsProvider::from_sdk_config("us-east-1".to_string(), Vec::new(), Vec::new(), &bounded)
     }
 
-    fn ec2_client_with_attempt_timeout(
+    fn raw_ec2_client(
         connector: ScriptedConnector,
-        operation_attempt_timeout: Duration,
+        timeout_config: TimeoutConfig,
+        max_attempts: u32,
     ) -> aws_sdk_ec2::Client {
         let selected = connector.clone();
         let http_client = http_client_fn(move |_, _| SharedHttpConnector::new(selected.clone()));
@@ -365,14 +366,10 @@ mod tests {
             .credentials_provider(SharedCredentialsProvider::new(credentials))
             .http_client(http_client)
             .sleep_impl(TokioSleep::new())
-            .timeout_config(
-                TimeoutConfig::builder()
-                    .operation_attempt_timeout(operation_attempt_timeout)
-                    .build(),
-            )
+            .timeout_config(timeout_config)
             .retry_config(
                 RetryConfig::standard()
-                    .with_max_attempts(2)
+                    .with_max_attempts(max_attempts)
                     .with_initial_backoff(Duration::from_millis(1)),
             )
             .build();
@@ -380,6 +377,23 @@ mod tests {
             aws_sdk_ec2::config::Builder::from(&config)
                 .interceptor(ResendGuard::new(ec2_idempotency))
                 .build(),
+        )
+    }
+
+    fn ec2_client(connector: ScriptedConnector) -> aws_sdk_ec2::Client {
+        raw_ec2_client(connector, TimeoutConfig::disabled(), 3)
+    }
+
+    fn ec2_client_with_attempt_timeout(
+        connector: ScriptedConnector,
+        operation_attempt_timeout: Duration,
+    ) -> aws_sdk_ec2::Client {
+        raw_ec2_client(
+            connector,
+            TimeoutConfig::builder()
+                .operation_attempt_timeout(operation_attempt_timeout)
+                .build(),
+            2,
         )
     }
 
@@ -513,11 +527,10 @@ mod tests {
                 body: CREATE_NAT_GATEWAY_OK,
             },
         ]);
-        let provider = provider(connector.clone());
+        let client = ec2_client(connector.clone());
         let token = "stable-client-token";
 
-        provider
-            .ec2_client
+        client
             .create_nat_gateway()
             .subnet_id("subnet-123")
             .client_token(token)
@@ -544,10 +557,9 @@ mod tests {
                 request_id: "final-throttling-request-id",
             },
         ]);
-        let provider = provider(connector.clone());
+        let client = ec2_client(connector.clone());
 
-        let error = provider
-            .ec2_client
+        let error = client
             .create_nat_gateway()
             .subnet_id("subnet-123")
             .client_token("stable-client-token")

@@ -113,20 +113,20 @@ impl AwsProvider {
             Err(error) => return Err(attempt.untracked(error)),
         };
 
-        let mut req = self
-            .ec2_client
-            .create_nat_gateway()
-            .subnet_id(&subnet_id)
-            .tag_specifications(build_tag_specification_with_create_token(
-                resource,
-                aws_sdk_ec2::types::ResourceType::Natgateway,
-                client_token,
-            ));
+        let mut req = self.ec2_client.create_nat_gateway().configure(|builder| {
+            builder.subnet_id(&subnet_id).tag_specifications(
+                build_tag_specification_with_create_token(
+                    resource,
+                    aws_sdk_ec2::types::ResourceType::Natgateway,
+                    client_token,
+                ),
+            )
+        });
 
         if let Some(Value::Concrete(ConcreteValue::String(alloc_id))) =
             resource.get_attr("allocation_id")
         {
-            req = req.allocation_id(alloc_id.expose_plaintext());
+            req = req.configure(|builder| builder.allocation_id(alloc_id.expose_plaintext()));
         }
 
         let connectivity_type = match optional_enum_attr(resource, schema, "connectivity_type") {
@@ -135,7 +135,8 @@ impl AwsProvider {
         };
         if let Some(conn_type) = connectivity_type {
             use aws_sdk_ec2::types::ConnectivityType;
-            req = req.connectivity_type(ConnectivityType::from(conn_type));
+            req = req
+                .configure(|builder| builder.connectivity_type(ConnectivityType::from(conn_type)));
         }
 
         let result =

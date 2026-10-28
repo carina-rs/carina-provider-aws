@@ -10,8 +10,82 @@ use aws_smithy_runtime_api::client::result::SdkError;
 use carina_aws_types::Idempotency;
 
 use crate::aws_operation::{
-    AwsOperation, ClientToken, DecidedOperationError, NoToken, TokenBearing, WithToken,
+    AwsOperation, ClientToken, DecidedOperationError, NoToken, TokenBearing, TokenOperation,
+    WithToken,
 };
+use crate::resend_guard::ResendGuard;
+use crate::sdk_config::BoundedSdkConfig;
+
+pub(crate) struct AcmClient {
+    inner: aws_sdk_acm::Client,
+}
+
+// Decisions can outlive their current call sites; every decided operation remains
+// available through the closed generated client API.
+#[allow(dead_code)]
+impl AcmClient {
+    pub(crate) fn from_bounded_config(config: &BoundedSdkConfig) -> Self {
+        Self {
+            inner: aws_sdk_acm::Client::from_conf(
+                aws_sdk_acm::config::Builder::from(config.sdk_config())
+                    .interceptor(ResendGuard::new(acm_idempotency))
+                    .build(),
+            ),
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn config(&self) -> &aws_sdk_acm::Config {
+        self.inner.config()
+    }
+
+    /// AddTagsToCertificate: sets tag keys on one certificate; repeating the same key/value pairs has no additional effect
+    pub(crate) fn add_tags_to_certificate(
+        &self,
+    ) -> aws_sdk_acm::operation::add_tags_to_certificate::builders::AddTagsToCertificateFluentBuilder
+    {
+        self.inner.add_tags_to_certificate()
+    }
+
+    /// DeleteCertificate: the provider does not accept an already-absent certificate as success
+    pub(crate) fn delete_certificate(
+        &self,
+    ) -> aws_sdk_acm::operation::delete_certificate::builders::DeleteCertificateFluentBuilder {
+        self.inner.delete_certificate()
+    }
+
+    /// DescribeCertificate: reads certificate state and has no side effects
+    pub(crate) fn describe_certificate(
+        &self,
+    ) -> aws_sdk_acm::operation::describe_certificate::builders::DescribeCertificateFluentBuilder
+    {
+        self.inner.describe_certificate()
+    }
+
+    /// ListTagsForCertificate: reads certificate tags and has no side effects
+    pub(crate) fn list_tags_for_certificate(&self) -> aws_sdk_acm::operation::list_tags_for_certificate::builders::ListTagsForCertificateFluentBuilder{
+        self.inner.list_tags_for_certificate()
+    }
+
+    /// RemoveTagsFromCertificate: removes named tag keys; repeating the removal leaves the same state
+    pub(crate) fn remove_tags_from_certificate(&self) -> aws_sdk_acm::operation::remove_tags_from_certificate::builders::RemoveTagsFromCertificateFluentBuilder{
+        self.inner.remove_tags_from_certificate()
+    }
+
+    /// RequestCertificate: the IdempotencyToken identifies one certificate request within ACM's token window
+    pub(crate) fn request_certificate(
+        &self,
+    ) -> TokenOperation<
+        aws_sdk_acm::operation::request_certificate::builders::RequestCertificateFluentBuilder,
+    > {
+        TokenOperation::new(self.inner.request_certificate())
+    }
+
+    /// UpdateCertificateOptions: replaces the requested certificate option values keyed by certificate ARN
+    pub(crate) fn update_certificate_options(&self) -> aws_sdk_acm::operation::update_certificate_options::builders::UpdateCertificateOptionsFluentBuilder{
+        self.inner.update_certificate_options()
+    }
+}
 
 pub(crate) fn acm_idempotency(operation: &str) -> Idempotency {
     match operation {
@@ -23,6 +97,114 @@ pub(crate) fn acm_idempotency(operation: &str) -> Idempotency {
         "RequestCertificate" => Idempotency::IdempotencyToken,
         "UpdateCertificateOptions" => Idempotency::Idempotent,
         _ => Idempotency::NotIdempotent,
+    }
+}
+
+pub(crate) struct CloudWatchLogsClient {
+    inner: aws_sdk_cloudwatchlogs::Client,
+}
+
+// Decisions can outlive their current call sites; every decided operation remains
+// available through the closed generated client API.
+#[allow(dead_code)]
+impl CloudWatchLogsClient {
+    pub(crate) fn from_bounded_config(config: &BoundedSdkConfig) -> Self {
+        Self {
+            inner: aws_sdk_cloudwatchlogs::Client::from_conf(
+                aws_sdk_cloudwatchlogs::config::Builder::from(config.sdk_config())
+                    .interceptor(ResendGuard::new(cloudwatchlogs_idempotency))
+                    .build(),
+            ),
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn config(&self) -> &aws_sdk_cloudwatchlogs::Config {
+        self.inner.config()
+    }
+
+    /// AssociateKmsKey: sets the KMS-key association for one log group
+    pub(crate) fn associate_kms_key(
+        &self,
+    ) -> aws_sdk_cloudwatchlogs::operation::associate_kms_key::builders::AssociateKmsKeyFluentBuilder
+    {
+        self.inner.associate_kms_key()
+    }
+
+    /// CreateLogGroup: creates a top-level resource without an idempotency token
+    pub(crate) fn create_log_group(
+        &self,
+    ) -> aws_sdk_cloudwatchlogs::operation::create_log_group::builders::CreateLogGroupFluentBuilder
+    {
+        self.inner.create_log_group()
+    }
+
+    /// DeleteLogGroup: the provider does not accept an already-absent log group as success
+    pub(crate) fn delete_log_group(
+        &self,
+    ) -> aws_sdk_cloudwatchlogs::operation::delete_log_group::builders::DeleteLogGroupFluentBuilder
+    {
+        self.inner.delete_log_group()
+    }
+
+    /// DeleteRetentionPolicy: removes the single retention policy keyed by log group
+    pub(crate) fn delete_retention_policy(&self) -> aws_sdk_cloudwatchlogs::operation::delete_retention_policy::builders::DeleteRetentionPolicyFluentBuilder{
+        self.inner.delete_retention_policy()
+    }
+
+    /// DescribeLogGroups: reads log-group state and has no side effects
+    pub(crate) fn describe_log_groups(&self) -> aws_sdk_cloudwatchlogs::operation::describe_log_groups::builders::DescribeLogGroupsFluentBuilder{
+        self.inner.describe_log_groups()
+    }
+
+    /// DisassociateKmsKey: removes the KMS-key association from one log group
+    pub(crate) fn disassociate_kms_key(&self) -> aws_sdk_cloudwatchlogs::operation::disassociate_kms_key::builders::DisassociateKmsKeyFluentBuilder{
+        self.inner.disassociate_kms_key()
+    }
+
+    /// ListTagsForResource: reads resource tags and has no side effects
+    pub(crate) fn list_tags_for_resource(&self) -> aws_sdk_cloudwatchlogs::operation::list_tags_for_resource::builders::ListTagsForResourceFluentBuilder{
+        self.inner.list_tags_for_resource()
+    }
+
+    /// ListTagsLogGroup: reads log-group tags and has no side effects
+    pub(crate) fn list_tags_log_group(&self) -> aws_sdk_cloudwatchlogs::operation::list_tags_log_group::builders::ListTagsLogGroupFluentBuilder{
+        self.inner.list_tags_log_group()
+    }
+
+    /// PutRetentionPolicy: replaces the single retention policy keyed by log group
+    pub(crate) fn put_retention_policy(&self) -> aws_sdk_cloudwatchlogs::operation::put_retention_policy::builders::PutRetentionPolicyFluentBuilder{
+        self.inner.put_retention_policy()
+    }
+
+    /// TagLogGroup: sets tag keys on one log group; repeating the same values has no additional effect
+    pub(crate) fn tag_log_group(
+        &self,
+    ) -> aws_sdk_cloudwatchlogs::operation::tag_log_group::builders::TagLogGroupFluentBuilder {
+        self.inner.tag_log_group()
+    }
+
+    /// TagResource: sets tag keys on one resource; repeating the same values has no additional effect
+    pub(crate) fn tag_resource(
+        &self,
+    ) -> aws_sdk_cloudwatchlogs::operation::tag_resource::builders::TagResourceFluentBuilder {
+        self.inner.tag_resource()
+    }
+
+    /// UntagLogGroup: removes named tag keys; repeating the removal leaves the same state
+    pub(crate) fn untag_log_group(
+        &self,
+    ) -> aws_sdk_cloudwatchlogs::operation::untag_log_group::builders::UntagLogGroupFluentBuilder
+    {
+        self.inner.untag_log_group()
+    }
+
+    /// UntagResource: removes named tag keys; repeating the removal leaves the same state
+    pub(crate) fn untag_resource(
+        &self,
+    ) -> aws_sdk_cloudwatchlogs::operation::untag_resource::builders::UntagResourceFluentBuilder
+    {
+        self.inner.untag_resource()
     }
 }
 
@@ -42,6 +224,458 @@ pub(crate) fn cloudwatchlogs_idempotency(operation: &str) -> Idempotency {
         "UntagLogGroup" => Idempotency::Idempotent,
         "UntagResource" => Idempotency::Idempotent,
         _ => Idempotency::NotIdempotent,
+    }
+}
+
+pub(crate) struct Ec2Client {
+    inner: aws_sdk_ec2::Client,
+}
+
+// Decisions can outlive their current call sites; every decided operation remains
+// available through the closed generated client API.
+#[allow(dead_code)]
+impl Ec2Client {
+    pub(crate) fn from_bounded_config(config: &BoundedSdkConfig) -> Self {
+        Self {
+            inner: aws_sdk_ec2::Client::from_conf(
+                aws_sdk_ec2::config::Builder::from(config.sdk_config())
+                    .interceptor(ResendGuard::new(ec2_idempotency))
+                    .build(),
+            ),
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn config(&self) -> &aws_sdk_ec2::Config {
+        self.inner.config()
+    }
+
+    /// AllocateAddress: each successful call can allocate another address and the API has no client token
+    pub(crate) fn allocate_address(
+        &self,
+    ) -> aws_sdk_ec2::operation::allocate_address::builders::AllocateAddressFluentBuilder {
+        self.inner.allocate_address()
+    }
+
+    /// AssociateRouteTable: creates an association without an idempotency token
+    pub(crate) fn associate_route_table(
+        &self,
+    ) -> aws_sdk_ec2::operation::associate_route_table::builders::AssociateRouteTableFluentBuilder
+    {
+        self.inner.associate_route_table()
+    }
+
+    /// AttachInternetGateway: attaches a resource and has no idempotency token
+    pub(crate) fn attach_internet_gateway(
+        &self,
+    ) -> aws_sdk_ec2::operation::attach_internet_gateway::builders::AttachInternetGatewayFluentBuilder
+    {
+        self.inner.attach_internet_gateway()
+    }
+
+    /// AttachVpnGateway: attaches a resource and has no idempotency token
+    pub(crate) fn attach_vpn_gateway(
+        &self,
+    ) -> aws_sdk_ec2::operation::attach_vpn_gateway::builders::AttachVpnGatewayFluentBuilder {
+        self.inner.attach_vpn_gateway()
+    }
+
+    /// AuthorizeSecurityGroupEgress: authorizes rules without an idempotency token
+    pub(crate) fn authorize_security_group_egress(&self) -> aws_sdk_ec2::operation::authorize_security_group_egress::builders::AuthorizeSecurityGroupEgressFluentBuilder{
+        self.inner.authorize_security_group_egress()
+    }
+
+    /// AuthorizeSecurityGroupIngress: authorizes rules without an idempotency token
+    pub(crate) fn authorize_security_group_ingress(&self) -> aws_sdk_ec2::operation::authorize_security_group_ingress::builders::AuthorizeSecurityGroupIngressFluentBuilder{
+        self.inner.authorize_security_group_ingress()
+    }
+
+    /// CreateEgressOnlyInternetGateway: ClientToken identifies one gateway creation request
+    pub(crate) fn create_egress_only_internet_gateway(&self) -> TokenOperation<aws_sdk_ec2::operation::create_egress_only_internet_gateway::builders::CreateEgressOnlyInternetGatewayFluentBuilder>{
+        TokenOperation::new(self.inner.create_egress_only_internet_gateway())
+    }
+
+    /// CreateFlowLogs: ClientToken identifies one flow-log creation request
+    pub(crate) fn create_flow_logs(
+        &self,
+    ) -> TokenOperation<
+        aws_sdk_ec2::operation::create_flow_logs::builders::CreateFlowLogsFluentBuilder,
+    > {
+        TokenOperation::new(self.inner.create_flow_logs())
+    }
+
+    /// CreateInternetGateway: each successful call creates a new gateway and the API has no client token
+    pub(crate) fn create_internet_gateway(
+        &self,
+    ) -> aws_sdk_ec2::operation::create_internet_gateway::builders::CreateInternetGatewayFluentBuilder
+    {
+        self.inner.create_internet_gateway()
+    }
+
+    /// CreateNatGateway: the model's ClientToken identifies one NAT-gateway creation request
+    pub(crate) fn create_nat_gateway(
+        &self,
+    ) -> TokenOperation<
+        aws_sdk_ec2::operation::create_nat_gateway::builders::CreateNatGatewayFluentBuilder,
+    > {
+        TokenOperation::new(self.inner.create_nat_gateway())
+    }
+
+    /// CreateRoute: creates a route without an idempotency token
+    pub(crate) fn create_route(
+        &self,
+    ) -> aws_sdk_ec2::operation::create_route::builders::CreateRouteFluentBuilder {
+        self.inner.create_route()
+    }
+
+    /// CreateRouteTable: the model's ClientToken identifies one route-table creation request
+    pub(crate) fn create_route_table(
+        &self,
+    ) -> TokenOperation<
+        aws_sdk_ec2::operation::create_route_table::builders::CreateRouteTableFluentBuilder,
+    > {
+        TokenOperation::new(self.inner.create_route_table())
+    }
+
+    /// CreateSecurityGroup: creates a security group without an idempotency token
+    pub(crate) fn create_security_group(
+        &self,
+    ) -> aws_sdk_ec2::operation::create_security_group::builders::CreateSecurityGroupFluentBuilder
+    {
+        self.inner.create_security_group()
+    }
+
+    /// CreateSubnet: each successful call can create a new subnet and the API has no client token
+    pub(crate) fn create_subnet(
+        &self,
+    ) -> aws_sdk_ec2::operation::create_subnet::builders::CreateSubnetFluentBuilder {
+        self.inner.create_subnet()
+    }
+
+    /// CreateTags: sets tag keys on named resources; repeating the same values has no additional effect
+    pub(crate) fn create_tags(
+        &self,
+    ) -> aws_sdk_ec2::operation::create_tags::builders::CreateTagsFluentBuilder {
+        self.inner.create_tags()
+    }
+
+    /// CreateTransitGateway: each successful call creates a new transit gateway and the API has no client token
+    pub(crate) fn create_transit_gateway(
+        &self,
+    ) -> aws_sdk_ec2::operation::create_transit_gateway::builders::CreateTransitGatewayFluentBuilder
+    {
+        self.inner.create_transit_gateway()
+    }
+
+    /// CreateTransitGatewayVpcAttachment: creates an attachment without an idempotency token
+    pub(crate) fn create_transit_gateway_vpc_attachment(&self) -> aws_sdk_ec2::operation::create_transit_gateway_vpc_attachment::builders::CreateTransitGatewayVpcAttachmentFluentBuilder{
+        self.inner.create_transit_gateway_vpc_attachment()
+    }
+
+    /// CreateVpc: each successful call creates a new VPC and the API has no client token
+    pub(crate) fn create_vpc(
+        &self,
+    ) -> aws_sdk_ec2::operation::create_vpc::builders::CreateVpcFluentBuilder {
+        self.inner.create_vpc()
+    }
+
+    /// CreateVpcEndpoint: ClientToken identifies one endpoint creation request
+    pub(crate) fn create_vpc_endpoint(
+        &self,
+    ) -> TokenOperation<
+        aws_sdk_ec2::operation::create_vpc_endpoint::builders::CreateVpcEndpointFluentBuilder,
+    > {
+        TokenOperation::new(self.inner.create_vpc_endpoint())
+    }
+
+    /// CreateVpcPeeringConnection: creates a peering connection without an idempotency token
+    pub(crate) fn create_vpc_peering_connection(&self) -> aws_sdk_ec2::operation::create_vpc_peering_connection::builders::CreateVpcPeeringConnectionFluentBuilder{
+        self.inner.create_vpc_peering_connection()
+    }
+
+    /// CreateVpnGateway: each successful call creates a new gateway and the API has no client token
+    pub(crate) fn create_vpn_gateway(
+        &self,
+    ) -> aws_sdk_ec2::operation::create_vpn_gateway::builders::CreateVpnGatewayFluentBuilder {
+        self.inner.create_vpn_gateway()
+    }
+
+    /// DeleteEgressOnlyInternetGateway: the provider does not accept an already-absent gateway as success
+    pub(crate) fn delete_egress_only_internet_gateway(&self) -> aws_sdk_ec2::operation::delete_egress_only_internet_gateway::builders::DeleteEgressOnlyInternetGatewayFluentBuilder{
+        self.inner.delete_egress_only_internet_gateway()
+    }
+
+    /// DeleteFlowLogs: the provider reports unsuccessful already-absent items as errors
+    pub(crate) fn delete_flow_logs(
+        &self,
+    ) -> aws_sdk_ec2::operation::delete_flow_logs::builders::DeleteFlowLogsFluentBuilder {
+        self.inner.delete_flow_logs()
+    }
+
+    /// DeleteInternetGateway: the provider does not accept an already-absent gateway as success
+    pub(crate) fn delete_internet_gateway(
+        &self,
+    ) -> aws_sdk_ec2::operation::delete_internet_gateway::builders::DeleteInternetGatewayFluentBuilder
+    {
+        self.inner.delete_internet_gateway()
+    }
+
+    /// DeleteNatGateway: the provider does not accept an already-absent NAT gateway as success
+    pub(crate) fn delete_nat_gateway(
+        &self,
+    ) -> aws_sdk_ec2::operation::delete_nat_gateway::builders::DeleteNatGatewayFluentBuilder {
+        self.inner.delete_nat_gateway()
+    }
+
+    /// DeleteRoute: the provider does not accept an already-absent route as success
+    pub(crate) fn delete_route(
+        &self,
+    ) -> aws_sdk_ec2::operation::delete_route::builders::DeleteRouteFluentBuilder {
+        self.inner.delete_route()
+    }
+
+    /// DeleteRouteTable: the provider does not accept an already-absent route table as success
+    pub(crate) fn delete_route_table(
+        &self,
+    ) -> aws_sdk_ec2::operation::delete_route_table::builders::DeleteRouteTableFluentBuilder {
+        self.inner.delete_route_table()
+    }
+
+    /// DeleteSecurityGroup: the provider does not accept an already-absent security group as success
+    pub(crate) fn delete_security_group(
+        &self,
+    ) -> aws_sdk_ec2::operation::delete_security_group::builders::DeleteSecurityGroupFluentBuilder
+    {
+        self.inner.delete_security_group()
+    }
+
+    /// DeleteSubnet: the provider does not accept an already-absent subnet as success
+    pub(crate) fn delete_subnet(
+        &self,
+    ) -> aws_sdk_ec2::operation::delete_subnet::builders::DeleteSubnetFluentBuilder {
+        self.inner.delete_subnet()
+    }
+
+    /// DeleteTags: removes named tag keys; repeating the removal leaves the same state
+    pub(crate) fn delete_tags(
+        &self,
+    ) -> aws_sdk_ec2::operation::delete_tags::builders::DeleteTagsFluentBuilder {
+        self.inner.delete_tags()
+    }
+
+    /// DeleteTransitGateway: the provider does not accept an already-deleting or absent transit gateway as success
+    pub(crate) fn delete_transit_gateway(
+        &self,
+    ) -> aws_sdk_ec2::operation::delete_transit_gateway::builders::DeleteTransitGatewayFluentBuilder
+    {
+        self.inner.delete_transit_gateway()
+    }
+
+    /// DeleteTransitGatewayVpcAttachment: the provider does not accept an already-deleting or absent attachment as success
+    pub(crate) fn delete_transit_gateway_vpc_attachment(&self) -> aws_sdk_ec2::operation::delete_transit_gateway_vpc_attachment::builders::DeleteTransitGatewayVpcAttachmentFluentBuilder{
+        self.inner.delete_transit_gateway_vpc_attachment()
+    }
+
+    /// DeleteVpc: the provider does not accept an already-absent VPC as success
+    pub(crate) fn delete_vpc(
+        &self,
+    ) -> aws_sdk_ec2::operation::delete_vpc::builders::DeleteVpcFluentBuilder {
+        self.inner.delete_vpc()
+    }
+
+    /// DeleteVpcEndpoints: the provider reports unsuccessful already-absent items as errors
+    pub(crate) fn delete_vpc_endpoints(
+        &self,
+    ) -> aws_sdk_ec2::operation::delete_vpc_endpoints::builders::DeleteVpcEndpointsFluentBuilder
+    {
+        self.inner.delete_vpc_endpoints()
+    }
+
+    /// DeleteVpcPeeringConnection: the provider does not accept an already-absent connection as success
+    pub(crate) fn delete_vpc_peering_connection(&self) -> aws_sdk_ec2::operation::delete_vpc_peering_connection::builders::DeleteVpcPeeringConnectionFluentBuilder{
+        self.inner.delete_vpc_peering_connection()
+    }
+
+    /// DeleteVpnGateway: the provider does not accept an already-absent gateway as success
+    pub(crate) fn delete_vpn_gateway(
+        &self,
+    ) -> aws_sdk_ec2::operation::delete_vpn_gateway::builders::DeleteVpnGatewayFluentBuilder {
+        self.inner.delete_vpn_gateway()
+    }
+
+    /// DescribeAddresses: reads address state and has no side effects
+    pub(crate) fn describe_addresses(
+        &self,
+    ) -> aws_sdk_ec2::operation::describe_addresses::builders::DescribeAddressesFluentBuilder {
+        self.inner.describe_addresses()
+    }
+
+    /// DescribeEgressOnlyInternetGateways: reads gateway state and has no side effects
+    pub(crate) fn describe_egress_only_internet_gateways(&self) -> aws_sdk_ec2::operation::describe_egress_only_internet_gateways::builders::DescribeEgressOnlyInternetGatewaysFluentBuilder{
+        self.inner.describe_egress_only_internet_gateways()
+    }
+
+    /// DescribeFlowLogs: reads flow-log state and has no side effects
+    pub(crate) fn describe_flow_logs(
+        &self,
+    ) -> aws_sdk_ec2::operation::describe_flow_logs::builders::DescribeFlowLogsFluentBuilder {
+        self.inner.describe_flow_logs()
+    }
+
+    /// DescribeInternetGateways: reads gateway state and has no side effects
+    pub(crate) fn describe_internet_gateways(&self) -> aws_sdk_ec2::operation::describe_internet_gateways::builders::DescribeInternetGatewaysFluentBuilder{
+        self.inner.describe_internet_gateways()
+    }
+
+    /// DescribeNatGateways: reads NAT-gateway state and has no side effects
+    pub(crate) fn describe_nat_gateways(
+        &self,
+    ) -> aws_sdk_ec2::operation::describe_nat_gateways::builders::DescribeNatGatewaysFluentBuilder
+    {
+        self.inner.describe_nat_gateways()
+    }
+
+    /// DescribeRouteTables: reads route-table state and has no side effects
+    pub(crate) fn describe_route_tables(
+        &self,
+    ) -> aws_sdk_ec2::operation::describe_route_tables::builders::DescribeRouteTablesFluentBuilder
+    {
+        self.inner.describe_route_tables()
+    }
+
+    /// DescribeSecurityGroupRules: reads security-group rules and has no side effects
+    pub(crate) fn describe_security_group_rules(&self) -> aws_sdk_ec2::operation::describe_security_group_rules::builders::DescribeSecurityGroupRulesFluentBuilder{
+        self.inner.describe_security_group_rules()
+    }
+
+    /// DescribeSecurityGroups: reads security-group state and has no side effects
+    pub(crate) fn describe_security_groups(&self) -> aws_sdk_ec2::operation::describe_security_groups::builders::DescribeSecurityGroupsFluentBuilder{
+        self.inner.describe_security_groups()
+    }
+
+    /// DescribeSubnets: reads subnet state and has no side effects
+    pub(crate) fn describe_subnets(
+        &self,
+    ) -> aws_sdk_ec2::operation::describe_subnets::builders::DescribeSubnetsFluentBuilder {
+        self.inner.describe_subnets()
+    }
+
+    /// DescribeTransitGatewayVpcAttachments: reads attachment state and has no side effects
+    pub(crate) fn describe_transit_gateway_vpc_attachments(&self) -> aws_sdk_ec2::operation::describe_transit_gateway_vpc_attachments::builders::DescribeTransitGatewayVpcAttachmentsFluentBuilder{
+        self.inner.describe_transit_gateway_vpc_attachments()
+    }
+
+    /// DescribeTransitGateways: reads transit-gateway state and has no side effects
+    pub(crate) fn describe_transit_gateways(&self) -> aws_sdk_ec2::operation::describe_transit_gateways::builders::DescribeTransitGatewaysFluentBuilder{
+        self.inner.describe_transit_gateways()
+    }
+
+    /// DescribeVpcAttribute: reads one VPC attribute and has no side effects
+    pub(crate) fn describe_vpc_attribute(
+        &self,
+    ) -> aws_sdk_ec2::operation::describe_vpc_attribute::builders::DescribeVpcAttributeFluentBuilder
+    {
+        self.inner.describe_vpc_attribute()
+    }
+
+    /// DescribeVpcEndpoints: reads endpoint state and has no side effects
+    pub(crate) fn describe_vpc_endpoints(
+        &self,
+    ) -> aws_sdk_ec2::operation::describe_vpc_endpoints::builders::DescribeVpcEndpointsFluentBuilder
+    {
+        self.inner.describe_vpc_endpoints()
+    }
+
+    /// DescribeVpcPeeringConnections: reads peering state and has no side effects
+    pub(crate) fn describe_vpc_peering_connections(&self) -> aws_sdk_ec2::operation::describe_vpc_peering_connections::builders::DescribeVpcPeeringConnectionsFluentBuilder{
+        self.inner.describe_vpc_peering_connections()
+    }
+
+    /// DescribeVpcs: reads VPC state and has no side effects
+    pub(crate) fn describe_vpcs(
+        &self,
+    ) -> aws_sdk_ec2::operation::describe_vpcs::builders::DescribeVpcsFluentBuilder {
+        self.inner.describe_vpcs()
+    }
+
+    /// DescribeVpnGateways: reads VPN-gateway state and has no side effects
+    pub(crate) fn describe_vpn_gateways(
+        &self,
+    ) -> aws_sdk_ec2::operation::describe_vpn_gateways::builders::DescribeVpnGatewaysFluentBuilder
+    {
+        self.inner.describe_vpn_gateways()
+    }
+
+    /// DetachInternetGateway: detaches a resource and the provider does not accept an already-detached result as success
+    pub(crate) fn detach_internet_gateway(
+        &self,
+    ) -> aws_sdk_ec2::operation::detach_internet_gateway::builders::DetachInternetGatewayFluentBuilder
+    {
+        self.inner.detach_internet_gateway()
+    }
+
+    /// DetachVpnGateway: detaches a resource and the provider does not accept an already-detached result as success
+    pub(crate) fn detach_vpn_gateway(
+        &self,
+    ) -> aws_sdk_ec2::operation::detach_vpn_gateway::builders::DetachVpnGatewayFluentBuilder {
+        self.inner.detach_vpn_gateway()
+    }
+
+    /// DisassociateRouteTable: removes an association and the provider does not accept an already-removed result as success
+    pub(crate) fn disassociate_route_table(&self) -> aws_sdk_ec2::operation::disassociate_route_table::builders::DisassociateRouteTableFluentBuilder{
+        self.inner.disassociate_route_table()
+    }
+
+    /// ModifySubnetAttribute: sets one named subnet attribute to a complete value
+    pub(crate) fn modify_subnet_attribute(
+        &self,
+    ) -> aws_sdk_ec2::operation::modify_subnet_attribute::builders::ModifySubnetAttributeFluentBuilder
+    {
+        self.inner.modify_subnet_attribute()
+    }
+
+    /// ModifyVpcAttribute: sets one named VPC attribute to a complete value
+    pub(crate) fn modify_vpc_attribute(
+        &self,
+    ) -> aws_sdk_ec2::operation::modify_vpc_attribute::builders::ModifyVpcAttributeFluentBuilder
+    {
+        self.inner.modify_vpc_attribute()
+    }
+
+    /// ModifyVpcEndpoint: applies incremental add/remove sets and a replay is not guaranteed to be accepted
+    pub(crate) fn modify_vpc_endpoint(
+        &self,
+    ) -> aws_sdk_ec2::operation::modify_vpc_endpoint::builders::ModifyVpcEndpointFluentBuilder {
+        self.inner.modify_vpc_endpoint()
+    }
+
+    /// ReleaseAddress: the provider does not accept an already-released address as success
+    pub(crate) fn release_address(
+        &self,
+    ) -> aws_sdk_ec2::operation::release_address::builders::ReleaseAddressFluentBuilder {
+        self.inner.release_address()
+    }
+
+    /// ReplaceRoute: replaces the complete route target keyed by route table and destination
+    pub(crate) fn replace_route(
+        &self,
+    ) -> aws_sdk_ec2::operation::replace_route::builders::ReplaceRouteFluentBuilder {
+        self.inner.replace_route()
+    }
+
+    /// ReplaceRouteTableAssociation: a successful call replaces the association identifier consumed by the request
+    pub(crate) fn replace_route_table_association(&self) -> aws_sdk_ec2::operation::replace_route_table_association::builders::ReplaceRouteTableAssociationFluentBuilder{
+        self.inner.replace_route_table_association()
+    }
+
+    /// RevokeSecurityGroupEgress: revokes rules and the provider does not accept already-absent rules as success
+    pub(crate) fn revoke_security_group_egress(&self) -> aws_sdk_ec2::operation::revoke_security_group_egress::builders::RevokeSecurityGroupEgressFluentBuilder{
+        self.inner.revoke_security_group_egress()
+    }
+
+    /// RevokeSecurityGroupIngress: revokes rules and the provider does not accept already-absent rules as success
+    pub(crate) fn revoke_security_group_ingress(&self) -> aws_sdk_ec2::operation::revoke_security_group_ingress::builders::RevokeSecurityGroupIngressFluentBuilder{
+        self.inner.revoke_security_group_ingress()
     }
 }
 
@@ -114,6 +748,84 @@ pub(crate) fn ec2_idempotency(operation: &str) -> Idempotency {
     }
 }
 
+pub(crate) struct IamClient {
+    inner: aws_sdk_iam::Client,
+}
+
+// Decisions can outlive their current call sites; every decided operation remains
+// available through the closed generated client API.
+#[allow(dead_code)]
+impl IamClient {
+    pub(crate) fn from_bounded_config(config: &BoundedSdkConfig) -> Self {
+        Self {
+            inner: aws_sdk_iam::Client::from_conf(
+                aws_sdk_iam::config::Builder::from(config.sdk_config())
+                    .interceptor(ResendGuard::new(iam_idempotency))
+                    .build(),
+            ),
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn config(&self) -> &aws_sdk_iam::Config {
+        self.inner.config()
+    }
+
+    /// CreateRole: creates a top-level resource without an idempotency token
+    pub(crate) fn create_role(
+        &self,
+    ) -> aws_sdk_iam::operation::create_role::builders::CreateRoleFluentBuilder {
+        self.inner.create_role()
+    }
+
+    /// DeleteRole: the provider does not accept an already-absent role as success
+    pub(crate) fn delete_role(
+        &self,
+    ) -> aws_sdk_iam::operation::delete_role::builders::DeleteRoleFluentBuilder {
+        self.inner.delete_role()
+    }
+
+    /// GetRole: reads role state and has no side effects
+    pub(crate) fn get_role(
+        &self,
+    ) -> aws_sdk_iam::operation::get_role::builders::GetRoleFluentBuilder {
+        self.inner.get_role()
+    }
+
+    /// ListRoles: reads role state and has no side effects
+    pub(crate) fn list_roles(
+        &self,
+    ) -> aws_sdk_iam::operation::list_roles::builders::ListRolesFluentBuilder {
+        self.inner.list_roles()
+    }
+
+    /// TagRole: sets tag keys on one role; repeating the same values has no additional effect
+    pub(crate) fn tag_role(
+        &self,
+    ) -> aws_sdk_iam::operation::tag_role::builders::TagRoleFluentBuilder {
+        self.inner.tag_role()
+    }
+
+    /// UntagRole: removes named tag keys; repeating the removal leaves the same state
+    pub(crate) fn untag_role(
+        &self,
+    ) -> aws_sdk_iam::operation::untag_role::builders::UntagRoleFluentBuilder {
+        self.inner.untag_role()
+    }
+
+    /// UpdateAssumeRolePolicy: replaces the whole trust policy keyed by role name
+    pub(crate) fn update_assume_role_policy(&self) -> aws_sdk_iam::operation::update_assume_role_policy::builders::UpdateAssumeRolePolicyFluentBuilder{
+        self.inner.update_assume_role_policy()
+    }
+
+    /// UpdateRole: sets complete mutable role attributes keyed by role name
+    pub(crate) fn update_role(
+        &self,
+    ) -> aws_sdk_iam::operation::update_role::builders::UpdateRoleFluentBuilder {
+        self.inner.update_role()
+    }
+}
+
 pub(crate) fn iam_idempotency(operation: &str) -> Idempotency {
     match operation {
         "CreateRole" => Idempotency::NotIdempotent,
@@ -128,11 +840,150 @@ pub(crate) fn iam_idempotency(operation: &str) -> Idempotency {
     }
 }
 
+pub(crate) struct IdentityStoreClient {
+    inner: aws_sdk_identitystore::Client,
+}
+
+// Decisions can outlive their current call sites; every decided operation remains
+// available through the closed generated client API.
+#[allow(dead_code)]
+impl IdentityStoreClient {
+    pub(crate) fn from_bounded_config(config: &BoundedSdkConfig) -> Self {
+        Self {
+            inner: aws_sdk_identitystore::Client::from_conf(
+                aws_sdk_identitystore::config::Builder::from(config.sdk_config())
+                    .interceptor(ResendGuard::new(identitystore_idempotency))
+                    .build(),
+            ),
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn config(&self) -> &aws_sdk_identitystore::Config {
+        self.inner.config()
+    }
+
+    /// DescribeUser: the model marks this read operation @readonly
+    pub(crate) fn describe_user(
+        &self,
+    ) -> aws_sdk_identitystore::operation::describe_user::builders::DescribeUserFluentBuilder {
+        self.inner.describe_user()
+    }
+
+    /// GetUserId: the model marks this read operation @readonly
+    pub(crate) fn get_user_id(
+        &self,
+    ) -> aws_sdk_identitystore::operation::get_user_id::builders::GetUserIdFluentBuilder {
+        self.inner.get_user_id()
+    }
+}
+
 pub(crate) fn identitystore_idempotency(operation: &str) -> Idempotency {
     match operation {
         "DescribeUser" => Idempotency::ReadOnly,
         "GetUserId" => Idempotency::ReadOnly,
         _ => Idempotency::NotIdempotent,
+    }
+}
+
+pub(crate) struct OrganizationsClient {
+    inner: aws_sdk_organizations::Client,
+}
+
+// Decisions can outlive their current call sites; every decided operation remains
+// available through the closed generated client API.
+#[allow(dead_code)]
+impl OrganizationsClient {
+    pub(crate) fn from_bounded_config(config: &BoundedSdkConfig) -> Self {
+        Self {
+            inner: aws_sdk_organizations::Client::from_conf(
+                aws_sdk_organizations::config::Builder::from(config.sdk_config())
+                    .interceptor(ResendGuard::new(organizations_idempotency))
+                    .build(),
+            ),
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn config(&self) -> &aws_sdk_organizations::Config {
+        self.inner.config()
+    }
+
+    /// CloseAccount: starts a top-level account transition and has no idempotency token
+    pub(crate) fn close_account(
+        &self,
+    ) -> aws_sdk_organizations::operation::close_account::builders::CloseAccountFluentBuilder {
+        self.inner.close_account()
+    }
+
+    /// CreateAccount: starts an account creation request without an idempotency token
+    pub(crate) fn create_account(
+        &self,
+    ) -> aws_sdk_organizations::operation::create_account::builders::CreateAccountFluentBuilder
+    {
+        self.inner.create_account()
+    }
+
+    /// CreateOrganization: creates a top-level organization without an idempotency token
+    pub(crate) fn create_organization(&self) -> aws_sdk_organizations::operation::create_organization::builders::CreateOrganizationFluentBuilder{
+        self.inner.create_organization()
+    }
+
+    /// DeleteOrganization: the provider does not accept an already-absent organization as success
+    pub(crate) fn delete_organization(&self) -> aws_sdk_organizations::operation::delete_organization::builders::DeleteOrganizationFluentBuilder{
+        self.inner.delete_organization()
+    }
+
+    /// DescribeAccount: reads account state and has no side effects
+    pub(crate) fn describe_account(
+        &self,
+    ) -> aws_sdk_organizations::operation::describe_account::builders::DescribeAccountFluentBuilder
+    {
+        self.inner.describe_account()
+    }
+
+    /// DescribeCreateAccountStatus: reads request state and has no side effects
+    pub(crate) fn describe_create_account_status(&self) -> aws_sdk_organizations::operation::describe_create_account_status::builders::DescribeCreateAccountStatusFluentBuilder{
+        self.inner.describe_create_account_status()
+    }
+
+    /// DescribeOrganization: reads organization state and has no side effects
+    pub(crate) fn describe_organization(&self) -> aws_sdk_organizations::operation::describe_organization::builders::DescribeOrganizationFluentBuilder{
+        self.inner.describe_organization()
+    }
+
+    /// ListParents: reads account parents and has no side effects
+    pub(crate) fn list_parents(
+        &self,
+    ) -> aws_sdk_organizations::operation::list_parents::builders::ListParentsFluentBuilder {
+        self.inner.list_parents()
+    }
+
+    /// ListTagsForResource: reads resource tags and has no side effects
+    pub(crate) fn list_tags_for_resource(&self) -> aws_sdk_organizations::operation::list_tags_for_resource::builders::ListTagsForResourceFluentBuilder{
+        self.inner.list_tags_for_resource()
+    }
+
+    /// MoveAccount: consumes the source parent relationship and a replay is not guaranteed to be accepted
+    pub(crate) fn move_account(
+        &self,
+    ) -> aws_sdk_organizations::operation::move_account::builders::MoveAccountFluentBuilder {
+        self.inner.move_account()
+    }
+
+    /// TagResource: sets tag keys on one resource; repeating the same values has no additional effect
+    pub(crate) fn tag_resource(
+        &self,
+    ) -> aws_sdk_organizations::operation::tag_resource::builders::TagResourceFluentBuilder {
+        self.inner.tag_resource()
+    }
+
+    /// UntagResource: removes named tag keys; repeating the removal leaves the same state
+    pub(crate) fn untag_resource(
+        &self,
+    ) -> aws_sdk_organizations::operation::untag_resource::builders::UntagResourceFluentBuilder
+    {
+        self.inner.untag_resource()
     }
 }
 
@@ -154,12 +1005,358 @@ pub(crate) fn organizations_idempotency(operation: &str) -> Idempotency {
     }
 }
 
+pub(crate) struct Route53Client {
+    inner: aws_sdk_route53::Client,
+}
+
+// Decisions can outlive their current call sites; every decided operation remains
+// available through the closed generated client API.
+#[allow(dead_code)]
+impl Route53Client {
+    pub(crate) fn from_bounded_config(config: &BoundedSdkConfig) -> Self {
+        Self {
+            inner: aws_sdk_route53::Client::from_conf(
+                aws_sdk_route53::config::Builder::from(config.sdk_config())
+                    .interceptor(ResendGuard::new(route53_idempotency))
+                    .build(),
+            ),
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn config(&self) -> &aws_sdk_route53::Config {
+        self.inner.config()
+    }
+
+    /// ChangeResourceRecordSets: applies a change batch without an idempotency token
+    pub(crate) fn change_resource_record_sets(&self) -> aws_sdk_route53::operation::change_resource_record_sets::builders::ChangeResourceRecordSetsFluentBuilder{
+        self.inner.change_resource_record_sets()
+    }
+
+    /// ListResourceRecordSets: reads record-set state and has no side effects
+    pub(crate) fn list_resource_record_sets(&self) -> aws_sdk_route53::operation::list_resource_record_sets::builders::ListResourceRecordSetsFluentBuilder{
+        self.inner.list_resource_record_sets()
+    }
+
+    /// ListTagsForResource: reads hosted-zone tags and has no side effects
+    pub(crate) fn list_tags_for_resource(&self) -> aws_sdk_route53::operation::list_tags_for_resource::builders::ListTagsForResourceFluentBuilder{
+        self.inner.list_tags_for_resource()
+    }
+}
+
 pub(crate) fn route53_idempotency(operation: &str) -> Idempotency {
     match operation {
         "ChangeResourceRecordSets" => Idempotency::NotIdempotent,
         "ListResourceRecordSets" => Idempotency::ReadOnly,
         "ListTagsForResource" => Idempotency::ReadOnly,
         _ => Idempotency::NotIdempotent,
+    }
+}
+
+pub(crate) struct S3Client {
+    inner: aws_sdk_s3::Client,
+}
+
+// Decisions can outlive their current call sites; every decided operation remains
+// available through the closed generated client API.
+#[allow(dead_code)]
+impl S3Client {
+    pub(crate) fn from_bounded_config(config: &BoundedSdkConfig) -> Self {
+        Self {
+            inner: aws_sdk_s3::Client::from_conf(
+                aws_sdk_s3::config::Builder::from(config.sdk_config())
+                    .interceptor(ResendGuard::new(s3_idempotency))
+                    .build(),
+            ),
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn config(&self) -> &aws_sdk_s3::Config {
+        self.inner.config()
+    }
+
+    /// CreateBucket: creates a top-level bucket without an idempotency token
+    pub(crate) fn create_bucket(
+        &self,
+    ) -> aws_sdk_s3::operation::create_bucket::builders::CreateBucketFluentBuilder {
+        self.inner.create_bucket()
+    }
+
+    /// DeleteBucket: the provider does not accept an already-absent bucket as success
+    pub(crate) fn delete_bucket(
+        &self,
+    ) -> aws_sdk_s3::operation::delete_bucket::builders::DeleteBucketFluentBuilder {
+        self.inner.delete_bucket()
+    }
+
+    /// DeleteBucketCors: removes the whole CORS sub-configuration keyed by bucket
+    pub(crate) fn delete_bucket_cors(
+        &self,
+    ) -> aws_sdk_s3::operation::delete_bucket_cors::builders::DeleteBucketCorsFluentBuilder {
+        self.inner.delete_bucket_cors()
+    }
+
+    /// DeleteBucketEncryption: removes the whole encryption sub-configuration keyed by bucket
+    pub(crate) fn delete_bucket_encryption(&self) -> aws_sdk_s3::operation::delete_bucket_encryption::builders::DeleteBucketEncryptionFluentBuilder{
+        self.inner.delete_bucket_encryption()
+    }
+
+    /// DeleteBucketLifecycle: removes the whole lifecycle sub-configuration keyed by bucket
+    pub(crate) fn delete_bucket_lifecycle(
+        &self,
+    ) -> aws_sdk_s3::operation::delete_bucket_lifecycle::builders::DeleteBucketLifecycleFluentBuilder
+    {
+        self.inner.delete_bucket_lifecycle()
+    }
+
+    /// DeleteBucketOwnershipControls: removes the whole ownership-controls sub-configuration keyed by bucket
+    pub(crate) fn delete_bucket_ownership_controls(&self) -> aws_sdk_s3::operation::delete_bucket_ownership_controls::builders::DeleteBucketOwnershipControlsFluentBuilder{
+        self.inner.delete_bucket_ownership_controls()
+    }
+
+    /// DeleteBucketPolicy: removes the whole policy sub-configuration keyed by bucket
+    pub(crate) fn delete_bucket_policy(
+        &self,
+    ) -> aws_sdk_s3::operation::delete_bucket_policy::builders::DeleteBucketPolicyFluentBuilder
+    {
+        self.inner.delete_bucket_policy()
+    }
+
+    /// DeleteBucketReplication: removes the whole replication sub-configuration keyed by bucket
+    pub(crate) fn delete_bucket_replication(&self) -> aws_sdk_s3::operation::delete_bucket_replication::builders::DeleteBucketReplicationFluentBuilder{
+        self.inner.delete_bucket_replication()
+    }
+
+    /// DeleteBucketTagging: removes the whole tag set keyed by bucket
+    pub(crate) fn delete_bucket_tagging(
+        &self,
+    ) -> aws_sdk_s3::operation::delete_bucket_tagging::builders::DeleteBucketTaggingFluentBuilder
+    {
+        self.inner.delete_bucket_tagging()
+    }
+
+    /// DeleteBucketWebsite: removes the whole website sub-configuration keyed by bucket
+    pub(crate) fn delete_bucket_website(
+        &self,
+    ) -> aws_sdk_s3::operation::delete_bucket_website::builders::DeleteBucketWebsiteFluentBuilder
+    {
+        self.inner.delete_bucket_website()
+    }
+
+    /// DeleteObjects: deletes the explicitly named object versions; deleting an absent key leaves it absent
+    pub(crate) fn delete_objects(
+        &self,
+    ) -> aws_sdk_s3::operation::delete_objects::builders::DeleteObjectsFluentBuilder {
+        self.inner.delete_objects()
+    }
+
+    /// DeletePublicAccessBlock: removes the whole public-access-block sub-configuration keyed by bucket
+    pub(crate) fn delete_public_access_block(&self) -> aws_sdk_s3::operation::delete_public_access_block::builders::DeletePublicAccessBlockFluentBuilder{
+        self.inner.delete_public_access_block()
+    }
+
+    /// GetBucketAcl: reads bucket ACL state and has no side effects
+    pub(crate) fn get_bucket_acl(
+        &self,
+    ) -> aws_sdk_s3::operation::get_bucket_acl::builders::GetBucketAclFluentBuilder {
+        self.inner.get_bucket_acl()
+    }
+
+    /// GetBucketCors: reads bucket CORS state and has no side effects
+    pub(crate) fn get_bucket_cors(
+        &self,
+    ) -> aws_sdk_s3::operation::get_bucket_cors::builders::GetBucketCorsFluentBuilder {
+        self.inner.get_bucket_cors()
+    }
+
+    /// GetBucketEncryption: reads bucket encryption state and has no side effects
+    pub(crate) fn get_bucket_encryption(
+        &self,
+    ) -> aws_sdk_s3::operation::get_bucket_encryption::builders::GetBucketEncryptionFluentBuilder
+    {
+        self.inner.get_bucket_encryption()
+    }
+
+    /// GetBucketLifecycleConfiguration: reads bucket lifecycle state and has no side effects
+    pub(crate) fn get_bucket_lifecycle_configuration(&self) -> aws_sdk_s3::operation::get_bucket_lifecycle_configuration::builders::GetBucketLifecycleConfigurationFluentBuilder{
+        self.inner.get_bucket_lifecycle_configuration()
+    }
+
+    /// GetBucketLogging: reads bucket logging state and has no side effects
+    pub(crate) fn get_bucket_logging(
+        &self,
+    ) -> aws_sdk_s3::operation::get_bucket_logging::builders::GetBucketLoggingFluentBuilder {
+        self.inner.get_bucket_logging()
+    }
+
+    /// GetBucketNotificationConfiguration: reads bucket notification state and has no side effects
+    pub(crate) fn get_bucket_notification_configuration(&self) -> aws_sdk_s3::operation::get_bucket_notification_configuration::builders::GetBucketNotificationConfigurationFluentBuilder{
+        self.inner.get_bucket_notification_configuration()
+    }
+
+    /// GetBucketOwnershipControls: reads bucket ownership-control state and has no side effects
+    pub(crate) fn get_bucket_ownership_controls(&self) -> aws_sdk_s3::operation::get_bucket_ownership_controls::builders::GetBucketOwnershipControlsFluentBuilder{
+        self.inner.get_bucket_ownership_controls()
+    }
+
+    /// GetBucketPolicy: reads bucket policy state and has no side effects
+    pub(crate) fn get_bucket_policy(
+        &self,
+    ) -> aws_sdk_s3::operation::get_bucket_policy::builders::GetBucketPolicyFluentBuilder {
+        self.inner.get_bucket_policy()
+    }
+
+    /// GetBucketReplication: reads bucket replication state and has no side effects
+    pub(crate) fn get_bucket_replication(
+        &self,
+    ) -> aws_sdk_s3::operation::get_bucket_replication::builders::GetBucketReplicationFluentBuilder
+    {
+        self.inner.get_bucket_replication()
+    }
+
+    /// GetBucketTagging: reads bucket tags and has no side effects
+    pub(crate) fn get_bucket_tagging(
+        &self,
+    ) -> aws_sdk_s3::operation::get_bucket_tagging::builders::GetBucketTaggingFluentBuilder {
+        self.inner.get_bucket_tagging()
+    }
+
+    /// GetBucketVersioning: reads bucket versioning state and has no side effects
+    pub(crate) fn get_bucket_versioning(
+        &self,
+    ) -> aws_sdk_s3::operation::get_bucket_versioning::builders::GetBucketVersioningFluentBuilder
+    {
+        self.inner.get_bucket_versioning()
+    }
+
+    /// GetBucketWebsite: reads bucket website state and has no side effects
+    pub(crate) fn get_bucket_website(
+        &self,
+    ) -> aws_sdk_s3::operation::get_bucket_website::builders::GetBucketWebsiteFluentBuilder {
+        self.inner.get_bucket_website()
+    }
+
+    /// GetObjectLockConfiguration: reads object-lock state and has no side effects
+    pub(crate) fn get_object_lock_configuration(&self) -> aws_sdk_s3::operation::get_object_lock_configuration::builders::GetObjectLockConfigurationFluentBuilder{
+        self.inner.get_object_lock_configuration()
+    }
+
+    /// GetPublicAccessBlock: reads public-access-block state and has no side effects
+    pub(crate) fn get_public_access_block(
+        &self,
+    ) -> aws_sdk_s3::operation::get_public_access_block::builders::GetPublicAccessBlockFluentBuilder
+    {
+        self.inner.get_public_access_block()
+    }
+
+    /// HeadBucket: reads bucket existence and region metadata and has no side effects
+    pub(crate) fn head_bucket(
+        &self,
+    ) -> aws_sdk_s3::operation::head_bucket::builders::HeadBucketFluentBuilder {
+        self.inner.head_bucket()
+    }
+
+    /// ListObjectVersions: reads object-version state and has no side effects
+    pub(crate) fn list_object_versions(
+        &self,
+    ) -> aws_sdk_s3::operation::list_object_versions::builders::ListObjectVersionsFluentBuilder
+    {
+        self.inner.list_object_versions()
+    }
+
+    /// PutBucketAcl: replaces the whole ACL keyed by bucket
+    pub(crate) fn put_bucket_acl(
+        &self,
+    ) -> aws_sdk_s3::operation::put_bucket_acl::builders::PutBucketAclFluentBuilder {
+        self.inner.put_bucket_acl()
+    }
+
+    /// PutBucketCors: replaces the whole CORS sub-configuration keyed by bucket
+    pub(crate) fn put_bucket_cors(
+        &self,
+    ) -> aws_sdk_s3::operation::put_bucket_cors::builders::PutBucketCorsFluentBuilder {
+        self.inner.put_bucket_cors()
+    }
+
+    /// PutBucketEncryption: replaces the whole encryption sub-configuration keyed by bucket
+    pub(crate) fn put_bucket_encryption(
+        &self,
+    ) -> aws_sdk_s3::operation::put_bucket_encryption::builders::PutBucketEncryptionFluentBuilder
+    {
+        self.inner.put_bucket_encryption()
+    }
+
+    /// PutBucketLifecycleConfiguration: replaces the whole lifecycle sub-configuration keyed by bucket
+    pub(crate) fn put_bucket_lifecycle_configuration(&self) -> aws_sdk_s3::operation::put_bucket_lifecycle_configuration::builders::PutBucketLifecycleConfigurationFluentBuilder{
+        self.inner.put_bucket_lifecycle_configuration()
+    }
+
+    /// PutBucketLogging: replaces the whole logging sub-configuration keyed by bucket
+    pub(crate) fn put_bucket_logging(
+        &self,
+    ) -> aws_sdk_s3::operation::put_bucket_logging::builders::PutBucketLoggingFluentBuilder {
+        self.inner.put_bucket_logging()
+    }
+
+    /// PutBucketNotificationConfiguration: replaces the whole notification sub-configuration keyed by bucket
+    pub(crate) fn put_bucket_notification_configuration(&self) -> aws_sdk_s3::operation::put_bucket_notification_configuration::builders::PutBucketNotificationConfigurationFluentBuilder{
+        self.inner.put_bucket_notification_configuration()
+    }
+
+    /// PutBucketOwnershipControls: replaces the whole ownership-controls sub-configuration keyed by bucket
+    pub(crate) fn put_bucket_ownership_controls(&self) -> aws_sdk_s3::operation::put_bucket_ownership_controls::builders::PutBucketOwnershipControlsFluentBuilder{
+        self.inner.put_bucket_ownership_controls()
+    }
+
+    /// PutBucketPolicy: replaces the whole policy keyed by bucket
+    pub(crate) fn put_bucket_policy(
+        &self,
+    ) -> aws_sdk_s3::operation::put_bucket_policy::builders::PutBucketPolicyFluentBuilder {
+        self.inner.put_bucket_policy()
+    }
+
+    /// PutBucketReplication: replaces the whole replication sub-configuration keyed by bucket
+    pub(crate) fn put_bucket_replication(
+        &self,
+    ) -> aws_sdk_s3::operation::put_bucket_replication::builders::PutBucketReplicationFluentBuilder
+    {
+        self.inner.put_bucket_replication()
+    }
+
+    /// PutBucketTagging: replaces the whole tag set keyed by bucket
+    pub(crate) fn put_bucket_tagging(
+        &self,
+    ) -> aws_sdk_s3::operation::put_bucket_tagging::builders::PutBucketTaggingFluentBuilder {
+        self.inner.put_bucket_tagging()
+    }
+
+    /// PutBucketVersioning: sets the complete versioning state keyed by bucket
+    pub(crate) fn put_bucket_versioning(
+        &self,
+    ) -> aws_sdk_s3::operation::put_bucket_versioning::builders::PutBucketVersioningFluentBuilder
+    {
+        self.inner.put_bucket_versioning()
+    }
+
+    /// PutBucketWebsite: replaces the whole website sub-configuration keyed by bucket
+    pub(crate) fn put_bucket_website(
+        &self,
+    ) -> aws_sdk_s3::operation::put_bucket_website::builders::PutBucketWebsiteFluentBuilder {
+        self.inner.put_bucket_website()
+    }
+
+    /// PutObjectLockConfiguration: replaces the whole object-lock sub-configuration keyed by bucket
+    pub(crate) fn put_object_lock_configuration(&self) -> aws_sdk_s3::operation::put_object_lock_configuration::builders::PutObjectLockConfigurationFluentBuilder{
+        self.inner.put_object_lock_configuration()
+    }
+
+    /// PutPublicAccessBlock: replaces the whole public-access-block sub-configuration keyed by bucket
+    pub(crate) fn put_public_access_block(
+        &self,
+    ) -> aws_sdk_s3::operation::put_public_access_block::builders::PutPublicAccessBlockFluentBuilder
+    {
+        self.inner.put_public_access_block()
     }
 }
 
@@ -211,6 +1408,81 @@ pub(crate) fn s3_idempotency(operation: &str) -> Idempotency {
     }
 }
 
+pub(crate) struct SqsClient {
+    inner: aws_sdk_sqs::Client,
+}
+
+// Decisions can outlive their current call sites; every decided operation remains
+// available through the closed generated client API.
+#[allow(dead_code)]
+impl SqsClient {
+    pub(crate) fn from_bounded_config(config: &BoundedSdkConfig) -> Self {
+        Self {
+            inner: aws_sdk_sqs::Client::from_conf(
+                aws_sdk_sqs::config::Builder::from(config.sdk_config())
+                    .interceptor(ResendGuard::new(sqs_idempotency))
+                    .build(),
+            ),
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn config(&self) -> &aws_sdk_sqs::Config {
+        self.inner.config()
+    }
+
+    /// CreateQueue: creates a top-level queue without an idempotency token
+    pub(crate) fn create_queue(
+        &self,
+    ) -> aws_sdk_sqs::operation::create_queue::builders::CreateQueueFluentBuilder {
+        self.inner.create_queue()
+    }
+
+    /// DeleteQueue: the provider does not accept an already-absent queue as success
+    pub(crate) fn delete_queue(
+        &self,
+    ) -> aws_sdk_sqs::operation::delete_queue::builders::DeleteQueueFluentBuilder {
+        self.inner.delete_queue()
+    }
+
+    /// GetQueueAttributes: reads queue state and has no side effects
+    pub(crate) fn get_queue_attributes(
+        &self,
+    ) -> aws_sdk_sqs::operation::get_queue_attributes::builders::GetQueueAttributesFluentBuilder
+    {
+        self.inner.get_queue_attributes()
+    }
+
+    /// ListQueueTags: reads queue tags and has no side effects
+    pub(crate) fn list_queue_tags(
+        &self,
+    ) -> aws_sdk_sqs::operation::list_queue_tags::builders::ListQueueTagsFluentBuilder {
+        self.inner.list_queue_tags()
+    }
+
+    /// SetQueueAttributes: sets complete values for named queue attributes
+    pub(crate) fn set_queue_attributes(
+        &self,
+    ) -> aws_sdk_sqs::operation::set_queue_attributes::builders::SetQueueAttributesFluentBuilder
+    {
+        self.inner.set_queue_attributes()
+    }
+
+    /// TagQueue: sets tag keys on one queue; repeating the same values has no additional effect
+    pub(crate) fn tag_queue(
+        &self,
+    ) -> aws_sdk_sqs::operation::tag_queue::builders::TagQueueFluentBuilder {
+        self.inner.tag_queue()
+    }
+
+    /// UntagQueue: removes named tag keys; repeating the removal leaves the same state
+    pub(crate) fn untag_queue(
+        &self,
+    ) -> aws_sdk_sqs::operation::untag_queue::builders::UntagQueueFluentBuilder {
+        self.inner.untag_queue()
+    }
+}
+
 pub(crate) fn sqs_idempotency(operation: &str) -> Idempotency {
     match operation {
         "CreateQueue" => Idempotency::NotIdempotent,
@@ -221,6 +1493,37 @@ pub(crate) fn sqs_idempotency(operation: &str) -> Idempotency {
         "TagQueue" => Idempotency::Idempotent,
         "UntagQueue" => Idempotency::Idempotent,
         _ => Idempotency::NotIdempotent,
+    }
+}
+
+pub(crate) struct StsClient {
+    inner: aws_sdk_sts::Client,
+}
+
+// Decisions can outlive their current call sites; every decided operation remains
+// available through the closed generated client API.
+#[allow(dead_code)]
+impl StsClient {
+    pub(crate) fn from_bounded_config(config: &BoundedSdkConfig) -> Self {
+        Self {
+            inner: aws_sdk_sts::Client::from_conf(
+                aws_sdk_sts::config::Builder::from(config.sdk_config())
+                    .interceptor(ResendGuard::new(sts_idempotency))
+                    .build(),
+            ),
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn config(&self) -> &aws_sdk_sts::Config {
+        self.inner.config()
+    }
+
+    /// GetCallerIdentity: reads caller identity and has no side effects
+    pub(crate) fn get_caller_identity(
+        &self,
+    ) -> aws_sdk_sts::operation::get_caller_identity::builders::GetCallerIdentityFluentBuilder {
+        self.inner.get_caller_identity()
     }
 }
 
@@ -4013,175 +5316,3 @@ impl DecidedOperationError for aws_sdk_sts::operation::get_caller_identity::GetC
     const NAME: &'static str = <aws_sdk_sts::operation::get_caller_identity::builders::GetCallerIdentityFluentBuilder as AwsOperation>::NAME;
     const IDEMPOTENCY: Idempotency = <aws_sdk_sts::operation::get_caller_identity::builders::GetCallerIdentityFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
-
-#[cfg(test)]
-pub(crate) const DECIDED_OPERATIONS: &[(&str, &str)] = &[
-    ("acm", "add_tags_to_certificate"),
-    ("acm", "delete_certificate"),
-    ("acm", "describe_certificate"),
-    ("acm", "list_tags_for_certificate"),
-    ("acm", "remove_tags_from_certificate"),
-    ("acm", "request_certificate"),
-    ("acm", "update_certificate_options"),
-    ("cloudwatchlogs", "associate_kms_key"),
-    ("cloudwatchlogs", "create_log_group"),
-    ("cloudwatchlogs", "delete_log_group"),
-    ("cloudwatchlogs", "delete_retention_policy"),
-    ("cloudwatchlogs", "describe_log_groups"),
-    ("cloudwatchlogs", "disassociate_kms_key"),
-    ("cloudwatchlogs", "list_tags_for_resource"),
-    ("cloudwatchlogs", "list_tags_log_group"),
-    ("cloudwatchlogs", "put_retention_policy"),
-    ("cloudwatchlogs", "tag_log_group"),
-    ("cloudwatchlogs", "tag_resource"),
-    ("cloudwatchlogs", "untag_log_group"),
-    ("cloudwatchlogs", "untag_resource"),
-    ("ec2", "allocate_address"),
-    ("ec2", "associate_route_table"),
-    ("ec2", "attach_internet_gateway"),
-    ("ec2", "attach_vpn_gateway"),
-    ("ec2", "authorize_security_group_egress"),
-    ("ec2", "authorize_security_group_ingress"),
-    ("ec2", "create_egress_only_internet_gateway"),
-    ("ec2", "create_flow_logs"),
-    ("ec2", "create_internet_gateway"),
-    ("ec2", "create_nat_gateway"),
-    ("ec2", "create_route"),
-    ("ec2", "create_route_table"),
-    ("ec2", "create_security_group"),
-    ("ec2", "create_subnet"),
-    ("ec2", "create_tags"),
-    ("ec2", "create_transit_gateway"),
-    ("ec2", "create_transit_gateway_vpc_attachment"),
-    ("ec2", "create_vpc"),
-    ("ec2", "create_vpc_endpoint"),
-    ("ec2", "create_vpc_peering_connection"),
-    ("ec2", "create_vpn_gateway"),
-    ("ec2", "delete_egress_only_internet_gateway"),
-    ("ec2", "delete_flow_logs"),
-    ("ec2", "delete_internet_gateway"),
-    ("ec2", "delete_nat_gateway"),
-    ("ec2", "delete_route"),
-    ("ec2", "delete_route_table"),
-    ("ec2", "delete_security_group"),
-    ("ec2", "delete_subnet"),
-    ("ec2", "delete_tags"),
-    ("ec2", "delete_transit_gateway"),
-    ("ec2", "delete_transit_gateway_vpc_attachment"),
-    ("ec2", "delete_vpc"),
-    ("ec2", "delete_vpc_endpoints"),
-    ("ec2", "delete_vpc_peering_connection"),
-    ("ec2", "delete_vpn_gateway"),
-    ("ec2", "describe_addresses"),
-    ("ec2", "describe_egress_only_internet_gateways"),
-    ("ec2", "describe_flow_logs"),
-    ("ec2", "describe_internet_gateways"),
-    ("ec2", "describe_nat_gateways"),
-    ("ec2", "describe_route_tables"),
-    ("ec2", "describe_security_group_rules"),
-    ("ec2", "describe_security_groups"),
-    ("ec2", "describe_subnets"),
-    ("ec2", "describe_transit_gateway_vpc_attachments"),
-    ("ec2", "describe_transit_gateways"),
-    ("ec2", "describe_vpc_attribute"),
-    ("ec2", "describe_vpc_endpoints"),
-    ("ec2", "describe_vpc_peering_connections"),
-    ("ec2", "describe_vpcs"),
-    ("ec2", "describe_vpn_gateways"),
-    ("ec2", "detach_internet_gateway"),
-    ("ec2", "detach_vpn_gateway"),
-    ("ec2", "disassociate_route_table"),
-    ("ec2", "modify_subnet_attribute"),
-    ("ec2", "modify_vpc_attribute"),
-    ("ec2", "modify_vpc_endpoint"),
-    ("ec2", "release_address"),
-    ("ec2", "replace_route"),
-    ("ec2", "replace_route_table_association"),
-    ("ec2", "revoke_security_group_egress"),
-    ("ec2", "revoke_security_group_ingress"),
-    ("iam", "create_role"),
-    ("iam", "delete_role"),
-    ("iam", "get_role"),
-    ("iam", "list_roles"),
-    ("iam", "tag_role"),
-    ("iam", "untag_role"),
-    ("iam", "update_assume_role_policy"),
-    ("iam", "update_role"),
-    ("identitystore", "describe_user"),
-    ("identitystore", "get_user_id"),
-    ("organizations", "close_account"),
-    ("organizations", "create_account"),
-    ("organizations", "create_organization"),
-    ("organizations", "delete_organization"),
-    ("organizations", "describe_account"),
-    ("organizations", "describe_create_account_status"),
-    ("organizations", "describe_organization"),
-    ("organizations", "list_parents"),
-    ("organizations", "list_tags_for_resource"),
-    ("organizations", "move_account"),
-    ("organizations", "tag_resource"),
-    ("organizations", "untag_resource"),
-    ("route53", "change_resource_record_sets"),
-    ("route53", "list_resource_record_sets"),
-    ("route53", "list_tags_for_resource"),
-    ("s3", "create_bucket"),
-    ("s3", "delete_bucket"),
-    ("s3", "delete_bucket_cors"),
-    ("s3", "delete_bucket_encryption"),
-    ("s3", "delete_bucket_lifecycle"),
-    ("s3", "delete_bucket_ownership_controls"),
-    ("s3", "delete_bucket_policy"),
-    ("s3", "delete_bucket_replication"),
-    ("s3", "delete_bucket_tagging"),
-    ("s3", "delete_bucket_website"),
-    ("s3", "delete_objects"),
-    ("s3", "delete_public_access_block"),
-    ("s3", "get_bucket_acl"),
-    ("s3", "get_bucket_cors"),
-    ("s3", "get_bucket_encryption"),
-    ("s3", "get_bucket_lifecycle_configuration"),
-    ("s3", "get_bucket_logging"),
-    ("s3", "get_bucket_notification_configuration"),
-    ("s3", "get_bucket_ownership_controls"),
-    ("s3", "get_bucket_policy"),
-    ("s3", "get_bucket_replication"),
-    ("s3", "get_bucket_tagging"),
-    ("s3", "get_bucket_versioning"),
-    ("s3", "get_bucket_website"),
-    ("s3", "get_object_lock_configuration"),
-    ("s3", "get_public_access_block"),
-    ("s3", "head_bucket"),
-    ("s3", "list_object_versions"),
-    ("s3", "put_bucket_acl"),
-    ("s3", "put_bucket_cors"),
-    ("s3", "put_bucket_encryption"),
-    ("s3", "put_bucket_lifecycle_configuration"),
-    ("s3", "put_bucket_logging"),
-    ("s3", "put_bucket_notification_configuration"),
-    ("s3", "put_bucket_ownership_controls"),
-    ("s3", "put_bucket_policy"),
-    ("s3", "put_bucket_replication"),
-    ("s3", "put_bucket_tagging"),
-    ("s3", "put_bucket_versioning"),
-    ("s3", "put_bucket_website"),
-    ("s3", "put_object_lock_configuration"),
-    ("s3", "put_public_access_block"),
-    ("sqs", "create_queue"),
-    ("sqs", "delete_queue"),
-    ("sqs", "get_queue_attributes"),
-    ("sqs", "list_queue_tags"),
-    ("sqs", "set_queue_attributes"),
-    ("sqs", "tag_queue"),
-    ("sqs", "untag_queue"),
-    ("sts", "get_caller_identity"),
-];
-
-#[cfg(test)]
-pub(crate) const TOKEN_OPERATIONS: &[(&str, &str)] = &[
-    ("acm", "request_certificate"),
-    ("ec2", "create_egress_only_internet_gateway"),
-    ("ec2", "create_flow_logs"),
-    ("ec2", "create_nat_gateway"),
-    ("ec2", "create_route_table"),
-    ("ec2", "create_vpc_endpoint"),
-];

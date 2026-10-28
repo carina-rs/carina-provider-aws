@@ -2,16 +2,18 @@
 //!
 //! These reduce boilerplate across EC2 (and other) service implementations.
 
+use std::future::Future;
 use std::time::Duration;
 
 use aws_sdk_ec2::types::{ResourceType, Tag, TagSpecification};
+use aws_smithy_runtime_api::client::orchestrator::HttpResponse;
 use aws_smithy_runtime_api::client::result::SdkError;
 use aws_smithy_types::error::display::DisplayErrorContext;
 use aws_smithy_types::error::metadata::ProvideErrorMetadata;
 use aws_smithy_types::retry::ProvideErrorKind;
 use tokio::time::sleep;
 
-use carina_aws_types::SendOutcome;
+use carina_aws_types::{Idempotency, SendOutcome};
 use carina_core::provider::{
     AppliedIdentifier, AppliedState, PatchOp, ProviderError, ProviderResult, ReadOutcome,
     UpdatePatch,
@@ -20,7 +22,8 @@ use carina_core::resource::{ConcreteValue, EnumAttrError, Resource, ResourceId, 
 use carina_core::schema::ResourceSchema;
 
 use crate::aws_operation::{
-    AwsOperation, ClientToken, EC2_CREATE_TOKEN_TAG, NoToken, TokenBearing, WithToken,
+    AwsOperation, ClientToken, EC2_CREATE_TOKEN_TAG, NoToken, TokenBearing, TokenOperation,
+    WithToken,
 };
 use crate::ec2_tags::value_to_ec2_tags;
 use crate::error_helpers::SendFailure;
@@ -365,6 +368,19 @@ impl Default for RetryPolicy {
     }
 }
 
+/// Capability required to send the builder inside a [`TokenOperation`].
+///
+/// The private field keeps construction inside this module, so provider call
+/// sites must use [`retry_aws_operation_with_token`] or
+/// [`send_aws_operation_with_token`].
+pub(crate) struct TokenSendPermit(());
+
+impl TokenSendPermit {
+    fn new() -> Self {
+        Self(())
+    }
+}
+
 /// Retry a generated non-token AWS builder with exponential backoff.
 ///
 /// A rebuilt request is sent only when both the failure classification and
@@ -384,7 +400,14 @@ where
     B: AwsOperation<Resend = NoToken>,
     B::Error: ProvideErrorKind + ProvideErrorMetadata + std::error::Error + 'static,
 {
-    retry_aws_builder(policy, builder, |request| request).await
+    retry_aws_builder(
+        policy,
+        builder,
+        |request| AwsOperation::send(request),
+        B::NAME,
+        B::IDEMPOTENCY,
+    )
+    .await
 }
 
 /// Retry a generated token-bearing AWS builder with one invocation token.
@@ -397,11 +420,18 @@ pub(crate) async fn retry_aws_operation_with_token<F, B>(
     builder: F,
 ) -> Result<B::Output, SendFailure<B::Error>>
 where
-    F: Fn() -> B,
+    F: Fn() -> TokenOperation<B>,
     B: AwsOperation<Resend = WithToken> + TokenBearing,
     B::Error: ProvideErrorKind + ProvideErrorMetadata + std::error::Error + 'static,
 {
-    retry_aws_builder(policy, builder, |request| request.with_client_token(token)).await
+    retry_aws_builder(
+        policy,
+        builder,
+        |request| request.send_with_token(token, TokenSendPermit::new()),
+        B::NAME,
+        B::IDEMPOTENCY,
+    )
+    .await
 }
 
 /// Send a generated token-bearing AWS builder exactly once.
@@ -410,15 +440,14 @@ where
 /// invocation token a type-checked invariant instead of call-site convention.
 pub(crate) async fn send_aws_operation_with_token<B>(
     token: &ClientToken,
-    builder: B,
+    builder: TokenOperation<B>,
 ) -> Result<B::Output, SendFailure<B::Error>>
 where
     B: AwsOperation<Resend = WithToken> + TokenBearing,
     B::Error: ProvideErrorKind + ProvideErrorMetadata,
 {
     builder
-        .with_client_token(token)
-        .send()
+        .send_with_token(token, TokenSendPermit::new())
         .await
         .map_err(|error| {
             let outcome = SendOutcome::classify(&error);
@@ -426,34 +455,36 @@ where
         })
 }
 
-async fn retry_aws_builder<F, P, B>(
+async fn retry_aws_builder<F, S, B, Fut, O, E>(
     policy: RetryPolicy,
     builder: F,
-    prepare: P,
-) -> Result<B::Output, SendFailure<B::Error>>
+    send: S,
+    operation_name: &'static str,
+    idempotency: Idempotency,
+) -> Result<O, SendFailure<E>>
 where
     F: Fn() -> B,
-    P: Fn(B) -> B,
-    B: AwsOperation,
-    B::Error: ProvideErrorKind + ProvideErrorMetadata + std::error::Error + 'static,
+    S: Fn(B) -> Fut,
+    Fut: Future<Output = Result<O, SdkError<E, HttpResponse>>>,
+    E: ProvideErrorKind + ProvideErrorMetadata + std::error::Error + 'static,
 {
     let mut attempt = 0;
     let mut maybe_sent = false;
     loop {
         attempt += 1;
-        match prepare(builder()).send().await {
+        match send(builder()).await {
             Ok(result) => return Ok(result),
             Err(error) => {
                 let outcome = SendOutcome::classify(&error);
                 maybe_sent |= outcome == SendOutcome::MaybeSent;
                 if attempt < policy.max_attempts
-                    && outcome.resend_is_safe(B::IDEMPOTENCY)
+                    && outcome.resend_is_safe(idempotency)
                     && is_retryable_sdk_error(&error)
                 {
                     let delay = policy.delay_secs(attempt);
                     eprintln!(
                         "  Retrying {} (attempt {}/{}): {}",
-                        B::NAME,
+                        operation_name,
                         attempt,
                         policy.max_attempts,
                         DisplayErrorContext(&error)
@@ -1257,7 +1288,9 @@ mod tests {
     use aws_smithy_types::error::metadata::ProvideErrorMetadata;
     use aws_smithy_types::retry::{ErrorKind, ProvideErrorKind};
 
-    use crate::aws_operation::{AwsOperation, ClientToken, NoToken, TokenBearing, WithToken};
+    use crate::aws_operation::{
+        AwsOperation, ClientToken, NoToken, TokenBearing, TokenOperation, WithToken,
+    };
 
     #[derive(Debug)]
     struct MockServiceError {
@@ -1552,13 +1585,14 @@ mod tests {
         let seen_tokens = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
         let token = ClientToken::new();
 
-        let result =
-            retry_aws_operation_with_token(&token, test_policy(3), || MockCreateNatGateway {
+        let result = retry_aws_operation_with_token(&token, test_policy(3), || {
+            TokenOperation::new(MockCreateNatGateway {
                 call: call.clone(),
                 token: None,
                 seen_tokens: seen_tokens.clone(),
             })
-            .await;
+        })
+        .await;
 
         assert_eq!(result.expect("token resend succeeds"), "success");
         assert_eq!(call.attempts(), 2);
@@ -1584,14 +1618,15 @@ mod tests {
         let seen_tokens = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
         let token = ClientToken::new();
 
-        let error =
-            retry_aws_operation_with_token(&token, test_policy(3), || MockCreateNatGateway {
+        let error = retry_aws_operation_with_token(&token, test_policy(3), || {
+            TokenOperation::new(MockCreateNatGateway {
                 call: call.clone(),
                 token: None,
                 seen_tokens: seen_tokens.clone(),
             })
-            .await
-            .expect_err("all provider attempts should fail");
+        })
+        .await
+        .expect_err("all provider attempts should fail");
 
         assert_eq!(call.attempts(), 3);
         assert_eq!(error.outcome(), SendOutcome::MaybeSent);
@@ -1609,11 +1644,11 @@ mod tests {
 
         let result = send_aws_operation_with_token(
             &token,
-            MockCreateNatGateway {
+            TokenOperation::new(MockCreateNatGateway {
                 call: call.clone(),
                 token: None,
                 seen_tokens: seen_tokens.clone(),
-            },
+            }),
         )
         .await;
 
