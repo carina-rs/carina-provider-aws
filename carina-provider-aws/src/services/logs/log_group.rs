@@ -28,8 +28,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                api_error_with_meta("Failed to describe log groups", "logs.DescribeLogGroups", e)
-                    .for_resource(id.clone())
+                api_error_with_meta("Failed to describe log groups", e).for_resource(id.clone())
             })?;
 
         // Find exact match (prefix search can return multiple results)
@@ -168,7 +167,7 @@ impl AwsProvider {
 
         if let Err(error) = req.send().await {
             return Err(attempt.untracked(
-                api_error_with_meta("Failed to create log group", "logs.CreateLogGroup", error)
+                api_error_with_meta("Failed to create log group", error)
                     .for_resource(resource.id.clone()),
             ));
         }
@@ -192,12 +191,8 @@ impl AwsProvider {
                 .send()
                 .await;
             if let Err(error) = result {
-                let error = api_error_with_meta(
-                    "Failed to set retention policy",
-                    "logs.PutRetentionPolicy",
-                    error,
-                )
-                .for_resource(resource.id.clone());
+                let error = api_error_with_meta("Failed to set retention policy", error)
+                    .for_resource(resource.id.clone());
                 return Err(self.failed_issued(&resource.id, issued, error).await);
             }
         }
@@ -231,12 +226,8 @@ impl AwsProvider {
                     .send()
                     .await
                     .map_err(|e| {
-                        api_error_with_meta(
-                            "Failed to set retention policy",
-                            "logs.PutRetentionPolicy",
-                            e,
-                        )
-                        .for_resource(id.clone())
+                        api_error_with_meta("Failed to set retention policy", e)
+                            .for_resource(id.clone())
                     })?;
             }
             None if from.attributes.contains_key("retention_in_days") => {
@@ -247,12 +238,8 @@ impl AwsProvider {
                     .send()
                     .await
                     .map_err(|e| {
-                        api_error_with_meta(
-                            "Failed to delete retention policy",
-                            "logs.DeleteRetentionPolicy",
-                            e,
-                        )
-                        .for_resource(id.clone())
+                        api_error_with_meta("Failed to delete retention policy", e)
+                            .for_resource(id.clone())
                     })?;
             }
             _ => {}
@@ -267,8 +254,7 @@ impl AwsProvider {
                 .send()
                 .await
                 .map_err(|e| {
-                    api_error_with_meta("Failed to associate KMS key", "logs.AssociateKmsKey", e)
-                        .for_resource(id.clone())
+                    api_error_with_meta("Failed to associate KMS key", e).for_resource(id.clone())
                 })?;
         } else if from.attributes.contains_key("kms_key_id") {
             self.logs_client
@@ -277,12 +263,8 @@ impl AwsProvider {
                 .send()
                 .await
                 .map_err(|e| {
-                    api_error_with_meta(
-                        "Failed to disassociate KMS key",
-                        "logs.DisassociateKmsKey",
-                        e,
-                    )
-                    .for_resource(id.clone())
+                    api_error_with_meta("Failed to disassociate KMS key", e)
+                        .for_resource(id.clone())
                 })?;
         }
 
@@ -311,8 +293,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                api_error_with_meta("Failed to delete log group", "logs.DeleteLogGroup", e)
-                    .for_resource(id.clone())
+                api_error_with_meta("Failed to delete log group", e).for_resource(id.clone())
             })?;
         Ok(())
     }
@@ -351,8 +332,7 @@ impl AwsProvider {
                 req = req.tags(key);
             }
             req.send().await.map_err(|e| {
-                api_error_with_meta("Failed to untag log group", "logs.UntagLogGroup", e)
-                    .for_resource(id.clone())
+                api_error_with_meta("Failed to untag log group", e).for_resource(id.clone())
             })?;
         }
 
@@ -379,8 +359,7 @@ impl AwsProvider {
                 .send()
                 .await
                 .map_err(|e| {
-                    api_error_with_meta("Failed to tag log group", "logs.TagLogGroup", e)
-                        .for_resource(id.clone())
+                    api_error_with_meta("Failed to tag log group", e).for_resource(id.clone())
                 })?;
         }
 

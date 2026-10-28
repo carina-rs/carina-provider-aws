@@ -28,10 +28,7 @@ impl AwsProvider {
             .vpc_id(identifier.as_str())
             .send()
             .await
-            .map_err(|e| {
-                api_error_with_meta("Failed to delete vpc", "ec2.DeleteVpc", e)
-                    .for_resource(id.clone())
-            })?;
+            .map_err(|e| api_error_with_meta("Failed to delete vpc", e).for_resource(id.clone()))?;
         Ok(())
     }
 
@@ -47,8 +44,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                api_error_with_meta("Failed to delete subnet", "ec2.DeleteSubnet", e)
-                    .for_resource(id.clone())
+                api_error_with_meta("Failed to delete subnet", e).for_resource(id.clone())
             })?;
         Ok(())
     }
@@ -65,8 +61,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                api_error_with_meta("Failed to delete route table", "ec2.DeleteRouteTable", e)
-                    .for_resource(id.clone())
+                api_error_with_meta("Failed to delete route table", e).for_resource(id.clone())
             })?;
         Ok(())
     }
@@ -83,12 +78,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                api_error_with_meta(
-                    "Failed to delete security group",
-                    "ec2.DeleteSecurityGroup",
-                    e,
-                )
-                .for_resource(id.clone())
+                api_error_with_meta("Failed to delete security group", e).for_resource(id.clone())
             })?;
         Ok(())
     }
@@ -105,8 +95,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                api_error_with_meta("Failed to delete nat gateway", "ec2.DeleteNatGateway", e)
-                    .for_resource(id.clone())
+                api_error_with_meta("Failed to delete nat gateway", e).for_resource(id.clone())
             })?;
         Ok(())
     }
@@ -123,12 +112,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                api_error_with_meta(
-                    "Failed to delete transit gateway",
-                    "ec2.DeleteTransitGateway",
-                    e,
-                )
-                .for_resource(id.clone())
+                api_error_with_meta("Failed to delete transit gateway", e).for_resource(id.clone())
             })?;
         Ok(())
     }
@@ -145,12 +129,8 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                api_error_with_meta(
-                    "Failed to delete transit gateway attachment",
-                    "ec2.DeleteTransitGatewayVpcAttachment",
-                    e,
-                )
-                .for_resource(id.clone())
+                api_error_with_meta("Failed to delete transit gateway attachment", e)
+                    .for_resource(id.clone())
             })?;
         Ok(())
     }

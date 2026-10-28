@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use carina_aws_types::SendOutcome;
 use carina_core::provider::{AppliedIdentifier, ReadOutcome};
 use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
@@ -10,8 +11,86 @@ use crate::aws_operation::ClientToken;
 use crate::error_helpers::api_error_with_meta;
 use crate::helpers::{
     build_tag_specification_with_create_token, optional_enum_attr, require_enum_attr,
+    send_aws_operation_with_token,
 };
 use crate::provider::{AwsCreateAttempt, Ec2TaggedResourceKind};
+
+/// Token state for one CreateFlowLogs request.
+///
+/// Rotation consumes the old value and is only available with typed evidence
+/// that an AWS response rejected every item without creating a flow log.
+#[derive(Debug)]
+struct FlowLogRequestToken(ClientToken);
+
+impl FlowLogRequestToken {
+    fn from_invocation(token: &ClientToken) -> Self {
+        Self(token.clone())
+    }
+
+    fn as_client_token(&self) -> &ClientToken {
+        &self.0
+    }
+
+    fn rotate_after(self, _rejection: &FlowLogCreateRejection) -> Self {
+        Self(ClientToken::new())
+    }
+
+    fn preserve_after(self, _maybe_sent: FlowLogMaybeSent) -> ClientToken {
+        self.0
+    }
+}
+
+#[derive(Debug)]
+struct FlowLogCreateRejection {
+    message: String,
+    code: String,
+}
+
+impl FlowLogCreateRejection {
+    fn from_output(
+        output: &aws_sdk_ec2::operation::create_flow_logs::CreateFlowLogsOutput,
+    ) -> Option<Self> {
+        if !output.flow_log_ids().is_empty() {
+            return None;
+        }
+        let item = output.unsuccessful().first()?;
+        let message = item
+            .error()
+            .and_then(|error| error.message())
+            .unwrap_or("unknown error")
+            .to_string();
+        let code = item
+            .error()
+            .and_then(|error| error.code())
+            .unwrap_or("")
+            .to_string();
+        Some(Self { message, code })
+    }
+
+    fn is_iam_propagation(&self) -> bool {
+        self.message.contains("Unable to assume IAM role")
+            || self.message.contains("Not authorized")
+            || self.message.contains("Access Denied")
+            || self.code == "403"
+    }
+
+    fn rendered(&self) -> String {
+        format!("{} ({})", self.message, self.code)
+    }
+}
+
+#[derive(Debug)]
+struct FlowLogMaybeSent;
+
+impl FlowLogMaybeSent {
+    fn from_error<E>(error: &crate::error_helpers::AwsSdkError<E>) -> Option<Self>
+    where
+        E: aws_smithy_types::error::metadata::ProvideErrorMetadata
+            + aws_smithy_types::retry::ProvideErrorKind,
+    {
+        (SendOutcome::classify(error) == SendOutcome::MaybeSent).then_some(Self)
+    }
+}
 
 impl AwsProvider {
     /// Read an EC2 Flow Log
@@ -40,8 +119,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                api_error_with_meta("Failed to describe flow logs", "ec2.DescribeFlowLogs", e)
-                    .for_resource(id.clone())
+                api_error_with_meta("Failed to describe flow logs", e).for_resource(id.clone())
             })?;
 
         if let Some(fl) = result.flow_logs().first() {
@@ -122,7 +200,6 @@ impl AwsProvider {
             .ec2_client
             .create_flow_logs()
             .set_resource_ids(Some(resource_ids_val.clone()))
-            .client_token(client_token.as_str())
             .resource_type(aws_sdk_ec2::types::FlowLogsResourceType::from(
                 resource_type_val.as_str(),
             ));
@@ -176,36 +253,42 @@ impl AwsProvider {
             req = req.max_aggregation_interval(*interval as i32);
         }
 
-        req = req.tag_specifications(build_tag_specification_with_create_token(
-            resource,
-            aws_sdk_ec2::types::ResourceType::VpcFlowLog,
-            client_token,
-        ));
-
         // Retry loop for IAM eventual consistency: newly created IAM roles may
         // not be usable immediately by create_flow_logs.
         let mut last_error = String::new();
+        let mut request_token = FlowLogRequestToken::from_invocation(client_token);
         for retry_index in 0..12 {
             if retry_index > 0 {
                 tokio::time::sleep(std::time::Duration::from_secs(5)).await;
             }
-            let resp = match req.clone().send().await {
+            let request =
+                req.clone()
+                    .tag_specifications(build_tag_specification_with_create_token(
+                        resource,
+                        aws_sdk_ec2::types::ResourceType::VpcFlowLog,
+                        request_token.as_client_token(),
+                    ));
+            let resp = match send_aws_operation_with_token(request_token.as_client_token(), request)
+                .await
+            {
                 Ok(resp) => resp,
                 Err(error) => {
-                    let err_str = format!("{error:?}");
-                    last_error = err_str.clone();
-                    // Retry on IAM propagation errors (check both Display and Debug output)
-                    if err_str.contains("Unable to assume")
-                        || err_str.contains("Not authorized")
-                        || err_str.contains("Access Denied")
-                    {
-                        continue;
+                    if let Some(maybe_sent) = FlowLogMaybeSent::from_error(&error) {
+                        let discovery_token = request_token.preserve_after(maybe_sent);
+                        return Self::tagged_ec2_send_error(
+                            attempt,
+                            &resource.id,
+                            Ec2TaggedResourceKind::FlowLog,
+                            &discovery_token,
+                            carina_core::provider::Sent::AllRequestAttributes,
+                            error,
+                        );
                     }
                     return Self::tagged_ec2_send_error(
                         attempt,
                         &resource.id,
                         Ec2TaggedResourceKind::FlowLog,
-                        client_token,
+                        request_token.as_client_token(),
                         carina_core::provider::Sent::AllRequestAttributes,
                         error,
                     );
@@ -261,36 +344,25 @@ impl AwsProvider {
                     .await;
             }
 
-            // With no returned ids, AWS proved that this response created no
-            // trackable flow logs, so retrying an IAM propagation failure is safe.
-            if let Some(error_item) = unsuccessful {
-                let msg = error_item
-                    .error()
-                    .and_then(|error| error.message())
-                    .map_or("unknown error", |message| message);
-                let code = error_item
-                    .error()
-                    .and_then(|error| error.code())
-                    .map_or("", |code| code);
-                last_error = format!("{msg} ({code})");
-                // Retry on IAM propagation errors
-                if msg.contains("Unable to assume IAM role")
-                    || msg.contains("Not authorized")
-                    || msg.contains("Access Denied")
-                    || code == "403"
-                {
+            if let Some(rejection) = FlowLogCreateRejection::from_output(&resp) {
+                last_error = rejection.rendered();
+                if rejection.is_iam_propagation() {
+                    request_token = request_token.rotate_after(&rejection);
                     continue;
                 }
                 return Err(attempt.untracked(
-                    ProviderError::api_error(format!("Failed to create flow log: {msg}"))
-                        .for_resource(resource.id.clone()),
+                    ProviderError::api_error(format!(
+                        "Failed to create flow log: {}",
+                        rejection.message
+                    ))
+                    .for_resource(resource.id.clone()),
                 ));
             }
 
             return Self::pending_tagged_ec2(
                 attempt,
                 Ec2TaggedResourceKind::FlowLog,
-                client_token,
+                request_token.as_client_token(),
                 carina_core::provider::Sent::AllRequestAttributes,
             );
         }
@@ -342,8 +414,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                api_error_with_meta("Failed to delete flow logs", "ec2.DeleteFlowLogs", e)
-                    .for_resource(id.clone())
+                api_error_with_meta("Failed to delete flow logs", e).for_resource(id.clone())
             })?;
 
         // Check for unsuccessful items
@@ -455,5 +526,50 @@ impl AwsProvider {
             }
         }
         obj.flow_log_id().map(String::from)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use aws_sdk_ec2::error::SdkError;
+    use aws_sdk_ec2::operation::create_flow_logs::CreateFlowLogsError;
+    use aws_sdk_ec2::types::{UnsuccessfulItem, UnsuccessfulItemError};
+
+    #[test]
+    fn proven_rejection_rotates_the_flow_log_client_token() {
+        let invocation_token = ClientToken::new();
+        let attempt_token = FlowLogRequestToken::from_invocation(&invocation_token);
+        let output = aws_sdk_ec2::operation::create_flow_logs::CreateFlowLogsOutput::builder()
+            .unsuccessful(
+                UnsuccessfulItem::builder()
+                    .error(
+                        UnsuccessfulItemError::builder()
+                            .code("403")
+                            .message("Unable to assume IAM role")
+                            .build(),
+                    )
+                    .build(),
+            )
+            .build();
+        let rejection = FlowLogCreateRejection::from_output(&output)
+            .expect("an empty unsuccessful response proves rejection");
+
+        let next = attempt_token.rotate_after(&rejection);
+
+        assert_ne!(next.as_client_token(), &invocation_token);
+    }
+
+    #[test]
+    fn maybe_sent_flow_log_failure_preserves_the_client_token() {
+        let invocation_token = ClientToken::new();
+        let attempt_token = FlowLogRequestToken::from_invocation(&invocation_token);
+        let error: SdkError<CreateFlowLogsError> = SdkError::timeout_error("response timed out");
+        let maybe_sent = FlowLogMaybeSent::from_error(&error)
+            .expect("a timeout cannot prove that AWS rejected the request");
+
+        let discovery_token = attempt_token.preserve_after(maybe_sent);
+
+        assert_eq!(discovery_token, invocation_token);
     }
 }

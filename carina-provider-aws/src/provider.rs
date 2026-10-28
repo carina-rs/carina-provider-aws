@@ -20,17 +20,18 @@ use carina_provider_protocol::{
 use serde::{Deserialize, Serialize};
 
 use crate::AwsProvider;
-use crate::aws_operation::{ClientToken, EC2_CREATE_TOKEN_TAG};
+use crate::aws_operation::{ClientToken, DecidedOperationError, EC2_CREATE_TOKEN_TAG};
 use crate::helpers::{CreatePoll, DeletePoll, apply_patch_to_state};
 
 pub(crate) const POLL_AFTER_SECS: u32 = 5;
-/// Eight describe calls after delays totaling 305 seconds. The pinned host
+/// Six describe calls after delays totaling 185 seconds. The pinned host
 /// gives an operation 15 minutes by default and clamps `poll_after` to 1–300
-/// seconds. This provider caps each SDK operation at 60 seconds (individual
-/// WASM HTTP attempts are capped at 30 seconds), so the initial create plus
-/// all eight describes and sleeps consume at most 845 seconds. That leaves a
-/// 55-second margin inside the 900-second operation budget.
-pub(crate) const TAGGED_EC2_DISCOVERY_ATTEMPTS: u8 = 8;
+/// seconds. In production WASM, attempt and operation timeouts are observed
+/// only between synchronous HTTP attempts, so one SDK call can take about 90
+/// seconds. The initial create plus six describes cost at most 7 * 90 = 630
+/// seconds; adding 185 seconds of sleeps gives 815 seconds and leaves an
+/// 85-second margin inside the 900-second operation budget.
+pub(crate) const TAGGED_EC2_DISCOVERY_ATTEMPTS: u8 = 6;
 pub(crate) const TAGGED_EC2_INITIAL_DELAY_SECS: u32 = 5;
 
 fn next_tagged_ec2_delay(current: u32) -> u32 {
@@ -43,12 +44,31 @@ fn next_tagged_ec2_delay(current: u32) -> u32 {
     }
 }
 
+fn describe_ids_from_pages<'a, Page: 'a, Item: 'a>(
+    pages: &'a [Page],
+    items: impl Fn(&'a Page) -> &'a [Item],
+    identifier: impl Fn(&'a Item) -> Option<&'a str>,
+) -> Vec<String> {
+    let mut identifiers = Vec::new();
+    for page in pages {
+        identifiers.extend(
+            items(page)
+                .iter()
+                .filter_map(|resource| identifier(resource).map(str::to_owned)),
+        );
+    }
+    identifiers
+}
+
 fn create_token_poll_after(token: &AwsCreateToken) -> u32 {
     match token {
         AwsCreateToken::TaggedEc2 {
             next_delay_secs, ..
         } => *next_delay_secs,
-        _ => POLL_AFTER_SECS,
+        AwsCreateToken::NatGateway { .. }
+        | AwsCreateToken::TransitGateway { .. }
+        | AwsCreateToken::TransitGatewayAttachment { .. }
+        | AwsCreateToken::OrganizationsAccount { .. } => POLL_AFTER_SECS,
     }
 }
 
@@ -173,25 +193,6 @@ impl Ec2TaggedResourceKind {
         }
     }
 
-    fn describe_operation(self) -> &'static str {
-        match self {
-            Self::Vpc => "ec2.DescribeVpcs",
-            Self::Subnet => "ec2.DescribeSubnets",
-            Self::RouteTable => "ec2.DescribeRouteTables",
-            Self::SecurityGroup => "ec2.DescribeSecurityGroups",
-            Self::InternetGateway => "ec2.DescribeInternetGateways",
-            Self::EgressOnlyInternetGateway => "ec2.DescribeEgressOnlyInternetGateways",
-            Self::VpnGateway => "ec2.DescribeVpnGateways",
-            Self::VpcPeeringConnection => "ec2.DescribeVpcPeeringConnections",
-            Self::Address => "ec2.DescribeAddresses",
-            Self::NatGateway => "ec2.DescribeNatGateways",
-            Self::VpcEndpoint => "ec2.DescribeVpcEndpoints",
-            Self::FlowLog => "ec2.DescribeFlowLogs",
-            Self::TransitGateway => "ec2.DescribeTransitGateways",
-            Self::TransitGatewayVpcAttachment => "ec2.DescribeTransitGatewayVpcAttachments",
-        }
-    }
-
     fn discovery_error_context(self) -> &'static str {
         match self {
             Self::Vpc => "Failed to discover VPC by create token",
@@ -227,15 +228,30 @@ impl Ec2TaggedResourceKind {
         filter: aws_sdk_ec2::types::Filter,
     ) -> ProviderResult<Vec<String>> {
         macro_rules! describe_ids {
-            ($request:expr, $items:ident, $identifier:ident) => {{
+            ($request:expr, $items:ident, $identifier:ident, paginated) => {{
+                let pages = $request
+                    .into_paginator()
+                    .send()
+                    .collect::<Result<Vec<_>, _>>()
+                    .await
+                    .map_err(|error| {
+                        AwsProvider::tagged_ec2_discovery_call_error(id, self, error)
+                    })?;
+                describe_ids_from_pages(
+                    &pages,
+                    |output| output.$items(),
+                    |resource| resource.$identifier(),
+                )
+            }};
+            ($request:expr, $items:ident, $identifier:ident, single) => {{
                 let output = $request.send().await.map_err(|error| {
                     AwsProvider::tagged_ec2_discovery_call_error(id, self, error)
                 })?;
-                output
-                    .$items()
-                    .iter()
-                    .filter_map(|resource| resource.$identifier().map(str::to_owned))
-                    .collect::<Vec<_>>()
+                describe_ids_from_pages(
+                    std::slice::from_ref(&output),
+                    |output| output.$items(),
+                    |resource| resource.$identifier(),
+                )
             }};
         }
 
@@ -243,17 +259,20 @@ impl Ec2TaggedResourceKind {
             Self::Vpc => describe_ids!(
                 provider.ec2_client.describe_vpcs().filters(filter),
                 vpcs,
-                vpc_id
+                vpc_id,
+                paginated
             ),
             Self::Subnet => describe_ids!(
                 provider.ec2_client.describe_subnets().filters(filter),
                 subnets,
-                subnet_id
+                subnet_id,
+                paginated
             ),
             Self::RouteTable => describe_ids!(
                 provider.ec2_client.describe_route_tables().filters(filter),
                 route_tables,
-                route_table_id
+                route_table_id,
+                paginated
             ),
             Self::SecurityGroup => describe_ids!(
                 provider
@@ -261,7 +280,8 @@ impl Ec2TaggedResourceKind {
                     .describe_security_groups()
                     .filters(filter),
                 security_groups,
-                group_id
+                group_id,
+                paginated
             ),
             Self::InternetGateway => describe_ids!(
                 provider
@@ -269,7 +289,8 @@ impl Ec2TaggedResourceKind {
                     .describe_internet_gateways()
                     .filters(filter),
                 internet_gateways,
-                internet_gateway_id
+                internet_gateway_id,
+                paginated
             ),
             Self::EgressOnlyInternetGateway => describe_ids!(
                 provider
@@ -277,12 +298,14 @@ impl Ec2TaggedResourceKind {
                     .describe_egress_only_internet_gateways()
                     .filters(filter),
                 egress_only_internet_gateways,
-                egress_only_internet_gateway_id
+                egress_only_internet_gateway_id,
+                paginated
             ),
             Self::VpnGateway => describe_ids!(
                 provider.ec2_client.describe_vpn_gateways().filters(filter),
                 vpn_gateways,
-                vpn_gateway_id
+                vpn_gateway_id,
+                single
             ),
             Self::VpcPeeringConnection => describe_ids!(
                 provider
@@ -290,27 +313,32 @@ impl Ec2TaggedResourceKind {
                     .describe_vpc_peering_connections()
                     .filters(filter),
                 vpc_peering_connections,
-                vpc_peering_connection_id
+                vpc_peering_connection_id,
+                paginated
             ),
             Self::Address => describe_ids!(
                 provider.ec2_client.describe_addresses().filters(filter),
                 addresses,
-                allocation_id
+                allocation_id,
+                single
             ),
             Self::NatGateway => describe_ids!(
                 provider.ec2_client.describe_nat_gateways().filter(filter),
                 nat_gateways,
-                nat_gateway_id
+                nat_gateway_id,
+                paginated
             ),
             Self::VpcEndpoint => describe_ids!(
                 provider.ec2_client.describe_vpc_endpoints().filters(filter),
                 vpc_endpoints,
-                vpc_endpoint_id
+                vpc_endpoint_id,
+                paginated
             ),
             Self::FlowLog => describe_ids!(
                 provider.ec2_client.describe_flow_logs().filter(filter),
                 flow_logs,
-                flow_log_id
+                flow_log_id,
+                paginated
             ),
             Self::TransitGateway => describe_ids!(
                 provider
@@ -318,7 +346,8 @@ impl Ec2TaggedResourceKind {
                     .describe_transit_gateways()
                     .filters(filter),
                 transit_gateways,
-                transit_gateway_id
+                transit_gateway_id,
+                paginated
             ),
             Self::TransitGatewayVpcAttachment => describe_ids!(
                 provider
@@ -326,7 +355,8 @@ impl Ec2TaggedResourceKind {
                     .describe_transit_gateway_vpc_attachments()
                     .filters(filter),
                 transit_gateway_vpc_attachments,
-                transit_gateway_attachment_id
+                transit_gateway_attachment_id,
+                paginated
             ),
         };
 
@@ -935,6 +965,7 @@ impl AwsProvider {
     where
         A: AwsCreateAttempt,
         E: std::error::Error
+            + DecidedOperationError
             + aws_smithy_types::error::metadata::ProvideErrorMetadata
             + aws_smithy_types::retry::ProvideErrorKind
             + Send
@@ -945,12 +976,8 @@ impl AwsProvider {
             return Self::pending_tagged_ec2(attempt, kind, create_token, sent);
         }
         Err(attempt.untracked(
-            crate::error_helpers::api_error_with_meta(
-                kind.create_error_context(),
-                kind.create_operation(),
-                error,
-            )
-            .for_resource(id.clone()),
+            crate::error_helpers::api_error_with_meta(kind.create_error_context(), error)
+                .for_resource(id.clone()),
         ))
     }
 
@@ -965,6 +992,7 @@ impl AwsProvider {
     where
         A: AwsCreateAttempt,
         E: std::error::Error
+            + DecidedOperationError
             + aws_smithy_types::error::metadata::ProvideErrorMetadata
             + aws_smithy_types::retry::ProvideErrorKind
             + Send
@@ -1013,18 +1041,15 @@ impl AwsProvider {
     ) -> ProviderError
     where
         E: std::error::Error
+            + DecidedOperationError
             + aws_smithy_types::error::metadata::ProvideErrorMetadata
             + aws_smithy_types::retry::ProvideErrorKind
             + Send
             + Sync
             + 'static,
     {
-        crate::error_helpers::api_error_with_meta(
-            kind.discovery_error_context(),
-            kind.describe_operation(),
-            error,
-        )
-        .for_resource(id.clone())
+        crate::error_helpers::api_error_with_meta(kind.discovery_error_context(), error)
+            .for_resource(id.clone())
     }
 
     async fn discover_tagged_ec2_resources(
@@ -1097,7 +1122,7 @@ impl AwsProvider {
     }
 
     fn tagged_ec2_outcome_unknown_error(
-        _id: &ResourceId,
+        id: &ResourceId,
         kind: Ec2TaggedResourceKind,
         create_token: &ClientToken,
         discovery_error: Option<ProviderError>,
@@ -1115,6 +1140,7 @@ impl AwsProvider {
                 ProviderError::api_error_caused_by(context, cause)
             }
         }
+        .for_resource(id.clone())
     }
 
     fn tagged_ec2_ambiguous_error(
@@ -1226,7 +1252,15 @@ impl AwsProvider {
                 )
                 .await?;
             }
-            _ => {}
+            Ec2TaggedResourceKind::SecurityGroup
+            | Ec2TaggedResourceKind::EgressOnlyInternetGateway
+            | Ec2TaggedResourceKind::VpnGateway
+            | Ec2TaggedResourceKind::VpcPeeringConnection
+            | Ec2TaggedResourceKind::Address
+            | Ec2TaggedResourceKind::NatGateway
+            | Ec2TaggedResourceKind::FlowLog
+            | Ec2TaggedResourceKind::TransitGateway
+            | Ec2TaggedResourceKind::TransitGatewayVpcAttachment => {}
         }
 
         let pending = match kind {
@@ -1241,7 +1275,17 @@ impl AwsProvider {
                     attachment_id: identifier.clone(),
                 })
             }
-            _ => None,
+            Ec2TaggedResourceKind::Vpc
+            | Ec2TaggedResourceKind::Subnet
+            | Ec2TaggedResourceKind::RouteTable
+            | Ec2TaggedResourceKind::SecurityGroup
+            | Ec2TaggedResourceKind::InternetGateway
+            | Ec2TaggedResourceKind::EgressOnlyInternetGateway
+            | Ec2TaggedResourceKind::VpnGateway
+            | Ec2TaggedResourceKind::VpcPeeringConnection
+            | Ec2TaggedResourceKind::Address
+            | Ec2TaggedResourceKind::VpcEndpoint
+            | Ec2TaggedResourceKind::FlowLog => None,
         };
         if let Some(token) = pending {
             return Ok(TaggedEc2Continuation::Pending(token));
@@ -1304,6 +1348,11 @@ impl AwsProvider {
         resource: &Resource,
         attempt: A,
     ) -> Result<A::Step, A::Verdict> {
+        if let Err(error) =
+            crate::ec2_tags::validate_ec2_user_tags(&resource.id, &resource.resolved_attributes())
+        {
+            return Err(attempt.untracked(error));
+        }
         let client_token = crate::aws_operation::ClientToken::new();
         let schema = match self.resource_schema(resource.id.resource_type.as_str()) {
             Some(schema) => schema,
@@ -2212,6 +2261,7 @@ impl AwsProvider {
         // partial-update API paths once those are wired in.
         let to = apply_patch_to_state(from, patch);
         let partial_attributes = to.resolved_attributes();
+        crate::ec2_tags::validate_ec2_user_tags(&id, &partial_attributes)?;
         let outcome_id = id.clone();
         let schema = self
             .resource_schema(id.resource_type.as_str())
@@ -2871,7 +2921,7 @@ mod pending_operation_tests {
     }
 
     #[test]
-    fn tagged_ec2_discovery_backoff_spans_about_five_minutes() {
+    fn tagged_ec2_discovery_window_fits_wasm_operation_budget() {
         let mut delay = TAGGED_EC2_INITIAL_DELAY_SECS;
         let mut delays = Vec::new();
         for _ in 0..TAGGED_EC2_DISCOVERY_ATTEMPTS {
@@ -2879,12 +2929,12 @@ mod pending_operation_tests {
             delay = next_tagged_ec2_delay(delay);
         }
 
-        assert_eq!(delays, [5, 10, 20, 30, 60, 60, 60, 60]);
-        assert_eq!(delays.iter().sum::<u32>(), 305);
+        assert_eq!(delays, [5, 10, 20, 30, 60, 60]);
+        assert_eq!(delays.iter().sum::<u32>(), 185);
         assert!(delays.iter().all(|delay| *delay <= 300));
         let worst_case_secs = u64::from(delays.iter().sum::<u32>())
-            + (u64::from(TAGGED_EC2_DISCOVERY_ATTEMPTS) + 1) * 60;
-        assert_eq!(worst_case_secs, 845);
+            + (u64::from(TAGGED_EC2_DISCOVERY_ATTEMPTS) + 1) * 90;
+        assert_eq!(worst_case_secs, 815);
         assert!(worst_case_secs < DEFAULT_OPERATION_BUDGET.as_secs());
         assert_eq!(
             create_token_poll_after(&AwsCreateToken::TaggedEc2 {
@@ -2895,6 +2945,54 @@ mod pending_operation_tests {
             }),
             60,
             "native resume must preserve the same backoff as host polling"
+        );
+    }
+
+    fn vpc_page(ids: &[&str]) -> aws_sdk_ec2::operation::describe_vpcs::DescribeVpcsOutput {
+        aws_sdk_ec2::operation::describe_vpcs::DescribeVpcsOutput::builder()
+            .set_vpcs(Some(
+                ids.iter()
+                    .map(|id| aws_sdk_ec2::types::Vpc::builder().vpc_id(*id).build())
+                    .collect(),
+            ))
+            .build()
+    }
+
+    #[test]
+    fn describe_ids_considers_a_match_after_an_empty_first_page() {
+        let pages = [vpc_page(&[]), vpc_page(&["vpc-second-page"])];
+
+        let ids = describe_ids_from_pages(&pages, |page| page.vpcs(), |vpc| vpc.vpc_id());
+
+        assert_eq!(ids, ["vpc-second-page"]);
+    }
+
+    #[test]
+    fn describe_ids_keeps_multiple_matches_across_pages() {
+        let pages = [vpc_page(&["vpc-first"]), vpc_page(&["vpc-second"])];
+
+        let ids = describe_ids_from_pages(&pages, |page| page.vpcs(), |vpc| vpc.vpc_id());
+
+        assert_eq!(ids, ["vpc-first", "vpc-second"]);
+    }
+
+    #[test]
+    fn tagged_ec2_outcome_unknown_error_names_the_resource() {
+        let id = ResourceId::with_provider_identity("aws", "ec2.Vpc", "example", None);
+        let error = AwsProvider::tagged_ec2_outcome_unknown_error(
+            &id,
+            Ec2TaggedResourceKind::Vpc,
+            &ClientToken::new(),
+            None,
+        );
+
+        assert_eq!(
+            error
+                .to_wire()
+                .resource_id
+                .as_ref()
+                .map(|resource_id| resource_id.identity.as_str()),
+            Some("example")
         );
     }
 

@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use regex::Regex;
 
-use crate::resend_safety_generated::{ALL_OPERATIONS, DECIDED_OPERATIONS};
+use crate::resend_safety_generated::{DECIDED_OPERATIONS, TOKEN_OPERATIONS};
 
 fn handwritten_sources(directory: &Path, sources: &mut Vec<PathBuf>) {
     for entry in std::fs::read_dir(directory).expect("read provider source directory") {
@@ -151,6 +151,62 @@ fn strip_cfg_test_items(source: &str) -> String {
     production
 }
 
+fn locked_sdk_operations() -> Vec<(String, String)> {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let metadata = std::process::Command::new(env!("CARGO"))
+        .args(["metadata", "--locked", "--offline", "--format-version", "1"])
+        .current_dir(manifest_dir)
+        .env("RUSTC_WRAPPER", "")
+        .output()
+        .expect("run cargo metadata for the locked AWS SDK crates");
+    assert!(
+        metadata.status.success(),
+        "cargo metadata failed: {}",
+        String::from_utf8_lossy(&metadata.stderr)
+    );
+    let metadata: serde_json::Value =
+        serde_json::from_slice(&metadata.stdout).expect("parse cargo metadata");
+    let mut operations = Vec::new();
+    for package in metadata["packages"]
+        .as_array()
+        .expect("cargo metadata packages array")
+    {
+        let Some(package_name) = package["name"].as_str() else {
+            continue;
+        };
+        let Some(service) = package_name.strip_prefix("aws-sdk-") else {
+            continue;
+        };
+        let manifest_path = PathBuf::from(
+            package["manifest_path"]
+                .as_str()
+                .expect("AWS SDK package manifest_path"),
+        );
+        let operation_dir = manifest_path
+            .parent()
+            .expect("AWS SDK manifest has a parent")
+            .join("src/operation");
+        for entry in std::fs::read_dir(&operation_dir)
+            .unwrap_or_else(|error| panic!("read {}: {error}", operation_dir.display()))
+        {
+            let entry = entry.expect("read AWS SDK operation entry");
+            if entry
+                .file_type()
+                .expect("AWS SDK operation file type")
+                .is_dir()
+            {
+                operations.push((
+                    service.to_string(),
+                    entry.file_name().to_string_lossy().into_owned(),
+                ));
+            }
+        }
+    }
+    operations.sort();
+    operations.dedup();
+    operations
+}
+
 #[test]
 fn cfg_test_stripping_keeps_production_calls_after_mid_file_test_items() {
     let source = r#"
@@ -198,11 +254,11 @@ fn every_called_sdk_operation_has_an_explicit_decision() {
         .collect::<HashSet<_>>();
 
     let mut called = Vec::new();
-    for (_, operation) in ALL_OPERATIONS {
-        let call = Regex::new(&format!(r"\.{}\s*\(", regex::escape(operation)))
+    for (_, operation) in locked_sdk_operations() {
+        let call = Regex::new(&format!(r"\.{}\s*\(", regex::escape(&operation)))
             .expect("generated operation name is valid regex text");
         if call.is_match(&source) {
-            called.push(*operation);
+            called.push(operation);
         }
     }
     called.sort_unstable();
@@ -210,8 +266,8 @@ fn every_called_sdk_operation_has_an_explicit_decision() {
 
     let undecided = called
         .iter()
-        .filter(|operation| !decided_names.contains(**operation))
-        .copied()
+        .filter(|operation| !decided_names.contains(operation.as_str()))
+        .cloned()
         .collect::<Vec<_>>();
     assert!(
         undecided.is_empty(),
@@ -222,5 +278,52 @@ fn every_called_sdk_operation_has_an_explicit_decision() {
         called.len() >= 100,
         "source scan unexpectedly found only {} SDK calls",
         called.len()
+    );
+}
+
+#[test]
+fn token_bearing_operations_use_only_token_entry_points() {
+    let mut paths = Vec::new();
+    handwritten_sources(
+        &Path::new(env!("CARGO_MANIFEST_DIR")).join("src"),
+        &mut paths,
+    );
+    paths.sort();
+
+    let mut violations = Vec::new();
+    for path in paths {
+        let source = std::fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
+        let source = strip_cfg_test_items(&source);
+        let explicit_setters = source.matches(".client_token(").count()
+            + source.matches(".idempotency_token(").count();
+        let token_factories = TOKEN_OPERATIONS
+            .iter()
+            .map(|(_, operation)| {
+                Regex::new(&format!(r"\.{}\s*\(", regex::escape(operation)))
+                    .expect("generated operation name is valid regex text")
+                    .find_iter(&source)
+                    .count()
+            })
+            .sum::<usize>();
+        let token_entry_points = source.matches("send_aws_operation_with_token(").count()
+            + source.matches("retry_aws_operation_with_token(").count();
+
+        // AWS fluent builders expose an inherent `send`, so the type system
+        // cannot hide that bypass. This scan pairs the generated WithToken set
+        // with two syntactic invariants: callers never set tokens themselves,
+        // and every token-bearing builder is routed through a token entry point.
+        if explicit_setters != 0 || token_entry_points < token_factories {
+            violations.push(format!(
+                "{}: {token_factories} token operation(s), {token_entry_points} token entry point(s), {explicit_setters} explicit token setter(s)",
+                path.display()
+            ));
+        }
+    }
+
+    assert!(
+        violations.is_empty(),
+        "WithToken operations must be sent only through token entry points:\n{}",
+        violations.join("\n")
     );
 }

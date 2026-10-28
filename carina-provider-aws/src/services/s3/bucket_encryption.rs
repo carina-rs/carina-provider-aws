@@ -64,12 +64,8 @@ impl AwsProvider {
                 {
                     return Ok(ReadOutcome::not_found(id.clone()));
                 }
-                Err(api_error_with_meta(
-                    "Failed to get bucket encryption",
-                    "s3.GetBucketEncryption",
-                    e,
-                )
-                .for_resource(id.clone()))
+                Err(api_error_with_meta("Failed to get bucket encryption", e)
+                    .for_resource(id.clone()))
             }
         }
     }
@@ -147,12 +143,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                api_error_with_meta(
-                    "Failed to put bucket encryption",
-                    "s3.PutBucketEncryption",
-                    e,
-                )
-                .for_resource(id.clone())
+                api_error_with_meta("Failed to put bucket encryption", e).for_resource(id.clone())
             })?;
 
         Ok(self
@@ -182,12 +173,8 @@ impl AwsProvider {
             {
                 Ok(())
             }
-            Err(e) => Err(api_error_with_meta(
-                "Failed to delete bucket encryption",
-                "s3.DeleteBucketEncryption",
-                e,
-            )
-            .for_resource(id.clone())),
+            Err(e) => Err(api_error_with_meta("Failed to delete bucket encryption", e)
+                .for_resource(id.clone())),
         }
     }
 }

@@ -46,6 +46,15 @@ pub(crate) trait AwsOperation {
     ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send;
 }
 
+/// Operation identity and resend semantics carried by a decided SDK error type.
+///
+/// Generated implementations make it impossible to attach the wrong service or
+/// operation label while converting an SDK error into a provider error.
+pub(crate) trait DecidedOperationError {
+    const NAME: &'static str;
+    const IDEMPOTENCY: Idempotency;
+}
+
 /// An operation builder with a generated idempotency-token setter.
 pub(crate) trait TokenBearing {
     fn with_client_token(self, token: &ClientToken) -> Self;

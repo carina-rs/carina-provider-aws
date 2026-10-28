@@ -37,12 +37,8 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                api_error_with_meta(
-                    "Failed to describe security groups",
-                    "ec2.DescribeSecurityGroups",
-                    e,
-                )
-                .for_resource(id.clone())
+                api_error_with_meta("Failed to describe security groups", e)
+                    .for_resource(id.clone())
             })?;
 
         if let Some(sg) = result.security_groups().first() {

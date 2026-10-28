@@ -35,8 +35,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                api_error_with_meta("Failed to describe addresses", "ec2.DescribeAddresses", e)
-                    .for_resource(id.clone())
+                api_error_with_meta("Failed to describe addresses", e).for_resource(id.clone())
             })?;
 
         if let Some(addr) = result.addresses().first() {
@@ -133,8 +132,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                api_error_with_meta("Failed to release address", "ec2.ReleaseAddress", e)
-                    .for_resource(id.clone())
+                api_error_with_meta("Failed to release address", e).for_resource(id.clone())
             })?;
         Ok(())
     }

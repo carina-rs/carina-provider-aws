@@ -73,10 +73,7 @@ impl AwsProvider {
                 if is_s3_not_configured_error(&e, "NoSuchBucket") {
                     return Ok(ReadOutcome::not_found(id.clone()));
                 }
-                Err(
-                    api_error_with_meta("Failed to get bucket logging", "s3.GetBucketLogging", e)
-                        .for_resource(id.clone()),
-                )
+                Err(api_error_with_meta("Failed to get bucket logging", e).for_resource(id.clone()))
             }
         }
     }
@@ -155,8 +152,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                api_error_with_meta("Failed to put bucket logging", "s3.PutBucketLogging", e)
-                    .for_resource(id.clone())
+                api_error_with_meta("Failed to put bucket logging", e).for_resource(id.clone())
             })?;
 
         Ok(self.read_s3_bucket_logging(id, applied_identifier).await)
@@ -181,10 +177,8 @@ impl AwsProvider {
             Ok(_) => Ok(()),
             Err(e) if is_s3_not_configured_error(&e, "NoSuchBucket") => Ok(()),
             Err(e) => {
-                Err(
-                    api_error_with_meta("Failed to clear bucket logging", "s3.PutBucketLogging", e)
-                        .for_resource(id.clone()),
-                )
+                Err(api_error_with_meta("Failed to clear bucket logging", e)
+                    .for_resource(id.clone()))
             }
         }
     }

@@ -97,6 +97,9 @@ impl Intercept for ResendGuard {
                 SendOutcome::classify_orchestrator(context.inner(), runtime_components)
             }
         };
+        // The interceptor only lends us the SDK error, and `SdkError` is not
+        // `Clone`. A later refusal can therefore carry the previous failure
+        // only as rendered source-chain text rather than as the typed error.
         let mut failure = context
             .output_or_error()
             .and_then(Result::err)

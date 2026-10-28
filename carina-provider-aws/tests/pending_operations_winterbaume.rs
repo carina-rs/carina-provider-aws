@@ -912,7 +912,7 @@ async fn create_vpc_post_send_failure_becomes_unissued_pending() {
         token,
         AwsCreateToken::TaggedEc2 {
             kind: Ec2TaggedResourceKind::Vpc,
-            attempts_remaining: 8,
+            attempts_remaining: 6,
             next_delay_secs: 5,
             ..
         }
@@ -940,7 +940,7 @@ async fn token_bearing_route_table_post_send_failure_enters_tagged_discovery() {
         TestCreateStep::Pending {
             token: AwsCreateToken::TaggedEc2 {
                 kind: Ec2TaggedResourceKind::RouteTable,
-                attempts_remaining: 8,
+                attempts_remaining: 6,
                 next_delay_secs: 5,
                 ..
             },
@@ -1058,10 +1058,20 @@ async fn tagged_vpc_discovery_error_consumes_final_attempt_and_keeps_cause() {
         .expect_err("a final discovery error must not re-pend forever");
 
     assert!(matches!(verdict, TestCreateVerdict::Undetermined(_)));
+    let wire = verdict.provider_error().to_wire();
+    assert_eq!(
+        wire.message,
+        format!(
+            "ec2.Vpc may have been created with tag carina:create-token={TAGGED_VPC_CREATE_TOKEN}; check before re-applying"
+        )
+    );
+    assert_eq!(
+        wire.resource_id
+            .as_ref()
+            .map(|resource_id| resource_id.identity.as_str()),
+        Some("outcome-unknown")
+    );
     let rendered = verdict.provider_error().to_string();
-    assert!(rendered.starts_with(&format!(
-        "ec2.Vpc may have been created with tag carina:create-token={TAGGED_VPC_CREATE_TOKEN}; check before re-applying"
-    )));
     assert!(rendered.contains("UnauthorizedOperation"), "{rendered}");
     assert!(rendered.contains("scripted discovery denial"), "{rendered}");
 }

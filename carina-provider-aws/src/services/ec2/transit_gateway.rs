@@ -150,12 +150,8 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                api_error_with_meta(
-                    "Failed to describe transit gateways",
-                    "ec2.DescribeTransitGateways",
-                    e,
-                )
-                .for_resource(id.clone())
+                api_error_with_meta("Failed to describe transit gateways", e)
+                    .for_resource(id.clone())
             })?;
 
         if let Some(tgw) = result.transit_gateways().first() {
@@ -268,12 +264,8 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                api_error_with_meta(
-                    "Failed to describe transit gateway",
-                    "ec2.DescribeTransitGateways",
-                    e,
-                )
-                .for_resource(id.clone())
+                api_error_with_meta("Failed to describe transit gateway", e)
+                    .for_resource(id.clone())
             })?;
         Ok(transit_gateway_create_poll_state(
             result
@@ -296,12 +288,8 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                api_error_with_meta(
-                    "Failed to describe transit gateway",
-                    "ec2.DescribeTransitGateways",
-                    e,
-                )
-                .for_resource(id.clone())
+                api_error_with_meta("Failed to describe transit gateway", e)
+                    .for_resource(id.clone())
             })?;
         Ok(transit_gateway_delete_poll_state(
             result

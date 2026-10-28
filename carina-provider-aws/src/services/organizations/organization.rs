@@ -99,12 +99,8 @@ impl AwsProvider {
                 {
                     return Ok(ReadOutcome::not_found(id.clone()));
                 }
-                Err(api_error_with_meta(
-                    "Failed to describe organization",
-                    "organizations.DescribeOrganization",
-                    e,
-                )
-                .for_resource(id.clone()))
+                Err(api_error_with_meta("Failed to describe organization", e)
+                    .for_resource(id.clone()))
             }
         }
     }
@@ -123,12 +119,8 @@ impl AwsProvider {
         }
 
         let response = req.send().await.map_err(|e| {
-            api_error_with_meta(
-                "Failed to create organization",
-                "organizations.CreateOrganization",
-                e,
-            )
-            .for_resource(resource.id.clone())
+            api_error_with_meta("Failed to create organization", e)
+                .for_resource(resource.id.clone())
         })?;
 
         if let Some(org) = response.organization() {
@@ -169,12 +161,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                api_error_with_meta(
-                    "Failed to delete organization",
-                    "organizations.DeleteOrganization",
-                    e,
-                )
-                .for_resource(id.clone())
+                api_error_with_meta("Failed to delete organization", e).for_resource(id.clone())
             })?;
         Ok(())
     }

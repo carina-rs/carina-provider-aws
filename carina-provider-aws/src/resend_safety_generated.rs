@@ -9,26 +9,18 @@ use aws_smithy_runtime_api::client::orchestrator::HttpResponse;
 use aws_smithy_runtime_api::client::result::SdkError;
 use carina_aws_types::Idempotency;
 
-use crate::aws_operation::{AwsOperation, ClientToken, NoToken, TokenBearing, WithToken};
+use crate::aws_operation::{
+    AwsOperation, ClientToken, DecidedOperationError, NoToken, TokenBearing, WithToken,
+};
 
 pub(crate) fn acm_idempotency(operation: &str) -> Idempotency {
     match operation {
         "AddTagsToCertificate" => Idempotency::Idempotent,
         "DeleteCertificate" => Idempotency::NotIdempotent,
         "DescribeCertificate" => Idempotency::ReadOnly,
-        "ExportCertificate" => Idempotency::NotIdempotent,
-        "GetAccountConfiguration" => Idempotency::NotIdempotent,
-        "GetCertificate" => Idempotency::NotIdempotent,
-        "ImportCertificate" => Idempotency::NotIdempotent,
-        "ListCertificates" => Idempotency::NotIdempotent,
         "ListTagsForCertificate" => Idempotency::ReadOnly,
-        "PutAccountConfiguration" => Idempotency::NotIdempotent,
         "RemoveTagsFromCertificate" => Idempotency::Idempotent,
-        "RenewCertificate" => Idempotency::NotIdempotent,
         "RequestCertificate" => Idempotency::IdempotencyToken,
-        "ResendValidationEmail" => Idempotency::NotIdempotent,
-        "RevokeCertificate" => Idempotency::NotIdempotent,
-        "SearchCertificates" => Idempotency::NotIdempotent,
         "UpdateCertificateOptions" => Idempotency::Idempotent,
         _ => Idempotency::NotIdempotent,
     }
@@ -37,1379 +29,195 @@ pub(crate) fn acm_idempotency(operation: &str) -> Idempotency {
 pub(crate) fn cloudwatchlogs_idempotency(operation: &str) -> Idempotency {
     match operation {
         "AssociateKmsKey" => Idempotency::Idempotent,
-        "AssociateSourceToS3TableIntegration" => Idempotency::NotIdempotent,
-        "CancelExportTask" => Idempotency::NotIdempotent,
-        "CancelImportTask" => Idempotency::NotIdempotent,
-        "CreateDelivery" => Idempotency::NotIdempotent,
-        "CreateExportTask" => Idempotency::NotIdempotent,
-        "CreateImportTask" => Idempotency::NotIdempotent,
-        "CreateLogAnomalyDetector" => Idempotency::NotIdempotent,
         "CreateLogGroup" => Idempotency::NotIdempotent,
-        "CreateLogStream" => Idempotency::NotIdempotent,
-        "CreateLookupTable" => Idempotency::NotIdempotent,
-        "CreateScheduledQuery" => Idempotency::NotIdempotent,
-        "DeleteAccountPolicy" => Idempotency::NotIdempotent,
-        "DeleteDataProtectionPolicy" => Idempotency::NotIdempotent,
-        "DeleteDelivery" => Idempotency::NotIdempotent,
-        "DeleteDeliveryDestination" => Idempotency::NotIdempotent,
-        "DeleteDeliveryDestinationPolicy" => Idempotency::NotIdempotent,
-        "DeleteDeliverySource" => Idempotency::NotIdempotent,
-        "DeleteDestination" => Idempotency::NotIdempotent,
-        "DeleteIndexPolicy" => Idempotency::NotIdempotent,
-        "DeleteIntegration" => Idempotency::NotIdempotent,
-        "DeleteLogAnomalyDetector" => Idempotency::NotIdempotent,
         "DeleteLogGroup" => Idempotency::NotIdempotent,
-        "DeleteLogStream" => Idempotency::NotIdempotent,
-        "DeleteLookupTable" => Idempotency::NotIdempotent,
-        "DeleteMetricFilter" => Idempotency::NotIdempotent,
-        "DeleteQueryDefinition" => Idempotency::NotIdempotent,
-        "DeleteResourcePolicy" => Idempotency::NotIdempotent,
         "DeleteRetentionPolicy" => Idempotency::Idempotent,
-        "DeleteScheduledQuery" => Idempotency::NotIdempotent,
-        "DeleteSubscriptionFilter" => Idempotency::NotIdempotent,
-        "DeleteTransformer" => Idempotency::NotIdempotent,
-        "DescribeAccountPolicies" => Idempotency::NotIdempotent,
-        "DescribeConfigurationTemplates" => Idempotency::NotIdempotent,
-        "DescribeDeliveries" => Idempotency::NotIdempotent,
-        "DescribeDeliveryDestinations" => Idempotency::NotIdempotent,
-        "DescribeDeliverySources" => Idempotency::NotIdempotent,
-        "DescribeDestinations" => Idempotency::NotIdempotent,
-        "DescribeExportTasks" => Idempotency::NotIdempotent,
-        "DescribeFieldIndexes" => Idempotency::NotIdempotent,
-        "DescribeImportTaskBatches" => Idempotency::NotIdempotent,
-        "DescribeImportTasks" => Idempotency::NotIdempotent,
-        "DescribeIndexPolicies" => Idempotency::NotIdempotent,
         "DescribeLogGroups" => Idempotency::ReadOnly,
-        "DescribeLogStreams" => Idempotency::NotIdempotent,
-        "DescribeLookupTables" => Idempotency::NotIdempotent,
-        "DescribeMetricFilters" => Idempotency::NotIdempotent,
-        "DescribeQueries" => Idempotency::NotIdempotent,
-        "DescribeQueryDefinitions" => Idempotency::NotIdempotent,
-        "DescribeResourcePolicies" => Idempotency::NotIdempotent,
-        "DescribeSubscriptionFilters" => Idempotency::NotIdempotent,
         "DisassociateKmsKey" => Idempotency::Idempotent,
-        "DisassociateSourceFromS3TableIntegration" => Idempotency::NotIdempotent,
-        "FilterLogEvents" => Idempotency::NotIdempotent,
-        "GetDataProtectionPolicy" => Idempotency::NotIdempotent,
-        "GetDelivery" => Idempotency::NotIdempotent,
-        "GetDeliveryDestination" => Idempotency::NotIdempotent,
-        "GetDeliveryDestinationPolicy" => Idempotency::NotIdempotent,
-        "GetDeliverySource" => Idempotency::NotIdempotent,
-        "GetIntegration" => Idempotency::NotIdempotent,
-        "GetLogAnomalyDetector" => Idempotency::NotIdempotent,
-        "GetLogEvents" => Idempotency::NotIdempotent,
-        "GetLogFields" => Idempotency::NotIdempotent,
-        "GetLogGroupFields" => Idempotency::NotIdempotent,
-        "GetLogObject" => Idempotency::NotIdempotent,
-        "GetLogRecord" => Idempotency::NotIdempotent,
-        "GetLookupTable" => Idempotency::NotIdempotent,
-        "GetQueryResults" => Idempotency::NotIdempotent,
-        "GetScheduledQuery" => Idempotency::NotIdempotent,
-        "GetScheduledQueryHistory" => Idempotency::NotIdempotent,
-        "GetTransformer" => Idempotency::NotIdempotent,
-        "ListAggregateLogGroupSummaries" => Idempotency::NotIdempotent,
-        "ListAnomalies" => Idempotency::NotIdempotent,
-        "ListIntegrations" => Idempotency::NotIdempotent,
-        "ListLogAnomalyDetectors" => Idempotency::NotIdempotent,
-        "ListLogGroups" => Idempotency::NotIdempotent,
-        "ListLogGroupsForQuery" => Idempotency::NotIdempotent,
-        "ListScheduledQueries" => Idempotency::NotIdempotent,
-        "ListSourcesForS3TableIntegration" => Idempotency::NotIdempotent,
         "ListTagsForResource" => Idempotency::ReadOnly,
         "ListTagsLogGroup" => Idempotency::ReadOnly,
-        "PutAccountPolicy" => Idempotency::NotIdempotent,
-        "PutBearerTokenAuthentication" => Idempotency::NotIdempotent,
-        "PutDataProtectionPolicy" => Idempotency::NotIdempotent,
-        "PutDeliveryDestination" => Idempotency::NotIdempotent,
-        "PutDeliveryDestinationPolicy" => Idempotency::NotIdempotent,
-        "PutDeliverySource" => Idempotency::NotIdempotent,
-        "PutDestination" => Idempotency::NotIdempotent,
-        "PutDestinationPolicy" => Idempotency::NotIdempotent,
-        "PutIndexPolicy" => Idempotency::NotIdempotent,
-        "PutIntegration" => Idempotency::NotIdempotent,
-        "PutLogEvents" => Idempotency::NotIdempotent,
-        "PutLogGroupDeletionProtection" => Idempotency::NotIdempotent,
-        "PutMetricFilter" => Idempotency::NotIdempotent,
-        "PutQueryDefinition" => Idempotency::IdempotencyToken,
-        "PutResourcePolicy" => Idempotency::NotIdempotent,
         "PutRetentionPolicy" => Idempotency::Idempotent,
-        "PutSubscriptionFilter" => Idempotency::NotIdempotent,
-        "PutTransformer" => Idempotency::NotIdempotent,
-        "StartLiveTail" => Idempotency::NotIdempotent,
-        "StartQuery" => Idempotency::NotIdempotent,
-        "StopQuery" => Idempotency::NotIdempotent,
         "TagLogGroup" => Idempotency::Idempotent,
         "TagResource" => Idempotency::Idempotent,
-        "TestMetricFilter" => Idempotency::NotIdempotent,
-        "TestTransformer" => Idempotency::NotIdempotent,
         "UntagLogGroup" => Idempotency::Idempotent,
         "UntagResource" => Idempotency::Idempotent,
-        "UpdateAnomaly" => Idempotency::NotIdempotent,
-        "UpdateDeliveryConfiguration" => Idempotency::NotIdempotent,
-        "UpdateLogAnomalyDetector" => Idempotency::NotIdempotent,
-        "UpdateLookupTable" => Idempotency::NotIdempotent,
-        "UpdateScheduledQuery" => Idempotency::NotIdempotent,
         _ => Idempotency::NotIdempotent,
     }
 }
 
 pub(crate) fn ec2_idempotency(operation: &str) -> Idempotency {
     match operation {
-        "AcceptAddressTransfer" => Idempotency::NotIdempotent,
-        "AcceptCapacityReservationBillingOwnership" => Idempotency::NotIdempotent,
-        "AcceptReservedInstancesExchangeQuote" => Idempotency::NotIdempotent,
-        "AcceptTransitGatewayMulticastDomainAssociations" => Idempotency::NotIdempotent,
-        "AcceptTransitGatewayPeeringAttachment" => Idempotency::NotIdempotent,
-        "AcceptTransitGatewayVpcAttachment" => Idempotency::NotIdempotent,
-        "AcceptVpcEndpointConnections" => Idempotency::NotIdempotent,
-        "AcceptVpcPeeringConnection" => Idempotency::NotIdempotent,
-        "AdvertiseByoipCidr" => Idempotency::NotIdempotent,
         "AllocateAddress" => Idempotency::NotIdempotent,
-        "AllocateHosts" => Idempotency::NotIdempotent,
-        "AllocateIpamPoolCidr" => Idempotency::IdempotencyToken,
-        "ApplySecurityGroupsToClientVpnTargetNetwork" => Idempotency::NotIdempotent,
-        "AssignIpv6Addresses" => Idempotency::NotIdempotent,
-        "AssignPrivateIpAddresses" => Idempotency::NotIdempotent,
-        "AssignPrivateNatGatewayAddress" => Idempotency::NotIdempotent,
-        "AssociateAddress" => Idempotency::NotIdempotent,
-        "AssociateCapacityReservationBillingOwner" => Idempotency::NotIdempotent,
-        "AssociateClientVpnTargetNetwork" => Idempotency::IdempotencyToken,
-        "AssociateDhcpOptions" => Idempotency::NotIdempotent,
-        "AssociateEnclaveCertificateIamRole" => Idempotency::NotIdempotent,
-        "AssociateIamInstanceProfile" => Idempotency::NotIdempotent,
-        "AssociateInstanceEventWindow" => Idempotency::NotIdempotent,
-        "AssociateIpamByoasn" => Idempotency::NotIdempotent,
-        "AssociateIpamResourceDiscovery" => Idempotency::IdempotencyToken,
-        "AssociateNatGatewayAddress" => Idempotency::NotIdempotent,
-        "AssociateRouteServer" => Idempotency::NotIdempotent,
         "AssociateRouteTable" => Idempotency::NotIdempotent,
-        "AssociateSecurityGroupVpc" => Idempotency::NotIdempotent,
-        "AssociateSubnetCidrBlock" => Idempotency::NotIdempotent,
-        "AssociateTransitGatewayMulticastDomain" => Idempotency::NotIdempotent,
-        "AssociateTransitGatewayPolicyTable" => Idempotency::NotIdempotent,
-        "AssociateTransitGatewayRouteTable" => Idempotency::NotIdempotent,
-        "AssociateTrunkInterface" => Idempotency::IdempotencyToken,
-        "AssociateVpcCidrBlock" => Idempotency::NotIdempotent,
-        "AttachClassicLinkVpc" => Idempotency::NotIdempotent,
         "AttachInternetGateway" => Idempotency::NotIdempotent,
-        "AttachNetworkInterface" => Idempotency::NotIdempotent,
-        "AttachVerifiedAccessTrustProvider" => Idempotency::IdempotencyToken,
-        "AttachVolume" => Idempotency::NotIdempotent,
         "AttachVpnGateway" => Idempotency::NotIdempotent,
-        "AuthorizeClientVpnIngress" => Idempotency::IdempotencyToken,
         "AuthorizeSecurityGroupEgress" => Idempotency::NotIdempotent,
         "AuthorizeSecurityGroupIngress" => Idempotency::NotIdempotent,
-        "BundleInstance" => Idempotency::NotIdempotent,
-        "CancelBundleTask" => Idempotency::NotIdempotent,
-        "CancelCapacityReservation" => Idempotency::NotIdempotent,
-        "CancelCapacityReservationFleets" => Idempotency::NotIdempotent,
-        "CancelConversionTask" => Idempotency::NotIdempotent,
-        "CancelDeclarativePoliciesReport" => Idempotency::NotIdempotent,
-        "CancelExportTask" => Idempotency::NotIdempotent,
-        "CancelImageLaunchPermission" => Idempotency::NotIdempotent,
-        "CancelImportTask" => Idempotency::NotIdempotent,
-        "CancelReservedInstancesListing" => Idempotency::NotIdempotent,
-        "CancelSpotFleetRequests" => Idempotency::NotIdempotent,
-        "CancelSpotInstanceRequests" => Idempotency::NotIdempotent,
-        "ConfirmProductInstance" => Idempotency::NotIdempotent,
-        "CopyFpgaImage" => Idempotency::NotIdempotent,
-        "CopyImage" => Idempotency::IdempotencyToken,
-        "CopySnapshot" => Idempotency::NotIdempotent,
-        "CopyVolumes" => Idempotency::IdempotencyToken,
-        "CreateCapacityManagerDataExport" => Idempotency::IdempotencyToken,
-        "CreateCapacityReservation" => Idempotency::NotIdempotent,
-        "CreateCapacityReservationBySplitting" => Idempotency::IdempotencyToken,
-        "CreateCapacityReservationFleet" => Idempotency::IdempotencyToken,
-        "CreateCarrierGateway" => Idempotency::IdempotencyToken,
-        "CreateClientVpnEndpoint" => Idempotency::IdempotencyToken,
-        "CreateClientVpnRoute" => Idempotency::IdempotencyToken,
-        "CreateCoipCidr" => Idempotency::NotIdempotent,
-        "CreateCoipPool" => Idempotency::NotIdempotent,
-        "CreateCustomerGateway" => Idempotency::NotIdempotent,
-        "CreateDefaultSubnet" => Idempotency::NotIdempotent,
-        "CreateDefaultVpc" => Idempotency::NotIdempotent,
-        "CreateDelegateMacVolumeOwnershipTask" => Idempotency::IdempotencyToken,
-        "CreateDhcpOptions" => Idempotency::NotIdempotent,
         "CreateEgressOnlyInternetGateway" => Idempotency::IdempotencyToken,
-        "CreateFleet" => Idempotency::IdempotencyToken,
         "CreateFlowLogs" => Idempotency::IdempotencyToken,
-        "CreateFpgaImage" => Idempotency::NotIdempotent,
-        "CreateImage" => Idempotency::NotIdempotent,
-        "CreateImageUsageReport" => Idempotency::IdempotencyToken,
-        "CreateInstanceConnectEndpoint" => Idempotency::IdempotencyToken,
-        "CreateInstanceEventWindow" => Idempotency::NotIdempotent,
-        "CreateInstanceExportTask" => Idempotency::NotIdempotent,
         "CreateInternetGateway" => Idempotency::NotIdempotent,
-        "CreateInterruptibleCapacityReservationAllocation" => Idempotency::IdempotencyToken,
-        "CreateIpam" => Idempotency::IdempotencyToken,
-        "CreateIpamExternalResourceVerificationToken" => Idempotency::IdempotencyToken,
-        "CreateIpamPolicy" => Idempotency::IdempotencyToken,
-        "CreateIpamPool" => Idempotency::IdempotencyToken,
-        "CreateIpamPrefixListResolver" => Idempotency::IdempotencyToken,
-        "CreateIpamPrefixListResolverTarget" => Idempotency::IdempotencyToken,
-        "CreateIpamResourceDiscovery" => Idempotency::IdempotencyToken,
-        "CreateIpamScope" => Idempotency::IdempotencyToken,
-        "CreateKeyPair" => Idempotency::NotIdempotent,
-        "CreateLaunchTemplate" => Idempotency::IdempotencyToken,
-        "CreateLaunchTemplateVersion" => Idempotency::IdempotencyToken,
-        "CreateLocalGatewayRoute" => Idempotency::NotIdempotent,
-        "CreateLocalGatewayRouteTable" => Idempotency::NotIdempotent,
-        "CreateLocalGatewayRouteTableVirtualInterfaceGroupAssociation" => {
-            Idempotency::NotIdempotent
-        }
-        "CreateLocalGatewayRouteTableVpcAssociation" => Idempotency::NotIdempotent,
-        "CreateLocalGatewayVirtualInterface" => Idempotency::NotIdempotent,
-        "CreateLocalGatewayVirtualInterfaceGroup" => Idempotency::NotIdempotent,
-        "CreateMacSystemIntegrityProtectionModificationTask" => Idempotency::IdempotencyToken,
-        "CreateManagedPrefixList" => Idempotency::IdempotencyToken,
         "CreateNatGateway" => Idempotency::IdempotencyToken,
-        "CreateNetworkAcl" => Idempotency::IdempotencyToken,
-        "CreateNetworkAclEntry" => Idempotency::NotIdempotent,
-        "CreateNetworkInsightsAccessScope" => Idempotency::IdempotencyToken,
-        "CreateNetworkInsightsPath" => Idempotency::IdempotencyToken,
-        "CreateNetworkInterface" => Idempotency::IdempotencyToken,
-        "CreateNetworkInterfacePermission" => Idempotency::NotIdempotent,
-        "CreatePlacementGroup" => Idempotency::NotIdempotent,
-        "CreatePublicIpv4Pool" => Idempotency::NotIdempotent,
-        "CreateReplaceRootVolumeTask" => Idempotency::IdempotencyToken,
-        "CreateReservedInstancesListing" => Idempotency::NotIdempotent,
-        "CreateRestoreImageTask" => Idempotency::NotIdempotent,
         "CreateRoute" => Idempotency::NotIdempotent,
-        "CreateRouteServer" => Idempotency::IdempotencyToken,
-        "CreateRouteServerEndpoint" => Idempotency::IdempotencyToken,
-        "CreateRouteServerPeer" => Idempotency::NotIdempotent,
         "CreateRouteTable" => Idempotency::IdempotencyToken,
-        "CreateSecondaryNetwork" => Idempotency::IdempotencyToken,
-        "CreateSecondarySubnet" => Idempotency::IdempotencyToken,
         "CreateSecurityGroup" => Idempotency::NotIdempotent,
-        "CreateSnapshot" => Idempotency::NotIdempotent,
-        "CreateSnapshots" => Idempotency::NotIdempotent,
-        "CreateSpotDatafeedSubscription" => Idempotency::NotIdempotent,
-        "CreateStoreImageTask" => Idempotency::NotIdempotent,
         "CreateSubnet" => Idempotency::NotIdempotent,
-        "CreateSubnetCidrReservation" => Idempotency::NotIdempotent,
         "CreateTags" => Idempotency::Idempotent,
-        "CreateTrafficMirrorFilter" => Idempotency::IdempotencyToken,
-        "CreateTrafficMirrorFilterRule" => Idempotency::IdempotencyToken,
-        "CreateTrafficMirrorSession" => Idempotency::IdempotencyToken,
-        "CreateTrafficMirrorTarget" => Idempotency::IdempotencyToken,
         "CreateTransitGateway" => Idempotency::NotIdempotent,
-        "CreateTransitGatewayConnect" => Idempotency::NotIdempotent,
-        "CreateTransitGatewayConnectPeer" => Idempotency::NotIdempotent,
-        "CreateTransitGatewayMeteringPolicy" => Idempotency::NotIdempotent,
-        "CreateTransitGatewayMeteringPolicyEntry" => Idempotency::NotIdempotent,
-        "CreateTransitGatewayMulticastDomain" => Idempotency::NotIdempotent,
-        "CreateTransitGatewayPeeringAttachment" => Idempotency::NotIdempotent,
-        "CreateTransitGatewayPolicyTable" => Idempotency::NotIdempotent,
-        "CreateTransitGatewayPrefixListReference" => Idempotency::NotIdempotent,
-        "CreateTransitGatewayRoute" => Idempotency::NotIdempotent,
-        "CreateTransitGatewayRouteTable" => Idempotency::NotIdempotent,
-        "CreateTransitGatewayRouteTableAnnouncement" => Idempotency::NotIdempotent,
         "CreateTransitGatewayVpcAttachment" => Idempotency::NotIdempotent,
-        "CreateVerifiedAccessEndpoint" => Idempotency::IdempotencyToken,
-        "CreateVerifiedAccessGroup" => Idempotency::IdempotencyToken,
-        "CreateVerifiedAccessInstance" => Idempotency::IdempotencyToken,
-        "CreateVerifiedAccessTrustProvider" => Idempotency::IdempotencyToken,
-        "CreateVolume" => Idempotency::IdempotencyToken,
         "CreateVpc" => Idempotency::NotIdempotent,
-        "CreateVpcBlockPublicAccessExclusion" => Idempotency::NotIdempotent,
-        "CreateVpcEncryptionControl" => Idempotency::NotIdempotent,
         "CreateVpcEndpoint" => Idempotency::IdempotencyToken,
-        "CreateVpcEndpointConnectionNotification" => Idempotency::NotIdempotent,
-        "CreateVpcEndpointServiceConfiguration" => Idempotency::NotIdempotent,
         "CreateVpcPeeringConnection" => Idempotency::NotIdempotent,
-        "CreateVpnConcentrator" => Idempotency::NotIdempotent,
-        "CreateVpnConnection" => Idempotency::NotIdempotent,
-        "CreateVpnConnectionRoute" => Idempotency::NotIdempotent,
         "CreateVpnGateway" => Idempotency::NotIdempotent,
-        "DeleteCapacityManagerDataExport" => Idempotency::NotIdempotent,
-        "DeleteCarrierGateway" => Idempotency::NotIdempotent,
-        "DeleteClientVpnEndpoint" => Idempotency::NotIdempotent,
-        "DeleteClientVpnRoute" => Idempotency::NotIdempotent,
-        "DeleteCoipCidr" => Idempotency::NotIdempotent,
-        "DeleteCoipPool" => Idempotency::NotIdempotent,
-        "DeleteCustomerGateway" => Idempotency::NotIdempotent,
-        "DeleteDhcpOptions" => Idempotency::NotIdempotent,
         "DeleteEgressOnlyInternetGateway" => Idempotency::NotIdempotent,
-        "DeleteFleets" => Idempotency::NotIdempotent,
         "DeleteFlowLogs" => Idempotency::NotIdempotent,
-        "DeleteFpgaImage" => Idempotency::NotIdempotent,
-        "DeleteImageUsageReport" => Idempotency::NotIdempotent,
-        "DeleteInstanceConnectEndpoint" => Idempotency::NotIdempotent,
-        "DeleteInstanceEventWindow" => Idempotency::NotIdempotent,
         "DeleteInternetGateway" => Idempotency::NotIdempotent,
-        "DeleteIpam" => Idempotency::NotIdempotent,
-        "DeleteIpamExternalResourceVerificationToken" => Idempotency::NotIdempotent,
-        "DeleteIpamPolicy" => Idempotency::NotIdempotent,
-        "DeleteIpamPool" => Idempotency::NotIdempotent,
-        "DeleteIpamPrefixListResolver" => Idempotency::NotIdempotent,
-        "DeleteIpamPrefixListResolverTarget" => Idempotency::NotIdempotent,
-        "DeleteIpamResourceDiscovery" => Idempotency::NotIdempotent,
-        "DeleteIpamScope" => Idempotency::NotIdempotent,
-        "DeleteKeyPair" => Idempotency::NotIdempotent,
-        "DeleteLaunchTemplate" => Idempotency::NotIdempotent,
-        "DeleteLaunchTemplateVersions" => Idempotency::NotIdempotent,
-        "DeleteLocalGatewayRoute" => Idempotency::NotIdempotent,
-        "DeleteLocalGatewayRouteTable" => Idempotency::NotIdempotent,
-        "DeleteLocalGatewayRouteTableVirtualInterfaceGroupAssociation" => {
-            Idempotency::NotIdempotent
-        }
-        "DeleteLocalGatewayRouteTableVpcAssociation" => Idempotency::NotIdempotent,
-        "DeleteLocalGatewayVirtualInterface" => Idempotency::NotIdempotent,
-        "DeleteLocalGatewayVirtualInterfaceGroup" => Idempotency::NotIdempotent,
-        "DeleteManagedPrefixList" => Idempotency::NotIdempotent,
         "DeleteNatGateway" => Idempotency::NotIdempotent,
-        "DeleteNetworkAcl" => Idempotency::NotIdempotent,
-        "DeleteNetworkAclEntry" => Idempotency::NotIdempotent,
-        "DeleteNetworkInsightsAccessScope" => Idempotency::NotIdempotent,
-        "DeleteNetworkInsightsAccessScopeAnalysis" => Idempotency::NotIdempotent,
-        "DeleteNetworkInsightsAnalysis" => Idempotency::NotIdempotent,
-        "DeleteNetworkInsightsPath" => Idempotency::NotIdempotent,
-        "DeleteNetworkInterface" => Idempotency::NotIdempotent,
-        "DeleteNetworkInterfacePermission" => Idempotency::NotIdempotent,
-        "DeletePlacementGroup" => Idempotency::NotIdempotent,
-        "DeletePublicIpv4Pool" => Idempotency::NotIdempotent,
-        "DeleteQueuedReservedInstances" => Idempotency::NotIdempotent,
         "DeleteRoute" => Idempotency::NotIdempotent,
-        "DeleteRouteServer" => Idempotency::NotIdempotent,
-        "DeleteRouteServerEndpoint" => Idempotency::NotIdempotent,
-        "DeleteRouteServerPeer" => Idempotency::NotIdempotent,
         "DeleteRouteTable" => Idempotency::NotIdempotent,
-        "DeleteSecondaryNetwork" => Idempotency::IdempotencyToken,
-        "DeleteSecondarySubnet" => Idempotency::IdempotencyToken,
         "DeleteSecurityGroup" => Idempotency::NotIdempotent,
-        "DeleteSnapshot" => Idempotency::NotIdempotent,
-        "DeleteSpotDatafeedSubscription" => Idempotency::NotIdempotent,
         "DeleteSubnet" => Idempotency::NotIdempotent,
-        "DeleteSubnetCidrReservation" => Idempotency::NotIdempotent,
         "DeleteTags" => Idempotency::Idempotent,
-        "DeleteTrafficMirrorFilter" => Idempotency::NotIdempotent,
-        "DeleteTrafficMirrorFilterRule" => Idempotency::NotIdempotent,
-        "DeleteTrafficMirrorSession" => Idempotency::NotIdempotent,
-        "DeleteTrafficMirrorTarget" => Idempotency::NotIdempotent,
         "DeleteTransitGateway" => Idempotency::NotIdempotent,
-        "DeleteTransitGatewayConnect" => Idempotency::NotIdempotent,
-        "DeleteTransitGatewayConnectPeer" => Idempotency::NotIdempotent,
-        "DeleteTransitGatewayMeteringPolicy" => Idempotency::NotIdempotent,
-        "DeleteTransitGatewayMeteringPolicyEntry" => Idempotency::NotIdempotent,
-        "DeleteTransitGatewayMulticastDomain" => Idempotency::NotIdempotent,
-        "DeleteTransitGatewayPeeringAttachment" => Idempotency::NotIdempotent,
-        "DeleteTransitGatewayPolicyTable" => Idempotency::NotIdempotent,
-        "DeleteTransitGatewayPrefixListReference" => Idempotency::NotIdempotent,
-        "DeleteTransitGatewayRoute" => Idempotency::NotIdempotent,
-        "DeleteTransitGatewayRouteTable" => Idempotency::NotIdempotent,
-        "DeleteTransitGatewayRouteTableAnnouncement" => Idempotency::NotIdempotent,
         "DeleteTransitGatewayVpcAttachment" => Idempotency::NotIdempotent,
-        "DeleteVerifiedAccessEndpoint" => Idempotency::IdempotencyToken,
-        "DeleteVerifiedAccessGroup" => Idempotency::IdempotencyToken,
-        "DeleteVerifiedAccessInstance" => Idempotency::IdempotencyToken,
-        "DeleteVerifiedAccessTrustProvider" => Idempotency::IdempotencyToken,
-        "DeleteVolume" => Idempotency::NotIdempotent,
         "DeleteVpc" => Idempotency::NotIdempotent,
-        "DeleteVpcBlockPublicAccessExclusion" => Idempotency::NotIdempotent,
-        "DeleteVpcEncryptionControl" => Idempotency::NotIdempotent,
-        "DeleteVpcEndpointConnectionNotifications" => Idempotency::NotIdempotent,
-        "DeleteVpcEndpointServiceConfigurations" => Idempotency::NotIdempotent,
         "DeleteVpcEndpoints" => Idempotency::NotIdempotent,
         "DeleteVpcPeeringConnection" => Idempotency::NotIdempotent,
-        "DeleteVpnConcentrator" => Idempotency::NotIdempotent,
-        "DeleteVpnConnection" => Idempotency::NotIdempotent,
-        "DeleteVpnConnectionRoute" => Idempotency::NotIdempotent,
         "DeleteVpnGateway" => Idempotency::NotIdempotent,
-        "DeprovisionByoipCidr" => Idempotency::NotIdempotent,
-        "DeprovisionIpamByoasn" => Idempotency::NotIdempotent,
-        "DeprovisionIpamPoolCidr" => Idempotency::NotIdempotent,
-        "DeprovisionPublicIpv4PoolCidr" => Idempotency::NotIdempotent,
-        "DeregisterImage" => Idempotency::NotIdempotent,
-        "DeregisterInstanceEventNotificationAttributes" => Idempotency::NotIdempotent,
-        "DeregisterTransitGatewayMulticastGroupMembers" => Idempotency::NotIdempotent,
-        "DeregisterTransitGatewayMulticastGroupSources" => Idempotency::NotIdempotent,
-        "DescribeAccountAttributes" => Idempotency::NotIdempotent,
-        "DescribeAddressTransfers" => Idempotency::NotIdempotent,
         "DescribeAddresses" => Idempotency::ReadOnly,
-        "DescribeAddressesAttribute" => Idempotency::NotIdempotent,
-        "DescribeAggregateIdFormat" => Idempotency::NotIdempotent,
-        "DescribeAvailabilityZones" => Idempotency::NotIdempotent,
-        "DescribeAwsNetworkPerformanceMetricSubscriptions" => Idempotency::NotIdempotent,
-        "DescribeBundleTasks" => Idempotency::NotIdempotent,
-        "DescribeByoipCidrs" => Idempotency::NotIdempotent,
-        "DescribeCapacityBlockExtensionHistory" => Idempotency::NotIdempotent,
-        "DescribeCapacityBlockExtensionOfferings" => Idempotency::NotIdempotent,
-        "DescribeCapacityBlockOfferings" => Idempotency::NotIdempotent,
-        "DescribeCapacityBlockStatus" => Idempotency::NotIdempotent,
-        "DescribeCapacityBlocks" => Idempotency::NotIdempotent,
-        "DescribeCapacityManagerDataExports" => Idempotency::NotIdempotent,
-        "DescribeCapacityReservationBillingRequests" => Idempotency::NotIdempotent,
-        "DescribeCapacityReservationFleets" => Idempotency::NotIdempotent,
-        "DescribeCapacityReservationTopology" => Idempotency::NotIdempotent,
-        "DescribeCapacityReservations" => Idempotency::NotIdempotent,
-        "DescribeCarrierGateways" => Idempotency::NotIdempotent,
-        "DescribeClassicLinkInstances" => Idempotency::NotIdempotent,
-        "DescribeClientVpnAuthorizationRules" => Idempotency::NotIdempotent,
-        "DescribeClientVpnConnections" => Idempotency::NotIdempotent,
-        "DescribeClientVpnEndpoints" => Idempotency::NotIdempotent,
-        "DescribeClientVpnRoutes" => Idempotency::NotIdempotent,
-        "DescribeClientVpnTargetNetworks" => Idempotency::NotIdempotent,
-        "DescribeCoipPools" => Idempotency::NotIdempotent,
-        "DescribeConversionTasks" => Idempotency::NotIdempotent,
-        "DescribeCustomerGateways" => Idempotency::NotIdempotent,
-        "DescribeDeclarativePoliciesReports" => Idempotency::NotIdempotent,
-        "DescribeDhcpOptions" => Idempotency::NotIdempotent,
         "DescribeEgressOnlyInternetGateways" => Idempotency::ReadOnly,
-        "DescribeElasticGpus" => Idempotency::NotIdempotent,
-        "DescribeExportImageTasks" => Idempotency::NotIdempotent,
-        "DescribeExportTasks" => Idempotency::NotIdempotent,
-        "DescribeFastLaunchImages" => Idempotency::NotIdempotent,
-        "DescribeFastSnapshotRestores" => Idempotency::NotIdempotent,
-        "DescribeFleetHistory" => Idempotency::NotIdempotent,
-        "DescribeFleetInstances" => Idempotency::NotIdempotent,
-        "DescribeFleets" => Idempotency::NotIdempotent,
         "DescribeFlowLogs" => Idempotency::ReadOnly,
-        "DescribeFpgaImageAttribute" => Idempotency::NotIdempotent,
-        "DescribeFpgaImages" => Idempotency::NotIdempotent,
-        "DescribeHostReservationOfferings" => Idempotency::NotIdempotent,
-        "DescribeHostReservations" => Idempotency::NotIdempotent,
-        "DescribeHosts" => Idempotency::NotIdempotent,
-        "DescribeIamInstanceProfileAssociations" => Idempotency::NotIdempotent,
-        "DescribeIdFormat" => Idempotency::NotIdempotent,
-        "DescribeIdentityIdFormat" => Idempotency::NotIdempotent,
-        "DescribeImageAttribute" => Idempotency::NotIdempotent,
-        "DescribeImageReferences" => Idempotency::NotIdempotent,
-        "DescribeImageUsageReportEntries" => Idempotency::NotIdempotent,
-        "DescribeImageUsageReports" => Idempotency::NotIdempotent,
-        "DescribeImages" => Idempotency::NotIdempotent,
-        "DescribeImportImageTasks" => Idempotency::NotIdempotent,
-        "DescribeImportSnapshotTasks" => Idempotency::NotIdempotent,
-        "DescribeInstanceAttribute" => Idempotency::NotIdempotent,
-        "DescribeInstanceConnectEndpoints" => Idempotency::NotIdempotent,
-        "DescribeInstanceCreditSpecifications" => Idempotency::NotIdempotent,
-        "DescribeInstanceEventNotificationAttributes" => Idempotency::NotIdempotent,
-        "DescribeInstanceEventWindows" => Idempotency::NotIdempotent,
-        "DescribeInstanceImageMetadata" => Idempotency::NotIdempotent,
-        "DescribeInstanceSqlHaHistoryStates" => Idempotency::NotIdempotent,
-        "DescribeInstanceSqlHaStates" => Idempotency::NotIdempotent,
-        "DescribeInstanceStatus" => Idempotency::NotIdempotent,
-        "DescribeInstanceTopology" => Idempotency::NotIdempotent,
-        "DescribeInstanceTypeOfferings" => Idempotency::NotIdempotent,
-        "DescribeInstanceTypes" => Idempotency::NotIdempotent,
-        "DescribeInstances" => Idempotency::NotIdempotent,
         "DescribeInternetGateways" => Idempotency::ReadOnly,
-        "DescribeIpamByoasn" => Idempotency::NotIdempotent,
-        "DescribeIpamExternalResourceVerificationTokens" => Idempotency::NotIdempotent,
-        "DescribeIpamPolicies" => Idempotency::NotIdempotent,
-        "DescribeIpamPools" => Idempotency::NotIdempotent,
-        "DescribeIpamPrefixListResolverTargets" => Idempotency::NotIdempotent,
-        "DescribeIpamPrefixListResolvers" => Idempotency::NotIdempotent,
-        "DescribeIpamResourceDiscoveries" => Idempotency::NotIdempotent,
-        "DescribeIpamResourceDiscoveryAssociations" => Idempotency::NotIdempotent,
-        "DescribeIpamScopes" => Idempotency::NotIdempotent,
-        "DescribeIpams" => Idempotency::NotIdempotent,
-        "DescribeIpv6Pools" => Idempotency::NotIdempotent,
-        "DescribeKeyPairs" => Idempotency::NotIdempotent,
-        "DescribeLaunchTemplateVersions" => Idempotency::NotIdempotent,
-        "DescribeLaunchTemplates" => Idempotency::NotIdempotent,
-        "DescribeLocalGatewayRouteTableVirtualInterfaceGroupAssociations" => {
-            Idempotency::NotIdempotent
-        }
-        "DescribeLocalGatewayRouteTableVpcAssociations" => Idempotency::NotIdempotent,
-        "DescribeLocalGatewayRouteTables" => Idempotency::NotIdempotent,
-        "DescribeLocalGatewayVirtualInterfaceGroups" => Idempotency::NotIdempotent,
-        "DescribeLocalGatewayVirtualInterfaces" => Idempotency::NotIdempotent,
-        "DescribeLocalGateways" => Idempotency::NotIdempotent,
-        "DescribeLockedSnapshots" => Idempotency::NotIdempotent,
-        "DescribeMacHosts" => Idempotency::NotIdempotent,
-        "DescribeMacModificationTasks" => Idempotency::NotIdempotent,
-        "DescribeManagedPrefixLists" => Idempotency::NotIdempotent,
-        "DescribeMovingAddresses" => Idempotency::NotIdempotent,
         "DescribeNatGateways" => Idempotency::ReadOnly,
-        "DescribeNetworkAcls" => Idempotency::NotIdempotent,
-        "DescribeNetworkInsightsAccessScopeAnalyses" => Idempotency::NotIdempotent,
-        "DescribeNetworkInsightsAccessScopes" => Idempotency::NotIdempotent,
-        "DescribeNetworkInsightsAnalyses" => Idempotency::NotIdempotent,
-        "DescribeNetworkInsightsPaths" => Idempotency::NotIdempotent,
-        "DescribeNetworkInterfaceAttribute" => Idempotency::NotIdempotent,
-        "DescribeNetworkInterfacePermissions" => Idempotency::NotIdempotent,
-        "DescribeNetworkInterfaces" => Idempotency::NotIdempotent,
-        "DescribeOutpostLags" => Idempotency::NotIdempotent,
-        "DescribePlacementGroups" => Idempotency::NotIdempotent,
-        "DescribePrefixLists" => Idempotency::NotIdempotent,
-        "DescribePrincipalIdFormat" => Idempotency::NotIdempotent,
-        "DescribePublicIpv4Pools" => Idempotency::NotIdempotent,
-        "DescribeRegions" => Idempotency::NotIdempotent,
-        "DescribeReplaceRootVolumeTasks" => Idempotency::NotIdempotent,
-        "DescribeReservedInstances" => Idempotency::NotIdempotent,
-        "DescribeReservedInstancesListings" => Idempotency::NotIdempotent,
-        "DescribeReservedInstancesModifications" => Idempotency::NotIdempotent,
-        "DescribeReservedInstancesOfferings" => Idempotency::NotIdempotent,
-        "DescribeRouteServerEndpoints" => Idempotency::NotIdempotent,
-        "DescribeRouteServerPeers" => Idempotency::NotIdempotent,
-        "DescribeRouteServers" => Idempotency::NotIdempotent,
         "DescribeRouteTables" => Idempotency::ReadOnly,
-        "DescribeScheduledInstanceAvailability" => Idempotency::NotIdempotent,
-        "DescribeScheduledInstances" => Idempotency::NotIdempotent,
-        "DescribeSecondaryInterfaces" => Idempotency::NotIdempotent,
-        "DescribeSecondaryNetworks" => Idempotency::NotIdempotent,
-        "DescribeSecondarySubnets" => Idempotency::NotIdempotent,
-        "DescribeSecurityGroupReferences" => Idempotency::NotIdempotent,
         "DescribeSecurityGroupRules" => Idempotency::ReadOnly,
-        "DescribeSecurityGroupVpcAssociations" => Idempotency::NotIdempotent,
         "DescribeSecurityGroups" => Idempotency::ReadOnly,
-        "DescribeServiceLinkVirtualInterfaces" => Idempotency::NotIdempotent,
-        "DescribeSnapshotAttribute" => Idempotency::NotIdempotent,
-        "DescribeSnapshotTierStatus" => Idempotency::NotIdempotent,
-        "DescribeSnapshots" => Idempotency::NotIdempotent,
-        "DescribeSpotDatafeedSubscription" => Idempotency::NotIdempotent,
-        "DescribeSpotFleetInstances" => Idempotency::NotIdempotent,
-        "DescribeSpotFleetRequestHistory" => Idempotency::NotIdempotent,
-        "DescribeSpotFleetRequests" => Idempotency::NotIdempotent,
-        "DescribeSpotInstanceRequests" => Idempotency::NotIdempotent,
-        "DescribeSpotPriceHistory" => Idempotency::NotIdempotent,
-        "DescribeStaleSecurityGroups" => Idempotency::NotIdempotent,
-        "DescribeStoreImageTasks" => Idempotency::NotIdempotent,
         "DescribeSubnets" => Idempotency::ReadOnly,
-        "DescribeTags" => Idempotency::NotIdempotent,
-        "DescribeTrafficMirrorFilterRules" => Idempotency::NotIdempotent,
-        "DescribeTrafficMirrorFilters" => Idempotency::NotIdempotent,
-        "DescribeTrafficMirrorSessions" => Idempotency::NotIdempotent,
-        "DescribeTrafficMirrorTargets" => Idempotency::NotIdempotent,
-        "DescribeTransitGatewayAttachments" => Idempotency::NotIdempotent,
-        "DescribeTransitGatewayConnectPeers" => Idempotency::NotIdempotent,
-        "DescribeTransitGatewayConnects" => Idempotency::NotIdempotent,
-        "DescribeTransitGatewayMeteringPolicies" => Idempotency::NotIdempotent,
-        "DescribeTransitGatewayMulticastDomains" => Idempotency::NotIdempotent,
-        "DescribeTransitGatewayPeeringAttachments" => Idempotency::NotIdempotent,
-        "DescribeTransitGatewayPolicyTables" => Idempotency::NotIdempotent,
-        "DescribeTransitGatewayRouteTableAnnouncements" => Idempotency::NotIdempotent,
-        "DescribeTransitGatewayRouteTables" => Idempotency::NotIdempotent,
         "DescribeTransitGatewayVpcAttachments" => Idempotency::ReadOnly,
         "DescribeTransitGateways" => Idempotency::ReadOnly,
-        "DescribeTrunkInterfaceAssociations" => Idempotency::NotIdempotent,
-        "DescribeVerifiedAccessEndpoints" => Idempotency::NotIdempotent,
-        "DescribeVerifiedAccessGroups" => Idempotency::NotIdempotent,
-        "DescribeVerifiedAccessInstanceLoggingConfigurations" => Idempotency::NotIdempotent,
-        "DescribeVerifiedAccessInstances" => Idempotency::NotIdempotent,
-        "DescribeVerifiedAccessTrustProviders" => Idempotency::NotIdempotent,
-        "DescribeVolumeAttribute" => Idempotency::NotIdempotent,
-        "DescribeVolumeStatus" => Idempotency::NotIdempotent,
-        "DescribeVolumes" => Idempotency::NotIdempotent,
-        "DescribeVolumesModifications" => Idempotency::NotIdempotent,
         "DescribeVpcAttribute" => Idempotency::ReadOnly,
-        "DescribeVpcBlockPublicAccessExclusions" => Idempotency::NotIdempotent,
-        "DescribeVpcBlockPublicAccessOptions" => Idempotency::NotIdempotent,
-        "DescribeVpcClassicLink" => Idempotency::NotIdempotent,
-        "DescribeVpcClassicLinkDnsSupport" => Idempotency::NotIdempotent,
-        "DescribeVpcEncryptionControls" => Idempotency::NotIdempotent,
-        "DescribeVpcEndpointAssociations" => Idempotency::NotIdempotent,
-        "DescribeVpcEndpointConnectionNotifications" => Idempotency::NotIdempotent,
-        "DescribeVpcEndpointConnections" => Idempotency::NotIdempotent,
-        "DescribeVpcEndpointServiceConfigurations" => Idempotency::NotIdempotent,
-        "DescribeVpcEndpointServicePermissions" => Idempotency::NotIdempotent,
-        "DescribeVpcEndpointServices" => Idempotency::NotIdempotent,
         "DescribeVpcEndpoints" => Idempotency::ReadOnly,
         "DescribeVpcPeeringConnections" => Idempotency::ReadOnly,
         "DescribeVpcs" => Idempotency::ReadOnly,
-        "DescribeVpnConcentrators" => Idempotency::NotIdempotent,
-        "DescribeVpnConnections" => Idempotency::NotIdempotent,
         "DescribeVpnGateways" => Idempotency::ReadOnly,
-        "DetachClassicLinkVpc" => Idempotency::NotIdempotent,
         "DetachInternetGateway" => Idempotency::NotIdempotent,
-        "DetachNetworkInterface" => Idempotency::NotIdempotent,
-        "DetachVerifiedAccessTrustProvider" => Idempotency::IdempotencyToken,
-        "DetachVolume" => Idempotency::NotIdempotent,
         "DetachVpnGateway" => Idempotency::NotIdempotent,
-        "DisableAddressTransfer" => Idempotency::NotIdempotent,
-        "DisableAllowedImagesSettings" => Idempotency::NotIdempotent,
-        "DisableAwsNetworkPerformanceMetricSubscription" => Idempotency::NotIdempotent,
-        "DisableCapacityManager" => Idempotency::IdempotencyToken,
-        "DisableEbsEncryptionByDefault" => Idempotency::NotIdempotent,
-        "DisableFastLaunch" => Idempotency::NotIdempotent,
-        "DisableFastSnapshotRestores" => Idempotency::NotIdempotent,
-        "DisableImage" => Idempotency::NotIdempotent,
-        "DisableImageBlockPublicAccess" => Idempotency::NotIdempotent,
-        "DisableImageDeprecation" => Idempotency::NotIdempotent,
-        "DisableImageDeregistrationProtection" => Idempotency::NotIdempotent,
-        "DisableInstanceSqlHaStandbyDetections" => Idempotency::NotIdempotent,
-        "DisableIpamOrganizationAdminAccount" => Idempotency::NotIdempotent,
-        "DisableIpamPolicy" => Idempotency::NotIdempotent,
-        "DisableRouteServerPropagation" => Idempotency::NotIdempotent,
-        "DisableSerialConsoleAccess" => Idempotency::NotIdempotent,
-        "DisableSnapshotBlockPublicAccess" => Idempotency::NotIdempotent,
-        "DisableTransitGatewayRouteTablePropagation" => Idempotency::NotIdempotent,
-        "DisableVgwRoutePropagation" => Idempotency::NotIdempotent,
-        "DisableVpcClassicLink" => Idempotency::NotIdempotent,
-        "DisableVpcClassicLinkDnsSupport" => Idempotency::NotIdempotent,
-        "DisassociateAddress" => Idempotency::NotIdempotent,
-        "DisassociateCapacityReservationBillingOwner" => Idempotency::NotIdempotent,
-        "DisassociateClientVpnTargetNetwork" => Idempotency::NotIdempotent,
-        "DisassociateEnclaveCertificateIamRole" => Idempotency::NotIdempotent,
-        "DisassociateIamInstanceProfile" => Idempotency::NotIdempotent,
-        "DisassociateInstanceEventWindow" => Idempotency::NotIdempotent,
-        "DisassociateIpamByoasn" => Idempotency::NotIdempotent,
-        "DisassociateIpamResourceDiscovery" => Idempotency::NotIdempotent,
-        "DisassociateNatGatewayAddress" => Idempotency::NotIdempotent,
-        "DisassociateRouteServer" => Idempotency::NotIdempotent,
         "DisassociateRouteTable" => Idempotency::NotIdempotent,
-        "DisassociateSecurityGroupVpc" => Idempotency::NotIdempotent,
-        "DisassociateSubnetCidrBlock" => Idempotency::NotIdempotent,
-        "DisassociateTransitGatewayMulticastDomain" => Idempotency::NotIdempotent,
-        "DisassociateTransitGatewayPolicyTable" => Idempotency::NotIdempotent,
-        "DisassociateTransitGatewayRouteTable" => Idempotency::NotIdempotent,
-        "DisassociateTrunkInterface" => Idempotency::IdempotencyToken,
-        "DisassociateVpcCidrBlock" => Idempotency::NotIdempotent,
-        "EnableAddressTransfer" => Idempotency::NotIdempotent,
-        "EnableAllowedImagesSettings" => Idempotency::NotIdempotent,
-        "EnableAwsNetworkPerformanceMetricSubscription" => Idempotency::NotIdempotent,
-        "EnableCapacityManager" => Idempotency::IdempotencyToken,
-        "EnableEbsEncryptionByDefault" => Idempotency::NotIdempotent,
-        "EnableFastLaunch" => Idempotency::NotIdempotent,
-        "EnableFastSnapshotRestores" => Idempotency::NotIdempotent,
-        "EnableImage" => Idempotency::NotIdempotent,
-        "EnableImageBlockPublicAccess" => Idempotency::NotIdempotent,
-        "EnableImageDeprecation" => Idempotency::NotIdempotent,
-        "EnableImageDeregistrationProtection" => Idempotency::NotIdempotent,
-        "EnableInstanceSqlHaStandbyDetections" => Idempotency::NotIdempotent,
-        "EnableIpamOrganizationAdminAccount" => Idempotency::NotIdempotent,
-        "EnableIpamPolicy" => Idempotency::NotIdempotent,
-        "EnableReachabilityAnalyzerOrganizationSharing" => Idempotency::NotIdempotent,
-        "EnableRouteServerPropagation" => Idempotency::NotIdempotent,
-        "EnableSerialConsoleAccess" => Idempotency::NotIdempotent,
-        "EnableSnapshotBlockPublicAccess" => Idempotency::NotIdempotent,
-        "EnableTransitGatewayRouteTablePropagation" => Idempotency::NotIdempotent,
-        "EnableVgwRoutePropagation" => Idempotency::NotIdempotent,
-        "EnableVolumeIO" => Idempotency::NotIdempotent,
-        "EnableVpcClassicLink" => Idempotency::NotIdempotent,
-        "EnableVpcClassicLinkDnsSupport" => Idempotency::NotIdempotent,
-        "ExportClientVpnClientCertificateRevocationList" => Idempotency::NotIdempotent,
-        "ExportClientVpnClientConfiguration" => Idempotency::NotIdempotent,
-        "ExportImage" => Idempotency::IdempotencyToken,
-        "ExportTransitGatewayRoutes" => Idempotency::NotIdempotent,
-        "ExportVerifiedAccessInstanceClientConfiguration" => Idempotency::NotIdempotent,
-        "GetActiveVpnTunnelStatus" => Idempotency::NotIdempotent,
-        "GetAllowedImagesSettings" => Idempotency::NotIdempotent,
-        "GetAssociatedEnclaveCertificateIamRoles" => Idempotency::NotIdempotent,
-        "GetAssociatedIpv6PoolCidrs" => Idempotency::NotIdempotent,
-        "GetAwsNetworkPerformanceData" => Idempotency::NotIdempotent,
-        "GetCapacityManagerAttributes" => Idempotency::NotIdempotent,
-        "GetCapacityManagerMetricData" => Idempotency::NotIdempotent,
-        "GetCapacityManagerMetricDimensions" => Idempotency::NotIdempotent,
-        "GetCapacityReservationUsage" => Idempotency::NotIdempotent,
-        "GetCoipPoolUsage" => Idempotency::NotIdempotent,
-        "GetConsoleOutput" => Idempotency::NotIdempotent,
-        "GetConsoleScreenshot" => Idempotency::NotIdempotent,
-        "GetDeclarativePoliciesReportSummary" => Idempotency::NotIdempotent,
-        "GetDefaultCreditSpecification" => Idempotency::NotIdempotent,
-        "GetEbsDefaultKmsKeyId" => Idempotency::NotIdempotent,
-        "GetEbsEncryptionByDefault" => Idempotency::NotIdempotent,
-        "GetEnabledIpamPolicy" => Idempotency::NotIdempotent,
-        "GetFlowLogsIntegrationTemplate" => Idempotency::NotIdempotent,
-        "GetGroupsForCapacityReservation" => Idempotency::NotIdempotent,
-        "GetHostReservationPurchasePreview" => Idempotency::NotIdempotent,
-        "GetImageAncestry" => Idempotency::NotIdempotent,
-        "GetImageBlockPublicAccessState" => Idempotency::NotIdempotent,
-        "GetInstanceMetadataDefaults" => Idempotency::NotIdempotent,
-        "GetInstanceTpmEkPub" => Idempotency::NotIdempotent,
-        "GetInstanceTypesFromInstanceRequirements" => Idempotency::NotIdempotent,
-        "GetInstanceUefiData" => Idempotency::NotIdempotent,
-        "GetIpamAddressHistory" => Idempotency::NotIdempotent,
-        "GetIpamDiscoveredAccounts" => Idempotency::NotIdempotent,
-        "GetIpamDiscoveredPublicAddresses" => Idempotency::NotIdempotent,
-        "GetIpamDiscoveredResourceCidrs" => Idempotency::NotIdempotent,
-        "GetIpamPolicyAllocationRules" => Idempotency::NotIdempotent,
-        "GetIpamPolicyOrganizationTargets" => Idempotency::NotIdempotent,
-        "GetIpamPoolAllocations" => Idempotency::NotIdempotent,
-        "GetIpamPoolCidrs" => Idempotency::NotIdempotent,
-        "GetIpamPrefixListResolverRules" => Idempotency::NotIdempotent,
-        "GetIpamPrefixListResolverVersionEntries" => Idempotency::NotIdempotent,
-        "GetIpamPrefixListResolverVersions" => Idempotency::NotIdempotent,
-        "GetIpamResourceCidrs" => Idempotency::NotIdempotent,
-        "GetLaunchTemplateData" => Idempotency::NotIdempotent,
-        "GetManagedPrefixListAssociations" => Idempotency::NotIdempotent,
-        "GetManagedPrefixListEntries" => Idempotency::NotIdempotent,
-        "GetNetworkInsightsAccessScopeAnalysisFindings" => Idempotency::NotIdempotent,
-        "GetNetworkInsightsAccessScopeContent" => Idempotency::NotIdempotent,
-        "GetPasswordData" => Idempotency::NotIdempotent,
-        "GetReservedInstancesExchangeQuote" => Idempotency::NotIdempotent,
-        "GetRouteServerAssociations" => Idempotency::NotIdempotent,
-        "GetRouteServerPropagations" => Idempotency::NotIdempotent,
-        "GetRouteServerRoutingDatabase" => Idempotency::NotIdempotent,
-        "GetSecurityGroupsForVpc" => Idempotency::NotIdempotent,
-        "GetSerialConsoleAccessStatus" => Idempotency::NotIdempotent,
-        "GetSnapshotBlockPublicAccessState" => Idempotency::NotIdempotent,
-        "GetSpotPlacementScores" => Idempotency::NotIdempotent,
-        "GetSubnetCidrReservations" => Idempotency::NotIdempotent,
-        "GetTransitGatewayAttachmentPropagations" => Idempotency::NotIdempotent,
-        "GetTransitGatewayMeteringPolicyEntries" => Idempotency::NotIdempotent,
-        "GetTransitGatewayMulticastDomainAssociations" => Idempotency::NotIdempotent,
-        "GetTransitGatewayPolicyTableAssociations" => Idempotency::NotIdempotent,
-        "GetTransitGatewayPolicyTableEntries" => Idempotency::NotIdempotent,
-        "GetTransitGatewayPrefixListReferences" => Idempotency::NotIdempotent,
-        "GetTransitGatewayRouteTableAssociations" => Idempotency::NotIdempotent,
-        "GetTransitGatewayRouteTablePropagations" => Idempotency::NotIdempotent,
-        "GetVerifiedAccessEndpointPolicy" => Idempotency::NotIdempotent,
-        "GetVerifiedAccessEndpointTargets" => Idempotency::NotIdempotent,
-        "GetVerifiedAccessGroupPolicy" => Idempotency::NotIdempotent,
-        "GetVpcResourcesBlockingEncryptionEnforcement" => Idempotency::NotIdempotent,
-        "GetVpnConnectionDeviceSampleConfiguration" => Idempotency::NotIdempotent,
-        "GetVpnConnectionDeviceTypes" => Idempotency::NotIdempotent,
-        "GetVpnTunnelReplacementStatus" => Idempotency::NotIdempotent,
-        "ImportClientVpnClientCertificateRevocationList" => Idempotency::NotIdempotent,
-        "ImportImage" => Idempotency::NotIdempotent,
-        "ImportInstance" => Idempotency::NotIdempotent,
-        "ImportKeyPair" => Idempotency::NotIdempotent,
-        "ImportSnapshot" => Idempotency::NotIdempotent,
-        "ImportVolume" => Idempotency::NotIdempotent,
-        "ListImagesInRecycleBin" => Idempotency::NotIdempotent,
-        "ListSnapshotsInRecycleBin" => Idempotency::NotIdempotent,
-        "ListVolumesInRecycleBin" => Idempotency::NotIdempotent,
-        "LockSnapshot" => Idempotency::NotIdempotent,
-        "ModifyAddressAttribute" => Idempotency::NotIdempotent,
-        "ModifyAvailabilityZoneGroup" => Idempotency::NotIdempotent,
-        "ModifyCapacityReservation" => Idempotency::NotIdempotent,
-        "ModifyCapacityReservationFleet" => Idempotency::NotIdempotent,
-        "ModifyClientVpnEndpoint" => Idempotency::NotIdempotent,
-        "ModifyDefaultCreditSpecification" => Idempotency::NotIdempotent,
-        "ModifyEbsDefaultKmsKeyId" => Idempotency::NotIdempotent,
-        "ModifyFleet" => Idempotency::NotIdempotent,
-        "ModifyFpgaImageAttribute" => Idempotency::NotIdempotent,
-        "ModifyHosts" => Idempotency::NotIdempotent,
-        "ModifyIdFormat" => Idempotency::NotIdempotent,
-        "ModifyIdentityIdFormat" => Idempotency::NotIdempotent,
-        "ModifyImageAttribute" => Idempotency::NotIdempotent,
-        "ModifyInstanceAttribute" => Idempotency::NotIdempotent,
-        "ModifyInstanceCapacityReservationAttributes" => Idempotency::NotIdempotent,
-        "ModifyInstanceConnectEndpoint" => Idempotency::NotIdempotent,
-        "ModifyInstanceCpuOptions" => Idempotency::NotIdempotent,
-        "ModifyInstanceCreditSpecification" => Idempotency::NotIdempotent,
-        "ModifyInstanceEventStartTime" => Idempotency::NotIdempotent,
-        "ModifyInstanceEventWindow" => Idempotency::NotIdempotent,
-        "ModifyInstanceMaintenanceOptions" => Idempotency::NotIdempotent,
-        "ModifyInstanceMetadataDefaults" => Idempotency::NotIdempotent,
-        "ModifyInstanceMetadataOptions" => Idempotency::NotIdempotent,
-        "ModifyInstanceNetworkPerformanceOptions" => Idempotency::NotIdempotent,
-        "ModifyInstancePlacement" => Idempotency::NotIdempotent,
-        "ModifyIpam" => Idempotency::NotIdempotent,
-        "ModifyIpamPolicyAllocationRules" => Idempotency::NotIdempotent,
-        "ModifyIpamPool" => Idempotency::NotIdempotent,
-        "ModifyIpamPrefixListResolver" => Idempotency::NotIdempotent,
-        "ModifyIpamPrefixListResolverTarget" => Idempotency::IdempotencyToken,
-        "ModifyIpamResourceCidr" => Idempotency::NotIdempotent,
-        "ModifyIpamResourceDiscovery" => Idempotency::NotIdempotent,
-        "ModifyIpamScope" => Idempotency::NotIdempotent,
-        "ModifyLaunchTemplate" => Idempotency::IdempotencyToken,
-        "ModifyLocalGatewayRoute" => Idempotency::NotIdempotent,
-        "ModifyManagedPrefixList" => Idempotency::NotIdempotent,
-        "ModifyNetworkInterfaceAttribute" => Idempotency::NotIdempotent,
-        "ModifyPrivateDnsNameOptions" => Idempotency::NotIdempotent,
-        "ModifyPublicIpDnsNameOptions" => Idempotency::NotIdempotent,
-        "ModifyReservedInstances" => Idempotency::NotIdempotent,
-        "ModifyRouteServer" => Idempotency::NotIdempotent,
-        "ModifySecurityGroupRules" => Idempotency::NotIdempotent,
-        "ModifySnapshotAttribute" => Idempotency::NotIdempotent,
-        "ModifySnapshotTier" => Idempotency::NotIdempotent,
-        "ModifySpotFleetRequest" => Idempotency::NotIdempotent,
         "ModifySubnetAttribute" => Idempotency::Idempotent,
-        "ModifyTrafficMirrorFilterNetworkServices" => Idempotency::NotIdempotent,
-        "ModifyTrafficMirrorFilterRule" => Idempotency::NotIdempotent,
-        "ModifyTrafficMirrorSession" => Idempotency::NotIdempotent,
-        "ModifyTransitGateway" => Idempotency::NotIdempotent,
-        "ModifyTransitGatewayMeteringPolicy" => Idempotency::NotIdempotent,
-        "ModifyTransitGatewayPrefixListReference" => Idempotency::NotIdempotent,
-        "ModifyTransitGatewayVpcAttachment" => Idempotency::NotIdempotent,
-        "ModifyVerifiedAccessEndpoint" => Idempotency::IdempotencyToken,
-        "ModifyVerifiedAccessEndpointPolicy" => Idempotency::IdempotencyToken,
-        "ModifyVerifiedAccessGroup" => Idempotency::IdempotencyToken,
-        "ModifyVerifiedAccessGroupPolicy" => Idempotency::IdempotencyToken,
-        "ModifyVerifiedAccessInstance" => Idempotency::IdempotencyToken,
-        "ModifyVerifiedAccessInstanceLoggingConfiguration" => Idempotency::IdempotencyToken,
-        "ModifyVerifiedAccessTrustProvider" => Idempotency::IdempotencyToken,
-        "ModifyVolume" => Idempotency::NotIdempotent,
-        "ModifyVolumeAttribute" => Idempotency::NotIdempotent,
         "ModifyVpcAttribute" => Idempotency::Idempotent,
-        "ModifyVpcBlockPublicAccessExclusion" => Idempotency::NotIdempotent,
-        "ModifyVpcBlockPublicAccessOptions" => Idempotency::NotIdempotent,
-        "ModifyVpcEncryptionControl" => Idempotency::NotIdempotent,
         "ModifyVpcEndpoint" => Idempotency::NotIdempotent,
-        "ModifyVpcEndpointConnectionNotification" => Idempotency::NotIdempotent,
-        "ModifyVpcEndpointServiceConfiguration" => Idempotency::NotIdempotent,
-        "ModifyVpcEndpointServicePayerResponsibility" => Idempotency::NotIdempotent,
-        "ModifyVpcEndpointServicePermissions" => Idempotency::NotIdempotent,
-        "ModifyVpcPeeringConnectionOptions" => Idempotency::NotIdempotent,
-        "ModifyVpcTenancy" => Idempotency::NotIdempotent,
-        "ModifyVpnConnection" => Idempotency::NotIdempotent,
-        "ModifyVpnConnectionOptions" => Idempotency::NotIdempotent,
-        "ModifyVpnTunnelCertificate" => Idempotency::NotIdempotent,
-        "ModifyVpnTunnelOptions" => Idempotency::NotIdempotent,
-        "MonitorInstances" => Idempotency::NotIdempotent,
-        "MoveAddressToVpc" => Idempotency::NotIdempotent,
-        "MoveByoipCidrToIpam" => Idempotency::NotIdempotent,
-        "MoveCapacityReservationInstances" => Idempotency::IdempotencyToken,
-        "ProvisionByoipCidr" => Idempotency::NotIdempotent,
-        "ProvisionIpamByoasn" => Idempotency::NotIdempotent,
-        "ProvisionIpamPoolCidr" => Idempotency::IdempotencyToken,
-        "ProvisionPublicIpv4PoolCidr" => Idempotency::NotIdempotent,
-        "PurchaseCapacityBlock" => Idempotency::NotIdempotent,
-        "PurchaseCapacityBlockExtension" => Idempotency::NotIdempotent,
-        "PurchaseHostReservation" => Idempotency::NotIdempotent,
-        "PurchaseReservedInstancesOffering" => Idempotency::NotIdempotent,
-        "PurchaseScheduledInstances" => Idempotency::IdempotencyToken,
-        "RebootInstances" => Idempotency::NotIdempotent,
-        "RegisterImage" => Idempotency::NotIdempotent,
-        "RegisterInstanceEventNotificationAttributes" => Idempotency::NotIdempotent,
-        "RegisterTransitGatewayMulticastGroupMembers" => Idempotency::NotIdempotent,
-        "RegisterTransitGatewayMulticastGroupSources" => Idempotency::NotIdempotent,
-        "RejectCapacityReservationBillingOwnership" => Idempotency::NotIdempotent,
-        "RejectTransitGatewayMulticastDomainAssociations" => Idempotency::NotIdempotent,
-        "RejectTransitGatewayPeeringAttachment" => Idempotency::NotIdempotent,
-        "RejectTransitGatewayVpcAttachment" => Idempotency::NotIdempotent,
-        "RejectVpcEndpointConnections" => Idempotency::NotIdempotent,
-        "RejectVpcPeeringConnection" => Idempotency::NotIdempotent,
         "ReleaseAddress" => Idempotency::NotIdempotent,
-        "ReleaseHosts" => Idempotency::NotIdempotent,
-        "ReleaseIpamPoolAllocation" => Idempotency::NotIdempotent,
-        "ReplaceIamInstanceProfileAssociation" => Idempotency::NotIdempotent,
-        "ReplaceImageCriteriaInAllowedImagesSettings" => Idempotency::NotIdempotent,
-        "ReplaceNetworkAclAssociation" => Idempotency::NotIdempotent,
-        "ReplaceNetworkAclEntry" => Idempotency::NotIdempotent,
         "ReplaceRoute" => Idempotency::Idempotent,
         "ReplaceRouteTableAssociation" => Idempotency::NotIdempotent,
-        "ReplaceTransitGatewayRoute" => Idempotency::NotIdempotent,
-        "ReplaceVpnTunnel" => Idempotency::NotIdempotent,
-        "ReportInstanceStatus" => Idempotency::NotIdempotent,
-        "RequestSpotFleet" => Idempotency::NotIdempotent,
-        "RequestSpotInstances" => Idempotency::NotIdempotent,
-        "ResetAddressAttribute" => Idempotency::NotIdempotent,
-        "ResetEbsDefaultKmsKeyId" => Idempotency::NotIdempotent,
-        "ResetFpgaImageAttribute" => Idempotency::NotIdempotent,
-        "ResetImageAttribute" => Idempotency::NotIdempotent,
-        "ResetInstanceAttribute" => Idempotency::NotIdempotent,
-        "ResetNetworkInterfaceAttribute" => Idempotency::NotIdempotent,
-        "ResetSnapshotAttribute" => Idempotency::NotIdempotent,
-        "RestoreAddressToClassic" => Idempotency::NotIdempotent,
-        "RestoreImageFromRecycleBin" => Idempotency::NotIdempotent,
-        "RestoreManagedPrefixListVersion" => Idempotency::NotIdempotent,
-        "RestoreSnapshotFromRecycleBin" => Idempotency::NotIdempotent,
-        "RestoreSnapshotTier" => Idempotency::NotIdempotent,
-        "RestoreVolumeFromRecycleBin" => Idempotency::NotIdempotent,
-        "RevokeClientVpnIngress" => Idempotency::NotIdempotent,
         "RevokeSecurityGroupEgress" => Idempotency::NotIdempotent,
         "RevokeSecurityGroupIngress" => Idempotency::NotIdempotent,
-        "RunInstances" => Idempotency::IdempotencyToken,
-        "RunScheduledInstances" => Idempotency::IdempotencyToken,
-        "SearchLocalGatewayRoutes" => Idempotency::NotIdempotent,
-        "SearchTransitGatewayMulticastGroups" => Idempotency::NotIdempotent,
-        "SearchTransitGatewayRoutes" => Idempotency::NotIdempotent,
-        "SendDiagnosticInterrupt" => Idempotency::NotIdempotent,
-        "StartDeclarativePoliciesReport" => Idempotency::NotIdempotent,
-        "StartInstances" => Idempotency::NotIdempotent,
-        "StartNetworkInsightsAccessScopeAnalysis" => Idempotency::IdempotencyToken,
-        "StartNetworkInsightsAnalysis" => Idempotency::IdempotencyToken,
-        "StartVpcEndpointServicePrivateDnsVerification" => Idempotency::NotIdempotent,
-        "StopInstances" => Idempotency::NotIdempotent,
-        "TerminateClientVpnConnections" => Idempotency::NotIdempotent,
-        "TerminateInstances" => Idempotency::NotIdempotent,
-        "UnassignIpv6Addresses" => Idempotency::NotIdempotent,
-        "UnassignPrivateIpAddresses" => Idempotency::NotIdempotent,
-        "UnassignPrivateNatGatewayAddress" => Idempotency::NotIdempotent,
-        "UnlockSnapshot" => Idempotency::NotIdempotent,
-        "UnmonitorInstances" => Idempotency::NotIdempotent,
-        "UpdateCapacityManagerOrganizationsAccess" => Idempotency::IdempotencyToken,
-        "UpdateInterruptibleCapacityReservationAllocation" => Idempotency::NotIdempotent,
-        "UpdateSecurityGroupRuleDescriptionsEgress" => Idempotency::NotIdempotent,
-        "UpdateSecurityGroupRuleDescriptionsIngress" => Idempotency::NotIdempotent,
-        "WithdrawByoipCidr" => Idempotency::NotIdempotent,
         _ => Idempotency::NotIdempotent,
     }
 }
 
 pub(crate) fn iam_idempotency(operation: &str) -> Idempotency {
     match operation {
-        "AcceptDelegationRequest" => Idempotency::NotIdempotent,
-        "AddClientIDToOpenIDConnectProvider" => Idempotency::NotIdempotent,
-        "AddRoleToInstanceProfile" => Idempotency::NotIdempotent,
-        "AddUserToGroup" => Idempotency::NotIdempotent,
-        "AssociateDelegationRequest" => Idempotency::NotIdempotent,
-        "AttachGroupPolicy" => Idempotency::NotIdempotent,
-        "AttachRolePolicy" => Idempotency::NotIdempotent,
-        "AttachUserPolicy" => Idempotency::NotIdempotent,
-        "ChangePassword" => Idempotency::NotIdempotent,
-        "CreateAccessKey" => Idempotency::NotIdempotent,
-        "CreateAccountAlias" => Idempotency::NotIdempotent,
-        "CreateDelegationRequest" => Idempotency::NotIdempotent,
-        "CreateGroup" => Idempotency::NotIdempotent,
-        "CreateInstanceProfile" => Idempotency::NotIdempotent,
-        "CreateLoginProfile" => Idempotency::NotIdempotent,
-        "CreateOpenIDConnectProvider" => Idempotency::NotIdempotent,
-        "CreatePolicy" => Idempotency::NotIdempotent,
-        "CreatePolicyVersion" => Idempotency::NotIdempotent,
         "CreateRole" => Idempotency::NotIdempotent,
-        "CreateSAMLProvider" => Idempotency::NotIdempotent,
-        "CreateServiceLinkedRole" => Idempotency::NotIdempotent,
-        "CreateServiceSpecificCredential" => Idempotency::NotIdempotent,
-        "CreateUser" => Idempotency::NotIdempotent,
-        "CreateVirtualMFADevice" => Idempotency::NotIdempotent,
-        "DeactivateMFADevice" => Idempotency::NotIdempotent,
-        "DeleteAccessKey" => Idempotency::NotIdempotent,
-        "DeleteAccountAlias" => Idempotency::NotIdempotent,
-        "DeleteAccountPasswordPolicy" => Idempotency::NotIdempotent,
-        "DeleteGroup" => Idempotency::NotIdempotent,
-        "DeleteGroupPolicy" => Idempotency::NotIdempotent,
-        "DeleteInstanceProfile" => Idempotency::NotIdempotent,
-        "DeleteLoginProfile" => Idempotency::NotIdempotent,
-        "DeleteOpenIDConnectProvider" => Idempotency::NotIdempotent,
-        "DeletePolicy" => Idempotency::NotIdempotent,
-        "DeletePolicyVersion" => Idempotency::NotIdempotent,
         "DeleteRole" => Idempotency::NotIdempotent,
-        "DeleteRolePermissionsBoundary" => Idempotency::NotIdempotent,
-        "DeleteRolePolicy" => Idempotency::NotIdempotent,
-        "DeleteSAMLProvider" => Idempotency::NotIdempotent,
-        "DeleteSSHPublicKey" => Idempotency::NotIdempotent,
-        "DeleteServerCertificate" => Idempotency::NotIdempotent,
-        "DeleteServiceLinkedRole" => Idempotency::NotIdempotent,
-        "DeleteServiceSpecificCredential" => Idempotency::NotIdempotent,
-        "DeleteSigningCertificate" => Idempotency::NotIdempotent,
-        "DeleteUser" => Idempotency::NotIdempotent,
-        "DeleteUserPermissionsBoundary" => Idempotency::NotIdempotent,
-        "DeleteUserPolicy" => Idempotency::NotIdempotent,
-        "DeleteVirtualMFADevice" => Idempotency::NotIdempotent,
-        "DetachGroupPolicy" => Idempotency::NotIdempotent,
-        "DetachRolePolicy" => Idempotency::NotIdempotent,
-        "DetachUserPolicy" => Idempotency::NotIdempotent,
-        "DisableOrganizationsRootCredentialsManagement" => Idempotency::NotIdempotent,
-        "DisableOrganizationsRootSessions" => Idempotency::NotIdempotent,
-        "DisableOutboundWebIdentityFederation" => Idempotency::NotIdempotent,
-        "EnableMFADevice" => Idempotency::NotIdempotent,
-        "EnableOrganizationsRootCredentialsManagement" => Idempotency::NotIdempotent,
-        "EnableOrganizationsRootSessions" => Idempotency::NotIdempotent,
-        "EnableOutboundWebIdentityFederation" => Idempotency::NotIdempotent,
-        "GenerateCredentialReport" => Idempotency::NotIdempotent,
-        "GenerateOrganizationsAccessReport" => Idempotency::NotIdempotent,
-        "GenerateServiceLastAccessedDetails" => Idempotency::NotIdempotent,
-        "GetAccessKeyLastUsed" => Idempotency::NotIdempotent,
-        "GetAccountAuthorizationDetails" => Idempotency::NotIdempotent,
-        "GetAccountPasswordPolicy" => Idempotency::NotIdempotent,
-        "GetAccountSummary" => Idempotency::NotIdempotent,
-        "GetContextKeysForCustomPolicy" => Idempotency::NotIdempotent,
-        "GetContextKeysForPrincipalPolicy" => Idempotency::NotIdempotent,
-        "GetCredentialReport" => Idempotency::NotIdempotent,
-        "GetDelegationRequest" => Idempotency::NotIdempotent,
-        "GetGroup" => Idempotency::NotIdempotent,
-        "GetGroupPolicy" => Idempotency::NotIdempotent,
-        "GetHumanReadableSummary" => Idempotency::NotIdempotent,
-        "GetInstanceProfile" => Idempotency::NotIdempotent,
-        "GetLoginProfile" => Idempotency::NotIdempotent,
-        "GetMFADevice" => Idempotency::NotIdempotent,
-        "GetOpenIDConnectProvider" => Idempotency::NotIdempotent,
-        "GetOrganizationsAccessReport" => Idempotency::NotIdempotent,
-        "GetOutboundWebIdentityFederationInfo" => Idempotency::NotIdempotent,
-        "GetPolicy" => Idempotency::NotIdempotent,
-        "GetPolicyVersion" => Idempotency::NotIdempotent,
         "GetRole" => Idempotency::ReadOnly,
-        "GetRolePolicy" => Idempotency::NotIdempotent,
-        "GetSAMLProvider" => Idempotency::NotIdempotent,
-        "GetSSHPublicKey" => Idempotency::NotIdempotent,
-        "GetServerCertificate" => Idempotency::NotIdempotent,
-        "GetServiceLastAccessedDetails" => Idempotency::NotIdempotent,
-        "GetServiceLastAccessedDetailsWithEntities" => Idempotency::NotIdempotent,
-        "GetServiceLinkedRoleDeletionStatus" => Idempotency::NotIdempotent,
-        "GetUser" => Idempotency::NotIdempotent,
-        "GetUserPolicy" => Idempotency::NotIdempotent,
-        "ListAccessKeys" => Idempotency::NotIdempotent,
-        "ListAccountAliases" => Idempotency::NotIdempotent,
-        "ListAttachedGroupPolicies" => Idempotency::NotIdempotent,
-        "ListAttachedRolePolicies" => Idempotency::NotIdempotent,
-        "ListAttachedUserPolicies" => Idempotency::NotIdempotent,
-        "ListDelegationRequests" => Idempotency::NotIdempotent,
-        "ListEntitiesForPolicy" => Idempotency::NotIdempotent,
-        "ListGroupPolicies" => Idempotency::NotIdempotent,
-        "ListGroups" => Idempotency::NotIdempotent,
-        "ListGroupsForUser" => Idempotency::NotIdempotent,
-        "ListInstanceProfileTags" => Idempotency::NotIdempotent,
-        "ListInstanceProfiles" => Idempotency::NotIdempotent,
-        "ListInstanceProfilesForRole" => Idempotency::NotIdempotent,
-        "ListMFADeviceTags" => Idempotency::NotIdempotent,
-        "ListMFADevices" => Idempotency::NotIdempotent,
-        "ListOpenIDConnectProviderTags" => Idempotency::NotIdempotent,
-        "ListOpenIDConnectProviders" => Idempotency::NotIdempotent,
-        "ListOrganizationsFeatures" => Idempotency::NotIdempotent,
-        "ListPolicies" => Idempotency::NotIdempotent,
-        "ListPoliciesGrantingServiceAccess" => Idempotency::NotIdempotent,
-        "ListPolicyTags" => Idempotency::NotIdempotent,
-        "ListPolicyVersions" => Idempotency::NotIdempotent,
-        "ListRolePolicies" => Idempotency::NotIdempotent,
-        "ListRoleTags" => Idempotency::NotIdempotent,
         "ListRoles" => Idempotency::ReadOnly,
-        "ListSAMLProviderTags" => Idempotency::NotIdempotent,
-        "ListSAMLProviders" => Idempotency::NotIdempotent,
-        "ListSSHPublicKeys" => Idempotency::NotIdempotent,
-        "ListServerCertificateTags" => Idempotency::NotIdempotent,
-        "ListServerCertificates" => Idempotency::NotIdempotent,
-        "ListServiceSpecificCredentials" => Idempotency::NotIdempotent,
-        "ListSigningCertificates" => Idempotency::NotIdempotent,
-        "ListUserPolicies" => Idempotency::NotIdempotent,
-        "ListUserTags" => Idempotency::NotIdempotent,
-        "ListUsers" => Idempotency::NotIdempotent,
-        "ListVirtualMFADevices" => Idempotency::NotIdempotent,
-        "PutGroupPolicy" => Idempotency::NotIdempotent,
-        "PutRolePermissionsBoundary" => Idempotency::NotIdempotent,
-        "PutRolePolicy" => Idempotency::NotIdempotent,
-        "PutUserPermissionsBoundary" => Idempotency::NotIdempotent,
-        "PutUserPolicy" => Idempotency::NotIdempotent,
-        "RejectDelegationRequest" => Idempotency::NotIdempotent,
-        "RemoveClientIDFromOpenIDConnectProvider" => Idempotency::NotIdempotent,
-        "RemoveRoleFromInstanceProfile" => Idempotency::NotIdempotent,
-        "RemoveUserFromGroup" => Idempotency::NotIdempotent,
-        "ResetServiceSpecificCredential" => Idempotency::NotIdempotent,
-        "ResyncMFADevice" => Idempotency::NotIdempotent,
-        "SendDelegationToken" => Idempotency::NotIdempotent,
-        "SetDefaultPolicyVersion" => Idempotency::NotIdempotent,
-        "SetSecurityTokenServicePreferences" => Idempotency::NotIdempotent,
-        "SimulateCustomPolicy" => Idempotency::NotIdempotent,
-        "SimulatePrincipalPolicy" => Idempotency::NotIdempotent,
-        "TagInstanceProfile" => Idempotency::NotIdempotent,
-        "TagMFADevice" => Idempotency::NotIdempotent,
-        "TagOpenIDConnectProvider" => Idempotency::NotIdempotent,
-        "TagPolicy" => Idempotency::NotIdempotent,
         "TagRole" => Idempotency::Idempotent,
-        "TagSAMLProvider" => Idempotency::NotIdempotent,
-        "TagServerCertificate" => Idempotency::NotIdempotent,
-        "TagUser" => Idempotency::NotIdempotent,
-        "UntagInstanceProfile" => Idempotency::NotIdempotent,
-        "UntagMFADevice" => Idempotency::NotIdempotent,
-        "UntagOpenIDConnectProvider" => Idempotency::NotIdempotent,
-        "UntagPolicy" => Idempotency::NotIdempotent,
         "UntagRole" => Idempotency::Idempotent,
-        "UntagSAMLProvider" => Idempotency::NotIdempotent,
-        "UntagServerCertificate" => Idempotency::NotIdempotent,
-        "UntagUser" => Idempotency::NotIdempotent,
-        "UpdateAccessKey" => Idempotency::NotIdempotent,
-        "UpdateAccountPasswordPolicy" => Idempotency::NotIdempotent,
         "UpdateAssumeRolePolicy" => Idempotency::Idempotent,
-        "UpdateDelegationRequest" => Idempotency::NotIdempotent,
-        "UpdateGroup" => Idempotency::NotIdempotent,
-        "UpdateLoginProfile" => Idempotency::NotIdempotent,
-        "UpdateOpenIDConnectProviderThumbprint" => Idempotency::NotIdempotent,
         "UpdateRole" => Idempotency::Idempotent,
-        "UpdateRoleDescription" => Idempotency::NotIdempotent,
-        "UpdateSAMLProvider" => Idempotency::NotIdempotent,
-        "UpdateSSHPublicKey" => Idempotency::NotIdempotent,
-        "UpdateServerCertificate" => Idempotency::NotIdempotent,
-        "UpdateServiceSpecificCredential" => Idempotency::NotIdempotent,
-        "UpdateSigningCertificate" => Idempotency::NotIdempotent,
-        "UpdateUser" => Idempotency::NotIdempotent,
-        "UploadSSHPublicKey" => Idempotency::NotIdempotent,
-        "UploadServerCertificate" => Idempotency::NotIdempotent,
-        "UploadSigningCertificate" => Idempotency::NotIdempotent,
         _ => Idempotency::NotIdempotent,
     }
 }
 
 pub(crate) fn identitystore_idempotency(operation: &str) -> Idempotency {
     match operation {
-        "CreateGroup" => Idempotency::NotIdempotent,
-        "CreateGroupMembership" => Idempotency::NotIdempotent,
-        "CreateUser" => Idempotency::NotIdempotent,
-        "DeleteGroup" => Idempotency::Idempotent,
-        "DeleteGroupMembership" => Idempotency::Idempotent,
-        "DeleteUser" => Idempotency::Idempotent,
-        "DescribeGroup" => Idempotency::ReadOnly,
-        "DescribeGroupMembership" => Idempotency::ReadOnly,
         "DescribeUser" => Idempotency::ReadOnly,
-        "GetGroupId" => Idempotency::ReadOnly,
-        "GetGroupMembershipId" => Idempotency::ReadOnly,
         "GetUserId" => Idempotency::ReadOnly,
-        "IsMemberInGroups" => Idempotency::ReadOnly,
-        "ListGroupMemberships" => Idempotency::ReadOnly,
-        "ListGroupMembershipsForMember" => Idempotency::ReadOnly,
-        "ListGroups" => Idempotency::ReadOnly,
-        "ListUsers" => Idempotency::ReadOnly,
-        "UpdateGroup" => Idempotency::NotIdempotent,
-        "UpdateUser" => Idempotency::NotIdempotent,
         _ => Idempotency::NotIdempotent,
     }
 }
 
 pub(crate) fn organizations_idempotency(operation: &str) -> Idempotency {
     match operation {
-        "AcceptHandshake" => Idempotency::NotIdempotent,
-        "AttachPolicy" => Idempotency::NotIdempotent,
-        "CancelHandshake" => Idempotency::NotIdempotent,
         "CloseAccount" => Idempotency::NotIdempotent,
         "CreateAccount" => Idempotency::NotIdempotent,
-        "CreateGovCloudAccount" => Idempotency::NotIdempotent,
         "CreateOrganization" => Idempotency::NotIdempotent,
-        "CreateOrganizationalUnit" => Idempotency::NotIdempotent,
-        "CreatePolicy" => Idempotency::NotIdempotent,
-        "DeclineHandshake" => Idempotency::NotIdempotent,
         "DeleteOrganization" => Idempotency::NotIdempotent,
-        "DeleteOrganizationalUnit" => Idempotency::NotIdempotent,
-        "DeletePolicy" => Idempotency::NotIdempotent,
-        "DeleteResourcePolicy" => Idempotency::NotIdempotent,
-        "DeregisterDelegatedAdministrator" => Idempotency::NotIdempotent,
         "DescribeAccount" => Idempotency::ReadOnly,
         "DescribeCreateAccountStatus" => Idempotency::ReadOnly,
-        "DescribeEffectivePolicy" => Idempotency::NotIdempotent,
-        "DescribeHandshake" => Idempotency::NotIdempotent,
         "DescribeOrganization" => Idempotency::ReadOnly,
-        "DescribeOrganizationalUnit" => Idempotency::NotIdempotent,
-        "DescribePolicy" => Idempotency::NotIdempotent,
-        "DescribeResourcePolicy" => Idempotency::NotIdempotent,
-        "DescribeResponsibilityTransfer" => Idempotency::NotIdempotent,
-        "DetachPolicy" => Idempotency::NotIdempotent,
-        "DisableAWSServiceAccess" => Idempotency::NotIdempotent,
-        "DisablePolicyType" => Idempotency::NotIdempotent,
-        "EnableAWSServiceAccess" => Idempotency::NotIdempotent,
-        "EnableAllFeatures" => Idempotency::NotIdempotent,
-        "EnablePolicyType" => Idempotency::NotIdempotent,
-        "InviteAccountToOrganization" => Idempotency::NotIdempotent,
-        "InviteOrganizationToTransferResponsibility" => Idempotency::NotIdempotent,
-        "LeaveOrganization" => Idempotency::NotIdempotent,
-        "ListAWSServiceAccessForOrganization" => Idempotency::NotIdempotent,
-        "ListAccounts" => Idempotency::NotIdempotent,
-        "ListAccountsForParent" => Idempotency::NotIdempotent,
-        "ListAccountsWithInvalidEffectivePolicy" => Idempotency::NotIdempotent,
-        "ListChildren" => Idempotency::NotIdempotent,
-        "ListCreateAccountStatus" => Idempotency::NotIdempotent,
-        "ListDelegatedAdministrators" => Idempotency::NotIdempotent,
-        "ListDelegatedServicesForAccount" => Idempotency::NotIdempotent,
-        "ListEffectivePolicyValidationErrors" => Idempotency::NotIdempotent,
-        "ListHandshakesForAccount" => Idempotency::NotIdempotent,
-        "ListHandshakesForOrganization" => Idempotency::NotIdempotent,
-        "ListInboundResponsibilityTransfers" => Idempotency::NotIdempotent,
-        "ListOrganizationalUnitsForParent" => Idempotency::NotIdempotent,
-        "ListOutboundResponsibilityTransfers" => Idempotency::NotIdempotent,
         "ListParents" => Idempotency::ReadOnly,
-        "ListPolicies" => Idempotency::NotIdempotent,
-        "ListPoliciesForTarget" => Idempotency::NotIdempotent,
-        "ListRoots" => Idempotency::NotIdempotent,
         "ListTagsForResource" => Idempotency::ReadOnly,
-        "ListTargetsForPolicy" => Idempotency::NotIdempotent,
         "MoveAccount" => Idempotency::NotIdempotent,
-        "PutResourcePolicy" => Idempotency::NotIdempotent,
-        "RegisterDelegatedAdministrator" => Idempotency::NotIdempotent,
-        "RemoveAccountFromOrganization" => Idempotency::NotIdempotent,
         "TagResource" => Idempotency::Idempotent,
-        "TerminateResponsibilityTransfer" => Idempotency::NotIdempotent,
         "UntagResource" => Idempotency::Idempotent,
-        "UpdateOrganizationalUnit" => Idempotency::NotIdempotent,
-        "UpdatePolicy" => Idempotency::NotIdempotent,
-        "UpdateResponsibilityTransfer" => Idempotency::NotIdempotent,
         _ => Idempotency::NotIdempotent,
     }
 }
 
 pub(crate) fn route53_idempotency(operation: &str) -> Idempotency {
     match operation {
-        "ActivateKeySigningKey" => Idempotency::NotIdempotent,
-        "AssociateVPCWithHostedZone" => Idempotency::NotIdempotent,
-        "ChangeCidrCollection" => Idempotency::NotIdempotent,
         "ChangeResourceRecordSets" => Idempotency::NotIdempotent,
-        "ChangeTagsForResource" => Idempotency::NotIdempotent,
-        "CreateCidrCollection" => Idempotency::NotIdempotent,
-        "CreateHealthCheck" => Idempotency::NotIdempotent,
-        "CreateHostedZone" => Idempotency::NotIdempotent,
-        "CreateKeySigningKey" => Idempotency::NotIdempotent,
-        "CreateQueryLoggingConfig" => Idempotency::NotIdempotent,
-        "CreateReusableDelegationSet" => Idempotency::NotIdempotent,
-        "CreateTrafficPolicy" => Idempotency::NotIdempotent,
-        "CreateTrafficPolicyInstance" => Idempotency::NotIdempotent,
-        "CreateTrafficPolicyVersion" => Idempotency::NotIdempotent,
-        "CreateVPCAssociationAuthorization" => Idempotency::NotIdempotent,
-        "DeactivateKeySigningKey" => Idempotency::NotIdempotent,
-        "DeleteCidrCollection" => Idempotency::NotIdempotent,
-        "DeleteHealthCheck" => Idempotency::NotIdempotent,
-        "DeleteHostedZone" => Idempotency::NotIdempotent,
-        "DeleteKeySigningKey" => Idempotency::NotIdempotent,
-        "DeleteQueryLoggingConfig" => Idempotency::NotIdempotent,
-        "DeleteReusableDelegationSet" => Idempotency::NotIdempotent,
-        "DeleteTrafficPolicy" => Idempotency::NotIdempotent,
-        "DeleteTrafficPolicyInstance" => Idempotency::NotIdempotent,
-        "DeleteVPCAssociationAuthorization" => Idempotency::NotIdempotent,
-        "DisableHostedZoneDNSSEC" => Idempotency::NotIdempotent,
-        "DisassociateVPCFromHostedZone" => Idempotency::NotIdempotent,
-        "EnableHostedZoneDNSSEC" => Idempotency::NotIdempotent,
-        "GetAccountLimit" => Idempotency::NotIdempotent,
-        "GetChange" => Idempotency::NotIdempotent,
-        "GetCheckerIpRanges" => Idempotency::NotIdempotent,
-        "GetDNSSEC" => Idempotency::NotIdempotent,
-        "GetGeoLocation" => Idempotency::NotIdempotent,
-        "GetHealthCheck" => Idempotency::NotIdempotent,
-        "GetHealthCheckCount" => Idempotency::NotIdempotent,
-        "GetHealthCheckLastFailureReason" => Idempotency::NotIdempotent,
-        "GetHealthCheckStatus" => Idempotency::NotIdempotent,
-        "GetHostedZone" => Idempotency::NotIdempotent,
-        "GetHostedZoneCount" => Idempotency::NotIdempotent,
-        "GetHostedZoneLimit" => Idempotency::NotIdempotent,
-        "GetQueryLoggingConfig" => Idempotency::NotIdempotent,
-        "GetReusableDelegationSet" => Idempotency::NotIdempotent,
-        "GetReusableDelegationSetLimit" => Idempotency::NotIdempotent,
-        "GetTrafficPolicy" => Idempotency::NotIdempotent,
-        "GetTrafficPolicyInstance" => Idempotency::NotIdempotent,
-        "GetTrafficPolicyInstanceCount" => Idempotency::NotIdempotent,
-        "ListCidrBlocks" => Idempotency::NotIdempotent,
-        "ListCidrCollections" => Idempotency::NotIdempotent,
-        "ListCidrLocations" => Idempotency::NotIdempotent,
-        "ListGeoLocations" => Idempotency::NotIdempotent,
-        "ListHealthChecks" => Idempotency::NotIdempotent,
-        "ListHostedZones" => Idempotency::NotIdempotent,
-        "ListHostedZonesByName" => Idempotency::NotIdempotent,
-        "ListHostedZonesByVPC" => Idempotency::NotIdempotent,
-        "ListQueryLoggingConfigs" => Idempotency::NotIdempotent,
         "ListResourceRecordSets" => Idempotency::ReadOnly,
-        "ListReusableDelegationSets" => Idempotency::NotIdempotent,
         "ListTagsForResource" => Idempotency::ReadOnly,
-        "ListTagsForResources" => Idempotency::NotIdempotent,
-        "ListTrafficPolicies" => Idempotency::NotIdempotent,
-        "ListTrafficPolicyInstances" => Idempotency::NotIdempotent,
-        "ListTrafficPolicyInstancesByHostedZone" => Idempotency::NotIdempotent,
-        "ListTrafficPolicyInstancesByPolicy" => Idempotency::NotIdempotent,
-        "ListTrafficPolicyVersions" => Idempotency::NotIdempotent,
-        "ListVPCAssociationAuthorizations" => Idempotency::NotIdempotent,
-        "TestDNSAnswer" => Idempotency::NotIdempotent,
-        "UpdateHealthCheck" => Idempotency::NotIdempotent,
-        "UpdateHostedZoneComment" => Idempotency::NotIdempotent,
-        "UpdateHostedZoneFeatures" => Idempotency::NotIdempotent,
-        "UpdateTrafficPolicyComment" => Idempotency::NotIdempotent,
-        "UpdateTrafficPolicyInstance" => Idempotency::NotIdempotent,
         _ => Idempotency::NotIdempotent,
     }
 }
 
 pub(crate) fn s3_idempotency(operation: &str) -> Idempotency {
     match operation {
-        "AbortMultipartUpload" => Idempotency::NotIdempotent,
-        "CompleteMultipartUpload" => Idempotency::NotIdempotent,
-        "CopyObject" => Idempotency::NotIdempotent,
         "CreateBucket" => Idempotency::NotIdempotent,
-        "CreateBucketMetadataConfiguration" => Idempotency::NotIdempotent,
-        "CreateBucketMetadataTableConfiguration" => Idempotency::NotIdempotent,
-        "CreateMultipartUpload" => Idempotency::NotIdempotent,
-        "CreateSession" => Idempotency::NotIdempotent,
         "DeleteBucket" => Idempotency::NotIdempotent,
-        "DeleteBucketAnalyticsConfiguration" => Idempotency::NotIdempotent,
         "DeleteBucketCors" => Idempotency::Idempotent,
         "DeleteBucketEncryption" => Idempotency::Idempotent,
-        "DeleteBucketIntelligentTieringConfiguration" => Idempotency::NotIdempotent,
-        "DeleteBucketInventoryConfiguration" => Idempotency::NotIdempotent,
         "DeleteBucketLifecycle" => Idempotency::Idempotent,
-        "DeleteBucketMetadataConfiguration" => Idempotency::NotIdempotent,
-        "DeleteBucketMetadataTableConfiguration" => Idempotency::NotIdempotent,
-        "DeleteBucketMetricsConfiguration" => Idempotency::NotIdempotent,
         "DeleteBucketOwnershipControls" => Idempotency::Idempotent,
         "DeleteBucketPolicy" => Idempotency::Idempotent,
         "DeleteBucketReplication" => Idempotency::Idempotent,
         "DeleteBucketTagging" => Idempotency::Idempotent,
         "DeleteBucketWebsite" => Idempotency::Idempotent,
-        "DeleteObject" => Idempotency::NotIdempotent,
-        "DeleteObjectTagging" => Idempotency::NotIdempotent,
         "DeleteObjects" => Idempotency::Idempotent,
         "DeletePublicAccessBlock" => Idempotency::Idempotent,
-        "GetBucketAbac" => Idempotency::NotIdempotent,
-        "GetBucketAccelerateConfiguration" => Idempotency::NotIdempotent,
         "GetBucketAcl" => Idempotency::ReadOnly,
-        "GetBucketAnalyticsConfiguration" => Idempotency::NotIdempotent,
         "GetBucketCors" => Idempotency::ReadOnly,
         "GetBucketEncryption" => Idempotency::ReadOnly,
-        "GetBucketIntelligentTieringConfiguration" => Idempotency::NotIdempotent,
-        "GetBucketInventoryConfiguration" => Idempotency::NotIdempotent,
         "GetBucketLifecycleConfiguration" => Idempotency::ReadOnly,
-        "GetBucketLocation" => Idempotency::NotIdempotent,
         "GetBucketLogging" => Idempotency::ReadOnly,
-        "GetBucketMetadataConfiguration" => Idempotency::NotIdempotent,
-        "GetBucketMetadataTableConfiguration" => Idempotency::NotIdempotent,
-        "GetBucketMetricsConfiguration" => Idempotency::NotIdempotent,
         "GetBucketNotificationConfiguration" => Idempotency::ReadOnly,
         "GetBucketOwnershipControls" => Idempotency::ReadOnly,
         "GetBucketPolicy" => Idempotency::ReadOnly,
-        "GetBucketPolicyStatus" => Idempotency::NotIdempotent,
         "GetBucketReplication" => Idempotency::ReadOnly,
-        "GetBucketRequestPayment" => Idempotency::NotIdempotent,
         "GetBucketTagging" => Idempotency::ReadOnly,
         "GetBucketVersioning" => Idempotency::ReadOnly,
         "GetBucketWebsite" => Idempotency::ReadOnly,
-        "GetObject" => Idempotency::NotIdempotent,
-        "GetObjectAcl" => Idempotency::NotIdempotent,
-        "GetObjectAttributes" => Idempotency::NotIdempotent,
-        "GetObjectLegalHold" => Idempotency::NotIdempotent,
         "GetObjectLockConfiguration" => Idempotency::ReadOnly,
-        "GetObjectRetention" => Idempotency::NotIdempotent,
-        "GetObjectTagging" => Idempotency::NotIdempotent,
-        "GetObjectTorrent" => Idempotency::NotIdempotent,
         "GetPublicAccessBlock" => Idempotency::ReadOnly,
         "HeadBucket" => Idempotency::ReadOnly,
-        "HeadObject" => Idempotency::NotIdempotent,
-        "ListBucketAnalyticsConfigurations" => Idempotency::NotIdempotent,
-        "ListBucketIntelligentTieringConfigurations" => Idempotency::NotIdempotent,
-        "ListBucketInventoryConfigurations" => Idempotency::NotIdempotent,
-        "ListBucketMetricsConfigurations" => Idempotency::NotIdempotent,
-        "ListBuckets" => Idempotency::NotIdempotent,
-        "ListDirectoryBuckets" => Idempotency::NotIdempotent,
-        "ListMultipartUploads" => Idempotency::NotIdempotent,
         "ListObjectVersions" => Idempotency::ReadOnly,
-        "ListObjects" => Idempotency::NotIdempotent,
-        "ListObjectsV2" => Idempotency::NotIdempotent,
-        "ListParts" => Idempotency::NotIdempotent,
-        "PutBucketAbac" => Idempotency::NotIdempotent,
-        "PutBucketAccelerateConfiguration" => Idempotency::NotIdempotent,
         "PutBucketAcl" => Idempotency::Idempotent,
-        "PutBucketAnalyticsConfiguration" => Idempotency::NotIdempotent,
         "PutBucketCors" => Idempotency::Idempotent,
         "PutBucketEncryption" => Idempotency::Idempotent,
-        "PutBucketIntelligentTieringConfiguration" => Idempotency::NotIdempotent,
-        "PutBucketInventoryConfiguration" => Idempotency::NotIdempotent,
         "PutBucketLifecycleConfiguration" => Idempotency::Idempotent,
         "PutBucketLogging" => Idempotency::Idempotent,
-        "PutBucketMetricsConfiguration" => Idempotency::NotIdempotent,
         "PutBucketNotificationConfiguration" => Idempotency::Idempotent,
         "PutBucketOwnershipControls" => Idempotency::Idempotent,
         "PutBucketPolicy" => Idempotency::Idempotent,
         "PutBucketReplication" => Idempotency::Idempotent,
-        "PutBucketRequestPayment" => Idempotency::NotIdempotent,
         "PutBucketTagging" => Idempotency::Idempotent,
         "PutBucketVersioning" => Idempotency::Idempotent,
         "PutBucketWebsite" => Idempotency::Idempotent,
-        "PutObject" => Idempotency::NotIdempotent,
-        "PutObjectAcl" => Idempotency::NotIdempotent,
-        "PutObjectLegalHold" => Idempotency::NotIdempotent,
         "PutObjectLockConfiguration" => Idempotency::Idempotent,
-        "PutObjectRetention" => Idempotency::NotIdempotent,
-        "PutObjectTagging" => Idempotency::NotIdempotent,
         "PutPublicAccessBlock" => Idempotency::Idempotent,
-        "RenameObject" => Idempotency::IdempotencyToken,
-        "RestoreObject" => Idempotency::NotIdempotent,
-        "SelectObjectContent" => Idempotency::NotIdempotent,
-        "UpdateBucketMetadataInventoryTableConfiguration" => Idempotency::NotIdempotent,
-        "UpdateBucketMetadataJournalTableConfiguration" => Idempotency::NotIdempotent,
-        "UpdateObjectEncryption" => Idempotency::NotIdempotent,
-        "UploadPart" => Idempotency::NotIdempotent,
-        "UploadPartCopy" => Idempotency::NotIdempotent,
-        "WriteGetObjectResponse" => Idempotency::NotIdempotent,
         _ => Idempotency::NotIdempotent,
     }
 }
 
 pub(crate) fn sqs_idempotency(operation: &str) -> Idempotency {
     match operation {
-        "AddPermission" => Idempotency::NotIdempotent,
-        "CancelMessageMoveTask" => Idempotency::NotIdempotent,
-        "ChangeMessageVisibility" => Idempotency::NotIdempotent,
-        "ChangeMessageVisibilityBatch" => Idempotency::NotIdempotent,
         "CreateQueue" => Idempotency::NotIdempotent,
-        "DeleteMessage" => Idempotency::NotIdempotent,
-        "DeleteMessageBatch" => Idempotency::NotIdempotent,
         "DeleteQueue" => Idempotency::NotIdempotent,
         "GetQueueAttributes" => Idempotency::ReadOnly,
-        "GetQueueUrl" => Idempotency::NotIdempotent,
-        "ListDeadLetterSourceQueues" => Idempotency::NotIdempotent,
-        "ListMessageMoveTasks" => Idempotency::NotIdempotent,
         "ListQueueTags" => Idempotency::ReadOnly,
-        "ListQueues" => Idempotency::NotIdempotent,
-        "PurgeQueue" => Idempotency::NotIdempotent,
-        "ReceiveMessage" => Idempotency::NotIdempotent,
-        "RemovePermission" => Idempotency::NotIdempotent,
-        "SendMessage" => Idempotency::NotIdempotent,
-        "SendMessageBatch" => Idempotency::NotIdempotent,
         "SetQueueAttributes" => Idempotency::Idempotent,
-        "StartMessageMoveTask" => Idempotency::NotIdempotent,
         "TagQueue" => Idempotency::Idempotent,
         "UntagQueue" => Idempotency::Idempotent,
         _ => Idempotency::NotIdempotent,
@@ -1418,36 +226,7 @@ pub(crate) fn sqs_idempotency(operation: &str) -> Idempotency {
 
 pub(crate) fn sts_idempotency(operation: &str) -> Idempotency {
     match operation {
-        "AssumeRole" => Idempotency::NotIdempotent,
-        "AssumeRoleWithSAML" => Idempotency::NotIdempotent,
-        "AssumeRoleWithWebIdentity" => Idempotency::NotIdempotent,
-        "AssumeRoot" => Idempotency::NotIdempotent,
-        "DecodeAuthorizationMessage" => Idempotency::NotIdempotent,
-        "GetAccessKeyInfo" => Idempotency::NotIdempotent,
         "GetCallerIdentity" => Idempotency::ReadOnly,
-        "GetDelegatedAccessToken" => Idempotency::NotIdempotent,
-        "GetFederationToken" => Idempotency::NotIdempotent,
-        "GetSessionToken" => Idempotency::NotIdempotent,
-        "GetWebIdentityToken" => Idempotency::NotIdempotent,
-        _ => Idempotency::NotIdempotent,
-    }
-}
-
-pub(crate) fn operation_idempotency(operation: &str) -> Idempotency {
-    let Some((service, operation)) = operation.split_once('.') else {
-        return Idempotency::NotIdempotent;
-    };
-    match service {
-        "acm" => acm_idempotency(operation),
-        "cloudwatchlogs" => cloudwatchlogs_idempotency(operation),
-        "ec2" => ec2_idempotency(operation),
-        "iam" => iam_idempotency(operation),
-        "identitystore" => identitystore_idempotency(operation),
-        "organizations" => organizations_idempotency(operation),
-        "route53" => route53_idempotency(operation),
-        "s3" => s3_idempotency(operation),
-        "sqs" => sqs_idempotency(operation),
-        "sts" => sts_idempotency(operation),
         _ => Idempotency::NotIdempotent,
     }
 }
@@ -1471,6 +250,13 @@ impl AwsOperation
     }
 }
 
+impl DecidedOperationError
+    for aws_sdk_acm::operation::add_tags_to_certificate::AddTagsToCertificateError
+{
+    const NAME: &'static str = <aws_sdk_acm::operation::add_tags_to_certificate::builders::AddTagsToCertificateFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_acm::operation::add_tags_to_certificate::builders::AddTagsToCertificateFluentBuilder as AwsOperation>::IDEMPOTENCY;
+}
+
 /// DeleteCertificate: the provider does not accept an already-absent certificate as success
 impl AwsOperation
     for aws_sdk_acm::operation::delete_certificate::builders::DeleteCertificateFluentBuilder
@@ -1488,6 +274,11 @@ impl AwsOperation
     {
         async move { self.send().await }
     }
+}
+
+impl DecidedOperationError for aws_sdk_acm::operation::delete_certificate::DeleteCertificateError {
+    const NAME: &'static str = <aws_sdk_acm::operation::delete_certificate::builders::DeleteCertificateFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_acm::operation::delete_certificate::builders::DeleteCertificateFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
 /// DescribeCertificate: reads certificate state and has no side effects
@@ -1509,6 +300,13 @@ impl AwsOperation
     }
 }
 
+impl DecidedOperationError
+    for aws_sdk_acm::operation::describe_certificate::DescribeCertificateError
+{
+    const NAME: &'static str = <aws_sdk_acm::operation::describe_certificate::builders::DescribeCertificateFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_acm::operation::describe_certificate::builders::DescribeCertificateFluentBuilder as AwsOperation>::IDEMPOTENCY;
+}
+
 /// ListTagsForCertificate: reads certificate tags and has no side effects
 impl AwsOperation for aws_sdk_acm::operation::list_tags_for_certificate::builders::ListTagsForCertificateFluentBuilder {
     type Resend = NoToken;
@@ -1525,6 +323,13 @@ impl AwsOperation for aws_sdk_acm::operation::list_tags_for_certificate::builder
     }
 }
 
+impl DecidedOperationError
+    for aws_sdk_acm::operation::list_tags_for_certificate::ListTagsForCertificateError
+{
+    const NAME: &'static str = <aws_sdk_acm::operation::list_tags_for_certificate::builders::ListTagsForCertificateFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_acm::operation::list_tags_for_certificate::builders::ListTagsForCertificateFluentBuilder as AwsOperation>::IDEMPOTENCY;
+}
+
 /// RemoveTagsFromCertificate: removes named tag keys; repeating the removal leaves the same state
 impl AwsOperation for aws_sdk_acm::operation::remove_tags_from_certificate::builders::RemoveTagsFromCertificateFluentBuilder {
     type Resend = NoToken;
@@ -1539,6 +344,13 @@ impl AwsOperation for aws_sdk_acm::operation::remove_tags_from_certificate::buil
     ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
         async move { self.send().await }
     }
+}
+
+impl DecidedOperationError
+    for aws_sdk_acm::operation::remove_tags_from_certificate::RemoveTagsFromCertificateError
+{
+    const NAME: &'static str = <aws_sdk_acm::operation::remove_tags_from_certificate::builders::RemoveTagsFromCertificateFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_acm::operation::remove_tags_from_certificate::builders::RemoveTagsFromCertificateFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
 /// RequestCertificate: the IdempotencyToken identifies one certificate request within ACM's token window
@@ -1558,6 +370,13 @@ impl AwsOperation
     {
         async move { self.send().await }
     }
+}
+
+impl DecidedOperationError
+    for aws_sdk_acm::operation::request_certificate::RequestCertificateError
+{
+    const NAME: &'static str = <aws_sdk_acm::operation::request_certificate::builders::RequestCertificateFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_acm::operation::request_certificate::builders::RequestCertificateFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
 impl TokenBearing
@@ -1584,6 +403,13 @@ impl AwsOperation for aws_sdk_acm::operation::update_certificate_options::builde
     }
 }
 
+impl DecidedOperationError
+    for aws_sdk_acm::operation::update_certificate_options::UpdateCertificateOptionsError
+{
+    const NAME: &'static str = <aws_sdk_acm::operation::update_certificate_options::builders::UpdateCertificateOptionsFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_acm::operation::update_certificate_options::builders::UpdateCertificateOptionsFluentBuilder as AwsOperation>::IDEMPOTENCY;
+}
+
 /// AssociateKmsKey: sets the KMS-key association for one log group
 impl AwsOperation
     for aws_sdk_cloudwatchlogs::operation::associate_kms_key::builders::AssociateKmsKeyFluentBuilder
@@ -1601,6 +427,13 @@ impl AwsOperation
     {
         async move { self.send().await }
     }
+}
+
+impl DecidedOperationError
+    for aws_sdk_cloudwatchlogs::operation::associate_kms_key::AssociateKmsKeyError
+{
+    const NAME: &'static str = <aws_sdk_cloudwatchlogs::operation::associate_kms_key::builders::AssociateKmsKeyFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_cloudwatchlogs::operation::associate_kms_key::builders::AssociateKmsKeyFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
 /// CreateLogGroup: creates a top-level resource without an idempotency token
@@ -1622,6 +455,13 @@ impl AwsOperation
     }
 }
 
+impl DecidedOperationError
+    for aws_sdk_cloudwatchlogs::operation::create_log_group::CreateLogGroupError
+{
+    const NAME: &'static str = <aws_sdk_cloudwatchlogs::operation::create_log_group::builders::CreateLogGroupFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_cloudwatchlogs::operation::create_log_group::builders::CreateLogGroupFluentBuilder as AwsOperation>::IDEMPOTENCY;
+}
+
 /// DeleteLogGroup: the provider does not accept an already-absent log group as success
 impl AwsOperation
     for aws_sdk_cloudwatchlogs::operation::delete_log_group::builders::DeleteLogGroupFluentBuilder
@@ -1641,6 +481,13 @@ impl AwsOperation
     }
 }
 
+impl DecidedOperationError
+    for aws_sdk_cloudwatchlogs::operation::delete_log_group::DeleteLogGroupError
+{
+    const NAME: &'static str = <aws_sdk_cloudwatchlogs::operation::delete_log_group::builders::DeleteLogGroupFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_cloudwatchlogs::operation::delete_log_group::builders::DeleteLogGroupFluentBuilder as AwsOperation>::IDEMPOTENCY;
+}
+
 /// DeleteRetentionPolicy: removes the single retention policy keyed by log group
 impl AwsOperation for aws_sdk_cloudwatchlogs::operation::delete_retention_policy::builders::DeleteRetentionPolicyFluentBuilder {
     type Resend = NoToken;
@@ -1655,6 +502,13 @@ impl AwsOperation for aws_sdk_cloudwatchlogs::operation::delete_retention_policy
     ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
         async move { self.send().await }
     }
+}
+
+impl DecidedOperationError
+    for aws_sdk_cloudwatchlogs::operation::delete_retention_policy::DeleteRetentionPolicyError
+{
+    const NAME: &'static str = <aws_sdk_cloudwatchlogs::operation::delete_retention_policy::builders::DeleteRetentionPolicyFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_cloudwatchlogs::operation::delete_retention_policy::builders::DeleteRetentionPolicyFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
 /// DescribeLogGroups: reads log-group state and has no side effects
@@ -1673,6 +527,13 @@ impl AwsOperation for aws_sdk_cloudwatchlogs::operation::describe_log_groups::bu
     }
 }
 
+impl DecidedOperationError
+    for aws_sdk_cloudwatchlogs::operation::describe_log_groups::DescribeLogGroupsError
+{
+    const NAME: &'static str = <aws_sdk_cloudwatchlogs::operation::describe_log_groups::builders::DescribeLogGroupsFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_cloudwatchlogs::operation::describe_log_groups::builders::DescribeLogGroupsFluentBuilder as AwsOperation>::IDEMPOTENCY;
+}
+
 /// DisassociateKmsKey: removes the KMS-key association from one log group
 impl AwsOperation for aws_sdk_cloudwatchlogs::operation::disassociate_kms_key::builders::DisassociateKmsKeyFluentBuilder {
     type Resend = NoToken;
@@ -1687,6 +548,13 @@ impl AwsOperation for aws_sdk_cloudwatchlogs::operation::disassociate_kms_key::b
     ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
         async move { self.send().await }
     }
+}
+
+impl DecidedOperationError
+    for aws_sdk_cloudwatchlogs::operation::disassociate_kms_key::DisassociateKmsKeyError
+{
+    const NAME: &'static str = <aws_sdk_cloudwatchlogs::operation::disassociate_kms_key::builders::DisassociateKmsKeyFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_cloudwatchlogs::operation::disassociate_kms_key::builders::DisassociateKmsKeyFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
 /// ListTagsForResource: reads resource tags and has no side effects
@@ -1705,6 +573,13 @@ impl AwsOperation for aws_sdk_cloudwatchlogs::operation::list_tags_for_resource:
     }
 }
 
+impl DecidedOperationError
+    for aws_sdk_cloudwatchlogs::operation::list_tags_for_resource::ListTagsForResourceError
+{
+    const NAME: &'static str = <aws_sdk_cloudwatchlogs::operation::list_tags_for_resource::builders::ListTagsForResourceFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_cloudwatchlogs::operation::list_tags_for_resource::builders::ListTagsForResourceFluentBuilder as AwsOperation>::IDEMPOTENCY;
+}
+
 /// ListTagsLogGroup: reads log-group tags and has no side effects
 impl AwsOperation for aws_sdk_cloudwatchlogs::operation::list_tags_log_group::builders::ListTagsLogGroupFluentBuilder {
     type Resend = NoToken;
@@ -1721,6 +596,13 @@ impl AwsOperation for aws_sdk_cloudwatchlogs::operation::list_tags_log_group::bu
     }
 }
 
+impl DecidedOperationError
+    for aws_sdk_cloudwatchlogs::operation::list_tags_log_group::ListTagsLogGroupError
+{
+    const NAME: &'static str = <aws_sdk_cloudwatchlogs::operation::list_tags_log_group::builders::ListTagsLogGroupFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_cloudwatchlogs::operation::list_tags_log_group::builders::ListTagsLogGroupFluentBuilder as AwsOperation>::IDEMPOTENCY;
+}
+
 /// PutRetentionPolicy: replaces the single retention policy keyed by log group
 impl AwsOperation for aws_sdk_cloudwatchlogs::operation::put_retention_policy::builders::PutRetentionPolicyFluentBuilder {
     type Resend = NoToken;
@@ -1735,6 +617,13 @@ impl AwsOperation for aws_sdk_cloudwatchlogs::operation::put_retention_policy::b
     ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
         async move { self.send().await }
     }
+}
+
+impl DecidedOperationError
+    for aws_sdk_cloudwatchlogs::operation::put_retention_policy::PutRetentionPolicyError
+{
+    const NAME: &'static str = <aws_sdk_cloudwatchlogs::operation::put_retention_policy::builders::PutRetentionPolicyFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_cloudwatchlogs::operation::put_retention_policy::builders::PutRetentionPolicyFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
 /// TagLogGroup: sets tag keys on one log group; repeating the same values has no additional effect
@@ -1756,6 +645,11 @@ impl AwsOperation
     }
 }
 
+impl DecidedOperationError for aws_sdk_cloudwatchlogs::operation::tag_log_group::TagLogGroupError {
+    const NAME: &'static str = <aws_sdk_cloudwatchlogs::operation::tag_log_group::builders::TagLogGroupFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_cloudwatchlogs::operation::tag_log_group::builders::TagLogGroupFluentBuilder as AwsOperation>::IDEMPOTENCY;
+}
+
 /// TagResource: sets tag keys on one resource; repeating the same values has no additional effect
 impl AwsOperation
     for aws_sdk_cloudwatchlogs::operation::tag_resource::builders::TagResourceFluentBuilder
@@ -1773,6 +667,11 @@ impl AwsOperation
     {
         async move { self.send().await }
     }
+}
+
+impl DecidedOperationError for aws_sdk_cloudwatchlogs::operation::tag_resource::TagResourceError {
+    const NAME: &'static str = <aws_sdk_cloudwatchlogs::operation::tag_resource::builders::TagResourceFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_cloudwatchlogs::operation::tag_resource::builders::TagResourceFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
 /// UntagLogGroup: removes named tag keys; repeating the removal leaves the same state
@@ -1794,6 +693,13 @@ impl AwsOperation
     }
 }
 
+impl DecidedOperationError
+    for aws_sdk_cloudwatchlogs::operation::untag_log_group::UntagLogGroupError
+{
+    const NAME: &'static str = <aws_sdk_cloudwatchlogs::operation::untag_log_group::builders::UntagLogGroupFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_cloudwatchlogs::operation::untag_log_group::builders::UntagLogGroupFluentBuilder as AwsOperation>::IDEMPOTENCY;
+}
+
 /// UntagResource: removes named tag keys; repeating the removal leaves the same state
 impl AwsOperation
     for aws_sdk_cloudwatchlogs::operation::untag_resource::builders::UntagResourceFluentBuilder
@@ -1811,6 +717,13 @@ impl AwsOperation
     {
         async move { self.send().await }
     }
+}
+
+impl DecidedOperationError
+    for aws_sdk_cloudwatchlogs::operation::untag_resource::UntagResourceError
+{
+    const NAME: &'static str = <aws_sdk_cloudwatchlogs::operation::untag_resource::builders::UntagResourceFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_cloudwatchlogs::operation::untag_resource::builders::UntagResourceFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
 /// AllocateAddress: each successful call can allocate another address and the API has no client token
@@ -1832,6 +745,11 @@ impl AwsOperation
     }
 }
 
+impl DecidedOperationError for aws_sdk_ec2::operation::allocate_address::AllocateAddressError {
+    const NAME: &'static str = <aws_sdk_ec2::operation::allocate_address::builders::AllocateAddressFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::allocate_address::builders::AllocateAddressFluentBuilder as AwsOperation>::IDEMPOTENCY;
+}
+
 /// AssociateRouteTable: creates an association without an idempotency token
 impl AwsOperation
     for aws_sdk_ec2::operation::associate_route_table::builders::AssociateRouteTableFluentBuilder
@@ -1851,6 +769,13 @@ impl AwsOperation
     }
 }
 
+impl DecidedOperationError
+    for aws_sdk_ec2::operation::associate_route_table::AssociateRouteTableError
+{
+    const NAME: &'static str = <aws_sdk_ec2::operation::associate_route_table::builders::AssociateRouteTableFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::associate_route_table::builders::AssociateRouteTableFluentBuilder as AwsOperation>::IDEMPOTENCY;
+}
+
 /// AttachInternetGateway: attaches a resource and has no idempotency token
 impl AwsOperation for aws_sdk_ec2::operation::attach_internet_gateway::builders::AttachInternetGatewayFluentBuilder {
     type Resend = NoToken;
@@ -1865,6 +790,13 @@ impl AwsOperation for aws_sdk_ec2::operation::attach_internet_gateway::builders:
     ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
         async move { self.send().await }
     }
+}
+
+impl DecidedOperationError
+    for aws_sdk_ec2::operation::attach_internet_gateway::AttachInternetGatewayError
+{
+    const NAME: &'static str = <aws_sdk_ec2::operation::attach_internet_gateway::builders::AttachInternetGatewayFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::attach_internet_gateway::builders::AttachInternetGatewayFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
 /// AttachVpnGateway: attaches a resource and has no idempotency token
@@ -1886,6 +818,11 @@ impl AwsOperation
     }
 }
 
+impl DecidedOperationError for aws_sdk_ec2::operation::attach_vpn_gateway::AttachVpnGatewayError {
+    const NAME: &'static str = <aws_sdk_ec2::operation::attach_vpn_gateway::builders::AttachVpnGatewayFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::attach_vpn_gateway::builders::AttachVpnGatewayFluentBuilder as AwsOperation>::IDEMPOTENCY;
+}
+
 /// AuthorizeSecurityGroupEgress: authorizes rules without an idempotency token
 impl AwsOperation for aws_sdk_ec2::operation::authorize_security_group_egress::builders::AuthorizeSecurityGroupEgressFluentBuilder {
     type Resend = NoToken;
@@ -1900,6 +837,13 @@ impl AwsOperation for aws_sdk_ec2::operation::authorize_security_group_egress::b
     ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
         async move { self.send().await }
     }
+}
+
+impl DecidedOperationError
+    for aws_sdk_ec2::operation::authorize_security_group_egress::AuthorizeSecurityGroupEgressError
+{
+    const NAME: &'static str = <aws_sdk_ec2::operation::authorize_security_group_egress::builders::AuthorizeSecurityGroupEgressFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::authorize_security_group_egress::builders::AuthorizeSecurityGroupEgressFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
 /// AuthorizeSecurityGroupIngress: authorizes rules without an idempotency token
@@ -1918,6 +862,13 @@ impl AwsOperation for aws_sdk_ec2::operation::authorize_security_group_ingress::
     }
 }
 
+impl DecidedOperationError
+    for aws_sdk_ec2::operation::authorize_security_group_ingress::AuthorizeSecurityGroupIngressError
+{
+    const NAME: &'static str = <aws_sdk_ec2::operation::authorize_security_group_ingress::builders::AuthorizeSecurityGroupIngressFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::authorize_security_group_ingress::builders::AuthorizeSecurityGroupIngressFluentBuilder as AwsOperation>::IDEMPOTENCY;
+}
+
 /// CreateEgressOnlyInternetGateway: ClientToken identifies one gateway creation request
 impl AwsOperation for aws_sdk_ec2::operation::create_egress_only_internet_gateway::builders::CreateEgressOnlyInternetGatewayFluentBuilder {
     type Resend = WithToken;
@@ -1932,6 +883,11 @@ impl AwsOperation for aws_sdk_ec2::operation::create_egress_only_internet_gatewa
     ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
         async move { self.send().await }
     }
+}
+
+impl DecidedOperationError for aws_sdk_ec2::operation::create_egress_only_internet_gateway::CreateEgressOnlyInternetGatewayError {
+    const NAME: &'static str = <aws_sdk_ec2::operation::create_egress_only_internet_gateway::builders::CreateEgressOnlyInternetGatewayFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::create_egress_only_internet_gateway::builders::CreateEgressOnlyInternetGatewayFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
 impl TokenBearing for aws_sdk_ec2::operation::create_egress_only_internet_gateway::builders::CreateEgressOnlyInternetGatewayFluentBuilder {
@@ -1959,6 +915,11 @@ impl AwsOperation
     }
 }
 
+impl DecidedOperationError for aws_sdk_ec2::operation::create_flow_logs::CreateFlowLogsError {
+    const NAME: &'static str = <aws_sdk_ec2::operation::create_flow_logs::builders::CreateFlowLogsFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::create_flow_logs::builders::CreateFlowLogsFluentBuilder as AwsOperation>::IDEMPOTENCY;
+}
+
 impl TokenBearing
     for aws_sdk_ec2::operation::create_flow_logs::builders::CreateFlowLogsFluentBuilder
 {
@@ -1983,6 +944,13 @@ impl AwsOperation for aws_sdk_ec2::operation::create_internet_gateway::builders:
     }
 }
 
+impl DecidedOperationError
+    for aws_sdk_ec2::operation::create_internet_gateway::CreateInternetGatewayError
+{
+    const NAME: &'static str = <aws_sdk_ec2::operation::create_internet_gateway::builders::CreateInternetGatewayFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::create_internet_gateway::builders::CreateInternetGatewayFluentBuilder as AwsOperation>::IDEMPOTENCY;
+}
+
 /// CreateNatGateway: the model's ClientToken identifies one NAT-gateway creation request
 impl AwsOperation
     for aws_sdk_ec2::operation::create_nat_gateway::builders::CreateNatGatewayFluentBuilder
@@ -2000,6 +968,11 @@ impl AwsOperation
     {
         async move { self.send().await }
     }
+}
+
+impl DecidedOperationError for aws_sdk_ec2::operation::create_nat_gateway::CreateNatGatewayError {
+    const NAME: &'static str = <aws_sdk_ec2::operation::create_nat_gateway::builders::CreateNatGatewayFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::create_nat_gateway::builders::CreateNatGatewayFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
 impl TokenBearing
@@ -2027,6 +1000,11 @@ impl AwsOperation for aws_sdk_ec2::operation::create_route::builders::CreateRout
     }
 }
 
+impl DecidedOperationError for aws_sdk_ec2::operation::create_route::CreateRouteError {
+    const NAME: &'static str = <aws_sdk_ec2::operation::create_route::builders::CreateRouteFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::create_route::builders::CreateRouteFluentBuilder as AwsOperation>::IDEMPOTENCY;
+}
+
 /// CreateRouteTable: the model's ClientToken identifies one route-table creation request
 impl AwsOperation
     for aws_sdk_ec2::operation::create_route_table::builders::CreateRouteTableFluentBuilder
@@ -2044,6 +1022,11 @@ impl AwsOperation
     {
         async move { self.send().await }
     }
+}
+
+impl DecidedOperationError for aws_sdk_ec2::operation::create_route_table::CreateRouteTableError {
+    const NAME: &'static str = <aws_sdk_ec2::operation::create_route_table::builders::CreateRouteTableFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::create_route_table::builders::CreateRouteTableFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
 impl TokenBearing
@@ -2073,6 +1056,13 @@ impl AwsOperation
     }
 }
 
+impl DecidedOperationError
+    for aws_sdk_ec2::operation::create_security_group::CreateSecurityGroupError
+{
+    const NAME: &'static str = <aws_sdk_ec2::operation::create_security_group::builders::CreateSecurityGroupFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::create_security_group::builders::CreateSecurityGroupFluentBuilder as AwsOperation>::IDEMPOTENCY;
+}
+
 /// CreateSubnet: each successful call can create a new subnet and the API has no client token
 impl AwsOperation for aws_sdk_ec2::operation::create_subnet::builders::CreateSubnetFluentBuilder {
     type Resend = NoToken;
@@ -2090,6 +1080,11 @@ impl AwsOperation for aws_sdk_ec2::operation::create_subnet::builders::CreateSub
     }
 }
 
+impl DecidedOperationError for aws_sdk_ec2::operation::create_subnet::CreateSubnetError {
+    const NAME: &'static str = <aws_sdk_ec2::operation::create_subnet::builders::CreateSubnetFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::create_subnet::builders::CreateSubnetFluentBuilder as AwsOperation>::IDEMPOTENCY;
+}
+
 /// CreateTags: sets tag keys on named resources; repeating the same values has no additional effect
 impl AwsOperation for aws_sdk_ec2::operation::create_tags::builders::CreateTagsFluentBuilder {
     type Resend = NoToken;
@@ -2105,6 +1100,11 @@ impl AwsOperation for aws_sdk_ec2::operation::create_tags::builders::CreateTagsF
     {
         async move { self.send().await }
     }
+}
+
+impl DecidedOperationError for aws_sdk_ec2::operation::create_tags::CreateTagsError {
+    const NAME: &'static str = <aws_sdk_ec2::operation::create_tags::builders::CreateTagsFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::create_tags::builders::CreateTagsFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
 /// CreateTransitGateway: each successful call creates a new transit gateway and the API has no client token
@@ -2126,6 +1126,13 @@ impl AwsOperation
     }
 }
 
+impl DecidedOperationError
+    for aws_sdk_ec2::operation::create_transit_gateway::CreateTransitGatewayError
+{
+    const NAME: &'static str = <aws_sdk_ec2::operation::create_transit_gateway::builders::CreateTransitGatewayFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::create_transit_gateway::builders::CreateTransitGatewayFluentBuilder as AwsOperation>::IDEMPOTENCY;
+}
+
 /// CreateTransitGatewayVpcAttachment: creates an attachment without an idempotency token
 impl AwsOperation for aws_sdk_ec2::operation::create_transit_gateway_vpc_attachment::builders::CreateTransitGatewayVpcAttachmentFluentBuilder {
     type Resend = NoToken;
@@ -2140,6 +1147,11 @@ impl AwsOperation for aws_sdk_ec2::operation::create_transit_gateway_vpc_attachm
     ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
         async move { self.send().await }
     }
+}
+
+impl DecidedOperationError for aws_sdk_ec2::operation::create_transit_gateway_vpc_attachment::CreateTransitGatewayVpcAttachmentError {
+    const NAME: &'static str = <aws_sdk_ec2::operation::create_transit_gateway_vpc_attachment::builders::CreateTransitGatewayVpcAttachmentFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::create_transit_gateway_vpc_attachment::builders::CreateTransitGatewayVpcAttachmentFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
 /// CreateVpc: each successful call creates a new VPC and the API has no client token
@@ -2159,6 +1171,11 @@ impl AwsOperation for aws_sdk_ec2::operation::create_vpc::builders::CreateVpcFlu
     }
 }
 
+impl DecidedOperationError for aws_sdk_ec2::operation::create_vpc::CreateVpcError {
+    const NAME: &'static str = <aws_sdk_ec2::operation::create_vpc::builders::CreateVpcFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::create_vpc::builders::CreateVpcFluentBuilder as AwsOperation>::IDEMPOTENCY;
+}
+
 /// CreateVpcEndpoint: ClientToken identifies one endpoint creation request
 impl AwsOperation
     for aws_sdk_ec2::operation::create_vpc_endpoint::builders::CreateVpcEndpointFluentBuilder
@@ -2176,6 +1193,11 @@ impl AwsOperation
     {
         async move { self.send().await }
     }
+}
+
+impl DecidedOperationError for aws_sdk_ec2::operation::create_vpc_endpoint::CreateVpcEndpointError {
+    const NAME: &'static str = <aws_sdk_ec2::operation::create_vpc_endpoint::builders::CreateVpcEndpointFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::create_vpc_endpoint::builders::CreateVpcEndpointFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
 impl TokenBearing
@@ -2202,6 +1224,13 @@ impl AwsOperation for aws_sdk_ec2::operation::create_vpc_peering_connection::bui
     }
 }
 
+impl DecidedOperationError
+    for aws_sdk_ec2::operation::create_vpc_peering_connection::CreateVpcPeeringConnectionError
+{
+    const NAME: &'static str = <aws_sdk_ec2::operation::create_vpc_peering_connection::builders::CreateVpcPeeringConnectionFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::create_vpc_peering_connection::builders::CreateVpcPeeringConnectionFluentBuilder as AwsOperation>::IDEMPOTENCY;
+}
+
 /// CreateVpnGateway: each successful call creates a new gateway and the API has no client token
 impl AwsOperation
     for aws_sdk_ec2::operation::create_vpn_gateway::builders::CreateVpnGatewayFluentBuilder
@@ -2221,6 +1250,11 @@ impl AwsOperation
     }
 }
 
+impl DecidedOperationError for aws_sdk_ec2::operation::create_vpn_gateway::CreateVpnGatewayError {
+    const NAME: &'static str = <aws_sdk_ec2::operation::create_vpn_gateway::builders::CreateVpnGatewayFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::create_vpn_gateway::builders::CreateVpnGatewayFluentBuilder as AwsOperation>::IDEMPOTENCY;
+}
+
 /// DeleteEgressOnlyInternetGateway: the provider does not accept an already-absent gateway as success
 impl AwsOperation for aws_sdk_ec2::operation::delete_egress_only_internet_gateway::builders::DeleteEgressOnlyInternetGatewayFluentBuilder {
     type Resend = NoToken;
@@ -2235,6 +1269,11 @@ impl AwsOperation for aws_sdk_ec2::operation::delete_egress_only_internet_gatewa
     ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
         async move { self.send().await }
     }
+}
+
+impl DecidedOperationError for aws_sdk_ec2::operation::delete_egress_only_internet_gateway::DeleteEgressOnlyInternetGatewayError {
+    const NAME: &'static str = <aws_sdk_ec2::operation::delete_egress_only_internet_gateway::builders::DeleteEgressOnlyInternetGatewayFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::delete_egress_only_internet_gateway::builders::DeleteEgressOnlyInternetGatewayFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
 /// DeleteFlowLogs: the provider reports unsuccessful already-absent items as errors
@@ -2256,6 +1295,11 @@ impl AwsOperation
     }
 }
 
+impl DecidedOperationError for aws_sdk_ec2::operation::delete_flow_logs::DeleteFlowLogsError {
+    const NAME: &'static str = <aws_sdk_ec2::operation::delete_flow_logs::builders::DeleteFlowLogsFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::delete_flow_logs::builders::DeleteFlowLogsFluentBuilder as AwsOperation>::IDEMPOTENCY;
+}
+
 /// DeleteInternetGateway: the provider does not accept an already-absent gateway as success
 impl AwsOperation for aws_sdk_ec2::operation::delete_internet_gateway::builders::DeleteInternetGatewayFluentBuilder {
     type Resend = NoToken;
@@ -2270,6 +1314,13 @@ impl AwsOperation for aws_sdk_ec2::operation::delete_internet_gateway::builders:
     ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
         async move { self.send().await }
     }
+}
+
+impl DecidedOperationError
+    for aws_sdk_ec2::operation::delete_internet_gateway::DeleteInternetGatewayError
+{
+    const NAME: &'static str = <aws_sdk_ec2::operation::delete_internet_gateway::builders::DeleteInternetGatewayFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::delete_internet_gateway::builders::DeleteInternetGatewayFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
 /// DeleteNatGateway: the provider does not accept an already-absent NAT gateway as success
@@ -2291,6 +1342,11 @@ impl AwsOperation
     }
 }
 
+impl DecidedOperationError for aws_sdk_ec2::operation::delete_nat_gateway::DeleteNatGatewayError {
+    const NAME: &'static str = <aws_sdk_ec2::operation::delete_nat_gateway::builders::DeleteNatGatewayFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::delete_nat_gateway::builders::DeleteNatGatewayFluentBuilder as AwsOperation>::IDEMPOTENCY;
+}
+
 /// DeleteRoute: the provider does not accept an already-absent route as success
 impl AwsOperation for aws_sdk_ec2::operation::delete_route::builders::DeleteRouteFluentBuilder {
     type Resend = NoToken;
@@ -2306,6 +1362,11 @@ impl AwsOperation for aws_sdk_ec2::operation::delete_route::builders::DeleteRout
     {
         async move { self.send().await }
     }
+}
+
+impl DecidedOperationError for aws_sdk_ec2::operation::delete_route::DeleteRouteError {
+    const NAME: &'static str = <aws_sdk_ec2::operation::delete_route::builders::DeleteRouteFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::delete_route::builders::DeleteRouteFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
 /// DeleteRouteTable: the provider does not accept an already-absent route table as success
@@ -2327,6 +1388,11 @@ impl AwsOperation
     }
 }
 
+impl DecidedOperationError for aws_sdk_ec2::operation::delete_route_table::DeleteRouteTableError {
+    const NAME: &'static str = <aws_sdk_ec2::operation::delete_route_table::builders::DeleteRouteTableFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::delete_route_table::builders::DeleteRouteTableFluentBuilder as AwsOperation>::IDEMPOTENCY;
+}
+
 /// DeleteSecurityGroup: the provider does not accept an already-absent security group as success
 impl AwsOperation
     for aws_sdk_ec2::operation::delete_security_group::builders::DeleteSecurityGroupFluentBuilder
@@ -2346,6 +1412,13 @@ impl AwsOperation
     }
 }
 
+impl DecidedOperationError
+    for aws_sdk_ec2::operation::delete_security_group::DeleteSecurityGroupError
+{
+    const NAME: &'static str = <aws_sdk_ec2::operation::delete_security_group::builders::DeleteSecurityGroupFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::delete_security_group::builders::DeleteSecurityGroupFluentBuilder as AwsOperation>::IDEMPOTENCY;
+}
+
 /// DeleteSubnet: the provider does not accept an already-absent subnet as success
 impl AwsOperation for aws_sdk_ec2::operation::delete_subnet::builders::DeleteSubnetFluentBuilder {
     type Resend = NoToken;
@@ -2363,6 +1436,11 @@ impl AwsOperation for aws_sdk_ec2::operation::delete_subnet::builders::DeleteSub
     }
 }
 
+impl DecidedOperationError for aws_sdk_ec2::operation::delete_subnet::DeleteSubnetError {
+    const NAME: &'static str = <aws_sdk_ec2::operation::delete_subnet::builders::DeleteSubnetFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::delete_subnet::builders::DeleteSubnetFluentBuilder as AwsOperation>::IDEMPOTENCY;
+}
+
 /// DeleteTags: removes named tag keys; repeating the removal leaves the same state
 impl AwsOperation for aws_sdk_ec2::operation::delete_tags::builders::DeleteTagsFluentBuilder {
     type Resend = NoToken;
@@ -2378,6 +1456,11 @@ impl AwsOperation for aws_sdk_ec2::operation::delete_tags::builders::DeleteTagsF
     {
         async move { self.send().await }
     }
+}
+
+impl DecidedOperationError for aws_sdk_ec2::operation::delete_tags::DeleteTagsError {
+    const NAME: &'static str = <aws_sdk_ec2::operation::delete_tags::builders::DeleteTagsFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::delete_tags::builders::DeleteTagsFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
 /// DeleteTransitGateway: the provider does not accept an already-deleting or absent transit gateway as success
@@ -2399,6 +1482,13 @@ impl AwsOperation
     }
 }
 
+impl DecidedOperationError
+    for aws_sdk_ec2::operation::delete_transit_gateway::DeleteTransitGatewayError
+{
+    const NAME: &'static str = <aws_sdk_ec2::operation::delete_transit_gateway::builders::DeleteTransitGatewayFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::delete_transit_gateway::builders::DeleteTransitGatewayFluentBuilder as AwsOperation>::IDEMPOTENCY;
+}
+
 /// DeleteTransitGatewayVpcAttachment: the provider does not accept an already-deleting or absent attachment as success
 impl AwsOperation for aws_sdk_ec2::operation::delete_transit_gateway_vpc_attachment::builders::DeleteTransitGatewayVpcAttachmentFluentBuilder {
     type Resend = NoToken;
@@ -2413,6 +1503,11 @@ impl AwsOperation for aws_sdk_ec2::operation::delete_transit_gateway_vpc_attachm
     ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
         async move { self.send().await }
     }
+}
+
+impl DecidedOperationError for aws_sdk_ec2::operation::delete_transit_gateway_vpc_attachment::DeleteTransitGatewayVpcAttachmentError {
+    const NAME: &'static str = <aws_sdk_ec2::operation::delete_transit_gateway_vpc_attachment::builders::DeleteTransitGatewayVpcAttachmentFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::delete_transit_gateway_vpc_attachment::builders::DeleteTransitGatewayVpcAttachmentFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
 /// DeleteVpc: the provider does not accept an already-absent VPC as success
@@ -2430,6 +1525,11 @@ impl AwsOperation for aws_sdk_ec2::operation::delete_vpc::builders::DeleteVpcFlu
     {
         async move { self.send().await }
     }
+}
+
+impl DecidedOperationError for aws_sdk_ec2::operation::delete_vpc::DeleteVpcError {
+    const NAME: &'static str = <aws_sdk_ec2::operation::delete_vpc::builders::DeleteVpcFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::delete_vpc::builders::DeleteVpcFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
 /// DeleteVpcEndpoints: the provider reports unsuccessful already-absent items as errors
@@ -2451,6 +1551,13 @@ impl AwsOperation
     }
 }
 
+impl DecidedOperationError
+    for aws_sdk_ec2::operation::delete_vpc_endpoints::DeleteVpcEndpointsError
+{
+    const NAME: &'static str = <aws_sdk_ec2::operation::delete_vpc_endpoints::builders::DeleteVpcEndpointsFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::delete_vpc_endpoints::builders::DeleteVpcEndpointsFluentBuilder as AwsOperation>::IDEMPOTENCY;
+}
+
 /// DeleteVpcPeeringConnection: the provider does not accept an already-absent connection as success
 impl AwsOperation for aws_sdk_ec2::operation::delete_vpc_peering_connection::builders::DeleteVpcPeeringConnectionFluentBuilder {
     type Resend = NoToken;
@@ -2465,6 +1572,13 @@ impl AwsOperation for aws_sdk_ec2::operation::delete_vpc_peering_connection::bui
     ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
         async move { self.send().await }
     }
+}
+
+impl DecidedOperationError
+    for aws_sdk_ec2::operation::delete_vpc_peering_connection::DeleteVpcPeeringConnectionError
+{
+    const NAME: &'static str = <aws_sdk_ec2::operation::delete_vpc_peering_connection::builders::DeleteVpcPeeringConnectionFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::delete_vpc_peering_connection::builders::DeleteVpcPeeringConnectionFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
 /// DeleteVpnGateway: the provider does not accept an already-absent gateway as success
@@ -2486,6 +1600,11 @@ impl AwsOperation
     }
 }
 
+impl DecidedOperationError for aws_sdk_ec2::operation::delete_vpn_gateway::DeleteVpnGatewayError {
+    const NAME: &'static str = <aws_sdk_ec2::operation::delete_vpn_gateway::builders::DeleteVpnGatewayFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::delete_vpn_gateway::builders::DeleteVpnGatewayFluentBuilder as AwsOperation>::IDEMPOTENCY;
+}
+
 /// DescribeAddresses: reads address state and has no side effects
 impl AwsOperation
     for aws_sdk_ec2::operation::describe_addresses::builders::DescribeAddressesFluentBuilder
@@ -2505,6 +1624,11 @@ impl AwsOperation
     }
 }
 
+impl DecidedOperationError for aws_sdk_ec2::operation::describe_addresses::DescribeAddressesError {
+    const NAME: &'static str = <aws_sdk_ec2::operation::describe_addresses::builders::DescribeAddressesFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::describe_addresses::builders::DescribeAddressesFluentBuilder as AwsOperation>::IDEMPOTENCY;
+}
+
 /// DescribeEgressOnlyInternetGateways: reads gateway state and has no side effects
 impl AwsOperation for aws_sdk_ec2::operation::describe_egress_only_internet_gateways::builders::DescribeEgressOnlyInternetGatewaysFluentBuilder {
     type Resend = NoToken;
@@ -2519,6 +1643,11 @@ impl AwsOperation for aws_sdk_ec2::operation::describe_egress_only_internet_gate
     ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
         async move { self.send().await }
     }
+}
+
+impl DecidedOperationError for aws_sdk_ec2::operation::describe_egress_only_internet_gateways::DescribeEgressOnlyInternetGatewaysError {
+    const NAME: &'static str = <aws_sdk_ec2::operation::describe_egress_only_internet_gateways::builders::DescribeEgressOnlyInternetGatewaysFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::describe_egress_only_internet_gateways::builders::DescribeEgressOnlyInternetGatewaysFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
 /// DescribeFlowLogs: reads flow-log state and has no side effects
@@ -2540,6 +1669,11 @@ impl AwsOperation
     }
 }
 
+impl DecidedOperationError for aws_sdk_ec2::operation::describe_flow_logs::DescribeFlowLogsError {
+    const NAME: &'static str = <aws_sdk_ec2::operation::describe_flow_logs::builders::DescribeFlowLogsFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::describe_flow_logs::builders::DescribeFlowLogsFluentBuilder as AwsOperation>::IDEMPOTENCY;
+}
+
 /// DescribeInternetGateways: reads gateway state and has no side effects
 impl AwsOperation for aws_sdk_ec2::operation::describe_internet_gateways::builders::DescribeInternetGatewaysFluentBuilder {
     type Resend = NoToken;
@@ -2554,6 +1688,13 @@ impl AwsOperation for aws_sdk_ec2::operation::describe_internet_gateways::builde
     ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
         async move { self.send().await }
     }
+}
+
+impl DecidedOperationError
+    for aws_sdk_ec2::operation::describe_internet_gateways::DescribeInternetGatewaysError
+{
+    const NAME: &'static str = <aws_sdk_ec2::operation::describe_internet_gateways::builders::DescribeInternetGatewaysFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::describe_internet_gateways::builders::DescribeInternetGatewaysFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
 /// DescribeNatGateways: reads NAT-gateway state and has no side effects
@@ -2575,6 +1716,13 @@ impl AwsOperation
     }
 }
 
+impl DecidedOperationError
+    for aws_sdk_ec2::operation::describe_nat_gateways::DescribeNatGatewaysError
+{
+    const NAME: &'static str = <aws_sdk_ec2::operation::describe_nat_gateways::builders::DescribeNatGatewaysFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::describe_nat_gateways::builders::DescribeNatGatewaysFluentBuilder as AwsOperation>::IDEMPOTENCY;
+}
+
 /// DescribeRouteTables: reads route-table state and has no side effects
 impl AwsOperation
     for aws_sdk_ec2::operation::describe_route_tables::builders::DescribeRouteTablesFluentBuilder
@@ -2594,6 +1742,13 @@ impl AwsOperation
     }
 }
 
+impl DecidedOperationError
+    for aws_sdk_ec2::operation::describe_route_tables::DescribeRouteTablesError
+{
+    const NAME: &'static str = <aws_sdk_ec2::operation::describe_route_tables::builders::DescribeRouteTablesFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::describe_route_tables::builders::DescribeRouteTablesFluentBuilder as AwsOperation>::IDEMPOTENCY;
+}
+
 /// DescribeSecurityGroupRules: reads security-group rules and has no side effects
 impl AwsOperation for aws_sdk_ec2::operation::describe_security_group_rules::builders::DescribeSecurityGroupRulesFluentBuilder {
     type Resend = NoToken;
@@ -2610,6 +1765,13 @@ impl AwsOperation for aws_sdk_ec2::operation::describe_security_group_rules::bui
     }
 }
 
+impl DecidedOperationError
+    for aws_sdk_ec2::operation::describe_security_group_rules::DescribeSecurityGroupRulesError
+{
+    const NAME: &'static str = <aws_sdk_ec2::operation::describe_security_group_rules::builders::DescribeSecurityGroupRulesFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::describe_security_group_rules::builders::DescribeSecurityGroupRulesFluentBuilder as AwsOperation>::IDEMPOTENCY;
+}
+
 /// DescribeSecurityGroups: reads security-group state and has no side effects
 impl AwsOperation for aws_sdk_ec2::operation::describe_security_groups::builders::DescribeSecurityGroupsFluentBuilder {
     type Resend = NoToken;
@@ -2624,6 +1786,13 @@ impl AwsOperation for aws_sdk_ec2::operation::describe_security_groups::builders
     ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
         async move { self.send().await }
     }
+}
+
+impl DecidedOperationError
+    for aws_sdk_ec2::operation::describe_security_groups::DescribeSecurityGroupsError
+{
+    const NAME: &'static str = <aws_sdk_ec2::operation::describe_security_groups::builders::DescribeSecurityGroupsFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::describe_security_groups::builders::DescribeSecurityGroupsFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
 /// DescribeSubnets: reads subnet state and has no side effects
@@ -2645,6 +1814,11 @@ impl AwsOperation
     }
 }
 
+impl DecidedOperationError for aws_sdk_ec2::operation::describe_subnets::DescribeSubnetsError {
+    const NAME: &'static str = <aws_sdk_ec2::operation::describe_subnets::builders::DescribeSubnetsFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::describe_subnets::builders::DescribeSubnetsFluentBuilder as AwsOperation>::IDEMPOTENCY;
+}
+
 /// DescribeTransitGatewayVpcAttachments: reads attachment state and has no side effects
 impl AwsOperation for aws_sdk_ec2::operation::describe_transit_gateway_vpc_attachments::builders::DescribeTransitGatewayVpcAttachmentsFluentBuilder {
     type Resend = NoToken;
@@ -2661,6 +1835,11 @@ impl AwsOperation for aws_sdk_ec2::operation::describe_transit_gateway_vpc_attac
     }
 }
 
+impl DecidedOperationError for aws_sdk_ec2::operation::describe_transit_gateway_vpc_attachments::DescribeTransitGatewayVpcAttachmentsError {
+    const NAME: &'static str = <aws_sdk_ec2::operation::describe_transit_gateway_vpc_attachments::builders::DescribeTransitGatewayVpcAttachmentsFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::describe_transit_gateway_vpc_attachments::builders::DescribeTransitGatewayVpcAttachmentsFluentBuilder as AwsOperation>::IDEMPOTENCY;
+}
+
 /// DescribeTransitGateways: reads transit-gateway state and has no side effects
 impl AwsOperation for aws_sdk_ec2::operation::describe_transit_gateways::builders::DescribeTransitGatewaysFluentBuilder {
     type Resend = NoToken;
@@ -2675,6 +1854,13 @@ impl AwsOperation for aws_sdk_ec2::operation::describe_transit_gateways::builder
     ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
         async move { self.send().await }
     }
+}
+
+impl DecidedOperationError
+    for aws_sdk_ec2::operation::describe_transit_gateways::DescribeTransitGatewaysError
+{
+    const NAME: &'static str = <aws_sdk_ec2::operation::describe_transit_gateways::builders::DescribeTransitGatewaysFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::describe_transit_gateways::builders::DescribeTransitGatewaysFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
 /// DescribeVpcAttribute: reads one VPC attribute and has no side effects
@@ -2696,6 +1882,13 @@ impl AwsOperation
     }
 }
 
+impl DecidedOperationError
+    for aws_sdk_ec2::operation::describe_vpc_attribute::DescribeVpcAttributeError
+{
+    const NAME: &'static str = <aws_sdk_ec2::operation::describe_vpc_attribute::builders::DescribeVpcAttributeFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::describe_vpc_attribute::builders::DescribeVpcAttributeFluentBuilder as AwsOperation>::IDEMPOTENCY;
+}
+
 /// DescribeVpcEndpoints: reads endpoint state and has no side effects
 impl AwsOperation
     for aws_sdk_ec2::operation::describe_vpc_endpoints::builders::DescribeVpcEndpointsFluentBuilder
@@ -2715,6 +1908,13 @@ impl AwsOperation
     }
 }
 
+impl DecidedOperationError
+    for aws_sdk_ec2::operation::describe_vpc_endpoints::DescribeVpcEndpointsError
+{
+    const NAME: &'static str = <aws_sdk_ec2::operation::describe_vpc_endpoints::builders::DescribeVpcEndpointsFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::describe_vpc_endpoints::builders::DescribeVpcEndpointsFluentBuilder as AwsOperation>::IDEMPOTENCY;
+}
+
 /// DescribeVpcPeeringConnections: reads peering state and has no side effects
 impl AwsOperation for aws_sdk_ec2::operation::describe_vpc_peering_connections::builders::DescribeVpcPeeringConnectionsFluentBuilder {
     type Resend = NoToken;
@@ -2729,6 +1929,13 @@ impl AwsOperation for aws_sdk_ec2::operation::describe_vpc_peering_connections::
     ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
         async move { self.send().await }
     }
+}
+
+impl DecidedOperationError
+    for aws_sdk_ec2::operation::describe_vpc_peering_connections::DescribeVpcPeeringConnectionsError
+{
+    const NAME: &'static str = <aws_sdk_ec2::operation::describe_vpc_peering_connections::builders::DescribeVpcPeeringConnectionsFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::describe_vpc_peering_connections::builders::DescribeVpcPeeringConnectionsFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
 /// DescribeVpcs: reads VPC state and has no side effects
@@ -2746,6 +1953,11 @@ impl AwsOperation for aws_sdk_ec2::operation::describe_vpcs::builders::DescribeV
     {
         async move { self.send().await }
     }
+}
+
+impl DecidedOperationError for aws_sdk_ec2::operation::describe_vpcs::DescribeVpcsError {
+    const NAME: &'static str = <aws_sdk_ec2::operation::describe_vpcs::builders::DescribeVpcsFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::describe_vpcs::builders::DescribeVpcsFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
 /// DescribeVpnGateways: reads VPN-gateway state and has no side effects
@@ -2767,6 +1979,13 @@ impl AwsOperation
     }
 }
 
+impl DecidedOperationError
+    for aws_sdk_ec2::operation::describe_vpn_gateways::DescribeVpnGatewaysError
+{
+    const NAME: &'static str = <aws_sdk_ec2::operation::describe_vpn_gateways::builders::DescribeVpnGatewaysFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::describe_vpn_gateways::builders::DescribeVpnGatewaysFluentBuilder as AwsOperation>::IDEMPOTENCY;
+}
+
 /// DetachInternetGateway: detaches a resource and the provider does not accept an already-detached result as success
 impl AwsOperation for aws_sdk_ec2::operation::detach_internet_gateway::builders::DetachInternetGatewayFluentBuilder {
     type Resend = NoToken;
@@ -2781,6 +2000,13 @@ impl AwsOperation for aws_sdk_ec2::operation::detach_internet_gateway::builders:
     ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
         async move { self.send().await }
     }
+}
+
+impl DecidedOperationError
+    for aws_sdk_ec2::operation::detach_internet_gateway::DetachInternetGatewayError
+{
+    const NAME: &'static str = <aws_sdk_ec2::operation::detach_internet_gateway::builders::DetachInternetGatewayFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::detach_internet_gateway::builders::DetachInternetGatewayFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
 /// DetachVpnGateway: detaches a resource and the provider does not accept an already-detached result as success
@@ -2802,6 +2028,11 @@ impl AwsOperation
     }
 }
 
+impl DecidedOperationError for aws_sdk_ec2::operation::detach_vpn_gateway::DetachVpnGatewayError {
+    const NAME: &'static str = <aws_sdk_ec2::operation::detach_vpn_gateway::builders::DetachVpnGatewayFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::detach_vpn_gateway::builders::DetachVpnGatewayFluentBuilder as AwsOperation>::IDEMPOTENCY;
+}
+
 /// DisassociateRouteTable: removes an association and the provider does not accept an already-removed result as success
 impl AwsOperation for aws_sdk_ec2::operation::disassociate_route_table::builders::DisassociateRouteTableFluentBuilder {
     type Resend = NoToken;
@@ -2818,6 +2049,13 @@ impl AwsOperation for aws_sdk_ec2::operation::disassociate_route_table::builders
     }
 }
 
+impl DecidedOperationError
+    for aws_sdk_ec2::operation::disassociate_route_table::DisassociateRouteTableError
+{
+    const NAME: &'static str = <aws_sdk_ec2::operation::disassociate_route_table::builders::DisassociateRouteTableFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::disassociate_route_table::builders::DisassociateRouteTableFluentBuilder as AwsOperation>::IDEMPOTENCY;
+}
+
 /// ModifySubnetAttribute: sets one named subnet attribute to a complete value
 impl AwsOperation for aws_sdk_ec2::operation::modify_subnet_attribute::builders::ModifySubnetAttributeFluentBuilder {
     type Resend = NoToken;
@@ -2832,6 +2070,13 @@ impl AwsOperation for aws_sdk_ec2::operation::modify_subnet_attribute::builders:
     ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
         async move { self.send().await }
     }
+}
+
+impl DecidedOperationError
+    for aws_sdk_ec2::operation::modify_subnet_attribute::ModifySubnetAttributeError
+{
+    const NAME: &'static str = <aws_sdk_ec2::operation::modify_subnet_attribute::builders::ModifySubnetAttributeFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::modify_subnet_attribute::builders::ModifySubnetAttributeFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
 /// ModifyVpcAttribute: sets one named VPC attribute to a complete value
@@ -2853,6 +2098,13 @@ impl AwsOperation
     }
 }
 
+impl DecidedOperationError
+    for aws_sdk_ec2::operation::modify_vpc_attribute::ModifyVpcAttributeError
+{
+    const NAME: &'static str = <aws_sdk_ec2::operation::modify_vpc_attribute::builders::ModifyVpcAttributeFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::modify_vpc_attribute::builders::ModifyVpcAttributeFluentBuilder as AwsOperation>::IDEMPOTENCY;
+}
+
 /// ModifyVpcEndpoint: applies incremental add/remove sets and a replay is not guaranteed to be accepted
 impl AwsOperation
     for aws_sdk_ec2::operation::modify_vpc_endpoint::builders::ModifyVpcEndpointFluentBuilder
@@ -2870,6 +2122,11 @@ impl AwsOperation
     {
         async move { self.send().await }
     }
+}
+
+impl DecidedOperationError for aws_sdk_ec2::operation::modify_vpc_endpoint::ModifyVpcEndpointError {
+    const NAME: &'static str = <aws_sdk_ec2::operation::modify_vpc_endpoint::builders::ModifyVpcEndpointFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::modify_vpc_endpoint::builders::ModifyVpcEndpointFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
 /// ReleaseAddress: the provider does not accept an already-released address as success
@@ -2891,6 +2148,11 @@ impl AwsOperation
     }
 }
 
+impl DecidedOperationError for aws_sdk_ec2::operation::release_address::ReleaseAddressError {
+    const NAME: &'static str = <aws_sdk_ec2::operation::release_address::builders::ReleaseAddressFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::release_address::builders::ReleaseAddressFluentBuilder as AwsOperation>::IDEMPOTENCY;
+}
+
 /// ReplaceRoute: replaces the complete route target keyed by route table and destination
 impl AwsOperation for aws_sdk_ec2::operation::replace_route::builders::ReplaceRouteFluentBuilder {
     type Resend = NoToken;
@@ -2906,6 +2168,11 @@ impl AwsOperation for aws_sdk_ec2::operation::replace_route::builders::ReplaceRo
     {
         async move { self.send().await }
     }
+}
+
+impl DecidedOperationError for aws_sdk_ec2::operation::replace_route::ReplaceRouteError {
+    const NAME: &'static str = <aws_sdk_ec2::operation::replace_route::builders::ReplaceRouteFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::replace_route::builders::ReplaceRouteFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
 /// ReplaceRouteTableAssociation: a successful call replaces the association identifier consumed by the request
@@ -2924,6 +2191,13 @@ impl AwsOperation for aws_sdk_ec2::operation::replace_route_table_association::b
     }
 }
 
+impl DecidedOperationError
+    for aws_sdk_ec2::operation::replace_route_table_association::ReplaceRouteTableAssociationError
+{
+    const NAME: &'static str = <aws_sdk_ec2::operation::replace_route_table_association::builders::ReplaceRouteTableAssociationFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::replace_route_table_association::builders::ReplaceRouteTableAssociationFluentBuilder as AwsOperation>::IDEMPOTENCY;
+}
+
 /// RevokeSecurityGroupEgress: revokes rules and the provider does not accept already-absent rules as success
 impl AwsOperation for aws_sdk_ec2::operation::revoke_security_group_egress::builders::RevokeSecurityGroupEgressFluentBuilder {
     type Resend = NoToken;
@@ -2940,6 +2214,13 @@ impl AwsOperation for aws_sdk_ec2::operation::revoke_security_group_egress::buil
     }
 }
 
+impl DecidedOperationError
+    for aws_sdk_ec2::operation::revoke_security_group_egress::RevokeSecurityGroupEgressError
+{
+    const NAME: &'static str = <aws_sdk_ec2::operation::revoke_security_group_egress::builders::RevokeSecurityGroupEgressFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::revoke_security_group_egress::builders::RevokeSecurityGroupEgressFluentBuilder as AwsOperation>::IDEMPOTENCY;
+}
+
 /// RevokeSecurityGroupIngress: revokes rules and the provider does not accept already-absent rules as success
 impl AwsOperation for aws_sdk_ec2::operation::revoke_security_group_ingress::builders::RevokeSecurityGroupIngressFluentBuilder {
     type Resend = NoToken;
@@ -2954,6 +2235,13 @@ impl AwsOperation for aws_sdk_ec2::operation::revoke_security_group_ingress::bui
     ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
         async move { self.send().await }
     }
+}
+
+impl DecidedOperationError
+    for aws_sdk_ec2::operation::revoke_security_group_ingress::RevokeSecurityGroupIngressError
+{
+    const NAME: &'static str = <aws_sdk_ec2::operation::revoke_security_group_ingress::builders::RevokeSecurityGroupIngressFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::revoke_security_group_ingress::builders::RevokeSecurityGroupIngressFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
 /// CreateRole: creates a top-level resource without an idempotency token
@@ -2973,6 +2261,11 @@ impl AwsOperation for aws_sdk_iam::operation::create_role::builders::CreateRoleF
     }
 }
 
+impl DecidedOperationError for aws_sdk_iam::operation::create_role::CreateRoleError {
+    const NAME: &'static str = <aws_sdk_iam::operation::create_role::builders::CreateRoleFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_iam::operation::create_role::builders::CreateRoleFluentBuilder as AwsOperation>::IDEMPOTENCY;
+}
+
 /// DeleteRole: the provider does not accept an already-absent role as success
 impl AwsOperation for aws_sdk_iam::operation::delete_role::builders::DeleteRoleFluentBuilder {
     type Resend = NoToken;
@@ -2988,6 +2281,11 @@ impl AwsOperation for aws_sdk_iam::operation::delete_role::builders::DeleteRoleF
     {
         async move { self.send().await }
     }
+}
+
+impl DecidedOperationError for aws_sdk_iam::operation::delete_role::DeleteRoleError {
+    const NAME: &'static str = <aws_sdk_iam::operation::delete_role::builders::DeleteRoleFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_iam::operation::delete_role::builders::DeleteRoleFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
 /// GetRole: reads role state and has no side effects
@@ -3007,6 +2305,12 @@ impl AwsOperation for aws_sdk_iam::operation::get_role::builders::GetRoleFluentB
     }
 }
 
+impl DecidedOperationError for aws_sdk_iam::operation::get_role::GetRoleError {
+    const NAME: &'static str =
+        <aws_sdk_iam::operation::get_role::builders::GetRoleFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_iam::operation::get_role::builders::GetRoleFluentBuilder as AwsOperation>::IDEMPOTENCY;
+}
+
 /// ListRoles: reads role state and has no side effects
 impl AwsOperation for aws_sdk_iam::operation::list_roles::builders::ListRolesFluentBuilder {
     type Resend = NoToken;
@@ -3022,6 +2326,11 @@ impl AwsOperation for aws_sdk_iam::operation::list_roles::builders::ListRolesFlu
     {
         async move { self.send().await }
     }
+}
+
+impl DecidedOperationError for aws_sdk_iam::operation::list_roles::ListRolesError {
+    const NAME: &'static str = <aws_sdk_iam::operation::list_roles::builders::ListRolesFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_iam::operation::list_roles::builders::ListRolesFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
 /// TagRole: sets tag keys on one role; repeating the same values has no additional effect
@@ -3041,6 +2350,12 @@ impl AwsOperation for aws_sdk_iam::operation::tag_role::builders::TagRoleFluentB
     }
 }
 
+impl DecidedOperationError for aws_sdk_iam::operation::tag_role::TagRoleError {
+    const NAME: &'static str =
+        <aws_sdk_iam::operation::tag_role::builders::TagRoleFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_iam::operation::tag_role::builders::TagRoleFluentBuilder as AwsOperation>::IDEMPOTENCY;
+}
+
 /// UntagRole: removes named tag keys; repeating the removal leaves the same state
 impl AwsOperation for aws_sdk_iam::operation::untag_role::builders::UntagRoleFluentBuilder {
     type Resend = NoToken;
@@ -3056,6 +2371,11 @@ impl AwsOperation for aws_sdk_iam::operation::untag_role::builders::UntagRoleFlu
     {
         async move { self.send().await }
     }
+}
+
+impl DecidedOperationError for aws_sdk_iam::operation::untag_role::UntagRoleError {
+    const NAME: &'static str = <aws_sdk_iam::operation::untag_role::builders::UntagRoleFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_iam::operation::untag_role::builders::UntagRoleFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
 /// UpdateAssumeRolePolicy: replaces the whole trust policy keyed by role name
@@ -3074,6 +2394,13 @@ impl AwsOperation for aws_sdk_iam::operation::update_assume_role_policy::builder
     }
 }
 
+impl DecidedOperationError
+    for aws_sdk_iam::operation::update_assume_role_policy::UpdateAssumeRolePolicyError
+{
+    const NAME: &'static str = <aws_sdk_iam::operation::update_assume_role_policy::builders::UpdateAssumeRolePolicyFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_iam::operation::update_assume_role_policy::builders::UpdateAssumeRolePolicyFluentBuilder as AwsOperation>::IDEMPOTENCY;
+}
+
 /// UpdateRole: sets complete mutable role attributes keyed by role name
 impl AwsOperation for aws_sdk_iam::operation::update_role::builders::UpdateRoleFluentBuilder {
     type Resend = NoToken;
@@ -3089,6 +2416,11 @@ impl AwsOperation for aws_sdk_iam::operation::update_role::builders::UpdateRoleF
     {
         async move { self.send().await }
     }
+}
+
+impl DecidedOperationError for aws_sdk_iam::operation::update_role::UpdateRoleError {
+    const NAME: &'static str = <aws_sdk_iam::operation::update_role::builders::UpdateRoleFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_iam::operation::update_role::builders::UpdateRoleFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
 /// DescribeUser: the model marks this read operation @readonly
@@ -3110,6 +2442,11 @@ impl AwsOperation
     }
 }
 
+impl DecidedOperationError for aws_sdk_identitystore::operation::describe_user::DescribeUserError {
+    const NAME: &'static str = <aws_sdk_identitystore::operation::describe_user::builders::DescribeUserFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_identitystore::operation::describe_user::builders::DescribeUserFluentBuilder as AwsOperation>::IDEMPOTENCY;
+}
+
 /// GetUserId: the model marks this read operation @readonly
 impl AwsOperation
     for aws_sdk_identitystore::operation::get_user_id::builders::GetUserIdFluentBuilder
@@ -3127,6 +2464,11 @@ impl AwsOperation
     {
         async move { self.send().await }
     }
+}
+
+impl DecidedOperationError for aws_sdk_identitystore::operation::get_user_id::GetUserIdError {
+    const NAME: &'static str = <aws_sdk_identitystore::operation::get_user_id::builders::GetUserIdFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_identitystore::operation::get_user_id::builders::GetUserIdFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
 /// CloseAccount: starts a top-level account transition and has no idempotency token
@@ -3148,6 +2490,11 @@ impl AwsOperation
     }
 }
 
+impl DecidedOperationError for aws_sdk_organizations::operation::close_account::CloseAccountError {
+    const NAME: &'static str = <aws_sdk_organizations::operation::close_account::builders::CloseAccountFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_organizations::operation::close_account::builders::CloseAccountFluentBuilder as AwsOperation>::IDEMPOTENCY;
+}
+
 /// CreateAccount: starts an account creation request without an idempotency token
 impl AwsOperation
     for aws_sdk_organizations::operation::create_account::builders::CreateAccountFluentBuilder
@@ -3167,6 +2514,13 @@ impl AwsOperation
     }
 }
 
+impl DecidedOperationError
+    for aws_sdk_organizations::operation::create_account::CreateAccountError
+{
+    const NAME: &'static str = <aws_sdk_organizations::operation::create_account::builders::CreateAccountFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_organizations::operation::create_account::builders::CreateAccountFluentBuilder as AwsOperation>::IDEMPOTENCY;
+}
+
 /// CreateOrganization: creates a top-level organization without an idempotency token
 impl AwsOperation for aws_sdk_organizations::operation::create_organization::builders::CreateOrganizationFluentBuilder {
     type Resend = NoToken;
@@ -3183,6 +2537,13 @@ impl AwsOperation for aws_sdk_organizations::operation::create_organization::bui
     }
 }
 
+impl DecidedOperationError
+    for aws_sdk_organizations::operation::create_organization::CreateOrganizationError
+{
+    const NAME: &'static str = <aws_sdk_organizations::operation::create_organization::builders::CreateOrganizationFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_organizations::operation::create_organization::builders::CreateOrganizationFluentBuilder as AwsOperation>::IDEMPOTENCY;
+}
+
 /// DeleteOrganization: the provider does not accept an already-absent organization as success
 impl AwsOperation for aws_sdk_organizations::operation::delete_organization::builders::DeleteOrganizationFluentBuilder {
     type Resend = NoToken;
@@ -3197,6 +2558,13 @@ impl AwsOperation for aws_sdk_organizations::operation::delete_organization::bui
     ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
         async move { self.send().await }
     }
+}
+
+impl DecidedOperationError
+    for aws_sdk_organizations::operation::delete_organization::DeleteOrganizationError
+{
+    const NAME: &'static str = <aws_sdk_organizations::operation::delete_organization::builders::DeleteOrganizationFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_organizations::operation::delete_organization::builders::DeleteOrganizationFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
 /// DescribeAccount: reads account state and has no side effects
@@ -3218,6 +2586,13 @@ impl AwsOperation
     }
 }
 
+impl DecidedOperationError
+    for aws_sdk_organizations::operation::describe_account::DescribeAccountError
+{
+    const NAME: &'static str = <aws_sdk_organizations::operation::describe_account::builders::DescribeAccountFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_organizations::operation::describe_account::builders::DescribeAccountFluentBuilder as AwsOperation>::IDEMPOTENCY;
+}
+
 /// DescribeCreateAccountStatus: reads request state and has no side effects
 impl AwsOperation for aws_sdk_organizations::operation::describe_create_account_status::builders::DescribeCreateAccountStatusFluentBuilder {
     type Resend = NoToken;
@@ -3234,6 +2609,11 @@ impl AwsOperation for aws_sdk_organizations::operation::describe_create_account_
     }
 }
 
+impl DecidedOperationError for aws_sdk_organizations::operation::describe_create_account_status::DescribeCreateAccountStatusError {
+    const NAME: &'static str = <aws_sdk_organizations::operation::describe_create_account_status::builders::DescribeCreateAccountStatusFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_organizations::operation::describe_create_account_status::builders::DescribeCreateAccountStatusFluentBuilder as AwsOperation>::IDEMPOTENCY;
+}
+
 /// DescribeOrganization: reads organization state and has no side effects
 impl AwsOperation for aws_sdk_organizations::operation::describe_organization::builders::DescribeOrganizationFluentBuilder {
     type Resend = NoToken;
@@ -3248,6 +2628,13 @@ impl AwsOperation for aws_sdk_organizations::operation::describe_organization::b
     ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
         async move { self.send().await }
     }
+}
+
+impl DecidedOperationError
+    for aws_sdk_organizations::operation::describe_organization::DescribeOrganizationError
+{
+    const NAME: &'static str = <aws_sdk_organizations::operation::describe_organization::builders::DescribeOrganizationFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_organizations::operation::describe_organization::builders::DescribeOrganizationFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
 /// ListParents: reads account parents and has no side effects
@@ -3269,6 +2656,11 @@ impl AwsOperation
     }
 }
 
+impl DecidedOperationError for aws_sdk_organizations::operation::list_parents::ListParentsError {
+    const NAME: &'static str = <aws_sdk_organizations::operation::list_parents::builders::ListParentsFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_organizations::operation::list_parents::builders::ListParentsFluentBuilder as AwsOperation>::IDEMPOTENCY;
+}
+
 /// ListTagsForResource: reads resource tags and has no side effects
 impl AwsOperation for aws_sdk_organizations::operation::list_tags_for_resource::builders::ListTagsForResourceFluentBuilder {
     type Resend = NoToken;
@@ -3283,6 +2675,13 @@ impl AwsOperation for aws_sdk_organizations::operation::list_tags_for_resource::
     ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
         async move { self.send().await }
     }
+}
+
+impl DecidedOperationError
+    for aws_sdk_organizations::operation::list_tags_for_resource::ListTagsForResourceError
+{
+    const NAME: &'static str = <aws_sdk_organizations::operation::list_tags_for_resource::builders::ListTagsForResourceFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_organizations::operation::list_tags_for_resource::builders::ListTagsForResourceFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
 /// MoveAccount: consumes the source parent relationship and a replay is not guaranteed to be accepted
@@ -3304,6 +2703,11 @@ impl AwsOperation
     }
 }
 
+impl DecidedOperationError for aws_sdk_organizations::operation::move_account::MoveAccountError {
+    const NAME: &'static str = <aws_sdk_organizations::operation::move_account::builders::MoveAccountFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_organizations::operation::move_account::builders::MoveAccountFluentBuilder as AwsOperation>::IDEMPOTENCY;
+}
+
 /// TagResource: sets tag keys on one resource; repeating the same values has no additional effect
 impl AwsOperation
     for aws_sdk_organizations::operation::tag_resource::builders::TagResourceFluentBuilder
@@ -3321,6 +2725,11 @@ impl AwsOperation
     {
         async move { self.send().await }
     }
+}
+
+impl DecidedOperationError for aws_sdk_organizations::operation::tag_resource::TagResourceError {
+    const NAME: &'static str = <aws_sdk_organizations::operation::tag_resource::builders::TagResourceFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_organizations::operation::tag_resource::builders::TagResourceFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
 /// UntagResource: removes named tag keys; repeating the removal leaves the same state
@@ -3342,6 +2751,13 @@ impl AwsOperation
     }
 }
 
+impl DecidedOperationError
+    for aws_sdk_organizations::operation::untag_resource::UntagResourceError
+{
+    const NAME: &'static str = <aws_sdk_organizations::operation::untag_resource::builders::UntagResourceFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_organizations::operation::untag_resource::builders::UntagResourceFluentBuilder as AwsOperation>::IDEMPOTENCY;
+}
+
 /// ChangeResourceRecordSets: applies a change batch without an idempotency token
 impl AwsOperation for aws_sdk_route53::operation::change_resource_record_sets::builders::ChangeResourceRecordSetsFluentBuilder {
     type Resend = NoToken;
@@ -3356,6 +2772,13 @@ impl AwsOperation for aws_sdk_route53::operation::change_resource_record_sets::b
     ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
         async move { self.send().await }
     }
+}
+
+impl DecidedOperationError
+    for aws_sdk_route53::operation::change_resource_record_sets::ChangeResourceRecordSetsError
+{
+    const NAME: &'static str = <aws_sdk_route53::operation::change_resource_record_sets::builders::ChangeResourceRecordSetsFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_route53::operation::change_resource_record_sets::builders::ChangeResourceRecordSetsFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
 /// ListResourceRecordSets: reads record-set state and has no side effects
@@ -3374,6 +2797,13 @@ impl AwsOperation for aws_sdk_route53::operation::list_resource_record_sets::bui
     }
 }
 
+impl DecidedOperationError
+    for aws_sdk_route53::operation::list_resource_record_sets::ListResourceRecordSetsError
+{
+    const NAME: &'static str = <aws_sdk_route53::operation::list_resource_record_sets::builders::ListResourceRecordSetsFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_route53::operation::list_resource_record_sets::builders::ListResourceRecordSetsFluentBuilder as AwsOperation>::IDEMPOTENCY;
+}
+
 /// ListTagsForResource: reads hosted-zone tags and has no side effects
 impl AwsOperation for aws_sdk_route53::operation::list_tags_for_resource::builders::ListTagsForResourceFluentBuilder {
     type Resend = NoToken;
@@ -3388,6 +2818,13 @@ impl AwsOperation for aws_sdk_route53::operation::list_tags_for_resource::builde
     ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
         async move { self.send().await }
     }
+}
+
+impl DecidedOperationError
+    for aws_sdk_route53::operation::list_tags_for_resource::ListTagsForResourceError
+{
+    const NAME: &'static str = <aws_sdk_route53::operation::list_tags_for_resource::builders::ListTagsForResourceFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_route53::operation::list_tags_for_resource::builders::ListTagsForResourceFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
 /// CreateBucket: creates a top-level bucket without an idempotency token
@@ -3407,6 +2844,11 @@ impl AwsOperation for aws_sdk_s3::operation::create_bucket::builders::CreateBuck
     }
 }
 
+impl DecidedOperationError for aws_sdk_s3::operation::create_bucket::CreateBucketError {
+    const NAME: &'static str = <aws_sdk_s3::operation::create_bucket::builders::CreateBucketFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_s3::operation::create_bucket::builders::CreateBucketFluentBuilder as AwsOperation>::IDEMPOTENCY;
+}
+
 /// DeleteBucket: the provider does not accept an already-absent bucket as success
 impl AwsOperation for aws_sdk_s3::operation::delete_bucket::builders::DeleteBucketFluentBuilder {
     type Resend = NoToken;
@@ -3422,6 +2864,11 @@ impl AwsOperation for aws_sdk_s3::operation::delete_bucket::builders::DeleteBuck
     {
         async move { self.send().await }
     }
+}
+
+impl DecidedOperationError for aws_sdk_s3::operation::delete_bucket::DeleteBucketError {
+    const NAME: &'static str = <aws_sdk_s3::operation::delete_bucket::builders::DeleteBucketFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_s3::operation::delete_bucket::builders::DeleteBucketFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
 /// DeleteBucketCors: removes the whole CORS sub-configuration keyed by bucket
@@ -3443,6 +2890,11 @@ impl AwsOperation
     }
 }
 
+impl DecidedOperationError for aws_sdk_s3::operation::delete_bucket_cors::DeleteBucketCorsError {
+    const NAME: &'static str = <aws_sdk_s3::operation::delete_bucket_cors::builders::DeleteBucketCorsFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_s3::operation::delete_bucket_cors::builders::DeleteBucketCorsFluentBuilder as AwsOperation>::IDEMPOTENCY;
+}
+
 /// DeleteBucketEncryption: removes the whole encryption sub-configuration keyed by bucket
 impl AwsOperation for aws_sdk_s3::operation::delete_bucket_encryption::builders::DeleteBucketEncryptionFluentBuilder {
     type Resend = NoToken;
@@ -3457,6 +2909,13 @@ impl AwsOperation for aws_sdk_s3::operation::delete_bucket_encryption::builders:
     ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
         async move { self.send().await }
     }
+}
+
+impl DecidedOperationError
+    for aws_sdk_s3::operation::delete_bucket_encryption::DeleteBucketEncryptionError
+{
+    const NAME: &'static str = <aws_sdk_s3::operation::delete_bucket_encryption::builders::DeleteBucketEncryptionFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_s3::operation::delete_bucket_encryption::builders::DeleteBucketEncryptionFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
 /// DeleteBucketLifecycle: removes the whole lifecycle sub-configuration keyed by bucket
@@ -3478,6 +2937,13 @@ impl AwsOperation
     }
 }
 
+impl DecidedOperationError
+    for aws_sdk_s3::operation::delete_bucket_lifecycle::DeleteBucketLifecycleError
+{
+    const NAME: &'static str = <aws_sdk_s3::operation::delete_bucket_lifecycle::builders::DeleteBucketLifecycleFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_s3::operation::delete_bucket_lifecycle::builders::DeleteBucketLifecycleFluentBuilder as AwsOperation>::IDEMPOTENCY;
+}
+
 /// DeleteBucketOwnershipControls: removes the whole ownership-controls sub-configuration keyed by bucket
 impl AwsOperation for aws_sdk_s3::operation::delete_bucket_ownership_controls::builders::DeleteBucketOwnershipControlsFluentBuilder {
     type Resend = NoToken;
@@ -3492,6 +2958,13 @@ impl AwsOperation for aws_sdk_s3::operation::delete_bucket_ownership_controls::b
     ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
         async move { self.send().await }
     }
+}
+
+impl DecidedOperationError
+    for aws_sdk_s3::operation::delete_bucket_ownership_controls::DeleteBucketOwnershipControlsError
+{
+    const NAME: &'static str = <aws_sdk_s3::operation::delete_bucket_ownership_controls::builders::DeleteBucketOwnershipControlsFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_s3::operation::delete_bucket_ownership_controls::builders::DeleteBucketOwnershipControlsFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
 /// DeleteBucketPolicy: removes the whole policy sub-configuration keyed by bucket
@@ -3513,6 +2986,13 @@ impl AwsOperation
     }
 }
 
+impl DecidedOperationError
+    for aws_sdk_s3::operation::delete_bucket_policy::DeleteBucketPolicyError
+{
+    const NAME: &'static str = <aws_sdk_s3::operation::delete_bucket_policy::builders::DeleteBucketPolicyFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_s3::operation::delete_bucket_policy::builders::DeleteBucketPolicyFluentBuilder as AwsOperation>::IDEMPOTENCY;
+}
+
 /// DeleteBucketReplication: removes the whole replication sub-configuration keyed by bucket
 impl AwsOperation for aws_sdk_s3::operation::delete_bucket_replication::builders::DeleteBucketReplicationFluentBuilder {
     type Resend = NoToken;
@@ -3527,6 +3007,13 @@ impl AwsOperation for aws_sdk_s3::operation::delete_bucket_replication::builders
     ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
         async move { self.send().await }
     }
+}
+
+impl DecidedOperationError
+    for aws_sdk_s3::operation::delete_bucket_replication::DeleteBucketReplicationError
+{
+    const NAME: &'static str = <aws_sdk_s3::operation::delete_bucket_replication::builders::DeleteBucketReplicationFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_s3::operation::delete_bucket_replication::builders::DeleteBucketReplicationFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
 /// DeleteBucketTagging: removes the whole tag set keyed by bucket
@@ -3548,6 +3035,13 @@ impl AwsOperation
     }
 }
 
+impl DecidedOperationError
+    for aws_sdk_s3::operation::delete_bucket_tagging::DeleteBucketTaggingError
+{
+    const NAME: &'static str = <aws_sdk_s3::operation::delete_bucket_tagging::builders::DeleteBucketTaggingFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_s3::operation::delete_bucket_tagging::builders::DeleteBucketTaggingFluentBuilder as AwsOperation>::IDEMPOTENCY;
+}
+
 /// DeleteBucketWebsite: removes the whole website sub-configuration keyed by bucket
 impl AwsOperation
     for aws_sdk_s3::operation::delete_bucket_website::builders::DeleteBucketWebsiteFluentBuilder
@@ -3567,6 +3061,13 @@ impl AwsOperation
     }
 }
 
+impl DecidedOperationError
+    for aws_sdk_s3::operation::delete_bucket_website::DeleteBucketWebsiteError
+{
+    const NAME: &'static str = <aws_sdk_s3::operation::delete_bucket_website::builders::DeleteBucketWebsiteFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_s3::operation::delete_bucket_website::builders::DeleteBucketWebsiteFluentBuilder as AwsOperation>::IDEMPOTENCY;
+}
+
 /// DeleteObjects: deletes the explicitly named object versions; deleting an absent key leaves it absent
 impl AwsOperation for aws_sdk_s3::operation::delete_objects::builders::DeleteObjectsFluentBuilder {
     type Resend = NoToken;
@@ -3584,6 +3085,11 @@ impl AwsOperation for aws_sdk_s3::operation::delete_objects::builders::DeleteObj
     }
 }
 
+impl DecidedOperationError for aws_sdk_s3::operation::delete_objects::DeleteObjectsError {
+    const NAME: &'static str = <aws_sdk_s3::operation::delete_objects::builders::DeleteObjectsFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_s3::operation::delete_objects::builders::DeleteObjectsFluentBuilder as AwsOperation>::IDEMPOTENCY;
+}
+
 /// DeletePublicAccessBlock: removes the whole public-access-block sub-configuration keyed by bucket
 impl AwsOperation for aws_sdk_s3::operation::delete_public_access_block::builders::DeletePublicAccessBlockFluentBuilder {
     type Resend = NoToken;
@@ -3598,6 +3104,13 @@ impl AwsOperation for aws_sdk_s3::operation::delete_public_access_block::builder
     ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
         async move { self.send().await }
     }
+}
+
+impl DecidedOperationError
+    for aws_sdk_s3::operation::delete_public_access_block::DeletePublicAccessBlockError
+{
+    const NAME: &'static str = <aws_sdk_s3::operation::delete_public_access_block::builders::DeletePublicAccessBlockFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_s3::operation::delete_public_access_block::builders::DeletePublicAccessBlockFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
 /// GetBucketAcl: reads bucket ACL state and has no side effects
@@ -3617,6 +3130,11 @@ impl AwsOperation for aws_sdk_s3::operation::get_bucket_acl::builders::GetBucket
     }
 }
 
+impl DecidedOperationError for aws_sdk_s3::operation::get_bucket_acl::GetBucketAclError {
+    const NAME: &'static str = <aws_sdk_s3::operation::get_bucket_acl::builders::GetBucketAclFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_s3::operation::get_bucket_acl::builders::GetBucketAclFluentBuilder as AwsOperation>::IDEMPOTENCY;
+}
+
 /// GetBucketCors: reads bucket CORS state and has no side effects
 impl AwsOperation for aws_sdk_s3::operation::get_bucket_cors::builders::GetBucketCorsFluentBuilder {
     type Resend = NoToken;
@@ -3632,6 +3150,11 @@ impl AwsOperation for aws_sdk_s3::operation::get_bucket_cors::builders::GetBucke
     {
         async move { self.send().await }
     }
+}
+
+impl DecidedOperationError for aws_sdk_s3::operation::get_bucket_cors::GetBucketCorsError {
+    const NAME: &'static str = <aws_sdk_s3::operation::get_bucket_cors::builders::GetBucketCorsFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_s3::operation::get_bucket_cors::builders::GetBucketCorsFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
 /// GetBucketEncryption: reads bucket encryption state and has no side effects
@@ -3653,6 +3176,13 @@ impl AwsOperation
     }
 }
 
+impl DecidedOperationError
+    for aws_sdk_s3::operation::get_bucket_encryption::GetBucketEncryptionError
+{
+    const NAME: &'static str = <aws_sdk_s3::operation::get_bucket_encryption::builders::GetBucketEncryptionFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_s3::operation::get_bucket_encryption::builders::GetBucketEncryptionFluentBuilder as AwsOperation>::IDEMPOTENCY;
+}
+
 /// GetBucketLifecycleConfiguration: reads bucket lifecycle state and has no side effects
 impl AwsOperation for aws_sdk_s3::operation::get_bucket_lifecycle_configuration::builders::GetBucketLifecycleConfigurationFluentBuilder {
     type Resend = NoToken;
@@ -3667,6 +3197,11 @@ impl AwsOperation for aws_sdk_s3::operation::get_bucket_lifecycle_configuration:
     ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
         async move { self.send().await }
     }
+}
+
+impl DecidedOperationError for aws_sdk_s3::operation::get_bucket_lifecycle_configuration::GetBucketLifecycleConfigurationError {
+    const NAME: &'static str = <aws_sdk_s3::operation::get_bucket_lifecycle_configuration::builders::GetBucketLifecycleConfigurationFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_s3::operation::get_bucket_lifecycle_configuration::builders::GetBucketLifecycleConfigurationFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
 /// GetBucketLogging: reads bucket logging state and has no side effects
@@ -3688,6 +3223,11 @@ impl AwsOperation
     }
 }
 
+impl DecidedOperationError for aws_sdk_s3::operation::get_bucket_logging::GetBucketLoggingError {
+    const NAME: &'static str = <aws_sdk_s3::operation::get_bucket_logging::builders::GetBucketLoggingFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_s3::operation::get_bucket_logging::builders::GetBucketLoggingFluentBuilder as AwsOperation>::IDEMPOTENCY;
+}
+
 /// GetBucketNotificationConfiguration: reads bucket notification state and has no side effects
 impl AwsOperation for aws_sdk_s3::operation::get_bucket_notification_configuration::builders::GetBucketNotificationConfigurationFluentBuilder {
     type Resend = NoToken;
@@ -3704,6 +3244,11 @@ impl AwsOperation for aws_sdk_s3::operation::get_bucket_notification_configurati
     }
 }
 
+impl DecidedOperationError for aws_sdk_s3::operation::get_bucket_notification_configuration::GetBucketNotificationConfigurationError {
+    const NAME: &'static str = <aws_sdk_s3::operation::get_bucket_notification_configuration::builders::GetBucketNotificationConfigurationFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_s3::operation::get_bucket_notification_configuration::builders::GetBucketNotificationConfigurationFluentBuilder as AwsOperation>::IDEMPOTENCY;
+}
+
 /// GetBucketOwnershipControls: reads bucket ownership-control state and has no side effects
 impl AwsOperation for aws_sdk_s3::operation::get_bucket_ownership_controls::builders::GetBucketOwnershipControlsFluentBuilder {
     type Resend = NoToken;
@@ -3718,6 +3263,13 @@ impl AwsOperation for aws_sdk_s3::operation::get_bucket_ownership_controls::buil
     ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
         async move { self.send().await }
     }
+}
+
+impl DecidedOperationError
+    for aws_sdk_s3::operation::get_bucket_ownership_controls::GetBucketOwnershipControlsError
+{
+    const NAME: &'static str = <aws_sdk_s3::operation::get_bucket_ownership_controls::builders::GetBucketOwnershipControlsFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_s3::operation::get_bucket_ownership_controls::builders::GetBucketOwnershipControlsFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
 /// GetBucketPolicy: reads bucket policy state and has no side effects
@@ -3739,6 +3291,11 @@ impl AwsOperation
     }
 }
 
+impl DecidedOperationError for aws_sdk_s3::operation::get_bucket_policy::GetBucketPolicyError {
+    const NAME: &'static str = <aws_sdk_s3::operation::get_bucket_policy::builders::GetBucketPolicyFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_s3::operation::get_bucket_policy::builders::GetBucketPolicyFluentBuilder as AwsOperation>::IDEMPOTENCY;
+}
+
 /// GetBucketReplication: reads bucket replication state and has no side effects
 impl AwsOperation
     for aws_sdk_s3::operation::get_bucket_replication::builders::GetBucketReplicationFluentBuilder
@@ -3756,6 +3313,13 @@ impl AwsOperation
     {
         async move { self.send().await }
     }
+}
+
+impl DecidedOperationError
+    for aws_sdk_s3::operation::get_bucket_replication::GetBucketReplicationError
+{
+    const NAME: &'static str = <aws_sdk_s3::operation::get_bucket_replication::builders::GetBucketReplicationFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_s3::operation::get_bucket_replication::builders::GetBucketReplicationFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
 /// GetBucketTagging: reads bucket tags and has no side effects
@@ -3777,6 +3341,11 @@ impl AwsOperation
     }
 }
 
+impl DecidedOperationError for aws_sdk_s3::operation::get_bucket_tagging::GetBucketTaggingError {
+    const NAME: &'static str = <aws_sdk_s3::operation::get_bucket_tagging::builders::GetBucketTaggingFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_s3::operation::get_bucket_tagging::builders::GetBucketTaggingFluentBuilder as AwsOperation>::IDEMPOTENCY;
+}
+
 /// GetBucketVersioning: reads bucket versioning state and has no side effects
 impl AwsOperation
     for aws_sdk_s3::operation::get_bucket_versioning::builders::GetBucketVersioningFluentBuilder
@@ -3794,6 +3363,13 @@ impl AwsOperation
     {
         async move { self.send().await }
     }
+}
+
+impl DecidedOperationError
+    for aws_sdk_s3::operation::get_bucket_versioning::GetBucketVersioningError
+{
+    const NAME: &'static str = <aws_sdk_s3::operation::get_bucket_versioning::builders::GetBucketVersioningFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_s3::operation::get_bucket_versioning::builders::GetBucketVersioningFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
 /// GetBucketWebsite: reads bucket website state and has no side effects
@@ -3815,6 +3391,11 @@ impl AwsOperation
     }
 }
 
+impl DecidedOperationError for aws_sdk_s3::operation::get_bucket_website::GetBucketWebsiteError {
+    const NAME: &'static str = <aws_sdk_s3::operation::get_bucket_website::builders::GetBucketWebsiteFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_s3::operation::get_bucket_website::builders::GetBucketWebsiteFluentBuilder as AwsOperation>::IDEMPOTENCY;
+}
+
 /// GetObjectLockConfiguration: reads object-lock state and has no side effects
 impl AwsOperation for aws_sdk_s3::operation::get_object_lock_configuration::builders::GetObjectLockConfigurationFluentBuilder {
     type Resend = NoToken;
@@ -3829,6 +3410,13 @@ impl AwsOperation for aws_sdk_s3::operation::get_object_lock_configuration::buil
     ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
         async move { self.send().await }
     }
+}
+
+impl DecidedOperationError
+    for aws_sdk_s3::operation::get_object_lock_configuration::GetObjectLockConfigurationError
+{
+    const NAME: &'static str = <aws_sdk_s3::operation::get_object_lock_configuration::builders::GetObjectLockConfigurationFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_s3::operation::get_object_lock_configuration::builders::GetObjectLockConfigurationFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
 /// GetPublicAccessBlock: reads public-access-block state and has no side effects
@@ -3850,6 +3438,13 @@ impl AwsOperation
     }
 }
 
+impl DecidedOperationError
+    for aws_sdk_s3::operation::get_public_access_block::GetPublicAccessBlockError
+{
+    const NAME: &'static str = <aws_sdk_s3::operation::get_public_access_block::builders::GetPublicAccessBlockFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_s3::operation::get_public_access_block::builders::GetPublicAccessBlockFluentBuilder as AwsOperation>::IDEMPOTENCY;
+}
+
 /// HeadBucket: reads bucket existence and region metadata and has no side effects
 impl AwsOperation for aws_sdk_s3::operation::head_bucket::builders::HeadBucketFluentBuilder {
     type Resend = NoToken;
@@ -3865,6 +3460,11 @@ impl AwsOperation for aws_sdk_s3::operation::head_bucket::builders::HeadBucketFl
     {
         async move { self.send().await }
     }
+}
+
+impl DecidedOperationError for aws_sdk_s3::operation::head_bucket::HeadBucketError {
+    const NAME: &'static str = <aws_sdk_s3::operation::head_bucket::builders::HeadBucketFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_s3::operation::head_bucket::builders::HeadBucketFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
 /// ListObjectVersions: reads object-version state and has no side effects
@@ -3886,6 +3486,13 @@ impl AwsOperation
     }
 }
 
+impl DecidedOperationError
+    for aws_sdk_s3::operation::list_object_versions::ListObjectVersionsError
+{
+    const NAME: &'static str = <aws_sdk_s3::operation::list_object_versions::builders::ListObjectVersionsFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_s3::operation::list_object_versions::builders::ListObjectVersionsFluentBuilder as AwsOperation>::IDEMPOTENCY;
+}
+
 /// PutBucketAcl: replaces the whole ACL keyed by bucket
 impl AwsOperation for aws_sdk_s3::operation::put_bucket_acl::builders::PutBucketAclFluentBuilder {
     type Resend = NoToken;
@@ -3903,6 +3510,11 @@ impl AwsOperation for aws_sdk_s3::operation::put_bucket_acl::builders::PutBucket
     }
 }
 
+impl DecidedOperationError for aws_sdk_s3::operation::put_bucket_acl::PutBucketAclError {
+    const NAME: &'static str = <aws_sdk_s3::operation::put_bucket_acl::builders::PutBucketAclFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_s3::operation::put_bucket_acl::builders::PutBucketAclFluentBuilder as AwsOperation>::IDEMPOTENCY;
+}
+
 /// PutBucketCors: replaces the whole CORS sub-configuration keyed by bucket
 impl AwsOperation for aws_sdk_s3::operation::put_bucket_cors::builders::PutBucketCorsFluentBuilder {
     type Resend = NoToken;
@@ -3918,6 +3530,11 @@ impl AwsOperation for aws_sdk_s3::operation::put_bucket_cors::builders::PutBucke
     {
         async move { self.send().await }
     }
+}
+
+impl DecidedOperationError for aws_sdk_s3::operation::put_bucket_cors::PutBucketCorsError {
+    const NAME: &'static str = <aws_sdk_s3::operation::put_bucket_cors::builders::PutBucketCorsFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_s3::operation::put_bucket_cors::builders::PutBucketCorsFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
 /// PutBucketEncryption: replaces the whole encryption sub-configuration keyed by bucket
@@ -3939,6 +3556,13 @@ impl AwsOperation
     }
 }
 
+impl DecidedOperationError
+    for aws_sdk_s3::operation::put_bucket_encryption::PutBucketEncryptionError
+{
+    const NAME: &'static str = <aws_sdk_s3::operation::put_bucket_encryption::builders::PutBucketEncryptionFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_s3::operation::put_bucket_encryption::builders::PutBucketEncryptionFluentBuilder as AwsOperation>::IDEMPOTENCY;
+}
+
 /// PutBucketLifecycleConfiguration: replaces the whole lifecycle sub-configuration keyed by bucket
 impl AwsOperation for aws_sdk_s3::operation::put_bucket_lifecycle_configuration::builders::PutBucketLifecycleConfigurationFluentBuilder {
     type Resend = NoToken;
@@ -3953,6 +3577,11 @@ impl AwsOperation for aws_sdk_s3::operation::put_bucket_lifecycle_configuration:
     ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
         async move { self.send().await }
     }
+}
+
+impl DecidedOperationError for aws_sdk_s3::operation::put_bucket_lifecycle_configuration::PutBucketLifecycleConfigurationError {
+    const NAME: &'static str = <aws_sdk_s3::operation::put_bucket_lifecycle_configuration::builders::PutBucketLifecycleConfigurationFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_s3::operation::put_bucket_lifecycle_configuration::builders::PutBucketLifecycleConfigurationFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
 /// PutBucketLogging: replaces the whole logging sub-configuration keyed by bucket
@@ -3974,6 +3603,11 @@ impl AwsOperation
     }
 }
 
+impl DecidedOperationError for aws_sdk_s3::operation::put_bucket_logging::PutBucketLoggingError {
+    const NAME: &'static str = <aws_sdk_s3::operation::put_bucket_logging::builders::PutBucketLoggingFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_s3::operation::put_bucket_logging::builders::PutBucketLoggingFluentBuilder as AwsOperation>::IDEMPOTENCY;
+}
+
 /// PutBucketNotificationConfiguration: replaces the whole notification sub-configuration keyed by bucket
 impl AwsOperation for aws_sdk_s3::operation::put_bucket_notification_configuration::builders::PutBucketNotificationConfigurationFluentBuilder {
     type Resend = NoToken;
@@ -3990,6 +3624,11 @@ impl AwsOperation for aws_sdk_s3::operation::put_bucket_notification_configurati
     }
 }
 
+impl DecidedOperationError for aws_sdk_s3::operation::put_bucket_notification_configuration::PutBucketNotificationConfigurationError {
+    const NAME: &'static str = <aws_sdk_s3::operation::put_bucket_notification_configuration::builders::PutBucketNotificationConfigurationFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_s3::operation::put_bucket_notification_configuration::builders::PutBucketNotificationConfigurationFluentBuilder as AwsOperation>::IDEMPOTENCY;
+}
+
 /// PutBucketOwnershipControls: replaces the whole ownership-controls sub-configuration keyed by bucket
 impl AwsOperation for aws_sdk_s3::operation::put_bucket_ownership_controls::builders::PutBucketOwnershipControlsFluentBuilder {
     type Resend = NoToken;
@@ -4004,6 +3643,13 @@ impl AwsOperation for aws_sdk_s3::operation::put_bucket_ownership_controls::buil
     ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
         async move { self.send().await }
     }
+}
+
+impl DecidedOperationError
+    for aws_sdk_s3::operation::put_bucket_ownership_controls::PutBucketOwnershipControlsError
+{
+    const NAME: &'static str = <aws_sdk_s3::operation::put_bucket_ownership_controls::builders::PutBucketOwnershipControlsFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_s3::operation::put_bucket_ownership_controls::builders::PutBucketOwnershipControlsFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
 /// PutBucketPolicy: replaces the whole policy keyed by bucket
@@ -4025,6 +3671,11 @@ impl AwsOperation
     }
 }
 
+impl DecidedOperationError for aws_sdk_s3::operation::put_bucket_policy::PutBucketPolicyError {
+    const NAME: &'static str = <aws_sdk_s3::operation::put_bucket_policy::builders::PutBucketPolicyFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_s3::operation::put_bucket_policy::builders::PutBucketPolicyFluentBuilder as AwsOperation>::IDEMPOTENCY;
+}
+
 /// PutBucketReplication: replaces the whole replication sub-configuration keyed by bucket
 impl AwsOperation
     for aws_sdk_s3::operation::put_bucket_replication::builders::PutBucketReplicationFluentBuilder
@@ -4042,6 +3693,13 @@ impl AwsOperation
     {
         async move { self.send().await }
     }
+}
+
+impl DecidedOperationError
+    for aws_sdk_s3::operation::put_bucket_replication::PutBucketReplicationError
+{
+    const NAME: &'static str = <aws_sdk_s3::operation::put_bucket_replication::builders::PutBucketReplicationFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_s3::operation::put_bucket_replication::builders::PutBucketReplicationFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
 /// PutBucketTagging: replaces the whole tag set keyed by bucket
@@ -4063,6 +3721,11 @@ impl AwsOperation
     }
 }
 
+impl DecidedOperationError for aws_sdk_s3::operation::put_bucket_tagging::PutBucketTaggingError {
+    const NAME: &'static str = <aws_sdk_s3::operation::put_bucket_tagging::builders::PutBucketTaggingFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_s3::operation::put_bucket_tagging::builders::PutBucketTaggingFluentBuilder as AwsOperation>::IDEMPOTENCY;
+}
+
 /// PutBucketVersioning: sets the complete versioning state keyed by bucket
 impl AwsOperation
     for aws_sdk_s3::operation::put_bucket_versioning::builders::PutBucketVersioningFluentBuilder
@@ -4080,6 +3743,13 @@ impl AwsOperation
     {
         async move { self.send().await }
     }
+}
+
+impl DecidedOperationError
+    for aws_sdk_s3::operation::put_bucket_versioning::PutBucketVersioningError
+{
+    const NAME: &'static str = <aws_sdk_s3::operation::put_bucket_versioning::builders::PutBucketVersioningFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_s3::operation::put_bucket_versioning::builders::PutBucketVersioningFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
 /// PutBucketWebsite: replaces the whole website sub-configuration keyed by bucket
@@ -4101,6 +3771,11 @@ impl AwsOperation
     }
 }
 
+impl DecidedOperationError for aws_sdk_s3::operation::put_bucket_website::PutBucketWebsiteError {
+    const NAME: &'static str = <aws_sdk_s3::operation::put_bucket_website::builders::PutBucketWebsiteFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_s3::operation::put_bucket_website::builders::PutBucketWebsiteFluentBuilder as AwsOperation>::IDEMPOTENCY;
+}
+
 /// PutObjectLockConfiguration: replaces the whole object-lock sub-configuration keyed by bucket
 impl AwsOperation for aws_sdk_s3::operation::put_object_lock_configuration::builders::PutObjectLockConfigurationFluentBuilder {
     type Resend = NoToken;
@@ -4115,6 +3790,13 @@ impl AwsOperation for aws_sdk_s3::operation::put_object_lock_configuration::buil
     ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
         async move { self.send().await }
     }
+}
+
+impl DecidedOperationError
+    for aws_sdk_s3::operation::put_object_lock_configuration::PutObjectLockConfigurationError
+{
+    const NAME: &'static str = <aws_sdk_s3::operation::put_object_lock_configuration::builders::PutObjectLockConfigurationFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_s3::operation::put_object_lock_configuration::builders::PutObjectLockConfigurationFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
 /// PutPublicAccessBlock: replaces the whole public-access-block sub-configuration keyed by bucket
@@ -4136,6 +3818,13 @@ impl AwsOperation
     }
 }
 
+impl DecidedOperationError
+    for aws_sdk_s3::operation::put_public_access_block::PutPublicAccessBlockError
+{
+    const NAME: &'static str = <aws_sdk_s3::operation::put_public_access_block::builders::PutPublicAccessBlockFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_s3::operation::put_public_access_block::builders::PutPublicAccessBlockFluentBuilder as AwsOperation>::IDEMPOTENCY;
+}
+
 /// CreateQueue: creates a top-level queue without an idempotency token
 impl AwsOperation for aws_sdk_sqs::operation::create_queue::builders::CreateQueueFluentBuilder {
     type Resend = NoToken;
@@ -4153,6 +3842,11 @@ impl AwsOperation for aws_sdk_sqs::operation::create_queue::builders::CreateQueu
     }
 }
 
+impl DecidedOperationError for aws_sdk_sqs::operation::create_queue::CreateQueueError {
+    const NAME: &'static str = <aws_sdk_sqs::operation::create_queue::builders::CreateQueueFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_sqs::operation::create_queue::builders::CreateQueueFluentBuilder as AwsOperation>::IDEMPOTENCY;
+}
+
 /// DeleteQueue: the provider does not accept an already-absent queue as success
 impl AwsOperation for aws_sdk_sqs::operation::delete_queue::builders::DeleteQueueFluentBuilder {
     type Resend = NoToken;
@@ -4168,6 +3862,11 @@ impl AwsOperation for aws_sdk_sqs::operation::delete_queue::builders::DeleteQueu
     {
         async move { self.send().await }
     }
+}
+
+impl DecidedOperationError for aws_sdk_sqs::operation::delete_queue::DeleteQueueError {
+    const NAME: &'static str = <aws_sdk_sqs::operation::delete_queue::builders::DeleteQueueFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_sqs::operation::delete_queue::builders::DeleteQueueFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
 /// GetQueueAttributes: reads queue state and has no side effects
@@ -4189,6 +3888,13 @@ impl AwsOperation
     }
 }
 
+impl DecidedOperationError
+    for aws_sdk_sqs::operation::get_queue_attributes::GetQueueAttributesError
+{
+    const NAME: &'static str = <aws_sdk_sqs::operation::get_queue_attributes::builders::GetQueueAttributesFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_sqs::operation::get_queue_attributes::builders::GetQueueAttributesFluentBuilder as AwsOperation>::IDEMPOTENCY;
+}
+
 /// ListQueueTags: reads queue tags and has no side effects
 impl AwsOperation
     for aws_sdk_sqs::operation::list_queue_tags::builders::ListQueueTagsFluentBuilder
@@ -4206,6 +3912,11 @@ impl AwsOperation
     {
         async move { self.send().await }
     }
+}
+
+impl DecidedOperationError for aws_sdk_sqs::operation::list_queue_tags::ListQueueTagsError {
+    const NAME: &'static str = <aws_sdk_sqs::operation::list_queue_tags::builders::ListQueueTagsFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_sqs::operation::list_queue_tags::builders::ListQueueTagsFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
 /// SetQueueAttributes: sets complete values for named queue attributes
@@ -4227,6 +3938,13 @@ impl AwsOperation
     }
 }
 
+impl DecidedOperationError
+    for aws_sdk_sqs::operation::set_queue_attributes::SetQueueAttributesError
+{
+    const NAME: &'static str = <aws_sdk_sqs::operation::set_queue_attributes::builders::SetQueueAttributesFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_sqs::operation::set_queue_attributes::builders::SetQueueAttributesFluentBuilder as AwsOperation>::IDEMPOTENCY;
+}
+
 /// TagQueue: sets tag keys on one queue; repeating the same values has no additional effect
 impl AwsOperation for aws_sdk_sqs::operation::tag_queue::builders::TagQueueFluentBuilder {
     type Resend = NoToken;
@@ -4244,6 +3962,12 @@ impl AwsOperation for aws_sdk_sqs::operation::tag_queue::builders::TagQueueFluen
     }
 }
 
+impl DecidedOperationError for aws_sdk_sqs::operation::tag_queue::TagQueueError {
+    const NAME: &'static str =
+        <aws_sdk_sqs::operation::tag_queue::builders::TagQueueFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_sqs::operation::tag_queue::builders::TagQueueFluentBuilder as AwsOperation>::IDEMPOTENCY;
+}
+
 /// UntagQueue: removes named tag keys; repeating the removal leaves the same state
 impl AwsOperation for aws_sdk_sqs::operation::untag_queue::builders::UntagQueueFluentBuilder {
     type Resend = NoToken;
@@ -4259,6 +3983,11 @@ impl AwsOperation for aws_sdk_sqs::operation::untag_queue::builders::UntagQueueF
     {
         async move { self.send().await }
     }
+}
+
+impl DecidedOperationError for aws_sdk_sqs::operation::untag_queue::UntagQueueError {
+    const NAME: &'static str = <aws_sdk_sqs::operation::untag_queue::builders::UntagQueueFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_sqs::operation::untag_queue::builders::UntagQueueFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
 /// GetCallerIdentity: reads caller identity and has no side effects
@@ -4280,1416 +4009,10 @@ impl AwsOperation
     }
 }
 
-#[cfg(test)]
-pub(crate) const ALL_OPERATIONS: &[(&str, &str)] = &[
-    ("acm", "add_tags_to_certificate"),
-    ("acm", "delete_certificate"),
-    ("acm", "describe_certificate"),
-    ("acm", "export_certificate"),
-    ("acm", "get_account_configuration"),
-    ("acm", "get_certificate"),
-    ("acm", "import_certificate"),
-    ("acm", "list_certificates"),
-    ("acm", "list_tags_for_certificate"),
-    ("acm", "put_account_configuration"),
-    ("acm", "remove_tags_from_certificate"),
-    ("acm", "renew_certificate"),
-    ("acm", "request_certificate"),
-    ("acm", "resend_validation_email"),
-    ("acm", "revoke_certificate"),
-    ("acm", "search_certificates"),
-    ("acm", "update_certificate_options"),
-    ("cloudwatchlogs", "associate_kms_key"),
-    ("cloudwatchlogs", "associate_source_to_s3_table_integration"),
-    ("cloudwatchlogs", "cancel_export_task"),
-    ("cloudwatchlogs", "cancel_import_task"),
-    ("cloudwatchlogs", "create_delivery"),
-    ("cloudwatchlogs", "create_export_task"),
-    ("cloudwatchlogs", "create_import_task"),
-    ("cloudwatchlogs", "create_log_anomaly_detector"),
-    ("cloudwatchlogs", "create_log_group"),
-    ("cloudwatchlogs", "create_log_stream"),
-    ("cloudwatchlogs", "create_lookup_table"),
-    ("cloudwatchlogs", "create_scheduled_query"),
-    ("cloudwatchlogs", "delete_account_policy"),
-    ("cloudwatchlogs", "delete_data_protection_policy"),
-    ("cloudwatchlogs", "delete_delivery"),
-    ("cloudwatchlogs", "delete_delivery_destination"),
-    ("cloudwatchlogs", "delete_delivery_destination_policy"),
-    ("cloudwatchlogs", "delete_delivery_source"),
-    ("cloudwatchlogs", "delete_destination"),
-    ("cloudwatchlogs", "delete_index_policy"),
-    ("cloudwatchlogs", "delete_integration"),
-    ("cloudwatchlogs", "delete_log_anomaly_detector"),
-    ("cloudwatchlogs", "delete_log_group"),
-    ("cloudwatchlogs", "delete_log_stream"),
-    ("cloudwatchlogs", "delete_lookup_table"),
-    ("cloudwatchlogs", "delete_metric_filter"),
-    ("cloudwatchlogs", "delete_query_definition"),
-    ("cloudwatchlogs", "delete_resource_policy"),
-    ("cloudwatchlogs", "delete_retention_policy"),
-    ("cloudwatchlogs", "delete_scheduled_query"),
-    ("cloudwatchlogs", "delete_subscription_filter"),
-    ("cloudwatchlogs", "delete_transformer"),
-    ("cloudwatchlogs", "describe_account_policies"),
-    ("cloudwatchlogs", "describe_configuration_templates"),
-    ("cloudwatchlogs", "describe_deliveries"),
-    ("cloudwatchlogs", "describe_delivery_destinations"),
-    ("cloudwatchlogs", "describe_delivery_sources"),
-    ("cloudwatchlogs", "describe_destinations"),
-    ("cloudwatchlogs", "describe_export_tasks"),
-    ("cloudwatchlogs", "describe_field_indexes"),
-    ("cloudwatchlogs", "describe_import_task_batches"),
-    ("cloudwatchlogs", "describe_import_tasks"),
-    ("cloudwatchlogs", "describe_index_policies"),
-    ("cloudwatchlogs", "describe_log_groups"),
-    ("cloudwatchlogs", "describe_log_streams"),
-    ("cloudwatchlogs", "describe_lookup_tables"),
-    ("cloudwatchlogs", "describe_metric_filters"),
-    ("cloudwatchlogs", "describe_queries"),
-    ("cloudwatchlogs", "describe_query_definitions"),
-    ("cloudwatchlogs", "describe_resource_policies"),
-    ("cloudwatchlogs", "describe_subscription_filters"),
-    ("cloudwatchlogs", "disassociate_kms_key"),
-    (
-        "cloudwatchlogs",
-        "disassociate_source_from_s3_table_integration",
-    ),
-    ("cloudwatchlogs", "filter_log_events"),
-    ("cloudwatchlogs", "get_data_protection_policy"),
-    ("cloudwatchlogs", "get_delivery"),
-    ("cloudwatchlogs", "get_delivery_destination"),
-    ("cloudwatchlogs", "get_delivery_destination_policy"),
-    ("cloudwatchlogs", "get_delivery_source"),
-    ("cloudwatchlogs", "get_integration"),
-    ("cloudwatchlogs", "get_log_anomaly_detector"),
-    ("cloudwatchlogs", "get_log_events"),
-    ("cloudwatchlogs", "get_log_fields"),
-    ("cloudwatchlogs", "get_log_group_fields"),
-    ("cloudwatchlogs", "get_log_object"),
-    ("cloudwatchlogs", "get_log_record"),
-    ("cloudwatchlogs", "get_lookup_table"),
-    ("cloudwatchlogs", "get_query_results"),
-    ("cloudwatchlogs", "get_scheduled_query"),
-    ("cloudwatchlogs", "get_scheduled_query_history"),
-    ("cloudwatchlogs", "get_transformer"),
-    ("cloudwatchlogs", "list_aggregate_log_group_summaries"),
-    ("cloudwatchlogs", "list_anomalies"),
-    ("cloudwatchlogs", "list_integrations"),
-    ("cloudwatchlogs", "list_log_anomaly_detectors"),
-    ("cloudwatchlogs", "list_log_groups"),
-    ("cloudwatchlogs", "list_log_groups_for_query"),
-    ("cloudwatchlogs", "list_scheduled_queries"),
-    ("cloudwatchlogs", "list_sources_for_s3_table_integration"),
-    ("cloudwatchlogs", "list_tags_for_resource"),
-    ("cloudwatchlogs", "list_tags_log_group"),
-    ("cloudwatchlogs", "put_account_policy"),
-    ("cloudwatchlogs", "put_bearer_token_authentication"),
-    ("cloudwatchlogs", "put_data_protection_policy"),
-    ("cloudwatchlogs", "put_delivery_destination"),
-    ("cloudwatchlogs", "put_delivery_destination_policy"),
-    ("cloudwatchlogs", "put_delivery_source"),
-    ("cloudwatchlogs", "put_destination"),
-    ("cloudwatchlogs", "put_destination_policy"),
-    ("cloudwatchlogs", "put_index_policy"),
-    ("cloudwatchlogs", "put_integration"),
-    ("cloudwatchlogs", "put_log_events"),
-    ("cloudwatchlogs", "put_log_group_deletion_protection"),
-    ("cloudwatchlogs", "put_metric_filter"),
-    ("cloudwatchlogs", "put_query_definition"),
-    ("cloudwatchlogs", "put_resource_policy"),
-    ("cloudwatchlogs", "put_retention_policy"),
-    ("cloudwatchlogs", "put_subscription_filter"),
-    ("cloudwatchlogs", "put_transformer"),
-    ("cloudwatchlogs", "start_live_tail"),
-    ("cloudwatchlogs", "start_query"),
-    ("cloudwatchlogs", "stop_query"),
-    ("cloudwatchlogs", "tag_log_group"),
-    ("cloudwatchlogs", "tag_resource"),
-    ("cloudwatchlogs", "test_metric_filter"),
-    ("cloudwatchlogs", "test_transformer"),
-    ("cloudwatchlogs", "untag_log_group"),
-    ("cloudwatchlogs", "untag_resource"),
-    ("cloudwatchlogs", "update_anomaly"),
-    ("cloudwatchlogs", "update_delivery_configuration"),
-    ("cloudwatchlogs", "update_log_anomaly_detector"),
-    ("cloudwatchlogs", "update_lookup_table"),
-    ("cloudwatchlogs", "update_scheduled_query"),
-    ("ec2", "accept_address_transfer"),
-    ("ec2", "accept_capacity_reservation_billing_ownership"),
-    ("ec2", "accept_reserved_instances_exchange_quote"),
-    (
-        "ec2",
-        "accept_transit_gateway_multicast_domain_associations",
-    ),
-    ("ec2", "accept_transit_gateway_peering_attachment"),
-    ("ec2", "accept_transit_gateway_vpc_attachment"),
-    ("ec2", "accept_vpc_endpoint_connections"),
-    ("ec2", "accept_vpc_peering_connection"),
-    ("ec2", "advertise_byoip_cidr"),
-    ("ec2", "allocate_address"),
-    ("ec2", "allocate_hosts"),
-    ("ec2", "allocate_ipam_pool_cidr"),
-    ("ec2", "apply_security_groups_to_client_vpn_target_network"),
-    ("ec2", "assign_ipv6_addresses"),
-    ("ec2", "assign_private_ip_addresses"),
-    ("ec2", "assign_private_nat_gateway_address"),
-    ("ec2", "associate_address"),
-    ("ec2", "associate_capacity_reservation_billing_owner"),
-    ("ec2", "associate_client_vpn_target_network"),
-    ("ec2", "associate_dhcp_options"),
-    ("ec2", "associate_enclave_certificate_iam_role"),
-    ("ec2", "associate_iam_instance_profile"),
-    ("ec2", "associate_instance_event_window"),
-    ("ec2", "associate_ipam_byoasn"),
-    ("ec2", "associate_ipam_resource_discovery"),
-    ("ec2", "associate_nat_gateway_address"),
-    ("ec2", "associate_route_server"),
-    ("ec2", "associate_route_table"),
-    ("ec2", "associate_security_group_vpc"),
-    ("ec2", "associate_subnet_cidr_block"),
-    ("ec2", "associate_transit_gateway_multicast_domain"),
-    ("ec2", "associate_transit_gateway_policy_table"),
-    ("ec2", "associate_transit_gateway_route_table"),
-    ("ec2", "associate_trunk_interface"),
-    ("ec2", "associate_vpc_cidr_block"),
-    ("ec2", "attach_classic_link_vpc"),
-    ("ec2", "attach_internet_gateway"),
-    ("ec2", "attach_network_interface"),
-    ("ec2", "attach_verified_access_trust_provider"),
-    ("ec2", "attach_volume"),
-    ("ec2", "attach_vpn_gateway"),
-    ("ec2", "authorize_client_vpn_ingress"),
-    ("ec2", "authorize_security_group_egress"),
-    ("ec2", "authorize_security_group_ingress"),
-    ("ec2", "bundle_instance"),
-    ("ec2", "cancel_bundle_task"),
-    ("ec2", "cancel_capacity_reservation"),
-    ("ec2", "cancel_capacity_reservation_fleets"),
-    ("ec2", "cancel_conversion_task"),
-    ("ec2", "cancel_declarative_policies_report"),
-    ("ec2", "cancel_export_task"),
-    ("ec2", "cancel_image_launch_permission"),
-    ("ec2", "cancel_import_task"),
-    ("ec2", "cancel_reserved_instances_listing"),
-    ("ec2", "cancel_spot_fleet_requests"),
-    ("ec2", "cancel_spot_instance_requests"),
-    ("ec2", "confirm_product_instance"),
-    ("ec2", "copy_fpga_image"),
-    ("ec2", "copy_image"),
-    ("ec2", "copy_snapshot"),
-    ("ec2", "copy_volumes"),
-    ("ec2", "create_capacity_manager_data_export"),
-    ("ec2", "create_capacity_reservation"),
-    ("ec2", "create_capacity_reservation_by_splitting"),
-    ("ec2", "create_capacity_reservation_fleet"),
-    ("ec2", "create_carrier_gateway"),
-    ("ec2", "create_client_vpn_endpoint"),
-    ("ec2", "create_client_vpn_route"),
-    ("ec2", "create_coip_cidr"),
-    ("ec2", "create_coip_pool"),
-    ("ec2", "create_customer_gateway"),
-    ("ec2", "create_default_subnet"),
-    ("ec2", "create_default_vpc"),
-    ("ec2", "create_delegate_mac_volume_ownership_task"),
-    ("ec2", "create_dhcp_options"),
-    ("ec2", "create_egress_only_internet_gateway"),
-    ("ec2", "create_fleet"),
-    ("ec2", "create_flow_logs"),
-    ("ec2", "create_fpga_image"),
-    ("ec2", "create_image"),
-    ("ec2", "create_image_usage_report"),
-    ("ec2", "create_instance_connect_endpoint"),
-    ("ec2", "create_instance_event_window"),
-    ("ec2", "create_instance_export_task"),
-    ("ec2", "create_internet_gateway"),
-    (
-        "ec2",
-        "create_interruptible_capacity_reservation_allocation",
-    ),
-    ("ec2", "create_ipam"),
-    ("ec2", "create_ipam_external_resource_verification_token"),
-    ("ec2", "create_ipam_policy"),
-    ("ec2", "create_ipam_pool"),
-    ("ec2", "create_ipam_prefix_list_resolver"),
-    ("ec2", "create_ipam_prefix_list_resolver_target"),
-    ("ec2", "create_ipam_resource_discovery"),
-    ("ec2", "create_ipam_scope"),
-    ("ec2", "create_key_pair"),
-    ("ec2", "create_launch_template"),
-    ("ec2", "create_launch_template_version"),
-    ("ec2", "create_local_gateway_route"),
-    ("ec2", "create_local_gateway_route_table"),
-    (
-        "ec2",
-        "create_local_gateway_route_table_virtual_interface_group_association",
-    ),
-    ("ec2", "create_local_gateway_route_table_vpc_association"),
-    ("ec2", "create_local_gateway_virtual_interface"),
-    ("ec2", "create_local_gateway_virtual_interface_group"),
-    (
-        "ec2",
-        "create_mac_system_integrity_protection_modification_task",
-    ),
-    ("ec2", "create_managed_prefix_list"),
-    ("ec2", "create_nat_gateway"),
-    ("ec2", "create_network_acl"),
-    ("ec2", "create_network_acl_entry"),
-    ("ec2", "create_network_insights_access_scope"),
-    ("ec2", "create_network_insights_path"),
-    ("ec2", "create_network_interface"),
-    ("ec2", "create_network_interface_permission"),
-    ("ec2", "create_placement_group"),
-    ("ec2", "create_public_ipv4_pool"),
-    ("ec2", "create_replace_root_volume_task"),
-    ("ec2", "create_reserved_instances_listing"),
-    ("ec2", "create_restore_image_task"),
-    ("ec2", "create_route"),
-    ("ec2", "create_route_server"),
-    ("ec2", "create_route_server_endpoint"),
-    ("ec2", "create_route_server_peer"),
-    ("ec2", "create_route_table"),
-    ("ec2", "create_secondary_network"),
-    ("ec2", "create_secondary_subnet"),
-    ("ec2", "create_security_group"),
-    ("ec2", "create_snapshot"),
-    ("ec2", "create_snapshots"),
-    ("ec2", "create_spot_datafeed_subscription"),
-    ("ec2", "create_store_image_task"),
-    ("ec2", "create_subnet"),
-    ("ec2", "create_subnet_cidr_reservation"),
-    ("ec2", "create_tags"),
-    ("ec2", "create_traffic_mirror_filter"),
-    ("ec2", "create_traffic_mirror_filter_rule"),
-    ("ec2", "create_traffic_mirror_session"),
-    ("ec2", "create_traffic_mirror_target"),
-    ("ec2", "create_transit_gateway"),
-    ("ec2", "create_transit_gateway_connect"),
-    ("ec2", "create_transit_gateway_connect_peer"),
-    ("ec2", "create_transit_gateway_metering_policy"),
-    ("ec2", "create_transit_gateway_metering_policy_entry"),
-    ("ec2", "create_transit_gateway_multicast_domain"),
-    ("ec2", "create_transit_gateway_peering_attachment"),
-    ("ec2", "create_transit_gateway_policy_table"),
-    ("ec2", "create_transit_gateway_prefix_list_reference"),
-    ("ec2", "create_transit_gateway_route"),
-    ("ec2", "create_transit_gateway_route_table"),
-    ("ec2", "create_transit_gateway_route_table_announcement"),
-    ("ec2", "create_transit_gateway_vpc_attachment"),
-    ("ec2", "create_verified_access_endpoint"),
-    ("ec2", "create_verified_access_group"),
-    ("ec2", "create_verified_access_instance"),
-    ("ec2", "create_verified_access_trust_provider"),
-    ("ec2", "create_volume"),
-    ("ec2", "create_vpc"),
-    ("ec2", "create_vpc_block_public_access_exclusion"),
-    ("ec2", "create_vpc_encryption_control"),
-    ("ec2", "create_vpc_endpoint"),
-    ("ec2", "create_vpc_endpoint_connection_notification"),
-    ("ec2", "create_vpc_endpoint_service_configuration"),
-    ("ec2", "create_vpc_peering_connection"),
-    ("ec2", "create_vpn_concentrator"),
-    ("ec2", "create_vpn_connection"),
-    ("ec2", "create_vpn_connection_route"),
-    ("ec2", "create_vpn_gateway"),
-    ("ec2", "delete_capacity_manager_data_export"),
-    ("ec2", "delete_carrier_gateway"),
-    ("ec2", "delete_client_vpn_endpoint"),
-    ("ec2", "delete_client_vpn_route"),
-    ("ec2", "delete_coip_cidr"),
-    ("ec2", "delete_coip_pool"),
-    ("ec2", "delete_customer_gateway"),
-    ("ec2", "delete_dhcp_options"),
-    ("ec2", "delete_egress_only_internet_gateway"),
-    ("ec2", "delete_fleets"),
-    ("ec2", "delete_flow_logs"),
-    ("ec2", "delete_fpga_image"),
-    ("ec2", "delete_image_usage_report"),
-    ("ec2", "delete_instance_connect_endpoint"),
-    ("ec2", "delete_instance_event_window"),
-    ("ec2", "delete_internet_gateway"),
-    ("ec2", "delete_ipam"),
-    ("ec2", "delete_ipam_external_resource_verification_token"),
-    ("ec2", "delete_ipam_policy"),
-    ("ec2", "delete_ipam_pool"),
-    ("ec2", "delete_ipam_prefix_list_resolver"),
-    ("ec2", "delete_ipam_prefix_list_resolver_target"),
-    ("ec2", "delete_ipam_resource_discovery"),
-    ("ec2", "delete_ipam_scope"),
-    ("ec2", "delete_key_pair"),
-    ("ec2", "delete_launch_template"),
-    ("ec2", "delete_launch_template_versions"),
-    ("ec2", "delete_local_gateway_route"),
-    ("ec2", "delete_local_gateway_route_table"),
-    (
-        "ec2",
-        "delete_local_gateway_route_table_virtual_interface_group_association",
-    ),
-    ("ec2", "delete_local_gateway_route_table_vpc_association"),
-    ("ec2", "delete_local_gateway_virtual_interface"),
-    ("ec2", "delete_local_gateway_virtual_interface_group"),
-    ("ec2", "delete_managed_prefix_list"),
-    ("ec2", "delete_nat_gateway"),
-    ("ec2", "delete_network_acl"),
-    ("ec2", "delete_network_acl_entry"),
-    ("ec2", "delete_network_insights_access_scope"),
-    ("ec2", "delete_network_insights_access_scope_analysis"),
-    ("ec2", "delete_network_insights_analysis"),
-    ("ec2", "delete_network_insights_path"),
-    ("ec2", "delete_network_interface"),
-    ("ec2", "delete_network_interface_permission"),
-    ("ec2", "delete_placement_group"),
-    ("ec2", "delete_public_ipv4_pool"),
-    ("ec2", "delete_queued_reserved_instances"),
-    ("ec2", "delete_route"),
-    ("ec2", "delete_route_server"),
-    ("ec2", "delete_route_server_endpoint"),
-    ("ec2", "delete_route_server_peer"),
-    ("ec2", "delete_route_table"),
-    ("ec2", "delete_secondary_network"),
-    ("ec2", "delete_secondary_subnet"),
-    ("ec2", "delete_security_group"),
-    ("ec2", "delete_snapshot"),
-    ("ec2", "delete_spot_datafeed_subscription"),
-    ("ec2", "delete_subnet"),
-    ("ec2", "delete_subnet_cidr_reservation"),
-    ("ec2", "delete_tags"),
-    ("ec2", "delete_traffic_mirror_filter"),
-    ("ec2", "delete_traffic_mirror_filter_rule"),
-    ("ec2", "delete_traffic_mirror_session"),
-    ("ec2", "delete_traffic_mirror_target"),
-    ("ec2", "delete_transit_gateway"),
-    ("ec2", "delete_transit_gateway_connect"),
-    ("ec2", "delete_transit_gateway_connect_peer"),
-    ("ec2", "delete_transit_gateway_metering_policy"),
-    ("ec2", "delete_transit_gateway_metering_policy_entry"),
-    ("ec2", "delete_transit_gateway_multicast_domain"),
-    ("ec2", "delete_transit_gateway_peering_attachment"),
-    ("ec2", "delete_transit_gateway_policy_table"),
-    ("ec2", "delete_transit_gateway_prefix_list_reference"),
-    ("ec2", "delete_transit_gateway_route"),
-    ("ec2", "delete_transit_gateway_route_table"),
-    ("ec2", "delete_transit_gateway_route_table_announcement"),
-    ("ec2", "delete_transit_gateway_vpc_attachment"),
-    ("ec2", "delete_verified_access_endpoint"),
-    ("ec2", "delete_verified_access_group"),
-    ("ec2", "delete_verified_access_instance"),
-    ("ec2", "delete_verified_access_trust_provider"),
-    ("ec2", "delete_volume"),
-    ("ec2", "delete_vpc"),
-    ("ec2", "delete_vpc_block_public_access_exclusion"),
-    ("ec2", "delete_vpc_encryption_control"),
-    ("ec2", "delete_vpc_endpoint_connection_notifications"),
-    ("ec2", "delete_vpc_endpoint_service_configurations"),
-    ("ec2", "delete_vpc_endpoints"),
-    ("ec2", "delete_vpc_peering_connection"),
-    ("ec2", "delete_vpn_concentrator"),
-    ("ec2", "delete_vpn_connection"),
-    ("ec2", "delete_vpn_connection_route"),
-    ("ec2", "delete_vpn_gateway"),
-    ("ec2", "deprovision_byoip_cidr"),
-    ("ec2", "deprovision_ipam_byoasn"),
-    ("ec2", "deprovision_ipam_pool_cidr"),
-    ("ec2", "deprovision_public_ipv4_pool_cidr"),
-    ("ec2", "deregister_image"),
-    ("ec2", "deregister_instance_event_notification_attributes"),
-    ("ec2", "deregister_transit_gateway_multicast_group_members"),
-    ("ec2", "deregister_transit_gateway_multicast_group_sources"),
-    ("ec2", "describe_account_attributes"),
-    ("ec2", "describe_address_transfers"),
-    ("ec2", "describe_addresses"),
-    ("ec2", "describe_addresses_attribute"),
-    ("ec2", "describe_aggregate_id_format"),
-    ("ec2", "describe_availability_zones"),
-    (
-        "ec2",
-        "describe_aws_network_performance_metric_subscriptions",
-    ),
-    ("ec2", "describe_bundle_tasks"),
-    ("ec2", "describe_byoip_cidrs"),
-    ("ec2", "describe_capacity_block_extension_history"),
-    ("ec2", "describe_capacity_block_extension_offerings"),
-    ("ec2", "describe_capacity_block_offerings"),
-    ("ec2", "describe_capacity_block_status"),
-    ("ec2", "describe_capacity_blocks"),
-    ("ec2", "describe_capacity_manager_data_exports"),
-    ("ec2", "describe_capacity_reservation_billing_requests"),
-    ("ec2", "describe_capacity_reservation_fleets"),
-    ("ec2", "describe_capacity_reservation_topology"),
-    ("ec2", "describe_capacity_reservations"),
-    ("ec2", "describe_carrier_gateways"),
-    ("ec2", "describe_classic_link_instances"),
-    ("ec2", "describe_client_vpn_authorization_rules"),
-    ("ec2", "describe_client_vpn_connections"),
-    ("ec2", "describe_client_vpn_endpoints"),
-    ("ec2", "describe_client_vpn_routes"),
-    ("ec2", "describe_client_vpn_target_networks"),
-    ("ec2", "describe_coip_pools"),
-    ("ec2", "describe_conversion_tasks"),
-    ("ec2", "describe_customer_gateways"),
-    ("ec2", "describe_declarative_policies_reports"),
-    ("ec2", "describe_dhcp_options"),
-    ("ec2", "describe_egress_only_internet_gateways"),
-    ("ec2", "describe_elastic_gpus"),
-    ("ec2", "describe_export_image_tasks"),
-    ("ec2", "describe_export_tasks"),
-    ("ec2", "describe_fast_launch_images"),
-    ("ec2", "describe_fast_snapshot_restores"),
-    ("ec2", "describe_fleet_history"),
-    ("ec2", "describe_fleet_instances"),
-    ("ec2", "describe_fleets"),
-    ("ec2", "describe_flow_logs"),
-    ("ec2", "describe_fpga_image_attribute"),
-    ("ec2", "describe_fpga_images"),
-    ("ec2", "describe_host_reservation_offerings"),
-    ("ec2", "describe_host_reservations"),
-    ("ec2", "describe_hosts"),
-    ("ec2", "describe_iam_instance_profile_associations"),
-    ("ec2", "describe_id_format"),
-    ("ec2", "describe_identity_id_format"),
-    ("ec2", "describe_image_attribute"),
-    ("ec2", "describe_image_references"),
-    ("ec2", "describe_image_usage_report_entries"),
-    ("ec2", "describe_image_usage_reports"),
-    ("ec2", "describe_images"),
-    ("ec2", "describe_import_image_tasks"),
-    ("ec2", "describe_import_snapshot_tasks"),
-    ("ec2", "describe_instance_attribute"),
-    ("ec2", "describe_instance_connect_endpoints"),
-    ("ec2", "describe_instance_credit_specifications"),
-    ("ec2", "describe_instance_event_notification_attributes"),
-    ("ec2", "describe_instance_event_windows"),
-    ("ec2", "describe_instance_image_metadata"),
-    ("ec2", "describe_instance_sql_ha_history_states"),
-    ("ec2", "describe_instance_sql_ha_states"),
-    ("ec2", "describe_instance_status"),
-    ("ec2", "describe_instance_topology"),
-    ("ec2", "describe_instance_type_offerings"),
-    ("ec2", "describe_instance_types"),
-    ("ec2", "describe_instances"),
-    ("ec2", "describe_internet_gateways"),
-    ("ec2", "describe_ipam_byoasn"),
-    ("ec2", "describe_ipam_external_resource_verification_tokens"),
-    ("ec2", "describe_ipam_policies"),
-    ("ec2", "describe_ipam_pools"),
-    ("ec2", "describe_ipam_prefix_list_resolver_targets"),
-    ("ec2", "describe_ipam_prefix_list_resolvers"),
-    ("ec2", "describe_ipam_resource_discoveries"),
-    ("ec2", "describe_ipam_resource_discovery_associations"),
-    ("ec2", "describe_ipam_scopes"),
-    ("ec2", "describe_ipams"),
-    ("ec2", "describe_ipv6_pools"),
-    ("ec2", "describe_key_pairs"),
-    ("ec2", "describe_launch_template_versions"),
-    ("ec2", "describe_launch_templates"),
-    (
-        "ec2",
-        "describe_local_gateway_route_table_virtual_interface_group_associations",
-    ),
-    ("ec2", "describe_local_gateway_route_table_vpc_associations"),
-    ("ec2", "describe_local_gateway_route_tables"),
-    ("ec2", "describe_local_gateway_virtual_interface_groups"),
-    ("ec2", "describe_local_gateway_virtual_interfaces"),
-    ("ec2", "describe_local_gateways"),
-    ("ec2", "describe_locked_snapshots"),
-    ("ec2", "describe_mac_hosts"),
-    ("ec2", "describe_mac_modification_tasks"),
-    ("ec2", "describe_managed_prefix_lists"),
-    ("ec2", "describe_moving_addresses"),
-    ("ec2", "describe_nat_gateways"),
-    ("ec2", "describe_network_acls"),
-    ("ec2", "describe_network_insights_access_scope_analyses"),
-    ("ec2", "describe_network_insights_access_scopes"),
-    ("ec2", "describe_network_insights_analyses"),
-    ("ec2", "describe_network_insights_paths"),
-    ("ec2", "describe_network_interface_attribute"),
-    ("ec2", "describe_network_interface_permissions"),
-    ("ec2", "describe_network_interfaces"),
-    ("ec2", "describe_outpost_lags"),
-    ("ec2", "describe_placement_groups"),
-    ("ec2", "describe_prefix_lists"),
-    ("ec2", "describe_principal_id_format"),
-    ("ec2", "describe_public_ipv4_pools"),
-    ("ec2", "describe_regions"),
-    ("ec2", "describe_replace_root_volume_tasks"),
-    ("ec2", "describe_reserved_instances"),
-    ("ec2", "describe_reserved_instances_listings"),
-    ("ec2", "describe_reserved_instances_modifications"),
-    ("ec2", "describe_reserved_instances_offerings"),
-    ("ec2", "describe_route_server_endpoints"),
-    ("ec2", "describe_route_server_peers"),
-    ("ec2", "describe_route_servers"),
-    ("ec2", "describe_route_tables"),
-    ("ec2", "describe_scheduled_instance_availability"),
-    ("ec2", "describe_scheduled_instances"),
-    ("ec2", "describe_secondary_interfaces"),
-    ("ec2", "describe_secondary_networks"),
-    ("ec2", "describe_secondary_subnets"),
-    ("ec2", "describe_security_group_references"),
-    ("ec2", "describe_security_group_rules"),
-    ("ec2", "describe_security_group_vpc_associations"),
-    ("ec2", "describe_security_groups"),
-    ("ec2", "describe_service_link_virtual_interfaces"),
-    ("ec2", "describe_snapshot_attribute"),
-    ("ec2", "describe_snapshot_tier_status"),
-    ("ec2", "describe_snapshots"),
-    ("ec2", "describe_spot_datafeed_subscription"),
-    ("ec2", "describe_spot_fleet_instances"),
-    ("ec2", "describe_spot_fleet_request_history"),
-    ("ec2", "describe_spot_fleet_requests"),
-    ("ec2", "describe_spot_instance_requests"),
-    ("ec2", "describe_spot_price_history"),
-    ("ec2", "describe_stale_security_groups"),
-    ("ec2", "describe_store_image_tasks"),
-    ("ec2", "describe_subnets"),
-    ("ec2", "describe_tags"),
-    ("ec2", "describe_traffic_mirror_filter_rules"),
-    ("ec2", "describe_traffic_mirror_filters"),
-    ("ec2", "describe_traffic_mirror_sessions"),
-    ("ec2", "describe_traffic_mirror_targets"),
-    ("ec2", "describe_transit_gateway_attachments"),
-    ("ec2", "describe_transit_gateway_connect_peers"),
-    ("ec2", "describe_transit_gateway_connects"),
-    ("ec2", "describe_transit_gateway_metering_policies"),
-    ("ec2", "describe_transit_gateway_multicast_domains"),
-    ("ec2", "describe_transit_gateway_peering_attachments"),
-    ("ec2", "describe_transit_gateway_policy_tables"),
-    ("ec2", "describe_transit_gateway_route_table_announcements"),
-    ("ec2", "describe_transit_gateway_route_tables"),
-    ("ec2", "describe_transit_gateway_vpc_attachments"),
-    ("ec2", "describe_transit_gateways"),
-    ("ec2", "describe_trunk_interface_associations"),
-    ("ec2", "describe_verified_access_endpoints"),
-    ("ec2", "describe_verified_access_groups"),
-    (
-        "ec2",
-        "describe_verified_access_instance_logging_configurations",
-    ),
-    ("ec2", "describe_verified_access_instances"),
-    ("ec2", "describe_verified_access_trust_providers"),
-    ("ec2", "describe_volume_attribute"),
-    ("ec2", "describe_volume_status"),
-    ("ec2", "describe_volumes"),
-    ("ec2", "describe_volumes_modifications"),
-    ("ec2", "describe_vpc_attribute"),
-    ("ec2", "describe_vpc_block_public_access_exclusions"),
-    ("ec2", "describe_vpc_block_public_access_options"),
-    ("ec2", "describe_vpc_classic_link"),
-    ("ec2", "describe_vpc_classic_link_dns_support"),
-    ("ec2", "describe_vpc_encryption_controls"),
-    ("ec2", "describe_vpc_endpoint_associations"),
-    ("ec2", "describe_vpc_endpoint_connection_notifications"),
-    ("ec2", "describe_vpc_endpoint_connections"),
-    ("ec2", "describe_vpc_endpoint_service_configurations"),
-    ("ec2", "describe_vpc_endpoint_service_permissions"),
-    ("ec2", "describe_vpc_endpoint_services"),
-    ("ec2", "describe_vpc_endpoints"),
-    ("ec2", "describe_vpc_peering_connections"),
-    ("ec2", "describe_vpcs"),
-    ("ec2", "describe_vpn_concentrators"),
-    ("ec2", "describe_vpn_connections"),
-    ("ec2", "describe_vpn_gateways"),
-    ("ec2", "detach_classic_link_vpc"),
-    ("ec2", "detach_internet_gateway"),
-    ("ec2", "detach_network_interface"),
-    ("ec2", "detach_verified_access_trust_provider"),
-    ("ec2", "detach_volume"),
-    ("ec2", "detach_vpn_gateway"),
-    ("ec2", "disable_address_transfer"),
-    ("ec2", "disable_allowed_images_settings"),
-    ("ec2", "disable_aws_network_performance_metric_subscription"),
-    ("ec2", "disable_capacity_manager"),
-    ("ec2", "disable_ebs_encryption_by_default"),
-    ("ec2", "disable_fast_launch"),
-    ("ec2", "disable_fast_snapshot_restores"),
-    ("ec2", "disable_image"),
-    ("ec2", "disable_image_block_public_access"),
-    ("ec2", "disable_image_deprecation"),
-    ("ec2", "disable_image_deregistration_protection"),
-    ("ec2", "disable_instance_sql_ha_standby_detections"),
-    ("ec2", "disable_ipam_organization_admin_account"),
-    ("ec2", "disable_ipam_policy"),
-    ("ec2", "disable_route_server_propagation"),
-    ("ec2", "disable_serial_console_access"),
-    ("ec2", "disable_snapshot_block_public_access"),
-    ("ec2", "disable_transit_gateway_route_table_propagation"),
-    ("ec2", "disable_vgw_route_propagation"),
-    ("ec2", "disable_vpc_classic_link"),
-    ("ec2", "disable_vpc_classic_link_dns_support"),
-    ("ec2", "disassociate_address"),
-    ("ec2", "disassociate_capacity_reservation_billing_owner"),
-    ("ec2", "disassociate_client_vpn_target_network"),
-    ("ec2", "disassociate_enclave_certificate_iam_role"),
-    ("ec2", "disassociate_iam_instance_profile"),
-    ("ec2", "disassociate_instance_event_window"),
-    ("ec2", "disassociate_ipam_byoasn"),
-    ("ec2", "disassociate_ipam_resource_discovery"),
-    ("ec2", "disassociate_nat_gateway_address"),
-    ("ec2", "disassociate_route_server"),
-    ("ec2", "disassociate_route_table"),
-    ("ec2", "disassociate_security_group_vpc"),
-    ("ec2", "disassociate_subnet_cidr_block"),
-    ("ec2", "disassociate_transit_gateway_multicast_domain"),
-    ("ec2", "disassociate_transit_gateway_policy_table"),
-    ("ec2", "disassociate_transit_gateway_route_table"),
-    ("ec2", "disassociate_trunk_interface"),
-    ("ec2", "disassociate_vpc_cidr_block"),
-    ("ec2", "enable_address_transfer"),
-    ("ec2", "enable_allowed_images_settings"),
-    ("ec2", "enable_aws_network_performance_metric_subscription"),
-    ("ec2", "enable_capacity_manager"),
-    ("ec2", "enable_ebs_encryption_by_default"),
-    ("ec2", "enable_fast_launch"),
-    ("ec2", "enable_fast_snapshot_restores"),
-    ("ec2", "enable_image"),
-    ("ec2", "enable_image_block_public_access"),
-    ("ec2", "enable_image_deprecation"),
-    ("ec2", "enable_image_deregistration_protection"),
-    ("ec2", "enable_instance_sql_ha_standby_detections"),
-    ("ec2", "enable_ipam_organization_admin_account"),
-    ("ec2", "enable_ipam_policy"),
-    ("ec2", "enable_reachability_analyzer_organization_sharing"),
-    ("ec2", "enable_route_server_propagation"),
-    ("ec2", "enable_serial_console_access"),
-    ("ec2", "enable_snapshot_block_public_access"),
-    ("ec2", "enable_transit_gateway_route_table_propagation"),
-    ("ec2", "enable_vgw_route_propagation"),
-    ("ec2", "enable_volume_io"),
-    ("ec2", "enable_vpc_classic_link"),
-    ("ec2", "enable_vpc_classic_link_dns_support"),
-    (
-        "ec2",
-        "export_client_vpn_client_certificate_revocation_list",
-    ),
-    ("ec2", "export_client_vpn_client_configuration"),
-    ("ec2", "export_image"),
-    ("ec2", "export_transit_gateway_routes"),
-    (
-        "ec2",
-        "export_verified_access_instance_client_configuration",
-    ),
-    ("ec2", "get_active_vpn_tunnel_status"),
-    ("ec2", "get_allowed_images_settings"),
-    ("ec2", "get_associated_enclave_certificate_iam_roles"),
-    ("ec2", "get_associated_ipv6_pool_cidrs"),
-    ("ec2", "get_aws_network_performance_data"),
-    ("ec2", "get_capacity_manager_attributes"),
-    ("ec2", "get_capacity_manager_metric_data"),
-    ("ec2", "get_capacity_manager_metric_dimensions"),
-    ("ec2", "get_capacity_reservation_usage"),
-    ("ec2", "get_coip_pool_usage"),
-    ("ec2", "get_console_output"),
-    ("ec2", "get_console_screenshot"),
-    ("ec2", "get_declarative_policies_report_summary"),
-    ("ec2", "get_default_credit_specification"),
-    ("ec2", "get_ebs_default_kms_key_id"),
-    ("ec2", "get_ebs_encryption_by_default"),
-    ("ec2", "get_enabled_ipam_policy"),
-    ("ec2", "get_flow_logs_integration_template"),
-    ("ec2", "get_groups_for_capacity_reservation"),
-    ("ec2", "get_host_reservation_purchase_preview"),
-    ("ec2", "get_image_ancestry"),
-    ("ec2", "get_image_block_public_access_state"),
-    ("ec2", "get_instance_metadata_defaults"),
-    ("ec2", "get_instance_tpm_ek_pub"),
-    ("ec2", "get_instance_types_from_instance_requirements"),
-    ("ec2", "get_instance_uefi_data"),
-    ("ec2", "get_ipam_address_history"),
-    ("ec2", "get_ipam_discovered_accounts"),
-    ("ec2", "get_ipam_discovered_public_addresses"),
-    ("ec2", "get_ipam_discovered_resource_cidrs"),
-    ("ec2", "get_ipam_policy_allocation_rules"),
-    ("ec2", "get_ipam_policy_organization_targets"),
-    ("ec2", "get_ipam_pool_allocations"),
-    ("ec2", "get_ipam_pool_cidrs"),
-    ("ec2", "get_ipam_prefix_list_resolver_rules"),
-    ("ec2", "get_ipam_prefix_list_resolver_version_entries"),
-    ("ec2", "get_ipam_prefix_list_resolver_versions"),
-    ("ec2", "get_ipam_resource_cidrs"),
-    ("ec2", "get_launch_template_data"),
-    ("ec2", "get_managed_prefix_list_associations"),
-    ("ec2", "get_managed_prefix_list_entries"),
-    ("ec2", "get_network_insights_access_scope_analysis_findings"),
-    ("ec2", "get_network_insights_access_scope_content"),
-    ("ec2", "get_password_data"),
-    ("ec2", "get_reserved_instances_exchange_quote"),
-    ("ec2", "get_route_server_associations"),
-    ("ec2", "get_route_server_propagations"),
-    ("ec2", "get_route_server_routing_database"),
-    ("ec2", "get_security_groups_for_vpc"),
-    ("ec2", "get_serial_console_access_status"),
-    ("ec2", "get_snapshot_block_public_access_state"),
-    ("ec2", "get_spot_placement_scores"),
-    ("ec2", "get_subnet_cidr_reservations"),
-    ("ec2", "get_transit_gateway_attachment_propagations"),
-    ("ec2", "get_transit_gateway_metering_policy_entries"),
-    ("ec2", "get_transit_gateway_multicast_domain_associations"),
-    ("ec2", "get_transit_gateway_policy_table_associations"),
-    ("ec2", "get_transit_gateway_policy_table_entries"),
-    ("ec2", "get_transit_gateway_prefix_list_references"),
-    ("ec2", "get_transit_gateway_route_table_associations"),
-    ("ec2", "get_transit_gateway_route_table_propagations"),
-    ("ec2", "get_verified_access_endpoint_policy"),
-    ("ec2", "get_verified_access_endpoint_targets"),
-    ("ec2", "get_verified_access_group_policy"),
-    ("ec2", "get_vpc_resources_blocking_encryption_enforcement"),
-    ("ec2", "get_vpn_connection_device_sample_configuration"),
-    ("ec2", "get_vpn_connection_device_types"),
-    ("ec2", "get_vpn_tunnel_replacement_status"),
-    (
-        "ec2",
-        "import_client_vpn_client_certificate_revocation_list",
-    ),
-    ("ec2", "import_image"),
-    ("ec2", "import_instance"),
-    ("ec2", "import_key_pair"),
-    ("ec2", "import_snapshot"),
-    ("ec2", "import_volume"),
-    ("ec2", "list_images_in_recycle_bin"),
-    ("ec2", "list_snapshots_in_recycle_bin"),
-    ("ec2", "list_volumes_in_recycle_bin"),
-    ("ec2", "lock_snapshot"),
-    ("ec2", "modify_address_attribute"),
-    ("ec2", "modify_availability_zone_group"),
-    ("ec2", "modify_capacity_reservation"),
-    ("ec2", "modify_capacity_reservation_fleet"),
-    ("ec2", "modify_client_vpn_endpoint"),
-    ("ec2", "modify_default_credit_specification"),
-    ("ec2", "modify_ebs_default_kms_key_id"),
-    ("ec2", "modify_fleet"),
-    ("ec2", "modify_fpga_image_attribute"),
-    ("ec2", "modify_hosts"),
-    ("ec2", "modify_id_format"),
-    ("ec2", "modify_identity_id_format"),
-    ("ec2", "modify_image_attribute"),
-    ("ec2", "modify_instance_attribute"),
-    ("ec2", "modify_instance_capacity_reservation_attributes"),
-    ("ec2", "modify_instance_connect_endpoint"),
-    ("ec2", "modify_instance_cpu_options"),
-    ("ec2", "modify_instance_credit_specification"),
-    ("ec2", "modify_instance_event_start_time"),
-    ("ec2", "modify_instance_event_window"),
-    ("ec2", "modify_instance_maintenance_options"),
-    ("ec2", "modify_instance_metadata_defaults"),
-    ("ec2", "modify_instance_metadata_options"),
-    ("ec2", "modify_instance_network_performance_options"),
-    ("ec2", "modify_instance_placement"),
-    ("ec2", "modify_ipam"),
-    ("ec2", "modify_ipam_policy_allocation_rules"),
-    ("ec2", "modify_ipam_pool"),
-    ("ec2", "modify_ipam_prefix_list_resolver"),
-    ("ec2", "modify_ipam_prefix_list_resolver_target"),
-    ("ec2", "modify_ipam_resource_cidr"),
-    ("ec2", "modify_ipam_resource_discovery"),
-    ("ec2", "modify_ipam_scope"),
-    ("ec2", "modify_launch_template"),
-    ("ec2", "modify_local_gateway_route"),
-    ("ec2", "modify_managed_prefix_list"),
-    ("ec2", "modify_network_interface_attribute"),
-    ("ec2", "modify_private_dns_name_options"),
-    ("ec2", "modify_public_ip_dns_name_options"),
-    ("ec2", "modify_reserved_instances"),
-    ("ec2", "modify_route_server"),
-    ("ec2", "modify_security_group_rules"),
-    ("ec2", "modify_snapshot_attribute"),
-    ("ec2", "modify_snapshot_tier"),
-    ("ec2", "modify_spot_fleet_request"),
-    ("ec2", "modify_subnet_attribute"),
-    ("ec2", "modify_traffic_mirror_filter_network_services"),
-    ("ec2", "modify_traffic_mirror_filter_rule"),
-    ("ec2", "modify_traffic_mirror_session"),
-    ("ec2", "modify_transit_gateway"),
-    ("ec2", "modify_transit_gateway_metering_policy"),
-    ("ec2", "modify_transit_gateway_prefix_list_reference"),
-    ("ec2", "modify_transit_gateway_vpc_attachment"),
-    ("ec2", "modify_verified_access_endpoint"),
-    ("ec2", "modify_verified_access_endpoint_policy"),
-    ("ec2", "modify_verified_access_group"),
-    ("ec2", "modify_verified_access_group_policy"),
-    ("ec2", "modify_verified_access_instance"),
-    (
-        "ec2",
-        "modify_verified_access_instance_logging_configuration",
-    ),
-    ("ec2", "modify_verified_access_trust_provider"),
-    ("ec2", "modify_volume"),
-    ("ec2", "modify_volume_attribute"),
-    ("ec2", "modify_vpc_attribute"),
-    ("ec2", "modify_vpc_block_public_access_exclusion"),
-    ("ec2", "modify_vpc_block_public_access_options"),
-    ("ec2", "modify_vpc_encryption_control"),
-    ("ec2", "modify_vpc_endpoint"),
-    ("ec2", "modify_vpc_endpoint_connection_notification"),
-    ("ec2", "modify_vpc_endpoint_service_configuration"),
-    ("ec2", "modify_vpc_endpoint_service_payer_responsibility"),
-    ("ec2", "modify_vpc_endpoint_service_permissions"),
-    ("ec2", "modify_vpc_peering_connection_options"),
-    ("ec2", "modify_vpc_tenancy"),
-    ("ec2", "modify_vpn_connection"),
-    ("ec2", "modify_vpn_connection_options"),
-    ("ec2", "modify_vpn_tunnel_certificate"),
-    ("ec2", "modify_vpn_tunnel_options"),
-    ("ec2", "monitor_instances"),
-    ("ec2", "move_address_to_vpc"),
-    ("ec2", "move_byoip_cidr_to_ipam"),
-    ("ec2", "move_capacity_reservation_instances"),
-    ("ec2", "provision_byoip_cidr"),
-    ("ec2", "provision_ipam_byoasn"),
-    ("ec2", "provision_ipam_pool_cidr"),
-    ("ec2", "provision_public_ipv4_pool_cidr"),
-    ("ec2", "purchase_capacity_block"),
-    ("ec2", "purchase_capacity_block_extension"),
-    ("ec2", "purchase_host_reservation"),
-    ("ec2", "purchase_reserved_instances_offering"),
-    ("ec2", "purchase_scheduled_instances"),
-    ("ec2", "reboot_instances"),
-    ("ec2", "register_image"),
-    ("ec2", "register_instance_event_notification_attributes"),
-    ("ec2", "register_transit_gateway_multicast_group_members"),
-    ("ec2", "register_transit_gateway_multicast_group_sources"),
-    ("ec2", "reject_capacity_reservation_billing_ownership"),
-    (
-        "ec2",
-        "reject_transit_gateway_multicast_domain_associations",
-    ),
-    ("ec2", "reject_transit_gateway_peering_attachment"),
-    ("ec2", "reject_transit_gateway_vpc_attachment"),
-    ("ec2", "reject_vpc_endpoint_connections"),
-    ("ec2", "reject_vpc_peering_connection"),
-    ("ec2", "release_address"),
-    ("ec2", "release_hosts"),
-    ("ec2", "release_ipam_pool_allocation"),
-    ("ec2", "replace_iam_instance_profile_association"),
-    ("ec2", "replace_image_criteria_in_allowed_images_settings"),
-    ("ec2", "replace_network_acl_association"),
-    ("ec2", "replace_network_acl_entry"),
-    ("ec2", "replace_route"),
-    ("ec2", "replace_route_table_association"),
-    ("ec2", "replace_transit_gateway_route"),
-    ("ec2", "replace_vpn_tunnel"),
-    ("ec2", "report_instance_status"),
-    ("ec2", "request_spot_fleet"),
-    ("ec2", "request_spot_instances"),
-    ("ec2", "reset_address_attribute"),
-    ("ec2", "reset_ebs_default_kms_key_id"),
-    ("ec2", "reset_fpga_image_attribute"),
-    ("ec2", "reset_image_attribute"),
-    ("ec2", "reset_instance_attribute"),
-    ("ec2", "reset_network_interface_attribute"),
-    ("ec2", "reset_snapshot_attribute"),
-    ("ec2", "restore_address_to_classic"),
-    ("ec2", "restore_image_from_recycle_bin"),
-    ("ec2", "restore_managed_prefix_list_version"),
-    ("ec2", "restore_snapshot_from_recycle_bin"),
-    ("ec2", "restore_snapshot_tier"),
-    ("ec2", "restore_volume_from_recycle_bin"),
-    ("ec2", "revoke_client_vpn_ingress"),
-    ("ec2", "revoke_security_group_egress"),
-    ("ec2", "revoke_security_group_ingress"),
-    ("ec2", "run_instances"),
-    ("ec2", "run_scheduled_instances"),
-    ("ec2", "search_local_gateway_routes"),
-    ("ec2", "search_transit_gateway_multicast_groups"),
-    ("ec2", "search_transit_gateway_routes"),
-    ("ec2", "send_diagnostic_interrupt"),
-    ("ec2", "start_declarative_policies_report"),
-    ("ec2", "start_instances"),
-    ("ec2", "start_network_insights_access_scope_analysis"),
-    ("ec2", "start_network_insights_analysis"),
-    ("ec2", "start_vpc_endpoint_service_private_dns_verification"),
-    ("ec2", "stop_instances"),
-    ("ec2", "terminate_client_vpn_connections"),
-    ("ec2", "terminate_instances"),
-    ("ec2", "unassign_ipv6_addresses"),
-    ("ec2", "unassign_private_ip_addresses"),
-    ("ec2", "unassign_private_nat_gateway_address"),
-    ("ec2", "unlock_snapshot"),
-    ("ec2", "unmonitor_instances"),
-    ("ec2", "update_capacity_manager_organizations_access"),
-    (
-        "ec2",
-        "update_interruptible_capacity_reservation_allocation",
-    ),
-    ("ec2", "update_security_group_rule_descriptions_egress"),
-    ("ec2", "update_security_group_rule_descriptions_ingress"),
-    ("ec2", "withdraw_byoip_cidr"),
-    ("iam", "accept_delegation_request"),
-    ("iam", "add_client_id_to_open_id_connect_provider"),
-    ("iam", "add_role_to_instance_profile"),
-    ("iam", "add_user_to_group"),
-    ("iam", "associate_delegation_request"),
-    ("iam", "attach_group_policy"),
-    ("iam", "attach_role_policy"),
-    ("iam", "attach_user_policy"),
-    ("iam", "change_password"),
-    ("iam", "create_access_key"),
-    ("iam", "create_account_alias"),
-    ("iam", "create_delegation_request"),
-    ("iam", "create_group"),
-    ("iam", "create_instance_profile"),
-    ("iam", "create_login_profile"),
-    ("iam", "create_open_id_connect_provider"),
-    ("iam", "create_policy"),
-    ("iam", "create_policy_version"),
-    ("iam", "create_role"),
-    ("iam", "create_saml_provider"),
-    ("iam", "create_service_linked_role"),
-    ("iam", "create_service_specific_credential"),
-    ("iam", "create_user"),
-    ("iam", "create_virtual_mfa_device"),
-    ("iam", "deactivate_mfa_device"),
-    ("iam", "delete_access_key"),
-    ("iam", "delete_account_alias"),
-    ("iam", "delete_account_password_policy"),
-    ("iam", "delete_group"),
-    ("iam", "delete_group_policy"),
-    ("iam", "delete_instance_profile"),
-    ("iam", "delete_login_profile"),
-    ("iam", "delete_open_id_connect_provider"),
-    ("iam", "delete_policy"),
-    ("iam", "delete_policy_version"),
-    ("iam", "delete_role"),
-    ("iam", "delete_role_permissions_boundary"),
-    ("iam", "delete_role_policy"),
-    ("iam", "delete_saml_provider"),
-    ("iam", "delete_server_certificate"),
-    ("iam", "delete_service_linked_role"),
-    ("iam", "delete_service_specific_credential"),
-    ("iam", "delete_signing_certificate"),
-    ("iam", "delete_ssh_public_key"),
-    ("iam", "delete_user"),
-    ("iam", "delete_user_permissions_boundary"),
-    ("iam", "delete_user_policy"),
-    ("iam", "delete_virtual_mfa_device"),
-    ("iam", "detach_group_policy"),
-    ("iam", "detach_role_policy"),
-    ("iam", "detach_user_policy"),
-    ("iam", "disable_organizations_root_credentials_management"),
-    ("iam", "disable_organizations_root_sessions"),
-    ("iam", "disable_outbound_web_identity_federation"),
-    ("iam", "enable_mfa_device"),
-    ("iam", "enable_organizations_root_credentials_management"),
-    ("iam", "enable_organizations_root_sessions"),
-    ("iam", "enable_outbound_web_identity_federation"),
-    ("iam", "generate_credential_report"),
-    ("iam", "generate_organizations_access_report"),
-    ("iam", "generate_service_last_accessed_details"),
-    ("iam", "get_access_key_last_used"),
-    ("iam", "get_account_authorization_details"),
-    ("iam", "get_account_password_policy"),
-    ("iam", "get_account_summary"),
-    ("iam", "get_context_keys_for_custom_policy"),
-    ("iam", "get_context_keys_for_principal_policy"),
-    ("iam", "get_credential_report"),
-    ("iam", "get_delegation_request"),
-    ("iam", "get_group"),
-    ("iam", "get_group_policy"),
-    ("iam", "get_human_readable_summary"),
-    ("iam", "get_instance_profile"),
-    ("iam", "get_login_profile"),
-    ("iam", "get_mfa_device"),
-    ("iam", "get_open_id_connect_provider"),
-    ("iam", "get_organizations_access_report"),
-    ("iam", "get_outbound_web_identity_federation_info"),
-    ("iam", "get_policy"),
-    ("iam", "get_policy_version"),
-    ("iam", "get_role"),
-    ("iam", "get_role_policy"),
-    ("iam", "get_saml_provider"),
-    ("iam", "get_server_certificate"),
-    ("iam", "get_service_last_accessed_details"),
-    ("iam", "get_service_last_accessed_details_with_entities"),
-    ("iam", "get_service_linked_role_deletion_status"),
-    ("iam", "get_ssh_public_key"),
-    ("iam", "get_user"),
-    ("iam", "get_user_policy"),
-    ("iam", "list_access_keys"),
-    ("iam", "list_account_aliases"),
-    ("iam", "list_attached_group_policies"),
-    ("iam", "list_attached_role_policies"),
-    ("iam", "list_attached_user_policies"),
-    ("iam", "list_delegation_requests"),
-    ("iam", "list_entities_for_policy"),
-    ("iam", "list_group_policies"),
-    ("iam", "list_groups"),
-    ("iam", "list_groups_for_user"),
-    ("iam", "list_instance_profile_tags"),
-    ("iam", "list_instance_profiles"),
-    ("iam", "list_instance_profiles_for_role"),
-    ("iam", "list_mfa_device_tags"),
-    ("iam", "list_mfa_devices"),
-    ("iam", "list_open_id_connect_provider_tags"),
-    ("iam", "list_open_id_connect_providers"),
-    ("iam", "list_organizations_features"),
-    ("iam", "list_policies"),
-    ("iam", "list_policies_granting_service_access"),
-    ("iam", "list_policy_tags"),
-    ("iam", "list_policy_versions"),
-    ("iam", "list_role_policies"),
-    ("iam", "list_role_tags"),
-    ("iam", "list_roles"),
-    ("iam", "list_saml_provider_tags"),
-    ("iam", "list_saml_providers"),
-    ("iam", "list_server_certificate_tags"),
-    ("iam", "list_server_certificates"),
-    ("iam", "list_service_specific_credentials"),
-    ("iam", "list_signing_certificates"),
-    ("iam", "list_ssh_public_keys"),
-    ("iam", "list_user_policies"),
-    ("iam", "list_user_tags"),
-    ("iam", "list_users"),
-    ("iam", "list_virtual_mfa_devices"),
-    ("iam", "put_group_policy"),
-    ("iam", "put_role_permissions_boundary"),
-    ("iam", "put_role_policy"),
-    ("iam", "put_user_permissions_boundary"),
-    ("iam", "put_user_policy"),
-    ("iam", "reject_delegation_request"),
-    ("iam", "remove_client_id_from_open_id_connect_provider"),
-    ("iam", "remove_role_from_instance_profile"),
-    ("iam", "remove_user_from_group"),
-    ("iam", "reset_service_specific_credential"),
-    ("iam", "resync_mfa_device"),
-    ("iam", "send_delegation_token"),
-    ("iam", "set_default_policy_version"),
-    ("iam", "set_security_token_service_preferences"),
-    ("iam", "simulate_custom_policy"),
-    ("iam", "simulate_principal_policy"),
-    ("iam", "tag_instance_profile"),
-    ("iam", "tag_mfa_device"),
-    ("iam", "tag_open_id_connect_provider"),
-    ("iam", "tag_policy"),
-    ("iam", "tag_role"),
-    ("iam", "tag_saml_provider"),
-    ("iam", "tag_server_certificate"),
-    ("iam", "tag_user"),
-    ("iam", "untag_instance_profile"),
-    ("iam", "untag_mfa_device"),
-    ("iam", "untag_open_id_connect_provider"),
-    ("iam", "untag_policy"),
-    ("iam", "untag_role"),
-    ("iam", "untag_saml_provider"),
-    ("iam", "untag_server_certificate"),
-    ("iam", "untag_user"),
-    ("iam", "update_access_key"),
-    ("iam", "update_account_password_policy"),
-    ("iam", "update_assume_role_policy"),
-    ("iam", "update_delegation_request"),
-    ("iam", "update_group"),
-    ("iam", "update_login_profile"),
-    ("iam", "update_open_id_connect_provider_thumbprint"),
-    ("iam", "update_role"),
-    ("iam", "update_role_description"),
-    ("iam", "update_saml_provider"),
-    ("iam", "update_server_certificate"),
-    ("iam", "update_service_specific_credential"),
-    ("iam", "update_signing_certificate"),
-    ("iam", "update_ssh_public_key"),
-    ("iam", "update_user"),
-    ("iam", "upload_server_certificate"),
-    ("iam", "upload_signing_certificate"),
-    ("iam", "upload_ssh_public_key"),
-    ("identitystore", "create_group"),
-    ("identitystore", "create_group_membership"),
-    ("identitystore", "create_user"),
-    ("identitystore", "delete_group"),
-    ("identitystore", "delete_group_membership"),
-    ("identitystore", "delete_user"),
-    ("identitystore", "describe_group"),
-    ("identitystore", "describe_group_membership"),
-    ("identitystore", "describe_user"),
-    ("identitystore", "get_group_id"),
-    ("identitystore", "get_group_membership_id"),
-    ("identitystore", "get_user_id"),
-    ("identitystore", "is_member_in_groups"),
-    ("identitystore", "list_group_memberships"),
-    ("identitystore", "list_group_memberships_for_member"),
-    ("identitystore", "list_groups"),
-    ("identitystore", "list_users"),
-    ("identitystore", "update_group"),
-    ("identitystore", "update_user"),
-    ("organizations", "accept_handshake"),
-    ("organizations", "attach_policy"),
-    ("organizations", "cancel_handshake"),
-    ("organizations", "close_account"),
-    ("organizations", "create_account"),
-    ("organizations", "create_gov_cloud_account"),
-    ("organizations", "create_organization"),
-    ("organizations", "create_organizational_unit"),
-    ("organizations", "create_policy"),
-    ("organizations", "decline_handshake"),
-    ("organizations", "delete_organization"),
-    ("organizations", "delete_organizational_unit"),
-    ("organizations", "delete_policy"),
-    ("organizations", "delete_resource_policy"),
-    ("organizations", "deregister_delegated_administrator"),
-    ("organizations", "describe_account"),
-    ("organizations", "describe_create_account_status"),
-    ("organizations", "describe_effective_policy"),
-    ("organizations", "describe_handshake"),
-    ("organizations", "describe_organization"),
-    ("organizations", "describe_organizational_unit"),
-    ("organizations", "describe_policy"),
-    ("organizations", "describe_resource_policy"),
-    ("organizations", "describe_responsibility_transfer"),
-    ("organizations", "detach_policy"),
-    ("organizations", "disable_aws_service_access"),
-    ("organizations", "disable_policy_type"),
-    ("organizations", "enable_all_features"),
-    ("organizations", "enable_aws_service_access"),
-    ("organizations", "enable_policy_type"),
-    ("organizations", "invite_account_to_organization"),
-    (
-        "organizations",
-        "invite_organization_to_transfer_responsibility",
-    ),
-    ("organizations", "leave_organization"),
-    ("organizations", "list_accounts"),
-    ("organizations", "list_accounts_for_parent"),
-    (
-        "organizations",
-        "list_accounts_with_invalid_effective_policy",
-    ),
-    ("organizations", "list_aws_service_access_for_organization"),
-    ("organizations", "list_children"),
-    ("organizations", "list_create_account_status"),
-    ("organizations", "list_delegated_administrators"),
-    ("organizations", "list_delegated_services_for_account"),
-    ("organizations", "list_effective_policy_validation_errors"),
-    ("organizations", "list_handshakes_for_account"),
-    ("organizations", "list_handshakes_for_organization"),
-    ("organizations", "list_inbound_responsibility_transfers"),
-    ("organizations", "list_organizational_units_for_parent"),
-    ("organizations", "list_outbound_responsibility_transfers"),
-    ("organizations", "list_parents"),
-    ("organizations", "list_policies"),
-    ("organizations", "list_policies_for_target"),
-    ("organizations", "list_roots"),
-    ("organizations", "list_tags_for_resource"),
-    ("organizations", "list_targets_for_policy"),
-    ("organizations", "move_account"),
-    ("organizations", "put_resource_policy"),
-    ("organizations", "register_delegated_administrator"),
-    ("organizations", "remove_account_from_organization"),
-    ("organizations", "tag_resource"),
-    ("organizations", "terminate_responsibility_transfer"),
-    ("organizations", "untag_resource"),
-    ("organizations", "update_organizational_unit"),
-    ("organizations", "update_policy"),
-    ("organizations", "update_responsibility_transfer"),
-    ("route53", "activate_key_signing_key"),
-    ("route53", "associate_vpc_with_hosted_zone"),
-    ("route53", "change_cidr_collection"),
-    ("route53", "change_resource_record_sets"),
-    ("route53", "change_tags_for_resource"),
-    ("route53", "create_cidr_collection"),
-    ("route53", "create_health_check"),
-    ("route53", "create_hosted_zone"),
-    ("route53", "create_key_signing_key"),
-    ("route53", "create_query_logging_config"),
-    ("route53", "create_reusable_delegation_set"),
-    ("route53", "create_traffic_policy"),
-    ("route53", "create_traffic_policy_instance"),
-    ("route53", "create_traffic_policy_version"),
-    ("route53", "create_vpc_association_authorization"),
-    ("route53", "deactivate_key_signing_key"),
-    ("route53", "delete_cidr_collection"),
-    ("route53", "delete_health_check"),
-    ("route53", "delete_hosted_zone"),
-    ("route53", "delete_key_signing_key"),
-    ("route53", "delete_query_logging_config"),
-    ("route53", "delete_reusable_delegation_set"),
-    ("route53", "delete_traffic_policy"),
-    ("route53", "delete_traffic_policy_instance"),
-    ("route53", "delete_vpc_association_authorization"),
-    ("route53", "disable_hosted_zone_dnssec"),
-    ("route53", "disassociate_vpc_from_hosted_zone"),
-    ("route53", "enable_hosted_zone_dnssec"),
-    ("route53", "get_account_limit"),
-    ("route53", "get_change"),
-    ("route53", "get_checker_ip_ranges"),
-    ("route53", "get_dnssec"),
-    ("route53", "get_geo_location"),
-    ("route53", "get_health_check"),
-    ("route53", "get_health_check_count"),
-    ("route53", "get_health_check_last_failure_reason"),
-    ("route53", "get_health_check_status"),
-    ("route53", "get_hosted_zone"),
-    ("route53", "get_hosted_zone_count"),
-    ("route53", "get_hosted_zone_limit"),
-    ("route53", "get_query_logging_config"),
-    ("route53", "get_reusable_delegation_set"),
-    ("route53", "get_reusable_delegation_set_limit"),
-    ("route53", "get_traffic_policy"),
-    ("route53", "get_traffic_policy_instance"),
-    ("route53", "get_traffic_policy_instance_count"),
-    ("route53", "list_cidr_blocks"),
-    ("route53", "list_cidr_collections"),
-    ("route53", "list_cidr_locations"),
-    ("route53", "list_geo_locations"),
-    ("route53", "list_health_checks"),
-    ("route53", "list_hosted_zones"),
-    ("route53", "list_hosted_zones_by_name"),
-    ("route53", "list_hosted_zones_by_vpc"),
-    ("route53", "list_query_logging_configs"),
-    ("route53", "list_resource_record_sets"),
-    ("route53", "list_reusable_delegation_sets"),
-    ("route53", "list_tags_for_resource"),
-    ("route53", "list_tags_for_resources"),
-    ("route53", "list_traffic_policies"),
-    ("route53", "list_traffic_policy_instances"),
-    ("route53", "list_traffic_policy_instances_by_hosted_zone"),
-    ("route53", "list_traffic_policy_instances_by_policy"),
-    ("route53", "list_traffic_policy_versions"),
-    ("route53", "list_vpc_association_authorizations"),
-    ("route53", "test_dns_answer"),
-    ("route53", "update_health_check"),
-    ("route53", "update_hosted_zone_comment"),
-    ("route53", "update_hosted_zone_features"),
-    ("route53", "update_traffic_policy_comment"),
-    ("route53", "update_traffic_policy_instance"),
-    ("s3", "abort_multipart_upload"),
-    ("s3", "complete_multipart_upload"),
-    ("s3", "copy_object"),
-    ("s3", "create_bucket"),
-    ("s3", "create_bucket_metadata_configuration"),
-    ("s3", "create_bucket_metadata_table_configuration"),
-    ("s3", "create_multipart_upload"),
-    ("s3", "create_session"),
-    ("s3", "delete_bucket"),
-    ("s3", "delete_bucket_analytics_configuration"),
-    ("s3", "delete_bucket_cors"),
-    ("s3", "delete_bucket_encryption"),
-    ("s3", "delete_bucket_intelligent_tiering_configuration"),
-    ("s3", "delete_bucket_inventory_configuration"),
-    ("s3", "delete_bucket_lifecycle"),
-    ("s3", "delete_bucket_metadata_configuration"),
-    ("s3", "delete_bucket_metadata_table_configuration"),
-    ("s3", "delete_bucket_metrics_configuration"),
-    ("s3", "delete_bucket_ownership_controls"),
-    ("s3", "delete_bucket_policy"),
-    ("s3", "delete_bucket_replication"),
-    ("s3", "delete_bucket_tagging"),
-    ("s3", "delete_bucket_website"),
-    ("s3", "delete_object"),
-    ("s3", "delete_object_tagging"),
-    ("s3", "delete_objects"),
-    ("s3", "delete_public_access_block"),
-    ("s3", "get_bucket_abac"),
-    ("s3", "get_bucket_accelerate_configuration"),
-    ("s3", "get_bucket_acl"),
-    ("s3", "get_bucket_analytics_configuration"),
-    ("s3", "get_bucket_cors"),
-    ("s3", "get_bucket_encryption"),
-    ("s3", "get_bucket_intelligent_tiering_configuration"),
-    ("s3", "get_bucket_inventory_configuration"),
-    ("s3", "get_bucket_lifecycle_configuration"),
-    ("s3", "get_bucket_location"),
-    ("s3", "get_bucket_logging"),
-    ("s3", "get_bucket_metadata_configuration"),
-    ("s3", "get_bucket_metadata_table_configuration"),
-    ("s3", "get_bucket_metrics_configuration"),
-    ("s3", "get_bucket_notification_configuration"),
-    ("s3", "get_bucket_ownership_controls"),
-    ("s3", "get_bucket_policy"),
-    ("s3", "get_bucket_policy_status"),
-    ("s3", "get_bucket_replication"),
-    ("s3", "get_bucket_request_payment"),
-    ("s3", "get_bucket_tagging"),
-    ("s3", "get_bucket_versioning"),
-    ("s3", "get_bucket_website"),
-    ("s3", "get_object"),
-    ("s3", "get_object_acl"),
-    ("s3", "get_object_attributes"),
-    ("s3", "get_object_legal_hold"),
-    ("s3", "get_object_lock_configuration"),
-    ("s3", "get_object_retention"),
-    ("s3", "get_object_tagging"),
-    ("s3", "get_object_torrent"),
-    ("s3", "get_public_access_block"),
-    ("s3", "head_bucket"),
-    ("s3", "head_object"),
-    ("s3", "list_bucket_analytics_configurations"),
-    ("s3", "list_bucket_intelligent_tiering_configurations"),
-    ("s3", "list_bucket_inventory_configurations"),
-    ("s3", "list_bucket_metrics_configurations"),
-    ("s3", "list_buckets"),
-    ("s3", "list_directory_buckets"),
-    ("s3", "list_multipart_uploads"),
-    ("s3", "list_object_versions"),
-    ("s3", "list_objects"),
-    ("s3", "list_objects_v2"),
-    ("s3", "list_parts"),
-    ("s3", "put_bucket_abac"),
-    ("s3", "put_bucket_accelerate_configuration"),
-    ("s3", "put_bucket_acl"),
-    ("s3", "put_bucket_analytics_configuration"),
-    ("s3", "put_bucket_cors"),
-    ("s3", "put_bucket_encryption"),
-    ("s3", "put_bucket_intelligent_tiering_configuration"),
-    ("s3", "put_bucket_inventory_configuration"),
-    ("s3", "put_bucket_lifecycle_configuration"),
-    ("s3", "put_bucket_logging"),
-    ("s3", "put_bucket_metrics_configuration"),
-    ("s3", "put_bucket_notification_configuration"),
-    ("s3", "put_bucket_ownership_controls"),
-    ("s3", "put_bucket_policy"),
-    ("s3", "put_bucket_replication"),
-    ("s3", "put_bucket_request_payment"),
-    ("s3", "put_bucket_tagging"),
-    ("s3", "put_bucket_versioning"),
-    ("s3", "put_bucket_website"),
-    ("s3", "put_object"),
-    ("s3", "put_object_acl"),
-    ("s3", "put_object_legal_hold"),
-    ("s3", "put_object_lock_configuration"),
-    ("s3", "put_object_retention"),
-    ("s3", "put_object_tagging"),
-    ("s3", "put_public_access_block"),
-    ("s3", "rename_object"),
-    ("s3", "restore_object"),
-    ("s3", "select_object_content"),
-    ("s3", "update_bucket_metadata_inventory_table_configuration"),
-    ("s3", "update_bucket_metadata_journal_table_configuration"),
-    ("s3", "update_object_encryption"),
-    ("s3", "upload_part"),
-    ("s3", "upload_part_copy"),
-    ("s3", "write_get_object_response"),
-    ("sqs", "add_permission"),
-    ("sqs", "cancel_message_move_task"),
-    ("sqs", "change_message_visibility"),
-    ("sqs", "change_message_visibility_batch"),
-    ("sqs", "create_queue"),
-    ("sqs", "delete_message"),
-    ("sqs", "delete_message_batch"),
-    ("sqs", "delete_queue"),
-    ("sqs", "get_queue_attributes"),
-    ("sqs", "get_queue_url"),
-    ("sqs", "list_dead_letter_source_queues"),
-    ("sqs", "list_message_move_tasks"),
-    ("sqs", "list_queue_tags"),
-    ("sqs", "list_queues"),
-    ("sqs", "purge_queue"),
-    ("sqs", "receive_message"),
-    ("sqs", "remove_permission"),
-    ("sqs", "send_message"),
-    ("sqs", "send_message_batch"),
-    ("sqs", "set_queue_attributes"),
-    ("sqs", "start_message_move_task"),
-    ("sqs", "tag_queue"),
-    ("sqs", "untag_queue"),
-    ("sts", "assume_role"),
-    ("sts", "assume_role_with_saml"),
-    ("sts", "assume_role_with_web_identity"),
-    ("sts", "assume_root"),
-    ("sts", "decode_authorization_message"),
-    ("sts", "get_access_key_info"),
-    ("sts", "get_caller_identity"),
-    ("sts", "get_delegated_access_token"),
-    ("sts", "get_federation_token"),
-    ("sts", "get_session_token"),
-    ("sts", "get_web_identity_token"),
-];
+impl DecidedOperationError for aws_sdk_sts::operation::get_caller_identity::GetCallerIdentityError {
+    const NAME: &'static str = <aws_sdk_sts::operation::get_caller_identity::builders::GetCallerIdentityFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_sts::operation::get_caller_identity::builders::GetCallerIdentityFluentBuilder as AwsOperation>::IDEMPOTENCY;
+}
 
 #[cfg(test)]
 pub(crate) const DECIDED_OPERATIONS: &[(&str, &str)] = &[
@@ -5851,4 +4174,14 @@ pub(crate) const DECIDED_OPERATIONS: &[(&str, &str)] = &[
     ("sqs", "tag_queue"),
     ("sqs", "untag_queue"),
     ("sts", "get_caller_identity"),
+];
+
+#[cfg(test)]
+pub(crate) const TOKEN_OPERATIONS: &[(&str, &str)] = &[
+    ("acm", "request_certificate"),
+    ("ec2", "create_egress_only_internet_gateway"),
+    ("ec2", "create_flow_logs"),
+    ("ec2", "create_nat_gateway"),
+    ("ec2", "create_route_table"),
+    ("ec2", "create_vpc_endpoint"),
 ];

@@ -131,12 +131,8 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                api_error_with_meta(
-                    "Failed to describe transit gateway VPC attachments",
-                    "ec2.DescribeTransitGatewayVpcAttachments",
-                    e,
-                )
-                .for_resource(id.clone())
+                api_error_with_meta("Failed to describe transit gateway VPC attachments", e)
+                    .for_resource(id.clone())
             })?;
 
         if let Some(att) = result.transit_gateway_vpc_attachments().first() {
@@ -287,12 +283,8 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                api_error_with_meta(
-                    "Failed to describe transit gateway VPC attachment",
-                    "ec2.DescribeTransitGatewayVpcAttachments",
-                    e,
-                )
-                .for_resource(id.clone())
+                api_error_with_meta("Failed to describe transit gateway VPC attachment", e)
+                    .for_resource(id.clone())
             })?;
         Ok(transit_gateway_attachment_create_poll_state(
             result
@@ -315,12 +307,8 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                api_error_with_meta(
-                    "Failed to describe transit gateway VPC attachment",
-                    "ec2.DescribeTransitGatewayVpcAttachments",
-                    e,
-                )
-                .for_resource(id.clone())
+                api_error_with_meta("Failed to describe transit gateway VPC attachment", e)
+                    .for_resource(id.clone())
             })?;
         Ok(transit_gateway_attachment_delete_poll_state(
             result

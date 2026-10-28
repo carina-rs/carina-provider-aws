@@ -35,12 +35,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                api_error_with_meta(
-                    "Failed to describe VPN gateways",
-                    "ec2.DescribeVpnGateways",
-                    e,
-                )
-                .for_resource(id.clone())
+                api_error_with_meta("Failed to describe VPN gateways", e).for_resource(id.clone())
             })?;
 
         if let Some(vgw) = result.vpn_gateways().first() {
@@ -146,8 +141,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                api_error_with_meta("Failed to delete VPN gateway", "ec2.DeleteVpnGateway", e)
-                    .for_resource(id.clone())
+                api_error_with_meta("Failed to delete VPN gateway", e).for_resource(id.clone())
             })?;
         Ok(())
     }

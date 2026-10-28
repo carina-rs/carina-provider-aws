@@ -3,7 +3,7 @@
 use indexmap::IndexMap;
 use std::collections::HashMap;
 
-use carina_core::provider::ProviderResult;
+use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{ConcreteValue, ResourceId, Value};
 
 use crate::AwsProvider;
@@ -12,10 +12,9 @@ use crate::error_helpers::api_error_with_meta;
 
 /// Convert user-authored tag values to SDK tags.
 ///
-/// This is the single write-side filter for the provider-owned discovery tag.
-/// User-supplied `carina:create-token` entries are silently ignored on both
-/// create and update; callers that need a `TagSpecification` must build it
-/// from this result so the policy cannot vary by call site.
+/// Provider entry points reject the provider-owned discovery key. This final
+/// filter prevents an internal caller from ever overwriting it even after a
+/// validation bug; callers that need a `TagSpecification` build from here.
 pub(crate) fn value_to_ec2_tags(value: &Value) -> Vec<aws_sdk_ec2::types::Tag> {
     let mut tags = Vec::new();
     if let Value::Concrete(ConcreteValue::Map(map)) = value {
@@ -33,6 +32,28 @@ pub(crate) fn value_to_ec2_tags(value: &Value) -> Vec<aws_sdk_ec2::types::Tag> {
         }
     }
     tags
+}
+
+/// Reject a user-authored provider discovery tag at the common EC2 boundary.
+pub(crate) fn validate_ec2_user_tags(
+    resource_id: &ResourceId,
+    attributes: &HashMap<String, Value>,
+) -> ProviderResult<()> {
+    if !resource_id.resource_type.as_str().starts_with("ec2.") {
+        return Ok(());
+    }
+    let has_reserved_key = matches!(
+        attributes.get("tags"),
+        Some(Value::Concrete(ConcreteValue::Map(tags)))
+            if tags.contains_key(EC2_CREATE_TOKEN_TAG)
+    );
+    if has_reserved_key {
+        return Err(ProviderError::invalid_input(format!(
+            "tag key `{EC2_CREATE_TOKEN_TAG}` is reserved for provider-managed create discovery"
+        ))
+        .for_resource(resource_id.clone()));
+    }
+    Ok(())
 }
 
 impl AwsProvider {
@@ -71,6 +92,8 @@ impl AwsProvider {
         attributes: &HashMap<String, Value>,
         from_attributes: Option<&HashMap<String, Value>>,
     ) -> ProviderResult<()> {
+        validate_ec2_user_tags(resource_id, attributes)?;
+
         // Delete tags that were removed (present in from but not in to)
         if let Some(from_attrs) = from_attributes {
             let old_keys: std::collections::HashSet<&String> = if let Some(Value::Concrete(
@@ -100,7 +123,7 @@ impl AwsProvider {
                     req = req.tags(aws_sdk_ec2::types::Tag::builder().key(key.as_str()).build());
                 }
                 req.send().await.map_err(|e| {
-                    api_error_with_meta("Failed to delete tags", "ec2.DeleteTags", e)
+                    api_error_with_meta("Failed to delete tags", e)
                         .for_resource(resource_id.clone())
                 })?;
             }
@@ -115,7 +138,7 @@ impl AwsProvider {
                     req = req.tags(tag);
                 }
                 req.send().await.map_err(|e| {
-                    api_error_with_meta("Failed to tag resource", "ec2.CreateTags", e)
+                    api_error_with_meta("Failed to tag resource", e)
                         .for_resource(resource_id.clone())
                 })?;
             }
@@ -332,7 +355,7 @@ mod tests {
     }
 
     #[test]
-    fn create_token_tag_cannot_be_written_as_a_user_tag() {
+    fn create_token_tag_is_rejected_as_reserved_input() {
         let value = Value::Concrete(ConcreteValue::Map(IndexMap::from([
             (
                 "carina:create-token".to_string(),
@@ -344,14 +367,16 @@ mod tests {
             ),
         ])));
 
-        let tags = value_to_ec2_tags(&value);
+        let id = ResourceId::with_provider_identity("aws", "ec2.Vpc", "example", None);
+        let error = validate_ec2_user_tags(&id, &HashMap::from([("tags".to_string(), value)]))
+            .expect_err("provider-owned create-token tags must be rejected");
 
-        assert_eq!(tags.len(), 1);
-        assert_eq!(tags[0].key(), Some("Name"));
+        assert_eq!(error.variant_name(), "invalid_input");
+        assert!(error.to_string().contains(EC2_CREATE_TOKEN_TAG));
     }
 
     #[tokio::test]
-    async fn updating_user_tags_never_deletes_or_overwrites_create_token() {
+    async fn updating_user_tags_rejects_reserved_create_token_before_aws_calls() {
         let service = Arc::new(TagRecordingEc2Service::default());
         let mock = MockAws::builder()
             .with_service(Arc::clone(&service))
@@ -386,7 +411,7 @@ mod tests {
             ),
         ])));
 
-        provider
+        let error = provider
             .apply_ec2_tags(
                 &id,
                 "vpc-12345678",
@@ -394,18 +419,14 @@ mod tests {
                 Some(&HashMap::from([("tags".to_string(), old_tags)])),
             )
             .await
-            .expect("tag update");
+            .expect_err("reserved tag update must fail");
 
+        assert!(error.to_string().contains(EC2_CREATE_TOKEN_TAG));
         let bodies = service.request_bodies.lock().expect("request-body lock");
-        assert_eq!(bodies.len(), 2, "expected DeleteTags and CreateTags");
-        assert!(bodies.iter().any(|body| body.contains("Old")));
-        assert!(bodies.iter().any(|body| body.contains("Name")));
-        for body in bodies.iter() {
-            assert!(!body.contains("carina:create-token"), "{body}");
-            assert!(!body.contains("carina%3Acreate-token"), "{body}");
-            assert!(!body.contains("original-token"), "{body}");
-            assert!(!body.contains("replacement-token"), "{body}");
-        }
+        assert!(
+            bodies.is_empty(),
+            "validation must precede AWS calls: {bodies:?}"
+        );
     }
 
     #[test]

@@ -66,8 +66,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                api_error_with_meta("Failed to describe subnets", "ec2.DescribeSubnets", e)
-                    .for_resource(id.clone())
+                api_error_with_meta("Failed to describe subnets", e).for_resource(id.clone())
             })?;
 
         if let Some(subnet) = result.subnets().first() {
@@ -204,12 +203,8 @@ impl AwsProvider {
                 .send()
                 .await
                 .map_err(|e| {
-                    api_error_with_meta(
-                        "Failed to set map_public_ip_on_launch",
-                        "ec2.ModifySubnetAttribute",
-                        e,
-                    )
-                    .for_resource(id.clone())
+                    api_error_with_meta("Failed to set map_public_ip_on_launch", e)
+                        .for_resource(id.clone())
                 })?;
         }
 
@@ -223,12 +218,8 @@ impl AwsProvider {
                 .send()
                 .await
                 .map_err(|e| {
-                    api_error_with_meta(
-                        "Failed to set assign_ipv6_address_on_creation",
-                        "ec2.ModifySubnetAttribute",
-                        e,
-                    )
-                    .for_resource(id.clone())
+                    api_error_with_meta("Failed to set assign_ipv6_address_on_creation", e)
+                        .for_resource(id.clone())
                 })?;
         }
 
@@ -240,12 +231,7 @@ impl AwsProvider {
                 .send()
                 .await
                 .map_err(|e| {
-                    api_error_with_meta(
-                        "Failed to set enable_dns64",
-                        "ec2.ModifySubnetAttribute",
-                        e,
-                    )
-                    .for_resource(id.clone())
+                    api_error_with_meta("Failed to set enable_dns64", e).for_resource(id.clone())
                 })?;
         }
 
@@ -261,7 +247,6 @@ impl AwsProvider {
                 .map_err(|e| {
                     api_error_with_meta(
                         "Failed to set private_dns_name_options_on_launch.hostname_type",
-                        "ec2.ModifySubnetAttribute",
                         e,
                     )
                     .for_resource(id.clone())
@@ -284,7 +269,6 @@ impl AwsProvider {
                 .map_err(|e| {
                     api_error_with_meta(
                         "Failed to set private_dns_name_options_on_launch.enable_resource_name_dns_a_record",
-                        "ec2.ModifySubnetAttribute",
                         e,
                     )
                     .for_resource(id.clone())
@@ -307,7 +291,6 @@ impl AwsProvider {
                 .map_err(|e| {
                     api_error_with_meta(
                         "Failed to set private_dns_name_options_on_launch.enable_resource_name_dns_aaaa_record",
-                        "ec2.ModifySubnetAttribute",
                         e,
                     )
                     .for_resource(id.clone())

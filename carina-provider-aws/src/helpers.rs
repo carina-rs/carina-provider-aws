@@ -404,6 +404,20 @@ where
     retry_aws_builder(policy, builder, |request| request.with_client_token(token)).await
 }
 
+/// Send a generated token-bearing AWS builder exactly once.
+///
+/// Keeping even one-shot sends behind this entry point makes applying the
+/// invocation token a type-checked invariant instead of call-site convention.
+pub(crate) async fn send_aws_operation_with_token<B>(
+    token: &ClientToken,
+    builder: B,
+) -> Result<B::Output, SdkError<B::Error, HttpResponse>>
+where
+    B: AwsOperation<Resend = WithToken> + TokenBearing,
+{
+    builder.with_client_token(token).send().await
+}
+
 async fn retry_aws_builder<F, P, B>(
     policy: RetryPolicy,
     builder: F,
@@ -1523,6 +1537,30 @@ mod tests {
         assert_eq!(
             seen_tokens.lock().expect("token lock").as_slice(),
             [token.as_str(), token.as_str()]
+        );
+    }
+
+    #[tokio::test]
+    async fn provider_single_send_applies_the_token() {
+        let call = MockCall::new(MockFailure::Timeout);
+        let seen_tokens = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let token = ClientToken::new();
+
+        let result = send_aws_operation_with_token(
+            &token,
+            MockCreateNatGateway {
+                call: call.clone(),
+                token: None,
+                seen_tokens: seen_tokens.clone(),
+            },
+        )
+        .await;
+
+        assert!(result.is_err());
+        assert_eq!(call.attempts(), 1);
+        assert_eq!(
+            seen_tokens.lock().expect("token lock").as_slice(),
+            [token.as_str()]
         );
     }
 

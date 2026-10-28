@@ -27,12 +27,8 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                api_error_with_meta(
-                    "Failed to describe VPC peering connections",
-                    "ec2.DescribeVpcPeeringConnections",
-                    e,
-                )
-                .for_resource(id.clone())
+                api_error_with_meta("Failed to describe VPC peering connections", e)
+                    .for_resource(id.clone())
             })?;
 
         if let Some(pcx) = result.vpc_peering_connections().first() {
@@ -158,12 +154,8 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                api_error_with_meta(
-                    "Failed to delete VPC peering connection",
-                    "ec2.DeleteVpcPeeringConnection",
-                    e,
-                )
-                .for_resource(id.clone())
+                api_error_with_meta("Failed to delete VPC peering connection", e)
+                    .for_resource(id.clone())
             })?;
         Ok(())
     }

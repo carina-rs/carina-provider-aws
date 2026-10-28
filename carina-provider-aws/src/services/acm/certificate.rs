@@ -26,6 +26,7 @@ use crate::aws_operation::ClientToken;
 use crate::error_helpers::{AwsSdkError, api_error_with_meta};
 use crate::helpers::{
     optional_enum_attr, optional_enum_struct_field, require_string_attr, sdk_error_message,
+    send_aws_operation_with_token,
 };
 use crate::provider::CreateCompletion;
 
@@ -41,12 +42,11 @@ fn request_certificate_error(
         // explicit so an operator checks ACM before applying again.
         api_error_with_meta(
             "acm.Certificate may have been created; check before re-applying",
-            "acm.RequestCertificate",
             error,
         )
+        .for_resource(id.clone())
     } else {
-        api_error_with_meta("RequestCertificate failed", "acm.RequestCertificate", error)
-            .for_resource(id.clone())
+        api_error_with_meta("RequestCertificate failed", error).for_resource(id.clone())
     }
 }
 
@@ -518,8 +518,7 @@ impl AwsProvider {
             .set_subject_alternative_names(request.subject_alternative_names)
             .set_options(request.options)
             .set_tags(request.tags)
-            .set_key_algorithm(request.key_algorithm)
-            .idempotency_token(client_token.as_str());
+            .set_key_algorithm(request.key_algorithm);
         // RequestCertificate accepts tags inline, avoiding a follow-up
         // AddTagsToCertificate round-trip on the create path.
         // The previous request-side `domain_validation_options`
@@ -532,8 +531,7 @@ impl AwsProvider {
         // feature; the common DNS-validation path is unaffected.
         // carina-rs/carina-provider-aws#296.
 
-        let output = req
-            .send()
+        let output = send_aws_operation_with_token(client_token, req)
             .await
             .map_err(|error| request_certificate_error(&id, error))?;
 
@@ -560,12 +558,8 @@ impl AwsProvider {
                         .send()
                         .await
                         .map_err(|e| {
-                            api_error_with_meta(
-                                "DescribeCertificate failed",
-                                "acm.DescribeCertificate",
-                                e,
-                            )
-                            .for_resource(id.clone())
+                            api_error_with_meta("DescribeCertificate failed", e)
+                                .for_resource(id.clone())
                         })
                         .map(|out| out.certificate().cloned())
                 },
@@ -632,8 +626,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                api_error_with_meta("DescribeCertificate failed", "acm.DescribeCertificate", e)
-                    .for_resource(id.clone())
+                api_error_with_meta("DescribeCertificate failed", e).for_resource(id.clone())
             })?;
         self.read_acm_certificate_from_detail(id, applied_identifier, output.certificate())
             .await
@@ -666,12 +659,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                api_error_with_meta(
-                    "ListTagsForCertificate failed",
-                    "acm.ListTagsForCertificate",
-                    e,
-                )
-                .for_resource(id.clone())
+                api_error_with_meta("ListTagsForCertificate failed", e).for_resource(id.clone())
             })?;
         let tags = tag_output.tags();
         if !tags.is_empty() {
@@ -714,12 +702,8 @@ impl AwsProvider {
                 .send()
                 .await
                 .map_err(|e| {
-                    api_error_with_meta(
-                        "UpdateCertificateOptions failed",
-                        "acm.UpdateCertificateOptions",
-                        e,
-                    )
-                    .for_resource(id.clone())
+                    api_error_with_meta("UpdateCertificateOptions failed", e)
+                        .for_resource(id.clone())
                 })?;
         }
         self.apply_acm_tags(&id, identifier.as_str(), &to, from)
@@ -768,8 +752,7 @@ impl AwsProvider {
                 req = req.tags(tag);
             }
             req.send().await.map_err(|e| {
-                api_error_with_meta("AddTagsToCertificate failed", "acm.AddTagsToCertificate", e)
-                    .for_resource(id.clone())
+                api_error_with_meta("AddTagsToCertificate failed", e).for_resource(id.clone())
             })?;
         }
 
@@ -793,12 +776,7 @@ impl AwsProvider {
                 req = req.tags(tag);
             }
             req.send().await.map_err(|e| {
-                api_error_with_meta(
-                    "RemoveTagsFromCertificate failed",
-                    "acm.RemoveTagsFromCertificate",
-                    e,
-                )
-                .for_resource(id.clone())
+                api_error_with_meta("RemoveTagsFromCertificate failed", e).for_resource(id.clone())
             })?;
         }
 
@@ -817,10 +795,7 @@ impl AwsProvider {
             .certificate_arn(identifier)
             .send()
             .await
-            .map_err(|e| {
-                api_error_with_meta("DeleteCertificate failed", "acm.DeleteCertificate", e)
-                    .for_resource(id)
-            })?;
+            .map_err(|e| api_error_with_meta("DeleteCertificate failed", e).for_resource(id))?;
         Ok(())
     }
 }
@@ -925,12 +900,21 @@ mod tests {
     fn maybe_sent_request_certificate_uses_acm_specific_outcome_unknown_message() {
         let error: SdkError<RequestCertificateError> =
             SdkError::timeout_error("response timed out");
+        let id = id();
 
-        let error = request_certificate_error(&id(), error);
+        let error = request_certificate_error(&id, error);
 
         assert_eq!(
             error.to_wire().message,
             "acm.Certificate may have been created; check before re-applying"
+        );
+        assert_eq!(
+            error
+                .to_wire()
+                .resource_id
+                .as_ref()
+                .map(|resource_id| resource_id.identity.as_str()),
+            Some("test-cert")
         );
         assert!(error.to_string().contains("response timed out"));
     }

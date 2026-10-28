@@ -60,10 +60,7 @@ impl AwsProvider {
                 if is_s3_not_configured_error(&e, "NoSuchBucketPolicy") {
                     return Ok(ReadOutcome::not_found(id.clone()));
                 }
-                Err(
-                    api_error_with_meta("Failed to get bucket policy", "s3.GetBucketPolicy", e)
-                        .for_resource(id.clone()),
-                )
+                Err(api_error_with_meta("Failed to get bucket policy", e).for_resource(id.clone()))
             }
         }
     }
@@ -115,8 +112,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                api_error_with_meta("Failed to put bucket policy", "s3.PutBucketPolicy", e)
-                    .for_resource(id.clone())
+                api_error_with_meta("Failed to put bucket policy", e).for_resource(id.clone())
             })?;
 
         Ok(self.read_s3_bucket_policy(id, applied_identifier).await)
@@ -148,12 +144,10 @@ impl AwsProvider {
             {
                 Ok(())
             }
-            Err(e) => Err(api_error_with_meta(
-                "Failed to delete bucket policy",
-                "s3.DeleteBucketPolicy",
-                e,
-            )
-            .for_resource(id.clone())),
+            Err(e) => {
+                Err(api_error_with_meta("Failed to delete bucket policy", e)
+                    .for_resource(id.clone()))
+            }
         }
     }
 }

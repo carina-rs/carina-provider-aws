@@ -140,10 +140,7 @@ impl AwsProvider {
                 if is_s3_not_configured_error(&e, "NoSuchBucket") {
                     return Ok(ReadOutcome::not_found(id.clone()));
                 }
-                Err(
-                    api_error_with_meta("Failed to get bucket ACL", "s3.GetBucketAcl", e)
-                        .for_resource(id.clone()),
-                )
+                Err(api_error_with_meta("Failed to get bucket ACL", e).for_resource(id.clone()))
             }
         }
     }
@@ -196,8 +193,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                api_error_with_meta("Failed to put bucket ACL", "s3.PutBucketAcl", e)
-                    .for_resource(id.clone())
+                api_error_with_meta("Failed to put bucket ACL", e).for_resource(id.clone())
             })?;
 
         Ok(self.read_s3_bucket_acl(id, applied_identifier).await)
@@ -223,10 +219,9 @@ impl AwsProvider {
         match result {
             Ok(_) => Ok(()),
             Err(e) if is_s3_not_configured_error(&e, "NoSuchBucket") => Ok(()),
-            Err(e) => Err(
-                api_error_with_meta("Failed to reset bucket ACL", "s3.PutBucketAcl", e)
-                    .for_resource(id.clone()),
-            ),
+            Err(e) => {
+                Err(api_error_with_meta("Failed to reset bucket ACL", e).for_resource(id.clone()))
+            }
         }
     }
 }

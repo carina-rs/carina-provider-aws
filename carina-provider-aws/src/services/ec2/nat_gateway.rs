@@ -71,12 +71,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                api_error_with_meta(
-                    "Failed to describe NAT gateways",
-                    "ec2.DescribeNatGateways",
-                    e,
-                )
-                .for_resource(id.clone())
+                api_error_with_meta("Failed to describe NAT gateways", e).for_resource(id.clone())
             })?;
 
         if let Some(ngw) = result.nat_gateways().first() {
@@ -204,12 +199,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                api_error_with_meta(
-                    "Failed to describe NAT gateway",
-                    "ec2.DescribeNatGateways",
-                    e,
-                )
-                .for_resource(id.clone())
+                api_error_with_meta("Failed to describe NAT gateway", e).for_resource(id.clone())
             })?;
         Ok(nat_gateway_create_poll_state(
             result.nat_gateways().first().and_then(|ngw| ngw.state()),
@@ -229,12 +219,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                api_error_with_meta(
-                    "Failed to describe NAT gateway",
-                    "ec2.DescribeNatGateways",
-                    e,
-                )
-                .for_resource(id.clone())
+                api_error_with_meta("Failed to describe NAT gateway", e).for_resource(id.clone())
             })?;
         Ok(nat_gateway_delete_poll_state(
             result.nat_gateways().first().and_then(|ngw| ngw.state()),

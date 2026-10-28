@@ -8,7 +8,9 @@ use carina_core::resource::{ConcreteValue, Resource, ResourceId, Value};
 use crate::AwsProvider;
 use crate::aws_operation::ClientToken;
 use crate::error_helpers::api_error_with_meta;
-use crate::helpers::{build_tag_specification_with_create_token, require_string_attr};
+use crate::helpers::{
+    build_tag_specification_with_create_token, require_string_attr, send_aws_operation_with_token,
+};
 use crate::provider::{AwsCreateAttempt, Ec2TaggedResourceKind};
 
 impl AwsProvider {
@@ -35,12 +37,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                api_error_with_meta(
-                    "Failed to describe route tables",
-                    "ec2.DescribeRouteTables",
-                    e,
-                )
-                .for_resource(id.clone())
+                api_error_with_meta("Failed to describe route tables", e).for_resource(id.clone())
             })?;
 
         if let Some(rt) = result.route_tables().first() {
@@ -104,18 +101,16 @@ impl AwsProvider {
         };
 
         // Create Route Table
-        let result = self
+        let req = self
             .ec2_client
             .create_route_table()
-            .client_token(client_token.as_str())
             .vpc_id(&vpc_id)
             .tag_specifications(build_tag_specification_with_create_token(
                 resource,
                 aws_sdk_ec2::types::ResourceType::RouteTable,
                 client_token,
-            ))
-            .send()
-            .await;
+            ));
+        let result = send_aws_operation_with_token(client_token, req).await;
         let sent = Self::sent_only(resource, &["vpc_id", "tags"]);
 
         self.finish_tagged_ec2_create(
@@ -167,12 +162,8 @@ impl AwsProvider {
                             .send()
                             .await;
                         if let Err(error) = result {
-                            let error = api_error_with_meta(
-                                "Failed to create route",
-                                "ec2.CreateRoute",
-                                error,
-                            )
-                            .for_resource(resource.id.clone());
+                            let error = api_error_with_meta("Failed to create route", error)
+                                .for_resource(resource.id.clone());
                             return Err(error);
                         }
                     }

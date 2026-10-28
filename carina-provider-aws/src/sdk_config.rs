@@ -82,7 +82,8 @@ impl BoundedSdkConfig {
 /// shorter deadline than the host already enforces. The operation timeout caps one
 /// SDK call at 60 seconds natively. In WASM the HTTP client sends synchronously, so
 /// connect/read timeouts reach `wasi:http`, but attempt/operation timeouts are checked
-/// only between attempts and one call can overrun 60 seconds by up to one attempt.
+/// only between attempts and one call can overrun 60 seconds by one 30-second attempt,
+/// taking about 90 seconds in the worst case.
 fn timeout_config() -> TimeoutConfig {
     TimeoutConfig::builder()
         .connect_timeout(Duration::from_millis(3_100))

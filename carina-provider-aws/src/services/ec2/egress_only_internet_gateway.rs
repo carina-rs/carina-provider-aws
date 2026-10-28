@@ -7,7 +7,9 @@ use carina_core::resource::{Resource, ResourceId, State};
 use crate::AwsProvider;
 use crate::aws_operation::ClientToken;
 use crate::error_helpers::api_error_with_meta;
-use crate::helpers::{build_tag_specification_with_create_token, require_string_attr};
+use crate::helpers::{
+    build_tag_specification_with_create_token, require_string_attr, send_aws_operation_with_token,
+};
 use crate::provider::{AwsCreateAttempt, Ec2TaggedResourceKind};
 
 impl AwsProvider {
@@ -27,12 +29,8 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                api_error_with_meta(
-                    "Failed to describe egress-only internet gateways",
-                    "ec2.DescribeEgressOnlyInternetGateways",
-                    e,
-                )
-                .for_resource(id.clone())
+                api_error_with_meta("Failed to describe egress-only internet gateways", e)
+                    .for_resource(id.clone())
             })?;
 
         if let Some(eigw) = result.egress_only_internet_gateways().first() {
@@ -71,14 +69,13 @@ impl AwsProvider {
         let req = self
             .ec2_client
             .create_egress_only_internet_gateway()
-            .client_token(client_token.as_str())
             .vpc_id(&vpc_id)
             .tag_specifications(build_tag_specification_with_create_token(
                 resource,
                 aws_sdk_ec2::types::ResourceType::EgressOnlyInternetGateway,
                 client_token,
             ));
-        let result = req.send().await;
+        let result = send_aws_operation_with_token(client_token, req).await;
 
         self.finish_tagged_ec2_create(
             resource,
@@ -129,12 +126,8 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                api_error_with_meta(
-                    "Failed to delete egress-only internet gateway",
-                    "ec2.DeleteEgressOnlyInternetGateway",
-                    e,
-                )
-                .for_resource(id.clone())
+                api_error_with_meta("Failed to delete egress-only internet gateway", e)
+                    .for_resource(id.clone())
             })?;
         Ok(())
     }

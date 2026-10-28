@@ -35,8 +35,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                api_error_with_meta("Failed to describe VPCs", "ec2.DescribeVpcs", e)
-                    .for_resource(id.clone())
+                api_error_with_meta("Failed to describe VPCs", e).for_resource(id.clone())
             })?;
 
         if let Some(vpc) = result.vpcs().first() {
@@ -164,12 +163,8 @@ impl AwsProvider {
                 .send()
                 .await;
             if let Err(error) = result {
-                let error = api_error_with_meta(
-                    "Failed to set DNS support",
-                    "ec2.ModifyVpcAttribute",
-                    error,
-                )
-                .for_resource(resource.id.clone());
+                let error = api_error_with_meta("Failed to set DNS support", error)
+                    .for_resource(resource.id.clone());
                 return Err(error);
             }
         }
@@ -188,12 +183,8 @@ impl AwsProvider {
                 .send()
                 .await;
             if let Err(error) = result {
-                let error = api_error_with_meta(
-                    "Failed to set DNS hostnames",
-                    "ec2.ModifyVpcAttribute",
-                    error,
-                )
-                .for_resource(resource.id.clone());
+                let error = api_error_with_meta("Failed to set DNS hostnames", error)
+                    .for_resource(resource.id.clone());
                 return Err(error);
             }
         }
@@ -225,8 +216,7 @@ impl AwsProvider {
                 .send()
                 .await
                 .map_err(|e| {
-                    api_error_with_meta("Failed to update DNS support", "ec2.ModifyVpcAttribute", e)
-                        .for_resource(id.clone())
+                    api_error_with_meta("Failed to update DNS support", e).for_resource(id.clone())
                 })?;
         }
 
@@ -243,12 +233,8 @@ impl AwsProvider {
                 .send()
                 .await
                 .map_err(|e| {
-                    api_error_with_meta(
-                        "Failed to update DNS hostnames",
-                        "ec2.ModifyVpcAttribute",
-                        e,
-                    )
-                    .for_resource(id.clone())
+                    api_error_with_meta("Failed to update DNS hostnames", e)
+                        .for_resource(id.clone())
                 })?;
         }
 

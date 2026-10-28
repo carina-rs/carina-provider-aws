@@ -34,12 +34,8 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                api_error_with_meta(
-                    "Failed to describe internet gateways",
-                    "ec2.DescribeInternetGateways",
-                    e,
-                )
-                .for_resource(id.clone())
+                api_error_with_meta("Failed to describe internet gateways", e)
+                    .for_resource(id.clone())
             })?;
 
         if let Some(igw) = result.internet_gateways().first() {
@@ -124,12 +120,8 @@ impl AwsProvider {
                 .send()
                 .await;
             if let Err(error) = result {
-                let error = api_error_with_meta(
-                    "Failed to attach internet gateway",
-                    "ec2.AttachInternetGateway",
-                    error,
-                )
-                .for_resource(resource.id.clone());
+                let error = api_error_with_meta("Failed to attach internet gateway", error)
+                    .for_resource(resource.id.clone());
                 return Err(error);
             }
         }
@@ -151,12 +143,8 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                api_error_with_meta(
-                    "Failed to describe internet gateway",
-                    "ec2.DescribeInternetGateways",
-                    e,
-                )
-                .for_resource(id.clone())
+                api_error_with_meta("Failed to describe internet gateway", e)
+                    .for_resource(id.clone())
             })?;
 
         if let Some(igw) = result.internet_gateways().first() {
@@ -171,12 +159,8 @@ impl AwsProvider {
                     .send()
                     .await
                     .map_err(|e| {
-                        api_error_with_meta(
-                            "Failed to detach internet gateway",
-                            "ec2.DetachInternetGateway",
-                            e,
-                        )
-                        .for_resource(id.clone())
+                        api_error_with_meta("Failed to detach internet gateway", e)
+                            .for_resource(id.clone())
                     })?;
             }
         }
@@ -188,12 +172,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                api_error_with_meta(
-                    "Failed to delete internet gateway",
-                    "ec2.DeleteInternetGateway",
-                    e,
-                )
-                .for_resource(id.clone())
+                api_error_with_meta("Failed to delete internet gateway", e).for_resource(id.clone())
             })?;
 
         Ok(())

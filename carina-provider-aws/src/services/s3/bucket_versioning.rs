@@ -68,12 +68,8 @@ impl AwsProvider {
                 if is_s3_not_configured_error(&e, "NoSuchBucket") {
                     return Ok(ReadOutcome::not_found(id.clone()));
                 }
-                Err(api_error_with_meta(
-                    "Failed to get bucket versioning",
-                    "s3.GetBucketVersioning",
-                    e,
-                )
-                .for_resource(id.clone()))
+                Err(api_error_with_meta("Failed to get bucket versioning", e)
+                    .for_resource(id.clone()))
             }
         }
     }
@@ -133,12 +129,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                api_error_with_meta(
-                    "Failed to put bucket versioning",
-                    "s3.PutBucketVersioning",
-                    e,
-                )
-                .for_resource(id.clone())
+                api_error_with_meta("Failed to put bucket versioning", e).for_resource(id.clone())
             })?;
 
         Ok(self.read_s3_bucket_versioning(id, applied_identifier).await)
@@ -218,7 +209,6 @@ fn finish_s3_bucket_versioning_suspend(
             }
             SuspensionErrorKind::Other => Err(api_error_with_meta(
                 "Failed to suspend bucket versioning",
-                "s3.PutBucketVersioning",
                 error,
             )
             .for_resource(id)),

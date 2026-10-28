@@ -72,7 +72,6 @@ impl AwsProvider {
             }
             Err(error) => Err(api_error_with_meta(
                 "Failed to get bucket Object Lock configuration",
-                "s3.GetObjectLockConfiguration",
                 error,
             )
             .for_resource(id.clone())),
@@ -146,7 +145,6 @@ impl AwsProvider {
             }
             Err(error) => Err(api_error_with_meta(
                 "Failed to check existing bucket Object Lock configuration before create",
-                "s3.GetObjectLockConfiguration",
                 error,
             )
             .for_resource(id.clone())),
@@ -223,7 +221,6 @@ impl AwsProvider {
             .map_err(|error| {
                 api_error_with_meta(
                     "Failed to check bucket versioning before enabling Object Lock",
-                    "s3.GetBucketVersioning",
                     error,
                 )
                 .for_resource(id.clone())
@@ -287,7 +284,6 @@ fn map_put_object_lock_configuration_result(
             InvalidBucketStateReason::ObjectLockConfigurationPresent
             | InvalidBucketStateReason::Other => Err(api_error_with_meta(
                 "Failed to put bucket Object Lock configuration",
-                "s3.PutObjectLockConfiguration",
                 error,
             )
             .for_resource(id.clone())),

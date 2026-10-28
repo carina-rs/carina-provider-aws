@@ -64,12 +64,10 @@ impl AwsProvider {
                 {
                     return Ok(ReadOutcome::not_found(id.clone()));
                 }
-                Err(api_error_with_meta(
-                    "Failed to get bucket lifecycle configuration",
-                    "s3.GetBucketLifecycleConfiguration",
-                    e,
+                Err(
+                    api_error_with_meta("Failed to get bucket lifecycle configuration", e)
+                        .for_resource(id.clone()),
                 )
-                .for_resource(id.clone()))
             }
         }
     }
@@ -150,12 +148,8 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                api_error_with_meta(
-                    "Failed to put bucket lifecycle configuration",
-                    "s3.PutBucketLifecycleConfiguration",
-                    e,
-                )
-                .for_resource(id.clone())
+                api_error_with_meta("Failed to put bucket lifecycle configuration", e)
+                    .for_resource(id.clone())
             })?;
 
         Ok(self
@@ -185,7 +179,6 @@ impl AwsProvider {
             }
             Err(e) => Err(api_error_with_meta(
                 "Failed to delete bucket lifecycle configuration",
-                "s3.DeleteBucketLifecycle",
                 e,
             )
             .for_resource(id.clone())),

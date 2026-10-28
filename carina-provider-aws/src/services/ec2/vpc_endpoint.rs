@@ -31,12 +31,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                api_error_with_meta(
-                    "Failed to describe VPC endpoints",
-                    "ec2.DescribeVpcEndpoints",
-                    e,
-                )
-                .for_resource(id.clone())
+                api_error_with_meta("Failed to describe VPC endpoints", e).for_resource(id.clone())
             })?;
 
         if let Some(endpoint) = result.vpc_endpoints().first() {
@@ -363,8 +358,7 @@ impl AwsProvider {
 
         if has_modifications {
             req.send().await.map_err(|e| {
-                api_error_with_meta("Failed to modify VPC endpoint", "ec2.ModifyVpcEndpoint", e)
-                    .for_resource(id.clone())
+                api_error_with_meta("Failed to modify VPC endpoint", e).for_resource(id.clone())
             })?;
         }
 
@@ -394,8 +388,7 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                api_error_with_meta("Failed to delete VPC endpoint", "ec2.DeleteVpcEndpoints", e)
-                    .for_resource(id.clone())
+                api_error_with_meta("Failed to delete VPC endpoint", e).for_resource(id.clone())
             })?;
 
         // Check for unsuccessful items
