@@ -10,16 +10,6 @@ use std::str;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
-use aws_sdk_acm::Client as AcmClient;
-use aws_sdk_cloudwatchlogs::Client as CloudWatchLogsClient;
-use aws_sdk_ec2::Client as Ec2Client;
-use aws_sdk_iam::Client as IamClient;
-use aws_sdk_identitystore::Client as IdentityStoreClient;
-use aws_sdk_organizations::Client as OrganizationsClient;
-use aws_sdk_route53::Client as Route53Client;
-use aws_sdk_s3::Client as S3Client;
-use aws_sdk_sqs::Client as SqsClient;
-use aws_sdk_sts::Client as StsClient;
 use carina_core::provider::{
     AppliedIdentifier, AppliedState, CreateRequest, DeleteRequest, Observation, ProviderError,
     ReadOutcome, Sent,
@@ -28,7 +18,7 @@ use carina_core::resource::{ConcreteValue, Resource, ResourceId, Value};
 use carina_provider_aws::{
     AwsCreateAttempt, AwsCreatePoll, AwsCreateResume, AwsCreateToken, AwsDeleteToken,
     AwsIssuedCreate, AwsNormalizer, AwsPollAttempt, AwsProvider, AwsResumeAttempt,
-    AwsResumedCreate,
+    AwsResumedCreate, BoundedSdkConfig,
 };
 use carina_provider_protocol::OperationStep;
 use indexmap::IndexMap;
@@ -550,21 +540,12 @@ fn empty_describe_flow_logs_response() -> &'static str {
 </DescribeFlowLogsResponse>"#
 }
 
-fn provider_from_config(sdk_config: &aws_types::SdkConfig) -> AwsProvider {
-    AwsProvider::from_clients(
+fn provider_from_config(sdk_config: aws_types::SdkConfig) -> AwsProvider {
+    AwsProvider::from_sdk_config(
         REGION.to_string(),
-        Vec::new(),
-        Vec::new(),
-        S3Client::new(sdk_config),
-        Ec2Client::new(sdk_config),
-        IamClient::new(sdk_config),
-        CloudWatchLogsClient::new(sdk_config),
-        StsClient::new(sdk_config),
-        OrganizationsClient::new(sdk_config),
-        IdentityStoreClient::new(sdk_config),
-        Route53Client::new(sdk_config),
-        AcmClient::new(sdk_config),
-        SqsClient::new(sdk_config),
+        vec![],
+        vec![],
+        &BoundedSdkConfig::new(sdk_config),
     )
 }
 
@@ -574,7 +555,7 @@ async fn provider_with_ec2(describe_states: &[&str]) -> (AwsProvider, Arc<Script
         .with_service(Arc::clone(&service))
         .build();
     let sdk_config = mock.sdk_config(REGION).await;
-    (provider_from_config(&sdk_config), service)
+    (provider_from_config(sdk_config), service)
 }
 
 async fn provider_with_ec2_failures(
@@ -591,7 +572,7 @@ async fn provider_with_ec2_failures(
         .with_service(Arc::clone(&service))
         .build();
     let sdk_config = mock.sdk_config(REGION).await;
-    (provider_from_config(&sdk_config), service)
+    (provider_from_config(sdk_config), service)
 }
 
 async fn provider_with_partial_flow_log() -> AwsProvider {
@@ -599,13 +580,13 @@ async fn provider_with_partial_flow_log() -> AwsProvider {
         .with_service(PartialFlowLogEc2Service)
         .build();
     let sdk_config = mock.sdk_config(REGION).await;
-    provider_from_config(&sdk_config)
+    provider_from_config(sdk_config)
 }
 
 async fn provider_without_services() -> AwsProvider {
     let mock = MockAws::builder().build();
     let sdk_config = mock.sdk_config(REGION).await;
-    provider_from_config(&sdk_config)
+    provider_from_config(sdk_config)
 }
 
 fn string(value: &str) -> Value {

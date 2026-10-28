@@ -3,22 +3,13 @@
 
 #![cfg(not(target_arch = "wasm32"))]
 
-use aws_sdk_acm::Client as AcmClient;
-use aws_sdk_cloudwatchlogs::Client as CloudWatchLogsClient;
-use aws_sdk_ec2::Client as Ec2Client;
-use aws_sdk_iam::Client as IamClient;
-use aws_sdk_identitystore::Client as IdentityStoreClient;
-use aws_sdk_organizations::Client as OrganizationsClient;
-use aws_sdk_route53::Client as Route53Client;
 use aws_sdk_s3::Client as S3Client;
-use aws_sdk_sqs::Client as SqsClient;
-use aws_sdk_sts::Client as StsClient;
 use carina_core::provider::{
     AppliedIdentifier, CreateOutcomeKind, CreateRequest, Provider, ProviderReadyDataSource,
     ReadRequest, UpdateOutcome, UpdateRequest,
 };
 use carina_core::resource::{ConcreteValue, DataSource, Resource, State, Value};
-use carina_provider_aws::{AwsNormalizer, AwsProvider};
+use carina_provider_aws::{AwsNormalizer, AwsProvider, BoundedSdkConfig};
 use indexmap::IndexMap;
 use std::collections::HashMap;
 use std::future::Future;
@@ -130,21 +121,12 @@ impl MockService for RecordingS3Service {
     }
 }
 
-fn provider_from_config(sdk_config: &aws_types::SdkConfig) -> AwsProvider {
-    AwsProvider::from_clients(
+fn provider_from_config(sdk_config: aws_types::SdkConfig) -> AwsProvider {
+    AwsProvider::from_sdk_config(
         PROVIDER_REGION.to_string(),
-        Vec::new(),
-        Vec::new(),
-        S3Client::new(sdk_config),
-        Ec2Client::new(sdk_config),
-        IamClient::new(sdk_config),
-        CloudWatchLogsClient::new(sdk_config),
-        StsClient::new(sdk_config),
-        OrganizationsClient::new(sdk_config),
-        IdentityStoreClient::new(sdk_config),
-        Route53Client::new(sdk_config),
-        AcmClient::new(sdk_config),
-        SqsClient::new(sdk_config),
+        vec![],
+        vec![],
+        &BoundedSdkConfig::new(sdk_config),
     )
 }
 
@@ -152,7 +134,7 @@ async fn provider_with_s3() -> (AwsProvider, S3Client) {
     let mock = MockAws::builder().with_service(S3Service::new()).build();
     let sdk_config = mock.sdk_config(PROVIDER_REGION).await;
     let s3_client = S3Client::new(&sdk_config);
-    (provider_from_config(&sdk_config), s3_client)
+    (provider_from_config(sdk_config), s3_client)
 }
 
 async fn provider_with_staged_bucket(bucket: &str) -> (AwsProvider, Arc<RecordingS3Service>) {
@@ -184,7 +166,7 @@ async fn provider_with_staged_bucket(bucket: &str) -> (AwsProvider, Arc<Recordin
         .with_service(Arc::clone(&recording_service))
         .build();
     let sdk_config = mock.sdk_config(PROVIDER_REGION).await;
-    (provider_from_config(&sdk_config), recording_service)
+    (provider_from_config(sdk_config), recording_service)
 }
 
 async fn provider_with_not_found_read_back(staged_bucket: Option<&str>) -> AwsProvider {
@@ -213,7 +195,7 @@ async fn provider_with_not_found_read_back(staged_bucket: Option<&str>) -> AwsPr
         .with_service(Arc::new(NotFoundHeadS3Service { inner: s3_service }))
         .build();
     let sdk_config = mock.sdk_config(PROVIDER_REGION).await;
-    provider_from_config(&sdk_config)
+    provider_from_config(sdk_config)
 }
 
 async fn provider_with_error_read_back(staged_bucket: Option<&str>) -> AwsProvider {
@@ -242,7 +224,7 @@ async fn provider_with_error_read_back(staged_bucket: Option<&str>) -> AwsProvid
         .with_service(Arc::new(ErrorHeadS3Service { inner: s3_service }))
         .build();
     let sdk_config = mock.sdk_config(PROVIDER_REGION).await;
-    provider_from_config(&sdk_config)
+    provider_from_config(sdk_config)
 }
 
 fn string(value: &str) -> Value {
