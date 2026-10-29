@@ -8,6 +8,12 @@ mod catalog;
 mod common;
 mod services;
 
+/// Implementation details used by exported catalog macros.
+#[doc(hidden)]
+pub mod __private {
+    pub use carina_core::schema::{AttributeType, TypeIdentity};
+}
+
 pub use catalog::*;
 pub use common::*;
 pub use services::*;
