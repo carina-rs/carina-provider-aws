@@ -30,6 +30,7 @@ pub fn s3_bucket_config() -> AwsSchemaConfig {
                 .with_provider_name("Bucket")
                 .build(),
         )
+        // Read contract: CreateBucket accepts the namespace selector but HeadBucket does not return it
         .attribute(
             AttributeSchema::optional("bucket_namespace", AttributeType::enum_(
     carina_core::schema::enum_identity("BucketNamespace", Some("aws.s3.Bucket")),
@@ -39,6 +40,7 @@ pub fn s3_bucket_config() -> AwsSchemaConfig {
     None,
 ))
                 .create_only()
+                .write_only()
                 .with_description("Specifies the namespace where you want to create your general purpose bucket. When you create a general purpose bucket, you can choose to create a buc...")
                 .with_provider_name("BucketNamespace")
                 .build(),

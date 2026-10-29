@@ -52,9 +52,11 @@ pub fn ec2_vpc_config() -> AwsSchemaConfig {
                 .with_provider_name("InstanceTenancy")
                 .build(),
         )
+        // Read contract: CreateVpc accepts the IPAM pool ID, but DescribeVpcs returns only the allocated CIDR association
         .attribute(
             AttributeSchema::optional("ipv4_ipam_pool_id", super::ipam_pool_id())
                 .create_only()
+                .write_only()
                 .with_description("The ID of an IPv4 IPAM pool you want to use for allocating this VPC's CIDR. For more information, see What is IPAM? in the Amazon VPC IPAM User Guide.")
                 .with_provider_name("Ipv4IpamPoolId")
                 .build(),

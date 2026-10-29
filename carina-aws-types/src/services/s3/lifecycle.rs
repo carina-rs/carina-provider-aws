@@ -40,7 +40,7 @@ fn s3_lifecycle_expiration() -> AttributeType {
             StructField::optional("days", AttributeType::int())
                 .with_provider_name("Days")
                 .build(),
-            StructField::optional("date", AttributeType::string())
+            StructField::optional("date", crate::s3_lifecycle_date())
                 .with_provider_name("Date")
                 .build(),
             StructField::optional("expired_object_delete_marker", AttributeType::bool())
@@ -57,7 +57,7 @@ fn s3_lifecycle_transition() -> AttributeType {
             StructField::optional("days", AttributeType::int())
                 .with_provider_name("Days")
                 .build(),
-            StructField::optional("date", AttributeType::string())
+            StructField::optional("date", crate::s3_lifecycle_date())
                 .with_provider_name("Date")
                 .build(),
             StructField::required("storage_class", s3_transition_storage_class())

@@ -4,8 +4,6 @@
 //! `name_regex` filter client-side (matching Terraform's `data.aws_iam_roles`
 //! behavior). Returns `arns` and `names` as parallel `list(String)` outputs.
 
-use std::collections::HashMap;
-
 use aws_sdk_iam::types::Role;
 use carina_core::provider::{BoxFuture, ProviderError, ProviderResult};
 use carina_core::resource::{ConcreteValue, DataSource, State, Value};
@@ -14,6 +12,8 @@ use regex::Regex;
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
 use crate::helpers::value_as_str;
+use crate::read_model::found_data_source_read;
+use crate::read_models_generated::IamRolesDataSourceReadModel;
 use crate::resend_safety_generated::IamClient;
 
 impl AwsProvider {
@@ -45,10 +45,19 @@ impl AwsProvider {
                 &resource,
             )
             .await?;
-            Ok(State::existing(
-                resource.id.clone(),
-                build_attributes(&matches),
-            ))
+            let RoleOutputs { arns, names } = build_outputs(&matches);
+            let string_value =
+                |value: &str| Value::Concrete(ConcreteValue::String(value.to_string().into()));
+            found_data_source_read(
+                &resource.id,
+                None,
+                IamRolesDataSourceReadModel {
+                    path_prefix: path_prefix.map(string_value),
+                    name_regex: name_regex_raw.map(string_value),
+                    arns: Some(arns),
+                    names: Some(names),
+                },
+            )
         })
     }
 }
@@ -106,7 +115,12 @@ fn filter_page(roles: &[Role], name_filter: Option<&Regex>) -> Vec<(String, Stri
 /// Project filtered `(name, arn)` pairs into the `arns` / `names` aggregated
 /// outputs. Pure projection — split out so it can be unit-tested without
 /// touching the AWS SDK.
-fn build_attributes(matches: &[(String, String)]) -> HashMap<String, Value> {
+struct RoleOutputs {
+    arns: Value,
+    names: Value,
+}
+
+fn build_outputs(matches: &[(String, String)]) -> RoleOutputs {
     let mut arns: Vec<Value> = Vec::with_capacity(matches.len());
     let mut names: Vec<Value> = Vec::with_capacity(matches.len());
     for (name, arn) in matches {
@@ -114,16 +128,10 @@ fn build_attributes(matches: &[(String, String)]) -> HashMap<String, Value> {
         arns.push(Value::Concrete(ConcreteValue::String(arn.clone().into())));
     }
 
-    let mut attributes = HashMap::new();
-    attributes.insert(
-        "arns".to_string(),
-        Value::Concrete(ConcreteValue::List(arns)),
-    );
-    attributes.insert(
-        "names".to_string(),
-        Value::Concrete(ConcreteValue::List(names)),
-    );
-    attributes
+    RoleOutputs {
+        arns: Value::Concrete(ConcreteValue::List(arns)),
+        names: Value::Concrete(ConcreteValue::List(names)),
+    }
 }
 
 #[cfg(test)]
@@ -172,14 +180,14 @@ mod tests {
             ],
             None,
         );
-        let attrs = build_attributes(&pairs);
+        let outputs = build_outputs(&pairs);
 
         assert_eq!(
-            extract_strings(&attrs["names"]),
+            extract_strings(&outputs.names),
             vec!["AdminRole", "ReadOnly"]
         );
         assert_eq!(
-            extract_strings(&attrs["arns"]),
+            extract_strings(&outputs.arns),
             vec![
                 "arn:aws:iam::123:role/AdminRole",
                 "arn:aws:iam::123:role/ReadOnly",
@@ -204,22 +212,22 @@ mod tests {
             ],
             Some(&re),
         );
-        let attrs = build_attributes(&pairs);
+        let outputs = build_outputs(&pairs);
 
         assert_eq!(
-            extract_strings(&attrs["names"]),
+            extract_strings(&outputs.names),
             vec!["AWSReservedSSO_AdministratorAccess_1ade6440f2d3bcdd"]
         );
-        let arns = extract_strings(&attrs["arns"]);
+        let arns = extract_strings(&outputs.arns);
         assert_eq!(arns.len(), 1);
         assert!(arns[0].ends_with("/AWSReservedSSO_AdministratorAccess_1ade6440f2d3bcdd"));
     }
 
     #[test]
     fn empty_input_yields_empty_lists() {
-        let attrs = build_attributes(&[]);
-        assert_eq!(extract_strings(&attrs["names"]), Vec::<&str>::new());
-        assert_eq!(extract_strings(&attrs["arns"]), Vec::<&str>::new());
+        let outputs = build_outputs(&[]);
+        assert_eq!(extract_strings(&outputs.names), Vec::<&str>::new());
+        assert_eq!(extract_strings(&outputs.arns), Vec::<&str>::new());
     }
 
     #[test]
@@ -229,9 +237,9 @@ mod tests {
             &[("AdminRole", "arn:aws:iam::123:role/AdminRole")],
             Some(&re),
         );
-        let attrs = build_attributes(&pairs);
-        assert_eq!(extract_strings(&attrs["names"]), Vec::<&str>::new());
-        assert_eq!(extract_strings(&attrs["arns"]), Vec::<&str>::new());
+        let outputs = build_outputs(&pairs);
+        assert_eq!(extract_strings(&outputs.names), Vec::<&str>::new());
+        assert_eq!(extract_strings(&outputs.arns), Vec::<&str>::new());
     }
 
     /// names[i] and arns[i] must refer to the same role even when
@@ -247,11 +255,11 @@ mod tests {
             ],
             Some(&re),
         );
-        let attrs = build_attributes(&pairs);
+        let outputs = build_outputs(&pairs);
 
-        assert_eq!(extract_strings(&attrs["names"]), vec!["Keep1", "Keep2"]);
+        assert_eq!(extract_strings(&outputs.names), vec!["Keep1", "Keep2"]);
         assert_eq!(
-            extract_strings(&attrs["arns"]),
+            extract_strings(&outputs.arns),
             vec!["arn:aws:iam::123:role/Keep1", "arn:aws:iam::123:role/Keep2"]
         );
     }
@@ -275,13 +283,13 @@ mod tests {
         matches.extend(filter_page(&page1, Some(&re)));
         matches.extend(filter_page(&page2, Some(&re)));
 
-        let attrs = build_attributes(&matches);
+        let outputs = build_outputs(&matches);
         assert_eq!(
-            extract_strings(&attrs["names"]),
+            extract_strings(&outputs.names),
             vec!["Keep1", "Keep2", "Keep3"]
         );
         assert_eq!(
-            extract_strings(&attrs["arns"]),
+            extract_strings(&outputs.arns),
             vec![
                 "arn:aws:iam::123:role/Keep1",
                 "arn:aws:iam::123:role/Keep2",

@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use aws_sdk_s3::types::{
     ServerSideEncryption, ServerSideEncryptionByDefault, ServerSideEncryptionConfiguration,
     ServerSideEncryptionRule,
@@ -18,6 +16,8 @@ use crate::helpers::{
     RetryPolicy, enum_attr_error, require_string_attr, retry_aws_operation, sdk_error_message,
 };
 use crate::provider::CreateCompletion;
+use crate::read_model::found_managed_read;
+use crate::read_models_generated::S3BucketServerSideEncryptionConfigurationReadModel;
 use crate::services::s3::bucket::is_s3_not_configured_error;
 
 impl AwsProvider {
@@ -38,25 +38,20 @@ impl AwsProvider {
 
         match result {
             Ok(output) => {
-                let mut attributes = HashMap::new();
-                attributes.insert(
-                    "bucket".to_string(),
-                    Value::Concrete(ConcreteValue::String(bucket.to_string().into())),
-                );
-                if let Some(config) = output.server_side_encryption_configuration() {
-                    let rules: Vec<Value> = config.rules().iter().map(rule_to_value).collect();
-                    if !rules.is_empty() {
-                        attributes.insert(
-                            "rules".to_string(),
-                            Value::Concrete(ConcreteValue::List(rules)),
-                        );
-                    }
-                }
-                Ok(crate::helpers::found_read(
-                    id,
-                    applied_identifier,
-                    attributes,
-                ))
+                let config = output
+                    .server_side_encryption_configuration()
+                    .ok_or_else(|| {
+                        ProviderError::api_error(
+                            "GetBucketEncryption returned no encryption configuration",
+                        )
+                        .for_resource(id.clone())
+                    })?;
+                let rules = config.rules().iter().map(rule_to_value).collect();
+                let model = S3BucketServerSideEncryptionConfigurationReadModel {
+                    bucket: crate::read_model::applied_identifier_value(identifier),
+                    rules: Value::Concrete(ConcreteValue::List(rules)),
+                };
+                found_managed_read(id, applied_identifier, model)
             }
             Err(e) => {
                 if is_s3_not_configured_error(&e, "ServerSideEncryptionConfigurationNotFoundError")

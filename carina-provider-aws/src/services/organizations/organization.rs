@@ -1,69 +1,16 @@
-use std::collections::HashMap;
-
 use carina_core::provider::{AppliedIdentifier, ReadOutcome};
 use carina_core::provider::{ProviderError, ProviderResult};
-use carina_core::resource::{ConcreteValue, Resource, ResourceId, Value};
+use carina_core::resource::{Resource, ResourceId};
 use carina_core::schema::ResourceSchema;
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
 use crate::helpers::optional_enum_attr;
 use crate::provider::CreateCompletion;
+use crate::read_model::{ManagedReadModel, found_managed_read};
+use crate::read_models_generated::OrganizationsOrganizationReadModelSupplement;
 
 impl AwsProvider {
-    /// Extract attributes from an Organizations Organization object
-    pub(crate) fn extract_organizations_organization_attributes(
-        org: &aws_sdk_organizations::types::Organization,
-        attributes: &mut HashMap<String, Value>,
-    ) -> Option<String> {
-        let mut identifier = None;
-
-        if let Some(id) = org.id() {
-            let id_string = id.to_string();
-            identifier = Some(id_string.clone());
-            attributes.insert(
-                "id".to_string(),
-                Value::Concrete(ConcreteValue::String(id_string.into())),
-            );
-        }
-        if let Some(arn) = org.arn() {
-            attributes.insert(
-                "arn".to_string(),
-                Value::Concrete(ConcreteValue::String(arn.to_string().into())),
-            );
-        }
-        if let Some(feature_set) = org.feature_set() {
-            attributes.insert(
-                "feature_set".to_string(),
-                Value::Concrete(ConcreteValue::String(
-                    feature_set.as_str().to_string().into(),
-                )),
-            );
-        }
-        if let Some(master_account_id) = org.master_account_id() {
-            attributes.insert(
-                "master_account_id".to_string(),
-                Value::Concrete(ConcreteValue::String(master_account_id.to_string().into())),
-            );
-        }
-        if let Some(master_account_arn) = org.master_account_arn() {
-            attributes.insert(
-                "master_account_arn".to_string(),
-                Value::Concrete(ConcreteValue::String(master_account_arn.to_string().into())),
-            );
-        }
-        if let Some(master_account_email) = org.master_account_email() {
-            attributes.insert(
-                "master_account_email".to_string(),
-                Value::Concrete(ConcreteValue::String(
-                    master_account_email.to_string().into(),
-                )),
-            );
-        }
-
-        identifier
-    }
-
     /// Read an Organizations organization
     pub(crate) async fn read_organizations_organization(
         &self,
@@ -81,14 +28,10 @@ impl AwsProvider {
         {
             Ok(response) => {
                 if let Some(org) = response.organization() {
-                    let mut attributes = HashMap::new();
-                    let _org_id =
-                        Self::extract_organizations_organization_attributes(org, &mut attributes);
-                    Ok(crate::helpers::found_read(
-                        id,
-                        applied_identifier,
-                        attributes,
-                    ))
+                    let fields = Self::extract_organizations_organization_attributes(org);
+                    let (_, model) =
+                        fields.into_model(id, OrganizationsOrganizationReadModelSupplement {})?;
+                    found_managed_read(id, applied_identifier, model)
                 } else {
                     Ok(ReadOutcome::not_found(id.clone()))
                 }
@@ -124,15 +67,19 @@ impl AwsProvider {
         })?;
 
         if let Some(org) = response.organization() {
-            let mut attributes = HashMap::new();
-            let org_id = Self::extract_organizations_organization_attributes(org, &mut attributes)
-                .ok_or_else(|| {
+            let fields = Self::extract_organizations_organization_attributes(org);
+            let (applied_identifier, model) = fields.into_model(
+                &resource.id,
+                OrganizationsOrganizationReadModelSupplement {},
+            )?;
+            let org_id = applied_identifier.ok_or_else(|| {
                     ProviderError::api_error(
                         "organizations.CreateOrganization returned an organization with an empty provider identifier",
                     )
                     .for_resource(resource.id.clone())
                     .with_operation("organizations.CreateOrganization")
                 })?;
+            let attributes = model.into_attributes()?;
             let identifier = crate::helpers::applied_identifier(
                 &resource.id,
                 "organizations.CreateOrganization",

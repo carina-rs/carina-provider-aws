@@ -1,8 +1,7 @@
 use indexmap::IndexMap;
 use std::collections::HashMap;
 
-use carina_core::provider::ProviderResult;
-use carina_core::provider::{AppliedIdentifier, ReadOutcome};
+use carina_core::provider::{AppliedIdentifier, ProviderResult, ReadOutcome};
 use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
 use carina_core::schema::ResourceSchema;
 
@@ -10,6 +9,8 @@ use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
 use crate::helpers::{optional_enum_attr, require_string_attr};
 use crate::provider::AwsCreateAttempt;
+use crate::read_model::found_managed_read;
+use crate::read_models_generated::LogsLogGroupReadModelSupplement;
 
 impl AwsProvider {
     /// Read a CloudWatch Logs Log Group
@@ -37,79 +38,48 @@ impl AwsProvider {
             .iter()
             .find(|lg| lg.log_group_name() == Some(identifier))
         {
-            let mut attributes = HashMap::new();
+            let fields = Self::extract_logs_log_group_attributes(lg);
 
-            if let Some(name) = lg.log_group_name() {
-                attributes.insert(
-                    "log_group_name".to_string(),
-                    Value::Concrete(ConcreteValue::String(name.to_string().into())),
-                );
-            }
-
-            if let Some(arn) = lg.arn() {
-                attributes.insert(
-                    "arn".to_string(),
-                    Value::Concrete(ConcreteValue::String(arn.to_string().into())),
-                );
-            }
-
-            if let Some(days) = lg.retention_in_days() {
-                attributes.insert(
-                    "retention_in_days".to_string(),
-                    Value::Concrete(ConcreteValue::Int(days as i64)),
-                );
-            }
-
-            if let Some(kms_key) = lg.kms_key_id() {
-                attributes.insert(
-                    "kms_key_id".to_string(),
-                    Value::Concrete(ConcreteValue::String(kms_key.to_string().into())),
-                );
-            }
-
-            if let Some(class) = lg.log_group_class() {
-                attributes.insert(
-                    "log_group_class".to_string(),
-                    Value::Concrete(ConcreteValue::String(class.as_str().to_string().into())),
-                );
-            }
-
-            // Read tags separately
+            // Read tags separately. Empty tags are canonical state, and a
+            // failed side read must not erase configured tags.
             #[allow(deprecated)]
-            match self
+            let tags_output = self
                 .logs_client
                 .list_tags_log_group()
                 .log_group_name(identifier)
                 .send()
                 .await
-            {
-                Ok(tags_output) => {
-                    if let Some(tags) = tags_output.tags()
-                        && !tags.is_empty()
-                    {
-                        let mut tag_map = IndexMap::new();
-                        for (key, val) in tags {
-                            tag_map.insert(
-                                key.to_string(),
-                                Value::Concrete(ConcreteValue::String(val.to_string().into())),
-                            );
-                        }
-                        attributes.insert(
-                            "tags".to_string(),
-                            Value::Concrete(ConcreteValue::Map(tag_map)),
-                        );
-                    }
-                }
-                Err(_) => {
-                    // Tags API may fail for some log groups; ignore
+                .map_err(|error| {
+                    api_error_with_meta(
+                        "ListTagsLogGroup failed; ensure logs:ListTagsLogGroup is allowed",
+                        error,
+                    )
+                    .for_resource(id.clone())
+                })?;
+            let mut tag_map = IndexMap::new();
+            if let Some(tags) = tags_output.tags() {
+                for (key, val) in tags {
+                    tag_map.insert(
+                        key.to_string(),
+                        Value::Concrete(ConcreteValue::String(val.to_string().into())),
+                    );
                 }
             }
 
-            Ok(crate::helpers::found_read(
+            // Measured with `aws logs describe-log-groups --log-group-name-prefix <name>
+            // --region ap-northeast-1` on 2026-10-29: the response omits
+            // deletionProtectionEnabled when it is false.
+            let fields = fields.map_deletion_protection_enabled(|value| {
+                Some(value.unwrap_or_else(|| Value::Concrete(ConcreteValue::Bool(false))))
+            });
+            let (_, model) = fields.into_model(
                 id,
-                applied_identifier,
-                attributes,
-            ))
+                LogsLogGroupReadModelSupplement {
+                    tags: Value::Concrete(ConcreteValue::Map(tag_map)),
+                },
+            )?;
+
+            found_managed_read(id, applied_identifier, model)
         } else {
             Ok(ReadOutcome::not_found(id.clone()))
         }
@@ -139,6 +109,12 @@ impl AwsProvider {
             .logs_client
             .create_log_group()
             .log_group_name(&log_group_name);
+
+        if let Some(Value::Concrete(ConcreteValue::Bool(enabled))) =
+            resource.get_attr("deletion_protection_enabled")
+        {
+            req = req.deletion_protection_enabled(*enabled);
+        }
 
         if let Some(Value::Concrete(ConcreteValue::String(kms_key))) =
             resource.get_attr("kms_key_id")
@@ -173,9 +149,15 @@ impl AwsProvider {
         }
         let issued = attempt.issued(
             identifier.clone(),
-            Self::sent_only(
+            self.sent_only(
                 resource,
-                &["log_group_name", "kms_key_id", "log_group_class", "tags"],
+                &[
+                    "log_group_name",
+                    "kms_key_id",
+                    "log_group_class",
+                    "deletion_protection_enabled",
+                    "tags",
+                ],
             ),
         );
 
@@ -264,6 +246,29 @@ impl AwsProvider {
                 .await
                 .map_err(|e| {
                     api_error_with_meta("Failed to disassociate KMS key", e)
+                        .for_resource(id.clone())
+                })?;
+        }
+
+        let current_deletion_protection = match from.attributes.get("deletion_protection_enabled") {
+            Some(Value::Concrete(ConcreteValue::Bool(enabled))) => Some(*enabled),
+            _ => None,
+        };
+        let desired_deletion_protection = match to.get_attr("deletion_protection_enabled") {
+            Some(Value::Concrete(ConcreteValue::Bool(enabled))) => Some(*enabled),
+            _ => None,
+        };
+        if let Some(enabled) = desired_deletion_protection
+            && desired_deletion_protection != current_deletion_protection
+        {
+            self.logs_client
+                .put_log_group_deletion_protection()
+                .log_group_identifier(identifier.as_str())
+                .deletion_protection_enabled(enabled)
+                .send()
+                .await
+                .map_err(|error| {
+                    api_error_with_meta("Failed to update log group deletion protection", error)
                         .for_resource(id.clone())
                 })?;
         }

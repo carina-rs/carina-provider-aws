@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use aws_sdk_s3::types::{ObjectOwnership, OwnershipControls, OwnershipControlsRule};
 use carina_core::provider::{AppliedIdentifier, ReadOutcome};
 use carina_core::provider::{ProviderError, ProviderResult};
@@ -12,6 +10,8 @@ use crate::helpers::{
     RetryPolicy, require_enum_attr, require_string_attr, retry_aws_operation, sdk_error_message,
 };
 use crate::provider::CreateCompletion;
+use crate::read_model::found_managed_read;
+use crate::read_models_generated::S3BucketOwnershipControlsReadModel;
 use crate::services::s3::bucket::is_s3_not_configured_error;
 
 impl AwsProvider {
@@ -32,26 +32,22 @@ impl AwsProvider {
 
         match result {
             Ok(output) => {
-                let mut attributes = HashMap::new();
-                attributes.insert(
-                    "bucket".to_string(),
-                    Value::Concrete(ConcreteValue::String(bucket.to_string().into())),
-                );
-                if let Some(controls) = output.ownership_controls()
-                    && let Some(rule) = controls.rules().first()
-                {
-                    attributes.insert(
-                        "object_ownership".to_string(),
-                        Value::Concrete(ConcreteValue::String(
-                            rule.object_ownership().as_str().to_string().into(),
-                        )),
-                    );
-                }
-                Ok(crate::helpers::found_read(
-                    id,
-                    applied_identifier,
-                    attributes,
-                ))
+                let rule = output
+                    .ownership_controls()
+                    .and_then(|controls| controls.rules().first())
+                    .ok_or_else(|| {
+                        ProviderError::api_error(
+                            "GetBucketOwnershipControls returned no ownership rule",
+                        )
+                        .for_resource(id.clone())
+                    })?;
+                let model = S3BucketOwnershipControlsReadModel {
+                    bucket: crate::read_model::applied_identifier_value(identifier),
+                    object_ownership: Value::Concrete(ConcreteValue::String(
+                        rule.object_ownership().as_str().to_string().into(),
+                    )),
+                };
+                found_managed_read(id, applied_identifier, model)
             }
             Err(e) => {
                 if is_s3_not_configured_error(&e, "OwnershipControlsNotFoundError")

@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use carina_core::provider::{AppliedIdentifier, ReadOutcome};
 use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{ConcreteValue, Resource, ResourceId, Value};
@@ -8,6 +6,8 @@ use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
 use crate::helpers::require_string_attr;
 use crate::provider::CreateCompletion;
+use crate::read_model::found_managed_read;
+use crate::read_models_generated::Ec2SubnetRouteTableAssociationReadModelSupplement;
 
 impl AwsProvider {
     /// Read an EC2 Subnet Route Table Association
@@ -46,32 +46,11 @@ impl AwsProvider {
             // Find the association matching the association_id
             for assoc in rt.associations() {
                 if assoc.route_table_association_id() == Some(association_id) {
-                    let mut attributes = HashMap::new();
+                    let fields = Self::extract_ec2_subnet_route_table_association_attributes(assoc);
 
-                    attributes.insert(
-                        "association_id".to_string(),
-                        Value::Concrete(ConcreteValue::String(association_id.to_string().into())),
-                    );
-
-                    if let Some(rt_id) = assoc.route_table_id() {
-                        attributes.insert(
-                            "route_table_id".to_string(),
-                            Value::Concrete(ConcreteValue::String(rt_id.to_string().into())),
-                        );
-                    }
-
-                    if let Some(sid) = assoc.subnet_id() {
-                        attributes.insert(
-                            "subnet_id".to_string(),
-                            Value::Concrete(ConcreteValue::String(sid.to_string().into())),
-                        );
-                    }
-
-                    return Ok(crate::helpers::found_read(
-                        id,
-                        applied_identifier,
-                        attributes,
-                    ));
+                    let (_, model) = fields
+                        .into_model(id, Ec2SubnetRouteTableAssociationReadModelSupplement {})?;
+                    return found_managed_read(id, applied_identifier, model);
                 }
             }
         }

@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use aws_sdk_s3::types::{BucketCannedAcl, Grant, Permission, Type as GranteeType};
 use carina_core::provider::ProviderResult;
 use carina_core::provider::{AppliedIdentifier, ReadOutcome};
@@ -10,11 +8,18 @@ use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
 use crate::helpers::{RetryPolicy, require_enum_attr, require_string_attr, retry_aws_operation};
 use crate::provider::CreateCompletion;
+use crate::read_model::found_managed_read;
+use crate::read_models_generated::S3BucketAclReadModel;
 use crate::services::s3::bucket::is_s3_not_configured_error;
 
 /// AWS group URIs used to identify canned-ACL grant patterns.
 const URI_ALL_USERS: &str = "http://acs.amazonaws.com/groups/global/AllUsers";
 const URI_AUTHENTICATED_USERS: &str = "http://acs.amazonaws.com/groups/global/AuthenticatedUsers";
+/// Read sentinel for a grant set that cannot be represented by any writable
+/// canned ACL. This is deliberately outside the closed schema enum: it keeps
+/// `acl` present and unequal to every desired value so planning can propose
+/// the corrective PutBucketAcl update.
+const CUSTOM_GRANTS_SENTINEL: &str = "__carina_custom_grants__";
 
 /// Inspect the grant list returned by `GetBucketAcl` and infer which
 /// canned ACL produced it, if any. Returns the wire-form name
@@ -31,9 +36,8 @@ const URI_AUTHENTICATED_USERS: &str = "http://acs.amazonaws.com/groups/global/Au
 ///
 /// Returns `None` for any grant shape that does not match — for
 /// example, a custom grant set or a canned ACL Carina does not yet
-/// surface in the schema. Callers should leave the `acl` attribute
-/// absent in state in that case (state then disagrees with desired,
-/// surfacing a real diff, which is the correct behavior).
+/// surface in the schema. The read path reports that state as
+/// unrepresentable instead of silently omitting `acl`.
 fn infer_canned_acl_from_grants(grants: &[Grant], owner_id: Option<&str>) -> Option<&'static str> {
     let owner_id = owner_id?;
     // Bucket the grants by (grantee key, permission). Owner grants
@@ -95,6 +99,10 @@ fn infer_canned_acl_from_grants(grants: &[Grant], owner_id: Option<&str>) -> Opt
     }
 }
 
+fn observed_acl_value(grants: &[Grant], owner_id: Option<&str>) -> &'static str {
+    infer_canned_acl_from_grants(grants, owner_id).unwrap_or(CUSTOM_GRANTS_SENTINEL)
+}
+
 impl AwsProvider {
     /// Read an S3 BucketAcl.
     ///
@@ -103,9 +111,8 @@ impl AwsProvider {
     /// produced the grant shape (private / public-read / public-read-write
     /// / authenticated-read) and write that into state so post-apply
     /// `plan-verify` is idempotent. Custom grant sets that do not match
-    /// any canned shape leave `acl` absent in state — the resulting diff
-    /// is accurate (the bucket no longer matches the requested canned
-    /// ACL).
+    /// any canned shape are represented by a non-writable sentinel so refresh
+    /// succeeds and the differ proposes an update to the desired canned ACL.
     pub(crate) async fn read_s3_bucket_acl(
         &self,
         id: &ResourceId,
@@ -118,23 +125,13 @@ impl AwsProvider {
 
         match result {
             Ok(output) => {
-                let mut attributes = HashMap::new();
-                attributes.insert(
-                    "bucket".to_string(),
-                    Value::Concrete(ConcreteValue::String(bucket.to_string().into())),
-                );
                 let owner_id = output.owner().and_then(|o| o.id());
-                if let Some(canned) = infer_canned_acl_from_grants(output.grants(), owner_id) {
-                    attributes.insert(
-                        "acl".to_string(),
-                        Value::Concrete(ConcreteValue::String(canned.to_string().into())),
-                    );
-                }
-                Ok(crate::helpers::found_read(
-                    id,
-                    applied_identifier,
-                    attributes,
-                ))
+                let canned = observed_acl_value(output.grants(), owner_id);
+                let model = S3BucketAclReadModel {
+                    bucket: crate::read_model::applied_identifier_value(identifier),
+                    acl: Value::Concrete(ConcreteValue::String(canned.to_string().into())),
+                };
+                found_managed_read(id, applied_identifier, model)
             }
             Err(e) => {
                 if is_s3_not_configured_error(&e, "NoSuchBucket") {
@@ -230,6 +227,11 @@ impl AwsProvider {
 mod tests {
     use super::*;
     use aws_sdk_s3::types::Grantee;
+    use carina_core::differ::{Diff, diff};
+    use carina_core::provider::RawSavedAttrs;
+    use carina_core::resource::{ResolvedResource, Resource};
+    use carina_core::schema::SchemaRegistry;
+    use std::collections::HashMap;
 
     fn owner_full_control(owner_id: &str) -> Grant {
         Grant::builder()
@@ -324,6 +326,61 @@ mod tests {
             infer_canned_acl_from_grants(&grants, Some("OWNER123")),
             None
         );
+    }
+
+    #[test]
+    fn custom_grants_refresh_and_plan_a_corrective_update() {
+        let grants = vec![
+            owner_full_control("OWNER123"),
+            Grant::builder()
+                .grantee(
+                    Grantee::builder()
+                        .r#type(GranteeType::CanonicalUser)
+                        .id("ANOTHER_USER")
+                        .build()
+                        .unwrap(),
+                )
+                .permission(Permission::Read)
+                .build(),
+        ];
+        let observed = observed_acl_value(&grants, Some("OWNER123"));
+        assert_eq!(observed, CUSTOM_GRANTS_SENTINEL);
+
+        let mut desired = Resource::with_provider("aws", "s3.BucketAcl", "example", None);
+        desired.set_attr(
+            "bucket",
+            Value::Concrete(ConcreteValue::String("example".into())),
+        );
+        desired.set_attr(
+            "acl",
+            Value::Concrete(ConcreteValue::String("private".into())),
+        );
+        let current = crate::read_model::test_existing_state(
+            desired.id.clone(),
+            HashMap::from([
+                (
+                    "bucket".to_string(),
+                    Value::Concrete(ConcreteValue::String("example".into())),
+                ),
+                (
+                    "acl".to_string(),
+                    Value::Concrete(ConcreteValue::String(observed.into())),
+                ),
+            ]),
+        )
+        .with_identifier("example");
+        let registry = SchemaRegistry::new();
+        let saved = RawSavedAttrs::default().lift(&registry);
+        let schema = crate::schemas::generated::s3::bucket_acl::s3_bucket_acl_config().schema;
+
+        let result = diff(
+            &ResolvedResource::new(desired),
+            &current,
+            &saved,
+            None,
+            Some(&schema),
+        );
+        assert!(matches!(result, Diff::Update { .. }), "{result:?}");
     }
 
     #[test]

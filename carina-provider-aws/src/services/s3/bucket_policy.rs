@@ -1,13 +1,13 @@
-use std::collections::HashMap;
-
 use carina_core::provider::{AppliedIdentifier, ReadOutcome};
 use carina_core::provider::{ProviderError, ProviderResult};
-use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
+use carina_core::resource::{Resource, ResourceId, State};
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
 use crate::helpers::{RetryPolicy, require_string_attr, retry_aws_operation};
 use crate::provider::CreateCompletion;
+use crate::read_model::found_managed_read;
+use crate::read_models_generated::S3BucketPolicyReadModel;
 use crate::services::iam::role::{iam_policy_json_to_value, resolve_iam_policy_attr};
 use crate::services::s3::bucket::is_s3_not_configured_error;
 
@@ -33,28 +33,25 @@ impl AwsProvider {
 
         match result {
             Ok(output) => {
-                let mut attributes = HashMap::new();
-                attributes.insert(
-                    "bucket".to_string(),
-                    Value::Concrete(ConcreteValue::String(bucket.to_string().into())),
-                );
-
                 if let Some(policy_json) = output.policy() {
-                    let policy_value = iam_policy_json_to_value(policy_json).map_err(|e| {
+                    let policy = iam_policy_json_to_value(policy_json).map_err(|e| {
                         ProviderError::invalid_input(format!(
                             "Failed to parse bucket policy: {}",
                             e
                         ))
                         .for_resource(id.clone())
                     })?;
-                    attributes.insert("policy".to_string(), policy_value);
+                    let model = S3BucketPolicyReadModel {
+                        bucket: crate::read_model::applied_identifier_value(identifier),
+                        policy,
+                    };
+                    found_managed_read(id, applied_identifier, model)
+                } else {
+                    Err(
+                        ProviderError::api_error("GetBucketPolicy returned no Policy")
+                            .for_resource(id.clone()),
+                    )
                 }
-
-                Ok(crate::helpers::found_read(
-                    id,
-                    applied_identifier,
-                    attributes,
-                ))
             }
             Err(e) => {
                 if is_s3_not_configured_error(&e, "NoSuchBucketPolicy") {

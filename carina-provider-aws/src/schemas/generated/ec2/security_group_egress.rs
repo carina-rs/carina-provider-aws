@@ -95,13 +95,6 @@ pub fn ec2_security_group_egress_config() -> AwsSchemaConfig {
                 .build(),
             )
             .attribute(
-                AttributeSchema::optional("source_security_group_name", AttributeType::string())
-                    .create_only()
-                    .with_description("Not supported. Use IP permissions instead.")
-                    .with_provider_name("SourceSecurityGroupName")
-                    .build(),
-            )
-            .attribute(
                 AttributeSchema::optional(
                     "source_security_group_owner_id",
                     super::aws_account_id(),

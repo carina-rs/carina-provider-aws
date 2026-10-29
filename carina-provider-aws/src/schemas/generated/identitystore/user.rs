@@ -5,7 +5,7 @@
 //! DO NOT EDIT MANUALLY - regenerate with smithy-codegen
 
 use super::AwsSchemaConfig;
-use carina_core::schema::{AttributeSchema, AttributeType, ResourceSchema};
+use carina_core::schema::{AttributeSchema, AttributeType, ResourceSchema, types};
 
 /// Returns the schema config for identitystore.User (Smithy: com.amazonaws.identitystore)
 pub fn identitystore_user_config() -> AwsSchemaConfig {
@@ -42,10 +42,19 @@ pub fn identitystore_user_config() -> AwsSchemaConfig {
                     .build(),
             )
             .attribute(
-                AttributeSchema::provider_populated("emails", AttributeType::string())
-                    .with_description("Email addresses associated with the user.")
-                    .with_provider_name("Emails")
+                AttributeSchema::provider_populated("name", super::identitystore_user_name())
+                    .with_description("Structured components of the user's name.")
+                    .with_provider_name("Name")
                     .build(),
+            )
+            .attribute(
+                AttributeSchema::provider_populated(
+                    "emails",
+                    AttributeType::unordered_list(types::email()),
+                )
+                .with_description("Email addresses associated with the user.")
+                .with_provider_name("Emails")
+                .build(),
             ),
     }
 }

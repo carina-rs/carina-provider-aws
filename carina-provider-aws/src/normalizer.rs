@@ -19,6 +19,13 @@ impl ProviderNormalizer for AwsNormalizer {
         // so the WASM host impl can `.await` the guest directly (carina#3112).
         Box::pin(async move {
             crate::services::route53::record_set::normalize_record_set_dns_names(resources);
+            crate::services::acm::certificate::normalize_acm_certificate_inputs(resources);
+            crate::services::s3::bucket_replication::normalize_delete_marker_replication(resources);
+            crate::services::ec2::subnet::normalize_subnet_ipv6_cidr_blocks(resources)?;
+            for resource in resources.iter() {
+                crate::services::ec2::nat_gateway::validate_nat_gateway_inputs(resource)?;
+                crate::services::sqs::queue::validate_sqs_queue_inputs(resource)?;
+            }
             Ok(())
         })
     }
@@ -45,7 +52,7 @@ mod tests {
     use std::collections::HashMap;
 
     use carina_core::provider::normalize_provider_states;
-    use carina_core::resource::{ConcreteValue, Resource, State, Value};
+    use carina_core::resource::{ConcreteValue, Resource, Value};
     use indexmap::IndexMap;
 
     #[tokio::test]
@@ -113,6 +120,34 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn normalize_desired_canonicalizes_acm_sans() {
+        let mut resource = Resource::with_provider("aws", "acm.Certificate", "test-cert", None);
+        resource.set_attr(
+            "domain_name".to_string(),
+            Value::Concrete(ConcreteValue::String("example.com".into())),
+        );
+        resource.set_attr(
+            "subject_alternative_names".to_string(),
+            Value::Concrete(ConcreteValue::List(vec![
+                Value::Concrete(ConcreteValue::String("EXAMPLE.COM.".into())),
+                Value::Concrete(ConcreteValue::String("WWW.EXAMPLE.COM.".into())),
+            ])),
+        );
+        let mut resources = vec![resource.into()];
+
+        AwsNormalizer
+            .normalize_desired(&mut resources)
+            .await
+            .expect("ACM SANs should be canonicalized");
+        assert_eq!(
+            resources[0].get_attr("subject_alternative_names"),
+            Some(&Value::Concrete(ConcreteValue::List(vec![
+                Value::Concrete(ConcreteValue::String("www.example.com".into()))
+            ])))
+        );
+    }
+
+    #[tokio::test]
     async fn normalize_state_keeps_raw_api_enum_spellings() {
         let mut inner = IndexMap::new();
         inner.insert(
@@ -128,7 +163,10 @@ mod tests {
             Value::Concrete(ConcreteValue::Map(inner)),
         )]);
         let id = Resource::with_provider("aws", "ec2.Subnet", "test-subnet", None).id;
-        let mut states = HashMap::from([(id.clone(), State::existing(id, attributes))]);
+        let mut states = HashMap::from([(
+            id.clone(),
+            crate::read_model::test_existing_state(id, attributes),
+        )]);
 
         normalize_provider_states(&AwsNormalizer, &mut states)
             .await

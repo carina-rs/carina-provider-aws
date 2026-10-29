@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use carina_core::provider::ProviderResult;
 use carina_core::provider::{AppliedIdentifier, ReadOutcome};
 use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
@@ -8,8 +6,12 @@ use carina_core::schema::ResourceSchema;
 use crate::AwsProvider;
 use crate::aws_operation::ClientToken;
 use crate::error_helpers::api_error_with_meta;
-use crate::helpers::{build_tag_specification_with_create_token, require_enum_attr};
+use crate::helpers::{
+    build_tag_specification_with_create_token, optional_enum_attr, require_enum_attr,
+};
 use crate::provider::{AwsCreateAttempt, Ec2TaggedResourceKind};
+use crate::read_model::{empty_map_value, found_managed_read};
+use crate::read_models_generated::Ec2VpnGatewayReadModelSupplement;
 
 impl AwsProvider {
     /// Read an EC2 VPN Gateway
@@ -44,20 +46,16 @@ impl AwsProvider {
                 return Ok(ReadOutcome::not_found(id.clone()));
             }
 
-            let mut attributes = HashMap::new();
+            let fields = Self::extract_ec2_vpn_gateway_attributes(vgw);
 
-            let _identifier_value = Self::extract_ec2_vpn_gateway_attributes(vgw, &mut attributes);
-
-            // Extract user-defined tags
-            if let Some(tags_value) = Self::ec2_tags_to_value(vgw.tags()) {
-                attributes.insert("tags".to_string(), tags_value);
-            }
-
-            Ok(crate::helpers::found_read(
+            let (_, model) = fields.into_model(
                 id,
-                applied_identifier,
-                attributes,
-            ))
+                Ec2VpnGatewayReadModelSupplement {
+                    tags: Self::ec2_tags_to_value(vgw.tags()).unwrap_or_else(empty_map_value),
+                },
+            )?;
+
+            found_managed_read(id, applied_identifier, model)
         } else {
             Ok(ReadOutcome::not_found(id.clone()))
         }
@@ -90,8 +88,18 @@ impl AwsProvider {
         {
             req = req.amazon_side_asn(*asn);
         }
+        let availability_zone = match optional_enum_attr(resource, schema, "availability_zone") {
+            Ok(value) => value,
+            Err(error) => return Err(attempt.untracked(error)),
+        };
+        if let Some(availability_zone) = availability_zone {
+            req = req.availability_zone(availability_zone);
+        }
 
-        let sent = Self::sent_only(resource, &["type", "amazon_side_asn", "tags"]);
+        let sent = self.sent_only(
+            resource,
+            &["type", "amazon_side_asn", "availability_zone", "tags"],
+        );
         let result = req.send().await;
 
         self.finish_tagged_ec2_create(

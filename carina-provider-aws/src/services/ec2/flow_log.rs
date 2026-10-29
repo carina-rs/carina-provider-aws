@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use carina_aws_types::SendOutcome;
 use carina_core::provider::{AppliedIdentifier, ReadOutcome};
 use carina_core::provider::{ProviderError, ProviderResult};
@@ -14,6 +12,8 @@ use crate::helpers::{
     send_aws_operation_with_token,
 };
 use crate::provider::{AwsCreateAttempt, Ec2TaggedResourceKind};
+use crate::read_model::{empty_map_value, found_managed_read, require_read_value};
+use crate::read_models_generated::Ec2FlowLogReadModelSupplement;
 
 /// Token state for one CreateFlowLogs request.
 ///
@@ -137,14 +137,11 @@ impl AwsProvider {
             })?;
 
         if let Some(fl) = result.flow_logs().first() {
-            let mut attributes = HashMap::new();
-
-            let _identifier_value = Self::extract_ec2_flow_log_attributes(fl, &mut attributes);
+            let fields = Self::extract_ec2_flow_log_attributes(fl);
 
             // A single CreateFlowLogs request can create one flow log per
             // requested resource. Preserve the complete set under one provider
             // identifier and reconstruct the schema's plural resource_ids.
-            attributes.remove("resource_id");
             let resource_ids = result
                 .flow_logs()
                 .iter()
@@ -153,23 +150,38 @@ impl AwsProvider {
                     Value::Concrete(ConcreteValue::String(resource_id.to_string().into()))
                 })
                 .collect::<Vec<_>>();
-            if !resource_ids.is_empty() {
-                attributes.insert(
-                    "resource_ids".to_string(),
-                    Value::Concrete(ConcreteValue::List(resource_ids)),
-                );
-            }
+            let resource_ids = Value::Concrete(ConcreteValue::List(resource_ids));
+            let resource_type = fl.resource_id().and_then(|resource_id| {
+                let resource_type = if resource_id.starts_with("tgw-attach-") {
+                    "TransitGatewayAttachment"
+                } else if resource_id.starts_with("tgw-") {
+                    "TransitGateway"
+                } else if resource_id.starts_with("nat-") {
+                    "RegionalNatGateway"
+                } else if resource_id.starts_with("vpc-") {
+                    "VPC"
+                } else if resource_id.starts_with("subnet-") {
+                    "Subnet"
+                } else if resource_id.starts_with("eni-") {
+                    "NetworkInterface"
+                } else {
+                    return None;
+                };
+                Some(Value::Concrete(ConcreteValue::String(
+                    resource_type.to_string().into(),
+                )))
+            });
 
-            // Extract user-defined tags
-            if let Some(tags_value) = Self::ec2_tags_to_value(fl.tags()) {
-                attributes.insert("tags".to_string(), tags_value);
-            }
-
-            Ok(crate::helpers::found_read(
+            let (_, model) = fields.into_model(
                 id,
-                applied_identifier,
-                attributes,
-            ))
+                Ec2FlowLogReadModelSupplement {
+                    resource_ids,
+                    resource_type: require_read_value(id, resource_type, "resource_type")?,
+                    tags: Self::ec2_tags_to_value(fl.tags()).unwrap_or_else(empty_map_value),
+                },
+            )?;
+
+            found_managed_read(id, applied_identifier, model)
         } else {
             Ok(ReadOutcome::not_found(id.clone()))
         }
@@ -455,102 +467,6 @@ impl AwsProvider {
         }
 
         Ok(())
-    }
-
-    /// Extract ec2.FlowLog attributes from the SDK response.
-    ///
-    /// Lives here (not in `provider_generated.rs`) because the
-    /// `resource_type` attribute is derived by string-matching the
-    /// `resource_id` prefix and is only emitted while
-    /// `flow_log_status == "ACTIVE"` — there is no Smithy structural
-    /// feature that would let the codegen express that conditional
-    /// derivation in one resource. `scan_manual_methods` picks this up
-    /// by name and the codegen skips emitting a duplicate stub.
-    pub(crate) fn extract_ec2_flow_log_attributes(
-        obj: &aws_sdk_ec2::types::FlowLog,
-        attributes: &mut HashMap<String, Value>,
-    ) -> Option<String> {
-        if let Some(v) = obj.flow_log_id() {
-            attributes.insert(
-                "flow_log_id".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string().into())),
-            );
-        }
-        if let Some(v) = obj.resource_id() {
-            attributes.insert(
-                "resource_id".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string().into())),
-            );
-        }
-        if let Some(v) = obj.traffic_type() {
-            attributes.insert(
-                "traffic_type".to_string(),
-                Value::Concrete(ConcreteValue::String(v.as_str().to_string().into())),
-            );
-        }
-        if let Some(v) = obj.log_destination_type() {
-            attributes.insert(
-                "log_destination_type".to_string(),
-                Value::Concrete(ConcreteValue::String(v.as_str().to_string().into())),
-            );
-        }
-        if let Some(v) = obj.log_destination() {
-            attributes.insert(
-                "log_destination".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string().into())),
-            );
-        }
-        if let Some(v) = obj.log_group_name() {
-            attributes.insert(
-                "log_group_name".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string().into())),
-            );
-        }
-        if let Some(v) = obj.deliver_logs_permission_arn() {
-            attributes.insert(
-                "deliver_logs_permission_arn".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string().into())),
-            );
-        }
-        if let Some(v) = obj.log_format() {
-            attributes.insert(
-                "log_format".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string().into())),
-            );
-        }
-        if let Some(v) = obj.max_aggregation_interval() {
-            attributes.insert(
-                "max_aggregation_interval".to_string(),
-                Value::Concrete(ConcreteValue::Int(v as i64)),
-            );
-        }
-        if let Some(v) = obj.flow_log_status()
-            && v == "ACTIVE"
-        {
-            // Only emit resource_type for active flow logs; an inactive
-            // record may carry a stale resource_id whose prefix no
-            // longer reflects what the flow log actually targets.
-            if let Some(rt) = obj.resource_id() {
-                let resource_type_str = if rt.starts_with("vpc-") {
-                    "VPC"
-                } else if rt.starts_with("subnet-") {
-                    "Subnet"
-                } else if rt.starts_with("eni-") {
-                    "NetworkInterface"
-                } else {
-                    ""
-                };
-                if !resource_type_str.is_empty() {
-                    attributes.insert(
-                        "resource_type".to_string(),
-                        Value::Concrete(ConcreteValue::String(
-                            resource_type_str.to_string().into(),
-                        )),
-                    );
-                }
-            }
-        }
-        obj.flow_log_id().map(String::from)
     }
 }
 

@@ -13,7 +13,7 @@ use std::sync::LazyLock;
 use anyhow::{Context, Result};
 use carina_smithy::{Shape, ShapeKind, SmithyModel};
 use clap::Parser;
-use heck::ToSnakeCase;
+use heck::{ToSnakeCase, ToUpperCamelCase};
 
 use carina_aws_types::dsl_enum_value;
 use carina_codegen_aws::resource_defs::{self, ReplacementClass, ResourceDef};
@@ -282,6 +282,14 @@ struct AttrInfo {
     is_create_only: bool,
     /// Whether the field is read-only
     is_read_only: bool,
+    /// Whether core must preserve the desired value because AWS never returns
+    /// it from read APIs.
+    is_write_only: bool,
+    /// Whether the generated read model requires a canonical value or permits
+    /// an absent AWS value.
+    read_presence: resource_defs::ReadPresence,
+    /// Reason attached to write-only/read overrides for generated comments.
+    read_reason: Option<String>,
     /// Whether the underlying Smithy member target is a plain string shape.
     /// This is captured before rendered type overrides are applied.
     is_plain_string: bool,
@@ -612,6 +620,13 @@ fn main() -> Result<()> {
                 .with_context(|| format!("Failed to write {}", output_path.display()))?;
             eprintln!("Generated: {}", output_path.display());
 
+            let read_models =
+                generate_read_models_code(&all_resources, &all_data_sources, &models)?;
+            let read_models_path = args.output_dir.join("read_models_generated.rs");
+            std::fs::write(&read_models_path, read_models)
+                .with_context(|| format!("Failed to write {}", read_models_path.display()))?;
+            eprintln!("Generated: {}", read_models_path.display());
+
             let resend_safety = carina_codegen_aws::resend_safety::generate_provider_module(
                 &models,
                 carina_codegen_aws::resend_safety::OVERRIDES,
@@ -692,8 +707,19 @@ fn load_model(model_dir: &Path, namespace: &str) -> Result<SmithyModel> {
     Ok(model)
 }
 
-/// Generate Rust schema code for a single resource.
-fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
+struct CollectedResourceAttributes {
+    attrs: Vec<AttrInfo>,
+    all_enums: BTreeMap<String, EnumInfo>,
+    description: Option<String>,
+}
+
+/// Collect the exact top-level schema attributes before rendering either the
+/// schema or its typed read model. Sharing this pass is the guard against the
+/// two generated contracts drifting apart.
+fn collect_resource_attributes_unvalidated(
+    res: &ResourceDef,
+    model: &SmithyModel,
+) -> Result<CollectedResourceAttributes> {
     let ns = res.service_namespace;
     let namespace = format!("aws.{}", res.name);
 
@@ -1032,6 +1058,13 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
             is_required,
             is_create_only,
             is_read_only,
+            is_write_only: false,
+            read_presence: if is_required {
+                resource_defs::ReadPresence::Required
+            } else {
+                resource_defs::ReadPresence::Optional
+            },
+            read_reason: None,
             is_plain_string,
             is_identity,
             is_deferred_populate,
@@ -1073,6 +1106,13 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
             is_required,
             is_create_only,
             is_read_only,
+            is_write_only: false,
+            read_presence: if is_required {
+                resource_defs::ReadPresence::Required
+            } else {
+                resource_defs::ReadPresence::Optional
+            },
+            read_reason: None,
             is_plain_string: false,
             is_identity: identity_overrides.contains(extra.name),
             is_deferred_populate: deferred_populate_overrides.contains(extra.name),
@@ -1112,6 +1152,9 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
             is_required: false,
             is_create_only: false,
             is_read_only: true,
+            is_write_only: false,
+            read_presence: resource_defs::ReadPresence::Optional,
+            read_reason: None,
             is_plain_string,
             is_identity: false,
             is_deferred_populate: deferred_populate_overrides.contains(name.as_str()),
@@ -1130,6 +1173,206 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
                 .or_insert_with(|| ei.clone());
         }
     }
+
+    let description = if let Some(read_struct) = read_structure {
+        SmithyModel::documentation(&read_struct.traits).map(str::to_string)
+    } else {
+        create_input
+            .as_ref()
+            .and_then(|input| SmithyModel::documentation(&input.traits))
+            .map(str::to_string)
+    };
+
+    Ok(CollectedResourceAttributes {
+        attrs,
+        all_enums,
+        description,
+    })
+}
+
+fn collect_resource_attributes(
+    res: &ResourceDef,
+    model: &SmithyModel,
+) -> Result<CollectedResourceAttributes> {
+    let mut collected = collect_resource_attributes_unvalidated(res, model)?;
+    let dispositions = res.read_dispositions();
+    apply_read_contract(res, model, &mut collected.attrs, &dispositions)?;
+    collected.all_enums.retain(|provider_name, _| {
+        collected
+            .attrs
+            .iter()
+            .any(|attr| attr.provider_name == *provider_name)
+    });
+    Ok(collected)
+}
+
+#[cfg(test)]
+fn validate_read_contract(
+    res: &ResourceDef,
+    model: &SmithyModel,
+    dispositions: &[resource_defs::ReadDisposition],
+) -> Result<()> {
+    let mut collected = collect_resource_attributes_unvalidated(res, model)?;
+    apply_read_contract(res, model, &mut collected.attrs, dispositions)
+}
+
+fn has_inferred_read_source(res: &ResourceDef, model: &SmithyModel, attr: &AttrInfo) -> bool {
+    let attr_snake = attr.provider_name.to_snake_case();
+    if res
+        .derived_attributes
+        .iter()
+        .any(|derived| derived.attr.to_snake_case() == attr_snake)
+    {
+        return true;
+    }
+
+    if res.read_ops.iter().any(|operation| {
+        operation
+            .fields
+            .iter()
+            .any(|(field, rename)| rename.unwrap_or(field).to_snake_case() == attr_snake)
+    }) {
+        return true;
+    }
+
+    let read_member = res
+        .extra_attributes
+        .iter()
+        .find(|extra| extra.name.to_snake_case() == attr_snake)
+        .and_then(|extra| extra.read_source)
+        .unwrap_or(attr.provider_name.as_str());
+    let Some(read_structure) = res.read_structure else {
+        return false;
+    };
+    let read_structure_id = format!("{}#{read_structure}", res.service_namespace);
+    model
+        .get_structure(&read_structure_id)
+        .is_some_and(|structure| {
+            structure
+                .members
+                .keys()
+                .any(|name| name.to_snake_case() == read_member.to_snake_case())
+        })
+}
+
+fn apply_read_contract(
+    res: &ResourceDef,
+    model: &SmithyModel,
+    attrs: &mut Vec<AttrInfo>,
+    dispositions: &[resource_defs::ReadDisposition],
+) -> Result<()> {
+    use resource_defs::ReadDisposition;
+
+    let mut seen = HashSet::new();
+    for disposition in dispositions {
+        let field = disposition.field();
+        let normalized = field.to_snake_case();
+        if !seen.insert(normalized.clone()) {
+            anyhow::bail!(
+                "{} has duplicate/conflicting read dispositions for {}",
+                res.name,
+                field
+            );
+        }
+
+        let Some(attr) = attrs
+            .iter_mut()
+            .find(|attr| attr.provider_name.to_snake_case() == normalized)
+        else {
+            anyhow::bail!(
+                "{} read disposition names unknown schema attribute {}",
+                res.name,
+                field
+            );
+        };
+
+        match disposition {
+            ReadDisposition::Read { presence, .. } => {
+                attr.read_presence = *presence;
+            }
+            ReadDisposition::WriteOnly { reason, .. } => {
+                if reason.trim().is_empty() {
+                    anyhow::bail!(
+                        "{} write-only attribute {} requires a non-empty reason",
+                        res.name,
+                        field
+                    );
+                }
+                if attr.is_read_only || !attr.is_create_only {
+                    anyhow::bail!(
+                        "{} write-only attribute {} must be writable and create-only",
+                        res.name,
+                        field
+                    );
+                }
+                attr.is_write_only = true;
+                attr.read_reason = Some((*reason).to_string());
+            }
+            ReadDisposition::OmitSchema { reason, .. } => {
+                if reason.trim().is_empty() {
+                    anyhow::bail!(
+                        "{} schema omission for {} requires a non-empty reason",
+                        res.name,
+                        field
+                    );
+                }
+                attr.read_reason = Some((*reason).to_string());
+            }
+        }
+    }
+
+    let omitted: HashSet<String> = dispositions
+        .iter()
+        .filter_map(|disposition| match disposition {
+            ReadDisposition::OmitSchema { field, .. } => Some(field.to_snake_case()),
+            _ => None,
+        })
+        .collect();
+    attrs.retain(|attr| !omitted.contains(&attr.provider_name.to_snake_case()));
+
+    let mut unclassified = Vec::new();
+    for attr in attrs.iter() {
+        let explicitly_readable = dispositions.iter().any(|disposition| {
+            matches!(disposition, ReadDisposition::Read { .. })
+                && disposition.field().to_snake_case() == attr.provider_name.to_snake_case()
+        });
+        if !attr.is_write_only
+            && !explicitly_readable
+            && !has_inferred_read_source(res, model, attr)
+        {
+            unclassified.push(attr.provider_name.as_str());
+        }
+    }
+
+    if !unclassified.is_empty() {
+        anyhow::bail!(
+            "{} schema attributes are unclassified: {}; add read dispositions or classify them as write-only/omitted with reasons",
+            res.name,
+            unclassified.join(", ")
+        );
+    }
+
+    Ok(())
+}
+
+/// Generate Rust schema code for a single resource.
+fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
+    let CollectedResourceAttributes {
+        attrs,
+        all_enums,
+        description,
+    } = collect_resource_attributes(res, model)?;
+    let ns = res.service_namespace;
+    let is_data_source = res.create_op.is_empty();
+    let namespace = format!("aws.{}", res.name);
+    let mut enum_alias_map: HashMap<&str, Vec<(&str, &str)>> = HashMap::new();
+    for (attr, alias, canonical) in &res.enum_aliases {
+        enum_alias_map
+            .entry(attr)
+            .or_default()
+            .push((canonical, alias));
+    }
+    let to_dsl_overrides: HashMap<&str, &str> = res.to_dsl_overrides.iter().copied().collect();
 
     // Determine needed imports
     let code_str = attrs
@@ -1235,16 +1478,8 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
         res.name,
     ));
 
-    // Description from read structure (or create input for multi-op resources)
-    let desc_traits = if let Some(read_struct) = read_structure {
-        Some(&read_struct.traits)
-    } else {
-        create_input.as_ref().map(|ci| &ci.traits)
-    };
-    if let Some(traits) = desc_traits
-        && let Some(desc) = SmithyModel::documentation(traits)
-    {
-        let escaped = escape_description(desc);
+    if let Some(description) = description {
+        let escaped = escape_description(&description);
         let truncated = truncate_str(&escaped, 200);
         code.push_str(&format!(
             "\x20       .with_description(\"{}\")\n",
@@ -1261,6 +1496,12 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
 
     // Generate attributes
     for attr in &attrs {
+        if let Some(reason) = &attr.read_reason {
+            code.push_str(&format!(
+                "\x20       // Read contract: {}\n",
+                reason.replace('\n', " ")
+            ));
+        }
         let type_code = if let Some(ref ei) = attr.enum_info {
             // Use shared schema enum type for constrained strings.
             //
@@ -1312,6 +1553,9 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
 
         if attr.is_create_only {
             attr_code.push_str("\n\x20               .create_only()");
+        }
+        if attr.is_write_only {
+            attr_code.push_str("\n\x20               .write_only()");
         }
         if attr.is_identity {
             attr_code.push_str("\n\x20               .identity()");
@@ -2097,12 +2341,210 @@ fn struct_child_value_expr(
     Some(expr)
 }
 
+#[derive(Debug)]
+struct DirectReadField<'a> {
+    attr_name: String,
+    accessor_name: String,
+    member_ref: &'a carina_smithy::ShapeRef,
+}
+
+fn direct_read_field_is_supported(
+    model: &SmithyModel,
+    member_ref: &carina_smithy::ShapeRef,
+) -> bool {
+    match model.shape_kind(&member_ref.target) {
+        Some(
+            ShapeKind::Enum
+            | ShapeKind::Boolean
+            | ShapeKind::Integer
+            | ShapeKind::Long
+            | ShapeKind::String,
+        ) => true,
+        Some(ShapeKind::List) => match model.get_shape(&member_ref.target) {
+            Some(carina_smithy::Shape::List(list_shape)) => matches!(
+                model.shape_kind(&list_shape.member.target),
+                Some(ShapeKind::String)
+            ),
+            _ => false,
+        },
+        _ => false,
+    }
+}
+
+fn direct_read_fields<'a>(
+    res: &ResourceDef,
+    model: &'a SmithyModel,
+    read_struct: &'a carina_smithy::StructureShape,
+) -> Vec<DirectReadField<'a>> {
+    let exclude: HashSet<&str> = res.exclude_fields.iter().copied().collect();
+    let omitted: HashSet<&str> = res
+        .read_dispositions()
+        .iter()
+        .filter_map(|disposition| match disposition {
+            resource_defs::ReadDisposition::OmitSchema { field, .. } => Some(*field),
+            _ => None,
+        })
+        .collect();
+    let create_input = if !res.create_op.is_empty() {
+        let create_op_id = format!("{}#{}", res.service_namespace, res.create_op);
+        model.operation_input(&create_op_id)
+    } else {
+        None
+    };
+    let schema_structure = res
+        .schema_structure
+        .and_then(|name| model.get_structure(&format!("{}#{name}", res.service_namespace)));
+    let updatable_fields: HashSet<&str> = res
+        .update_ops
+        .iter()
+        .flat_map(|operation| operation.fields.field_names().iter())
+        .copied()
+        .collect();
+    let extra_read_only: HashSet<&str> = res.extra_read_only.iter().copied().collect();
+    let mut fields = Vec::new();
+
+    for (member_name, member_ref) in &read_struct.members {
+        if exclude.contains(member_name.as_str())
+            || (omitted.contains(member_name.as_str())
+                && !is_read_model_alias_source(res.name, &member_name.to_snake_case()))
+            || member_name.eq_ignore_ascii_case("tags")
+        {
+            continue;
+        }
+        let is_schema_attr = member_name == res.identifier
+            || extra_read_only.contains(member_name.as_str())
+            || updatable_fields.contains(member_name.as_str())
+            || schema_structure.is_some_and(|schema| schema.members.contains_key(member_name))
+            || create_input.is_some_and(|input| input.members.contains_key(member_name));
+        if !is_schema_attr || !direct_read_field_is_supported(model, member_ref) {
+            continue;
+        }
+        let snake_name = member_name.to_snake_case();
+        fields.push(DirectReadField {
+            attr_name: snake_name.clone(),
+            accessor_name: snake_name,
+            member_ref,
+        });
+    }
+
+    for extra in &res.extra_attributes {
+        if let Some(read_source) = extra.read_source
+            && let Some(member_ref) = read_struct.members.get(read_source)
+            && direct_read_field_is_supported(model, member_ref)
+        {
+            let attr_name = extra.name.to_snake_case();
+            let accessor_name = read_source.to_snake_case();
+            if !fields.iter().any(|field| field.attr_name == attr_name) {
+                fields.push(DirectReadField {
+                    attr_name,
+                    accessor_name,
+                    member_ref,
+                });
+            }
+        }
+    }
+
+    fields.sort_by(|left, right| left.attr_name.cmp(&right.attr_name));
+    fields
+}
+
+fn extracted_read_field_names(
+    res: &ResourceDef,
+    direct_fields: &[DirectReadField<'_>],
+    readable: &[&AttrInfo],
+) -> Vec<String> {
+    let readable_names: HashSet<&str> = readable
+        .iter()
+        .map(|attribute| attribute.snake_name.as_str())
+        .collect();
+    let mut names: Vec<String> = direct_fields
+        .iter()
+        .map(|field| field.attr_name.clone())
+        .chain(
+            res.derived_attributes
+                .iter()
+                .filter(|derived| readable_names.contains(derived.attr.to_snake_case().as_str()))
+                .map(|derived| derived.attr.to_snake_case()),
+        )
+        .collect();
+    names.sort();
+    names.dedup();
+    names
+}
+
+fn read_fields_type_name(resource_name: &str) -> String {
+    let (service, resource) = split_service_resource(resource_name);
+    format!("{}{}ReadFields", service.to_upper_camel_case(), resource)
+}
+
+fn read_model_supplement_type_name(resource_name: &str) -> String {
+    let (service, resource) = split_service_resource(resource_name);
+    format!(
+        "{}{}ReadModelSupplement",
+        service.to_upper_camel_case(),
+        resource
+    )
+}
+
+/// Return the extracted SDK field that supplies a differently named canonical
+/// read-model field. Every other extracted field maps by snake_case name.
+fn read_model_field_alias(resource_name: &str, model_field: &str) -> Option<&'static str> {
+    match (resource_name, model_field) {
+        ("ec2.Eip", "address") => Some("public_ip"),
+        ("organizations.Account", "account_name") => Some("name"),
+        _ => None,
+    }
+}
+
+fn is_read_model_alias_source(resource_name: &str, source: &str) -> bool {
+    matches!(
+        (resource_name, source),
+        ("ec2.Eip", "public_ip") | ("organizations.Account", "name")
+    )
+}
+
+fn read_model_field_sources(
+    res: &ResourceDef,
+    extracted_field_names: &[String],
+    readable: &[&AttrInfo],
+) -> HashMap<String, String> {
+    let extracted: HashSet<&str> = extracted_field_names.iter().map(String::as_str).collect();
+    let mut sources = HashMap::new();
+    for attr in readable {
+        let source =
+            read_model_field_alias(res.name, &attr.snake_name).unwrap_or(attr.snake_name.as_str());
+        if extracted.contains(source) {
+            sources.insert(attr.snake_name.clone(), source.to_string());
+        }
+    }
+
+    for extracted_name in extracted_field_names {
+        if !sources.values().any(|source| source == extracted_name) {
+            panic!(
+                "codegen: typed read field {}.{} is not consumed by the canonical read model; add an explicit alias or classification",
+                res.name, extracted_name
+            );
+        }
+    }
+    sources
+}
+
 fn generate_provider_code(
     all_resources: &[ResourceDef],
     all_data_sources: &[resource_defs::DataSourceDef],
     models: &HashMap<&str, SmithyModel>,
     manual_methods: &std::collections::HashSet<String>,
 ) -> String {
+    if let Some(resource) = all_resources
+        .iter()
+        .find(|resource| !resource.read_ops.is_empty())
+    {
+        panic!(
+            "codegen: legacy map-based read_ops are unsupported for {}; add the response fields to its typed read extractor",
+            resource.name
+        );
+    }
+
     let mut code = String::new();
 
     // Header
@@ -2112,7 +2554,6 @@ fn generate_provider_code(
          //! DO NOT EDIT MANUALLY - regenerate with:\n\
          //!   ./carina-provider-aws/scripts/generate-provider.sh\n\n\
          use indexmap::IndexMap;\n\
-         use std::collections::HashMap;\n\n\
          use carina_core::provider::{\n\
          \x20   AppliedIdentifier, BoxFuture, ProviderError, ProviderResult, ReadOutcome,\n\
          };\n\
@@ -2125,13 +2566,138 @@ fn generate_provider_code(
 
     // Generate methods on AwsProvider
     code.push_str("// ===== Generated Methods on AwsProvider =====\n\n");
-    // Some emitted helpers (e.g. `extract_<resource>_attributes` for
-    // resources whose hand-written read paths build the attribute map
-    // inline, or `update_<resource>` for noop-update resources whose
-    // service file calls the underlying read method directly) have no
-    // call sites in the current code. They are still emitted so the
-    // generator can stay simple and uniform; gate dead-code on the impl
-    // block instead of pruning case-by-case.
+
+    for res in all_resources
+        .iter()
+        .filter(|resource| resource.read_structure.is_some())
+    {
+        let resource_name = module_name(res.name);
+        if manual_methods.contains(&format!("extract_{}_attributes", resource_name)) {
+            continue;
+        }
+        let Some(model) = models.get(res.service_namespace) else {
+            continue;
+        };
+        let read_struct_name = res.read_structure.expect("filtered above");
+        let read_struct_id = format!("{}#{}", res.service_namespace, read_struct_name);
+        let Some(read_struct) = model.get_structure(&read_struct_id) else {
+            continue;
+        };
+        let direct_fields = direct_read_fields(res, model, read_struct);
+        let fields_type = read_fields_type_name(res.name);
+        let model_type = read_model_type_name(res.name);
+        let supplement_type = read_model_supplement_type_name(res.name);
+        let collected = collect_resource_attributes(res, model)
+            .unwrap_or_else(|error| panic!("codegen: {} read model: {error}", res.name));
+        let readable: Vec<&AttrInfo> = collected
+            .attrs
+            .iter()
+            .filter(|attr| !attr.is_write_only)
+            .collect();
+        let field_names = extracted_read_field_names(res, &direct_fields, &readable);
+        let model_sources = read_model_field_sources(res, &field_names, &readable);
+        let supplemental: Vec<&&AttrInfo> = readable
+            .iter()
+            .filter(|attr| !model_sources.contains_key(&attr.snake_name))
+            .collect();
+
+        code.push_str(&format!(
+            "/// Typed values extracted from the AWS read shape for `{}`.\n\
+             #[allow(dead_code)]\n\
+             pub(crate) struct {} {{\n",
+            res.name, fields_type
+        ));
+        for field in &field_names {
+            let field = escape_rust_keyword(field);
+            code.push_str(&format!("    {field}: Option<Value>,\n"));
+        }
+        code.push_str("    applied_identifier: Option<String>,\n");
+        code.push_str("}\n\n");
+
+        code.push_str(&format!(
+            "#[allow(dead_code, clippy::wrong_self_convention)]\nimpl {fields_type} {{\n"
+        ));
+        for field_name in &field_names {
+            let field = escape_rust_keyword(field_name);
+            let map_method = escape_rust_keyword(&format!("map_{field_name}"));
+            code.push_str(&format!(
+                "    pub(crate) fn {field}(&self) -> Option<&Value> {{\n\
+                         self.{field}.as_ref()\n\
+                     }}\n\n\
+                     pub(crate) fn {map_method}(\n\
+                         mut self,\n\
+                         map: impl FnOnce(Option<Value>) -> Option<Value>,\n\
+                     ) -> Self {{\n\
+                         self.{field} = map(self.{field});\n\
+                         self\n\
+                     }}\n\n"
+            ));
+        }
+        code.push_str(
+            "    pub(crate) fn applied_identifier(&self) -> &Option<String> {\n\
+                     &self.applied_identifier\n\
+                 }\n\n",
+        );
+        code.push_str(&format!(
+            "    pub(crate) fn into_model(\n\
+                     self,\n\
+                     resource_id: &ResourceId,\n\
+                     supplement: crate::read_models_generated::{supplement_type},\n\
+                 ) -> ProviderResult<(Option<String>, crate::read_models_generated::{model_type})> {{\n"
+        ));
+        code.push_str("        let Self {\n");
+        for field_name in &field_names {
+            let field = escape_rust_keyword(field_name);
+            code.push_str(&format!("            {field},\n"));
+        }
+        code.push_str("            applied_identifier,\n        } = self;\n");
+        code.push_str(&format!(
+            "        let crate::read_models_generated::{supplement_type} {{\n"
+        ));
+        for attr in &supplemental {
+            let field = escape_rust_keyword(&attr.snake_name);
+            code.push_str(&format!("            {field},\n"));
+        }
+        if res.has_tags {
+            code.push_str("            tags,\n");
+        }
+        code.push_str("        } = supplement;\n");
+        code.push_str("        let _ = resource_id;\n");
+        code.push_str(&format!(
+            "        let model = crate::read_models_generated::{model_type} {{\n"
+        ));
+        for attr in &readable {
+            let field = escape_rust_keyword(&attr.snake_name);
+            if let Some(source) = model_sources.get(&attr.snake_name) {
+                let source = escape_rust_keyword(source);
+                match attr.read_presence {
+                    resource_defs::ReadPresence::Required => code.push_str(&format!(
+                        "            {field}: crate::read_model::require_read_value(resource_id, {source}.clone(), \"{}\")?,\n",
+                        attr.snake_name
+                    )),
+                    resource_defs::ReadPresence::Optional => code.push_str(&format!(
+                        "            {field}: {source}.clone(),\n"
+                    )),
+                }
+            } else {
+                code.push_str(&format!("            {field},\n"));
+            }
+        }
+        if res.has_tags {
+            code.push_str("            tags,\n");
+        }
+        code.push_str(
+            "        };\n\
+                     Ok((applied_identifier, model))\n\
+                 }\n\
+             }\n\n",
+        );
+    }
+
+    // Some typed SDK projections are unused when a managed read needs a
+    // different response shape or additional side calls. No-op update helpers
+    // can likewise be unused when the service calls its read directly. Emit
+    // these uniformly and gate dead-code here instead of pruning case-by-case.
     code.push_str("#[allow(dead_code)]\nimpl AwsProvider {\n");
 
     // Simple delete methods
@@ -2206,104 +2772,6 @@ fn generate_provider_code(
                  \x20   }}\n\n",
                 res.name, method_name, read_method,
             ));
-        }
-    }
-
-    // Read helpers for read_ops (non-data-source resources only)
-    for res in all_resources
-        .iter()
-        .filter(|r| !r.read_ops.is_empty() && !r.identifier.is_empty())
-    {
-        let model = match models.get(res.service_namespace) {
-            Some(m) => m,
-            None => continue,
-        };
-        let ns = res.service_namespace;
-        let client_field = client_field_name(ns);
-        let id_setter = res.identifier.to_snake_case();
-        let resource_name = module_name(res.name);
-
-        for read_op in &res.read_ops {
-            let suffix = op_suffix(read_op.operation, res.identifier);
-            let method_name = format!("read_{}_{}", resource_name, suffix);
-            if manual_methods.contains(&method_name) {
-                continue;
-            }
-            let sdk_method = read_op.operation.to_snake_case();
-
-            // Resolve output structure
-            let op_id = format!("{}#{}", ns, read_op.operation);
-            let output = match model.operation_output(&op_id) {
-                Some(o) => o,
-                None => continue,
-            };
-
-            // Build defaults map
-            let defaults: HashMap<&str, &str> = read_op.defaults.iter().copied().collect();
-
-            // Method signature
-            let op_desc = format!("{} {}", res.name, read_op.operation);
-            code.push_str(&format!("\x20   /// Read {} (generated)\n", op_desc));
-            code.push_str(&format!("\x20   pub(crate) async fn {}(\n", method_name));
-            code.push_str("\x20       &self,\n");
-            code.push_str("\x20       id: &ResourceId,\n");
-            code.push_str("\x20       identifier: &str,\n");
-            code.push_str("\x20       attributes: &mut HashMap<String, Value>,\n");
-            code.push_str("\x20   ) -> ProviderResult<()> {\n");
-            code.push_str(&format!(
-                "\x20       let output = self.{}.{}().{}(identifier).send().await.map_err(|e| {{\n",
-                client_field, sdk_method, id_setter
-            ));
-            code.push_str(&format!(
-                "\x20           api_error_with_meta(\"Failed to read {}\", e)\n",
-                op_desc,
-            ));
-            code.push_str("\x20               .for_resource(id.clone())\n");
-            code.push_str("\x20       })?;\n");
-
-            // Extract each field
-            for (field_name, rename) in &read_op.fields {
-                let effective_name = rename.unwrap_or(field_name);
-                let attr_snake = effective_name.to_snake_case();
-                let accessor = escape_rust_keyword(&field_name.to_snake_case());
-
-                // Determine if field is an enum
-                let is_enum = if let Some(member_ref) = output.members.get(*field_name) {
-                    matches!(model.shape_kind(&member_ref.target), Some(ShapeKind::Enum))
-                } else {
-                    false
-                };
-
-                let value_expr = if is_enum {
-                    "v.as_str().to_string()"
-                } else {
-                    "v.to_string()"
-                };
-
-                if let Some(default_value) = defaults.get(effective_name) {
-                    code.push_str(&format!(
-                        "\x20       let value = output.{}().map(|v| {}).unwrap_or_else(|| \"{}\".to_string());\n",
-                        accessor, value_expr, default_value,
-                    ));
-                    code.push_str(&format!(
-                        "\x20       attributes.insert(\"{}\".to_string(), Value::Concrete(ConcreteValue::String(value.into())));\n",
-                        attr_snake,
-                    ));
-                } else {
-                    code.push_str(&format!(
-                        "\x20       if let Some(v) = output.{}() {{\n",
-                        accessor,
-                    ));
-                    code.push_str(&format!(
-                        "\x20           attributes.insert(\"{}\".to_string(), Value::Concrete(ConcreteValue::String({}.into())));\n",
-                        attr_snake, value_expr,
-                    ));
-                    code.push_str("\x20       }\n");
-                }
-            }
-
-            code.push_str("\x20       Ok(())\n");
-            code.push_str("\x20   }\n\n");
         }
     }
 
@@ -2426,7 +2894,7 @@ fn generate_provider_code(
             code.push_str("\x20       &self,\n");
             code.push_str("\x20       id: &ResourceId,\n");
             code.push_str("\x20       identifier: &str,\n");
-            code.push_str("\x20       attributes: &HashMap<String, Value>,\n");
+            code.push_str("\x20       attributes: &std::collections::HashMap<String, Value>,\n");
             code.push_str("\x20   ) -> ProviderResult<()> {\n");
             code.push_str(&format!(
                 "\x20       use {}::types::{{{}}};\n",
@@ -2511,65 +2979,16 @@ fn generate_provider_code(
             continue;
         }
         let sdk_crate = sdk_crate_name(ns);
-
-        // Build exclude set
-        let exclude: HashSet<&str> = res.exclude_fields.iter().copied().collect();
-
-        // Get create input members
-        let create_input = if !res.create_op.is_empty() {
-            let create_op_id = format!("{}#{}", ns, res.create_op);
-            model.operation_input(&create_op_id)
-        } else {
-            None
-        };
-
-        // Compute updatable field names
-        let updatable_fields: HashSet<&str> = res
-            .update_ops
+        let direct_fields = direct_read_fields(res, model, read_struct);
+        let collected = collect_resource_attributes(res, model)
+            .unwrap_or_else(|error| panic!("codegen: {} read extractor: {error}", res.name));
+        let readable: Vec<&AttrInfo> = collected
+            .attrs
             .iter()
-            .flat_map(|op| op.fields.field_names().iter())
-            .copied()
+            .filter(|attr| !attr.is_write_only)
             .collect();
-
-        let extra_read_only: HashSet<&str> = res.extra_read_only.iter().copied().collect();
-
-        // Collect fields to extract: (attr_snake_name, accessor_snake_name, member_ref)
-        let mut fields_to_extract: Vec<(String, String, &carina_smithy::ShapeRef)> = Vec::new();
-
-        for (member_name, member_ref) in &read_struct.members {
-            if exclude.contains(member_name.as_str()) || member_name.eq_ignore_ascii_case("tags") {
-                continue;
-            }
-
-            let is_schema_attr = member_name == res.identifier
-                || extra_read_only.contains(member_name.as_str())
-                || updatable_fields.contains(member_name.as_str())
-                || create_input.is_some_and(|ci| ci.members.contains_key(member_name));
-
-            if !is_schema_attr {
-                continue;
-            }
-
-            let snake_name = member_name.to_snake_case();
-            fields_to_extract.push((snake_name.clone(), snake_name, member_ref));
-        }
-
-        // Add extra_attributes fields with read_source (different attr name vs accessor)
-        for extra in &res.extra_attributes {
-            if let Some(read_source) = extra.read_source
-                && let Some(member_ref) = read_struct.members.get(read_source)
-            {
-                let attr_name = extra.name.to_snake_case();
-                let accessor_name = read_source.to_snake_case();
-                // Avoid duplicates (if already extracted under the same accessor)
-                if !fields_to_extract.iter().any(|(a, _, _)| a == &attr_name) {
-                    fields_to_extract.push((attr_name, accessor_name, member_ref));
-                }
-            }
-        }
-
-        // Sort fields for deterministic output
-        fields_to_extract.sort_by(|a, b| a.0.cmp(&b.0));
+        let extracted_field_names = extracted_read_field_names(res, &direct_fields, &readable);
+        let fields_type = read_fields_type_name(res.name);
 
         // Generate method
         code.push_str(&format!(
@@ -2584,12 +3003,17 @@ fn generate_provider_code(
             "\x20       obj: &{}::types::{},\n",
             sdk_crate, read_struct_name
         ));
-        code.push_str("\x20       attributes: &mut HashMap<String, Value>,\n");
-        code.push_str("\x20   ) -> Option<String> {\n");
+        code.push_str(&format!("\x20   ) -> {fields_type} {{\n"));
 
-        for (attr_name, accessor_name, member_ref) in &fields_to_extract {
+        for DirectReadField {
+            attr_name,
+            accessor_name,
+            member_ref,
+        } in &direct_fields
+        {
             let kind = model.shape_kind(&member_ref.target);
             let accessor = escape_rust_keyword(accessor_name);
+            let field = escape_rust_keyword(attr_name);
             // Smithy `@required` members generate accessors that return the
             // value directly (`-> &str`, `-> bool`, etc.) rather than as
             // `Option`. Branch the emission so required strings hit
@@ -2602,37 +3026,23 @@ fn generate_provider_code(
                 Some(ShapeKind::Enum) => {
                     if required {
                         code.push_str(&format!(
-                            "\x20       attributes.insert(\"{}\".to_string(), Value::Concrete(ConcreteValue::String(obj.{}().as_str().to_string().into())));\n",
-                            attr_name, accessor
+                            "\x20       let {field} = Some(Value::Concrete(ConcreteValue::String(obj.{accessor}().as_str().to_string().into())));\n"
                         ));
                     } else {
                         code.push_str(&format!(
-                            "\x20       if let Some(v) = obj.{}() {{\n",
-                            accessor
+                            "\x20       let {field} = obj.{accessor}().map(|v| Value::Concrete(ConcreteValue::String(v.as_str().to_string().into())));\n"
                         ));
-                        code.push_str(&format!(
-                            "\x20           attributes.insert(\"{}\".to_string(), Value::Concrete(ConcreteValue::String(v.as_str().to_string().into())));\n",
-                            attr_name
-                        ));
-                        code.push_str("\x20       }\n");
                     }
                 }
                 Some(ShapeKind::Boolean) => {
                     if required {
                         code.push_str(&format!(
-                            "\x20       attributes.insert(\"{}\".to_string(), Value::Concrete(ConcreteValue::Bool(obj.{}())));\n",
-                            attr_name, accessor
+                            "\x20       let {field} = Some(Value::Concrete(ConcreteValue::Bool(obj.{accessor}())));\n"
                         ));
                     } else {
                         code.push_str(&format!(
-                            "\x20       if let Some(v) = obj.{}() {{\n",
-                            accessor
+                            "\x20       let {field} = obj.{accessor}().map(|v| Value::Concrete(ConcreteValue::Bool(v)));\n"
                         ));
-                        code.push_str(&format!(
-                            "\x20           attributes.insert(\"{}\".to_string(), Value::Concrete(ConcreteValue::Bool(v)));\n",
-                            attr_name
-                        ));
-                        code.push_str("\x20       }\n");
                     }
                 }
                 Some(int_kind @ (ShapeKind::Integer | ShapeKind::Long)) => {
@@ -2647,19 +3057,12 @@ fn generate_provider_code(
                     };
                     if required {
                         code.push_str(&format!(
-                            "\x20       attributes.insert(\"{}\".to_string(), Value::Concrete(ConcreteValue::Int(obj.{}(){})));\n",
-                            attr_name, accessor, cast
+                            "\x20       let {field} = Some(Value::Concrete(ConcreteValue::Int(obj.{accessor}(){cast})));\n"
                         ));
                     } else {
                         code.push_str(&format!(
-                            "\x20       if let Some(v) = obj.{}() {{\n",
-                            accessor
+                            "\x20       let {field} = obj.{accessor}().map(|v| Value::Concrete(ConcreteValue::Int(v{cast})));\n"
                         ));
-                        code.push_str(&format!(
-                            "\x20           attributes.insert(\"{}\".to_string(), Value::Concrete(ConcreteValue::Int(v{})));\n",
-                            attr_name, cast
-                        ));
-                        code.push_str("\x20       }\n");
                     }
                 }
                 Some(ShapeKind::String) => {
@@ -2668,22 +3071,13 @@ fn generate_provider_code(
                         // SDK uses for "missing on the wire," matching the
                         // pre-existing hand edits in provider_generated.rs.
                         code.push_str(&format!(
-                            "\x20       let v = obj.{}();\n\
-                             \x20       if !v.is_empty() {{\n\
-                             \x20           attributes.insert(\"{}\".to_string(), Value::Concrete(ConcreteValue::String(v.to_string().into())));\n\
-                             \x20       }}\n",
-                            accessor, attr_name
+                            "\x20       let v = obj.{accessor}();\n\
+                             \x20       let {field} = (!v.is_empty()).then(|| Value::Concrete(ConcreteValue::String(v.to_string().into())));\n"
                         ));
                     } else {
                         code.push_str(&format!(
-                            "\x20       if let Some(v) = obj.{}() {{\n",
-                            accessor
+                            "\x20       let {field} = obj.{accessor}().map(|v| Value::Concrete(ConcreteValue::String(v.to_string().into())));\n"
                         ));
-                        code.push_str(&format!(
-                            "\x20           attributes.insert(\"{}\".to_string(), Value::Concrete(ConcreteValue::String(v.to_string().into())));\n",
-                            attr_name
-                        ));
-                        code.push_str("\x20       }\n");
                     }
                 }
                 Some(carina_smithy::ShapeKind::List) => {
@@ -2699,23 +3093,17 @@ fn generate_provider_code(
                     };
                     if matches!(element_kind, Some(carina_smithy::ShapeKind::String)) {
                         code.push_str(&format!(
-                            "\x20       {{\n\
-                             \x20           let ids = obj.{}();\n\
-                             \x20           if !ids.is_empty() {{\n\
-                             \x20               let list: Vec<Value> = ids.iter().map(|s| Value::Concrete(ConcreteValue::String(s.to_string().into()))).collect();\n\
-                             \x20               attributes.insert(\"{}\".to_string(), Value::Concrete(ConcreteValue::List(list)));\n\
-                             \x20           }}\n\
-                             \x20       }}\n",
-                            accessor, attr_name
+                            "\x20       let ids = obj.{accessor}();\n\
+                             \x20       let {field} = (!ids.is_empty()).then(|| {{\n\
+                             \x20           let list: Vec<Value> = ids.iter().map(|s| Value::Concrete(ConcreteValue::String(s.to_string().into()))).collect();\n\
+                             \x20           Value::Concrete(ConcreteValue::List(list))\n\
+                             \x20       }});\n"
                         ));
                     }
                     // Non-string-element lists need a declarative
                     // projection (DerivedSource::ListAll) — handled below.
                 }
-                _ => {
-                    // Skip complex types (structures, maps) that need
-                    // custom handling in hand-written code
-                }
+                _ => unreachable!("unsupported direct read fields were filtered above"),
             }
         }
 
@@ -2794,12 +3182,9 @@ fn generate_provider_code(
                     }
 
                     code.push_str(&format!(
-                        "\x20       if let Some(addr) = obj.{}().first()\n\
-                         \x20           && let Some(v) = addr.{}()\n\
-                         \x20       {{\n\
-                         \x20           attributes.insert(\"{}\".to_string(), Value::Concrete(ConcreteValue::String(v.to_string().into())));\n\
-                         \x20       }}\n",
-                        list_snake, child_snake, attr_snake
+                        "\x20       let {attr_snake} = obj.{list_snake}().first()\n\
+                         \x20           .and_then(|item| item.{child_snake}())\n\
+                         \x20           .map(|value| Value::Concrete(ConcreteValue::String(value.to_string().into())));\n"
                     ));
                 }
                 resource_defs::DerivedSource::ListAll {
@@ -2860,19 +3245,11 @@ fn generate_provider_code(
                         continue;
                     }
                     code.push_str(&format!(
-                        "\x20       {{\n\
-                         \x20           let groups = obj.{}();\n\
-                         \x20           if !groups.is_empty() {{\n\
-                         \x20               let list: Vec<Value> = groups\n\
-                         \x20                   .iter()\n\
-                         \x20                   .filter_map(|g| g.{}().map(|id| Value::Concrete(ConcreteValue::String(id.to_string().into()))))\n\
-                         \x20                   .collect();\n\
-                         \x20               if !list.is_empty() {{\n\
-                         \x20                   attributes.insert(\"{}\".to_string(), Value::Concrete(ConcreteValue::List(list)));\n\
-                         \x20               }}\n\
-                         \x20           }}\n\
-                         \x20       }}\n",
-                        list_snake, child_snake, attr_snake
+                        "\x20       let list: Vec<Value> = obj.{list_snake}()\n\
+                         \x20           .iter()\n\
+                         \x20           .filter_map(|item| item.{child_snake}().map(|id| Value::Concrete(ConcreteValue::String(id.to_string().into()))))\n\
+                         \x20           .collect();\n\
+                         \x20       let {attr_snake} = (!list.is_empty()).then(|| Value::Concrete(ConcreteValue::List(list)));\n"
                     ));
                 }
                 resource_defs::DerivedSource::FromStruct {
@@ -2928,9 +3305,8 @@ fn generate_provider_code(
 
                     if is_nested_map_layout {
                         code.push_str(&format!(
-                            "\x20       if let Some(dns_opts) = obj.{}() {{\n\
-                             \x20           let mut fields = IndexMap::new();\n",
-                            struct_snake
+                            "\x20       let {attr_snake} = obj.{struct_snake}().and_then(|dns_opts| {{\n\
+                             \x20           let mut fields = IndexMap::new();\n"
                         ));
                         for child_name in *children {
                             let Some(child_ref) = inner_struct.members.get(*child_name) else {
@@ -2969,13 +3345,10 @@ fn generate_provider_code(
                                 ));
                             }
                         }
-                        code.push_str(&format!(
-                            "\x20           if !fields.is_empty() {{\n\
-                             \x20               attributes.insert(\"{}\".to_string(), Value::Concrete(ConcreteValue::Map(fields)));\n\
-                             \x20           }}\n\
-                             \x20       }}\n",
-                            attr_snake
-                        ));
+                        code.push_str(
+                            "\x20           (!fields.is_empty()).then(|| Value::Concrete(ConcreteValue::Map(fields)))\n\
+                             \x20       });\n",
+                        );
                     } else {
                         let child_name = children[0];
                         let Some(child_ref) = inner_struct.members.get(child_name) else {
@@ -2995,37 +3368,43 @@ fn generate_provider_code(
                             continue;
                         };
                         code.push_str(&format!(
-                            "\x20       if let Some(opts) = obj.{}()\n\
-                             \x20           && let Some(v) = opts.{}()\n\
-                             \x20       {{\n\
-                             \x20           attributes.insert(\"{}\".to_string(), {});\n\
-                             \x20       }}\n",
-                            struct_snake, child_snake, attr_snake, insert_expr
+                            "\x20       let {attr_snake} = obj.{struct_snake}()\n\
+                             \x20           .and_then(|opts| opts.{child_snake}())\n\
+                             \x20           .map(|v| {insert_expr});\n"
                         ));
                     }
                 }
             }
         }
 
-        // Return identifier value (only if identifier exists in read_structure)
+        // Preserve the response identifier for create paths that need to turn
+        // the just-created SDK object into an AppliedIdentifier.
         if !res.identifier.is_empty() && read_struct.members.contains_key(res.identifier) {
             let id_snake = escape_rust_keyword(&res.identifier.to_snake_case());
             let id_member = read_struct.members.get(res.identifier).unwrap();
             let id_required = SmithyModel::is_required(id_member);
             if id_required {
                 code.push_str(&format!(
-                    "\x20       Some(obj.{}().to_string())\n",
+                    "\x20       let applied_identifier = Some(obj.{}().to_string());\n",
                     id_snake
                 ));
             } else {
                 code.push_str(&format!(
-                    "\x20       obj.{}().map(String::from)\n",
+                    "\x20       let applied_identifier = obj.{}().map(String::from);\n",
                     id_snake
                 ));
             }
         } else {
-            code.push_str("\x20       None\n");
+            code.push_str("\x20       let applied_identifier = None;\n");
         }
+
+        code.push_str(&format!("\x20       {fields_type} {{\n"));
+        for field in &extracted_field_names {
+            let field = escape_rust_keyword(field);
+            code.push_str(&format!("\x20           {field},\n"));
+        }
+        code.push_str("\x20           applied_identifier,\n");
+        code.push_str("\x20       }\n");
 
         code.push_str("\x20   }\n\n");
     }
@@ -3089,6 +3468,258 @@ fn generate_provider_code(
     );
 
     code
+}
+
+fn read_model_type_name(resource_name: &str) -> String {
+    let (service, resource) = split_service_resource(resource_name);
+    format!("{}{}ReadModel", service.to_upper_camel_case(), resource)
+}
+
+fn data_source_read_model_type_name(resource_name: &str) -> String {
+    let (service, resource) = split_service_resource(resource_name);
+    format!(
+        "{}{}DataSourceReadModel",
+        service.to_upper_camel_case(),
+        resource
+    )
+}
+
+/// Generate the exhaustive managed-resource read models and their sole
+/// Value-map conversion seam.
+fn generate_read_models_code(
+    all_resources: &[ResourceDef],
+    all_data_sources: &[resource_defs::DataSourceDef],
+    models: &HashMap<&str, SmithyModel>,
+) -> Result<String> {
+    let mut code = String::from(
+        "//! Auto-generated managed-resource and data-source read models.\n\
+         //!\n\
+         //! DO NOT EDIT MANUALLY - regenerate with:\n\
+         //!   ./scripts/generate-provider.sh\n\n\
+         use std::collections::HashMap;\n\n\
+         use std::sync::OnceLock;\n\n\
+         use carina_core::provider::ProviderResult;\n\
+         use carina_core::resource::Value;\n\n\
+         use carina_core::schema::ValidatedResourceSchema;\n\n\
+         use crate::read_model::{\n\
+         \x20   DataSourceReadModel, ManagedReadModel, cached_validated_read_schema, sealed,\n\
+         \x20   validate_read_attributes,\n\
+         };\n\n",
+    );
+
+    for res in all_resources {
+        let model = models
+            .get(res.service_namespace)
+            .with_context(|| format!("missing Smithy model for {}", res.name))?;
+        let collected = collect_resource_attributes(res, model)?;
+        let readable: Vec<&AttrInfo> = collected
+            .attrs
+            .iter()
+            .filter(|attr| !attr.is_write_only)
+            .collect();
+        let model_name = read_model_type_name(res.name);
+        let (service, resource) = split_service_resource_snake(res.name);
+        let config_fn = format!("{}_config", module_name(res.name));
+        let model_supplement = res.read_structure.and_then(|read_structure| {
+            let read_struct_id = format!("{}#{read_structure}", res.service_namespace);
+            let read_struct = model.get_structure(&read_struct_id)?;
+            let direct_fields = direct_read_fields(res, model, read_struct);
+            let extracted = extracted_read_field_names(res, &direct_fields, &readable);
+            let sources = read_model_field_sources(res, &extracted, &readable);
+            let supplemental = readable
+                .iter()
+                .filter(|attr| !sources.contains_key(&attr.snake_name))
+                .copied()
+                .collect::<Vec<_>>();
+            Some((read_model_supplement_type_name(res.name), supplemental))
+        });
+
+        code.push_str(&format!(
+            "/// Exhaustive canonical read state for `{}`.\n\
+             pub(crate) struct {} {{\n",
+            res.name, model_name
+        ));
+        for attr in &readable {
+            let field = escape_rust_keyword(&attr.snake_name);
+            let field_type = match attr.read_presence {
+                resource_defs::ReadPresence::Required => "Value",
+                resource_defs::ReadPresence::Optional => "Option<Value>",
+            };
+            code.push_str(&format!("    pub(crate) {field}: {field_type},\n"));
+        }
+        if res.has_tags {
+            code.push_str("    pub(crate) tags: Value,\n");
+        }
+        code.push_str("}\n\n");
+
+        if let Some((supplement_name, supplemental)) = &model_supplement {
+            code.push_str(&format!(
+                "/// Canonical fields for `{}` supplied by identifiers, side reads, or complex SDK projections.\n\
+                 pub(crate) struct {supplement_name} {{\n",
+                res.name
+            ));
+            for attr in supplemental {
+                let field = escape_rust_keyword(&attr.snake_name);
+                let field_type = match attr.read_presence {
+                    resource_defs::ReadPresence::Required => "Value",
+                    resource_defs::ReadPresence::Optional => "Option<Value>",
+                };
+                code.push_str(&format!("    pub(crate) {field}: {field_type},\n"));
+            }
+            if res.has_tags {
+                code.push_str("    pub(crate) tags: Value,\n");
+            }
+            code.push_str("}\n\n");
+        }
+
+        code.push_str(&format!("impl sealed::Sealed for {model_name} {{}}\n\n"));
+        code.push_str(&format!(
+            "impl ManagedReadModel for {model_name} {{\n\
+             \x20   fn into_attributes(self) -> ProviderResult<HashMap<String, Value>> {{\n"
+        ));
+        code.push_str("        let Self {\n");
+        for attr in &readable {
+            let field = escape_rust_keyword(&attr.snake_name);
+            code.push_str(&format!("            {field},\n"));
+        }
+        if res.has_tags {
+            code.push_str("            tags,\n");
+        }
+        code.push_str("        } = self;\n");
+        code.push_str(&format!(
+            "        let mut attributes = HashMap::with_capacity({});\n",
+            readable.len() + usize::from(res.has_tags)
+        ));
+        for attr in &readable {
+            let field = escape_rust_keyword(&attr.snake_name);
+            match attr.read_presence {
+                resource_defs::ReadPresence::Required => code.push_str(&format!(
+                    "        attributes.insert(\"{}\".to_string(), {field});\n",
+                    attr.snake_name
+                )),
+                resource_defs::ReadPresence::Optional => code.push_str(&format!(
+                    "        if let Some(value) = {field} {{\n\
+                     \x20           attributes.insert(\"{}\".to_string(), value);\n\
+                     \x20       }}\n",
+                    attr.snake_name
+                )),
+            }
+        }
+        if res.has_tags {
+            code.push_str("        attributes.insert(\"tags\".to_string(), tags);\n");
+        }
+        code.push_str(&format!(
+            "        static VALIDATED_SCHEMA: OnceLock<Result<ValidatedResourceSchema, String>> = OnceLock::new();\n\
+             \x20       let schema = cached_validated_read_schema(\n\
+             \x20           \"{}\",\n\
+             \x20           &VALIDATED_SCHEMA,\n\
+             \x20           || crate::schemas::generated::{service}::{resource}::{config_fn}().schema,\n\
+             \x20       )?;\n\
+             \x20       validate_read_attributes(\n\
+             \x20           \"{}\",\n\
+             \x20           schema,\n\
+             \x20           &mut attributes,\n\
+             \x20       )?;\n\
+             \x20       Ok(attributes)\n\
+             \x20   }}\n\
+             }}\n\n",
+            res.name, res.name
+        ));
+    }
+
+    let managed_names = all_resources
+        .iter()
+        .map(|resource| resource.name)
+        .collect::<HashSet<_>>();
+    for data_source in all_data_sources {
+        let mut fields = Vec::<(&str, bool)>::new();
+        for input in &data_source.inputs {
+            fields.push((input.name, input.required));
+        }
+        match &data_source.shape {
+            resource_defs::DataSourceShape::Single { output_attributes } => {
+                for output in output_attributes {
+                    if !fields.iter().any(|(name, _)| *name == output.name) {
+                        fields.push((output.name, false));
+                    }
+                }
+            }
+            resource_defs::DataSourceShape::ListAggregated { aggregated_outputs } => {
+                for output in aggregated_outputs {
+                    fields.push((output.name, false));
+                }
+            }
+        }
+
+        let model_name = data_source_read_model_type_name(data_source.name);
+        code.push_str(&format!(
+            "/// Exhaustive canonical data-source state for `{}`.\n\
+             pub(crate) struct {model_name} {{\n",
+            data_source.name
+        ));
+        for (name, required) in &fields {
+            let field = escape_rust_keyword(name);
+            let field_type = if *required { "Value" } else { "Option<Value>" };
+            code.push_str(&format!("    pub(crate) {field}: {field_type},\n"));
+        }
+        code.push_str("}\n\n");
+        code.push_str(&format!("impl sealed::Sealed for {model_name} {{}}\n\n"));
+        code.push_str(&format!(
+            "impl DataSourceReadModel for {model_name} {{\n\
+             \x20   fn into_attributes(self) -> ProviderResult<HashMap<String, Value>> {{\n\
+             \x20       let Self {{\n"
+        ));
+        for (name, _) in &fields {
+            let field = escape_rust_keyword(name);
+            code.push_str(&format!("            {field},\n"));
+        }
+        code.push_str("        } = self;\n");
+        code.push_str(&format!(
+            "        let mut attributes = HashMap::with_capacity({});\n",
+            fields.len()
+        ));
+        for (name, required) in &fields {
+            let field = escape_rust_keyword(name);
+            if *required {
+                code.push_str(&format!(
+                    "        attributes.insert(\"{name}\".to_string(), {field});\n"
+                ));
+            } else {
+                code.push_str(&format!(
+                    "        if let Some(value) = {field} {{\n\
+                     \x20           attributes.insert(\"{name}\".to_string(), value);\n\
+                     \x20       }}\n"
+                ));
+            }
+        }
+        let (service, resource) = split_service_resource_snake(data_source.name);
+        let dual_suffix = if managed_names.contains(data_source.name) {
+            "_data_source"
+        } else {
+            ""
+        };
+        let module = format!("{resource}{dual_suffix}");
+        let config_fn = format!("{}{dual_suffix}_config", module_name(data_source.name));
+        code.push_str(&format!(
+            "        static VALIDATED_SCHEMA: OnceLock<Result<ValidatedResourceSchema, String>> = OnceLock::new();\n\
+             \x20       let schema = cached_validated_read_schema(\n\
+             \x20           \"{}\",\n\
+             \x20           &VALIDATED_SCHEMA,\n\
+             \x20           || crate::schemas::generated::{service}::{module}::{config_fn}().schema,\n\
+             \x20       )?;\n\
+             \x20       validate_read_attributes(\n\
+             \x20           \"{}\",\n\
+             \x20           schema,\n\
+             \x20           &mut attributes,\n\
+             \x20       )?;\n\
+             \x20       Ok(attributes)\n\
+             \x20   }}\n\
+             }}\n\n",
+            data_source.name, data_source.name
+        ));
+    }
+
+    Ok(code)
 }
 
 /// Returns true when `attr` (as a PascalCase / Smithy member name) is
@@ -3413,7 +4044,12 @@ fn generate_markdown_resource(
 
     let is_data_source = res.create_op.is_empty();
 
-    let exclude: HashSet<&str> = res.exclude_fields.iter().copied().collect();
+    let mut exclude: HashSet<&str> = res.exclude_fields.iter().copied().collect();
+    for disposition in res.read_dispositions() {
+        if let resource_defs::ReadDisposition::OmitSchema { field, .. } = disposition {
+            exclude.insert(field);
+        }
+    }
     let type_overrides: HashMap<&str, &str> = res.type_overrides.iter().copied().collect();
     let struct_field_type_overrides: HashMap<(&str, &str), &str> = res
         .struct_field_type_overrides
@@ -5125,6 +5761,395 @@ fn truncate_str(s: &str, max_len: usize) -> String {
 mod tests {
     use super::*;
 
+    const PROVIDER_FIXTURE_FIELDS: &[&str] = &[
+        "AllocationId",
+        "AvailabilityMode",
+        "CidrBlock",
+        "Description",
+        "Name",
+        "Options",
+        "Path",
+        "PeerOwnerId",
+        "PeerVpcId",
+        "PrivateDnsNameOptionsOnLaunch",
+        "RoleName",
+        "RouteTableIds",
+        "SecurityGroupIds",
+        "SubnetIds",
+        "TransitGatewayId",
+        "Unobservable",
+        "VpcId",
+    ];
+
+    fn empty_test_model() -> SmithyModel {
+        carina_smithy::parse(r#"{"smithy":"2.0","shapes":{}}"#).expect("parse empty test model")
+    }
+
+    fn string_fixture_model(
+        create_fields: &[(&str, bool)],
+        read_fields: &[(&str, bool)],
+    ) -> SmithyModel {
+        fn members(fields: &[(&str, bool)]) -> String {
+            fields
+                .iter()
+                .map(|(name, required)| {
+                    let traits = if *required {
+                        r#"{"smithy.api#required":{}}"#
+                    } else {
+                        "{}"
+                    };
+                    format!(r#""{name}":{{"target":"smithy.api#String","traits":{traits}}}"#)
+                })
+                .collect::<Vec<_>>()
+                .join(",")
+        }
+
+        let document = r##"{
+          "smithy": "2.0",
+          "shapes": {
+            "com.amazonaws.test#CreateFixture": {
+              "type": "operation",
+              "input": { "target": "com.amazonaws.test#CreateFixtureRequest" },
+              "output": { "target": "smithy.api#Unit" },
+              "traits": {}
+            },
+            "com.amazonaws.test#CreateFixtureRequest": {
+              "type": "structure",
+              "members": { __CREATE_FIELDS__ },
+              "traits": { "smithy.api#input": {} }
+            },
+            "com.amazonaws.test#ReadFixture": {
+              "type": "structure",
+              "members": { __READ_FIELDS__ },
+              "traits": {}
+            }
+          }
+        }"##
+        .replace("__CREATE_FIELDS__", &members(create_fields))
+        .replace("__READ_FIELDS__", &members(read_fields));
+        carina_smithy::parse(&document).expect("parse string-only fixture model")
+    }
+
+    /// Minimal Smithy surface shared by codegen unit tests. Every shape here
+    /// is exercised by at least one test below; no ignored AWS model cache is
+    /// needed for the codegen contract to be tested in CI.
+    fn provider_fixture_model() -> SmithyModel {
+        carina_smithy::parse(
+            r##"{
+              "smithy": "2.0",
+              "shapes": {
+                "com.amazonaws.test#CreateFixture": {
+                  "type": "operation",
+                  "input": { "target": "com.amazonaws.test#CreateFixtureRequest" },
+                  "output": { "target": "smithy.api#Unit" },
+                  "traits": {}
+                },
+                "com.amazonaws.test#CreateFixtureRequest": {
+                  "type": "structure",
+                  "members": {
+                    "AllocationId": { "target": "smithy.api#String", "traits": {} },
+                    "AvailabilityMode": { "target": "smithy.api#String", "traits": {} },
+                    "CidrBlock": { "target": "smithy.api#String", "traits": {} },
+                    "Description": { "target": "smithy.api#String", "traits": {} },
+                    "Name": { "target": "smithy.api#String", "traits": { "smithy.api#required": {} } },
+                    "Options": { "target": "com.amazonaws.test#Options", "traits": {} },
+                    "Path": { "target": "smithy.api#String", "traits": {} },
+                    "PeerOwnerId": { "target": "smithy.api#String", "traits": {} },
+                    "PeerVpcId": { "target": "smithy.api#String", "traits": {} },
+                    "PrivateDnsNameOptionsOnLaunch": { "target": "com.amazonaws.test#PrivateDnsOptions", "traits": {} },
+                    "RoleName": { "target": "smithy.api#String", "traits": { "smithy.api#required": {} } },
+                    "RouteTableIds": { "target": "com.amazonaws.test#StringList", "traits": {} },
+                    "SecurityGroupIds": { "target": "com.amazonaws.test#StringList", "traits": {} },
+                    "SubnetIds": { "target": "com.amazonaws.test#StringList", "traits": {} },
+                    "TransitGatewayId": { "target": "smithy.api#String", "traits": {} },
+                    "Unobservable": { "target": "smithy.api#String", "traits": {} },
+                    "VpcId": { "target": "smithy.api#String", "traits": {} }
+                  },
+                  "traits": { "smithy.api#input": {} }
+                },
+                "com.amazonaws.test#ReadFixture": {
+                  "type": "structure",
+                  "members": {
+                    "AccepterVpcInfo": { "target": "com.amazonaws.test#VpcInfo", "traits": {} },
+                    "Arn": { "target": "smithy.api#String", "traits": { "smithy.api#required": {} } },
+                    "Attachments": { "target": "com.amazonaws.test#VpcInfoList", "traits": {} },
+                    "AvailabilityMode": { "target": "smithy.api#String", "traits": {} },
+                    "CidrBlock": { "target": "smithy.api#String", "traits": {} },
+                    "Description": { "target": "smithy.api#String", "traits": {} },
+                    "EgressOnlyInternetGatewayId": { "target": "smithy.api#String", "traits": {} },
+                    "Groups": { "target": "com.amazonaws.test#GroupList", "traits": {} },
+                    "Name": { "target": "smithy.api#String", "traits": { "smithy.api#required": {} } },
+                    "NatGatewayAddresses": { "target": "com.amazonaws.test#NatGatewayAddressList", "traits": {} },
+                    "NatGatewayId": { "target": "smithy.api#String", "traits": {} },
+                    "Options": { "target": "com.amazonaws.test#Options", "traits": {} },
+                    "Path": { "target": "smithy.api#String", "traits": { "smithy.api#required": {} } },
+                    "PrivateDnsNameOptionsOnLaunch": { "target": "com.amazonaws.test#PrivateDnsOptions", "traits": {} },
+                    "RequesterVpcInfo": { "target": "com.amazonaws.test#VpcInfo", "traits": {} },
+                    "RoleId": { "target": "smithy.api#String", "traits": { "smithy.api#required": {} } },
+                    "RoleName": { "target": "smithy.api#String", "traits": { "smithy.api#required": {} } },
+                    "RouteTableIds": { "target": "com.amazonaws.test#StringList", "traits": {} },
+                    "SubnetId": { "target": "smithy.api#String", "traits": {} },
+                    "SubnetIds": { "target": "com.amazonaws.test#StringList", "traits": {} },
+                    "TransitGatewayId": { "target": "smithy.api#String", "traits": {} },
+                    "VpcEndpointId": { "target": "smithy.api#String", "traits": {} },
+                    "VpcId": { "target": "smithy.api#String", "traits": {} },
+                    "VpcPeeringConnectionId": { "target": "smithy.api#String", "traits": {} }
+                  },
+                  "traits": {}
+                },
+                "com.amazonaws.test#StringList": {
+                  "type": "list",
+                  "member": { "target": "smithy.api#String", "traits": {} },
+                  "traits": {}
+                },
+                "com.amazonaws.test#VpcInfoList": {
+                  "type": "list",
+                  "member": { "target": "com.amazonaws.test#VpcInfo", "traits": {} },
+                  "traits": {}
+                },
+                "com.amazonaws.test#VpcInfo": {
+                  "type": "structure",
+                  "members": {
+                    "OwnerId": { "target": "smithy.api#String", "traits": {} },
+                    "VpcId": { "target": "smithy.api#String", "traits": {} }
+                  },
+                  "traits": {}
+                },
+                "com.amazonaws.test#NatGatewayAddressList": {
+                  "type": "list",
+                  "member": { "target": "com.amazonaws.test#NatGatewayAddress", "traits": {} },
+                  "traits": {}
+                },
+                "com.amazonaws.test#NatGatewayAddress": {
+                  "type": "structure",
+                  "members": {
+                    "AllocationId": { "target": "smithy.api#String", "traits": {} }
+                  },
+                  "traits": {}
+                },
+                "com.amazonaws.test#GroupList": {
+                  "type": "list",
+                  "member": { "target": "com.amazonaws.test#Group", "traits": {} },
+                  "traits": {}
+                },
+                "com.amazonaws.test#Group": {
+                  "type": "structure",
+                  "members": {
+                    "GroupId": { "target": "smithy.api#String", "traits": {} }
+                  },
+                  "traits": {}
+                },
+                "com.amazonaws.test#Options": {
+                  "type": "structure",
+                  "members": {
+                    "AmazonSideAsn": { "target": "smithy.api#Long", "traits": {} },
+                    "DnsSupport": { "target": "com.amazonaws.test#FeatureState", "traits": {} }
+                  },
+                  "traits": {}
+                },
+                "com.amazonaws.test#PrivateDnsOptions": {
+                  "type": "structure",
+                  "members": {
+                    "EnableResourceNameDnsARecord": { "target": "smithy.api#Boolean", "traits": {} },
+                    "HostnameType": { "target": "com.amazonaws.test#HostnameType", "traits": {} }
+                  },
+                  "traits": {}
+                },
+                "com.amazonaws.test#FeatureState": {
+                  "type": "enum",
+                  "members": {
+                    "enable": { "target": "smithy.api#Unit", "traits": { "smithy.api#enumValue": "enable" } },
+                    "disable": { "target": "smithy.api#Unit", "traits": { "smithy.api#enumValue": "disable" } }
+                  },
+                  "traits": {}
+                },
+                "com.amazonaws.test#HostnameType": {
+                  "type": "enum",
+                  "members": {
+                    "ip-name": { "target": "smithy.api#Unit", "traits": { "smithy.api#enumValue": "ip-name" } }
+                  },
+                  "traits": {}
+                }
+              }
+            }"##,
+        )
+        .expect("parse provider codegen fixture model")
+    }
+
+    fn provider_fixture_model_without_read_fields(fields: &[&str]) -> SmithyModel {
+        let mut model = provider_fixture_model();
+        let read_shape = model
+            .shapes
+            .get_mut("com.amazonaws.test#ReadFixture")
+            .expect("provider fixture read shape");
+        let carina_smithy::Shape::Structure(read_structure) = read_shape else {
+            panic!("provider fixture read shape must be a structure");
+        };
+        for field in fields {
+            read_structure.members.remove(*field);
+        }
+        model
+    }
+
+    fn provider_fixture_resource(
+        name: &'static str,
+        identifier: &'static str,
+        fields: &[&'static str],
+        derived_attributes: Vec<resource_defs::DerivedAttribute>,
+    ) -> ResourceDef {
+        ResourceDef {
+            name,
+            replacement: ReplacementClass::Conflicting,
+            service_namespace: "com.amazonaws.test",
+            schema_structure: None,
+            simple_delete: false,
+            noop_update: false,
+            create_op: "CreateFixture",
+            read_structure: Some("ReadFixture"),
+            read_ops: vec![],
+            delete_op: "",
+            update_ops: vec![],
+            identifier,
+            has_tags: false,
+            type_overrides: vec![],
+            exclude_fields: PROVIDER_FIXTURE_FIELDS
+                .iter()
+                .copied()
+                .filter(|field| !fields.contains(field))
+                .collect(),
+            create_only_overrides: vec![],
+            enum_aliases: vec![],
+            to_dsl_overrides: vec![],
+            required_overrides: vec![],
+            extra_read_only: vec![],
+            read_only_overrides: vec![],
+            extra_attributes: vec![],
+            identity_overrides: vec![],
+            deferred_populate_overrides: vec![],
+            deferred_populate_struct_field_overrides: vec![],
+            struct_field_type_overrides: vec![],
+            read_shape_overrides: vec![],
+            derived_attributes,
+        }
+    }
+
+    fn enum_fixture_model() -> SmithyModel {
+        carina_smithy::parse(
+            r##"{
+              "smithy": "2.0",
+              "shapes": {
+                "com.amazonaws.test#CreateEnumFixture": {
+                  "type": "operation",
+                  "input": { "target": "com.amazonaws.test#EnumFixture" },
+                  "output": { "target": "smithy.api#Unit" },
+                  "traits": {}
+                },
+                "com.amazonaws.test#EnumFixture": {
+                  "type": "structure",
+                  "members": {
+                    "Type": { "target": "com.amazonaws.test#RecordType", "traits": {} }
+                  },
+                  "traits": { "smithy.api#input": {} }
+                },
+                "com.amazonaws.test#RecordType": {
+                  "type": "enum",
+                  "members": {
+                    "A": { "target": "smithy.api#Unit", "traits": { "smithy.api#enumValue": "A" } },
+                    "CNAME": { "target": "smithy.api#Unit", "traits": { "smithy.api#enumValue": "CNAME" } }
+                  },
+                  "traits": {}
+                }
+              }
+            }"##,
+        )
+        .expect("parse enum codegen fixture model")
+    }
+
+    fn enum_fixture_resource() -> ResourceDef {
+        ResourceDef {
+            // Use a registered resource name because generate_resource also
+            // emits the provider's closed CloudFormation type mapping.
+            name: "iam.Role",
+            replacement: ReplacementClass::Conflicting,
+            service_namespace: "com.amazonaws.test",
+            schema_structure: None,
+            simple_delete: false,
+            noop_update: false,
+            create_op: "CreateEnumFixture",
+            read_structure: Some("EnumFixture"),
+            read_ops: vec![],
+            delete_op: "",
+            update_ops: vec![],
+            identifier: "",
+            has_tags: false,
+            type_overrides: vec![],
+            exclude_fields: vec![],
+            create_only_overrides: vec![],
+            enum_aliases: vec![],
+            to_dsl_overrides: vec![],
+            required_overrides: vec![],
+            extra_read_only: vec![],
+            read_only_overrides: vec![],
+            extra_attributes: vec![],
+            identity_overrides: vec![],
+            deferred_populate_overrides: vec![],
+            deferred_populate_struct_field_overrides: vec![],
+            struct_field_type_overrides: vec![],
+            read_shape_overrides: vec![],
+            derived_attributes: vec![],
+        }
+    }
+
+    #[test]
+    fn unclassified_read_attribute_fails_generation() {
+        let model = string_fixture_model(
+            &[("Description", false), ("Unobservable", false)],
+            &[("Description", false)],
+        );
+        let resource =
+            provider_fixture_resource("test.UnclassifiedFixture", "", &["Unobservable"], vec![]);
+
+        let error = validate_read_contract(&resource, &model, &[])
+            .expect_err("a schema attribute without a read disposition must fail generation");
+        assert!(error.to_string().contains("Unobservable"), "{error:#}");
+    }
+
+    #[test]
+    fn write_only_read_disposition_requires_create_only_attribute() {
+        let model = string_fixture_model(&[("Description", false)], &[("Description", false)]);
+        let mut resource =
+            provider_fixture_resource("test.UpdatableFixture", "", &["Description"], vec![]);
+        resource.update_ops.push(resource_defs::UpdateOp {
+            operation: "UpdateFixture",
+            fields: resource_defs::FieldLayout::Flat(vec!["Description"]),
+        });
+        let dispositions = [resource_defs::ReadDisposition::WriteOnly {
+            field: "Description",
+            reason: "test fixture",
+        }];
+
+        let error = validate_read_contract(&resource, &model, &dispositions)
+            .expect_err("write-only must not hide an updatable attribute");
+        assert!(error.to_string().contains("Description"), "{error:#}");
+        assert!(error.to_string().contains("create-only"), "{error:#}");
+    }
+
+    #[test]
+    fn schema_omission_requires_a_non_empty_reason() {
+        let model = string_fixture_model(&[("Unobservable", false)], &[]);
+        let resource =
+            provider_fixture_resource("test.OmittedFixture", "", &["Unobservable"], vec![]);
+        let dispositions = [resource_defs::ReadDisposition::OmitSchema {
+            field: "Unobservable",
+            reason: "",
+        }];
+
+        let error = validate_read_contract(&resource, &model, &dispositions)
+            .expect_err("omitting a schema attribute without a reason must fail generation");
+        assert!(error.to_string().contains("Unobservable"), "{error:#}");
+        assert!(error.to_string().contains("reason"), "{error:#}");
+    }
+
     #[test]
     fn mode_constructor_golden() {
         let rendered = [(false, false), (true, false), (false, true), (true, true)]
@@ -5271,6 +6296,9 @@ mod tests {
             is_required: false,
             is_create_only: false,
             is_read_only,
+            is_write_only: false,
+            read_presence: resource_defs::ReadPresence::Optional,
+            read_reason: None,
             is_plain_string,
             is_identity,
             is_deferred_populate: false,
@@ -5390,14 +6418,7 @@ mod tests {
 
     #[test]
     fn generate_data_source_for_sts_caller_identity_emits_explicit_outputs() {
-        let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../carina-provider-aws/tests/fixtures/smithy/sts.json");
-        if !fixture.exists() {
-            eprintln!("Skipping: Smithy fixture not found: {}", fixture.display());
-            return;
-        }
-        let file = std::fs::File::open(&fixture).expect("open Smithy fixture");
-        let model = carina_smithy::parse_reader(std::io::BufReader::new(file)).expect("parse");
+        let model = empty_test_model();
         let ds = resource_defs::sts_data_sources()
             .into_iter()
             .next()
@@ -5433,13 +6454,7 @@ mod tests {
 
     #[test]
     fn generate_data_source_for_identitystore_user_emits_inputs_and_outputs() {
-        let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../carina-provider-aws/tests/fixtures/smithy/identitystore.json");
-        if !fixture.exists() {
-            return;
-        }
-        let file = std::fs::File::open(&fixture).unwrap();
-        let model = carina_smithy::parse_reader(std::io::BufReader::new(file)).unwrap();
+        let model = empty_test_model();
         let ds = resource_defs::identitystore_data_sources()
             .into_iter()
             .next()
@@ -5453,22 +6468,17 @@ mod tests {
         assert!(generated.contains(
             r#"AttributeSchema::provider_populated("display_name", AttributeType::string())"#
         ));
-        assert!(
-            generated.contains(
-                r#"AttributeSchema::provider_populated("emails", AttributeType::string())"#
-            )
-        );
+        assert!(generated.contains(
+            r#"AttributeSchema::provider_populated("name", super::identitystore_user_name())"#
+        ));
+        assert!(generated.contains(
+            r#"AttributeSchema::provider_populated("emails", AttributeType::unordered_list(types::email()))"#
+        ));
     }
 
     #[test]
     fn markdown_data_source_lists_explicit_output_attributes() {
-        let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../carina-provider-aws/tests/fixtures/smithy/sts.json");
-        if !fixture.exists() {
-            return;
-        }
-        let file = std::fs::File::open(&fixture).unwrap();
-        let model = carina_smithy::parse_reader(std::io::BufReader::new(file)).unwrap();
+        let model = empty_test_model();
         let ds = resource_defs::sts_data_sources()
             .into_iter()
             .next()
@@ -5487,14 +6497,7 @@ mod tests {
     /// `arns: List(...)` rather than scalar.
     #[test]
     fn generate_data_source_for_iam_roles_emits_list_attributes() {
-        let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../carina-provider-aws/tests/fixtures/smithy/iam.json");
-        if !fixture.exists() {
-            eprintln!("Skipping: Smithy fixture not found: {}", fixture.display());
-            return;
-        }
-        let file = std::fs::File::open(&fixture).expect("open iam fixture");
-        let model = carina_smithy::parse_reader(std::io::BufReader::new(file)).expect("parse iam");
+        let model = empty_test_model();
         let ds = resource_defs::iam_data_sources()
             .into_iter()
             .next()
@@ -5547,13 +6550,7 @@ mod tests {
 
     #[test]
     fn markdown_data_source_for_iam_roles_emits_list_types() {
-        let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../carina-provider-aws/tests/fixtures/smithy/iam.json");
-        if !fixture.exists() {
-            return;
-        }
-        let file = std::fs::File::open(&fixture).unwrap();
-        let model = carina_smithy::parse_reader(std::io::BufReader::new(file)).unwrap();
+        let model = empty_test_model();
         let ds = resource_defs::iam_data_sources()
             .into_iter()
             .next()
@@ -5571,17 +6568,10 @@ mod tests {
 
     #[test]
     fn markdown_resource_for_iam_role_displays_specific_arn_type() {
-        let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../carina-provider-aws/tests/fixtures/smithy/iam.json");
-        if !fixture.exists() {
-            return;
-        }
-        let file = std::fs::File::open(&fixture).unwrap();
-        let model = carina_smithy::parse_reader(std::io::BufReader::new(file)).unwrap();
-        let res = resource_defs::iam_resources()
-            .into_iter()
-            .find(|r| r.name == "iam.Role")
-            .expect("iam.Role missing");
+        let model = provider_fixture_model();
+        let mut res = provider_fixture_resource("iam.Role", "RoleName", &["RoleName"], vec![]);
+        res.extra_read_only = vec!["Arn"];
+        res.type_overrides = vec![("Arn", "super::super::iam::role::arn()")];
 
         let md = generate_markdown_resource(&res, &model, None).expect("md");
 
@@ -5644,22 +6634,8 @@ mod tests {
     /// `aws.route53.RecordSet.Type.a`.
     #[test]
     fn generate_resource_emits_dsl_aliases_for_pascal_enum() {
-        let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../carina-provider-aws/tests/fixtures/smithy/route53.json");
-        if !fixture.exists() {
-            eprintln!(
-                "Skipping: Smithy fixture not found: {}\nRun scripts/download-smithy-models.sh to enable this test",
-                fixture.display()
-            );
-            return;
-        }
-        let file = std::fs::File::open(&fixture).expect("failed to open route53 fixture");
-        let model = carina_smithy::parse_reader(std::io::BufReader::new(file))
-            .expect("failed to parse route53 fixture");
-        let resource = resource_defs::route53_resources()
-            .into_iter()
-            .find(|res| res.name == "route53.RecordSet")
-            .expect("missing route53.RecordSet resource def");
+        let model = enum_fixture_model();
+        let resource = enum_fixture_resource();
 
         let generated = generate_resource(&resource, &model).expect("failed to generate resource");
 
@@ -5717,22 +6693,8 @@ mod tests {
 
     #[test]
     fn generate_resource_uses_enum_for_namespaced_enums() {
-        let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../carina-provider-aws/tests/fixtures/smithy/s3.json");
-        if !fixture.exists() {
-            eprintln!(
-                "Skipping: Smithy fixture not found: {}\nRun scripts/download-smithy-models.sh to enable this test",
-                fixture.display()
-            );
-            return;
-        }
-        let file = std::fs::File::open(&fixture).expect("failed to open Smithy fixture");
-        let model = carina_smithy::parse_reader(std::io::BufReader::new(file))
-            .expect("failed to parse Smithy fixture");
-        let resource = resource_defs::s3_resources()
-            .into_iter()
-            .find(|res| res.name == "s3.Bucket")
-            .expect("missing s3.Bucket resource def");
+        let model = enum_fixture_model();
+        let resource = enum_fixture_resource();
 
         let generated = generate_resource(&resource, &model).expect("failed to generate resource");
 
@@ -5744,40 +6706,6 @@ mod tests {
             !generated.contains(".with_completions("),
             "enum completions should come from schema type metadata: {generated}"
         );
-    }
-
-    /// Build the inputs `generate_provider_code` needs for a single
-    /// resource def, loading the Smithy fixture if available. Returns
-    /// `None` when the fixture is missing so the caller can skip
-    /// gracefully.
-    fn provider_code_for_single_resource(res: ResourceDef, fixture: &str) -> Option<String> {
-        let fixture_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../carina-provider-aws/tests/fixtures/smithy/")
-            .join(fixture);
-        if !fixture_path.exists() {
-            eprintln!(
-                "Skipping: Smithy fixture not found: {}",
-                fixture_path.display()
-            );
-            return None;
-        }
-        let file = std::fs::File::open(&fixture_path).expect("open fixture");
-        let model = carina_smithy::parse_reader(std::io::BufReader::new(file)).expect("parse");
-        let mut models: HashMap<&str, SmithyModel> = HashMap::new();
-        // Leak the namespace string to obtain a 'static borrow for the
-        // models map without redesigning the signature.
-        let ns: &'static str = Box::leak(res.service_namespace.to_string().into_boxed_str());
-        models.insert(ns, model);
-
-        let resources = vec![res];
-        let data_sources: Vec<resource_defs::DataSourceDef> = vec![];
-        let manual = std::collections::HashSet::new();
-        Some(generate_provider_code(
-            &resources,
-            &data_sources,
-            &models,
-            &manual,
-        ))
     }
 
     fn provider_code_for_single_resource_with_model(
@@ -5810,6 +6738,7 @@ mod tests {
                   "type": "structure",
                   "members": {
                     "FlatOptions": { "target": "smithy.api#String", "traits": {} },
+                    "Options": { "target": "com.amazonaws.ec2#Options", "traits": {} },
                     "VpcId": { "target": "smithy.api#String", "traits": {} },
                     "PeerVpcId": { "target": "smithy.api#String", "traits": {} }
                   },
@@ -5821,6 +6750,7 @@ mod tests {
                     "RequesterVpcInfo": { "target": "com.amazonaws.ec2#VpcInfo", "traits": {} },
                     "AccepterVpcInfo": { "target": "com.amazonaws.ec2#VpcInfo", "traits": {} },
                     "FlatOptions": { "target": "com.amazonaws.ec2#Options", "traits": {} },
+                    "FooBar": { "target": "smithy.api#String", "traits": {} },
                     "Options": { "target": "com.amazonaws.ec2#Options", "traits": {} }
                   },
                   "traits": {}
@@ -5867,7 +6797,10 @@ mod tests {
             identifier: "",
             has_tags: false,
             type_overrides: vec![],
-            exclude_fields: vec![],
+            exclude_fields: ["VpcId", "PeerVpcId"]
+                .into_iter()
+                .filter(|field| *field != attr)
+                .collect(),
             create_only_overrides: vec![],
             enum_aliases: vec![],
             to_dsl_overrides: vec![],
@@ -6744,7 +7677,8 @@ mod tests {
         let code = provider_code_for_single_resource_with_model(res, minimal_from_struct_model());
 
         assert!(
-            code.contains("attributes.insert(\"foo_bar\".to_string(), Value::Concrete(ConcreteValue::String(v.to_string().into())));"),
+            code.contains("let foo_bar = obj.options()")
+                && code.contains("foo_bar,\n            applied_identifier,"),
             "extra_read_only FromStruct attr should emit without schema-missing panic: {code}"
         );
     }
@@ -6782,12 +7716,14 @@ mod tests {
         let code = provider_code_for_single_resource_with_model(res, minimal_from_struct_model());
 
         assert!(
-            code.contains("if let Some(opts) = obj.requester_vpc_info()\n            && let Some(v) = opts.vpc_id()"),
+            code.contains(
+                "let vpc_id = obj.requester_vpc_info()\n            .and_then(|opts| opts.vpc_id())"
+            ),
             "must emit flat rename shape: {code}"
         );
         assert!(
-            code.contains("attributes.insert(\"vpc_id\".to_string(), Value::Concrete(ConcreteValue::String(v.to_string().into())));"),
-            "must insert leaf attr directly: {code}"
+            code.contains("vpc_id,\n            applied_identifier,"),
+            "must return the leaf as a typed field: {code}"
         );
     }
 
@@ -6803,7 +7739,7 @@ mod tests {
         let code = provider_code_for_single_resource_with_model(res, minimal_from_struct_model());
 
         assert!(
-            code.contains("if let Some(dns_opts) = obj.options() {"),
+            code.contains("let options = obj.options().and_then(|dns_opts| {"),
             "must emit nested map source walk: {code}"
         );
         assert!(
@@ -6811,20 +7747,23 @@ mod tests {
             "must build nested fields map: {code}"
         );
         assert!(
-            code.contains("attributes.insert(\"options\".to_string(), Value::Concrete(ConcreteValue::Map(fields)));"),
-            "must insert nested map attr: {code}"
+            code.contains(
+                "(!fields.is_empty()).then(|| Value::Concrete(ConcreteValue::Map(fields)))"
+            ) && code.contains("options,\n            applied_identifier,"),
+            "must return the nested map as a typed field: {code}"
         );
     }
 
     #[test]
     fn extract_iam_role_uses_required_field_pattern() {
-        let res = resource_defs::iam_resources()
-            .into_iter()
-            .find(|r| r.name == "iam.Role")
-            .expect("iam.Role missing");
-        let Some(code) = provider_code_for_single_resource(res, "iam.json") else {
-            return;
-        };
+        let mut res = provider_fixture_resource(
+            "test.RequiredFixture",
+            "RoleName",
+            &["Description", "Path", "RoleName"],
+            vec![],
+        );
+        res.extra_read_only = vec!["Arn", "RoleId"];
+        let code = provider_code_for_single_resource_with_model(res, provider_fixture_model());
 
         // Required strings must use the `let v = obj.<f>(); if !v.is_empty()` shape.
         // The wrong (current) shape is `if let Some(v) = obj.role_name()`, which
@@ -6854,22 +7793,132 @@ mod tests {
             "required identifier role_name must Some(.to_string()): {code}"
         );
 
-        // No regression: optional fields keep the if-let-Some shape.
+        // No regression: optional fields stay optional in the typed result.
         assert!(
-            code.contains("if let Some(v) = obj.description()"),
-            "optional description must keep if-let-Some: {code}"
+            code.contains("let description = obj.description().map(|v|"),
+            "optional description must use Option::map: {code}"
+        );
+    }
+
+    #[test]
+    fn generated_extractors_return_typed_read_fields() {
+        let res = provider_fixture_resource("test.TypedFixture", "VpcId", &["CidrBlock"], vec![]);
+        let code = provider_code_for_single_resource_with_model(
+            res,
+            string_fixture_model(
+                &[("CidrBlock", false)],
+                &[("CidrBlock", false), ("VpcId", false)],
+            ),
+        );
+
+        assert!(
+            code.contains("pub(crate) struct TestTypedFixtureReadFields"),
+            "extractor output must be a generated typed struct: {code}"
+        );
+        assert!(
+            code.contains(") -> TestTypedFixtureReadFields"),
+            "extractor must return its typed fields directly: {code}"
+        );
+        assert!(
+            code.contains("cidr_block: Option<Value>"),
+            "SDK-optional fields must remain typed options: {code}"
+        );
+        assert!(
+            !code.contains("pub(crate) cidr_block: Option<Value>"),
+            "extracted fields must be private so handwritten reads cannot destructure them: {code}"
+        );
+        assert!(
+            code.contains("pub(crate) fn into_model(")
+                && code.contains("let Self {")
+                && code.contains(
+                    "let crate::read_models_generated::TestTypedFixtureReadModelSupplement"
+                ),
+            "generated code must consume every extracted and hand-supplied field: {code}"
+        );
+        assert!(
+            !code.contains("attributes: &mut HashMap<String, Value>"),
+            "extractors must not communicate through string-keyed maps: {code}"
+        );
+    }
+
+    #[test]
+    fn legacy_map_based_read_ops_fail_generation() {
+        let mut resource =
+            provider_fixture_resource("test.LegacyReadOpsFixture", "VpcId", &["CidrBlock"], vec![]);
+        resource.read_ops = vec![resource_defs::ReadOp {
+            operation: "ReadFixture",
+            fields: vec![("CidrBlock", None)],
+            defaults: vec![],
+        }];
+
+        let panic = provider_code_panic_for_single_resource_with_model(
+            resource,
+            string_fixture_model(
+                &[("CidrBlock", false)],
+                &[("CidrBlock", false), ("VpcId", false)],
+            ),
+        )
+        .expect("legacy map-based read_ops must fail generation");
+        assert!(
+            panic.contains(
+                "legacy map-based read_ops are unsupported for test.LegacyReadOpsFixture"
+            ),
+            "unexpected panic: {panic}"
+        );
+    }
+
+    #[test]
+    fn generated_read_models_cache_validated_schemas() {
+        let resource =
+            provider_fixture_resource("test.CacheFixture", "VpcId", &["CidrBlock"], vec![]);
+        let model = string_fixture_model(
+            &[("CidrBlock", false)],
+            &[("CidrBlock", false), ("VpcId", false)],
+        );
+        let mut models = HashMap::new();
+        models.insert(resource.service_namespace, model);
+
+        let code = generate_read_models_code(&[resource], &[], &models)
+            .expect("generate test.CacheFixture read model");
+
+        assert!(
+            code.contains("static VALIDATED_SCHEMA: OnceLock"),
+            "each model must cache its validated schema: {code}"
+        );
+        assert!(
+            code.contains("cached_validated_read_schema("),
+            "generated models must use the cache seam: {code}"
+        );
+        assert_eq!(
+            code.matches("test_cache_fixture_config().schema").count(),
+            1,
+            "the schema must be built only inside the cache initializer: {code}"
+        );
+    }
+
+    #[test]
+    fn generated_data_source_models_exhaustively_name_schema_attributes() {
+        let data_sources = resource_defs::sts_data_sources();
+        let code = generate_read_models_code(&[], &data_sources, &HashMap::new())
+            .expect("generate STS data-source read model");
+
+        assert!(
+            code.contains("pub(crate) struct StsCallerIdentityDataSourceReadModel")
+                && code.contains("pub(crate) account_id: Option<Value>")
+                && code.contains("pub(crate) arn: Option<Value>")
+                && code.contains("pub(crate) user_id: Option<Value>"),
+            "data-source output names must be compiler-checked fields: {code}"
+        );
+        assert!(
+            code.contains("impl DataSourceReadModel for StsCallerIdentityDataSourceReadModel"),
+            "data-source maps must be produced only at the generated seam: {code}"
         );
     }
 
     #[test]
     fn extract_route53_record_set_required_name_compiles() {
-        let res = resource_defs::route53_resources()
-            .into_iter()
-            .find(|r| r.name == "route53.RecordSet")
-            .expect("route53.RecordSet missing");
-        let Some(code) = provider_code_for_single_resource(res, "route53.json") else {
-            return;
-        };
+        let res = provider_fixture_resource("test.RequiredNameFixture", "Name", &["Name"], vec![]);
+        let code = provider_code_for_single_resource_with_model(res, provider_fixture_model());
 
         assert!(
             code.contains("let v = obj.name();"),
@@ -6883,75 +7932,90 @@ mod tests {
 
     #[test]
     fn extract_ec2_nat_gateway_emits_list_first_for_allocation_id() {
-        let res = resource_defs::ec2_resources()
-            .into_iter()
-            .find(|r| r.name == "ec2.NatGateway")
-            .expect("ec2.NatGateway missing");
-        let Some(code) = provider_code_for_single_resource(res, "ec2.json") else {
-            return;
-        };
+        let res = provider_fixture_resource(
+            "test.ListFirstFixture",
+            "NatGatewayId",
+            &["AllocationId", "AvailabilityMode"],
+            vec![resource_defs::DerivedAttribute {
+                attr: "AllocationId",
+                source: resource_defs::DerivedSource::ListFirst {
+                    list_member: "NatGatewayAddresses",
+                    child_member: "AllocationId",
+                },
+            }],
+        );
+        let code = provider_code_for_single_resource_with_model(res, provider_fixture_model());
 
         // The hand-written extractor reads `obj.nat_gateway_addresses().first()`
         // and projects `.allocation_id()` from the inner struct. The codegen
         // must reproduce that walk for the DSL `allocation_id` attribute.
         assert!(
-            code.contains("if let Some(addr) = obj.nat_gateway_addresses().first()"),
+            code.contains("let allocation_id = obj.nat_gateway_addresses().first()"),
             "must walk nat_gateway_addresses().first(): {code}"
         );
         assert!(
-            code.contains("addr.allocation_id()"),
+            code.contains(".and_then(|item| item.allocation_id())"),
             "must project allocation_id from the list element: {code}"
         );
         assert!(
-            code.contains("attributes.insert(\"allocation_id\".to_string()"),
-            "must insert allocation_id attribute: {code}"
+            code.contains("allocation_id,\n            availability_mode,"),
+            "must return allocation_id as a typed field: {code}"
         );
         // Regression guard: the regular pass must not also emit
         // `obj.allocation_id()` (NatGateway has no top-level allocation_id getter,
         // so that would be a compile error).
         assert!(
-            !code.contains("if let Some(v) = obj.allocation_id()"),
+            !code.contains("obj.allocation_id()"),
             "must not emit obj.allocation_id() at the top level: {code}"
         );
     }
 
     #[test]
     fn extract_ec2_egress_only_internet_gateway_emits_list_first_for_vpc_id() {
-        let res = resource_defs::ec2_resources()
-            .into_iter()
-            .find(|r| r.name == "ec2.EgressOnlyInternetGateway")
-            .expect("ec2.EgressOnlyInternetGateway missing");
-        let Some(code) = provider_code_for_single_resource(res, "ec2.json") else {
-            return;
-        };
+        let res = provider_fixture_resource(
+            "test.ListFirstVpcFixture",
+            "EgressOnlyInternetGatewayId",
+            &["VpcId"],
+            vec![resource_defs::DerivedAttribute {
+                attr: "VpcId",
+                source: resource_defs::DerivedSource::ListFirst {
+                    list_member: "Attachments",
+                    child_member: "VpcId",
+                },
+            }],
+        );
+        let code = provider_code_for_single_resource_with_model(
+            res,
+            provider_fixture_model_without_read_fields(&["VpcId"]),
+        );
 
         assert!(
-            code.contains("if let Some(addr) = obj.attachments().first()"),
+            code.contains("let vpc_id = obj.attachments().first()"),
             "must walk attachments().first(): {code}"
         );
         assert!(
-            code.contains("addr.vpc_id()"),
+            code.contains(".and_then(|item| item.vpc_id())"),
             "must project vpc_id from the list element: {code}"
         );
         assert!(
-            code.contains("attributes.insert(\"vpc_id\".to_string()"),
-            "must insert vpc_id attribute: {code}"
+            code.contains("vpc_id,\n            applied_identifier,"),
+            "must return vpc_id as a typed field: {code}"
         );
         assert!(
-            !code.contains("if let Some(v) = obj.vpc_id()"),
+            !code.contains("obj.vpc_id()"),
             "must not emit obj.vpc_id() at the top level (EgressOnlyInternetGateway has no top-level vpc_id getter): {code}"
         );
     }
 
     #[test]
     fn extract_ec2_vpc_endpoint_emits_list_of_string_for_route_table_ids() {
-        let res = resource_defs::ec2_resources()
-            .into_iter()
-            .find(|r| r.name == "ec2.VpcEndpoint")
-            .expect("ec2.VpcEndpoint missing");
-        let Some(code) = provider_code_for_single_resource(res, "ec2.json") else {
-            return;
-        };
+        let res = provider_fixture_resource(
+            "test.ListStringsFixture",
+            "VpcEndpointId",
+            &["RouteTableIds", "SubnetIds"],
+            vec![],
+        );
+        let code = provider_code_for_single_resource_with_model(res, provider_fixture_model());
 
         // Hand-written shape that the codegen must reproduce for any
         // List<String> read-structure member.
@@ -6966,8 +8030,9 @@ mod tests {
             "must collect into Vec<Value>: {code}"
         );
         assert!(
-            code.contains("attributes.insert(\"route_table_ids\".to_string(), Value::Concrete(ConcreteValue::List(list)));"),
-            "must insert as Value::List: {code}"
+            code.contains("let route_table_ids = (!ids.is_empty()).then(||")
+                && code.contains("route_table_ids,"),
+            "must return route_table_ids as a typed Value::List: {code}"
         );
 
         assert!(
@@ -6975,30 +8040,38 @@ mod tests {
             "must read .subnet_ids(): {code}"
         );
         assert!(
-            code.contains("attributes.insert(\"subnet_ids\".to_string(), Value::Concrete(ConcreteValue::List(list)));"),
-            "must insert subnet_ids as Value::List: {code}"
+            code.contains("let subnet_ids = (!ids.is_empty()).then(||")
+                && code.contains("subnet_ids,"),
+            "must return subnet_ids as a typed Value::List: {code}"
         );
     }
 
     #[test]
     fn extract_ec2_transit_gateway_attachment_emits_subnet_ids_and_from_struct_options() {
-        let res = resource_defs::ec2_resources()
-            .into_iter()
-            .find(|r| r.name == "ec2.TransitGatewayAttachment")
-            .expect("ec2.TransitGatewayAttachment missing");
-        let Some(code) = provider_code_for_single_resource(res, "ec2.json") else {
-            return;
-        };
+        let res = provider_fixture_resource(
+            "test.ListAndStructFixture",
+            "",
+            &["Options", "SubnetIds"],
+            vec![resource_defs::DerivedAttribute {
+                attr: "Options",
+                source: resource_defs::DerivedSource::FromStruct {
+                    struct_member: "Options",
+                    children: &["DnsSupport"],
+                },
+            }],
+        );
+        let code = provider_code_for_single_resource_with_model(res, provider_fixture_model());
         assert!(
             code.contains("let ids = obj.subnet_ids();"),
             "must read .subnet_ids(): {code}"
         );
         assert!(
-            code.contains("attributes.insert(\"subnet_ids\".to_string(), Value::Concrete(ConcreteValue::List(list)));"),
-            "must insert subnet_ids as Value::List: {code}"
+            code.contains("let subnet_ids = (!ids.is_empty()).then(||")
+                && code.contains("subnet_ids,"),
+            "must return subnet_ids as a typed Value::List: {code}"
         );
         assert!(
-            code.contains("if let Some(dns_opts) = obj.options() {"),
+            code.contains("let options = obj.options().and_then(|dns_opts| {"),
             "must walk obj.options() as a FromStruct source: {code}"
         );
         assert!(
@@ -7014,56 +8087,69 @@ mod tests {
             "dns_support must insert inside fields map: {code}"
         );
         assert!(
-            code.contains("attributes.insert(\"options\".to_string(), Value::Concrete(ConcreteValue::Map(fields)));"),
-            "must insert nested options map: {code}"
+            code.contains(
+                "(!fields.is_empty()).then(|| Value::Concrete(ConcreteValue::Map(fields)))"
+            ) && code.contains("options,\n            subnet_ids,"),
+            "must return the nested options map as a typed field: {code}"
         );
     }
 
     #[test]
     fn extract_ec2_vpc_endpoint_emits_list_all_for_security_group_ids() {
-        let res = resource_defs::ec2_resources()
-            .into_iter()
-            .find(|r| r.name == "ec2.VpcEndpoint")
-            .expect("ec2.VpcEndpoint missing");
-        let Some(code) = provider_code_for_single_resource(res, "ec2.json") else {
-            return;
-        };
+        let res = provider_fixture_resource(
+            "test.ListAllFixture",
+            "VpcEndpointId",
+            &["SecurityGroupIds"],
+            vec![resource_defs::DerivedAttribute {
+                attr: "SecurityGroupIds",
+                source: resource_defs::DerivedSource::ListAll {
+                    list_member: "Groups",
+                    child_member: "GroupId",
+                },
+            }],
+        );
+        let code = provider_code_for_single_resource_with_model(res, provider_fixture_model());
 
         // Walk groups list, project group_id off each element via
         // filter_map, drop the attribute when the result is empty (so an
         // empty list does not show up as Value::List([])).
         assert!(
-            code.contains("let groups = obj.groups();"),
+            code.contains("let list: Vec<Value> = obj.groups()"),
             "must read .groups() as the list source: {code}"
         );
         assert!(
-            code.contains(".filter_map(|g| g.group_id().map(|id| Value::Concrete(ConcreteValue::String(id.to_string().into()))))"),
+            code.contains(".filter_map(|item| item.group_id().map(|id| Value::Concrete(ConcreteValue::String(id.to_string().into()))))"),
             "must filter_map child .group_id(): {code}"
         );
         assert!(
-            code.contains(
-                "attributes.insert(\"security_group_ids\".to_string(), Value::Concrete(ConcreteValue::List(list)));"
-            ),
-            "must insert as security_group_ids Value::List: {code}"
+            code.contains("let security_group_ids = (!list.is_empty())")
+                && code.contains("security_group_ids,"),
+            "must return security_group_ids as a typed Value::List: {code}"
         );
     }
 
     #[test]
     fn extract_ec2_transit_gateway_emits_from_struct_options() {
-        let res = resource_defs::ec2_resources()
-            .into_iter()
-            .find(|r| r.name == "ec2.TransitGateway")
-            .expect("ec2.TransitGateway missing");
-        let Some(code) = provider_code_for_single_resource(res, "ec2.json") else {
-            return;
-        };
+        let res = provider_fixture_resource(
+            "test.StructFixture",
+            "NatGatewayId",
+            &["Options"],
+            vec![resource_defs::DerivedAttribute {
+                attr: "Options",
+                source: resource_defs::DerivedSource::FromStruct {
+                    struct_member: "Options",
+                    children: &["AmazonSideAsn", "DnsSupport"],
+                },
+            }],
+        );
+        let code = provider_code_for_single_resource_with_model(res, provider_fixture_model());
 
         // Each child of obj.options() lands inside a nested `options`
         // map matching the schema struct.
         // Pin one numeric (amazon_side_asn) and one enum (dns_support) to
         // exercise both Int and Enum emission paths.
         assert!(
-            code.contains("if let Some(dns_opts) = obj.options() {"),
+            code.contains("let options = obj.options().and_then(|dns_opts| {"),
             "must walk obj.options() as a FromStruct source: {code}"
         );
         assert!(
@@ -7089,73 +8175,101 @@ mod tests {
             "dns_support must insert as enum-as-String inside fields map: {code}"
         );
         assert!(
-            code.contains("attributes.insert(\"options\".to_string(), Value::Concrete(ConcreteValue::Map(fields)));"),
-            "must insert nested options map: {code}"
+            code.contains(
+                "(!fields.is_empty()).then(|| Value::Concrete(ConcreteValue::Map(fields)))"
+            ) && code.contains("options: options.clone(),")
+                && code.contains("nat_gateway_id: nat_gateway_id.clone(),"),
+            "must return the nested options map as a typed field: {code}"
         );
     }
 
     #[test]
     fn extract_ec2_vpc_peering_connection_emits_struct_with_rename() {
-        let res = resource_defs::ec2_resources()
-            .into_iter()
-            .find(|r| r.name == "ec2.VpcPeeringConnection")
-            .expect("ec2.VpcPeeringConnection missing");
-        let Some(code) = provider_code_for_single_resource(res, "ec2.json") else {
-            return;
-        };
+        let res = provider_fixture_resource(
+            "test.RenamedStructFixture",
+            "VpcPeeringConnectionId",
+            &["PeerOwnerId", "PeerVpcId", "VpcId"],
+            vec![
+                resource_defs::DerivedAttribute {
+                    attr: "VpcId",
+                    source: resource_defs::DerivedSource::FromStruct {
+                        struct_member: "RequesterVpcInfo",
+                        children: &["VpcId"],
+                    },
+                },
+                resource_defs::DerivedAttribute {
+                    attr: "PeerVpcId",
+                    source: resource_defs::DerivedSource::FromStruct {
+                        struct_member: "AccepterVpcInfo",
+                        children: &["VpcId"],
+                    },
+                },
+                resource_defs::DerivedAttribute {
+                    attr: "PeerOwnerId",
+                    source: resource_defs::DerivedSource::FromStruct {
+                        struct_member: "AccepterVpcInfo",
+                        children: &["OwnerId"],
+                    },
+                },
+            ],
+        );
+        let code = provider_code_for_single_resource_with_model(res, provider_fixture_model());
 
         // Requester: child `vpc_id` keeps its DSL name.
         assert!(
-            code.contains("if let Some(opts) = obj.requester_vpc_info()\n            && let Some(v) = opts.vpc_id()"),
+            code.contains(
+                "let vpc_id = obj.requester_vpc_info()\n            .and_then(|opts| opts.vpc_id())"
+            ),
             "requester_vpc_info.vpc_id must walk obj.requester_vpc_info(): {code}"
         );
         assert!(
-            code.contains(
-                "attributes.insert(\"vpc_id\".to_string(), Value::Concrete(ConcreteValue::String(v.to_string().into())));"
-            ),
-            "requester vpc_id inserts under \"vpc_id\": {code}"
+            code.contains("vpc_id,\n            vpc_peering_connection_id,"),
+            "requester vpc_id returns under the typed vpc_id field: {code}"
         );
 
         // Accepter: child `vpc_id` is renamed to `peer_vpc_id` (the rename
         // is the whole reason this can't be a direct read-structure member
         // pull). Owner / region get the same rename treatment.
         assert!(
-            code.contains("if let Some(opts) = obj.accepter_vpc_info()\n            && let Some(v) = opts.vpc_id()"),
+            code.contains("let peer_vpc_id = obj.accepter_vpc_info()\n            .and_then(|opts| opts.vpc_id())"),
             "accepter_vpc_info.vpc_id must walk obj.accepter_vpc_info(): {code}"
         );
         assert!(
-            code.contains(
-                "attributes.insert(\"peer_vpc_id\".to_string(), Value::Concrete(ConcreteValue::String(v.to_string().into())));"
-            ),
-            "accepter vpc_id inserts under \"peer_vpc_id\" (rename): {code}"
+            code.contains("peer_vpc_id,\n            vpc_id,"),
+            "accepter vpc_id returns under the typed peer_vpc_id field: {code}"
         );
         assert!(
-            code.contains(
-                "attributes.insert(\"peer_owner_id\".to_string(), Value::Concrete(ConcreteValue::String(v.to_string().into())));"
-            ),
-            "accepter owner_id inserts under \"peer_owner_id\": {code}"
+            code.contains("let peer_owner_id = obj.accepter_vpc_info()")
+                && code.contains("peer_owner_id,\n            peer_vpc_id,"),
+            "accepter owner_id returns under the typed peer_owner_id field: {code}"
         );
         assert!(
-            !code.contains("attributes.insert(\"peer_region\".to_string()"),
+            !code.contains("peer_region: Option<Value>") && !code.contains("let peer_region ="),
             "peer_region is excluded from the schema and must not be extracted: {code}"
         );
     }
 
     #[test]
     fn extract_ec2_subnet_emits_from_struct_map_for_private_dns_options() {
-        let res = resource_defs::ec2_resources()
-            .into_iter()
-            .find(|r| r.name == "ec2.Subnet")
-            .expect("ec2.Subnet missing");
-        let Some(code) = provider_code_for_single_resource(res, "ec2.json") else {
-            return;
-        };
+        let res = provider_fixture_resource(
+            "test.PrivateDnsFixture",
+            "SubnetId",
+            &["PrivateDnsNameOptionsOnLaunch"],
+            vec![resource_defs::DerivedAttribute {
+                attr: "PrivateDnsNameOptionsOnLaunch",
+                source: resource_defs::DerivedSource::FromStruct {
+                    struct_member: "PrivateDnsNameOptionsOnLaunch",
+                    children: &["HostnameType", "EnableResourceNameDnsARecord"],
+                },
+            }],
+        );
+        let code = provider_code_for_single_resource_with_model(res, provider_fixture_model());
 
         // The whole inner struct collapses into one Value::Map attribute.
         // Pin the outer wrap, the IndexMap collection of children, the
         // empty-map guard, and the final insert.
         assert!(
-            code.contains("if let Some(dns_opts) = obj.private_dns_name_options_on_launch()"),
+            code.contains("let private_dns_name_options_on_launch = obj.private_dns_name_options_on_launch().and_then(|dns_opts|"),
             "must walk obj.private_dns_name_options_on_launch(): {code}"
         );
         assert!(
@@ -7184,13 +8298,15 @@ mod tests {
         );
         // Empty-map guard
         assert!(
-            code.contains("if !fields.is_empty()"),
-            "must guard the outer insert on non-empty fields: {code}"
+            code.contains(
+                "(!fields.is_empty()).then(|| Value::Concrete(ConcreteValue::Map(fields)))"
+            ),
+            "must guard the typed nested value on non-empty fields: {code}"
         );
-        // Final insert under the DSL attr name
+        // Typed return field under the DSL attr name.
         assert!(
-            code.contains("attributes.insert(\"private_dns_name_options_on_launch\".to_string(), Value::Concrete(ConcreteValue::Map(fields)));"),
-            "must insert the collected map under \"private_dns_name_options_on_launch\": {code}"
+            code.contains("private_dns_name_options_on_launch,\n            subnet_id,"),
+            "must return the collected map under private_dns_name_options_on_launch: {code}"
         );
     }
 
@@ -7327,22 +8443,66 @@ mod tests {
 
     #[test]
     fn organizations_account_email_is_email_type() {
-        let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../carina-provider-aws/tests/fixtures/smithy/organizations.json");
-        if !fixture.exists() {
-            eprintln!(
-                "Skipping: Smithy fixture not found: {}\nRun scripts/download-smithy-models.sh to enable this test",
-                fixture.display()
-            );
-            return;
-        }
-        let file = std::fs::File::open(&fixture).expect("failed to open Smithy fixture");
-        let model = carina_smithy::parse_reader(std::io::BufReader::new(file))
-            .expect("failed to parse Smithy fixture");
-        let resource = resource_defs::organizations_resources()
-            .into_iter()
-            .find(|res| res.name == "organizations.Account")
-            .expect("missing organizations.Account resource def");
+        let model = carina_smithy::parse(
+            r##"{
+              "smithy": "2.0",
+              "shapes": {
+                "com.amazonaws.test#CreateEmailFixture": {
+                  "type": "operation",
+                  "input": { "target": "com.amazonaws.test#CreateEmailFixtureRequest" },
+                  "output": { "target": "smithy.api#Unit" },
+                  "traits": {}
+                },
+                "com.amazonaws.test#CreateEmailFixtureRequest": {
+                  "type": "structure",
+                  "members": {
+                    "Email": { "target": "smithy.api#String", "traits": {} }
+                  },
+                  "traits": { "smithy.api#input": {} }
+                },
+                "com.amazonaws.test#EmailFixture": {
+                  "type": "structure",
+                  "members": {
+                    "Email": { "target": "smithy.api#String", "traits": {} }
+                  },
+                  "traits": {}
+                }
+              }
+            }"##,
+        )
+        .expect("parse email type fixture model");
+        let resource = ResourceDef {
+            // Use a registered resource name because generate_resource also
+            // emits the provider's closed CloudFormation type mapping.
+            name: "iam.Role",
+            replacement: ReplacementClass::Conflicting,
+            service_namespace: "com.amazonaws.test",
+            schema_structure: None,
+            simple_delete: false,
+            noop_update: false,
+            create_op: "CreateEmailFixture",
+            read_structure: Some("EmailFixture"),
+            read_ops: vec![],
+            delete_op: "",
+            update_ops: vec![],
+            identifier: "",
+            has_tags: false,
+            type_overrides: vec![],
+            exclude_fields: vec![],
+            create_only_overrides: vec![],
+            enum_aliases: vec![],
+            to_dsl_overrides: vec![],
+            required_overrides: vec![],
+            extra_read_only: vec![],
+            read_only_overrides: vec![],
+            extra_attributes: vec![],
+            identity_overrides: vec![],
+            deferred_populate_overrides: vec![],
+            deferred_populate_struct_field_overrides: vec![],
+            struct_field_type_overrides: vec![],
+            read_shape_overrides: vec![],
+            derived_attributes: vec![],
+        };
 
         let generated = generate_resource(&resource, &model).expect("failed to generate resource");
 

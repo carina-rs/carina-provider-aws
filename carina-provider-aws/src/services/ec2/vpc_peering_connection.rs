@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use carina_core::provider::{AppliedIdentifier, ReadOutcome};
 use carina_core::provider::{ProviderResult, Sent};
 use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
@@ -9,6 +7,8 @@ use crate::aws_operation::ClientToken;
 use crate::error_helpers::api_error_with_meta;
 use crate::helpers::{build_tag_specification_with_create_token, require_string_attr};
 use crate::provider::{AwsCreateAttempt, Ec2TaggedResourceKind};
+use crate::read_model::{empty_map_value, found_managed_read};
+use crate::read_models_generated::Ec2VpcPeeringConnectionReadModelSupplement;
 
 impl AwsProvider {
     /// Read an EC2 VPC Peering Connection
@@ -44,21 +44,16 @@ impl AwsProvider {
                 return Ok(ReadOutcome::not_found(id.clone()));
             }
 
-            let mut attributes = HashMap::new();
+            let fields = Self::extract_ec2_vpc_peering_connection_attributes(pcx);
 
-            let _identifier_value =
-                Self::extract_ec2_vpc_peering_connection_attributes(pcx, &mut attributes);
-
-            // Extract user-defined tags
-            if let Some(tags_value) = Self::ec2_tags_to_value(pcx.tags()) {
-                attributes.insert("tags".to_string(), tags_value);
-            }
-
-            Ok(crate::helpers::found_read(
+            let (_, model) = fields.into_model(
                 id,
-                applied_identifier,
-                attributes,
-            ))
+                Ec2VpcPeeringConnectionReadModelSupplement {
+                    tags: Self::ec2_tags_to_value(pcx.tags()).unwrap_or_else(empty_map_value),
+                },
+            )?;
+
+            found_managed_read(id, applied_identifier, model)
         } else {
             Ok(ReadOutcome::not_found(id.clone()))
         }
