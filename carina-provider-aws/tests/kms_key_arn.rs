@@ -1,5 +1,3 @@
-use carina_provider_aws::schemas::config::validate_aws_custom_type;
-
 fn rootless_type(attr: carina_core::schema::AttributeType) -> carina_core::schema::RootlessType {
     const NAME: &str = "test_value";
     carina_core::schema::ValidatedConfigSchema::validate(std::collections::BTreeMap::from([(
@@ -12,8 +10,7 @@ fn rootless_type(attr: carina_core::schema::AttributeType) -> carina_core::schem
 }
 
 fn assert_kms_key_id_validator_accepts(value: &str) {
-    let identity = carina_aws_types::provider_type("kms", "Key", "Id");
-    assert!(validate_aws_custom_type(&identity, value).is_ok());
+    assert_schema_accepts(carina_aws_types::kms_key_id(), value);
 }
 
 fn assert_schema_accepts(t: carina_core::schema::AttributeType, value: &str) {

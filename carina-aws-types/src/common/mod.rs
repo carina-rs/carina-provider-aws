@@ -13,7 +13,7 @@ pub use account::*;
 pub use arn::*;
 pub use availability_zone::*;
 pub use enums::*;
-pub use provider::*;
+pub(crate) use provider::*;
 pub use region::*;
 pub use resend_guard::*;
 pub use resource_id::*;

@@ -10,12 +10,7 @@ use carina_core::schema::{AttributeSchema, AttributeType, ResourceSchema, types}
 const VALID_FEATURE_SET: &[&str] = &["ALL", "CONSOLIDATED_BILLING"];
 
 pub fn arn() -> AttributeType {
-    AttributeType::refined_string(
-        Some(super::provider_type("organizations", "Organization", "Arn")),
-        Some("^arn:(aws|aws-cn|aws-us-gov):organizations:.*$".to_string()),
-        None,
-        None,
-    )
+    super::organizations_organization_arn()
 }
 
 /// Returns the schema config for organizations.Organization (Smithy: com.amazonaws.organizations)

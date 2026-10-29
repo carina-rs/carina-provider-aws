@@ -1,7 +1,4 @@
-use carina_core::resource::{ConcreteValue, Value};
-use carina_core::schema::{AttributeType, legacy_validator};
-
-use crate::{provider_type, validate_service_arn};
+use crate::validate_service_arn;
 
 // ========== KMS Key ID ==========
 
@@ -45,29 +42,5 @@ pub fn validate_kms_key_id(value: &str) -> Result<(), String> {
     Err(
         "expected a key ARN, alias ARN, alias name (alias/...), or key ID (UUID format)"
             .to_string(),
-    )
-}
-
-/// KMS Key ID type - accepts multiple formats:
-/// - Key ARN: "arn:aws:kms:us-east-1:123456789012:key/..."
-/// - Key alias ARN: "arn:aws:kms:us-east-1:123456789012:alias/my-key"
-/// - Key alias: "alias/my-key"
-/// - Key ID: "1234abcd-12ab-34cd-56ef-1234567890ab"
-pub fn kms_key_id() -> AttributeType {
-    AttributeType::refined_string_with_validator(
-        provider_type("kms", "Key", "Id"),
-        Some(
-            "^((arn:(aws|aws-cn|aws-us-gov):kms:[^:]*:[^:]*:(key|alias)/.+)|(alias/.+)|([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}))$"
-                .to_string(),
-        ),
-        None,
-        legacy_validator(|value| {
-            if let Value::Concrete(ConcreteValue::String(value)) = value {
-                validate_kms_key_id(value.expose_plaintext())
-            } else {
-                Err("Expected string".to_string())
-            }
-        }),
-        None,
     )
 }

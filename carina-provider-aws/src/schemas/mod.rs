@@ -114,6 +114,65 @@ mod tests {
             .attr_type()
     }
 
+    fn assert_provider_populated_outputs(
+        resource_type: &str,
+        schema: &ResourceSchema,
+        outputs: &[&str],
+    ) {
+        for output in outputs {
+            let attribute = schema
+                .attributes()
+                .get(*output)
+                .unwrap_or_else(|| panic!("missing {resource_type}.{output}"));
+            assert!(
+                attribute
+                    .parts()
+                    .declared_input_mode
+                    .is_provider_populated(),
+                "{resource_type}.{output} must be provider-populated"
+            );
+        }
+    }
+
+    #[test]
+    fn data_source_outputs_are_provider_populated() {
+        let iam_roles = super::generated::iam::roles::iam_roles_config();
+        let identitystore_user = super::generated::identitystore::user::identitystore_user_config();
+        let s3_bucket = super::generated::s3::bucket_data_source::s3_bucket_data_source_config();
+        let caller_identity = super::generated::sts::caller_identity::sts_caller_identity_config();
+
+        for (resource_type, schema, outputs) in [
+            (
+                "iam.Roles",
+                &iam_roles.schema,
+                &["arns", "names"] as &[&str],
+            ),
+            (
+                "identitystore.User",
+                &identitystore_user.schema,
+                &["display_name", "emails"],
+            ),
+            (
+                "s3.Bucket",
+                &s3_bucket.schema,
+                &[
+                    "arn",
+                    "region",
+                    "bucket_domain_name",
+                    "bucket_regional_domain_name",
+                    "hosted_zone_id",
+                ],
+            ),
+            (
+                "sts.CallerIdentity",
+                &caller_identity.schema,
+                &["account_id", "arn", "user_id"],
+            ),
+        ] {
+            assert_provider_populated_outputs(resource_type, schema, outputs);
+        }
+    }
+
     fn struct_field_type<'a>(
         schema: &'a ResourceSchema,
         attr_name: &str,

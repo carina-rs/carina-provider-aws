@@ -4,9 +4,11 @@
 //! and `carina-provider-awscc`. Provider-specific types (region with namespace,
 //! schema config structs) remain in their respective crates.
 
+mod catalog;
 mod common;
 mod services;
 
+pub use catalog::*;
 pub use common::*;
 pub use services::*;
 
@@ -1791,81 +1793,6 @@ mod tests {
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
         assert!(err.contains("does not match required pattern"));
-    }
-
-    #[test]
-    fn validate_tags_map_detects_key_value_pattern() {
-        let mut attrs = std::collections::HashMap::new();
-        attrs.insert(
-            "tags".to_string(),
-            Value::Concrete(ConcreteValue::Map(
-                [
-                    (
-                        "key".to_string(),
-                        Value::Concrete(ConcreteValue::String("Project".to_string().into())),
-                    ),
-                    (
-                        "value".to_string(),
-                        Value::Concrete(ConcreteValue::String("carina".to_string().into())),
-                    ),
-                ]
-                .into_iter()
-                .collect(),
-            )),
-        );
-        assert!(validate_tags_map(&attrs).is_err());
-    }
-
-    #[test]
-    fn validate_tags_map_case_insensitive() {
-        let mut attrs = std::collections::HashMap::new();
-        attrs.insert(
-            "tags".to_string(),
-            Value::Concrete(ConcreteValue::Map(
-                [
-                    (
-                        "Key".to_string(),
-                        Value::Concrete(ConcreteValue::String("Project".to_string().into())),
-                    ),
-                    (
-                        "Value".to_string(),
-                        Value::Concrete(ConcreteValue::String("carina".to_string().into())),
-                    ),
-                ]
-                .into_iter()
-                .collect(),
-            )),
-        );
-        assert!(validate_tags_map(&attrs).is_err());
-    }
-
-    #[test]
-    fn validate_tags_map_normal_tags_ok() {
-        let mut attrs = std::collections::HashMap::new();
-        attrs.insert(
-            "tags".to_string(),
-            Value::Concrete(ConcreteValue::Map(
-                [
-                    (
-                        "Project".to_string(),
-                        Value::Concrete(ConcreteValue::String("carina".to_string().into())),
-                    ),
-                    (
-                        "ManagedBy".to_string(),
-                        Value::Concrete(ConcreteValue::String("carina".to_string().into())),
-                    ),
-                ]
-                .into_iter()
-                .collect(),
-            )),
-        );
-        assert!(validate_tags_map(&attrs).is_ok());
-    }
-
-    #[test]
-    fn validate_tags_map_no_tags_ok() {
-        let attrs = std::collections::HashMap::new();
-        assert!(validate_tags_map(&attrs).is_ok());
     }
 
     // --- Condition operator tests ---
