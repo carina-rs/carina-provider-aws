@@ -13,7 +13,7 @@ mod tests {
     use aws_smithy_runtime_api::client::result::ConnectorError;
     use aws_smithy_types::body::SdkBody;
     use aws_smithy_types::error::metadata::ProvideErrorMetadata;
-    use carina_aws_types::{OperationDispatchFailure, OperationSendOutcome, SendOutcome};
+    use carina_aws_types::SendOutcome;
     use carina_plugin_sdk::wasi_http::{SendPhase, transport_connector_error_for_test};
 
     use crate::aws_operation::ClientToken;
@@ -167,14 +167,6 @@ mod tests {
             .expect("dispatch failure has a connector error")
     }
 
-    fn operation_dispatch_failure<E>(
-        error: &aws_smithy_runtime_api::client::result::SdkError<E, HttpResponse>,
-    ) -> &OperationDispatchFailure {
-        std::error::Error::source(connector_error(error))
-            .and_then(|source| source.downcast_ref::<OperationDispatchFailure>())
-            .expect("the guard must be the connector error's direct source")
-    }
-
     #[tokio::test]
     async fn non_idempotent_create_vpc_is_not_resent_after_io_failure() {
         let connector = ScriptedConnector::new([
@@ -186,15 +178,16 @@ mod tests {
         ]);
         let provider = provider(connector.clone());
 
-        let result = provider
+        let error = provider
             .ec2_client
             .create_vpc()
             .cidr_block("10.0.0.0/16")
             .send()
-            .await;
+            .await
+            .expect_err("the resend guard must refuse the ambiguous retry");
 
-        assert!(result.is_err());
         assert_eq!(connector.requests().len(), 1);
+        assert_eq!(SendOutcome::classify(&error), SendOutcome::MaybeSent);
     }
 
     #[tokio::test]
@@ -328,10 +321,7 @@ mod tests {
 
         assert_eq!(connector.requests().len(), 3);
         assert_eq!(SendOutcome::classify(&error), SendOutcome::MaybeSent);
-        assert_eq!(
-            operation_dispatch_failure(&error).outcome().outcome(),
-            SendOutcome::MaybeSent
-        );
+        assert!(connector_error(&error).is_io());
     }
 
     #[tokio::test]
@@ -353,10 +343,7 @@ mod tests {
 
         assert_eq!(connector.requests().len(), 3);
         assert_eq!(SendOutcome::classify(&error), SendOutcome::MaybeSent);
-        assert_eq!(
-            operation_dispatch_failure(&error).outcome().outcome(),
-            SendOutcome::MaybeSent
-        );
+        assert!(connector_error(&error).is_io());
     }
 
     #[tokio::test]
@@ -407,10 +394,6 @@ mod tests {
         assert_eq!(connector.requests().len(), 3);
         assert_eq!(SendOutcome::classify(&error), SendOutcome::NotSent);
         assert!(connector_error(&error).is_io());
-        assert_eq!(
-            operation_dispatch_failure(&error).outcome().outcome(),
-            SendOutcome::NotSent
-        );
     }
 
     #[tokio::test]
@@ -429,10 +412,6 @@ mod tests {
         assert_eq!(connector.requests().len(), 3);
         assert!(connector_error(&error).is_timeout());
         assert_eq!(SendOutcome::classify(&error), SendOutcome::MaybeSent);
-        assert_eq!(
-            operation_dispatch_failure(&error).outcome().outcome(),
-            SendOutcome::MaybeSent
-        );
     }
 
     #[tokio::test]
@@ -453,11 +432,11 @@ mod tests {
 
         assert_eq!(connector.requests().len(), 1);
         assert_eq!(SendOutcome::classify(&error), SendOutcome::Rejected);
-        let verdict = error
-            .raw_response()
-            .and_then(|response| response.extension::<OperationSendOutcome>())
-            .expect("the guard must attach an operation verdict");
-        assert_eq!(verdict.outcome(), SendOutcome::Rejected);
+        let service_error = error.into_service_error();
+        assert_eq!(
+            ProvideErrorMetadata::code(&service_error),
+            Some("NoSuchBucketPolicy")
+        );
     }
 
     #[tokio::test]
@@ -485,7 +464,7 @@ mod tests {
             .await
             .expect_err("all three SDK attempts should fail");
         assert_eq!(connector.requests().len(), 3);
-        assert_eq!(error.outcome(), SendOutcome::MaybeSent);
+        assert_eq!(SendOutcome::classify(&error), SendOutcome::MaybeSent);
         let aws_smithy_runtime_api::client::result::SdkError::ServiceError(context) = &*error
         else {
             panic!("expected the modeled service error, got {error:?}");
@@ -498,11 +477,6 @@ mod tests {
             context.raw().headers().get("x-amzn-requestid"),
             Some("final-throttling-request-id")
         );
-        let verdict = context
-            .raw()
-            .extension::<OperationSendOutcome>()
-            .expect("the guard must attach an operation verdict");
-        assert_eq!(verdict.outcome(), SendOutcome::MaybeSent);
     }
 
     #[tokio::test(start_paused = true)]
@@ -531,7 +505,7 @@ mod tests {
 
         assert_eq!(connector.requests().len(), 3);
         assert_eq!(connector.completed_delayed_timeouts(), 0);
-        assert_eq!(error.outcome(), SendOutcome::MaybeSent);
+        assert_eq!(SendOutcome::classify(&error), SendOutcome::MaybeSent);
     }
 
     #[tokio::test]

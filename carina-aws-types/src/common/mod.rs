@@ -17,5 +17,5 @@ pub use provider::*;
 pub use region::*;
 pub use resend_guard::*;
 pub use resource_id::*;
-pub use send_outcome::*;
+pub use send_outcome::{Idempotency, SendOutcome};
 pub use tags::*;

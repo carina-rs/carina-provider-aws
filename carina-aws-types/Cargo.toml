@@ -16,6 +16,7 @@ test-utils = ["dep:carina-plugin-sdk", "carina-plugin-sdk/test-utils"]
 [dev-dependencies]
 aws-runtime = { version = "1" }
 aws-smithy-runtime-api = { version = "1.19", features = ["client", "test-util"] }
+carina-plugin-sdk = { workspace = true, features = ["test-utils"] }
 indexmap = "2"
 
 [dependencies]

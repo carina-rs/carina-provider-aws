@@ -22,27 +22,23 @@ pub enum SendOutcome {
     Rejected,
 }
 
-/// The resend guard's verdict over every attempt of one SDK operation.
-///
-/// Only the resend guard can construct this type. Consumers may inspect the
-/// verdict, but cannot promote a single-attempt result to an operation result.
+/// The resend guard's internal verdict over every attempt of one SDK operation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct OperationSendOutcome(SendOutcome);
+pub(crate) struct OperationSendOutcome(SendOutcome);
 
 impl OperationSendOutcome {
     pub(crate) fn new(outcome: SendOutcome) -> Self {
         Self(outcome)
     }
 
-    /// Returns the all-attempts verdict.
-    pub fn outcome(self) -> SendOutcome {
+    pub(crate) fn outcome(self) -> SendOutcome {
         self.0
     }
 }
 
 /// A dispatch failure annotated with the resend guard's all-attempts verdict.
 #[derive(Debug)]
-pub struct OperationDispatchFailure {
+pub(crate) struct OperationDispatchFailure {
     outcome: OperationSendOutcome,
     source: BoxError,
 }
@@ -52,8 +48,7 @@ impl OperationDispatchFailure {
         Self { outcome, source }
     }
 
-    /// Returns the all-attempts verdict attached by the resend guard.
-    pub fn outcome(&self) -> OperationSendOutcome {
+    pub(crate) fn outcome(&self) -> OperationSendOutcome {
         self.outcome
     }
 }
@@ -99,8 +94,8 @@ impl SendOutcome {
     ///
     /// Apart from construction failures, a conclusive result is accepted only
     /// when [`ResendGuard`](super::ResendGuard) observed every SDK attempt and
-    /// attached an [`OperationSendOutcome`]. A connector's per-attempt send
-    /// phase is deliberately ignored here.
+    /// attached its internal all-attempts verdict. A connector's per-attempt
+    /// send phase is deliberately ignored here.
     pub fn classify<E>(error: &SdkError<E, HttpResponse>) -> SendOutcome
     where
         E: ProvideErrorKind + ProvideErrorMetadata,
@@ -135,7 +130,7 @@ impl SendOutcome {
         context: &InterceptorContext,
         runtime_components: &RuntimeComponents,
     ) -> SendOutcome {
-        #[cfg(any(target_arch = "wasm32", feature = "test-utils"))]
+        #[cfg(any(target_arch = "wasm32", feature = "test-utils", test))]
         if let Some(send_phase) = context
             .output_or_error()
             .and_then(Result::err)
@@ -213,23 +208,19 @@ mod tests {
     use aws_smithy_types::error::metadata::ProvideErrorMetadata;
     use aws_smithy_types::retry::{ErrorKind, ProvideErrorKind};
 
-    #[cfg(feature = "test-utils")]
     use carina_plugin_sdk::wasi_http::{SendPhase, transport_connector_error_for_test};
 
     use super::{Idempotency, OperationDispatchFailure, OperationSendOutcome, SendOutcome};
 
-    #[cfg(feature = "test-utils")]
     #[derive(Debug)]
     struct WrappedConnectorError(ConnectorError);
 
-    #[cfg(feature = "test-utils")]
     impl std::fmt::Display for WrappedConnectorError {
         fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
             formatter.write_str("wrapped connector error")
         }
     }
 
-    #[cfg(feature = "test-utils")]
     impl std::error::Error for WrappedConnectorError {
         fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
             Some(&self.0)
@@ -353,7 +344,6 @@ mod tests {
         assert_eq!(SendOutcome::classify(&error), SendOutcome::NotSent);
     }
 
-    #[cfg(feature = "test-utils")]
     #[test]
     fn raw_transport_not_sent_without_operation_verdict_may_have_been_sent() {
         let error: SdkError<MockServiceError, HttpResponse> =
@@ -362,7 +352,6 @@ mod tests {
         assert_eq!(SendOutcome::classify(&error), SendOutcome::MaybeSent);
     }
 
-    #[cfg(feature = "test-utils")]
     #[test]
     fn wrapped_transport_not_sent_without_operation_verdict_may_have_been_sent() {
         let connector_error = ConnectorError::other(
@@ -386,44 +375,11 @@ mod tests {
     }
 
     #[test]
-    fn throttling_kind_with_client_error_is_rejected() {
-        let error = service_error_with_outcome(
-            "SomeThrottlingError",
-            Some(ErrorKind::ThrottlingError),
-            400,
-            SendOutcome::Rejected,
-        );
-
-        assert_eq!(SendOutcome::classify(&error), SendOutcome::Rejected);
-    }
-
-    #[test]
-    fn slow_down_code_with_server_error_is_rejected() {
-        let error = service_error_with_outcome("SlowDown", None, 503, SendOutcome::Rejected);
-
-        assert_eq!(SendOutcome::classify(&error), SendOutcome::Rejected);
-    }
-
-    #[test]
-    fn request_limit_exceeded_code_with_server_error_is_rejected() {
+    fn service_error_with_operation_verdict_uses_verdict() {
         let error =
-            service_error_with_outcome("RequestLimitExceeded", None, 503, SendOutcome::Rejected);
+            service_error_with_outcome("ValidationException", None, 400, SendOutcome::Rejected);
 
         assert_eq!(SendOutcome::classify(&error), SendOutcome::Rejected);
-    }
-
-    #[test]
-    fn internal_error_with_server_error_may_have_been_sent() {
-        let error = service_error("InternalError", None, 500);
-
-        assert_eq!(SendOutcome::classify(&error), SendOutcome::MaybeSent);
-    }
-
-    #[test]
-    fn internal_error_with_success_status_may_have_been_sent() {
-        let error = service_error("InternalError", None, 200);
-
-        assert_eq!(SendOutcome::classify(&error), SendOutcome::MaybeSent);
     }
 
     #[test]
@@ -434,29 +390,7 @@ mod tests {
     }
 
     #[test]
-    fn s3_operation_aborted_is_rejected() {
-        let error =
-            service_error_with_outcome("OperationAborted", None, 409, SendOutcome::Rejected);
-
-        assert_eq!(SendOutcome::classify(&error), SendOutcome::Rejected);
-    }
-
-    #[test]
-    fn s3_request_timeout_may_have_been_sent() {
-        let error = service_error("RequestTimeout", None, 400);
-
-        assert_eq!(SendOutcome::classify(&error), SendOutcome::MaybeSent);
-    }
-
-    #[test]
-    fn generic_request_timeout_exception_may_have_been_sent() {
-        let error = service_error("RequestTimeoutException", None, 400);
-
-        assert_eq!(SendOutcome::classify(&error), SendOutcome::MaybeSent);
-    }
-
-    #[test]
-    fn direct_and_orchestrator_classifiers_agree_on_service_failures() {
+    fn orchestrator_service_failures_have_expected_outcomes() {
         use aws_runtime::retries::classifiers::AwsErrorCodeClassifier;
         use aws_smithy_runtime_api::client::interceptors::context::{
             Error, Input, InterceptorContext,
@@ -469,29 +403,38 @@ mod tests {
             .build()
             .expect("test runtime components");
         let cases = [
-            ("Throttling", Some(ErrorKind::ThrottlingError), 400),
-            ("SlowDown", None, 503),
-            ("ValidationException", None, 400),
-            ("InternalError", Some(ErrorKind::ServerError), 500),
-            ("RequestTimeout", None, 400),
-            ("RequestTimeoutException", None, 400),
+            (
+                "Throttling",
+                Some(ErrorKind::ThrottlingError),
+                400,
+                SendOutcome::Rejected,
+            ),
+            ("SlowDown", None, 503, SendOutcome::Rejected),
+            ("RequestLimitExceeded", None, 503, SendOutcome::Rejected),
+            ("OperationAborted", None, 409, SendOutcome::Rejected),
+            ("ValidationException", None, 400, SendOutcome::Rejected),
+            ("RequestTimeout", None, 400, SendOutcome::MaybeSent),
+            ("RequestTimeoutException", None, 400, SendOutcome::MaybeSent),
+            (
+                "InternalError",
+                Some(ErrorKind::ServerError),
+                500,
+                SendOutcome::MaybeSent,
+            ),
         ];
 
-        for (code, retryable, status) in cases {
+        for (code, retryable, status, expected) in cases {
             let mut context = InterceptorContext::new(Input::doesnt_matter());
             context.set_response(http_response(status));
             context.set_output_or_error(Err(OrchestratorError::operation(Error::erase(
                 MockServiceError::new(code, retryable),
             ))));
-            let orchestrated = SendOutcome::classify_orchestrator(&context, &runtime_components);
-            let direct = SendOutcome::classify(&service_error_with_outcome(
-                code,
-                retryable,
-                status,
-                orchestrated,
-            ));
 
-            assert_eq!(direct, orchestrated, "classifiers disagreed for {code}");
+            assert_eq!(
+                SendOutcome::classify_orchestrator(&context, &runtime_components),
+                expected,
+                "unexpected per-attempt outcome for {code}"
+            );
         }
     }
 
