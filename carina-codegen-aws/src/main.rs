@@ -5761,65 +5761,392 @@ fn truncate_str(s: &str, max_len: usize) -> String {
 mod tests {
     use super::*;
 
-    fn fixture_model(service: &str, namespace: &str) -> SmithyModel {
-        let model_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../carina-provider-aws/tests/fixtures/smithy");
-        load_model(&model_dir, namespace)
-            .unwrap_or_else(|error| panic!("load {service} Smithy fixture: {error:#}"))
+    const PROVIDER_FIXTURE_FIELDS: &[&str] = &[
+        "AllocationId",
+        "AvailabilityMode",
+        "CidrBlock",
+        "Description",
+        "Name",
+        "Options",
+        "Path",
+        "PeerOwnerId",
+        "PeerVpcId",
+        "PrivateDnsNameOptionsOnLaunch",
+        "RoleName",
+        "RouteTableIds",
+        "SecurityGroupIds",
+        "SubnetIds",
+        "TransitGatewayId",
+        "Unobservable",
+        "VpcId",
+    ];
+
+    fn empty_test_model() -> SmithyModel {
+        carina_smithy::parse(r#"{"smithy":"2.0","shapes":{}}"#).expect("parse empty test model")
+    }
+
+    fn string_fixture_model(
+        create_fields: &[(&str, bool)],
+        read_fields: &[(&str, bool)],
+    ) -> SmithyModel {
+        fn members(fields: &[(&str, bool)]) -> String {
+            fields
+                .iter()
+                .map(|(name, required)| {
+                    let traits = if *required {
+                        r#"{"smithy.api#required":{}}"#
+                    } else {
+                        "{}"
+                    };
+                    format!(r#""{name}":{{"target":"smithy.api#String","traits":{traits}}}"#)
+                })
+                .collect::<Vec<_>>()
+                .join(",")
+        }
+
+        let document = r##"{
+          "smithy": "2.0",
+          "shapes": {
+            "com.amazonaws.test#CreateFixture": {
+              "type": "operation",
+              "input": { "target": "com.amazonaws.test#CreateFixtureRequest" },
+              "output": { "target": "smithy.api#Unit" },
+              "traits": {}
+            },
+            "com.amazonaws.test#CreateFixtureRequest": {
+              "type": "structure",
+              "members": { __CREATE_FIELDS__ },
+              "traits": { "smithy.api#input": {} }
+            },
+            "com.amazonaws.test#ReadFixture": {
+              "type": "structure",
+              "members": { __READ_FIELDS__ },
+              "traits": {}
+            }
+          }
+        }"##
+        .replace("__CREATE_FIELDS__", &members(create_fields))
+        .replace("__READ_FIELDS__", &members(read_fields));
+        carina_smithy::parse(&document).expect("parse string-only fixture model")
+    }
+
+    /// Minimal Smithy surface shared by codegen unit tests. Every shape here
+    /// is exercised by at least one test below; no ignored AWS model cache is
+    /// needed for the codegen contract to be tested in CI.
+    fn provider_fixture_model() -> SmithyModel {
+        carina_smithy::parse(
+            r##"{
+              "smithy": "2.0",
+              "shapes": {
+                "com.amazonaws.test#CreateFixture": {
+                  "type": "operation",
+                  "input": { "target": "com.amazonaws.test#CreateFixtureRequest" },
+                  "output": { "target": "smithy.api#Unit" },
+                  "traits": {}
+                },
+                "com.amazonaws.test#CreateFixtureRequest": {
+                  "type": "structure",
+                  "members": {
+                    "AllocationId": { "target": "smithy.api#String", "traits": {} },
+                    "AvailabilityMode": { "target": "smithy.api#String", "traits": {} },
+                    "CidrBlock": { "target": "smithy.api#String", "traits": {} },
+                    "Description": { "target": "smithy.api#String", "traits": {} },
+                    "Name": { "target": "smithy.api#String", "traits": { "smithy.api#required": {} } },
+                    "Options": { "target": "com.amazonaws.test#Options", "traits": {} },
+                    "Path": { "target": "smithy.api#String", "traits": {} },
+                    "PeerOwnerId": { "target": "smithy.api#String", "traits": {} },
+                    "PeerVpcId": { "target": "smithy.api#String", "traits": {} },
+                    "PrivateDnsNameOptionsOnLaunch": { "target": "com.amazonaws.test#PrivateDnsOptions", "traits": {} },
+                    "RoleName": { "target": "smithy.api#String", "traits": { "smithy.api#required": {} } },
+                    "RouteTableIds": { "target": "com.amazonaws.test#StringList", "traits": {} },
+                    "SecurityGroupIds": { "target": "com.amazonaws.test#StringList", "traits": {} },
+                    "SubnetIds": { "target": "com.amazonaws.test#StringList", "traits": {} },
+                    "TransitGatewayId": { "target": "smithy.api#String", "traits": {} },
+                    "Unobservable": { "target": "smithy.api#String", "traits": {} },
+                    "VpcId": { "target": "smithy.api#String", "traits": {} }
+                  },
+                  "traits": { "smithy.api#input": {} }
+                },
+                "com.amazonaws.test#ReadFixture": {
+                  "type": "structure",
+                  "members": {
+                    "AccepterVpcInfo": { "target": "com.amazonaws.test#VpcInfo", "traits": {} },
+                    "Arn": { "target": "smithy.api#String", "traits": { "smithy.api#required": {} } },
+                    "Attachments": { "target": "com.amazonaws.test#VpcInfoList", "traits": {} },
+                    "AvailabilityMode": { "target": "smithy.api#String", "traits": {} },
+                    "CidrBlock": { "target": "smithy.api#String", "traits": {} },
+                    "Description": { "target": "smithy.api#String", "traits": {} },
+                    "EgressOnlyInternetGatewayId": { "target": "smithy.api#String", "traits": {} },
+                    "Groups": { "target": "com.amazonaws.test#GroupList", "traits": {} },
+                    "Name": { "target": "smithy.api#String", "traits": { "smithy.api#required": {} } },
+                    "NatGatewayAddresses": { "target": "com.amazonaws.test#NatGatewayAddressList", "traits": {} },
+                    "NatGatewayId": { "target": "smithy.api#String", "traits": {} },
+                    "Options": { "target": "com.amazonaws.test#Options", "traits": {} },
+                    "Path": { "target": "smithy.api#String", "traits": { "smithy.api#required": {} } },
+                    "PrivateDnsNameOptionsOnLaunch": { "target": "com.amazonaws.test#PrivateDnsOptions", "traits": {} },
+                    "RequesterVpcInfo": { "target": "com.amazonaws.test#VpcInfo", "traits": {} },
+                    "RoleId": { "target": "smithy.api#String", "traits": { "smithy.api#required": {} } },
+                    "RoleName": { "target": "smithy.api#String", "traits": { "smithy.api#required": {} } },
+                    "RouteTableIds": { "target": "com.amazonaws.test#StringList", "traits": {} },
+                    "SubnetId": { "target": "smithy.api#String", "traits": {} },
+                    "SubnetIds": { "target": "com.amazonaws.test#StringList", "traits": {} },
+                    "TransitGatewayId": { "target": "smithy.api#String", "traits": {} },
+                    "VpcEndpointId": { "target": "smithy.api#String", "traits": {} },
+                    "VpcId": { "target": "smithy.api#String", "traits": {} },
+                    "VpcPeeringConnectionId": { "target": "smithy.api#String", "traits": {} }
+                  },
+                  "traits": {}
+                },
+                "com.amazonaws.test#StringList": {
+                  "type": "list",
+                  "member": { "target": "smithy.api#String", "traits": {} },
+                  "traits": {}
+                },
+                "com.amazonaws.test#VpcInfoList": {
+                  "type": "list",
+                  "member": { "target": "com.amazonaws.test#VpcInfo", "traits": {} },
+                  "traits": {}
+                },
+                "com.amazonaws.test#VpcInfo": {
+                  "type": "structure",
+                  "members": {
+                    "OwnerId": { "target": "smithy.api#String", "traits": {} },
+                    "VpcId": { "target": "smithy.api#String", "traits": {} }
+                  },
+                  "traits": {}
+                },
+                "com.amazonaws.test#NatGatewayAddressList": {
+                  "type": "list",
+                  "member": { "target": "com.amazonaws.test#NatGatewayAddress", "traits": {} },
+                  "traits": {}
+                },
+                "com.amazonaws.test#NatGatewayAddress": {
+                  "type": "structure",
+                  "members": {
+                    "AllocationId": { "target": "smithy.api#String", "traits": {} }
+                  },
+                  "traits": {}
+                },
+                "com.amazonaws.test#GroupList": {
+                  "type": "list",
+                  "member": { "target": "com.amazonaws.test#Group", "traits": {} },
+                  "traits": {}
+                },
+                "com.amazonaws.test#Group": {
+                  "type": "structure",
+                  "members": {
+                    "GroupId": { "target": "smithy.api#String", "traits": {} }
+                  },
+                  "traits": {}
+                },
+                "com.amazonaws.test#Options": {
+                  "type": "structure",
+                  "members": {
+                    "AmazonSideAsn": { "target": "smithy.api#Long", "traits": {} },
+                    "DnsSupport": { "target": "com.amazonaws.test#FeatureState", "traits": {} }
+                  },
+                  "traits": {}
+                },
+                "com.amazonaws.test#PrivateDnsOptions": {
+                  "type": "structure",
+                  "members": {
+                    "EnableResourceNameDnsARecord": { "target": "smithy.api#Boolean", "traits": {} },
+                    "HostnameType": { "target": "com.amazonaws.test#HostnameType", "traits": {} }
+                  },
+                  "traits": {}
+                },
+                "com.amazonaws.test#FeatureState": {
+                  "type": "enum",
+                  "members": {
+                    "enable": { "target": "smithy.api#Unit", "traits": { "smithy.api#enumValue": "enable" } },
+                    "disable": { "target": "smithy.api#Unit", "traits": { "smithy.api#enumValue": "disable" } }
+                  },
+                  "traits": {}
+                },
+                "com.amazonaws.test#HostnameType": {
+                  "type": "enum",
+                  "members": {
+                    "ip-name": { "target": "smithy.api#Unit", "traits": { "smithy.api#enumValue": "ip-name" } }
+                  },
+                  "traits": {}
+                }
+              }
+            }"##,
+        )
+        .expect("parse provider codegen fixture model")
+    }
+
+    fn provider_fixture_model_without_read_fields(fields: &[&str]) -> SmithyModel {
+        let mut model = provider_fixture_model();
+        let read_shape = model
+            .shapes
+            .get_mut("com.amazonaws.test#ReadFixture")
+            .expect("provider fixture read shape");
+        let carina_smithy::Shape::Structure(read_structure) = read_shape else {
+            panic!("provider fixture read shape must be a structure");
+        };
+        for field in fields {
+            read_structure.members.remove(*field);
+        }
+        model
+    }
+
+    fn provider_fixture_resource(
+        name: &'static str,
+        identifier: &'static str,
+        fields: &[&'static str],
+        derived_attributes: Vec<resource_defs::DerivedAttribute>,
+    ) -> ResourceDef {
+        ResourceDef {
+            name,
+            replacement: ReplacementClass::Conflicting,
+            service_namespace: "com.amazonaws.test",
+            schema_structure: None,
+            simple_delete: false,
+            noop_update: false,
+            create_op: "CreateFixture",
+            read_structure: Some("ReadFixture"),
+            read_ops: vec![],
+            delete_op: "",
+            update_ops: vec![],
+            identifier,
+            has_tags: false,
+            type_overrides: vec![],
+            exclude_fields: PROVIDER_FIXTURE_FIELDS
+                .iter()
+                .copied()
+                .filter(|field| !fields.contains(field))
+                .collect(),
+            create_only_overrides: vec![],
+            enum_aliases: vec![],
+            to_dsl_overrides: vec![],
+            required_overrides: vec![],
+            extra_read_only: vec![],
+            read_only_overrides: vec![],
+            extra_attributes: vec![],
+            identity_overrides: vec![],
+            deferred_populate_overrides: vec![],
+            deferred_populate_struct_field_overrides: vec![],
+            struct_field_type_overrides: vec![],
+            read_shape_overrides: vec![],
+            derived_attributes,
+        }
+    }
+
+    fn enum_fixture_model() -> SmithyModel {
+        carina_smithy::parse(
+            r##"{
+              "smithy": "2.0",
+              "shapes": {
+                "com.amazonaws.test#CreateEnumFixture": {
+                  "type": "operation",
+                  "input": { "target": "com.amazonaws.test#EnumFixture" },
+                  "output": { "target": "smithy.api#Unit" },
+                  "traits": {}
+                },
+                "com.amazonaws.test#EnumFixture": {
+                  "type": "structure",
+                  "members": {
+                    "Type": { "target": "com.amazonaws.test#RecordType", "traits": {} }
+                  },
+                  "traits": { "smithy.api#input": {} }
+                },
+                "com.amazonaws.test#RecordType": {
+                  "type": "enum",
+                  "members": {
+                    "A": { "target": "smithy.api#Unit", "traits": { "smithy.api#enumValue": "A" } },
+                    "CNAME": { "target": "smithy.api#Unit", "traits": { "smithy.api#enumValue": "CNAME" } }
+                  },
+                  "traits": {}
+                }
+              }
+            }"##,
+        )
+        .expect("parse enum codegen fixture model")
+    }
+
+    fn enum_fixture_resource() -> ResourceDef {
+        ResourceDef {
+            // Use a registered resource name because generate_resource also
+            // emits the provider's closed CloudFormation type mapping.
+            name: "iam.Role",
+            replacement: ReplacementClass::Conflicting,
+            service_namespace: "com.amazonaws.test",
+            schema_structure: None,
+            simple_delete: false,
+            noop_update: false,
+            create_op: "CreateEnumFixture",
+            read_structure: Some("EnumFixture"),
+            read_ops: vec![],
+            delete_op: "",
+            update_ops: vec![],
+            identifier: "",
+            has_tags: false,
+            type_overrides: vec![],
+            exclude_fields: vec![],
+            create_only_overrides: vec![],
+            enum_aliases: vec![],
+            to_dsl_overrides: vec![],
+            required_overrides: vec![],
+            extra_read_only: vec![],
+            read_only_overrides: vec![],
+            extra_attributes: vec![],
+            identity_overrides: vec![],
+            deferred_populate_overrides: vec![],
+            deferred_populate_struct_field_overrides: vec![],
+            struct_field_type_overrides: vec![],
+            read_shape_overrides: vec![],
+            derived_attributes: vec![],
+        }
     }
 
     #[test]
     fn unclassified_read_attribute_fails_generation() {
-        let model = fixture_model("sqs", "com.amazonaws.sqs");
-        let resource = resource_defs::sqs_resources()
-            .into_iter()
-            .find(|resource| resource.name == "sqs.Queue")
-            .expect("sqs.Queue definition");
-        let mut dispositions = resource.read_dispositions();
-        dispositions.retain(|disposition| disposition.field() != "QueueName");
+        let model = string_fixture_model(
+            &[("Description", false), ("Unobservable", false)],
+            &[("Description", false)],
+        );
+        let resource =
+            provider_fixture_resource("test.UnclassifiedFixture", "", &["Unobservable"], vec![]);
 
-        let error = validate_read_contract(&resource, &model, &dispositions)
+        let error = validate_read_contract(&resource, &model, &[])
             .expect_err("a schema attribute without a read disposition must fail generation");
-        assert!(error.to_string().contains("QueueName"), "{error:#}");
+        assert!(error.to_string().contains("Unobservable"), "{error:#}");
     }
 
     #[test]
     fn write_only_read_disposition_requires_create_only_attribute() {
-        let model = fixture_model("logs", "com.amazonaws.cloudwatchlogs");
-        let resource = resource_defs::logs_resources()
-            .into_iter()
-            .find(|resource| resource.name == "logs.LogGroup")
-            .expect("logs.LogGroup definition");
-        let mut dispositions = resource.read_dispositions();
-        dispositions.retain(|disposition| disposition.field() != "RetentionInDays");
-        dispositions.push(resource_defs::ReadDisposition::WriteOnly {
-            field: "RetentionInDays",
-            reason: "test fixture",
+        let model = string_fixture_model(&[("Description", false)], &[("Description", false)]);
+        let mut resource =
+            provider_fixture_resource("test.UpdatableFixture", "", &["Description"], vec![]);
+        resource.update_ops.push(resource_defs::UpdateOp {
+            operation: "UpdateFixture",
+            fields: resource_defs::FieldLayout::Flat(vec!["Description"]),
         });
+        let dispositions = [resource_defs::ReadDisposition::WriteOnly {
+            field: "Description",
+            reason: "test fixture",
+        }];
 
         let error = validate_read_contract(&resource, &model, &dispositions)
             .expect_err("write-only must not hide an updatable attribute");
-        assert!(error.to_string().contains("RetentionInDays"), "{error:#}");
+        assert!(error.to_string().contains("Description"), "{error:#}");
         assert!(error.to_string().contains("create-only"), "{error:#}");
     }
 
     #[test]
     fn schema_omission_requires_a_non_empty_reason() {
-        let model = fixture_model("acm", "com.amazonaws.acm");
-        let resource = resource_defs::acm_resources()
-            .into_iter()
-            .find(|resource| resource.name == "acm.Certificate")
-            .expect("acm.Certificate definition");
-        let mut dispositions = resource.read_dispositions();
-        dispositions.retain(|disposition| disposition.field() != "DomainName");
-        dispositions.push(resource_defs::ReadDisposition::OmitSchema {
-            field: "DomainName",
+        let model = string_fixture_model(&[("Unobservable", false)], &[]);
+        let resource =
+            provider_fixture_resource("test.OmittedFixture", "", &["Unobservable"], vec![]);
+        let dispositions = [resource_defs::ReadDisposition::OmitSchema {
+            field: "Unobservable",
             reason: "",
-        });
+        }];
 
         let error = validate_read_contract(&resource, &model, &dispositions)
             .expect_err("omitting a schema attribute without a reason must fail generation");
-        assert!(error.to_string().contains("DomainName"), "{error:#}");
+        assert!(error.to_string().contains("Unobservable"), "{error:#}");
         assert!(error.to_string().contains("reason"), "{error:#}");
     }
 
@@ -6091,14 +6418,7 @@ mod tests {
 
     #[test]
     fn generate_data_source_for_sts_caller_identity_emits_explicit_outputs() {
-        let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../carina-provider-aws/tests/fixtures/smithy/sts.json");
-        if !fixture.exists() {
-            eprintln!("Skipping: Smithy fixture not found: {}", fixture.display());
-            return;
-        }
-        let file = std::fs::File::open(&fixture).expect("open Smithy fixture");
-        let model = carina_smithy::parse_reader(std::io::BufReader::new(file)).expect("parse");
+        let model = empty_test_model();
         let ds = resource_defs::sts_data_sources()
             .into_iter()
             .next()
@@ -6134,13 +6454,7 @@ mod tests {
 
     #[test]
     fn generate_data_source_for_identitystore_user_emits_inputs_and_outputs() {
-        let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../carina-provider-aws/tests/fixtures/smithy/identitystore.json");
-        if !fixture.exists() {
-            return;
-        }
-        let file = std::fs::File::open(&fixture).unwrap();
-        let model = carina_smithy::parse_reader(std::io::BufReader::new(file)).unwrap();
+        let model = empty_test_model();
         let ds = resource_defs::identitystore_data_sources()
             .into_iter()
             .next()
@@ -6164,13 +6478,7 @@ mod tests {
 
     #[test]
     fn markdown_data_source_lists_explicit_output_attributes() {
-        let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../carina-provider-aws/tests/fixtures/smithy/sts.json");
-        if !fixture.exists() {
-            return;
-        }
-        let file = std::fs::File::open(&fixture).unwrap();
-        let model = carina_smithy::parse_reader(std::io::BufReader::new(file)).unwrap();
+        let model = empty_test_model();
         let ds = resource_defs::sts_data_sources()
             .into_iter()
             .next()
@@ -6189,14 +6497,7 @@ mod tests {
     /// `arns: List(...)` rather than scalar.
     #[test]
     fn generate_data_source_for_iam_roles_emits_list_attributes() {
-        let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../carina-provider-aws/tests/fixtures/smithy/iam.json");
-        if !fixture.exists() {
-            eprintln!("Skipping: Smithy fixture not found: {}", fixture.display());
-            return;
-        }
-        let file = std::fs::File::open(&fixture).expect("open iam fixture");
-        let model = carina_smithy::parse_reader(std::io::BufReader::new(file)).expect("parse iam");
+        let model = empty_test_model();
         let ds = resource_defs::iam_data_sources()
             .into_iter()
             .next()
@@ -6249,13 +6550,7 @@ mod tests {
 
     #[test]
     fn markdown_data_source_for_iam_roles_emits_list_types() {
-        let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../carina-provider-aws/tests/fixtures/smithy/iam.json");
-        if !fixture.exists() {
-            return;
-        }
-        let file = std::fs::File::open(&fixture).unwrap();
-        let model = carina_smithy::parse_reader(std::io::BufReader::new(file)).unwrap();
+        let model = empty_test_model();
         let ds = resource_defs::iam_data_sources()
             .into_iter()
             .next()
@@ -6273,17 +6568,10 @@ mod tests {
 
     #[test]
     fn markdown_resource_for_iam_role_displays_specific_arn_type() {
-        let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../carina-provider-aws/tests/fixtures/smithy/iam.json");
-        if !fixture.exists() {
-            return;
-        }
-        let file = std::fs::File::open(&fixture).unwrap();
-        let model = carina_smithy::parse_reader(std::io::BufReader::new(file)).unwrap();
-        let res = resource_defs::iam_resources()
-            .into_iter()
-            .find(|r| r.name == "iam.Role")
-            .expect("iam.Role missing");
+        let model = provider_fixture_model();
+        let mut res = provider_fixture_resource("iam.Role", "RoleName", &["RoleName"], vec![]);
+        res.extra_read_only = vec!["Arn"];
+        res.type_overrides = vec![("Arn", "super::super::iam::role::arn()")];
 
         let md = generate_markdown_resource(&res, &model, None).expect("md");
 
@@ -6346,22 +6634,8 @@ mod tests {
     /// `aws.route53.RecordSet.Type.a`.
     #[test]
     fn generate_resource_emits_dsl_aliases_for_pascal_enum() {
-        let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../carina-provider-aws/tests/fixtures/smithy/route53.json");
-        if !fixture.exists() {
-            eprintln!(
-                "Skipping: Smithy fixture not found: {}\nRun scripts/download-smithy-models.sh to enable this test",
-                fixture.display()
-            );
-            return;
-        }
-        let file = std::fs::File::open(&fixture).expect("failed to open route53 fixture");
-        let model = carina_smithy::parse_reader(std::io::BufReader::new(file))
-            .expect("failed to parse route53 fixture");
-        let resource = resource_defs::route53_resources()
-            .into_iter()
-            .find(|res| res.name == "route53.RecordSet")
-            .expect("missing route53.RecordSet resource def");
+        let model = enum_fixture_model();
+        let resource = enum_fixture_resource();
 
         let generated = generate_resource(&resource, &model).expect("failed to generate resource");
 
@@ -6419,22 +6693,8 @@ mod tests {
 
     #[test]
     fn generate_resource_uses_enum_for_namespaced_enums() {
-        let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../carina-provider-aws/tests/fixtures/smithy/s3.json");
-        if !fixture.exists() {
-            eprintln!(
-                "Skipping: Smithy fixture not found: {}\nRun scripts/download-smithy-models.sh to enable this test",
-                fixture.display()
-            );
-            return;
-        }
-        let file = std::fs::File::open(&fixture).expect("failed to open Smithy fixture");
-        let model = carina_smithy::parse_reader(std::io::BufReader::new(file))
-            .expect("failed to parse Smithy fixture");
-        let resource = resource_defs::s3_resources()
-            .into_iter()
-            .find(|res| res.name == "s3.Bucket")
-            .expect("missing s3.Bucket resource def");
+        let model = enum_fixture_model();
+        let resource = enum_fixture_resource();
 
         let generated = generate_resource(&resource, &model).expect("failed to generate resource");
 
@@ -6446,40 +6706,6 @@ mod tests {
             !generated.contains(".with_completions("),
             "enum completions should come from schema type metadata: {generated}"
         );
-    }
-
-    /// Build the inputs `generate_provider_code` needs for a single
-    /// resource def, loading the Smithy fixture if available. Returns
-    /// `None` when the fixture is missing so the caller can skip
-    /// gracefully.
-    fn provider_code_for_single_resource(res: ResourceDef, fixture: &str) -> Option<String> {
-        let fixture_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../carina-provider-aws/tests/fixtures/smithy/")
-            .join(fixture);
-        if !fixture_path.exists() {
-            eprintln!(
-                "Skipping: Smithy fixture not found: {}",
-                fixture_path.display()
-            );
-            return None;
-        }
-        let file = std::fs::File::open(&fixture_path).expect("open fixture");
-        let model = carina_smithy::parse_reader(std::io::BufReader::new(file)).expect("parse");
-        let mut models: HashMap<&str, SmithyModel> = HashMap::new();
-        // Leak the namespace string to obtain a 'static borrow for the
-        // models map without redesigning the signature.
-        let ns: &'static str = Box::leak(res.service_namespace.to_string().into_boxed_str());
-        models.insert(ns, model);
-
-        let resources = vec![res];
-        let data_sources: Vec<resource_defs::DataSourceDef> = vec![];
-        let manual = std::collections::HashSet::new();
-        Some(generate_provider_code(
-            &resources,
-            &data_sources,
-            &models,
-            &manual,
-        ))
     }
 
     fn provider_code_for_single_resource_with_model(
@@ -7530,13 +7756,14 @@ mod tests {
 
     #[test]
     fn extract_iam_role_uses_required_field_pattern() {
-        let res = resource_defs::iam_resources()
-            .into_iter()
-            .find(|r| r.name == "iam.Role")
-            .expect("iam.Role missing");
-        let Some(code) = provider_code_for_single_resource(res, "iam.json") else {
-            return;
-        };
+        let mut res = provider_fixture_resource(
+            "test.RequiredFixture",
+            "RoleName",
+            &["Description", "Path", "RoleName"],
+            vec![],
+        );
+        res.extra_read_only = vec!["Arn", "RoleId"];
+        let code = provider_code_for_single_resource_with_model(res, provider_fixture_model());
 
         // Required strings must use the `let v = obj.<f>(); if !v.is_empty()` shape.
         // The wrong (current) shape is `if let Some(v) = obj.role_name()`, which
@@ -7575,20 +7802,21 @@ mod tests {
 
     #[test]
     fn generated_extractors_return_typed_read_fields() {
-        let res = resource_defs::ec2_resources()
-            .into_iter()
-            .find(|r| r.name == "ec2.Vpc")
-            .expect("ec2.Vpc missing");
-        let Some(code) = provider_code_for_single_resource(res, "ec2.json") else {
-            return;
-        };
+        let res = provider_fixture_resource("test.TypedFixture", "VpcId", &["CidrBlock"], vec![]);
+        let code = provider_code_for_single_resource_with_model(
+            res,
+            string_fixture_model(
+                &[("CidrBlock", false)],
+                &[("CidrBlock", false), ("VpcId", false)],
+            ),
+        );
 
         assert!(
-            code.contains("pub(crate) struct Ec2VpcReadFields"),
+            code.contains("pub(crate) struct TestTypedFixtureReadFields"),
             "extractor output must be a generated typed struct: {code}"
         );
         assert!(
-            code.contains(") -> Ec2VpcReadFields"),
+            code.contains(") -> TestTypedFixtureReadFields"),
             "extractor must return its typed fields directly: {code}"
         );
         assert!(
@@ -7602,7 +7830,9 @@ mod tests {
         assert!(
             code.contains("pub(crate) fn into_model(")
                 && code.contains("let Self {")
-                && code.contains("let crate::read_models_generated::Ec2VpcReadModelSupplement"),
+                && code.contains(
+                    "let crate::read_models_generated::TestTypedFixtureReadModelSupplement"
+                ),
             "generated code must consume every extracted and hand-supplied field: {code}"
         );
         assert!(
@@ -7613,39 +7843,43 @@ mod tests {
 
     #[test]
     fn legacy_map_based_read_ops_fail_generation() {
-        let mut resource = resource_defs::ec2_resources()
-            .into_iter()
-            .find(|resource| resource.name == "ec2.Vpc")
-            .expect("ec2.Vpc missing");
+        let mut resource =
+            provider_fixture_resource("test.LegacyReadOpsFixture", "VpcId", &["CidrBlock"], vec![]);
         resource.read_ops = vec![resource_defs::ReadOp {
-            operation: "DescribeVpcs",
-            fields: vec![("VpcId", None)],
+            operation: "ReadFixture",
+            fields: vec![("CidrBlock", None)],
             defaults: vec![],
         }];
 
         let panic = provider_code_panic_for_single_resource_with_model(
             resource,
-            fixture_model("ec2", "com.amazonaws.ec2"),
+            string_fixture_model(
+                &[("CidrBlock", false)],
+                &[("CidrBlock", false), ("VpcId", false)],
+            ),
         )
         .expect("legacy map-based read_ops must fail generation");
         assert!(
-            panic.contains("legacy map-based read_ops are unsupported for ec2.Vpc"),
+            panic.contains(
+                "legacy map-based read_ops are unsupported for test.LegacyReadOpsFixture"
+            ),
             "unexpected panic: {panic}"
         );
     }
 
     #[test]
     fn generated_read_models_cache_validated_schemas() {
-        let resource = resource_defs::ec2_resources()
-            .into_iter()
-            .find(|resource| resource.name == "ec2.Vpc")
-            .expect("ec2.Vpc definition");
-        let model = fixture_model("ec2", "com.amazonaws.ec2");
+        let resource =
+            provider_fixture_resource("test.CacheFixture", "VpcId", &["CidrBlock"], vec![]);
+        let model = string_fixture_model(
+            &[("CidrBlock", false)],
+            &[("CidrBlock", false), ("VpcId", false)],
+        );
         let mut models = HashMap::new();
         models.insert(resource.service_namespace, model);
 
         let code = generate_read_models_code(&[resource], &[], &models)
-            .expect("generate ec2.Vpc read model");
+            .expect("generate test.CacheFixture read model");
 
         assert!(
             code.contains("static VALIDATED_SCHEMA: OnceLock"),
@@ -7656,7 +7890,7 @@ mod tests {
             "generated models must use the cache seam: {code}"
         );
         assert_eq!(
-            code.matches("ec2_vpc_config().schema").count(),
+            code.matches("test_cache_fixture_config().schema").count(),
             1,
             "the schema must be built only inside the cache initializer: {code}"
         );
@@ -7683,13 +7917,8 @@ mod tests {
 
     #[test]
     fn extract_route53_record_set_required_name_compiles() {
-        let res = resource_defs::route53_resources()
-            .into_iter()
-            .find(|r| r.name == "route53.RecordSet")
-            .expect("route53.RecordSet missing");
-        let Some(code) = provider_code_for_single_resource(res, "route53.json") else {
-            return;
-        };
+        let res = provider_fixture_resource("test.RequiredNameFixture", "Name", &["Name"], vec![]);
+        let code = provider_code_for_single_resource_with_model(res, provider_fixture_model());
 
         assert!(
             code.contains("let v = obj.name();"),
@@ -7703,13 +7932,19 @@ mod tests {
 
     #[test]
     fn extract_ec2_nat_gateway_emits_list_first_for_allocation_id() {
-        let res = resource_defs::ec2_resources()
-            .into_iter()
-            .find(|r| r.name == "ec2.NatGateway")
-            .expect("ec2.NatGateway missing");
-        let Some(code) = provider_code_for_single_resource(res, "ec2.json") else {
-            return;
-        };
+        let res = provider_fixture_resource(
+            "test.ListFirstFixture",
+            "NatGatewayId",
+            &["AllocationId", "AvailabilityMode"],
+            vec![resource_defs::DerivedAttribute {
+                attr: "AllocationId",
+                source: resource_defs::DerivedSource::ListFirst {
+                    list_member: "NatGatewayAddresses",
+                    child_member: "AllocationId",
+                },
+            }],
+        );
+        let code = provider_code_for_single_resource_with_model(res, provider_fixture_model());
 
         // The hand-written extractor reads `obj.nat_gateway_addresses().first()`
         // and projects `.allocation_id()` from the inner struct. The codegen
@@ -7737,13 +7972,22 @@ mod tests {
 
     #[test]
     fn extract_ec2_egress_only_internet_gateway_emits_list_first_for_vpc_id() {
-        let res = resource_defs::ec2_resources()
-            .into_iter()
-            .find(|r| r.name == "ec2.EgressOnlyInternetGateway")
-            .expect("ec2.EgressOnlyInternetGateway missing");
-        let Some(code) = provider_code_for_single_resource(res, "ec2.json") else {
-            return;
-        };
+        let res = provider_fixture_resource(
+            "test.ListFirstVpcFixture",
+            "EgressOnlyInternetGatewayId",
+            &["VpcId"],
+            vec![resource_defs::DerivedAttribute {
+                attr: "VpcId",
+                source: resource_defs::DerivedSource::ListFirst {
+                    list_member: "Attachments",
+                    child_member: "VpcId",
+                },
+            }],
+        );
+        let code = provider_code_for_single_resource_with_model(
+            res,
+            provider_fixture_model_without_read_fields(&["VpcId"]),
+        );
 
         assert!(
             code.contains("let vpc_id = obj.attachments().first()"),
@@ -7765,13 +8009,13 @@ mod tests {
 
     #[test]
     fn extract_ec2_vpc_endpoint_emits_list_of_string_for_route_table_ids() {
-        let res = resource_defs::ec2_resources()
-            .into_iter()
-            .find(|r| r.name == "ec2.VpcEndpoint")
-            .expect("ec2.VpcEndpoint missing");
-        let Some(code) = provider_code_for_single_resource(res, "ec2.json") else {
-            return;
-        };
+        let res = provider_fixture_resource(
+            "test.ListStringsFixture",
+            "VpcEndpointId",
+            &["RouteTableIds", "SubnetIds"],
+            vec![],
+        );
+        let code = provider_code_for_single_resource_with_model(res, provider_fixture_model());
 
         // Hand-written shape that the codegen must reproduce for any
         // List<String> read-structure member.
@@ -7804,13 +8048,19 @@ mod tests {
 
     #[test]
     fn extract_ec2_transit_gateway_attachment_emits_subnet_ids_and_from_struct_options() {
-        let res = resource_defs::ec2_resources()
-            .into_iter()
-            .find(|r| r.name == "ec2.TransitGatewayAttachment")
-            .expect("ec2.TransitGatewayAttachment missing");
-        let Some(code) = provider_code_for_single_resource(res, "ec2.json") else {
-            return;
-        };
+        let res = provider_fixture_resource(
+            "test.ListAndStructFixture",
+            "",
+            &["Options", "SubnetIds"],
+            vec![resource_defs::DerivedAttribute {
+                attr: "Options",
+                source: resource_defs::DerivedSource::FromStruct {
+                    struct_member: "Options",
+                    children: &["DnsSupport"],
+                },
+            }],
+        );
+        let code = provider_code_for_single_resource_with_model(res, provider_fixture_model());
         assert!(
             code.contains("let ids = obj.subnet_ids();"),
             "must read .subnet_ids(): {code}"
@@ -7846,13 +8096,19 @@ mod tests {
 
     #[test]
     fn extract_ec2_vpc_endpoint_emits_list_all_for_security_group_ids() {
-        let res = resource_defs::ec2_resources()
-            .into_iter()
-            .find(|r| r.name == "ec2.VpcEndpoint")
-            .expect("ec2.VpcEndpoint missing");
-        let Some(code) = provider_code_for_single_resource(res, "ec2.json") else {
-            return;
-        };
+        let res = provider_fixture_resource(
+            "test.ListAllFixture",
+            "VpcEndpointId",
+            &["SecurityGroupIds"],
+            vec![resource_defs::DerivedAttribute {
+                attr: "SecurityGroupIds",
+                source: resource_defs::DerivedSource::ListAll {
+                    list_member: "Groups",
+                    child_member: "GroupId",
+                },
+            }],
+        );
+        let code = provider_code_for_single_resource_with_model(res, provider_fixture_model());
 
         // Walk groups list, project group_id off each element via
         // filter_map, drop the attribute when the result is empty (so an
@@ -7874,13 +8130,19 @@ mod tests {
 
     #[test]
     fn extract_ec2_transit_gateway_emits_from_struct_options() {
-        let res = resource_defs::ec2_resources()
-            .into_iter()
-            .find(|r| r.name == "ec2.TransitGateway")
-            .expect("ec2.TransitGateway missing");
-        let Some(code) = provider_code_for_single_resource(res, "ec2.json") else {
-            return;
-        };
+        let res = provider_fixture_resource(
+            "test.StructFixture",
+            "NatGatewayId",
+            &["Options"],
+            vec![resource_defs::DerivedAttribute {
+                attr: "Options",
+                source: resource_defs::DerivedSource::FromStruct {
+                    struct_member: "Options",
+                    children: &["AmazonSideAsn", "DnsSupport"],
+                },
+            }],
+        );
+        let code = provider_code_for_single_resource_with_model(res, provider_fixture_model());
 
         // Each child of obj.options() lands inside a nested `options`
         // map matching the schema struct.
@@ -7915,20 +8177,43 @@ mod tests {
         assert!(
             code.contains(
                 "(!fields.is_empty()).then(|| Value::Concrete(ConcreteValue::Map(fields)))"
-            ) && code.contains("options,\n            transit_gateway_id,"),
+            ) && code.contains("options: options.clone(),")
+                && code.contains("nat_gateway_id: nat_gateway_id.clone(),"),
             "must return the nested options map as a typed field: {code}"
         );
     }
 
     #[test]
     fn extract_ec2_vpc_peering_connection_emits_struct_with_rename() {
-        let res = resource_defs::ec2_resources()
-            .into_iter()
-            .find(|r| r.name == "ec2.VpcPeeringConnection")
-            .expect("ec2.VpcPeeringConnection missing");
-        let Some(code) = provider_code_for_single_resource(res, "ec2.json") else {
-            return;
-        };
+        let res = provider_fixture_resource(
+            "test.RenamedStructFixture",
+            "VpcPeeringConnectionId",
+            &["PeerOwnerId", "PeerVpcId", "VpcId"],
+            vec![
+                resource_defs::DerivedAttribute {
+                    attr: "VpcId",
+                    source: resource_defs::DerivedSource::FromStruct {
+                        struct_member: "RequesterVpcInfo",
+                        children: &["VpcId"],
+                    },
+                },
+                resource_defs::DerivedAttribute {
+                    attr: "PeerVpcId",
+                    source: resource_defs::DerivedSource::FromStruct {
+                        struct_member: "AccepterVpcInfo",
+                        children: &["VpcId"],
+                    },
+                },
+                resource_defs::DerivedAttribute {
+                    attr: "PeerOwnerId",
+                    source: resource_defs::DerivedSource::FromStruct {
+                        struct_member: "AccepterVpcInfo",
+                        children: &["OwnerId"],
+                    },
+                },
+            ],
+        );
+        let code = provider_code_for_single_resource_with_model(res, provider_fixture_model());
 
         // Requester: child `vpc_id` keeps its DSL name.
         assert!(
@@ -7966,13 +8251,19 @@ mod tests {
 
     #[test]
     fn extract_ec2_subnet_emits_from_struct_map_for_private_dns_options() {
-        let res = resource_defs::ec2_resources()
-            .into_iter()
-            .find(|r| r.name == "ec2.Subnet")
-            .expect("ec2.Subnet missing");
-        let Some(code) = provider_code_for_single_resource(res, "ec2.json") else {
-            return;
-        };
+        let res = provider_fixture_resource(
+            "test.PrivateDnsFixture",
+            "SubnetId",
+            &["PrivateDnsNameOptionsOnLaunch"],
+            vec![resource_defs::DerivedAttribute {
+                attr: "PrivateDnsNameOptionsOnLaunch",
+                source: resource_defs::DerivedSource::FromStruct {
+                    struct_member: "PrivateDnsNameOptionsOnLaunch",
+                    children: &["HostnameType", "EnableResourceNameDnsARecord"],
+                },
+            }],
+        );
+        let code = provider_code_for_single_resource_with_model(res, provider_fixture_model());
 
         // The whole inner struct collapses into one Value::Map attribute.
         // Pin the outer wrap, the IndexMap collection of children, the
@@ -8152,22 +8443,66 @@ mod tests {
 
     #[test]
     fn organizations_account_email_is_email_type() {
-        let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../carina-provider-aws/tests/fixtures/smithy/organizations.json");
-        if !fixture.exists() {
-            eprintln!(
-                "Skipping: Smithy fixture not found: {}\nRun scripts/download-smithy-models.sh to enable this test",
-                fixture.display()
-            );
-            return;
-        }
-        let file = std::fs::File::open(&fixture).expect("failed to open Smithy fixture");
-        let model = carina_smithy::parse_reader(std::io::BufReader::new(file))
-            .expect("failed to parse Smithy fixture");
-        let resource = resource_defs::organizations_resources()
-            .into_iter()
-            .find(|res| res.name == "organizations.Account")
-            .expect("missing organizations.Account resource def");
+        let model = carina_smithy::parse(
+            r##"{
+              "smithy": "2.0",
+              "shapes": {
+                "com.amazonaws.test#CreateEmailFixture": {
+                  "type": "operation",
+                  "input": { "target": "com.amazonaws.test#CreateEmailFixtureRequest" },
+                  "output": { "target": "smithy.api#Unit" },
+                  "traits": {}
+                },
+                "com.amazonaws.test#CreateEmailFixtureRequest": {
+                  "type": "structure",
+                  "members": {
+                    "Email": { "target": "smithy.api#String", "traits": {} }
+                  },
+                  "traits": { "smithy.api#input": {} }
+                },
+                "com.amazonaws.test#EmailFixture": {
+                  "type": "structure",
+                  "members": {
+                    "Email": { "target": "smithy.api#String", "traits": {} }
+                  },
+                  "traits": {}
+                }
+              }
+            }"##,
+        )
+        .expect("parse email type fixture model");
+        let resource = ResourceDef {
+            // Use a registered resource name because generate_resource also
+            // emits the provider's closed CloudFormation type mapping.
+            name: "iam.Role",
+            replacement: ReplacementClass::Conflicting,
+            service_namespace: "com.amazonaws.test",
+            schema_structure: None,
+            simple_delete: false,
+            noop_update: false,
+            create_op: "CreateEmailFixture",
+            read_structure: Some("EmailFixture"),
+            read_ops: vec![],
+            delete_op: "",
+            update_ops: vec![],
+            identifier: "",
+            has_tags: false,
+            type_overrides: vec![],
+            exclude_fields: vec![],
+            create_only_overrides: vec![],
+            enum_aliases: vec![],
+            to_dsl_overrides: vec![],
+            required_overrides: vec![],
+            extra_read_only: vec![],
+            read_only_overrides: vec![],
+            extra_attributes: vec![],
+            identity_overrides: vec![],
+            deferred_populate_overrides: vec![],
+            deferred_populate_struct_field_overrides: vec![],
+            struct_field_type_overrides: vec![],
+            read_shape_overrides: vec![],
+            derived_attributes: vec![],
+        };
 
         let generated = generate_resource(&resource, &model).expect("failed to generate resource");
 
