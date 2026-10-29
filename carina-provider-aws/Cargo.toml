@@ -61,6 +61,8 @@ wasi = "0.14"
 # `wasi:http` to a real endpoint). PoC seed for #355 (STS data source);
 # follow-ups will reuse the same dev-deps for other services.
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+carina-aws-types = { path = "../carina-aws-types", features = ["test-utils"] }
+carina-plugin-sdk = { workspace = true, features = ["test-utils"] }
 tokio = { version = "1", features = ["test-util"] }
 winterbaume-core = "0.2"
 winterbaume-s3 = "0.2"

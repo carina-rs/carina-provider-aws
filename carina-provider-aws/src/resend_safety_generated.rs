@@ -5,14 +5,13 @@ use std::future::Future;
 
 use aws_smithy_runtime_api::client::orchestrator::HttpResponse;
 use aws_smithy_runtime_api::client::result::SdkError;
-use carina_aws_types::Idempotency;
+use carina_aws_types::{Idempotency, ResendGuard};
 
 use crate::aws_operation::{
     AwsOperation, ClientToken, DecidedOperationError, DecidedSend, NoToken, TokenBearing,
     TokenOperation, WithToken,
 };
 use crate::helpers::TokenSendPermit;
-use crate::resend_guard::ResendGuard;
 use crate::sdk_config::BoundedSdkConfig;
 
 /// Guarded AWS service client with a closed, generated operation API.

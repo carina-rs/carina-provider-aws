@@ -10,13 +10,22 @@ description = "AWS type definitions for Carina infrastructure management tool"
 [lib]
 doctest = false
 
+[features]
+test-utils = ["dep:carina-plugin-sdk", "carina-plugin-sdk/test-utils"]
+
 [dev-dependencies]
-aws-smithy-runtime-api = { version = "1", features = ["client", "test-util"] }
+aws-runtime = { version = "1" }
+aws-smithy-runtime-api = { version = "1.19", features = ["client", "test-util"] }
 indexmap = "2"
 
 [dependencies]
-aws-runtime = { version = "1" }
-aws-smithy-runtime-api = { version = "1", features = ["client"] }
+aws-smithy-runtime-api = { version = "1.19", features = ["client"] }
 aws-smithy-types = { version = "1" }
 carina-core = { workspace = true }
 heck = "0.5"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+carina-plugin-sdk = { workspace = true, optional = true }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+carina-plugin-sdk = { workspace = true }
