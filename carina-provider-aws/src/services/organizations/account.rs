@@ -10,7 +10,8 @@ use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
 use crate::helpers::{CreatePoll, optional_enum_attr, require_string_attr, sdk_error_message};
 use crate::provider::CreateCompletion;
-use crate::read_model::{found_managed_read, take_optional, take_required};
+use crate::provider_generated::OrganizationsAccountReadFields;
+use crate::read_model::{found_managed_read, require_read_value};
 use crate::read_models_generated::OrganizationsAccountReadModel;
 
 fn organizations_account_create_poll_state(
@@ -33,63 +34,6 @@ fn organizations_account_create_poll_state(
 }
 
 impl AwsProvider {
-    /// Extract attributes from an Organizations Account object
-    pub(crate) fn extract_organizations_account_attributes(
-        account: &aws_sdk_organizations::types::Account,
-        attributes: &mut HashMap<String, Value>,
-    ) -> Option<String> {
-        let mut identifier = None;
-
-        if let Some(id) = account.id() {
-            let id_string = id.to_string();
-            identifier = Some(id_string.clone());
-            attributes.insert(
-                "id".to_string(),
-                Value::Concrete(ConcreteValue::String(id_string.into())),
-            );
-        }
-        if let Some(arn) = account.arn() {
-            attributes.insert(
-                "arn".to_string(),
-                Value::Concrete(ConcreteValue::String(arn.to_string().into())),
-            );
-        }
-        if let Some(name) = account.name() {
-            attributes.insert(
-                "name".to_string(),
-                Value::Concrete(ConcreteValue::String(name.to_string().into())),
-            );
-        }
-        if let Some(email) = account.email() {
-            attributes.insert(
-                "email".to_string(),
-                Value::Concrete(ConcreteValue::String(email.to_string().into())),
-            );
-        }
-        if let Some(status) = account.status() {
-            attributes.insert(
-                "status".to_string(),
-                Value::Concrete(ConcreteValue::String(status.as_str().to_string().into())),
-            );
-        }
-        if let Some(joined_method) = account.joined_method() {
-            attributes.insert(
-                "joined_method".to_string(),
-                Value::Concrete(ConcreteValue::String(
-                    joined_method.as_str().to_string().into(),
-                )),
-            );
-        }
-        if let Some(joined_timestamp) = account.joined_timestamp() {
-            attributes.insert(
-                "joined_timestamp".to_string(),
-                Value::Concrete(ConcreteValue::String(joined_timestamp.to_string().into())),
-            );
-        }
-
-        identifier
-    }
-
     /// Read an Organizations account
     pub(crate) async fn read_organizations_account(
         &self,
@@ -110,9 +54,15 @@ impl AwsProvider {
         match account_result {
             Ok(response) => {
                 if let Some(account) = response.account() {
-                    let mut attributes = HashMap::new();
-                    let _account_id =
-                        Self::extract_organizations_account_attributes(account, &mut attributes);
+                    let OrganizationsAccountReadFields {
+                        arn,
+                        email,
+                        id: account_id,
+                        joined_method,
+                        name,
+                        status,
+                        applied_identifier: _,
+                    } = Self::extract_organizations_account_attributes(account);
 
                     let tags_response = self
                         .organizations_client
@@ -132,18 +82,18 @@ impl AwsProvider {
                         );
                     }
 
-                    let account_name = attributes.remove("name").ok_or_else(|| {
-                        ProviderError::api_error("DescribeAccount returned no Name")
-                            .for_resource(id.clone())
-                    })?;
+                    let account_name = require_read_value(id, name, "account_name")?;
+                    let joined_timestamp = account.joined_timestamp().map(|timestamp| {
+                        Value::Concrete(ConcreteValue::String(timestamp.to_string().into()))
+                    });
                     let model = OrganizationsAccountReadModel {
                         account_name,
-                        email: take_required(id, &mut attributes, "email")?,
-                        arn: take_optional(&mut attributes, "arn"),
-                        id: take_optional(&mut attributes, "id"),
-                        joined_method: take_optional(&mut attributes, "joined_method"),
-                        joined_timestamp: take_optional(&mut attributes, "joined_timestamp"),
-                        status: take_optional(&mut attributes, "status"),
+                        email: require_read_value(id, email, "email")?,
+                        arn,
+                        id: account_id,
+                        joined_method,
+                        joined_timestamp,
+                        status,
                         tags: Value::Concrete(ConcreteValue::Map(tag_map)),
                     };
                     found_managed_read(id, applied_identifier, model)

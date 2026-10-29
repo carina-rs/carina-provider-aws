@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use carina_core::provider::{AppliedIdentifier, ReadOutcome};
 use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
@@ -15,7 +13,8 @@ use crate::helpers::{
     optional_enum_attr, optional_string_attr, require_string_attr, retry_aws_operation_with_token,
 };
 use crate::provider::{AwsCreateAttempt, Ec2TaggedResourceKind};
-use crate::read_model::{empty_map_value, found_managed_read, take_optional, take_required};
+use crate::provider_generated::Ec2NatGatewayReadFields;
+use crate::read_model::{empty_map_value, found_managed_read, require_read_value};
 use crate::read_models_generated::Ec2NatGatewayReadModel;
 
 fn nat_gateway_create_poll_state(state: Option<&NatGatewayState>) -> CreatePoll<()> {
@@ -162,10 +161,15 @@ impl AwsProvider {
                 return Ok(ReadOutcome::not_found(id.clone()));
             }
 
-            let mut attributes = HashMap::new();
-
-            // Extract attributes
-            let _identifier_value = Self::extract_ec2_nat_gateway_attributes(ngw, &mut attributes);
+            let Ec2NatGatewayReadFields {
+                allocation_id,
+                availability_mode,
+                connectivity_type,
+                nat_gateway_id,
+                subnet_id,
+                vpc_id,
+                applied_identifier: _,
+            } = Self::extract_ec2_nat_gateway_attributes(ngw);
 
             let mut grouped_addresses: indexmap::IndexMap<
                 (Option<String>, Option<String>),
@@ -221,16 +225,16 @@ impl AwsProvider {
                 .and_then(|address| address.private_ip())
                 .map(|value| Value::Concrete(ConcreteValue::String(value.to_string().into())));
             let model = Ec2NatGatewayReadModel {
-                allocation_id: take_optional(&mut attributes, "allocation_id"),
-                availability_mode: take_optional(&mut attributes, "availability_mode"),
+                allocation_id,
+                availability_mode,
                 availability_zone_addresses: Value::Concrete(ConcreteValue::List(
                     availability_zone_addresses,
                 )),
-                connectivity_type: take_optional(&mut attributes, "connectivity_type"),
+                connectivity_type,
                 private_ip_address,
-                subnet_id: take_required(id, &mut attributes, "subnet_id")?,
-                vpc_id: take_optional(&mut attributes, "vpc_id"),
-                nat_gateway_id: take_optional(&mut attributes, "nat_gateway_id"),
+                subnet_id: require_read_value(id, subnet_id, "subnet_id")?,
+                vpc_id,
+                nat_gateway_id,
                 tags: Self::ec2_tags_to_value(ngw.tags()).unwrap_or_else(empty_map_value),
             };
 

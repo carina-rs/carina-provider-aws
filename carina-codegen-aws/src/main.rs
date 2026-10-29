@@ -2340,12 +2340,140 @@ fn struct_child_value_expr(
     Some(expr)
 }
 
+#[derive(Debug)]
+struct DirectReadField<'a> {
+    attr_name: String,
+    accessor_name: String,
+    member_ref: &'a carina_smithy::ShapeRef,
+}
+
+fn direct_read_field_is_supported(
+    model: &SmithyModel,
+    member_ref: &carina_smithy::ShapeRef,
+) -> bool {
+    match model.shape_kind(&member_ref.target) {
+        Some(
+            ShapeKind::Enum
+            | ShapeKind::Boolean
+            | ShapeKind::Integer
+            | ShapeKind::Long
+            | ShapeKind::String,
+        ) => true,
+        Some(ShapeKind::List) => match model.get_shape(&member_ref.target) {
+            Some(carina_smithy::Shape::List(list_shape)) => matches!(
+                model.shape_kind(&list_shape.member.target),
+                Some(ShapeKind::String)
+            ),
+            _ => false,
+        },
+        _ => false,
+    }
+}
+
+fn direct_read_fields<'a>(
+    res: &ResourceDef,
+    model: &'a SmithyModel,
+    read_struct: &'a carina_smithy::StructureShape,
+) -> Vec<DirectReadField<'a>> {
+    let exclude: HashSet<&str> = res.exclude_fields.iter().copied().collect();
+    let create_input = if !res.create_op.is_empty() {
+        let create_op_id = format!("{}#{}", res.service_namespace, res.create_op);
+        model.operation_input(&create_op_id)
+    } else {
+        None
+    };
+    let schema_structure = res
+        .schema_structure
+        .and_then(|name| model.get_structure(&format!("{}#{name}", res.service_namespace)));
+    let updatable_fields: HashSet<&str> = res
+        .update_ops
+        .iter()
+        .flat_map(|operation| operation.fields.field_names().iter())
+        .copied()
+        .collect();
+    let extra_read_only: HashSet<&str> = res.extra_read_only.iter().copied().collect();
+    let mut fields = Vec::new();
+
+    for (member_name, member_ref) in &read_struct.members {
+        if exclude.contains(member_name.as_str()) || member_name.eq_ignore_ascii_case("tags") {
+            continue;
+        }
+        let is_schema_attr = member_name == res.identifier
+            || extra_read_only.contains(member_name.as_str())
+            || updatable_fields.contains(member_name.as_str())
+            || schema_structure.is_some_and(|schema| schema.members.contains_key(member_name))
+            || create_input.is_some_and(|input| input.members.contains_key(member_name));
+        if !is_schema_attr || !direct_read_field_is_supported(model, member_ref) {
+            continue;
+        }
+        let snake_name = member_name.to_snake_case();
+        fields.push(DirectReadField {
+            attr_name: snake_name.clone(),
+            accessor_name: snake_name,
+            member_ref,
+        });
+    }
+
+    for extra in &res.extra_attributes {
+        if let Some(read_source) = extra.read_source
+            && let Some(member_ref) = read_struct.members.get(read_source)
+            && direct_read_field_is_supported(model, member_ref)
+        {
+            let attr_name = extra.name.to_snake_case();
+            let accessor_name = read_source.to_snake_case();
+            if !fields.iter().any(|field| field.attr_name == attr_name) {
+                fields.push(DirectReadField {
+                    attr_name,
+                    accessor_name,
+                    member_ref,
+                });
+            }
+        }
+    }
+
+    fields.sort_by(|left, right| left.attr_name.cmp(&right.attr_name));
+    fields
+}
+
+fn extracted_read_field_names(
+    res: &ResourceDef,
+    direct_fields: &[DirectReadField<'_>],
+) -> Vec<String> {
+    let mut names: Vec<String> = direct_fields
+        .iter()
+        .map(|field| field.attr_name.clone())
+        .chain(
+            res.derived_attributes
+                .iter()
+                .map(|derived| derived.attr.to_snake_case()),
+        )
+        .collect();
+    names.sort();
+    names.dedup();
+    names
+}
+
+fn read_fields_type_name(resource_name: &str) -> String {
+    let (service, resource) = split_service_resource(resource_name);
+    format!("{}{}ReadFields", service.to_upper_camel_case(), resource)
+}
+
 fn generate_provider_code(
     all_resources: &[ResourceDef],
     all_data_sources: &[resource_defs::DataSourceDef],
     models: &HashMap<&str, SmithyModel>,
     manual_methods: &std::collections::HashSet<String>,
 ) -> String {
+    if let Some(resource) = all_resources
+        .iter()
+        .find(|resource| !resource.read_ops.is_empty())
+    {
+        panic!(
+            "codegen: legacy map-based read_ops are unsupported for {}; add the response fields to its typed read extractor",
+            resource.name
+        );
+    }
+
     let mut code = String::new();
 
     // Header
@@ -2355,7 +2483,6 @@ fn generate_provider_code(
          //! DO NOT EDIT MANUALLY - regenerate with:\n\
          //!   ./carina-provider-aws/scripts/generate-provider.sh\n\n\
          use indexmap::IndexMap;\n\
-         use std::collections::HashMap;\n\n\
          use carina_core::provider::{\n\
          \x20   AppliedIdentifier, BoxFuture, ProviderError, ProviderResult, ReadOutcome,\n\
          };\n\
@@ -2368,13 +2495,45 @@ fn generate_provider_code(
 
     // Generate methods on AwsProvider
     code.push_str("// ===== Generated Methods on AwsProvider =====\n\n");
-    // Some emitted helpers (e.g. `extract_<resource>_attributes` for
-    // resources whose hand-written read paths build the attribute map
-    // inline, or `update_<resource>` for noop-update resources whose
-    // service file calls the underlying read method directly) have no
-    // call sites in the current code. They are still emitted so the
-    // generator can stay simple and uniform; gate dead-code on the impl
-    // block instead of pruning case-by-case.
+
+    for res in all_resources
+        .iter()
+        .filter(|resource| resource.read_structure.is_some())
+    {
+        let resource_name = module_name(res.name);
+        if manual_methods.contains(&format!("extract_{}_attributes", resource_name)) {
+            continue;
+        }
+        let Some(model) = models.get(res.service_namespace) else {
+            continue;
+        };
+        let read_struct_name = res.read_structure.expect("filtered above");
+        let read_struct_id = format!("{}#{}", res.service_namespace, read_struct_name);
+        let Some(read_struct) = model.get_structure(&read_struct_id) else {
+            continue;
+        };
+        let direct_fields = direct_read_fields(res, model, read_struct);
+        let field_names = extracted_read_field_names(res, &direct_fields);
+        let fields_type = read_fields_type_name(res.name);
+
+        code.push_str(&format!(
+            "/// Typed values extracted from the AWS read shape for `{}`.\n\
+             #[allow(dead_code)]\n\
+             pub(crate) struct {} {{\n",
+            res.name, fields_type
+        ));
+        for field in field_names {
+            let field = escape_rust_keyword(&field);
+            code.push_str(&format!("    pub(crate) {field}: Option<Value>,\n"));
+        }
+        code.push_str("    pub(crate) applied_identifier: Option<String>,\n");
+        code.push_str("}\n\n");
+    }
+
+    // Some typed SDK projections are unused when a managed read needs a
+    // different response shape or additional side calls. No-op update helpers
+    // can likewise be unused when the service calls its read directly. Emit
+    // these uniformly and gate dead-code here instead of pruning case-by-case.
     code.push_str("#[allow(dead_code)]\nimpl AwsProvider {\n");
 
     // Simple delete methods
@@ -2449,104 +2608,6 @@ fn generate_provider_code(
                  \x20   }}\n\n",
                 res.name, method_name, read_method,
             ));
-        }
-    }
-
-    // Read helpers for read_ops (non-data-source resources only)
-    for res in all_resources
-        .iter()
-        .filter(|r| !r.read_ops.is_empty() && !r.identifier.is_empty())
-    {
-        let model = match models.get(res.service_namespace) {
-            Some(m) => m,
-            None => continue,
-        };
-        let ns = res.service_namespace;
-        let client_field = client_field_name(ns);
-        let id_setter = res.identifier.to_snake_case();
-        let resource_name = module_name(res.name);
-
-        for read_op in &res.read_ops {
-            let suffix = op_suffix(read_op.operation, res.identifier);
-            let method_name = format!("read_{}_{}", resource_name, suffix);
-            if manual_methods.contains(&method_name) {
-                continue;
-            }
-            let sdk_method = read_op.operation.to_snake_case();
-
-            // Resolve output structure
-            let op_id = format!("{}#{}", ns, read_op.operation);
-            let output = match model.operation_output(&op_id) {
-                Some(o) => o,
-                None => continue,
-            };
-
-            // Build defaults map
-            let defaults: HashMap<&str, &str> = read_op.defaults.iter().copied().collect();
-
-            // Method signature
-            let op_desc = format!("{} {}", res.name, read_op.operation);
-            code.push_str(&format!("\x20   /// Read {} (generated)\n", op_desc));
-            code.push_str(&format!("\x20   pub(crate) async fn {}(\n", method_name));
-            code.push_str("\x20       &self,\n");
-            code.push_str("\x20       id: &ResourceId,\n");
-            code.push_str("\x20       identifier: &str,\n");
-            code.push_str("\x20       attributes: &mut HashMap<String, Value>,\n");
-            code.push_str("\x20   ) -> ProviderResult<()> {\n");
-            code.push_str(&format!(
-                "\x20       let output = self.{}.{}().{}(identifier).send().await.map_err(|e| {{\n",
-                client_field, sdk_method, id_setter
-            ));
-            code.push_str(&format!(
-                "\x20           api_error_with_meta(\"Failed to read {}\", e)\n",
-                op_desc,
-            ));
-            code.push_str("\x20               .for_resource(id.clone())\n");
-            code.push_str("\x20       })?;\n");
-
-            // Extract each field
-            for (field_name, rename) in &read_op.fields {
-                let effective_name = rename.unwrap_or(field_name);
-                let attr_snake = effective_name.to_snake_case();
-                let accessor = escape_rust_keyword(&field_name.to_snake_case());
-
-                // Determine if field is an enum
-                let is_enum = if let Some(member_ref) = output.members.get(*field_name) {
-                    matches!(model.shape_kind(&member_ref.target), Some(ShapeKind::Enum))
-                } else {
-                    false
-                };
-
-                let value_expr = if is_enum {
-                    "v.as_str().to_string()"
-                } else {
-                    "v.to_string()"
-                };
-
-                if let Some(default_value) = defaults.get(effective_name) {
-                    code.push_str(&format!(
-                        "\x20       let value = output.{}().map(|v| {}).unwrap_or_else(|| \"{}\".to_string());\n",
-                        accessor, value_expr, default_value,
-                    ));
-                    code.push_str(&format!(
-                        "\x20       attributes.insert(\"{}\".to_string(), Value::Concrete(ConcreteValue::String(value.into())));\n",
-                        attr_snake,
-                    ));
-                } else {
-                    code.push_str(&format!(
-                        "\x20       if let Some(v) = output.{}() {{\n",
-                        accessor,
-                    ));
-                    code.push_str(&format!(
-                        "\x20           attributes.insert(\"{}\".to_string(), Value::Concrete(ConcreteValue::String({}.into())));\n",
-                        attr_snake, value_expr,
-                    ));
-                    code.push_str("\x20       }\n");
-                }
-            }
-
-            code.push_str("\x20       Ok(())\n");
-            code.push_str("\x20   }\n\n");
         }
     }
 
@@ -2669,7 +2730,7 @@ fn generate_provider_code(
             code.push_str("\x20       &self,\n");
             code.push_str("\x20       id: &ResourceId,\n");
             code.push_str("\x20       identifier: &str,\n");
-            code.push_str("\x20       attributes: &HashMap<String, Value>,\n");
+            code.push_str("\x20       attributes: &std::collections::HashMap<String, Value>,\n");
             code.push_str("\x20   ) -> ProviderResult<()> {\n");
             code.push_str(&format!(
                 "\x20       use {}::types::{{{}}};\n",
@@ -2754,65 +2815,9 @@ fn generate_provider_code(
             continue;
         }
         let sdk_crate = sdk_crate_name(ns);
-
-        // Build exclude set
-        let exclude: HashSet<&str> = res.exclude_fields.iter().copied().collect();
-
-        // Get create input members
-        let create_input = if !res.create_op.is_empty() {
-            let create_op_id = format!("{}#{}", ns, res.create_op);
-            model.operation_input(&create_op_id)
-        } else {
-            None
-        };
-
-        // Compute updatable field names
-        let updatable_fields: HashSet<&str> = res
-            .update_ops
-            .iter()
-            .flat_map(|op| op.fields.field_names().iter())
-            .copied()
-            .collect();
-
-        let extra_read_only: HashSet<&str> = res.extra_read_only.iter().copied().collect();
-
-        // Collect fields to extract: (attr_snake_name, accessor_snake_name, member_ref)
-        let mut fields_to_extract: Vec<(String, String, &carina_smithy::ShapeRef)> = Vec::new();
-
-        for (member_name, member_ref) in &read_struct.members {
-            if exclude.contains(member_name.as_str()) || member_name.eq_ignore_ascii_case("tags") {
-                continue;
-            }
-
-            let is_schema_attr = member_name == res.identifier
-                || extra_read_only.contains(member_name.as_str())
-                || updatable_fields.contains(member_name.as_str())
-                || create_input.is_some_and(|ci| ci.members.contains_key(member_name));
-
-            if !is_schema_attr {
-                continue;
-            }
-
-            let snake_name = member_name.to_snake_case();
-            fields_to_extract.push((snake_name.clone(), snake_name, member_ref));
-        }
-
-        // Add extra_attributes fields with read_source (different attr name vs accessor)
-        for extra in &res.extra_attributes {
-            if let Some(read_source) = extra.read_source
-                && let Some(member_ref) = read_struct.members.get(read_source)
-            {
-                let attr_name = extra.name.to_snake_case();
-                let accessor_name = read_source.to_snake_case();
-                // Avoid duplicates (if already extracted under the same accessor)
-                if !fields_to_extract.iter().any(|(a, _, _)| a == &attr_name) {
-                    fields_to_extract.push((attr_name, accessor_name, member_ref));
-                }
-            }
-        }
-
-        // Sort fields for deterministic output
-        fields_to_extract.sort_by(|a, b| a.0.cmp(&b.0));
+        let direct_fields = direct_read_fields(res, model, read_struct);
+        let extracted_field_names = extracted_read_field_names(res, &direct_fields);
+        let fields_type = read_fields_type_name(res.name);
 
         // Generate method
         code.push_str(&format!(
@@ -2827,12 +2832,17 @@ fn generate_provider_code(
             "\x20       obj: &{}::types::{},\n",
             sdk_crate, read_struct_name
         ));
-        code.push_str("\x20       attributes: &mut HashMap<String, Value>,\n");
-        code.push_str("\x20   ) -> Option<String> {\n");
+        code.push_str(&format!("\x20   ) -> {fields_type} {{\n"));
 
-        for (attr_name, accessor_name, member_ref) in &fields_to_extract {
+        for DirectReadField {
+            attr_name,
+            accessor_name,
+            member_ref,
+        } in &direct_fields
+        {
             let kind = model.shape_kind(&member_ref.target);
             let accessor = escape_rust_keyword(accessor_name);
+            let field = escape_rust_keyword(attr_name);
             // Smithy `@required` members generate accessors that return the
             // value directly (`-> &str`, `-> bool`, etc.) rather than as
             // `Option`. Branch the emission so required strings hit
@@ -2845,37 +2855,23 @@ fn generate_provider_code(
                 Some(ShapeKind::Enum) => {
                     if required {
                         code.push_str(&format!(
-                            "\x20       attributes.insert(\"{}\".to_string(), Value::Concrete(ConcreteValue::String(obj.{}().as_str().to_string().into())));\n",
-                            attr_name, accessor
+                            "\x20       let {field} = Some(Value::Concrete(ConcreteValue::String(obj.{accessor}().as_str().to_string().into())));\n"
                         ));
                     } else {
                         code.push_str(&format!(
-                            "\x20       if let Some(v) = obj.{}() {{\n",
-                            accessor
+                            "\x20       let {field} = obj.{accessor}().map(|v| Value::Concrete(ConcreteValue::String(v.as_str().to_string().into())));\n"
                         ));
-                        code.push_str(&format!(
-                            "\x20           attributes.insert(\"{}\".to_string(), Value::Concrete(ConcreteValue::String(v.as_str().to_string().into())));\n",
-                            attr_name
-                        ));
-                        code.push_str("\x20       }\n");
                     }
                 }
                 Some(ShapeKind::Boolean) => {
                     if required {
                         code.push_str(&format!(
-                            "\x20       attributes.insert(\"{}\".to_string(), Value::Concrete(ConcreteValue::Bool(obj.{}())));\n",
-                            attr_name, accessor
+                            "\x20       let {field} = Some(Value::Concrete(ConcreteValue::Bool(obj.{accessor}())));\n"
                         ));
                     } else {
                         code.push_str(&format!(
-                            "\x20       if let Some(v) = obj.{}() {{\n",
-                            accessor
+                            "\x20       let {field} = obj.{accessor}().map(|v| Value::Concrete(ConcreteValue::Bool(v)));\n"
                         ));
-                        code.push_str(&format!(
-                            "\x20           attributes.insert(\"{}\".to_string(), Value::Concrete(ConcreteValue::Bool(v)));\n",
-                            attr_name
-                        ));
-                        code.push_str("\x20       }\n");
                     }
                 }
                 Some(int_kind @ (ShapeKind::Integer | ShapeKind::Long)) => {
@@ -2890,19 +2886,12 @@ fn generate_provider_code(
                     };
                     if required {
                         code.push_str(&format!(
-                            "\x20       attributes.insert(\"{}\".to_string(), Value::Concrete(ConcreteValue::Int(obj.{}(){})));\n",
-                            attr_name, accessor, cast
+                            "\x20       let {field} = Some(Value::Concrete(ConcreteValue::Int(obj.{accessor}(){cast})));\n"
                         ));
                     } else {
                         code.push_str(&format!(
-                            "\x20       if let Some(v) = obj.{}() {{\n",
-                            accessor
+                            "\x20       let {field} = obj.{accessor}().map(|v| Value::Concrete(ConcreteValue::Int(v{cast})));\n"
                         ));
-                        code.push_str(&format!(
-                            "\x20           attributes.insert(\"{}\".to_string(), Value::Concrete(ConcreteValue::Int(v{})));\n",
-                            attr_name, cast
-                        ));
-                        code.push_str("\x20       }\n");
                     }
                 }
                 Some(ShapeKind::String) => {
@@ -2911,22 +2900,13 @@ fn generate_provider_code(
                         // SDK uses for "missing on the wire," matching the
                         // pre-existing hand edits in provider_generated.rs.
                         code.push_str(&format!(
-                            "\x20       let v = obj.{}();\n\
-                             \x20       if !v.is_empty() {{\n\
-                             \x20           attributes.insert(\"{}\".to_string(), Value::Concrete(ConcreteValue::String(v.to_string().into())));\n\
-                             \x20       }}\n",
-                            accessor, attr_name
+                            "\x20       let v = obj.{accessor}();\n\
+                             \x20       let {field} = (!v.is_empty()).then(|| Value::Concrete(ConcreteValue::String(v.to_string().into())));\n"
                         ));
                     } else {
                         code.push_str(&format!(
-                            "\x20       if let Some(v) = obj.{}() {{\n",
-                            accessor
+                            "\x20       let {field} = obj.{accessor}().map(|v| Value::Concrete(ConcreteValue::String(v.to_string().into())));\n"
                         ));
-                        code.push_str(&format!(
-                            "\x20           attributes.insert(\"{}\".to_string(), Value::Concrete(ConcreteValue::String(v.to_string().into())));\n",
-                            attr_name
-                        ));
-                        code.push_str("\x20       }\n");
                     }
                 }
                 Some(carina_smithy::ShapeKind::List) => {
@@ -2942,23 +2922,17 @@ fn generate_provider_code(
                     };
                     if matches!(element_kind, Some(carina_smithy::ShapeKind::String)) {
                         code.push_str(&format!(
-                            "\x20       {{\n\
-                             \x20           let ids = obj.{}();\n\
-                             \x20           if !ids.is_empty() {{\n\
-                             \x20               let list: Vec<Value> = ids.iter().map(|s| Value::Concrete(ConcreteValue::String(s.to_string().into()))).collect();\n\
-                             \x20               attributes.insert(\"{}\".to_string(), Value::Concrete(ConcreteValue::List(list)));\n\
-                             \x20           }}\n\
-                             \x20       }}\n",
-                            accessor, attr_name
+                            "\x20       let ids = obj.{accessor}();\n\
+                             \x20       let {field} = (!ids.is_empty()).then(|| {{\n\
+                             \x20           let list: Vec<Value> = ids.iter().map(|s| Value::Concrete(ConcreteValue::String(s.to_string().into()))).collect();\n\
+                             \x20           Value::Concrete(ConcreteValue::List(list))\n\
+                             \x20       }});\n"
                         ));
                     }
                     // Non-string-element lists need a declarative
                     // projection (DerivedSource::ListAll) — handled below.
                 }
-                _ => {
-                    // Skip complex types (structures, maps) that need
-                    // custom handling in hand-written code
-                }
+                _ => unreachable!("unsupported direct read fields were filtered above"),
             }
         }
 
@@ -3037,12 +3011,9 @@ fn generate_provider_code(
                     }
 
                     code.push_str(&format!(
-                        "\x20       if let Some(addr) = obj.{}().first()\n\
-                         \x20           && let Some(v) = addr.{}()\n\
-                         \x20       {{\n\
-                         \x20           attributes.insert(\"{}\".to_string(), Value::Concrete(ConcreteValue::String(v.to_string().into())));\n\
-                         \x20       }}\n",
-                        list_snake, child_snake, attr_snake
+                        "\x20       let {attr_snake} = obj.{list_snake}().first()\n\
+                         \x20           .and_then(|item| item.{child_snake}())\n\
+                         \x20           .map(|value| Value::Concrete(ConcreteValue::String(value.to_string().into())));\n"
                     ));
                 }
                 resource_defs::DerivedSource::ListAll {
@@ -3103,19 +3074,11 @@ fn generate_provider_code(
                         continue;
                     }
                     code.push_str(&format!(
-                        "\x20       {{\n\
-                         \x20           let groups = obj.{}();\n\
-                         \x20           if !groups.is_empty() {{\n\
-                         \x20               let list: Vec<Value> = groups\n\
-                         \x20                   .iter()\n\
-                         \x20                   .filter_map(|g| g.{}().map(|id| Value::Concrete(ConcreteValue::String(id.to_string().into()))))\n\
-                         \x20                   .collect();\n\
-                         \x20               if !list.is_empty() {{\n\
-                         \x20                   attributes.insert(\"{}\".to_string(), Value::Concrete(ConcreteValue::List(list)));\n\
-                         \x20               }}\n\
-                         \x20           }}\n\
-                         \x20       }}\n",
-                        list_snake, child_snake, attr_snake
+                        "\x20       let list: Vec<Value> = obj.{list_snake}()\n\
+                         \x20           .iter()\n\
+                         \x20           .filter_map(|item| item.{child_snake}().map(|id| Value::Concrete(ConcreteValue::String(id.to_string().into()))))\n\
+                         \x20           .collect();\n\
+                         \x20       let {attr_snake} = (!list.is_empty()).then(|| Value::Concrete(ConcreteValue::List(list)));\n"
                     ));
                 }
                 resource_defs::DerivedSource::FromStruct {
@@ -3171,9 +3134,8 @@ fn generate_provider_code(
 
                     if is_nested_map_layout {
                         code.push_str(&format!(
-                            "\x20       if let Some(dns_opts) = obj.{}() {{\n\
-                             \x20           let mut fields = IndexMap::new();\n",
-                            struct_snake
+                            "\x20       let {attr_snake} = obj.{struct_snake}().and_then(|dns_opts| {{\n\
+                             \x20           let mut fields = IndexMap::new();\n"
                         ));
                         for child_name in *children {
                             let Some(child_ref) = inner_struct.members.get(*child_name) else {
@@ -3212,13 +3174,10 @@ fn generate_provider_code(
                                 ));
                             }
                         }
-                        code.push_str(&format!(
-                            "\x20           if !fields.is_empty() {{\n\
-                             \x20               attributes.insert(\"{}\".to_string(), Value::Concrete(ConcreteValue::Map(fields)));\n\
-                             \x20           }}\n\
-                             \x20       }}\n",
-                            attr_snake
-                        ));
+                        code.push_str(
+                            "\x20           (!fields.is_empty()).then(|| Value::Concrete(ConcreteValue::Map(fields)))\n\
+                             \x20       });\n",
+                        );
                     } else {
                         let child_name = children[0];
                         let Some(child_ref) = inner_struct.members.get(child_name) else {
@@ -3238,37 +3197,43 @@ fn generate_provider_code(
                             continue;
                         };
                         code.push_str(&format!(
-                            "\x20       if let Some(opts) = obj.{}()\n\
-                             \x20           && let Some(v) = opts.{}()\n\
-                             \x20       {{\n\
-                             \x20           attributes.insert(\"{}\".to_string(), {});\n\
-                             \x20       }}\n",
-                            struct_snake, child_snake, attr_snake, insert_expr
+                            "\x20       let {attr_snake} = obj.{struct_snake}()\n\
+                             \x20           .and_then(|opts| opts.{child_snake}())\n\
+                             \x20           .map(|v| {insert_expr});\n"
                         ));
                     }
                 }
             }
         }
 
-        // Return identifier value (only if identifier exists in read_structure)
+        // Preserve the response identifier for create paths that need to turn
+        // the just-created SDK object into an AppliedIdentifier.
         if !res.identifier.is_empty() && read_struct.members.contains_key(res.identifier) {
             let id_snake = escape_rust_keyword(&res.identifier.to_snake_case());
             let id_member = read_struct.members.get(res.identifier).unwrap();
             let id_required = SmithyModel::is_required(id_member);
             if id_required {
                 code.push_str(&format!(
-                    "\x20       Some(obj.{}().to_string())\n",
+                    "\x20       let applied_identifier = Some(obj.{}().to_string());\n",
                     id_snake
                 ));
             } else {
                 code.push_str(&format!(
-                    "\x20       obj.{}().map(String::from)\n",
+                    "\x20       let applied_identifier = obj.{}().map(String::from);\n",
                     id_snake
                 ));
             }
         } else {
-            code.push_str("\x20       None\n");
+            code.push_str("\x20       let applied_identifier = None;\n");
         }
+
+        code.push_str(&format!("\x20       {fields_type} {{\n"));
+        for field in &extracted_field_names {
+            let field = escape_rust_keyword(field);
+            code.push_str(&format!("\x20           {field},\n"));
+        }
+        code.push_str("\x20           applied_identifier,\n");
+        code.push_str("\x20       }\n");
 
         code.push_str("\x20   }\n\n");
     }
@@ -3351,9 +3316,13 @@ fn generate_read_models_code(
          //! DO NOT EDIT MANUALLY - regenerate with:\n\
          //!   ./scripts/generate-provider.sh\n\n\
          use std::collections::HashMap;\n\n\
+         use std::sync::OnceLock;\n\n\
          use carina_core::provider::ProviderResult;\n\
          use carina_core::resource::Value;\n\n\
-         use crate::read_model::{ManagedReadModel, sealed, validate_read_attributes};\n\n",
+         use carina_core::schema::ValidatedResourceSchema;\n\n\
+         use crate::read_model::{\n\
+         \x20   ManagedReadModel, cached_validated_read_schema, sealed, validate_read_attributes,\n\
+         };\n\n",
     );
 
     for res in all_resources {
@@ -3425,15 +3394,21 @@ fn generate_read_models_code(
             code.push_str("        attributes.insert(\"tags\".to_string(), tags);\n");
         }
         code.push_str(&format!(
-            "        validate_read_attributes(\n\
+            "        static VALIDATED_SCHEMA: OnceLock<Result<ValidatedResourceSchema, String>> = OnceLock::new();\n\
+             \x20       let schema = cached_validated_read_schema(\n\
              \x20           \"{}\",\n\
-             \x20           crate::schemas::generated::{service}::{resource}::{config_fn}().schema,\n\
+             \x20           &VALIDATED_SCHEMA,\n\
+             \x20           || crate::schemas::generated::{service}::{resource}::{config_fn}().schema,\n\
+             \x20       )?;\n\
+             \x20       validate_read_attributes(\n\
+             \x20           \"{}\",\n\
+             \x20           schema,\n\
              \x20           &mut attributes,\n\
              \x20       )?;\n\
              \x20       Ok(attributes)\n\
              \x20   }}\n\
              }}\n\n",
-            res.name
+            res.name, res.name
         ));
     }
 
@@ -7163,7 +7138,8 @@ mod tests {
         let code = provider_code_for_single_resource_with_model(res, minimal_from_struct_model());
 
         assert!(
-            code.contains("attributes.insert(\"foo_bar\".to_string(), Value::Concrete(ConcreteValue::String(v.to_string().into())));"),
+            code.contains("let foo_bar = obj.options()")
+                && code.contains("foo_bar,\n            applied_identifier,"),
             "extra_read_only FromStruct attr should emit without schema-missing panic: {code}"
         );
     }
@@ -7201,12 +7177,14 @@ mod tests {
         let code = provider_code_for_single_resource_with_model(res, minimal_from_struct_model());
 
         assert!(
-            code.contains("if let Some(opts) = obj.requester_vpc_info()\n            && let Some(v) = opts.vpc_id()"),
+            code.contains(
+                "let vpc_id = obj.requester_vpc_info()\n            .and_then(|opts| opts.vpc_id())"
+            ),
             "must emit flat rename shape: {code}"
         );
         assert!(
-            code.contains("attributes.insert(\"vpc_id\".to_string(), Value::Concrete(ConcreteValue::String(v.to_string().into())));"),
-            "must insert leaf attr directly: {code}"
+            code.contains("vpc_id,\n            applied_identifier,"),
+            "must return the leaf as a typed field: {code}"
         );
     }
 
@@ -7222,7 +7200,7 @@ mod tests {
         let code = provider_code_for_single_resource_with_model(res, minimal_from_struct_model());
 
         assert!(
-            code.contains("if let Some(dns_opts) = obj.options() {"),
+            code.contains("let options = obj.options().and_then(|dns_opts| {"),
             "must emit nested map source walk: {code}"
         );
         assert!(
@@ -7230,8 +7208,10 @@ mod tests {
             "must build nested fields map: {code}"
         );
         assert!(
-            code.contains("attributes.insert(\"options\".to_string(), Value::Concrete(ConcreteValue::Map(fields)));"),
-            "must insert nested map attr: {code}"
+            code.contains(
+                "(!fields.is_empty()).then(|| Value::Concrete(ConcreteValue::Map(fields)))"
+            ) && code.contains("options,\n            applied_identifier,"),
+            "must return the nested map as a typed field: {code}"
         );
     }
 
@@ -7273,10 +7253,89 @@ mod tests {
             "required identifier role_name must Some(.to_string()): {code}"
         );
 
-        // No regression: optional fields keep the if-let-Some shape.
+        // No regression: optional fields stay optional in the typed result.
         assert!(
-            code.contains("if let Some(v) = obj.description()"),
-            "optional description must keep if-let-Some: {code}"
+            code.contains("let description = obj.description().map(|v|"),
+            "optional description must use Option::map: {code}"
+        );
+    }
+
+    #[test]
+    fn generated_extractors_return_typed_read_fields() {
+        let res = resource_defs::ec2_resources()
+            .into_iter()
+            .find(|r| r.name == "ec2.Vpc")
+            .expect("ec2.Vpc missing");
+        let Some(code) = provider_code_for_single_resource(res, "ec2.json") else {
+            return;
+        };
+
+        assert!(
+            code.contains("pub(crate) struct Ec2VpcReadFields"),
+            "extractor output must be a generated typed struct: {code}"
+        );
+        assert!(
+            code.contains(") -> Ec2VpcReadFields"),
+            "extractor must return its typed fields directly: {code}"
+        );
+        assert!(
+            code.contains("cidr_block: Option<Value>"),
+            "SDK-optional fields must remain typed options: {code}"
+        );
+        assert!(
+            !code.contains("attributes: &mut HashMap<String, Value>"),
+            "extractors must not communicate through string-keyed maps: {code}"
+        );
+    }
+
+    #[test]
+    fn legacy_map_based_read_ops_fail_generation() {
+        let mut resource = resource_defs::ec2_resources()
+            .into_iter()
+            .find(|resource| resource.name == "ec2.Vpc")
+            .expect("ec2.Vpc missing");
+        resource.read_ops = vec![resource_defs::ReadOp {
+            operation: "DescribeVpcs",
+            fields: vec![("VpcId", None)],
+            defaults: vec![],
+        }];
+
+        let panic = provider_code_panic_for_single_resource_with_model(
+            resource,
+            fixture_model("ec2", "com.amazonaws.ec2"),
+        )
+        .expect("legacy map-based read_ops must fail generation");
+        assert!(
+            panic.contains("legacy map-based read_ops are unsupported for ec2.Vpc"),
+            "unexpected panic: {panic}"
+        );
+    }
+
+    #[test]
+    fn generated_read_models_cache_validated_schemas() {
+        let resource = resource_defs::ec2_resources()
+            .into_iter()
+            .find(|resource| resource.name == "ec2.Vpc")
+            .expect("ec2.Vpc definition");
+        let model = fixture_model("ec2", "com.amazonaws.ec2");
+        let mut models = HashMap::new();
+        models.insert(resource.service_namespace, model);
+
+        let code =
+            generate_read_models_code(&[resource], &models).expect("generate ec2.Vpc read model");
+
+        assert!(
+            code.contains("static VALIDATED_SCHEMA: OnceLock"),
+            "each model must cache its validated schema: {code}"
+        );
+        assert!(
+            code.contains("cached_validated_read_schema("),
+            "generated models must use the cache seam: {code}"
+        );
+        assert_eq!(
+            code.matches("ec2_vpc_config().schema").count(),
+            1,
+            "the schema must be built only inside the cache initializer: {code}"
         );
     }
 
@@ -7314,22 +7373,22 @@ mod tests {
         // and projects `.allocation_id()` from the inner struct. The codegen
         // must reproduce that walk for the DSL `allocation_id` attribute.
         assert!(
-            code.contains("if let Some(addr) = obj.nat_gateway_addresses().first()"),
+            code.contains("let allocation_id = obj.nat_gateway_addresses().first()"),
             "must walk nat_gateway_addresses().first(): {code}"
         );
         assert!(
-            code.contains("addr.allocation_id()"),
+            code.contains(".and_then(|item| item.allocation_id())"),
             "must project allocation_id from the list element: {code}"
         );
         assert!(
-            code.contains("attributes.insert(\"allocation_id\".to_string()"),
-            "must insert allocation_id attribute: {code}"
+            code.contains("allocation_id,\n            availability_mode,"),
+            "must return allocation_id as a typed field: {code}"
         );
         // Regression guard: the regular pass must not also emit
         // `obj.allocation_id()` (NatGateway has no top-level allocation_id getter,
         // so that would be a compile error).
         assert!(
-            !code.contains("if let Some(v) = obj.allocation_id()"),
+            !code.contains("obj.allocation_id()"),
             "must not emit obj.allocation_id() at the top level: {code}"
         );
     }
@@ -7345,19 +7404,19 @@ mod tests {
         };
 
         assert!(
-            code.contains("if let Some(addr) = obj.attachments().first()"),
+            code.contains("let vpc_id = obj.attachments().first()"),
             "must walk attachments().first(): {code}"
         );
         assert!(
-            code.contains("addr.vpc_id()"),
+            code.contains(".and_then(|item| item.vpc_id())"),
             "must project vpc_id from the list element: {code}"
         );
         assert!(
-            code.contains("attributes.insert(\"vpc_id\".to_string()"),
-            "must insert vpc_id attribute: {code}"
+            code.contains("vpc_id,\n            applied_identifier,"),
+            "must return vpc_id as a typed field: {code}"
         );
         assert!(
-            !code.contains("if let Some(v) = obj.vpc_id()"),
+            !code.contains("obj.vpc_id()"),
             "must not emit obj.vpc_id() at the top level (EgressOnlyInternetGateway has no top-level vpc_id getter): {code}"
         );
     }
@@ -7385,8 +7444,9 @@ mod tests {
             "must collect into Vec<Value>: {code}"
         );
         assert!(
-            code.contains("attributes.insert(\"route_table_ids\".to_string(), Value::Concrete(ConcreteValue::List(list)));"),
-            "must insert as Value::List: {code}"
+            code.contains("let route_table_ids = (!ids.is_empty()).then(||")
+                && code.contains("route_table_ids,"),
+            "must return route_table_ids as a typed Value::List: {code}"
         );
 
         assert!(
@@ -7394,8 +7454,9 @@ mod tests {
             "must read .subnet_ids(): {code}"
         );
         assert!(
-            code.contains("attributes.insert(\"subnet_ids\".to_string(), Value::Concrete(ConcreteValue::List(list)));"),
-            "must insert subnet_ids as Value::List: {code}"
+            code.contains("let subnet_ids = (!ids.is_empty()).then(||")
+                && code.contains("subnet_ids,"),
+            "must return subnet_ids as a typed Value::List: {code}"
         );
     }
 
@@ -7413,11 +7474,12 @@ mod tests {
             "must read .subnet_ids(): {code}"
         );
         assert!(
-            code.contains("attributes.insert(\"subnet_ids\".to_string(), Value::Concrete(ConcreteValue::List(list)));"),
-            "must insert subnet_ids as Value::List: {code}"
+            code.contains("let subnet_ids = (!ids.is_empty()).then(||")
+                && code.contains("subnet_ids,"),
+            "must return subnet_ids as a typed Value::List: {code}"
         );
         assert!(
-            code.contains("if let Some(dns_opts) = obj.options() {"),
+            code.contains("let options = obj.options().and_then(|dns_opts| {"),
             "must walk obj.options() as a FromStruct source: {code}"
         );
         assert!(
@@ -7433,8 +7495,10 @@ mod tests {
             "dns_support must insert inside fields map: {code}"
         );
         assert!(
-            code.contains("attributes.insert(\"options\".to_string(), Value::Concrete(ConcreteValue::Map(fields)));"),
-            "must insert nested options map: {code}"
+            code.contains(
+                "(!fields.is_empty()).then(|| Value::Concrete(ConcreteValue::Map(fields)))"
+            ) && code.contains("options,\n            subnet_ids,"),
+            "must return the nested options map as a typed field: {code}"
         );
     }
 
@@ -7452,18 +7516,17 @@ mod tests {
         // filter_map, drop the attribute when the result is empty (so an
         // empty list does not show up as Value::List([])).
         assert!(
-            code.contains("let groups = obj.groups();"),
+            code.contains("let list: Vec<Value> = obj.groups()"),
             "must read .groups() as the list source: {code}"
         );
         assert!(
-            code.contains(".filter_map(|g| g.group_id().map(|id| Value::Concrete(ConcreteValue::String(id.to_string().into()))))"),
+            code.contains(".filter_map(|item| item.group_id().map(|id| Value::Concrete(ConcreteValue::String(id.to_string().into()))))"),
             "must filter_map child .group_id(): {code}"
         );
         assert!(
-            code.contains(
-                "attributes.insert(\"security_group_ids\".to_string(), Value::Concrete(ConcreteValue::List(list)));"
-            ),
-            "must insert as security_group_ids Value::List: {code}"
+            code.contains("let security_group_ids = (!list.is_empty())")
+                && code.contains("security_group_ids,"),
+            "must return security_group_ids as a typed Value::List: {code}"
         );
     }
 
@@ -7482,7 +7545,7 @@ mod tests {
         // Pin one numeric (amazon_side_asn) and one enum (dns_support) to
         // exercise both Int and Enum emission paths.
         assert!(
-            code.contains("if let Some(dns_opts) = obj.options() {"),
+            code.contains("let options = obj.options().and_then(|dns_opts| {"),
             "must walk obj.options() as a FromStruct source: {code}"
         );
         assert!(
@@ -7508,8 +7571,10 @@ mod tests {
             "dns_support must insert as enum-as-String inside fields map: {code}"
         );
         assert!(
-            code.contains("attributes.insert(\"options\".to_string(), Value::Concrete(ConcreteValue::Map(fields)));"),
-            "must insert nested options map: {code}"
+            code.contains(
+                "(!fields.is_empty()).then(|| Value::Concrete(ConcreteValue::Map(fields)))"
+            ) && code.contains("options,\n            transit_gateway_id,"),
+            "must return the nested options map as a typed field: {code}"
         );
     }
 
@@ -7525,37 +7590,34 @@ mod tests {
 
         // Requester: child `vpc_id` keeps its DSL name.
         assert!(
-            code.contains("if let Some(opts) = obj.requester_vpc_info()\n            && let Some(v) = opts.vpc_id()"),
+            code.contains(
+                "let vpc_id = obj.requester_vpc_info()\n            .and_then(|opts| opts.vpc_id())"
+            ),
             "requester_vpc_info.vpc_id must walk obj.requester_vpc_info(): {code}"
         );
         assert!(
-            code.contains(
-                "attributes.insert(\"vpc_id\".to_string(), Value::Concrete(ConcreteValue::String(v.to_string().into())));"
-            ),
-            "requester vpc_id inserts under \"vpc_id\": {code}"
+            code.contains("vpc_id,\n            vpc_peering_connection_id,"),
+            "requester vpc_id returns under the typed vpc_id field: {code}"
         );
 
         // Accepter: child `vpc_id` is renamed to `peer_vpc_id` (the rename
         // is the whole reason this can't be a direct read-structure member
         // pull). Owner / region get the same rename treatment.
         assert!(
-            code.contains("if let Some(opts) = obj.accepter_vpc_info()\n            && let Some(v) = opts.vpc_id()"),
+            code.contains("let peer_vpc_id = obj.accepter_vpc_info()\n            .and_then(|opts| opts.vpc_id())"),
             "accepter_vpc_info.vpc_id must walk obj.accepter_vpc_info(): {code}"
         );
         assert!(
-            code.contains(
-                "attributes.insert(\"peer_vpc_id\".to_string(), Value::Concrete(ConcreteValue::String(v.to_string().into())));"
-            ),
-            "accepter vpc_id inserts under \"peer_vpc_id\" (rename): {code}"
+            code.contains("peer_vpc_id,\n            vpc_id,"),
+            "accepter vpc_id returns under the typed peer_vpc_id field: {code}"
         );
         assert!(
-            code.contains(
-                "attributes.insert(\"peer_owner_id\".to_string(), Value::Concrete(ConcreteValue::String(v.to_string().into())));"
-            ),
-            "accepter owner_id inserts under \"peer_owner_id\": {code}"
+            code.contains("let peer_owner_id = obj.accepter_vpc_info()")
+                && code.contains("peer_owner_id,\n            peer_vpc_id,"),
+            "accepter owner_id returns under the typed peer_owner_id field: {code}"
         );
         assert!(
-            !code.contains("attributes.insert(\"peer_region\".to_string()"),
+            !code.contains("peer_region: Option<Value>") && !code.contains("let peer_region ="),
             "peer_region is excluded from the schema and must not be extracted: {code}"
         );
     }
@@ -7574,7 +7636,7 @@ mod tests {
         // Pin the outer wrap, the IndexMap collection of children, the
         // empty-map guard, and the final insert.
         assert!(
-            code.contains("if let Some(dns_opts) = obj.private_dns_name_options_on_launch()"),
+            code.contains("let private_dns_name_options_on_launch = obj.private_dns_name_options_on_launch().and_then(|dns_opts|"),
             "must walk obj.private_dns_name_options_on_launch(): {code}"
         );
         assert!(
@@ -7603,13 +7665,15 @@ mod tests {
         );
         // Empty-map guard
         assert!(
-            code.contains("if !fields.is_empty()"),
-            "must guard the outer insert on non-empty fields: {code}"
+            code.contains(
+                "(!fields.is_empty()).then(|| Value::Concrete(ConcreteValue::Map(fields)))"
+            ),
+            "must guard the typed nested value on non-empty fields: {code}"
         );
-        // Final insert under the DSL attr name
+        // Typed return field under the DSL attr name.
         assert!(
-            code.contains("attributes.insert(\"private_dns_name_options_on_launch\".to_string(), Value::Concrete(ConcreteValue::Map(fields)));"),
-            "must insert the collected map under \"private_dns_name_options_on_launch\": {code}"
+            code.contains("private_dns_name_options_on_launch,\n            subnet_id,"),
+            "must return the collected map under private_dns_name_options_on_launch: {code}"
         );
     }
 

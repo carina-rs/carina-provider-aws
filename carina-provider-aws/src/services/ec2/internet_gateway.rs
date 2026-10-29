@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use carina_core::provider::ProviderResult;
 use carina_core::provider::{AppliedIdentifier, ReadOutcome};
 use carina_core::resource::{ConcreteValue, Resource, ResourceId, Value};
@@ -9,7 +7,8 @@ use crate::aws_operation::ClientToken;
 use crate::error_helpers::api_error_with_meta;
 use crate::helpers::build_tag_specification_with_create_token;
 use crate::provider::{AwsCreateAttempt, Ec2TaggedResourceKind};
-use crate::read_model::{empty_map_value, found_managed_read, take_optional, take_required};
+use crate::provider_generated::Ec2InternetGatewayReadFields;
+use crate::read_model::{empty_map_value, found_managed_read, require_read_value};
 use crate::read_models_generated::Ec2InternetGatewayReadModel;
 
 impl AwsProvider {
@@ -41,25 +40,21 @@ impl AwsProvider {
             })?;
 
         if let Some(igw) = result.internet_gateways().first() {
-            let mut attributes = HashMap::new();
-
-            // Auto-generated attribute extraction
-            let _identifier_value =
-                Self::extract_ec2_internet_gateway_attributes(igw, &mut attributes);
+            let Ec2InternetGatewayReadFields {
+                internet_gateway_id,
+                applied_identifier: _,
+            } = Self::extract_ec2_internet_gateway_attributes(igw);
 
             // Store attached VPC ID (from Attachments, not a direct member)
-            if let Some(attachment) = igw.attachments().first()
-                && let Some(vpc_id) = attachment.vpc_id()
-            {
-                attributes.insert(
-                    "vpc_id".to_string(),
-                    Value::Concrete(ConcreteValue::String(vpc_id.to_string().into())),
-                );
-            }
+            let vpc_id = igw
+                .attachments()
+                .first()
+                .and_then(|attachment| attachment.vpc_id())
+                .map(|vpc_id| Value::Concrete(ConcreteValue::String(vpc_id.to_string().into())));
 
             let model = Ec2InternetGatewayReadModel {
-                vpc_id: take_required(id, &mut attributes, "vpc_id")?,
-                internet_gateway_id: take_optional(&mut attributes, "internet_gateway_id"),
+                vpc_id: require_read_value(id, vpc_id, "vpc_id")?,
+                internet_gateway_id,
                 tags: Self::ec2_tags_to_value(igw.tags()).unwrap_or_else(empty_map_value),
             };
 

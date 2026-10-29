@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use carina_core::provider::{AppliedIdentifier, ReadOutcome};
 use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
@@ -13,7 +11,8 @@ use crate::helpers::{
     optional_int_attr, optional_string_attr, retry_aws_operation,
 };
 use crate::provider::{AwsCreateAttempt, Ec2TaggedResourceKind};
-use crate::read_model::{empty_map_value, found_managed_read, take_optional};
+use crate::provider_generated::Ec2VpcReadFields;
+use crate::read_model::{empty_map_value, found_managed_read};
 use crate::read_models_generated::Ec2VpcReadModel;
 
 impl AwsProvider {
@@ -41,15 +40,17 @@ impl AwsProvider {
             })?;
 
         if let Some(vpc) = result.vpcs().first() {
-            let mut attributes = HashMap::new();
-
-            // Auto-generated attribute extraction
-            let _identifier_value = Self::extract_ec2_vpc_attributes(vpc, &mut attributes);
+            let Ec2VpcReadFields {
+                cidr_block,
+                instance_tenancy,
+                vpc_id,
+                applied_identifier: _,
+            } = Self::extract_ec2_vpc_attributes(vpc);
 
             let tags = Self::ec2_tags_to_value(vpc.tags()).unwrap_or_else(empty_map_value);
 
             // Get VPC attributes for DNS settings (not in Vpc struct)
-            let vpc_id = vpc.vpc_id().ok_or_else(|| {
+            let vpc_id_str = vpc.vpc_id().ok_or_else(|| {
                 carina_core::provider::ProviderError::api_error(
                     "DescribeVpcs returned a VPC without VpcId",
                 )
@@ -58,7 +59,7 @@ impl AwsProvider {
             let dns_support = self
                 .ec2_client
                 .describe_vpc_attribute()
-                .vpc_id(vpc_id)
+                .vpc_id(vpc_id_str)
                 .attribute(aws_sdk_ec2::types::VpcAttributeName::EnableDnsSupport)
                 .send()
                 .await
@@ -69,7 +70,7 @@ impl AwsProvider {
             let dns_hostnames = self
                 .ec2_client
                 .describe_vpc_attribute()
-                .vpc_id(vpc_id)
+                .vpc_id(vpc_id_str)
                 .attribute(aws_sdk_ec2::types::VpcAttributeName::EnableDnsHostnames)
                 .send()
                 .await
@@ -87,7 +88,7 @@ impl AwsProvider {
                 })
             });
             let model = Ec2VpcReadModel {
-                cidr_block: take_optional(&mut attributes, "cidr_block"),
+                cidr_block,
                 enable_dns_hostnames: Value::Concrete(ConcreteValue::Bool(
                     dns_hostnames
                         .enable_dns_hostnames()
@@ -100,9 +101,9 @@ impl AwsProvider {
                         .and_then(|attribute| attribute.value)
                         .unwrap_or(false),
                 )),
-                instance_tenancy: take_optional(&mut attributes, "instance_tenancy"),
+                instance_tenancy,
                 ipv4_netmask_length,
-                vpc_id: take_optional(&mut attributes, "vpc_id"),
+                vpc_id,
                 tags,
             };
 

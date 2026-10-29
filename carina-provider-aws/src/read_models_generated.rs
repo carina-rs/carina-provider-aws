@@ -5,10 +5,16 @@
 
 use std::collections::HashMap;
 
+use std::sync::OnceLock;
+
 use carina_core::provider::ProviderResult;
 use carina_core::resource::Value;
 
-use crate::read_model::{ManagedReadModel, sealed, validate_read_attributes};
+use carina_core::schema::ValidatedResourceSchema;
+
+use crate::read_model::{
+    ManagedReadModel, cached_validated_read_schema, sealed, validate_read_attributes,
+};
 
 /// Exhaustive canonical read state for `ec2.Vpc`.
 pub(crate) struct Ec2VpcReadModel {
@@ -50,11 +56,12 @@ impl ManagedReadModel for Ec2VpcReadModel {
             attributes.insert("vpc_id".to_string(), value);
         }
         attributes.insert("tags".to_string(), tags);
-        validate_read_attributes(
-            "ec2.Vpc",
-            crate::schemas::generated::ec2::vpc::ec2_vpc_config().schema,
-            &mut attributes,
-        )?;
+        static VALIDATED_SCHEMA: OnceLock<Result<ValidatedResourceSchema, String>> =
+            OnceLock::new();
+        let schema = cached_validated_read_schema("ec2.Vpc", &VALIDATED_SCHEMA, || {
+            crate::schemas::generated::ec2::vpc::ec2_vpc_config().schema
+        })?;
+        validate_read_attributes("ec2.Vpc", schema, &mut attributes)?;
         Ok(attributes)
     }
 }
@@ -146,11 +153,12 @@ impl ManagedReadModel for Ec2SubnetReadModel {
             attributes.insert("subnet_id".to_string(), value);
         }
         attributes.insert("tags".to_string(), tags);
-        validate_read_attributes(
-            "ec2.Subnet",
-            crate::schemas::generated::ec2::subnet::ec2_subnet_config().schema,
-            &mut attributes,
-        )?;
+        static VALIDATED_SCHEMA: OnceLock<Result<ValidatedResourceSchema, String>> =
+            OnceLock::new();
+        let schema = cached_validated_read_schema("ec2.Subnet", &VALIDATED_SCHEMA, || {
+            crate::schemas::generated::ec2::subnet::ec2_subnet_config().schema
+        })?;
+        validate_read_attributes("ec2.Subnet", schema, &mut attributes)?;
         Ok(attributes)
     }
 }
@@ -177,11 +185,14 @@ impl ManagedReadModel for Ec2InternetGatewayReadModel {
             attributes.insert("internet_gateway_id".to_string(), value);
         }
         attributes.insert("tags".to_string(), tags);
-        validate_read_attributes(
-            "ec2.InternetGateway",
-            crate::schemas::generated::ec2::internet_gateway::ec2_internet_gateway_config().schema,
-            &mut attributes,
-        )?;
+        static VALIDATED_SCHEMA: OnceLock<Result<ValidatedResourceSchema, String>> =
+            OnceLock::new();
+        let schema =
+            cached_validated_read_schema("ec2.InternetGateway", &VALIDATED_SCHEMA, || {
+                crate::schemas::generated::ec2::internet_gateway::ec2_internet_gateway_config()
+                    .schema
+            })?;
+        validate_read_attributes("ec2.InternetGateway", schema, &mut attributes)?;
         Ok(attributes)
     }
 }
@@ -208,11 +219,12 @@ impl ManagedReadModel for Ec2RouteTableReadModel {
             attributes.insert("route_table_id".to_string(), value);
         }
         attributes.insert("tags".to_string(), tags);
-        validate_read_attributes(
-            "ec2.RouteTable",
-            crate::schemas::generated::ec2::route_table::ec2_route_table_config().schema,
-            &mut attributes,
-        )?;
+        static VALIDATED_SCHEMA: OnceLock<Result<ValidatedResourceSchema, String>> =
+            OnceLock::new();
+        let schema = cached_validated_read_schema("ec2.RouteTable", &VALIDATED_SCHEMA, || {
+            crate::schemas::generated::ec2::route_table::ec2_route_table_config().schema
+        })?;
+        validate_read_attributes("ec2.RouteTable", schema, &mut attributes)?;
         Ok(attributes)
     }
 }
@@ -246,11 +258,12 @@ impl ManagedReadModel for Ec2RouteReadModel {
             attributes.insert("nat_gateway_id".to_string(), value);
         }
         attributes.insert("route_table_id".to_string(), route_table_id);
-        validate_read_attributes(
-            "ec2.Route",
-            crate::schemas::generated::ec2::route::ec2_route_config().schema,
-            &mut attributes,
-        )?;
+        static VALIDATED_SCHEMA: OnceLock<Result<ValidatedResourceSchema, String>> =
+            OnceLock::new();
+        let schema = cached_validated_read_schema("ec2.Route", &VALIDATED_SCHEMA, || {
+            crate::schemas::generated::ec2::route::ec2_route_config().schema
+        })?;
+        validate_read_attributes("ec2.Route", schema, &mut attributes)?;
         Ok(attributes)
     }
 }
@@ -285,11 +298,12 @@ impl ManagedReadModel for Ec2SecurityGroupReadModel {
             attributes.insert("group_id".to_string(), value);
         }
         attributes.insert("tags".to_string(), tags);
-        validate_read_attributes(
-            "ec2.SecurityGroup",
-            crate::schemas::generated::ec2::security_group::ec2_security_group_config().schema,
-            &mut attributes,
-        )?;
+        static VALIDATED_SCHEMA: OnceLock<Result<ValidatedResourceSchema, String>> =
+            OnceLock::new();
+        let schema = cached_validated_read_schema("ec2.SecurityGroup", &VALIDATED_SCHEMA, || {
+            crate::schemas::generated::ec2::security_group::ec2_security_group_config().schema
+        })?;
+        validate_read_attributes("ec2.SecurityGroup", schema, &mut attributes)?;
         Ok(attributes)
     }
 }
@@ -358,11 +372,16 @@ impl ManagedReadModel for Ec2SecurityGroupIngressReadModel {
         if let Some(value) = security_group_rule_id {
             attributes.insert("security_group_rule_id".to_string(), value);
         }
-        validate_read_attributes(
+        static VALIDATED_SCHEMA: OnceLock<Result<ValidatedResourceSchema, String>> =
+            OnceLock::new();
+        let schema = cached_validated_read_schema(
             "ec2.SecurityGroupIngress",
-            crate::schemas::generated::ec2::security_group_ingress::ec2_security_group_ingress_config().schema,
-            &mut attributes,
+            &VALIDATED_SCHEMA,
+            || {
+                crate::schemas::generated::ec2::security_group_ingress::ec2_security_group_ingress_config().schema
+            },
         )?;
+        validate_read_attributes("ec2.SecurityGroupIngress", schema, &mut attributes)?;
         Ok(attributes)
     }
 }
@@ -429,11 +448,16 @@ impl ManagedReadModel for Ec2SecurityGroupEgressReadModel {
         if let Some(value) = security_group_rule_id {
             attributes.insert("security_group_rule_id".to_string(), value);
         }
-        validate_read_attributes(
+        static VALIDATED_SCHEMA: OnceLock<Result<ValidatedResourceSchema, String>> =
+            OnceLock::new();
+        let schema = cached_validated_read_schema(
             "ec2.SecurityGroupEgress",
-            crate::schemas::generated::ec2::security_group_egress::ec2_security_group_egress_config().schema,
-            &mut attributes,
+            &VALIDATED_SCHEMA,
+            || {
+                crate::schemas::generated::ec2::security_group_egress::ec2_security_group_egress_config().schema
+            },
         )?;
+        validate_read_attributes("ec2.SecurityGroupEgress", schema, &mut attributes)?;
         Ok(attributes)
     }
 }
@@ -460,11 +484,16 @@ impl ManagedReadModel for Ec2EgressOnlyInternetGatewayReadModel {
             attributes.insert("egress_only_internet_gateway_id".to_string(), value);
         }
         attributes.insert("tags".to_string(), tags);
-        validate_read_attributes(
+        static VALIDATED_SCHEMA: OnceLock<Result<ValidatedResourceSchema, String>> =
+            OnceLock::new();
+        let schema = cached_validated_read_schema(
             "ec2.EgressOnlyInternetGateway",
-            crate::schemas::generated::ec2::egress_only_internet_gateway::ec2_egress_only_internet_gateway_config().schema,
-            &mut attributes,
+            &VALIDATED_SCHEMA,
+            || {
+                crate::schemas::generated::ec2::egress_only_internet_gateway::ec2_egress_only_internet_gateway_config().schema
+            },
         )?;
+        validate_read_attributes("ec2.EgressOnlyInternetGateway", schema, &mut attributes)?;
         Ok(attributes)
     }
 }
@@ -508,11 +537,12 @@ impl ManagedReadModel for Ec2EipReadModel {
             attributes.insert("public_ip".to_string(), value);
         }
         attributes.insert("tags".to_string(), tags);
-        validate_read_attributes(
-            "ec2.Eip",
-            crate::schemas::generated::ec2::eip::ec2_eip_config().schema,
-            &mut attributes,
-        )?;
+        static VALIDATED_SCHEMA: OnceLock<Result<ValidatedResourceSchema, String>> =
+            OnceLock::new();
+        let schema = cached_validated_read_schema("ec2.Eip", &VALIDATED_SCHEMA, || {
+            crate::schemas::generated::ec2::eip::ec2_eip_config().schema
+        })?;
+        validate_read_attributes("ec2.Eip", schema, &mut attributes)?;
         Ok(attributes)
     }
 }
@@ -577,11 +607,12 @@ impl ManagedReadModel for Ec2FlowLogReadModel {
             attributes.insert("flow_log_id".to_string(), value);
         }
         attributes.insert("tags".to_string(), tags);
-        validate_read_attributes(
-            "ec2.FlowLog",
-            crate::schemas::generated::ec2::flow_log::ec2_flow_log_config().schema,
-            &mut attributes,
-        )?;
+        static VALIDATED_SCHEMA: OnceLock<Result<ValidatedResourceSchema, String>> =
+            OnceLock::new();
+        let schema = cached_validated_read_schema("ec2.FlowLog", &VALIDATED_SCHEMA, || {
+            crate::schemas::generated::ec2::flow_log::ec2_flow_log_config().schema
+        })?;
+        validate_read_attributes("ec2.FlowLog", schema, &mut attributes)?;
         Ok(attributes)
     }
 }
@@ -639,11 +670,12 @@ impl ManagedReadModel for Ec2NatGatewayReadModel {
             attributes.insert("nat_gateway_id".to_string(), value);
         }
         attributes.insert("tags".to_string(), tags);
-        validate_read_attributes(
-            "ec2.NatGateway",
-            crate::schemas::generated::ec2::nat_gateway::ec2_nat_gateway_config().schema,
-            &mut attributes,
-        )?;
+        static VALIDATED_SCHEMA: OnceLock<Result<ValidatedResourceSchema, String>> =
+            OnceLock::new();
+        let schema = cached_validated_read_schema("ec2.NatGateway", &VALIDATED_SCHEMA, || {
+            crate::schemas::generated::ec2::nat_gateway::ec2_nat_gateway_config().schema
+        })?;
+        validate_read_attributes("ec2.NatGateway", schema, &mut attributes)?;
         Ok(attributes)
     }
 }
@@ -665,11 +697,16 @@ impl ManagedReadModel for Ec2SubnetRouteTableAssociationReadModel {
         let mut attributes = HashMap::with_capacity(2);
         attributes.insert("route_table_id".to_string(), route_table_id);
         attributes.insert("subnet_id".to_string(), subnet_id);
-        validate_read_attributes(
+        static VALIDATED_SCHEMA: OnceLock<Result<ValidatedResourceSchema, String>> =
+            OnceLock::new();
+        let schema = cached_validated_read_schema(
             "ec2.SubnetRouteTableAssociation",
-            crate::schemas::generated::ec2::subnet_route_table_association::ec2_subnet_route_table_association_config().schema,
-            &mut attributes,
+            &VALIDATED_SCHEMA,
+            || {
+                crate::schemas::generated::ec2::subnet_route_table_association::ec2_subnet_route_table_association_config().schema
+            },
         )?;
+        validate_read_attributes("ec2.SubnetRouteTableAssociation", schema, &mut attributes)?;
         Ok(attributes)
     }
 }
@@ -703,11 +740,12 @@ impl ManagedReadModel for Ec2TransitGatewayReadModel {
             attributes.insert("transit_gateway_id".to_string(), value);
         }
         attributes.insert("tags".to_string(), tags);
-        validate_read_attributes(
-            "ec2.TransitGateway",
-            crate::schemas::generated::ec2::transit_gateway::ec2_transit_gateway_config().schema,
-            &mut attributes,
-        )?;
+        static VALIDATED_SCHEMA: OnceLock<Result<ValidatedResourceSchema, String>> =
+            OnceLock::new();
+        let schema = cached_validated_read_schema("ec2.TransitGateway", &VALIDATED_SCHEMA, || {
+            crate::schemas::generated::ec2::transit_gateway::ec2_transit_gateway_config().schema
+        })?;
+        validate_read_attributes("ec2.TransitGateway", schema, &mut attributes)?;
         Ok(attributes)
     }
 }
@@ -745,11 +783,16 @@ impl ManagedReadModel for Ec2TransitGatewayAttachmentReadModel {
             attributes.insert("transit_gateway_attachment_id".to_string(), value);
         }
         attributes.insert("tags".to_string(), tags);
-        validate_read_attributes(
+        static VALIDATED_SCHEMA: OnceLock<Result<ValidatedResourceSchema, String>> =
+            OnceLock::new();
+        let schema = cached_validated_read_schema(
             "ec2.TransitGatewayAttachment",
-            crate::schemas::generated::ec2::transit_gateway_attachment::ec2_transit_gateway_attachment_config().schema,
-            &mut attributes,
+            &VALIDATED_SCHEMA,
+            || {
+                crate::schemas::generated::ec2::transit_gateway_attachment::ec2_transit_gateway_attachment_config().schema
+            },
         )?;
+        validate_read_attributes("ec2.TransitGatewayAttachment", schema, &mut attributes)?;
         Ok(attributes)
     }
 }
@@ -818,11 +861,12 @@ impl ManagedReadModel for Ec2VpcEndpointReadModel {
             attributes.insert("vpc_endpoint_id".to_string(), value);
         }
         attributes.insert("tags".to_string(), tags);
-        validate_read_attributes(
-            "ec2.VpcEndpoint",
-            crate::schemas::generated::ec2::vpc_endpoint::ec2_vpc_endpoint_config().schema,
-            &mut attributes,
-        )?;
+        static VALIDATED_SCHEMA: OnceLock<Result<ValidatedResourceSchema, String>> =
+            OnceLock::new();
+        let schema = cached_validated_read_schema("ec2.VpcEndpoint", &VALIDATED_SCHEMA, || {
+            crate::schemas::generated::ec2::vpc_endpoint::ec2_vpc_endpoint_config().schema
+        })?;
+        validate_read_attributes("ec2.VpcEndpoint", schema, &mut attributes)?;
         Ok(attributes)
     }
 }
@@ -851,11 +895,16 @@ impl ManagedReadModel for Ec2VpcGatewayAttachmentReadModel {
         if let Some(value) = vpn_gateway_id {
             attributes.insert("vpn_gateway_id".to_string(), value);
         }
-        validate_read_attributes(
+        static VALIDATED_SCHEMA: OnceLock<Result<ValidatedResourceSchema, String>> =
+            OnceLock::new();
+        let schema = cached_validated_read_schema(
             "ec2.VpcGatewayAttachment",
-            crate::schemas::generated::ec2::vpc_gateway_attachment::ec2_vpc_gateway_attachment_config().schema,
-            &mut attributes,
+            &VALIDATED_SCHEMA,
+            || {
+                crate::schemas::generated::ec2::vpc_gateway_attachment::ec2_vpc_gateway_attachment_config().schema
+            },
         )?;
+        validate_read_attributes("ec2.VpcGatewayAttachment", schema, &mut attributes)?;
         Ok(attributes)
     }
 }
@@ -890,11 +939,16 @@ impl ManagedReadModel for Ec2VpcPeeringConnectionReadModel {
             attributes.insert("vpc_peering_connection_id".to_string(), value);
         }
         attributes.insert("tags".to_string(), tags);
-        validate_read_attributes(
+        static VALIDATED_SCHEMA: OnceLock<Result<ValidatedResourceSchema, String>> =
+            OnceLock::new();
+        let schema = cached_validated_read_schema(
             "ec2.VpcPeeringConnection",
-            crate::schemas::generated::ec2::vpc_peering_connection::ec2_vpc_peering_connection_config().schema,
-            &mut attributes,
+            &VALIDATED_SCHEMA,
+            || {
+                crate::schemas::generated::ec2::vpc_peering_connection::ec2_vpc_peering_connection_config().schema
+            },
         )?;
+        validate_read_attributes("ec2.VpcPeeringConnection", schema, &mut attributes)?;
         Ok(attributes)
     }
 }
@@ -931,11 +985,12 @@ impl ManagedReadModel for Ec2VpnGatewayReadModel {
             attributes.insert("vpn_gateway_id".to_string(), value);
         }
         attributes.insert("tags".to_string(), tags);
-        validate_read_attributes(
-            "ec2.VpnGateway",
-            crate::schemas::generated::ec2::vpn_gateway::ec2_vpn_gateway_config().schema,
-            &mut attributes,
-        )?;
+        static VALIDATED_SCHEMA: OnceLock<Result<ValidatedResourceSchema, String>> =
+            OnceLock::new();
+        let schema = cached_validated_read_schema("ec2.VpnGateway", &VALIDATED_SCHEMA, || {
+            crate::schemas::generated::ec2::vpn_gateway::ec2_vpn_gateway_config().schema
+        })?;
+        validate_read_attributes("ec2.VpnGateway", schema, &mut attributes)?;
         Ok(attributes)
     }
 }
@@ -977,11 +1032,12 @@ impl ManagedReadModel for S3BucketReadModel {
             attributes.insert("hosted_zone_id".to_string(), value);
         }
         attributes.insert("tags".to_string(), tags);
-        validate_read_attributes(
-            "s3.Bucket",
-            crate::schemas::generated::s3::bucket::s3_bucket_config().schema,
-            &mut attributes,
-        )?;
+        static VALIDATED_SCHEMA: OnceLock<Result<ValidatedResourceSchema, String>> =
+            OnceLock::new();
+        let schema = cached_validated_read_schema("s3.Bucket", &VALIDATED_SCHEMA, || {
+            crate::schemas::generated::s3::bucket::s3_bucket_config().schema
+        })?;
+        validate_read_attributes("s3.Bucket", schema, &mut attributes)?;
         Ok(attributes)
     }
 }
@@ -1000,11 +1056,12 @@ impl ManagedReadModel for S3BucketPolicyReadModel {
         let mut attributes = HashMap::with_capacity(2);
         attributes.insert("bucket".to_string(), bucket);
         attributes.insert("policy".to_string(), policy);
-        validate_read_attributes(
-            "s3.BucketPolicy",
-            crate::schemas::generated::s3::bucket_policy::s3_bucket_policy_config().schema,
-            &mut attributes,
-        )?;
+        static VALIDATED_SCHEMA: OnceLock<Result<ValidatedResourceSchema, String>> =
+            OnceLock::new();
+        let schema = cached_validated_read_schema("s3.BucketPolicy", &VALIDATED_SCHEMA, || {
+            crate::schemas::generated::s3::bucket_policy::s3_bucket_policy_config().schema
+        })?;
+        validate_read_attributes("s3.BucketPolicy", schema, &mut attributes)?;
         Ok(attributes)
     }
 }
@@ -1023,11 +1080,14 @@ impl ManagedReadModel for S3BucketVersioningReadModel {
         let mut attributes = HashMap::with_capacity(2);
         attributes.insert("bucket".to_string(), bucket);
         attributes.insert("status".to_string(), status);
-        validate_read_attributes(
-            "s3.BucketVersioning",
-            crate::schemas::generated::s3::bucket_versioning::s3_bucket_versioning_config().schema,
-            &mut attributes,
-        )?;
+        static VALIDATED_SCHEMA: OnceLock<Result<ValidatedResourceSchema, String>> =
+            OnceLock::new();
+        let schema =
+            cached_validated_read_schema("s3.BucketVersioning", &VALIDATED_SCHEMA, || {
+                crate::schemas::generated::s3::bucket_versioning::s3_bucket_versioning_config()
+                    .schema
+            })?;
+        validate_read_attributes("s3.BucketVersioning", schema, &mut attributes)?;
         Ok(attributes)
     }
 }
@@ -1054,11 +1114,16 @@ impl ManagedReadModel for S3BucketObjectLockConfigurationReadModel {
         if let Some(value) = rule {
             attributes.insert("rule".to_string(), value);
         }
-        validate_read_attributes(
+        static VALIDATED_SCHEMA: OnceLock<Result<ValidatedResourceSchema, String>> =
+            OnceLock::new();
+        let schema = cached_validated_read_schema(
             "s3.BucketObjectLockConfiguration",
-            crate::schemas::generated::s3::bucket_object_lock_configuration::s3_bucket_object_lock_configuration_config().schema,
-            &mut attributes,
+            &VALIDATED_SCHEMA,
+            || {
+                crate::schemas::generated::s3::bucket_object_lock_configuration::s3_bucket_object_lock_configuration_config().schema
+            },
         )?;
+        validate_read_attributes("s3.BucketObjectLockConfiguration", schema, &mut attributes)?;
         Ok(attributes)
     }
 }
@@ -1077,11 +1142,12 @@ impl ManagedReadModel for S3BucketAclReadModel {
         let mut attributes = HashMap::with_capacity(2);
         attributes.insert("acl".to_string(), acl);
         attributes.insert("bucket".to_string(), bucket);
-        validate_read_attributes(
-            "s3.BucketAcl",
-            crate::schemas::generated::s3::bucket_acl::s3_bucket_acl_config().schema,
-            &mut attributes,
-        )?;
+        static VALIDATED_SCHEMA: OnceLock<Result<ValidatedResourceSchema, String>> =
+            OnceLock::new();
+        let schema = cached_validated_read_schema("s3.BucketAcl", &VALIDATED_SCHEMA, || {
+            crate::schemas::generated::s3::bucket_acl::s3_bucket_acl_config().schema
+        })?;
+        validate_read_attributes("s3.BucketAcl", schema, &mut attributes)?;
         Ok(attributes)
     }
 }
@@ -1103,11 +1169,16 @@ impl ManagedReadModel for S3BucketOwnershipControlsReadModel {
         let mut attributes = HashMap::with_capacity(2);
         attributes.insert("bucket".to_string(), bucket);
         attributes.insert("object_ownership".to_string(), object_ownership);
-        validate_read_attributes(
+        static VALIDATED_SCHEMA: OnceLock<Result<ValidatedResourceSchema, String>> =
+            OnceLock::new();
+        let schema = cached_validated_read_schema(
             "s3.BucketOwnershipControls",
-            crate::schemas::generated::s3::bucket_ownership_controls::s3_bucket_ownership_controls_config().schema,
-            &mut attributes,
+            &VALIDATED_SCHEMA,
+            || {
+                crate::schemas::generated::s3::bucket_ownership_controls::s3_bucket_ownership_controls_config().schema
+            },
         )?;
+        validate_read_attributes("s3.BucketOwnershipControls", schema, &mut attributes)?;
         Ok(attributes)
     }
 }
@@ -1126,9 +1197,18 @@ impl ManagedReadModel for S3BucketServerSideEncryptionConfigurationReadModel {
         let mut attributes = HashMap::with_capacity(2);
         attributes.insert("bucket".to_string(), bucket);
         attributes.insert("rules".to_string(), rules);
+        static VALIDATED_SCHEMA: OnceLock<Result<ValidatedResourceSchema, String>> =
+            OnceLock::new();
+        let schema = cached_validated_read_schema(
+            "s3.BucketServerSideEncryptionConfiguration",
+            &VALIDATED_SCHEMA,
+            || {
+                crate::schemas::generated::s3::bucket_server_side_encryption_configuration::s3_bucket_server_side_encryption_configuration_config().schema
+            },
+        )?;
         validate_read_attributes(
             "s3.BucketServerSideEncryptionConfiguration",
-            crate::schemas::generated::s3::bucket_server_side_encryption_configuration::s3_bucket_server_side_encryption_configuration_config().schema,
+            schema,
             &mut attributes,
         )?;
         Ok(attributes)
@@ -1155,11 +1235,16 @@ impl ManagedReadModel for S3BucketReplicationConfigurationReadModel {
         attributes.insert("bucket".to_string(), bucket);
         attributes.insert("role".to_string(), role);
         attributes.insert("rules".to_string(), rules);
-        validate_read_attributes(
+        static VALIDATED_SCHEMA: OnceLock<Result<ValidatedResourceSchema, String>> =
+            OnceLock::new();
+        let schema = cached_validated_read_schema(
             "s3.BucketReplicationConfiguration",
-            crate::schemas::generated::s3::bucket_replication_configuration::s3_bucket_replication_configuration_config().schema,
-            &mut attributes,
+            &VALIDATED_SCHEMA,
+            || {
+                crate::schemas::generated::s3::bucket_replication_configuration::s3_bucket_replication_configuration_config().schema
+            },
         )?;
+        validate_read_attributes("s3.BucketReplicationConfiguration", schema, &mut attributes)?;
         Ok(attributes)
     }
 }
@@ -1178,11 +1263,16 @@ impl ManagedReadModel for S3BucketLifecycleConfigurationReadModel {
         let mut attributes = HashMap::with_capacity(2);
         attributes.insert("bucket".to_string(), bucket);
         attributes.insert("rules".to_string(), rules);
-        validate_read_attributes(
+        static VALIDATED_SCHEMA: OnceLock<Result<ValidatedResourceSchema, String>> =
+            OnceLock::new();
+        let schema = cached_validated_read_schema(
             "s3.BucketLifecycleConfiguration",
-            crate::schemas::generated::s3::bucket_lifecycle_configuration::s3_bucket_lifecycle_configuration_config().schema,
-            &mut attributes,
+            &VALIDATED_SCHEMA,
+            || {
+                crate::schemas::generated::s3::bucket_lifecycle_configuration::s3_bucket_lifecycle_configuration_config().schema
+            },
         )?;
+        validate_read_attributes("s3.BucketLifecycleConfiguration", schema, &mut attributes)?;
         Ok(attributes)
     }
 }
@@ -1216,11 +1306,16 @@ impl ManagedReadModel for S3BucketWebsiteConfigurationReadModel {
         if let Some(value) = redirect_all_requests_to {
             attributes.insert("redirect_all_requests_to".to_string(), value);
         }
-        validate_read_attributes(
+        static VALIDATED_SCHEMA: OnceLock<Result<ValidatedResourceSchema, String>> =
+            OnceLock::new();
+        let schema = cached_validated_read_schema(
             "s3.BucketWebsiteConfiguration",
-            crate::schemas::generated::s3::bucket_website_configuration::s3_bucket_website_configuration_config().schema,
-            &mut attributes,
+            &VALIDATED_SCHEMA,
+            || {
+                crate::schemas::generated::s3::bucket_website_configuration::s3_bucket_website_configuration_config().schema
+            },
         )?;
+        validate_read_attributes("s3.BucketWebsiteConfiguration", schema, &mut attributes)?;
         Ok(attributes)
     }
 }
@@ -1239,11 +1334,16 @@ impl ManagedReadModel for S3BucketCorsConfigurationReadModel {
         let mut attributes = HashMap::with_capacity(2);
         attributes.insert("bucket".to_string(), bucket);
         attributes.insert("cors_rules".to_string(), cors_rules);
-        validate_read_attributes(
+        static VALIDATED_SCHEMA: OnceLock<Result<ValidatedResourceSchema, String>> =
+            OnceLock::new();
+        let schema = cached_validated_read_schema(
             "s3.BucketCorsConfiguration",
-            crate::schemas::generated::s3::bucket_cors_configuration::s3_bucket_cors_configuration_config().schema,
-            &mut attributes,
+            &VALIDATED_SCHEMA,
+            || {
+                crate::schemas::generated::s3::bucket_cors_configuration::s3_bucket_cors_configuration_config().schema
+            },
         )?;
+        validate_read_attributes("s3.BucketCorsConfiguration", schema, &mut attributes)?;
         Ok(attributes)
     }
 }
@@ -1279,9 +1379,18 @@ impl ManagedReadModel for S3BucketNotificationConfigurationReadModel {
         if let Some(value) = event_bridge_configuration {
             attributes.insert("event_bridge_configuration".to_string(), value);
         }
+        static VALIDATED_SCHEMA: OnceLock<Result<ValidatedResourceSchema, String>> =
+            OnceLock::new();
+        let schema = cached_validated_read_schema(
+            "s3.BucketNotificationConfiguration",
+            &VALIDATED_SCHEMA,
+            || {
+                crate::schemas::generated::s3::bucket_notification_configuration::s3_bucket_notification_configuration_config().schema
+            },
+        )?;
         validate_read_attributes(
             "s3.BucketNotificationConfiguration",
-            crate::schemas::generated::s3::bucket_notification_configuration::s3_bucket_notification_configuration_config().schema,
+            schema,
             &mut attributes,
         )?;
         Ok(attributes)
@@ -1313,11 +1422,12 @@ impl ManagedReadModel for S3BucketLoggingReadModel {
         if let Some(value) = target_object_key_format {
             attributes.insert("target_object_key_format".to_string(), value);
         }
-        validate_read_attributes(
-            "s3.BucketLogging",
-            crate::schemas::generated::s3::bucket_logging::s3_bucket_logging_config().schema,
-            &mut attributes,
-        )?;
+        static VALIDATED_SCHEMA: OnceLock<Result<ValidatedResourceSchema, String>> =
+            OnceLock::new();
+        let schema = cached_validated_read_schema("s3.BucketLogging", &VALIDATED_SCHEMA, || {
+            crate::schemas::generated::s3::bucket_logging::s3_bucket_logging_config().schema
+        })?;
+        validate_read_attributes("s3.BucketLogging", schema, &mut attributes)?;
         Ok(attributes)
     }
 }
@@ -1351,11 +1461,16 @@ impl ManagedReadModel for S3BucketPublicAccessBlockReadModel {
             "restrict_public_buckets".to_string(),
             restrict_public_buckets,
         );
-        validate_read_attributes(
+        static VALIDATED_SCHEMA: OnceLock<Result<ValidatedResourceSchema, String>> =
+            OnceLock::new();
+        let schema = cached_validated_read_schema(
             "s3.BucketPublicAccessBlock",
-            crate::schemas::generated::s3::bucket_public_access_block::s3_bucket_public_access_block_config().schema,
-            &mut attributes,
+            &VALIDATED_SCHEMA,
+            || {
+                crate::schemas::generated::s3::bucket_public_access_block::s3_bucket_public_access_block_config().schema
+            },
         )?;
+        validate_read_attributes("s3.BucketPublicAccessBlock", schema, &mut attributes)?;
         Ok(attributes)
     }
 }
@@ -1401,11 +1516,16 @@ impl ManagedReadModel for OrganizationsOrganizationReadModel {
         if let Some(value) = master_account_id {
             attributes.insert("master_account_id".to_string(), value);
         }
-        validate_read_attributes(
+        static VALIDATED_SCHEMA: OnceLock<Result<ValidatedResourceSchema, String>> =
+            OnceLock::new();
+        let schema = cached_validated_read_schema(
             "organizations.Organization",
-            crate::schemas::generated::organizations::organization::organizations_organization_config().schema,
-            &mut attributes,
+            &VALIDATED_SCHEMA,
+            || {
+                crate::schemas::generated::organizations::organization::organizations_organization_config().schema
+            },
         )?;
+        validate_read_attributes("organizations.Organization", schema, &mut attributes)?;
         Ok(attributes)
     }
 }
@@ -1455,12 +1575,14 @@ impl ManagedReadModel for OrganizationsAccountReadModel {
             attributes.insert("status".to_string(), value);
         }
         attributes.insert("tags".to_string(), tags);
-        validate_read_attributes(
-            "organizations.Account",
-            crate::schemas::generated::organizations::account::organizations_account_config()
-                .schema,
-            &mut attributes,
-        )?;
+        static VALIDATED_SCHEMA: OnceLock<Result<ValidatedResourceSchema, String>> =
+            OnceLock::new();
+        let schema =
+            cached_validated_read_schema("organizations.Account", &VALIDATED_SCHEMA, || {
+                crate::schemas::generated::organizations::account::organizations_account_config()
+                    .schema
+            })?;
+        validate_read_attributes("organizations.Account", schema, &mut attributes)?;
         Ok(attributes)
     }
 }
@@ -1500,11 +1622,12 @@ impl ManagedReadModel for Route53RecordSetReadModel {
         }
         attributes.insert("type".to_string(), r#type);
         attributes.insert("hosted_zone_id".to_string(), hosted_zone_id);
-        validate_read_attributes(
-            "route53.RecordSet",
-            crate::schemas::generated::route53::record_set::route53_record_set_config().schema,
-            &mut attributes,
-        )?;
+        static VALIDATED_SCHEMA: OnceLock<Result<ValidatedResourceSchema, String>> =
+            OnceLock::new();
+        let schema = cached_validated_read_schema("route53.RecordSet", &VALIDATED_SCHEMA, || {
+            crate::schemas::generated::route53::record_set::route53_record_set_config().schema
+        })?;
+        validate_read_attributes("route53.RecordSet", schema, &mut attributes)?;
         Ok(attributes)
     }
 }
@@ -1557,11 +1680,12 @@ impl ManagedReadModel for IamRoleReadModel {
             attributes.insert("role_id".to_string(), value);
         }
         attributes.insert("tags".to_string(), tags);
-        validate_read_attributes(
-            "iam.Role",
-            crate::schemas::generated::iam::role::iam_role_config().schema,
-            &mut attributes,
-        )?;
+        static VALIDATED_SCHEMA: OnceLock<Result<ValidatedResourceSchema, String>> =
+            OnceLock::new();
+        let schema = cached_validated_read_schema("iam.Role", &VALIDATED_SCHEMA, || {
+            crate::schemas::generated::iam::role::iam_role_config().schema
+        })?;
+        validate_read_attributes("iam.Role", schema, &mut attributes)?;
         Ok(attributes)
     }
 }
@@ -1604,11 +1728,12 @@ impl ManagedReadModel for LogsLogGroupReadModel {
             attributes.insert("retention_in_days".to_string(), value);
         }
         attributes.insert("tags".to_string(), tags);
-        validate_read_attributes(
-            "logs.LogGroup",
-            crate::schemas::generated::logs::log_group::logs_log_group_config().schema,
-            &mut attributes,
-        )?;
+        static VALIDATED_SCHEMA: OnceLock<Result<ValidatedResourceSchema, String>> =
+            OnceLock::new();
+        let schema = cached_validated_read_schema("logs.LogGroup", &VALIDATED_SCHEMA, || {
+            crate::schemas::generated::logs::log_group::logs_log_group_config().schema
+        })?;
+        validate_read_attributes("logs.LogGroup", schema, &mut attributes)?;
         Ok(attributes)
     }
 }
@@ -1681,11 +1806,12 @@ impl ManagedReadModel for AcmCertificateReadModel {
             attributes.insert("type".to_string(), value);
         }
         attributes.insert("tags".to_string(), tags);
-        validate_read_attributes(
-            "acm.Certificate",
-            crate::schemas::generated::acm::certificate::acm_certificate_config().schema,
-            &mut attributes,
-        )?;
+        static VALIDATED_SCHEMA: OnceLock<Result<ValidatedResourceSchema, String>> =
+            OnceLock::new();
+        let schema = cached_validated_read_schema("acm.Certificate", &VALIDATED_SCHEMA, || {
+            crate::schemas::generated::acm::certificate::acm_certificate_config().schema
+        })?;
+        validate_read_attributes("acm.Certificate", schema, &mut attributes)?;
         Ok(attributes)
     }
 }
@@ -1808,11 +1934,12 @@ impl ManagedReadModel for SqsQueueReadModel {
             last_modified_timestamp,
         );
         attributes.insert("tags".to_string(), tags);
-        validate_read_attributes(
-            "sqs.Queue",
-            crate::schemas::generated::sqs::queue::sqs_queue_config().schema,
-            &mut attributes,
-        )?;
+        static VALIDATED_SCHEMA: OnceLock<Result<ValidatedResourceSchema, String>> =
+            OnceLock::new();
+        let schema = cached_validated_read_schema("sqs.Queue", &VALIDATED_SCHEMA, || {
+            crate::schemas::generated::sqs::queue::sqs_queue_config().schema
+        })?;
+        validate_read_attributes("sqs.Queue", schema, &mut attributes)?;
         Ok(attributes)
     }
 }

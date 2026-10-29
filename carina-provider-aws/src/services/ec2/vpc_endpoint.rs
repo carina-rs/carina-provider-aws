@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use carina_core::provider::{AppliedIdentifier, ReadOutcome};
 use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
@@ -13,7 +11,8 @@ use crate::helpers::{
     optional_string_attr, require_string_attr, retry_aws_operation_with_token,
 };
 use crate::provider::{AwsCreateAttempt, Ec2TaggedResourceKind};
-use crate::read_model::{empty_map_value, found_managed_read, take_optional, take_required};
+use crate::provider_generated::Ec2VpcEndpointReadFields;
+use crate::read_model::{empty_map_value, found_managed_read, require_read_value};
 use crate::read_models_generated::Ec2VpcEndpointReadModel;
 
 impl AwsProvider {
@@ -42,27 +41,43 @@ impl AwsProvider {
                 return Ok(ReadOutcome::not_found(id.clone()));
             }
 
-            let mut attributes = HashMap::new();
-
-            let _identifier_value =
-                Self::extract_ec2_vpc_endpoint_attributes(endpoint, &mut attributes);
+            let Ec2VpcEndpointReadFields {
+                policy_document,
+                private_dns_enabled,
+                resource_configuration_arn,
+                route_table_ids,
+                security_group_ids,
+                service_name,
+                service_network_arn,
+                service_region,
+                subnet_ids,
+                vpc_endpoint_id,
+                vpc_endpoint_type,
+                vpc_id,
+                applied_identifier: _,
+            } = Self::extract_ec2_vpc_endpoint_attributes(endpoint);
+            let policy_document = policy_document.map(|value| match value {
+                Value::Concrete(ConcreteValue::String(raw)) => {
+                    crate::services::iam::role::iam_policy_json_to_value(raw.expose_plaintext())
+                        .unwrap_or(Value::Concrete(ConcreteValue::String(raw)))
+                }
+                value => value,
+            });
+            let empty_list = || Value::Concrete(ConcreteValue::List(Vec::new()));
 
             let model = Ec2VpcEndpointReadModel {
-                policy_document: take_optional(&mut attributes, "policy_document"),
-                private_dns_enabled: take_optional(&mut attributes, "private_dns_enabled"),
-                resource_configuration_arn: take_optional(
-                    &mut attributes,
-                    "resource_configuration_arn",
-                ),
-                route_table_ids: take_required(id, &mut attributes, "route_table_ids")?,
-                security_group_ids: take_required(id, &mut attributes, "security_group_ids")?,
-                service_name: take_required(id, &mut attributes, "service_name")?,
-                service_network_arn: take_optional(&mut attributes, "service_network_arn"),
-                service_region: take_optional(&mut attributes, "service_region"),
-                subnet_ids: take_required(id, &mut attributes, "subnet_ids")?,
-                vpc_endpoint_type: take_optional(&mut attributes, "vpc_endpoint_type"),
-                vpc_id: take_required(id, &mut attributes, "vpc_id")?,
-                vpc_endpoint_id: take_optional(&mut attributes, "vpc_endpoint_id"),
+                policy_document,
+                private_dns_enabled,
+                resource_configuration_arn,
+                route_table_ids: route_table_ids.unwrap_or_else(empty_list),
+                security_group_ids: security_group_ids.unwrap_or_else(empty_list),
+                service_name: require_read_value(id, service_name, "service_name")?,
+                service_network_arn,
+                service_region,
+                subnet_ids: subnet_ids.unwrap_or_else(empty_list),
+                vpc_endpoint_type,
+                vpc_id: require_read_value(id, vpc_id, "vpc_id")?,
+                vpc_endpoint_id,
                 tags: Self::ec2_tags_to_value(endpoint.tags()).unwrap_or_else(empty_map_value),
             };
 
@@ -444,113 +459,5 @@ impl AwsProvider {
         }
 
         Ok(())
-    }
-
-    /// Extract ec2.VpcEndpoint attributes from the SDK response.
-    ///
-    /// Lives here (not in `provider_generated.rs`) because
-    /// `policy_document` is parsed JSON → `Value::Map` via
-    /// `iam_policy_json_to_value`, which the codegen template can't
-    /// express. `scan_manual_methods` picks this up by name and the
-    /// codegen skips emitting a duplicate stub. The list-typed members
-    /// (route_table_ids / subnet_ids / Groups[*].group_id) are also
-    /// extracted here for the same reason — keeping the extractor
-    /// whole reads cleaner than re-deriving half of it from
-    /// `derived_attributes`.
-    pub(crate) fn extract_ec2_vpc_endpoint_attributes(
-        obj: &aws_sdk_ec2::types::VpcEndpoint,
-        attributes: &mut HashMap<String, Value>,
-    ) -> Option<String> {
-        if let Some(v) = obj.vpc_endpoint_id() {
-            attributes.insert(
-                "vpc_endpoint_id".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string().into())),
-            );
-        }
-        if let Some(v) = obj.vpc_endpoint_type() {
-            attributes.insert(
-                "vpc_endpoint_type".to_string(),
-                Value::Concrete(ConcreteValue::String(v.as_str().to_string().into())),
-            );
-        }
-        if let Some(v) = obj.vpc_id() {
-            attributes.insert(
-                "vpc_id".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string().into())),
-            );
-        }
-        if let Some(v) = obj.service_name() {
-            attributes.insert(
-                "service_name".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string().into())),
-            );
-        }
-        if let Some(v) = obj.private_dns_enabled() {
-            attributes.insert(
-                "private_dns_enabled".to_string(),
-                Value::Concrete(ConcreteValue::Bool(v)),
-            );
-        }
-        for (name, value) in [
-            (
-                "resource_configuration_arn",
-                obj.resource_configuration_arn(),
-            ),
-            ("service_network_arn", obj.service_network_arn()),
-            ("service_region", obj.service_region()),
-        ] {
-            if let Some(value) = value {
-                attributes.insert(
-                    name.to_string(),
-                    Value::Concrete(ConcreteValue::String(value.to_string().into())),
-                );
-            }
-        }
-        if let Some(v) = obj.policy_document() {
-            // Try to parse the policy document JSON into a Value::Map.
-            let policy_value = crate::services::iam::role::iam_policy_json_to_value(v)
-                .unwrap_or_else(|_| Value::Concrete(ConcreteValue::String(v.to_string().into())));
-            attributes.insert("policy_document".to_string(), policy_value);
-        }
-        {
-            let ids = obj.route_table_ids();
-            let list: Vec<Value> = ids
-                .iter()
-                .map(|s| Value::Concrete(ConcreteValue::String(s.to_string().into())))
-                .collect();
-            attributes.insert(
-                "route_table_ids".to_string(),
-                Value::Concrete(ConcreteValue::List(list)),
-            );
-        }
-        {
-            let ids = obj.subnet_ids();
-            let list: Vec<Value> = ids
-                .iter()
-                .map(|s| Value::Concrete(ConcreteValue::String(s.to_string().into())))
-                .collect();
-            attributes.insert(
-                "subnet_ids".to_string(),
-                Value::Concrete(ConcreteValue::List(list)),
-            );
-        }
-        // Extract security group IDs from Groups[*].group_id.
-        {
-            let groups = obj.groups();
-            if !groups.is_empty() {
-                let list: Vec<Value> = groups
-                    .iter()
-                    .filter_map(|g| {
-                        g.group_id()
-                            .map(|id| Value::Concrete(ConcreteValue::String(id.to_string().into())))
-                    })
-                    .collect();
-                attributes.insert(
-                    "security_group_ids".to_string(),
-                    Value::Concrete(ConcreteValue::List(list)),
-                );
-            }
-        }
-        obj.vpc_endpoint_id().map(String::from)
     }
 }

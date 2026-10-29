@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use carina_core::provider::{AppliedIdentifier, ReadOutcome, Sent};
 use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
@@ -15,7 +13,8 @@ use crate::helpers::{
     optional_int_struct_field, optional_string_list_struct_field,
 };
 use crate::provider::{AwsCreateAttempt, Ec2TaggedResourceKind};
-use crate::read_model::{empty_map_value, found_managed_read, take_optional};
+use crate::provider_generated::Ec2TransitGatewayReadFields;
+use crate::read_model::{empty_map_value, found_managed_read};
 use crate::read_models_generated::Ec2TransitGatewayReadModel;
 
 fn transit_gateway_create_poll_state(state: Option<&TransitGatewayState>) -> CreatePoll<()> {
@@ -162,15 +161,17 @@ impl AwsProvider {
                 return Ok(ReadOutcome::not_found(id.clone()));
             }
 
-            let mut attributes = HashMap::new();
-
-            let _identifier_value =
-                Self::extract_ec2_transit_gateway_attributes(tgw, &mut attributes);
+            let Ec2TransitGatewayReadFields {
+                description,
+                options,
+                transit_gateway_id,
+                applied_identifier: _,
+            } = Self::extract_ec2_transit_gateway_attributes(tgw);
 
             let model = Ec2TransitGatewayReadModel {
-                description: take_optional(&mut attributes, "description"),
-                options: take_optional(&mut attributes, "options"),
-                transit_gateway_id: take_optional(&mut attributes, "transit_gateway_id"),
+                description,
+                options,
+                transit_gateway_id,
                 tags: Self::ec2_tags_to_value(tgw.tags()).unwrap_or_else(empty_map_value),
             };
 
@@ -577,11 +578,10 @@ mod tests {
                     .build(),
             )
             .build();
-        let mut attrs = HashMap::new();
-        AwsProvider::extract_ec2_transit_gateway_attributes(&tgw, &mut attrs);
+        let fields = AwsProvider::extract_ec2_transit_gateway_attributes(&tgw);
 
-        let Some(Value::Concrete(ConcreteValue::Map(options))) = attrs.get("options") else {
-            panic!("expected nested options map, got {attrs:?}");
+        let Some(Value::Concrete(ConcreteValue::Map(options))) = fields.options.as_ref() else {
+            panic!("expected nested options map");
         };
         assert_eq!(
             options.get("dns_support"),
@@ -601,7 +601,6 @@ mod tests {
                 Value::Concrete(ConcreteValue::String("10.0.0.0/24".to_string().into()))
             ])))
         );
-        assert!(!attrs.contains_key("dns_support"));
     }
 
     #[test]

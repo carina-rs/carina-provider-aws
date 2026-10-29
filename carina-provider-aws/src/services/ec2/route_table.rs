@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use carina_core::provider::ProviderResult;
 use carina_core::provider::{AppliedIdentifier, ReadOutcome};
 use carina_core::resource::{ConcreteValue, Resource, ResourceId, Value};
@@ -11,7 +9,8 @@ use crate::helpers::{
     build_tag_specification_with_create_token, require_string_attr, send_aws_operation_with_token,
 };
 use crate::provider::{AwsCreateAttempt, Ec2TaggedResourceKind};
-use crate::read_model::{empty_map_value, found_managed_read, take_optional, take_required};
+use crate::provider_generated::Ec2RouteTableReadFields;
+use crate::read_model::{empty_map_value, found_managed_read, require_read_value};
 use crate::read_models_generated::Ec2RouteTableReadModel;
 
 impl AwsProvider {
@@ -42,14 +41,15 @@ impl AwsProvider {
             })?;
 
         if let Some(rt) = result.route_tables().first() {
-            let mut attributes = HashMap::new();
-
-            // Auto-generated attribute extraction
-            let _identifier_value = Self::extract_ec2_route_table_attributes(rt, &mut attributes);
+            let Ec2RouteTableReadFields {
+                route_table_id,
+                vpc_id,
+                applied_identifier: _,
+            } = Self::extract_ec2_route_table_attributes(rt);
 
             let model = Ec2RouteTableReadModel {
-                vpc_id: take_required(id, &mut attributes, "vpc_id")?,
-                route_table_id: take_optional(&mut attributes, "route_table_id"),
+                vpc_id: require_read_value(id, vpc_id, "vpc_id")?,
+                route_table_id,
                 tags: Self::ec2_tags_to_value(rt.tags()).unwrap_or_else(empty_map_value),
             };
 

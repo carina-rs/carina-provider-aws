@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use carina_core::provider::{AppliedIdentifier, ReadOutcome};
 use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{ConcreteValue, Resource, ResourceId, Value};
@@ -8,7 +6,8 @@ use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
 use crate::helpers::require_string_attr;
 use crate::provider::CreateCompletion;
-use crate::read_model::{found_managed_read, take_optional, take_required};
+use crate::provider_generated::Ec2RouteReadFields;
+use crate::read_model::found_managed_read;
 use crate::read_models_generated::Ec2RouteReadModel;
 
 impl AwsProvider {
@@ -41,25 +40,22 @@ impl AwsProvider {
             // Find the route matching destination_cidr_block
             for route in rt.routes() {
                 if route.destination_cidr_block() == Some(destination_cidr_block) {
-                    let mut attributes = HashMap::new();
-
-                    // Auto-generated attribute extraction
-                    Self::extract_ec2_route_attributes(route, &mut attributes);
-
-                    // route_table_id is not in the Route struct, add from parameter
-                    attributes.insert(
-                        "route_table_id".to_string(),
-                        Value::Concrete(ConcreteValue::String(route_table_id.to_string().into())),
-                    );
+                    let Ec2RouteReadFields {
+                        destination_cidr_block,
+                        gateway_id,
+                        nat_gateway_id,
+                        applied_identifier: _,
+                    } = Self::extract_ec2_route_attributes(route);
 
                     let model = Ec2RouteReadModel {
-                        destination_cidr_block: take_optional(
-                            &mut attributes,
-                            "destination_cidr_block",
-                        ),
-                        gateway_id: take_optional(&mut attributes, "gateway_id"),
-                        nat_gateway_id: take_optional(&mut attributes, "nat_gateway_id"),
-                        route_table_id: take_required(id, &mut attributes, "route_table_id")?,
+                        destination_cidr_block,
+                        gateway_id,
+                        nat_gateway_id,
+                        // Route does not carry its parent table in the SDK
+                        // response, so the request target supplies it.
+                        route_table_id: Value::Concrete(ConcreteValue::String(
+                            route_table_id.to_string().into(),
+                        )),
                     };
                     return found_managed_read(id, applied_identifier, model);
                 }

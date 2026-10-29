@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use carina_core::provider::ProviderResult;
 use carina_core::provider::{AppliedIdentifier, ReadOutcome};
 use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
@@ -10,7 +8,8 @@ use crate::aws_operation::ClientToken;
 use crate::error_helpers::api_error_with_meta;
 use crate::helpers::{build_tag_specification_with_create_token, optional_enum_attr};
 use crate::provider::{AwsCreateAttempt, Ec2TaggedResourceKind};
-use crate::read_model::{empty_map_value, found_managed_read, take_optional};
+use crate::provider_generated::Ec2EipReadFields;
+use crate::read_model::{empty_map_value, found_managed_read};
 use crate::read_models_generated::Ec2EipReadModel;
 
 impl AwsProvider {
@@ -41,17 +40,18 @@ impl AwsProvider {
             })?;
 
         if let Some(addr) = result.addresses().first() {
-            let mut attributes = HashMap::new();
-
-            // Extract attributes
-            let _identifier_value = Self::extract_ec2_eip_attributes(addr, &mut attributes);
-
-            let public_ip = take_optional(&mut attributes, "public_ip");
+            let Ec2EipReadFields {
+                allocation_id,
+                domain,
+                public_ip,
+                public_ipv4_pool,
+                applied_identifier: _,
+            } = Self::extract_ec2_eip_attributes(addr);
             let model = Ec2EipReadModel {
                 address: public_ip.clone(),
-                domain: take_optional(&mut attributes, "domain"),
-                public_ipv4_pool: take_optional(&mut attributes, "public_ipv4_pool"),
-                allocation_id: take_optional(&mut attributes, "allocation_id"),
+                domain,
+                public_ipv4_pool,
+                allocation_id,
                 public_ip,
                 tags: Self::ec2_tags_to_value(addr.tags()).unwrap_or_else(empty_map_value),
             };

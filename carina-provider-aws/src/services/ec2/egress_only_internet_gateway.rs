@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use carina_core::provider::ProviderResult;
 use carina_core::provider::{AppliedIdentifier, ReadOutcome, Sent};
 use carina_core::resource::{Resource, ResourceId, State};
@@ -11,7 +9,8 @@ use crate::helpers::{
     build_tag_specification_with_create_token, require_string_attr, send_aws_operation_with_token,
 };
 use crate::provider::{AwsCreateAttempt, Ec2TaggedResourceKind};
-use crate::read_model::{empty_map_value, found_managed_read, take_optional, take_required};
+use crate::provider_generated::Ec2EgressOnlyInternetGatewayReadFields;
+use crate::read_model::{empty_map_value, found_managed_read, require_read_value};
 use crate::read_models_generated::Ec2EgressOnlyInternetGatewayReadModel;
 
 impl AwsProvider {
@@ -36,17 +35,15 @@ impl AwsProvider {
             })?;
 
         if let Some(eigw) = result.egress_only_internet_gateways().first() {
-            let mut attributes = HashMap::new();
-
-            let _identifier_value =
-                Self::extract_ec2_egress_only_internet_gateway_attributes(eigw, &mut attributes);
+            let Ec2EgressOnlyInternetGatewayReadFields {
+                egress_only_internet_gateway_id,
+                vpc_id,
+                applied_identifier: _,
+            } = Self::extract_ec2_egress_only_internet_gateway_attributes(eigw);
 
             let model = Ec2EgressOnlyInternetGatewayReadModel {
-                vpc_id: take_required(id, &mut attributes, "vpc_id")?,
-                egress_only_internet_gateway_id: take_optional(
-                    &mut attributes,
-                    "egress_only_internet_gateway_id",
-                ),
+                vpc_id: require_read_value(id, vpc_id, "vpc_id")?,
+                egress_only_internet_gateway_id,
                 tags: Self::ec2_tags_to_value(eigw.tags()).unwrap_or_else(empty_map_value),
             };
 

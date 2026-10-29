@@ -4,7 +4,6 @@
 //! for CRUD operations. Cloud Control does not support Route 53 records.
 
 use indexmap::IndexMap;
-use std::collections::HashMap;
 
 use aws_sdk_route53::types::{
     AliasTarget, Change, ChangeAction, ChangeBatch, ResourceRecord, ResourceRecordSet, RrType,
@@ -19,7 +18,8 @@ use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
 use crate::helpers::{require_enum_attr, require_string_attr, sdk_error_message};
 use crate::provider::CreateCompletion;
-use crate::read_model::{found_managed_read, take_optional, take_required};
+use crate::provider_generated::Route53RecordSetReadFields;
+use crate::read_model::{found_managed_read, require_read_value};
 use crate::read_models_generated::Route53RecordSetReadModel;
 use crate::resend_safety_generated::Route53Client;
 
@@ -229,44 +229,17 @@ async fn change_record_set(
     Ok(())
 }
 
-/// Extract carina attributes from an AWS SDK ResourceRecordSet.
-fn extract_attributes(hosted_zone_id: &str, rrs: &ResourceRecordSet) -> HashMap<String, Value> {
-    let mut attrs = HashMap::new();
-
-    attrs.insert(
-        "hosted_zone_id".to_string(),
-        Value::Concrete(ConcreteValue::String(hosted_zone_id.to_string().into())),
-    );
-
-    attrs.insert(
-        "name".to_string(),
-        Value::Concrete(ConcreteValue::String(strip_trailing_dot(rrs.name()).into())),
-    );
-
-    attrs.insert(
-        "type".to_string(),
-        Value::Concrete(ConcreteValue::String(
-            rrs.r#type().as_str().to_string().into(),
-        )),
-    );
-
-    if let Some(ttl) = rrs.ttl() {
-        attrs.insert("ttl".to_string(), Value::Concrete(ConcreteValue::Int(ttl)));
-    }
-
+fn resource_records_value(rrs: &ResourceRecordSet) -> Option<Value> {
     let records: Vec<Value> = rrs
         .resource_records()
         .iter()
         .map(|r| Value::Concrete(ConcreteValue::String(r.value().to_string().into())))
         .collect();
-    if !records.is_empty() {
-        attrs.insert(
-            "resource_records".to_string(),
-            Value::Concrete(ConcreteValue::List(records)),
-        );
-    }
+    (!records.is_empty()).then(|| Value::Concrete(ConcreteValue::List(records)))
+}
 
-    if let Some(alias) = rrs.alias_target() {
+fn alias_target_value(rrs: &ResourceRecordSet) -> Option<Value> {
+    rrs.alias_target().map(|alias| {
         let mut alias_map: IndexMap<String, Value> = IndexMap::new();
         alias_map.insert(
             "dns_name".to_string(),
@@ -284,13 +257,8 @@ fn extract_attributes(hosted_zone_id: &str, rrs: &ResourceRecordSet) -> HashMap<
             "evaluate_target_health".to_string(),
             Value::Concrete(ConcreteValue::Bool(alias.evaluate_target_health())),
         );
-        attrs.insert(
-            "alias_target".to_string(),
-            Value::Concrete(ConcreteValue::Map(alias_map)),
-        );
-    }
-
-    attrs
+        Value::Concrete(ConcreteValue::Map(alias_map))
+    })
 }
 
 impl AwsProvider {
@@ -336,14 +304,31 @@ impl AwsProvider {
             match scan_page_for_record(result.resource_record_sets(), &normalized_name, record_type)
             {
                 PageScan::Found(rrs) => {
-                    let mut attributes = extract_attributes(zone_id, rrs);
+                    let Route53RecordSetReadFields {
+                        name,
+                        ttl,
+                        r#type,
+                        applied_identifier: _,
+                    } = Self::extract_route53_record_set_attributes(rrs);
+                    let name = match require_read_value(id, name, "name")? {
+                        Value::Concrete(ConcreteValue::String(name)) => {
+                            Value::Concrete(ConcreteValue::String(
+                                strip_trailing_dot(name.expose_plaintext()).into(),
+                            ))
+                        }
+                        value => value,
+                    };
                     let model = Route53RecordSetReadModel {
-                        alias_target: take_optional(&mut attributes, "alias_target"),
-                        name: take_required(id, &mut attributes, "name")?,
-                        resource_records: take_optional(&mut attributes, "resource_records"),
-                        ttl: take_optional(&mut attributes, "ttl"),
-                        r#type: take_required(id, &mut attributes, "type")?,
-                        hosted_zone_id: take_required(id, &mut attributes, "hosted_zone_id")?,
+                        alias_target: alias_target_value(rrs),
+                        name,
+                        resource_records: resource_records_value(rrs),
+                        ttl,
+                        r#type: require_read_value(id, r#type, "type")?,
+                        // HostedZoneId is the request target, not a member of
+                        // ResourceRecordSet.
+                        hosted_zone_id: Value::Concrete(ConcreteValue::String(
+                            zone_id.to_string().into(),
+                        )),
                     };
                     return found_managed_read(id, applied_identifier, model);
                 }

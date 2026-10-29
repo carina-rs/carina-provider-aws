@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use carina_core::provider::{AppliedIdentifier, ReadOutcome};
 use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{ConcreteValue, Resource, ResourceId, Value};
@@ -12,7 +10,8 @@ use crate::helpers::{
     retry_aws_operation,
 };
 use crate::provider::{AwsCreateAttempt, Ec2TaggedResourceKind};
-use crate::read_model::{empty_map_value, found_managed_read, take_optional, take_required};
+use crate::provider_generated::Ec2SecurityGroupReadFields;
+use crate::read_model::{empty_map_value, found_managed_read, require_read_value};
 use crate::read_models_generated::Ec2SecurityGroupReadModel;
 
 impl AwsProvider {
@@ -44,17 +43,19 @@ impl AwsProvider {
             })?;
 
         if let Some(sg) = result.security_groups().first() {
-            let mut attributes = HashMap::new();
-
-            // Auto-generated attribute extraction
-            let _identifier_value =
-                Self::extract_ec2_security_group_attributes(sg, &mut attributes);
+            let Ec2SecurityGroupReadFields {
+                description,
+                group_id,
+                group_name,
+                vpc_id,
+                applied_identifier: _,
+            } = Self::extract_ec2_security_group_attributes(sg);
 
             let model = Ec2SecurityGroupReadModel {
-                description: take_required(id, &mut attributes, "description")?,
-                group_name: take_required(id, &mut attributes, "group_name")?,
-                vpc_id: take_optional(&mut attributes, "vpc_id"),
-                group_id: take_optional(&mut attributes, "group_id"),
+                description: require_read_value(id, description, "description")?,
+                group_name: require_read_value(id, group_name, "group_name")?,
+                vpc_id,
+                group_id,
                 tags: Self::ec2_tags_to_value(sg.tags()).unwrap_or_else(empty_map_value),
             };
 

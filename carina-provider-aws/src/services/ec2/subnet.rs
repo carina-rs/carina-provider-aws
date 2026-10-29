@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use carina_core::provider::{AppliedIdentifier, ReadOutcome};
 use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
@@ -14,7 +12,8 @@ use crate::helpers::{
     require_string_attr,
 };
 use crate::provider::{AwsCreateAttempt, Ec2TaggedResourceKind};
-use crate::read_model::{empty_map_value, found_managed_read, take_optional, take_required};
+use crate::provider_generated::Ec2SubnetReadFields;
+use crate::read_model::{empty_map_value, found_managed_read, require_read_value};
 use crate::read_models_generated::Ec2SubnetReadModel;
 use aws_sdk_ec2::types::{AttributeBooleanValue, HostnameType};
 
@@ -121,10 +120,21 @@ impl AwsProvider {
             })?;
 
         if let Some(subnet) = result.subnets().first() {
-            let mut attributes = HashMap::new();
-
-            // Auto-generated attribute extraction
-            let _identifier_value = Self::extract_ec2_subnet_attributes(subnet, &mut attributes);
+            let Ec2SubnetReadFields {
+                assign_ipv6_address_on_creation,
+                availability_zone,
+                availability_zone_id,
+                cidr_block,
+                enable_dns64,
+                enable_lni_at_device_index,
+                ipv6_native,
+                map_public_ip_on_launch,
+                outpost_arn,
+                private_dns_name_options_on_launch,
+                subnet_id,
+                vpc_id,
+                applied_identifier: _,
+            } = Self::extract_ec2_subnet_attributes(subnet);
 
             let tags = Self::ec2_tags_to_value(subnet.tags()).unwrap_or_else(empty_map_value);
             let prefix_value = |cidr: &str| {
@@ -146,30 +156,21 @@ impl AwsProvider {
                 .find_map(|association| association.ipv6_cidr_block())
                 .and_then(prefix_value);
             let model = Ec2SubnetReadModel {
-                assign_ipv6_address_on_creation: take_optional(
-                    &mut attributes,
-                    "assign_ipv6_address_on_creation",
-                ),
-                availability_zone: take_optional(&mut attributes, "availability_zone"),
-                availability_zone_id: take_optional(&mut attributes, "availability_zone_id"),
-                cidr_block: take_optional(&mut attributes, "cidr_block"),
-                enable_dns64: take_optional(&mut attributes, "enable_dns64"),
-                enable_lni_at_device_index: take_optional(
-                    &mut attributes,
-                    "enable_lni_at_device_index",
-                ),
+                assign_ipv6_address_on_creation,
+                availability_zone,
+                availability_zone_id,
+                cidr_block,
+                enable_dns64,
+                enable_lni_at_device_index,
                 ipv4_netmask_length: subnet.cidr_block().and_then(prefix_value),
                 ipv6_cidr_block,
-                ipv6_native: take_optional(&mut attributes, "ipv6_native"),
+                ipv6_native,
                 ipv6_netmask_length,
-                map_public_ip_on_launch: take_optional(&mut attributes, "map_public_ip_on_launch"),
-                outpost_arn: take_optional(&mut attributes, "outpost_arn"),
-                private_dns_name_options_on_launch: take_optional(
-                    &mut attributes,
-                    "private_dns_name_options_on_launch",
-                ),
-                vpc_id: take_required(id, &mut attributes, "vpc_id")?,
-                subnet_id: take_optional(&mut attributes, "subnet_id"),
+                map_public_ip_on_launch,
+                outpost_arn,
+                private_dns_name_options_on_launch,
+                vpc_id: require_read_value(id, vpc_id, "vpc_id")?,
+                subnet_id,
                 tags,
             };
 

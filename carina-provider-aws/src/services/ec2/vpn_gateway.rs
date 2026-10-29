@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use carina_core::provider::ProviderResult;
 use carina_core::provider::{AppliedIdentifier, ReadOutcome};
 use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
@@ -12,7 +10,8 @@ use crate::helpers::{
     build_tag_specification_with_create_token, optional_enum_attr, require_enum_attr,
 };
 use crate::provider::{AwsCreateAttempt, Ec2TaggedResourceKind};
-use crate::read_model::{empty_map_value, found_managed_read, take_optional, take_required};
+use crate::provider_generated::Ec2VpnGatewayReadFields;
+use crate::read_model::{empty_map_value, found_managed_read, require_read_value};
 use crate::read_models_generated::Ec2VpnGatewayReadModel;
 
 impl AwsProvider {
@@ -48,15 +47,19 @@ impl AwsProvider {
                 return Ok(ReadOutcome::not_found(id.clone()));
             }
 
-            let mut attributes = HashMap::new();
-
-            let _identifier_value = Self::extract_ec2_vpn_gateway_attributes(vgw, &mut attributes);
+            let Ec2VpnGatewayReadFields {
+                amazon_side_asn,
+                availability_zone,
+                r#type,
+                vpn_gateway_id,
+                applied_identifier: _,
+            } = Self::extract_ec2_vpn_gateway_attributes(vgw);
 
             let model = Ec2VpnGatewayReadModel {
-                amazon_side_asn: take_optional(&mut attributes, "amazon_side_asn"),
-                availability_zone: take_optional(&mut attributes, "availability_zone"),
-                r#type: take_required(id, &mut attributes, "type")?,
-                vpn_gateway_id: take_optional(&mut attributes, "vpn_gateway_id"),
+                amazon_side_asn,
+                availability_zone,
+                r#type: require_read_value(id, r#type, "type")?,
+                vpn_gateway_id,
                 tags: Self::ec2_tags_to_value(vgw.tags()).unwrap_or_else(empty_map_value),
             };
 

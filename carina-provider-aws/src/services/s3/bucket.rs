@@ -11,7 +11,7 @@ use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
 use crate::helpers::{RetryPolicy, retry_aws_operation, sdk_error_message};
 use crate::provider::AwsCreateAttempt;
-use crate::read_model::{empty_map_value, found_managed_read, take_optional, take_required};
+use crate::read_model::{empty_map_value, found_managed_read};
 use crate::read_models_generated::S3BucketReadModel;
 
 /// The complete read-only projection shared by managed and data-source
@@ -109,22 +109,29 @@ impl AwsProvider {
                 // GetBucketLocation for this purpose, so using this response avoids
                 // another API round trip and another IAM permission.
                 let region = normalize_bucket_location(output.bucket_region());
-                let mut attributes = s3_bucket_read_only_outputs(name, &region).into_attributes();
-                // Get tags
-                self.read_s3_bucket_tags(id, name, &mut attributes).await?;
+                let S3BucketReadOnlyOutputs {
+                    arn,
+                    region,
+                    bucket_domain_name,
+                    bucket_regional_domain_name,
+                    hosted_zone_id,
+                } = s3_bucket_read_only_outputs(name, &region);
+                let tags = self.read_s3_bucket_tags(id, name).await?;
 
                 let model = S3BucketReadModel {
                     bucket: crate::read_model::applied_identifier_value(identifier),
-                    arn: take_required(id, &mut attributes, "arn")?,
-                    region: take_required(id, &mut attributes, "region")?,
-                    bucket_domain_name: take_required(id, &mut attributes, "bucket_domain_name")?,
-                    bucket_regional_domain_name: take_required(
-                        id,
-                        &mut attributes,
-                        "bucket_regional_domain_name",
-                    )?,
-                    hosted_zone_id: take_optional(&mut attributes, "hosted_zone_id"),
-                    tags: take_optional(&mut attributes, "tags").unwrap_or_else(empty_map_value),
+                    arn: Value::Concrete(ConcreteValue::String(arn.into())),
+                    region: Value::Concrete(ConcreteValue::String(region.into())),
+                    bucket_domain_name: Value::Concrete(ConcreteValue::String(
+                        bucket_domain_name.into(),
+                    )),
+                    bucket_regional_domain_name: Value::Concrete(ConcreteValue::String(
+                        bucket_regional_domain_name.into(),
+                    )),
+                    hosted_zone_id: hosted_zone_id.map(|hosted_zone_id| {
+                        Value::Concrete(ConcreteValue::String(hosted_zone_id.into()))
+                    }),
+                    tags,
                 };
                 found_managed_read(id, applied_identifier, model)
             }
@@ -404,8 +411,7 @@ impl AwsProvider {
         &self,
         id: &ResourceId,
         identifier: &str,
-        attributes: &mut HashMap<String, Value>,
-    ) -> ProviderResult<()> {
+    ) -> ProviderResult<Value> {
         match self
             .s3_client
             .get_bucket_tagging()
@@ -421,20 +427,16 @@ impl AwsProvider {
                         Value::Concrete(ConcreteValue::String(tag.value().to_string().into())),
                     );
                 }
-                attributes.insert(
-                    "tags".to_string(),
-                    Value::Concrete(ConcreteValue::Map(tag_map)),
-                );
+                Ok(Value::Concrete(ConcreteValue::Map(tag_map)))
             }
             Err(err) => {
                 if !is_s3_not_configured_error(&err, "NoSuchTagSet") {
                     return Err(api_error_with_meta("Failed to read bucket tagging", err)
                         .for_resource(id.clone()));
                 }
-                attributes.insert("tags".to_string(), empty_map_value());
+                Ok(empty_map_value())
             }
         }
-        Ok(())
     }
 
     /// Write S3 bucket tags

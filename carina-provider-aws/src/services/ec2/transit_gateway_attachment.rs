@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use carina_core::provider::{AppliedIdentifier, ReadOutcome, Sent};
 use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
@@ -15,7 +13,8 @@ use crate::helpers::{
     require_string_attr,
 };
 use crate::provider::{AwsCreateAttempt, Ec2TaggedResourceKind};
-use crate::read_model::{empty_map_value, found_managed_read, take_optional, take_required};
+use crate::provider_generated::Ec2TransitGatewayAttachmentReadFields;
+use crate::read_model::{empty_map_value, found_managed_read, require_read_value};
 use crate::read_models_generated::Ec2TransitGatewayAttachmentReadModel;
 
 fn transit_gateway_attachment_create_poll_state(
@@ -143,20 +142,25 @@ impl AwsProvider {
                 return Ok(ReadOutcome::not_found(id.clone()));
             }
 
-            let mut attributes = HashMap::new();
-
-            let _identifier_value =
-                Self::extract_ec2_transit_gateway_attachment_attributes(att, &mut attributes);
+            let Ec2TransitGatewayAttachmentReadFields {
+                options,
+                subnet_ids,
+                transit_gateway_attachment_id,
+                transit_gateway_id,
+                vpc_id,
+                applied_identifier: _,
+            } = Self::extract_ec2_transit_gateway_attachment_attributes(att);
 
             let model = Ec2TransitGatewayAttachmentReadModel {
-                options: take_optional(&mut attributes, "options"),
-                subnet_ids: take_required(id, &mut attributes, "subnet_ids")?,
-                transit_gateway_id: take_required(id, &mut attributes, "transit_gateway_id")?,
-                vpc_id: take_required(id, &mut attributes, "vpc_id")?,
-                transit_gateway_attachment_id: take_optional(
-                    &mut attributes,
-                    "transit_gateway_attachment_id",
-                ),
+                options,
+                subnet_ids: require_read_value(id, subnet_ids, "subnet_ids")?,
+                transit_gateway_id: require_read_value(
+                    id,
+                    transit_gateway_id,
+                    "transit_gateway_id",
+                )?,
+                vpc_id: require_read_value(id, vpc_id, "vpc_id")?,
+                transit_gateway_attachment_id,
                 tags: Self::ec2_tags_to_value(att.tags()).unwrap_or_else(empty_map_value),
             };
 
@@ -475,11 +479,10 @@ mod tests {
                     .build(),
             )
             .build();
-        let mut attrs = HashMap::new();
-        AwsProvider::extract_ec2_transit_gateway_attachment_attributes(&attachment, &mut attrs);
+        let fields = AwsProvider::extract_ec2_transit_gateway_attachment_attributes(&attachment);
 
-        let Some(Value::Concrete(ConcreteValue::Map(options))) = attrs.get("options") else {
-            panic!("expected nested options map, got {attrs:?}");
+        let Some(Value::Concrete(ConcreteValue::Map(options))) = fields.options.as_ref() else {
+            panic!("expected nested options map");
         };
         assert_eq!(
             options.get("dns_support"),
@@ -499,7 +502,6 @@ mod tests {
                 "enable".to_string().into()
             )))
         );
-        assert!(!attrs.contains_key("dns_support"));
     }
 
     #[test]

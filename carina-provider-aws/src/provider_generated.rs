@@ -3,17 +3,285 @@
 //! DO NOT EDIT MANUALLY - regenerate with:
 //!   ./carina-provider-aws/scripts/generate-provider.sh
 
-use indexmap::IndexMap;
-use std::collections::HashMap;
-
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
 use carina_core::provider::{
     AppliedIdentifier, BoxFuture, ProviderError, ProviderResult, ReadOutcome,
 };
 use carina_core::resource::{ConcreteValue, DataSource, Resource, ResourceId, State, Value};
+use indexmap::IndexMap;
 
 // ===== Generated Methods on AwsProvider =====
+
+/// Typed values extracted from the AWS read shape for `ec2.Vpc`.
+#[allow(dead_code)]
+pub(crate) struct Ec2VpcReadFields {
+    pub(crate) cidr_block: Option<Value>,
+    pub(crate) instance_tenancy: Option<Value>,
+    pub(crate) vpc_id: Option<Value>,
+    pub(crate) applied_identifier: Option<String>,
+}
+
+/// Typed values extracted from the AWS read shape for `ec2.Subnet`.
+#[allow(dead_code)]
+pub(crate) struct Ec2SubnetReadFields {
+    pub(crate) assign_ipv6_address_on_creation: Option<Value>,
+    pub(crate) availability_zone: Option<Value>,
+    pub(crate) availability_zone_id: Option<Value>,
+    pub(crate) cidr_block: Option<Value>,
+    pub(crate) enable_dns64: Option<Value>,
+    pub(crate) enable_lni_at_device_index: Option<Value>,
+    pub(crate) ipv6_native: Option<Value>,
+    pub(crate) map_public_ip_on_launch: Option<Value>,
+    pub(crate) outpost_arn: Option<Value>,
+    pub(crate) private_dns_name_options_on_launch: Option<Value>,
+    pub(crate) subnet_id: Option<Value>,
+    pub(crate) vpc_id: Option<Value>,
+    pub(crate) applied_identifier: Option<String>,
+}
+
+/// Typed values extracted from the AWS read shape for `ec2.InternetGateway`.
+#[allow(dead_code)]
+pub(crate) struct Ec2InternetGatewayReadFields {
+    pub(crate) internet_gateway_id: Option<Value>,
+    pub(crate) applied_identifier: Option<String>,
+}
+
+/// Typed values extracted from the AWS read shape for `ec2.RouteTable`.
+#[allow(dead_code)]
+pub(crate) struct Ec2RouteTableReadFields {
+    pub(crate) route_table_id: Option<Value>,
+    pub(crate) vpc_id: Option<Value>,
+    pub(crate) applied_identifier: Option<String>,
+}
+
+/// Typed values extracted from the AWS read shape for `ec2.Route`.
+#[allow(dead_code)]
+pub(crate) struct Ec2RouteReadFields {
+    pub(crate) destination_cidr_block: Option<Value>,
+    pub(crate) gateway_id: Option<Value>,
+    pub(crate) nat_gateway_id: Option<Value>,
+    pub(crate) applied_identifier: Option<String>,
+}
+
+/// Typed values extracted from the AWS read shape for `ec2.SecurityGroup`.
+#[allow(dead_code)]
+pub(crate) struct Ec2SecurityGroupReadFields {
+    pub(crate) description: Option<Value>,
+    pub(crate) group_id: Option<Value>,
+    pub(crate) group_name: Option<Value>,
+    pub(crate) vpc_id: Option<Value>,
+    pub(crate) applied_identifier: Option<String>,
+}
+
+/// Typed values extracted from the AWS read shape for `ec2.SecurityGroupIngress`.
+#[allow(dead_code)]
+pub(crate) struct Ec2SecurityGroupIngressReadFields {
+    pub(crate) cidr_ipv6: Option<Value>,
+    pub(crate) description: Option<Value>,
+    pub(crate) from_port: Option<Value>,
+    pub(crate) group_id: Option<Value>,
+    pub(crate) ip_protocol: Option<Value>,
+    pub(crate) security_group_rule_id: Option<Value>,
+    pub(crate) source_prefix_list_id: Option<Value>,
+    pub(crate) to_port: Option<Value>,
+    pub(crate) applied_identifier: Option<String>,
+}
+
+/// Typed values extracted from the AWS read shape for `ec2.SecurityGroupEgress`.
+#[allow(dead_code)]
+pub(crate) struct Ec2SecurityGroupEgressReadFields {
+    pub(crate) cidr_ipv6: Option<Value>,
+    pub(crate) description: Option<Value>,
+    pub(crate) destination_prefix_list_id: Option<Value>,
+    pub(crate) from_port: Option<Value>,
+    pub(crate) group_id: Option<Value>,
+    pub(crate) ip_protocol: Option<Value>,
+    pub(crate) security_group_rule_id: Option<Value>,
+    pub(crate) to_port: Option<Value>,
+    pub(crate) applied_identifier: Option<String>,
+}
+
+/// Typed values extracted from the AWS read shape for `ec2.EgressOnlyInternetGateway`.
+#[allow(dead_code)]
+pub(crate) struct Ec2EgressOnlyInternetGatewayReadFields {
+    pub(crate) egress_only_internet_gateway_id: Option<Value>,
+    pub(crate) vpc_id: Option<Value>,
+    pub(crate) applied_identifier: Option<String>,
+}
+
+/// Typed values extracted from the AWS read shape for `ec2.Eip`.
+#[allow(dead_code)]
+pub(crate) struct Ec2EipReadFields {
+    pub(crate) allocation_id: Option<Value>,
+    pub(crate) domain: Option<Value>,
+    pub(crate) public_ip: Option<Value>,
+    pub(crate) public_ipv4_pool: Option<Value>,
+    pub(crate) applied_identifier: Option<String>,
+}
+
+/// Typed values extracted from the AWS read shape for `ec2.FlowLog`.
+#[allow(dead_code)]
+pub(crate) struct Ec2FlowLogReadFields {
+    pub(crate) deliver_logs_permission_arn: Option<Value>,
+    pub(crate) flow_log_id: Option<Value>,
+    pub(crate) log_destination: Option<Value>,
+    pub(crate) log_destination_type: Option<Value>,
+    pub(crate) log_format: Option<Value>,
+    pub(crate) log_group_name: Option<Value>,
+    pub(crate) max_aggregation_interval: Option<Value>,
+    pub(crate) traffic_type: Option<Value>,
+    pub(crate) applied_identifier: Option<String>,
+}
+
+/// Typed values extracted from the AWS read shape for `ec2.NatGateway`.
+#[allow(dead_code)]
+pub(crate) struct Ec2NatGatewayReadFields {
+    pub(crate) allocation_id: Option<Value>,
+    pub(crate) availability_mode: Option<Value>,
+    pub(crate) connectivity_type: Option<Value>,
+    pub(crate) nat_gateway_id: Option<Value>,
+    pub(crate) subnet_id: Option<Value>,
+    pub(crate) vpc_id: Option<Value>,
+    pub(crate) applied_identifier: Option<String>,
+}
+
+/// Typed values extracted from the AWS read shape for `ec2.SubnetRouteTableAssociation`.
+#[allow(dead_code)]
+pub(crate) struct Ec2SubnetRouteTableAssociationReadFields {
+    pub(crate) public_ipv4_pool: Option<Value>,
+    pub(crate) route_table_id: Option<Value>,
+    pub(crate) subnet_id: Option<Value>,
+    pub(crate) applied_identifier: Option<String>,
+}
+
+/// Typed values extracted from the AWS read shape for `ec2.TransitGateway`.
+#[allow(dead_code)]
+pub(crate) struct Ec2TransitGatewayReadFields {
+    pub(crate) description: Option<Value>,
+    pub(crate) options: Option<Value>,
+    pub(crate) transit_gateway_id: Option<Value>,
+    pub(crate) applied_identifier: Option<String>,
+}
+
+/// Typed values extracted from the AWS read shape for `ec2.TransitGatewayAttachment`.
+#[allow(dead_code)]
+pub(crate) struct Ec2TransitGatewayAttachmentReadFields {
+    pub(crate) options: Option<Value>,
+    pub(crate) subnet_ids: Option<Value>,
+    pub(crate) transit_gateway_attachment_id: Option<Value>,
+    pub(crate) transit_gateway_id: Option<Value>,
+    pub(crate) vpc_id: Option<Value>,
+    pub(crate) applied_identifier: Option<String>,
+}
+
+/// Typed values extracted from the AWS read shape for `ec2.VpcEndpoint`.
+#[allow(dead_code)]
+pub(crate) struct Ec2VpcEndpointReadFields {
+    pub(crate) policy_document: Option<Value>,
+    pub(crate) private_dns_enabled: Option<Value>,
+    pub(crate) resource_configuration_arn: Option<Value>,
+    pub(crate) route_table_ids: Option<Value>,
+    pub(crate) security_group_ids: Option<Value>,
+    pub(crate) service_name: Option<Value>,
+    pub(crate) service_network_arn: Option<Value>,
+    pub(crate) service_region: Option<Value>,
+    pub(crate) subnet_ids: Option<Value>,
+    pub(crate) vpc_endpoint_id: Option<Value>,
+    pub(crate) vpc_endpoint_type: Option<Value>,
+    pub(crate) vpc_id: Option<Value>,
+    pub(crate) applied_identifier: Option<String>,
+}
+
+/// Typed values extracted from the AWS read shape for `ec2.VpcPeeringConnection`.
+#[allow(dead_code)]
+pub(crate) struct Ec2VpcPeeringConnectionReadFields {
+    pub(crate) peer_owner_id: Option<Value>,
+    pub(crate) peer_vpc_id: Option<Value>,
+    pub(crate) vpc_id: Option<Value>,
+    pub(crate) vpc_peering_connection_id: Option<Value>,
+    pub(crate) applied_identifier: Option<String>,
+}
+
+/// Typed values extracted from the AWS read shape for `ec2.VpnGateway`.
+#[allow(dead_code)]
+pub(crate) struct Ec2VpnGatewayReadFields {
+    pub(crate) amazon_side_asn: Option<Value>,
+    pub(crate) availability_zone: Option<Value>,
+    pub(crate) r#type: Option<Value>,
+    pub(crate) vpn_gateway_id: Option<Value>,
+    pub(crate) applied_identifier: Option<String>,
+}
+
+/// Typed values extracted from the AWS read shape for `organizations.Organization`.
+#[allow(dead_code)]
+pub(crate) struct OrganizationsOrganizationReadFields {
+    pub(crate) arn: Option<Value>,
+    pub(crate) feature_set: Option<Value>,
+    pub(crate) id: Option<Value>,
+    pub(crate) master_account_arn: Option<Value>,
+    pub(crate) master_account_email: Option<Value>,
+    pub(crate) master_account_id: Option<Value>,
+    pub(crate) applied_identifier: Option<String>,
+}
+
+/// Typed values extracted from the AWS read shape for `organizations.Account`.
+#[allow(dead_code)]
+pub(crate) struct OrganizationsAccountReadFields {
+    pub(crate) arn: Option<Value>,
+    pub(crate) email: Option<Value>,
+    pub(crate) id: Option<Value>,
+    pub(crate) joined_method: Option<Value>,
+    pub(crate) name: Option<Value>,
+    pub(crate) status: Option<Value>,
+    pub(crate) applied_identifier: Option<String>,
+}
+
+/// Typed values extracted from the AWS read shape for `route53.RecordSet`.
+#[allow(dead_code)]
+pub(crate) struct Route53RecordSetReadFields {
+    pub(crate) name: Option<Value>,
+    pub(crate) ttl: Option<Value>,
+    pub(crate) r#type: Option<Value>,
+    pub(crate) applied_identifier: Option<String>,
+}
+
+/// Typed values extracted from the AWS read shape for `iam.Role`.
+#[allow(dead_code)]
+pub(crate) struct IamRoleReadFields {
+    pub(crate) arn: Option<Value>,
+    pub(crate) assume_role_policy_document: Option<Value>,
+    pub(crate) description: Option<Value>,
+    pub(crate) max_session_duration: Option<Value>,
+    pub(crate) path: Option<Value>,
+    pub(crate) role_id: Option<Value>,
+    pub(crate) role_name: Option<Value>,
+    pub(crate) applied_identifier: Option<String>,
+}
+
+/// Typed values extracted from the AWS read shape for `logs.LogGroup`.
+#[allow(dead_code)]
+pub(crate) struct LogsLogGroupReadFields {
+    pub(crate) deletion_protection_enabled: Option<Value>,
+    pub(crate) kms_key_id: Option<Value>,
+    pub(crate) log_group_class: Option<Value>,
+    pub(crate) log_group_name: Option<Value>,
+    pub(crate) retention_in_days: Option<Value>,
+    pub(crate) applied_identifier: Option<String>,
+}
+
+/// Typed values extracted from the AWS read shape for `acm.Certificate`.
+#[allow(dead_code)]
+pub(crate) struct AcmCertificateReadFields {
+    pub(crate) certificate_arn: Option<Value>,
+    pub(crate) domain_name: Option<Value>,
+    pub(crate) key_algorithm: Option<Value>,
+    pub(crate) renewal_eligibility: Option<Value>,
+    pub(crate) status: Option<Value>,
+    pub(crate) subject_alternative_names: Option<Value>,
+    pub(crate) r#type: Option<Value>,
+    pub(crate) applied_identifier: Option<String>,
+}
 
 #[allow(dead_code)]
 impl AwsProvider {
@@ -200,480 +468,425 @@ impl AwsProvider {
     }
 
     /// Extract ec2.Vpc attributes from SDK response type (generated)
-    pub(crate) fn extract_ec2_vpc_attributes(
-        obj: &aws_sdk_ec2::types::Vpc,
-        attributes: &mut HashMap<String, Value>,
-    ) -> Option<String> {
-        if let Some(v) = obj.cidr_block() {
-            attributes.insert(
-                "cidr_block".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string().into())),
-            );
+    pub(crate) fn extract_ec2_vpc_attributes(obj: &aws_sdk_ec2::types::Vpc) -> Ec2VpcReadFields {
+        let cidr_block = obj
+            .cidr_block()
+            .map(|v| Value::Concrete(ConcreteValue::String(v.to_string().into())));
+        let instance_tenancy = obj
+            .instance_tenancy()
+            .map(|v| Value::Concrete(ConcreteValue::String(v.as_str().to_string().into())));
+        let vpc_id = obj
+            .vpc_id()
+            .map(|v| Value::Concrete(ConcreteValue::String(v.to_string().into())));
+        let applied_identifier = obj.vpc_id().map(String::from);
+        Ec2VpcReadFields {
+            cidr_block,
+            instance_tenancy,
+            vpc_id,
+            applied_identifier,
         }
-        if let Some(v) = obj.instance_tenancy() {
-            attributes.insert(
-                "instance_tenancy".to_string(),
-                Value::Concrete(ConcreteValue::String(v.as_str().to_string().into())),
-            );
-        }
-        if let Some(v) = obj.vpc_id() {
-            attributes.insert(
-                "vpc_id".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string().into())),
-            );
-        }
-        obj.vpc_id().map(String::from)
     }
 
     /// Extract ec2.Subnet attributes from SDK response type (generated)
     pub(crate) fn extract_ec2_subnet_attributes(
         obj: &aws_sdk_ec2::types::Subnet,
-        attributes: &mut HashMap<String, Value>,
-    ) -> Option<String> {
-        if let Some(v) = obj.assign_ipv6_address_on_creation() {
-            attributes.insert(
-                "assign_ipv6_address_on_creation".to_string(),
-                Value::Concrete(ConcreteValue::Bool(v)),
-            );
+    ) -> Ec2SubnetReadFields {
+        let assign_ipv6_address_on_creation = obj
+            .assign_ipv6_address_on_creation()
+            .map(|v| Value::Concrete(ConcreteValue::Bool(v)));
+        let availability_zone = obj
+            .availability_zone()
+            .map(|v| Value::Concrete(ConcreteValue::String(v.to_string().into())));
+        let availability_zone_id = obj
+            .availability_zone_id()
+            .map(|v| Value::Concrete(ConcreteValue::String(v.to_string().into())));
+        let cidr_block = obj
+            .cidr_block()
+            .map(|v| Value::Concrete(ConcreteValue::String(v.to_string().into())));
+        let enable_dns64 = obj
+            .enable_dns64()
+            .map(|v| Value::Concrete(ConcreteValue::Bool(v)));
+        let enable_lni_at_device_index = obj
+            .enable_lni_at_device_index()
+            .map(|v| Value::Concrete(ConcreteValue::Int(v as i64)));
+        let ipv6_native = obj
+            .ipv6_native()
+            .map(|v| Value::Concrete(ConcreteValue::Bool(v)));
+        let map_public_ip_on_launch = obj
+            .map_public_ip_on_launch()
+            .map(|v| Value::Concrete(ConcreteValue::Bool(v)));
+        let outpost_arn = obj
+            .outpost_arn()
+            .map(|v| Value::Concrete(ConcreteValue::String(v.to_string().into())));
+        let subnet_id = obj
+            .subnet_id()
+            .map(|v| Value::Concrete(ConcreteValue::String(v.to_string().into())));
+        let vpc_id = obj
+            .vpc_id()
+            .map(|v| Value::Concrete(ConcreteValue::String(v.to_string().into())));
+        let private_dns_name_options_on_launch =
+            obj.private_dns_name_options_on_launch()
+                .and_then(|dns_opts| {
+                    let mut fields = IndexMap::new();
+                    if let Some(v) = dns_opts.hostname_type() {
+                        fields.insert(
+                            "hostname_type".to_string(),
+                            Value::Concrete(ConcreteValue::String(v.as_str().to_string().into())),
+                        );
+                    }
+                    if let Some(v) = dns_opts.enable_resource_name_dns_a_record() {
+                        fields.insert(
+                            "enable_resource_name_dns_a_record".to_string(),
+                            Value::Concrete(ConcreteValue::Bool(v)),
+                        );
+                    }
+                    if let Some(v) = dns_opts.enable_resource_name_dns_aaaa_record() {
+                        fields.insert(
+                            "enable_resource_name_dns_aaaa_record".to_string(),
+                            Value::Concrete(ConcreteValue::Bool(v)),
+                        );
+                    }
+                    (!fields.is_empty()).then(|| Value::Concrete(ConcreteValue::Map(fields)))
+                });
+        let applied_identifier = obj.subnet_id().map(String::from);
+        Ec2SubnetReadFields {
+            assign_ipv6_address_on_creation,
+            availability_zone,
+            availability_zone_id,
+            cidr_block,
+            enable_dns64,
+            enable_lni_at_device_index,
+            ipv6_native,
+            map_public_ip_on_launch,
+            outpost_arn,
+            private_dns_name_options_on_launch,
+            subnet_id,
+            vpc_id,
+            applied_identifier,
         }
-        if let Some(v) = obj.availability_zone() {
-            attributes.insert(
-                "availability_zone".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string().into())),
-            );
-        }
-        if let Some(v) = obj.availability_zone_id() {
-            attributes.insert(
-                "availability_zone_id".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string().into())),
-            );
-        }
-        if let Some(v) = obj.cidr_block() {
-            attributes.insert(
-                "cidr_block".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string().into())),
-            );
-        }
-        if let Some(v) = obj.enable_dns64() {
-            attributes.insert(
-                "enable_dns64".to_string(),
-                Value::Concrete(ConcreteValue::Bool(v)),
-            );
-        }
-        if let Some(v) = obj.enable_lni_at_device_index() {
-            attributes.insert(
-                "enable_lni_at_device_index".to_string(),
-                Value::Concrete(ConcreteValue::Int(v as i64)),
-            );
-        }
-        if let Some(v) = obj.ipv6_native() {
-            attributes.insert(
-                "ipv6_native".to_string(),
-                Value::Concrete(ConcreteValue::Bool(v)),
-            );
-        }
-        if let Some(v) = obj.map_public_ip_on_launch() {
-            attributes.insert(
-                "map_public_ip_on_launch".to_string(),
-                Value::Concrete(ConcreteValue::Bool(v)),
-            );
-        }
-        if let Some(v) = obj.outpost_arn() {
-            attributes.insert(
-                "outpost_arn".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string().into())),
-            );
-        }
-        if let Some(v) = obj.subnet_id() {
-            attributes.insert(
-                "subnet_id".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string().into())),
-            );
-        }
-        if let Some(v) = obj.vpc_id() {
-            attributes.insert(
-                "vpc_id".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string().into())),
-            );
-        }
-        if let Some(dns_opts) = obj.private_dns_name_options_on_launch() {
-            let mut fields = IndexMap::new();
-            if let Some(v) = dns_opts.hostname_type() {
-                fields.insert(
-                    "hostname_type".to_string(),
-                    Value::Concrete(ConcreteValue::String(v.as_str().to_string().into())),
-                );
-            }
-            if let Some(v) = dns_opts.enable_resource_name_dns_a_record() {
-                fields.insert(
-                    "enable_resource_name_dns_a_record".to_string(),
-                    Value::Concrete(ConcreteValue::Bool(v)),
-                );
-            }
-            if let Some(v) = dns_opts.enable_resource_name_dns_aaaa_record() {
-                fields.insert(
-                    "enable_resource_name_dns_aaaa_record".to_string(),
-                    Value::Concrete(ConcreteValue::Bool(v)),
-                );
-            }
-            if !fields.is_empty() {
-                attributes.insert(
-                    "private_dns_name_options_on_launch".to_string(),
-                    Value::Concrete(ConcreteValue::Map(fields)),
-                );
-            }
-        }
-        obj.subnet_id().map(String::from)
     }
 
     /// Extract ec2.InternetGateway attributes from SDK response type (generated)
     pub(crate) fn extract_ec2_internet_gateway_attributes(
         obj: &aws_sdk_ec2::types::InternetGateway,
-        attributes: &mut HashMap<String, Value>,
-    ) -> Option<String> {
-        if let Some(v) = obj.internet_gateway_id() {
-            attributes.insert(
-                "internet_gateway_id".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string().into())),
-            );
+    ) -> Ec2InternetGatewayReadFields {
+        let internet_gateway_id = obj
+            .internet_gateway_id()
+            .map(|v| Value::Concrete(ConcreteValue::String(v.to_string().into())));
+        let applied_identifier = obj.internet_gateway_id().map(String::from);
+        Ec2InternetGatewayReadFields {
+            internet_gateway_id,
+            applied_identifier,
         }
-        obj.internet_gateway_id().map(String::from)
     }
 
     /// Extract ec2.RouteTable attributes from SDK response type (generated)
     pub(crate) fn extract_ec2_route_table_attributes(
         obj: &aws_sdk_ec2::types::RouteTable,
-        attributes: &mut HashMap<String, Value>,
-    ) -> Option<String> {
-        if let Some(v) = obj.route_table_id() {
-            attributes.insert(
-                "route_table_id".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string().into())),
-            );
+    ) -> Ec2RouteTableReadFields {
+        let route_table_id = obj
+            .route_table_id()
+            .map(|v| Value::Concrete(ConcreteValue::String(v.to_string().into())));
+        let vpc_id = obj
+            .vpc_id()
+            .map(|v| Value::Concrete(ConcreteValue::String(v.to_string().into())));
+        let applied_identifier = obj.route_table_id().map(String::from);
+        Ec2RouteTableReadFields {
+            route_table_id,
+            vpc_id,
+            applied_identifier,
         }
-        if let Some(v) = obj.vpc_id() {
-            attributes.insert(
-                "vpc_id".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string().into())),
-            );
-        }
-        obj.route_table_id().map(String::from)
     }
 
     /// Extract ec2.Route attributes from SDK response type (generated)
     pub(crate) fn extract_ec2_route_attributes(
         obj: &aws_sdk_ec2::types::Route,
-        attributes: &mut HashMap<String, Value>,
-    ) -> Option<String> {
-        if let Some(v) = obj.destination_cidr_block() {
-            attributes.insert(
-                "destination_cidr_block".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string().into())),
-            );
+    ) -> Ec2RouteReadFields {
+        let destination_cidr_block = obj
+            .destination_cidr_block()
+            .map(|v| Value::Concrete(ConcreteValue::String(v.to_string().into())));
+        let gateway_id = obj
+            .gateway_id()
+            .map(|v| Value::Concrete(ConcreteValue::String(v.to_string().into())));
+        let nat_gateway_id = obj
+            .nat_gateway_id()
+            .map(|v| Value::Concrete(ConcreteValue::String(v.to_string().into())));
+        let applied_identifier = None;
+        Ec2RouteReadFields {
+            destination_cidr_block,
+            gateway_id,
+            nat_gateway_id,
+            applied_identifier,
         }
-        if let Some(v) = obj.gateway_id() {
-            attributes.insert(
-                "gateway_id".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string().into())),
-            );
-        }
-        if let Some(v) = obj.nat_gateway_id() {
-            attributes.insert(
-                "nat_gateway_id".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string().into())),
-            );
-        }
-        None
     }
 
     /// Extract ec2.SecurityGroup attributes from SDK response type (generated)
     pub(crate) fn extract_ec2_security_group_attributes(
         obj: &aws_sdk_ec2::types::SecurityGroup,
-        attributes: &mut HashMap<String, Value>,
-    ) -> Option<String> {
-        if let Some(v) = obj.description() {
-            attributes.insert(
-                "description".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string().into())),
-            );
+    ) -> Ec2SecurityGroupReadFields {
+        let description = obj
+            .description()
+            .map(|v| Value::Concrete(ConcreteValue::String(v.to_string().into())));
+        let group_id = obj
+            .group_id()
+            .map(|v| Value::Concrete(ConcreteValue::String(v.to_string().into())));
+        let group_name = obj
+            .group_name()
+            .map(|v| Value::Concrete(ConcreteValue::String(v.to_string().into())));
+        let vpc_id = obj
+            .vpc_id()
+            .map(|v| Value::Concrete(ConcreteValue::String(v.to_string().into())));
+        let applied_identifier = obj.group_id().map(String::from);
+        Ec2SecurityGroupReadFields {
+            description,
+            group_id,
+            group_name,
+            vpc_id,
+            applied_identifier,
         }
-        if let Some(v) = obj.group_id() {
-            attributes.insert(
-                "group_id".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string().into())),
-            );
-        }
-        if let Some(v) = obj.group_name() {
-            attributes.insert(
-                "group_name".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string().into())),
-            );
-        }
-        if let Some(v) = obj.vpc_id() {
-            attributes.insert(
-                "vpc_id".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string().into())),
-            );
-        }
-        obj.group_id().map(String::from)
     }
 
     /// Extract ec2.SecurityGroupIngress attributes from SDK response type (generated)
     pub(crate) fn extract_ec2_security_group_ingress_attributes(
         obj: &aws_sdk_ec2::types::SecurityGroupRule,
-        attributes: &mut HashMap<String, Value>,
-    ) -> Option<String> {
-        if let Some(v) = obj.cidr_ipv6() {
-            attributes.insert(
-                "cidr_ipv6".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string().into())),
-            );
+    ) -> Ec2SecurityGroupIngressReadFields {
+        let cidr_ipv6 = obj
+            .cidr_ipv6()
+            .map(|v| Value::Concrete(ConcreteValue::String(v.to_string().into())));
+        let description = obj
+            .description()
+            .map(|v| Value::Concrete(ConcreteValue::String(v.to_string().into())));
+        let from_port = obj
+            .from_port()
+            .map(|v| Value::Concrete(ConcreteValue::Int(v as i64)));
+        let group_id = obj
+            .group_id()
+            .map(|v| Value::Concrete(ConcreteValue::String(v.to_string().into())));
+        let ip_protocol = obj
+            .ip_protocol()
+            .map(|v| Value::Concrete(ConcreteValue::String(v.to_string().into())));
+        let security_group_rule_id = obj
+            .security_group_rule_id()
+            .map(|v| Value::Concrete(ConcreteValue::String(v.to_string().into())));
+        let source_prefix_list_id = obj
+            .prefix_list_id()
+            .map(|v| Value::Concrete(ConcreteValue::String(v.to_string().into())));
+        let to_port = obj
+            .to_port()
+            .map(|v| Value::Concrete(ConcreteValue::Int(v as i64)));
+        let applied_identifier = obj.security_group_rule_id().map(String::from);
+        Ec2SecurityGroupIngressReadFields {
+            cidr_ipv6,
+            description,
+            from_port,
+            group_id,
+            ip_protocol,
+            security_group_rule_id,
+            source_prefix_list_id,
+            to_port,
+            applied_identifier,
         }
-        if let Some(v) = obj.description() {
-            attributes.insert(
-                "description".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string().into())),
-            );
-        }
-        if let Some(v) = obj.from_port() {
-            attributes.insert(
-                "from_port".to_string(),
-                Value::Concrete(ConcreteValue::Int(v as i64)),
-            );
-        }
-        if let Some(v) = obj.group_id() {
-            attributes.insert(
-                "group_id".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string().into())),
-            );
-        }
-        if let Some(v) = obj.ip_protocol() {
-            attributes.insert(
-                "ip_protocol".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string().into())),
-            );
-        }
-        if let Some(v) = obj.security_group_rule_id() {
-            attributes.insert(
-                "security_group_rule_id".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string().into())),
-            );
-        }
-        if let Some(v) = obj.prefix_list_id() {
-            attributes.insert(
-                "source_prefix_list_id".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string().into())),
-            );
-        }
-        if let Some(v) = obj.to_port() {
-            attributes.insert(
-                "to_port".to_string(),
-                Value::Concrete(ConcreteValue::Int(v as i64)),
-            );
-        }
-        obj.security_group_rule_id().map(String::from)
     }
 
     /// Extract ec2.SecurityGroupEgress attributes from SDK response type (generated)
     pub(crate) fn extract_ec2_security_group_egress_attributes(
         obj: &aws_sdk_ec2::types::SecurityGroupRule,
-        attributes: &mut HashMap<String, Value>,
-    ) -> Option<String> {
-        if let Some(v) = obj.cidr_ipv6() {
-            attributes.insert(
-                "cidr_ipv6".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string().into())),
-            );
+    ) -> Ec2SecurityGroupEgressReadFields {
+        let cidr_ipv6 = obj
+            .cidr_ipv6()
+            .map(|v| Value::Concrete(ConcreteValue::String(v.to_string().into())));
+        let description = obj
+            .description()
+            .map(|v| Value::Concrete(ConcreteValue::String(v.to_string().into())));
+        let destination_prefix_list_id = obj
+            .prefix_list_id()
+            .map(|v| Value::Concrete(ConcreteValue::String(v.to_string().into())));
+        let from_port = obj
+            .from_port()
+            .map(|v| Value::Concrete(ConcreteValue::Int(v as i64)));
+        let group_id = obj
+            .group_id()
+            .map(|v| Value::Concrete(ConcreteValue::String(v.to_string().into())));
+        let ip_protocol = obj
+            .ip_protocol()
+            .map(|v| Value::Concrete(ConcreteValue::String(v.to_string().into())));
+        let security_group_rule_id = obj
+            .security_group_rule_id()
+            .map(|v| Value::Concrete(ConcreteValue::String(v.to_string().into())));
+        let to_port = obj
+            .to_port()
+            .map(|v| Value::Concrete(ConcreteValue::Int(v as i64)));
+        let applied_identifier = obj.security_group_rule_id().map(String::from);
+        Ec2SecurityGroupEgressReadFields {
+            cidr_ipv6,
+            description,
+            destination_prefix_list_id,
+            from_port,
+            group_id,
+            ip_protocol,
+            security_group_rule_id,
+            to_port,
+            applied_identifier,
         }
-        if let Some(v) = obj.description() {
-            attributes.insert(
-                "description".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string().into())),
-            );
-        }
-        if let Some(v) = obj.prefix_list_id() {
-            attributes.insert(
-                "destination_prefix_list_id".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string().into())),
-            );
-        }
-        if let Some(v) = obj.from_port() {
-            attributes.insert(
-                "from_port".to_string(),
-                Value::Concrete(ConcreteValue::Int(v as i64)),
-            );
-        }
-        if let Some(v) = obj.group_id() {
-            attributes.insert(
-                "group_id".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string().into())),
-            );
-        }
-        if let Some(v) = obj.ip_protocol() {
-            attributes.insert(
-                "ip_protocol".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string().into())),
-            );
-        }
-        if let Some(v) = obj.security_group_rule_id() {
-            attributes.insert(
-                "security_group_rule_id".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string().into())),
-            );
-        }
-        if let Some(v) = obj.to_port() {
-            attributes.insert(
-                "to_port".to_string(),
-                Value::Concrete(ConcreteValue::Int(v as i64)),
-            );
-        }
-        obj.security_group_rule_id().map(String::from)
     }
 
     /// Extract ec2.EgressOnlyInternetGateway attributes from SDK response type (generated)
     pub(crate) fn extract_ec2_egress_only_internet_gateway_attributes(
         obj: &aws_sdk_ec2::types::EgressOnlyInternetGateway,
-        attributes: &mut HashMap<String, Value>,
-    ) -> Option<String> {
-        if let Some(v) = obj.egress_only_internet_gateway_id() {
-            attributes.insert(
-                "egress_only_internet_gateway_id".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string().into())),
-            );
+    ) -> Ec2EgressOnlyInternetGatewayReadFields {
+        let egress_only_internet_gateway_id = obj
+            .egress_only_internet_gateway_id()
+            .map(|v| Value::Concrete(ConcreteValue::String(v.to_string().into())));
+        let vpc_id = obj
+            .attachments()
+            .first()
+            .and_then(|item| item.vpc_id())
+            .map(|value| Value::Concrete(ConcreteValue::String(value.to_string().into())));
+        let applied_identifier = obj.egress_only_internet_gateway_id().map(String::from);
+        Ec2EgressOnlyInternetGatewayReadFields {
+            egress_only_internet_gateway_id,
+            vpc_id,
+            applied_identifier,
         }
-        if let Some(addr) = obj.attachments().first()
-            && let Some(v) = addr.vpc_id()
-        {
-            attributes.insert(
-                "vpc_id".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string().into())),
-            );
-        }
-        obj.egress_only_internet_gateway_id().map(String::from)
     }
 
     /// Extract ec2.Eip attributes from SDK response type (generated)
     pub(crate) fn extract_ec2_eip_attributes(
         obj: &aws_sdk_ec2::types::Address,
-        attributes: &mut HashMap<String, Value>,
-    ) -> Option<String> {
-        if let Some(v) = obj.allocation_id() {
-            attributes.insert(
-                "allocation_id".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string().into())),
-            );
+    ) -> Ec2EipReadFields {
+        let allocation_id = obj
+            .allocation_id()
+            .map(|v| Value::Concrete(ConcreteValue::String(v.to_string().into())));
+        let domain = obj
+            .domain()
+            .map(|v| Value::Concrete(ConcreteValue::String(v.as_str().to_string().into())));
+        let public_ip = obj
+            .public_ip()
+            .map(|v| Value::Concrete(ConcreteValue::String(v.to_string().into())));
+        let public_ipv4_pool = obj
+            .public_ipv4_pool()
+            .map(|v| Value::Concrete(ConcreteValue::String(v.to_string().into())));
+        let applied_identifier = obj.allocation_id().map(String::from);
+        Ec2EipReadFields {
+            allocation_id,
+            domain,
+            public_ip,
+            public_ipv4_pool,
+            applied_identifier,
         }
-        if let Some(v) = obj.domain() {
-            attributes.insert(
-                "domain".to_string(),
-                Value::Concrete(ConcreteValue::String(v.as_str().to_string().into())),
-            );
+    }
+
+    /// Extract ec2.FlowLog attributes from SDK response type (generated)
+    pub(crate) fn extract_ec2_flow_log_attributes(
+        obj: &aws_sdk_ec2::types::FlowLog,
+    ) -> Ec2FlowLogReadFields {
+        let deliver_logs_permission_arn = obj
+            .deliver_logs_permission_arn()
+            .map(|v| Value::Concrete(ConcreteValue::String(v.to_string().into())));
+        let flow_log_id = obj
+            .flow_log_id()
+            .map(|v| Value::Concrete(ConcreteValue::String(v.to_string().into())));
+        let log_destination = obj
+            .log_destination()
+            .map(|v| Value::Concrete(ConcreteValue::String(v.to_string().into())));
+        let log_destination_type = obj
+            .log_destination_type()
+            .map(|v| Value::Concrete(ConcreteValue::String(v.as_str().to_string().into())));
+        let log_format = obj
+            .log_format()
+            .map(|v| Value::Concrete(ConcreteValue::String(v.to_string().into())));
+        let log_group_name = obj
+            .log_group_name()
+            .map(|v| Value::Concrete(ConcreteValue::String(v.to_string().into())));
+        let max_aggregation_interval = obj
+            .max_aggregation_interval()
+            .map(|v| Value::Concrete(ConcreteValue::Int(v as i64)));
+        let traffic_type = obj
+            .traffic_type()
+            .map(|v| Value::Concrete(ConcreteValue::String(v.as_str().to_string().into())));
+        let applied_identifier = obj.flow_log_id().map(String::from);
+        Ec2FlowLogReadFields {
+            deliver_logs_permission_arn,
+            flow_log_id,
+            log_destination,
+            log_destination_type,
+            log_format,
+            log_group_name,
+            max_aggregation_interval,
+            traffic_type,
+            applied_identifier,
         }
-        if let Some(v) = obj.public_ip() {
-            attributes.insert(
-                "public_ip".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string().into())),
-            );
-        }
-        if let Some(v) = obj.public_ipv4_pool() {
-            attributes.insert(
-                "public_ipv4_pool".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string().into())),
-            );
-        }
-        obj.allocation_id().map(String::from)
     }
 
     /// Extract ec2.NatGateway attributes from SDK response type (generated)
     pub(crate) fn extract_ec2_nat_gateway_attributes(
         obj: &aws_sdk_ec2::types::NatGateway,
-        attributes: &mut HashMap<String, Value>,
-    ) -> Option<String> {
-        if let Some(v) = obj.availability_mode() {
-            attributes.insert(
-                "availability_mode".to_string(),
-                Value::Concrete(ConcreteValue::String(v.as_str().to_string().into())),
-            );
+    ) -> Ec2NatGatewayReadFields {
+        let availability_mode = obj
+            .availability_mode()
+            .map(|v| Value::Concrete(ConcreteValue::String(v.as_str().to_string().into())));
+        let connectivity_type = obj
+            .connectivity_type()
+            .map(|v| Value::Concrete(ConcreteValue::String(v.as_str().to_string().into())));
+        let nat_gateway_id = obj
+            .nat_gateway_id()
+            .map(|v| Value::Concrete(ConcreteValue::String(v.to_string().into())));
+        let subnet_id = obj
+            .subnet_id()
+            .map(|v| Value::Concrete(ConcreteValue::String(v.to_string().into())));
+        let vpc_id = obj
+            .vpc_id()
+            .map(|v| Value::Concrete(ConcreteValue::String(v.to_string().into())));
+        let allocation_id = obj
+            .nat_gateway_addresses()
+            .first()
+            .and_then(|item| item.allocation_id())
+            .map(|value| Value::Concrete(ConcreteValue::String(value.to_string().into())));
+        let applied_identifier = obj.nat_gateway_id().map(String::from);
+        Ec2NatGatewayReadFields {
+            allocation_id,
+            availability_mode,
+            connectivity_type,
+            nat_gateway_id,
+            subnet_id,
+            vpc_id,
+            applied_identifier,
         }
-        if let Some(v) = obj.connectivity_type() {
-            attributes.insert(
-                "connectivity_type".to_string(),
-                Value::Concrete(ConcreteValue::String(v.as_str().to_string().into())),
-            );
-        }
-        if let Some(v) = obj.nat_gateway_id() {
-            attributes.insert(
-                "nat_gateway_id".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string().into())),
-            );
-        }
-        if let Some(v) = obj.subnet_id() {
-            attributes.insert(
-                "subnet_id".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string().into())),
-            );
-        }
-        if let Some(v) = obj.vpc_id() {
-            attributes.insert(
-                "vpc_id".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string().into())),
-            );
-        }
-        if let Some(addr) = obj.nat_gateway_addresses().first()
-            && let Some(v) = addr.allocation_id()
-        {
-            attributes.insert(
-                "allocation_id".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string().into())),
-            );
-        }
-        obj.nat_gateway_id().map(String::from)
     }
 
     /// Extract ec2.SubnetRouteTableAssociation attributes from SDK response type (generated)
     pub(crate) fn extract_ec2_subnet_route_table_association_attributes(
         obj: &aws_sdk_ec2::types::RouteTableAssociation,
-        attributes: &mut HashMap<String, Value>,
-    ) -> Option<String> {
-        if let Some(v) = obj.public_ipv4_pool() {
-            attributes.insert(
-                "public_ipv4_pool".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string().into())),
-            );
+    ) -> Ec2SubnetRouteTableAssociationReadFields {
+        let public_ipv4_pool = obj
+            .public_ipv4_pool()
+            .map(|v| Value::Concrete(ConcreteValue::String(v.to_string().into())));
+        let route_table_id = obj
+            .route_table_id()
+            .map(|v| Value::Concrete(ConcreteValue::String(v.to_string().into())));
+        let subnet_id = obj
+            .subnet_id()
+            .map(|v| Value::Concrete(ConcreteValue::String(v.to_string().into())));
+        let applied_identifier = None;
+        Ec2SubnetRouteTableAssociationReadFields {
+            public_ipv4_pool,
+            route_table_id,
+            subnet_id,
+            applied_identifier,
         }
-        if let Some(v) = obj.route_table_id() {
-            attributes.insert(
-                "route_table_id".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string().into())),
-            );
-        }
-        if let Some(v) = obj.subnet_id() {
-            attributes.insert(
-                "subnet_id".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string().into())),
-            );
-        }
-        None
     }
 
     /// Extract ec2.TransitGateway attributes from SDK response type (generated)
     pub(crate) fn extract_ec2_transit_gateway_attributes(
         obj: &aws_sdk_ec2::types::TransitGateway,
-        attributes: &mut HashMap<String, Value>,
-    ) -> Option<String> {
-        if let Some(v) = obj.description() {
-            attributes.insert(
-                "description".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string().into())),
-            );
-        }
-        if let Some(v) = obj.transit_gateway_id() {
-            attributes.insert(
-                "transit_gateway_id".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string().into())),
-            );
-        }
-        if let Some(dns_opts) = obj.options() {
+    ) -> Ec2TransitGatewayReadFields {
+        let description = obj
+            .description()
+            .map(|v| Value::Concrete(ConcreteValue::String(v.to_string().into())));
+        let transit_gateway_id = obj
+            .transit_gateway_id()
+            .map(|v| Value::Concrete(ConcreteValue::String(v.to_string().into())));
+        let options = obj.options().and_then(|dns_opts| {
             let mut fields = IndexMap::new();
             if let Some(v) = dns_opts.amazon_side_asn() {
                 fields.insert(
@@ -738,53 +951,39 @@ impl AwsProvider {
                     Value::Concrete(ConcreteValue::String(v.as_str().to_string().into())),
                 );
             }
-            if !fields.is_empty() {
-                attributes.insert(
-                    "options".to_string(),
-                    Value::Concrete(ConcreteValue::Map(fields)),
-                );
-            }
+            (!fields.is_empty()).then(|| Value::Concrete(ConcreteValue::Map(fields)))
+        });
+        let applied_identifier = obj.transit_gateway_id().map(String::from);
+        Ec2TransitGatewayReadFields {
+            description,
+            options,
+            transit_gateway_id,
+            applied_identifier,
         }
-        obj.transit_gateway_id().map(String::from)
     }
 
     /// Extract ec2.TransitGatewayAttachment attributes from SDK response type (generated)
     pub(crate) fn extract_ec2_transit_gateway_attachment_attributes(
         obj: &aws_sdk_ec2::types::TransitGatewayVpcAttachment,
-        attributes: &mut HashMap<String, Value>,
-    ) -> Option<String> {
-        {
-            let ids = obj.subnet_ids();
-            if !ids.is_empty() {
-                let list: Vec<Value> = ids
-                    .iter()
-                    .map(|s| Value::Concrete(ConcreteValue::String(s.to_string().into())))
-                    .collect();
-                attributes.insert(
-                    "subnet_ids".to_string(),
-                    Value::Concrete(ConcreteValue::List(list)),
-                );
-            }
-        }
-        if let Some(v) = obj.transit_gateway_attachment_id() {
-            attributes.insert(
-                "transit_gateway_attachment_id".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string().into())),
-            );
-        }
-        if let Some(v) = obj.transit_gateway_id() {
-            attributes.insert(
-                "transit_gateway_id".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string().into())),
-            );
-        }
-        if let Some(v) = obj.vpc_id() {
-            attributes.insert(
-                "vpc_id".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string().into())),
-            );
-        }
-        if let Some(dns_opts) = obj.options() {
+    ) -> Ec2TransitGatewayAttachmentReadFields {
+        let ids = obj.subnet_ids();
+        let subnet_ids = (!ids.is_empty()).then(|| {
+            let list: Vec<Value> = ids
+                .iter()
+                .map(|s| Value::Concrete(ConcreteValue::String(s.to_string().into())))
+                .collect();
+            Value::Concrete(ConcreteValue::List(list))
+        });
+        let transit_gateway_attachment_id = obj
+            .transit_gateway_attachment_id()
+            .map(|v| Value::Concrete(ConcreteValue::String(v.to_string().into())));
+        let transit_gateway_id = obj
+            .transit_gateway_id()
+            .map(|v| Value::Concrete(ConcreteValue::String(v.to_string().into())));
+        let vpc_id = obj
+            .vpc_id()
+            .map(|v| Value::Concrete(ConcreteValue::String(v.to_string().into())));
+        let options = obj.options().and_then(|dns_opts| {
             let mut fields = IndexMap::new();
             if let Some(v) = dns_opts.appliance_mode_support() {
                 fields.insert(
@@ -810,194 +1009,344 @@ impl AwsProvider {
                     Value::Concrete(ConcreteValue::String(v.as_str().to_string().into())),
                 );
             }
-            if !fields.is_empty() {
-                attributes.insert(
-                    "options".to_string(),
-                    Value::Concrete(ConcreteValue::Map(fields)),
-                );
-            }
+            (!fields.is_empty()).then(|| Value::Concrete(ConcreteValue::Map(fields)))
+        });
+        let applied_identifier = obj.transit_gateway_attachment_id().map(String::from);
+        Ec2TransitGatewayAttachmentReadFields {
+            options,
+            subnet_ids,
+            transit_gateway_attachment_id,
+            transit_gateway_id,
+            vpc_id,
+            applied_identifier,
         }
-        obj.transit_gateway_attachment_id().map(String::from)
+    }
+
+    /// Extract ec2.VpcEndpoint attributes from SDK response type (generated)
+    pub(crate) fn extract_ec2_vpc_endpoint_attributes(
+        obj: &aws_sdk_ec2::types::VpcEndpoint,
+    ) -> Ec2VpcEndpointReadFields {
+        let policy_document = obj
+            .policy_document()
+            .map(|v| Value::Concrete(ConcreteValue::String(v.to_string().into())));
+        let private_dns_enabled = obj
+            .private_dns_enabled()
+            .map(|v| Value::Concrete(ConcreteValue::Bool(v)));
+        let resource_configuration_arn = obj
+            .resource_configuration_arn()
+            .map(|v| Value::Concrete(ConcreteValue::String(v.to_string().into())));
+        let ids = obj.route_table_ids();
+        let route_table_ids = (!ids.is_empty()).then(|| {
+            let list: Vec<Value> = ids
+                .iter()
+                .map(|s| Value::Concrete(ConcreteValue::String(s.to_string().into())))
+                .collect();
+            Value::Concrete(ConcreteValue::List(list))
+        });
+        let service_name = obj
+            .service_name()
+            .map(|v| Value::Concrete(ConcreteValue::String(v.to_string().into())));
+        let service_network_arn = obj
+            .service_network_arn()
+            .map(|v| Value::Concrete(ConcreteValue::String(v.to_string().into())));
+        let service_region = obj
+            .service_region()
+            .map(|v| Value::Concrete(ConcreteValue::String(v.to_string().into())));
+        let ids = obj.subnet_ids();
+        let subnet_ids = (!ids.is_empty()).then(|| {
+            let list: Vec<Value> = ids
+                .iter()
+                .map(|s| Value::Concrete(ConcreteValue::String(s.to_string().into())))
+                .collect();
+            Value::Concrete(ConcreteValue::List(list))
+        });
+        let vpc_endpoint_id = obj
+            .vpc_endpoint_id()
+            .map(|v| Value::Concrete(ConcreteValue::String(v.to_string().into())));
+        let vpc_endpoint_type = obj
+            .vpc_endpoint_type()
+            .map(|v| Value::Concrete(ConcreteValue::String(v.as_str().to_string().into())));
+        let vpc_id = obj
+            .vpc_id()
+            .map(|v| Value::Concrete(ConcreteValue::String(v.to_string().into())));
+        let list: Vec<Value> = obj
+            .groups()
+            .iter()
+            .filter_map(|item| {
+                item.group_id()
+                    .map(|id| Value::Concrete(ConcreteValue::String(id.to_string().into())))
+            })
+            .collect();
+        let security_group_ids =
+            (!list.is_empty()).then(|| Value::Concrete(ConcreteValue::List(list)));
+        let applied_identifier = obj.vpc_endpoint_id().map(String::from);
+        Ec2VpcEndpointReadFields {
+            policy_document,
+            private_dns_enabled,
+            resource_configuration_arn,
+            route_table_ids,
+            security_group_ids,
+            service_name,
+            service_network_arn,
+            service_region,
+            subnet_ids,
+            vpc_endpoint_id,
+            vpc_endpoint_type,
+            vpc_id,
+            applied_identifier,
+        }
     }
 
     /// Extract ec2.VpcPeeringConnection attributes from SDK response type (generated)
     pub(crate) fn extract_ec2_vpc_peering_connection_attributes(
         obj: &aws_sdk_ec2::types::VpcPeeringConnection,
-        attributes: &mut HashMap<String, Value>,
-    ) -> Option<String> {
-        if let Some(v) = obj.vpc_peering_connection_id() {
-            attributes.insert(
-                "vpc_peering_connection_id".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string().into())),
-            );
+    ) -> Ec2VpcPeeringConnectionReadFields {
+        let vpc_peering_connection_id = obj
+            .vpc_peering_connection_id()
+            .map(|v| Value::Concrete(ConcreteValue::String(v.to_string().into())));
+        let vpc_id = obj
+            .requester_vpc_info()
+            .and_then(|opts| opts.vpc_id())
+            .map(|v| Value::Concrete(ConcreteValue::String(v.to_string().into())));
+        let peer_vpc_id = obj
+            .accepter_vpc_info()
+            .and_then(|opts| opts.vpc_id())
+            .map(|v| Value::Concrete(ConcreteValue::String(v.to_string().into())));
+        let peer_owner_id = obj
+            .accepter_vpc_info()
+            .and_then(|opts| opts.owner_id())
+            .map(|v| Value::Concrete(ConcreteValue::String(v.to_string().into())));
+        let applied_identifier = obj.vpc_peering_connection_id().map(String::from);
+        Ec2VpcPeeringConnectionReadFields {
+            peer_owner_id,
+            peer_vpc_id,
+            vpc_id,
+            vpc_peering_connection_id,
+            applied_identifier,
         }
-        if let Some(opts) = obj.requester_vpc_info()
-            && let Some(v) = opts.vpc_id()
-        {
-            attributes.insert(
-                "vpc_id".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string().into())),
-            );
-        }
-        if let Some(opts) = obj.accepter_vpc_info()
-            && let Some(v) = opts.vpc_id()
-        {
-            attributes.insert(
-                "peer_vpc_id".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string().into())),
-            );
-        }
-        if let Some(opts) = obj.accepter_vpc_info()
-            && let Some(v) = opts.owner_id()
-        {
-            attributes.insert(
-                "peer_owner_id".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string().into())),
-            );
-        }
-        obj.vpc_peering_connection_id().map(String::from)
     }
 
     /// Extract ec2.VpnGateway attributes from SDK response type (generated)
     pub(crate) fn extract_ec2_vpn_gateway_attributes(
         obj: &aws_sdk_ec2::types::VpnGateway,
-        attributes: &mut HashMap<String, Value>,
-    ) -> Option<String> {
-        if let Some(v) = obj.amazon_side_asn() {
-            attributes.insert(
-                "amazon_side_asn".to_string(),
-                Value::Concrete(ConcreteValue::Int(v)),
-            );
+    ) -> Ec2VpnGatewayReadFields {
+        let amazon_side_asn = obj
+            .amazon_side_asn()
+            .map(|v| Value::Concrete(ConcreteValue::Int(v)));
+        let availability_zone = obj
+            .availability_zone()
+            .map(|v| Value::Concrete(ConcreteValue::String(v.to_string().into())));
+        let r#type = obj
+            .r#type()
+            .map(|v| Value::Concrete(ConcreteValue::String(v.as_str().to_string().into())));
+        let vpn_gateway_id = obj
+            .vpn_gateway_id()
+            .map(|v| Value::Concrete(ConcreteValue::String(v.to_string().into())));
+        let applied_identifier = obj.vpn_gateway_id().map(String::from);
+        Ec2VpnGatewayReadFields {
+            amazon_side_asn,
+            availability_zone,
+            r#type,
+            vpn_gateway_id,
+            applied_identifier,
         }
-        if let Some(v) = obj.availability_zone() {
-            attributes.insert(
-                "availability_zone".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string().into())),
-            );
+    }
+
+    /// Extract organizations.Organization attributes from SDK response type (generated)
+    pub(crate) fn extract_organizations_organization_attributes(
+        obj: &aws_sdk_organizations::types::Organization,
+    ) -> OrganizationsOrganizationReadFields {
+        let arn = obj
+            .arn()
+            .map(|v| Value::Concrete(ConcreteValue::String(v.to_string().into())));
+        let feature_set = obj
+            .feature_set()
+            .map(|v| Value::Concrete(ConcreteValue::String(v.as_str().to_string().into())));
+        let id = obj
+            .id()
+            .map(|v| Value::Concrete(ConcreteValue::String(v.to_string().into())));
+        let master_account_arn = obj
+            .master_account_arn()
+            .map(|v| Value::Concrete(ConcreteValue::String(v.to_string().into())));
+        let master_account_email = obj
+            .master_account_email()
+            .map(|v| Value::Concrete(ConcreteValue::String(v.to_string().into())));
+        let master_account_id = obj
+            .master_account_id()
+            .map(|v| Value::Concrete(ConcreteValue::String(v.to_string().into())));
+        let applied_identifier = obj.id().map(String::from);
+        OrganizationsOrganizationReadFields {
+            arn,
+            feature_set,
+            id,
+            master_account_arn,
+            master_account_email,
+            master_account_id,
+            applied_identifier,
         }
-        if let Some(v) = obj.r#type() {
-            attributes.insert(
-                "type".to_string(),
-                Value::Concrete(ConcreteValue::String(v.as_str().to_string().into())),
-            );
+    }
+
+    /// Extract organizations.Account attributes from SDK response type (generated)
+    pub(crate) fn extract_organizations_account_attributes(
+        obj: &aws_sdk_organizations::types::Account,
+    ) -> OrganizationsAccountReadFields {
+        let arn = obj
+            .arn()
+            .map(|v| Value::Concrete(ConcreteValue::String(v.to_string().into())));
+        let email = obj
+            .email()
+            .map(|v| Value::Concrete(ConcreteValue::String(v.to_string().into())));
+        let id = obj
+            .id()
+            .map(|v| Value::Concrete(ConcreteValue::String(v.to_string().into())));
+        let joined_method = obj
+            .joined_method()
+            .map(|v| Value::Concrete(ConcreteValue::String(v.as_str().to_string().into())));
+        let name = obj
+            .name()
+            .map(|v| Value::Concrete(ConcreteValue::String(v.to_string().into())));
+        let status = obj
+            .status()
+            .map(|v| Value::Concrete(ConcreteValue::String(v.as_str().to_string().into())));
+        let applied_identifier = obj.id().map(String::from);
+        OrganizationsAccountReadFields {
+            arn,
+            email,
+            id,
+            joined_method,
+            name,
+            status,
+            applied_identifier,
         }
-        if let Some(v) = obj.vpn_gateway_id() {
-            attributes.insert(
-                "vpn_gateway_id".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string().into())),
-            );
-        }
-        obj.vpn_gateway_id().map(String::from)
     }
 
     /// Extract route53.RecordSet attributes from SDK response type (generated)
     pub(crate) fn extract_route53_record_set_attributes(
         obj: &aws_sdk_route53::types::ResourceRecordSet,
-        attributes: &mut HashMap<String, Value>,
-    ) -> Option<String> {
+    ) -> Route53RecordSetReadFields {
         let v = obj.name();
-        if !v.is_empty() {
-            attributes.insert(
-                "name".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string().into())),
-            );
+        let name =
+            (!v.is_empty()).then(|| Value::Concrete(ConcreteValue::String(v.to_string().into())));
+        let ttl = obj.ttl().map(|v| Value::Concrete(ConcreteValue::Int(v)));
+        let r#type = Some(Value::Concrete(ConcreteValue::String(
+            obj.r#type().as_str().to_string().into(),
+        )));
+        let applied_identifier = Some(obj.name().to_string());
+        Route53RecordSetReadFields {
+            name,
+            ttl,
+            r#type,
+            applied_identifier,
         }
-        Some(obj.name().to_string())
+    }
+
+    /// Extract iam.Role attributes from SDK response type (generated)
+    pub(crate) fn extract_iam_role_attributes(obj: &aws_sdk_iam::types::Role) -> IamRoleReadFields {
+        let v = obj.arn();
+        let arn =
+            (!v.is_empty()).then(|| Value::Concrete(ConcreteValue::String(v.to_string().into())));
+        let assume_role_policy_document = obj
+            .assume_role_policy_document()
+            .map(|v| Value::Concrete(ConcreteValue::String(v.to_string().into())));
+        let description = obj
+            .description()
+            .map(|v| Value::Concrete(ConcreteValue::String(v.to_string().into())));
+        let max_session_duration = obj
+            .max_session_duration()
+            .map(|v| Value::Concrete(ConcreteValue::Int(v as i64)));
+        let v = obj.path();
+        let path =
+            (!v.is_empty()).then(|| Value::Concrete(ConcreteValue::String(v.to_string().into())));
+        let v = obj.role_id();
+        let role_id =
+            (!v.is_empty()).then(|| Value::Concrete(ConcreteValue::String(v.to_string().into())));
+        let v = obj.role_name();
+        let role_name =
+            (!v.is_empty()).then(|| Value::Concrete(ConcreteValue::String(v.to_string().into())));
+        let applied_identifier = Some(obj.role_name().to_string());
+        IamRoleReadFields {
+            arn,
+            assume_role_policy_document,
+            description,
+            max_session_duration,
+            path,
+            role_id,
+            role_name,
+            applied_identifier,
+        }
     }
 
     /// Extract logs.LogGroup attributes from SDK response type (generated)
     pub(crate) fn extract_logs_log_group_attributes(
         obj: &aws_sdk_cloudwatchlogs::types::LogGroup,
-        attributes: &mut HashMap<String, Value>,
-    ) -> Option<String> {
-        if let Some(v) = obj.deletion_protection_enabled() {
-            attributes.insert(
-                "deletion_protection_enabled".to_string(),
-                Value::Concrete(ConcreteValue::Bool(v)),
-            );
+    ) -> LogsLogGroupReadFields {
+        let deletion_protection_enabled = obj
+            .deletion_protection_enabled()
+            .map(|v| Value::Concrete(ConcreteValue::Bool(v)));
+        let kms_key_id = obj
+            .kms_key_id()
+            .map(|v| Value::Concrete(ConcreteValue::String(v.to_string().into())));
+        let log_group_class = obj
+            .log_group_class()
+            .map(|v| Value::Concrete(ConcreteValue::String(v.as_str().to_string().into())));
+        let log_group_name = obj
+            .log_group_name()
+            .map(|v| Value::Concrete(ConcreteValue::String(v.to_string().into())));
+        let retention_in_days = obj
+            .retention_in_days()
+            .map(|v| Value::Concrete(ConcreteValue::Int(v as i64)));
+        let applied_identifier = None;
+        LogsLogGroupReadFields {
+            deletion_protection_enabled,
+            kms_key_id,
+            log_group_class,
+            log_group_name,
+            retention_in_days,
+            applied_identifier,
         }
-        if let Some(v) = obj.kms_key_id() {
-            attributes.insert(
-                "kms_key_id".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string().into())),
-            );
-        }
-        if let Some(v) = obj.log_group_class() {
-            attributes.insert(
-                "log_group_class".to_string(),
-                Value::Concrete(ConcreteValue::String(v.as_str().to_string().into())),
-            );
-        }
-        if let Some(v) = obj.log_group_name() {
-            attributes.insert(
-                "log_group_name".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string().into())),
-            );
-        }
-        if let Some(v) = obj.retention_in_days() {
-            attributes.insert(
-                "retention_in_days".to_string(),
-                Value::Concrete(ConcreteValue::Int(v as i64)),
-            );
-        }
-        None
     }
 
     /// Extract acm.Certificate attributes from SDK response type (generated)
     pub(crate) fn extract_acm_certificate_attributes(
         obj: &aws_sdk_acm::types::CertificateDetail,
-        attributes: &mut HashMap<String, Value>,
-    ) -> Option<String> {
-        if let Some(v) = obj.certificate_arn() {
-            attributes.insert(
-                "certificate_arn".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string().into())),
-            );
+    ) -> AcmCertificateReadFields {
+        let certificate_arn = obj
+            .certificate_arn()
+            .map(|v| Value::Concrete(ConcreteValue::String(v.to_string().into())));
+        let domain_name = obj
+            .domain_name()
+            .map(|v| Value::Concrete(ConcreteValue::String(v.to_string().into())));
+        let key_algorithm = obj
+            .key_algorithm()
+            .map(|v| Value::Concrete(ConcreteValue::String(v.as_str().to_string().into())));
+        let renewal_eligibility = obj
+            .renewal_eligibility()
+            .map(|v| Value::Concrete(ConcreteValue::String(v.as_str().to_string().into())));
+        let status = obj
+            .status()
+            .map(|v| Value::Concrete(ConcreteValue::String(v.as_str().to_string().into())));
+        let ids = obj.subject_alternative_names();
+        let subject_alternative_names = (!ids.is_empty()).then(|| {
+            let list: Vec<Value> = ids
+                .iter()
+                .map(|s| Value::Concrete(ConcreteValue::String(s.to_string().into())))
+                .collect();
+            Value::Concrete(ConcreteValue::List(list))
+        });
+        let r#type = obj
+            .r#type()
+            .map(|v| Value::Concrete(ConcreteValue::String(v.as_str().to_string().into())));
+        let applied_identifier = obj.certificate_arn().map(String::from);
+        AcmCertificateReadFields {
+            certificate_arn,
+            domain_name,
+            key_algorithm,
+            renewal_eligibility,
+            status,
+            subject_alternative_names,
+            r#type,
+            applied_identifier,
         }
-        if let Some(v) = obj.domain_name() {
-            attributes.insert(
-                "domain_name".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string().into())),
-            );
-        }
-        if let Some(v) = obj.key_algorithm() {
-            attributes.insert(
-                "key_algorithm".to_string(),
-                Value::Concrete(ConcreteValue::String(v.as_str().to_string().into())),
-            );
-        }
-        if let Some(v) = obj.renewal_eligibility() {
-            attributes.insert(
-                "renewal_eligibility".to_string(),
-                Value::Concrete(ConcreteValue::String(v.as_str().to_string().into())),
-            );
-        }
-        if let Some(v) = obj.status() {
-            attributes.insert(
-                "status".to_string(),
-                Value::Concrete(ConcreteValue::String(v.as_str().to_string().into())),
-            );
-        }
-        {
-            let ids = obj.subject_alternative_names();
-            if !ids.is_empty() {
-                let list: Vec<Value> = ids
-                    .iter()
-                    .map(|s| Value::Concrete(ConcreteValue::String(s.to_string().into())))
-                    .collect();
-                attributes.insert(
-                    "subject_alternative_names".to_string(),
-                    Value::Concrete(ConcreteValue::List(list)),
-                );
-            }
-        }
-        if let Some(v) = obj.r#type() {
-            attributes.insert(
-                "type".to_string(),
-                Value::Concrete(ConcreteValue::String(v.as_str().to_string().into())),
-            );
-        }
-        obj.certificate_arn().map(String::from)
     }
 }
 

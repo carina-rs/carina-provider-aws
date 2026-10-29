@@ -1,7 +1,7 @@
 use indexmap::IndexMap;
 use std::collections::HashMap;
 
-use carina_core::provider::{AppliedIdentifier, ProviderError, ProviderResult, ReadOutcome};
+use carina_core::provider::{AppliedIdentifier, ProviderResult, ReadOutcome};
 use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
 use carina_core::schema::ResourceSchema;
 
@@ -9,7 +9,8 @@ use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
 use crate::helpers::{optional_enum_attr, require_string_attr};
 use crate::provider::AwsCreateAttempt;
-use crate::read_model::found_managed_read;
+use crate::provider_generated::LogsLogGroupReadFields;
+use crate::read_model::{found_managed_read, require_read_value};
 use crate::read_models_generated::LogsLogGroupReadModel;
 
 impl AwsProvider {
@@ -38,6 +39,15 @@ impl AwsProvider {
             .iter()
             .find(|lg| lg.log_group_name() == Some(identifier))
         {
+            let LogsLogGroupReadFields {
+                deletion_protection_enabled,
+                kms_key_id,
+                log_group_class,
+                log_group_name,
+                retention_in_days,
+                applied_identifier: _,
+            } = Self::extract_logs_log_group_attributes(lg);
+
             // Read tags separately. Empty tags are canonical state, and a
             // failed side read must not erase configured tags.
             #[allow(deprecated)]
@@ -61,27 +71,16 @@ impl AwsProvider {
                 }
             }
 
-            let name = lg.log_group_name().ok_or_else(|| {
-                ProviderError::api_error("DescribeLogGroups returned a group without LogGroupName")
-                    .for_resource(id.clone())
-            })?;
             // Measured with `aws logs describe-log-groups --log-group-name-prefix <name>
             // --region ap-northeast-1` on 2026-10-29: the response omits
             // deletionProtectionEnabled when it is false.
             let model = LogsLogGroupReadModel {
-                deletion_protection_enabled: Value::Concrete(ConcreteValue::Bool(
-                    lg.deletion_protection_enabled().unwrap_or(false),
-                )),
-                kms_key_id: lg
-                    .kms_key_id()
-                    .map(|value| Value::Concrete(ConcreteValue::String(value.to_string().into()))),
-                log_group_class: lg.log_group_class().map(|value| {
-                    Value::Concrete(ConcreteValue::String(value.as_str().to_string().into()))
-                }),
-                log_group_name: Value::Concrete(ConcreteValue::String(name.to_string().into())),
-                retention_in_days: lg
-                    .retention_in_days()
-                    .map(|value| Value::Concrete(ConcreteValue::Int(value as i64))),
+                deletion_protection_enabled: deletion_protection_enabled
+                    .unwrap_or_else(|| Value::Concrete(ConcreteValue::Bool(false))),
+                kms_key_id,
+                log_group_class,
+                log_group_name: require_read_value(id, log_group_name, "log_group_name")?,
+                retention_in_days,
                 tags: Value::Concrete(ConcreteValue::Map(tag_map)),
             };
 

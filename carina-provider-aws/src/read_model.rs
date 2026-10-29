@@ -1,10 +1,11 @@
 //! Typed boundary for managed-resource reads.
 
 use std::collections::HashMap;
+use std::sync::OnceLock;
 
 use carina_core::provider::{AppliedIdentifier, ProviderError, ProviderResult, ReadOutcome};
 use carina_core::resource::{ConcreteValue, ResourceId, Value};
-use carina_core::schema::ResourceSchema;
+use carina_core::schema::{ResourceSchema, ValidatedResourceSchema};
 
 pub(crate) mod sealed {
     pub trait Sealed {}
@@ -15,19 +16,13 @@ pub(crate) trait ManagedReadModel: sealed::Sealed {
     fn into_attributes(self) -> ProviderResult<HashMap<String, Value>>;
 }
 
-/// Consume one optional value from an existing SDK-extraction map while a
-/// hand-written read is migrated into its exhaustive model literal.
-pub(crate) fn take_optional(attributes: &mut HashMap<String, Value>, name: &str) -> Option<Value> {
-    attributes.remove(name)
-}
-
-/// Consume a value that the canonical read model requires.
-pub(crate) fn take_required(
+/// Require a typed SDK-extracted value that the canonical model cannot omit.
+pub(crate) fn require_read_value(
     id: &ResourceId,
-    attributes: &mut HashMap<String, Value>,
+    value: Option<Value>,
     name: &str,
 ) -> ProviderResult<Value> {
-    attributes.remove(name).ok_or_else(|| {
+    value.ok_or_else(|| {
         ProviderError::internal(format!(
             "AWS read omitted required canonical attribute {name}"
         ))
@@ -62,20 +57,30 @@ pub(crate) fn found_managed_read(
     Ok(crate::helpers::found_read(id, identifier, attributes))
 }
 
-/// Validate every generated `Value` field against the same schema the differ
-/// consumes. In particular, this catches malformed hand-built nested values at
-/// the one map-conversion seam.
+/// Return the one validated schema instance used by a generated read model.
+pub(crate) fn cached_validated_read_schema(
+    resource_type: &str,
+    cache: &'static OnceLock<Result<ValidatedResourceSchema, String>>,
+    build: impl FnOnce() -> ResourceSchema,
+) -> ProviderResult<&'static ValidatedResourceSchema> {
+    cache
+        .get_or_init(|| build().validate().map_err(|error| error.to_string()))
+        .as_ref()
+        .map_err(|error| {
+            ProviderError::internal(format!(
+                "generated read schema for {resource_type} is invalid: {error}"
+            ))
+        })
+}
+
+/// Validate every generated `Value` field against the same cached schema the
+/// differ consumes. In particular, this catches malformed hand-built nested
+/// values at the one map-conversion seam.
 pub(crate) fn validate_read_attributes(
     resource_type: &str,
-    schema: ResourceSchema,
+    schema: &ValidatedResourceSchema,
     attributes: &mut HashMap<String, Value>,
 ) -> ProviderResult<()> {
-    let schema = schema.validate().map_err(|error| {
-        ProviderError::internal(format!(
-            "generated read schema for {resource_type} is invalid: {error}"
-        ))
-    })?;
-
     for (name, value) in attributes {
         let attribute = schema.effective_attribute(name).ok_or_else(|| {
             ProviderError::internal(format!(
@@ -131,6 +136,75 @@ mod tests {
                     path.display()
                 );
             }
+        }
+    }
+
+    #[test]
+    fn managed_reads_do_not_use_string_keyed_take_helpers() {
+        let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut files = Vec::new();
+        rust_files_below(&src.join("services"), &mut files);
+        files.push(src.join("ec2_security_group_rules.rs"));
+
+        for path in files {
+            let source = fs::read_to_string(&path).expect("read managed-resource source");
+            assert!(
+                !source.contains("take_optional(") && !source.contains("take_required("),
+                "{} still moves extracted read state through string keys",
+                path.display()
+            );
+        }
+    }
+
+    #[test]
+    fn generated_extractors_do_not_accept_attribute_maps() {
+        let generated = include_str!("provider_generated.rs");
+        assert!(
+            !generated.contains("attributes: &mut") && !generated.contains("attributes.insert("),
+            "generated SDK extractors must return typed fields directly"
+        );
+    }
+
+    #[test]
+    fn every_generated_read_fields_type_is_exhaustively_consumed() {
+        let generated = include_str!("provider_generated.rs");
+        let type_names = generated.lines().filter_map(|line| {
+            line.strip_prefix("pub(crate) struct ")
+                .and_then(|line| line.strip_suffix("ReadFields {"))
+                .map(|prefix| format!("{prefix}ReadFields"))
+        });
+
+        let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut files = Vec::new();
+        rust_files_below(&src.join("services"), &mut files);
+        files.push(src.join("ec2_security_group_rules.rs"));
+        let managed_reads = files
+            .iter()
+            .map(|path| fs::read_to_string(path).expect("read managed-resource source"))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        for type_name in type_names {
+            assert!(
+                managed_reads.contains(&type_name),
+                "{type_name} is generated but no managed read consumes it"
+            );
+        }
+        for binding in managed_reads.split("let ").skip(1) {
+            let Some(start) = binding.find("ReadFields {") else {
+                continue;
+            };
+            if binding[..start].contains('\n') {
+                continue;
+            }
+            let pattern = binding[start + "ReadFields {".len()..]
+                .split_once('}')
+                .map(|(pattern, _)| pattern)
+                .expect("read-fields destructuring pattern is closed");
+            assert!(
+                !pattern.contains(".."),
+                "managed reads must exhaustively destructure generated read fields"
+            );
         }
     }
 }

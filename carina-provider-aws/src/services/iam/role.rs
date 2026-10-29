@@ -9,7 +9,8 @@ use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
 use crate::helpers::{require_string_attr, sdk_error_message};
 use crate::provider::CreateCompletion;
-use crate::read_model::{found_managed_read, take_optional, take_required};
+use crate::provider_generated::IamRoleReadFields;
+use crate::read_model::{found_managed_read, require_read_value};
 use crate::read_models_generated::IamRoleReadModel;
 
 impl AwsProvider {
@@ -32,10 +33,31 @@ impl AwsProvider {
         match result {
             Ok(output) => {
                 if let Some(role) = output.role() {
-                    let mut attributes = HashMap::new();
-
-                    let _identifier_value =
-                        Self::extract_iam_role_attributes(role, &mut attributes);
+                    let IamRoleReadFields {
+                        arn,
+                        assume_role_policy_document,
+                        description,
+                        max_session_duration,
+                        path,
+                        role_id,
+                        role_name,
+                        applied_identifier: _,
+                    } = Self::extract_iam_role_attributes(role);
+                    let assume_role_policy_document = require_read_value(
+                        id,
+                        assume_role_policy_document,
+                        "assume_role_policy_document",
+                    )?;
+                    let assume_role_policy_document = match assume_role_policy_document {
+                        Value::Concrete(ConcreteValue::String(raw)) => {
+                            let decoded = urlencoding::decode(raw.expose_plaintext())
+                                .unwrap_or_else(|_| raw.expose_plaintext().into());
+                            iam_policy_json_to_value(&decoded).unwrap_or_else(|_| {
+                                Value::Concrete(ConcreteValue::String(decoded.into_owned().into()))
+                            })
+                        }
+                        value => value,
+                    };
 
                     let mut tag_map = IndexMap::new();
                     for tag in role.tags() {
@@ -46,20 +68,13 @@ impl AwsProvider {
                     }
 
                     let model = IamRoleReadModel {
-                        assume_role_policy_document: take_required(
-                            id,
-                            &mut attributes,
-                            "assume_role_policy_document",
-                        )?,
-                        description: take_optional(&mut attributes, "description"),
-                        max_session_duration: take_optional(
-                            &mut attributes,
-                            "max_session_duration",
-                        ),
-                        path: take_optional(&mut attributes, "path"),
-                        role_name: take_required(id, &mut attributes, "role_name")?,
-                        arn: take_optional(&mut attributes, "arn"),
-                        role_id: take_optional(&mut attributes, "role_id"),
+                        assume_role_policy_document,
+                        description,
+                        max_session_duration,
+                        path,
+                        role_name: require_read_value(id, role_name, "role_name")?,
+                        arn,
+                        role_id,
                         tags: Value::Concrete(ConcreteValue::Map(tag_map)),
                     };
                     found_managed_read(id, applied_identifier, model)
@@ -284,77 +299,6 @@ impl AwsProvider {
         }
 
         Ok(())
-    }
-
-    /// Extract iam.Role attributes from the SDK response.
-    ///
-    /// Lives here (not in `provider_generated.rs`) because
-    /// `assume_role_policy_document` needs URL-decoding and a JSON →
-    /// `Value::Map` parse step that the codegen template can't express;
-    /// `scan_manual_methods` picks it up by name and the codegen skips
-    /// emitting a duplicate stub. Returns the role name as the
-    /// state identifier.
-    pub(crate) fn extract_iam_role_attributes(
-        obj: &aws_sdk_iam::types::Role,
-        attributes: &mut HashMap<String, Value>,
-    ) -> Option<String> {
-        // arn, path, role_id, role_name return &str (always present per
-        // Smithy `@required`); skip the empty-string sentinel the SDK
-        // sometimes uses when the field is absent on the wire.
-        let arn = obj.arn();
-        if !arn.is_empty() {
-            attributes.insert(
-                "arn".to_string(),
-                Value::Concrete(ConcreteValue::String(arn.to_string().into())),
-            );
-        }
-        if let Some(v) = obj.assume_role_policy_document() {
-            // The SDK URL-encodes the policy document.
-            let decoded = urlencoding::decode(v).unwrap_or_else(|_| v.into());
-            // Convert JSON string to Value::Map with snake_case keys for
-            // struct comparison; fall back to the raw string if the
-            // policy is malformed.
-            let policy_value = iam_policy_json_to_value(&decoded).unwrap_or_else(|_| {
-                Value::Concrete(ConcreteValue::String(decoded.into_owned().into()))
-            });
-            attributes.insert("assume_role_policy_document".to_string(), policy_value);
-        }
-        if let Some(v) = obj.description() {
-            attributes.insert(
-                "description".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string().into())),
-            );
-        }
-        if let Some(v) = obj.max_session_duration() {
-            attributes.insert(
-                "max_session_duration".to_string(),
-                Value::Concrete(ConcreteValue::Int(v as i64)),
-            );
-        }
-        let path = obj.path();
-        if !path.is_empty() {
-            attributes.insert(
-                "path".to_string(),
-                Value::Concrete(ConcreteValue::String(path.to_string().into())),
-            );
-        }
-        let role_id = obj.role_id();
-        if !role_id.is_empty() {
-            attributes.insert(
-                "role_id".to_string(),
-                Value::Concrete(ConcreteValue::String(role_id.to_string().into())),
-            );
-        }
-        let role_name = obj.role_name();
-        if !role_name.is_empty() {
-            attributes.insert(
-                "role_name".to_string(),
-                Value::Concrete(ConcreteValue::String(role_name.to_string().into())),
-            );
-            Some(role_name.to_string())
-        } else {
-            None
-        }
     }
 }
 
