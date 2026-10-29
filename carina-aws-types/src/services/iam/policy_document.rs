@@ -1,5 +1,7 @@
 use carina_core::resource::Value;
-use carina_core::schema::{AttributeType, StructField};
+use std::collections::BTreeMap;
+
+use carina_core::schema::{AttributeType, StructField, ValidatedConfigSchema};
 
 use crate::{dsl_enum_value, enum_with_dsl_aliases};
 
@@ -29,13 +31,18 @@ fn string_or_principal_struct() -> AttributeType {
         AttributeType::struct_(
             "Principal".to_string(),
             vec![
-                StructField::new("service", string_or_list_of_strings())
-                    .with_provider_name("Service"),
-                StructField::new("aws", string_or_list_of_strings()).with_provider_name("AWS"),
-                StructField::new("federated", string_or_list_of_strings())
-                    .with_provider_name("Federated"),
-                StructField::new("canonical_user", string_or_list_of_strings())
-                    .with_provider_name("CanonicalUser"),
+                StructField::optional("service", string_or_list_of_strings())
+                    .with_provider_name("Service")
+                    .build(),
+                StructField::optional("aws", string_or_list_of_strings())
+                    .with_provider_name("AWS")
+                    .build(),
+                StructField::optional("federated", string_or_list_of_strings())
+                    .with_provider_name("Federated")
+                    .build(),
+                StructField::optional("canonical_user", string_or_list_of_strings())
+                    .with_provider_name("CanonicalUser")
+                    .build(),
             ],
         ),
         AttributeType::string(),
@@ -115,20 +122,33 @@ fn iam_policy_statement() -> AttributeType {
     AttributeType::struct_(
         "Statement".to_string(),
         vec![
-            StructField::new("sid", AttributeType::string()).with_provider_name("Sid"),
-            StructField::new("effect", iam_policy_effect()).with_provider_name("Effect"),
-            StructField::new("action", string_or_list_of_strings()).with_provider_name("Action"),
-            StructField::new("not_action", string_or_list_of_strings())
-                .with_provider_name("NotAction"),
-            StructField::new("resource", string_or_list_of_strings())
-                .with_provider_name("Resource"),
-            StructField::new("not_resource", string_or_list_of_strings())
-                .with_provider_name("NotResource"),
-            StructField::new("principal", string_or_principal_struct())
-                .with_provider_name("Principal"),
-            StructField::new("not_principal", string_or_principal_struct())
-                .with_provider_name("NotPrincipal"),
-            StructField::new("condition", condition_type()).with_provider_name("Condition"),
+            StructField::optional("sid", AttributeType::string())
+                .with_provider_name("Sid")
+                .build(),
+            StructField::optional("effect", iam_policy_effect())
+                .with_provider_name("Effect")
+                .build(),
+            StructField::optional("action", string_or_list_of_strings())
+                .with_provider_name("Action")
+                .build(),
+            StructField::optional("not_action", string_or_list_of_strings())
+                .with_provider_name("NotAction")
+                .build(),
+            StructField::optional("resource", string_or_list_of_strings())
+                .with_provider_name("Resource")
+                .build(),
+            StructField::optional("not_resource", string_or_list_of_strings())
+                .with_provider_name("NotResource")
+                .build(),
+            StructField::optional("principal", string_or_principal_struct())
+                .with_provider_name("Principal")
+                .build(),
+            StructField::optional("not_principal", string_or_principal_struct())
+                .with_provider_name("NotPrincipal")
+                .build(),
+            StructField::optional("condition", condition_type())
+                .with_provider_name("Condition")
+                .build(),
         ],
     )
 }
@@ -143,11 +163,16 @@ pub fn iam_policy_document() -> AttributeType {
     AttributeType::struct_(
         "PolicyDocument".to_string(),
         vec![
-            StructField::new("version", iam_policy_version()).with_provider_name("Version"),
-            StructField::new("id", AttributeType::string()).with_provider_name("Id"),
-            StructField::new("statement", AttributeType::list(iam_policy_statement()))
+            StructField::optional("version", iam_policy_version())
+                .with_provider_name("Version")
+                .build(),
+            StructField::optional("id", AttributeType::string())
+                .with_provider_name("Id")
+                .build(),
+            StructField::optional("statement", AttributeType::list(iam_policy_statement()))
                 .with_provider_name("Statement")
-                .with_block_name("statement"),
+                .with_block_name("statement")
+                .build(),
         ],
     )
 }
@@ -156,7 +181,14 @@ pub fn iam_policy_document() -> AttributeType {
 pub fn validate_iam_policy_document(value: &Value) -> Result<(), String> {
     // The IAM policy schema is flat (no `AttributeType::Ref`), so an
     // empty `defs` map is sound here (carina#3345).
-    carina_core::schema::Schema::flat(iam_policy_document())
+    let schema = ValidatedConfigSchema::validate(BTreeMap::from([(
+        "policy_document".to_string(),
+        iam_policy_document(),
+    )]))
+    .expect("IAM policy document schema must be valid");
+    schema
+        .rootless_type("policy_document")
+        .expect("IAM policy document type must exist")
         .validate(value)
         .map_err(|e| e.to_string())?;
     validate_condition_operators(value)

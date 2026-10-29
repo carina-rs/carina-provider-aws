@@ -4,12 +4,12 @@ fn s3_notification_filter_rule() -> AttributeType {
     AttributeType::struct_(
         "FilterRule".to_string(),
         vec![
-            StructField::new("name", AttributeType::string())
+            StructField::required("name", AttributeType::string())
                 .with_provider_name("Name")
-                .required(),
-            StructField::new("value", AttributeType::string())
+                .build(),
+            StructField::required("value", AttributeType::string())
                 .with_provider_name("Value")
-                .required(),
+                .build(),
         ],
     )
 }
@@ -18,11 +18,12 @@ fn s3_notification_filter() -> AttributeType {
     AttributeType::struct_(
         "NotificationFilter".to_string(),
         vec![
-            StructField::new(
+            StructField::optional(
                 "filter_rules",
                 AttributeType::list(s3_notification_filter_rule()),
             )
-            .with_provider_name("FilterRules"),
+            .with_provider_name("FilterRules")
+            .build(),
         ],
     )
 }
@@ -31,14 +32,18 @@ fn s3_topic_configuration() -> AttributeType {
     AttributeType::struct_(
         "TopicConfiguration".to_string(),
         vec![
-            StructField::new("id", AttributeType::string()).with_provider_name("Id"),
-            StructField::new("topic_arn", AttributeType::string())
+            StructField::optional("id", AttributeType::string())
+                .with_provider_name("Id")
+                .build(),
+            StructField::required("topic_arn", AttributeType::string())
                 .with_provider_name("TopicArn")
-                .required(),
-            StructField::new("events", AttributeType::list(AttributeType::string()))
+                .build(),
+            StructField::required("events", AttributeType::list(AttributeType::string()))
                 .with_provider_name("Events")
-                .required(),
-            StructField::new("filter", s3_notification_filter()).with_provider_name("Filter"),
+                .build(),
+            StructField::optional("filter", s3_notification_filter())
+                .with_provider_name("Filter")
+                .build(),
         ],
     )
 }
@@ -47,14 +52,18 @@ fn s3_queue_configuration() -> AttributeType {
     AttributeType::struct_(
         "QueueConfiguration".to_string(),
         vec![
-            StructField::new("id", AttributeType::string()).with_provider_name("Id"),
-            StructField::new("queue_arn", AttributeType::string())
+            StructField::optional("id", AttributeType::string())
+                .with_provider_name("Id")
+                .build(),
+            StructField::required("queue_arn", AttributeType::string())
                 .with_provider_name("QueueArn")
-                .required(),
-            StructField::new("events", AttributeType::list(AttributeType::string()))
+                .build(),
+            StructField::required("events", AttributeType::list(AttributeType::string()))
                 .with_provider_name("Events")
-                .required(),
-            StructField::new("filter", s3_notification_filter()).with_provider_name("Filter"),
+                .build(),
+            StructField::optional("filter", s3_notification_filter())
+                .with_provider_name("Filter")
+                .build(),
         ],
     )
 }
@@ -63,14 +72,18 @@ fn s3_lambda_function_configuration() -> AttributeType {
     AttributeType::struct_(
         "LambdaFunctionConfiguration".to_string(),
         vec![
-            StructField::new("id", AttributeType::string()).with_provider_name("Id"),
-            StructField::new("lambda_function_arn", AttributeType::string())
+            StructField::optional("id", AttributeType::string())
+                .with_provider_name("Id")
+                .build(),
+            StructField::required("lambda_function_arn", AttributeType::string())
                 .with_provider_name("LambdaFunctionArn")
-                .required(),
-            StructField::new("events", AttributeType::list(AttributeType::string()))
+                .build(),
+            StructField::required("events", AttributeType::list(AttributeType::string()))
                 .with_provider_name("Events")
-                .required(),
-            StructField::new("filter", s3_notification_filter()).with_provider_name("Filter"),
+                .build(),
+            StructField::optional("filter", s3_notification_filter())
+                .with_provider_name("Filter")
+                .build(),
         ],
     )
 }

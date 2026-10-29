@@ -179,7 +179,7 @@ impl AwsProvider {
     /// Create an Organizations account
     pub(crate) async fn create_organizations_account_start(
         &self,
-        resource: &Resource,
+        resource: &Resource<impl Sized>,
         schema: &ResourceSchema,
     ) -> ProviderResult<String> {
         let name = require_string_attr(resource, "account_name")?;
@@ -261,7 +261,7 @@ impl AwsProvider {
     /// Complete post-create handling after the account status becomes ready.
     pub(crate) async fn finish_organizations_account_create(
         &self,
-        resource: &Resource,
+        resource: &Resource<impl Sized>,
         account_id: &str,
     ) -> ProviderResult<CreateCompletion> {
         // Move to parent OU if specified

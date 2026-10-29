@@ -16,37 +16,47 @@ pub fn s3_bucket_notification_configuration_config() -> AwsSchemaConfig {
         schema: ResourceSchema::new("s3.BucketNotificationConfiguration")
             .with_coexisting_replacement()
             .attribute(
-                AttributeSchema::new("bucket", AttributeType::string())
-                    .required()
+                AttributeSchema::required("bucket", AttributeType::string())
                     .create_only()
                     .with_description("The name of the bucket.")
-                    .with_provider_name("Bucket"),
+                    .with_provider_name("Bucket")
+                    .build(),
             )
             .attribute(
-                AttributeSchema::new("topic_configurations", super::bucket_topic_configurations())
-                    .with_description("SNS topic notification configurations.")
-                    .with_provider_name("TopicConfigurations"),
+                AttributeSchema::optional(
+                    "topic_configurations",
+                    super::bucket_topic_configurations(),
+                )
+                .with_description("SNS topic notification configurations.")
+                .with_provider_name("TopicConfigurations")
+                .build(),
             )
             .attribute(
-                AttributeSchema::new("queue_configurations", super::bucket_queue_configurations())
-                    .with_description("SQS queue notification configurations.")
-                    .with_provider_name("QueueConfigurations"),
+                AttributeSchema::optional(
+                    "queue_configurations",
+                    super::bucket_queue_configurations(),
+                )
+                .with_description("SQS queue notification configurations.")
+                .with_provider_name("QueueConfigurations")
+                .build(),
             )
             .attribute(
-                AttributeSchema::new(
+                AttributeSchema::optional(
                     "lambda_function_configurations",
                     super::bucket_lambda_function_configurations(),
                 )
                 .with_description("Lambda function notification configurations.")
-                .with_provider_name("LambdaFunctionConfigurations"),
+                .with_provider_name("LambdaFunctionConfigurations")
+                .build(),
             )
             .attribute(
-                AttributeSchema::new(
+                AttributeSchema::optional(
                     "event_bridge_configuration",
                     super::bucket_event_bridge_configuration(),
                 )
                 .with_description("Enables EventBridge notifications when present.")
-                .with_provider_name("EventBridgeConfiguration"),
+                .with_provider_name("EventBridgeConfiguration")
+                .build(),
             ),
     }
 }

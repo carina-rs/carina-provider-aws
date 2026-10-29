@@ -4,31 +4,36 @@ fn s3_cors_rule() -> AttributeType {
     AttributeType::struct_(
         "CorsRule".to_string(),
         vec![
-            StructField::new("id", AttributeType::string()).with_provider_name("ID"),
-            StructField::new(
+            StructField::optional("id", AttributeType::string())
+                .with_provider_name("ID")
+                .build(),
+            StructField::required(
                 "allowed_methods",
                 AttributeType::list(AttributeType::string()),
             )
             .with_provider_name("AllowedMethods")
-            .required(),
-            StructField::new(
+            .build(),
+            StructField::required(
                 "allowed_origins",
                 AttributeType::list(AttributeType::string()),
             )
             .with_provider_name("AllowedOrigins")
-            .required(),
-            StructField::new(
+            .build(),
+            StructField::optional(
                 "allowed_headers",
                 AttributeType::list(AttributeType::string()),
             )
-            .with_provider_name("AllowedHeaders"),
-            StructField::new(
+            .with_provider_name("AllowedHeaders")
+            .build(),
+            StructField::optional(
                 "expose_headers",
                 AttributeType::list(AttributeType::string()),
             )
-            .with_provider_name("ExposeHeaders"),
-            StructField::new("max_age_seconds", AttributeType::int())
-                .with_provider_name("MaxAgeSeconds"),
+            .with_provider_name("ExposeHeaders")
+            .build(),
+            StructField::optional("max_age_seconds", AttributeType::int())
+                .with_provider_name("MaxAgeSeconds")
+                .build(),
         ],
     )
 }

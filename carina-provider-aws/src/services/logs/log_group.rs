@@ -118,7 +118,7 @@ impl AwsProvider {
     /// Create a CloudWatch Logs Log Group
     pub(crate) async fn create_logs_log_group<A: AwsCreateAttempt>(
         &self,
-        resource: &Resource,
+        resource: &Resource<impl Sized>,
         schema: &ResourceSchema,
         attempt: A,
     ) -> Result<A::Step, A::Verdict> {

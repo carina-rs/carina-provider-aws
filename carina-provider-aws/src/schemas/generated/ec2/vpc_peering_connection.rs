@@ -6,8 +6,8 @@
 
 use super::AwsSchemaConfig;
 use super::tags_type;
-use super::validate_tags_map;
 use carina_core::schema::{AttributeSchema, ResourceSchema};
+use carina_provider_protocol::types::ValidatorType;
 
 /// Returns the schema config for ec2.VpcPeeringConnection (Smithy: com.amazonaws.ec2)
 pub fn ec2_vpc_peering_connection_config() -> AwsSchemaConfig {
@@ -19,37 +19,39 @@ pub fn ec2_vpc_peering_connection_config() -> AwsSchemaConfig {
         .with_description("Describes a VPC peering connection.")
         .with_conflicting_replacement()
         .attribute(
-            AttributeSchema::new("peer_owner_id", super::aws_account_id())
+            AttributeSchema::optional("peer_owner_id", super::aws_account_id())
                 .create_only()
                 .with_description("The Amazon Web Services account ID of the owner of the accepter VPC. Default: Your Amazon Web Services account ID")
-                .with_provider_name("PeerOwnerId"),
+                .with_provider_name("PeerOwnerId")
+                .build(),
         )
         .attribute(
-            AttributeSchema::new("peer_vpc_id", super::vpc_id())
-                .required()
+            AttributeSchema::required("peer_vpc_id", super::vpc_id())
                 .create_only()
                 .with_description("The ID of the VPC with which you are creating the VPC peering connection. You must specify this parameter in the request.")
-                .with_provider_name("PeerVpcId"),
+                .with_provider_name("PeerVpcId")
+                .build(),
         )
         .attribute(
-            AttributeSchema::new("vpc_id", super::vpc_id())
-                .required()
+            AttributeSchema::required("vpc_id", super::vpc_id())
                 .create_only()
                 .with_description("The ID of the requester VPC. You must specify this parameter in the request.")
-                .with_provider_name("VpcId"),
+                .with_provider_name("VpcId")
+                .build(),
         )
         .attribute(
-            AttributeSchema::new("vpc_peering_connection_id", super::vpc_peering_connection_id())
-                .read_only()
+            AttributeSchema::provider_populated("vpc_peering_connection_id", super::vpc_peering_connection_id())
                 .with_description("The ID of the VPC peering connection. (read-only)")
-                .with_provider_name("VpcPeeringConnectionId"),
+                .with_provider_name("VpcPeeringConnectionId")
+                .build(),
         )
         .attribute(
-            AttributeSchema::new("tags", tags_type())
+            AttributeSchema::optional("tags", tags_type())
                 .with_description("The tags for the resource.")
-                .with_provider_name("Tags"),
+                .with_provider_name("Tags")
+                .build(),
         )
-        .with_validator(validate_tags_map)
+        .with_declared_validators(vec![ValidatorType::TagsKeyValueCheck])
     }
 }
 

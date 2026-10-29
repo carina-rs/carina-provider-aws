@@ -6,8 +6,8 @@
 
 use super::AwsSchemaConfig;
 use super::tags_type;
-use super::validate_tags_map;
 use carina_core::schema::{AttributeSchema, ResourceSchema};
+use carina_provider_protocol::types::ValidatorType;
 
 /// Returns the schema config for ec2.RouteTable (Smithy: com.amazonaws.ec2)
 pub fn ec2_route_table_config() -> AwsSchemaConfig {
@@ -19,24 +19,25 @@ pub fn ec2_route_table_config() -> AwsSchemaConfig {
             .with_description("Describes a route table.")
             .with_coexisting_replacement()
             .attribute(
-                AttributeSchema::new("vpc_id", super::vpc_id())
-                    .required()
+                AttributeSchema::required("vpc_id", super::vpc_id())
                     .create_only()
                     .with_description("The ID of the VPC.")
-                    .with_provider_name("VpcId"),
+                    .with_provider_name("VpcId")
+                    .build(),
             )
             .attribute(
-                AttributeSchema::new("route_table_id", super::route_table_id())
-                    .read_only()
+                AttributeSchema::provider_populated("route_table_id", super::route_table_id())
                     .with_description("The ID of the route table. (read-only)")
-                    .with_provider_name("RouteTableId"),
+                    .with_provider_name("RouteTableId")
+                    .build(),
             )
             .attribute(
-                AttributeSchema::new("tags", tags_type())
+                AttributeSchema::optional("tags", tags_type())
                     .with_description("The tags for the resource.")
-                    .with_provider_name("Tags"),
+                    .with_provider_name("Tags")
+                    .build(),
             )
-            .with_validator(validate_tags_map),
+            .with_declared_validators(vec![ValidatorType::TagsKeyValueCheck]),
     }
 }
 

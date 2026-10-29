@@ -6,8 +6,8 @@
 
 use super::AwsSchemaConfig;
 use super::tags_type;
-use super::validate_tags_map;
 use carina_core::schema::{AttributeSchema, AttributeType, ResourceSchema};
+use carina_provider_protocol::types::ValidatorType;
 
 const VALID_LOG_GROUP_CLASS: &[&str] = &["DELIVERY", "INFREQUENT_ACCESS", "STANDARD"];
 
@@ -21,19 +21,21 @@ pub fn logs_log_group_config() -> AwsSchemaConfig {
         .with_description("Represents a log group.")
         .with_unique_name_attribute("log_group_name")
         .attribute(
-            AttributeSchema::new("deletion_protection_enabled", AttributeType::bool())
+            AttributeSchema::optional("deletion_protection_enabled", AttributeType::bool())
                 .create_only()
                 .with_description("Use this parameter to enable deletion protection for the new log group. When enabled on a log group, deletion protection blocks all deletion operation...")
-                .with_provider_name("deletionProtectionEnabled"),
+                .with_provider_name("deletionProtectionEnabled")
+                .build(),
         )
         .attribute(
-            AttributeSchema::new("kms_key_id", super::super::kms::key::id())
+            AttributeSchema::optional("kms_key_id", super::super::kms::key::id())
                 .create_only()
                 .with_description("The Amazon Resource Name (ARN) of the KMS key to use when encrypting log data. For more information, see Amazon Resource Names.")
-                .with_provider_name("kmsKeyId"),
+                .with_provider_name("kmsKeyId")
+                .build(),
         )
         .attribute(
-            AttributeSchema::new("log_group_class", AttributeType::enum_(
+            AttributeSchema::optional("log_group_class", AttributeType::enum_(
     carina_core::schema::enum_identity("LogGroupClass", Some("aws.logs.LogGroup")),
     Some(vec!["DELIVERY".to_string(), "INFREQUENT_ACCESS".to_string(), "STANDARD".to_string()]),
     vec![("DELIVERY".to_string(), "delivery".to_string()), ("INFREQUENT_ACCESS".to_string(), "infrequent_access".to_string()), ("STANDARD".to_string(), "standard".to_string())],
@@ -42,32 +44,29 @@ pub fn logs_log_group_config() -> AwsSchemaConfig {
 ))
                 .create_only()
                 .with_description("Use this parameter to specify the log group class for this log group. There are three classes: The Standard log class supports all CloudWatch Logs fea...")
-                .with_provider_name("logGroupClass"),
+                .with_provider_name("logGroupClass")
+                .build(),
         )
         .attribute(
-            AttributeSchema::new("log_group_name", AttributeType::string())
-                .required()
+            AttributeSchema::required("log_group_name", AttributeType::string())
                 .create_only()
                 .with_description("A name for the log group.")
-                .with_provider_name("logGroupName"),
+                .with_provider_name("logGroupName")
+                .build(),
         )
         .attribute(
-            AttributeSchema::new("retention_in_days", AttributeType::int())
+            AttributeSchema::optional("retention_in_days", AttributeType::int())
                 .with_description("The number of days to retain the log events in the log group. If unset, events never expire. The provider applies changes via PutRetentionPolicy / Del...")
-                .with_provider_name("retentionInDays"),
+                .with_provider_name("retentionInDays")
+                .build(),
         )
         .attribute(
-            AttributeSchema::new("tags", AttributeType::map(AttributeType::string()))
-                .create_only()
-                .with_description("The key-value pairs to use for the tags. You can grant users access to certain log groups while preventing them from accessing other log groups. To do...")
-                .with_provider_name("tags"),
-        )
-        .attribute(
-            AttributeSchema::new("tags", tags_type())
+            AttributeSchema::optional("tags", tags_type())
                 .with_description("The tags for the resource.")
-                .with_provider_name("Tags"),
+                .with_provider_name("Tags")
+                .build(),
         )
-        .with_validator(validate_tags_map)
+        .with_declared_validators(vec![ValidatorType::TagsKeyValueCheck])
     }
 }
 

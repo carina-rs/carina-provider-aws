@@ -14,7 +14,7 @@ impl AwsProvider {
     /// `data_source_lookups::DataSourceLookups`.
     pub(crate) fn do_read_sts_caller_identity_data_source(
         &self,
-        resource: &DataSource,
+        resource: &DataSource<impl Clone + Send + Sync + 'static>,
     ) -> BoxFuture<'_, ProviderResult<State>> {
         let id = resource.id.clone();
         Box::pin(async move {

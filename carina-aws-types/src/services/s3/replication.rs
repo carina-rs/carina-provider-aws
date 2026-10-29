@@ -8,12 +8,12 @@ pub(super) fn s3_filter_tag() -> AttributeType {
     AttributeType::struct_(
         "FilterTag".to_string(),
         vec![
-            StructField::new("key", AttributeType::string())
+            StructField::required("key", AttributeType::string())
                 .with_provider_name("Key")
-                .required(),
-            StructField::new("value", AttributeType::string())
+                .build(),
+            StructField::required("value", AttributeType::string())
                 .with_provider_name("Value")
-                .required(),
+                .build(),
         ],
     )
 }
@@ -24,11 +24,10 @@ fn s3_replication_destination() -> AttributeType {
     AttributeType::struct_(
         "ReplicationDestination".to_string(),
         vec![
-            StructField::new("bucket", AttributeType::string())
-                .with_provider_name("Bucket")
-                .required(),
-            StructField::new("account", AttributeType::string()).with_provider_name("Account"),
-            StructField::new(
+            StructField::required("bucket", AttributeType::string())
+                .with_provider_name("Bucket").build(),
+            StructField::optional("account", AttributeType::string()).with_provider_name("Account").build(),
+            StructField::optional(
                 "storage_class",
                 enum_with_dsl_aliases(
 &[
@@ -47,7 +46,7 @@ carina_core::schema::enum_identity(
                     )
 ),
             )
-            .with_provider_name("StorageClass"),
+            .with_provider_name("StorageClass").build(),
         ],
     )
 }
@@ -69,10 +68,13 @@ fn s3_replication_filter_and() -> AttributeType {
     AttributeType::struct_(
         "ReplicationRuleAndOperator".to_string(),
         vec![
-            StructField::new("prefix", AttributeType::string()).with_provider_name("Prefix"),
-            StructField::new("tags", AttributeType::list(s3_filter_tag()))
+            StructField::optional("prefix", AttributeType::string())
+                .with_provider_name("Prefix")
+                .build(),
+            StructField::optional("tags", AttributeType::list(s3_filter_tag()))
                 .with_provider_name("Tags")
-                .with_block_name("tag"),
+                .with_block_name("tag")
+                .build(),
         ],
     )
 }
@@ -84,13 +86,17 @@ fn s3_replication_rule_filter() -> AttributeType {
     AttributeType::struct_(
         "ReplicationRuleFilter".to_string(),
         vec![
-            StructField::new("prefix", AttributeType::string()).with_provider_name("Prefix"),
-            StructField::new("tag", s3_filter_tag())
+            StructField::optional("prefix", AttributeType::string())
+                .with_provider_name("Prefix")
+                .build(),
+            StructField::optional("tag", s3_filter_tag())
                 .with_provider_name("Tag")
-                .with_block_name("tag"),
-            StructField::new("and", s3_replication_filter_and())
+                .with_block_name("tag")
+                .build(),
+            StructField::optional("and", s3_replication_filter_and())
                 .with_provider_name("And")
-                .with_block_name("and"),
+                .with_block_name("and")
+                .build(),
         ],
     )
 }
@@ -102,7 +108,7 @@ fn s3_delete_marker_replication() -> AttributeType {
     AttributeType::struct_(
         "DeleteMarkerReplication".to_string(),
         vec![
-            StructField::new(
+            StructField::required(
                 "status",
                 enum_with_dsl_aliases(
 &["Enabled", "Disabled"],
@@ -112,8 +118,7 @@ carina_core::schema::enum_identity(
                     )
 ),
             )
-            .with_provider_name("Status")
-            .required(),
+            .with_provider_name("Status").build(),
         ],
     )
 }
@@ -122,21 +127,27 @@ fn s3_replication_rule() -> AttributeType {
     AttributeType::struct_(
         "ReplicationRule".to_string(),
         vec![
-            StructField::new("id", AttributeType::string()).with_provider_name("ID"),
-            StructField::new("priority", AttributeType::int()).with_provider_name("Priority"),
-            StructField::new("filter", s3_replication_rule_filter())
+            StructField::optional("id", AttributeType::string())
+                .with_provider_name("ID")
+                .build(),
+            StructField::optional("priority", AttributeType::int())
+                .with_provider_name("Priority")
+                .build(),
+            StructField::optional("filter", s3_replication_rule_filter())
                 .with_provider_name("Filter")
-                .with_block_name("filter"),
-            StructField::new("status", s3_replication_status())
+                .with_block_name("filter")
+                .build(),
+            StructField::required("status", s3_replication_status())
                 .with_provider_name("Status")
-                .required(),
-            StructField::new("delete_marker_replication", s3_delete_marker_replication())
+                .build(),
+            StructField::optional("delete_marker_replication", s3_delete_marker_replication())
                 .with_provider_name("DeleteMarkerReplication")
-                .with_block_name("delete_marker_replication"),
-            StructField::new("destination", s3_replication_destination())
+                .with_block_name("delete_marker_replication")
+                .build(),
+            StructField::required("destination", s3_replication_destination())
                 .with_provider_name("Destination")
                 .with_block_name("destination")
-                .required(),
+                .build(),
         ],
     )
 }

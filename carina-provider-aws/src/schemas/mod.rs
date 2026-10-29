@@ -3,11 +3,19 @@
 pub mod config;
 pub mod generated;
 
-use carina_core::schema::ResourceSchema;
+use carina_core::schema::ValidatedResourceSchema;
 
 /// Returns all AWS schemas
-pub fn all_schemas() -> Vec<ResourceSchema> {
-    generated::configs().into_iter().map(|c| c.schema).collect()
+pub fn all_schemas() -> Vec<ValidatedResourceSchema> {
+    generated::configs()
+        .into_iter()
+        .map(|config| {
+            config
+                .schema
+                .validate()
+                .unwrap_or_else(|error| panic!("{error}"))
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -371,6 +379,18 @@ mod tests {
     #[test]
     fn route53_alias_target_hosted_zone_id_validates_cloudfront_and_route53_values() {
         let record_set = super::generated::route53::record_set::route53_record_set_config();
+        let schema = record_set
+            .schema
+            .validate()
+            .expect("Route 53 RecordSet schema must pass admission");
+        let validate_attributes = |attributes: &HashMap<String, Value>| {
+            attributes.iter().try_for_each(|(name, value)| {
+                schema
+                    .effective_attribute(name)
+                    .unwrap_or_else(|| panic!("missing RecordSet attribute {name}"))
+                    .validate(value)
+            })
+        };
         let accepted = [
             (
                 "CloudFront namespaced constant",
@@ -407,7 +427,7 @@ mod tests {
                     )),
                 ),
             ]);
-            let result = record_set.schema.validate(&attributes);
+            let result = validate_attributes(&attributes);
             assert!(result.is_ok(), "{label} should validate: {result:?}");
         }
 
@@ -443,7 +463,7 @@ mod tests {
                     )),
                 ),
             ]);
-            let result = record_set.schema.validate(&attributes);
+            let result = validate_attributes(&attributes);
             assert!(result.is_err(), "{label} should be rejected");
         }
     }
@@ -505,7 +525,7 @@ mod tests {
             &current,
             &saved_attrs,
             None,
-            Some(schema),
+            Some(schema.schema().as_schema()),
         );
         assert!(
             matches!(result, Diff::NoChange(_)),

@@ -73,7 +73,7 @@ impl AwsProvider {
     /// Create an EC2 Internet Gateway
     pub(crate) async fn create_ec2_internet_gateway<A: AwsCreateAttempt>(
         &self,
-        resource: &Resource,
+        resource: &Resource<impl Sized>,
         client_token: &ClientToken,
         attempt: A,
     ) -> Result<A::Step, A::Verdict> {
@@ -107,7 +107,7 @@ impl AwsProvider {
 
     pub(crate) async fn continue_ec2_internet_gateway_create(
         &self,
-        resource: &Resource,
+        resource: &Resource<impl Sized>,
         igw_id: &str,
     ) -> ProviderResult<()> {
         // Attach to VPC if specified

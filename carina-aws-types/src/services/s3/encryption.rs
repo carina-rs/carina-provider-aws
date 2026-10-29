@@ -18,11 +18,12 @@ fn s3_sse_by_default() -> AttributeType {
     AttributeType::struct_(
         "SseByDefault".to_string(),
         vec![
-            StructField::new("sse_algorithm", s3_sse_algorithm())
+            StructField::required("sse_algorithm", s3_sse_algorithm())
                 .with_provider_name("SSEAlgorithm")
-                .required(),
-            StructField::new("kms_master_key_id", AttributeType::string())
-                .with_provider_name("KMSMasterKeyID"),
+                .build(),
+            StructField::optional("kms_master_key_id", AttributeType::string())
+                .with_provider_name("KMSMasterKeyID")
+                .build(),
         ],
     )
 }
@@ -32,14 +33,16 @@ fn s3_sse_rule() -> AttributeType {
     AttributeType::struct_(
         "SseRule".to_string(),
         vec![
-            StructField::new(
+            StructField::optional(
                 "apply_server_side_encryption_by_default",
                 s3_sse_by_default(),
             )
             .with_provider_name("ApplyServerSideEncryptionByDefault")
-            .with_block_name("apply_server_side_encryption_by_default"),
-            StructField::new("bucket_key_enabled", AttributeType::bool())
-                .with_provider_name("BucketKeyEnabled"),
+            .with_block_name("apply_server_side_encryption_by_default")
+            .build(),
+            StructField::optional("bucket_key_enabled", AttributeType::bool())
+                .with_provider_name("BucketKeyEnabled")
+                .build(),
         ],
     )
 }

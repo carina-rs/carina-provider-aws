@@ -6,8 +6,8 @@
 
 use super::AwsSchemaConfig;
 use super::tags_type;
-use super::validate_tags_map;
 use carina_core::schema::{AttributeSchema, AttributeType, ResourceSchema, StructField};
+use carina_provider_protocol::types::ValidatorType;
 
 const VALID_APPLIANCE_MODE_SUPPORT: &[&str] = &["disable", "enable"];
 
@@ -27,76 +27,78 @@ pub fn ec2_transit_gateway_attachment_config() -> AwsSchemaConfig {
         .with_description("Describes a VPC attachment.")
         .with_conflicting_replacement()
         .attribute(
-            AttributeSchema::new("options", AttributeType::struct_(
+            AttributeSchema::optional("options", AttributeType::struct_(
                     "CreateTransitGatewayVpcAttachmentRequestOptions".to_string(),
                     vec![
-                    StructField::new("appliance_mode_support", AttributeType::enum_(
+                    StructField::optional("appliance_mode_support", AttributeType::enum_(
     carina_core::schema::enum_identity("ApplianceModeSupport", Some("aws.ec2.TransitGatewayAttachment.CreateTransitGatewayVpcAttachmentRequestOptions")),
     Some(vec!["disable".to_string(), "enable".to_string()]),
     vec![("disable".to_string(), "disable".to_string()), ("enable".to_string(), "enable".to_string())],
     None,
     None,
-)).with_description("Enable or disable support for appliance mode. If enabled, a traffic flow between a source and destination uses the same Availability Zone for the VPC ...").with_provider_name("ApplianceModeSupport"),
-                    StructField::new("dns_support", AttributeType::enum_(
+)).with_description("Enable or disable support for appliance mode. If enabled, a traffic flow between a source and destination uses the same Availability Zone for the VPC ...").with_provider_name("ApplianceModeSupport").build(),
+                    StructField::optional("dns_support", AttributeType::enum_(
     carina_core::schema::enum_identity("DnsSupport", Some("aws.ec2.TransitGatewayAttachment.CreateTransitGatewayVpcAttachmentRequestOptions")),
     Some(vec!["disable".to_string(), "enable".to_string()]),
     vec![("disable".to_string(), "disable".to_string()), ("enable".to_string(), "enable".to_string())],
     None,
     None,
-)).with_description("Enable or disable DNS support. The default is enable.").with_provider_name("DnsSupport"),
-                    StructField::new("ipv6_support", AttributeType::enum_(
+)).with_description("Enable or disable DNS support. The default is enable.").with_provider_name("DnsSupport").build(),
+                    StructField::optional("ipv6_support", AttributeType::enum_(
     carina_core::schema::enum_identity("Ipv6Support", Some("aws.ec2.TransitGatewayAttachment.CreateTransitGatewayVpcAttachmentRequestOptions")),
     Some(vec!["disable".to_string(), "enable".to_string()]),
     vec![("disable".to_string(), "disable".to_string()), ("enable".to_string(), "enable".to_string())],
     None,
     None,
-)).with_description("Specifies whether IPv6 support is enabled for the attachment. When enabled, the transit gateway network interface receives an IPv6 address. When you e...").with_provider_name("Ipv6Support"),
-                    StructField::new("security_group_referencing_support", AttributeType::enum_(
+)).with_description("Specifies whether IPv6 support is enabled for the attachment. When enabled, the transit gateway network interface receives an IPv6 address. When you e...").with_provider_name("Ipv6Support").build(),
+                    StructField::optional("security_group_referencing_support", AttributeType::enum_(
     carina_core::schema::enum_identity("SecurityGroupReferencingSupport", Some("aws.ec2.TransitGatewayAttachment.CreateTransitGatewayVpcAttachmentRequestOptions")),
     Some(vec!["disable".to_string(), "enable".to_string()]),
     vec![("disable".to_string(), "disable".to_string()), ("enable".to_string(), "enable".to_string())],
     None,
     None,
-)).with_description("Enables you to reference a security group across VPCs attached to a transit gateway to simplify security group management. This option is set to enabl...").with_provider_name("SecurityGroupReferencingSupport")
+)).with_description("Enables you to reference a security group across VPCs attached to a transit gateway to simplify security group management. This option is set to enabl...").with_provider_name("SecurityGroupReferencingSupport").build()
                     ],
                 ))
                 .create_only()
                 .with_description("The VPC attachment options.")
-                .with_provider_name("Options"),
+                .with_provider_name("Options")
+                .build(),
         )
         .attribute(
-            AttributeSchema::new("subnet_ids", AttributeType::list(super::subnet_id()))
-                .required()
+            AttributeSchema::required("subnet_ids", AttributeType::list(super::subnet_id()))
                 .create_only()
                 .with_description("The IDs of one or more subnets. You can specify only one subnet per Availability Zone. You must specify at least one subnet, but we recommend that you...")
-                .with_provider_name("SubnetIds"),
+                .with_provider_name("SubnetIds")
+                .build(),
         )
         .attribute(
-            AttributeSchema::new("transit_gateway_id", super::transit_gateway_id())
-                .required()
+            AttributeSchema::required("transit_gateway_id", super::transit_gateway_id())
                 .create_only()
                 .with_description("The ID of the transit gateway.")
-                .with_provider_name("TransitGatewayId"),
+                .with_provider_name("TransitGatewayId")
+                .build(),
         )
         .attribute(
-            AttributeSchema::new("vpc_id", super::vpc_id())
-                .required()
+            AttributeSchema::required("vpc_id", super::vpc_id())
                 .create_only()
                 .with_description("The ID of the VPC.")
-                .with_provider_name("VpcId"),
+                .with_provider_name("VpcId")
+                .build(),
         )
         .attribute(
-            AttributeSchema::new("transit_gateway_attachment_id", AttributeType::string())
-                .read_only()
+            AttributeSchema::provider_populated("transit_gateway_attachment_id", AttributeType::string())
                 .with_description("The ID of the attachment. (read-only)")
-                .with_provider_name("TransitGatewayAttachmentId"),
+                .with_provider_name("TransitGatewayAttachmentId")
+                .build(),
         )
         .attribute(
-            AttributeSchema::new("tags", tags_type())
+            AttributeSchema::optional("tags", tags_type())
                 .with_description("The tags for the resource.")
-                .with_provider_name("Tags"),
+                .with_provider_name("Tags")
+                .build(),
         )
-        .with_validator(validate_tags_map)
+        .with_declared_validators(vec![ValidatorType::TagsKeyValueCheck])
     }
 }
 

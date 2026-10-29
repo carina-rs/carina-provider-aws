@@ -1,4 +1,5 @@
-use carina_core::schema::AttributeType;
+use carina_core::resource::{ConcreteValue, Value};
+use carina_core::schema::{AttributeType, legacy_validator};
 
 use crate::provider_type;
 
@@ -18,10 +19,17 @@ pub fn validate_iam_role_id(id: &str) -> Result<(), String> {
 
 /// IAM Role ID type (e.g., "AROAEXAMPLEID")
 pub fn iam_role_id() -> AttributeType {
-    AttributeType::refined_string(
-        Some(provider_type("iam", "Role", "Id")),
+    AttributeType::refined_string_with_validator(
+        provider_type("iam", "Role", "Id"),
         Some("^AROA[A-Z0-9]+$".to_string()),
         None,
+        legacy_validator(|value| {
+            if let Value::Concrete(ConcreteValue::String(value)) = value {
+                validate_iam_role_id(value.expose_plaintext())
+            } else {
+                Err("Expected string".to_string())
+            }
+        }),
         None,
     )
 }

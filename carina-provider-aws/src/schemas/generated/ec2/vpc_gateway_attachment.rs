@@ -16,30 +16,25 @@ pub fn ec2_vpc_gateway_attachment_config() -> AwsSchemaConfig {
         schema: ResourceSchema::new("ec2.VpcGatewayAttachment")
             .with_conflicting_replacement()
             .attribute(
-                AttributeSchema::new("internet_gateway_id", super::internet_gateway_id())
-                    .required()
+                AttributeSchema::optional("internet_gateway_id", super::internet_gateway_id())
                     .create_only()
                     .with_description("The ID of the internet gateway.")
-                    .with_provider_name("InternetGatewayId"),
+                    .with_provider_name("InternetGatewayId")
+                    .build(),
             )
             .attribute(
-                AttributeSchema::new("vpc_id", super::vpc_id())
-                    .required()
+                AttributeSchema::required("vpc_id", super::vpc_id())
                     .create_only()
                     .with_description("The ID of the VPC.")
-                    .with_provider_name("VpcId"),
+                    .with_provider_name("VpcId")
+                    .build(),
             )
             .attribute(
-                AttributeSchema::new("internet_gateway_id", super::internet_gateway_id())
-                    .create_only()
-                    .with_description("The ID of the internet gateway.")
-                    .with_provider_name("InternetGatewayId"),
-            )
-            .attribute(
-                AttributeSchema::new("vpn_gateway_id", super::vpn_gateway_id())
+                AttributeSchema::optional("vpn_gateway_id", super::vpn_gateway_id())
                     .create_only()
                     .with_description("The ID of the VPN gateway.")
-                    .with_provider_name("VpnGatewayId"),
+                    .with_provider_name("VpnGatewayId")
+                    .build(),
             ),
     }
 }

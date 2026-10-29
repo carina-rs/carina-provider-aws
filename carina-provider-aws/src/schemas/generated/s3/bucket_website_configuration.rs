@@ -16,26 +16,29 @@ pub fn s3_bucket_website_configuration_config() -> AwsSchemaConfig {
         schema: ResourceSchema::new("s3.BucketWebsiteConfiguration")
         .with_coexisting_replacement()
         .attribute(
-            AttributeSchema::new("bucket", AttributeType::string())
-                .required()
+            AttributeSchema::required("bucket", AttributeType::string())
                 .create_only()
                 .with_description("The bucket name.")
-                .with_provider_name("Bucket"),
+                .with_provider_name("Bucket")
+                .build(),
         )
         .attribute(
-            AttributeSchema::new("index_document", super::s3_index_document())
+            AttributeSchema::optional("index_document", super::s3_index_document())
                 .with_description("Index document for the bucket's website.")
-                .with_provider_name("IndexDocument"),
+                .with_provider_name("IndexDocument")
+                .build(),
         )
         .attribute(
-            AttributeSchema::new("error_document", super::s3_error_document())
+            AttributeSchema::optional("error_document", super::s3_error_document())
                 .with_description("Custom error document key.")
-                .with_provider_name("ErrorDocument"),
+                .with_provider_name("ErrorDocument")
+                .build(),
         )
         .attribute(
-            AttributeSchema::new("redirect_all_requests_to", super::s3_redirect_all_requests_to())
+            AttributeSchema::optional("redirect_all_requests_to", super::s3_redirect_all_requests_to())
                 .with_description("Redirect all bucket-website requests to another host (alternative to index_document).")
-                .with_provider_name("RedirectAllRequestsTo"),
+                .with_provider_name("RedirectAllRequestsTo")
+                .build(),
         )
     }
 }

@@ -25,35 +25,40 @@ pub fn s3_bucket_data_source_config() -> AwsSchemaConfig {
         schema: ResourceSchema::new("s3.Bucket")
         .as_data_source()
         .attribute(
-            AttributeSchema::new("bucket", AttributeType::string())
-            .required()
+            AttributeSchema::required("bucket", AttributeType::string())
                 .with_description("Name of the S3 bucket to look up.")
-                .with_provider_name("Bucket"),
+                .with_provider_name("Bucket")
+                .build(),
         )
         .attribute(
-            AttributeSchema::new("arn", self::arn())
+            AttributeSchema::optional("arn", self::arn())
                 .with_description("ARN of the bucket.")
-                .with_provider_name(""),
+                .with_provider_name("")
+                .build(),
         )
         .attribute(
-            AttributeSchema::new("region", AttributeType::string())
+            AttributeSchema::optional("region", AttributeType::string())
                 .with_description("AWS region the bucket is in.")
-                .with_provider_name("LocationConstraint"),
+                .with_provider_name("LocationConstraint")
+                .build(),
         )
         .attribute(
-            AttributeSchema::new("bucket_domain_name", AttributeType::string())
+            AttributeSchema::optional("bucket_domain_name", AttributeType::string())
                 .with_description("Bucket domain name (`<bucket>.s3.amazonaws.com`).")
-                .with_provider_name(""),
+                .with_provider_name("")
+                .build(),
         )
         .attribute(
-            AttributeSchema::new("bucket_regional_domain_name", AttributeType::string())
+            AttributeSchema::optional("bucket_regional_domain_name", AttributeType::string())
                 .with_description("Region-specific bucket domain name (`<bucket>.s3.<region>.amazonaws.com`).")
-                .with_provider_name(""),
+                .with_provider_name("")
+                .build(),
         )
         .attribute(
-            AttributeSchema::new("hosted_zone_id", super::route53_hosted_zone_id())
+            AttributeSchema::optional("hosted_zone_id", super::route53_hosted_zone_id())
                 .with_description("Route 53 Hosted Zone ID for the bucket's region.")
-                .with_provider_name(""),
+                .with_provider_name("")
+                .build(),
         )
     }
 }

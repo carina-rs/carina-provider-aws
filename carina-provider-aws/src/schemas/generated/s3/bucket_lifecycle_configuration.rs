@@ -16,17 +16,17 @@ pub fn s3_bucket_lifecycle_configuration_config() -> AwsSchemaConfig {
         schema: ResourceSchema::new("s3.BucketLifecycleConfiguration")
             .with_coexisting_replacement()
             .attribute(
-                AttributeSchema::new("bucket", AttributeType::string())
-                    .required()
+                AttributeSchema::required("bucket", AttributeType::string())
                     .create_only()
                     .with_description("The name of the bucket for which to set the configuration.")
-                    .with_provider_name("Bucket"),
+                    .with_provider_name("Bucket")
+                    .build(),
             )
             .attribute(
-                AttributeSchema::new("rules", super::bucket_lifecycle_rules())
-                    .required()
+                AttributeSchema::required("rules", super::bucket_lifecycle_rules())
                     .with_description("Lifecycle rules to apply to the bucket.")
-                    .with_provider_name("Rules"),
+                    .with_provider_name("Rules")
+                    .build(),
             ),
     }
 }

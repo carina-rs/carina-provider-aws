@@ -94,7 +94,8 @@ pub struct ResourceDef {
     pub read_only_overrides: Vec<&'static str>,
     /// Extra schema attributes (writable or read-only) that are not present
     /// in the create operation input. Each entry is emitted as an
-    /// `AttributeSchema::new(...)` line with the usual flag combination:
+    /// `AttributeSchema::{optional,required,provider_populated}(...)` line
+    /// with the usual flag combination:
     /// - `update_ops` lists the field → updatable (else create-only).
     /// - `read_only_overrides` lists the field → read-only.
     pub extra_attributes: Vec<ExtraField>,

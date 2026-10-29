@@ -6,8 +6,8 @@
 
 use super::AwsSchemaConfig;
 use super::tags_type;
-use super::validate_tags_map;
 use carina_core::schema::{AttributeSchema, AttributeType, ResourceSchema};
+use carina_provider_protocol::types::ValidatorType;
 
 pub fn arn() -> AttributeType {
     super::iam_role_arn()
@@ -23,58 +23,62 @@ pub fn iam_role_config() -> AwsSchemaConfig {
         .with_description("Contains information about an IAM role. This structure is returned as a response element in several API operations that interact with roles.")
         .with_unique_name_attribute("role_name")
         .attribute(
-            AttributeSchema::new("assume_role_policy_document", super::iam_policy_document())
-                .required()
+            AttributeSchema::required("assume_role_policy_document", super::iam_policy_document())
                 .create_only()
                 .with_description("The trust relationship policy document that grants an entity permission to assume the role. In IAM, you must provide a JSON policy that has been conve...")
-                .with_provider_name("AssumeRolePolicyDocument"),
+                .with_provider_name("AssumeRolePolicyDocument")
+                .build(),
         )
         .attribute(
-            AttributeSchema::new("description", AttributeType::string())
+            AttributeSchema::optional("description", AttributeType::string())
                 .create_only()
                 .with_description("A description of the role.")
-                .with_provider_name("Description"),
+                .with_provider_name("Description")
+                .build(),
         )
         .attribute(
-            AttributeSchema::new("max_session_duration", AttributeType::refined_int(
+            AttributeSchema::optional("max_session_duration", AttributeType::refined_int(
                 None,
                 Some((Some(3600), Some(43200))),
             ))
                 .create_only()
                 .with_description("The maximum session duration (in seconds) that you want to set for the specified role. If you do not specify a value for this setting, the default val...")
-                .with_provider_name("MaxSessionDuration"),
+                .with_provider_name("MaxSessionDuration")
+                .build(),
         )
         .attribute(
-            AttributeSchema::new("path", AttributeType::string())
+            AttributeSchema::optional("path", AttributeType::string())
                 .create_only()
                 .with_description("The path to the role. For more information about paths, see IAM Identifiers in the IAM User Guide. This parameter is optional. If it is not included, ...")
-                .with_provider_name("Path"),
+                .with_provider_name("Path")
+                .build(),
         )
         .attribute(
-            AttributeSchema::new("role_name", AttributeType::string())
-                .required()
+            AttributeSchema::required("role_name", AttributeType::string())
                 .create_only()
                 .with_description("The name of the role to create. IAM user, group, role, and policy names must be unique within the account. Names are not distinguished by case. For ex...")
-                .with_provider_name("RoleName"),
+                .with_provider_name("RoleName")
+                .build(),
         )
         .attribute(
-            AttributeSchema::new("arn", self::arn())
-                .read_only()
+            AttributeSchema::provider_populated("arn", self::arn())
                 .with_description("The Amazon Resource Name (ARN) specifying the role. For more information about ARNs and how to use them in policies, see IAM identifiers in the IAM Us... (read-only)")
-                .with_provider_name("Arn"),
+                .with_provider_name("Arn")
+                .build(),
         )
         .attribute(
-            AttributeSchema::new("role_id", super::iam_role_id())
-                .read_only()
+            AttributeSchema::provider_populated("role_id", super::iam_role_id())
                 .with_description("The stable and unique string identifying the role. For more information about IDs, see IAM identifiers in the IAM User Guide. (read-only)")
-                .with_provider_name("RoleId"),
+                .with_provider_name("RoleId")
+                .build(),
         )
         .attribute(
-            AttributeSchema::new("tags", tags_type())
+            AttributeSchema::optional("tags", tags_type())
                 .with_description("The tags for the resource.")
-                .with_provider_name("Tags"),
+                .with_provider_name("Tags")
+                .build(),
         )
-        .with_validator(validate_tags_map)
+        .with_declared_validators(vec![ValidatorType::TagsKeyValueCheck])
     }
 }
 

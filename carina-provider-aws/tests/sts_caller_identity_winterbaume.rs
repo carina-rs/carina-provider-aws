@@ -84,7 +84,7 @@ impl MockService for AlwaysUnavailableStsService {
 
 fn ready_data_source_for_test(resource: DataSource) -> ProviderReadyDataSource {
     let bindings = carina_core::binding_index::ResolvedBindings::default();
-    let module_gate = carina_core::executor::ModuleConstraintGate::new(&[]);
+    let module_gate = carina_core::executor::ModuleConstraintGate::from_live_compositions(&[]);
     let mut schemas = carina_core::schema::SchemaRegistry::new();
     for schema in carina_provider_aws::schemas::all_schemas() {
         schemas.insert("aws", schema);

@@ -66,7 +66,7 @@ impl AwsProvider {
     /// Create an EC2 VPN Gateway
     pub(crate) async fn create_ec2_vpn_gateway<A: AwsCreateAttempt>(
         &self,
-        resource: &Resource,
+        resource: &Resource<impl Sized>,
         schema: &ResourceSchema,
         client_token: &ClientToken,
         attempt: A,

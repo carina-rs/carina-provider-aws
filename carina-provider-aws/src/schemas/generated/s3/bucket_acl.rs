@@ -23,7 +23,7 @@ pub fn s3_bucket_acl_config() -> AwsSchemaConfig {
         schema: ResourceSchema::new("s3.BucketAcl")
             .with_coexisting_replacement()
             .attribute(
-                AttributeSchema::new(
+                AttributeSchema::required(
                     "acl",
                     AttributeType::enum_(
                         carina_core::schema::enum_identity("Acl", Some("aws.s3.BucketAcl")),
@@ -49,16 +49,16 @@ pub fn s3_bucket_acl_config() -> AwsSchemaConfig {
                         None,
                     ),
                 )
-                .required()
                 .with_description("The canned ACL to apply to the bucket.")
-                .with_provider_name("ACL"),
+                .with_provider_name("ACL")
+                .build(),
             )
             .attribute(
-                AttributeSchema::new("bucket", AttributeType::string())
-                    .required()
+                AttributeSchema::required("bucket", AttributeType::string())
                     .create_only()
                     .with_description("The bucket to which to apply the ACL.")
-                    .with_provider_name("Bucket"),
+                    .with_provider_name("Bucket")
+                    .build(),
             ),
     }
 }

@@ -1,9 +1,27 @@
-use carina_core::schema::{AttributeType, TypeIdentity};
+use carina_core::resource::{ConcreteValue, Value};
+use carina_core::schema::{AttributeType, TypeIdentity, legacy_validator};
 
-use crate::provider_type;
+use crate::{provider_type, validate_prefixed_resource_id};
 
 fn resource_id(identity: TypeIdentity, pattern: &str) -> AttributeType {
-    AttributeType::refined_string(Some(identity), Some(pattern.to_string()), None, None)
+    let prefix = pattern
+        .strip_prefix('^')
+        .and_then(|pattern| pattern.strip_suffix("-[0-9a-f]{8,}$"))
+        .expect("EC2 resource ID regex must encode its prefix")
+        .to_string();
+    AttributeType::refined_string_with_validator(
+        identity,
+        Some(pattern.to_string()),
+        None,
+        legacy_validator(move |value| {
+            if let Value::Concrete(ConcreteValue::String(value)) = value {
+                validate_prefixed_resource_id(value.expose_plaintext(), &prefix)
+            } else {
+                Err("Expected string".to_string())
+            }
+        }),
+        None,
+    )
 }
 
 /// VPC ID type (e.g., "vpc-1a2b3c4d")

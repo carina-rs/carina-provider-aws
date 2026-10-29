@@ -6,8 +6,8 @@
 
 use super::AwsSchemaConfig;
 use super::tags_type;
-use super::validate_tags_map;
 use carina_core::schema::{AttributeSchema, AttributeType, ResourceSchema, types};
+use carina_provider_protocol::types::ValidatorType;
 
 const VALID_IAM_USER_ACCESS_TO_BILLING: &[&str] = &["ALLOW", "DENY"];
 
@@ -34,21 +34,21 @@ pub fn organizations_account_config() -> AwsSchemaConfig {
         .with_description("Contains information about an Amazon Web Services account that is a member of an organization.")
         .with_conflicting_replacement()
         .attribute(
-            AttributeSchema::new("account_name", AttributeType::string())
-                .required()
+            AttributeSchema::required("account_name", AttributeType::string())
                 .create_only()
                 .with_description("The friendly name of the member account.")
-                .with_provider_name("AccountName"),
+                .with_provider_name("AccountName")
+                .build(),
         )
         .attribute(
-            AttributeSchema::new("email", types::email())
-                .required()
+            AttributeSchema::required("email", types::email())
                 .create_only()
                 .with_description("The email address of the owner to assign to the new member account. This email address must not already be associated with another Amazon Web Services...")
-                .with_provider_name("Email"),
+                .with_provider_name("Email")
+                .build(),
         )
         .attribute(
-            AttributeSchema::new("iam_user_access_to_billing", AttributeType::enum_(
+            AttributeSchema::optional("iam_user_access_to_billing", AttributeType::enum_(
     carina_core::schema::enum_identity("IamUserAccessToBilling", Some("aws.organizations.Account")),
     Some(vec!["ALLOW".to_string(), "DENY".to_string()]),
     vec![("ALLOW".to_string(), "allow".to_string()), ("DENY".to_string(), "deny".to_string())],
@@ -57,68 +57,71 @@ pub fn organizations_account_config() -> AwsSchemaConfig {
 ))
                 .create_only()
                 .with_description("If set to ALLOW, the new account enables IAM users to access account billing information if they have the required permissions. If set to DENY, only t...")
-                .with_provider_name("IamUserAccessToBilling"),
+                .with_provider_name("IamUserAccessToBilling")
+                .build(),
         )
         .attribute(
-            AttributeSchema::new("role_name", AttributeType::string())
+            AttributeSchema::optional("role_name", AttributeType::string())
                 .create_only()
                 .with_description("The name of an IAM role that Organizations automatically preconfigures in the new member account. This role trusts the management account, allowing us...")
-                .with_provider_name("RoleName"),
+                .with_provider_name("RoleName")
+                .build(),
         )
         .attribute(
-            AttributeSchema::new("arn", self::arn())
-                .read_only()
+            AttributeSchema::provider_populated("arn", self::arn())
                 .with_description("The Amazon Resource Name (ARN) of the account. For more information about ARNs in Organizations, see ARN Formats Supported by Organizations in the Ama... (read-only)")
-                .with_provider_name("Arn"),
+                .with_provider_name("Arn")
+                .build(),
         )
         .attribute(
-            AttributeSchema::new("id", AttributeType::string())
-                .read_only()
+            AttributeSchema::provider_populated("id", AttributeType::string())
                 .with_description("The unique identifier (ID) of the account. The regex pattern for an account ID string requires exactly 12 digits. (read-only)")
-                .with_provider_name("Id"),
+                .with_provider_name("Id")
+                .build(),
         )
         .attribute(
-            AttributeSchema::new("joined_method", AttributeType::enum_(
+            AttributeSchema::provider_populated("joined_method", AttributeType::enum_(
     carina_core::schema::enum_identity("JoinedMethod", Some("aws.organizations.Account")),
     Some(vec!["CREATED".to_string(), "INVITED".to_string()]),
     vec![("CREATED".to_string(), "created".to_string()), ("INVITED".to_string(), "invited".to_string())],
     None,
     None,
 ))
-                .read_only()
                 .with_description("The method by which the account joined the organization. (read-only)")
-                .with_provider_name("JoinedMethod"),
+                .with_provider_name("JoinedMethod")
+                .build(),
         )
         .attribute(
-            AttributeSchema::new("joined_timestamp", AttributeType::string())
-                .read_only()
+            AttributeSchema::provider_populated("joined_timestamp", AttributeType::string())
                 .with_description("The date the account became a part of the organization. (read-only)")
-                .with_provider_name("JoinedTimestamp"),
+                .with_provider_name("JoinedTimestamp")
+                .build(),
         )
         .attribute(
-            AttributeSchema::new("name", AttributeType::string())
-                .read_only()
+            AttributeSchema::provider_populated("name", AttributeType::string())
                 .with_description("The friendly name of the account. The regex pattern that is used to validate this parameter is a string of any of the characters in the ASCII characte... (read-only)")
-                .with_provider_name("Name"),
+                .with_provider_name("Name")
+                .build(),
         )
         .attribute(
-            AttributeSchema::new("status", AttributeType::enum_(
+            AttributeSchema::provider_populated("status", AttributeType::enum_(
     carina_core::schema::enum_identity("Status", Some("aws.organizations.Account")),
     Some(vec!["ACTIVE".to_string(), "PENDING_CLOSURE".to_string(), "SUSPENDED".to_string()]),
     vec![("ACTIVE".to_string(), "active".to_string()), ("PENDING_CLOSURE".to_string(), "pending_closure".to_string()), ("SUSPENDED".to_string(), "suspended".to_string())],
     None,
     None,
 ))
-                .read_only()
                 .with_description("The status of the account in the organization. The Status parameter in the Account object will be retired on September 9, 2026. Although both the acco... (read-only)")
-                .with_provider_name("Status"),
+                .with_provider_name("Status")
+                .build(),
         )
         .attribute(
-            AttributeSchema::new("tags", tags_type())
+            AttributeSchema::optional("tags", tags_type())
                 .with_description("The tags for the resource.")
-                .with_provider_name("Tags"),
+                .with_provider_name("Tags")
+                .build(),
         )
-        .with_validator(validate_tags_map)
+        .with_declared_validators(vec![ValidatorType::TagsKeyValueCheck])
     }
 }
 

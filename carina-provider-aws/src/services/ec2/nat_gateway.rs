@@ -103,7 +103,7 @@ impl AwsProvider {
     /// Create an EC2 NAT Gateway
     pub(crate) async fn create_ec2_nat_gateway_start<A: AwsCreateAttempt>(
         &self,
-        resource: &Resource,
+        resource: &Resource<impl Sized>,
         schema: &ResourceSchema,
         client_token: &ClientToken,
         attempt: A,

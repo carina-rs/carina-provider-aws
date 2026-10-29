@@ -17,24 +17,25 @@ pub fn ec2_subnet_route_table_association_config() -> AwsSchemaConfig {
         .with_description("Describes an association between a route table and a subnet or gateway.")
         .with_conflicting_replacement()
         .attribute(
-            AttributeSchema::new("public_ipv4_pool", AttributeType::string())
+            AttributeSchema::optional("public_ipv4_pool", AttributeType::string())
                 .create_only()
                 .with_description("The ID of a public IPv4 pool. A public IPv4 pool is a pool of IPv4 addresses that you've brought to Amazon Web Services with BYOIP.")
-                .with_provider_name("PublicIpv4Pool"),
+                .with_provider_name("PublicIpv4Pool")
+                .build(),
         )
         .attribute(
-            AttributeSchema::new("route_table_id", super::route_table_id())
-                .required()
+            AttributeSchema::required("route_table_id", super::route_table_id())
                 .create_only()
                 .with_description("The ID of the route table.")
-                .with_provider_name("RouteTableId"),
+                .with_provider_name("RouteTableId")
+                .build(),
         )
         .attribute(
-            AttributeSchema::new("subnet_id", super::subnet_id())
-                .required()
+            AttributeSchema::required("subnet_id", super::subnet_id())
                 .create_only()
                 .with_description("The ID of the subnet.")
-                .with_provider_name("SubnetId"),
+                .with_provider_name("SubnetId")
+                .build(),
         )
     }
 }

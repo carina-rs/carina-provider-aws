@@ -159,7 +159,7 @@ fn build_alias_target_from_map(
 
 /// Build an AWS SDK ResourceRecordSet from carina resource attributes.
 fn build_record_set(
-    resource: &Resource,
+    resource: &Resource<impl Sized>,
     schema: &ResourceSchema,
 ) -> ProviderResult<ResourceRecordSet> {
     let name = require_string_attr(resource, "name")?;
@@ -359,7 +359,7 @@ impl AwsProvider {
 
     pub(crate) async fn create_route53_record_set(
         &self,
-        resource: &Resource,
+        resource: &Resource<impl Sized>,
         schema: &ResourceSchema,
     ) -> ProviderResult<CreateCompletion> {
         let hosted_zone_id = require_string_attr(resource, "hosted_zone_id")?;
@@ -501,7 +501,7 @@ impl AwsProvider {
 /// the apply would just re-UPSERT the same DNS name.
 ///
 /// See aws#300, follow-up to aws#117.
-pub(crate) fn normalize_record_set_dns_names(resources: &mut [Resource]) {
+pub(crate) fn normalize_record_set_dns_names<S>(resources: &mut [Resource<S>]) {
     for resource in resources.iter_mut() {
         if resource.id.provider != "aws" || resource.id.resource_type != "route53.RecordSet" {
             continue;
@@ -573,7 +573,7 @@ mod tests {
 
     #[test]
     fn build_record_set_accepts_canonical_enum_type() {
-        use carina_core::schema::{AttributeType, Schema, enum_identity};
+        use carina_core::schema::{AttributeType, enum_identity};
 
         let attr_type = AttributeType::enum_(
             enum_identity("Type", Some("aws.route53.RecordSet")),
@@ -585,7 +585,7 @@ mod tests {
             None,
             None,
         );
-        let schema = Schema::flat(attr_type);
+        let schema = crate::test_rootless_type(attr_type);
         let canonical =
             schema.canonicalize_state(Value::Concrete(ConcreteValue::String("AAAA".into())));
 

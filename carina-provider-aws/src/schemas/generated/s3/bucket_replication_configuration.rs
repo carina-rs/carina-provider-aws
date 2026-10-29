@@ -16,23 +16,23 @@ pub fn s3_bucket_replication_configuration_config() -> AwsSchemaConfig {
         schema: ResourceSchema::new("s3.BucketReplicationConfiguration")
             .with_coexisting_replacement()
             .attribute(
-                AttributeSchema::new("bucket", AttributeType::string())
-                    .required()
+                AttributeSchema::required("bucket", AttributeType::string())
                     .create_only()
                     .with_description("The name of the bucket")
-                    .with_provider_name("Bucket"),
+                    .with_provider_name("Bucket")
+                    .build(),
             )
             .attribute(
-                AttributeSchema::new("role", AttributeType::string())
-                    .required()
+                AttributeSchema::required("role", AttributeType::string())
                     .with_description("ARN of the IAM role S3 uses to perform the replication.")
-                    .with_provider_name("Role"),
+                    .with_provider_name("Role")
+                    .build(),
             )
             .attribute(
-                AttributeSchema::new("rules", super::bucket_replication_rules())
-                    .required()
+                AttributeSchema::required("rules", super::bucket_replication_rules())
                     .with_description("Replication rules — at least one is required.")
-                    .with_provider_name("Rules"),
+                    .with_provider_name("Rules")
+                    .build(),
             ),
     }
 }

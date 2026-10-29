@@ -32,6 +32,20 @@ pub use provider::{
 pub use provider::{AwsCreateToken, AwsDeleteToken, Ec2TaggedResourceKind};
 pub use sdk_config::BoundedSdkConfig;
 
+#[cfg(test)]
+pub(crate) fn test_rootless_type(
+    attr: carina_core::schema::AttributeType,
+) -> carina_core::schema::RootlessType {
+    const NAME: &str = "test_value";
+    carina_core::schema::ValidatedConfigSchema::validate(std::collections::BTreeMap::from([(
+        NAME.to_string(),
+        attr,
+    )]))
+    .expect("test attribute type must pass config-schema admission")
+    .rootless_type(NAME)
+    .expect("test attribute type must be present")
+}
+
 use carina_core::schema::{ResourceSchema, SchemaKind, SchemaRegistry};
 use resend_safety_generated::{
     AcmClient, CloudWatchLogsClient, Ec2Client, IamClient, IdentityStoreClient,
@@ -104,5 +118,6 @@ impl AwsProvider {
     pub(crate) fn resource_schema(&self, resource_type: &str) -> Option<&ResourceSchema> {
         self.schema_registry
             .get("aws", resource_type, SchemaKind::Resource)
+            .map(|schema| schema.schema().as_schema())
     }
 }

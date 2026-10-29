@@ -66,7 +66,7 @@ impl AwsProvider {
     /// Create an EC2 Security Group
     pub(crate) async fn create_ec2_security_group<A: AwsCreateAttempt>(
         &self,
-        resource: &Resource,
+        resource: &Resource<impl Sized>,
         client_token: &ClientToken,
         attempt: A,
     ) -> Result<A::Step, A::Verdict> {

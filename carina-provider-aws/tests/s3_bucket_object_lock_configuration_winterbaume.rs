@@ -102,7 +102,7 @@ fn schema_registry() -> carina_core::schema::SchemaRegistry {
 
 async fn create_request_for_test(resource: Resource) -> CreateRequest {
     let bindings = carina_core::binding_index::ResolvedBindings::default();
-    let module_gate = carina_core::executor::ModuleConstraintGate::new(&[]);
+    let module_gate = carina_core::executor::ModuleConstraintGate::from_live_compositions(&[]);
     let schemas = carina_core::schema::SchemaRegistry::new();
     let preparation = carina_core::executor::ProviderPreparationContext::new(
         &bindings,
@@ -123,8 +123,10 @@ async fn update_request_for_test(
     changed_attributes: &[String],
 ) -> UpdateRequest {
     let bindings = carina_core::binding_index::ResolvedBindings::default();
-    let module_gate = carina_core::executor::ModuleConstraintGate::new(&[]);
+    let module_gate = carina_core::executor::ModuleConstraintGate::from_live_compositions(&[]);
     let schemas = schema_registry();
+    let factories: Vec<Box<dyn carina_core::provider::ProviderFactory>> =
+        vec![Box::new(carina_provider_aws::AwsProviderFactory)];
     carina_core::value::canonicalize_normalized_resources_with_schemas(
         std::slice::from_mut(&mut resource),
         &schemas,
@@ -135,7 +137,7 @@ async fn update_request_for_test(
         &module_gate,
         &[],
         &NoopNormalizer,
-        &[],
+        &factories,
         &schemas,
     );
     carina_core::executor::prepare_update_request(resource, from, changed_attributes, &preparation)
@@ -614,13 +616,12 @@ async fn recreate_without_rule_refuses_to_clobber_retained_compliance_rule() {
 fn served_schema_keeps_rule_updatable() {
     let schema = carina_provider_aws::schemas::all_schemas()
         .into_iter()
-        .find(|schema| schema.resource_type() == RESOURCE_TYPE)
+        .find(|schema| schema.parts().resource_type == RESOURCE_TYPE)
         .expect("served Object Lock schema");
 
     assert!(
         !schema
-            .attributes()
-            .get("rule")
+            .effective_attribute("rule")
             .expect("rule attribute")
             .is_create_only(),
         "served rule attribute must not force replacement"

@@ -3,7 +3,7 @@
 use carina_core::provider::{
     BoxFuture, ProviderNormalizer, ProviderResult, SavedAttrs, StateTransformMap, ready_noop,
 };
-use carina_core::resource::Resource;
+use carina_core::resource::ProviderResource;
 
 /// Schema extension for the AWS provider.
 ///
@@ -13,7 +13,7 @@ pub struct AwsNormalizer;
 impl ProviderNormalizer for AwsNormalizer {
     fn normalize_desired<'a>(
         &'a self,
-        resources: &'a mut [Resource],
+        resources: &'a mut [ProviderResource],
     ) -> BoxFuture<'a, ProviderResult<()>> {
         // Bodies are pure (dns-name strip — no I/O); the trait is async only
         // so the WASM host impl can `.await` the guest directly (carina#3112).
@@ -45,7 +45,7 @@ mod tests {
     use std::collections::HashMap;
 
     use carina_core::provider::normalize_provider_states;
-    use carina_core::resource::{ConcreteValue, State, Value};
+    use carina_core::resource::{ConcreteValue, Resource, State, Value};
     use indexmap::IndexMap;
 
     #[tokio::test]
@@ -62,7 +62,7 @@ mod tests {
                 Value::Concrete(ConcreteValue::String("ip-name".to_string().into())),
             )]))),
         );
-        let mut resources = vec![resource];
+        let mut resources = vec![resource.into()];
 
         AwsNormalizer
             .normalize_desired(&mut resources)
@@ -97,7 +97,7 @@ mod tests {
                 "_abc.example.com.".to_string().into(),
             )),
         );
-        let mut resources = vec![resource];
+        let mut resources = vec![resource.into()];
 
         AwsNormalizer
             .normalize_desired(&mut resources)

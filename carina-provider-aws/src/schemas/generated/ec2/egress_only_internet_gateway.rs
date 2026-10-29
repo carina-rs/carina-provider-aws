@@ -6,8 +6,8 @@
 
 use super::AwsSchemaConfig;
 use super::tags_type;
-use super::validate_tags_map;
 use carina_core::schema::{AttributeSchema, ResourceSchema};
+use carina_provider_protocol::types::ValidatorType;
 
 /// Returns the schema config for ec2.EgressOnlyInternetGateway (Smithy: com.amazonaws.ec2)
 pub fn ec2_egress_only_internet_gateway_config() -> AwsSchemaConfig {
@@ -19,29 +19,30 @@ pub fn ec2_egress_only_internet_gateway_config() -> AwsSchemaConfig {
             .with_description("Describes an egress-only internet gateway.")
             .with_coexisting_replacement()
             .attribute(
-                AttributeSchema::new("vpc_id", super::vpc_id())
-                    .required()
+                AttributeSchema::required("vpc_id", super::vpc_id())
                     .create_only()
                     .with_description(
                         "The ID of the VPC for which to create the egress-only internet gateway.",
                     )
-                    .with_provider_name("VpcId"),
+                    .with_provider_name("VpcId")
+                    .build(),
             )
             .attribute(
-                AttributeSchema::new(
+                AttributeSchema::provider_populated(
                     "egress_only_internet_gateway_id",
                     super::egress_only_internet_gateway_id(),
                 )
-                .read_only()
                 .with_description("The ID of the egress-only internet gateway. (read-only)")
-                .with_provider_name("EgressOnlyInternetGatewayId"),
+                .with_provider_name("EgressOnlyInternetGatewayId")
+                .build(),
             )
             .attribute(
-                AttributeSchema::new("tags", tags_type())
+                AttributeSchema::optional("tags", tags_type())
                     .with_description("The tags for the resource.")
-                    .with_provider_name("Tags"),
+                    .with_provider_name("Tags")
+                    .build(),
             )
-            .with_validator(validate_tags_map),
+            .with_declared_validators(vec![ValidatorType::TagsKeyValueCheck]),
     }
 }
 

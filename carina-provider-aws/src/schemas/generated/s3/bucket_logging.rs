@@ -16,32 +16,34 @@ pub fn s3_bucket_logging_config() -> AwsSchemaConfig {
         schema: ResourceSchema::new("s3.BucketLogging")
             .with_coexisting_replacement()
             .attribute(
-                AttributeSchema::new("bucket", AttributeType::string())
-                    .required()
+                AttributeSchema::required("bucket", AttributeType::string())
                     .create_only()
                     .with_description(
                         "The name of the bucket for which to set the logging parameters.",
                     )
-                    .with_provider_name("Bucket"),
+                    .with_provider_name("Bucket")
+                    .build(),
             )
             .attribute(
-                AttributeSchema::new("target_bucket", AttributeType::string())
-                    .required()
+                AttributeSchema::required("target_bucket", AttributeType::string())
                     .with_description("Destination bucket for server access logs.")
-                    .with_provider_name("TargetBucket"),
+                    .with_provider_name("TargetBucket")
+                    .build(),
             )
             .attribute(
-                AttributeSchema::new("target_prefix", AttributeType::string())
+                AttributeSchema::optional("target_prefix", AttributeType::string())
                     .with_description("Key prefix to apply to log objects.")
-                    .with_provider_name("TargetPrefix"),
+                    .with_provider_name("TargetPrefix")
+                    .build(),
             )
             .attribute(
-                AttributeSchema::new(
+                AttributeSchema::optional(
                     "target_object_key_format",
                     super::bucket_target_object_key_format(),
                 )
                 .with_description("Partitioning / simple-prefix selector for log object keys.")
-                .with_provider_name("TargetObjectKeyFormat"),
+                .with_provider_name("TargetObjectKeyFormat")
+                .build(),
             ),
     }
 }

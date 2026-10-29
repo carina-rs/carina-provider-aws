@@ -1,4 +1,5 @@
-use carina_core::schema::AttributeType;
+use carina_core::resource::{ConcreteValue, Value};
+use carina_core::schema::{AttributeType, legacy_validator};
 
 use crate::provider_type;
 
@@ -20,10 +21,17 @@ pub fn validate_ipam_pool_id(id: &str) -> Result<(), String> {
 
 /// IPAM Pool ID type (e.g., "ipam-pool-0123456789abcdef0")
 pub fn ipam_pool_id() -> AttributeType {
-    AttributeType::refined_string(
-        Some(provider_type("ec2", "IpamPool", "Id")),
+    AttributeType::refined_string_with_validator(
+        provider_type("ec2", "IpamPool", "Id"),
         Some("^ipam-pool-[0-9a-f]{8,}$".to_string()),
         None,
+        legacy_validator(|value| {
+            if let Value::Concrete(ConcreteValue::String(value)) = value {
+                validate_ipam_pool_id(value.expose_plaintext())
+            } else {
+                Err("Expected string".to_string())
+            }
+        }),
         None,
     )
 }

@@ -1009,22 +1009,22 @@ impl AwsProvider {
 pub trait DataSourceLookups {
     fn read_sts_caller_identity_data_source(
         &self,
-        resource: &DataSource,
+        resource: &DataSource<impl Clone + Send + Sync + 'static>,
     ) -> BoxFuture<'_, ProviderResult<State>>;
 
     fn read_identitystore_user_data_source(
         &self,
-        resource: &DataSource,
+        resource: &DataSource<impl Clone + Send + Sync + 'static>,
     ) -> BoxFuture<'_, ProviderResult<State>>;
 
     fn read_s3_bucket_data_source(
         &self,
-        resource: &DataSource,
+        resource: &DataSource<impl Clone + Send + Sync + 'static>,
     ) -> BoxFuture<'_, ProviderResult<State>>;
 
     fn read_iam_roles_data_source(
         &self,
-        resource: &DataSource,
+        resource: &DataSource<impl Clone + Send + Sync + 'static>,
     ) -> BoxFuture<'_, ProviderResult<State>>;
 }
 
@@ -1035,7 +1035,7 @@ pub trait DataSourceLookups {
 /// to drop user-supplied inputs silently.
 pub(crate) fn dispatch_read_data_source<'a>(
     provider: &'a AwsProvider,
-    resource: &'a DataSource,
+    resource: &'a DataSource<impl Clone + Send + Sync + 'static>,
 ) -> BoxFuture<'a, ProviderResult<State>> {
     match resource.id.resource_type.as_str() {
         "sts.CallerIdentity" => provider.read_sts_caller_identity_data_source(resource),

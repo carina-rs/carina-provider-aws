@@ -123,7 +123,7 @@ struct CertificateRequestEnums {
 }
 
 fn resolve_certificate_request_enums(
-    resource: &Resource,
+    resource: &Resource<impl Sized>,
     schema: &ResourceSchema,
 ) -> ProviderResult<CertificateRequestEnums> {
     Ok(CertificateRequestEnums {
@@ -135,7 +135,7 @@ fn resolve_certificate_request_enums(
 }
 
 fn build_request_certificate(
-    resource: &Resource,
+    resource: &Resource<impl Sized>,
     schema: &ResourceSchema,
 ) -> ProviderResult<RequestCertificateInput> {
     let domain_name = require_string_attr(resource, "domain_name")?;
@@ -186,7 +186,7 @@ fn build_request_certificate(
 }
 
 fn build_update_certificate_options(
-    resource: &Resource,
+    resource: &Resource<impl Sized>,
     schema: &ResourceSchema,
 ) -> ProviderResult<Option<aws_sdk_acm::types::CertificateOptions>> {
     let Some(pref) = optional_enum_struct_field(
@@ -206,7 +206,7 @@ fn build_update_certificate_options(
 }
 
 fn build_create_certificate_options(
-    resource: &Resource,
+    resource: &Resource<impl Sized>,
     schema: &ResourceSchema,
 ) -> ProviderResult<Option<aws_sdk_acm::types::CertificateOptions>> {
     use aws_sdk_acm::types::{CertificateExport, CertificateTransparencyLoggingPreference};
@@ -411,7 +411,7 @@ fn partial_acm_certificate_state(
     id: &ResourceId,
     arn: &AppliedIdentifier,
     domain_name: &str,
-    resource: &Resource,
+    resource: &Resource<impl Sized>,
     request_enums: &CertificateRequestEnums,
     cert: Option<&aws_sdk_acm::types::CertificateDetail>,
 ) -> AppliedState {
@@ -480,7 +480,7 @@ fn partial_acm_certificate_create_outcome(
     id: &ResourceId,
     arn: &AppliedIdentifier,
     domain_name: &str,
-    resource: &Resource,
+    resource: &Resource<impl Sized>,
     request_enums: &CertificateRequestEnums,
     cert: Option<&aws_sdk_acm::types::CertificateDetail>,
     reason: String,
@@ -493,7 +493,7 @@ impl AwsProvider {
     /// Issue one `RequestCertificate` call with the caller's stable token.
     pub(crate) async fn request_acm_certificate(
         &self,
-        resource: &Resource,
+        resource: &Resource<impl Sized>,
         schema: &ResourceSchema,
         client_token: &ClientToken,
     ) -> ProviderResult<Result<AppliedIdentifier, SendFailure<RequestCertificateError>>> {
@@ -537,7 +537,7 @@ impl AwsProvider {
     /// Continue an issued ACM create through its normal read-back path.
     pub(crate) async fn continue_acm_certificate_create(
         &self,
-        resource: &Resource,
+        resource: &Resource<impl Sized>,
         schema: &ResourceSchema,
         arn: AppliedIdentifier,
     ) -> ProviderResult<CreateCompletion> {
@@ -732,7 +732,7 @@ impl AwsProvider {
         &self,
         id: &ResourceId,
         arn: &str,
-        to: &Resource,
+        to: &Resource<impl Sized>,
         from: &State,
     ) -> ProviderResult<()> {
         let empty = IndexMap::new();
@@ -1065,7 +1065,7 @@ mod tests {
     /// carina#3061: the certificate ARN must be published under the
     /// schema attribute name `certificate_arn` (see
     /// `schemas/generated/acm/certificate.rs` —
-    /// `AttributeSchema::new("certificate_arn", ...)`), NOT `arn`.
+    /// `AttributeSchema::provider_populated("certificate_arn", ...)`), NOT `arn`.
     ///
     /// Pre-fix the read inserted key `"arn"`, which matches no schema
     /// attribute and no DSL reference. A `wait cert { until =
@@ -1576,7 +1576,7 @@ mod tests {
     /// `helpers::optional_enum_attr` path so helper regressions are caught here.
     #[test]
     fn validation_method_canonical_enum_reaches_request() {
-        use carina_core::schema::{AttributeType, Schema, enum_identity};
+        use carina_core::schema::{AttributeType, enum_identity};
 
         let attr_type = AttributeType::enum_(
             enum_identity("ValidationMethod", Some("aws.acm.Certificate")),
@@ -1593,7 +1593,7 @@ mod tests {
             None,
             None,
         );
-        let schema = Schema::flat(attr_type);
+        let schema = crate::test_rootless_type(attr_type);
 
         let canonical =
             schema.canonicalize_state(Value::Concrete(ConcreteValue::String("DNS".into())));

@@ -1,12 +1,23 @@
 use carina_provider_aws::schemas::config::validate_aws_custom_type;
 
+fn rootless_type(attr: carina_core::schema::AttributeType) -> carina_core::schema::RootlessType {
+    const NAME: &str = "test_value";
+    carina_core::schema::ValidatedConfigSchema::validate(std::collections::BTreeMap::from([(
+        NAME.to_string(),
+        attr,
+    )]))
+    .expect("test attribute type must pass config-schema admission")
+    .rootless_type(NAME)
+    .expect("test attribute type must be present")
+}
+
 fn assert_kms_key_id_validator_accepts(value: &str) {
     let identity = carina_aws_types::provider_type("kms", "Key", "Id");
     assert!(validate_aws_custom_type(&identity, value).is_ok());
 }
 
 fn assert_schema_accepts(t: carina_core::schema::AttributeType, value: &str) {
-    let schema = carina_core::schema::Schema::flat(t);
+    let schema = rootless_type(t);
     let value = carina_core::resource::Value::Concrete(
         carina_core::resource::ConcreteValue::String(value.to_string().into()),
     );
@@ -14,7 +25,7 @@ fn assert_schema_accepts(t: carina_core::schema::AttributeType, value: &str) {
 }
 
 fn assert_schema_rejects(t: carina_core::schema::AttributeType, value: &str) {
-    let schema = carina_core::schema::Schema::flat(t);
+    let schema = rootless_type(t);
     let value = carina_core::resource::Value::Concrete(
         carina_core::resource::ConcreteValue::String(value.to_string().into()),
     );

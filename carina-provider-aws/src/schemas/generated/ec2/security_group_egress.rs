@@ -19,47 +19,52 @@ pub fn ec2_security_group_egress_config() -> AwsSchemaConfig {
             .with_description("Describes a security group rule.")
             .with_conflicting_replacement()
             .attribute(
-                AttributeSchema::new("cidr_ip", types::ipv4_cidr())
+                AttributeSchema::optional("cidr_ip", types::ipv4_cidr())
                     .create_only()
                     .with_description("Not supported. Use IP permissions instead.")
-                    .with_provider_name("CidrIp"),
+                    .with_provider_name("CidrIp")
+                    .build(),
             )
             .attribute(
-                AttributeSchema::new("cidr_ipv6", types::ipv6_cidr())
+                AttributeSchema::optional("cidr_ipv6", types::ipv6_cidr())
                     .create_only()
                     .with_description("The IPv6 CIDR range.")
-                    .with_provider_name("CidrIpv6"),
+                    .with_provider_name("CidrIpv6")
+                    .build(),
             )
             .attribute(
-                AttributeSchema::new("description", AttributeType::string())
+                AttributeSchema::optional("description", AttributeType::string())
                     .create_only()
                     .with_description("The security group rule description.")
-                    .with_provider_name("Description"),
+                    .with_provider_name("Description")
+                    .build(),
             )
             .attribute(
-                AttributeSchema::new("destination_prefix_list_id", super::prefix_list_id())
+                AttributeSchema::optional("destination_prefix_list_id", super::prefix_list_id())
                     .create_only()
                     .with_description("The ID of the destination prefix list.")
-                    .with_provider_name("DestinationPrefixListId"),
+                    .with_provider_name("DestinationPrefixListId")
+                    .build(),
             )
             .attribute(
-                AttributeSchema::new(
+                AttributeSchema::optional(
                     "from_port",
                     AttributeType::refined_int(None, Some((Some(-1), Some(65535)))),
                 )
                 .create_only()
                 .with_description("Not supported. Use IP permissions instead.")
-                .with_provider_name("FromPort"),
+                .with_provider_name("FromPort")
+                .build(),
             )
             .attribute(
-                AttributeSchema::new("group_id", super::security_group_id())
-                    .required()
+                AttributeSchema::required("group_id", super::security_group_id())
                     .create_only()
                     .with_description("The ID of the security group.")
-                    .with_provider_name("GroupId"),
+                    .with_provider_name("GroupId")
+                    .build(),
             )
             .attribute(
-                AttributeSchema::new(
+                AttributeSchema::required(
                     "ip_protocol",
                     AttributeType::enum_(
                         carina_core::schema::enum_identity(
@@ -84,43 +89,56 @@ pub fn ec2_security_group_egress_config() -> AwsSchemaConfig {
                         None,
                     ),
                 )
-                .required()
                 .create_only()
                 .with_description("Not supported. Use IP permissions instead.")
-                .with_provider_name("IpProtocol"),
+                .with_provider_name("IpProtocol")
+                .build(),
             )
             .attribute(
-                AttributeSchema::new("source_security_group_name", AttributeType::string())
+                AttributeSchema::optional("source_security_group_name", AttributeType::string())
                     .create_only()
                     .with_description("Not supported. Use IP permissions instead.")
-                    .with_provider_name("SourceSecurityGroupName"),
+                    .with_provider_name("SourceSecurityGroupName")
+                    .build(),
             )
             .attribute(
-                AttributeSchema::new("source_security_group_owner_id", super::aws_account_id())
-                    .create_only()
-                    .with_description("Not supported. Use IP permissions instead.")
-                    .with_provider_name("SourceSecurityGroupOwnerId"),
+                AttributeSchema::optional(
+                    "source_security_group_owner_id",
+                    super::aws_account_id(),
+                )
+                .create_only()
+                .with_description("Not supported. Use IP permissions instead.")
+                .with_provider_name("SourceSecurityGroupOwnerId")
+                .build(),
             )
             .attribute(
-                AttributeSchema::new(
+                AttributeSchema::optional(
                     "to_port",
                     AttributeType::refined_int(None, Some((Some(-1), Some(65535)))),
                 )
                 .create_only()
                 .with_description("Not supported. Use IP permissions instead.")
-                .with_provider_name("ToPort"),
+                .with_provider_name("ToPort")
+                .build(),
             )
             .attribute(
-                AttributeSchema::new("destination_security_group_id", super::security_group_id())
-                    .create_only()
-                    .with_description("The ID of the destination security group.")
-                    .with_provider_name("DestinationSecurityGroupId"),
+                AttributeSchema::optional(
+                    "destination_security_group_id",
+                    super::security_group_id(),
+                )
+                .create_only()
+                .with_description("The ID of the destination security group.")
+                .with_provider_name("DestinationSecurityGroupId")
+                .build(),
             )
             .attribute(
-                AttributeSchema::new("security_group_rule_id", super::security_group_rule_id())
-                    .read_only()
-                    .with_description("The ID of the security group rule. (read-only)")
-                    .with_provider_name("SecurityGroupRuleId"),
+                AttributeSchema::provider_populated(
+                    "security_group_rule_id",
+                    super::security_group_rule_id(),
+                )
+                .with_description("The ID of the security group rule. (read-only)")
+                .with_provider_name("SecurityGroupRuleId")
+                .build(),
             ),
     }
 }

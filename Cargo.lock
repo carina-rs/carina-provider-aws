@@ -823,12 +823,13 @@ dependencies = [
 
 [[package]]
 name = "carina-core"
-version = "0.6.0"
-source = "git+https://github.com/carina-rs/carina?rev=acd9ae1e#acd9ae1e2aed5eef1a82f8869d65f95a485571bd"
+version = "0.7.1"
+source = "git+https://github.com/carina-rs/carina?rev=4d05bad6#4d05bad60da07c5912e909bdbf863eb32f518399"
 dependencies = [
  "argon2",
  "carina-provider-protocol",
  "chrono",
+ "dirs",
  "futures",
  "hex",
  "indexmap",
@@ -851,11 +852,12 @@ dependencies = [
 
 [[package]]
 name = "carina-plugin-sdk"
-version = "0.6.0"
-source = "git+https://github.com/carina-rs/carina?rev=acd9ae1e#acd9ae1e2aed5eef1a82f8869d65f95a485571bd"
+version = "0.7.1"
+source = "git+https://github.com/carina-rs/carina?rev=4d05bad6#4d05bad60da07c5912e909bdbf863eb32f518399"
 dependencies = [
  "aws-smithy-runtime-api",
  "aws-smithy-types",
+ "carina-core",
  "carina-provider-protocol",
  "http 1.4.0",
  "serde",
@@ -907,7 +909,7 @@ dependencies = [
 [[package]]
 name = "carina-provider-protocol"
 version = "0.3.0"
-source = "git+https://github.com/carina-rs/carina?rev=acd9ae1e#acd9ae1e2aed5eef1a82f8869d65f95a485571bd"
+source = "git+https://github.com/carina-rs/carina?rev=4d05bad6#4d05bad60da07c5912e909bdbf863eb32f518399"
 dependencies = [
  "serde",
  "serde_json",
@@ -1100,6 +1102,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "dirs"
+version = "6.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c3e8aa94d75141228480295a7d0e7feb620b1a5ad9f12bc40be62411e38cce4e"
+dependencies = [
+ "dirs-sys",
+]
+
+[[package]]
+name = "dirs-sys"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e01a3366d27ee9890022452ee61b2b63a67e6f13f58900b651ff5665f0bb1fab"
+dependencies = [
+ "libc",
+ "option-ext",
+ "redox_users",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "displaydoc"
 version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1135,7 +1158,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -1701,6 +1724,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "48f5d2a454e16a5ea0f4ced81bd44e4cfc7bd3a507b61887c99fd3538b28e4af"
 
 [[package]]
+name = "libredox"
+version = "0.1.25"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "61ff90caf6077a803a240f62fdbe88645a890bbca49ef8174c3cb0404362171d"
+dependencies = [
+ "libc",
+]
+
+[[package]]
 name = "linux-raw-sys"
 version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1804,6 +1836,12 @@ name = "openssl-probe"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7c87def4c32ab89d880effc9e097653c8da5d6ef28e6b539d313baaacfbafcbe"
+
+[[package]]
+name = "option-ext"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "04744f49eae99ab78e0d5c0b603ab218f515ea8cfe5a456d7629ad883a3b6e7d"
 
 [[package]]
 name = "outref"
@@ -1990,6 +2028,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "redox_users"
+version = "0.5.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "60dc65c0ff1a7ae1294b0c67b9f14baf70b644404010370171787bfac1038fc0"
+dependencies = [
+ "libredox",
+ "thiserror",
+]
+
+[[package]]
 name = "regex"
 version = "1.12.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2057,7 +2105,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -2322,7 +2370,7 @@ dependencies = [
  "getrandom 0.4.2",
  "once_cell",
  "rustix",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
