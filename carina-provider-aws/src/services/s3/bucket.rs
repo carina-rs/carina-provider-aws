@@ -11,8 +11,9 @@ use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
 use crate::helpers::{RetryPolicy, retry_aws_operation, sdk_error_message};
 use crate::provider::AwsCreateAttempt;
+use crate::read_model::found_data_source_read;
 use crate::read_model::{empty_map_value, found_managed_read};
-use crate::read_models_generated::S3BucketReadModel;
+use crate::read_models_generated::{S3BucketDataSourceReadModel, S3BucketReadModel};
 
 /// The complete read-only projection shared by managed and data-source
 /// reads of an S3 bucket.
@@ -27,6 +28,7 @@ struct S3BucketReadOnlyOutputs {
 impl S3BucketReadOnlyOutputs {
     /// Consume the projection as one unit so neither read path selects a
     /// different subset of outputs.
+    #[cfg(test)]
     fn into_attributes(self) -> HashMap<String, Value> {
         let mut attributes = HashMap::from([
             (
@@ -238,7 +240,7 @@ impl AwsProvider {
         }
         let issued = attempt.issued(
             identifier.clone(),
-            Self::sent_only(resource, &["bucket", "bucket_namespace"]),
+            self.sent_only(resource, &["bucket", "bucket_namespace"]),
         );
 
         // Set tags
@@ -550,13 +552,30 @@ impl AwsProvider {
             // 2. Derive the region from HeadBucket's `x-amz-bucket-region` and
             //    use the same complete output projection as the managed read path.
             let region = normalize_bucket_location(output.bucket_region());
-            let mut attrs = s3_bucket_read_only_outputs(&bucket, &region).into_attributes();
-            attrs.insert(
-                "bucket".into(),
-                Value::Concrete(ConcreteValue::String(bucket.clone().into())),
-            );
-
-            Ok(State::existing(resource.id.clone(), attrs).with_identifier(&bucket))
+            let S3BucketReadOnlyOutputs {
+                arn,
+                region,
+                bucket_domain_name,
+                bucket_regional_domain_name,
+                hosted_zone_id,
+            } = s3_bucket_read_only_outputs(&bucket, &region);
+            found_data_source_read(
+                &resource.id,
+                Some(&bucket),
+                S3BucketDataSourceReadModel {
+                    bucket: Value::Concrete(ConcreteValue::String(bucket.clone().into())),
+                    arn: Some(Value::Concrete(ConcreteValue::String(arn.into()))),
+                    region: Some(Value::Concrete(ConcreteValue::String(region.into()))),
+                    bucket_domain_name: Some(Value::Concrete(ConcreteValue::String(
+                        bucket_domain_name.into(),
+                    ))),
+                    bucket_regional_domain_name: Some(Value::Concrete(ConcreteValue::String(
+                        bucket_regional_domain_name.into(),
+                    ))),
+                    hosted_zone_id: hosted_zone_id
+                        .map(|value| Value::Concrete(ConcreteValue::String(value.into()))),
+                },
+            )
         })
     }
 }

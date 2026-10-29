@@ -187,40 +187,6 @@ impl AwsProvider {
         resource: &Resource<impl Sized>,
         account_id: &str,
     ) -> ProviderResult<CreateCompletion> {
-        // Move to parent OU if specified
-        if let Some(Value::Concrete(ConcreteValue::String(parent_id))) =
-            resource.get_attr("parent_id")
-        {
-            // Get current parent (root)
-            let parents_response = self
-                .organizations_client
-                .list_parents()
-                .child_id(account_id)
-                .send()
-                .await
-                .map_err(|e| {
-                    api_error_with_meta("Failed to list parents for new account", e)
-                        .for_resource(resource.id.clone())
-                })?;
-
-            if let Some(current_parent) = parents_response.parents().first()
-                && let Some(source_parent_id) = current_parent.id()
-                && source_parent_id != parent_id
-            {
-                self.organizations_client
-                    .move_account()
-                    .account_id(account_id)
-                    .source_parent_id(source_parent_id)
-                    .destination_parent_id(parent_id.expose_plaintext())
-                    .send()
-                    .await
-                    .map_err(|e| {
-                        api_error_with_meta("Failed to move account to parent", e)
-                            .for_resource(resource.id.clone())
-                    })?;
-            }
-        }
-
         let identifier = crate::helpers::applied_identifier(
             &resource.id,
             "organizations.CreateAccount",
@@ -246,31 +212,6 @@ impl AwsProvider {
         to: Resource,
         _schema: &ResourceSchema,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
-        // Handle parent_id change via MoveAccount
-        let desired_parent = to.get_attr("parent_id").and_then(|v| match v {
-            Value::Concrete(ConcreteValue::String(s)) => Some(s.expose_plaintext()),
-            _ => None,
-        });
-        let current_parent = from.attributes.get("parent_id").and_then(|v| match v {
-            Value::Concrete(ConcreteValue::String(s)) => Some(s.expose_plaintext()),
-            _ => None,
-        });
-
-        if desired_parent != current_parent
-            && let (Some(dest), Some(src)) = (desired_parent, current_parent)
-        {
-            self.organizations_client
-                .move_account()
-                .account_id(identifier.as_str())
-                .source_parent_id(src)
-                .destination_parent_id(dest)
-                .send()
-                .await
-                .map_err(|e| {
-                    api_error_with_meta("Failed to move account", e).for_resource(id.clone())
-                })?;
-        }
-
         // Handle tag changes
         self.apply_organizations_tags(
             &id,

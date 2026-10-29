@@ -39,9 +39,9 @@ const ACM_CLIENT_TOKEN: &str = "abcdef0123456789abcdef0123456789";
 
 #[derive(Debug)]
 enum TestCreateStep {
-    Success(AppliedState),
+    Success(TestAppliedState),
     Partial {
-        state: AppliedState,
+        state: TestAppliedState,
         reason: String,
         missing_attributes: Vec<String>,
     },
@@ -50,6 +50,31 @@ enum TestCreateStep {
         identifier: Option<AppliedIdentifier>,
         poll_after_secs: u32,
     },
+}
+
+#[derive(Debug)]
+struct TestAppliedState {
+    _id: ResourceId,
+    identifier: AppliedIdentifier,
+    _attributes: std::collections::HashMap<String, Value>,
+}
+
+impl TestAppliedState {
+    fn new(
+        id: ResourceId,
+        identifier: AppliedIdentifier,
+        attributes: std::collections::HashMap<String, Value>,
+    ) -> Self {
+        Self {
+            _id: id,
+            identifier,
+            _attributes: attributes,
+        }
+    }
+
+    fn identifier(&self) -> &AppliedIdentifier {
+        &self.identifier
+    }
 }
 
 #[derive(Debug)]
@@ -168,7 +193,7 @@ impl AwsIssuedCreate for TestIssuedCreate {
         self,
         attributes: std::collections::HashMap<String, Value>,
     ) -> Result<Self::Step, Self::Verdict> {
-        Ok(TestCreateStep::Success(AppliedState::from_identifier(
+        Ok(TestCreateStep::Success(TestAppliedState::new(
             self.id,
             self.identifier,
             attributes,
@@ -182,7 +207,7 @@ impl AwsIssuedCreate for TestIssuedCreate {
         missing_attributes: Vec<String>,
     ) -> Result<Self::Step, Self::Verdict> {
         Ok(TestCreateStep::Partial {
-            state: AppliedState::from_identifier(self.id, self.identifier, attributes),
+            state: TestAppliedState::new(self.id, self.identifier, attributes),
             reason,
             missing_attributes,
         })
@@ -1124,8 +1149,24 @@ fn applied_identifier(value: &str) -> AppliedIdentifier {
     AppliedIdentifier::new(value).expect("test provider identifier must be non-empty")
 }
 
-fn assert_nat_gateway_state_identifier(state: &AppliedState) {
-    assert_eq!(state.identifier().as_str(), NAT_GATEWAY_ID);
+trait TestStateIdentifier {
+    fn test_identifier(&self) -> &AppliedIdentifier;
+}
+
+impl TestStateIdentifier for AppliedState {
+    fn test_identifier(&self) -> &AppliedIdentifier {
+        self.identifier()
+    }
+}
+
+impl TestStateIdentifier for TestAppliedState {
+    fn test_identifier(&self) -> &AppliedIdentifier {
+        self.identifier()
+    }
+}
+
+fn assert_nat_gateway_state_identifier(state: &impl TestStateIdentifier) {
+    assert_eq!(state.test_identifier().as_str(), NAT_GATEWAY_ID);
 }
 
 #[tokio::test]

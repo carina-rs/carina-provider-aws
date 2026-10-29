@@ -137,31 +137,6 @@ fn resolve_certificate_request_enums(
     })
 }
 
-pub(crate) fn validate_acm_certificate_inputs<S>(resource: &Resource<S>) -> ProviderResult<()> {
-    if resource.id.provider != "aws" || resource.id.resource_type != "acm.Certificate" {
-        return Ok(());
-    }
-    let Some(Value::Concrete(ConcreteValue::String(domain_name))) =
-        resource.get_attr("domain_name")
-    else {
-        return Ok(());
-    };
-    if resource
-        .get_attr("subject_alternative_names")
-        .is_some_and(|value| {
-            extract_string_list(value)
-                .iter()
-                .any(|san| acm_dns_names_equal(san, domain_name.expose_plaintext()))
-        })
-    {
-        return Err(ProviderError::invalid_input(
-            "acm.Certificate subject_alternative_names must not contain domain_name; ACM adds the primary domain automatically",
-        )
-        .for_resource(resource.id.clone()));
-    }
-    Ok(())
-}
-
 fn normalize_acm_dns_name(name: &str) -> String {
     name.trim_end_matches('.').to_ascii_lowercase()
 }
@@ -182,11 +157,17 @@ fn canonicalize_acm_subject_alternative_names(
         Some(Value::Concrete(ConcreteValue::List(names))) => Value::Concrete(ConcreteValue::List(
             names
                 .into_iter()
-                .filter(|name| match (name, primary_domain) {
-                    (Value::Concrete(ConcreteValue::String(name)), Some(primary_domain)) => {
-                        !acm_dns_names_equal(name.expose_plaintext(), primary_domain)
+                .filter_map(|name| match name {
+                    Value::Concrete(ConcreteValue::String(name)) => {
+                        let name = normalize_acm_dns_name(name.expose_plaintext());
+                        if primary_domain.is_some_and(|primary| acm_dns_names_equal(&name, primary))
+                        {
+                            None
+                        } else {
+                            Some(Value::Concrete(ConcreteValue::String(name.into())))
+                        }
                     }
-                    _ => true,
+                    other => Some(other),
                 })
                 .collect(),
         )),
@@ -195,16 +176,44 @@ fn canonicalize_acm_subject_alternative_names(
     }
 }
 
+/// Canonicalize authored SANs to the same representation returned by ACM.
+/// ACM accepts the apex in the request and adds it to the response, so the
+/// provider models only additional names and removes the apex on both sides.
+pub(crate) fn normalize_acm_certificate_inputs<S>(resources: &mut [Resource<S>]) {
+    for resource in resources {
+        if resource.id.provider != "aws" || resource.id.resource_type != "acm.Certificate" {
+            continue;
+        }
+        let Some(subject_alternative_names) =
+            resource.get_attr("subject_alternative_names").cloned()
+        else {
+            continue;
+        };
+        let normalized = canonicalize_acm_subject_alternative_names(
+            resource.get_attr("domain_name"),
+            Some(subject_alternative_names),
+        );
+        resource.set_attr("subject_alternative_names", normalized);
+    }
+}
+
 fn build_request_certificate(
     resource: &Resource<impl Sized>,
     schema: &ResourceSchema,
 ) -> ProviderResult<RequestCertificateInput> {
-    validate_acm_certificate_inputs(resource)?;
     let domain_name = require_string_attr(resource, "domain_name")?;
     let request_enums = resolve_certificate_request_enums(resource, schema)?;
 
     let sans = resource
         .get_attr("subject_alternative_names")
+        .cloned()
+        .map(|value| {
+            canonicalize_acm_subject_alternative_names(
+                resource.get_attr("domain_name"),
+                Some(value),
+            )
+        })
+        .as_ref()
         .map(extract_string_list)
         .filter(|values| !values.is_empty());
     let options = build_create_certificate_options(resource, schema)?;
@@ -545,7 +554,7 @@ fn partial_acm_certificate_state(
             .or_insert_with(|| tags.clone());
     }
 
-    Ok(AppliedState::from_identifier(
+    Ok(crate::read_model::partial_applied_state(
         id.clone(),
         arn.clone(),
         attributes,
@@ -1108,9 +1117,12 @@ mod tests {
             )])),
         );
 
-        let error = validate_acm_certificate_inputs(&resource)
-            .expect_err("case and a trailing dot must not hide the primary domain");
-        assert!(error.to_string().contains("subject_alternative_names"));
+        let mut resources = vec![resource];
+        normalize_acm_certificate_inputs(&mut resources);
+        assert_eq!(
+            resources[0].get_attr("subject_alternative_names"),
+            Some(&Value::Concrete(ConcreteValue::List(Vec::new())))
+        );
 
         let domain_name = Value::Concrete(ConcreteValue::String("Example.COM.".into()));
         let returned = Value::Concrete(ConcreteValue::List(vec![
@@ -1120,7 +1132,7 @@ mod tests {
         assert_eq!(
             canonicalize_acm_subject_alternative_names(Some(&domain_name), Some(returned)),
             Value::Concrete(ConcreteValue::List(vec![Value::Concrete(
-                ConcreteValue::String("www.example.com.".into()),
+                ConcreteValue::String("www.example.com".into()),
             )]))
         );
     }

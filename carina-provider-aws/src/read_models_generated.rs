@@ -1,4 +1,4 @@
-//! Auto-generated managed-resource read models.
+//! Auto-generated managed-resource and data-source read models.
 //!
 //! DO NOT EDIT MANUALLY - regenerate with:
 //!   ./scripts/generate-provider.sh
@@ -13,7 +13,8 @@ use carina_core::resource::Value;
 use carina_core::schema::ValidatedResourceSchema;
 
 use crate::read_model::{
-    ManagedReadModel, cached_validated_read_schema, sealed, validate_read_attributes,
+    DataSourceReadModel, ManagedReadModel, cached_validated_read_schema, sealed,
+    validate_read_attributes,
 };
 
 /// Exhaustive canonical read state for `ec2.Vpc`.
@@ -692,7 +693,7 @@ pub(crate) struct Ec2NatGatewayReadModel {
     pub(crate) availability_zone_addresses: Value,
     pub(crate) connectivity_type: Option<Value>,
     pub(crate) private_ip_address: Option<Value>,
-    pub(crate) subnet_id: Value,
+    pub(crate) subnet_id: Option<Value>,
     pub(crate) vpc_id: Option<Value>,
     pub(crate) nat_gateway_id: Option<Value>,
     pub(crate) tags: Value,
@@ -737,7 +738,9 @@ impl ManagedReadModel for Ec2NatGatewayReadModel {
         if let Some(value) = private_ip_address {
             attributes.insert("private_ip_address".to_string(), value);
         }
-        attributes.insert("subnet_id".to_string(), subnet_id);
+        if let Some(value) = subnet_id {
+            attributes.insert("subnet_id".to_string(), value);
+        }
         if let Some(value) = vpc_id {
             attributes.insert("vpc_id".to_string(), value);
         }
@@ -2077,6 +2080,181 @@ impl ManagedReadModel for SqsQueueReadModel {
             crate::schemas::generated::sqs::queue::sqs_queue_config().schema
         })?;
         validate_read_attributes("sqs.Queue", schema, &mut attributes)?;
+        Ok(attributes)
+    }
+}
+
+/// Exhaustive canonical data-source state for `sts.CallerIdentity`.
+pub(crate) struct StsCallerIdentityDataSourceReadModel {
+    pub(crate) account_id: Option<Value>,
+    pub(crate) arn: Option<Value>,
+    pub(crate) user_id: Option<Value>,
+}
+
+impl sealed::Sealed for StsCallerIdentityDataSourceReadModel {}
+
+impl DataSourceReadModel for StsCallerIdentityDataSourceReadModel {
+    fn into_attributes(self) -> ProviderResult<HashMap<String, Value>> {
+        let Self {
+            account_id,
+            arn,
+            user_id,
+        } = self;
+        let mut attributes = HashMap::with_capacity(3);
+        if let Some(value) = account_id {
+            attributes.insert("account_id".to_string(), value);
+        }
+        if let Some(value) = arn {
+            attributes.insert("arn".to_string(), value);
+        }
+        if let Some(value) = user_id {
+            attributes.insert("user_id".to_string(), value);
+        }
+        static VALIDATED_SCHEMA: OnceLock<Result<ValidatedResourceSchema, String>> =
+            OnceLock::new();
+        let schema = cached_validated_read_schema("sts.CallerIdentity", &VALIDATED_SCHEMA, || {
+            crate::schemas::generated::sts::caller_identity::sts_caller_identity_config().schema
+        })?;
+        validate_read_attributes("sts.CallerIdentity", schema, &mut attributes)?;
+        Ok(attributes)
+    }
+}
+
+/// Exhaustive canonical data-source state for `identitystore.User`.
+pub(crate) struct IdentitystoreUserDataSourceReadModel {
+    pub(crate) identity_store_id: Value,
+    pub(crate) user_id: Option<Value>,
+    pub(crate) user_name: Option<Value>,
+    pub(crate) display_name: Option<Value>,
+    pub(crate) name: Option<Value>,
+    pub(crate) emails: Option<Value>,
+}
+
+impl sealed::Sealed for IdentitystoreUserDataSourceReadModel {}
+
+impl DataSourceReadModel for IdentitystoreUserDataSourceReadModel {
+    fn into_attributes(self) -> ProviderResult<HashMap<String, Value>> {
+        let Self {
+            identity_store_id,
+            user_id,
+            user_name,
+            display_name,
+            name,
+            emails,
+        } = self;
+        let mut attributes = HashMap::with_capacity(6);
+        attributes.insert("identity_store_id".to_string(), identity_store_id);
+        if let Some(value) = user_id {
+            attributes.insert("user_id".to_string(), value);
+        }
+        if let Some(value) = user_name {
+            attributes.insert("user_name".to_string(), value);
+        }
+        if let Some(value) = display_name {
+            attributes.insert("display_name".to_string(), value);
+        }
+        if let Some(value) = name {
+            attributes.insert("name".to_string(), value);
+        }
+        if let Some(value) = emails {
+            attributes.insert("emails".to_string(), value);
+        }
+        static VALIDATED_SCHEMA: OnceLock<Result<ValidatedResourceSchema, String>> =
+            OnceLock::new();
+        let schema = cached_validated_read_schema("identitystore.User", &VALIDATED_SCHEMA, || {
+            crate::schemas::generated::identitystore::user::identitystore_user_config().schema
+        })?;
+        validate_read_attributes("identitystore.User", schema, &mut attributes)?;
+        Ok(attributes)
+    }
+}
+
+/// Exhaustive canonical data-source state for `s3.Bucket`.
+pub(crate) struct S3BucketDataSourceReadModel {
+    pub(crate) bucket: Value,
+    pub(crate) arn: Option<Value>,
+    pub(crate) region: Option<Value>,
+    pub(crate) bucket_domain_name: Option<Value>,
+    pub(crate) bucket_regional_domain_name: Option<Value>,
+    pub(crate) hosted_zone_id: Option<Value>,
+}
+
+impl sealed::Sealed for S3BucketDataSourceReadModel {}
+
+impl DataSourceReadModel for S3BucketDataSourceReadModel {
+    fn into_attributes(self) -> ProviderResult<HashMap<String, Value>> {
+        let Self {
+            bucket,
+            arn,
+            region,
+            bucket_domain_name,
+            bucket_regional_domain_name,
+            hosted_zone_id,
+        } = self;
+        let mut attributes = HashMap::with_capacity(6);
+        attributes.insert("bucket".to_string(), bucket);
+        if let Some(value) = arn {
+            attributes.insert("arn".to_string(), value);
+        }
+        if let Some(value) = region {
+            attributes.insert("region".to_string(), value);
+        }
+        if let Some(value) = bucket_domain_name {
+            attributes.insert("bucket_domain_name".to_string(), value);
+        }
+        if let Some(value) = bucket_regional_domain_name {
+            attributes.insert("bucket_regional_domain_name".to_string(), value);
+        }
+        if let Some(value) = hosted_zone_id {
+            attributes.insert("hosted_zone_id".to_string(), value);
+        }
+        static VALIDATED_SCHEMA: OnceLock<Result<ValidatedResourceSchema, String>> =
+            OnceLock::new();
+        let schema = cached_validated_read_schema("s3.Bucket", &VALIDATED_SCHEMA, || {
+            crate::schemas::generated::s3::bucket_data_source::s3_bucket_data_source_config().schema
+        })?;
+        validate_read_attributes("s3.Bucket", schema, &mut attributes)?;
+        Ok(attributes)
+    }
+}
+
+/// Exhaustive canonical data-source state for `iam.Roles`.
+pub(crate) struct IamRolesDataSourceReadModel {
+    pub(crate) path_prefix: Option<Value>,
+    pub(crate) name_regex: Option<Value>,
+    pub(crate) arns: Option<Value>,
+    pub(crate) names: Option<Value>,
+}
+
+impl sealed::Sealed for IamRolesDataSourceReadModel {}
+
+impl DataSourceReadModel for IamRolesDataSourceReadModel {
+    fn into_attributes(self) -> ProviderResult<HashMap<String, Value>> {
+        let Self {
+            path_prefix,
+            name_regex,
+            arns,
+            names,
+        } = self;
+        let mut attributes = HashMap::with_capacity(4);
+        if let Some(value) = path_prefix {
+            attributes.insert("path_prefix".to_string(), value);
+        }
+        if let Some(value) = name_regex {
+            attributes.insert("name_regex".to_string(), value);
+        }
+        if let Some(value) = arns {
+            attributes.insert("arns".to_string(), value);
+        }
+        if let Some(value) = names {
+            attributes.insert("names".to_string(), value);
+        }
+        static VALIDATED_SCHEMA: OnceLock<Result<ValidatedResourceSchema, String>> =
+            OnceLock::new();
+        let schema = cached_validated_read_schema("iam.Roles", &VALIDATED_SCHEMA, || {
+            crate::schemas::generated::iam::roles::iam_roles_config().schema
+        })?;
+        validate_read_attributes("iam.Roles", schema, &mut attributes)?;
         Ok(attributes)
     }
 }

@@ -1,4 +1,6 @@
-//! Typed boundary for managed-resource reads.
+//! Typed boundary for managed-resource and data-source reads.
+
+#![allow(clippy::disallowed_methods)]
 
 use std::collections::HashMap;
 use std::sync::OnceLock;
@@ -6,7 +8,7 @@ use std::sync::OnceLock;
 use carina_core::provider::{
     AppliedIdentifier, AppliedState, ProviderError, ProviderResult, ReadOutcome,
 };
-use carina_core::resource::{ConcreteValue, ResourceId, Value};
+use carina_core::resource::{ConcreteValue, ResourceId, State, Value};
 use carina_core::schema::{ResourceSchema, ValidatedResourceSchema};
 
 pub(crate) mod sealed {
@@ -15,6 +17,11 @@ pub(crate) mod sealed {
 
 /// Implemented only by generated exhaustive read-model structs.
 pub(crate) trait ManagedReadModel: sealed::Sealed {
+    fn into_attributes(self) -> ProviderResult<HashMap<String, Value>>;
+}
+
+/// Implemented only by generated exhaustive data-source read-model structs.
+pub(crate) trait DataSourceReadModel: sealed::Sealed {
     fn into_attributes(self) -> ProviderResult<HashMap<String, Value>>;
 }
 
@@ -61,6 +68,64 @@ pub(crate) fn found_managed_read(
         identifier.clone(),
         attributes,
     )))
+}
+
+/// The sole data-source boundary that turns an exhaustive typed model into
+/// core's generic state representation.
+pub(crate) fn found_data_source_read(
+    id: &ResourceId,
+    identifier: Option<&str>,
+    model: impl DataSourceReadModel,
+) -> ProviderResult<State> {
+    let attributes = model
+        .into_attributes()
+        .map_err(|error| error.for_resource(id.clone()))?;
+    let state = State::existing(id.clone(), attributes);
+    Ok(match identifier {
+        Some(identifier) => state.with_identifier(identifier),
+        None => state,
+    })
+}
+
+/// Confine partial-success and diagnostic construction from a raw map to the
+/// same audited module as successful typed reads.
+pub(crate) fn partial_applied_state(
+    id: ResourceId,
+    identifier: AppliedIdentifier,
+    attributes: HashMap<String, Value>,
+) -> AppliedState {
+    AppliedState::from_identifier(id, identifier, attributes)
+}
+
+#[doc(hidden)]
+#[cfg(debug_assertions)]
+pub fn test_existing_state(id: ResourceId, attributes: HashMap<String, Value>) -> State {
+    State::existing(id, attributes)
+}
+
+#[cfg(test)]
+pub(crate) fn test_applied_state(
+    id: ResourceId,
+    identifier: AppliedIdentifier,
+    attributes: HashMap<String, Value>,
+) -> AppliedState {
+    AppliedState::from_identifier(id, identifier, attributes)
+}
+
+/// Build the deliberately invalid state used to verify protocol-boundary
+/// handling of non-finite provider output without exposing a general raw-map
+/// constructor outside this module.
+#[doc(hidden)]
+#[cfg(all(not(target_arch = "wasm32"), debug_assertions))]
+pub fn non_finite_applied_state_for_protocol_test() -> AppliedState {
+    AppliedState::from_identifier(
+        ResourceId::with_provider_identity("aws", "test.NonFiniteOutput", "fixture", None),
+        AppliedIdentifier::new("provider-id").expect("fixture identifier must be non-empty"),
+        HashMap::from([(
+            "value".to_string(),
+            Value::Concrete(ConcreteValue::Float(f64::NAN)),
+        )]),
+    )
 }
 
 /// Return the one validated schema instance used by a generated read model.

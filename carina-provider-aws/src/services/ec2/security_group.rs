@@ -97,7 +97,7 @@ impl AwsProvider {
             aws_sdk_ec2::types::ResourceType::SecurityGroup,
             client_token,
         );
-        let sent = Self::sent_only(resource, &["vpc_id", "description", "group_name", "tags"]);
+        let sent = self.sent_only(resource, &["vpc_id", "description", "group_name", "tags"]);
         let result = retry_aws_operation(RetryPolicy::default(), || {
             let group_name = group_name.clone();
             let description = description.clone();

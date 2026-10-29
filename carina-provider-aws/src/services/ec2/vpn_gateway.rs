@@ -96,7 +96,7 @@ impl AwsProvider {
             req = req.availability_zone(availability_zone);
         }
 
-        let sent = Self::sent_only(
+        let sent = self.sent_only(
             resource,
             &["type", "amazon_side_asn", "availability_zone", "tags"],
         );

@@ -15,6 +15,7 @@ use crate::provider::{AwsCreateAttempt, Ec2TaggedResourceKind};
 use crate::read_model::{empty_map_value, found_managed_read};
 use crate::read_models_generated::Ec2SubnetReadModelSupplement;
 use aws_sdk_ec2::types::{AttributeBooleanValue, HostnameType};
+use std::net::Ipv6Addr;
 
 // `read_ec2_subnet` must store `availability_zone` as the AWS canonical
 // form (`"ap-northeast-1a"`). Rewriting it to a DSL-prefixed identifier
@@ -64,20 +65,18 @@ fn validate_subnet_cidr_source(
     required: bool,
 ) -> ProviderResult<()> {
     match (cidr, pool_id, netmask_length) {
-        (Some(_), None, None) | (None, Some(_), Some(_)) | (None, None, None) if !required => {
+        (Some(_), None | Some(_), None) | (None, Some(_), Some(_)) | (None, None, None)
+            if !required =>
+        {
             Ok(())
         }
-        (Some(_), None, None) | (None, Some(_), Some(_)) => Ok(()),
+        (Some(_), None | Some(_), None) | (None, Some(_), Some(_)) => Ok(()),
         (None, None, None) => Err(ProviderError::invalid_input(format!(
             "an {family} CIDR block or {family} IPAM pool with netmask length is required"
         ))
         .for_resource(id.clone())),
-        (Some(_), Some(_), _) => Err(ProviderError::invalid_input(format!(
-            "{family} CIDR block and {family} IPAM pool ID are mutually exclusive"
-        ))
-        .for_resource(id.clone())),
-        (Some(_), None, Some(_)) => Err(ProviderError::invalid_input(format!(
-            "{family} netmask length may only be used with an {family} IPAM pool ID"
+        (Some(_), _, Some(_)) => Err(ProviderError::invalid_input(format!(
+            "{family} CIDR block and {family} netmask length are mutually exclusive"
         ))
         .for_resource(id.clone())),
         (None, Some(_), None) => Err(ProviderError::invalid_input(format!(
@@ -89,6 +88,60 @@ fn validate_subnet_cidr_source(
         ))
         .for_resource(id.clone())),
     }
+}
+
+fn canonical_ipv6_cidr(value: &str) -> Result<String, String> {
+    let (address, prefix) = value
+        .rsplit_once('/')
+        .ok_or_else(|| "IPv6 CIDR must include a prefix length".to_string())?;
+    let address = address
+        .parse::<Ipv6Addr>()
+        .map_err(|error| format!("invalid IPv6 address: {error}"))?;
+    let prefix = prefix
+        .parse::<u8>()
+        .map_err(|error| format!("invalid IPv6 prefix length: {error}"))?;
+    if prefix > 128 {
+        return Err("IPv6 prefix length must be between 0 and 128".to_string());
+    }
+    Ok(format!("{address}/{prefix}"))
+}
+
+fn associated_ipv6_cidr(
+    associations: &[aws_sdk_ec2::types::SubnetIpv6CidrBlockAssociation],
+) -> Option<&str> {
+    associations
+        .iter()
+        .find(|association| {
+            association
+                .ipv6_cidr_block_state()
+                .and_then(|state| state.state())
+                == Some(&aws_sdk_ec2::types::SubnetCidrBlockStateCode::Associated)
+        })
+        .and_then(|association| association.ipv6_cidr_block())
+}
+
+pub(crate) fn normalize_subnet_ipv6_cidr_blocks<S>(
+    resources: &mut [Resource<S>],
+) -> ProviderResult<()> {
+    for resource in resources {
+        if resource.id.provider != "aws" || resource.id.resource_type != "ec2.Subnet" {
+            continue;
+        }
+        let Some(Value::Concrete(ConcreteValue::String(value))) =
+            resource.get_attr("ipv6_cidr_block")
+        else {
+            continue;
+        };
+        let canonical = canonical_ipv6_cidr(value.expose_plaintext()).map_err(|error| {
+            ProviderError::invalid_input(format!("invalid ipv6_cidr_block: {error}"))
+                .for_resource(resource.id.clone())
+        })?;
+        resource.set_attr(
+            "ipv6_cidr_block",
+            Value::Concrete(ConcreteValue::String(canonical.into())),
+        );
+    }
+    Ok(())
 }
 
 impl AwsProvider {
@@ -130,16 +183,13 @@ impl AwsProvider {
                         .map(|prefix| Value::Concrete(ConcreteValue::Int(prefix)))
                 })
             };
-            let ipv6_cidr_block = subnet
-                .ipv6_cidr_block_association_set()
-                .iter()
-                .find_map(|association| association.ipv6_cidr_block())
-                .map(|cidr| Value::Concrete(ConcreteValue::String(cidr.to_string().into())));
-            let ipv6_netmask_length = subnet
-                .ipv6_cidr_block_association_set()
-                .iter()
-                .find_map(|association| association.ipv6_cidr_block())
-                .and_then(prefix_value);
+            let associated_ipv6_cidr =
+                associated_ipv6_cidr(subnet.ipv6_cidr_block_association_set());
+            let ipv6_cidr_block = associated_ipv6_cidr.map(|cidr| {
+                let cidr = canonical_ipv6_cidr(cidr).unwrap_or_else(|_| cidr.to_string());
+                Value::Concrete(ConcreteValue::String(cidr.into()))
+            });
+            let ipv6_netmask_length = associated_ipv6_cidr.and_then(prefix_value);
             let (_, model) = fields.into_model(
                 id,
                 Ec2SubnetReadModelSupplement {
@@ -280,7 +330,7 @@ impl AwsProvider {
             req = req.availability_zone(az);
         }
 
-        let sent = Self::sent_only(
+        let sent = self.sent_only(
             resource,
             &[
                 "vpc_id",
@@ -499,5 +549,83 @@ mod tests {
 
         resolve_modify_subnet_enum_attrs(&resource, &schema)
             .expect_err("invalid hostname_type must fail before any EC2 mutation");
+    }
+
+    #[test]
+    fn explicit_cidrs_from_ipam_pools_are_allowed_but_netmasks_conflict() {
+        let id = ResourceId::with_provider_identity("aws", "ec2.Subnet", "test", None);
+        validate_subnet_cidr_source(
+            &id,
+            "IPv4",
+            Some("10.0.1.0/24"),
+            Some("ipam-pool-12345678"),
+            None,
+            true,
+        )
+        .expect("AWS accepts an explicit IPv4 CIDR from an IPAM pool");
+        validate_subnet_cidr_source(
+            &id,
+            "IPv6",
+            Some("2001:db8::/64"),
+            Some("ipam-pool-12345678"),
+            None,
+            false,
+        )
+        .expect("AWS accepts an explicit IPv6 CIDR from an IPAM pool");
+        assert!(
+            validate_subnet_cidr_source(
+                &id,
+                "IPv4",
+                Some("10.0.1.0/24"),
+                Some("ipam-pool-12345678"),
+                Some(24),
+                true,
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn ipv6_cidr_normalization_matches_the_associated_read_value() {
+        assert_eq!(
+            canonical_ipv6_cidr("2001:0DB8:0000:0000:0000:0000:0000:0000/64").unwrap(),
+            "2001:db8::/64"
+        );
+        let mut resource = Resource::with_provider("aws", "ec2.Subnet", "test", None);
+        resource.set_attr(
+            "ipv6_cidr_block",
+            Value::Concrete(ConcreteValue::String(
+                "2001:0DB8:0000:0000:0000:0000:0000:0000/64".into(),
+            )),
+        );
+        let mut resources = vec![resource];
+        normalize_subnet_ipv6_cidr_blocks(&mut resources).unwrap();
+        assert_eq!(
+            resources[0].get_attr("ipv6_cidr_block"),
+            Some(&Value::Concrete(ConcreteValue::String(
+                "2001:db8::/64".into()
+            )))
+        );
+
+        let associating = aws_sdk_ec2::types::SubnetIpv6CidrBlockAssociation::builder()
+            .ipv6_cidr_block("2001:db8:1::/64")
+            .ipv6_cidr_block_state(
+                aws_sdk_ec2::types::SubnetCidrBlockState::builder()
+                    .state(aws_sdk_ec2::types::SubnetCidrBlockStateCode::Associating)
+                    .build(),
+            )
+            .build();
+        let associated = aws_sdk_ec2::types::SubnetIpv6CidrBlockAssociation::builder()
+            .ipv6_cidr_block("2001:db8::/64")
+            .ipv6_cidr_block_state(
+                aws_sdk_ec2::types::SubnetCidrBlockState::builder()
+                    .state(aws_sdk_ec2::types::SubnetCidrBlockStateCode::Associated)
+                    .build(),
+            )
+            .build();
+        assert_eq!(
+            associated_ipv6_cidr(&[associating, associated]),
+            Some("2001:db8::/64")
+        );
     }
 }

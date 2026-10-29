@@ -1332,11 +1332,7 @@ impl Ec2NatGatewayReadFields {
             availability_zone_addresses,
             connectivity_type: connectivity_type.clone(),
             private_ip_address,
-            subnet_id: crate::read_model::require_read_value(
-                resource_id,
-                subnet_id.clone(),
-                "subnet_id",
-            )?,
+            subnet_id: subnet_id.clone(),
             vpc_id: vpc_id.clone(),
             nat_gateway_id: nat_gateway_id.clone(),
             tags,

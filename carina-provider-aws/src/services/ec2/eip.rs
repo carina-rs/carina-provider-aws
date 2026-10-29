@@ -91,7 +91,7 @@ impl AwsProvider {
             req = req.domain(aws_sdk_ec2::types::DomainType::Vpc);
         }
 
-        let sent = Self::sent_only(resource, &["address", "domain", "public_ipv4_pool", "tags"]);
+        let sent = self.sent_only(resource, &["address", "domain", "public_ipv4_pool", "tags"]);
         let result = req.send().await;
 
         self.finish_tagged_ec2_create(

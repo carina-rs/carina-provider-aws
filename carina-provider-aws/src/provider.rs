@@ -566,10 +566,7 @@ pub type AwsDeleteStep = OperationStep<(), ProviderError, AwsDeleteToken>;
 /// typestate handle.
 #[derive(Debug)]
 pub(crate) enum CreateCompletion {
-    Success {
-        identifier: AppliedIdentifier,
-        attributes: HashMap<String, Value>,
-    },
+    Success(AppliedState),
     Partial {
         identifier: AppliedIdentifier,
         attributes: HashMap<String, Value>,
@@ -983,11 +980,7 @@ impl AwsProvider {
     ) -> CreateCompletion {
         let reason = match outcome {
             Ok(ReadOutcome::Found { state }) => {
-                let (_id, identifier, attributes) = state.into_parts();
-                return CreateCompletion::Success {
-                    identifier,
-                    attributes,
-                };
+                return CreateCompletion::Success(state);
             }
             Ok(ReadOutcome::NotFound { .. }) => {
                 "post-create read-back did not find the created resource".to_string()
@@ -1017,17 +1010,41 @@ impl AwsProvider {
             }
             Err(error) => format!("post-update read-back failed: {error}"),
         };
-        let state = AppliedState::from_identifier(id.clone(), identifier, attributes);
+        let state = crate::read_model::partial_applied_state(id.clone(), identifier, attributes);
         let (reason, missing_attributes) = self.read_back_diagnostic(id, reason);
         UpdateOutcome::partial_success(state, reason, missing_attributes)
     }
 
-    pub(crate) fn sent_only(resource: &Resource<impl Sized>, names: &[&str]) -> Sent {
-        Sent::only(
-            names
-                .iter()
-                .copied()
-                .filter(|name| resource.attributes.contains_key(*name)),
+    fn sent_only_with_schema(
+        resource: &Resource<impl Sized>,
+        schema: Option<&carina_core::schema::ResourceSchema>,
+        names: &[&str],
+    ) -> Sent {
+        let mut sent = names
+            .iter()
+            .copied()
+            .filter(|name| resource.attributes.contains_key(*name))
+            .map(str::to_string)
+            .collect::<std::collections::BTreeSet<_>>();
+        if let Some(schema) = schema {
+            sent.extend(
+                schema
+                    .attributes()
+                    .iter()
+                    .filter(|(name, attribute)| {
+                        attribute.is_write_only() && resource.attributes.contains_key(*name)
+                    })
+                    .map(|(name, _attribute)| name.clone()),
+            );
+        }
+        Sent::only(sent)
+    }
+
+    pub(crate) fn sent_only(&self, resource: &Resource<impl Sized>, names: &[&str]) -> Sent {
+        Self::sent_only_with_schema(
+            resource,
+            self.resource_schema(resource.id.resource_type.as_str()),
+            names,
         )
     }
 
@@ -1148,10 +1165,10 @@ impl AwsProvider {
         result: ProviderResult<CreateCompletion>,
     ) -> Result<A::Step, A::Verdict> {
         match result {
-            Ok(CreateCompletion::Success {
-                identifier,
-                attributes,
-            }) => attempt.issued(identifier, sent).succeeded(attributes),
+            Ok(CreateCompletion::Success(state)) => {
+                let (_id, identifier, attributes) = state.into_parts();
+                attempt.issued(identifier, sent).succeeded(attributes)
+            }
             Ok(CreateCompletion::Partial {
                 identifier,
                 attributes,
@@ -1170,10 +1187,10 @@ impl AwsProvider {
         completion: CreateCompletion,
     ) -> Result<I::Step, I::Verdict> {
         match completion {
-            CreateCompletion::Success {
-                identifier: _identifier,
-                attributes,
-            } => issued.succeeded(attributes),
+            CreateCompletion::Success(state) => {
+                let (_id, _identifier, attributes) = state.into_parts();
+                issued.succeeded(attributes)
+            }
             CreateCompletion::Partial {
                 identifier: _identifier,
                 attributes,
@@ -1716,7 +1733,7 @@ impl AwsProvider {
                     Ok(request_id) => request_id,
                     Err(error) => return Err(attempt.untracked(error)),
                 };
-                let sent = Self::sent_only(
+                let sent = self.sent_only(
                     resource,
                     &[
                         "account_name",
@@ -2343,14 +2360,7 @@ impl AwsProvider {
         completion: CreateCompletion,
     ) -> Result<R::Step, R::Verdict> {
         match completion {
-            CreateCompletion::Success {
-                identifier,
-                attributes,
-            } => resumed.completed(AppliedState::from_identifier(
-                id.clone(),
-                identifier,
-                attributes,
-            )),
+            CreateCompletion::Success(state) => resumed.completed(state),
             CreateCompletion::Partial {
                 identifier: _identifier,
                 attributes: _attributes,
@@ -3425,6 +3435,29 @@ mod pending_operation_tests {
     }
 
     #[test]
+    fn present_write_only_attributes_are_recorded_without_a_hand_kept_name() {
+        let mut resource = Resource::with_provider("aws", "ec2.Vpc", "test", None);
+        resource.set_attr(
+            "ipv4_ipam_pool_id",
+            Value::Concrete(carina_core::resource::ConcreteValue::String(
+                "ipam-pool-12345678".into(),
+            )),
+        );
+        let schema = crate::schemas::generated::ec2::vpc::ec2_vpc_config().schema;
+        let sent = AwsProvider::sent_only_with_schema(&resource, Some(&schema), &[]);
+        let request_attributes = resource
+            .attributes
+            .keys()
+            .cloned()
+            .collect::<std::collections::BTreeSet<_>>();
+
+        assert!(
+            sent.names(&request_attributes)
+                .contains("ipv4_ipam_pool_id")
+        );
+    }
+
+    #[test]
     fn sticky_maybe_sent_failure_keeps_tagged_create_pending() {
         use aws_sdk_ec2::operation::create_nat_gateway::CreateNatGatewayError;
         use aws_smithy_runtime_api::client::orchestrator::HttpResponse;
@@ -3680,8 +3713,11 @@ mod pending_operation_tests {
     #[tokio::test]
     async fn drive_operation_returns_done_value_from_poll() {
         let id = ResourceId::with_provider_identity("aws", "ec2.NatGateway", "example", None);
-        let expected =
-            AppliedState::from_identifier(id.clone(), identifier("nat-read-back"), HashMap::new());
+        let expected = crate::read_model::test_applied_state(
+            id.clone(),
+            identifier("nat-read-back"),
+            HashMap::new(),
+        );
         let mut done = Some(expected.clone());
 
         let outcome = drive_operation(

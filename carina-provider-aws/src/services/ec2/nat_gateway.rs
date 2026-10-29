@@ -10,7 +10,7 @@ use crate::aws_operation::ClientToken;
 use crate::error_helpers::api_error_with_meta;
 use crate::helpers::{
     CreatePoll, DeletePoll, RetryPolicy, build_tag_specification_with_create_token,
-    optional_enum_attr, optional_string_attr, require_string_attr, retry_aws_operation_with_token,
+    optional_enum_attr, optional_string_attr, retry_aws_operation_with_token,
 };
 use crate::provider::{AwsCreateAttempt, Ec2TaggedResourceKind};
 use crate::read_model::{empty_map_value, found_managed_read};
@@ -106,20 +106,98 @@ fn build_availability_zone_addresses(
                 }
             };
             let availability_zone = string_field("availability_zone")?;
-            let availability_zone_id = string_field("availability_zone_id")?;
-            if availability_zone.is_some() && availability_zone_id.is_some() {
-                return Err(ProviderError::invalid_input(
-                    "availability_zone_addresses.availability_zone and availability_zone_id are mutually exclusive",
-                )
-                .for_resource(id.clone()));
-            }
             Ok(AvailabilityZoneAddress::builder()
                 .set_availability_zone(availability_zone)
-                .set_availability_zone_id(availability_zone_id)
                 .set_allocation_ids(Some(allocation_ids))
                 .build())
         })
         .collect()
+}
+
+fn availability_zone_addresses_to_value(
+    addresses: &[aws_sdk_ec2::types::NatGatewayAddress],
+) -> Value {
+    let mut grouped: indexmap::IndexMap<Option<String>, Vec<String>> = indexmap::IndexMap::new();
+    for address in addresses {
+        // EC2 returns both the AZ name and ID for regional NAT addresses, but
+        // create accepts either selector, not both. The schema exposes the
+        // name as the sole canonical selector.
+        let key = address.availability_zone().map(str::to_string);
+        let allocation_ids = grouped.entry(key).or_default();
+        if let Some(allocation_id) = address.allocation_id() {
+            allocation_ids.push(allocation_id.to_string());
+        }
+    }
+    Value::Concrete(ConcreteValue::List(
+        grouped
+            .into_iter()
+            .filter_map(|(availability_zone, allocation_ids)| {
+                let mut fields = indexmap::IndexMap::new();
+                if !allocation_ids.is_empty() {
+                    fields.insert(
+                        "allocation_ids".to_string(),
+                        Value::Concrete(ConcreteValue::List(
+                            allocation_ids
+                                .into_iter()
+                                .map(|allocation_id| {
+                                    Value::Concrete(ConcreteValue::String(allocation_id.into()))
+                                })
+                                .collect(),
+                        )),
+                    );
+                }
+                if let Some(availability_zone) = availability_zone {
+                    fields.insert(
+                        "availability_zone".to_string(),
+                        Value::Concrete(ConcreteValue::String(availability_zone.into())),
+                    );
+                }
+                if fields.is_empty() {
+                    None
+                } else {
+                    Some(Value::Concrete(ConcreteValue::Map(fields)))
+                }
+            })
+            .collect(),
+    ))
+}
+
+fn concrete_string(value: &Value) -> Option<&str> {
+    match value {
+        Value::Concrete(ConcreteValue::String(value)) => Some(value.expose_plaintext()),
+        Value::Concrete(ConcreteValue::CanonicalEnum(value)) => Some(value.api_value()),
+        _ => None,
+    }
+}
+
+/// Validate the mode-dependent placement inputs while unresolved references
+/// are still allowed to defer the decision until apply-time resolution.
+pub(crate) fn validate_nat_gateway_inputs<S>(resource: &Resource<S>) -> ProviderResult<()> {
+    if resource.id.provider != "aws" || resource.id.resource_type != "ec2.NatGateway" {
+        return Ok(());
+    }
+
+    let mode = match resource.get_attr("availability_mode") {
+        None => Some("zonal"),
+        Some(value) => concrete_string(value),
+    };
+    let Some(mode) = mode else {
+        return Ok(());
+    };
+    let subnet = resource.get_attr("subnet_id");
+    match mode {
+        "regional" if subnet.is_some_and(|value| concrete_string(value).is_some()) => {
+            Err(ProviderError::invalid_input(
+                "ec2.NatGateway subnet_id must be omitted when availability_mode = regional",
+            )
+            .for_resource(resource.id.clone()))
+        }
+        "zonal" if subnet.is_none() => Err(ProviderError::invalid_input(
+            "ec2.NatGateway subnet_id is required when availability_mode = zonal",
+        )
+        .for_resource(resource.id.clone())),
+        _ => Ok(()),
+    }
 }
 
 impl AwsProvider {
@@ -162,52 +240,8 @@ impl AwsProvider {
 
             let fields = Self::extract_ec2_nat_gateway_attributes(ngw);
 
-            let mut grouped_addresses: indexmap::IndexMap<
-                (Option<String>, Option<String>),
-                Vec<String>,
-            > = indexmap::IndexMap::new();
-            for address in ngw.nat_gateway_addresses() {
-                let key = (
-                    address.availability_zone().map(str::to_string),
-                    address.availability_zone_id().map(str::to_string),
-                );
-                let allocation_ids = grouped_addresses.entry(key).or_default();
-                if let Some(allocation_id) = address.allocation_id() {
-                    allocation_ids.push(allocation_id.to_string());
-                }
-            }
-            let mut availability_zone_addresses = Vec::new();
-            for ((availability_zone, availability_zone_id), allocation_ids) in grouped_addresses {
-                let mut fields = indexmap::IndexMap::new();
-                if !allocation_ids.is_empty() {
-                    fields.insert(
-                        "allocation_ids".to_string(),
-                        Value::Concrete(ConcreteValue::List(
-                            allocation_ids
-                                .into_iter()
-                                .map(|allocation_id| {
-                                    Value::Concrete(ConcreteValue::String(allocation_id.into()))
-                                })
-                                .collect(),
-                        )),
-                    );
-                }
-                if let Some(availability_zone) = availability_zone {
-                    fields.insert(
-                        "availability_zone".to_string(),
-                        Value::Concrete(ConcreteValue::String(availability_zone.into())),
-                    );
-                }
-                if let Some(availability_zone_id) = availability_zone_id {
-                    fields.insert(
-                        "availability_zone_id".to_string(),
-                        Value::Concrete(ConcreteValue::String(availability_zone_id.into())),
-                    );
-                }
-                if !fields.is_empty() {
-                    availability_zone_addresses.push(Value::Concrete(ConcreteValue::Map(fields)));
-                }
-            }
+            let availability_zone_addresses =
+                availability_zone_addresses_to_value(ngw.nat_gateway_addresses());
             let private_ip_address = ngw
                 .nat_gateway_addresses()
                 .iter()
@@ -218,9 +252,7 @@ impl AwsProvider {
             let (_, model) = fields.into_model(
                 id,
                 Ec2NatGatewayReadModelSupplement {
-                    availability_zone_addresses: Value::Concrete(ConcreteValue::List(
-                        availability_zone_addresses,
-                    )),
+                    availability_zone_addresses,
                     private_ip_address,
                     tags: Self::ec2_tags_to_value(ngw.tags()).unwrap_or_else(empty_map_value),
                 },
@@ -240,20 +272,24 @@ impl AwsProvider {
         client_token: &ClientToken,
         attempt: A,
     ) -> Result<A::Step, A::Verdict> {
-        let subnet_id = match require_string_attr(resource, "subnet_id") {
+        if let Err(error) = validate_nat_gateway_inputs(resource) {
+            return Err(attempt.untracked(error));
+        }
+        let subnet_id = match optional_string_attr(resource, "subnet_id") {
             Ok(subnet_id) => subnet_id,
             Err(error) => return Err(attempt.untracked(error)),
         };
 
         let mut req = self.ec2_client.create_nat_gateway().configure(|builder| {
-            builder.subnet_id(&subnet_id).tag_specifications(
-                build_tag_specification_with_create_token(
-                    resource,
-                    aws_sdk_ec2::types::ResourceType::Natgateway,
-                    client_token,
-                ),
-            )
+            builder.tag_specifications(build_tag_specification_with_create_token(
+                resource,
+                aws_sdk_ec2::types::ResourceType::Natgateway,
+                client_token,
+            ))
         });
+        if let Some(subnet_id) = subnet_id {
+            req = req.configure(|builder| builder.subnet_id(subnet_id));
+        }
 
         if let Some(Value::Concrete(ConcreteValue::String(alloc_id))) =
             resource.get_attr("allocation_id")
@@ -312,7 +348,7 @@ impl AwsProvider {
         let result =
             retry_aws_operation_with_token(client_token, RetryPolicy::default(), || req.clone())
                 .await;
-        let sent = Self::sent_only(
+        let sent = self.sent_only(
             resource,
             &[
                 "subnet_id",
@@ -410,6 +446,11 @@ impl AwsProvider {
 #[cfg(test)]
 mod pending_tests {
     use super::*;
+    use carina_core::differ::{Diff, diff};
+    use carina_core::provider::RawSavedAttrs;
+    use carina_core::resource::{ResolvedResource, Resource};
+    use carina_core::schema::SchemaRegistry;
+    use std::collections::HashMap;
 
     #[test]
     fn create_poll_maps_pending_ready_and_failed_states() {
@@ -446,5 +487,92 @@ mod pending_tests {
             DeletePoll::Gone
         );
         assert_eq!(nat_gateway_delete_poll_state(None), DeletePoll::Gone);
+    }
+
+    #[test]
+    fn zonal_and_regional_modes_enforce_subnet_placement() {
+        let mut zonal = Resource::with_provider("aws", "ec2.NatGateway", "zonal", None);
+        zonal.set_attr(
+            "availability_mode",
+            Value::Concrete(ConcreteValue::String("zonal".into())),
+        );
+        assert!(validate_nat_gateway_inputs(&zonal).is_err());
+        zonal.set_attr(
+            "subnet_id",
+            Value::Concrete(ConcreteValue::String("subnet-12345678".into())),
+        );
+        validate_nat_gateway_inputs(&zonal).expect("zonal mode accepts a subnet");
+
+        let mut regional = Resource::with_provider("aws", "ec2.NatGateway", "regional", None);
+        regional.set_attr(
+            "availability_mode",
+            Value::Concrete(ConcreteValue::String("regional".into())),
+        );
+        validate_nat_gateway_inputs(&regional).expect("regional mode omits subnet_id");
+        regional.set_attr(
+            "subnet_id",
+            Value::Concrete(ConcreteValue::String("subnet-12345678".into())),
+        );
+        assert!(validate_nat_gateway_inputs(&regional).is_err());
+    }
+
+    #[test]
+    fn regional_addresses_read_one_canonical_zone_selector_without_diff() {
+        let address = aws_sdk_ec2::types::NatGatewayAddress::builder()
+            .allocation_id("eipalloc-12345678")
+            .availability_zone("ap-northeast-1a")
+            .availability_zone_id("apne1-az4")
+            .build();
+        let observed = availability_zone_addresses_to_value(&[address]);
+        let Value::Concrete(ConcreteValue::List(items)) = &observed else {
+            panic!("availability-zone addresses must be a list");
+        };
+        let Value::Concrete(ConcreteValue::Map(fields)) = &items[0] else {
+            panic!("availability-zone address must be a map");
+        };
+        assert_eq!(
+            fields.get("availability_zone"),
+            Some(&Value::Concrete(ConcreteValue::String(
+                "ap-northeast-1a".into()
+            )))
+        );
+        assert!(!fields.contains_key("availability_zone_id"));
+
+        let mut desired = Resource::with_provider("aws", "ec2.NatGateway", "regional", None);
+        desired.set_attr(
+            "availability_mode",
+            Value::Concrete(ConcreteValue::String("regional".into())),
+        );
+        desired.set_attr(
+            "vpc_id",
+            Value::Concrete(ConcreteValue::String("vpc-12345678".into())),
+        );
+        desired.set_attr("availability_zone_addresses", observed.clone());
+        let current = crate::read_model::test_existing_state(
+            desired.id.clone(),
+            HashMap::from([
+                (
+                    "availability_mode".to_string(),
+                    Value::Concrete(ConcreteValue::String("regional".into())),
+                ),
+                (
+                    "vpc_id".to_string(),
+                    Value::Concrete(ConcreteValue::String("vpc-12345678".into())),
+                ),
+                ("availability_zone_addresses".to_string(), observed),
+            ]),
+        )
+        .with_identifier("nat-12345678");
+        let registry = SchemaRegistry::new();
+        let saved = RawSavedAttrs::default().lift(&registry);
+        let schema = crate::schemas::generated::ec2::nat_gateway::ec2_nat_gateway_config().schema;
+        let result = diff(
+            &ResolvedResource::new(desired),
+            &current,
+            &saved,
+            None,
+            Some(&schema),
+        );
+        assert!(matches!(result, Diff::NoChange(_)), "{result:?}");
     }
 }

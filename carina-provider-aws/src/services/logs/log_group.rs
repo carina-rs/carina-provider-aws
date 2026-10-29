@@ -149,7 +149,7 @@ impl AwsProvider {
         }
         let issued = attempt.issued(
             identifier.clone(),
-            Self::sent_only(
+            self.sent_only(
                 resource,
                 &[
                     "log_group_name",

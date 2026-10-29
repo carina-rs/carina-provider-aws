@@ -21,6 +21,41 @@ use crate::read_model::found_managed_read;
 use crate::read_models_generated::S3BucketReplicationConfigurationReadModel;
 use crate::services::s3::bucket::is_s3_not_configured_error;
 
+/// Insert the provider's canonical V2 replication default into authored
+/// rules. The schema declares the nested field required, so every plan and
+/// every read compares the same explicit `{ status = Disabled }` shape.
+pub(crate) fn normalize_delete_marker_replication<S>(resources: &mut [Resource<S>]) {
+    for resource in resources {
+        if resource.id.provider != "aws"
+            || resource.id.resource_type != "s3.BucketReplicationConfiguration"
+        {
+            continue;
+        }
+        let Some(Value::Concrete(ConcreteValue::List(rules))) = resource.get_attr("rules") else {
+            continue;
+        };
+        let normalized = rules
+            .iter()
+            .map(|rule| {
+                let Value::Concrete(ConcreteValue::Map(fields)) = rule else {
+                    return rule.clone();
+                };
+                let mut fields = fields.clone();
+                fields
+                    .entry("delete_marker_replication".to_string())
+                    .or_insert_with(|| {
+                        Value::Concrete(ConcreteValue::Map(indexmap::IndexMap::from([(
+                            "status".to_string(),
+                            Value::Concrete(ConcreteValue::String("Disabled".into())),
+                        )])))
+                    });
+                Value::Concrete(ConcreteValue::Map(fields))
+            })
+            .collect();
+        resource.set_attr("rules", Value::Concrete(ConcreteValue::List(normalized)));
+    }
+}
+
 impl AwsProvider {
     pub(crate) async fn read_s3_bucket_replication_configuration(
         &self,

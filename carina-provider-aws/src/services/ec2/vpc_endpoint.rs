@@ -191,7 +191,7 @@ impl AwsProvider {
         let result =
             retry_aws_operation_with_token(client_token, RetryPolicy::default(), || req.clone())
                 .await;
-        let sent = Self::sent_only(
+        let sent = self.sent_only(
             resource,
             &[
                 "vpc_id",

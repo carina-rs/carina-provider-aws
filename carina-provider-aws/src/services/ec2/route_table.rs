@@ -78,7 +78,7 @@ impl AwsProvider {
                 ))
         });
         let result = send_aws_operation_with_token(client_token, req).await;
-        let sent = Self::sent_only(resource, &["vpc_id", "tags"]);
+        let sent = self.sent_only(resource, &["vpc_id", "tags"]);
 
         self.finish_tagged_ec2_create(
             resource,

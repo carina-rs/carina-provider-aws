@@ -4,17 +4,21 @@
 #![cfg(not(target_arch = "wasm32"))]
 
 use aws_sdk_s3::Client as S3Client;
+use carina_core::differ::{Diff, diff};
+use carina_core::provider::RawSavedAttrs;
 use carina_core::provider::{
-    AppliedIdentifier, CreateOutcomeKind, CreateRequest, Provider, ProviderReadyDataSource,
-    ReadRequest, UpdateOutcome, UpdateRequest,
+    AppliedIdentifier, CreateOutcomeKind, CreateRequest, NoopNormalizer, Provider,
+    ProviderReadyDataSource, ReadRequest, UpdateOutcome, UpdateRequest,
 };
-use carina_core::resource::{ConcreteValue, DataSource, Resource, State, Value};
-use carina_provider_aws::{AwsNormalizer, AwsProvider, BoundedSdkConfig};
+use carina_core::resource::{ConcreteValue, DataSource, ResolvedResource, Resource, State, Value};
+use carina_core::schema::SchemaKind;
+use carina_provider_aws::{AwsNormalizer, AwsProvider, BoundedSdkConfig, test_existing_state};
 use indexmap::IndexMap;
 use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use winterbaume_core::{
     MockAws, MockRequest, MockResponse, MockService, StatefulService, default_account_id,
@@ -37,6 +41,39 @@ struct NotFoundHeadS3Service {
 
 struct ErrorHeadS3Service {
     inner: Arc<S3Service>,
+}
+
+struct NamespaceRecordingS3Service {
+    inner: Arc<S3Service>,
+    namespaces: Mutex<Vec<String>>,
+}
+
+impl MockService for NamespaceRecordingS3Service {
+    fn service_name(&self) -> &str {
+        self.inner.service_name()
+    }
+
+    fn url_patterns(&self) -> Vec<&str> {
+        self.inner.url_patterns()
+    }
+
+    fn handle(
+        &self,
+        request: MockRequest,
+    ) -> Pin<Box<dyn Future<Output = MockResponse> + Send + '_>> {
+        if request.method == "PUT"
+            && let Some(namespace) = request
+                .headers
+                .get("x-amz-bucket-namespace")
+                .and_then(|value| value.to_str().ok())
+        {
+            self.namespaces
+                .lock()
+                .expect("namespace recording lock")
+                .push(namespace.to_string());
+        }
+        self.inner.handle(request)
+    }
 }
 
 impl MockService for NotFoundHeadS3Service {
@@ -138,6 +175,18 @@ async fn provider_with_s3() -> (AwsProvider, S3Client) {
     let sdk_config = mock.sdk_config(PROVIDER_REGION).await;
     let s3_client = S3Client::new(&sdk_config);
     (provider_from_config(sdk_config), s3_client)
+}
+
+async fn provider_with_namespace_recording_s3() -> (AwsProvider, Arc<NamespaceRecordingS3Service>) {
+    let service = Arc::new(NamespaceRecordingS3Service {
+        inner: Arc::new(S3Service::new()),
+        namespaces: Mutex::new(Vec::new()),
+    });
+    let mock = MockAws::builder()
+        .with_service(Arc::clone(&service))
+        .build();
+    let sdk_config = mock.sdk_config(PROVIDER_REGION).await;
+    (provider_from_config(sdk_config), service)
 }
 
 async fn provider_with_staged_bucket(bucket: &str) -> (AwsProvider, Arc<RecordingS3Service>) {
@@ -242,6 +291,22 @@ fn schema_registry() -> carina_core::schema::SchemaRegistry {
     schemas
 }
 
+fn assert_no_diff(desired: Resource, current: State) {
+    let registry = schema_registry();
+    let schema = registry
+        .get("aws", RESOURCE_TYPE, SchemaKind::Resource)
+        .expect("S3 bucket schema");
+    let saved = RawSavedAttrs::default().lift(&registry);
+    let result = diff(
+        &ResolvedResource::new(desired),
+        &current,
+        &saved,
+        None,
+        Some(schema.schema().as_schema()),
+    );
+    assert!(matches!(result, Diff::NoChange(_)), "{result:?}");
+}
+
 async fn create_request_for_test(resource: Resource) -> CreateRequest {
     let bindings = carina_core::binding_index::ResolvedBindings::default();
     let module_gate = carina_core::executor::ModuleConstraintGate::from_live_compositions(&[]);
@@ -257,6 +322,23 @@ async fn create_request_for_test(resource: Resource) -> CreateRequest {
     carina_core::executor::prepare_create_request(resource, &preparation)
         .await
         .expect("test resource should pass checked create preparation")
+}
+
+async fn create_request_without_schema_for_test(resource: Resource) -> CreateRequest {
+    let bindings = carina_core::binding_index::ResolvedBindings::default();
+    let module_gate = carina_core::executor::ModuleConstraintGate::from_live_compositions(&[]);
+    let schemas = carina_core::schema::SchemaRegistry::new();
+    let preparation = carina_core::executor::ProviderPreparationContext::new(
+        &bindings,
+        &module_gate,
+        &[],
+        &NoopNormalizer,
+        &[],
+        &schemas,
+    );
+    carina_core::executor::prepare_create_request(resource, &preparation)
+        .await
+        .expect("test resource should become a provider-ready create request")
 }
 
 async fn update_request_for_test(
@@ -365,6 +447,39 @@ async fn create_bucket_ignores_supplied_read_only_region_for_placement() {
 }
 
 #[tokio::test]
+async fn bucket_namespace_is_sent_and_import_style_read_has_no_diff() {
+    let (provider, service) = provider_with_namespace_recording_s3().await;
+    let bucket = "carina-bucket-namespace";
+    let mut desired = Resource::with_provider("aws", RESOURCE_TYPE, "namespace", None);
+    desired.set_attr("bucket", string(bucket));
+    desired.set_attr("bucket_namespace", string("global"));
+    desired.set_attr("tags", Value::Concrete(ConcreteValue::Map(IndexMap::new())));
+    let id = desired.id.clone();
+    let request = create_request_without_schema_for_test(desired.clone()).await;
+
+    let current = carina_core::executor::complete_create_for_writeback(
+        carina_core::executor::dispatch_create(&provider, &id, request)
+            .await
+            .expect("create namespaced S3 bucket"),
+    )
+    .0;
+
+    assert_eq!(
+        service
+            .namespaces
+            .lock()
+            .expect("namespace recording lock")
+            .as_slice(),
+        ["global"]
+    );
+    assert!(
+        !current.attributes.contains_key("bucket_namespace"),
+        "HeadBucket cannot return the create-time namespace selector"
+    );
+    assert_no_diff(desired, current);
+}
+
+#[tokio::test]
 async fn create_bucket_read_back_not_found_is_partial_success_with_created_identifier() {
     let provider = provider_with_not_found_read_back(None).await;
     let bucket = "carina-bucket-create-read-back-not-found";
@@ -390,7 +505,7 @@ async fn update_bucket_read_back_not_found_is_partial_success_with_updated_ident
     let bucket = "carina-bucket-update-read-back-not-found";
     let provider = provider_with_not_found_read_back(Some(bucket)).await;
     let id = Resource::with_provider("aws", RESOURCE_TYPE, "partial-update", None).id;
-    let from = State::existing(
+    let from = test_existing_state(
         id.clone(),
         HashMap::from([("bucket".to_string(), string(bucket))]),
     )
@@ -446,7 +561,7 @@ async fn update_bucket_read_back_error_is_partial_success_with_updated_identifie
     let bucket = "carina-bucket-update-read-back-error";
     let provider = provider_with_error_read_back(Some(bucket)).await;
     let id = Resource::with_provider("aws", RESOURCE_TYPE, "partial-update-error", None).id;
-    let from = State::existing(
+    let from = test_existing_state(
         id.clone(),
         HashMap::from([("bucket".to_string(), string(bucket))]),
     )

@@ -1043,16 +1043,7 @@ mod tests {
     }
 
     fn non_finite_state() -> CoreAppliedState {
-        CoreAppliedState::new(
-            carina_core::resource::ResourceId::pending_with_provider(
-                "aws",
-                "test.NonFiniteOutput",
-                None,
-            ),
-            "provider-id",
-            non_finite_attributes(),
-        )
-        .expect("fixture identifier is non-empty")
+        carina_provider_aws::non_finite_applied_state_for_protocol_test()
     }
 
     fn assert_typed_conversion_error(error: CoreProviderError, message: &str) {
@@ -1070,8 +1061,10 @@ mod tests {
 
     #[test]
     fn non_finite_read_output_surfaces_as_a_provider_error() {
-        let error = read_outcome_to_proto(&CoreReadOutcome::found(non_finite_state()))
-            .expect_err("non-finite provider output must be rejected without panicking");
+        let error = read_outcome_to_proto(&CoreReadOutcome::Found {
+            state: non_finite_state(),
+        })
+        .expect_err("non-finite provider output must be rejected without panicking");
         assert_typed_conversion_error(error, "failed to encode read result");
     }
 

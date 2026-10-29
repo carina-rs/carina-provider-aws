@@ -5,6 +5,7 @@
 //! the same row, so a wrapper cannot accidentally pair one identity with
 //! another type's validation.
 
+use aws_smithy_types::{DateTime, date_time::Format};
 use carina_core::resource::{ConcreteValue, Value};
 use carina_core::schema::{AttributeType, DslTransform, TypeIdentity, legacy_validator};
 
@@ -136,6 +137,28 @@ fn availability_zone_type(identity: TypeIdentity) -> AttributeType {
             }
         })),
         Some(DslTransform::HyphenToUnderscore),
+    )
+}
+
+fn s3_lifecycle_date_type(identity: TypeIdentity) -> AttributeType {
+    validated_string(
+        identity,
+        "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$",
+        Some((Some(20), Some(20))),
+        |value| {
+            let parsed = DateTime::from_str(value, Format::DateTime)
+                .map_err(|error| format!("invalid UTC RFC 3339 timestamp: {error}"))?;
+            let canonical = parsed
+                .fmt(Format::DateTime)
+                .map_err(|error| format!("cannot format UTC RFC 3339 timestamp: {error}"))?;
+            if canonical == value {
+                Ok(())
+            } else {
+                Err(format!(
+                    "timestamp must use canonical UTC RFC 3339 form {canonical}"
+                ))
+            }
+        },
     )
 }
 
@@ -275,6 +298,14 @@ define_aws_types! {
             None,
             validate_availability_zone_id,
         ),
+    },
+    /// Canonical UTC timestamp used by S3 lifecycle expiration and transition dates.
+    S3LifecycleDate => s3_lifecycle_date {
+        segments: ["s3", "BucketLifecycleConfiguration"],
+        kind: "LifecycleDate",
+        valid_sample: "2026-01-01T00:00:00Z",
+        has_validator: true,
+        constructor: s3_lifecycle_date_type,
     },
     /// IAM role ID.
     IamRoleId => iam_role_id {
@@ -760,6 +791,7 @@ mod tests {
             AwsType::Region,
             AwsType::AvailabilityZone,
             AwsType::AvailabilityZoneId,
+            AwsType::S3LifecycleDate,
             AwsType::IamRoleId,
             AwsType::IamRoleArn,
             AwsType::IamPolicyArn,
@@ -794,7 +826,7 @@ mod tests {
         ]);
         assert_eq!(
             expected.len(),
-            37,
+            38,
             "the pre-catalog validator contract changed"
         );
 
@@ -823,6 +855,26 @@ mod tests {
                     aws_type.valid_sample()
                 );
             }
+        }
+    }
+
+    #[test]
+    fn s3_lifecycle_date_accepts_only_canonical_utc_rfc3339() {
+        let attribute_type = AwsType::S3LifecycleDate.attribute_type();
+        let validator = attribute_type_validator(&attribute_type)
+            .expect("S3 lifecycle dates have a semantic validator");
+        let value = |value: &str| Value::Concrete(ConcreteValue::String(value.to_string().into()));
+
+        assert!(validator(&value("2026-01-01T00:00:00Z")).is_ok());
+        for noncanonical in [
+            "2026-01-01T00:00:00.000Z",
+            "2026-01-01t00:00:00Z",
+            "2026-01-01",
+        ] {
+            assert!(
+                validator(&value(noncanonical)).is_err(),
+                "{noncanonical} must be rejected before an S3 request is built"
+            );
         }
     }
 }

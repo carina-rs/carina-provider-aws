@@ -620,7 +620,8 @@ fn main() -> Result<()> {
                 .with_context(|| format!("Failed to write {}", output_path.display()))?;
             eprintln!("Generated: {}", output_path.display());
 
-            let read_models = generate_read_models_code(&all_resources, &models)?;
+            let read_models =
+                generate_read_models_code(&all_resources, &all_data_sources, &models)?;
             let read_models_path = args.output_dir.join("read_models_generated.rs");
             std::fs::write(&read_models_path, read_models)
                 .with_context(|| format!("Failed to write {}", read_models_path.display()))?;
@@ -3474,14 +3475,24 @@ fn read_model_type_name(resource_name: &str) -> String {
     format!("{}{}ReadModel", service.to_upper_camel_case(), resource)
 }
 
+fn data_source_read_model_type_name(resource_name: &str) -> String {
+    let (service, resource) = split_service_resource(resource_name);
+    format!(
+        "{}{}DataSourceReadModel",
+        service.to_upper_camel_case(),
+        resource
+    )
+}
+
 /// Generate the exhaustive managed-resource read models and their sole
 /// Value-map conversion seam.
 fn generate_read_models_code(
     all_resources: &[ResourceDef],
+    all_data_sources: &[resource_defs::DataSourceDef],
     models: &HashMap<&str, SmithyModel>,
 ) -> Result<String> {
     let mut code = String::from(
-        "//! Auto-generated managed-resource read models.\n\
+        "//! Auto-generated managed-resource and data-source read models.\n\
          //!\n\
          //! DO NOT EDIT MANUALLY - regenerate with:\n\
          //!   ./scripts/generate-provider.sh\n\n\
@@ -3491,7 +3502,8 @@ fn generate_read_models_code(
          use carina_core::resource::Value;\n\n\
          use carina_core::schema::ValidatedResourceSchema;\n\n\
          use crate::read_model::{\n\
-         \x20   ManagedReadModel, cached_validated_read_schema, sealed, validate_read_attributes,\n\
+         \x20   DataSourceReadModel, ManagedReadModel, cached_validated_read_schema, sealed,\n\
+         \x20   validate_read_attributes,\n\
          };\n\n",
     );
 
@@ -3612,6 +3624,98 @@ fn generate_read_models_code(
              \x20   }}\n\
              }}\n\n",
             res.name, res.name
+        ));
+    }
+
+    let managed_names = all_resources
+        .iter()
+        .map(|resource| resource.name)
+        .collect::<HashSet<_>>();
+    for data_source in all_data_sources {
+        let mut fields = Vec::<(&str, bool)>::new();
+        for input in &data_source.inputs {
+            fields.push((input.name, input.required));
+        }
+        match &data_source.shape {
+            resource_defs::DataSourceShape::Single { output_attributes } => {
+                for output in output_attributes {
+                    if !fields.iter().any(|(name, _)| *name == output.name) {
+                        fields.push((output.name, false));
+                    }
+                }
+            }
+            resource_defs::DataSourceShape::ListAggregated { aggregated_outputs } => {
+                for output in aggregated_outputs {
+                    fields.push((output.name, false));
+                }
+            }
+        }
+
+        let model_name = data_source_read_model_type_name(data_source.name);
+        code.push_str(&format!(
+            "/// Exhaustive canonical data-source state for `{}`.\n\
+             pub(crate) struct {model_name} {{\n",
+            data_source.name
+        ));
+        for (name, required) in &fields {
+            let field = escape_rust_keyword(name);
+            let field_type = if *required { "Value" } else { "Option<Value>" };
+            code.push_str(&format!("    pub(crate) {field}: {field_type},\n"));
+        }
+        code.push_str("}\n\n");
+        code.push_str(&format!("impl sealed::Sealed for {model_name} {{}}\n\n"));
+        code.push_str(&format!(
+            "impl DataSourceReadModel for {model_name} {{\n\
+             \x20   fn into_attributes(self) -> ProviderResult<HashMap<String, Value>> {{\n\
+             \x20       let Self {{\n"
+        ));
+        for (name, _) in &fields {
+            let field = escape_rust_keyword(name);
+            code.push_str(&format!("            {field},\n"));
+        }
+        code.push_str("        } = self;\n");
+        code.push_str(&format!(
+            "        let mut attributes = HashMap::with_capacity({});\n",
+            fields.len()
+        ));
+        for (name, required) in &fields {
+            let field = escape_rust_keyword(name);
+            if *required {
+                code.push_str(&format!(
+                    "        attributes.insert(\"{name}\".to_string(), {field});\n"
+                ));
+            } else {
+                code.push_str(&format!(
+                    "        if let Some(value) = {field} {{\n\
+                     \x20           attributes.insert(\"{name}\".to_string(), value);\n\
+                     \x20       }}\n"
+                ));
+            }
+        }
+        let (service, resource) = split_service_resource_snake(data_source.name);
+        let dual_suffix = if managed_names.contains(data_source.name) {
+            "_data_source"
+        } else {
+            ""
+        };
+        let module = format!("{resource}{dual_suffix}");
+        let config_fn = format!("{}{dual_suffix}_config", module_name(data_source.name));
+        code.push_str(&format!(
+            "        static VALIDATED_SCHEMA: OnceLock<Result<ValidatedResourceSchema, String>> = OnceLock::new();\n\
+             \x20       let schema = cached_validated_read_schema(\n\
+             \x20           \"{}\",\n\
+             \x20           &VALIDATED_SCHEMA,\n\
+             \x20           || crate::schemas::generated::{service}::{module}::{config_fn}().schema,\n\
+             \x20       )?;\n\
+             \x20       validate_read_attributes(\n\
+             \x20           \"{}\",\n\
+             \x20           schema,\n\
+             \x20           &mut attributes,\n\
+             \x20       )?;\n\
+             \x20       Ok(attributes)\n\
+             \x20   }}\n\
+             }}\n\n",
+            data_source.name, data_source.name
         ));
     }
 
@@ -6050,11 +6154,12 @@ mod tests {
         assert!(generated.contains(
             r#"AttributeSchema::provider_populated("display_name", AttributeType::string())"#
         ));
-        assert!(
-            generated.contains(
-                r#"AttributeSchema::provider_populated("emails", AttributeType::string())"#
-            )
-        );
+        assert!(generated.contains(
+            r#"AttributeSchema::provider_populated("name", super::identitystore_user_name())"#
+        ));
+        assert!(generated.contains(
+            r#"AttributeSchema::provider_populated("emails", AttributeType::unordered_list(types::email()))"#
+        ));
     }
 
     #[test]
@@ -7539,8 +7644,8 @@ mod tests {
         let mut models = HashMap::new();
         models.insert(resource.service_namespace, model);
 
-        let code =
-            generate_read_models_code(&[resource], &models).expect("generate ec2.Vpc read model");
+        let code = generate_read_models_code(&[resource], &[], &models)
+            .expect("generate ec2.Vpc read model");
 
         assert!(
             code.contains("static VALIDATED_SCHEMA: OnceLock"),
@@ -7554,6 +7659,25 @@ mod tests {
             code.matches("ec2_vpc_config().schema").count(),
             1,
             "the schema must be built only inside the cache initializer: {code}"
+        );
+    }
+
+    #[test]
+    fn generated_data_source_models_exhaustively_name_schema_attributes() {
+        let data_sources = resource_defs::sts_data_sources();
+        let code = generate_read_models_code(&[], &data_sources, &HashMap::new())
+            .expect("generate STS data-source read model");
+
+        assert!(
+            code.contains("pub(crate) struct StsCallerIdentityDataSourceReadModel")
+                && code.contains("pub(crate) account_id: Option<Value>")
+                && code.contains("pub(crate) arn: Option<Value>")
+                && code.contains("pub(crate) user_id: Option<Value>"),
+            "data-source output names must be compiler-checked fields: {code}"
+        );
+        assert!(
+            code.contains("impl DataSourceReadModel for StsCallerIdentityDataSourceReadModel"),
+            "data-source maps must be produced only at the generated seam: {code}"
         );
     }
 

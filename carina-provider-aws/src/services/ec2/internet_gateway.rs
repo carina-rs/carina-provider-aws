@@ -70,7 +70,7 @@ impl AwsProvider {
         attempt: A,
     ) -> Result<A::Step, A::Verdict> {
         // Create Internet Gateway
-        let sent = Self::sent_only(resource, &["tags"]);
+        let sent = self.sent_only(resource, &["tags"]);
         let result = self
             .ec2_client
             .create_internet_gateway()

@@ -1135,8 +1135,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
                     \"AvailabilityZoneAddress\".to_string(),\
                     vec![\
                     StructField::optional(\"allocation_ids\", AttributeType::unordered_list(super::allocation_id())).with_description(\"The allocation IDs of the Elastic IP addresses (EIPs) to be used for handling outbound NAT traffic in this specific Availability Zone.\").with_provider_name(\"AllocationIds\").build(),\
-                    StructField::optional(\"availability_zone\", super::availability_zone()).with_description(\"For regional NAT gateways only: The Availability Zone where this specific NAT gateway configuration will be active. Each AZ in a regional NAT gateway has its own configuration to handle outbound NAT traffic from that AZ.\").with_provider_name(\"AvailabilityZone\").build(),\
-                    StructField::optional(\"availability_zone_id\", super::availability_zone_id()).with_description(\"For regional NAT gateways only: The ID of the Availability Zone where this specific NAT gateway configuration will be active.\").with_provider_name(\"AvailabilityZoneId\").build()\
+                    StructField::optional(\"availability_zone\", super::availability_zone()).with_description(\"For regional NAT gateways only: The Availability Zone where this specific NAT gateway configuration will be active. Each AZ in a regional NAT gateway has its own configuration to handle outbound NAT traffic from that AZ.\").with_provider_name(\"AvailabilityZone\").build()\
                     ],\
                 ))",
             )],
@@ -1151,7 +1150,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             create_only_overrides: vec![],
             enum_aliases: vec![],
             to_dsl_overrides: vec![],
-            required_overrides: vec!["SubnetId"],
+            required_overrides: vec![],
             extra_read_only: vec![],
             read_only_overrides: vec![],
             extra_attributes: vec![],
@@ -1564,10 +1563,16 @@ pub fn identitystore_data_sources() -> Vec<DataSourceDef> {
                     type_code: "AttributeType::string()",
                 },
                 DataSourceOutput {
+                    name: "name",
+                    provider_name: Some("Name"),
+                    description: "Structured components of the user's name.",
+                    type_code: "super::identitystore_user_name()",
+                },
+                DataSourceOutput {
                     name: "emails",
                     provider_name: Some("Emails"),
                     description: "Email addresses associated with the user.",
-                    type_code: "AttributeType::string()",
+                    type_code: "AttributeType::unordered_list(types::email())",
                 },
             ],
         },
@@ -3289,9 +3294,10 @@ mod tests {
         let ds = &defs[0];
         let outs = ds.shape.single_outputs().expect("Single shape");
         let names: Vec<&str> = outs.iter().map(|o| o.name).collect();
-        assert_eq!(names, vec!["display_name", "emails"]);
+        assert_eq!(names, vec!["display_name", "name", "emails"]);
         assert_eq!(outs[0].provider_name, Some("DisplayName"));
-        assert_eq!(outs[1].provider_name, Some("Emails"));
+        assert_eq!(outs[1].provider_name, Some("Name"));
+        assert_eq!(outs[2].provider_name, Some("Emails"));
         assert_eq!(ds.inputs.len(), 3);
     }
 

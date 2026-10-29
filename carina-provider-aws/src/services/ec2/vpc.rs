@@ -14,6 +14,33 @@ use crate::provider::{AwsCreateAttempt, Ec2TaggedResourceKind};
 use crate::read_model::{empty_map_value, found_managed_read};
 use crate::read_models_generated::Ec2VpcReadModelSupplement;
 
+fn validate_vpc_cidr_source(
+    id: &ResourceId,
+    cidr_block: Option<&str>,
+    ipv4_ipam_pool_id: Option<&str>,
+    ipv4_netmask_length: Option<i64>,
+) -> ProviderResult<()> {
+    match (cidr_block, ipv4_ipam_pool_id, ipv4_netmask_length) {
+        (Some(_), None | Some(_), None) | (None, Some(_), Some(_)) => Ok(()),
+        (None, None, None) => Err(ProviderError::invalid_input(
+            "either cidr_block or ipv4_ipam_pool_id with ipv4_netmask_length is required",
+        )
+        .for_resource(id.clone())),
+        (Some(_), _, Some(_)) => Err(ProviderError::invalid_input(
+            "cidr_block and ipv4_netmask_length are mutually exclusive",
+        )
+        .for_resource(id.clone())),
+        (None, Some(_), None) => Err(ProviderError::invalid_input(
+            "ipv4_ipam_pool_id requires ipv4_netmask_length",
+        )
+        .for_resource(id.clone())),
+        (None, None, Some(_)) => Err(ProviderError::invalid_input(
+            "ipv4_netmask_length requires ipv4_ipam_pool_id",
+        )
+        .for_resource(id.clone())),
+    }
+}
+
 impl AwsProvider {
     /// Read an EC2 VPC
     pub(crate) async fn read_ec2_vpc(
@@ -128,44 +155,13 @@ impl AwsProvider {
             Err(error) => return Err(attempt.untracked(error)),
         };
 
-        match (cidr_block, ipv4_ipam_pool_id, ipv4_netmask_length) {
-            (Some(_), None, None) | (None, Some(_), Some(_)) => {}
-            (None, None, None) => {
-                return Err(attempt.untracked(
-                    ProviderError::invalid_input(
-                        "either cidr_block or ipv4_ipam_pool_id with ipv4_netmask_length is required",
-                    )
-                    .for_resource(resource.id.clone()),
-                ));
-            }
-            (Some(_), Some(_), _) => {
-                return Err(attempt.untracked(
-                    ProviderError::invalid_input(
-                        "cidr_block and ipv4_ipam_pool_id are mutually exclusive",
-                    )
-                    .for_resource(resource.id.clone()),
-                ));
-            }
-            (Some(_), None, Some(_)) => {
-                return Err(attempt.untracked(
-                    ProviderError::invalid_input(
-                        "ipv4_netmask_length requires ipv4_ipam_pool_id when cidr_block is set",
-                    )
-                    .for_resource(resource.id.clone()),
-                ));
-            }
-            (None, Some(_), None) => {
-                return Err(attempt.untracked(
-                    ProviderError::invalid_input("ipv4_ipam_pool_id requires ipv4_netmask_length")
-                        .for_resource(resource.id.clone()),
-                ));
-            }
-            (None, None, Some(_)) => {
-                return Err(attempt.untracked(
-                    ProviderError::invalid_input("ipv4_netmask_length requires ipv4_ipam_pool_id")
-                        .for_resource(resource.id.clone()),
-                ));
-            }
+        if let Err(error) = validate_vpc_cidr_source(
+            &resource.id,
+            cidr_block,
+            ipv4_ipam_pool_id,
+            ipv4_netmask_length,
+        ) {
+            return Err(attempt.untracked(error));
         }
 
         // Create VPC with optional instance_tenancy
@@ -211,7 +207,7 @@ impl AwsProvider {
             create_vpc_builder = create_vpc_builder.instance_tenancy(tenancy_enum);
         }
 
-        let sent = Self::sent_only(
+        let sent = self.sent_only(
             resource,
             &[
                 "cidr_block",
@@ -338,5 +334,30 @@ impl AwsProvider {
         .await?;
 
         Ok(self.read_ec2_vpc(&id, identifier).await)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn id() -> ResourceId {
+        ResourceId::with_provider_identity("aws", "ec2.Vpc", "test", None)
+    }
+
+    #[test]
+    fn explicit_cidr_from_ipam_pool_is_allowed_but_netmask_conflicts() {
+        validate_vpc_cidr_source(&id(), Some("10.0.0.0/16"), Some("ipam-pool-12345678"), None)
+            .expect("AWS accepts an explicit CIDR allocated from an IPAM pool");
+
+        let error = validate_vpc_cidr_source(
+            &id(),
+            Some("10.0.0.0/16"),
+            Some("ipam-pool-12345678"),
+            Some(16),
+        )
+        .expect_err("an explicit CIDR and generated netmask conflict");
+        assert!(error.to_string().contains("cidr_block"));
+        assert!(error.to_string().contains("ipv4_netmask_length"));
     }
 }

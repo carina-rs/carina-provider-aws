@@ -713,7 +713,7 @@ mod tests {
             "write_only_token".into(),
             Value::Concrete(ConcreteValue::String("saved-placeholder".into())),
         );
-        let from = State::existing(id, from_attrs);
+        let from = crate::read_model::test_existing_state(id, from_attrs);
 
         let patch = UpdatePatch {
             ops: vec![
