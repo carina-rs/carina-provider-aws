@@ -146,6 +146,8 @@ macro_rules! define_aws_types {
             $variant:ident => $wrapper:ident {
                 segments: [$($segment:literal),* $(,)?],
                 kind: $kind:literal,
+                valid_sample: $valid_sample:literal,
+                has_validator: $has_validator:literal,
                 constructor: $constructor:expr $(,)?
             }
         ),* $(,)?
@@ -163,11 +165,28 @@ macro_rules! define_aws_types {
             /// Structured identity declared by this row.
             pub fn identity(self) -> TypeIdentity {
                 match self {
-                    $(Self::$variant => TypeIdentity::new(
-                        Some("aws"),
-                        Vec::<&'static str>::from([$($segment),*]),
-                        $kind,
-                    )),*
+                    $(Self::$variant => {
+                        let segments: &[&str] = &[$($segment),*];
+                        if let [service, resource] = segments {
+                            crate::common::provider_type(service, resource, $kind)
+                        } else {
+                            crate::common::provider_bare_type(segments, $kind)
+                        }
+                    }),*
+                }
+            }
+
+            /// Known-valid provider-facing value for this row.
+            pub const fn valid_sample(self) -> &'static str {
+                match self {
+                    $(Self::$variant => $valid_sample),*
+                }
+            }
+
+            /// Whether this row's constructor carries a custom validator.
+            pub const fn has_validator(self) -> bool {
+                match self {
+                    $(Self::$variant => $has_validator),*
                 }
             }
 
@@ -193,6 +212,8 @@ define_aws_types! {
     Arn => arn {
         segments: [],
         kind: "Arn",
+        valid_sample: "arn:aws:s3:::example-bucket",
+        has_validator: true,
         constructor: |identity| validated_string(
             identity,
             "^arn:(aws|aws-cn|aws-us-gov):[^:]+:.*$",
@@ -204,6 +225,8 @@ define_aws_types! {
     ResourceId => aws_resource_id {
         segments: [],
         kind: "ResourceId",
+        valid_sample: "resource-12345678",
+        has_validator: true,
         constructor: |identity| validated_string(
             identity,
             "^[a-z-]+-[0-9a-f]{8,}$",
@@ -215,6 +238,8 @@ define_aws_types! {
     AccountId => aws_account_id {
         segments: [],
         kind: "AccountId",
+        valid_sample: "123456789012",
+        has_validator: true,
         constructor: |identity| validated_string(
             identity,
             "^\\d{12}$",
@@ -226,18 +251,24 @@ define_aws_types! {
     Region => aws_region {
         segments: [],
         kind: "Region",
+        valid_sample: "ap-northeast-1",
+        has_validator: true,
         constructor: |identity| validated_open_enum(identity, validate_aws_region),
     },
     /// AWS Availability Zone in provider-facing API spelling.
     AvailabilityZone => availability_zone {
         segments: ["AvailabilityZone"],
         kind: "ZoneName",
+        valid_sample: "ap-northeast-1a",
+        has_validator: true,
         constructor: availability_zone_type,
     },
     /// AWS Availability Zone ID.
     AvailabilityZoneId => availability_zone_id {
         segments: ["AvailabilityZone"],
         kind: "ZoneId",
+        valid_sample: "use1-az1",
+        has_validator: true,
         constructor: |identity| validated_string(
             identity,
             "^[a-z]+[0-9]+-az[0-9]+$",
@@ -249,6 +280,8 @@ define_aws_types! {
     IamRoleId => iam_role_id {
         segments: ["iam", "Role"],
         kind: "Id",
+        valid_sample: "AROA1234567890EXAMPLE",
+        has_validator: true,
         constructor: |identity| validated_string(
             identity,
             "^AROA[A-Z0-9]+$",
@@ -260,6 +293,8 @@ define_aws_types! {
     IamRoleArn => iam_role_arn {
         segments: ["iam", "Role"],
         kind: "Arn",
+        valid_sample: "arn:aws:iam::123456789012:role/example-role",
+        has_validator: true,
         constructor: |identity| iam_arn(
             identity,
             "^arn:(aws|aws-cn|aws-us-gov):iam::[^:]*:role/.+$",
@@ -270,6 +305,8 @@ define_aws_types! {
     IamPolicyArn => iam_policy_arn {
         segments: ["iam", "Policy"],
         kind: "Arn",
+        valid_sample: "arn:aws:iam::123456789012:policy/example-policy",
+        has_validator: true,
         constructor: |identity| iam_arn(
             identity,
             "^arn:(aws|aws-cn|aws-us-gov):iam::[^:]*:policy/.+$",
@@ -280,6 +317,8 @@ define_aws_types! {
     IamOidcProviderArn => iam_oidc_provider_arn {
         segments: ["iam", "OidcProvider"],
         kind: "Arn",
+        valid_sample: "arn:aws:iam::123456789012:oidc-provider/example.com",
+        has_validator: false,
         constructor: |identity| metadata_string(
             identity,
             "^arn:(aws|aws-cn|aws-us-gov):iam::[^:]*:oidc-provider/.+$",
@@ -290,6 +329,8 @@ define_aws_types! {
     KmsKeyId => kms_key_id {
         segments: ["kms", "Key"],
         kind: "Id",
+        valid_sample: "12345678-1234-1234-1234-123456789abc",
+        has_validator: true,
         constructor: |identity| validated_string(
             identity,
             "^((arn:(aws|aws-cn|aws-us-gov):kms:[^:]*:[^:]*:(key|alias)/.+)|(alias/.+)|([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}))$",
@@ -301,6 +342,8 @@ define_aws_types! {
     KmsKeyArn => kms_key_arn {
         segments: ["kms", "Key"],
         kind: "Arn",
+        valid_sample: "arn:aws:kms:ap-northeast-1:123456789012:key/12345678-1234-1234-1234-123456789abc",
+        has_validator: true,
         constructor: |identity| service_arn(
             identity,
             "^arn:(aws|aws-cn|aws-us-gov):kms:[^:]*:[^:]*:key/.+$",
@@ -312,6 +355,8 @@ define_aws_types! {
     IpamPoolId => ipam_pool_id {
         segments: ["ec2", "IpamPool"],
         kind: "Id",
+        valid_sample: "ipam-pool-12345678",
+        has_validator: true,
         constructor: |identity| validated_string(
             identity,
             "^ipam-pool-[0-9a-f]{8,}$",
@@ -323,6 +368,8 @@ define_aws_types! {
     Route53HostedZoneId => route53_hosted_zone_id {
         segments: ["route53", "HostedZone"],
         kind: "Id",
+        valid_sample: "Z2FDTNDATAQYW2",
+        has_validator: false,
         constructor: |identity| metadata_string(
             identity,
             "^Z[A-Z0-9]+$",
@@ -333,6 +380,8 @@ define_aws_types! {
     IdentityStoreId => identity_store_id {
         segments: ["identitystore", "Store"],
         kind: "Id",
+        valid_sample: "d-1234567890",
+        has_validator: false,
         constructor: |identity| metadata_string(
             identity,
             "^(d-[0-9a-fA-F]{10}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
@@ -343,12 +392,16 @@ define_aws_types! {
     SsoPrincipalId => sso_principal_id {
         segments: ["sso", "Principal"],
         kind: "Id",
+        valid_sample: "12345678-1234-1234-1234-123456789abc",
+        has_validator: false,
         constructor: |identity| metadata_string(identity, "^.{1,64}$", None),
     },
     /// IAM Identity Center instance ARN.
     SsoInstanceArn => sso_instance_arn {
         segments: ["sso", "Instance"],
         kind: "Arn",
+        valid_sample: "arn:aws:sso:::instance/ssoins-1234567890abcdef",
+        has_validator: false,
         constructor: |identity| metadata_string(
             identity,
             "^arn:(aws|aws-cn|aws-us-gov):sso:::instance/.+$",
@@ -359,6 +412,8 @@ define_aws_types! {
     SsoPermissionSetArn => sso_permission_set_arn {
         segments: ["sso", "PermissionSet"],
         kind: "Arn",
+        valid_sample: "arn:aws:sso:::permissionSet/ssoins-1234567890abcdef/ps-1234567890abcdef",
+        has_validator: false,
         constructor: |identity| metadata_string(
             identity,
             "^arn:(aws|aws-cn|aws-us-gov):sso:::permissionSet/.+$",
@@ -369,6 +424,8 @@ define_aws_types! {
     S3Grantee => s3_grantee {
         segments: ["s3"],
         kind: "Grantee",
+        valid_sample: "id=canonical-user-id",
+        has_validator: false,
         constructor: |identity| metadata_string(
             identity,
             r"^(id|emailAddress|uri)=.+(\s*,\s*(id|emailAddress|uri)=.+)*$",
@@ -379,6 +436,8 @@ define_aws_types! {
     CloudFrontHostedZoneId => cloudfront_hosted_zone_id {
         segments: ["cloudfront"],
         kind: "HostedZoneId",
+        valid_sample: "Z2FDTNDATAQYW2",
+        has_validator: false,
         constructor: |identity| AttributeType::enum_(
             identity,
             Some(vec!["Z2FDTNDATAQYW2".to_string()]),
@@ -391,6 +450,8 @@ define_aws_types! {
     S3BucketArn => s3_bucket_arn {
         segments: ["s3", "Bucket"],
         kind: "Arn",
+        valid_sample: "arn:aws:s3:::example-bucket",
+        has_validator: false,
         constructor: |identity| metadata_string(
             identity,
             "^arn:(aws|aws-cn|aws-us-gov):s3:::.+$",
@@ -401,6 +462,8 @@ define_aws_types! {
     StsCallerIdentityArn => sts_caller_identity_arn {
         segments: ["sts", "CallerIdentity"],
         kind: "Arn",
+        valid_sample: "arn:aws:sts::123456789012:assumed-role/example-role/example-session",
+        has_validator: false,
         constructor: |identity| metadata_string(
             identity,
             "^arn:(aws|aws-cn|aws-us-gov):sts:.*$",
@@ -411,6 +474,8 @@ define_aws_types! {
     OrganizationsAccountArn => organizations_account_arn {
         segments: ["organizations", "Account"],
         kind: "Arn",
+        valid_sample: "arn:aws:organizations::123456789012:account/o-example/123456789012",
+        has_validator: false,
         constructor: |identity| metadata_string(
             identity,
             "^arn:(aws|aws-cn|aws-us-gov):organizations:.*$",
@@ -421,6 +486,8 @@ define_aws_types! {
     OrganizationsOrganizationArn => organizations_organization_arn {
         segments: ["organizations", "Organization"],
         kind: "Arn",
+        valid_sample: "arn:aws:organizations::123456789012:organization/o-example",
+        has_validator: false,
         constructor: |identity| metadata_string(
             identity,
             "^arn:(aws|aws-cn|aws-us-gov):organizations:.*$",
@@ -431,150 +498,200 @@ define_aws_types! {
     VpcId => vpc_id {
         segments: ["ec2", "Vpc"],
         kind: "Id",
+        valid_sample: "vpc-12345678",
+        has_validator: true,
         constructor: |identity| prefixed_resource_id(identity, "vpc"),
     },
     /// EC2 subnet ID.
     SubnetId => subnet_id {
         segments: ["ec2", "Subnet"],
         kind: "Id",
+        valid_sample: "subnet-12345678",
+        has_validator: true,
         constructor: |identity| prefixed_resource_id(identity, "subnet"),
     },
     /// EC2 security-group ID.
     SecurityGroupId => security_group_id {
         segments: ["ec2", "SecurityGroup"],
         kind: "Id",
+        valid_sample: "sg-12345678",
+        has_validator: true,
         constructor: |identity| prefixed_resource_id(identity, "sg"),
     },
     /// EC2 internet-gateway ID.
     InternetGatewayId => internet_gateway_id {
         segments: ["ec2", "InternetGateway"],
         kind: "Id",
+        valid_sample: "igw-12345678",
+        has_validator: true,
         constructor: |identity| prefixed_resource_id(identity, "igw"),
     },
     /// EC2 route-table ID.
     RouteTableId => route_table_id {
         segments: ["ec2", "RouteTable"],
         kind: "Id",
+        valid_sample: "rtb-12345678",
+        has_validator: true,
         constructor: |identity| prefixed_resource_id(identity, "rtb"),
     },
     /// EC2 NAT-gateway ID.
     NatGatewayId => nat_gateway_id {
         segments: ["ec2", "NatGateway"],
         kind: "Id",
+        valid_sample: "nat-12345678",
+        has_validator: true,
         constructor: |identity| prefixed_resource_id(identity, "nat"),
     },
     /// EC2 VPC-peering-connection ID.
     VpcPeeringConnectionId => vpc_peering_connection_id {
         segments: ["ec2", "VpcPeeringConnection"],
         kind: "Id",
+        valid_sample: "pcx-12345678",
+        has_validator: true,
         constructor: |identity| prefixed_resource_id(identity, "pcx"),
     },
     /// EC2 transit-gateway ID.
     TransitGatewayId => transit_gateway_id {
         segments: ["ec2", "TransitGateway"],
         kind: "Id",
+        valid_sample: "tgw-12345678",
+        has_validator: true,
         constructor: |identity| prefixed_resource_id(identity, "tgw"),
     },
     /// EC2 VPC CIDR-block-association ID.
     VpcCidrBlockAssociationId => vpc_cidr_block_association_id {
         segments: ["ec2", "VpcCidrBlockAssociation"],
         kind: "Id",
+        valid_sample: "vpc-cidr-assoc-12345678",
+        has_validator: true,
         constructor: |identity| prefixed_resource_id(identity, "vpc-cidr-assoc"),
     },
     /// EC2 transit-gateway route-table ID.
     TransitGatewayRouteTableId => tgw_route_table_id {
         segments: ["ec2", "TransitGatewayRouteTable"],
         kind: "Id",
+        valid_sample: "tgw-rtb-12345678",
+        has_validator: true,
         constructor: |identity| prefixed_resource_id(identity, "tgw-rtb"),
     },
     /// EC2 VPN-gateway ID.
     VpnGatewayId => vpn_gateway_id {
         segments: ["ec2", "VpnGateway"],
         kind: "Id",
+        valid_sample: "vgw-12345678",
+        has_validator: true,
         constructor: |identity| prefixed_resource_id(identity, "vgw"),
     },
     /// EC2 egress-only internet-gateway ID.
     EgressOnlyInternetGatewayId => egress_only_internet_gateway_id {
         segments: ["ec2", "EgressOnlyInternetGateway"],
         kind: "Id",
+        valid_sample: "eigw-12345678",
+        has_validator: true,
         constructor: |identity| prefixed_resource_id(identity, "eigw"),
     },
     /// EC2 VPC-endpoint ID.
     VpcEndpointId => vpc_endpoint_id {
         segments: ["ec2", "VpcEndpoint"],
         kind: "Id",
+        valid_sample: "vpce-12345678",
+        has_validator: true,
         constructor: |identity| prefixed_resource_id(identity, "vpce"),
     },
     /// EC2 instance ID.
     InstanceId => instance_id {
         segments: ["ec2", "Instance"],
         kind: "Id",
+        valid_sample: "i-12345678",
+        has_validator: true,
         constructor: |identity| prefixed_resource_id(identity, "i"),
     },
     /// EC2 network-interface ID.
     NetworkInterfaceId => network_interface_id {
         segments: ["ec2", "NetworkInterface"],
         kind: "Id",
+        valid_sample: "eni-12345678",
+        has_validator: true,
         constructor: |identity| prefixed_resource_id(identity, "eni"),
     },
     /// EC2 Elastic IP allocation ID.
     AllocationId => allocation_id {
         segments: ["ec2", "Eip"],
         kind: "AllocationId",
+        valid_sample: "eipalloc-12345678",
+        has_validator: true,
         constructor: |identity| prefixed_resource_id(identity, "eipalloc"),
     },
     /// EC2 prefix-list ID.
     PrefixListId => prefix_list_id {
         segments: ["ec2", "PrefixList"],
         kind: "Id",
+        valid_sample: "pl-12345678",
+        has_validator: true,
         constructor: |identity| prefixed_resource_id(identity, "pl"),
     },
     /// EC2 carrier-gateway ID.
     CarrierGatewayId => carrier_gateway_id {
         segments: ["ec2", "CarrierGateway"],
         kind: "Id",
+        valid_sample: "cagw-12345678",
+        has_validator: true,
         constructor: |identity| prefixed_resource_id(identity, "cagw"),
     },
     /// EC2 local-gateway ID.
     LocalGatewayId => local_gateway_id {
         segments: ["ec2", "LocalGateway"],
         kind: "Id",
+        valid_sample: "lgw-12345678",
+        has_validator: true,
         constructor: |identity| prefixed_resource_id(identity, "lgw"),
     },
     /// EC2 network-ACL ID.
     NetworkAclId => network_acl_id {
         segments: ["ec2", "NetworkAcl"],
         kind: "Id",
+        valid_sample: "acl-12345678",
+        has_validator: true,
         constructor: |identity| prefixed_resource_id(identity, "acl"),
     },
     /// EC2 transit-gateway-attachment ID.
     TransitGatewayAttachmentId => transit_gateway_attachment_id {
         segments: ["ec2", "TransitGatewayAttachment"],
         kind: "Id",
+        valid_sample: "tgw-attach-12345678",
+        has_validator: true,
         constructor: |identity| prefixed_resource_id(identity, "tgw-attach"),
     },
     /// EC2 flow-log ID.
     FlowLogId => flow_log_id {
         segments: ["ec2", "FlowLog"],
         kind: "Id",
+        valid_sample: "fl-12345678",
+        has_validator: true,
         constructor: |identity| prefixed_resource_id(identity, "fl"),
     },
     /// EC2 IPAM ID.
     IpamId => ipam_id {
         segments: ["ec2", "Ipam"],
         kind: "Id",
+        valid_sample: "ipam-12345678",
+        has_validator: true,
         constructor: |identity| prefixed_resource_id(identity, "ipam"),
     },
     /// EC2 subnet/route-table-association ID.
     SubnetRouteTableAssociationId => subnet_route_table_association_id {
         segments: ["ec2", "SubnetRouteTableAssociation"],
         kind: "Id",
+        valid_sample: "rtbassoc-12345678",
+        has_validator: true,
         constructor: |identity| prefixed_resource_id(identity, "rtbassoc"),
     },
     /// EC2 security-group-rule ID.
     SecurityGroupRuleId => security_group_rule_id {
         segments: ["ec2", "SecurityGroupRule"],
         kind: "Id",
+        valid_sample: "sgr-12345678",
+        has_validator: true,
         constructor: |identity| prefixed_resource_id(identity, "sgr"),
     },
 }
@@ -583,7 +700,7 @@ define_aws_types! {
 mod tests {
     use std::collections::HashSet;
 
-    use carina_core::schema::RawShape;
+    use carina_core::schema::{CustomValidator, RawShape};
 
     use super::*;
 
@@ -606,6 +723,16 @@ mod tests {
         }
     }
 
+    fn attribute_type_validator(attribute_type: &AttributeType) -> Option<&CustomValidator> {
+        match attribute_type.raw_shape() {
+            RawShape::String { validate, .. }
+            | RawShape::Int { validate, .. }
+            | RawShape::Float { validate, .. }
+            | RawShape::Enum { validate, .. } => validate,
+            shape => panic!("catalog constructor must carry a scalar identity, got {shape:?}"),
+        }
+    }
+
     #[test]
     fn all_identities_are_unique_and_match_their_constructors() {
         let mut identities = HashSet::new();
@@ -622,5 +749,80 @@ mod tests {
         }
 
         assert_eq!(identities.len(), AwsType::ALL.len());
+    }
+
+    #[test]
+    fn validator_declarations_match_constructor_shapes_and_the_registry_contract() {
+        let expected = HashSet::from([
+            AwsType::Arn,
+            AwsType::ResourceId,
+            AwsType::AccountId,
+            AwsType::Region,
+            AwsType::AvailabilityZone,
+            AwsType::AvailabilityZoneId,
+            AwsType::IamRoleId,
+            AwsType::IamRoleArn,
+            AwsType::IamPolicyArn,
+            AwsType::KmsKeyId,
+            AwsType::KmsKeyArn,
+            AwsType::IpamPoolId,
+            AwsType::VpcId,
+            AwsType::SubnetId,
+            AwsType::SecurityGroupId,
+            AwsType::InternetGatewayId,
+            AwsType::RouteTableId,
+            AwsType::NatGatewayId,
+            AwsType::VpcPeeringConnectionId,
+            AwsType::TransitGatewayId,
+            AwsType::VpcCidrBlockAssociationId,
+            AwsType::TransitGatewayRouteTableId,
+            AwsType::VpnGatewayId,
+            AwsType::EgressOnlyInternetGatewayId,
+            AwsType::VpcEndpointId,
+            AwsType::InstanceId,
+            AwsType::NetworkInterfaceId,
+            AwsType::AllocationId,
+            AwsType::PrefixListId,
+            AwsType::CarrierGatewayId,
+            AwsType::LocalGatewayId,
+            AwsType::NetworkAclId,
+            AwsType::TransitGatewayAttachmentId,
+            AwsType::FlowLogId,
+            AwsType::IpamId,
+            AwsType::SubnetRouteTableAssociationId,
+            AwsType::SecurityGroupRuleId,
+        ]);
+        assert_eq!(
+            expected.len(),
+            37,
+            "the pre-catalog validator contract changed"
+        );
+
+        let declared = AwsType::ALL
+            .iter()
+            .copied()
+            .filter(|aws_type| aws_type.has_validator())
+            .collect::<HashSet<_>>();
+        assert_eq!(declared, expected);
+
+        for aws_type in AwsType::ALL.iter().copied() {
+            let attribute_type = aws_type.attribute_type();
+            let validator = attribute_type_validator(&attribute_type);
+            assert_eq!(
+                validator.is_some(),
+                aws_type.has_validator(),
+                "validator declaration disagrees with constructor for {aws_type:?}"
+            );
+            if let Some(validator) = validator {
+                let sample = Value::Concrete(ConcreteValue::String(
+                    aws_type.valid_sample().to_string().into(),
+                ));
+                assert!(
+                    validator(&sample).is_ok(),
+                    "declared sample {:?} must pass the validator for {aws_type:?}",
+                    aws_type.valid_sample()
+                );
+            }
+        }
     }
 }

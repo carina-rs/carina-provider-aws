@@ -70,6 +70,41 @@ fn read_outcome_to_proto(
 }
 
 #[cfg(any(target_arch = "wasm32", test))]
+fn issued_create_attributes_to_proto(
+    attributes: &HashMap<String, CoreValue>,
+) -> Result<BTreeMap<String, proto::Value>, CoreProviderError> {
+    protocol_convert::try_core_to_protocol_value_map(attributes)
+        .map_err(|error| protocol_output_error("failed to encode create result", error))
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn partial_create_attributes_to_proto(
+    attributes: &HashMap<String, CoreValue>,
+) -> Result<BTreeMap<String, proto::Value>, CoreProviderError> {
+    protocol_convert::try_core_to_protocol_value_map(attributes)
+        .map_err(|error| protocol_output_error("failed to encode partial create result", error))
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn resumed_state_to_proto(
+    state: &CoreAppliedState,
+) -> Result<proto::AppliedState, CoreProviderError> {
+    protocol_convert::try_applied_state_to_protocol(state)
+        .map_err(|error| protocol_output_error("failed to encode resumed create result", error))
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn update_outcome_to_proto(
+    outcome: &carina_core::provider::UpdateOutcome,
+    state_after_patch: proto::PersistedState,
+    id: &carina_core::resource::ResourceId,
+) -> Result<proto::UpdateOutcome, CoreProviderError> {
+    protocol_convert::try_update_outcome_to_protocol(outcome, state_after_patch).map_err(|error| {
+        protocol_output_error("failed to encode update result", error).for_resource(id.clone())
+    })
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
 struct GuestCreateAttempt(SdkCreateAttempt);
 #[cfg(any(target_arch = "wasm32", test))]
 struct GuestPollAttempt(SdkPollAttempt);
@@ -159,11 +194,10 @@ impl AwsIssuedCreate for GuestPolledIssuedCreate {
         self,
         attributes: HashMap<String, CoreValue>,
     ) -> Result<Self::Step, Self::Verdict> {
-        match protocol_convert::try_core_to_protocol_value_map(&attributes) {
+        match issued_create_attributes_to_proto(&attributes) {
             Ok(attributes) => Ok(self.0.succeeded(attributes)),
             Err(error) => {
-                let error =
-                    protocol_output_error("failed to encode create result", error).to_wire();
+                let error = error.to_wire();
                 Err(self
                     .0
                     .failed(proto::Observation::ReadFailed(error.clone()), error)
@@ -178,7 +212,7 @@ impl AwsIssuedCreate for GuestPolledIssuedCreate {
         reason: String,
         missing_attributes: Vec<String>,
     ) -> Result<Self::Step, Self::Verdict> {
-        match protocol_convert::try_core_to_protocol_value_map(&attributes) {
+        match partial_create_attributes_to_proto(&attributes) {
             Ok(attributes) => Ok(self.0.partial(
                 attributes,
                 proto::PartialReadDiagnostic {
@@ -187,8 +221,7 @@ impl AwsIssuedCreate for GuestPolledIssuedCreate {
                 },
             )),
             Err(error) => {
-                let error = protocol_output_error("failed to encode partial create result", error)
-                    .to_wire();
+                let error = error.to_wire();
                 Err(self
                     .0
                     .failed(proto::Observation::ReadFailed(error.clone()), error)
@@ -229,11 +262,10 @@ impl AwsIssuedCreate for GuestIssuedCreate {
         self,
         attributes: HashMap<String, CoreValue>,
     ) -> Result<Self::Step, Self::Verdict> {
-        match protocol_convert::try_core_to_protocol_value_map(&attributes) {
+        match issued_create_attributes_to_proto(&attributes) {
             Ok(attributes) => Ok(self.0.succeeded(attributes)),
             Err(error) => {
-                let error =
-                    protocol_output_error("failed to encode create result", error).to_wire();
+                let error = error.to_wire();
                 Err(self
                     .0
                     .failed(proto::Observation::ReadFailed(error.clone()), error))
@@ -247,7 +279,7 @@ impl AwsIssuedCreate for GuestIssuedCreate {
         reason: String,
         missing_attributes: Vec<String>,
     ) -> Result<Self::Step, Self::Verdict> {
-        match protocol_convert::try_core_to_protocol_value_map(&attributes) {
+        match partial_create_attributes_to_proto(&attributes) {
             Ok(attributes) => Ok(self.0.partial(
                 attributes,
                 proto::PartialReadDiagnostic {
@@ -256,8 +288,7 @@ impl AwsIssuedCreate for GuestIssuedCreate {
                 },
             )),
             Err(error) => {
-                let error = protocol_output_error("failed to encode partial create result", error)
-                    .to_wire();
+                let error = error.to_wire();
                 Err(self
                     .0
                     .failed(proto::Observation::ReadFailed(error.clone()), error))
@@ -320,11 +351,10 @@ impl AwsResumedCreate for GuestResumedCreate {
     }
 
     fn completed(self, state: CoreAppliedState) -> Result<Self::Step, Self::Verdict> {
-        match protocol_convert::try_applied_state_to_protocol(&state) {
+        match resumed_state_to_proto(&state) {
             Ok(state) => Ok(self.0.completed(FoundRead::from_applied_state(state))),
             Err(error) => {
-                let error = protocol_output_error("failed to encode resumed create result", error)
-                    .to_wire();
+                let error = error.to_wire();
                 Err(self
                     .0
                     .failed(proto::Observation::ReadFailed(error.clone()), error))
@@ -720,16 +750,9 @@ impl CarinaProvider for AwsProcessProvider {
             &core_patch,
         ));
         match result {
-            Ok(outcome) => {
-                protocol_convert::try_update_outcome_to_protocol(&outcome, state_after_patch)
-                    .map(SdkUpdateOutcome::Done)
-                    .map_err(|error| {
-                        Self::convert_error(
-                            protocol_output_error("failed to encode update result", error)
-                                .for_resource(core_id.clone()),
-                        )
-                    })
-            }
+            Ok(outcome) => update_outcome_to_proto(&outcome, state_after_patch, &core_id)
+                .map(SdkUpdateOutcome::Done)
+                .map_err(Self::convert_error),
             Err(e) => Err(Self::convert_error(e)),
         }
     }
@@ -977,6 +1000,32 @@ mod tests {
         }
     }
 
+    fn valid_bridge_sample(identity: &CoreTypeIdentity) -> &'static str {
+        if let Some(aws_type) = carina_aws_types::AwsType::ALL
+            .iter()
+            .copied()
+            .find(|aws_type| aws_type.identity() == *identity)
+        {
+            assert!(
+                aws_type.has_validator(),
+                "callback-bearing identity {identity} must be declared validated"
+            );
+            return aws_type.valid_sample();
+        }
+
+        assert!(
+            identity.provider.is_none() && identity.segments.is_empty(),
+            "validated identity {identity} is neither an AWS catalog row nor a core built-in"
+        );
+        match identity.kind.as_str() {
+            "Email" => "user@example.com",
+            "Ipv4Address" => "192.0.2.1",
+            "Ipv4Cidr" => "10.0.0.0/16",
+            "Ipv6Cidr" => "2001:db8::/32",
+            kind => panic!("core built-in validator {kind} needs a bridge sample"),
+        }
+    }
+
     fn declared_validators(
         schema: &ValidatedResourceSchema,
     ) -> &[carina_provider_protocol::types::ValidatorType] {
@@ -986,28 +1035,30 @@ mod tests {
         }
     }
 
-    #[test]
-    fn non_finite_read_output_surfaces_as_a_provider_error() {
-        let id = carina_core::resource::ResourceId::pending_with_provider(
-            "aws",
-            "test.NonFiniteOutput",
-            None,
-        );
-        let state = CoreAppliedState::new(
-            id,
-            "provider-id",
-            HashMap::from([(
-                "value".to_string(),
-                CoreValue::Concrete(ConcreteValue::Float(f64::NAN)),
-            )]),
-        )
-        .expect("fixture identifier is non-empty");
+    fn non_finite_attributes() -> HashMap<String, CoreValue> {
+        HashMap::from([(
+            "value".to_string(),
+            CoreValue::Concrete(ConcreteValue::Float(f64::NAN)),
+        )])
+    }
 
-        let error = read_outcome_to_proto(&CoreReadOutcome::found(state))
-            .expect_err("non-finite provider output must be rejected without panicking")
-            .to_wire();
+    fn non_finite_state() -> CoreAppliedState {
+        CoreAppliedState::new(
+            carina_core::resource::ResourceId::pending_with_provider(
+                "aws",
+                "test.NonFiniteOutput",
+                None,
+            ),
+            "provider-id",
+            non_finite_attributes(),
+        )
+        .expect("fixture identifier is non-empty")
+    }
+
+    fn assert_typed_conversion_error(error: CoreProviderError, message: &str) {
+        let error = error.to_wire();
         assert_eq!(error.kind, proto::ProviderErrorKind::Internal);
-        assert_eq!(error.message, "failed to encode read result");
+        assert_eq!(error.message, message);
         assert!(
             error
                 .cause
@@ -1015,6 +1066,54 @@ mod tests {
                 .is_some_and(|cause| cause.contains("non-finite float")),
             "typed protocol-conversion cause must be retained: {error:?}"
         );
+    }
+
+    #[test]
+    fn non_finite_read_output_surfaces_as_a_provider_error() {
+        let error = read_outcome_to_proto(&CoreReadOutcome::found(non_finite_state()))
+            .expect_err("non-finite provider output must be rejected without panicking");
+        assert_typed_conversion_error(error, "failed to encode read result");
+    }
+
+    #[test]
+    fn non_finite_issued_create_output_surfaces_as_a_provider_error() {
+        let error = issued_create_attributes_to_proto(&non_finite_attributes());
+        assert_typed_conversion_error(
+            error.expect_err("non-finite issued-create output must be rejected"),
+            "failed to encode create result",
+        );
+    }
+
+    #[test]
+    fn non_finite_partial_create_output_surfaces_as_a_provider_error() {
+        let error = partial_create_attributes_to_proto(&non_finite_attributes());
+        assert_typed_conversion_error(
+            error.expect_err("non-finite partial-create output must be rejected"),
+            "failed to encode partial create result",
+        );
+    }
+
+    #[test]
+    fn non_finite_resumed_create_output_surfaces_as_a_provider_error() {
+        let error = resumed_state_to_proto(&non_finite_state())
+            .expect_err("non-finite resumed-create output must be rejected");
+        assert_typed_conversion_error(error, "failed to encode resumed create result");
+    }
+
+    #[test]
+    fn non_finite_update_output_surfaces_as_a_provider_error() {
+        let state = non_finite_state();
+        let id = state.id().clone();
+        let outcome = carina_core::provider::UpdateOutcome::Success { state };
+        let state_after_patch = proto::PersistedState {
+            id: protocol_convert::resource_id_to_protocol(&id),
+            identifier: None,
+            attributes: BTreeMap::new(),
+            exists: true,
+        };
+        let error = update_outcome_to_proto(&outcome, state_after_patch, &id)
+            .expect_err("non-finite update output must be rejected");
+        assert_typed_conversion_error(error, "failed to encode update result");
     }
 
     #[test]
@@ -1093,7 +1192,23 @@ mod tests {
             "generated resource and config witnesses must expose callback-bearing identities"
         );
         for (identity, binding) in bindings {
-            let mut observed_rejection = false;
+            let sample = valid_bridge_sample(&identity);
+            let sample_value = bridge_probe(binding.scalar, sample);
+            assert!(
+                binding
+                    .callbacks
+                    .iter()
+                    .all(|callback| callback(&sample_value).is_ok()),
+                "valid sample {sample:?} must pass every direct callback for {identity}"
+            );
+            dispatch_custom_type_validation(&cache, &wire_identity(&identity), sample)
+                .unwrap_or_else(|error| {
+                    panic!(
+                        "valid sample {sample:?} must pass the SDK bridge for {identity}: {error}"
+                    )
+                });
+
+            let mut rejected_by_both = false;
             for text in probe_texts(binding.scalar) {
                 let value = bridge_probe(binding.scalar, text);
                 let direct = binding
@@ -1107,11 +1222,11 @@ mod tests {
                     bridged, direct,
                     "SDK dispatch for {identity} diverged from its validated witness callbacks on {text:?}"
                 );
-                observed_rejection |= !direct;
+                rejected_by_both |= !direct && !bridged;
             }
             assert!(
-                observed_rejection,
-                "bridge probes must exercise a rejecting callback for {identity}"
+                rejected_by_both,
+                "at least one invalid probe must be rejected directly and through the SDK bridge for {identity}"
             );
         }
     }

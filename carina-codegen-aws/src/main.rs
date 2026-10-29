@@ -82,20 +82,6 @@ struct ArnValidation {
     service: &'static str,
     resource: &'static str,
     regex: &'static str,
-    validator: ArnValidator,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ArnValidator {
-    Iam {
-        prefix: &'static str,
-        label: &'static str,
-    },
-    Service {
-        service: &'static str,
-        prefix: Option<&'static str>,
-        label: &'static str,
-    },
 }
 
 static ARN_VALIDATIONS: &[ArnValidation] = &[
@@ -103,88 +89,46 @@ static ARN_VALIDATIONS: &[ArnValidation] = &[
         service: "iam",
         resource: "Role",
         regex: "^arn:(aws|aws-cn|aws-us-gov):iam::[^:]*:role/.+$",
-        validator: ArnValidator::Iam {
-            prefix: "role/",
-            label: "IAM Role",
-        },
     },
     ArnValidation {
         service: "iam",
         resource: "Policy",
         regex: "^arn:(aws|aws-cn|aws-us-gov):iam::[^:]*:policy/.+$",
-        validator: ArnValidator::Iam {
-            prefix: "policy/",
-            label: "IAM Policy",
-        },
     },
     ArnValidation {
         service: "iam",
         resource: "OidcProvider",
         regex: "^arn:(aws|aws-cn|aws-us-gov):iam::[^:]*:oidc-provider/.+$",
-        validator: ArnValidator::Iam {
-            prefix: "oidc-provider/",
-            label: "IAM OIDC Provider",
-        },
     },
     ArnValidation {
         service: "kms",
         resource: "Key",
         regex: "^arn:(aws|aws-cn|aws-us-gov):kms:[^:]*:[^:]*:key/.+$",
-        validator: ArnValidator::Service {
-            service: "kms",
-            prefix: Some("key/"),
-            label: "KMS Key",
-        },
     },
     ArnValidation {
         service: "s3",
         resource: "Bucket",
         regex: "^arn:(aws|aws-cn|aws-us-gov):s3:::.+$",
-        validator: ArnValidator::Service {
-            service: "s3",
-            prefix: None,
-            label: "s3",
-        },
     },
     ArnValidation {
         service: "cloudfront",
         resource: "Distribution",
         regex: "^arn:(aws|aws-cn|aws-us-gov):cloudfront::[^:]*:distribution/.+$",
-        validator: ArnValidator::Service {
-            service: "cloudfront",
-            prefix: Some("distribution/"),
-            label: "cloudfront",
-        },
     },
     ArnValidation {
         service: "ecs",
         resource: "Cluster",
         regex: "^arn:(aws|aws-cn|aws-us-gov):ecs:[^:]*:[^:]*:cluster/.+$",
-        validator: ArnValidator::Service {
-            service: "ecs",
-            prefix: Some("cluster/"),
-            label: "ecs",
-        },
     },
     ArnValidation {
         service: "dynamodb",
         resource: "Table",
         regex: "^arn:(aws|aws-cn|aws-us-gov):dynamodb:[^:]*:[^:]*:table/.+$",
-        validator: ArnValidator::Service {
-            service: "dynamodb",
-            prefix: Some("table/"),
-            label: "dynamodb",
-        },
     },
     ArnValidation {
         service: "logs",
         resource: "LogGroup",
         regex: "^arn:(aws|aws-cn|aws-us-gov):logs:[^:]*:[^:]*:log-group:.+$",
-        validator: ArnValidator::Service {
-            service: "logs",
-            prefix: Some("log-group:"),
-            label: "logs",
-        },
     },
 ];
 
@@ -219,63 +163,6 @@ fn resource_identity_parts(name: &str) -> Option<(&str, &str)> {
     name.split_once('.')
 }
 
-#[allow(dead_code)]
-fn arn_validator_for(validator: ArnValidator) -> String {
-    match validator {
-        ArnValidator::Iam { prefix, label } => format!(
-            r#"|value| {{
-            if let Value::Concrete(ConcreteValue::String(s)) = value {{
-                let s = s.expose_plaintext();
-                super::validate_iam_arn(s, {prefix:?})
-                    .map_err(|reason| format!("Invalid {label} ARN '{{}}': {{}}", s, reason))
-            }} else {{
-                Err("Expected string".to_string())
-            }}
-        }}"#
-        ),
-        ArnValidator::Service {
-            service,
-            prefix,
-            label,
-        } => {
-            let prefix_expr = match prefix {
-                Some(prefix) => format!("Some({prefix:?})"),
-                None => "None".to_string(),
-            };
-            format!(
-                r#"|value| {{
-            if let Value::Concrete(ConcreteValue::String(s)) = value {{
-                let s = s.expose_plaintext();
-                super::validate_service_arn(s, {service:?}, {prefix_expr})
-                    .map_err(|reason| format!("Invalid {label} ARN '{{}}': {{}}", s, reason))
-            }} else {{
-                Err("Expected string".to_string())
-            }}
-        }}"#
-            )
-        }
-    }
-}
-
-#[allow(dead_code)]
-fn arn_validator_expression(choice: ArnEmitChoice) -> String {
-    match choice {
-        ArnEmitChoice::PerKind(entry) => arn_validator_for(entry.validator),
-        ArnEmitChoice::ServicePrefix(service) => format!(
-            r#"|value| {{
-            if let Value::Concrete(ConcreteValue::String(s)) = value {{
-                let s = s.expose_plaintext();
-                super::validate_service_arn(s, {service:?}, None)
-                    .map_err(|reason| format!("Invalid {service} ARN '{{}}': {{}}", s, reason))
-            }} else {{
-                Err("Expected string".to_string())
-            }}
-        }}"#
-        ),
-        ArnEmitChoice::Generic => unreachable!("generic ARN helper has no validator expression"),
-    }
-}
-
 fn shared_arn_constructor(service: &str, resource: &str) -> Option<&'static str> {
     match (service, resource) {
         ("iam", "Role") => Some("iam_role_arn"),
@@ -288,15 +175,6 @@ fn shared_arn_constructor(service: &str, resource: &str) -> Option<&'static str>
         ("sts", "CallerIdentity") => Some("sts_caller_identity_arn"),
         _ => None,
     }
-}
-
-fn arn_helper_needs_validation_imports(
-    service: &str,
-    resource: &str,
-    choice: ArnEmitChoice,
-) -> bool {
-    let _ = (service, resource, choice);
-    false
 }
 
 fn emit_arn_helper(service: &str, resource: &str, choice: ArnEmitChoice) -> String {
@@ -1241,16 +1119,8 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
     let arn_helper =
         arn_identity.map(|(service, resource, choice)| emit_arn_helper(service, resource, choice));
     let has_arn_helper = arn_helper.is_some();
-    let arn_helper_needs_validation_imports = arn_identity
-        .map(|(service, resource, choice)| {
-            arn_helper_needs_validation_imports(service, resource, choice)
-        })
-        .unwrap_or(false);
     if has_arn_helper && !schema_imports.contains(&"AttributeType") {
         schema_imports.insert(1, "AttributeType");
-    }
-    if arn_helper_needs_validation_imports && !schema_imports.contains(&"legacy_validator") {
-        schema_imports.push("legacy_validator");
     }
     let schema_imports_str = schema_imports.join(", ");
     code.push_str(&format!(
@@ -1266,9 +1136,6 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
     if needs_tags_type {
         code.push_str("use super::tags_type;\n");
         code.push_str("use carina_provider_protocol::types::ValidatorType;\n");
-    }
-    if arn_helper_needs_validation_imports {
-        code.push_str("use carina_core::resource::{ConcreteValue, Value};\n");
     }
     code.push_str(&format!(
         "use carina_core::schema::{{{}}};\n\n",
@@ -3884,23 +3751,10 @@ fn generate_data_source(
     let arn_helper =
         arn_identity.map(|(service, resource, choice)| emit_arn_helper(service, resource, choice));
     let has_arn_helper = arn_helper.is_some();
-    let arn_helper_needs_validation_imports = arn_identity
-        .map(|(service, resource, choice)| {
-            arn_helper_needs_validation_imports(service, resource, choice)
-        })
-        .unwrap_or(false);
     if has_arn_helper && !schema_imports.contains(&"AttributeType") {
         schema_imports.insert(1, "AttributeType");
     }
-    if arn_helper_needs_validation_imports && !schema_imports.contains(&"legacy_validator") {
-        schema_imports.push("legacy_validator");
-    }
     let schema_imports_str = schema_imports.join(", ");
-    let resource_import = if arn_helper_needs_validation_imports {
-        "use carina_core::resource::{ConcreteValue, Value};\n"
-    } else {
-        ""
-    };
     let arn_helper_code = arn_helper.unwrap_or_default();
 
     let mut code = String::new();
@@ -3911,7 +3765,6 @@ fn generate_data_source(
          //!\n\
          //! DO NOT EDIT MANUALLY - regenerate with smithy-codegen\n\n\
          use super::AwsSchemaConfig;\n\
-         {resource_import}\
          use carina_core::schema::{{{}}};\n\n\
          {arn_helper_code}\
          /// Returns the schema config for {} (Smithy: {})\n\
