@@ -3775,15 +3775,13 @@ fn generate_markdown_resource_with_example(
     if !struct_defs.is_empty() {
         page.heading(Heading::plain(2, "Struct Definitions"))
             .map_err(anyhow::Error::msg)?;
-        for (key, struct_doc) in &struct_defs {
+        for (key, heading_text) in &struct_heading_texts {
+            let struct_doc = struct_defs
+                .get(key)
+                .expect("every struct heading must refer to a discovered struct");
             page.target_heading(
                 MarkdownTarget::Struct(key.clone()),
-                Heading::plain(
-                    3,
-                    struct_heading_texts
-                        .get(key)
-                        .expect("every struct must have a visible heading"),
-                ),
+                Heading::plain(3, heading_text),
             )
             .map_err(anyhow::Error::msg)?;
             page.push_str("| Field | Type | Required | Description |\n");
@@ -3906,20 +3904,16 @@ fn markdown_enum_heading_texts(
             (key, heading)
         })
         .collect();
-    headings.sort_by(|(left_key, left_heading), (right_key, right_heading)| {
-        left_heading
-            .cmp(right_heading)
-            .then_with(|| left_key.cmp(right_key))
-    });
+    sort_markdown_headings(&mut headings);
     headings
 }
 
 fn markdown_struct_heading_texts(
     structs: &BTreeMap<MarkdownStructKey, MarkdownStruct>,
     root_namespace: &str,
-) -> BTreeMap<MarkdownStructKey, String> {
+) -> Vec<(MarkdownStructKey, String)> {
     let mut used_slugs = HashSet::new();
-    structs
+    let mut headings: Vec<_> = structs
         .iter()
         .map(|(key, struct_doc)| {
             let base = struct_doc.name.clone();
@@ -3931,7 +3925,17 @@ fn markdown_struct_heading_texts(
             let heading = claim_unique_heading(primary, &source, &mut used_slugs);
             (key.clone(), heading)
         })
-        .collect()
+        .collect();
+    sort_markdown_headings(&mut headings);
+    headings
+}
+
+fn sort_markdown_headings<K: Ord>(headings: &mut [(K, String)]) {
+    headings.sort_by(|(left_key, left_heading), (right_key, right_heading)| {
+        left_heading
+            .cmp(right_heading)
+            .then_with(|| left_key.cmp(right_key))
+    });
 }
 
 fn relative_heading_context(namespace: &str, root_namespace: &str) -> Option<String> {
@@ -5952,6 +5956,52 @@ mod tests {
         .expect("parse nested enum model")
     }
 
+    fn markdown_struct_order_model() -> SmithyModel {
+        carina_smithy::parse(
+            r##"{
+              "smithy": "2.0",
+              "shapes": {
+                "com.amazonaws.ec2#CreateMarkdownFixture": {
+                  "type": "operation",
+                  "input": { "target": "com.amazonaws.ec2#CreateMarkdownFixtureRequest" },
+                  "output": { "target": "smithy.api#Unit" },
+                  "traits": {}
+                },
+                "com.amazonaws.ec2#CreateMarkdownFixtureRequest": {
+                  "type": "structure",
+                  "members": {
+                    "Alpha": { "target": "com.amazonaws.ec2#Alpha", "traits": {} },
+                    "Zulu": { "target": "com.amazonaws.ec2#Zulu", "traits": {} }
+                  },
+                  "traits": { "smithy.api#input": {} }
+                },
+                "com.amazonaws.ec2#Alpha": {
+                  "type": "structure",
+                  "members": {
+                    "Child": { "target": "com.amazonaws.ec2#Child", "traits": {} }
+                  },
+                  "traits": {}
+                },
+                "com.amazonaws.ec2#Child": {
+                  "type": "structure",
+                  "members": {
+                    "Name": { "target": "smithy.api#String", "traits": {} }
+                  },
+                  "traits": {}
+                },
+                "com.amazonaws.ec2#Zulu": {
+                  "type": "structure",
+                  "members": {
+                    "Name": { "target": "smithy.api#String", "traits": {} }
+                  },
+                  "traits": {}
+                }
+              }
+            }"##,
+        )
+        .expect("parse struct-order model")
+    }
+
     fn markdown_read_shape_override_model() -> SmithyModel {
         carina_smithy::parse(
             r##"{
@@ -6141,6 +6191,27 @@ mod tests {
             .expect("struct definitions section")
             .0;
         let headings: Vec<&str> = enum_section
+            .lines()
+            .filter(|line| line.starts_with("### "))
+            .collect();
+        let mut sorted = headings.clone();
+        sorted.sort_unstable();
+
+        assert_eq!(headings, sorted, "{markdown}");
+    }
+
+    #[test]
+    fn markdown_struct_sections_are_sorted_by_visible_heading() {
+        let markdown = generate_markdown_resource(
+            &markdown_regression_resource(),
+            &markdown_struct_order_model(),
+        )
+        .expect("generate markdown");
+        let struct_section = markdown
+            .split_once("## Struct Definitions\n\n")
+            .expect("struct definitions section")
+            .1;
+        let headings: Vec<&str> = struct_section
             .lines()
             .filter(|line| line.starts_with("### "))
             .collect();
