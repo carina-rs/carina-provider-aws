@@ -102,7 +102,7 @@ impl AwsProvider {
 
     pub(crate) async fn create_s3_bucket_website_configuration(
         &self,
-        resource: &Resource,
+        resource: &Resource<impl Sized>,
         schema: &ResourceSchema,
     ) -> ProviderResult<CreateCompletion> {
         let bucket = require_string_attr(resource, "bucket")?;
@@ -135,7 +135,7 @@ impl AwsProvider {
         &self,
         id: &ResourceId,
         bucket: &AppliedIdentifier,
-        resource: &Resource,
+        resource: &Resource<impl Sized>,
         schema: &ResourceSchema,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
         let applied_identifier = bucket;
@@ -187,7 +187,7 @@ impl AwsProvider {
 
 fn build_website_configuration(
     id: &ResourceId,
-    resource: &Resource,
+    resource: &Resource<impl Sized>,
     schema: &ResourceSchema,
 ) -> ProviderResult<WebsiteConfiguration> {
     let mut config_builder = WebsiteConfiguration::builder();

@@ -28,7 +28,7 @@ struct ModifySubnetEnumAttrs {
 }
 
 fn resolve_modify_subnet_enum_attrs(
-    resource: &Resource,
+    resource: &Resource<impl Sized>,
     schema: &ResourceSchema,
 ) -> ProviderResult<ModifySubnetEnumAttrs> {
     Ok(ModifySubnetEnumAttrs {
@@ -93,7 +93,7 @@ impl AwsProvider {
     /// Create an EC2 Subnet
     pub(crate) async fn create_ec2_subnet<A: AwsCreateAttempt>(
         &self,
-        resource: &Resource,
+        resource: &Resource<impl Sized>,
         schema: &ResourceSchema,
         client_token: &ClientToken,
         attempt: A,
@@ -153,7 +153,7 @@ impl AwsProvider {
 
     pub(crate) async fn continue_ec2_subnet_create(
         &self,
-        resource: &Resource,
+        resource: &Resource<impl Sized>,
         schema: &ResourceSchema,
         subnet_id: &str,
     ) -> ProviderResult<()> {
@@ -192,7 +192,7 @@ impl AwsProvider {
         &self,
         id: &ResourceId,
         subnet_id: &str,
-        resource: &Resource,
+        resource: &Resource<impl Sized>,
         enum_attrs: &ModifySubnetEnumAttrs,
     ) -> ProviderResult<()> {
         if let Some(enabled) = optional_bool_attr(resource, "map_public_ip_on_launch") {

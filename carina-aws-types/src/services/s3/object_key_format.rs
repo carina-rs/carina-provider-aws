@@ -16,8 +16,9 @@ fn s3_partitioned_prefix() -> AttributeType {
     AttributeType::struct_(
         "PartitionedPrefix".to_string(),
         vec![
-            StructField::new("partition_date_source", s3_partition_date_source())
-                .with_provider_name("PartitionDateSource"),
+            StructField::optional("partition_date_source", s3_partition_date_source())
+                .with_provider_name("PartitionDateSource")
+                .build(),
         ],
     )
 }
@@ -30,10 +31,12 @@ pub fn bucket_target_object_key_format() -> AttributeType {
     AttributeType::struct_(
         "TargetObjectKeyFormat".to_string(),
         vec![
-            StructField::new("simple_prefix", s3_simple_prefix())
-                .with_provider_name("SimplePrefix"),
-            StructField::new("partitioned_prefix", s3_partitioned_prefix())
-                .with_provider_name("PartitionedPrefix"),
+            StructField::optional("simple_prefix", s3_simple_prefix())
+                .with_provider_name("SimplePrefix")
+                .build(),
+            StructField::optional("partitioned_prefix", s3_partitioned_prefix())
+                .with_provider_name("PartitionedPrefix")
+                .build(),
         ],
     )
 }

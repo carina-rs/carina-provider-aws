@@ -299,6 +299,35 @@ fn emit_arn_helper(service: &str, resource: &str, choice: ArnEmitChoice) -> Stri
         return format!("pub fn arn() -> AttributeType {{\n    super::{constructor}()\n}}\n\n");
     }
 
+    // `aws.kms.Key.Arn` was part of the provider's pre-SDK-dispatch
+    // validator registry. Keep that behavior on the identity-bearing
+    // constructor now that the SDK discovers callbacks from schemas.
+    if service == "kms" && resource == "Key" {
+        let ArnEmitChoice::PerKind(entry) = choice else {
+            unreachable!("KMS Key ARN must have a per-kind validation entry")
+        };
+        return format!(
+            r#"pub fn arn() -> AttributeType {{
+    AttributeType::refined_string_with_validator(
+        super::provider_type("kms", "Key", "Arn"),
+        Some({:?}.to_string()),
+        None,
+        legacy_validator(|value| {{
+            if let Value::Concrete(ConcreteValue::String(value)) = value {{
+                super::validate_service_arn(value.expose_plaintext(), "kms", Some("key/"))
+            }} else {{
+                Err("Expected string".to_string())
+            }}
+        }}),
+        None,
+    )
+}}
+
+"#,
+            entry.regex
+        );
+    }
+
     if matches!(choice, ArnEmitChoice::Generic) {
         return "pub fn arn() -> AttributeType {\n    super::arn()\n}\n\n".to_string();
     }
@@ -884,7 +913,7 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
             if exclude.contains(name.as_str()) {
                 continue;
             }
-            if name == "Tags" {
+            if name.eq_ignore_ascii_case("tags") {
                 continue;
             }
             writable_fields.insert(name.clone(), member_ref);
@@ -894,7 +923,7 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
             if exclude.contains(name.as_str()) {
                 continue;
             }
-            if name == "Tags" {
+            if name.eq_ignore_ascii_case("tags") {
                 continue; // handled separately
             }
             // Skip names whose schema type should come from the read
@@ -934,7 +963,10 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
     if let Some(read_struct) = read_structure {
         // (e.g., EnableDnsHostnames for VPC is in ModifyVpcAttributeRequest but not in Vpc struct)
         for (name, member_ref) in &read_struct.members {
-            if exclude.contains(name.as_str()) || name == "Tags" || name == res.identifier {
+            if exclude.contains(name.as_str())
+                || name.eq_ignore_ascii_case("tags")
+                || name == res.identifier
+            {
                 continue;
             }
             if writable_fields.contains_key(name) {
@@ -948,7 +980,10 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
     // Also check update operation inputs for fields not found in create input or read structure
     for update_input in &update_inputs {
         for (name, member_ref) in &update_input.members {
-            if exclude.contains(name.as_str()) || name == "Tags" || name == res.identifier {
+            if exclude.contains(name.as_str())
+                || name.eq_ignore_ascii_case("tags")
+                || name == res.identifier
+            {
                 continue;
             }
             if writable_fields.contains_key(name) {
@@ -981,7 +1016,7 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
             if exclude.contains(name.as_str()) {
                 continue;
             }
-            if name == "Tags" {
+            if name.eq_ignore_ascii_case("tags") {
                 continue;
             }
             // Skip fields already in writable set
@@ -1013,10 +1048,6 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
     // Process writable fields
     for (name, member_ref) in &writable_fields {
         let snake_name = name.to_snake_case();
-        let is_required = (SmithyModel::is_required(member_ref)
-            || required_overrides.contains(name.as_str()))
-            && !read_only_overrides.contains(name.as_str());
-        let is_read_only = read_only_overrides.contains(name.as_str());
         // `extra_attributes` fields with `read_source = None` are synthetic:
         // the codegen has no Smithy member to ground them in. They default
         // to create-only — UNLESS they appear in `update_ops` (typically as
@@ -1027,6 +1058,16 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
             .extra_attributes
             .iter()
             .any(|e| e.name == name.as_str() && e.read_source.is_none());
+        // A synthetic declaration is the authoritative schema declaration
+        // even when the create request happens to expose a same-named Smithy
+        // member. Preserve the synthetic requiredness override instead of
+        // emitting the request member and synthetic field twice.
+        let is_required = if is_synthetic_extra_attribute {
+            required_overrides.contains(name.as_str())
+        } else {
+            SmithyModel::is_required(member_ref) || required_overrides.contains(name.as_str())
+        } && !read_only_overrides.contains(name.as_str());
+        let is_read_only = read_only_overrides.contains(name.as_str());
         let is_create_only = if is_read_only {
             false
         } else if is_synthetic_extra_attribute {
@@ -1093,6 +1134,9 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
     for extra in &res.extra_attributes {
         if extra.read_source.is_some() {
             continue; // Already handled via writable_fields
+        }
+        if attrs.iter().any(|attr| attr.provider_name == extra.name) {
+            continue; // Same-named Smithy member was emitted with synthetic semantics above.
         }
         let snake_name = extra.name.to_snake_case();
         let type_code = if let Some(&override_type) = type_overrides.get(extra.name) {
@@ -1236,7 +1280,7 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
 
     if needs_tags_type {
         code.push_str("use super::tags_type;\n");
-        code.push_str("use super::validate_tags_map;\n");
+        code.push_str("use carina_provider_protocol::types::ValidatorType;\n");
     }
     if arn_helper_needs_validation_imports {
         code.push_str("use carina_core::resource::{ConcreteValue, Value};\n");
@@ -1355,20 +1399,21 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
             type_code
         };
 
+        let constructor = if attr.is_read_only {
+            "provider_populated"
+        } else if attr.is_required {
+            "required"
+        } else {
+            "optional"
+        };
         let mut attr_code = format!(
             "\x20       .attribute(\n\
-             \x20           AttributeSchema::new(\"{}\", {})",
-            attr.snake_name, type_code
+             \x20           AttributeSchema::{}(\"{}\", {})",
+            constructor, attr.snake_name, type_code
         );
 
-        if attr.is_required {
-            attr_code.push_str("\n\x20               .required()");
-        }
         if attr.is_create_only {
             attr_code.push_str("\n\x20               .create_only()");
-        }
-        if attr.is_read_only {
-            attr_code.push_str("\n\x20               .read_only()");
         }
         if attr.is_identity {
             attr_code.push_str("\n\x20               .identity()");
@@ -1397,6 +1442,7 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
             "\n\x20               .with_provider_name(\"{}\")",
             attr.provider_name
         ));
+        attr_code.push_str("\n\x20               .build()");
 
         attr_code.push_str(",\n\x20       )\n");
         code.push_str(&attr_code);
@@ -1406,16 +1452,19 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
     if res.has_tags {
         code.push_str(
             "\x20       .attribute(\n\
-             \x20           AttributeSchema::new(\"tags\", tags_type())\n\
+             \x20           AttributeSchema::optional(\"tags\", tags_type())\n\
              \x20               .with_description(\"The tags for the resource.\")\n\
-             \x20               .with_provider_name(\"Tags\"),\n\
+             \x20               .with_provider_name(\"Tags\")\n\
+             \x20               .build(),\n\
              \x20       )\n",
         );
     }
 
     // Tags validator
     if res.has_tags {
-        code.push_str("\x20       .with_validator(validate_tags_map)\n");
+        code.push_str(
+            "\x20       .with_declared_validators(vec![ValidatorType::TagsKeyValueCheck])\n",
+        );
     }
 
     // Close schema and config
@@ -1689,10 +1738,11 @@ fn generate_struct_type(
             field_type
         };
 
-        let mut field_code = format!("StructField::new(\"{}\", {})", snake_name, field_type);
-        if is_required {
-            field_code.push_str(".required()");
-        }
+        let constructor = if is_required { "required" } else { "optional" };
+        let mut field_code = format!(
+            "StructField::{}(\"{}\", {})",
+            constructor, snake_name, field_type
+        );
         if let Some(root_attr) = ctx.current_root_attr
             && ctx
                 .deferred_populate_struct_fields
@@ -1706,6 +1756,7 @@ fn generate_struct_type(
             field_code.push_str(&format!(".with_description(\"{}\")", truncated));
         }
         field_code.push_str(&format!(".with_provider_name(\"{}\")", field_name));
+        field_code.push_str(".build()");
         fields.push(field_code);
     }
 
@@ -1798,14 +1849,10 @@ fn generate_virtual_helper_modules(
          //!\n\
          //! DO NOT EDIT MANUALLY - regenerate with:\n\
          //!   ./carina-provider-aws/scripts/generate-schemas-smithy.sh\n\n\
-         use carina_core::schema::AttributeType;\n\n{}\
+         use carina_core::resource::{{ConcreteValue, Value}};\n\
+         use carina_core::schema::{{AttributeType, legacy_validator}};\n\n{}\
          pub fn id() -> AttributeType {{\n\
-         \x20   AttributeType::refined_string(\n\
-         \x20       Some(super::provider_type(\"kms\", \"Key\", \"Id\")),\n\
-         \x20       None,\n\
-         \x20       None,\n\
-         \x20       None,\n\
-         \x20   )\n\
+         \x20   super::kms_key_id()\n\
          }}\n",
         emit_arn_helper("kms", "Key", arn_emit_choice("kms", "Key"))
     );
@@ -2593,7 +2640,7 @@ fn generate_provider_code(
         let mut fields_to_extract: Vec<(String, String, &carina_smithy::ShapeRef)> = Vec::new();
 
         for (member_name, member_ref) in &read_struct.members {
-            if exclude.contains(member_name.as_str()) || member_name == "Tags" {
+            if exclude.contains(member_name.as_str()) || member_name.eq_ignore_ascii_case("tags") {
                 continue;
             }
 
@@ -3101,7 +3148,7 @@ fn generate_provider_code(
         code.push_str(&format!(
             "\x20   fn read_{}_data_source(\n\
              \x20       &self,\n\
-             \x20       resource: &DataSource,\n\
+             \x20       resource: &DataSource<impl Clone + Send + Sync + 'static>,\n\
              \x20   ) -> BoxFuture<'_, ProviderResult<State>>;\n\n",
             module,
         ));
@@ -3118,7 +3165,7 @@ fn generate_provider_code(
     code.push_str(
         "pub(crate) fn dispatch_read_data_source<'a>(\n\
          \x20   provider: &'a AwsProvider,\n\
-         \x20   resource: &'a DataSource,\n\
+         \x20   resource: &'a DataSource<impl Clone + Send + Sync + 'static>,\n\
          ) -> BoxFuture<'a, ProviderResult<State>> {\n\
          \x20   match resource.id.resource_type.as_str() {\n",
     );
@@ -3157,7 +3204,7 @@ fn generate_provider_code(
 /// to the schema / differ).
 ///
 /// Schema-attribute sources checked (mirroring what `generate_resource`
-/// emits as `AttributeSchema::new(...)`): `extra_attributes`,
+/// emits as an `AttributeSchema` typestate builder): `extra_attributes`,
 /// `extra_read_only`, `update_ops[].fields`, `schema_structure` members
 /// (excluding `Tags` and `exclude_fields`), the create-op input members when
 /// `schema_structure` is None, and `read_structure` members.
@@ -3230,7 +3277,9 @@ fn schema_attribute_shape_kind(
             && let Some((_, member_ref)) = schema_struct
                 .members
                 .iter()
-                .filter(|(name, _)| !exclude.contains(name.as_str()) && name.as_str() != "Tags")
+                .filter(|(name, _)| {
+                    !exclude.contains(name.as_str()) && !name.eq_ignore_ascii_case("tags")
+                })
                 .find(|(name, _)| matches_attr(name))
         {
             return model.shape_kind(&member_ref.target);
@@ -3241,7 +3290,9 @@ fn schema_attribute_shape_kind(
             && let Some((_, member_ref)) = create_input
                 .members
                 .iter()
-                .filter(|(name, _)| !exclude.contains(name.as_str()) && name.as_str() != "Tags")
+                .filter(|(name, _)| {
+                    !exclude.contains(name.as_str()) && !name.eq_ignore_ascii_case("tags")
+                })
                 .find(|(name, _)| matches_attr(name))
         {
             return model.shape_kind(&member_ref.target);
@@ -3254,7 +3305,9 @@ fn schema_attribute_shape_kind(
             && let Some((_, member_ref)) = read_struct
                 .members
                 .iter()
-                .filter(|(name, _)| !exclude.contains(name.as_str()) && name.as_str() != "Tags")
+                .filter(|(name, _)| {
+                    !exclude.contains(name.as_str()) && !name.eq_ignore_ascii_case("tags")
+                })
                 .find(|(name, _)| matches_attr(name))
         {
             return model.shape_kind(&member_ref.target);
@@ -3275,7 +3328,7 @@ fn schema_member_ref<'a>(
         return model
             .get_structure(&schema_structure_id)
             .and_then(|schema_struct| schema_struct.members.get(name))
-            .filter(|_| !exclude.contains(name) && name != "Tags");
+            .filter(|_| !exclude.contains(name) && !name.eq_ignore_ascii_case("tags"));
     }
 
     if !res.create_op.is_empty() {
@@ -3283,7 +3336,7 @@ fn schema_member_ref<'a>(
         if let Some(member_ref) = model
             .operation_input(&create_op_id)
             .and_then(|create_input| create_input.members.get(name))
-            .filter(|_| !exclude.contains(name) && name != "Tags")
+            .filter(|_| !exclude.contains(name) && !name.eq_ignore_ascii_case("tags"))
         {
             return Some(member_ref);
         }
@@ -3294,7 +3347,7 @@ fn schema_member_ref<'a>(
         return model
             .get_structure(&read_structure_id)
             .and_then(|read_struct| read_struct.members.get(name))
-            .filter(|_| !exclude.contains(name) && name != "Tags");
+            .filter(|_| !exclude.contains(name) && !name.eq_ignore_ascii_case("tags"));
     }
 
     None
@@ -3411,14 +3464,14 @@ fn generate_markdown_resource(res: &ResourceDef, model: &SmithyModel) -> Result<
     let mut writable_fields: BTreeMap<String, &carina_smithy::ShapeRef> = BTreeMap::new();
     if let Some(schema_struct) = &schema_structure {
         for (name, member_ref) in &schema_struct.members {
-            if exclude.contains(name.as_str()) || name == "Tags" {
+            if exclude.contains(name.as_str()) || name.eq_ignore_ascii_case("tags") {
                 continue;
             }
             writable_fields.insert(name.clone(), member_ref);
         }
     } else if let Some(create_input) = &create_input {
         for (name, member_ref) in &create_input.members {
-            if exclude.contains(name.as_str()) || name == "Tags" {
+            if exclude.contains(name.as_str()) || name.eq_ignore_ascii_case("tags") {
                 continue;
             }
             writable_fields.insert(name.clone(), member_ref);
@@ -3449,7 +3502,10 @@ fn generate_markdown_resource(res: &ResourceDef, model: &SmithyModel) -> Result<
     // Add updatable-only fields from read structure
     if let Some(read_struct) = read_structure {
         for (name, member_ref) in &read_struct.members {
-            if exclude.contains(name.as_str()) || name == "Tags" || name == res.identifier {
+            if exclude.contains(name.as_str())
+                || name.eq_ignore_ascii_case("tags")
+                || name == res.identifier
+            {
                 continue;
             }
             if !writable_fields.contains_key(name) && updatable_fields.contains(name.as_str()) {
@@ -3476,7 +3532,7 @@ fn generate_markdown_resource(res: &ResourceDef, model: &SmithyModel) -> Result<
     if let Some(read_struct) = read_structure {
         for (name, member_ref) in &read_struct.members {
             if exclude.contains(name.as_str())
-                || name == "Tags"
+                || name.eq_ignore_ascii_case("tags")
                 || writable_fields.contains_key(name)
             {
                 continue;
@@ -3909,25 +3965,27 @@ fn generate_data_source(
         if attr.read_only {
             code.push_str(&format!(
                 "\x20       .attribute(\n\
-                 \x20           AttributeSchema::new(\"{}\", {})\n\
+                 \x20           AttributeSchema::optional(\"{}\", {})\n\
                  \x20               .with_description(\"{}\")\n\
-                 \x20               .with_provider_name(\"{}\"),\n\
+                 \x20               .with_provider_name(\"{}\")\n\
+                 \x20               .build(),\n\
                  \x20       )\n",
                 attr.name, type_str, attr.description, attr.provider_name,
             ));
         } else {
-            let required = if attr.required {
-                "\n            .required()"
+            let constructor = if attr.required {
+                "required"
             } else {
-                ""
+                "optional"
             };
             code.push_str(&format!(
                 "\x20       .attribute(\n\
-                 \x20           AttributeSchema::new(\"{}\", {}){}\n\
+                 \x20           AttributeSchema::{}(\"{}\", {})\n\
                  \x20               .with_description(\"{}\")\n\
-                 \x20               .with_provider_name(\"{}\"),\n\
+                 \x20               .with_provider_name(\"{}\")\n\
+                 \x20               .build(),\n\
                  \x20       )\n",
-                attr.name, type_str, required, attr.description, attr.provider_name,
+                constructor, attr.name, type_str, attr.description, attr.provider_name,
             ));
         }
     }
@@ -4828,6 +4886,17 @@ mod tests {
     }
 
     #[test]
+    fn emit_arn_helper_declares_kms_callback() {
+        let generated = emit_arn_helper("kms", "Key", arn_emit_choice("kms", "Key"));
+
+        assert!(generated.contains("AttributeType::refined_string_with_validator"));
+        assert!(generated.contains("legacy_validator"));
+        assert!(generated.contains(
+            "super::validate_service_arn(value.expose_plaintext(), \"kms\", Some(\"key/\"))"
+        ));
+    }
+
+    #[test]
     fn type_display_names_include_shared_iam_arn_constructors() {
         assert_eq!(type_code_to_display("super::iam_role_arn()"), "IamRoleArn");
         assert_eq!(
@@ -5015,15 +5084,16 @@ mod tests {
             "must mark as data source: {generated}"
         );
         assert!(
-            generated.contains(r#"AttributeSchema::new("account_id", super::aws_account_id())"#),
+            generated
+                .contains(r#"AttributeSchema::optional("account_id", super::aws_account_id())"#),
             "account_id must use aws_account_id(): {generated}"
         );
         assert!(
-            generated.contains(r#"AttributeSchema::new("arn", self::arn())"#),
+            generated.contains(r#"AttributeSchema::optional("arn", self::arn())"#),
             "arn must use arn(): {generated}"
         );
         assert!(
-            generated.contains(r#"AttributeSchema::new("user_id", AttributeType::string())"#),
+            generated.contains(r#"AttributeSchema::optional("user_id", AttributeType::string())"#),
             "user_id must be String: {generated}"
         );
         assert!(
@@ -5048,18 +5118,16 @@ mod tests {
 
         let generated = generate_data_source(&ds, &model, false).expect("generate_data_source");
 
+        assert!(generated.contains(
+            r#"AttributeSchema::required("identity_store_id", AttributeType::string())"#
+        ));
         assert!(
             generated
-                .contains(r#"AttributeSchema::new("identity_store_id", AttributeType::string())"#)
+                .contains(r#"AttributeSchema::optional("display_name", AttributeType::string())"#)
         );
         assert!(
-            generated.contains(".required()"),
-            "identity_store_id is required"
+            generated.contains(r#"AttributeSchema::optional("emails", AttributeType::string())"#)
         );
-        assert!(
-            generated.contains(r#"AttributeSchema::new("display_name", AttributeType::string())"#)
-        );
-        assert!(generated.contains(r#"AttributeSchema::new("emails", AttributeType::string())"#));
     }
 
     #[test]
@@ -5111,27 +5179,29 @@ mod tests {
         // arns is List<iam_role_arn>
         assert!(
             generated.contains(
-                "AttributeSchema::new(\"arns\", AttributeType::unordered_list(super::super::iam::role::arn()))"
+                "AttributeSchema::optional(\"arns\", AttributeType::unordered_list(super::super::iam::role::arn()))"
             ),
             "arns must be List(iam_role_arn): {generated}"
         );
         // names is List<String>
         assert!(
             generated.contains(
-                "AttributeSchema::new(\"names\", AttributeType::unordered_list(AttributeType::string()))"
+                "AttributeSchema::optional(\"names\", AttributeType::unordered_list(AttributeType::string()))"
             ),
             "names must be List(String): {generated}"
         );
         // Inputs are both optional strings.
         assert!(
-            generated.contains(r#"AttributeSchema::new("path_prefix", AttributeType::string())"#),
+            generated
+                .contains(r#"AttributeSchema::optional("path_prefix", AttributeType::string())"#),
             "path_prefix input: {generated}"
         );
         assert!(
-            generated.contains(r#"AttributeSchema::new("name_regex", AttributeType::string())"#),
+            generated
+                .contains(r#"AttributeSchema::optional("name_regex", AttributeType::string())"#),
             "name_regex input: {generated}"
         );
-        // Neither input is marked .required().
+        // Neither input uses the required typestate constructor.
         let path_prefix_idx = generated
             .find("path_prefix")
             .expect("path_prefix in generated");
@@ -5140,7 +5210,7 @@ mod tests {
             .expect("name_regex in generated");
         let path_prefix_block = &generated[path_prefix_idx..name_regex_idx];
         assert!(
-            !path_prefix_block.contains(".required()"),
+            !path_prefix_block.contains("AttributeSchema::required"),
             "path_prefix must not be required: {path_prefix_block}"
         );
     }

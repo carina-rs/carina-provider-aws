@@ -697,7 +697,7 @@ async fn test_subnet_availability_zone_survives_normalize_desired() {
         "availability_zone".to_string(),
         Value::Concrete(ConcreteValue::String("ap-northeast-1a".to_string().into())),
     );
-    let mut resources = vec![resource];
+    let mut resources = vec![resource.into()];
 
     AwsNormalizer
         .normalize_desired(&mut resources)
@@ -1750,7 +1750,13 @@ fn test_organization_feature_set_host_canonicalizes_snake_case_alias() {
     let config =
         crate::schemas::generated::organizations::organization::organizations_organization_config();
     let mut registry = carina_core::schema::SchemaRegistry::new();
-    registry.insert("aws", config.schema);
+    registry.insert(
+        "aws",
+        config
+            .schema
+            .validate()
+            .expect("Organizations schema must pass admission"),
+    );
 
     for (authored, api) in [
         ("all", "ALL"),
@@ -1791,7 +1797,13 @@ fn test_route53_record_type_host_canonicalizes_snake_case_alias() {
 
     let config = crate::schemas::generated::route53::record_set::route53_record_set_config();
     let mut registry = carina_core::schema::SchemaRegistry::new();
-    registry.insert("aws", config.schema);
+    registry.insert(
+        "aws",
+        config
+            .schema
+            .validate()
+            .expect("Route 53 RecordSet schema must pass admission"),
+    );
 
     for (authored, api) in [("a", "A"), ("cname", "CNAME")] {
         let mut resource = Resource::with_provider("aws", "route53.RecordSet", authored, None);

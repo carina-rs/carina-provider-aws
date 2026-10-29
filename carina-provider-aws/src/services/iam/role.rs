@@ -79,7 +79,7 @@ impl AwsProvider {
     /// Create an IAM Role
     pub(crate) async fn create_iam_role(
         &self,
-        resource: &Resource,
+        resource: &Resource<impl Sized>,
     ) -> ProviderResult<CreateCompletion> {
         let role_name = require_string_attr(resource, "role_name")?;
 
@@ -378,7 +378,10 @@ pub fn value_to_iam_policy_json(value: &Value) -> Result<String, String> {
 /// Accepts either a pre-serialized JSON string or a Carina `Value::Map`
 /// (block-syntax DSL form). Errors when the attribute is missing or has an
 /// unsupported type.
-pub fn resolve_iam_policy_attr(resource: &Resource, attr_name: &str) -> ProviderResult<String> {
+pub fn resolve_iam_policy_attr(
+    resource: &Resource<impl Sized>,
+    attr_name: &str,
+) -> ProviderResult<String> {
     match resource.get_attr(attr_name) {
         Some(Value::Concrete(ConcreteValue::String(s))) => Ok(s.expose_plaintext().to_string()),
         Some(value @ Value::Concrete(ConcreteValue::Map(_))) => value_to_iam_policy_json(value)
@@ -910,7 +913,7 @@ mod tests {
                 ConcreteValue::Map(stmt),
             )])),
         );
-        let schema = carina_core::schema::Schema::flat(carina_aws_types::iam_policy_document());
+        let schema = crate::test_rootless_type(carina_aws_types::iam_policy_document());
         let canonical = schema.canonicalize_state(Value::Concrete(ConcreteValue::Map(policy)));
         assert!(
             matches!(canonical, Value::Concrete(ConcreteValue::Map(_))),
@@ -1106,13 +1109,21 @@ mod tests {
               tags = { Environment = 'acceptance-test' }
             }
         "#;
-        let parsed =
-            carina_core::parser::parse(src, &carina_core::parser::ProviderContext::default())
-                .expect("parse fixture");
+        let parsed = carina_core::parser::parse_file(
+            src,
+            std::path::Path::new("iam-role-policy-test.crn"),
+            &carina_core::parser::ProviderContext::default(),
+        )
+        .expect("parse fixture");
         let resource = parsed.resources[0].clone();
         let schema = crate::schemas::generated::iam::role::iam_role_config().schema;
         let mut registry = carina_core::schema::SchemaRegistry::new();
-        registry.insert("aws", schema);
+        registry.insert(
+            "aws",
+            schema
+                .validate()
+                .expect("IAM Role fixture schema must pass admission"),
+        );
         let mut resources = vec![resource];
         carina_core::value::canonicalize_resources_with_schemas(&mut resources, &registry)
             .expect("host desired canonicalization");

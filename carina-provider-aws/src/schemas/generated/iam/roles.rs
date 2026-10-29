@@ -16,24 +16,28 @@ pub fn iam_roles_config() -> AwsSchemaConfig {
         schema: ResourceSchema::new("iam.Roles")
         .as_data_source()
         .attribute(
-            AttributeSchema::new("path_prefix", AttributeType::string())
+            AttributeSchema::optional("path_prefix", AttributeType::string())
                 .with_description("Path prefix for filtering the results. If it is not included, it defaults to `/`, listing all roles.")
-                .with_provider_name("PathPrefix"),
+                .with_provider_name("PathPrefix")
+                .build(),
         )
         .attribute(
-            AttributeSchema::new("name_regex", AttributeType::string())
+            AttributeSchema::optional("name_regex", AttributeType::string())
                 .with_description("Regular expression string applied client-side to filter results by role name.")
-                .with_provider_name(""),
+                .with_provider_name("")
+                .build(),
         )
         .attribute(
-            AttributeSchema::new("arns", AttributeType::unordered_list(super::super::iam::role::arn()))
+            AttributeSchema::optional("arns", AttributeType::unordered_list(super::super::iam::role::arn()))
                 .with_description("Set of ARNs of the matched IAM roles.")
-                .with_provider_name(""),
+                .with_provider_name("")
+                .build(),
         )
         .attribute(
-            AttributeSchema::new("names", AttributeType::unordered_list(AttributeType::string()))
+            AttributeSchema::optional("names", AttributeType::unordered_list(AttributeType::string()))
                 .with_description("Set of names of the matched IAM roles.")
-                .with_provider_name(""),
+                .with_provider_name("")
+                .build(),
         )
     }
 }

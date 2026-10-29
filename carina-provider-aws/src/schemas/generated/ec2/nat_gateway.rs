@@ -6,8 +6,8 @@
 
 use super::AwsSchemaConfig;
 use super::tags_type;
-use super::validate_tags_map;
 use carina_core::schema::{AttributeSchema, AttributeType, ResourceSchema, StructField, types};
+use carina_provider_protocol::types::ValidatorType;
 
 const VALID_AVAILABILITY_MODE: &[&str] = &["regional", "zonal"];
 
@@ -23,13 +23,14 @@ pub fn ec2_nat_gateway_config() -> AwsSchemaConfig {
         .with_description("Describes a NAT gateway.")
         .with_conflicting_replacement()
         .attribute(
-            AttributeSchema::new("allocation_id", super::allocation_id())
+            AttributeSchema::optional("allocation_id", super::allocation_id())
                 .create_only()
                 .with_description("[Public NAT gateways only] The allocation ID of an Elastic IP address to associate with the NAT gateway. You cannot specify an Elastic IP address with...")
-                .with_provider_name("AllocationId"),
+                .with_provider_name("AllocationId")
+                .build(),
         )
         .attribute(
-            AttributeSchema::new("availability_mode", AttributeType::enum_(
+            AttributeSchema::optional("availability_mode", AttributeType::enum_(
     carina_core::schema::enum_identity("AvailabilityMode", Some("aws.ec2.NatGateway")),
     Some(vec!["regional".to_string(), "zonal".to_string()]),
     vec![("regional".to_string(), "regional".to_string()), ("zonal".to_string(), "zonal".to_string())],
@@ -38,23 +39,25 @@ pub fn ec2_nat_gateway_config() -> AwsSchemaConfig {
 ))
                 .create_only()
                 .with_description("Specifies whether to create a zonal (single-AZ) or regional (multi-AZ) NAT gateway. Defaults to zonal. A zonal NAT gateway is a NAT Gateway that provi...")
-                .with_provider_name("AvailabilityMode"),
+                .with_provider_name("AvailabilityMode")
+                .build(),
         )
         .attribute(
-            AttributeSchema::new("availability_zone_addresses", AttributeType::list(AttributeType::struct_(
+            AttributeSchema::optional("availability_zone_addresses", AttributeType::list(AttributeType::struct_(
                     "AvailabilityZoneAddress".to_string(),
                     vec![
-                    StructField::new("allocation_ids", AttributeType::list(super::allocation_id())).with_description("The allocation IDs of the Elastic IP addresses (EIPs) to be used for handling outbound NAT traffic in this specific Availability Zone.").with_provider_name("AllocationIds"),
-                    StructField::new("availability_zone", super::availability_zone()).with_description("For regional NAT gateways only: The Availability Zone where this specific NAT gateway configuration will be active. Each AZ in a regional NAT gateway ...").with_provider_name("AvailabilityZone"),
-                    StructField::new("availability_zone_id", super::availability_zone_id()).with_description("For regional NAT gateways only: The ID of the Availability Zone where this specific NAT gateway configuration will be active. Each AZ in a regional NA...").with_provider_name("AvailabilityZoneId")
+                    StructField::optional("allocation_ids", AttributeType::list(super::allocation_id())).with_description("The allocation IDs of the Elastic IP addresses (EIPs) to be used for handling outbound NAT traffic in this specific Availability Zone.").with_provider_name("AllocationIds").build(),
+                    StructField::optional("availability_zone", super::availability_zone()).with_description("For regional NAT gateways only: The Availability Zone where this specific NAT gateway configuration will be active. Each AZ in a regional NAT gateway ...").with_provider_name("AvailabilityZone").build(),
+                    StructField::optional("availability_zone_id", super::availability_zone_id()).with_description("For regional NAT gateways only: The ID of the Availability Zone where this specific NAT gateway configuration will be active. Each AZ in a regional NA...").with_provider_name("AvailabilityZoneId").build()
                     ],
                 )))
                 .create_only()
                 .with_description("For regional NAT gateways only: Specifies which Availability Zones you want the NAT gateway to support and the Elastic IP addresses (EIPs) to use in e...")
-                .with_provider_name("AvailabilityZoneAddresses"),
+                .with_provider_name("AvailabilityZoneAddresses")
+                .build(),
         )
         .attribute(
-            AttributeSchema::new("connectivity_type", AttributeType::enum_(
+            AttributeSchema::optional("connectivity_type", AttributeType::enum_(
     carina_core::schema::enum_identity("ConnectivityType", Some("aws.ec2.NatGateway")),
     Some(vec!["private".to_string(), "public".to_string()]),
     vec![("private".to_string(), "private".to_string()), ("public".to_string(), "public".to_string())],
@@ -63,39 +66,43 @@ pub fn ec2_nat_gateway_config() -> AwsSchemaConfig {
 ))
                 .create_only()
                 .with_description("Indicates whether the NAT gateway supports public or private connectivity. The default is public connectivity.")
-                .with_provider_name("ConnectivityType"),
+                .with_provider_name("ConnectivityType")
+                .build(),
         )
         .attribute(
-            AttributeSchema::new("private_ip_address", types::ipv4_address())
+            AttributeSchema::optional("private_ip_address", types::ipv4_address())
                 .create_only()
                 .with_description("The private IPv4 address to assign to the NAT gateway. If you don't provide an address, a private IPv4 address will be automatically assigned.")
-                .with_provider_name("PrivateIpAddress"),
+                .with_provider_name("PrivateIpAddress")
+                .build(),
         )
         .attribute(
-            AttributeSchema::new("subnet_id", super::subnet_id())
-                .required()
+            AttributeSchema::required("subnet_id", super::subnet_id())
                 .create_only()
                 .with_description("The ID of the subnet in which to create the NAT gateway.")
-                .with_provider_name("SubnetId"),
+                .with_provider_name("SubnetId")
+                .build(),
         )
         .attribute(
-            AttributeSchema::new("vpc_id", super::vpc_id())
+            AttributeSchema::optional("vpc_id", super::vpc_id())
                 .create_only()
                 .with_description("The ID of the VPC where you want to create a regional NAT gateway.")
-                .with_provider_name("VpcId"),
+                .with_provider_name("VpcId")
+                .build(),
         )
         .attribute(
-            AttributeSchema::new("nat_gateway_id", super::nat_gateway_id())
-                .read_only()
+            AttributeSchema::provider_populated("nat_gateway_id", super::nat_gateway_id())
                 .with_description("The ID of the NAT gateway. (read-only)")
-                .with_provider_name("NatGatewayId"),
+                .with_provider_name("NatGatewayId")
+                .build(),
         )
         .attribute(
-            AttributeSchema::new("tags", tags_type())
+            AttributeSchema::optional("tags", tags_type())
                 .with_description("The tags for the resource.")
-                .with_provider_name("Tags"),
+                .with_provider_name("Tags")
+                .build(),
         )
-        .with_validator(validate_tags_map)
+        .with_declared_validators(vec![ValidatorType::TagsKeyValueCheck])
     }
 }
 

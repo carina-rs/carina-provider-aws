@@ -1041,7 +1041,7 @@ fn schema_registry() -> carina_core::schema::SchemaRegistry {
 
 async fn create_request_for_test(resource: Resource) -> CreateRequest {
     let bindings = carina_core::binding_index::ResolvedBindings::default();
-    let module_gate = carina_core::executor::ModuleConstraintGate::new(&[]);
+    let module_gate = carina_core::executor::ModuleConstraintGate::from_live_compositions(&[]);
     let schemas = schema_registry();
     let preparation = carina_core::executor::ProviderPreparationContext::new(
         &bindings,

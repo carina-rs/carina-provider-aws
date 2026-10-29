@@ -100,7 +100,7 @@ impl AwsProvider {
 
     pub(crate) async fn create_s3_bucket_notification_configuration(
         &self,
-        resource: &Resource,
+        resource: &Resource<impl Sized>,
     ) -> ProviderResult<CreateCompletion> {
         let bucket = require_string_attr(resource, "bucket")?;
         let identifier = crate::helpers::applied_identifier(
@@ -133,7 +133,7 @@ impl AwsProvider {
         &self,
         id: &ResourceId,
         bucket: &AppliedIdentifier,
-        resource: &Resource,
+        resource: &Resource<impl Sized>,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
         let applied_identifier = bucket;
         let bucket = bucket.as_str();

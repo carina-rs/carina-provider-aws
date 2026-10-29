@@ -6,8 +6,8 @@
 
 use super::AwsSchemaConfig;
 use super::tags_type;
-use super::validate_tags_map;
 use carina_core::schema::{AttributeSchema, AttributeType, ResourceSchema};
+use carina_provider_protocol::types::ValidatorType;
 
 /// Returns the schema config for ec2.SecurityGroup (Smithy: com.amazonaws.ec2)
 pub fn ec2_security_group_config() -> AwsSchemaConfig {
@@ -19,37 +19,39 @@ pub fn ec2_security_group_config() -> AwsSchemaConfig {
         .with_description("Describes a security group.")
         .with_unique_name_attribute("group_name")
         .attribute(
-            AttributeSchema::new("description", AttributeType::string())
-                .required()
+            AttributeSchema::required("description", AttributeType::string())
                 .create_only()
                 .with_description("A description for the security group. Constraints: Up to 255 characters in length Valid characters: a-z, A-Z, 0-9, spaces, and ._-:/()#,@[]+=&;{}!$*")
-                .with_provider_name("Description"),
+                .with_provider_name("Description")
+                .build(),
         )
         .attribute(
-            AttributeSchema::new("group_name", AttributeType::string())
-                .required()
+            AttributeSchema::required("group_name", AttributeType::string())
                 .create_only()
                 .with_description("The name of the security group. Names are case-insensitive and must be unique within the VPC. Constraints: Up to 255 characters in length. Can't start...")
-                .with_provider_name("GroupName"),
+                .with_provider_name("GroupName")
+                .build(),
         )
         .attribute(
-            AttributeSchema::new("vpc_id", super::vpc_id())
+            AttributeSchema::optional("vpc_id", super::vpc_id())
                 .create_only()
                 .with_description("The ID of the VPC. Required for a nondefault VPC.")
-                .with_provider_name("VpcId"),
+                .with_provider_name("VpcId")
+                .build(),
         )
         .attribute(
-            AttributeSchema::new("group_id", super::security_group_id())
-                .read_only()
+            AttributeSchema::provider_populated("group_id", super::security_group_id())
                 .with_description("The ID of the security group. (read-only)")
-                .with_provider_name("GroupId"),
+                .with_provider_name("GroupId")
+                .build(),
         )
         .attribute(
-            AttributeSchema::new("tags", tags_type())
+            AttributeSchema::optional("tags", tags_type())
                 .with_description("The tags for the resource.")
-                .with_provider_name("Tags"),
+                .with_provider_name("Tags")
+                .build(),
         )
-        .with_validator(validate_tags_map)
+        .with_declared_validators(vec![ValidatorType::TagsKeyValueCheck])
     }
 }
 

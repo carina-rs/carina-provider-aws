@@ -16,17 +16,17 @@ pub fn s3_bucket_server_side_encryption_configuration_config() -> AwsSchemaConfi
         schema: ResourceSchema::new("s3.BucketServerSideEncryptionConfiguration")
         .with_coexisting_replacement()
         .attribute(
-            AttributeSchema::new("bucket", AttributeType::string())
-                .required()
+            AttributeSchema::required("bucket", AttributeType::string())
                 .create_only()
                 .with_description("Specifies default encryption for a bucket using server-side encryption with different key options. Directory buckets - When you use this operation wit...")
-                .with_provider_name("Bucket"),
+                .with_provider_name("Bucket")
+                .build(),
         )
         .attribute(
-            AttributeSchema::new("rules", super::bucket_encryption_rules())
-                .required()
+            AttributeSchema::required("rules", super::bucket_encryption_rules())
                 .with_description("List of server-side encryption rules to apply to the bucket.")
-                .with_provider_name("Rules"),
+                .with_provider_name("Rules")
+                .build(),
         )
     }
 }

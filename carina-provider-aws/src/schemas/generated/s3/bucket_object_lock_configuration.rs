@@ -16,22 +16,23 @@ pub fn s3_bucket_object_lock_configuration_config() -> AwsSchemaConfig {
         schema: ResourceSchema::new("s3.BucketObjectLockConfiguration")
         .with_coexisting_replacement()
         .attribute(
-            AttributeSchema::new("bucket", AttributeType::string())
-                .required()
+            AttributeSchema::required("bucket", AttributeType::string())
                 .create_only()
                 .with_description("The bucket whose Object Lock configuration you want to create or replace.")
-                .with_provider_name("Bucket"),
+                .with_provider_name("Bucket")
+                .build(),
         )
         .attribute(
-            AttributeSchema::new("object_lock_enabled", super::s3_object_lock_enabled())
-                .required()
+            AttributeSchema::required("object_lock_enabled", super::s3_object_lock_enabled())
                 .with_description("Whether S3 Object Lock is enabled for the bucket.")
-                .with_provider_name("ObjectLockEnabled"),
+                .with_provider_name("ObjectLockEnabled")
+                .build(),
         )
         .attribute(
-            AttributeSchema::new("rule", super::bucket_object_lock_rule())
+            AttributeSchema::optional("rule", super::bucket_object_lock_rule())
                 .with_description("Optional bucket-default Object Lock retention rule. If `default_retention` is set, its `retention_period` must contain exactly one of `days` or `years...")
-                .with_provider_name("Rule"),
+                .with_provider_name("Rule")
+                .build(),
         )
     }
 }

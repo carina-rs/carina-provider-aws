@@ -16,23 +16,23 @@ pub fn s3_bucket_ownership_controls_config() -> AwsSchemaConfig {
         schema: ResourceSchema::new("s3.BucketOwnershipControls")
         .with_coexisting_replacement()
         .attribute(
-            AttributeSchema::new("bucket", AttributeType::string())
-                .required()
+            AttributeSchema::required("bucket", AttributeType::string())
                 .create_only()
                 .with_description("The name of the Amazon S3 bucket whose OwnershipControls you want to set.")
-                .with_provider_name("Bucket"),
+                .with_provider_name("Bucket")
+                .build(),
         )
         .attribute(
-            AttributeSchema::new("object_ownership", AttributeType::enum_(
+            AttributeSchema::required("object_ownership", AttributeType::enum_(
 carina_core::schema::enum_identity("ObjectOwnership", Some("aws.s3.BucketOwnershipControls")),
 Some(vec!["BucketOwnerEnforced".to_string(), "BucketOwnerPreferred".to_string(), "ObjectWriter".to_string()]),
 vec![("BucketOwnerEnforced".to_string(), "bucket_owner_enforced".to_string()), ("BucketOwnerPreferred".to_string(), "bucket_owner_preferred".to_string()), ("ObjectWriter".to_string(), "object_writer".to_string())],
 None,
 None,
 ))
-                .required()
                 .with_description("Object ownership setting: BucketOwnerEnforced, BucketOwnerPreferred, or ObjectWriter.")
-                .with_provider_name("ObjectOwnership"),
+                .with_provider_name("ObjectOwnership")
+                .build(),
         )
     }
 }

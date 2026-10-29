@@ -473,7 +473,7 @@ impl AwsProvider {
     /// Create an SQS Queue and return its post-create state.
     pub(crate) async fn create_sqs_queue(
         &self,
-        resource: &Resource,
+        resource: &Resource<impl Sized>,
         _schema: &ResourceSchema,
     ) -> ProviderResult<CreateCompletion> {
         let queue_name = require_string_attr(resource, "queue_name")?;
@@ -659,7 +659,7 @@ impl AwsProvider {
 
 /// Extract a `tags = { ... }` block from the resource, dropping any
 /// non-string values. Returns `None` when no tags are set.
-fn resource_tags_map(resource: &Resource) -> Option<HashMap<String, String>> {
+fn resource_tags_map(resource: &Resource<impl Sized>) -> Option<HashMap<String, String>> {
     let Some(Value::Concrete(ConcreteValue::Map(tag_map))) = resource.get_attr("tags") else {
         return None;
     };
@@ -697,8 +697,7 @@ mod tests {
             "redrive_permission".to_string(),
             Value::Concrete(ConcreteValue::String("allowAll".into())),
         );
-        let schema =
-            carina_core::schema::Schema::flat(carina_aws_types::sqs_redrive_allow_policy());
+        let schema = crate::test_rootless_type(carina_aws_types::sqs_redrive_allow_policy());
         let canonical = schema.canonicalize_state(Value::Concrete(ConcreteValue::Map(map)));
 
         let json = redrive_allow_policy_to_json_string(&canonical).expect("redrive allow JSON");

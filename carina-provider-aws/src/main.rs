@@ -2,7 +2,7 @@
 mod convert;
 
 #[cfg(any(target_arch = "wasm32", test))]
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 #[cfg(any(target_arch = "wasm32", test))]
 use carina_plugin_sdk::{
@@ -23,13 +23,13 @@ use carina_provider_protocol::types as proto;
 use carina_core::provider::{
     AppliedIdentifier as CoreAppliedIdentifier, AppliedState as CoreAppliedState,
     DeleteRequest as CoreDeleteRequest, Observation as CoreObservation, PatchOp as CorePatchOp,
-    Provider, ProviderError as CoreProviderError, ProviderNormalizer,
+    Provider, ProviderError as CoreProviderError, ProviderFactory, ProviderNormalizer,
     ReadRequest as CoreReadRequest, Sent as CoreSent, UpdatePatch as CoreUpdatePatch,
 };
 #[cfg(any(target_arch = "wasm32", test))]
 use carina_core::resource::Value as CoreValue;
 #[cfg(any(target_arch = "wasm32", test))]
-use carina_core::schema::SchemaRegistry;
+use carina_core::schema::{SchemaRegistry, ValidatedConfigSchema, ValidatedResourceSchema};
 
 #[cfg(any(target_arch = "wasm32", test))]
 use carina_provider_aws::{
@@ -337,76 +337,15 @@ impl CarinaProvider for AwsProcessProvider {
         }
     }
 
-    fn schemas(&self) -> Vec<proto::ResourceSchema> {
-        carina_provider_aws::schemas::generated::configs()
-            .iter()
-            .map(|config| {
-                let mut schema = convert::core_to_proto_schema(&config.schema);
-                if config.has_tags {
-                    schema
-                        .validators
-                        .push(proto::ValidatorType::TagsKeyValueCheck);
-                }
-                schema
-            })
-            .collect()
+    fn schemas(&self) -> Vec<ValidatedResourceSchema> {
+        carina_provider_aws::schemas::all_schemas()
     }
 
-    fn provider_config_attribute_types(&self) -> HashMap<String, proto::AttributeType> {
-        let mut types = HashMap::new();
-        // Region codes carry hyphens; the DSL form replaces them with
-        // underscores. Materialize the alias pairs so the WASM-component
-        // boundary preserves the mapping (carina#2832 / aws#247).
-        let region_values: Vec<String> = carina_aws_types::REGIONS
-            .iter()
-            .map(|(code, _)| code.to_string())
-            .collect();
-        let region_dsl_aliases: Vec<(String, String)> = region_values
-            .iter()
-            .filter_map(|code| {
-                let dsl = code.replace('-', "_");
-                if dsl == *code {
-                    None
-                } else {
-                    Some((code.clone(), dsl))
-                }
-            })
-            .collect();
-        types.insert(
-            "region".to_string(),
-            proto::AttributeType::StringEnum {
-                name: "Region".to_string(),
-                values: region_values,
-                // proto's StringEnum still carries the flat `namespace`
-                // string for the wire form; only the core form was
-                // restructured in carina#3222.
-                namespace: Some("aws".to_string()),
-                dsl_aliases: region_dsl_aliases,
-            },
-        );
-        types.insert(
-            "allowed_account_ids".to_string(),
-            proto::AttributeType::List {
-                element_type: Box::new(proto_string_type()),
-                ordered: false,
-                length: None,
-                validate: None,
-            },
-        );
-        types.insert(
-            "forbidden_account_ids".to_string(),
-            proto::AttributeType::List {
-                element_type: Box::new(proto_string_type()),
-                ordered: false,
-                length: None,
-                validate: None,
-            },
-        );
-        types.insert("assume_role".to_string(), assume_role_attribute_type());
-        types
+    fn provider_config_attribute_types(&self) -> ValidatedConfigSchema {
+        carina_provider_aws::AwsProviderFactory.provider_config_attribute_types()
     }
 
-    fn validate_config(&self, attrs: &HashMap<String, proto::Value>) -> Result<(), String> {
+    fn validate_config(&self, attrs: &BTreeMap<String, proto::Value>) -> Result<(), String> {
         // Region format/value validation is handled by the host via
         // `provider_config_attribute_types`. The provider-specific check
         // we add here is the cross-account guardrail: when `assume_role`
@@ -425,7 +364,7 @@ impl CarinaProvider for AwsProcessProvider {
         Ok(())
     }
 
-    fn initialize(&mut self, attrs: &HashMap<String, proto::Value>) -> Result<(), String> {
+    fn initialize(&mut self, attrs: &BTreeMap<String, proto::Value>) -> Result<(), String> {
         use carina_provider_aws::services::sts::account_guard::extract_string_list;
         use carina_provider_aws::services::sts::assume_role::extract_assume_role;
         let core_attrs: indexmap::IndexMap<_, _> = convert::proto_to_core_value_map(attrs)
@@ -472,19 +411,6 @@ impl CarinaProvider for AwsProcessProvider {
         _op: carina_plugin_sdk::PlanOp,
     ) -> Result<Vec<String>, proto::ProviderError> {
         Ok(Vec::new())
-    }
-
-    fn validate_custom_type(
-        &self,
-        identity: &carina_plugin_sdk::types::TypeIdentity,
-        value: &str,
-    ) -> Result<(), String> {
-        let core_identity = carina_core::schema::TypeIdentity::new(
-            (!identity.provider.is_empty()).then_some(identity.provider.as_str()),
-            identity.segments.iter().map(String::as_str),
-            identity.kind.as_str(),
-        );
-        carina_provider_aws::schemas::config::validate_aws_custom_type(&core_identity, value)
     }
 
     fn read(
@@ -758,7 +684,7 @@ impl CarinaProvider for AwsProcessProvider {
     ) -> Result<Vec<proto::Resource>, proto::ProviderError> {
         let mut core_resources: Vec<_> = resources
             .iter()
-            .map(convert::proto_to_core_resource)
+            .map(|resource| convert::proto_to_core_resource(resource).into())
             .collect();
         // Guest-side: drive the now-async normalizer on the guest's own
         // outermost runtime — the same pattern the `Provider` CRUD
@@ -772,81 +698,6 @@ impl CarinaProvider for AwsProcessProvider {
             .iter()
             .map(convert::core_to_proto_resource)
             .collect())
-    }
-}
-
-/// Schema for the provider-level `assume_role` block. Mirrors the
-/// Terraform AWS provider's `assume_role` (MVP field set:
-/// `role_arn`, `session_name`, `external_id`, `duration`). When
-/// present, the provider chains an `sts:AssumeRole` call on top of
-/// the ambient credential chain (aws#342).
-#[cfg(any(target_arch = "wasm32", test))]
-fn assume_role_attribute_type() -> proto::AttributeType {
-    proto::AttributeType::Struct {
-        name: "AssumeRole".to_string(),
-        fields: vec![
-            proto::StructField {
-                name: "role_arn".to_string(),
-                field_type: proto_string_type(),
-                required: true,
-                description: Some("IAM role ARN to assume.".to_string()),
-                block_name: None,
-                provider_name: None,
-                read_only: false,
-                write_only: false,
-                deferred_populate: false,
-            },
-            proto::StructField {
-                name: "session_name".to_string(),
-                field_type: proto_string_type(),
-                required: false,
-                description: Some(
-                    "STS session name to associate with the assumed-role session.".to_string(),
-                ),
-                block_name: None,
-                provider_name: None,
-                read_only: false,
-                write_only: false,
-                deferred_populate: false,
-            },
-            proto::StructField {
-                name: "external_id".to_string(),
-                field_type: proto_string_type(),
-                required: false,
-                description: Some(
-                    "External ID required by the trust policy of the assumed role.".to_string(),
-                ),
-                block_name: None,
-                provider_name: None,
-                read_only: false,
-                write_only: false,
-                deferred_populate: false,
-            },
-            proto::StructField {
-                name: "duration".to_string(),
-                field_type: proto::AttributeType::Duration,
-                required: false,
-                description: Some(
-                    "Assumed-role session duration (e.g., 30min, 1h, 15s).".to_string(),
-                ),
-                block_name: None,
-                provider_name: None,
-                read_only: false,
-                write_only: false,
-                deferred_populate: false,
-            },
-        ],
-    }
-}
-
-#[cfg(any(target_arch = "wasm32", test))]
-fn proto_string_type() -> proto::AttributeType {
-    proto::AttributeType::String {
-        pattern: None,
-        length: None,
-        validate: None,
-        to_dsl: None,
-        identity: None,
     }
 }
 
@@ -867,7 +718,9 @@ fn main() {}
 #[cfg(test)]
 mod tests {
     use super::*;
+    use carina_core::schema::{RawShape, ResourceValidation};
     use carina_plugin_sdk::types::{TypeIdentity, ValidatorType};
+    use carina_plugin_sdk::{ProviderSchemaCache, dispatch_custom_type_validation};
 
     fn ident(segments: &[&str], kind: &str) -> TypeIdentity {
         TypeIdentity {
@@ -880,18 +733,32 @@ mod tests {
         }
     }
 
+    fn dispatch(identity: &TypeIdentity, value: &str) -> Result<(), String> {
+        let provider = AwsProcessProvider::new();
+        let cache = ProviderSchemaCache::from_provider(&provider)
+            .expect("AWS resource and config schemas must form one valid dispatch table");
+        dispatch_custom_type_validation(&cache, identity, value)
+    }
+
+    fn declared_validators(
+        schema: &ValidatedResourceSchema,
+    ) -> &[carina_provider_protocol::types::ValidatorType] {
+        match schema.parts().validation {
+            ResourceValidation::Declared(validators) => validators,
+            ResourceValidation::None => &[],
+        }
+    }
+
     #[test]
     fn schemas_include_tags_validator_for_tagged_resources() {
         let provider = AwsProcessProvider::new();
         let schemas = provider.schemas();
         let bucket = schemas
             .iter()
-            .find(|s| s.resource_type == "s3.Bucket")
+            .find(|schema| schema.parts().resource_type == "s3.Bucket")
             .expect("s3.bucket schema should exist");
         assert!(
-            bucket
-                .validators
-                .contains(&ValidatorType::TagsKeyValueCheck),
+            declared_validators(bucket).contains(&ValidatorType::TagsKeyValueCheck),
             "s3.bucket should have TagsKeyValueCheck validator"
         );
     }
@@ -904,12 +771,10 @@ mod tests {
         if let Some(untagged) = configs.iter().find(|c| !c.has_tags) {
             let schema = schemas
                 .iter()
-                .find(|s| s.resource_type == untagged.resource_type_name)
+                .find(|schema| schema.parts().resource_type == untagged.resource_type_name)
                 .expect("untagged schema should exist");
             assert!(
-                !schema
-                    .validators
-                    .contains(&ValidatorType::TagsKeyValueCheck),
+                !declared_validators(schema).contains(&ValidatorType::TagsKeyValueCheck),
                 "untagged resource should not have TagsKeyValueCheck"
             );
         }
@@ -920,80 +785,74 @@ mod tests {
         let provider = AwsProcessProvider::new();
         let schemas = provider.schemas();
         assert!(
-            schemas.iter().any(|s| s.resource_type == "iam.Role"),
+            schemas
+                .iter()
+                .any(|schema| schema.parts().resource_type == "iam.Role"),
             "iam.Role schema should be registered"
         );
         assert!(
-            schemas.iter().any(|s| s.resource_type == "logs.LogGroup"),
+            schemas
+                .iter()
+                .any(|schema| schema.parts().resource_type == "logs.LogGroup"),
             "logs.LogGroup schema should be registered"
         );
     }
 
     #[test]
-    fn validate_custom_type_accepts_valid_vpc_id() {
+    fn provider_schema_cache_admits_all_schemas_and_dispatches_region() {
         let provider = AwsProcessProvider::new();
+        let expected_schema_count = carina_provider_aws::schemas::generated::configs().len();
+        let cache = ProviderSchemaCache::from_provider(&provider)
+            .expect("every AWS resource and config schema must pass v12 admission");
+
+        assert_eq!(cache.schemas().len(), expected_schema_count);
+        assert!(cache.config().parts().contains_key("region"));
+
+        let region = ident(&[], "Region");
+        dispatch_custom_type_validation(&cache, &region, "ap-northeast-1")
+            .expect("a valid AWS Region must pass every declared callback");
         assert!(
-            provider
-                .validate_custom_type(&ident(&["ec2", "Vpc"], "Id"), "vpc-12345678")
-                .is_ok()
+            dispatch_custom_type_validation(&cache, &region, "not-a-region").is_err(),
+            "an invalid AWS Region must fail declared callback dispatch"
         );
+    }
+
+    #[test]
+    fn validate_custom_type_accepts_valid_vpc_id() {
+        assert!(dispatch(&ident(&["ec2", "Vpc"], "Id"), "vpc-12345678").is_ok());
     }
 
     #[test]
     fn validate_custom_type_rejects_invalid_vpc_id() {
-        let provider = AwsProcessProvider::new();
-        assert!(
-            provider
-                .validate_custom_type(&ident(&["ec2", "Vpc"], "Id"), "subnet-12345678")
-                .is_err()
-        );
+        assert!(dispatch(&ident(&["ec2", "Vpc"], "Id"), "subnet-12345678").is_err());
     }
 
     #[test]
     fn validate_custom_type_accepts_valid_arn() {
-        let provider = AwsProcessProvider::new();
-        assert!(
-            provider
-                .validate_custom_type(&ident(&[], "Arn"), "arn:aws:s3:::my-bucket")
-                .is_ok()
-        );
+        assert!(dispatch(&ident(&[], "Arn"), "arn:aws:s3:::my-bucket").is_ok());
     }
 
     #[test]
     fn validate_custom_type_rejects_invalid_arn() {
-        let provider = AwsProcessProvider::new();
-        assert!(
-            provider
-                .validate_custom_type(&ident(&[], "Arn"), "not-an-arn")
-                .is_err()
-        );
+        assert!(dispatch(&ident(&[], "Arn"), "not-an-arn").is_err());
     }
 
     #[test]
-    fn validate_custom_type_passes_unknown_type() {
-        let provider = AwsProcessProvider::new();
+    fn validate_custom_type_rejects_unknown_type() {
         assert!(
-            provider
-                .validate_custom_type(&ident(&[], "UnknownType"), "any-value")
-                .is_ok()
+            dispatch(&ident(&[], "UnknownType"), "any-value").is_err(),
+            "the SDK dispatch table rejects identities absent from validated schemas"
         );
     }
 
     #[test]
     fn validate_custom_type_uses_structured_availability_zone_identity() {
-        let provider = AwsProcessProvider::new();
         let identity = ident(&["AvailabilityZone"], "ZoneName");
 
+        assert!(dispatch(&identity, "ap-northeast-1a").is_ok());
         assert!(
-            provider
-                .validate_custom_type(&identity, "ap-northeast-1a")
-                .is_ok()
-        );
-        assert!(
-            provider
-                .validate_custom_type(&identity, "not-an-az")
-                .is_err(),
-            "the guest provider entry point must find the structured AZ validator"
+            dispatch(&identity, "not-an-az").is_err(),
+            "the SDK dispatch table must find the structured AZ validator"
         );
     }
 
@@ -1006,16 +865,12 @@ mod tests {
         let provider = AwsProcessProvider::new();
         let types = provider.provider_config_attribute_types();
         for attr in ["allowed_account_ids", "forbidden_account_ids"] {
-            let ty = types.get(attr).unwrap_or_else(|| {
+            let ty = types.parts().get(attr).unwrap_or_else(|| {
                 panic!("{attr} must be declared as a provider config attribute")
             });
-            match ty {
-                proto::AttributeType::List { element_type, .. } => match element_type.as_ref() {
-                    proto::AttributeType::String { .. } => {}
-                    other => {
-                        panic!("{attr} must be List<String>, inner was {other:?}")
-                    }
-                },
+            match ty.raw_shape() {
+                RawShape::List { element_type, .. }
+                    if matches!(element_type.raw_shape(), RawShape::String { .. }) => {}
                 other => panic!("{attr} must be a List, was {other:?}"),
             }
         }
@@ -1023,28 +878,36 @@ mod tests {
 
     #[test]
     fn validate_custom_type_accepts_valid_iam_role_arn() {
-        let provider = AwsProcessProvider::new();
         assert!(
-            provider
-                .validate_custom_type(
-                    &ident(&["iam", "Role"], "Arn"),
-                    "arn:aws:iam::123456789012:role/my-role"
-                )
-                .is_ok()
+            dispatch(
+                &ident(&["iam", "Role"], "Arn"),
+                "arn:aws:iam::123456789012:role/my-role"
+            )
+            .is_ok()
         );
     }
 
     #[test]
     fn validate_custom_type_rejects_iam_policy_arn_for_role() {
-        let provider = AwsProcessProvider::new();
         assert!(
-            provider
-                .validate_custom_type(
-                    &ident(&["iam", "Role"], "Arn"),
-                    "arn:aws:iam::123456789012:policy/my-policy"
-                )
-                .is_err()
+            dispatch(
+                &ident(&["iam", "Role"], "Arn"),
+                "arn:aws:iam::123456789012:policy/my-policy"
+            )
+            .is_err()
         );
+    }
+
+    #[test]
+    fn validate_custom_type_uses_kms_key_id_callback() {
+        assert!(
+            dispatch(
+                &ident(&["kms", "Key"], "Id"),
+                "1234abcd-12ab-34cd-56ef-1234567890ab"
+            )
+            .is_ok()
+        );
+        assert!(dispatch(&ident(&["kms", "Key"], "Id"), "not-a-key-id").is_err());
     }
 
     #[test]
@@ -1058,38 +921,51 @@ mod tests {
         let provider = AwsProcessProvider::new();
         let types = provider.provider_config_attribute_types();
         let ty = types
+            .parts()
             .get("assume_role")
             .expect("assume_role must be declared as a provider config attribute");
-        match ty {
-            proto::AttributeType::Struct { name, fields } => {
+        match ty.raw_shape() {
+            RawShape::Struct { name, fields } => {
                 assert_eq!(name, "AssumeRole");
                 let role_arn = fields
                     .iter()
-                    .find(|f| f.name == "role_arn")
+                    .find(|field| field.name() == "role_arn")
                     .expect("assume_role.role_arn must be declared");
-                assert!(role_arn.required, "role_arn must be required");
+                assert!(
+                    role_arn.parts().declared_input_mode.is_required(),
+                    "role_arn must be required"
+                );
                 assert!(matches!(
-                    role_arn.field_type,
-                    proto::AttributeType::String { .. }
+                    role_arn.field_type().raw_shape(),
+                    RawShape::String { .. }
                 ));
                 for opt in ["session_name", "external_id"] {
                     let f = fields
                         .iter()
-                        .find(|f| f.name == opt)
+                        .find(|field| field.name() == opt)
                         .unwrap_or_else(|| panic!("assume_role.{opt} must be declared"));
-                    assert!(!f.required, "assume_role.{opt} must be optional");
-                    assert!(matches!(f.field_type, proto::AttributeType::String { .. }));
+                    assert!(
+                        !f.parts().declared_input_mode.is_required(),
+                        "assume_role.{opt} must be optional"
+                    );
+                    assert!(matches!(
+                        f.field_type().raw_shape(),
+                        RawShape::String { .. }
+                    ));
                 }
                 let duration = fields
                     .iter()
-                    .find(|f| f.name == "duration")
+                    .find(|field| field.name() == "duration")
                     .expect("assume_role.duration must be declared");
-                assert!(!duration.required, "duration must be optional");
                 assert!(
-                    matches!(duration.field_type, proto::AttributeType::Duration),
+                    !duration.parts().declared_input_mode.is_required(),
+                    "duration must be optional"
+                );
+                assert!(
+                    matches!(duration.field_type().raw_shape(), RawShape::Duration),
                     "duration must be a Duration so DSL literals like `30min` are accepted; \
                      was {:?}",
-                    duration.field_type
+                    duration.field_type()
                 );
             }
             other => panic!("assume_role must be a Struct, was {other:?}"),
@@ -1105,7 +981,7 @@ mod tests {
     }
 
     fn proto_map(items: &[(&str, proto::Value)]) -> proto::Value {
-        let mut m = std::collections::HashMap::new();
+        let mut m = BTreeMap::new();
         for (k, v) in items {
             m.insert((*k).to_string(), v.clone());
         }
@@ -1115,7 +991,7 @@ mod tests {
     #[test]
     fn validate_config_accepts_assume_role_in_allowed_account() {
         let provider = AwsProcessProvider::new();
-        let attrs = HashMap::from([
+        let attrs = BTreeMap::from([
             (
                 "allowed_account_ids".to_string(),
                 proto_list_str(&["412038850359"]),
@@ -1136,7 +1012,7 @@ mod tests {
     #[test]
     fn validate_config_rejects_assume_role_outside_allowed_account() {
         let provider = AwsProcessProvider::new();
-        let attrs = HashMap::from([
+        let attrs = BTreeMap::from([
             (
                 "allowed_account_ids".to_string(),
                 proto_list_str(&["111111111111"]),
@@ -1159,7 +1035,7 @@ mod tests {
     #[test]
     fn validate_config_no_assume_role_is_noop() {
         let provider = AwsProcessProvider::new();
-        let attrs = HashMap::from([(
+        let attrs = BTreeMap::from([(
             "allowed_account_ids".to_string(),
             proto_list_str(&["412038850359"]),
         )]);
@@ -1175,7 +1051,7 @@ mod tests {
         // assume-role is allowed. (STS itself remains the final
         // authority.)
         let provider = AwsProcessProvider::new();
-        let attrs = HashMap::from([(
+        let attrs = BTreeMap::from([(
             "assume_role".to_string(),
             proto_map(&[(
                 "role_arn",

@@ -21,7 +21,7 @@ impl AwsProvider {
     /// `name_regex` inputs.
     pub(crate) fn do_read_iam_roles_data_source(
         &self,
-        resource: &DataSource,
+        resource: &DataSource<impl Clone + Send + Sync + 'static>,
     ) -> BoxFuture<'_, ProviderResult<State>> {
         let resource = resource.clone();
         Box::pin(async move {
@@ -60,7 +60,7 @@ async fn list_matching_roles(
     client: &IamClient,
     path_prefix: Option<&str>,
     name_filter: Option<&Regex>,
-    resource: &DataSource,
+    resource: &DataSource<impl Clone + Send + Sync + 'static>,
 ) -> Result<Vec<(String, String)>, ProviderError> {
     let mut matches: Vec<(String, String)> = Vec::new();
     let mut marker: Option<String> = None;

@@ -33,23 +33,23 @@ fn s3_object_lock_retention_period() -> AttributeType {
         AttributeType::struct_(
             "RetentionDays",
             vec![
-                StructField::new("days", AttributeType::int())
+                StructField::required("days", AttributeType::int())
                     .with_provider_name("Days")
                     .with_description(
                         "Retention duration in days. Set exactly one of `days` or `years`.",
                     )
-                    .required(),
+                    .build(),
             ],
         ),
         AttributeType::struct_(
             "RetentionYears",
             vec![
-                StructField::new("years", AttributeType::int())
+                StructField::required("years", AttributeType::int())
                     .with_provider_name("Years")
                     .with_description(
                         "Retention duration in years. Set exactly one of `days` or `years`.",
                     )
-                    .required(),
+                    .build(),
             ],
         ),
     ])
@@ -63,13 +63,13 @@ fn s3_object_lock_default_retention() -> AttributeType {
     AttributeType::struct_(
         "DefaultRetention",
         vec![
-            StructField::new("mode", s3_object_lock_retention_mode())
+            StructField::required("mode", s3_object_lock_retention_mode())
                 .with_provider_name("Mode")
                 .with_description("Retention mode applied to new objects in the bucket.")
-                .required(),
-            StructField::new("retention_period", s3_object_lock_retention_period())
+                .build(),
+            StructField::required("retention_period", s3_object_lock_retention_period())
                 .with_description("Retention duration; set exactly one of `days` or `years`.")
-                .required(),
+                .build(),
         ],
     )
 }
@@ -79,12 +79,12 @@ pub fn bucket_object_lock_rule() -> AttributeType {
     AttributeType::struct_(
         "ObjectLockRule",
         vec![
-            StructField::new("default_retention", s3_object_lock_default_retention())
+            StructField::optional("default_retention", s3_object_lock_default_retention())
                 .with_provider_name("DefaultRetention")
                 .with_description(
                     "Bucket-default retention settings. `retention_period` must contain exactly one of `days` or `years`.",
                 )
-                .with_block_name("default_retention"),
+                .with_block_name("default_retention").build(),
         ],
     )
 }
@@ -138,7 +138,7 @@ mod tests {
             Some(map([("days", int(30))])),
         ));
 
-        let schema = carina_core::schema::Schema::flat(bucket_object_lock_rule());
+        let schema = crate::tests::rootless(bucket_object_lock_rule());
         assert!(schema.validate_collect(&value).is_empty());
     }
 
@@ -149,13 +149,13 @@ mod tests {
             Some(map([("years", int(1))])),
         ));
 
-        let schema = carina_core::schema::Schema::flat(bucket_object_lock_rule());
+        let schema = crate::tests::rootless(bucket_object_lock_rule());
         assert!(schema.validate_collect(&value).is_empty());
     }
 
     #[test]
     fn object_lock_rule_reports_days_and_years_as_mutually_exclusive() {
-        let schema = carina_core::schema::Schema::flat(bucket_object_lock_rule());
+        let schema = crate::tests::rootless(bucket_object_lock_rule());
         let both = rule(default_retention(
             Some("GOVERNANCE"),
             Some(map([("days", int(30)), ("years", int(1))])),
@@ -183,7 +183,7 @@ mod tests {
     fn object_lock_rule_empty_period_reports_exclusive_union_error() {
         let value = rule(default_retention(Some("GOVERNANCE"), Some(map([]))));
 
-        let schema = carina_core::schema::Schema::flat(bucket_object_lock_rule());
+        let schema = crate::tests::rootless(bucket_object_lock_rule());
         let errors = schema.validate_collect(&value);
         assert_eq!(errors.len(), 1, "{errors:?}");
         assert_eq!(
@@ -196,7 +196,7 @@ mod tests {
     fn object_lock_rule_rejects_mode_without_retention_period() {
         let value = rule(default_retention(Some("GOVERNANCE"), None));
 
-        let schema = carina_core::schema::Schema::flat(bucket_object_lock_rule());
+        let schema = crate::tests::rootless(bucket_object_lock_rule());
         assert!(!schema.validate_collect(&value).is_empty());
     }
 
@@ -204,13 +204,13 @@ mod tests {
     fn object_lock_rule_rejects_retention_period_without_mode() {
         let value = rule(default_retention(None, Some(map([("days", int(30))]))));
 
-        let schema = carina_core::schema::Schema::flat(bucket_object_lock_rule());
+        let schema = crate::tests::rootless(bucket_object_lock_rule());
         assert!(!schema.validate_collect(&value).is_empty());
     }
 
     #[test]
     fn object_lock_rule_allows_default_retention_to_be_omitted() {
-        let schema = carina_core::schema::Schema::flat(bucket_object_lock_rule());
+        let schema = crate::tests::rootless(bucket_object_lock_rule());
         assert!(schema.validate_collect(&map([])).is_empty());
     }
 }

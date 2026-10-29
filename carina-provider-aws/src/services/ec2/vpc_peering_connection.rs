@@ -67,7 +67,7 @@ impl AwsProvider {
     /// Create an EC2 VPC Peering Connection
     pub(crate) async fn create_ec2_vpc_peering_connection<A: AwsCreateAttempt>(
         &self,
-        resource: &Resource,
+        resource: &Resource<impl Sized>,
         client_token: &ClientToken,
         attempt: A,
     ) -> Result<A::Step, A::Verdict> {

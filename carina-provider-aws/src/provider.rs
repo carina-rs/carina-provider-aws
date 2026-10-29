@@ -1020,7 +1020,7 @@ impl AwsProvider {
         UpdateOutcome::partial_success(state, reason, missing_attributes)
     }
 
-    pub(crate) fn sent_only(resource: &Resource, names: &[&str]) -> Sent {
+    pub(crate) fn sent_only(resource: &Resource<impl Sized>, names: &[&str]) -> Sent {
         Sent::only(
             names
                 .iter()
@@ -1031,7 +1031,7 @@ impl AwsProvider {
 
     async fn request_acm_certificate_transition(
         &self,
-        resource: &Resource,
+        resource: &Resource<impl Sized>,
         schema: &carina_core::schema::ResourceSchema,
         fresh_client_token: FreshAcmClientToken,
         attempts_remaining: u8,
@@ -1073,7 +1073,7 @@ impl AwsProvider {
 
     async fn request_initial_acm_certificate_transition(
         &self,
-        resource: &Resource,
+        resource: &Resource<impl Sized>,
         schema: &carina_core::schema::ResourceSchema,
         fresh_client_token: FreshAcmClientToken,
         attempts_after_request: NonZeroU8,
@@ -1109,7 +1109,7 @@ impl AwsProvider {
 
     async fn finish_acm_certificate_issued<I: AwsIssuedCreate>(
         &self,
-        resource: &Resource,
+        resource: &Resource<impl Sized>,
         schema: &carina_core::schema::ResourceSchema,
         identifier: AppliedIdentifier,
         issued: I,
@@ -1125,7 +1125,7 @@ impl AwsProvider {
 
     async fn finish_acm_certificate_resumed<R: AwsResumedCreate>(
         &self,
-        resource: &Resource,
+        resource: &Resource<impl Sized>,
         schema: &carina_core::schema::ResourceSchema,
         identifier: AppliedIdentifier,
         resumed: R,
@@ -1256,7 +1256,7 @@ impl AwsProvider {
 
     pub(crate) async fn finish_tagged_ec2_create<A, O, Failure, Identifier>(
         &self,
-        resource: &Resource,
+        resource: &Resource<impl Sized>,
         attempt: A,
         context: TaggedEc2CreateContext<'_>,
         result: Result<O, Failure>,
@@ -1328,7 +1328,7 @@ impl AwsProvider {
 
     async fn discover_tagged_ec2_resources(
         &self,
-        resource: &Resource,
+        resource: &Resource<impl Sized>,
         kind: Ec2TaggedResourceKind,
         create_token: &ClientToken,
     ) -> ProviderResult<Vec<AppliedIdentifier>> {
@@ -1475,7 +1475,7 @@ impl AwsProvider {
 
     async fn tagged_ec2_discovery(
         &self,
-        resource: &Resource,
+        resource: &Resource<impl Sized>,
         kind: Ec2TaggedResourceKind,
         create_token: ClientToken,
         attempts_remaining: u8,
@@ -1540,7 +1540,7 @@ impl AwsProvider {
 
     async fn continue_tagged_ec2_create(
         &self,
-        resource: &Resource,
+        resource: &Resource<impl Sized>,
         kind: Ec2TaggedResourceKind,
         identifier: AppliedIdentifier,
     ) -> ProviderResult<TaggedEc2Continuation> {
@@ -1630,7 +1630,7 @@ impl AwsProvider {
 
     pub(crate) async fn finish_tagged_ec2_issued<I: AwsIssuedCreate>(
         &self,
-        resource: &Resource,
+        resource: &Resource<impl Sized>,
         kind: Ec2TaggedResourceKind,
         identifier: AppliedIdentifier,
         issued: I,
@@ -1649,7 +1649,7 @@ impl AwsProvider {
 
     async fn finish_tagged_ec2_resumed<R: AwsResumedCreate>(
         &self,
-        resource: &Resource,
+        resource: &Resource<impl Sized>,
         kind: Ec2TaggedResourceKind,
         identifier: AppliedIdentifier,
         resumed: R,
@@ -1669,7 +1669,7 @@ impl AwsProvider {
     /// Perform the initial, non-blocking create step.
     pub async fn create_step<A: AwsCreateAttempt>(
         &self,
-        resource: &Resource,
+        resource: &Resource<impl Sized>,
         attempt: A,
     ) -> Result<A::Step, A::Verdict> {
         if let Err(error) =
@@ -1953,7 +1953,7 @@ impl AwsProvider {
     /// Perform one describe step for a pending create operation.
     pub async fn poll_create_step<U: AwsPollAttempt>(
         &self,
-        resource: &Resource,
+        resource: &Resource<impl Sized>,
         token: AwsCreateToken,
         poll: AwsCreatePoll<U, U::Issued>,
     ) -> Result<U::Step, U::Verdict> {
@@ -2285,7 +2285,7 @@ impl AwsProvider {
 
     async fn drive_native_create(
         &self,
-        resource: &Resource,
+        resource: &Resource<impl Sized>,
         attempt: CreateAttempt,
     ) -> Result<CreateOutcome, CreateFailure> {
         let budget =
@@ -2386,7 +2386,7 @@ impl AwsProvider {
     /// Perform one step while resuming a create loaded from state.
     pub async fn resume_create_step<U: AwsResumeAttempt>(
         &self,
-        resource: &Resource,
+        resource: &Resource<impl Sized>,
         token: AwsCreateToken,
         resume: AwsCreateResume<U, U::Resumed>,
     ) -> Result<U::Step, U::Verdict> {
@@ -2753,7 +2753,10 @@ impl AwsProvider {
     /// The WASM guest bridge already receives a protocol-validated request and
     /// cannot forge carina-core's sealed provider-readiness witness, so it
     /// shares this body with the core [`Provider`] implementation.
-    pub async fn read_data_source_resource(&self, resource: &DataSource) -> ProviderResult<State> {
+    pub async fn read_data_source_resource(
+        &self,
+        resource: &DataSource<impl Clone + Send + Sync + 'static>,
+    ) -> ProviderResult<State> {
         crate::provider_generated::dispatch_read_data_source(self, resource).await
     }
 

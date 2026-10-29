@@ -66,7 +66,7 @@ impl AwsProvider {
     /// Create an EC2 Route
     pub(crate) async fn create_ec2_route(
         &self,
-        resource: &Resource,
+        resource: &Resource<impl Sized>,
     ) -> ProviderResult<CreateCompletion> {
         let route_table_id = require_string_attr(resource, "route_table_id")?;
         let destination_cidr = require_string_attr(resource, "destination_cidr_block")?;

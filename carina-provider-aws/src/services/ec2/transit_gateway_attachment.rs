@@ -70,7 +70,7 @@ fn transit_gateway_attachment_delete_poll_state(
 }
 
 fn build_create_transit_gateway_attachment_options(
-    resource: &Resource,
+    resource: &Resource<impl Sized>,
     schema: &ResourceSchema,
 ) -> ProviderResult<Option<aws_sdk_ec2::types::CreateTransitGatewayVpcAttachmentRequestOptions>> {
     use aws_sdk_ec2::types::{
@@ -164,7 +164,7 @@ impl AwsProvider {
     /// Create an EC2 Transit Gateway VPC Attachment
     pub(crate) async fn create_ec2_transit_gateway_attachment_start<A: AwsCreateAttempt>(
         &self,
-        resource: &Resource,
+        resource: &Resource<impl Sized>,
         schema: &ResourceSchema,
         client_token: &ClientToken,
         attempt: A,

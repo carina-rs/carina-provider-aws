@@ -28,7 +28,7 @@ pub fn organizations_organization_config() -> AwsSchemaConfig {
         .with_description("Contains details about an organization. An organization is a collection of accounts that are centrally managed together using consolidated billing, organized hierarchically with organizational units (...")
         .with_conflicting_replacement()
         .attribute(
-            AttributeSchema::new("feature_set", AttributeType::enum_(
+            AttributeSchema::optional("feature_set", AttributeType::enum_(
     carina_core::schema::enum_identity("FeatureSet", Some("aws.organizations.Organization")),
     Some(vec!["ALL".to_string(), "CONSOLIDATED_BILLING".to_string()]),
     vec![("ALL".to_string(), "all".to_string()), ("CONSOLIDATED_BILLING".to_string(), "consolidated_billing".to_string())],
@@ -37,37 +37,38 @@ pub fn organizations_organization_config() -> AwsSchemaConfig {
 ))
                 .create_only()
                 .with_description("Specifies the feature set supported by the new organization. Each feature set supports different levels of functionality. CONSOLIDATED_BILLING: All me...")
-                .with_provider_name("FeatureSet"),
+                .with_provider_name("FeatureSet")
+                .build(),
         )
         .attribute(
-            AttributeSchema::new("arn", self::arn())
-                .read_only()
+            AttributeSchema::provider_populated("arn", self::arn())
                 .with_description("The Amazon Resource Name (ARN) of an organization. For more information about ARNs in Organizations, see ARN Formats Supported by Organizations in the... (read-only)")
-                .with_provider_name("Arn"),
+                .with_provider_name("Arn")
+                .build(),
         )
         .attribute(
-            AttributeSchema::new("id", AttributeType::string())
-                .read_only()
+            AttributeSchema::provider_populated("id", AttributeType::string())
                 .with_description("The unique identifier (ID) of an organization. The regex pattern for an organization ID string requires \"o-\" followed by from 10 to 32 lowercase let... (read-only)")
-                .with_provider_name("Id"),
+                .with_provider_name("Id")
+                .build(),
         )
         .attribute(
-            AttributeSchema::new("master_account_arn", super::arn())
-                .read_only()
+            AttributeSchema::provider_populated("master_account_arn", super::arn())
                 .with_description("The Amazon Resource Name (ARN) of the account that is designated as the management account for the organization. For more information about ARNs in Or... (read-only)")
-                .with_provider_name("MasterAccountArn"),
+                .with_provider_name("MasterAccountArn")
+                .build(),
         )
         .attribute(
-            AttributeSchema::new("master_account_email", types::email())
-                .read_only()
+            AttributeSchema::provider_populated("master_account_email", types::email())
                 .with_description("The email address that is associated with the Amazon Web Services account that is designated as the management account for the organization. (read-only)")
-                .with_provider_name("MasterAccountEmail"),
+                .with_provider_name("MasterAccountEmail")
+                .build(),
         )
         .attribute(
-            AttributeSchema::new("master_account_id", super::aws_account_id())
-                .read_only()
+            AttributeSchema::provider_populated("master_account_id", super::aws_account_id())
                 .with_description("The unique identifier (ID) of the management account of an organization. The regex pattern for an account ID string requires exactly 12 digits. (read-only)")
-                .with_provider_name("MasterAccountId"),
+                .with_provider_name("MasterAccountId")
+                .build(),
         )
     }
 }

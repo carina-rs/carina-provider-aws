@@ -68,7 +68,10 @@ pub fn value_as_str(v: &Value) -> Option<&str> {
 /// Extract a required `String` attribute from a resource.
 ///
 /// Returns the string value or a `ProviderError` with `"{attr_name} is required"`.
-pub fn require_string_attr(resource: &Resource, attr_name: &str) -> ProviderResult<String> {
+pub fn require_string_attr(
+    resource: &Resource<impl Sized>,
+    attr_name: &str,
+) -> ProviderResult<String> {
     match resource.get_attr(attr_name) {
         Some(Value::Concrete(ConcreteValue::String(s))) => Ok(s.expose_plaintext().to_string()),
         _ => Err(
@@ -87,7 +90,7 @@ pub(crate) fn enum_attr_error(id: &ResourceId, error: EnumAttrError) -> Provider
 /// AWS API canonical spelling, or `ProviderError::invalid_input`
 /// when the attribute is absent or carries a non-enum-shaped value.
 pub fn require_enum_attr(
-    resource: &Resource,
+    resource: &Resource<impl Sized>,
     schema: &ResourceSchema,
     attr_name: &str,
 ) -> ProviderResult<String> {
@@ -101,7 +104,7 @@ pub fn require_enum_attr(
 
 /// Return the AWS API canonical spelling for an optional top-level enum.
 pub fn optional_enum_attr<'a>(
-    resource: &'a Resource,
+    resource: &'a Resource<impl Sized>,
     schema: &'a ResourceSchema,
     attr_name: &str,
 ) -> ProviderResult<Option<&'a str>> {
@@ -116,7 +119,7 @@ pub fn optional_enum_attr<'a>(
 /// `Value` shape. Sibling of [`optional_enum_attr`] /
 /// [`value_as_str`]; closes the symmetric top-level helper set for
 /// Bool reads (carina-rs/carina-provider-aws#451).
-pub(crate) fn optional_bool_attr(resource: &Resource, attr_name: &str) -> Option<bool> {
+pub(crate) fn optional_bool_attr(resource: &Resource<impl Sized>, attr_name: &str) -> Option<bool> {
     match resource.get_attr(attr_name)? {
         Value::Concrete(ConcreteValue::Bool(b)) => Some(*b),
         _ => None,
@@ -137,7 +140,7 @@ pub(crate) fn optional_bool_attr(resource: &Resource, attr_name: &str) -> Option
 /// its parent struct (`resource.get_attr("options")` -> Map ->
 /// `m.get("dns_support")`).
 pub(crate) fn optional_enum_struct_field<'a>(
-    resource: &'a Resource,
+    resource: &'a Resource<impl Sized>,
     schema: &'a ResourceSchema,
     struct_attr: &str,
     field_name: &str,
@@ -161,7 +164,7 @@ pub(crate) fn optional_enum_struct_field<'a>(
 /// there is nothing analogous to the three-variant enum coverage.
 /// carina-rs/carina-provider-aws#441 / #442.
 pub(crate) fn optional_int_struct_field(
-    resource: &Resource,
+    resource: &Resource<impl Sized>,
     struct_attr: &str,
     field_name: &str,
 ) -> Option<i64> {
@@ -185,7 +188,7 @@ pub(crate) fn optional_int_struct_field(
 /// [`optional_string_list_struct_field`] /
 /// [`optional_string_struct_field`]. carina-rs/carina-provider-aws#445.
 pub(crate) fn optional_bool_struct_field(
-    resource: &Resource,
+    resource: &Resource<impl Sized>,
     struct_attr: &str,
     field_name: &str,
 ) -> Option<bool> {
@@ -214,7 +217,7 @@ pub(crate) fn optional_bool_struct_field(
 /// when grepping for unused functions.
 #[allow(dead_code)]
 pub(crate) fn optional_string_struct_field<'a>(
-    resource: &'a Resource,
+    resource: &'a Resource<impl Sized>,
     struct_attr: &str,
     field_name: &str,
 ) -> Option<&'a str> {
@@ -244,7 +247,7 @@ pub(crate) fn optional_string_struct_field<'a>(
 /// indicates schema/value mismatch upstream.
 /// carina-rs/carina-provider-aws#441 / #442.
 pub(crate) fn optional_string_list_struct_field(
-    resource: &Resource,
+    resource: &Resource<impl Sized>,
     struct_attr: &str,
     field_name: &str,
 ) -> Option<Vec<String>> {
@@ -271,7 +274,7 @@ pub(crate) fn optional_string_list_struct_field(
 
 /// Build the create-time EC2 tags, including the provider discovery token.
 pub(crate) fn build_tag_specification_with_create_token(
-    resource: &Resource,
+    resource: &Resource<impl Sized>,
     resource_type: ResourceType,
     token: &ClientToken,
 ) -> TagSpecification {
@@ -628,7 +631,7 @@ mod tests {
     }
 
     fn canonical_validation_method_value() -> Value {
-        use carina_core::schema::{AttributeType, Schema, enum_identity};
+        use carina_core::schema::{AttributeType, enum_identity};
 
         let attr_type = AttributeType::enum_(
             enum_identity("ValidationMethod", Some("aws.acm.Certificate")),
@@ -640,12 +643,12 @@ mod tests {
             None,
             None,
         );
-        let schema = Schema::flat(attr_type);
+        let schema = crate::test_rootless_type(attr_type);
         schema.canonicalize_state(Value::Concrete(ConcreteValue::String("DNS".into())))
     }
 
     fn canonical_certificate_transparency_value() -> Value {
-        use carina_core::schema::{AttributeType, Schema, enum_identity};
+        use carina_core::schema::{AttributeType, enum_identity};
 
         let attr_type = AttributeType::enum_(
             enum_identity(
@@ -660,7 +663,7 @@ mod tests {
             None,
             None,
         );
-        let schema = Schema::flat(attr_type);
+        let schema = crate::test_rootless_type(attr_type);
         schema.canonicalize_state(Value::Concrete(ConcreteValue::String("ENABLED".into())))
     }
 

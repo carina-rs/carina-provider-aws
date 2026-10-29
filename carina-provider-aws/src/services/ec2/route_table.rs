@@ -91,7 +91,7 @@ impl AwsProvider {
     /// Create an EC2 Route Table
     pub(crate) async fn create_ec2_route_table<A: AwsCreateAttempt>(
         &self,
-        resource: &Resource,
+        resource: &Resource<impl Sized>,
         client_token: &ClientToken,
         attempt: A,
     ) -> Result<A::Step, A::Verdict> {
@@ -130,7 +130,7 @@ impl AwsProvider {
 
     pub(crate) async fn continue_ec2_route_table_create(
         &self,
-        resource: &Resource,
+        resource: &Resource<impl Sized>,
         rt_id: &str,
     ) -> ProviderResult<()> {
         // Add routes

@@ -11,14 +11,12 @@ pub fn sqs_redrive_policy() -> AttributeType {
     AttributeType::struct_(
         "RedrivePolicy".to_string(),
         vec![
-            StructField::new("dead_letter_target_arn", arn())
+            StructField::required("dead_letter_target_arn", arn())
                 .with_provider_name("deadLetterTargetArn")
-                .required()
-                .with_description("ARN of the dead-letter queue to which Amazon SQS moves messages after `max_receive_count` is exceeded."),
-            StructField::new("max_receive_count", AttributeType::int())
+                .with_description("ARN of the dead-letter queue to which Amazon SQS moves messages after `max_receive_count` is exceeded.").build(),
+            StructField::required("max_receive_count", AttributeType::int())
                 .with_provider_name("maxReceiveCount")
-                .required()
-                .with_description("Number of times a consumer can receive a message before it is moved to the dead-letter queue. Range 1–1,000."),
+                .with_description("Number of times a consumer can receive a message before it is moved to the dead-letter queue. Range 1–1,000.").build(),
         ],
     )
 }
@@ -42,13 +40,12 @@ pub fn sqs_redrive_allow_policy() -> AttributeType {
     AttributeType::struct_(
         "RedriveAllowPolicy".to_string(),
         vec![
-            StructField::new("redrive_permission", sqs_redrive_permission())
+            StructField::required("redrive_permission", sqs_redrive_permission())
                 .with_provider_name("redrivePermission")
-                .required()
-                .with_description("Which source queues may redrive into this queue. `allowAll`: any queue in the account; `denyAll`: none; `byQueue`: only the ARNs in `source_queue_arns`."),
-            StructField::new("source_queue_arns", AttributeType::list(arn()))
+                .with_description("Which source queues may redrive into this queue. `allowAll`: any queue in the account; `denyAll`: none; `byQueue`: only the ARNs in `source_queue_arns`.").build(),
+            StructField::optional("source_queue_arns", AttributeType::list(arn()))
                 .with_provider_name("sourceQueueArns")
-                .with_description("Up to 10 source queue ARNs permitted to redrive into this queue. Required when `redrive_permission` is `byQueue`."),
+                .with_description("Up to 10 source queue ARNs permitted to redrive into this queue. Required when `redrive_permission` is `byQueue`.").build(),
         ],
     )
 }

@@ -13,7 +13,7 @@ use crate::helpers::require_enum_attr;
 use crate::provider::CreateCompletion;
 
 fn build_security_group_rule_permission(
-    resource: &Resource,
+    resource: &Resource<impl Sized>,
     schema: &ResourceSchema,
     is_ingress: bool,
 ) -> ProviderResult<aws_sdk_ec2::types::IpPermission> {
@@ -104,7 +104,7 @@ fn build_security_group_rule_permission(
     Ok(permission_builder.build())
 }
 
-fn require_security_group_rule_group_id(resource: &Resource) -> ProviderResult<String> {
+fn require_security_group_rule_group_id(resource: &Resource<impl Sized>) -> ProviderResult<String> {
     match resource.get_attr("group_id") {
         Some(Value::Concrete(ConcreteValue::String(s))) => Ok(s.expose_plaintext().to_string()),
         _ => Err(
@@ -202,7 +202,7 @@ impl AwsProvider {
     /// Create an EC2 Security Group Rule (shared between ingress and egress)
     pub(crate) async fn create_ec2_security_group_rule(
         &self,
-        resource: &Resource,
+        resource: &Resource<impl Sized>,
         schema: &ResourceSchema,
         is_ingress: bool,
     ) -> ProviderResult<CreateCompletion> {
@@ -221,7 +221,7 @@ impl AwsProvider {
 
     async fn create_ec2_security_group_rule_with_permission(
         &self,
-        resource: &Resource,
+        resource: &Resource<impl Sized>,
         sg_id: String,
         permission: aws_sdk_ec2::types::IpPermission,
         is_ingress: bool,

@@ -95,7 +95,7 @@ impl AwsProvider {
     /// Create an EC2 VPC
     pub(crate) async fn create_ec2_vpc<A: AwsCreateAttempt>(
         &self,
-        resource: &Resource,
+        resource: &Resource<impl Sized>,
         schema: &ResourceSchema,
         client_token: &ClientToken,
         attempt: A,
@@ -146,7 +146,7 @@ impl AwsProvider {
 
     pub(crate) async fn continue_ec2_vpc_create(
         &self,
-        resource: &Resource,
+        resource: &Resource<impl Sized>,
         vpc_id: &str,
     ) -> ProviderResult<()> {
         // Configure DNS support

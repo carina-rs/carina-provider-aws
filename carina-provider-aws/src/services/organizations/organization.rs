@@ -108,7 +108,7 @@ impl AwsProvider {
     /// Create an Organizations organization
     pub(crate) async fn create_organizations_organization(
         &self,
-        resource: &Resource,
+        resource: &Resource<impl Sized>,
         schema: &ResourceSchema,
     ) -> ProviderResult<CreateCompletion> {
         let mut req = self.organizations_client.create_organization();

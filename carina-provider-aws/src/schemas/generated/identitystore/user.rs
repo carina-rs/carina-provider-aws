@@ -16,32 +16,36 @@ pub fn identitystore_user_config() -> AwsSchemaConfig {
         schema: ResourceSchema::new("identitystore.User")
             .as_data_source()
             .attribute(
-                AttributeSchema::new("identity_store_id", AttributeType::string())
-                    .required()
+                AttributeSchema::required("identity_store_id", AttributeType::string())
                     .with_description("The globally unique identifier for the identity store.")
-                    .with_provider_name("IdentityStoreId"),
+                    .with_provider_name("IdentityStoreId")
+                    .build(),
             )
             .attribute(
-                AttributeSchema::new("user_id", AttributeType::string())
+                AttributeSchema::optional("user_id", AttributeType::string())
                     .with_description(
                         "The identifier for the user. Provide either user_id or user_name.",
                     )
-                    .with_provider_name("UserId"),
+                    .with_provider_name("UserId")
+                    .build(),
             )
             .attribute(
-                AttributeSchema::new("user_name", AttributeType::string())
+                AttributeSchema::optional("user_name", AttributeType::string())
                     .with_description("The user's user name. Provide either user_id or user_name.")
-                    .with_provider_name("UserName"),
+                    .with_provider_name("UserName")
+                    .build(),
             )
             .attribute(
-                AttributeSchema::new("display_name", AttributeType::string())
+                AttributeSchema::optional("display_name", AttributeType::string())
                     .with_description("Display name of the user.")
-                    .with_provider_name("DisplayName"),
+                    .with_provider_name("DisplayName")
+                    .build(),
             )
             .attribute(
-                AttributeSchema::new("emails", AttributeType::string())
+                AttributeSchema::optional("emails", AttributeType::string())
                     .with_description("Email addresses associated with the user.")
-                    .with_provider_name("Emails"),
+                    .with_provider_name("Emails")
+                    .build(),
             ),
     }
 }

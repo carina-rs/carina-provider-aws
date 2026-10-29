@@ -19,95 +19,106 @@ pub fn ec2_security_group_ingress_config() -> AwsSchemaConfig {
         .with_description("Describes a security group rule.")
         .with_conflicting_replacement()
         .attribute(
-            AttributeSchema::new("cidr_ip", types::ipv4_cidr())
+            AttributeSchema::optional("cidr_ip", types::ipv4_cidr())
                 .create_only()
                 .with_description("The IPv4 address range, in CIDR format. Amazon Web Services canonicalizes IPv4 and IPv6 CIDRs. For example, if you specify 100.68.0.18/18 for the CIDR...")
-                .with_provider_name("CidrIp"),
+                .with_provider_name("CidrIp")
+                .build(),
         )
         .attribute(
-            AttributeSchema::new("cidr_ipv6", types::ipv6_cidr())
+            AttributeSchema::optional("cidr_ipv6", types::ipv6_cidr())
                 .create_only()
                 .with_description("The IPv6 CIDR range.")
-                .with_provider_name("CidrIpv6"),
+                .with_provider_name("CidrIpv6")
+                .build(),
         )
         .attribute(
-            AttributeSchema::new("description", AttributeType::string())
+            AttributeSchema::optional("description", AttributeType::string())
                 .create_only()
                 .with_description("The security group rule description.")
-                .with_provider_name("Description"),
+                .with_provider_name("Description")
+                .build(),
         )
         .attribute(
-            AttributeSchema::new("from_port", AttributeType::refined_int(
+            AttributeSchema::optional("from_port", AttributeType::refined_int(
                 None,
                 Some((Some(-1), Some(65535))),
             ))
                 .create_only()
                 .with_description("If the protocol is TCP or UDP, this is the start of the port range. If the protocol is ICMP, this is the ICMP type or -1 (all ICMP types). To specify ...")
-                .with_provider_name("FromPort"),
+                .with_provider_name("FromPort")
+                .build(),
         )
         .attribute(
-            AttributeSchema::new("group_id", super::security_group_id())
+            AttributeSchema::optional("group_id", super::security_group_id())
                 .create_only()
                 .with_description("The ID of the security group.")
-                .with_provider_name("GroupId"),
+                .with_provider_name("GroupId")
+                .build(),
         )
         .attribute(
-            AttributeSchema::new("group_name", AttributeType::string())
+            AttributeSchema::optional("group_name", AttributeType::string())
                 .create_only()
                 .with_description("[Default VPC] The name of the security group. For security groups for a default VPC you can specify either the ID or the name of the security group. F...")
-                .with_provider_name("GroupName"),
+                .with_provider_name("GroupName")
+                .build(),
         )
         .attribute(
-            AttributeSchema::new("ip_protocol", AttributeType::enum_(
+            AttributeSchema::required("ip_protocol", AttributeType::enum_(
     carina_core::schema::enum_identity("IpProtocol", Some("aws.ec2.SecurityGroupIngress")),
     Some(vec!["tcp".to_string(), "udp".to_string(), "icmp".to_string(), "icmpv6".to_string(), "-1".to_string()]),
     vec![("-1".to_string(), "all".to_string()), ("tcp".to_string(), "tcp".to_string()), ("udp".to_string(), "udp".to_string()), ("icmp".to_string(), "icmp".to_string()), ("icmpv6".to_string(), "icmpv6".to_string())],
     None,
     None,
 ))
-                .required()
                 .create_only()
                 .with_description("The IP protocol name (tcp, udp, icmp) or number (see Protocol Numbers). To specify all protocols, use -1. To specify icmpv6, use IP permissions instea...")
-                .with_provider_name("IpProtocol"),
+                .with_provider_name("IpProtocol")
+                .build(),
         )
         .attribute(
-            AttributeSchema::new("source_prefix_list_id", super::prefix_list_id())
+            AttributeSchema::optional("source_prefix_list_id", super::prefix_list_id())
                 .create_only()
                 .with_description("The ID of the source prefix list.")
-                .with_provider_name("SourcePrefixListId"),
+                .with_provider_name("SourcePrefixListId")
+                .build(),
         )
         .attribute(
-            AttributeSchema::new("source_security_group_name", AttributeType::string())
+            AttributeSchema::optional("source_security_group_name", AttributeType::string())
                 .create_only()
                 .with_description("[Default VPC] The name of the source security group. The rule grants full ICMP, UDP, and TCP access. To create a rule with a specific protocol and por...")
-                .with_provider_name("SourceSecurityGroupName"),
+                .with_provider_name("SourceSecurityGroupName")
+                .build(),
         )
         .attribute(
-            AttributeSchema::new("source_security_group_owner_id", super::aws_account_id())
+            AttributeSchema::optional("source_security_group_owner_id", super::aws_account_id())
                 .create_only()
                 .with_description("The Amazon Web Services account ID for the source security group, if the source security group is in a different account. The rule grants full ICMP, U...")
-                .with_provider_name("SourceSecurityGroupOwnerId"),
+                .with_provider_name("SourceSecurityGroupOwnerId")
+                .build(),
         )
         .attribute(
-            AttributeSchema::new("to_port", AttributeType::refined_int(
+            AttributeSchema::optional("to_port", AttributeType::refined_int(
                 None,
                 Some((Some(-1), Some(65535))),
             ))
                 .create_only()
                 .with_description("If the protocol is TCP or UDP, this is the end of the port range. If the protocol is ICMP, this is the ICMP code or -1 (all ICMP codes). If the start ...")
-                .with_provider_name("ToPort"),
+                .with_provider_name("ToPort")
+                .build(),
         )
         .attribute(
-            AttributeSchema::new("source_security_group_id", super::security_group_id())
+            AttributeSchema::optional("source_security_group_id", super::security_group_id())
                 .create_only()
                 .with_description("The ID of the source security group.")
-                .with_provider_name("SourceSecurityGroupId"),
+                .with_provider_name("SourceSecurityGroupId")
+                .build(),
         )
         .attribute(
-            AttributeSchema::new("security_group_rule_id", super::security_group_rule_id())
-                .read_only()
+            AttributeSchema::provider_populated("security_group_rule_id", super::security_group_rule_id())
                 .with_description("The ID of the security group rule. (read-only)")
-                .with_provider_name("SecurityGroupRuleId"),
+                .with_provider_name("SecurityGroupRuleId")
+                .build(),
         )
     }
 }

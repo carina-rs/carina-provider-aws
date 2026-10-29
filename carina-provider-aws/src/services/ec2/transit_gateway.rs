@@ -51,7 +51,7 @@ fn transit_gateway_delete_poll_state(state: Option<&TransitGatewayState>) -> Del
 }
 
 fn build_create_transit_gateway_options(
-    resource: &Resource,
+    resource: &Resource<impl Sized>,
     schema: &ResourceSchema,
 ) -> ProviderResult<Option<aws_sdk_ec2::types::TransitGatewayRequestOptions>> {
     use aws_sdk_ec2::types::{
@@ -183,7 +183,7 @@ impl AwsProvider {
     /// Create an EC2 Transit Gateway
     pub(crate) async fn create_ec2_transit_gateway_start<A: AwsCreateAttempt>(
         &self,
-        resource: &Resource,
+        resource: &Resource<impl Sized>,
         schema: &ResourceSchema,
         client_token: &ClientToken,
         attempt: A,
@@ -370,7 +370,7 @@ mod tests {
     }
 
     fn canonical_dns_support(api_value: &str) -> Value {
-        use carina_core::schema::{AttributeType, Schema, enum_identity};
+        use carina_core::schema::{AttributeType, enum_identity};
 
         let attr_type = AttributeType::enum_(
             enum_identity(
@@ -385,7 +385,7 @@ mod tests {
             None,
             None,
         );
-        Schema::flat(attr_type)
+        crate::test_rootless_type(attr_type)
             .canonicalize_state(Value::Concrete(ConcreteValue::String(api_value.into())))
     }
 

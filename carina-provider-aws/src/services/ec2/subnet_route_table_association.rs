@@ -82,7 +82,7 @@ impl AwsProvider {
     /// Create an EC2 Subnet Route Table Association
     pub(crate) async fn create_ec2_subnet_route_table_association(
         &self,
-        resource: &Resource,
+        resource: &Resource<impl Sized>,
     ) -> ProviderResult<CreateCompletion> {
         let route_table_id = require_string_attr(resource, "route_table_id")?;
         let subnet_id = require_string_attr(resource, "subnet_id")?;

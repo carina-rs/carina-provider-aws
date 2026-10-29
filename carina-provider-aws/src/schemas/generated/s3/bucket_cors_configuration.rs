@@ -16,17 +16,17 @@ pub fn s3_bucket_cors_configuration_config() -> AwsSchemaConfig {
         schema: ResourceSchema::new("s3.BucketCorsConfiguration")
             .with_coexisting_replacement()
             .attribute(
-                AttributeSchema::new("bucket", AttributeType::string())
-                    .required()
+                AttributeSchema::required("bucket", AttributeType::string())
                     .create_only()
                     .with_description("Specifies the bucket impacted by the corsconfiguration.")
-                    .with_provider_name("Bucket"),
+                    .with_provider_name("Bucket")
+                    .build(),
             )
             .attribute(
-                AttributeSchema::new("cors_rules", super::bucket_cors_rules())
-                    .required()
+                AttributeSchema::required("cors_rules", super::bucket_cors_rules())
                     .with_description("CORS rules to apply to the bucket.")
-                    .with_provider_name("CORSRules"),
+                    .with_provider_name("CORSRules")
+                    .build(),
             ),
     }
 }

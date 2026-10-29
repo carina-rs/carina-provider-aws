@@ -15,28 +15,28 @@ use crate::provider_generated::DataSourceLookups;
 impl DataSourceLookups for AwsProvider {
     fn read_sts_caller_identity_data_source(
         &self,
-        resource: &DataSource,
+        resource: &DataSource<impl Clone + Send + Sync + 'static>,
     ) -> BoxFuture<'_, ProviderResult<State>> {
         self.do_read_sts_caller_identity_data_source(resource)
     }
 
     fn read_identitystore_user_data_source(
         &self,
-        resource: &DataSource,
+        resource: &DataSource<impl Clone + Send + Sync + 'static>,
     ) -> BoxFuture<'_, ProviderResult<State>> {
         self.do_read_identitystore_user_data_source(resource)
     }
 
     fn read_s3_bucket_data_source(
         &self,
-        resource: &DataSource,
+        resource: &DataSource<impl Clone + Send + Sync + 'static>,
     ) -> BoxFuture<'_, ProviderResult<State>> {
         self.do_read_s3_bucket_data_source(resource)
     }
 
     fn read_iam_roles_data_source(
         &self,
-        resource: &DataSource,
+        resource: &DataSource<impl Clone + Send + Sync + 'static>,
     ) -> BoxFuture<'_, ProviderResult<State>> {
         self.do_read_iam_roles_data_source(resource)
     }

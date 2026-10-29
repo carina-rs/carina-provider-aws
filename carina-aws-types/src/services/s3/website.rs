@@ -6,9 +6,9 @@ pub fn s3_index_document() -> AttributeType {
     AttributeType::struct_(
         "IndexDocument".to_string(),
         vec![
-            StructField::new("suffix", AttributeType::string())
+            StructField::required("suffix", AttributeType::string())
                 .with_provider_name("Suffix")
-                .required(),
+                .build(),
         ],
     )
 }
@@ -17,9 +17,9 @@ pub fn s3_error_document() -> AttributeType {
     AttributeType::struct_(
         "ErrorDocument".to_string(),
         vec![
-            StructField::new("key", AttributeType::string())
+            StructField::required("key", AttributeType::string())
                 .with_provider_name("Key")
-                .required(),
+                .build(),
         ],
     )
 }
@@ -28,10 +28,10 @@ pub fn s3_redirect_all_requests_to() -> AttributeType {
     AttributeType::struct_(
         "RedirectAllRequestsTo".to_string(),
         vec![
-            StructField::new("host_name", AttributeType::string())
+            StructField::required("host_name", AttributeType::string())
                 .with_provider_name("HostName")
-                .required(),
-            StructField::new(
+                .build(),
+            StructField::optional(
                 "protocol",
                 enum_with_dsl_aliases(
                     &["http", "https"],
@@ -41,7 +41,8 @@ pub fn s3_redirect_all_requests_to() -> AttributeType {
                     ),
                 ),
             )
-            .with_provider_name("Protocol"),
+            .with_provider_name("Protocol")
+            .build(),
         ],
     )
 }

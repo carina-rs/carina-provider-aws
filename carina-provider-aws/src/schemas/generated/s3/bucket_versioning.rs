@@ -16,26 +16,26 @@ pub fn s3_bucket_versioning_config() -> AwsSchemaConfig {
         schema: ResourceSchema::new("s3.BucketVersioning")
         .with_coexisting_replacement()
         .attribute(
-            AttributeSchema::new("bucket", AttributeType::string())
-                .required()
+            AttributeSchema::required("bucket", AttributeType::string())
                 .create_only()
                 .with_description("The bucket name.")
-                .with_provider_name("Bucket"),
+                .with_provider_name("Bucket")
+                .build(),
         )
         .attribute(
-            AttributeSchema::new("status", AttributeType::enum_(
+            AttributeSchema::required("status", AttributeType::enum_(
 carina_core::schema::enum_identity("VersioningStatus", Some("aws.s3.BucketVersioning")),
 Some(vec!["Enabled".to_string(), "Suspended".to_string()]),
 vec![("Enabled".to_string(), "enabled".to_string()), ("Suspended".to_string(), "suspended".to_string())],
 None,
 None,
 ))
-                .required()
                 .with_description("Versioning state of the bucket: Enabled or Suspended.")
-                .with_provider_name("Status"),
+                .with_provider_name("Status")
+                .build(),
         )
         .attribute(
-            AttributeSchema::new("mfa_delete", AttributeType::enum_(
+            AttributeSchema::optional("mfa_delete", AttributeType::enum_(
 carina_core::schema::enum_identity("MFADelete", Some("aws.s3.BucketVersioning")),
 Some(vec!["Enabled".to_string(), "Disabled".to_string()]),
 vec![("Enabled".to_string(), "enabled".to_string()), ("Disabled".to_string(), "disabled".to_string())],
@@ -43,7 +43,8 @@ None,
 None,
 ))
                 .with_description("MFA-delete state. Specifies whether MFA delete is enabled in the bucket versioning configuration.")
-                .with_provider_name("MFADelete"),
+                .with_provider_name("MFADelete")
+                .build(),
         )
     }
 }

@@ -6,8 +6,8 @@
 
 use super::AwsSchemaConfig;
 use super::tags_type;
-use super::validate_tags_map;
 use carina_core::schema::{AttributeSchema, AttributeType, ResourceSchema, types};
+use carina_provider_protocol::types::ValidatorType;
 
 const VALID_INSTANCE_TENANCY: &[&str] = &["dedicated", "default", "host"];
 
@@ -21,23 +21,26 @@ pub fn ec2_vpc_config() -> AwsSchemaConfig {
         .with_description("Describes a VPC.")
         .with_conflicting_replacement()
         .attribute(
-            AttributeSchema::new("cidr_block", types::ipv4_cidr())
+            AttributeSchema::optional("cidr_block", types::ipv4_cidr())
                 .create_only()
                 .with_description("The IPv4 network range for the VPC, in CIDR notation. For example, 10.0.0.0/16. We modify the specified CIDR block to its canonical form; for example,...")
-                .with_provider_name("CidrBlock"),
+                .with_provider_name("CidrBlock")
+                .build(),
         )
         .attribute(
-            AttributeSchema::new("enable_dns_hostnames", AttributeType::bool())
+            AttributeSchema::optional("enable_dns_hostnames", AttributeType::bool())
                 .with_description("Indicates whether the instances launched in the VPC get DNS hostnames. If enabled, instances in the VPC get DNS hostnames; otherwise, they do not. You...")
-                .with_provider_name("EnableDnsHostnames"),
+                .with_provider_name("EnableDnsHostnames")
+                .build(),
         )
         .attribute(
-            AttributeSchema::new("enable_dns_support", AttributeType::bool())
+            AttributeSchema::optional("enable_dns_support", AttributeType::bool())
                 .with_description("Indicates whether the DNS resolution is supported for the VPC. If enabled, queries to the Amazon provided DNS server at the 169.254.169.253 IP address...")
-                .with_provider_name("EnableDnsSupport"),
+                .with_provider_name("EnableDnsSupport")
+                .build(),
         )
         .attribute(
-            AttributeSchema::new("instance_tenancy", AttributeType::enum_(
+            AttributeSchema::optional("instance_tenancy", AttributeType::enum_(
     carina_core::schema::enum_identity("InstanceTenancy", Some("aws.ec2.Vpc")),
     Some(vec!["dedicated".to_string(), "default".to_string(), "host".to_string()]),
     vec![("dedicated".to_string(), "dedicated".to_string()), ("default".to_string(), "default".to_string()), ("host".to_string(), "host".to_string())],
@@ -46,35 +49,39 @@ pub fn ec2_vpc_config() -> AwsSchemaConfig {
 ))
                 .create_only()
                 .with_description("The tenancy options for instances launched into the VPC. For default, instances are launched with shared tenancy by default. You can launch instances ...")
-                .with_provider_name("InstanceTenancy"),
+                .with_provider_name("InstanceTenancy")
+                .build(),
         )
         .attribute(
-            AttributeSchema::new("ipv4_ipam_pool_id", super::ipam_pool_id())
+            AttributeSchema::optional("ipv4_ipam_pool_id", super::ipam_pool_id())
                 .create_only()
                 .with_description("The ID of an IPv4 IPAM pool you want to use for allocating this VPC's CIDR. For more information, see What is IPAM? in the Amazon VPC IPAM User Guide.")
-                .with_provider_name("Ipv4IpamPoolId"),
+                .with_provider_name("Ipv4IpamPoolId")
+                .build(),
         )
         .attribute(
-            AttributeSchema::new("ipv4_netmask_length", AttributeType::refined_int(
+            AttributeSchema::optional("ipv4_netmask_length", AttributeType::refined_int(
                 None,
                 Some((Some(0), Some(32))),
             ))
                 .create_only()
                 .with_description("The netmask length of the IPv4 CIDR you want to allocate to this VPC from an Amazon VPC IP Address Manager (IPAM) pool. For more information about IPA...")
-                .with_provider_name("Ipv4NetmaskLength"),
+                .with_provider_name("Ipv4NetmaskLength")
+                .build(),
         )
         .attribute(
-            AttributeSchema::new("vpc_id", super::vpc_id())
-                .read_only()
+            AttributeSchema::provider_populated("vpc_id", super::vpc_id())
                 .with_description("The ID of the VPC. (read-only)")
-                .with_provider_name("VpcId"),
+                .with_provider_name("VpcId")
+                .build(),
         )
         .attribute(
-            AttributeSchema::new("tags", tags_type())
+            AttributeSchema::optional("tags", tags_type())
                 .with_description("The tags for the resource.")
-                .with_provider_name("Tags"),
+                .with_provider_name("Tags")
+                .build(),
         )
-        .with_validator(validate_tags_map)
+        .with_declared_validators(vec![ValidatorType::TagsKeyValueCheck])
     }
 }
 

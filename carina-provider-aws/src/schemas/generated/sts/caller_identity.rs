@@ -25,19 +25,22 @@ pub fn sts_caller_identity_config() -> AwsSchemaConfig {
         schema: ResourceSchema::new("sts.CallerIdentity")
         .as_data_source()
         .attribute(
-            AttributeSchema::new("account_id", super::aws_account_id())
+            AttributeSchema::optional("account_id", super::aws_account_id())
                 .with_description("The Amazon Web Services account ID number of the account that owns or contains the calling entity.")
-                .with_provider_name("Account"),
+                .with_provider_name("Account")
+                .build(),
         )
         .attribute(
-            AttributeSchema::new("arn", self::arn())
+            AttributeSchema::optional("arn", self::arn())
                 .with_description("The Amazon Web Services ARN associated with the calling entity.")
-                .with_provider_name("Arn"),
+                .with_provider_name("Arn")
+                .build(),
         )
         .attribute(
-            AttributeSchema::new("user_id", AttributeType::string())
+            AttributeSchema::optional("user_id", AttributeType::string())
                 .with_description("The unique identifier of the calling entity.")
-                .with_provider_name("UserId"),
+                .with_provider_name("UserId")
+                .build(),
         )
     }
 }

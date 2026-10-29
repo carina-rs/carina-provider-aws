@@ -17,27 +17,30 @@ pub fn ec2_route_config() -> AwsSchemaConfig {
         .with_description("Describes a route in a route table.")
         .with_coexisting_replacement()
         .attribute(
-            AttributeSchema::new("destination_cidr_block", types::ipv4_cidr())
+            AttributeSchema::optional("destination_cidr_block", types::ipv4_cidr())
                 .create_only()
                 .with_description("The IPv4 CIDR address block used for the destination match. Routing decisions are based on the most specific match. We modify the specified CIDR block...")
-                .with_provider_name("DestinationCidrBlock"),
+                .with_provider_name("DestinationCidrBlock")
+                .build(),
         )
         .attribute(
-            AttributeSchema::new("gateway_id", super::gateway_id())
+            AttributeSchema::optional("gateway_id", super::gateway_id())
                 .with_description("The ID of an internet gateway or virtual private gateway attached to your VPC.")
-                .with_provider_name("GatewayId"),
+                .with_provider_name("GatewayId")
+                .build(),
         )
         .attribute(
-            AttributeSchema::new("nat_gateway_id", super::nat_gateway_id())
+            AttributeSchema::optional("nat_gateway_id", super::nat_gateway_id())
                 .with_description("[IPv4 traffic only] The ID of a NAT gateway.")
-                .with_provider_name("NatGatewayId"),
+                .with_provider_name("NatGatewayId")
+                .build(),
         )
         .attribute(
-            AttributeSchema::new("route_table_id", super::route_table_id())
-                .required()
+            AttributeSchema::required("route_table_id", super::route_table_id())
                 .create_only()
                 .with_description("The ID of the route table for the route.")
-                .with_provider_name("RouteTableId"),
+                .with_provider_name("RouteTableId")
+                .build(),
         )
     }
 }

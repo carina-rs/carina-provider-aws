@@ -155,7 +155,7 @@ impl AwsProvider {
     /// Create an S3 bucket
     pub(crate) async fn create_s3_bucket<A: AwsCreateAttempt>(
         &self,
-        resource: &Resource,
+        resource: &Resource<impl Sized>,
         attempt: A,
     ) -> Result<A::Step, A::Verdict> {
         let bucket_name = match resource.get_attr("bucket") {
@@ -469,7 +469,7 @@ impl AwsProvider {
     /// `data_source_lookups::DataSourceLookups`.
     pub(crate) fn do_read_s3_bucket_data_source(
         &self,
-        resource: &DataSource,
+        resource: &DataSource<impl Clone + Send + Sync + 'static>,
     ) -> BoxFuture<'_, ProviderResult<State>> {
         let resource = resource.clone();
         Box::pin(async move {
@@ -840,7 +840,7 @@ mod tests {
 
     #[test]
     fn every_s3_hosted_zone_id_validates_as_route53_hosted_zone_id() {
-        let schema = carina_core::schema::Schema::flat(carina_aws_types::route53_hosted_zone_id());
+        let schema = crate::test_rootless_type(carina_aws_types::route53_hosted_zone_id());
         for &(region, hosted_zone_id) in S3_HOSTED_ZONE_IDS {
             assert_eq!(s3_hosted_zone_id(region).as_deref(), Ok(hosted_zone_id));
             let result = schema.validate(&Value::Concrete(ConcreteValue::String(

@@ -16,17 +16,17 @@ pub fn s3_bucket_policy_config() -> AwsSchemaConfig {
         schema: ResourceSchema::new("s3.BucketPolicy")
         .with_coexisting_replacement()
         .attribute(
-            AttributeSchema::new("bucket", AttributeType::string())
-                .required()
+            AttributeSchema::required("bucket", AttributeType::string())
                 .create_only()
                 .with_description("The name of the bucket. Directory buckets - When you use this operation with a directory bucket, you must use path-style requests in the format https:...")
-                .with_provider_name("Bucket"),
+                .with_provider_name("Bucket")
+                .build(),
         )
         .attribute(
-            AttributeSchema::new("policy", super::iam_policy_document())
-                .required()
+            AttributeSchema::required("policy", super::iam_policy_document())
                 .with_description("The bucket policy as a JSON document. For directory buckets, the only IAM action supported in the bucket policy is s3express:CreateSession.")
-                .with_provider_name("Policy"),
+                .with_provider_name("Policy")
+                .build(),
         )
     }
 }

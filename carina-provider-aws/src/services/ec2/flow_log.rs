@@ -178,7 +178,7 @@ impl AwsProvider {
     /// Create an EC2 Flow Log
     pub(crate) async fn create_ec2_flow_log<A: AwsCreateAttempt>(
         &self,
-        resource: &Resource,
+        resource: &Resource<impl Sized>,
         schema: &ResourceSchema,
         client_token: &ClientToken,
         attempt: A,
