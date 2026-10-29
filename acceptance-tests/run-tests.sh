@@ -512,42 +512,27 @@ if [ ! -f "$CARINA_BIN" ]; then
     exit 1
 fi
 
-# ── Provider source injection ────────────────────────────────────────
-_TEST_AWS_WASM="${_TEST_AWS_WASM:-$PROJECT_ROOT/target/wasm32-wasip2/release/carina-provider-aws.wasm}"
-_TEST_AWSCC_WASM="${_TEST_AWSCC_WASM:-}"
+# ── Provider source injection and local-provider trust ───────────────
+# This runs after the provider build because carina rejects grants for missing
+# files. It also validates and absolutizes the paths used in file:// sources.
+source "$SCRIPT_DIR/shared/_provider_env.sh" || exit 1
 
 # Read provider version from workspace Cargo.toml to avoid hardcoding
 PROVIDER_VERSION=$(grep '^version = ' "$PROJECT_ROOT/Cargo.toml" | head -1 | sed 's/version = "\(.*\)"/\1/')
 
-# Validate that provider binaries are WASM components, not native binaries.
-# Native binaries are no longer supported and will cause cryptic linker errors.
-for bin_var in _TEST_AWS_WASM _TEST_AWSCC_WASM; do
-    bin_path="${!bin_var}"
-    if [ -n "$bin_path" ] && [ -f "$bin_path" ] && [[ "$bin_path" != *.wasm ]]; then
-        echo "ERROR: $bin_var points to a non-WASM binary: $bin_path"
-        echo "       Provider binaries must be .wasm components."
-        echo "       Unset $bin_var to use the default WASM build, or point it to a .wasm file."
-        exit 1
-    fi
-done
-
-ensure_awscc_wasm() {
-    if [ -z "${_TEST_AWSCC_WASM:-}" ]; then
-        _TEST_AWSCC_WASM="${SIBLING_BASE:-$(resolve_sibling_base)}/carina-provider-awscc/target/wasm32-wasip2/release/carina-provider-awscc.wasm"
-    fi
-}
-
 # inject_provider_source: Create a temp copy of a .crn file with source/version
-# injected into provider blocks. Prints the temp file path.
-# Args: original_crn_file
+# injected into provider blocks and assign its path to a caller variable.
+# Args: original_crn_file output_variable
 inject_provider_source() {
     local original="$1"
+    local output_variable="$2"
     local tmp_file
-    tmp_file=$(mktemp).crn
 
     if grep -q '^provider awscc {' "$original" 2>/dev/null; then
-        ensure_awscc_wasm
+        ensure_awscc_wasm || return 1
     fi
+
+    tmp_file=$(mktemp).crn
 
     sed \
         -e '/^provider aws {/a\
@@ -558,7 +543,7 @@ inject_provider_source() {
   version = "'"$PROVIDER_VERSION"'"' \
         "$original" > "$tmp_file"
 
-    echo "$tmp_file"
+    printf -v "$output_variable" '%s' "$tmp_file"
 }
 
 # Find test files
@@ -681,7 +666,7 @@ if [ "$COMMAND" = "cleanup" ]; then
             TEST_INDEX=0
             for TEST_FILE in "${TESTS[@]}"; do
                 REL_PATH="${TEST_FILE#$SCRIPT_DIR/}"
-                INJECTED_FILE=$(inject_provider_source "$TEST_FILE")
+                inject_provider_source "$TEST_FILE" INJECTED_FILE || exit 1
                 TEST_STATE_DIR="$STATE_DIR/test_${TEST_INDEX}"
                 mkdir -p "$TEST_STATE_DIR"
                 cp "$INJECTED_FILE" "$TEST_STATE_DIR/main.crn"
@@ -843,7 +828,7 @@ if [ "$COMMAND" = "full" ]; then
                 fi
 
                 REL_PATH="${TEST_FILE#$SCRIPT_DIR/}"
-                INJECTED_FILE=$(inject_provider_source "$TEST_FILE")
+                inject_provider_source "$TEST_FILE" INJECTED_FILE || exit 1
 
                 # Use a separate state directory per test to prevent
                 # state file cross-contamination between tests (issue #537)
@@ -1000,7 +985,7 @@ for TEST_FILE in "${TESTS[@]}"; do
     REL_PATH="${TEST_FILE#$SCRIPT_DIR/}"
     printf "  %-55s " "$REL_PATH"
 
-    INJECTED_FILE=$(inject_provider_source "$TEST_FILE")
+    inject_provider_source "$TEST_FILE" INJECTED_FILE || exit 1
 
     AUTO_APPROVE=""
     if [ "$COMMAND" = "apply" ] || [ "$COMMAND" = "destroy" ]; then
