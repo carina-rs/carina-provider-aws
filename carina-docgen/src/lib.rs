@@ -43,18 +43,22 @@ impl Heading {
         }
     }
 
-    fn markdown(&self) -> Result<String, String> {
+    fn markdown(&self) -> Result<String, DocgenError> {
         if !(1..=6).contains(&self.level) {
-            return Err(format!(
+            return Err(DocgenError::build(format!(
                 "Markdown heading level must be between 1 and 6, got {}",
                 self.level
-            ));
+            )));
         }
         if self.content.contains(['\n', '\r']) {
-            return Err("Markdown heading content must fit on one line".to_string());
+            return Err(DocgenError::build(
+                "Markdown heading content must fit on one line",
+            ));
         }
         if matches!(self.style, HeadingStyle::Code) && self.content.contains('`') {
-            return Err("Markdown code heading content must not contain a backtick".to_string());
+            return Err(DocgenError::build(
+                "Markdown code heading content must not contain a backtick",
+            ));
         }
 
         let marker = "#".repeat(usize::from(self.level));
@@ -112,14 +116,16 @@ where
     }
 
     /// Write an ordinary heading and allocate its registry slug immediately.
-    pub fn heading(&mut self, heading: Heading) -> Result<(), String> {
+    pub fn heading(&mut self, heading: Heading) -> Result<(), DocgenError> {
         self.write_heading(heading).map(|_| ())
     }
 
     /// Write a keyed target heading and bind the key to its allocated slug.
-    pub fn target_heading(&mut self, key: K, heading: Heading) -> Result<(), String> {
+    pub fn target_heading(&mut self, key: K, heading: Heading) -> Result<(), DocgenError> {
         if self.targets.contains_key(&key) {
-            return Err(format!("heading target {key:?} was written more than once"));
+            return Err(DocgenError::build(format!(
+                "heading target {key:?} was written more than once"
+            )));
         }
         let slug = self.write_heading(heading)?;
         self.targets.insert(key, slug);
@@ -137,14 +143,16 @@ where
 
     /// Resolve links, verify the builder's headings against Comrak's flattened
     /// heading text, and run the generated-page checker over the finished page.
-    pub fn finish(self) -> Result<String, String> {
+    pub fn finish(self) -> Result<String, DocgenError> {
         let mut markdown = String::new();
         for chunk in self.chunks {
             match chunk {
                 PageChunk::Markdown(text) => markdown.push_str(&text),
                 PageChunk::Link { target, label } => {
                     let slug = self.targets.get(&target).ok_or_else(|| {
-                        format!("link target {target:?} has no heading: it was never written")
+                        DocgenError::build(format!(
+                            "link target {target:?} has no heading: it was never written"
+                        ))
                     })?;
                     markdown.push_str(&format!("[{label}](#{slug})"));
                 }
@@ -159,21 +167,58 @@ where
             .collect();
         let expected_ids: Vec<&str> = self.heading_ids.iter().map(String::as_str).collect();
         if actual_ids != expected_ids {
-            return Err(format!(
+            return Err(DocgenError::build(format!(
                 "generated heading order differed from the page builder: expected {expected_ids:?}, got {actual_ids:?}"
-            ));
+            )));
         }
-        finish_check(analysis).map_err(|error| error.to_string())?;
+        finish_check(analysis)?;
         Ok(markdown)
     }
 
-    fn write_heading(&mut self, heading: Heading) -> Result<String, String> {
+    fn write_heading(&mut self, heading: Heading) -> Result<String, DocgenError> {
         let markdown = heading.markdown()?;
         let slug = self.slugs.unique(heading_slug(&heading.content));
         self.heading_ids.push(slug.clone());
         self.push_str(&markdown);
         self.push_str("\n\n");
         Ok(slug)
+    }
+}
+
+/// An error encountered while constructing or validating a generated page.
+#[derive(Debug)]
+pub enum DocgenError {
+    Build(String),
+    Check(PageCheckError),
+}
+
+impl DocgenError {
+    fn build(message: impl Into<String>) -> Self {
+        Self::Build(message.into())
+    }
+}
+
+impl fmt::Display for DocgenError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Build(message) => formatter.write_str(message),
+            Self::Check(error) => error.fmt(formatter),
+        }
+    }
+}
+
+impl std::error::Error for DocgenError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Build(_) => None,
+            Self::Check(error) => Some(error),
+        }
+    }
+}
+
+impl From<PageCheckError> for DocgenError {
+    fn from(error: PageCheckError) -> Self {
+        Self::Check(error)
     }
 }
 

@@ -5,11 +5,25 @@ edition = "2024"
 license = "MIT"
 publish = false
 
+[features]
+default = []
+check-bin = ["dep:flate2", "dep:tar"]
+
+[[bin]]
+name = "carina-docgen-check"
+path = "src/bin/carina-docgen-check.rs"
+required-features = ["check-bin"]
+
+[[test]]
+name = "check_binary"
+path = "tests/check_binary.rs"
+required-features = ["check-bin"]
+
 [dependencies]
 comrak = { version = "=0.54.0", default-features = false }
 finl_unicode = { version = "=1.4.0", default-features = false, features = ["categories"] }
-flate2 = "1"
-tar = { version = "0.4", default-features = false }
+flate2 = { version = "1", optional = true }
+tar = { version = "0.4", default-features = false, optional = true }
 
 [dev-dependencies]
 serde = { version = "1", features = ["derive"] }

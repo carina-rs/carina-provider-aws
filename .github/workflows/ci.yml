@@ -93,7 +93,7 @@ jobs:
       - name: Build docs bundle
         run: python3 scripts/docs-bundle.py build "$RUNNER_TEMP/carina-provider-aws-docs.tar.gz"
       - name: Check shipped Markdown pages
-        run: cargo run --locked -p carina-docgen --bin carina-docgen-check -- "$RUNNER_TEMP/carina-provider-aws-docs.tar.gz"
+        run: cargo run --locked -p carina-docgen --features check-bin --bin carina-docgen-check -- "$RUNNER_TEMP/carina-provider-aws-docs.tar.gz"
       - name: Validate docs bundle
         run: python3 scripts/docs-bundle.py check "$RUNNER_TEMP/carina-provider-aws-docs.tar.gz"
 

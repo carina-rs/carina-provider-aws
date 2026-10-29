@@ -15,6 +15,25 @@ fn violation_kinds(markdown: &str) -> Vec<PageViolationKind> {
         .collect()
 }
 
+fn assert_std_error<T, E: std::error::Error>(_: &Result<T, E>) {}
+
+#[test]
+fn page_builder_methods_return_std_errors() {
+    let mut page: PageBuilder<Target> = PageBuilder::new();
+
+    let heading = page.heading(Heading::plain(1, "Page"));
+    assert_std_error(&heading);
+    heading.expect("valid heading");
+
+    let target_heading = page.target_heading(Target::Options, Heading::plain(2, "Options"));
+    assert_std_error(&target_heading);
+    target_heading.expect("valid target heading");
+
+    let finished = page.finish();
+    assert_std_error(&finished);
+    finished.expect("valid finished page");
+}
+
 #[test]
 fn check_page_rejects_unresolved_fragment_only_links() {
     assert_eq!(
@@ -125,7 +144,7 @@ fn page_builder_rejects_a_link_to_a_target_that_was_never_written() {
     page.heading(Heading::plain(2, "Missing")).unwrap();
 
     let error = page.finish().expect_err("missing target must fail");
-    assert!(error.contains("never written"), "{error}");
+    assert!(error.to_string().contains("never written"), "{error}");
 }
 
 #[test]
@@ -137,7 +156,7 @@ fn page_builder_rejects_writing_the_same_target_twice() {
     let error = page
         .target_heading(Target::Options, Heading::plain(2, "Other Options"))
         .expect_err("duplicate target key must fail");
-    assert!(error.contains("more than once"), "{error}");
+    assert!(error.to_string().contains("more than once"), "{error}");
 }
 
 #[test]
@@ -147,5 +166,8 @@ fn page_builder_rejects_a_heading_that_bypasses_the_builder() {
     page.push_str("## Bypassed\n\n");
 
     let error = page.finish().expect_err("unregistered heading must fail");
-    assert!(error.contains("heading order differed"), "{error}");
+    assert!(
+        error.to_string().contains("heading order differed"),
+        "{error}"
+    );
 }
