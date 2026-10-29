@@ -15,11 +15,9 @@ pub fn s3_bucket_versioning_config() -> AwsSchemaConfig {
         has_tags: false,
         schema: ResourceSchema::new("s3.BucketVersioning")
             .with_coexisting_replacement()
-            // Read contract: S3 versioning responses identify the targeted bucket only through the request, not the response
             .attribute(
                 AttributeSchema::required("bucket", AttributeType::string())
                     .create_only()
-                    .write_only()
                     .with_description("The bucket name.")
                     .with_provider_name("Bucket")
                     .build(),

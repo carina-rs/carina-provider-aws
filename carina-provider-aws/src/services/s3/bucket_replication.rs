@@ -46,6 +46,7 @@ impl AwsProvider {
                     .for_resource(id.clone())
                 })?;
                 let model = S3BucketReplicationConfigurationReadModel {
+                    bucket: crate::read_model::applied_identifier_value(identifier),
                     role: Value::Concrete(ConcreteValue::String(config.role().to_string().into())),
                     rules: Value::Concrete(ConcreteValue::List(
                         config.rules().iter().map(rule_to_value).collect(),

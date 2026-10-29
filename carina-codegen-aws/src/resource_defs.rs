@@ -316,10 +316,7 @@ impl ResourceDef {
                 },
             ],
             "s3.Bucket" => vec![
-                WriteOnly {
-                    field: "Bucket",
-                    reason: "HeadBucket identifies the target through the request and does not return the bucket name",
-                },
+                ReadDisposition::read("Bucket", Required),
                 WriteOnly {
                     field: "BucketNamespace",
                     reason: "CreateBucket accepts the namespace selector but HeadBucket does not return it",
@@ -335,104 +332,65 @@ impl ResourceDef {
                     field: "MFADelete",
                     reason: "changing MFA delete also requires an MFA header that this resource cannot supply",
                 },
-                WriteOnly {
-                    field: "Bucket",
-                    reason: "S3 versioning responses identify the targeted bucket only through the request, not the response",
-                },
+                ReadDisposition::read("Bucket", Required),
                 ReadDisposition::read("Status", Required),
             ],
             "s3.BucketAcl" => vec![
-                WriteOnly {
-                    field: "Bucket",
-                    reason: "GetBucketAcl does not return the targeted bucket name",
-                },
+                ReadDisposition::read("Bucket", Required),
                 ReadDisposition::read("ACL", Required),
             ],
             "s3.BucketPolicy" => vec![
-                WriteOnly {
-                    field: "Bucket",
-                    reason: "GetBucketPolicy does not return the targeted bucket name",
-                },
+                ReadDisposition::read("Bucket", Required),
                 ReadDisposition::read("Policy", Required),
             ],
             "s3.BucketCorsConfiguration" => vec![
-                WriteOnly {
-                    field: "Bucket",
-                    reason: "GetBucketCors does not return the targeted bucket name",
-                },
+                ReadDisposition::read("Bucket", Required),
                 ReadDisposition::read("CORSRules", Required),
             ],
             "s3.BucketLifecycleConfiguration" => vec![
-                WriteOnly {
-                    field: "Bucket",
-                    reason: "GetBucketLifecycleConfiguration does not return the targeted bucket name",
-                },
+                ReadDisposition::read("Bucket", Required),
                 ReadDisposition::read("Rules", Required),
             ],
             "s3.BucketLogging" => vec![
-                WriteOnly {
-                    field: "Bucket",
-                    reason: "GetBucketLogging does not return the targeted bucket name",
-                },
+                ReadDisposition::read("Bucket", Required),
                 ReadDisposition::read("TargetBucket", Required),
                 ReadDisposition::read("TargetPrefix", Required),
                 ReadDisposition::read("TargetObjectKeyFormat", Optional),
             ],
             "s3.BucketNotificationConfiguration" => vec![
-                WriteOnly {
-                    field: "Bucket",
-                    reason: "GetBucketNotificationConfiguration does not return the targeted bucket name",
-                },
+                ReadDisposition::read("Bucket", Required),
                 ReadDisposition::read("TopicConfigurations", Required),
                 ReadDisposition::read("QueueConfigurations", Required),
                 ReadDisposition::read("LambdaFunctionConfigurations", Required),
                 ReadDisposition::read("EventBridgeConfiguration", Optional),
             ],
             "s3.BucketObjectLockConfiguration" => vec![
-                WriteOnly {
-                    field: "Bucket",
-                    reason: "GetObjectLockConfiguration does not return the targeted bucket name",
-                },
+                ReadDisposition::read("Bucket", Required),
                 ReadDisposition::read("ObjectLockEnabled", Required),
                 ReadDisposition::read("Rule", Optional),
             ],
             "s3.BucketOwnershipControls" => vec![
-                WriteOnly {
-                    field: "Bucket",
-                    reason: "GetBucketOwnershipControls does not return the targeted bucket name",
-                },
+                ReadDisposition::read("Bucket", Required),
                 ReadDisposition::read("ObjectOwnership", Required),
             ],
             "s3.BucketPublicAccessBlock" => vec![
-                WriteOnly {
-                    field: "Bucket",
-                    reason: "GetPublicAccessBlock does not return the targeted bucket name",
-                },
+                ReadDisposition::read("Bucket", Required),
                 ReadDisposition::read("BlockPublicAcls", Required),
                 ReadDisposition::read("IgnorePublicAcls", Required),
                 ReadDisposition::read("BlockPublicPolicy", Required),
                 ReadDisposition::read("RestrictPublicBuckets", Required),
             ],
             "s3.BucketReplicationConfiguration" => vec![
-                WriteOnly {
-                    field: "Bucket",
-                    reason: "GetBucketReplication does not return the targeted bucket name",
-                },
+                ReadDisposition::read("Bucket", Required),
                 ReadDisposition::read("Role", Required),
                 ReadDisposition::read("Rules", Required),
             ],
             "s3.BucketServerSideEncryptionConfiguration" => vec![
-                WriteOnly {
-                    field: "Bucket",
-                    reason: "GetBucketEncryption does not return the targeted bucket name",
-                },
+                ReadDisposition::read("Bucket", Required),
                 ReadDisposition::read("Rules", Required),
             ],
             "s3.BucketWebsiteConfiguration" => vec![
-                WriteOnly {
-                    field: "Bucket",
-                    reason: "GetBucketWebsite does not return the targeted bucket name",
-                },
+                ReadDisposition::read("Bucket", Required),
                 ReadDisposition::read("IndexDocument", Optional),
                 ReadDisposition::read("ErrorDocument", Optional),
                 ReadDisposition::read("RedirectAllRequestsTo", Optional),
@@ -3431,6 +3389,81 @@ mod tests {
         assert!(
             !resource.required_overrides.contains(&"Rule"),
             "rule must remain optional"
+        );
+    }
+
+    #[test]
+    fn every_s3_bucket_target_is_required_read_state() {
+        let resources = s3_resources();
+
+        for resource in &resources {
+            let bucket_disposition = resource
+                .read_dispositions()
+                .into_iter()
+                .find(|disposition| disposition.field() == "Bucket");
+
+            assert!(
+                matches!(
+                    bucket_disposition,
+                    Some(ReadDisposition::Read {
+                        presence: ReadPresence::Required,
+                        ..
+                    })
+                ),
+                "{} must read bucket from its applied identifier",
+                resource.name
+            );
+        }
+
+        let write_only_fields = resources
+            .iter()
+            .flat_map(|resource| {
+                resource
+                    .read_dispositions()
+                    .into_iter()
+                    .filter_map(move |disposition| match disposition {
+                        ReadDisposition::WriteOnly { field, .. } => Some((resource.name, field)),
+                        _ => None,
+                    })
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(write_only_fields, vec![("s3.Bucket", "BucketNamespace")]);
+    }
+
+    #[test]
+    fn write_only_fields_are_limited_to_unobservable_create_inputs() {
+        let write_only_fields = ec2_resources()
+            .into_iter()
+            .chain(sts_resources())
+            .chain(organizations_resources())
+            .chain(s3_resources())
+            .chain(acm_resources())
+            .chain(route53_resources())
+            .chain(iam_resources())
+            .chain(logs_resources())
+            .chain(sqs_resources())
+            .flat_map(|resource| {
+                let resource_name = resource.name;
+                resource
+                    .read_dispositions()
+                    .into_iter()
+                    .filter_map(move |disposition| match disposition {
+                        ReadDisposition::WriteOnly { field, .. } => Some((resource_name, field)),
+                        _ => None,
+                    })
+            })
+            .collect::<std::collections::BTreeSet<_>>();
+
+        assert_eq!(
+            write_only_fields,
+            std::collections::BTreeSet::from([
+                ("ec2.Subnet", "Ipv4IpamPoolId"),
+                ("ec2.Subnet", "Ipv6IpamPoolId"),
+                ("ec2.Vpc", "Ipv4IpamPoolId"),
+                ("organizations.Account", "IamUserAccessToBilling"),
+                ("organizations.Account", "RoleName"),
+                ("s3.Bucket", "BucketNamespace"),
+            ])
         );
     }
 }

@@ -40,6 +40,7 @@ impl AwsProvider {
                     id,
                     identifier,
                     S3BucketPublicAccessBlockReadModel {
+                        bucket: crate::read_model::applied_identifier_value(identifier),
                         block_public_acls: Value::Concrete(ConcreteValue::Bool(
                             config.block_public_acls().unwrap_or(false),
                         )),

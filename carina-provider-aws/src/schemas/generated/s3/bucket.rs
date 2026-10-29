@@ -23,11 +23,9 @@ pub fn s3_bucket_config() -> AwsSchemaConfig {
         has_tags: true,
         schema: ResourceSchema::new("s3.Bucket")
         .with_conflicting_replacement()
-        // Read contract: HeadBucket identifies the target through the request and does not return the bucket name
         .attribute(
             AttributeSchema::required("bucket", AttributeType::string())
                 .create_only()
-                .write_only()
                 .with_description("The name of the bucket to create. General purpose buckets - For information about bucket naming restrictions, see Bucket naming rules in the Amazon S3...")
                 .with_provider_name("Bucket")
                 .build(),

@@ -56,6 +56,7 @@ impl AwsProvider {
                     id,
                     identifier,
                     S3BucketNotificationConfigurationReadModel {
+                        bucket: crate::read_model::applied_identifier_value(identifier),
                         topic_configurations: Value::Concrete(ConcreteValue::List(topics)),
                         queue_configurations: Value::Concrete(ConcreteValue::List(queues)),
                         lambda_function_configurations: Value::Concrete(ConcreteValue::List(

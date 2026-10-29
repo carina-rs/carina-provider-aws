@@ -53,11 +53,9 @@ pub fn s3_bucket_acl_config() -> AwsSchemaConfig {
                 .with_provider_name("ACL")
                 .build(),
             )
-            // Read contract: GetBucketAcl does not return the targeted bucket name
             .attribute(
                 AttributeSchema::required("bucket", AttributeType::string())
                     .create_only()
-                    .write_only()
                     .with_description("The bucket to which to apply the ACL.")
                     .with_provider_name("Bucket")
                     .build(),

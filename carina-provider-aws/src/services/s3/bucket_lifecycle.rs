@@ -49,6 +49,7 @@ impl AwsProvider {
                     id,
                     identifier,
                     S3BucketLifecycleConfigurationReadModel {
+                        bucket: crate::read_model::applied_identifier_value(identifier),
                         rules: Value::Concrete(ConcreteValue::List(rules)),
                     },
                 )

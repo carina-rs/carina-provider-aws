@@ -41,7 +41,10 @@ impl AwsProvider {
                         ))
                         .for_resource(id.clone())
                     })?;
-                    let model = S3BucketPolicyReadModel { policy };
+                    let model = S3BucketPolicyReadModel {
+                        bucket: crate::read_model::applied_identifier_value(identifier),
+                        policy,
+                    };
                     found_managed_read(id, applied_identifier, model)
                 } else {
                     Err(

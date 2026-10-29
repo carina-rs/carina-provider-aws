@@ -15,11 +15,9 @@ pub fn s3_bucket_policy_config() -> AwsSchemaConfig {
         has_tags: false,
         schema: ResourceSchema::new("s3.BucketPolicy")
         .with_coexisting_replacement()
-        // Read contract: GetBucketPolicy does not return the targeted bucket name
         .attribute(
             AttributeSchema::required("bucket", AttributeType::string())
                 .create_only()
-                .write_only()
                 .with_description("The name of the bucket. Directory buckets - When you use this operation with a directory bucket, you must use path-style requests in the format https:...")
                 .with_provider_name("Bucket")
                 .build(),

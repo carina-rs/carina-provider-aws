@@ -48,6 +48,7 @@ impl AwsProvider {
                     })?;
                 let rules = config.rules().iter().map(rule_to_value).collect();
                 let model = S3BucketServerSideEncryptionConfigurationReadModel {
+                    bucket: crate::read_model::applied_identifier_value(identifier),
                     rules: Value::Concrete(ConcreteValue::List(rules)),
                 };
                 found_managed_read(id, applied_identifier, model)

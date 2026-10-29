@@ -114,6 +114,7 @@ impl AwsProvider {
                 self.read_s3_bucket_tags(id, name, &mut attributes).await?;
 
                 let model = S3BucketReadModel {
+                    bucket: crate::read_model::applied_identifier_value(identifier),
                     arn: take_required(id, &mut attributes, "arn")?,
                     region: take_required(id, &mut attributes, "region")?,
                     bucket_domain_name: take_required(id, &mut attributes, "bucket_domain_name")?,

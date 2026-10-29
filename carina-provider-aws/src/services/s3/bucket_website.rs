@@ -69,6 +69,7 @@ impl AwsProvider {
                     id,
                     identifier,
                     S3BucketWebsiteConfigurationReadModel {
+                        bucket: crate::read_model::applied_identifier_value(identifier),
                         index_document,
                         error_document,
                         redirect_all_requests_to,

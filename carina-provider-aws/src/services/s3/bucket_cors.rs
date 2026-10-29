@@ -29,6 +29,7 @@ impl AwsProvider {
                     id,
                     identifier,
                     S3BucketCorsConfigurationReadModel {
+                        bucket: crate::read_model::applied_identifier_value(identifier),
                         cors_rules: Value::Concrete(ConcreteValue::List(rules)),
                     },
                 )

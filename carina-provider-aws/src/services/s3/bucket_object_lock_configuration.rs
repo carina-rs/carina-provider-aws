@@ -50,6 +50,7 @@ impl AwsProvider {
                     return Ok(ReadOutcome::not_found(id.clone()));
                 };
                 let model = S3BucketObjectLockConfigurationReadModel {
+                    bucket: crate::read_model::applied_identifier_value(identifier),
                     object_lock_enabled: string_value(enabled.as_str()),
                     rule: configuration
                         .rule()

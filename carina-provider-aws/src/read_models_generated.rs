@@ -942,6 +942,7 @@ impl ManagedReadModel for Ec2VpnGatewayReadModel {
 
 /// Exhaustive canonical read state for `s3.Bucket`.
 pub(crate) struct S3BucketReadModel {
+    pub(crate) bucket: Value,
     pub(crate) arn: Value,
     pub(crate) region: Value,
     pub(crate) bucket_domain_name: Value,
@@ -955,6 +956,7 @@ impl sealed::Sealed for S3BucketReadModel {}
 impl ManagedReadModel for S3BucketReadModel {
     fn into_attributes(self) -> ProviderResult<HashMap<String, Value>> {
         let Self {
+            bucket,
             arn,
             region,
             bucket_domain_name,
@@ -962,7 +964,8 @@ impl ManagedReadModel for S3BucketReadModel {
             hosted_zone_id,
             tags,
         } = self;
-        let mut attributes = HashMap::with_capacity(6);
+        let mut attributes = HashMap::with_capacity(7);
+        attributes.insert("bucket".to_string(), bucket);
         attributes.insert("arn".to_string(), arn);
         attributes.insert("region".to_string(), region);
         attributes.insert("bucket_domain_name".to_string(), bucket_domain_name);
@@ -985,6 +988,7 @@ impl ManagedReadModel for S3BucketReadModel {
 
 /// Exhaustive canonical read state for `s3.BucketPolicy`.
 pub(crate) struct S3BucketPolicyReadModel {
+    pub(crate) bucket: Value,
     pub(crate) policy: Value,
 }
 
@@ -992,8 +996,9 @@ impl sealed::Sealed for S3BucketPolicyReadModel {}
 
 impl ManagedReadModel for S3BucketPolicyReadModel {
     fn into_attributes(self) -> ProviderResult<HashMap<String, Value>> {
-        let Self { policy } = self;
-        let mut attributes = HashMap::with_capacity(1);
+        let Self { bucket, policy } = self;
+        let mut attributes = HashMap::with_capacity(2);
+        attributes.insert("bucket".to_string(), bucket);
         attributes.insert("policy".to_string(), policy);
         validate_read_attributes(
             "s3.BucketPolicy",
@@ -1006,6 +1011,7 @@ impl ManagedReadModel for S3BucketPolicyReadModel {
 
 /// Exhaustive canonical read state for `s3.BucketVersioning`.
 pub(crate) struct S3BucketVersioningReadModel {
+    pub(crate) bucket: Value,
     pub(crate) status: Value,
 }
 
@@ -1013,8 +1019,9 @@ impl sealed::Sealed for S3BucketVersioningReadModel {}
 
 impl ManagedReadModel for S3BucketVersioningReadModel {
     fn into_attributes(self) -> ProviderResult<HashMap<String, Value>> {
-        let Self { status } = self;
-        let mut attributes = HashMap::with_capacity(1);
+        let Self { bucket, status } = self;
+        let mut attributes = HashMap::with_capacity(2);
+        attributes.insert("bucket".to_string(), bucket);
         attributes.insert("status".to_string(), status);
         validate_read_attributes(
             "s3.BucketVersioning",
@@ -1027,6 +1034,7 @@ impl ManagedReadModel for S3BucketVersioningReadModel {
 
 /// Exhaustive canonical read state for `s3.BucketObjectLockConfiguration`.
 pub(crate) struct S3BucketObjectLockConfigurationReadModel {
+    pub(crate) bucket: Value,
     pub(crate) object_lock_enabled: Value,
     pub(crate) rule: Option<Value>,
 }
@@ -1036,10 +1044,12 @@ impl sealed::Sealed for S3BucketObjectLockConfigurationReadModel {}
 impl ManagedReadModel for S3BucketObjectLockConfigurationReadModel {
     fn into_attributes(self) -> ProviderResult<HashMap<String, Value>> {
         let Self {
+            bucket,
             object_lock_enabled,
             rule,
         } = self;
-        let mut attributes = HashMap::with_capacity(2);
+        let mut attributes = HashMap::with_capacity(3);
+        attributes.insert("bucket".to_string(), bucket);
         attributes.insert("object_lock_enabled".to_string(), object_lock_enabled);
         if let Some(value) = rule {
             attributes.insert("rule".to_string(), value);
@@ -1056,15 +1066,17 @@ impl ManagedReadModel for S3BucketObjectLockConfigurationReadModel {
 /// Exhaustive canonical read state for `s3.BucketAcl`.
 pub(crate) struct S3BucketAclReadModel {
     pub(crate) acl: Value,
+    pub(crate) bucket: Value,
 }
 
 impl sealed::Sealed for S3BucketAclReadModel {}
 
 impl ManagedReadModel for S3BucketAclReadModel {
     fn into_attributes(self) -> ProviderResult<HashMap<String, Value>> {
-        let Self { acl } = self;
-        let mut attributes = HashMap::with_capacity(1);
+        let Self { acl, bucket } = self;
+        let mut attributes = HashMap::with_capacity(2);
         attributes.insert("acl".to_string(), acl);
+        attributes.insert("bucket".to_string(), bucket);
         validate_read_attributes(
             "s3.BucketAcl",
             crate::schemas::generated::s3::bucket_acl::s3_bucket_acl_config().schema,
@@ -1076,6 +1088,7 @@ impl ManagedReadModel for S3BucketAclReadModel {
 
 /// Exhaustive canonical read state for `s3.BucketOwnershipControls`.
 pub(crate) struct S3BucketOwnershipControlsReadModel {
+    pub(crate) bucket: Value,
     pub(crate) object_ownership: Value,
 }
 
@@ -1083,8 +1096,12 @@ impl sealed::Sealed for S3BucketOwnershipControlsReadModel {}
 
 impl ManagedReadModel for S3BucketOwnershipControlsReadModel {
     fn into_attributes(self) -> ProviderResult<HashMap<String, Value>> {
-        let Self { object_ownership } = self;
-        let mut attributes = HashMap::with_capacity(1);
+        let Self {
+            bucket,
+            object_ownership,
+        } = self;
+        let mut attributes = HashMap::with_capacity(2);
+        attributes.insert("bucket".to_string(), bucket);
         attributes.insert("object_ownership".to_string(), object_ownership);
         validate_read_attributes(
             "s3.BucketOwnershipControls",
@@ -1097,6 +1114,7 @@ impl ManagedReadModel for S3BucketOwnershipControlsReadModel {
 
 /// Exhaustive canonical read state for `s3.BucketServerSideEncryptionConfiguration`.
 pub(crate) struct S3BucketServerSideEncryptionConfigurationReadModel {
+    pub(crate) bucket: Value,
     pub(crate) rules: Value,
 }
 
@@ -1104,8 +1122,9 @@ impl sealed::Sealed for S3BucketServerSideEncryptionConfigurationReadModel {}
 
 impl ManagedReadModel for S3BucketServerSideEncryptionConfigurationReadModel {
     fn into_attributes(self) -> ProviderResult<HashMap<String, Value>> {
-        let Self { rules } = self;
-        let mut attributes = HashMap::with_capacity(1);
+        let Self { bucket, rules } = self;
+        let mut attributes = HashMap::with_capacity(2);
+        attributes.insert("bucket".to_string(), bucket);
         attributes.insert("rules".to_string(), rules);
         validate_read_attributes(
             "s3.BucketServerSideEncryptionConfiguration",
@@ -1118,6 +1137,7 @@ impl ManagedReadModel for S3BucketServerSideEncryptionConfigurationReadModel {
 
 /// Exhaustive canonical read state for `s3.BucketReplicationConfiguration`.
 pub(crate) struct S3BucketReplicationConfigurationReadModel {
+    pub(crate) bucket: Value,
     pub(crate) role: Value,
     pub(crate) rules: Value,
 }
@@ -1126,8 +1146,13 @@ impl sealed::Sealed for S3BucketReplicationConfigurationReadModel {}
 
 impl ManagedReadModel for S3BucketReplicationConfigurationReadModel {
     fn into_attributes(self) -> ProviderResult<HashMap<String, Value>> {
-        let Self { role, rules } = self;
-        let mut attributes = HashMap::with_capacity(2);
+        let Self {
+            bucket,
+            role,
+            rules,
+        } = self;
+        let mut attributes = HashMap::with_capacity(3);
+        attributes.insert("bucket".to_string(), bucket);
         attributes.insert("role".to_string(), role);
         attributes.insert("rules".to_string(), rules);
         validate_read_attributes(
@@ -1141,6 +1166,7 @@ impl ManagedReadModel for S3BucketReplicationConfigurationReadModel {
 
 /// Exhaustive canonical read state for `s3.BucketLifecycleConfiguration`.
 pub(crate) struct S3BucketLifecycleConfigurationReadModel {
+    pub(crate) bucket: Value,
     pub(crate) rules: Value,
 }
 
@@ -1148,8 +1174,9 @@ impl sealed::Sealed for S3BucketLifecycleConfigurationReadModel {}
 
 impl ManagedReadModel for S3BucketLifecycleConfigurationReadModel {
     fn into_attributes(self) -> ProviderResult<HashMap<String, Value>> {
-        let Self { rules } = self;
-        let mut attributes = HashMap::with_capacity(1);
+        let Self { bucket, rules } = self;
+        let mut attributes = HashMap::with_capacity(2);
+        attributes.insert("bucket".to_string(), bucket);
         attributes.insert("rules".to_string(), rules);
         validate_read_attributes(
             "s3.BucketLifecycleConfiguration",
@@ -1162,6 +1189,7 @@ impl ManagedReadModel for S3BucketLifecycleConfigurationReadModel {
 
 /// Exhaustive canonical read state for `s3.BucketWebsiteConfiguration`.
 pub(crate) struct S3BucketWebsiteConfigurationReadModel {
+    pub(crate) bucket: Value,
     pub(crate) index_document: Option<Value>,
     pub(crate) error_document: Option<Value>,
     pub(crate) redirect_all_requests_to: Option<Value>,
@@ -1172,11 +1200,13 @@ impl sealed::Sealed for S3BucketWebsiteConfigurationReadModel {}
 impl ManagedReadModel for S3BucketWebsiteConfigurationReadModel {
     fn into_attributes(self) -> ProviderResult<HashMap<String, Value>> {
         let Self {
+            bucket,
             index_document,
             error_document,
             redirect_all_requests_to,
         } = self;
-        let mut attributes = HashMap::with_capacity(3);
+        let mut attributes = HashMap::with_capacity(4);
+        attributes.insert("bucket".to_string(), bucket);
         if let Some(value) = index_document {
             attributes.insert("index_document".to_string(), value);
         }
@@ -1197,6 +1227,7 @@ impl ManagedReadModel for S3BucketWebsiteConfigurationReadModel {
 
 /// Exhaustive canonical read state for `s3.BucketCorsConfiguration`.
 pub(crate) struct S3BucketCorsConfigurationReadModel {
+    pub(crate) bucket: Value,
     pub(crate) cors_rules: Value,
 }
 
@@ -1204,8 +1235,9 @@ impl sealed::Sealed for S3BucketCorsConfigurationReadModel {}
 
 impl ManagedReadModel for S3BucketCorsConfigurationReadModel {
     fn into_attributes(self) -> ProviderResult<HashMap<String, Value>> {
-        let Self { cors_rules } = self;
-        let mut attributes = HashMap::with_capacity(1);
+        let Self { bucket, cors_rules } = self;
+        let mut attributes = HashMap::with_capacity(2);
+        attributes.insert("bucket".to_string(), bucket);
         attributes.insert("cors_rules".to_string(), cors_rules);
         validate_read_attributes(
             "s3.BucketCorsConfiguration",
@@ -1218,6 +1250,7 @@ impl ManagedReadModel for S3BucketCorsConfigurationReadModel {
 
 /// Exhaustive canonical read state for `s3.BucketNotificationConfiguration`.
 pub(crate) struct S3BucketNotificationConfigurationReadModel {
+    pub(crate) bucket: Value,
     pub(crate) topic_configurations: Value,
     pub(crate) queue_configurations: Value,
     pub(crate) lambda_function_configurations: Value,
@@ -1229,12 +1262,14 @@ impl sealed::Sealed for S3BucketNotificationConfigurationReadModel {}
 impl ManagedReadModel for S3BucketNotificationConfigurationReadModel {
     fn into_attributes(self) -> ProviderResult<HashMap<String, Value>> {
         let Self {
+            bucket,
             topic_configurations,
             queue_configurations,
             lambda_function_configurations,
             event_bridge_configuration,
         } = self;
-        let mut attributes = HashMap::with_capacity(4);
+        let mut attributes = HashMap::with_capacity(5);
+        attributes.insert("bucket".to_string(), bucket);
         attributes.insert("topic_configurations".to_string(), topic_configurations);
         attributes.insert("queue_configurations".to_string(), queue_configurations);
         attributes.insert(
@@ -1255,6 +1290,7 @@ impl ManagedReadModel for S3BucketNotificationConfigurationReadModel {
 
 /// Exhaustive canonical read state for `s3.BucketLogging`.
 pub(crate) struct S3BucketLoggingReadModel {
+    pub(crate) bucket: Value,
     pub(crate) target_bucket: Value,
     pub(crate) target_prefix: Value,
     pub(crate) target_object_key_format: Option<Value>,
@@ -1265,11 +1301,13 @@ impl sealed::Sealed for S3BucketLoggingReadModel {}
 impl ManagedReadModel for S3BucketLoggingReadModel {
     fn into_attributes(self) -> ProviderResult<HashMap<String, Value>> {
         let Self {
+            bucket,
             target_bucket,
             target_prefix,
             target_object_key_format,
         } = self;
-        let mut attributes = HashMap::with_capacity(3);
+        let mut attributes = HashMap::with_capacity(4);
+        attributes.insert("bucket".to_string(), bucket);
         attributes.insert("target_bucket".to_string(), target_bucket);
         attributes.insert("target_prefix".to_string(), target_prefix);
         if let Some(value) = target_object_key_format {
@@ -1286,6 +1324,7 @@ impl ManagedReadModel for S3BucketLoggingReadModel {
 
 /// Exhaustive canonical read state for `s3.BucketPublicAccessBlock`.
 pub(crate) struct S3BucketPublicAccessBlockReadModel {
+    pub(crate) bucket: Value,
     pub(crate) block_public_acls: Value,
     pub(crate) ignore_public_acls: Value,
     pub(crate) block_public_policy: Value,
@@ -1297,12 +1336,14 @@ impl sealed::Sealed for S3BucketPublicAccessBlockReadModel {}
 impl ManagedReadModel for S3BucketPublicAccessBlockReadModel {
     fn into_attributes(self) -> ProviderResult<HashMap<String, Value>> {
         let Self {
+            bucket,
             block_public_acls,
             ignore_public_acls,
             block_public_policy,
             restrict_public_buckets,
         } = self;
-        let mut attributes = HashMap::with_capacity(4);
+        let mut attributes = HashMap::with_capacity(5);
+        attributes.insert("bucket".to_string(), bucket);
         attributes.insert("block_public_acls".to_string(), block_public_acls);
         attributes.insert("ignore_public_acls".to_string(), ignore_public_acls);
         attributes.insert("block_public_policy".to_string(), block_public_policy);

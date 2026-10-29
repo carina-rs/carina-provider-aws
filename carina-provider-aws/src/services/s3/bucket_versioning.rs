@@ -43,6 +43,7 @@ impl AwsProvider {
                     return Ok(ReadOutcome::not_found(id.clone()));
                 };
                 let model = S3BucketVersioningReadModel {
+                    bucket: crate::read_model::applied_identifier_value(identifier),
                     status: Value::Concrete(ConcreteValue::String(
                         status.as_str().to_string().into(),
                     )),

@@ -126,6 +126,7 @@ impl AwsProvider {
                     },
                 )?;
                 let model = S3BucketAclReadModel {
+                    bucket: crate::read_model::applied_identifier_value(identifier),
                     acl: Value::Concrete(ConcreteValue::String(canned.to_string().into())),
                 };
                 found_managed_read(id, applied_identifier, model)

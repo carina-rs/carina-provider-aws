@@ -44,6 +44,7 @@ impl AwsProvider {
                     id,
                     identifier,
                     S3BucketLoggingReadModel {
+                        bucket: crate::read_model::applied_identifier_value(identifier),
                         target_bucket: Value::Concrete(ConcreteValue::String(
                             le.target_bucket().to_string().into(),
                         )),

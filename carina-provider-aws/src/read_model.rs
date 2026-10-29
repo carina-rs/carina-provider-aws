@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 
 use carina_core::provider::{AppliedIdentifier, ProviderError, ProviderResult, ReadOutcome};
-use carina_core::resource::{ResourceId, Value};
+use carina_core::resource::{ConcreteValue, ResourceId, Value};
 use carina_core::schema::ResourceSchema;
 
 pub(crate) mod sealed {
@@ -38,6 +38,14 @@ pub(crate) fn take_required(
 pub(crate) fn empty_map_value() -> Value {
     Value::Concrete(carina_core::resource::ConcreteValue::Map(
         indexmap::IndexMap::new(),
+    ))
+}
+
+/// Materialize a resource attribute that is canonically observable through
+/// the provider's applied identifier even when the AWS response body omits it.
+pub(crate) fn applied_identifier_value(identifier: &AppliedIdentifier) -> Value {
+    Value::Concrete(ConcreteValue::String(
+        identifier.as_str().to_string().into(),
     ))
 }
 

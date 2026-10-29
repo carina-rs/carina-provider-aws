@@ -15,11 +15,9 @@ pub fn s3_bucket_replication_configuration_config() -> AwsSchemaConfig {
         has_tags: false,
         schema: ResourceSchema::new("s3.BucketReplicationConfiguration")
             .with_coexisting_replacement()
-            // Read contract: GetBucketReplication does not return the targeted bucket name
             .attribute(
                 AttributeSchema::required("bucket", AttributeType::string())
                     .create_only()
-                    .write_only()
                     .with_description("The name of the bucket")
                     .with_provider_name("Bucket")
                     .build(),

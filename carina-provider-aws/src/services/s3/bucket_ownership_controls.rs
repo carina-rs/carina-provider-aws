@@ -42,6 +42,7 @@ impl AwsProvider {
                         .for_resource(id.clone())
                     })?;
                 let model = S3BucketOwnershipControlsReadModel {
+                    bucket: crate::read_model::applied_identifier_value(identifier),
                     object_ownership: Value::Concrete(ConcreteValue::String(
                         rule.object_ownership().as_str().to_string().into(),
                     )),
