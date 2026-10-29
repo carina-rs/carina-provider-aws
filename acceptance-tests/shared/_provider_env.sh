@@ -10,6 +10,8 @@ _TEST_AWS_WASM="${_TEST_AWS_WASM:-$PROJECT_ROOT/target/wasm32-wasip2/release/car
 _TEST_AWSCC_WASM="${_TEST_AWSCC_WASM:-}"
 _TEST_OPERATOR_TRUST_LOCAL_PROVIDER="${CARINA_TRUST_LOCAL_PROVIDER:-}"
 
+PROVIDER_VERSION=$(grep '^version = ' "$PROJECT_ROOT/Cargo.toml" | head -1 | sed 's/version = "\(.*\)"/\1/')
+
 resolve_provider_wasm_path() {
     local variable_name="$1"
     local configured_path="${!variable_name:-}"
@@ -71,6 +73,36 @@ ensure_awscc_wasm() {
         _TEST_AWSCC_WASM="${SIBLING_BASE:-$(resolve_sibling_base)}/carina-provider-awscc/target/wasm32-wasip2/release/carina-provider-awscc.wasm"
     fi
     export_local_provider_trust
+}
+
+_inject_provider_source_filter() {
+    sed \
+        -e '/^provider aws {/a\
+  source = "file://'"$_TEST_AWS_WASM"'"\
+  version = "'"$PROVIDER_VERSION"'"' \
+        -e '/^provider awscc {/a\
+  source = "file://'"$_TEST_AWSCC_WASM"'"'
+}
+
+# inject_provider_source: Create a temporary directory containing a .crn file
+# with local provider sources injected and assign it to a caller variable.
+# PROVIDER_VERSION describes this repository's aws provider, so the sibling
+# awscc provider gets a source override only.
+# Args: original_crn_file output_variable
+inject_provider_source() {
+    local original="$1"
+    local output_variable="$2"
+    local tmp_dir
+
+    if grep -q '^provider awscc {' "$original" 2>/dev/null; then
+        ensure_awscc_wasm || return 1
+    fi
+
+    tmp_dir=$(mktemp -d)
+
+    _inject_provider_source_filter < "$original" > "$tmp_dir/main.crn"
+
+    printf -v "$output_variable" '%s' "$tmp_dir"
 }
 
 export_local_provider_trust || {

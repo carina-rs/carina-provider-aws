@@ -81,15 +81,10 @@ fi
 # only the managed consumer role is persisted.
 assert_state_resource_count "assert: 1 resource in state" "1" "$WORK_DIR"
 
-printf "  %-50s" "assert: consumer.description = $PRE_ROLE_NAME"
-ACTUAL=$(jq -r '.resources[] | select(.attributes.role_name == "'"$CONSUMER_ROLE_NAME"'") | .attributes.description' "$WORK_DIR/carina.state.json" 2>/dev/null)
-if [ "$ACTUAL" = "$PRE_ROLE_NAME" ]; then
-    echo "OK"
-    TEST_PASSED=$((TEST_PASSED + 1))
-else
-    echo "FAIL (got '$ACTUAL')"
-    TEST_FAILED=$((TEST_FAILED + 1))
-fi
+assert_state_value "assert: consumer.description = $PRE_ROLE_NAME" \
+    '.resources[] | select(.current.attributes.role_name == "'"$CONSUMER_ROLE_NAME"'") | .current.attributes.description' \
+    "$PRE_ROLE_NAME" \
+    "$WORK_DIR"
 
 run_step "step3: destroy (consumer role only)" "$CARINA_BIN" destroy --auto-approve .
 ACTIVE_WORK_DIR=""

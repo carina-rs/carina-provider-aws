@@ -43,7 +43,8 @@ let eip = awscc.ec2.Eip {
   domain = aws.ec2.Eip.Domain.vpc
 }
 
-awscc.ec2.NatGateway {
+# This binding keeps the address identical across steps so the test measures an in-place update; anonymous-to-let changes it (carina-rs/carina#3003).
+let nat_gw = awscc.ec2.NatGateway {
   allocation_id = eip.allocation_id
   subnet_id     = subnet.subnet_id
 }

@@ -16,8 +16,8 @@
 #
 # AWS authentication:
 #   Set AWS_PROFILE to one of the carina-test-00X profiles. The script
-#   resolves fresh STS credentials from that profile before each carina
-#   invocation (via `aws configure export-credentials`), so long-running
+#   resolves fresh STS credentials from that profile before each AWS-facing
+#   carina invocation (via `aws configure export-credentials`), so long-running
 #   apply/destroy cycles are not bound to a single SSO access-token
 #   lifetime (see carina-rs/carina-provider-awscc#157). The first run
 #   in a session needs `aws sso login --sso-session carina`.
@@ -102,12 +102,12 @@ run_step() {
     fi
 }
 
-# Extract all resource identifiers from carina.state.json as a sorted newline-separated string.
+# Extract all resource identifiers through `carina state show --json`.
 # Args: work_dir
-# Outputs: sorted identifiers (one per line), or empty if none found
+# Outputs: sorted identifiers (one per line); fails if any identifier is missing
 get_identifiers() {
     local work_dir="$1"
-    jq -r '.resources[].identifier // empty' "$work_dir/carina.state.json" 2>/dev/null | sort || true
+    carina_state_identifiers "$work_dir"
 }
 
 # Assert that two identifier sets match the expected relationship
@@ -285,7 +285,15 @@ run_test() {
 
     # Capture identifiers after step 1
     local ids_after_step1
-    ids_after_step1=$(get_identifiers "$work_dir")
+    if ! ids_after_step1=$(get_identifiers "$work_dir"); then
+        echo "  assert: read identifiers after step 1                 FAIL"
+        echo "  ERROR: could not read identifiers after step 1"
+        TOTAL_FAILED=$((TOTAL_FAILED + 1))
+        destroy_work_dir "$work_dir" "$step2" "$step1"
+        rm -rf "$work_dir"
+        ACTIVE_WORK_DIR=""
+        return 1
+    fi
 
     # Swap in step2 config (providers are the same, lock already present).
     swap_crn "$step2" "$work_dir"
@@ -300,7 +308,15 @@ run_test() {
 
     # Capture identifiers after step 2
     local ids_after_step2
-    ids_after_step2=$(get_identifiers "$work_dir")
+    if ! ids_after_step2=$(get_identifiers "$work_dir"); then
+        echo "  assert: read identifiers after step 2                 FAIL"
+        echo "  ERROR: could not read identifiers after step 2"
+        TOTAL_FAILED=$((TOTAL_FAILED + 1))
+        destroy_work_dir "$work_dir" "$step2" "$step1"
+        rm -rf "$work_dir"
+        ACTIVE_WORK_DIR=""
+        return 1
+    fi
 
     # Assert identifiers preserved (in-place update should NOT replace any resource)
     if ! assert_identifiers "assert: identifiers preserved after update" "$ids_after_step1" "$ids_after_step2" "equal"; then

@@ -24,48 +24,48 @@ run_step "step1: apply (create source + consumer)" "$CARINA_BIN" apply --auto-ap
 
 assert_state_resource_count "assert: 2 resources in state" "2" "$WORK_DIR"
 
-SOURCE_PATH=".resources[] | select(.attributes.bucket == \"$SOURCE_BUCKET\")"
-CONSUMER_PATH=".resources[] | select(.attributes.bucket == \"$CONSUMER_BUCKET\")"
+SOURCE_PATH=".resources[] | select(.current.attributes.bucket == \"$SOURCE_BUCKET\")"
+CONSUMER_PATH=".resources[] | select(.current.attributes.bucket == \"$CONSUMER_BUCKET\")"
 
 assert_state_value "assert: source arn" \
-    "$SOURCE_PATH | .attributes.arn" \
+    "$SOURCE_PATH | .current.attributes.arn" \
     "arn:aws:s3:::$SOURCE_BUCKET" \
     "$WORK_DIR"
 assert_state_value "assert: source region" \
-    "$SOURCE_PATH | .attributes.region" \
+    "$SOURCE_PATH | .current.attributes.region" \
     "$REGION" \
     "$WORK_DIR"
 assert_state_value "assert: source domain name" \
-    "$SOURCE_PATH | .attributes.bucket_domain_name" \
+    "$SOURCE_PATH | .current.attributes.bucket_domain_name" \
     "$SOURCE_BUCKET.s3.amazonaws.com" \
     "$WORK_DIR"
 assert_state_value "assert: source regional domain name" \
-    "$SOURCE_PATH | .attributes.bucket_regional_domain_name" \
+    "$SOURCE_PATH | .current.attributes.bucket_regional_domain_name" \
     "$SOURCE_BUCKET.s3.$REGION.amazonaws.com" \
     "$WORK_DIR"
 assert_state_value "assert: source hosted zone id" \
-    "$SOURCE_PATH | .attributes.hosted_zone_id" \
+    "$SOURCE_PATH | .current.attributes.hosted_zone_id" \
     "Z2M4EHUR26P7ZW" \
     "$WORK_DIR"
 
 assert_state_value "assert: consumer tag SourceArn" \
-    "$CONSUMER_PATH | .attributes.tags.SourceArn" \
+    "$CONSUMER_PATH | .current.attributes.tags.SourceArn" \
     "arn:aws:s3:::$SOURCE_BUCKET" \
     "$WORK_DIR"
 assert_state_value "assert: consumer tag SourceRegion" \
-    "$CONSUMER_PATH | .attributes.tags.SourceRegion" \
+    "$CONSUMER_PATH | .current.attributes.tags.SourceRegion" \
     "$REGION" \
     "$WORK_DIR"
 assert_state_value "assert: consumer tag SourceDomain" \
-    "$CONSUMER_PATH | .attributes.tags.SourceDomain" \
+    "$CONSUMER_PATH | .current.attributes.tags.SourceDomain" \
     "$SOURCE_BUCKET.s3.amazonaws.com" \
     "$WORK_DIR"
 assert_state_value "assert: consumer tag SourceRegionalDomain" \
-    "$CONSUMER_PATH | .attributes.tags.SourceRegionalDomain" \
+    "$CONSUMER_PATH | .current.attributes.tags.SourceRegionalDomain" \
     "$SOURCE_BUCKET.s3.$REGION.amazonaws.com" \
     "$WORK_DIR"
 assert_state_value "assert: consumer tag SourceHostedZoneId" \
-    "$CONSUMER_PATH | .attributes.tags.SourceHostedZoneId" \
+    "$CONSUMER_PATH | .current.attributes.tags.SourceHostedZoneId" \
     "Z2M4EHUR26P7ZW" \
     "$WORK_DIR"
 
