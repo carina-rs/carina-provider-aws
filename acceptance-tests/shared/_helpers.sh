@@ -37,31 +37,25 @@ if [ -z "${CARINA_BIN:-}" ]; then
     fi
 fi
 
-# ── Provider source injection ────────────────────────────────────────
+# ── Provider source injection and local-provider trust ───────────────
 # Use WASM provider binaries (carina CLI only supports WASM providers)
 # Build with: cargo build -p carina-provider-aws --target wasm32-wasip2 --release
-_TEST_AWS_WASM="${_TEST_AWS_WASM:-$PROJECT_ROOT/target/wasm32-wasip2/release/carina-provider-aws.wasm}"
-_TEST_AWSCC_WASM="${_TEST_AWSCC_WASM:-}"
+source "$HELPERS_DIR/_provider_env.sh" || exit 1
 PROVIDER_VERSION=$(grep '^version = ' "$PROJECT_ROOT/Cargo.toml" | head -1 | sed 's/version = "\(.*\)"/\1/')
-
-ensure_awscc_wasm() {
-    if [ -z "${_TEST_AWSCC_WASM:-}" ]; then
-        _TEST_AWSCC_WASM="${SIBLING_BASE:-$(resolve_sibling_base)}/carina-provider-awscc/target/wasm32-wasip2/release/carina-provider-awscc.wasm"
-    fi
-}
-
 # inject_provider_source: Create a temp directory containing a .crn file with
-# source/version injected into provider blocks. Prints the temp directory path.
+# source/version injected into provider blocks and assign it to a caller variable.
 # carina CLI expects a directory path, not a file path.
-# Args: original_crn_file
+# Args: original_crn_file output_variable
 inject_provider_source() {
     local original="$1"
+    local output_variable="$2"
     local tmp_dir
-    tmp_dir=$(mktemp -d)
 
     if grep -q '^provider awscc {' "$original" 2>/dev/null; then
-        ensure_awscc_wasm
+        ensure_awscc_wasm || return 1
     fi
+
+    tmp_dir=$(mktemp -d)
 
     sed \
         -e '/^provider aws {/a\
@@ -72,7 +66,7 @@ inject_provider_source() {
   version = "'"$PROVIDER_VERSION"'"' \
         "$original" > "$tmp_dir/main.crn"
 
-    echo "$tmp_dir"
+    printf -v "$output_variable" '%s' "$tmp_dir"
 }
 
 # inject_provider_source_dir: Inject source/version into all .crn files in a directory (in-place).
@@ -81,7 +75,7 @@ inject_provider_source() {
 inject_provider_source_dir() {
     local dir="$1"
     if grep -R -q '^provider awscc {' "$dir" 2>/dev/null; then
-        ensure_awscc_wasm
+        ensure_awscc_wasm || return 1
     fi
 
     find "$dir" -name '*.crn' -print0 | while IFS= read -r -d '' crn_file; do
@@ -121,7 +115,7 @@ prepare_work_dir() {
 
     local work_dir="$1"
 
-    inject_provider_source_dir "$work_dir"
+    inject_provider_source_dir "$work_dir" || return 1
 
     if carina_work_dir_initialized "$work_dir"; then
         return 0

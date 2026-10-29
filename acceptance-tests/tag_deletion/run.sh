@@ -160,7 +160,7 @@ swap_crn() {
     local src="$1"
     local target="$2"
     local injected_dir
-    injected_dir=$(inject_provider_source "$src")
+    inject_provider_source "$src" injected_dir || return 1
     cp "$injected_dir/main.crn" "$target/main.crn"
     rm -rf "$injected_dir"
 }
