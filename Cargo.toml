@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "carina-aws-types",
+    "carina-docgen",
     "carina-provider-aws",
     "carina-codegen-aws",
     "carina-smithy",

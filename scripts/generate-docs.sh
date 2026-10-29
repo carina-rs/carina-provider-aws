@@ -85,6 +85,7 @@ cd "$PROJECT_ROOT"
 cargo run -p carina-codegen-aws --bin smithy-codegen -- \
   --model-dir "$SCRIPT_DIR/../carina-provider-aws/tests/fixtures/smithy" \
   --output-dir "$DOCS_DIR" \
+  --examples-dir "$EXAMPLES_DIR" \
   --format markdown
 
 # Prepend Starlight frontmatter to all generated docs
@@ -111,42 +112,6 @@ for DOC_FILE in "$DOCS_DIR"/*/*.md; do
         sed '1{/^# /d;}' "$DOC_FILE"
     } > "$FRONTMATTER_TMPFILE"
     mv "$FRONTMATTER_TMPFILE" "$DOC_FILE"
-done
-
-# Insert examples into generated docs (after description, before Argument Reference)
-for DOC_FILE in "$DOCS_DIR"/*/*.md; do
-    SERVICE_DIR=$(basename "$(dirname "$DOC_FILE")")
-    RESOURCE_NAME=$(basename "$DOC_FILE" .md)
-    EXAMPLE_FILE="$EXAMPLES_DIR/${SERVICE_DIR}_${RESOURCE_NAME}/main.crn"
-    if [ -f "$EXAMPLE_FILE" ]; then
-        EXAMPLE_TMPFILE=$(mktemp)
-        {
-            echo "## Example"
-            echo ""
-            echo '```crn'
-            # Strip provider block, leading comments, and leading blank lines
-            sed -n '/^provider /,/^}/!p' "$EXAMPLE_FILE" | \
-                sed '/^#/d' | \
-                sed '/./,$!d'
-            echo '```'
-            echo ""
-        } > "$EXAMPLE_TMPFILE"
-        # Insert the example before the first resource or data-source reference section.
-        MERGED_TMPFILE=$(mktemp)
-        EXAMPLE_INSERTED=false
-        while IFS= read -r line || [ -n "$line" ]; do
-            if [ "$EXAMPLE_INSERTED" = false ] && \
-                { [ "$line" = "## Argument Reference" ] || \
-                  [ "$line" = "## Lookup Inputs" ] || \
-                  [ "$line" = "## Attributes" ]; }; then
-                cat "$EXAMPLE_TMPFILE"
-                EXAMPLE_INSERTED=true
-            fi
-            printf '%s\n' "$line"
-        done < "$DOC_FILE" > "$MERGED_TMPFILE"
-        mv "$MERGED_TMPFILE" "$DOC_FILE"
-        rm -f "$EXAMPLE_TMPFILE"
-    fi
 done
 
 echo ""

@@ -4,12 +4,23 @@ This document explains how to generate and maintain resource schemas from AWS Sm
 
 ## Overview
 
-The AWS provider uses two codegen outputs:
+The AWS provider uses two Rust codegen outputs:
 
 1. **Schema definitions** (`schemas/generated/`) — resource attribute schemas generated from Smithy models
 2. **Provider boilerplate** (`provider_generated.rs`) — delete/update method stubs generated from `ResourceDef` metadata
 
 Both are produced by the `carina-codegen-aws` crate.
+
+Provider reference Markdown is also generated from the same Smithy models with
+`./scripts/generate-docs.sh`. `carina-docgen` allocates registry-compatible
+heading ids as each heading is written, resolves typed link targets when the
+page is finished, and validates the finished page. Generation fails on missing
+targets, dead local fragments, Markdown links hidden inside code spans, or
+duplicated enum/struct section headings. Codegen also inserts examples before
+validation; the script only adds frontmatter. The resulting `generated-docs/`
+tree is a transient build artifact and is not committed. The docs-bundle CI job
+also runs `carina-docgen-check` on the built tarball, after the bundle has
+reconstructed each page's H1 from its frontmatter title.
 
 ## Prerequisites
 
@@ -185,6 +196,7 @@ carina-provider-aws/src/
 ## Crate Structure
 
 - **carina-codegen-aws** — Codegen binary (`smithy-codegen`) and resource definitions
+- **carina-docgen** — Shared registry-compatible Markdown page builder and checker
 - **carina-smithy** — Smithy 2.0 JSON AST parser
 
 ## Smithy Model Cache
