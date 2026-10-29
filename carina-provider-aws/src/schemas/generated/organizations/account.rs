@@ -30,7 +30,6 @@ pub fn organizations_account_config() -> AwsSchemaConfig {
         .with_conflicting_replacement()
         .attribute(
             AttributeSchema::required("account_name", AttributeType::string())
-                .create_only()
                 .with_description("The friendly name of the member account.")
                 .with_provider_name("AccountName")
                 .build(),

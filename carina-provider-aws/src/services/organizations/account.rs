@@ -13,6 +13,8 @@ use crate::provider::CreateCompletion;
 use crate::read_model::found_managed_read;
 use crate::read_models_generated::OrganizationsAccountReadModelSupplement;
 
+const ACCOUNT_RENAME_SETUP_ERROR: &str = "Failed to rename account: AccessDenied can mean either a missing IAM permission account:PutAccountName or that Account Management trusted access is not enabled. Enable trusted access with `aws organizations enable-aws-service-access --service-principal account.amazonaws.com`";
+
 fn organizations_account_create_poll_state(
     status: Option<&aws_sdk_organizations::types::CreateAccountStatus>,
 ) -> CreatePoll<Option<String>> {
@@ -212,6 +214,50 @@ impl AwsProvider {
         to: Resource,
         _schema: &ResourceSchema,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
+        if from.attributes.get("account_name") != to.get_attr("account_name") {
+            let account_name = require_string_attr(&to, "account_name")?;
+            let organization = self
+                .organizations_client
+                .describe_organization()
+                .send()
+                .await
+                .map_err(|error| {
+                    api_error_with_meta(
+                        "Failed to determine the management account before renaming account",
+                        error,
+                    )
+                    .for_resource(id.clone())
+                })?;
+            let management_account_id = organization
+                .organization()
+                .and_then(|organization| organization.master_account_id())
+                .ok_or_else(|| {
+                    ProviderError::api_error(
+                        "DescribeOrganization returned no management account ID",
+                    )
+                    .for_resource(id.clone())
+                })?;
+
+            let mut request = self
+                .account_client
+                .put_account_name()
+                .account_name(account_name);
+            if identifier.as_str() != management_account_id {
+                request = request.account_id(identifier.as_str());
+            }
+            request.send().await.map_err(|error| {
+                let requires_setup = error
+                    .as_service_error()
+                    .is_some_and(|service_error| service_error.is_access_denied_exception());
+                let context = if requires_setup {
+                    ACCOUNT_RENAME_SETUP_ERROR
+                } else {
+                    "Failed to rename account"
+                };
+                api_error_with_meta(context, error).for_resource(id.clone())
+            })?;
+        }
+
         // Handle tag changes
         self.apply_organizations_tags(
             &id,

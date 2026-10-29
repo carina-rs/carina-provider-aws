@@ -541,12 +541,30 @@ fn main() -> Result<()> {
         let model = load_model(&args.model_dir, res.service_namespace)?;
         models.insert(res.service_namespace, model);
     }
+    // Cross-service models validate hand-written updates and are also inputs
+    // to resend-safety generation for the corresponding guarded SDK clients.
+    for res in &resources {
+        for namespace in res
+            .update_ops
+            .iter()
+            .filter_map(|operation| operation.fields.cross_service_namespace())
+        {
+            if models.contains_key(namespace) {
+                continue;
+            }
+            let model = load_model(&args.model_dir, namespace)?;
+            models.insert(namespace, model);
+        }
+    }
     for ds in &data_sources {
         if models.contains_key(ds.service_namespace) {
             continue;
         }
         let model = load_model(&args.model_dir, ds.service_namespace)?;
         models.insert(ds.service_namespace, model);
+    }
+    for res in &resources {
+        validate_cross_service_update_operations(res, &models)?;
     }
 
     match args.format.as_str() {
@@ -707,6 +725,42 @@ fn load_model(model_dir: &Path, namespace: &str) -> Result<SmithyModel> {
     Ok(model)
 }
 
+fn validate_cross_service_update_operations(
+    res: &ResourceDef,
+    models: &HashMap<&str, SmithyModel>,
+) -> Result<()> {
+    for update_op in &res.update_ops {
+        let resource_defs::FieldLayout::CrossServiceFlat {
+            service_namespace,
+            fields,
+        } = &update_op.fields
+        else {
+            continue;
+        };
+        let model = models.get(service_namespace).with_context(|| {
+            format!(
+                "Missing Smithy model {service_namespace} for {} cross-service update {}",
+                res.name, update_op.operation
+            )
+        })?;
+        let operation_id = format!("{service_namespace}#{}", update_op.operation);
+        let input = model.operation_input(&operation_id).with_context(|| {
+            format!(
+                "Cannot find cross-service update input for {operation_id} used by {}",
+                res.name
+            )
+        })?;
+        for field in fields {
+            anyhow::ensure!(
+                input.members.contains_key(*field),
+                "Cross-service update operation {operation_id} for {} is missing declared field {field}",
+                res.name
+            );
+        }
+    }
+    Ok(())
+}
+
 struct CollectedResourceAttributes {
     attrs: Vec<AttrInfo>,
     all_enums: BTreeMap<String, EnumInfo>,
@@ -834,6 +888,11 @@ fn collect_resource_attributes_unvalidated(
     for update_op in &res.update_ops {
         for field in update_op.fields.field_names() {
             updatable_fields.insert(field.to_string());
+        }
+        // Cross-service flat inputs are validated against their own model
+        // before generation; this collector only borrows the resource model.
+        if update_op.fields.cross_service_namespace().is_some() {
+            continue;
         }
         let update_op_id = format!("{}#{}", ns, update_op.operation);
         if let Some(update_input) = model.operation_input(&update_op_id) {
@@ -5828,6 +5887,174 @@ mod tests {
         .replace("__CREATE_FIELDS__", &members(create_fields))
         .replace("__READ_FIELDS__", &members(read_fields));
         carina_smithy::parse(&document).expect("parse string-only fixture model")
+    }
+
+    fn organizations_account_fixture_model() -> SmithyModel {
+        carina_smithy::parse(
+            r##"{
+              "smithy": "2.0",
+              "shapes": {
+                "com.amazonaws.organizations#CreateAccount": {
+                  "type": "operation",
+                  "input": { "target": "com.amazonaws.organizations#CreateAccountRequest" },
+                  "output": { "target": "smithy.api#Unit" },
+                  "traits": {}
+                },
+                "com.amazonaws.organizations#CreateAccountRequest": {
+                  "type": "structure",
+                  "members": {
+                    "AccountName": { "target": "smithy.api#String", "traits": { "smithy.api#required": {} } },
+                    "Email": { "target": "smithy.api#String", "traits": { "smithy.api#required": {} } },
+                    "IamUserAccessToBilling": { "target": "smithy.api#String", "traits": {} },
+                    "RoleName": { "target": "smithy.api#String", "traits": {} }
+                  },
+                  "traits": { "smithy.api#input": {} }
+                },
+                "com.amazonaws.organizations#Account": {
+                  "type": "structure",
+                  "members": {
+                    "Id": { "target": "smithy.api#String", "traits": {} },
+                    "Arn": { "target": "smithy.api#String", "traits": {} },
+                    "Email": { "target": "smithy.api#String", "traits": {} },
+                    "Name": { "target": "smithy.api#String", "traits": {} },
+                    "Status": { "target": "smithy.api#String", "traits": {} },
+                    "JoinedMethod": { "target": "smithy.api#String", "traits": {} },
+                    "JoinedTimestamp": { "target": "smithy.api#String", "traits": {} }
+                  },
+                  "traits": {}
+                }
+              }
+            }"##,
+        )
+        .expect("parse inline Organizations account model")
+    }
+
+    fn account_update_fixture_model(input_members: Option<&str>) -> SmithyModel {
+        let shapes = input_members.map_or_else(
+            || "{}".to_string(),
+            |input_members| {
+                format!(
+                    r##"{{
+                      "com.amazonaws.account#PutAccountName": {{
+                        "type": "operation",
+                        "input": {{ "target": "com.amazonaws.account#PutAccountNameRequest" }},
+                        "output": {{ "target": "smithy.api#Unit" }},
+                        "traits": {{}}
+                      }},
+                      "com.amazonaws.account#PutAccountNameRequest": {{
+                        "type": "structure",
+                        "members": {{ {input_members} }},
+                        "traits": {{ "smithy.api#input": {{}} }}
+                      }}
+                    }}"##
+                )
+            },
+        );
+        carina_smithy::parse(&format!(
+            r##"{{
+              "smithy": "2.0",
+              "shapes": {shapes}
+            }}"##
+        ))
+        .expect("parse inline Account Management update model")
+    }
+
+    fn organizations_account_resource_definition() -> ResourceDef {
+        resource_defs::organizations_resources()
+            .into_iter()
+            .find(|resource| resource.name == "organizations.Account")
+            .expect("Organizations account resource definition")
+    }
+
+    fn organizations_account_models(
+        account_model: SmithyModel,
+    ) -> HashMap<&'static str, SmithyModel> {
+        HashMap::from([
+            (
+                "com.amazonaws.organizations",
+                organizations_account_fixture_model(),
+            ),
+            ("com.amazonaws.account", account_model),
+        ])
+    }
+
+    #[test]
+    fn organizations_account_codegen_keeps_read_contract_while_allowing_name_updates() {
+        let resource = organizations_account_resource_definition();
+        let account_model = account_update_fixture_model(Some(
+            r#""AccountName": { "target": "smithy.api#String", "traits": { "smithy.api#required": {} } }"#,
+        ));
+        validate_cross_service_update_operations(
+            &resource,
+            &organizations_account_models(account_model),
+        )
+        .expect("validate Organizations account cross-service update operation");
+        let generated =
+            collect_resource_attributes(&resource, &organizations_account_fixture_model())
+                .expect("generate Organizations account attributes from inline Smithy");
+
+        let account_name = generated
+            .attrs
+            .iter()
+            .find(|attribute| attribute.snake_name == "account_name")
+            .expect("account_name attribute");
+        assert_eq!(account_name.provider_name, "AccountName");
+        assert!(account_name.is_required);
+        assert!(
+            !account_name.is_create_only,
+            "account_name must be updated in place"
+        );
+
+        let email = generated
+            .attrs
+            .iter()
+            .find(|attribute| attribute.snake_name == "email")
+            .expect("email attribute");
+        assert!(email.is_create_only, "email still requires replacement");
+
+        for name in ["role_name", "iam_user_access_to_billing"] {
+            let attribute = generated
+                .attrs
+                .iter()
+                .find(|attribute| attribute.snake_name == name)
+                .unwrap_or_else(|| panic!("{name} attribute"));
+            assert!(attribute.is_create_only, "{name} remains create-only");
+            assert!(attribute.is_write_only, "{name} remains write-only");
+        }
+    }
+
+    #[test]
+    fn cross_service_update_rejects_missing_operation() {
+        let resource = organizations_account_resource_definition();
+        let error = validate_cross_service_update_operations(
+            &resource,
+            &organizations_account_models(account_update_fixture_model(None)),
+        )
+        .expect_err("missing cross-service update operation must fail codegen");
+
+        assert!(
+            error
+                .to_string()
+                .contains("com.amazonaws.account#PutAccountName"),
+            "{error:#}"
+        );
+    }
+
+    #[test]
+    fn cross_service_update_rejects_missing_field() {
+        let resource = organizations_account_resource_definition();
+        let account_model = account_update_fixture_model(Some(
+            r#""AccountId": { "target": "smithy.api#String", "traits": {} }"#,
+        ));
+        let error = validate_cross_service_update_operations(
+            &resource,
+            &organizations_account_models(account_model),
+        )
+        .expect_err("missing declared cross-service update field must fail codegen");
+
+        let message = error.to_string();
+        assert!(message.contains("PutAccountName"), "{error:#}");
+        assert!(message.contains("AccountName"), "{error:#}");
     }
 
     /// Minimal Smithy surface shared by codegen unit tests. Every shape here

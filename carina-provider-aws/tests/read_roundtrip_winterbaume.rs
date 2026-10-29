@@ -7,18 +7,23 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
 use std::str;
+use std::sync::{Arc, Mutex};
 
-use carina_core::differ::{Diff, diff};
+use carina_core::differ::{Diff, Orphans, PlanPriorStates, create_plan, diff};
+use carina_core::effect::Effect;
 use carina_core::provider::{
-    AppliedIdentifier, CreateRequest, NoopNormalizer, Provider, ProviderNormalizer, ReadRequest,
-    UpdateRequest,
+    AppliedIdentifier, CreateRequest, NoopNormalizer, Provider, ProviderNormalizer, RawSavedAttrs,
+    ReadRequest, UpdateRequest,
 };
-use carina_core::resource::{ConcreteValue, ResolvedResource, Resource, State, Value};
+use carina_core::resource::{
+    ConcreteValue, Current, ResolvedResource, Resource, State, Value, into_plan_input_current_map,
+};
 use carina_core::schema::{SchemaKind, SchemaRegistry};
 use carina_provider_aws::{AwsNormalizer, AwsProvider, BoundedSdkConfig, test_existing_state};
 use indexmap::IndexMap;
 use winterbaume_core::{
     MockAws, MockRequest, MockResponse, MockService, StatefulService, default_account_id,
+    rest_json_error,
 };
 use winterbaume_s3::views::BucketStateView;
 use winterbaume_s3::{S3Service, S3StateView};
@@ -43,6 +48,8 @@ const SECURITY_GROUP_RULE_ID: &str = "sgr-0123456789abcdef0";
 const FLOW_LOG_ID: &str = "fl-0123456789abcdef0";
 const VPC_ENDPOINT_ID: &str = "vpce-0123456789abcdef0";
 const REPLICATION_BUCKET: &str = "carina-read-roundtrip-replication";
+const ORGANIZATIONS_MANAGEMENT_ACCOUNT_ID: &str = "111111111111";
+const ORGANIZATIONS_ACCOUNT_ID: &str = "123456789012";
 
 fn string(value: &str) -> Value {
     Value::Concrete(ConcreteValue::String(value.to_string().into()))
@@ -444,6 +451,237 @@ impl MockService for OrganizationsAccountService {
         };
         Box::pin(async move { response })
     }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum AccountRenameMode {
+    Success,
+    AccessDenied,
+    OtherError,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct PutAccountNameCall {
+    account_id: Option<String>,
+    account_name: String,
+}
+
+#[derive(Debug)]
+struct AccountRenameState {
+    account_name: String,
+    tags: IndexMap<String, String>,
+    management_account_id: String,
+    calls: Vec<PutAccountNameCall>,
+    operations: Vec<&'static str>,
+    mode: AccountRenameMode,
+}
+
+struct OrganizationsAccountRenameService {
+    state: Arc<Mutex<AccountRenameState>>,
+}
+
+impl MockService for OrganizationsAccountRenameService {
+    fn service_name(&self) -> &str {
+        "organizations"
+    }
+
+    fn url_patterns(&self) -> Vec<&str> {
+        vec![r"^https://organizations\.[^/]+\.amazonaws\.com"]
+    }
+
+    fn handle(
+        &self,
+        request: MockRequest,
+    ) -> Pin<Box<dyn Future<Output = MockResponse> + Send + '_>> {
+        let response = match request_target(&request) {
+            "AWSOrganizationsV20161128.DescribeOrganization" => {
+                let management_account_id = self
+                    .state
+                    .lock()
+                    .expect("account rename state lock")
+                    .management_account_id
+                    .clone();
+                MockResponse::json(
+                    200,
+                    serde_json::json!({
+                        "Organization": {
+                            "MasterAccountId": management_account_id
+                        }
+                    })
+                    .to_string(),
+                )
+            }
+            "AWSOrganizationsV20161128.DescribeAccount" => {
+                let account_name = self
+                    .state
+                    .lock()
+                    .expect("account rename state lock")
+                    .account_name
+                    .clone();
+                MockResponse::json(
+                    200,
+                    serde_json::json!({
+                        "Account": {
+                            "Id": ORGANIZATIONS_ACCOUNT_ID,
+                            "Arn": "arn:aws:organizations::111111111111:account/o-example/123456789012",
+                            "Email": "member@example.com",
+                            "Name": account_name,
+                            "Status": "ACTIVE",
+                            "JoinedMethod": "CREATED"
+                        }
+                    })
+                    .to_string(),
+                )
+            }
+            "AWSOrganizationsV20161128.ListTagsForResource" => {
+                let tags = self
+                    .state
+                    .lock()
+                    .expect("account rename state lock")
+                    .tags
+                    .iter()
+                    .map(|(key, value)| serde_json::json!({ "Key": key, "Value": value }))
+                    .collect::<Vec<_>>();
+                MockResponse::json(200, serde_json::json!({ "Tags": tags }).to_string())
+            }
+            "AWSOrganizationsV20161128.TagResource" => {
+                let body: serde_json::Value =
+                    serde_json::from_slice(&request.body).expect("TagResource body must be JSON");
+                assert_eq!(body["ResourceId"], ORGANIZATIONS_ACCOUNT_ID);
+                let tags = body["Tags"].as_array().expect("TagResource Tags array");
+                let mut state = self.state.lock().expect("account rename state lock");
+                for tag in tags {
+                    let key = tag["Key"].as_str().expect("TagResource tag key");
+                    let value = tag["Value"].as_str().expect("TagResource tag value");
+                    state.tags.insert(key.to_string(), value.to_string());
+                }
+                state.operations.push("TagResource");
+                MockResponse::json(200, r#"{}"#)
+            }
+            target => panic!("unexpected Organizations operation {target}"),
+        };
+        Box::pin(async move { response })
+    }
+}
+
+struct AccountManagementRenameService {
+    state: Arc<Mutex<AccountRenameState>>,
+}
+
+impl MockService for AccountManagementRenameService {
+    fn service_name(&self) -> &str {
+        "account"
+    }
+
+    fn url_patterns(&self) -> Vec<&str> {
+        vec![r"^https://account\.us-east-1\.amazonaws\.com"]
+    }
+
+    fn handle(
+        &self,
+        request: MockRequest,
+    ) -> Pin<Box<dyn Future<Output = MockResponse> + Send + '_>> {
+        assert_eq!(request.method, "POST");
+        assert!(
+            request.uri.ends_with("/putAccountName"),
+            "unexpected Account Management URI: {}",
+            request.uri
+        );
+        let body: serde_json::Value =
+            serde_json::from_slice(&request.body).expect("PutAccountName body must be JSON");
+        let account_id = body.get("AccountId").map(|value| {
+            value
+                .as_str()
+                .expect("PutAccountName AccountId must be a string")
+                .to_string()
+        });
+        let account_name = body["AccountName"]
+            .as_str()
+            .expect("PutAccountName AccountName")
+            .to_string();
+
+        let mut state = self.state.lock().expect("account rename state lock");
+        state.calls.push(PutAccountNameCall {
+            account_id,
+            account_name: account_name.clone(),
+        });
+        state.operations.push("PutAccountName");
+        let response = match state.mode {
+            AccountRenameMode::Success => {
+                state.account_name = account_name;
+                MockResponse::rest_json(200, r#"{}"#)
+            }
+            AccountRenameMode::AccessDenied => rest_json_error(
+                403,
+                "AccessDeniedException",
+                "not authorized to rename this account",
+            ),
+            AccountRenameMode::OtherError => rest_json_error(
+                400,
+                "ValidationException",
+                "trusted access prerequisite wording is not an AccessDenied error",
+            ),
+        };
+        Box::pin(async move { response })
+    }
+}
+
+async fn provider_with_account_rename(
+    initial_name: &str,
+    management_account_id: &str,
+    mode: AccountRenameMode,
+) -> (AwsProvider, Arc<Mutex<AccountRenameState>>) {
+    let state = Arc::new(Mutex::new(AccountRenameState {
+        account_name: initial_name.to_string(),
+        tags: IndexMap::new(),
+        management_account_id: management_account_id.to_string(),
+        calls: Vec::new(),
+        operations: Vec::new(),
+        mode,
+    }));
+    let mock = MockAws::builder()
+        .with_service(OrganizationsAccountRenameService {
+            state: Arc::clone(&state),
+        })
+        .with_service(AccountManagementRenameService {
+            state: Arc::clone(&state),
+        })
+        .build();
+    let sdk_config = mock.sdk_config(REGION).await;
+    let provider = AwsProvider::from_sdk_config(
+        REGION.to_string(),
+        vec![],
+        vec![],
+        &BoundedSdkConfig::new(sdk_config),
+    );
+    (provider, state)
+}
+
+fn organizations_account_resource(account_name: &str) -> Resource {
+    organizations_account_resource_with_tags(account_name, IndexMap::new())
+}
+
+fn organizations_account_resource_with_tags(
+    account_name: &str,
+    tags: IndexMap<String, Value>,
+) -> Resource {
+    let mut resource = Resource::with_provider("aws", "organizations.Account", "member", None);
+    resource.set_attr("account_name", string(account_name));
+    resource.set_attr("email", string("member@example.com"));
+    resource.set_attr("tags", Value::Concrete(ConcreteValue::Map(tags)));
+    resource
+}
+
+fn organizations_account_state(resource: &Resource, account_name: &str) -> State {
+    test_existing_state(
+        resource.id.clone(),
+        HashMap::from([
+            ("account_name".to_string(), string(account_name)),
+            ("email".to_string(), string("member@example.com")),
+            ("tags".to_string(), empty_map()),
+        ]),
+    )
+    .with_identifier(ORGANIZATIONS_ACCOUNT_ID)
 }
 
 #[derive(Clone, Copy)]
@@ -993,6 +1231,283 @@ async fn account_write_only_create_inputs_and_import_read_round_trip() {
             .contains_key("iam_user_access_to_billing")
     );
     assert_no_diff(desired, imported);
+}
+
+#[test]
+fn served_account_schema_updates_name_but_not_email_in_place() {
+    let schema = carina_provider_aws::schemas::all_schemas()
+        .into_iter()
+        .find(|schema| schema.parts().resource_type == "organizations.Account")
+        .expect("served Organizations account schema");
+
+    assert!(
+        !schema
+            .effective_attribute("account_name")
+            .expect("account_name attribute")
+            .is_create_only(),
+        "account_name must not force account replacement"
+    );
+    assert!(
+        schema
+            .effective_attribute("email")
+            .expect("email attribute")
+            .is_create_only(),
+        "email changes still require replacement"
+    );
+}
+
+#[tokio::test]
+async fn account_name_change_plans_an_update_instead_of_replacement() {
+    let provider = provider_from_service(OrganizationsAccountService).await;
+    let schemas = schema_registry();
+    let desired = organizations_account_resource("desired-name");
+    let current = organizations_account_state(&desired, "renamed-outside-carina");
+    let current_states = into_plan_input_current_map(
+        HashMap::from([(desired.id.clone(), Current::from_state(current))]),
+        &schemas,
+        std::slice::from_ref(&desired),
+    );
+    let managed = [ResolvedResource::new(desired)];
+    let orphans = Orphans::new();
+    let saved = RawSavedAttrs::default().lift(&schemas);
+
+    let plan = create_plan(
+        &managed,
+        &[],
+        &provider,
+        PlanPriorStates::new(&current_states, &orphans),
+        &HashMap::new(),
+        &schemas,
+        &saved,
+        &HashMap::new(),
+        &[],
+    )
+    .expect("plan Organizations account rename");
+
+    assert!(
+        matches!(
+            plan.effects(),
+            [Effect::Update {
+                changed_attributes,
+                ..
+            }] if changed_attributes == &["account_name".to_string()]
+        ),
+        "account rename must be one in-place update, got {:?}",
+        plan.effects()
+    );
+}
+
+#[tokio::test]
+async fn account_name_update_sends_put_account_name_and_read_converges() {
+    let (provider, observed) = provider_with_account_rename(
+        "old-name",
+        ORGANIZATIONS_MANAGEMENT_ACCOUNT_ID,
+        AccountRenameMode::Success,
+    )
+    .await;
+    let desired = organizations_account_resource("new-name");
+    let current = organizations_account_state(&desired, "old-name");
+    let request =
+        update_request_for_test(desired.clone(), current, &["account_name".to_string()]).await;
+
+    let updated = provider
+        .update(
+            &desired.id,
+            &applied_identifier(ORGANIZATIONS_ACCOUNT_ID),
+            request,
+        )
+        .await
+        .expect("rename Organizations account")
+        .into_state_for_writeback();
+
+    assert_eq!(
+        observed.lock().expect("account rename state lock").calls,
+        vec![PutAccountNameCall {
+            account_id: Some(ORGANIZATIONS_ACCOUNT_ID.to_string()),
+            account_name: "new-name".to_string(),
+        }]
+    );
+    assert_eq!(
+        updated.attributes.get("account_name"),
+        Some(&string("new-name"))
+    );
+    assert_no_diff(desired, updated);
+}
+
+#[tokio::test]
+async fn management_account_rename_omits_account_id() {
+    let (provider, observed) = provider_with_account_rename(
+        "old-name",
+        ORGANIZATIONS_ACCOUNT_ID,
+        AccountRenameMode::Success,
+    )
+    .await;
+    let desired = organizations_account_resource("new-name");
+    let current = organizations_account_state(&desired, "old-name");
+    let request =
+        update_request_for_test(desired.clone(), current, &["account_name".to_string()]).await;
+
+    let updated = provider
+        .update(
+            &desired.id,
+            &applied_identifier(ORGANIZATIONS_ACCOUNT_ID),
+            request,
+        )
+        .await
+        .expect("rename Organizations management account")
+        .into_state_for_writeback();
+
+    assert_eq!(
+        observed.lock().expect("account rename state lock").calls,
+        vec![PutAccountNameCall {
+            account_id: None,
+            account_name: "new-name".to_string(),
+        }]
+    );
+    assert_no_diff(desired, updated);
+}
+
+#[tokio::test]
+async fn unchanged_account_name_sends_no_put_account_name() {
+    let (provider, observed) = provider_with_account_rename(
+        "same-name",
+        ORGANIZATIONS_MANAGEMENT_ACCOUNT_ID,
+        AccountRenameMode::Success,
+    )
+    .await;
+    let desired = organizations_account_resource("same-name");
+    let current = organizations_account_state(&desired, "same-name");
+    let request =
+        update_request_for_test(desired.clone(), current, &["account_name".to_string()]).await;
+
+    provider
+        .update(
+            &desired.id,
+            &applied_identifier(ORGANIZATIONS_ACCOUNT_ID),
+            request,
+        )
+        .await
+        .expect("unchanged account name update");
+
+    assert!(
+        observed
+            .lock()
+            .expect("account rename state lock")
+            .calls
+            .is_empty(),
+        "an unchanged account name must not call PutAccountName"
+    );
+}
+
+#[tokio::test]
+async fn account_name_and_tags_update_in_order_and_read_converges() {
+    let (provider, observed) = provider_with_account_rename(
+        "old-name",
+        ORGANIZATIONS_MANAGEMENT_ACCOUNT_ID,
+        AccountRenameMode::Success,
+    )
+    .await;
+    let desired = organizations_account_resource_with_tags(
+        "new-name",
+        IndexMap::from([("environment".to_string(), string("production"))]),
+    );
+    let current = organizations_account_state(&desired, "old-name");
+    let request = update_request_for_test(
+        desired.clone(),
+        current,
+        &["account_name".to_string(), "tags".to_string()],
+    )
+    .await;
+
+    let updated = provider
+        .update(
+            &desired.id,
+            &applied_identifier(ORGANIZATIONS_ACCOUNT_ID),
+            request,
+        )
+        .await
+        .expect("rename and tag Organizations account")
+        .into_state_for_writeback();
+
+    let state = observed.lock().expect("account rename state lock");
+    assert_eq!(state.operations, vec!["PutAccountName", "TagResource"]);
+    assert_eq!(
+        state.calls,
+        vec![PutAccountNameCall {
+            account_id: Some(ORGANIZATIONS_ACCOUNT_ID.to_string()),
+            account_name: "new-name".to_string(),
+        }]
+    );
+    drop(state);
+    assert_no_diff(desired, updated);
+}
+
+#[tokio::test]
+async fn account_name_access_denied_error_names_required_setup() {
+    let (provider, _observed) = provider_with_account_rename(
+        "old-name",
+        ORGANIZATIONS_MANAGEMENT_ACCOUNT_ID,
+        AccountRenameMode::AccessDenied,
+    )
+    .await;
+    let desired = organizations_account_resource("new-name");
+    let current = organizations_account_state(&desired, "old-name");
+    let request =
+        update_request_for_test(desired.clone(), current, &["account_name".to_string()]).await;
+
+    let error = provider
+        .update(
+            &desired.id,
+            &applied_identifier(ORGANIZATIONS_ACCOUNT_ID),
+            request,
+        )
+        .await
+        .expect_err("AccessDenied must fail account rename");
+    let message = error.to_string();
+    assert!(message.contains("missing IAM permission"), "{message}");
+    assert!(message.contains("account:PutAccountName"), "{message}");
+    assert!(
+        message.contains("Account Management trusted access is not enabled"),
+        "{message}"
+    );
+    assert!(
+        message.contains(
+            "aws organizations enable-aws-service-access --service-principal account.amazonaws.com"
+        ),
+        "{message}"
+    );
+}
+
+#[tokio::test]
+async fn account_name_non_access_denied_error_has_no_setup_hint() {
+    let (provider, _observed) = provider_with_account_rename(
+        "old-name",
+        ORGANIZATIONS_MANAGEMENT_ACCOUNT_ID,
+        AccountRenameMode::OtherError,
+    )
+    .await;
+    let desired = organizations_account_resource("new-name");
+    let current = organizations_account_state(&desired, "old-name");
+    let request =
+        update_request_for_test(desired.clone(), current, &["account_name".to_string()]).await;
+
+    let error = provider
+        .update(
+            &desired.id,
+            &applied_identifier(ORGANIZATIONS_ACCOUNT_ID),
+            request,
+        )
+        .await
+        .expect_err("non-AccessDenied must fail account rename");
+    let message = error.to_string();
+    assert!(message.contains("Failed to rename account"), "{message}");
+    assert!(!message.contains("account:PutAccountName"), "{message}");
+    assert!(
+        !message.contains(
+            "aws organizations enable-aws-service-access --service-principal account.amazonaws.com"
+        ),
+        "{message}"
+    );
 }
 
 #[tokio::test]
