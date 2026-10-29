@@ -11,7 +11,6 @@ import re
 import sys
 import tarfile
 import tempfile
-import unicodedata
 import zlib
 from dataclasses import dataclass
 from pathlib import Path
@@ -27,7 +26,6 @@ MAX_TAR_SIZE = 80 * MIB
 ROOT = Path(__file__).resolve().parents[1]
 GENERATED_DOCS = ROOT / "generated-docs" / "aws"
 INDEX_SOURCE = ROOT / "docs" / "registry" / "index.md"
-SERVICE_TITLES_SOURCE = ROOT / "docs" / "registry" / "service-titles.json"
 
 SLUG_RE = re.compile(r"[a-z0-9][a-z0-9_]*\Z")
 
@@ -36,76 +34,11 @@ class BundleError(Exception):
     """A clear, user-facing build error."""
 
 
-class DuplicateJSONKeyError(ValueError):
-    """A JSON object repeats a key."""
-
-    def __init__(self, key):
-        super().__init__(key)
-        self.key = key
-
-
 @dataclass(frozen=True)
 class Page:
     archive_path: str
     title: str
     content: bytes
-    service: str = ""
-
-
-def _reject_duplicate_json_keys(pairs):
-    result = {}
-    for key, value in pairs:
-        if key in result:
-            raise DuplicateJSONKeyError(key)
-        result[key] = value
-    return result
-
-
-def _service_title_error(title):
-    if not isinstance(title, str):
-        return "must be a string"
-    if not title:
-        return "must not be empty"
-    if len(title) > 128:
-        return "exceeds 128 Unicode code points"
-
-    for character in title:
-        codepoint = ord(character)
-        category = unicodedata.category(character)
-        if category == "Cs":
-            return f"contains invalid Unicode surrogate U+{codepoint:04X}"
-        forbidden = (
-            category == "Cc"
-            or codepoint in (0x00AD, 0x061C, 0x180E, 0xFEFF)
-            or 0x200B <= codepoint <= 0x200F
-            or 0x2028 <= codepoint <= 0x202E
-            or 0x2060 <= codepoint <= 0x206F
-            or 0xFFF9 <= codepoint <= 0xFFFB
-        )
-        if forbidden:
-            return f"contains forbidden character U+{codepoint:04X}"
-    return None
-
-
-def _load_service_titles(path=SERVICE_TITLES_SOURCE):
-    try:
-        text = path.read_text(encoding="utf-8")
-    except FileNotFoundError as error:
-        raise BundleError(f"AWS service titles file does not exist: {path}") from error
-    except UnicodeDecodeError as error:
-        raise BundleError(f"{path}: AWS service titles are not UTF-8: {error}") from error
-
-    try:
-        titles = json.loads(text, object_pairs_hook=_reject_duplicate_json_keys)
-    except DuplicateJSONKeyError as error:
-        raise BundleError(
-            f"{path}: duplicate AWS service title key {error.key!r}"
-        ) from error
-    except json.JSONDecodeError as error:
-        raise BundleError(f"{path}: invalid AWS service titles JSON: {error}") from error
-    if not isinstance(titles, dict):
-        raise BundleError(f"{path}: AWS service titles must be a JSON object")
-    return titles
 
 
 def _validate_source_slug(slug, description):
@@ -187,10 +120,7 @@ def _collect_pages(source_root=GENERATED_DOCS):
             )
 
         title, content = _frontmatter_title_and_body(source)
-        destinations[archive_path] = (
-            source,
-            Page(archive_path, title, content, service),
-        )
+        destinations[archive_path] = (source, Page(archive_path, title, content))
 
     if not destinations:
         raise BundleError(
@@ -235,60 +165,6 @@ def _build_index(pages, index_source=INDEX_SOURCE):
     )
 
 
-def _build_services(pages, service_titles_source=SERVICE_TITLES_SOURCE):
-    titles = _load_service_titles(service_titles_source)
-    grouped = {}
-    for page in pages:
-        service = grouped.setdefault(
-            page.service,
-            {"resources": [], "data_sources": []},
-        )
-        section, filename = page.archive_path.split("/", 1)
-        field = "resources" if section == "resources" else "data_sources"
-        service[field].append(filename[:-3])
-
-    services = []
-    seen_titles = {}
-    for service_id in sorted(grouped):
-        if service_id not in titles:
-            raise BundleError(
-                f"AWS service {service_id!r} has no display title in "
-                f"{service_titles_source}"
-            )
-        title = titles[service_id]
-        title_error = _service_title_error(title)
-        if title_error:
-            raise BundleError(
-                f"display title for AWS service {service_id!r} {title_error}"
-            )
-        if title in seen_titles:
-            raise BundleError(
-                f"AWS services {seen_titles[title]!r} and {service_id!r} have "
-                f"duplicate display title {title!r}"
-            )
-        seen_titles[title] = service_id
-
-        sections = grouped[service_id]
-        services.append(
-            {
-                "id": service_id,
-                "title": title,
-                "resources": sorted(sections["resources"]),
-                "data_sources": sorted(sections["data_sources"]),
-            }
-        )
-
-    return (
-        json.dumps(
-            {"services": services},
-            ensure_ascii=False,
-            separators=(",", ":"),
-            sort_keys=True,
-        )
-        + "\n"
-    ).encode("utf-8")
-
-
 def _tar_info(name, *, size=0, directory=False):
     info = tarfile.TarInfo(name)
     info.type = tarfile.DIRTYPE if directory else tarfile.REGTYPE
@@ -302,17 +178,11 @@ def _tar_info(name, *, size=0, directory=False):
     return info
 
 
-def build_bundle(
-    output,
-    source_root=GENERATED_DOCS,
-    index_source=INDEX_SOURCE,
-    service_titles_source=SERVICE_TITLES_SOURCE,
-):
+def build_bundle(output, source_root=GENERATED_DOCS, index_source=INDEX_SOURCE):
     pages = _collect_pages(source_root)
     index = _build_index(pages, index_source)
-    services = _build_services(pages, service_titles_source)
 
-    entries = [("index.md", False, index), ("services.json", False, services)]
+    entries = [("index.md", False, index)]
     for directory in ("resources", "data-sources"):
         if any(page.archive_path.startswith(directory + "/") for page in pages):
             entries.append((directory, True, b""))
@@ -344,7 +214,7 @@ def build_bundle(
         if temporary is not None:
             temporary.unlink(missing_ok=True)
 
-    print(f"built {output} ({len(pages) + 2} files)")
+    print(f"built {output} ({len(pages) + 1} files)")
 
 
 def _decompress_gzip(path, errors):
@@ -521,8 +391,8 @@ def _entry_type_error(typeflag):
 
 
 def _validate_file_path(path, errors):
-    if path in (b"index.md", b"services.json"):
-        return None
+    if path == b"index.md":
+        return
     parts = path.split(b"/")
     if (
         len(parts) != 2
@@ -530,13 +400,11 @@ def _validate_file_path(path, errors):
         or not parts[1].endswith(b".md")
     ):
         errors.append(f"file is not allowed: {_path_text(path)!r}")
-        return None
+        return
 
     slug_bytes = parts[1][:-3]
-    valid = True
     if len(slug_bytes) > 128:
         errors.append(f"slug in {_path_text(path)!r} exceeds 128 bytes")
-        valid = False
     try:
         slug = slug_bytes.decode("utf-8")
     except UnicodeDecodeError:
@@ -545,146 +413,10 @@ def _validate_file_path(path, errors):
         errors.append(
             f"invalid slug in {_path_text(path)!r}: expected [a-z0-9][a-z0-9_]*"
         )
-        valid = False
-    return path.decode("utf-8") if valid else None
-
-
-def _reject_json_constant(value):
-    raise ValueError(f"non-standard JSON value {value!r}")
-
-
-def _validate_exact_keys(value, expected, description, errors):
-    actual = set(value)
-    for key in sorted(actual - expected):
-        errors.append(f"{description} contains unknown key {key!r}")
-    for key in sorted(expected - actual):
-        errors.append(f"{description} is missing required key {key!r}")
-
-
-def _validate_services_json(data, page_paths, errors):
-    try:
-        text = data.decode("utf-8")
-    except UnicodeDecodeError:
-        return
-
-    try:
-        document = json.loads(
-            text,
-            object_pairs_hook=_reject_duplicate_json_keys,
-            parse_constant=_reject_json_constant,
-        )
-    except DuplicateJSONKeyError as error:
-        errors.append(f"services.json contains duplicate key {error.key!r}")
-        return
-    except (json.JSONDecodeError, ValueError) as error:
-        errors.append(f"services.json is not valid JSON: {error}")
-        return
-
-    if not isinstance(document, dict):
-        errors.append("services.json root must be a JSON object")
-        return
-    _validate_exact_keys(document, {"services"}, "services.json root", errors)
-    if "services" not in document:
-        return
-
-    services = document["services"]
-    if not isinstance(services, list):
-        errors.append("services.json 'services' must be an array")
-        return
-    if not services:
-        errors.append("services.json 'services' must not be empty")
-
-    required_keys = {"id", "title", "resources", "data_sources"}
-    seen_ids = {}
-    seen_titles = {}
-    assignments = {}
-
-    for position, service in enumerate(services, start=1):
-        description = f"services.json service entry {position}"
-        if not isinstance(service, dict):
-            errors.append(f"{description} must be a JSON object")
-            continue
-        _validate_exact_keys(service, required_keys, description, errors)
-
-        service_id = service.get("id")
-        if not isinstance(service_id, str):
-            errors.append(f"{description} id must be a string")
-        else:
-            if not SLUG_RE.fullmatch(service_id):
-                errors.append(
-                    f"{description} has invalid id {service_id!r}: expected "
-                    "[a-z0-9][a-z0-9_]*"
-                )
-            elif len(service_id.encode("utf-8")) > 128:
-                errors.append(f"{description} id exceeds 128 bytes")
-            if service_id in seen_ids:
-                errors.append(
-                    f"{description} duplicates service id {service_id!r} from "
-                    f"entry {seen_ids[service_id]}"
-                )
-            else:
-                seen_ids[service_id] = position
-
-        title = service.get("title")
-        title_error = _service_title_error(title)
-        if title_error:
-            errors.append(f"{description} title {title_error}")
-        elif title in seen_titles:
-            errors.append(
-                f"{description} duplicates service title {title!r} from "
-                f"entry {seen_titles[title]}"
-            )
-        else:
-            seen_titles[title] = position
-
-        listed_count = 0
-        for field, section, other_field, other_section in (
-            ("resources", "resources", "data_sources", "data-sources"),
-            ("data_sources", "data-sources", "resources", "resources"),
-        ):
-            slugs = service.get(field)
-            if not isinstance(slugs, list):
-                errors.append(f"{description} {field!r} must be an array")
-                continue
-            listed_count += len(slugs)
-            for slug_position, slug in enumerate(slugs, start=1):
-                if not isinstance(slug, str):
-                    errors.append(
-                        f"{description} {field}[{slug_position}] must be a string"
-                    )
-                    continue
-
-                page_path = f"{section}/{slug}.md"
-                if page_path not in page_paths:
-                    other_path = f"{other_section}/{slug}.md"
-                    if other_path in page_paths:
-                        errors.append(
-                            f"{description} lists slug {slug!r} in {field!r}, "
-                            f"but it is in the wrong section; use {other_field!r}"
-                        )
-                    else:
-                        errors.append(
-                            f"{description} lists unknown slug {slug!r} in {field!r}"
-                        )
-                    continue
-                assignments.setdefault(page_path, []).append(position)
-
-        if listed_count == 0:
-            errors.append(f"{description} must contain at least one page")
-
-    for page_path, positions in sorted(assignments.items()):
-        if len(positions) > 1:
-            errors.append(
-                f"page {page_path!r} appears more than once in services.json"
-            )
-    for page_path in sorted(page_paths - assignments.keys()):
-        errors.append(f"page {page_path!r} is not assigned to any service")
 
 
 def _validate_tar(stream, errors):
     seen_paths = set()
-    page_paths = set()
-    services_data = None
     index_present = False
     entries = 0
     files_size = 0
@@ -800,9 +532,7 @@ def _validate_tar(stream, errors):
                 if path not in (b"resources", b"data-sources"):
                     errors.append(f"directory is not allowed: {_path_text(path)!r}")
             elif regular:
-                page_path = _validate_file_path(path, errors)
-                if page_path is not None:
-                    page_paths.add(page_path)
+                _validate_file_path(path, errors)
                 if path == b"index.md":
                     index_present = True
 
@@ -814,17 +544,14 @@ def _validate_tar(stream, errors):
                 errors.append("regular files total more than 64 MiB")
                 files_limit_reported = True
 
-        collect_services = regular and path == b"services.json"
-        payload, complete = _read_payload(
+        _, complete = _read_payload(
             stream,
             effective_size,
-            collect=collect_services,
+            collect=False,
             validate_utf8=regular,
             label=path_label,
             errors=errors,
         )
-        if collect_services and services_data is None:
-            services_data = payload
         if not complete:
             break
 
@@ -832,8 +559,6 @@ def _validate_tar(stream, errors):
         errors.append("tar archive is missing its two-block end marker")
     if not index_present:
         errors.append("index.md is required at the archive root")
-    if services_data is not None:
-        _validate_services_json(services_data, page_paths, errors)
 
 
 def check_bundle(bundle):

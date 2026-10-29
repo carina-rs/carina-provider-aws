@@ -2,7 +2,6 @@
 
 import gzip
 import io
-import json
 import os
 import runpy
 import subprocess
@@ -17,6 +16,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "docs-bundle.py"
 DOCS_BUNDLE = runpy.run_path(str(SCRIPT))
+REMOVED_SERVICE_MANIFEST = Path("services").with_suffix(".json").name
 
 
 def _octal(value, width):
@@ -78,44 +78,6 @@ def write_bundle(path, *entries):
     path.write_bytes(gzip.compress(tar_stream(*entries), mtime=0))
 
 
-NO_SERVICES_JSON = object()
-
-
-def service_entry(
-    *, service_id="core", title="Core", resources=None, data_sources=None, **extra
-):
-    entry = {
-        "id": service_id,
-        "title": title,
-        "resources": ["alpha"] if resources is None else resources,
-        "data_sources": ["beta"] if data_sources is None else data_sources,
-    }
-    entry.update(extra)
-    return entry
-
-
-def docs_entries(
-    services=NO_SERVICES_JSON,
-    *,
-    resources=("alpha",),
-    data_sources=("beta",),
-):
-    entries = [tar_entry("index.md", b"# Index\n")]
-    entries.extend(
-        tar_entry(f"resources/{slug}.md", f"# {slug}\n".encode())
-        for slug in resources
-    )
-    entries.extend(
-        tar_entry(f"data-sources/{slug}.md", f"# {slug}\n".encode())
-        for slug in data_sources
-    )
-    if services is not NO_SERVICES_JSON:
-        if not isinstance(services, bytes):
-            services = json.dumps(services).encode("utf-8")
-        entries.append(tar_entry("services.json", services))
-    return entries
-
-
 def entry_limit_entries(page_count):
     return [
         tar_entry("./", typeflag=b"5"),
@@ -150,16 +112,6 @@ def create_build_fixture(
         ("gamma/lookup_data_source.md", "aws.gamma.Lookup"),
     ]
     index_source = directory / "index.md"
-    service_titles_source = directory / "service-titles.json"
-    service_titles_source.write_text(
-        json.dumps(
-            {"alpha": "Alpha", "beta": "Beta", "gamma": "Gamma"},
-            indent=2,
-            sort_keys=True,
-        )
-        + "\n",
-        encoding="utf-8",
-    )
 
     if reverse_creation:
         index_source.write_text(
@@ -178,11 +130,11 @@ def create_build_fixture(
             "# AWS fixture\n\nFixture introduction.\n", encoding="utf-8"
         )
 
-    for fixture_file in [index_source, service_titles_source, *page_paths]:
+    for fixture_file in [index_source, *page_paths]:
         os.chmod(fixture_file, file_mode)
         os.utime(fixture_file, (mtime, mtime))
 
-    return source_root, index_source, service_titles_source
+    return source_root, index_source
 
 
 class DocsBundleTests(unittest.TestCase):
@@ -204,26 +156,14 @@ class DocsBundleTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn(message.lower(), result.stderr.lower())
 
-    def assert_check_accepts(self, entries):
-        with tempfile.TemporaryDirectory() as directory:
-            bundle = Path(directory) / "docs.tar.gz"
-            write_bundle(bundle, *entries)
-            result = self.run_script("check", bundle)
-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-
     def build_fixture(self, directory, filename="docs.tar.gz", **fixture_options):
         directory = Path(directory)
-        source_root, index_source, service_titles_source = create_build_fixture(
+        source_root, index_source = create_build_fixture(
             directory, **fixture_options
         )
         bundle = directory / filename
         with redirect_stdout(io.StringIO()):
-            DOCS_BUNDLE["build_bundle"](
-                bundle,
-                source_root,
-                index_source,
-                service_titles_source,
-            )
+            DOCS_BUNDLE["build_bundle"](bundle, source_root, index_source)
         return bundle
 
     def test_build_round_trip_passes_check(self):
@@ -232,36 +172,11 @@ class DocsBundleTests(unittest.TestCase):
             check = self.run_script("check", bundle)
             self.assertEqual(check.returncode, 0, check.stdout + check.stderr)
 
+    def test_build_omits_removed_service_manifest(self):
+        with tempfile.TemporaryDirectory() as directory:
+            bundle = self.build_fixture(directory)
             with tarfile.open(bundle, "r:gz") as archive:
-                member = archive.extractfile("services.json")
-                self.assertIsNotNone(member)
-                services = json.load(member)
-
-        self.assertEqual(
-            services,
-            {
-                "services": [
-                    {
-                        "id": "alpha",
-                        "title": "Alpha",
-                        "resources": ["alpha_standalone"],
-                        "data_sources": [],
-                    },
-                    {
-                        "id": "beta",
-                        "title": "Beta",
-                        "resources": ["beta_shared"],
-                        "data_sources": ["beta_shared"],
-                    },
-                    {
-                        "id": "gamma",
-                        "title": "Gamma",
-                        "resources": [],
-                        "data_sources": ["gamma_lookup"],
-                    },
-                ]
-            },
-        )
+                self.assertNotIn(REMOVED_SERVICE_MANIFEST, archive.getnames())
 
     def test_build_is_byte_reproducible(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -329,19 +244,9 @@ class DocsBundleTests(unittest.TestCase):
             )
             index_source = directory / "index.md"
             index_source.write_text("# AWS fixture\n", encoding="utf-8")
-            service_titles_source = directory / "service-titles.json"
-            service_titles_source.write_text(
-                json.dumps({"alpha": "Alpha"}),
-                encoding="utf-8",
-            )
             bundle = directory / "docs.tar.gz"
             with redirect_stdout(io.StringIO()):
-                DOCS_BUNDLE["build_bundle"](
-                    bundle,
-                    source_root,
-                    index_source,
-                    service_titles_source,
-                )
+                DOCS_BUNDLE["build_bundle"](bundle, source_root, index_source)
 
             with tarfile.open(bundle, "r:gz") as archive:
                 member = archive.extractfile("resources/alpha_example.md")
@@ -370,7 +275,6 @@ class DocsBundleTests(unittest.TestCase):
                         "resources",
                         "resources/alpha_standalone.md",
                         "resources/beta_shared.md",
-                        "services.json",
                     },
                 )
                 member = archive.extractfile("index.md")
@@ -400,56 +304,6 @@ class DocsBundleTests(unittest.TestCase):
             ):
                 DOCS_BUNDLE["build_bundle"](
                     directory / "docs.tar.gz", source_root, index_source
-                )
-
-    def test_build_rejects_service_missing_from_titles(self):
-        with tempfile.TemporaryDirectory() as directory:
-            directory = Path(directory)
-            source_root, index_source, service_titles_source = create_build_fixture(
-                directory
-            )
-            service_titles_source.write_text(
-                json.dumps({"alpha": "Alpha", "beta": "Beta"}),
-                encoding="utf-8",
-            )
-
-            with self.assertRaisesRegex(
-                DOCS_BUNDLE["BundleError"],
-                "gamma.*no display title",
-            ):
-                DOCS_BUNDLE["build_bundle"](
-                    directory / "docs.tar.gz",
-                    source_root,
-                    index_source,
-                    service_titles_source,
-                )
-
-    def test_build_rejects_invalid_service_title(self):
-        with tempfile.TemporaryDirectory() as directory:
-            directory = Path(directory)
-            source_root, index_source, service_titles_source = create_build_fixture(
-                directory
-            )
-            service_titles_source.write_text(
-                json.dumps(
-                    {
-                        "alpha": "Alpha\u200b",
-                        "beta": "Beta",
-                        "gamma": "Gamma",
-                    }
-                ),
-                encoding="utf-8",
-            )
-
-            with self.assertRaisesRegex(
-                DOCS_BUNDLE["BundleError"],
-                "alpha.*forbidden character U\\+200B",
-            ):
-                DOCS_BUNDLE["build_bundle"](
-                    directory / "docs.tar.gz",
-                    source_root,
-                    index_source,
-                    service_titles_source,
                 )
 
     def test_index_omits_empty_sections(self):
@@ -483,182 +337,13 @@ class DocsBundleTests(unittest.TestCase):
                     self.assertIn(present, index)
                     self.assertNotIn(absent, index)
 
-    def test_check_accepts_bundle_without_services_json(self):
-        self.assert_check_accepts(docs_entries())
-
-    def test_check_accepts_128_character_multibyte_service_title(self):
-        services = {
-            "services": [service_entry(title="界" * 128)],
-        }
-        self.assert_check_accepts(docs_entries(services))
-
-    def test_check_accepts_128_byte_service_id(self):
-        services = {
-            "services": [service_entry(service_id="a" * 128)],
-        }
-        self.assert_check_accepts(docs_entries(services))
-
-    def test_check_rejects_unknown_services_json_root_key(self):
-        services = {
-            "services": [service_entry()],
-            "unknown": True,
-        }
-        self.assert_check_rejects(docs_entries(services), "unknown key 'unknown'")
-
-    def test_check_rejects_unknown_service_entry_key(self):
-        services = {
-            "services": [service_entry(unknown=True)],
-        }
-        self.assert_check_rejects(docs_entries(services), "unknown key 'unknown'")
-
-    def test_check_rejects_duplicate_services_json_keys(self):
-        cases = (
-            (
-                b'{"services":[],"services":[]}',
-                "duplicate key 'services'",
-            ),
-            (
-                b'{"services":[{"id":"core","id":"other",'
-                b'"title":"Core","resources":["alpha"],'
-                b'"data_sources":["beta"]}]}',
-                "duplicate key 'id'",
-            ),
-        )
-        for services, message in cases:
-            with self.subTest(message=message):
-                self.assert_check_rejects(docs_entries(services), message)
-
-    def test_check_rejects_empty_services(self):
+    def test_check_rejects_removed_service_manifest(self):
         self.assert_check_rejects(
-            docs_entries({"services": []}),
-            "'services' must not be empty",
-        )
-
-    def test_check_rejects_bad_service_id(self):
-        services = {
-            "services": [service_entry(service_id="Bad-Id")],
-        }
-        self.assert_check_rejects(docs_entries(services), "invalid id")
-
-    def test_check_rejects_129_byte_service_id(self):
-        services = {
-            "services": [service_entry(service_id="a" * 129)],
-        }
-        self.assert_check_rejects(docs_entries(services), "id exceeds 128 bytes")
-
-    def test_check_rejects_empty_service_title(self):
-        services = {"services": [service_entry(title="")]}
-        self.assert_check_rejects(docs_entries(services), "title must not be empty")
-
-    def test_check_rejects_129_character_service_title(self):
-        services = {"services": [service_entry(title="x" * 129)]}
-        self.assert_check_rejects(
-            docs_entries(services),
-            "title exceeds 128 Unicode code points",
-        )
-
-    def test_check_rejects_control_character_in_service_title(self):
-        services = {"services": [service_entry(title="Core\nService")]}
-        self.assert_check_rejects(
-            docs_entries(services),
-            "forbidden character U+000A",
-        )
-
-    def test_check_rejects_forbidden_format_characters_in_service_title(self):
-        codepoints = (
-            0x00AD,
-            0x061C,
-            0x180E,
-            0x200B,
-            0x200F,
-            0x2028,
-            0x202E,
-            0x2060,
-            0x206F,
-            0xFEFF,
-            0xFFF9,
-            0xFFFB,
-        )
-        for codepoint in codepoints:
-            with self.subTest(codepoint=f"U+{codepoint:04X}"):
-                services = {
-                    "services": [
-                        service_entry(title=f"Core{chr(codepoint)}Service")
-                    ]
-                }
-                self.assert_check_rejects(
-                    docs_entries(services),
-                    f"forbidden character U+{codepoint:04X}",
-                )
-
-    def test_check_rejects_duplicate_service_id(self):
-        services = {
-            "services": [
-                service_entry(resources=["alpha"], data_sources=[]),
-                service_entry(
-                    title="Other",
-                    resources=[],
-                    data_sources=["beta"],
-                ),
-            ]
-        }
-        self.assert_check_rejects(docs_entries(services), "duplicates service id")
-
-    def test_check_rejects_duplicate_service_title(self):
-        services = {
-            "services": [
-                service_entry(resources=["alpha"], data_sources=[]),
-                service_entry(
-                    service_id="other",
-                    resources=[],
-                    data_sources=["beta"],
-                ),
-            ]
-        }
-        self.assert_check_rejects(docs_entries(services), "duplicates service title")
-
-    def test_check_rejects_unknown_service_slug(self):
-        services = {
-            "services": [service_entry(resources=["missing"])],
-        }
-        self.assert_check_rejects(docs_entries(services), "unknown slug 'missing'")
-
-    def test_check_rejects_service_slug_in_wrong_section(self):
-        services = {
-            "services": [
-                service_entry(resources=["alpha", "beta"], data_sources=[])
+            [
+                tar_entry("index.md", b"# Index\n"),
+                tar_entry(REMOVED_SERVICE_MANIFEST, b"{}"),
             ],
-        }
-        self.assert_check_rejects(docs_entries(services), "wrong section")
-
-    def test_check_rejects_page_assigned_twice(self):
-        services = {
-            "services": [service_entry(resources=["alpha", "alpha"])],
-        }
-        self.assert_check_rejects(docs_entries(services), "appears more than once")
-
-    def test_check_rejects_unassigned_page(self):
-        services = {"services": [service_entry()]}
-        self.assert_check_rejects(
-            docs_entries(services, resources=("alpha", "spare")),
-            "page 'resources/spare.md' is not assigned",
-        )
-
-    def test_check_rejects_service_without_pages(self):
-        services = {
-            "services": [
-                service_entry(),
-                service_entry(
-                    service_id="empty",
-                    title="Empty",
-                    resources=[],
-                    data_sources=[],
-                ),
-            ]
-        }
-        self.assert_check_rejects(
-            docs_entries(services),
-            "must contain at least one page",
+            "file is not allowed",
         )
 
     def test_check_accepts_pax_path_and_size_overrides(self):
@@ -694,11 +379,6 @@ class DocsBundleTests(unittest.TestCase):
                         self.assertIn(
                             "more than 4096 entries", result.stderr.lower()
                         )
-
-    def test_check_counts_services_json_toward_entry_limit(self):
-        entries = entry_limit_entries(4094)
-        entries.append(tar_entry("services.json", b"{}"))
-        self.assert_check_rejects(entries, "more than 4096 entries")
 
     def test_check_rejects_missing_index(self):
         self.assert_check_rejects(
