@@ -1,7 +1,4 @@
-use carina_core::resource::{ConcreteValue, Value};
-use carina_core::schema::{AttributeType, CompletionValue, DslTransform, legacy_validator};
-
-use super::provider_bare_type;
+use carina_core::schema::CompletionValue;
 
 // ========== Region constants ==========
 
@@ -115,26 +112,4 @@ pub fn region_completions(prefix: &str) -> Vec<CompletionValue> {
             CompletionValue::new(format!("{}.Region.{}", prefix, dsl_code), *name)
         })
         .collect()
-}
-
-/// AWS region type with provider-facing API-spelling validation.
-///
-/// Enum identifiers are resolved to API spelling by the host before this
-/// validator runs. Quoted strings are literal and must already use the AWS
-/// spelling (for example, `"ap-northeast-1"`).
-pub fn aws_region() -> AttributeType {
-    AttributeType::enum_(
-        provider_bare_type(&[], "Region"),
-        None,
-        vec![],
-        Some(legacy_validator(|value| {
-            if let Value::Concrete(ConcreteValue::String(s)) = value {
-                let s = s.expose_plaintext();
-                validate_aws_region(s)
-            } else {
-                Err("Expected string".to_string())
-            }
-        })),
-        Some(DslTransform::HyphenToUnderscore),
-    )
 }

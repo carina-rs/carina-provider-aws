@@ -204,7 +204,7 @@ impl AwsProvider {
             resource.resolved_attributes(),
             outcome,
         );
-        Ok(self.finish_issued(issued, completion))
+        self.finish_issued(issued, completion)
     }
 
     /// Update a CloudWatch Logs Log Group

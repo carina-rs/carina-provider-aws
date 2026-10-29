@@ -8,12 +8,7 @@ use super::AwsSchemaConfig;
 use carina_core::schema::{AttributeSchema, AttributeType, ResourceSchema};
 
 pub fn arn() -> AttributeType {
-    AttributeType::refined_string(
-        Some(super::provider_type("sts", "CallerIdentity", "Arn")),
-        Some("^arn:(aws|aws-cn|aws-us-gov):sts:.*$".to_string()),
-        None,
-        None,
-    )
+    super::sts_caller_identity_arn()
 }
 
 /// Returns the schema config for sts.CallerIdentity (Smithy: com.amazonaws.sts)
@@ -25,19 +20,19 @@ pub fn sts_caller_identity_config() -> AwsSchemaConfig {
         schema: ResourceSchema::new("sts.CallerIdentity")
         .as_data_source()
         .attribute(
-            AttributeSchema::optional("account_id", super::aws_account_id())
+            AttributeSchema::provider_populated("account_id", super::aws_account_id())
                 .with_description("The Amazon Web Services account ID number of the account that owns or contains the calling entity.")
                 .with_provider_name("Account")
                 .build(),
         )
         .attribute(
-            AttributeSchema::optional("arn", self::arn())
+            AttributeSchema::provider_populated("arn", self::arn())
                 .with_description("The Amazon Web Services ARN associated with the calling entity.")
                 .with_provider_name("Arn")
                 .build(),
         )
         .attribute(
-            AttributeSchema::optional("user_id", AttributeType::string())
+            AttributeSchema::provider_populated("user_id", AttributeType::string())
                 .with_description("The unique identifier of the calling entity.")
                 .with_provider_name("UserId")
                 .build(),

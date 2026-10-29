@@ -82,20 +82,6 @@ struct ArnValidation {
     service: &'static str,
     resource: &'static str,
     regex: &'static str,
-    validator: ArnValidator,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ArnValidator {
-    Iam {
-        prefix: &'static str,
-        label: &'static str,
-    },
-    Service {
-        service: &'static str,
-        prefix: Option<&'static str>,
-        label: &'static str,
-    },
 }
 
 static ARN_VALIDATIONS: &[ArnValidation] = &[
@@ -103,88 +89,46 @@ static ARN_VALIDATIONS: &[ArnValidation] = &[
         service: "iam",
         resource: "Role",
         regex: "^arn:(aws|aws-cn|aws-us-gov):iam::[^:]*:role/.+$",
-        validator: ArnValidator::Iam {
-            prefix: "role/",
-            label: "IAM Role",
-        },
     },
     ArnValidation {
         service: "iam",
         resource: "Policy",
         regex: "^arn:(aws|aws-cn|aws-us-gov):iam::[^:]*:policy/.+$",
-        validator: ArnValidator::Iam {
-            prefix: "policy/",
-            label: "IAM Policy",
-        },
     },
     ArnValidation {
         service: "iam",
         resource: "OidcProvider",
         regex: "^arn:(aws|aws-cn|aws-us-gov):iam::[^:]*:oidc-provider/.+$",
-        validator: ArnValidator::Iam {
-            prefix: "oidc-provider/",
-            label: "IAM OIDC Provider",
-        },
     },
     ArnValidation {
         service: "kms",
         resource: "Key",
         regex: "^arn:(aws|aws-cn|aws-us-gov):kms:[^:]*:[^:]*:key/.+$",
-        validator: ArnValidator::Service {
-            service: "kms",
-            prefix: Some("key/"),
-            label: "KMS Key",
-        },
     },
     ArnValidation {
         service: "s3",
         resource: "Bucket",
         regex: "^arn:(aws|aws-cn|aws-us-gov):s3:::.+$",
-        validator: ArnValidator::Service {
-            service: "s3",
-            prefix: None,
-            label: "s3",
-        },
     },
     ArnValidation {
         service: "cloudfront",
         resource: "Distribution",
         regex: "^arn:(aws|aws-cn|aws-us-gov):cloudfront::[^:]*:distribution/.+$",
-        validator: ArnValidator::Service {
-            service: "cloudfront",
-            prefix: Some("distribution/"),
-            label: "cloudfront",
-        },
     },
     ArnValidation {
         service: "ecs",
         resource: "Cluster",
         regex: "^arn:(aws|aws-cn|aws-us-gov):ecs:[^:]*:[^:]*:cluster/.+$",
-        validator: ArnValidator::Service {
-            service: "ecs",
-            prefix: Some("cluster/"),
-            label: "ecs",
-        },
     },
     ArnValidation {
         service: "dynamodb",
         resource: "Table",
         regex: "^arn:(aws|aws-cn|aws-us-gov):dynamodb:[^:]*:[^:]*:table/.+$",
-        validator: ArnValidator::Service {
-            service: "dynamodb",
-            prefix: Some("table/"),
-            label: "dynamodb",
-        },
     },
     ArnValidation {
         service: "logs",
         resource: "LogGroup",
         regex: "^arn:(aws|aws-cn|aws-us-gov):logs:[^:]*:[^:]*:log-group:.+$",
-        validator: ArnValidator::Service {
-            service: "logs",
-            prefix: Some("log-group:"),
-            label: "logs",
-        },
     },
 ];
 
@@ -219,113 +163,23 @@ fn resource_identity_parts(name: &str) -> Option<(&str, &str)> {
     name.split_once('.')
 }
 
-#[allow(dead_code)]
-fn arn_validator_for(validator: ArnValidator) -> String {
-    match validator {
-        ArnValidator::Iam { prefix, label } => format!(
-            r#"|value| {{
-            if let Value::Concrete(ConcreteValue::String(s)) = value {{
-                let s = s.expose_plaintext();
-                super::validate_iam_arn(s, {prefix:?})
-                    .map_err(|reason| format!("Invalid {label} ARN '{{}}': {{}}", s, reason))
-            }} else {{
-                Err("Expected string".to_string())
-            }}
-        }}"#
-        ),
-        ArnValidator::Service {
-            service,
-            prefix,
-            label,
-        } => {
-            let prefix_expr = match prefix {
-                Some(prefix) => format!("Some({prefix:?})"),
-                None => "None".to_string(),
-            };
-            format!(
-                r#"|value| {{
-            if let Value::Concrete(ConcreteValue::String(s)) = value {{
-                let s = s.expose_plaintext();
-                super::validate_service_arn(s, {service:?}, {prefix_expr})
-                    .map_err(|reason| format!("Invalid {label} ARN '{{}}': {{}}", s, reason))
-            }} else {{
-                Err("Expected string".to_string())
-            }}
-        }}"#
-            )
-        }
-    }
-}
-
-#[allow(dead_code)]
-fn arn_validator_expression(choice: ArnEmitChoice) -> String {
-    match choice {
-        ArnEmitChoice::PerKind(entry) => arn_validator_for(entry.validator),
-        ArnEmitChoice::ServicePrefix(service) => format!(
-            r#"|value| {{
-            if let Value::Concrete(ConcreteValue::String(s)) = value {{
-                let s = s.expose_plaintext();
-                super::validate_service_arn(s, {service:?}, None)
-                    .map_err(|reason| format!("Invalid {service} ARN '{{}}': {{}}", s, reason))
-            }} else {{
-                Err("Expected string".to_string())
-            }}
-        }}"#
-        ),
-        ArnEmitChoice::Generic => unreachable!("generic ARN helper has no validator expression"),
-    }
-}
-
 fn shared_arn_constructor(service: &str, resource: &str) -> Option<&'static str> {
     match (service, resource) {
         ("iam", "Role") => Some("iam_role_arn"),
         ("iam", "Policy") => Some("iam_policy_arn"),
         ("iam", "OidcProvider") => Some("iam_oidc_provider_arn"),
+        ("kms", "Key") => Some("kms_key_arn"),
+        ("organizations", "Account") => Some("organizations_account_arn"),
+        ("organizations", "Organization") => Some("organizations_organization_arn"),
+        ("s3", "Bucket") => Some("s3_bucket_arn"),
+        ("sts", "CallerIdentity") => Some("sts_caller_identity_arn"),
         _ => None,
     }
-}
-
-fn arn_helper_needs_validation_imports(
-    service: &str,
-    resource: &str,
-    choice: ArnEmitChoice,
-) -> bool {
-    let _ = (service, resource, choice);
-    false
 }
 
 fn emit_arn_helper(service: &str, resource: &str, choice: ArnEmitChoice) -> String {
     if let Some(constructor) = shared_arn_constructor(service, resource) {
         return format!("pub fn arn() -> AttributeType {{\n    super::{constructor}()\n}}\n\n");
-    }
-
-    // `aws.kms.Key.Arn` was part of the provider's pre-SDK-dispatch
-    // validator registry. Keep that behavior on the identity-bearing
-    // constructor now that the SDK discovers callbacks from schemas.
-    if service == "kms" && resource == "Key" {
-        let ArnEmitChoice::PerKind(entry) = choice else {
-            unreachable!("KMS Key ARN must have a per-kind validation entry")
-        };
-        return format!(
-            r#"pub fn arn() -> AttributeType {{
-    AttributeType::refined_string_with_validator(
-        super::provider_type("kms", "Key", "Arn"),
-        Some({:?}.to_string()),
-        None,
-        legacy_validator(|value| {{
-            if let Value::Concrete(ConcreteValue::String(value)) = value {{
-                super::validate_service_arn(value.expose_plaintext(), "kms", Some("key/"))
-            }} else {{
-                Err("Expected string".to_string())
-            }}
-        }}),
-        None,
-    )
-}}
-
-"#,
-            entry.regex
-        );
     }
 
     if matches!(choice, ArnEmitChoice::Generic) {
@@ -436,6 +290,15 @@ struct AttrInfo {
     description: Option<String>,
     /// Enum info if this attribute is an enum
     enum_info: Option<EnumInfo>,
+}
+
+/// Select the one typestate constructor represented by a source declaration.
+fn mode_constructor(required: bool, read_only: bool) -> &'static str {
+    match (required, read_only) {
+        (_, true) => "provider_populated",
+        (true, false) => "required",
+        (false, false) => "optional",
+    }
 }
 
 fn is_plain_smithy_string(model: &SmithyModel, target: &str) -> bool {
@@ -1256,16 +1119,8 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
     let arn_helper =
         arn_identity.map(|(service, resource, choice)| emit_arn_helper(service, resource, choice));
     let has_arn_helper = arn_helper.is_some();
-    let arn_helper_needs_validation_imports = arn_identity
-        .map(|(service, resource, choice)| {
-            arn_helper_needs_validation_imports(service, resource, choice)
-        })
-        .unwrap_or(false);
     if has_arn_helper && !schema_imports.contains(&"AttributeType") {
         schema_imports.insert(1, "AttributeType");
-    }
-    if arn_helper_needs_validation_imports && !schema_imports.contains(&"legacy_validator") {
-        schema_imports.push("legacy_validator");
     }
     let schema_imports_str = schema_imports.join(", ");
     code.push_str(&format!(
@@ -1281,9 +1136,6 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
     if needs_tags_type {
         code.push_str("use super::tags_type;\n");
         code.push_str("use carina_provider_protocol::types::ValidatorType;\n");
-    }
-    if arn_helper_needs_validation_imports {
-        code.push_str("use carina_core::resource::{ConcreteValue, Value};\n");
     }
     code.push_str(&format!(
         "use carina_core::schema::{{{}}};\n\n",
@@ -1399,13 +1251,7 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
             type_code
         };
 
-        let constructor = if attr.is_read_only {
-            "provider_populated"
-        } else if attr.is_required {
-            "required"
-        } else {
-            "optional"
-        };
+        let constructor = mode_constructor(attr.is_required, attr.is_read_only);
         let mut attr_code = format!(
             "\x20       .attribute(\n\
              \x20           AttributeSchema::{}(\"{}\", {})",
@@ -1738,7 +1584,7 @@ fn generate_struct_type(
             field_type
         };
 
-        let constructor = if is_required { "required" } else { "optional" };
+        let constructor = mode_constructor(is_required, false);
         let mut field_code = format!(
             "StructField::{}(\"{}\", {})",
             constructor, snake_name, field_type
@@ -1849,8 +1695,7 @@ fn generate_virtual_helper_modules(
          //!\n\
          //! DO NOT EDIT MANUALLY - regenerate with:\n\
          //!   ./carina-provider-aws/scripts/generate-schemas-smithy.sh\n\n\
-         use carina_core::resource::{{ConcreteValue, Value}};\n\
-         use carina_core::schema::{{AttributeType, legacy_validator}};\n\n{}\
+         use carina_core::schema::AttributeType;\n\n{}\
          pub fn id() -> AttributeType {{\n\
          \x20   super::kms_key_id()\n\
          }}\n",
@@ -3906,23 +3751,10 @@ fn generate_data_source(
     let arn_helper =
         arn_identity.map(|(service, resource, choice)| emit_arn_helper(service, resource, choice));
     let has_arn_helper = arn_helper.is_some();
-    let arn_helper_needs_validation_imports = arn_identity
-        .map(|(service, resource, choice)| {
-            arn_helper_needs_validation_imports(service, resource, choice)
-        })
-        .unwrap_or(false);
     if has_arn_helper && !schema_imports.contains(&"AttributeType") {
         schema_imports.insert(1, "AttributeType");
     }
-    if arn_helper_needs_validation_imports && !schema_imports.contains(&"legacy_validator") {
-        schema_imports.push("legacy_validator");
-    }
     let schema_imports_str = schema_imports.join(", ");
-    let resource_import = if arn_helper_needs_validation_imports {
-        "use carina_core::resource::{ConcreteValue, Value};\n"
-    } else {
-        ""
-    };
     let arn_helper_code = arn_helper.unwrap_or_default();
 
     let mut code = String::new();
@@ -3933,7 +3765,6 @@ fn generate_data_source(
          //!\n\
          //! DO NOT EDIT MANUALLY - regenerate with smithy-codegen\n\n\
          use super::AwsSchemaConfig;\n\
-         {resource_import}\
          use carina_core::schema::{{{}}};\n\n\
          {arn_helper_code}\
          /// Returns the schema config for {} (Smithy: {})\n\
@@ -3962,32 +3793,16 @@ fn generate_data_source(
         } else {
             attr.type_str.as_str()
         };
-        if attr.read_only {
-            code.push_str(&format!(
-                "\x20       .attribute(\n\
-                 \x20           AttributeSchema::optional(\"{}\", {})\n\
-                 \x20               .with_description(\"{}\")\n\
-                 \x20               .with_provider_name(\"{}\")\n\
-                 \x20               .build(),\n\
-                 \x20       )\n",
-                attr.name, type_str, attr.description, attr.provider_name,
-            ));
-        } else {
-            let constructor = if attr.required {
-                "required"
-            } else {
-                "optional"
-            };
-            code.push_str(&format!(
-                "\x20       .attribute(\n\
-                 \x20           AttributeSchema::{}(\"{}\", {})\n\
-                 \x20               .with_description(\"{}\")\n\
-                 \x20               .with_provider_name(\"{}\")\n\
-                 \x20               .build(),\n\
-                 \x20       )\n",
-                constructor, attr.name, type_str, attr.description, attr.provider_name,
-            ));
-        }
+        let constructor = mode_constructor(attr.required, attr.read_only);
+        code.push_str(&format!(
+            "\x20       .attribute(\n\
+             \x20           AttributeSchema::{}(\"{}\", {})\n\
+             \x20               .with_description(\"{}\")\n\
+             \x20               .with_provider_name(\"{}\")\n\
+             \x20               .build(),\n\
+             \x20       )\n",
+            constructor, attr.name, type_str, attr.description, attr.provider_name,
+        ));
     }
 
     code.push_str("    }\n}\n\n");
@@ -4855,6 +4670,26 @@ mod tests {
     use super::*;
 
     #[test]
+    fn mode_constructor_golden() {
+        let rendered = [(false, false), (true, false), (false, true), (true, true)]
+            .map(|(required, read_only)| {
+                format!(
+                    "AttributeSchema::{}(\"value\", AttributeType::string())",
+                    mode_constructor(required, read_only)
+                )
+            })
+            .join("\n");
+
+        assert_eq!(
+            rendered,
+            "AttributeSchema::optional(\"value\", AttributeType::string())\n\
+             AttributeSchema::required(\"value\", AttributeType::string())\n\
+             AttributeSchema::provider_populated(\"value\", AttributeType::string())\n\
+             AttributeSchema::provider_populated(\"value\", AttributeType::string())"
+        );
+    }
+
+    #[test]
     fn markdown_output_names_encode_data_source_kind() {
         assert_eq!(markdown_file_name("Bucket", false), "bucket.md");
         assert_eq!(markdown_file_name("Bucket", true), "bucket_data_source.md");
@@ -4886,14 +4721,37 @@ mod tests {
     }
 
     #[test]
-    fn emit_arn_helper_declares_kms_callback() {
-        let generated = emit_arn_helper("kms", "Key", arn_emit_choice("kms", "Key"));
+    fn emit_arn_helper_uses_shared_kms_constructor() {
+        assert_eq!(
+            emit_arn_helper("kms", "Key", arn_emit_choice("kms", "Key")),
+            "pub fn arn() -> AttributeType {\n    super::kms_key_arn()\n}\n\n"
+        );
+    }
 
-        assert!(generated.contains("AttributeType::refined_string_with_validator"));
-        assert!(generated.contains("legacy_validator"));
-        assert!(generated.contains(
-            "super::validate_service_arn(value.expose_plaintext(), \"kms\", Some(\"key/\"))"
-        ));
+    #[test]
+    fn virtual_kms_helper_matches_shared_catalog_constructor_output() {
+        let output_dir = tempfile::tempdir().expect("create output directory");
+        let mut modules = Vec::new();
+
+        generate_virtual_helper_modules(output_dir.path(), &mut modules)
+            .expect("generate virtual helper modules");
+
+        let generated = std::fs::read_to_string(output_dir.path().join("kms/key.rs"))
+            .expect("read generated KMS helper");
+        assert_eq!(
+            generated,
+            "//! Auto-generated helper schema module for AWS KMS Key identifiers\n\
+             //!\n\
+             //! DO NOT EDIT MANUALLY - regenerate with:\n\
+             //!   ./carina-provider-aws/scripts/generate-schemas-smithy.sh\n\n\
+             use carina_core::schema::AttributeType;\n\n\
+             pub fn arn() -> AttributeType {\n\
+             \x20   super::kms_key_arn()\n\
+             }\n\n\
+             pub fn id() -> AttributeType {\n\
+             \x20   super::kms_key_id()\n\
+             }\n"
+        );
     }
 
     #[test]
@@ -5084,16 +4942,19 @@ mod tests {
             "must mark as data source: {generated}"
         );
         assert!(
-            generated
-                .contains(r#"AttributeSchema::optional("account_id", super::aws_account_id())"#),
+            generated.contains(
+                r#"AttributeSchema::provider_populated("account_id", super::aws_account_id())"#
+            ),
             "account_id must use aws_account_id(): {generated}"
         );
         assert!(
-            generated.contains(r#"AttributeSchema::optional("arn", self::arn())"#),
+            generated.contains(r#"AttributeSchema::provider_populated("arn", self::arn())"#),
             "arn must use arn(): {generated}"
         );
         assert!(
-            generated.contains(r#"AttributeSchema::optional("user_id", AttributeType::string())"#),
+            generated.contains(
+                r#"AttributeSchema::provider_populated("user_id", AttributeType::string())"#
+            ),
             "user_id must be String: {generated}"
         );
         assert!(
@@ -5121,12 +4982,13 @@ mod tests {
         assert!(generated.contains(
             r#"AttributeSchema::required("identity_store_id", AttributeType::string())"#
         ));
+        assert!(generated.contains(
+            r#"AttributeSchema::provider_populated("display_name", AttributeType::string())"#
+        ));
         assert!(
-            generated
-                .contains(r#"AttributeSchema::optional("display_name", AttributeType::string())"#)
-        );
-        assert!(
-            generated.contains(r#"AttributeSchema::optional("emails", AttributeType::string())"#)
+            generated.contains(
+                r#"AttributeSchema::provider_populated("emails", AttributeType::string())"#
+            )
         );
     }
 
@@ -5179,14 +5041,14 @@ mod tests {
         // arns is List<iam_role_arn>
         assert!(
             generated.contains(
-                "AttributeSchema::optional(\"arns\", AttributeType::unordered_list(super::super::iam::role::arn()))"
+                "AttributeSchema::provider_populated(\"arns\", AttributeType::unordered_list(super::super::iam::role::arn()))"
             ),
             "arns must be List(iam_role_arn): {generated}"
         );
         // names is List<String>
         assert!(
             generated.contains(
-                "AttributeSchema::optional(\"names\", AttributeType::unordered_list(AttributeType::string()))"
+                "AttributeSchema::provider_populated(\"names\", AttributeType::unordered_list(AttributeType::string()))"
             ),
             "names must be List(String): {generated}"
         );

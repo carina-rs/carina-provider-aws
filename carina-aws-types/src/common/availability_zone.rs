@@ -1,8 +1,3 @@
-use carina_core::resource::{ConcreteValue, Value};
-use carina_core::schema::{AttributeType, DslTransform, legacy_validator};
-
-use super::provider_bare_type;
-
 // ========== Availability Zone ==========
 
 /// Validate availability zone format.
@@ -55,29 +50,6 @@ pub fn validate_availability_zone(az: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// Availability zone type with provider-facing API-spelling validation.
-///
-/// Enum identifiers are resolved to API spelling by the host before this
-/// validator runs. Quoted strings are literal and must already use the AWS
-/// spelling (for example, `"us-east-1a"`).
-pub fn availability_zone() -> AttributeType {
-    AttributeType::enum_(
-        provider_bare_type(&["AvailabilityZone"], "ZoneName"),
-        None,
-        vec![],
-        Some(legacy_validator(|value| {
-            if let Value::Concrete(ConcreteValue::String(s)) = value {
-                let s = s.expose_plaintext();
-                validate_availability_zone(s)
-                    .map_err(|reason| format!("Invalid availability zone '{}': {}", s, reason))
-            } else {
-                Err("Expected string".to_string())
-            }
-        })),
-        Some(DslTransform::HyphenToUnderscore),
-    )
-}
-
 // ========== Availability Zone ID ==========
 
 /// Validate availability zone ID format.
@@ -113,21 +85,4 @@ pub fn validate_availability_zone_id(az_id: &str) -> Result<(), String> {
     }
 
     Ok(())
-}
-
-/// Availability Zone ID type (e.g., "use1-az1", "usw2-az2", "apne1-az4")
-pub fn availability_zone_id() -> AttributeType {
-    AttributeType::refined_string_with_validator(
-        provider_bare_type(&["AvailabilityZone"], "ZoneId"),
-        Some("^[a-z]+[0-9]+-az[0-9]+$".to_string()),
-        None,
-        legacy_validator(|value| {
-            if let Value::Concrete(ConcreteValue::String(value)) = value {
-                validate_availability_zone_id(value.expose_plaintext())
-            } else {
-                Err("Expected string".to_string())
-            }
-        }),
-        None,
-    )
 }

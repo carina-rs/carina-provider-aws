@@ -36,13 +36,13 @@ pub fn identitystore_user_config() -> AwsSchemaConfig {
                     .build(),
             )
             .attribute(
-                AttributeSchema::optional("display_name", AttributeType::string())
+                AttributeSchema::provider_populated("display_name", AttributeType::string())
                     .with_description("Display name of the user.")
                     .with_provider_name("DisplayName")
                     .build(),
             )
             .attribute(
-                AttributeSchema::optional("emails", AttributeType::string())
+                AttributeSchema::provider_populated("emails", AttributeType::string())
                     .with_description("Email addresses associated with the user.")
                     .with_provider_name("Emails")
                     .build(),

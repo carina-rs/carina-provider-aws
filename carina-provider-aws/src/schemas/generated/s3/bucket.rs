@@ -12,12 +12,7 @@ use carina_provider_protocol::types::ValidatorType;
 const VALID_BUCKET_NAMESPACE: &[&str] = &["account-regional", "global"];
 
 pub fn arn() -> AttributeType {
-    AttributeType::refined_string(
-        Some(super::provider_type("s3", "Bucket", "Arn")),
-        Some("^arn:(aws|aws-cn|aws-us-gov):s3:::.+$".to_string()),
-        None,
-        None,
-    )
+    super::s3_bucket_arn()
 }
 
 /// Returns the schema config for s3.Bucket (Smithy: com.amazonaws.s3)

@@ -1,5 +1,8 @@
-use carina_core::schema::RawShape;
-use carina_provider_aws::schemas::{config::validate_aws_custom_type, generated::iam};
+use std::collections::BTreeMap;
+
+use carina_core::resource::{ConcreteValue, Value};
+use carina_core::schema::{RawShape, ValidatedConfigSchema};
+use carina_provider_aws::schemas::generated::iam;
 
 #[test]
 fn policy_arn_identity_is_provider_scoped() {
@@ -15,6 +18,16 @@ fn policy_arn_identity_is_provider_scoped() {
 
 #[test]
 fn policy_arn_rejects_role_arn() {
-    let identity = carina_aws_types::provider_type("iam", "Policy", "Arn");
-    assert!(validate_aws_custom_type(&identity, "arn:aws:iam::123456789012:role/MyRole").is_err());
+    let schema = ValidatedConfigSchema::validate(BTreeMap::from([(
+        "value".to_string(),
+        carina_aws_types::iam_policy_arn(),
+    )]))
+    .expect("IAM policy ARN type must pass admission");
+    let result = schema
+        .rootless_type("value")
+        .expect("IAM policy ARN type")
+        .validate(&Value::Concrete(ConcreteValue::String(
+            "arn:aws:iam::123456789012:role/MyRole".into(),
+        )));
+    assert!(result.is_err());
 }
