@@ -41,56 +41,33 @@ fi
 # Use WASM provider binaries (carina CLI only supports WASM providers)
 # Build with: cargo build -p carina-provider-aws --target wasm32-wasip2 --release
 source "$HELPERS_DIR/_provider_env.sh" || exit 1
-PROVIDER_VERSION=$(grep '^version = ' "$PROJECT_ROOT/Cargo.toml" | head -1 | sed 's/version = "\(.*\)"/\1/')
-# inject_provider_source: Create a temp directory containing a .crn file with
-# source/version injected into provider blocks and assign it to a caller variable.
-# carina CLI expects a directory path, not a file path.
-# Args: original_crn_file output_variable
-inject_provider_source() {
-    local original="$1"
-    local output_variable="$2"
-    local tmp_dir
 
-    if grep -q '^provider awscc {' "$original" 2>/dev/null; then
-        ensure_awscc_wasm || return 1
-    fi
-
-    tmp_dir=$(mktemp -d)
-
-    sed \
-        -e '/^provider aws {/a\
-  source = "file://'"$_TEST_AWS_WASM"'"\
-  version = "'"$PROVIDER_VERSION"'"' \
-        -e '/^provider awscc {/a\
-  source = "file://'"$_TEST_AWSCC_WASM"'"\
-  version = "'"$PROVIDER_VERSION"'"' \
-        "$original" > "$tmp_dir/main.crn"
-
-    printf -v "$output_variable" '%s' "$tmp_dir"
-}
-
-# inject_provider_source_dir: Inject source/version into all .crn files in a directory (in-place).
-# Idempotent: skips files that already contain 'source =' on the line after a provider block.
+# inject_provider_source_dir: Inject local provider metadata into all .crn files in a directory (in-place).
+# The aws block gets source/version; awscc gets source only.
+# Idempotent: skips files that already contain a 'source =' line.
 # Args: directory
 inject_provider_source_dir() {
     local dir="$1"
+    local crn_file
+    local tmp_file
+
     if grep -R -q '^provider awscc {' "$dir" 2>/dev/null; then
         ensure_awscc_wasm || return 1
     fi
 
-    find "$dir" -name '*.crn' -print0 | while IFS= read -r -d '' crn_file; do
-        if grep -q '^\s*source\s*=' "$crn_file" 2>/dev/null; then
+    while IFS= read -r -d '' crn_file; do
+        if grep -q '^[[:space:]]*source[[:space:]]*=' "$crn_file" 2>/dev/null; then
             continue
         fi
-        sed -i '' \
-            -e '/^provider aws {/a\
-  source = "file://'"$_TEST_AWS_WASM"'"\
-  version = "'"$PROVIDER_VERSION"'"' \
-            -e '/^provider awscc {/a\
-  source = "file://'"$_TEST_AWSCC_WASM"'"\
-  version = "'"$PROVIDER_VERSION"'"' \
-            "$crn_file"
-    done
+
+        tmp_file=$(mktemp "$crn_file.tmp.XXXXXX") || return 1
+        if ! cp -p "$crn_file" "$tmp_file" ||
+           ! _inject_provider_source_filter < "$crn_file" > "$tmp_file" ||
+           ! mv "$tmp_file" "$crn_file"; then
+            rm -f "$tmp_file"
+            return 1
+        fi
+    done < <(find "$dir" -name '*.crn' -print0)
 }
 
 TEST_PASSED=0
@@ -152,6 +129,72 @@ run_step() {
     fi
 }
 
+# carina_state_json: Read local state through carina's supported interface.
+# Args: work_dir
+carina_state_json() {
+    "$CARINA_BIN" state show --json "$1"
+}
+
+# carina_state_query: Extract exactly one non-empty value from local state.
+# Args: work_dir jq_query
+carina_state_query() {
+    local work_dir="$1"
+    local jq_query="$2"
+    local state_json
+
+    state_json=$(carina_state_json "$work_dir") || return $?
+
+    jq -r --arg state_query "$jq_query" "
+        [$jq_query] as \$values
+        | if (\$values | length) == 0
+            or any(\$values[]; . == null or (type == \"string\" and length == 0)) then
+            error(\"state query returned no value: \" + \$state_query)
+          elif (\$values | length) != 1 then
+            error(\"state query returned \" + ((\$values | length) | tostring)
+                + \" values (expected exactly one): \" + \$state_query)
+          else
+            \$values[0]
+          end
+    " <<< "$state_json"
+}
+
+# carina_state_identifiers: Print every current v18 resource identifier, sorted.
+# Args: work_dir
+carina_state_identifiers() {
+    local state_json
+    local identifiers
+    state_json=$(carina_state_json "$1") || return $?
+    if ! identifiers=$(jq -r '
+        .resources as $resources
+        | if ($resources | length) == 0 then
+            error("state contains no resources")
+          else .
+          end
+        | [$resources[]
+            | select(.current.kind != "applied")
+            | "binding \((.binding // "<missing>") | tojson) identity \((.identity // "<missing>") | tojson) has current.kind \((.current.kind // "<missing>") | tojson)"
+          ] as $non_applied
+        | if ($non_applied | length) != 0 then
+            error("state contains non-applied resource rows: " + ($non_applied | join("; ")))
+          else .
+          end
+        | [$resources[]
+            | select((.current.identifier | type) != "string" or .current.identifier == "")
+            | "binding \((.binding // "<missing>") | tojson) identity \((.identity // "<missing>") | tojson)"
+          ] as $missing_identifiers
+        | if ($missing_identifiers | length) != 0 then
+            error("state applied resource is missing current.identifier: "
+                + ($missing_identifiers | join("; ")))
+          else .
+          end
+        | $resources[].current.identifier
+    ' <<< "$state_json"); then
+        return 1
+    fi
+
+    printf '%s\n' "$identifiers" | LC_ALL=C sort
+}
+
 assert_state_value() {
     local description="$1"
     local jq_query="$2"
@@ -160,7 +203,11 @@ assert_state_value() {
 
     printf "  %-50s" "$description"
     local actual
-    actual=$(jq -r "$jq_query" "$work_dir/carina.state.json" 2>/dev/null)
+    if ! actual=$(carina_state_query "$work_dir" "$jq_query"); then
+        echo "FAIL (state query failed)"
+        TEST_FAILED=$((TEST_FAILED + 1))
+        return 0
+    fi
     if [ "$actual" = "$expected" ]; then
         echo "OK"
         TEST_PASSED=$((TEST_PASSED + 1))
@@ -177,7 +224,11 @@ assert_state_resource_count() {
 
     printf "  %-50s" "$description"
     local actual
-    actual=$(jq '.resources | length' "$work_dir/carina.state.json" 2>/dev/null)
+    if ! actual=$(carina_state_query "$work_dir" '.resources | length'); then
+        echo "FAIL (state query failed)"
+        TEST_FAILED=$((TEST_FAILED + 1))
+        return 0
+    fi
     if [ "$actual" = "$expected" ]; then
         echo "OK"
         TEST_PASSED=$((TEST_PASSED + 1))

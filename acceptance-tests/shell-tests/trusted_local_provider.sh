@@ -32,6 +32,8 @@ read_exported_grant() {
     local awscc_wasm="$3"
     local operator_value="$4"
     local config_file="${5:-}"
+    local aws_block
+    local awscc_block
 
     (
         cd "$working_dir"
@@ -55,6 +57,16 @@ read_exported_grant() {
             inject_provider_source "$config_file" injected_dir
             grep -F "source = \"file://$_TEST_AWS_WASM\"" "$injected_dir/main.crn" >/dev/null
             grep -F "source = \"file://$_TEST_AWSCC_WASM\"" "$injected_dir/main.crn" >/dev/null
+            aws_block=$(sed -n '/^provider aws {/,/^}/p' "$injected_dir/main.crn")
+            if ! grep -Fq "  version = \"$PROVIDER_VERSION\"" <<< "$aws_block"; then
+                echo "provider aws block did not receive the aws provider version" >&2
+                return 1
+            fi
+            awscc_block=$(sed -n '/^provider awscc {/,/^}/p' "$injected_dir/main.crn")
+            if grep -q '^  version = ' <<< "$awscc_block"; then
+                echo "provider awscc block unexpectedly received the aws provider version" >&2
+                return 1
+            fi
             rm -rf "$injected_dir"
         fi
 
