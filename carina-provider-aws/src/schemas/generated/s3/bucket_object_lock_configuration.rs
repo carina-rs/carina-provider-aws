@@ -15,9 +15,11 @@ pub fn s3_bucket_object_lock_configuration_config() -> AwsSchemaConfig {
         has_tags: false,
         schema: ResourceSchema::new("s3.BucketObjectLockConfiguration")
         .with_coexisting_replacement()
+        // Read contract: GetObjectLockConfiguration does not return the targeted bucket name
         .attribute(
             AttributeSchema::required("bucket", AttributeType::string())
                 .create_only()
+                .write_only()
                 .with_description("The bucket whose Object Lock configuration you want to create or replace.")
                 .with_provider_name("Bucket")
                 .build(),

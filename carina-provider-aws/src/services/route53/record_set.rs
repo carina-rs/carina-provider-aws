@@ -19,6 +19,8 @@ use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
 use crate::helpers::{require_enum_attr, require_string_attr, sdk_error_message};
 use crate::provider::CreateCompletion;
+use crate::read_model::{found_managed_read, take_optional, take_required};
+use crate::read_models_generated::Route53RecordSetReadModel;
 use crate::resend_safety_generated::Route53Client;
 
 /// Composite identifier format: `hosted_zone_id|name|type`
@@ -334,8 +336,16 @@ impl AwsProvider {
             match scan_page_for_record(result.resource_record_sets(), &normalized_name, record_type)
             {
                 PageScan::Found(rrs) => {
-                    let attrs = extract_attributes(zone_id, rrs);
-                    return Ok(crate::helpers::found_read(id, applied_identifier, attrs));
+                    let mut attributes = extract_attributes(zone_id, rrs);
+                    let model = Route53RecordSetReadModel {
+                        alias_target: take_optional(&mut attributes, "alias_target"),
+                        name: take_required(id, &mut attributes, "name")?,
+                        resource_records: take_optional(&mut attributes, "resource_records"),
+                        ttl: take_optional(&mut attributes, "ttl"),
+                        r#type: take_required(id, &mut attributes, "type")?,
+                        hosted_zone_id: take_required(id, &mut attributes, "hosted_zone_id")?,
+                    };
+                    return found_managed_read(id, applied_identifier, model);
                 }
                 PageScan::StopNotFound => return Ok(ReadOutcome::not_found(id.clone())),
                 PageScan::KeepPaging => {}

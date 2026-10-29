@@ -15,9 +15,11 @@ pub fn s3_bucket_website_configuration_config() -> AwsSchemaConfig {
         has_tags: false,
         schema: ResourceSchema::new("s3.BucketWebsiteConfiguration")
         .with_coexisting_replacement()
+        // Read contract: GetBucketWebsite does not return the targeted bucket name
         .attribute(
             AttributeSchema::required("bucket", AttributeType::string())
                 .create_only()
+                .write_only()
                 .with_description("The bucket name.")
                 .with_provider_name("Bucket")
                 .build(),

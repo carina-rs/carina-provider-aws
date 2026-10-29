@@ -15,9 +15,11 @@ pub fn s3_bucket_lifecycle_configuration_config() -> AwsSchemaConfig {
         has_tags: false,
         schema: ResourceSchema::new("s3.BucketLifecycleConfiguration")
             .with_coexisting_replacement()
+            // Read contract: GetBucketLifecycleConfiguration does not return the targeted bucket name
             .attribute(
                 AttributeSchema::required("bucket", AttributeType::string())
                     .create_only()
+                    .write_only()
                     .with_description("The name of the bucket for which to set the configuration.")
                     .with_provider_name("Bucket")
                     .build(),

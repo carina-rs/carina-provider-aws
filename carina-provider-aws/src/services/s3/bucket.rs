@@ -11,6 +11,8 @@ use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
 use crate::helpers::{RetryPolicy, retry_aws_operation, sdk_error_message};
 use crate::provider::AwsCreateAttempt;
+use crate::read_model::{empty_map_value, found_managed_read, take_optional, take_required};
+use crate::read_models_generated::S3BucketReadModel;
 
 /// The complete read-only projection shared by managed and data-source
 /// reads of an S3 bucket.
@@ -108,20 +110,22 @@ impl AwsProvider {
                 // another API round trip and another IAM permission.
                 let region = normalize_bucket_location(output.bucket_region());
                 let mut attributes = s3_bucket_read_only_outputs(name, &region).into_attributes();
-                attributes.insert(
-                    "bucket".to_string(),
-                    Value::Concrete(ConcreteValue::String(name.to_string().into())),
-                );
-
                 // Get tags
                 self.read_s3_bucket_tags(id, name, &mut attributes).await?;
 
-                // S3 bucket identifier is the bucket name
-                Ok(crate::helpers::found_read(
-                    id,
-                    applied_identifier,
-                    attributes,
-                ))
+                let model = S3BucketReadModel {
+                    arn: take_required(id, &mut attributes, "arn")?,
+                    region: take_required(id, &mut attributes, "region")?,
+                    bucket_domain_name: take_required(id, &mut attributes, "bucket_domain_name")?,
+                    bucket_regional_domain_name: take_required(
+                        id,
+                        &mut attributes,
+                        "bucket_regional_domain_name",
+                    )?,
+                    hosted_zone_id: take_optional(&mut attributes, "hosted_zone_id"),
+                    tags: take_optional(&mut attributes, "tags").unwrap_or_else(empty_map_value),
+                };
+                found_managed_read(id, applied_identifier, model)
             }
             Err(err) => {
                 // Handle bucket not found
@@ -179,6 +183,25 @@ impl AwsProvider {
         // Create bucket
         let mut req = self.s3_client.create_bucket().bucket(&bucket_name);
 
+        if let Some(value) = resource.get_attr("bucket_namespace") {
+            let namespace = match value {
+                Value::Concrete(ConcreteValue::String(value)) => {
+                    value.expose_plaintext().to_string()
+                }
+                Value::Concrete(ConcreteValue::CanonicalEnum(value)) => {
+                    value.api_value().to_string()
+                }
+                _ => {
+                    return Err(attempt.untracked(
+                        ProviderError::invalid_input("bucket_namespace must be an enum value")
+                            .for_resource(resource.id.clone()),
+                    ));
+                }
+            };
+            req =
+                req.bucket_namespace(aws_sdk_s3::types::BucketNamespace::from(namespace.as_str()));
+        }
+
         // `region` is a read-only output, not a placement input. Derive the
         // LocationConstraint only from the provider region even if a caller supplies
         // that attribute while carina-core still permits read-only writes (carina#3766).
@@ -205,7 +228,10 @@ impl AwsProvider {
                 api_error_with_meta("Failed to create bucket", error).for_resource(rid),
             ));
         }
-        let issued = attempt.issued(identifier.clone(), Self::sent_only(resource, &["bucket"]));
+        let issued = attempt.issued(
+            identifier.clone(),
+            Self::sent_only(resource, &["bucket", "bucket_namespace"]),
+        );
 
         // Set tags
         let attrs = resource.resolved_attributes();
@@ -394,18 +420,17 @@ impl AwsProvider {
                         Value::Concrete(ConcreteValue::String(tag.value().to_string().into())),
                     );
                 }
-                if !tag_map.is_empty() {
-                    attributes.insert(
-                        "tags".to_string(),
-                        Value::Concrete(ConcreteValue::Map(tag_map)),
-                    );
-                }
+                attributes.insert(
+                    "tags".to_string(),
+                    Value::Concrete(ConcreteValue::Map(tag_map)),
+                );
             }
             Err(err) => {
                 if !is_s3_not_configured_error(&err, "NoSuchTagSet") {
                     return Err(api_error_with_meta("Failed to read bucket tagging", err)
                         .for_resource(id.clone()));
                 }
+                attributes.insert("tags".to_string(), empty_map_value());
             }
         }
         Ok(())

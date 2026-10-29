@@ -1,11 +1,10 @@
-use std::collections::HashMap;
-
 use aws_sdk_s3::types::{
     AbortIncompleteMultipartUpload, BucketLifecycleConfiguration, ExpirationStatus,
     LifecycleExpiration, LifecycleRule, LifecycleRuleAndOperator, LifecycleRuleFilter,
     NoncurrentVersionExpiration, NoncurrentVersionTransition, Tag, Transition,
     TransitionStorageClass,
 };
+use aws_smithy_types::{DateTime, date_time::Format};
 use carina_core::provider::{AppliedIdentifier, ReadOutcome};
 use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{
@@ -20,6 +19,8 @@ use crate::helpers::{
     RetryPolicy, enum_attr_error, require_string_attr, retry_aws_operation, sdk_error_message,
 };
 use crate::provider::CreateCompletion;
+use crate::read_model::found_managed_read;
+use crate::read_models_generated::S3BucketLifecycleConfigurationReadModel;
 use crate::services::s3::bucket::is_s3_not_configured_error;
 
 impl AwsProvider {
@@ -28,7 +29,6 @@ impl AwsProvider {
         id: &ResourceId,
         identifier: &AppliedIdentifier,
     ) -> ProviderResult<ReadOutcome> {
-        let applied_identifier = identifier;
         let bucket = identifier.as_str();
 
         let result = self
@@ -40,23 +40,18 @@ impl AwsProvider {
 
         match result {
             Ok(output) => {
-                let mut attributes = HashMap::new();
-                attributes.insert(
-                    "bucket".to_string(),
-                    Value::Concrete(ConcreteValue::String(bucket.to_string().into())),
-                );
-                let rules: Vec<Value> = output.rules().iter().map(rule_to_value).collect();
-                if !rules.is_empty() {
-                    attributes.insert(
-                        "rules".to_string(),
-                        Value::Concrete(ConcreteValue::List(rules)),
-                    );
-                }
-                Ok(crate::helpers::found_read(
+                let rules = output
+                    .rules()
+                    .iter()
+                    .map(|rule| rule_to_value(id, rule))
+                    .collect::<ProviderResult<Vec<_>>>()?;
+                found_managed_read(
                     id,
-                    applied_identifier,
-                    attributes,
-                ))
+                    identifier,
+                    S3BucketLifecycleConfigurationReadModel {
+                        rules: Value::Concrete(ConcreteValue::List(rules)),
+                    },
+                )
             }
             Err(e) => {
                 if is_s3_not_configured_error(&e, "NoSuchLifecycleConfiguration")
@@ -363,6 +358,13 @@ fn build_expiration(id: &ResourceId, value: &Value) -> ProviderResult<LifecycleE
     if let Some(Value::Concrete(ConcreteValue::Int(d))) = map.get("days") {
         builder = builder.days(*d as i32);
     }
+    if let Some(Value::Concrete(ConcreteValue::String(date))) = map.get("date") {
+        builder = builder.date(parse_lifecycle_date(
+            id,
+            "expiration.date",
+            date.expose_plaintext(),
+        )?);
+    }
     if let Some(Value::Concrete(ConcreteValue::Bool(b))) = map.get("expired_object_delete_marker") {
         builder = builder.expired_object_delete_marker(*b);
     }
@@ -395,7 +397,33 @@ fn build_transition(
     if let Some(Value::Concrete(ConcreteValue::Int(d))) = map.get("days") {
         builder = builder.days(*d as i32);
     }
+    if let Some(Value::Concrete(ConcreteValue::String(date))) = map.get("date") {
+        builder = builder.date(parse_lifecycle_date(
+            id,
+            "transition.date",
+            date.expose_plaintext(),
+        )?);
+    }
     Ok(builder.build())
+}
+
+fn parse_lifecycle_date(id: &ResourceId, field: &str, value: &str) -> ProviderResult<DateTime> {
+    DateTime::from_str(value, Format::DateTime).map_err(|error| {
+        ProviderError::invalid_input(format!(
+            "{field} must be a UTC RFC 3339 timestamp (for example 2026-01-01T00:00:00Z): {error}"
+        ))
+        .for_resource(id.clone())
+    })
+}
+
+fn lifecycle_date_value(id: &ResourceId, field: &str, value: &DateTime) -> ProviderResult<Value> {
+    value
+        .fmt(Format::DateTime)
+        .map(|value| Value::Concrete(ConcreteValue::String(value.into())))
+        .map_err(|error| {
+            ProviderError::api_error(format!("failed to format {field} returned by S3: {error}"))
+                .for_resource(id.clone())
+        })
 }
 
 fn build_ncv_expiration(
@@ -468,11 +496,9 @@ fn build_abort_multipart(
     Ok(builder.build())
 }
 
-fn rule_to_value(rule: &LifecycleRule) -> Value {
+fn rule_to_value(id: &ResourceId, rule: &LifecycleRule) -> ProviderResult<Value> {
     let mut map = IndexMap::new();
-    if let Some(s) = rule.id()
-        && !s.is_empty()
-    {
+    if let Some(s) = rule.id() {
         map.insert(
             "id".to_string(),
             Value::Concrete(ConcreteValue::String(s.to_string().into())),
@@ -484,13 +510,8 @@ fn rule_to_value(rule: &LifecycleRule) -> Value {
             rule.status().as_str().to_string().into(),
         )),
     );
-    // Only surface a non-empty filter. S3 returns an empty `<Filter/>`
-    // for match-all rules; reflecting that as an empty map would diff
-    // against a DSL config that simply omits `filter`.
-    if let Some(filter) = rule.filter()
-        && let Some(filter_value) = filter_to_value(filter)
-    {
-        map.insert("filter".to_string(), filter_value);
+    if let Some(filter) = rule.filter() {
+        map.insert("filter".to_string(), filter_to_value(filter));
     }
     if let Some(exp) = rule.expiration() {
         let mut e = IndexMap::new();
@@ -500,26 +521,32 @@ fn rule_to_value(rule: &LifecycleRule) -> Value {
                 Value::Concrete(ConcreteValue::Int(d as i64)),
             );
         }
+        if let Some(date) = exp.date() {
+            e.insert(
+                "date".to_string(),
+                lifecycle_date_value(id, "expiration.date", date)?,
+            );
+        }
         if let Some(b) = exp.expired_object_delete_marker() {
             e.insert(
                 "expired_object_delete_marker".to_string(),
                 Value::Concrete(ConcreteValue::Bool(b)),
             );
         }
-        if !e.is_empty() {
-            map.insert(
-                "expiration".to_string(),
-                Value::Concrete(ConcreteValue::Map(e)),
-            );
-        }
-    }
-    let transitions: Vec<Value> = rule.transitions().iter().map(transition_to_value).collect();
-    if !transitions.is_empty() {
         map.insert(
-            "transitions".to_string(),
-            Value::Concrete(ConcreteValue::List(transitions)),
+            "expiration".to_string(),
+            Value::Concrete(ConcreteValue::Map(e)),
         );
     }
+    let transitions = rule
+        .transitions()
+        .iter()
+        .map(|transition| transition_to_value(id, transition))
+        .collect::<ProviderResult<Vec<_>>>()?;
+    map.insert(
+        "transitions".to_string(),
+        Value::Concrete(ConcreteValue::List(transitions)),
+    );
     if let Some(ncv) = rule.noncurrent_version_expiration() {
         let mut e = IndexMap::new();
         if let Some(d) = ncv.noncurrent_days() {
@@ -534,24 +561,20 @@ fn rule_to_value(rule: &LifecycleRule) -> Value {
                 Value::Concrete(ConcreteValue::Int(n as i64)),
             );
         }
-        if !e.is_empty() {
-            map.insert(
-                "noncurrent_version_expiration".to_string(),
-                Value::Concrete(ConcreteValue::Map(e)),
-            );
-        }
+        map.insert(
+            "noncurrent_version_expiration".to_string(),
+            Value::Concrete(ConcreteValue::Map(e)),
+        );
     }
     let ncv_transitions: Vec<Value> = rule
         .noncurrent_version_transitions()
         .iter()
         .map(ncv_transition_to_value)
         .collect();
-    if !ncv_transitions.is_empty() {
-        map.insert(
-            "noncurrent_version_transitions".to_string(),
-            Value::Concrete(ConcreteValue::List(ncv_transitions)),
-        );
-    }
+    map.insert(
+        "noncurrent_version_transitions".to_string(),
+        Value::Concrete(ConcreteValue::List(ncv_transitions)),
+    );
     if let Some(abort) = rule.abort_incomplete_multipart_upload() {
         let mut a = IndexMap::new();
         if let Some(d) = abort.days_after_initiation() {
@@ -560,14 +583,12 @@ fn rule_to_value(rule: &LifecycleRule) -> Value {
                 Value::Concrete(ConcreteValue::Int(d as i64)),
             );
         }
-        if !a.is_empty() {
-            map.insert(
-                "abort_incomplete_multipart_upload".to_string(),
-                Value::Concrete(ConcreteValue::Map(a)),
-            );
-        }
+        map.insert(
+            "abort_incomplete_multipart_upload".to_string(),
+            Value::Concrete(ConcreteValue::Map(a)),
+        );
     }
-    Value::Concrete(ConcreteValue::Map(map))
+    Ok(Value::Concrete(ConcreteValue::Map(map)))
 }
 
 /// Convert an S3 `Tag` into a `{ key, value }` map value.
@@ -584,25 +605,19 @@ fn tag_to_value(tag: &Tag) -> Value {
     Value::Concrete(ConcreteValue::Map(m))
 }
 
-/// Convert a `LifecycleRuleAndOperator` into a map value, or `None` when
-/// every field is empty.
-fn filter_and_to_value(and: &LifecycleRuleAndOperator) -> Option<Value> {
+fn filter_and_to_value(and: &LifecycleRuleAndOperator) -> Value {
     let mut m = IndexMap::new();
-    if let Some(p) = and.prefix()
-        && !p.is_empty()
-    {
+    if let Some(p) = and.prefix() {
         m.insert(
             "prefix".to_string(),
             Value::Concrete(ConcreteValue::String(p.to_string().into())),
         );
     }
     let tags = and.tags();
-    if !tags.is_empty() {
-        m.insert(
-            "tags".to_string(),
-            Value::Concrete(ConcreteValue::List(tags.iter().map(tag_to_value).collect())),
-        );
-    }
+    m.insert(
+        "tags".to_string(),
+        Value::Concrete(ConcreteValue::List(tags.iter().map(tag_to_value).collect())),
+    );
     if let Some(n) = and.object_size_greater_than() {
         m.insert(
             "object_size_greater_than".to_string(),
@@ -615,20 +630,12 @@ fn filter_and_to_value(and: &LifecycleRuleAndOperator) -> Option<Value> {
             Value::Concrete(ConcreteValue::Int(n)),
         );
     }
-    if m.is_empty() {
-        None
-    } else {
-        Some(Value::Concrete(ConcreteValue::Map(m)))
-    }
+    Value::Concrete(ConcreteValue::Map(m))
 }
 
-/// Convert a `LifecycleRuleFilter` into a map value, or `None` when the
-/// filter is empty (a match-all `<Filter/>`).
-fn filter_to_value(filter: &LifecycleRuleFilter) -> Option<Value> {
+fn filter_to_value(filter: &LifecycleRuleFilter) -> Value {
     let mut m = IndexMap::new();
-    if let Some(p) = filter.prefix()
-        && !p.is_empty()
-    {
+    if let Some(p) = filter.prefix() {
         m.insert(
             "prefix".to_string(),
             Value::Concrete(ConcreteValue::String(p.to_string().into())),
@@ -649,24 +656,24 @@ fn filter_to_value(filter: &LifecycleRuleFilter) -> Option<Value> {
             Value::Concrete(ConcreteValue::Int(n)),
         );
     }
-    if let Some(and) = filter.and()
-        && let Some(and_value) = filter_and_to_value(and)
-    {
-        m.insert("and".to_string(), and_value);
+    if let Some(and) = filter.and() {
+        m.insert("and".to_string(), filter_and_to_value(and));
     }
-    if m.is_empty() {
-        None
-    } else {
-        Some(Value::Concrete(ConcreteValue::Map(m)))
-    }
+    Value::Concrete(ConcreteValue::Map(m))
 }
 
-fn transition_to_value(t: &Transition) -> Value {
+fn transition_to_value(id: &ResourceId, t: &Transition) -> ProviderResult<Value> {
     let mut m = IndexMap::new();
     if let Some(d) = t.days() {
         m.insert(
             "days".to_string(),
             Value::Concrete(ConcreteValue::Int(d as i64)),
+        );
+    }
+    if let Some(date) = t.date() {
+        m.insert(
+            "date".to_string(),
+            lifecycle_date_value(id, "transition.date", date)?,
         );
     }
     if let Some(sc) = t.storage_class() {
@@ -675,7 +682,7 @@ fn transition_to_value(t: &Transition) -> Value {
             Value::Concrete(ConcreteValue::String(sc.as_str().to_string().into())),
         );
     }
-    Value::Concrete(ConcreteValue::Map(m))
+    Ok(Value::Concrete(ConcreteValue::Map(m)))
 }
 
 fn ncv_transition_to_value(t: &NoncurrentVersionTransition) -> Value {
@@ -857,11 +864,12 @@ mod tests {
     }
 
     #[test]
-    fn empty_filter_is_not_surfaced_on_read() {
-        // S3 returns an empty <Filter/> for match-all rules; reading it
-        // back as an empty map would diff against a DSL that omits it.
+    fn empty_filter_is_preserved_on_read() {
         let empty = LifecycleRuleFilter::builder().build();
-        assert!(filter_to_value(&empty).is_none());
+        assert_eq!(
+            filter_to_value(&empty),
+            Value::Concrete(ConcreteValue::Map(IndexMap::new()))
+        );
     }
 
     #[test]
@@ -875,7 +883,7 @@ mod tests {
             ]),
         )
         .unwrap();
-        let value = rule_to_value(&built);
+        let value = rule_to_value(&rid(), &built).unwrap();
         let Value::Concrete(ConcreteValue::Map(m)) = value else {
             panic!("expected map");
         };
@@ -883,5 +891,67 @@ mod tests {
             panic!("filter should round-trip");
         };
         assert_eq!(filter.get("prefix"), Some(&str_val("logs/")));
+    }
+
+    #[test]
+    fn empty_fields_and_dates_round_trip() {
+        let date = "2026-01-01T00:00:00Z";
+        let built = build_rule(
+            &rid(),
+            &schema(),
+            &map_val(vec![
+                ("id", str_val("")),
+                ("status", str_val("Enabled")),
+                ("filter", map_val(vec![("prefix", str_val(""))])),
+                ("expiration", map_val(vec![("date", str_val(date))])),
+                (
+                    "transitions",
+                    Value::Concrete(ConcreteValue::List(vec![map_val(vec![
+                        ("date", str_val(date)),
+                        ("storage_class", str_val("GLACIER")),
+                    ])])),
+                ),
+            ]),
+        )
+        .unwrap();
+        let Value::Concrete(ConcreteValue::Map(read)) = rule_to_value(&rid(), &built).unwrap()
+        else {
+            panic!("expected rule map");
+        };
+        assert_eq!(read.get("id"), Some(&str_val("")));
+        let Some(Value::Concrete(ConcreteValue::Map(filter))) = read.get("filter") else {
+            panic!("expected filter map");
+        };
+        assert_eq!(filter.get("prefix"), Some(&str_val("")));
+        let Some(Value::Concrete(ConcreteValue::Map(expiration))) = read.get("expiration") else {
+            panic!("expected expiration map");
+        };
+        assert_eq!(expiration.get("date"), Some(&str_val(date)));
+        let Some(Value::Concrete(ConcreteValue::List(transitions))) = read.get("transitions")
+        else {
+            panic!("expected transitions list");
+        };
+        let Value::Concrete(ConcreteValue::Map(transition)) = &transitions[0] else {
+            panic!("expected transition map");
+        };
+        assert_eq!(transition.get("date"), Some(&str_val(date)));
+    }
+
+    #[test]
+    fn present_empty_expiration_is_preserved() {
+        let rule = LifecycleRule::builder()
+            .status(ExpirationStatus::Enabled)
+            .filter(LifecycleRuleFilter::builder().build())
+            .expiration(LifecycleExpiration::builder().build())
+            .build()
+            .unwrap();
+        let Value::Concrete(ConcreteValue::Map(read)) = rule_to_value(&rid(), &rule).unwrap()
+        else {
+            panic!("expected rule map");
+        };
+        assert_eq!(
+            read.get("expiration"),
+            Some(&Value::Concrete(ConcreteValue::Map(IndexMap::new())))
+        );
     }
 }

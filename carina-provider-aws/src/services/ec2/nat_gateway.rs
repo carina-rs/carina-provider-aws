@@ -1,20 +1,22 @@
 use std::collections::HashMap;
 
-use carina_core::provider::ProviderResult;
 use carina_core::provider::{AppliedIdentifier, ReadOutcome};
+use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
 use carina_core::schema::ResourceSchema;
 
-use aws_sdk_ec2::types::NatGatewayState;
+use aws_sdk_ec2::types::{AvailabilityZoneAddress, NatGatewayState};
 
 use crate::AwsProvider;
 use crate::aws_operation::ClientToken;
 use crate::error_helpers::api_error_with_meta;
 use crate::helpers::{
     CreatePoll, DeletePoll, RetryPolicy, build_tag_specification_with_create_token,
-    optional_enum_attr, require_string_attr, retry_aws_operation_with_token,
+    optional_enum_attr, optional_string_attr, require_string_attr, retry_aws_operation_with_token,
 };
 use crate::provider::{AwsCreateAttempt, Ec2TaggedResourceKind};
+use crate::read_model::{empty_map_value, found_managed_read, take_optional, take_required};
+use crate::read_models_generated::Ec2NatGatewayReadModel;
 
 fn nat_gateway_create_poll_state(state: Option<&NatGatewayState>) -> CreatePoll<()> {
     match state {
@@ -40,6 +42,86 @@ fn nat_gateway_delete_poll_state(state: Option<&NatGatewayState>) -> DeletePoll 
         // prove that the gateway is gone.
         Some(_unrecognized_state) => DeletePoll::Pending,
     }
+}
+
+fn build_availability_zone_addresses(
+    id: &ResourceId,
+    value: Option<&Value>,
+) -> ProviderResult<Vec<AvailabilityZoneAddress>> {
+    let Some(value) = value else {
+        return Ok(Vec::new());
+    };
+    let Value::Concrete(ConcreteValue::List(items)) = value else {
+        return Err(
+            ProviderError::invalid_input("availability_zone_addresses must be a list")
+                .for_resource(id.clone()),
+        );
+    };
+
+    items
+        .iter()
+        .map(|item| {
+            let Value::Concrete(ConcreteValue::Map(fields)) = item else {
+                return Err(ProviderError::invalid_input(
+                    "each availability_zone_addresses item must be a map",
+                )
+                .for_resource(id.clone()));
+            };
+            let string_field = |name: &str| -> ProviderResult<Option<String>> {
+                match fields.get(name) {
+                    Some(Value::Concrete(ConcreteValue::String(value))) => {
+                        Ok(Some(value.expose_plaintext().to_string()))
+                    }
+                    Some(Value::Concrete(ConcreteValue::CanonicalEnum(value))) => {
+                        Ok(Some(value.api_value().to_string()))
+                    }
+                    None => Ok(None),
+                    Some(_) => Err(ProviderError::invalid_input(format!(
+                        "availability_zone_addresses.{name} must be a string"
+                    ))
+                    .for_resource(id.clone())),
+                }
+            };
+            let allocation_ids = match fields.get("allocation_ids") {
+                Some(Value::Concrete(ConcreteValue::List(values))) => values
+                    .iter()
+                    .map(|value| match value {
+                        Value::Concrete(ConcreteValue::String(value)) => {
+                            Ok(value.expose_plaintext().to_string())
+                        }
+                        _ => Err(ProviderError::invalid_input(
+                            "availability_zone_addresses.allocation_ids must contain strings",
+                        )
+                        .for_resource(id.clone())),
+                    })
+                    .collect::<ProviderResult<Vec<_>>>()?,
+                Some(Value::Concrete(ConcreteValue::StringList(values))) => values
+                    .iter()
+                    .map(|value| value.expose_plaintext().to_string())
+                    .collect(),
+                None => Vec::new(),
+                Some(_) => {
+                    return Err(ProviderError::invalid_input(
+                        "availability_zone_addresses.allocation_ids must be a list",
+                    )
+                    .for_resource(id.clone()));
+                }
+            };
+            let availability_zone = string_field("availability_zone")?;
+            let availability_zone_id = string_field("availability_zone_id")?;
+            if availability_zone.is_some() && availability_zone_id.is_some() {
+                return Err(ProviderError::invalid_input(
+                    "availability_zone_addresses.availability_zone and availability_zone_id are mutually exclusive",
+                )
+                .for_resource(id.clone()));
+            }
+            Ok(AvailabilityZoneAddress::builder()
+                .set_availability_zone(availability_zone)
+                .set_availability_zone_id(availability_zone_id)
+                .set_allocation_ids(Some(allocation_ids))
+                .build())
+        })
+        .collect()
 }
 
 impl AwsProvider {
@@ -85,16 +167,74 @@ impl AwsProvider {
             // Extract attributes
             let _identifier_value = Self::extract_ec2_nat_gateway_attributes(ngw, &mut attributes);
 
-            // Extract user-defined tags
-            if let Some(tags_value) = Self::ec2_tags_to_value(ngw.tags()) {
-                attributes.insert("tags".to_string(), tags_value);
+            let mut grouped_addresses: indexmap::IndexMap<
+                (Option<String>, Option<String>),
+                Vec<String>,
+            > = indexmap::IndexMap::new();
+            for address in ngw.nat_gateway_addresses() {
+                let key = (
+                    address.availability_zone().map(str::to_string),
+                    address.availability_zone_id().map(str::to_string),
+                );
+                let allocation_ids = grouped_addresses.entry(key).or_default();
+                if let Some(allocation_id) = address.allocation_id() {
+                    allocation_ids.push(allocation_id.to_string());
+                }
             }
+            let mut availability_zone_addresses = Vec::new();
+            for ((availability_zone, availability_zone_id), allocation_ids) in grouped_addresses {
+                let mut fields = indexmap::IndexMap::new();
+                if !allocation_ids.is_empty() {
+                    fields.insert(
+                        "allocation_ids".to_string(),
+                        Value::Concrete(ConcreteValue::List(
+                            allocation_ids
+                                .into_iter()
+                                .map(|allocation_id| {
+                                    Value::Concrete(ConcreteValue::String(allocation_id.into()))
+                                })
+                                .collect(),
+                        )),
+                    );
+                }
+                if let Some(availability_zone) = availability_zone {
+                    fields.insert(
+                        "availability_zone".to_string(),
+                        Value::Concrete(ConcreteValue::String(availability_zone.into())),
+                    );
+                }
+                if let Some(availability_zone_id) = availability_zone_id {
+                    fields.insert(
+                        "availability_zone_id".to_string(),
+                        Value::Concrete(ConcreteValue::String(availability_zone_id.into())),
+                    );
+                }
+                if !fields.is_empty() {
+                    availability_zone_addresses.push(Value::Concrete(ConcreteValue::Map(fields)));
+                }
+            }
+            let private_ip_address = ngw
+                .nat_gateway_addresses()
+                .iter()
+                .find(|address| address.is_primary().unwrap_or(false))
+                .or_else(|| ngw.nat_gateway_addresses().first())
+                .and_then(|address| address.private_ip())
+                .map(|value| Value::Concrete(ConcreteValue::String(value.to_string().into())));
+            let model = Ec2NatGatewayReadModel {
+                allocation_id: take_optional(&mut attributes, "allocation_id"),
+                availability_mode: take_optional(&mut attributes, "availability_mode"),
+                availability_zone_addresses: Value::Concrete(ConcreteValue::List(
+                    availability_zone_addresses,
+                )),
+                connectivity_type: take_optional(&mut attributes, "connectivity_type"),
+                private_ip_address,
+                subnet_id: take_required(id, &mut attributes, "subnet_id")?,
+                vpc_id: take_optional(&mut attributes, "vpc_id"),
+                nat_gateway_id: take_optional(&mut attributes, "nat_gateway_id"),
+                tags: Self::ec2_tags_to_value(ngw.tags()).unwrap_or_else(empty_map_value),
+            };
 
-            Ok(crate::helpers::found_read(
-                id,
-                applied_identifier,
-                attributes,
-            ))
+            found_managed_read(id, applied_identifier, model)
         } else {
             Ok(ReadOutcome::not_found(id.clone()))
         }
@@ -139,12 +279,59 @@ impl AwsProvider {
                 .configure(|builder| builder.connectivity_type(ConnectivityType::from(conn_type)));
         }
 
+        let availability_mode = match optional_enum_attr(resource, schema, "availability_mode") {
+            Ok(value) => value,
+            Err(error) => return Err(attempt.untracked(error)),
+        };
+        if let Some(availability_mode) = availability_mode {
+            req = req.configure(|builder| {
+                builder.availability_mode(aws_sdk_ec2::types::AvailabilityMode::from(
+                    availability_mode,
+                ))
+            });
+        }
+        let vpc_id = match optional_string_attr(resource, "vpc_id") {
+            Ok(value) => value,
+            Err(error) => return Err(attempt.untracked(error)),
+        };
+        if let Some(vpc_id) = vpc_id {
+            req = req.configure(|builder| builder.vpc_id(vpc_id));
+        }
+        let private_ip_address = match optional_string_attr(resource, "private_ip_address") {
+            Ok(value) => value,
+            Err(error) => return Err(attempt.untracked(error)),
+        };
+        if let Some(private_ip_address) = private_ip_address {
+            req = req.configure(|builder| builder.private_ip_address(private_ip_address));
+        }
+        let availability_zone_addresses = match build_availability_zone_addresses(
+            &resource.id,
+            resource.get_attr("availability_zone_addresses"),
+        ) {
+            Ok(value) => value,
+            Err(error) => return Err(attempt.untracked(error)),
+        };
+        if !availability_zone_addresses.is_empty() {
+            req = req.configure(|builder| {
+                builder.set_availability_zone_addresses(Some(availability_zone_addresses.clone()))
+            });
+        }
+
         let result =
             retry_aws_operation_with_token(client_token, RetryPolicy::default(), || req.clone())
                 .await;
         let sent = Self::sent_only(
             resource,
-            &["subnet_id", "allocation_id", "connectivity_type", "tags"],
+            &[
+                "subnet_id",
+                "allocation_id",
+                "availability_mode",
+                "availability_zone_addresses",
+                "connectivity_type",
+                "private_ip_address",
+                "vpc_id",
+                "tags",
+            ],
         );
 
         self.finish_tagged_ec2_create(

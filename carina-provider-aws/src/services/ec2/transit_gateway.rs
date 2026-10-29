@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
-use carina_core::provider::ProviderResult;
 use carina_core::provider::{AppliedIdentifier, ReadOutcome, Sent};
+use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
 use carina_core::schema::ResourceSchema;
 
@@ -15,6 +15,8 @@ use crate::helpers::{
     optional_int_struct_field, optional_string_list_struct_field,
 };
 use crate::provider::{AwsCreateAttempt, Ec2TaggedResourceKind};
+use crate::read_model::{empty_map_value, found_managed_read, take_optional};
+use crate::read_models_generated::Ec2TransitGatewayReadModel;
 
 fn transit_gateway_create_poll_state(state: Option<&TransitGatewayState>) -> CreatePoll<()> {
     match state {
@@ -165,16 +167,14 @@ impl AwsProvider {
             let _identifier_value =
                 Self::extract_ec2_transit_gateway_attributes(tgw, &mut attributes);
 
-            // Extract user-defined tags
-            if let Some(tags_value) = Self::ec2_tags_to_value(tgw.tags()) {
-                attributes.insert("tags".to_string(), tags_value);
-            }
+            let model = Ec2TransitGatewayReadModel {
+                description: take_optional(&mut attributes, "description"),
+                options: take_optional(&mut attributes, "options"),
+                transit_gateway_id: take_optional(&mut attributes, "transit_gateway_id"),
+                tags: Self::ec2_tags_to_value(tgw.tags()).unwrap_or_else(empty_map_value),
+            };
 
-            Ok(crate::helpers::found_read(
-                id,
-                applied_identifier,
-                attributes,
-            ))
+            found_managed_read(id, applied_identifier, model)
         } else {
             Ok(ReadOutcome::not_found(id.clone()))
         }
@@ -227,7 +227,7 @@ impl AwsProvider {
         .await
     }
 
-    /// Update an EC2 Transit Gateway (tags only for now)
+    /// Update an EC2 Transit Gateway.
     pub(crate) async fn update_ec2_transit_gateway(
         &self,
         id: ResourceId,
@@ -236,6 +236,26 @@ impl AwsProvider {
         to: Resource,
         _schema: &ResourceSchema,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
+        if from.attributes.get("description") != to.get_attr("description") {
+            let description = match to.get_attr("description") {
+                Some(Value::Concrete(ConcreteValue::String(value))) => value.expose_plaintext(),
+                None => "",
+                Some(_) => {
+                    return Err(ProviderError::invalid_input("description must be a string")
+                        .for_resource(id.clone()));
+                }
+            };
+            self.ec2_client
+                .modify_transit_gateway()
+                .transit_gateway_id(identifier.as_str())
+                .description(description)
+                .send()
+                .await
+                .map_err(|error| {
+                    api_error_with_meta("Failed to update transit gateway description", error)
+                        .for_resource(id.clone())
+                })?;
+        }
         self.apply_ec2_tags(
             &id,
             identifier.as_str(),

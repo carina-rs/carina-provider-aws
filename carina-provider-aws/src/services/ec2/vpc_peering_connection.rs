@@ -9,6 +9,8 @@ use crate::aws_operation::ClientToken;
 use crate::error_helpers::api_error_with_meta;
 use crate::helpers::{build_tag_specification_with_create_token, require_string_attr};
 use crate::provider::{AwsCreateAttempt, Ec2TaggedResourceKind};
+use crate::read_model::{empty_map_value, found_managed_read, take_optional, take_required};
+use crate::read_models_generated::Ec2VpcPeeringConnectionReadModel;
 
 impl AwsProvider {
     /// Read an EC2 VPC Peering Connection
@@ -49,16 +51,18 @@ impl AwsProvider {
             let _identifier_value =
                 Self::extract_ec2_vpc_peering_connection_attributes(pcx, &mut attributes);
 
-            // Extract user-defined tags
-            if let Some(tags_value) = Self::ec2_tags_to_value(pcx.tags()) {
-                attributes.insert("tags".to_string(), tags_value);
-            }
+            let model = Ec2VpcPeeringConnectionReadModel {
+                peer_owner_id: take_optional(&mut attributes, "peer_owner_id"),
+                peer_vpc_id: take_required(id, &mut attributes, "peer_vpc_id")?,
+                vpc_id: take_required(id, &mut attributes, "vpc_id")?,
+                vpc_peering_connection_id: take_optional(
+                    &mut attributes,
+                    "vpc_peering_connection_id",
+                ),
+                tags: Self::ec2_tags_to_value(pcx.tags()).unwrap_or_else(empty_map_value),
+            };
 
-            Ok(crate::helpers::found_read(
-                id,
-                applied_identifier,
-                attributes,
-            ))
+            found_managed_read(id, applied_identifier, model)
         } else {
             Ok(ReadOutcome::not_found(id.clone()))
         }

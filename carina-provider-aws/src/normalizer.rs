@@ -19,6 +19,10 @@ impl ProviderNormalizer for AwsNormalizer {
         // so the WASM host impl can `.await` the guest directly (carina#3112).
         Box::pin(async move {
             crate::services::route53::record_set::normalize_record_set_dns_names(resources);
+            for resource in resources.iter() {
+                crate::services::acm::certificate::validate_acm_certificate_inputs(resource)?;
+                crate::services::sqs::queue::validate_sqs_queue_inputs(resource)?;
+            }
             Ok(())
         })
     }
@@ -110,6 +114,29 @@ mod tests {
                 "_abc.example.com".to_string().into()
             )))
         );
+    }
+
+    #[tokio::test]
+    async fn normalize_desired_rejects_primary_domain_in_acm_sans() {
+        let mut resource = Resource::with_provider("aws", "acm.Certificate", "test-cert", None);
+        resource.set_attr(
+            "domain_name".to_string(),
+            Value::Concrete(ConcreteValue::String("example.com".into())),
+        );
+        resource.set_attr(
+            "subject_alternative_names".to_string(),
+            Value::Concrete(ConcreteValue::List(vec![Value::Concrete(
+                ConcreteValue::String("EXAMPLE.COM.".into()),
+            )])),
+        );
+        let mut resources = vec![resource.into()];
+
+        let error = AwsNormalizer
+            .normalize_desired(&mut resources)
+            .await
+            .expect_err("ACM adds the primary domain to SANs automatically");
+        assert!(error.to_string().contains("subject_alternative_names"));
+        assert!(error.to_string().contains("domain_name"));
     }
 
     #[tokio::test]

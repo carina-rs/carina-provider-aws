@@ -1,17 +1,16 @@
-use std::collections::HashMap;
 use std::io::{self, Write};
 
 use crate::AwsProvider;
 use crate::error_helpers::{IntoSendFailure, api_error_with_meta};
-use crate::helpers::{
-    RetryPolicy, optional_enum_attr, require_enum_attr, require_string_attr, retry_aws_operation,
-};
+use crate::helpers::{RetryPolicy, require_enum_attr, require_string_attr, retry_aws_operation};
 use crate::provider::CreateCompletion;
+use crate::read_model::found_managed_read;
+use crate::read_models_generated::S3BucketVersioningReadModel;
 use crate::services::s3::bucket::is_s3_not_configured_error;
 use crate::services::s3::{InvalidBucketStateReason, classify_invalid_bucket_state};
 use aws_sdk_s3::error::ProvideErrorMetadata;
 use aws_sdk_s3::operation::put_bucket_versioning::PutBucketVersioningError;
-use aws_sdk_s3::types::{BucketVersioningStatus, MfaDelete, VersioningConfiguration};
+use aws_sdk_s3::types::{BucketVersioningStatus, VersioningConfiguration};
 use carina_core::provider::ProviderResult;
 use carina_core::provider::{AppliedIdentifier, ReadOutcome};
 use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
@@ -43,26 +42,12 @@ impl AwsProvider {
                 let Some(status) = output.status() else {
                     return Ok(ReadOutcome::not_found(id.clone()));
                 };
-                let mut attributes = HashMap::new();
-                attributes.insert(
-                    "bucket".to_string(),
-                    Value::Concrete(ConcreteValue::String(bucket.to_string().into())),
-                );
-                attributes.insert(
-                    "status".to_string(),
-                    Value::Concrete(ConcreteValue::String(status.as_str().to_string().into())),
-                );
-                if let Some(mfa) = output.mfa_delete() {
-                    attributes.insert(
-                        "mfa_delete".to_string(),
-                        Value::Concrete(ConcreteValue::String(mfa.as_str().to_string().into())),
-                    );
-                }
-                Ok(crate::helpers::found_read(
-                    id,
-                    applied_identifier,
-                    attributes,
-                ))
+                let model = S3BucketVersioningReadModel {
+                    status: Value::Concrete(ConcreteValue::String(
+                        status.as_str().to_string().into(),
+                    )),
+                };
+                found_managed_read(id, applied_identifier, model)
             }
             Err(e) => {
                 if is_s3_not_configured_error(&e, "NoSuchBucket") {
@@ -117,10 +102,7 @@ impl AwsProvider {
         let status_str = require_enum_attr(resource, schema, "status")?;
         let status = BucketVersioningStatus::from(status_str.as_str());
 
-        let mut config_builder = VersioningConfiguration::builder().status(status);
-        if let Some(s) = optional_enum_attr(resource, schema, "mfa_delete")? {
-            config_builder = config_builder.mfa_delete(MfaDelete::from(s));
-        }
+        let config_builder = VersioningConfiguration::builder().status(status);
 
         self.s3_client
             .put_bucket_versioning()

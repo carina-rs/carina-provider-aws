@@ -31,6 +31,8 @@ use crate::helpers::{
     send_aws_operation_with_token,
 };
 use crate::provider::CreateCompletion;
+use crate::read_model::found_managed_read;
+use crate::read_models_generated::AcmCertificateReadModel;
 
 const DVO_MISSING_ATTRIBUTE: &str = "domain_validation_options";
 
@@ -134,10 +136,37 @@ fn resolve_certificate_request_enums(
     })
 }
 
+pub(crate) fn validate_acm_certificate_inputs<S>(resource: &Resource<S>) -> ProviderResult<()> {
+    if resource.id.provider != "aws" || resource.id.resource_type != "acm.Certificate" {
+        return Ok(());
+    }
+    let Some(Value::Concrete(ConcreteValue::String(domain_name))) =
+        resource.get_attr("domain_name")
+    else {
+        return Ok(());
+    };
+    if resource
+        .get_attr("subject_alternative_names")
+        .is_some_and(|value| {
+            extract_string_list(value).iter().any(|san| {
+                san.trim_end_matches('.')
+                    .eq_ignore_ascii_case(domain_name.expose_plaintext().trim_end_matches('.'))
+            })
+        })
+    {
+        return Err(ProviderError::invalid_input(
+            "acm.Certificate subject_alternative_names must not contain domain_name; ACM adds the primary domain automatically",
+        )
+        .for_resource(resource.id.clone()));
+    }
+    Ok(())
+}
+
 fn build_request_certificate(
     resource: &Resource<impl Sized>,
     schema: &ResourceSchema,
 ) -> ProviderResult<RequestCertificateInput> {
+    validate_acm_certificate_inputs(resource)?;
     let domain_name = require_string_attr(resource, "domain_name")?;
     let request_enums = resolve_certificate_request_enums(resource, schema)?;
 
@@ -305,17 +334,20 @@ fn certificate_detail_to_attributes(
             );
         }
     }
-    let sans = cert.subject_alternative_names();
-    if !sans.is_empty() {
-        attributes.insert(
-            "subject_alternative_names".to_string(),
-            Value::Concrete(ConcreteValue::List(
-                sans.iter()
-                    .map(|s| Value::Concrete(ConcreteValue::String(s.clone().into())))
-                    .collect(),
-            )),
-        );
-    }
+    // Measured with `aws acm describe-certificate --certificate-arn <arn>
+    // --region ap-northeast-1` on 2026-10-29: ACM includes DomainName in
+    // SubjectAlternativeNames. The DSL models only the additional names.
+    let domain_name = cert.domain_name();
+    let sans = cert
+        .subject_alternative_names()
+        .iter()
+        .filter(|san| Some(san.as_str()) != domain_name)
+        .map(|san| Value::Concrete(ConcreteValue::String(san.clone().into())))
+        .collect();
+    attributes.insert(
+        "subject_alternative_names".to_string(),
+        Value::Concrete(ConcreteValue::List(sans)),
+    );
     // domain_validation_options carries the DNS records the user
     // needs to publish to satisfy DNS validation — the wait
     // construct's primary use case.
@@ -450,17 +482,15 @@ fn partial_acm_certificate_state(
     }
     if let Some(value) = resource.get_attr("subject_alternative_names") {
         let sans = extract_string_list(value);
-        if !sans.is_empty() {
-            attributes
-                .entry("subject_alternative_names".to_string())
-                .or_insert_with(|| {
-                    Value::Concrete(ConcreteValue::List(
-                        sans.into_iter()
-                            .map(|san| Value::Concrete(ConcreteValue::String(san.into())))
-                            .collect(),
-                    ))
-                });
-        }
+        attributes
+            .entry("subject_alternative_names".to_string())
+            .or_insert_with(|| {
+                Value::Concrete(ConcreteValue::List(
+                    sans.into_iter()
+                        .map(|san| Value::Concrete(ConcreteValue::String(san.into())))
+                        .collect(),
+                ))
+            });
     }
     if let Some(options) = resource.get_attr("options") {
         attributes
@@ -672,25 +702,38 @@ impl AwsProvider {
             .map_err(|e| {
                 api_error_with_meta("ListTagsForCertificate failed", e).for_resource(id.clone())
             })?;
-        let tags = tag_output.tags();
-        if !tags.is_empty() {
-            let mut tag_map = IndexMap::new();
-            for tag in tags {
-                if let Some(k) = Some(tag.key()) {
-                    let v = tag.value().unwrap_or("").to_string();
-                    tag_map.insert(
-                        k.to_string(),
-                        Value::Concrete(ConcreteValue::String(v.into())),
-                    );
-                }
-            }
-            attributes.insert(
-                "tags".to_string(),
-                Value::Concrete(ConcreteValue::Map(tag_map)),
+        let mut tag_map = IndexMap::new();
+        for tag in tag_output.tags() {
+            let value = tag.value().unwrap_or("").to_string();
+            tag_map.insert(
+                tag.key().to_string(),
+                Value::Concrete(ConcreteValue::String(value.into())),
             );
         }
 
-        Ok(crate::helpers::found_read(id, identifier, attributes))
+        let domain_name = attributes.remove("domain_name").ok_or_else(|| {
+            ProviderError::api_error("DescribeCertificate returned no DomainName")
+                .for_resource(id.clone())
+        })?;
+        let subject_alternative_names = attributes
+            .remove("subject_alternative_names")
+            .unwrap_or_else(|| Value::Concrete(ConcreteValue::List(Vec::new())));
+        let model = AcmCertificateReadModel {
+            domain_name,
+            key_algorithm: attributes.remove("key_algorithm"),
+            options: attributes.remove("options"),
+            subject_alternative_names,
+            validation_method: attributes.remove("validation_method"),
+            certificate_arn: attributes.remove("certificate_arn"),
+            domain_validation_options: attributes.remove("domain_validation_options"),
+            renewal_eligibility: attributes.remove("renewal_eligibility"),
+            renewal_summary: attributes.remove("renewal_summary"),
+            status: attributes.remove("status"),
+            r#type: attributes.remove("type"),
+            tags: Value::Concrete(ConcreteValue::Map(tag_map)),
+        };
+
+        found_managed_read(id, identifier, model)
     }
 
     /// Update an ACM certificate. Only `CertificateTransparencyLoggingPreference`

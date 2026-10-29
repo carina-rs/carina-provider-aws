@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use aws_sdk_s3::types::{CorsConfiguration, CorsRule};
 use carina_core::provider::{AppliedIdentifier, ReadOutcome};
 use carina_core::provider::{ProviderError, ProviderResult};
@@ -10,6 +8,8 @@ use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
 use crate::helpers::{RetryPolicy, require_string_attr, retry_aws_operation, sdk_error_message};
 use crate::provider::CreateCompletion;
+use crate::read_model::found_managed_read;
+use crate::read_models_generated::S3BucketCorsConfigurationReadModel;
 use crate::services::s3::bucket::is_s3_not_configured_error;
 
 impl AwsProvider {
@@ -18,28 +18,20 @@ impl AwsProvider {
         id: &ResourceId,
         identifier: &AppliedIdentifier,
     ) -> ProviderResult<ReadOutcome> {
-        let applied_identifier = identifier;
         let bucket = identifier.as_str();
 
         let result = self.s3_client.get_bucket_cors().bucket(bucket).send().await;
 
         match result {
             Ok(output) => {
-                let mut attributes = HashMap::new();
-                attributes.insert(
-                    "bucket".to_string(),
-                    Value::Concrete(ConcreteValue::String(bucket.to_string().into())),
-                );
                 let rules: Vec<Value> = output.cors_rules().iter().map(rule_to_value).collect();
-                attributes.insert(
-                    "cors_rules".to_string(),
-                    Value::Concrete(ConcreteValue::List(rules)),
-                );
-                Ok(crate::helpers::found_read(
+                found_managed_read(
                     id,
-                    applied_identifier,
-                    attributes,
-                ))
+                    identifier,
+                    S3BucketCorsConfigurationReadModel {
+                        cors_rules: Value::Concrete(ConcreteValue::List(rules)),
+                    },
+                )
             }
             Err(e) => {
                 if is_s3_not_configured_error(&e, "NoSuchCORSConfiguration")
@@ -220,9 +212,7 @@ fn strings_from_list(id: &ResourceId, items: &[Value], field: &str) -> ProviderR
 
 fn rule_to_value(rule: &CorsRule) -> Value {
     let mut m = IndexMap::new();
-    if let Some(s) = rule.id()
-        && !s.is_empty()
-    {
+    if let Some(s) = rule.id() {
         m.insert(
             "id".to_string(),
             Value::Concrete(ConcreteValue::String(s.to_string().into())),
@@ -251,23 +241,19 @@ fn rule_to_value(rule: &CorsRule) -> Value {
         .iter()
         .map(|s| Value::Concrete(ConcreteValue::String(s.clone().into())))
         .collect();
-    if !headers.is_empty() {
-        m.insert(
-            "allowed_headers".to_string(),
-            Value::Concrete(ConcreteValue::List(headers)),
-        );
-    }
+    m.insert(
+        "allowed_headers".to_string(),
+        Value::Concrete(ConcreteValue::List(headers)),
+    );
     let expose: Vec<Value> = rule
         .expose_headers()
         .iter()
         .map(|s| Value::Concrete(ConcreteValue::String(s.clone().into())))
         .collect();
-    if !expose.is_empty() {
-        m.insert(
-            "expose_headers".to_string(),
-            Value::Concrete(ConcreteValue::List(expose)),
-        );
-    }
+    m.insert(
+        "expose_headers".to_string(),
+        Value::Concrete(ConcreteValue::List(expose)),
+    );
     if let Some(n) = rule.max_age_seconds() {
         m.insert(
             "max_age_seconds".to_string(),
@@ -275,4 +261,36 @@ fn rule_to_value(rule: &CorsRule) -> Value {
         );
     }
     Value::Concrete(ConcreteValue::Map(m))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn empty_optional_cors_fields_are_preserved() {
+        let rule = CorsRule::builder()
+            .id("")
+            .allowed_methods("GET")
+            .allowed_origins("https://example.com")
+            .set_allowed_headers(Some(Vec::new()))
+            .set_expose_headers(Some(Vec::new()))
+            .build()
+            .unwrap();
+        let Value::Concrete(ConcreteValue::Map(read)) = rule_to_value(&rule) else {
+            panic!("expected rule map");
+        };
+        assert_eq!(
+            read.get("id"),
+            Some(&Value::Concrete(ConcreteValue::String("".into())))
+        );
+        assert_eq!(
+            read.get("allowed_headers"),
+            Some(&Value::Concrete(ConcreteValue::List(Vec::new())))
+        );
+        assert_eq!(
+            read.get("expose_headers"),
+            Some(&Value::Concrete(ConcreteValue::List(Vec::new())))
+        );
+    }
 }

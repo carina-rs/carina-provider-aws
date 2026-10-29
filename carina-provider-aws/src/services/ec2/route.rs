@@ -8,6 +8,8 @@ use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
 use crate::helpers::require_string_attr;
 use crate::provider::CreateCompletion;
+use crate::read_model::{found_managed_read, take_optional, take_required};
+use crate::read_models_generated::Ec2RouteReadModel;
 
 impl AwsProvider {
     /// Read an EC2 Route (routes are identified by route_table_id + destination)
@@ -50,12 +52,16 @@ impl AwsProvider {
                         Value::Concrete(ConcreteValue::String(route_table_id.to_string().into())),
                     );
 
-                    // Route identifier is route_table_id|destination_cidr_block
-                    return Ok(crate::helpers::found_read(
-                        id,
-                        applied_identifier,
-                        attributes,
-                    ));
+                    let model = Ec2RouteReadModel {
+                        destination_cidr_block: take_optional(
+                            &mut attributes,
+                            "destination_cidr_block",
+                        ),
+                        gateway_id: take_optional(&mut attributes, "gateway_id"),
+                        nat_gateway_id: take_optional(&mut attributes, "nat_gateway_id"),
+                        route_table_id: take_required(id, &mut attributes, "route_table_id")?,
+                    };
+                    return found_managed_read(id, applied_identifier, model);
                 }
             }
         }

@@ -10,9 +10,11 @@ use crate::aws_operation::ClientToken;
 use crate::error_helpers::api_error_with_meta;
 use crate::helpers::{
     RetryPolicy, build_tag_specification_with_create_token, optional_bool_attr, optional_enum_attr,
-    require_string_attr, retry_aws_operation_with_token,
+    optional_string_attr, require_string_attr, retry_aws_operation_with_token,
 };
 use crate::provider::{AwsCreateAttempt, Ec2TaggedResourceKind};
+use crate::read_model::{empty_map_value, found_managed_read, take_optional, take_required};
+use crate::read_models_generated::Ec2VpcEndpointReadModel;
 
 impl AwsProvider {
     /// Read an EC2 VPC Endpoint
@@ -45,16 +47,26 @@ impl AwsProvider {
             let _identifier_value =
                 Self::extract_ec2_vpc_endpoint_attributes(endpoint, &mut attributes);
 
-            // Extract user-defined tags
-            if let Some(tags_value) = Self::ec2_tags_to_value(endpoint.tags()) {
-                attributes.insert("tags".to_string(), tags_value);
-            }
+            let model = Ec2VpcEndpointReadModel {
+                policy_document: take_optional(&mut attributes, "policy_document"),
+                private_dns_enabled: take_optional(&mut attributes, "private_dns_enabled"),
+                resource_configuration_arn: take_optional(
+                    &mut attributes,
+                    "resource_configuration_arn",
+                ),
+                route_table_ids: take_required(id, &mut attributes, "route_table_ids")?,
+                security_group_ids: take_required(id, &mut attributes, "security_group_ids")?,
+                service_name: take_required(id, &mut attributes, "service_name")?,
+                service_network_arn: take_optional(&mut attributes, "service_network_arn"),
+                service_region: take_optional(&mut attributes, "service_region"),
+                subnet_ids: take_required(id, &mut attributes, "subnet_ids")?,
+                vpc_endpoint_type: take_optional(&mut attributes, "vpc_endpoint_type"),
+                vpc_id: take_required(id, &mut attributes, "vpc_id")?,
+                vpc_endpoint_id: take_optional(&mut attributes, "vpc_endpoint_id"),
+                tags: Self::ec2_tags_to_value(endpoint.tags()).unwrap_or_else(empty_map_value),
+            };
 
-            Ok(crate::helpers::found_read(
-                id,
-                applied_identifier,
-                attributes,
-            ))
+            found_managed_read(id, applied_identifier, model)
         } else {
             Ok(ReadOutcome::not_found(id.clone()))
         }
@@ -154,6 +166,29 @@ impl AwsProvider {
             req = req.configure(|builder| builder.policy_document(&json_str));
         }
 
+        let resource_configuration_arn =
+            match optional_string_attr(resource, "resource_configuration_arn") {
+                Ok(value) => value,
+                Err(error) => return Err(attempt.untracked(error)),
+            };
+        if let Some(value) = resource_configuration_arn {
+            req = req.configure(|builder| builder.resource_configuration_arn(value));
+        }
+        let service_network_arn = match optional_string_attr(resource, "service_network_arn") {
+            Ok(value) => value,
+            Err(error) => return Err(attempt.untracked(error)),
+        };
+        if let Some(value) = service_network_arn {
+            req = req.configure(|builder| builder.service_network_arn(value));
+        }
+        let service_region = match optional_enum_attr(resource, schema, "service_region") {
+            Ok(value) => value,
+            Err(error) => return Err(attempt.untracked(error)),
+        };
+        if let Some(value) = service_region {
+            req = req.configure(|builder| builder.service_region(value));
+        }
+
         let result =
             retry_aws_operation_with_token(client_token, RetryPolicy::default(), || req.clone())
                 .await;
@@ -168,6 +203,9 @@ impl AwsProvider {
                 "security_group_ids",
                 "private_dns_enabled",
                 "policy_document",
+                "resource_configuration_arn",
+                "service_network_arn",
+                "service_region",
                 "tags",
             ],
         );
@@ -453,6 +491,21 @@ impl AwsProvider {
                 Value::Concrete(ConcreteValue::Bool(v)),
             );
         }
+        for (name, value) in [
+            (
+                "resource_configuration_arn",
+                obj.resource_configuration_arn(),
+            ),
+            ("service_network_arn", obj.service_network_arn()),
+            ("service_region", obj.service_region()),
+        ] {
+            if let Some(value) = value {
+                attributes.insert(
+                    name.to_string(),
+                    Value::Concrete(ConcreteValue::String(value.to_string().into())),
+                );
+            }
+        }
         if let Some(v) = obj.policy_document() {
             // Try to parse the policy document JSON into a Value::Map.
             let policy_value = crate::services::iam::role::iam_policy_json_to_value(v)
@@ -461,29 +514,25 @@ impl AwsProvider {
         }
         {
             let ids = obj.route_table_ids();
-            if !ids.is_empty() {
-                let list: Vec<Value> = ids
-                    .iter()
-                    .map(|s| Value::Concrete(ConcreteValue::String(s.to_string().into())))
-                    .collect();
-                attributes.insert(
-                    "route_table_ids".to_string(),
-                    Value::Concrete(ConcreteValue::List(list)),
-                );
-            }
+            let list: Vec<Value> = ids
+                .iter()
+                .map(|s| Value::Concrete(ConcreteValue::String(s.to_string().into())))
+                .collect();
+            attributes.insert(
+                "route_table_ids".to_string(),
+                Value::Concrete(ConcreteValue::List(list)),
+            );
         }
         {
             let ids = obj.subnet_ids();
-            if !ids.is_empty() {
-                let list: Vec<Value> = ids
-                    .iter()
-                    .map(|s| Value::Concrete(ConcreteValue::String(s.to_string().into())))
-                    .collect();
-                attributes.insert(
-                    "subnet_ids".to_string(),
-                    Value::Concrete(ConcreteValue::List(list)),
-                );
-            }
+            let list: Vec<Value> = ids
+                .iter()
+                .map(|s| Value::Concrete(ConcreteValue::String(s.to_string().into())))
+                .collect();
+            attributes.insert(
+                "subnet_ids".to_string(),
+                Value::Concrete(ConcreteValue::List(list)),
+            );
         }
         // Extract security group IDs from Groups[*].group_id.
         {
@@ -496,12 +545,10 @@ impl AwsProvider {
                             .map(|id| Value::Concrete(ConcreteValue::String(id.to_string().into())))
                     })
                     .collect();
-                if !list.is_empty() {
-                    attributes.insert(
-                        "security_group_ids".to_string(),
-                        Value::Concrete(ConcreteValue::List(list)),
-                    );
-                }
+                attributes.insert(
+                    "security_group_ids".to_string(),
+                    Value::Concrete(ConcreteValue::List(list)),
+                );
             }
         }
         obj.vpc_endpoint_id().map(String::from)

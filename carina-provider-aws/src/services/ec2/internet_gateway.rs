@@ -9,6 +9,8 @@ use crate::aws_operation::ClientToken;
 use crate::error_helpers::api_error_with_meta;
 use crate::helpers::build_tag_specification_with_create_token;
 use crate::provider::{AwsCreateAttempt, Ec2TaggedResourceKind};
+use crate::read_model::{empty_map_value, found_managed_read, take_optional, take_required};
+use crate::read_models_generated::Ec2InternetGatewayReadModel;
 
 impl AwsProvider {
     /// Read an EC2 Internet Gateway
@@ -55,16 +57,13 @@ impl AwsProvider {
                 );
             }
 
-            // Extract user-defined tags
-            if let Some(tags_value) = Self::ec2_tags_to_value(igw.tags()) {
-                attributes.insert("tags".to_string(), tags_value);
-            }
+            let model = Ec2InternetGatewayReadModel {
+                vpc_id: take_required(id, &mut attributes, "vpc_id")?,
+                internet_gateway_id: take_optional(&mut attributes, "internet_gateway_id"),
+                tags: Self::ec2_tags_to_value(igw.tags()).unwrap_or_else(empty_map_value),
+            };
 
-            Ok(crate::helpers::found_read(
-                id,
-                applied_identifier,
-                attributes,
-            ))
+            found_managed_read(id, applied_identifier, model)
         } else {
             Ok(ReadOutcome::not_found(id.clone()))
         }

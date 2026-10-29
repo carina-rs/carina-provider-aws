@@ -1,8 +1,6 @@
-use std::collections::HashMap;
-
 use aws_sdk_s3::types::{BucketCannedAcl, Grant, Permission, Type as GranteeType};
-use carina_core::provider::ProviderResult;
 use carina_core::provider::{AppliedIdentifier, ReadOutcome};
+use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
 use carina_core::schema::ResourceSchema;
 
@@ -10,6 +8,8 @@ use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
 use crate::helpers::{RetryPolicy, require_enum_attr, require_string_attr, retry_aws_operation};
 use crate::provider::CreateCompletion;
+use crate::read_model::found_managed_read;
+use crate::read_models_generated::S3BucketAclReadModel;
 use crate::services::s3::bucket::is_s3_not_configured_error;
 
 /// AWS group URIs used to identify canned-ACL grant patterns.
@@ -31,9 +31,8 @@ const URI_AUTHENTICATED_USERS: &str = "http://acs.amazonaws.com/groups/global/Au
 ///
 /// Returns `None` for any grant shape that does not match — for
 /// example, a custom grant set or a canned ACL Carina does not yet
-/// surface in the schema. Callers should leave the `acl` attribute
-/// absent in state in that case (state then disagrees with desired,
-/// surfacing a real diff, which is the correct behavior).
+/// surface in the schema. The read path reports that state as
+/// unrepresentable instead of silently omitting `acl`.
 fn infer_canned_acl_from_grants(grants: &[Grant], owner_id: Option<&str>) -> Option<&'static str> {
     let owner_id = owner_id?;
     // Bucket the grants by (grantee key, permission). Owner grants
@@ -103,9 +102,8 @@ impl AwsProvider {
     /// produced the grant shape (private / public-read / public-read-write
     /// / authenticated-read) and write that into state so post-apply
     /// `plan-verify` is idempotent. Custom grant sets that do not match
-    /// any canned shape leave `acl` absent in state — the resulting diff
-    /// is accurate (the bucket no longer matches the requested canned
-    /// ACL).
+    /// any canned shape fail the read because omitting `acl` would create
+    /// an ambiguous perpetual diff.
     pub(crate) async fn read_s3_bucket_acl(
         &self,
         id: &ResourceId,
@@ -118,23 +116,19 @@ impl AwsProvider {
 
         match result {
             Ok(output) => {
-                let mut attributes = HashMap::new();
-                attributes.insert(
-                    "bucket".to_string(),
-                    Value::Concrete(ConcreteValue::String(bucket.to_string().into())),
-                );
                 let owner_id = output.owner().and_then(|o| o.id());
-                if let Some(canned) = infer_canned_acl_from_grants(output.grants(), owner_id) {
-                    attributes.insert(
-                        "acl".to_string(),
-                        Value::Concrete(ConcreteValue::String(canned.to_string().into())),
-                    );
-                }
-                Ok(crate::helpers::found_read(
-                    id,
-                    applied_identifier,
-                    attributes,
-                ))
+                let canned = infer_canned_acl_from_grants(output.grants(), owner_id).ok_or_else(
+                    || {
+                        ProviderError::invalid_input(
+                            "GetBucketAcl returned a custom grant set that cannot be represented by the acl attribute",
+                        )
+                        .for_resource(id.clone())
+                    },
+                )?;
+                let model = S3BucketAclReadModel {
+                    acl: Value::Concrete(ConcreteValue::String(canned.to_string().into())),
+                };
+                found_managed_read(id, applied_identifier, model)
             }
             Err(e) => {
                 if is_s3_not_configured_error(&e, "NoSuchBucket") {

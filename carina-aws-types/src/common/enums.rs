@@ -91,6 +91,23 @@ pub(crate) fn enum_with_dsl_aliases(
     AttributeType::enum_(identity, Some(owned_values), aliases, None, None)
 }
 
+/// Build the standard exhaustive alias table and append compatibility aliases
+/// for historical authored spellings. Each compatibility pair is `(api, dsl)`.
+pub(crate) fn enum_with_dsl_aliases_and_legacy(
+    values: &[&str],
+    legacy_aliases: &[(&str, &str)],
+    identity: carina_core::schema::TypeIdentity,
+) -> AttributeType {
+    let owned_values: Vec<String> = values.iter().map(|value| value.to_string()).collect();
+    let mut aliases = dsl_aliases_for(values);
+    aliases.extend(
+        legacy_aliases
+            .iter()
+            .map(|(api, dsl)| (api.to_string(), dsl.to_string())),
+    );
+    AttributeType::enum_(identity, Some(owned_values), aliases, None, None)
+}
+
 /// Check if `input` matches any of `valid_values` using enum matching rules:
 /// exact match, case-insensitive, or underscore-to-hyphen (case-insensitive).
 /// Returns the matched valid value if found.

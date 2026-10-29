@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use aws_sdk_s3::types::PublicAccessBlockConfiguration;
 use carina_core::provider::ProviderResult;
 use carina_core::provider::{AppliedIdentifier, ReadOutcome};
@@ -9,6 +7,8 @@ use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
 use crate::helpers::{RetryPolicy, optional_bool_attr, require_string_attr, retry_aws_operation};
 use crate::provider::CreateCompletion;
+use crate::read_model::found_managed_read;
+use crate::read_models_generated::S3BucketPublicAccessBlockReadModel;
 use crate::services::s3::bucket::is_s3_not_configured_error;
 
 impl AwsProvider {
@@ -22,7 +22,6 @@ impl AwsProvider {
         id: &ResourceId,
         identifier: &AppliedIdentifier,
     ) -> ProviderResult<ReadOutcome> {
-        let applied_identifier = identifier;
         let bucket = identifier.as_str();
 
         let result = self
@@ -34,44 +33,27 @@ impl AwsProvider {
 
         match result {
             Ok(output) => {
-                let mut attributes = HashMap::new();
-                attributes.insert(
-                    "bucket".to_string(),
-                    Value::Concrete(ConcreteValue::String(bucket.to_string().into())),
-                );
-
-                if let Some(config) = output.public_access_block_configuration() {
-                    if let Some(v) = config.block_public_acls() {
-                        attributes.insert(
-                            "block_public_acls".to_string(),
-                            Value::Concrete(ConcreteValue::Bool(v)),
-                        );
-                    }
-                    if let Some(v) = config.ignore_public_acls() {
-                        attributes.insert(
-                            "ignore_public_acls".to_string(),
-                            Value::Concrete(ConcreteValue::Bool(v)),
-                        );
-                    }
-                    if let Some(v) = config.block_public_policy() {
-                        attributes.insert(
-                            "block_public_policy".to_string(),
-                            Value::Concrete(ConcreteValue::Bool(v)),
-                        );
-                    }
-                    if let Some(v) = config.restrict_public_buckets() {
-                        attributes.insert(
-                            "restrict_public_buckets".to_string(),
-                            Value::Concrete(ConcreteValue::Bool(v)),
-                        );
-                    }
-                }
-
-                Ok(crate::helpers::found_read(
+                let Some(config) = output.public_access_block_configuration() else {
+                    return Ok(ReadOutcome::not_found(id.clone()));
+                };
+                found_managed_read(
                     id,
-                    applied_identifier,
-                    attributes,
-                ))
+                    identifier,
+                    S3BucketPublicAccessBlockReadModel {
+                        block_public_acls: Value::Concrete(ConcreteValue::Bool(
+                            config.block_public_acls().unwrap_or(false),
+                        )),
+                        ignore_public_acls: Value::Concrete(ConcreteValue::Bool(
+                            config.ignore_public_acls().unwrap_or(false),
+                        )),
+                        block_public_policy: Value::Concrete(ConcreteValue::Bool(
+                            config.block_public_policy().unwrap_or(false),
+                        )),
+                        restrict_public_buckets: Value::Concrete(ConcreteValue::Bool(
+                            config.restrict_public_buckets().unwrap_or(false),
+                        )),
+                    },
+                )
             }
             Err(e) => {
                 if is_s3_not_configured_error(&e, "NoSuchPublicAccessBlockConfiguration") {

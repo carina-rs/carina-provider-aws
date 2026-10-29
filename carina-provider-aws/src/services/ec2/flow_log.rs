@@ -14,6 +14,8 @@ use crate::helpers::{
     send_aws_operation_with_token,
 };
 use crate::provider::{AwsCreateAttempt, Ec2TaggedResourceKind};
+use crate::read_model::{empty_map_value, found_managed_read, take_optional, take_required};
+use crate::read_models_generated::Ec2FlowLogReadModel;
 
 /// Token state for one CreateFlowLogs request.
 ///
@@ -153,23 +155,32 @@ impl AwsProvider {
                     Value::Concrete(ConcreteValue::String(resource_id.to_string().into()))
                 })
                 .collect::<Vec<_>>();
-            if !resource_ids.is_empty() {
-                attributes.insert(
-                    "resource_ids".to_string(),
-                    Value::Concrete(ConcreteValue::List(resource_ids)),
-                );
-            }
+            attributes.insert(
+                "resource_ids".to_string(),
+                Value::Concrete(ConcreteValue::List(resource_ids)),
+            );
 
-            // Extract user-defined tags
-            if let Some(tags_value) = Self::ec2_tags_to_value(fl.tags()) {
-                attributes.insert("tags".to_string(), tags_value);
-            }
+            let model = Ec2FlowLogReadModel {
+                deliver_logs_permission_arn: take_optional(
+                    &mut attributes,
+                    "deliver_logs_permission_arn",
+                ),
+                log_destination: take_optional(&mut attributes, "log_destination"),
+                log_destination_type: take_optional(&mut attributes, "log_destination_type"),
+                log_format: take_optional(&mut attributes, "log_format"),
+                log_group_name: take_optional(&mut attributes, "log_group_name"),
+                max_aggregation_interval: take_optional(
+                    &mut attributes,
+                    "max_aggregation_interval",
+                ),
+                resource_ids: take_required(id, &mut attributes, "resource_ids")?,
+                resource_type: take_required(id, &mut attributes, "resource_type")?,
+                traffic_type: take_optional(&mut attributes, "traffic_type"),
+                flow_log_id: take_optional(&mut attributes, "flow_log_id"),
+                tags: Self::ec2_tags_to_value(fl.tags()).unwrap_or_else(empty_map_value),
+            };
 
-            Ok(crate::helpers::found_read(
-                id,
-                applied_identifier,
-                attributes,
-            ))
+            found_managed_read(id, applied_identifier, model)
         } else {
             Ok(ReadOutcome::not_found(id.clone()))
         }
@@ -460,11 +471,10 @@ impl AwsProvider {
     /// Extract ec2.FlowLog attributes from the SDK response.
     ///
     /// Lives here (not in `provider_generated.rs`) because the
-    /// `resource_type` attribute is derived by string-matching the
-    /// `resource_id` prefix and is only emitted while
-    /// `flow_log_status == "ACTIVE"` — there is no Smithy structural
-    /// feature that would let the codegen express that conditional
-    /// derivation in one resource. `scan_manual_methods` picks this up
+    /// `resource_type` attribute is derived by string-matching every
+    /// supported `resource_id` prefix — there is no Smithy structural
+    /// feature that would let the codegen express that derivation.
+    /// `scan_manual_methods` picks this up
     /// by name and the codegen skips emitting a duplicate stub.
     pub(crate) fn extract_ec2_flow_log_attributes(
         obj: &aws_sdk_ec2::types::FlowLog,
@@ -524,30 +534,27 @@ impl AwsProvider {
                 Value::Concrete(ConcreteValue::Int(v as i64)),
             );
         }
-        if let Some(v) = obj.flow_log_status()
-            && v == "ACTIVE"
-        {
-            // Only emit resource_type for active flow logs; an inactive
-            // record may carry a stale resource_id whose prefix no
-            // longer reflects what the flow log actually targets.
-            if let Some(rt) = obj.resource_id() {
-                let resource_type_str = if rt.starts_with("vpc-") {
-                    "VPC"
-                } else if rt.starts_with("subnet-") {
-                    "Subnet"
-                } else if rt.starts_with("eni-") {
-                    "NetworkInterface"
-                } else {
-                    ""
-                };
-                if !resource_type_str.is_empty() {
-                    attributes.insert(
-                        "resource_type".to_string(),
-                        Value::Concrete(ConcreteValue::String(
-                            resource_type_str.to_string().into(),
-                        )),
-                    );
-                }
+        if let Some(resource_id) = obj.resource_id() {
+            let resource_type = if resource_id.starts_with("tgw-attach-") {
+                Some("TransitGatewayAttachment")
+            } else if resource_id.starts_with("tgw-") {
+                Some("TransitGateway")
+            } else if resource_id.starts_with("nat-") {
+                Some("RegionalNatGateway")
+            } else if resource_id.starts_with("vpc-") {
+                Some("VPC")
+            } else if resource_id.starts_with("subnet-") {
+                Some("Subnet")
+            } else if resource_id.starts_with("eni-") {
+                Some("NetworkInterface")
+            } else {
+                None
+            };
+            if let Some(resource_type) = resource_type {
+                attributes.insert(
+                    "resource_type".to_string(),
+                    Value::Concrete(ConcreteValue::String(resource_type.to_string().into())),
+                );
             }
         }
         obj.flow_log_id().map(String::from)

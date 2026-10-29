@@ -189,6 +189,11 @@ impl CloudWatchLogsClient {
         self.inner.list_tags_log_group()
     }
 
+    /// PutLogGroupDeletionProtection: sets one boolean on the identified log group
+    pub(crate) fn put_log_group_deletion_protection(&self) -> aws_sdk_cloudwatchlogs::operation::put_log_group_deletion_protection::builders::PutLogGroupDeletionProtectionFluentBuilder{
+        self.inner.put_log_group_deletion_protection()
+    }
+
     /// PutRetentionPolicy: replaces the single retention policy keyed by log group
     pub(crate) fn put_retention_policy(&self) -> aws_sdk_cloudwatchlogs::operation::put_retention_policy::builders::PutRetentionPolicyFluentBuilder{
         self.inner.put_retention_policy()
@@ -235,6 +240,7 @@ pub(crate) fn cloudwatchlogs_idempotency(operation: &str) -> Idempotency {
         "DisassociateKmsKey" => Idempotency::Idempotent,
         "ListTagsForResource" => Idempotency::ReadOnly,
         "ListTagsLogGroup" => Idempotency::ReadOnly,
+        "PutLogGroupDeletionProtection" => Idempotency::Idempotent,
         "PutRetentionPolicy" => Idempotency::Idempotent,
         "TagLogGroup" => Idempotency::Idempotent,
         "TagResource" => Idempotency::Idempotent,
@@ -668,6 +674,14 @@ impl Ec2Client {
         self.inner.modify_subnet_attribute()
     }
 
+    /// ModifyTransitGateway: sets the complete transit-gateway description value
+    pub(crate) fn modify_transit_gateway(
+        &self,
+    ) -> aws_sdk_ec2::operation::modify_transit_gateway::builders::ModifyTransitGatewayFluentBuilder
+    {
+        self.inner.modify_transit_gateway()
+    }
+
     /// ModifyVpcAttribute: sets one named VPC attribute to a complete value
     pub(crate) fn modify_vpc_attribute(
         &self,
@@ -771,6 +785,7 @@ pub(crate) fn ec2_idempotency(operation: &str) -> Idempotency {
         "DetachVpnGateway" => Idempotency::NotIdempotent,
         "DisassociateRouteTable" => Idempotency::NotIdempotent,
         "ModifySubnetAttribute" => Idempotency::Idempotent,
+        "ModifyTransitGateway" => Idempotency::Idempotent,
         "ModifyVpcAttribute" => Idempotency::Idempotent,
         "ModifyVpcEndpoint" => Idempotency::NotIdempotent,
         "ReleaseAddress" => Idempotency::NotIdempotent,
@@ -2082,6 +2097,30 @@ impl DecidedOperationError
 }
 
 impl DecidedSend<()> for aws_sdk_cloudwatchlogs::operation::list_tags_log_group::builders::ListTagsLogGroupFluentBuilder {
+    fn send(
+        self,
+        (): (),
+    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
+        self.send()
+    }
+}
+
+/// PutLogGroupDeletionProtection: sets one boolean on the identified log group
+impl AwsOperation for aws_sdk_cloudwatchlogs::operation::put_log_group_deletion_protection::builders::PutLogGroupDeletionProtectionFluentBuilder {
+    type Resend = NoToken;
+    type Output = aws_sdk_cloudwatchlogs::operation::put_log_group_deletion_protection::PutLogGroupDeletionProtectionOutput;
+    type Error = aws_sdk_cloudwatchlogs::operation::put_log_group_deletion_protection::PutLogGroupDeletionProtectionError;
+
+    const NAME: &'static str = "cloudwatchlogs.PutLogGroupDeletionProtection";
+    const IDEMPOTENCY: Idempotency = Idempotency::Idempotent;
+}
+
+impl DecidedOperationError for aws_sdk_cloudwatchlogs::operation::put_log_group_deletion_protection::PutLogGroupDeletionProtectionError {
+    const NAME: &'static str = <aws_sdk_cloudwatchlogs::operation::put_log_group_deletion_protection::builders::PutLogGroupDeletionProtectionFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_cloudwatchlogs::operation::put_log_group_deletion_protection::builders::PutLogGroupDeletionProtectionFluentBuilder as AwsOperation>::IDEMPOTENCY;
+}
+
+impl DecidedSend<()> for aws_sdk_cloudwatchlogs::operation::put_log_group_deletion_protection::builders::PutLogGroupDeletionProtectionFluentBuilder {
     fn send(
         self,
         (): (),
@@ -3938,6 +3977,37 @@ impl DecidedSend<()> for aws_sdk_ec2::operation::modify_subnet_attribute::builde
         self,
         (): (),
     ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
+        self.send()
+    }
+}
+
+/// ModifyTransitGateway: sets the complete transit-gateway description value
+impl AwsOperation
+    for aws_sdk_ec2::operation::modify_transit_gateway::builders::ModifyTransitGatewayFluentBuilder
+{
+    type Resend = NoToken;
+    type Output = aws_sdk_ec2::operation::modify_transit_gateway::ModifyTransitGatewayOutput;
+    type Error = aws_sdk_ec2::operation::modify_transit_gateway::ModifyTransitGatewayError;
+
+    const NAME: &'static str = "ec2.ModifyTransitGateway";
+    const IDEMPOTENCY: Idempotency = Idempotency::Idempotent;
+}
+
+impl DecidedOperationError
+    for aws_sdk_ec2::operation::modify_transit_gateway::ModifyTransitGatewayError
+{
+    const NAME: &'static str = <aws_sdk_ec2::operation::modify_transit_gateway::builders::ModifyTransitGatewayFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::modify_transit_gateway::builders::ModifyTransitGatewayFluentBuilder as AwsOperation>::IDEMPOTENCY;
+}
+
+impl DecidedSend<()>
+    for aws_sdk_ec2::operation::modify_transit_gateway::builders::ModifyTransitGatewayFluentBuilder
+{
+    fn send(
+        self,
+        (): (),
+    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send
+    {
         self.send()
     }
 }

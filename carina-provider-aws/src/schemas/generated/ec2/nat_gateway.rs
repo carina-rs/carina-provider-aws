@@ -43,14 +43,7 @@ pub fn ec2_nat_gateway_config() -> AwsSchemaConfig {
                 .build(),
         )
         .attribute(
-            AttributeSchema::optional("availability_zone_addresses", AttributeType::list(AttributeType::struct_(
-                    "AvailabilityZoneAddress".to_string(),
-                    vec![
-                    StructField::optional("allocation_ids", AttributeType::list(super::allocation_id())).with_description("The allocation IDs of the Elastic IP addresses (EIPs) to be used for handling outbound NAT traffic in this specific Availability Zone.").with_provider_name("AllocationIds").build(),
-                    StructField::optional("availability_zone", super::availability_zone()).with_description("For regional NAT gateways only: The Availability Zone where this specific NAT gateway configuration will be active. Each AZ in a regional NAT gateway ...").with_provider_name("AvailabilityZone").build(),
-                    StructField::optional("availability_zone_id", super::availability_zone_id()).with_description("For regional NAT gateways only: The ID of the Availability Zone where this specific NAT gateway configuration will be active. Each AZ in a regional NA...").with_provider_name("AvailabilityZoneId").build()
-                    ],
-                )))
+            AttributeSchema::optional("availability_zone_addresses", AttributeType::unordered_list(AttributeType::struct_("AvailabilityZoneAddress".to_string(),vec![StructField::optional("allocation_ids", AttributeType::unordered_list(super::allocation_id())).with_description("The allocation IDs of the Elastic IP addresses (EIPs) to be used for handling outbound NAT traffic in this specific Availability Zone.").with_provider_name("AllocationIds").build(),StructField::optional("availability_zone", super::availability_zone()).with_description("For regional NAT gateways only: The Availability Zone where this specific NAT gateway configuration will be active. Each AZ in a regional NAT gateway has its own configuration to handle outbound NAT traffic from that AZ.").with_provider_name("AvailabilityZone").build(),StructField::optional("availability_zone_id", super::availability_zone_id()).with_description("For regional NAT gateways only: The ID of the Availability Zone where this specific NAT gateway configuration will be active.").with_provider_name("AvailabilityZoneId").build()],)))
                 .create_only()
                 .with_description("For regional NAT gateways only: Specifies which Availability Zones you want the NAT gateway to support and the Elastic IP addresses (EIPs) to use in e...")
                 .with_provider_name("AvailabilityZoneAddresses")

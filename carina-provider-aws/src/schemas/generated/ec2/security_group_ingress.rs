@@ -57,13 +57,6 @@ pub fn ec2_security_group_ingress_config() -> AwsSchemaConfig {
                 .build(),
         )
         .attribute(
-            AttributeSchema::optional("group_name", AttributeType::string())
-                .create_only()
-                .with_description("[Default VPC] The name of the security group. For security groups for a default VPC you can specify either the ID or the name of the security group. F...")
-                .with_provider_name("GroupName")
-                .build(),
-        )
-        .attribute(
             AttributeSchema::required("ip_protocol", AttributeType::enum_(
     carina_core::schema::enum_identity("IpProtocol", Some("aws.ec2.SecurityGroupIngress")),
     Some(vec!["tcp".to_string(), "udp".to_string(), "icmp".to_string(), "icmpv6".to_string(), "-1".to_string()]),
@@ -81,13 +74,6 @@ pub fn ec2_security_group_ingress_config() -> AwsSchemaConfig {
                 .create_only()
                 .with_description("The ID of the source prefix list.")
                 .with_provider_name("SourcePrefixListId")
-                .build(),
-        )
-        .attribute(
-            AttributeSchema::optional("source_security_group_name", AttributeType::string())
-                .create_only()
-                .with_description("[Default VPC] The name of the source security group. The rule grants full ICMP, UDP, and TCP access. To create a rule with a specific protocol and por...")
-                .with_provider_name("SourceSecurityGroupName")
                 .build(),
         )
         .attribute(

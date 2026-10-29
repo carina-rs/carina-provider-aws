@@ -81,6 +81,40 @@ pub fn require_string_attr(
     }
 }
 
+/// Extract an optional concrete string attribute, rejecting a present value
+/// with a different shape instead of silently dropping it from the AWS
+/// request.
+pub(crate) fn optional_string_attr<'a>(
+    resource: &'a Resource<impl Sized>,
+    attr_name: &str,
+) -> ProviderResult<Option<&'a str>> {
+    match resource.get_attr(attr_name) {
+        Some(Value::Concrete(ConcreteValue::String(value))) => Ok(Some(value.expose_plaintext())),
+        None => Ok(None),
+        Some(_) => Err(
+            ProviderError::invalid_input(format!("{attr_name} must be a string"))
+                .for_resource(resource.id.clone()),
+        ),
+    }
+}
+
+/// Extract an optional concrete integer attribute, rejecting a present value
+/// with a different shape instead of silently dropping it from the AWS
+/// request.
+pub(crate) fn optional_int_attr(
+    resource: &Resource<impl Sized>,
+    attr_name: &str,
+) -> ProviderResult<Option<i64>> {
+    match resource.get_attr(attr_name) {
+        Some(Value::Concrete(ConcreteValue::Int(value))) => Ok(Some(*value)),
+        None => Ok(None),
+        Some(_) => Err(
+            ProviderError::invalid_input(format!("{attr_name} must be an integer"))
+                .for_resource(resource.id.clone()),
+        ),
+    }
+}
+
 pub(crate) fn enum_attr_error(id: &ResourceId, error: EnumAttrError) -> ProviderError {
     ProviderError::invalid_input_caused_by("rejected enum attribute value", error)
         .for_resource(id.clone())

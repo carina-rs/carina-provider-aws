@@ -1667,7 +1667,9 @@ fn test_organizations_account_schema_attributes() {
     assert!(schema.attributes().contains_key("id"));
     assert!(schema.attributes().contains_key("arn"));
     assert!(schema.attributes().contains_key("status"));
-    assert!(schema.attributes().contains_key("name"));
+    // `account_name` is the canonical schema key; the duplicate Smithy `name`
+    // member cannot be independently round-tripped.
+    assert!(!schema.attributes().contains_key("name"));
     assert!(schema.attributes().contains_key("tags"));
     // Verify has_tags
     assert!(config.has_tags);

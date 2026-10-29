@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use aws_sdk_s3::types::{
     Event, EventBridgeConfiguration, FilterRule, FilterRuleName, LambdaFunctionConfiguration,
     NotificationConfiguration, NotificationConfigurationFilter, QueueConfiguration, S3KeyFilter,
@@ -14,6 +12,8 @@ use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
 use crate::helpers::{RetryPolicy, require_string_attr, retry_aws_operation, sdk_error_message};
 use crate::provider::CreateCompletion;
+use crate::read_model::found_managed_read;
+use crate::read_models_generated::S3BucketNotificationConfigurationReadModel;
 use crate::services::s3::bucket::is_s3_not_configured_error;
 
 impl AwsProvider {
@@ -22,7 +22,6 @@ impl AwsProvider {
         id: &ResourceId,
         identifier: &AppliedIdentifier,
     ) -> ProviderResult<ReadOutcome> {
-        let applied_identifier = identifier;
         let bucket = identifier.as_str();
 
         let result = self
@@ -34,57 +33,37 @@ impl AwsProvider {
 
         match result {
             Ok(output) => {
-                let mut attributes = HashMap::new();
-                attributes.insert(
-                    "bucket".to_string(),
-                    Value::Concrete(ConcreteValue::String(bucket.to_string().into())),
-                );
-
                 let topics: Vec<Value> = output
                     .topic_configurations()
                     .iter()
                     .map(topic_to_value)
                     .collect();
-                if !topics.is_empty() {
-                    attributes.insert(
-                        "topic_configurations".to_string(),
-                        Value::Concrete(ConcreteValue::List(topics)),
-                    );
-                }
                 let queues: Vec<Value> = output
                     .queue_configurations()
                     .iter()
                     .map(queue_to_value)
                     .collect();
-                if !queues.is_empty() {
-                    attributes.insert(
-                        "queue_configurations".to_string(),
-                        Value::Concrete(ConcreteValue::List(queues)),
-                    );
-                }
                 let lambdas: Vec<Value> = output
                     .lambda_function_configurations()
                     .iter()
                     .map(lambda_to_value)
                     .collect();
-                if !lambdas.is_empty() {
-                    attributes.insert(
-                        "lambda_function_configurations".to_string(),
-                        Value::Concrete(ConcreteValue::List(lambdas)),
-                    );
-                }
-                if output.event_bridge_configuration().is_some() {
-                    attributes.insert(
-                        "event_bridge_configuration".to_string(),
-                        Value::Concrete(ConcreteValue::Map(IndexMap::new())),
-                    );
-                }
+                let event_bridge_configuration = output
+                    .event_bridge_configuration()
+                    .map(|_| Value::Concrete(ConcreteValue::Map(IndexMap::new())));
 
-                Ok(crate::helpers::found_read(
+                found_managed_read(
                     id,
-                    applied_identifier,
-                    attributes,
-                ))
+                    identifier,
+                    S3BucketNotificationConfigurationReadModel {
+                        topic_configurations: Value::Concrete(ConcreteValue::List(topics)),
+                        queue_configurations: Value::Concrete(ConcreteValue::List(queues)),
+                        lambda_function_configurations: Value::Concrete(ConcreteValue::List(
+                            lambdas,
+                        )),
+                        event_bridge_configuration,
+                    },
+                )
             }
             Err(e) => {
                 if is_s3_not_configured_error(&e, "NoSuchBucket") {
@@ -368,12 +347,28 @@ fn build_filter(
                 ))
                 .for_resource(id.clone()));
             };
-            let name = require_string_field(id, rule_map, "name", "filter.filter_rules")?;
+            let name = match rule_map.get("name") {
+                Some(Value::Concrete(ConcreteValue::String(name))) => name.expose_plaintext(),
+                Some(Value::Concrete(ConcreteValue::CanonicalEnum(name))) => name.api_value(),
+                _ => {
+                    return Err(ProviderError::invalid_input(format!(
+                        "{parent}.filter.filter_rules.name is required"
+                    ))
+                    .for_resource(id.clone()));
+                }
+            };
+            let name = if name.eq_ignore_ascii_case("prefix") {
+                FilterRuleName::Prefix
+            } else if name.eq_ignore_ascii_case("suffix") {
+                FilterRuleName::Suffix
+            } else {
+                return Err(ProviderError::invalid_input(format!(
+                    "{parent}.filter.filter_rules.name must be prefix or suffix"
+                ))
+                .for_resource(id.clone()));
+            };
             let value = require_string_field(id, rule_map, "value", "filter.filter_rules")?;
-            Ok(FilterRule::builder()
-                .name(FilterRuleName::from(name.as_str()))
-                .value(value)
-                .build())
+            Ok(FilterRule::builder().name(name).value(value).build())
         })
         .collect::<ProviderResult<Vec<_>>>()?;
 
@@ -482,4 +477,39 @@ fn filter_to_value(f: &NotificationConfigurationFilter) -> Value {
         );
     }
     Value::Concrete(ConcreteValue::Map(outer))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn legacy_filter_rule_case_is_normalized() {
+        let id = ResourceId::with_identity("s3.bucket_notification_configuration", "test");
+        let rule = Value::Concrete(ConcreteValue::Map(IndexMap::from([
+            (
+                "name".to_string(),
+                Value::Concrete(ConcreteValue::String("Prefix".into())),
+            ),
+            (
+                "value".to_string(),
+                Value::Concrete(ConcreteValue::String("images/".into())),
+            ),
+        ])));
+        let fields = IndexMap::from([(
+            "filter".to_string(),
+            Value::Concrete(ConcreteValue::Map(IndexMap::from([(
+                "filter_rules".to_string(),
+                Value::Concrete(ConcreteValue::List(vec![rule])),
+            )]))),
+        )]);
+
+        let filter = build_filter(&id, &fields, "topic_configurations")
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            filter.key().unwrap().filter_rules()[0].name(),
+            Some(&FilterRuleName::Prefix)
+        );
+    }
 }

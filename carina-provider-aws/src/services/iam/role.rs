@@ -9,6 +9,8 @@ use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
 use crate::helpers::{require_string_attr, sdk_error_message};
 use crate::provider::CreateCompletion;
+use crate::read_model::{found_managed_read, take_optional, take_required};
+use crate::read_models_generated::IamRoleReadModel;
 
 impl AwsProvider {
     /// Read an IAM Role
@@ -35,31 +37,32 @@ impl AwsProvider {
                     let _identifier_value =
                         Self::extract_iam_role_attributes(role, &mut attributes);
 
-                    // Extract tags
-                    let tags = role.tags();
-                    if !tags.is_empty() {
-                        let mut tag_map = IndexMap::new();
-                        for tag in tags {
-                            let key = tag.key();
-                            let val = tag.value();
-                            tag_map.insert(
-                                key.to_string(),
-                                Value::Concrete(ConcreteValue::String(val.to_string().into())),
-                            );
-                        }
-                        if !tag_map.is_empty() {
-                            attributes.insert(
-                                "tags".to_string(),
-                                Value::Concrete(ConcreteValue::Map(tag_map)),
-                            );
-                        }
+                    let mut tag_map = IndexMap::new();
+                    for tag in role.tags() {
+                        tag_map.insert(
+                            tag.key().to_string(),
+                            Value::Concrete(ConcreteValue::String(tag.value().to_string().into())),
+                        );
                     }
 
-                    Ok(crate::helpers::found_read(
-                        id,
-                        applied_identifier,
-                        attributes,
-                    ))
+                    let model = IamRoleReadModel {
+                        assume_role_policy_document: take_required(
+                            id,
+                            &mut attributes,
+                            "assume_role_policy_document",
+                        )?,
+                        description: take_optional(&mut attributes, "description"),
+                        max_session_duration: take_optional(
+                            &mut attributes,
+                            "max_session_duration",
+                        ),
+                        path: take_optional(&mut attributes, "path"),
+                        role_name: take_required(id, &mut attributes, "role_name")?,
+                        arn: take_optional(&mut attributes, "arn"),
+                        role_id: take_optional(&mut attributes, "role_id"),
+                        tags: Value::Concrete(ConcreteValue::Map(tag_map)),
+                    };
+                    found_managed_read(id, applied_identifier, model)
                 } else {
                     Ok(ReadOutcome::not_found(id.clone()))
                 }

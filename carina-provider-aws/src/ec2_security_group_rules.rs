@@ -11,6 +11,10 @@ use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
 use crate::helpers::require_enum_attr;
 use crate::provider::CreateCompletion;
+use crate::read_model::{found_managed_read, take_optional, take_required};
+use crate::read_models_generated::{
+    Ec2SecurityGroupEgressReadModel, Ec2SecurityGroupIngressReadModel,
+};
 
 fn build_security_group_rule_permission(
     resource: &Resource<impl Sized>,
@@ -95,6 +99,11 @@ fn build_security_group_rule_permission(
 
     if let Some(ref ref_sg_id) = ref_security_group_id {
         let mut pair_builder = aws_sdk_ec2::types::UserIdGroupPair::builder().group_id(ref_sg_id);
+        if let Some(Value::Concrete(ConcreteValue::String(owner_id))) =
+            resource.get_attr("source_security_group_owner_id")
+        {
+            pair_builder = pair_builder.user_id(owner_id.expose_plaintext());
+        }
         if let Some(ref desc) = description {
             pair_builder = pair_builder.description(desc);
         }
@@ -190,13 +199,60 @@ impl AwsProvider {
                 attr_name.to_string(),
                 Value::Concrete(ConcreteValue::String(group_id.to_string().into())),
             );
+            if let Some(owner_id) = ref_group.user_id() {
+                attributes.insert(
+                    "source_security_group_owner_id".to_string(),
+                    Value::Concrete(ConcreteValue::String(owner_id.to_string().into())),
+                );
+            }
         }
 
-        Ok(crate::helpers::found_read(
-            id,
-            applied_identifier,
-            attributes,
-        ))
+        if is_ingress {
+            let model = Ec2SecurityGroupIngressReadModel {
+                cidr_ip: take_optional(&mut attributes, "cidr_ip"),
+                cidr_ipv6: take_optional(&mut attributes, "cidr_ipv6"),
+                description: take_optional(&mut attributes, "description"),
+                from_port: take_optional(&mut attributes, "from_port"),
+                group_id: take_optional(&mut attributes, "group_id"),
+                ip_protocol: take_required(id, &mut attributes, "ip_protocol")?,
+                source_prefix_list_id: take_optional(&mut attributes, "source_prefix_list_id"),
+                source_security_group_owner_id: take_optional(
+                    &mut attributes,
+                    "source_security_group_owner_id",
+                ),
+                to_port: take_optional(&mut attributes, "to_port"),
+                source_security_group_id: take_optional(
+                    &mut attributes,
+                    "source_security_group_id",
+                ),
+                security_group_rule_id: take_optional(&mut attributes, "security_group_rule_id"),
+            };
+            found_managed_read(id, applied_identifier, model)
+        } else {
+            let model = Ec2SecurityGroupEgressReadModel {
+                cidr_ip: take_optional(&mut attributes, "cidr_ip"),
+                cidr_ipv6: take_optional(&mut attributes, "cidr_ipv6"),
+                description: take_optional(&mut attributes, "description"),
+                destination_prefix_list_id: take_optional(
+                    &mut attributes,
+                    "destination_prefix_list_id",
+                ),
+                from_port: take_optional(&mut attributes, "from_port"),
+                group_id: take_required(id, &mut attributes, "group_id")?,
+                ip_protocol: take_required(id, &mut attributes, "ip_protocol")?,
+                source_security_group_owner_id: take_optional(
+                    &mut attributes,
+                    "source_security_group_owner_id",
+                ),
+                to_port: take_optional(&mut attributes, "to_port"),
+                destination_security_group_id: take_optional(
+                    &mut attributes,
+                    "destination_security_group_id",
+                ),
+                security_group_rule_id: take_optional(&mut attributes, "security_group_rule_id"),
+            };
+            found_managed_read(id, applied_identifier, model)
+        }
     }
 
     /// Create an EC2 Security Group Rule (shared between ingress and egress)

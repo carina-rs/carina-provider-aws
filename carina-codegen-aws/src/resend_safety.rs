@@ -134,6 +134,12 @@ pub const OVERRIDES: &[Override] = &[
     ),
     decision(
         "cloudwatchlogs",
+        "PutLogGroupDeletionProtection",
+        Decision::Idempotent,
+        "PutLogGroupDeletionProtection: sets one boolean on the identified log group",
+    ),
+    decision(
+        "cloudwatchlogs",
         "PutRetentionPolicy",
         Decision::Idempotent,
         "PutRetentionPolicy: replaces the single retention policy keyed by log group",
@@ -497,6 +503,12 @@ pub const OVERRIDES: &[Override] = &[
         "ModifySubnetAttribute",
         Decision::Idempotent,
         "ModifySubnetAttribute: sets one named subnet attribute to a complete value",
+    ),
+    decision(
+        "ec2",
+        "ModifyTransitGateway",
+        Decision::Idempotent,
+        "ModifyTransitGateway: sets the complete transit-gateway description value",
     ),
     decision(
         "ec2",

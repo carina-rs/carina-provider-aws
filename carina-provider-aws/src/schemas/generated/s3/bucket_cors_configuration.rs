@@ -15,9 +15,11 @@ pub fn s3_bucket_cors_configuration_config() -> AwsSchemaConfig {
         has_tags: false,
         schema: ResourceSchema::new("s3.BucketCorsConfiguration")
             .with_coexisting_replacement()
+            // Read contract: GetBucketCors does not return the targeted bucket name
             .attribute(
                 AttributeSchema::required("bucket", AttributeType::string())
                     .create_only()
+                    .write_only()
                     .with_description("Specifies the bucket impacted by the corsconfiguration.")
                     .with_provider_name("Bucket")
                     .build(),

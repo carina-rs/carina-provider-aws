@@ -22,7 +22,6 @@ pub fn logs_log_group_config() -> AwsSchemaConfig {
         .with_unique_name_attribute("log_group_name")
         .attribute(
             AttributeSchema::optional("deletion_protection_enabled", AttributeType::bool())
-                .create_only()
                 .with_description("Use this parameter to enable deletion protection for the new log group. When enabled on a log group, deletion protection blocks all deletion operation...")
                 .with_provider_name("deletionProtectionEnabled")
                 .build(),

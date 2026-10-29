@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::io::{self, Write};
 
 use aws_sdk_s3::error::{ProvideErrorMetadata, SdkError};
@@ -21,6 +20,8 @@ use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
 use crate::helpers::{enum_attr_error, require_enum_attr, require_string_attr};
 use crate::provider::CreateCompletion;
+use crate::read_model::found_managed_read;
+use crate::read_models_generated::S3BucketObjectLockConfigurationReadModel;
 use crate::services::s3::bucket::is_s3_not_configured_error;
 use crate::services::s3::{InvalidBucketStateReason, classify_invalid_bucket_state};
 
@@ -48,21 +49,14 @@ impl AwsProvider {
                 let Some(enabled) = configuration.object_lock_enabled() else {
                     return Ok(ReadOutcome::not_found(id.clone()));
                 };
-                let mut attributes = HashMap::new();
-                attributes.insert("bucket".to_string(), string_value(bucket));
-                attributes.insert(
-                    "object_lock_enabled".to_string(),
-                    string_value(enabled.as_str()),
-                );
-                if let Some(rule) = configuration.rule() {
-                    attributes.insert("rule".to_string(), rule_to_value(id, rule)?);
-                }
-
-                Ok(crate::helpers::found_read(
-                    id,
-                    applied_identifier,
-                    attributes,
-                ))
+                let model = S3BucketObjectLockConfigurationReadModel {
+                    object_lock_enabled: string_value(enabled.as_str()),
+                    rule: configuration
+                        .rule()
+                        .map(|rule| rule_to_value(id, rule))
+                        .transpose()?,
+                };
+                found_managed_read(id, applied_identifier, model)
             }
             Err(error)
                 if is_s3_not_configured_error(&error, "ObjectLockConfigurationNotFoundError")

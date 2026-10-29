@@ -15,9 +15,11 @@ pub fn s3_bucket_ownership_controls_config() -> AwsSchemaConfig {
         has_tags: false,
         schema: ResourceSchema::new("s3.BucketOwnershipControls")
         .with_coexisting_replacement()
+        // Read contract: GetBucketOwnershipControls does not return the targeted bucket name
         .attribute(
             AttributeSchema::required("bucket", AttributeType::string())
                 .create_only()
+                .write_only()
                 .with_description("The name of the Amazon S3 bucket whose OwnershipControls you want to set.")
                 .with_provider_name("Bucket")
                 .build(),

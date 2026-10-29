@@ -15,6 +15,8 @@ use crate::helpers::{
     require_string_attr,
 };
 use crate::provider::{AwsCreateAttempt, Ec2TaggedResourceKind};
+use crate::read_model::{empty_map_value, found_managed_read, take_optional, take_required};
+use crate::read_models_generated::Ec2TransitGatewayAttachmentReadModel;
 
 fn transit_gateway_attachment_create_poll_state(
     state: Option<&TransitGatewayAttachmentState>,
@@ -146,16 +148,19 @@ impl AwsProvider {
             let _identifier_value =
                 Self::extract_ec2_transit_gateway_attachment_attributes(att, &mut attributes);
 
-            // Extract user-defined tags
-            if let Some(tags_value) = Self::ec2_tags_to_value(att.tags()) {
-                attributes.insert("tags".to_string(), tags_value);
-            }
+            let model = Ec2TransitGatewayAttachmentReadModel {
+                options: take_optional(&mut attributes, "options"),
+                subnet_ids: take_required(id, &mut attributes, "subnet_ids")?,
+                transit_gateway_id: take_required(id, &mut attributes, "transit_gateway_id")?,
+                vpc_id: take_required(id, &mut attributes, "vpc_id")?,
+                transit_gateway_attachment_id: take_optional(
+                    &mut attributes,
+                    "transit_gateway_attachment_id",
+                ),
+                tags: Self::ec2_tags_to_value(att.tags()).unwrap_or_else(empty_map_value),
+            };
 
-            Ok(crate::helpers::found_read(
-                id,
-                applied_identifier,
-                attributes,
-            ))
+            found_managed_read(id, applied_identifier, model)
         } else {
             Ok(ReadOutcome::not_found(id.clone()))
         }

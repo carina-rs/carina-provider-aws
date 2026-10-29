@@ -14,38 +14,37 @@ pub fn s3_bucket_versioning_config() -> AwsSchemaConfig {
         resource_type_name: "s3.BucketVersioning",
         has_tags: false,
         schema: ResourceSchema::new("s3.BucketVersioning")
-        .with_coexisting_replacement()
-        .attribute(
-            AttributeSchema::required("bucket", AttributeType::string())
-                .create_only()
-                .with_description("The bucket name.")
-                .with_provider_name("Bucket")
-                .build(),
-        )
-        .attribute(
-            AttributeSchema::required("status", AttributeType::enum_(
-carina_core::schema::enum_identity("VersioningStatus", Some("aws.s3.BucketVersioning")),
-Some(vec!["Enabled".to_string(), "Suspended".to_string()]),
-vec![("Enabled".to_string(), "enabled".to_string()), ("Suspended".to_string(), "suspended".to_string())],
-None,
-None,
-))
+            .with_coexisting_replacement()
+            // Read contract: S3 versioning responses identify the targeted bucket only through the request, not the response
+            .attribute(
+                AttributeSchema::required("bucket", AttributeType::string())
+                    .create_only()
+                    .write_only()
+                    .with_description("The bucket name.")
+                    .with_provider_name("Bucket")
+                    .build(),
+            )
+            .attribute(
+                AttributeSchema::required(
+                    "status",
+                    AttributeType::enum_(
+                        carina_core::schema::enum_identity(
+                            "VersioningStatus",
+                            Some("aws.s3.BucketVersioning"),
+                        ),
+                        Some(vec!["Enabled".to_string(), "Suspended".to_string()]),
+                        vec![
+                            ("Enabled".to_string(), "enabled".to_string()),
+                            ("Suspended".to_string(), "suspended".to_string()),
+                        ],
+                        None,
+                        None,
+                    ),
+                )
                 .with_description("Versioning state of the bucket: Enabled or Suspended.")
                 .with_provider_name("Status")
                 .build(),
-        )
-        .attribute(
-            AttributeSchema::optional("mfa_delete", AttributeType::enum_(
-carina_core::schema::enum_identity("MFADelete", Some("aws.s3.BucketVersioning")),
-Some(vec!["Enabled".to_string(), "Disabled".to_string()]),
-vec![("Enabled".to_string(), "enabled".to_string()), ("Disabled".to_string(), "disabled".to_string())],
-None,
-None,
-))
-                .with_description("MFA-delete state. Specifies whether MFA delete is enabled in the bucket versioning configuration.")
-                .with_provider_name("MFADelete")
-                .build(),
-        )
+            ),
     }
 }
 

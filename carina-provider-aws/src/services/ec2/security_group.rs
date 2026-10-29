@@ -12,6 +12,8 @@ use crate::helpers::{
     retry_aws_operation,
 };
 use crate::provider::{AwsCreateAttempt, Ec2TaggedResourceKind};
+use crate::read_model::{empty_map_value, found_managed_read, take_optional, take_required};
+use crate::read_models_generated::Ec2SecurityGroupReadModel;
 
 impl AwsProvider {
     /// Read an EC2 Security Group
@@ -48,16 +50,15 @@ impl AwsProvider {
             let _identifier_value =
                 Self::extract_ec2_security_group_attributes(sg, &mut attributes);
 
-            // Extract user-defined tags
-            if let Some(tags_value) = Self::ec2_tags_to_value(sg.tags()) {
-                attributes.insert("tags".to_string(), tags_value);
-            }
+            let model = Ec2SecurityGroupReadModel {
+                description: take_required(id, &mut attributes, "description")?,
+                group_name: take_required(id, &mut attributes, "group_name")?,
+                vpc_id: take_optional(&mut attributes, "vpc_id"),
+                group_id: take_optional(&mut attributes, "group_id"),
+                tags: Self::ec2_tags_to_value(sg.tags()).unwrap_or_else(empty_map_value),
+            };
 
-            Ok(crate::helpers::found_read(
-                id,
-                applied_identifier,
-                attributes,
-            ))
+            found_managed_read(id, applied_identifier, model)
         } else {
             Ok(ReadOutcome::not_found(id.clone()))
         }

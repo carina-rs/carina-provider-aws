@@ -8,6 +8,8 @@ use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
 use crate::helpers::require_string_attr;
 use crate::provider::CreateCompletion;
+use crate::read_model::{found_managed_read, take_required};
+use crate::read_models_generated::Ec2SubnetRouteTableAssociationReadModel;
 
 impl AwsProvider {
     /// Read an EC2 Subnet Route Table Association
@@ -48,11 +50,6 @@ impl AwsProvider {
                 if assoc.route_table_association_id() == Some(association_id) {
                     let mut attributes = HashMap::new();
 
-                    attributes.insert(
-                        "association_id".to_string(),
-                        Value::Concrete(ConcreteValue::String(association_id.to_string().into())),
-                    );
-
                     if let Some(rt_id) = assoc.route_table_id() {
                         attributes.insert(
                             "route_table_id".to_string(),
@@ -67,11 +64,11 @@ impl AwsProvider {
                         );
                     }
 
-                    return Ok(crate::helpers::found_read(
-                        id,
-                        applied_identifier,
-                        attributes,
-                    ));
+                    let model = Ec2SubnetRouteTableAssociationReadModel {
+                        route_table_id: take_required(id, &mut attributes, "route_table_id")?,
+                        subnet_id: take_required(id, &mut attributes, "subnet_id")?,
+                    };
+                    return found_managed_read(id, applied_identifier, model);
                 }
             }
         }

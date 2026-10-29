@@ -10,6 +10,8 @@ use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
 use crate::helpers::{CreatePoll, optional_enum_attr, require_string_attr, sdk_error_message};
 use crate::provider::CreateCompletion;
+use crate::read_model::{found_managed_read, take_optional, take_required};
+use crate::read_models_generated::OrganizationsAccountReadModel;
 
 fn organizations_account_create_poll_state(
     status: Option<&aws_sdk_organizations::types::CreateAccountStatus>,
@@ -112,55 +114,39 @@ impl AwsProvider {
                     let _account_id =
                         Self::extract_organizations_account_attributes(account, &mut attributes);
 
-                    // ListParents for parent_id
-                    if let Ok(parents_response) = self
-                        .organizations_client
-                        .list_parents()
-                        .child_id(identifier)
-                        .send()
-                        .await
-                        && let Some(parent) = parents_response.parents().first()
-                        && let Some(parent_id) = parent.id()
-                    {
-                        attributes.insert(
-                            "parent_id".to_string(),
-                            Value::Concrete(ConcreteValue::String(parent_id.to_string().into())),
-                        );
-                    }
-
-                    // ListTagsForResource for tags
-                    if let Ok(tags_response) = self
+                    let tags_response = self
                         .organizations_client
                         .list_tags_for_resource()
                         .resource_id(identifier)
                         .send()
                         .await
-                    {
-                        let tags = tags_response.tags();
-                        if !tags.is_empty() {
-                            let mut tag_map = IndexMap::new();
-                            for tag in tags {
-                                tag_map.insert(
-                                    tag.key().to_string(),
-                                    Value::Concrete(ConcreteValue::String(
-                                        tag.value().to_string().into(),
-                                    )),
-                                );
-                            }
-                            if !tag_map.is_empty() {
-                                attributes.insert(
-                                    "tags".to_string(),
-                                    Value::Concrete(ConcreteValue::Map(tag_map)),
-                                );
-                            }
-                        }
+                        .map_err(|error| {
+                            api_error_with_meta("Failed to list account tags", error)
+                                .for_resource(id.clone())
+                        })?;
+                    let mut tag_map = IndexMap::new();
+                    for tag in tags_response.tags() {
+                        tag_map.insert(
+                            tag.key().to_string(),
+                            Value::Concrete(ConcreteValue::String(tag.value().to_string().into())),
+                        );
                     }
 
-                    Ok(crate::helpers::found_read(
-                        id,
-                        applied_identifier,
-                        attributes,
-                    ))
+                    let account_name = attributes.remove("name").ok_or_else(|| {
+                        ProviderError::api_error("DescribeAccount returned no Name")
+                            .for_resource(id.clone())
+                    })?;
+                    let model = OrganizationsAccountReadModel {
+                        account_name,
+                        email: take_required(id, &mut attributes, "email")?,
+                        arn: take_optional(&mut attributes, "arn"),
+                        id: take_optional(&mut attributes, "id"),
+                        joined_method: take_optional(&mut attributes, "joined_method"),
+                        joined_timestamp: take_optional(&mut attributes, "joined_timestamp"),
+                        status: take_optional(&mut attributes, "status"),
+                        tags: Value::Concrete(ConcreteValue::Map(tag_map)),
+                    };
+                    found_managed_read(id, applied_identifier, model)
                 } else {
                     Ok(ReadOutcome::not_found(id.clone()))
                 }

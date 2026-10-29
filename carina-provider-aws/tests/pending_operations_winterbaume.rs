@@ -1542,7 +1542,7 @@ async fn request_certificate_token_with_issued_resume_fails_without_resending() 
 
 #[tokio::test]
 async fn tagged_vpc_poll_with_one_match_hands_continuation_to_next_poll() {
-    let provider = provider_with_tagged_vpcs(&["vpc-0553"]).await;
+    let provider = provider_with_tagged_vpcs(&["vpc-00000553"]).await;
     let resource = vpc_resource();
 
     let step = provider
@@ -1558,7 +1558,7 @@ async fn tagged_vpc_poll_with_one_match_hands_continuation_to_next_poll() {
     else {
         panic!("one discovered VPC must hand continuation to a later poll");
     };
-    assert_eq!(identifier.as_str(), "vpc-0553");
+    assert_eq!(identifier.as_str(), "vpc-00000553");
     assert!(matches!(
         &token,
         AwsCreateToken::TaggedEc2Found {
@@ -1581,9 +1581,9 @@ async fn tagged_vpc_poll_with_one_match_hands_continuation_to_next_poll() {
         .expect("the later poll must run the normal continuation");
 
     let TestCreateStep::Success(state) = step else {
-        panic!("the continuation poll must complete the VPC");
+        panic!("the continuation poll must complete the VPC, got {step:?}");
     };
-    assert_eq!(state.identifier().as_str(), "vpc-0553");
+    assert_eq!(state.identifier().as_str(), "vpc-00000553");
 }
 
 #[tokio::test]

@@ -13,7 +13,7 @@ use std::sync::LazyLock;
 use anyhow::{Context, Result};
 use carina_smithy::{Shape, ShapeKind, SmithyModel};
 use clap::Parser;
-use heck::ToSnakeCase;
+use heck::{ToSnakeCase, ToUpperCamelCase};
 
 use carina_aws_types::dsl_enum_value;
 use carina_codegen_aws::resource_defs::{self, ReplacementClass, ResourceDef};
@@ -282,6 +282,14 @@ struct AttrInfo {
     is_create_only: bool,
     /// Whether the field is read-only
     is_read_only: bool,
+    /// Whether core must preserve the desired value because AWS never returns
+    /// it from read APIs.
+    is_write_only: bool,
+    /// Whether the generated read model requires a canonical value or permits
+    /// an absent AWS value.
+    read_presence: resource_defs::ReadPresence,
+    /// Reason attached to write-only/read overrides for generated comments.
+    read_reason: Option<String>,
     /// Whether the underlying Smithy member target is a plain string shape.
     /// This is captured before rendered type overrides are applied.
     is_plain_string: bool,
@@ -612,6 +620,12 @@ fn main() -> Result<()> {
                 .with_context(|| format!("Failed to write {}", output_path.display()))?;
             eprintln!("Generated: {}", output_path.display());
 
+            let read_models = generate_read_models_code(&all_resources, &models)?;
+            let read_models_path = args.output_dir.join("read_models_generated.rs");
+            std::fs::write(&read_models_path, read_models)
+                .with_context(|| format!("Failed to write {}", read_models_path.display()))?;
+            eprintln!("Generated: {}", read_models_path.display());
+
             let resend_safety = carina_codegen_aws::resend_safety::generate_provider_module(
                 &models,
                 carina_codegen_aws::resend_safety::OVERRIDES,
@@ -692,8 +706,19 @@ fn load_model(model_dir: &Path, namespace: &str) -> Result<SmithyModel> {
     Ok(model)
 }
 
-/// Generate Rust schema code for a single resource.
-fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
+struct CollectedResourceAttributes {
+    attrs: Vec<AttrInfo>,
+    all_enums: BTreeMap<String, EnumInfo>,
+    description: Option<String>,
+}
+
+/// Collect the exact top-level schema attributes before rendering either the
+/// schema or its typed read model. Sharing this pass is the guard against the
+/// two generated contracts drifting apart.
+fn collect_resource_attributes_unvalidated(
+    res: &ResourceDef,
+    model: &SmithyModel,
+) -> Result<CollectedResourceAttributes> {
     let ns = res.service_namespace;
     let namespace = format!("aws.{}", res.name);
 
@@ -1032,6 +1057,13 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
             is_required,
             is_create_only,
             is_read_only,
+            is_write_only: false,
+            read_presence: if is_required {
+                resource_defs::ReadPresence::Required
+            } else {
+                resource_defs::ReadPresence::Optional
+            },
+            read_reason: None,
             is_plain_string,
             is_identity,
             is_deferred_populate,
@@ -1073,6 +1105,13 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
             is_required,
             is_create_only,
             is_read_only,
+            is_write_only: false,
+            read_presence: if is_required {
+                resource_defs::ReadPresence::Required
+            } else {
+                resource_defs::ReadPresence::Optional
+            },
+            read_reason: None,
             is_plain_string: false,
             is_identity: identity_overrides.contains(extra.name),
             is_deferred_populate: deferred_populate_overrides.contains(extra.name),
@@ -1112,6 +1151,9 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
             is_required: false,
             is_create_only: false,
             is_read_only: true,
+            is_write_only: false,
+            read_presence: resource_defs::ReadPresence::Optional,
+            read_reason: None,
             is_plain_string,
             is_identity: false,
             is_deferred_populate: deferred_populate_overrides.contains(name.as_str()),
@@ -1130,6 +1172,206 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
                 .or_insert_with(|| ei.clone());
         }
     }
+
+    let description = if let Some(read_struct) = read_structure {
+        SmithyModel::documentation(&read_struct.traits).map(str::to_string)
+    } else {
+        create_input
+            .as_ref()
+            .and_then(|input| SmithyModel::documentation(&input.traits))
+            .map(str::to_string)
+    };
+
+    Ok(CollectedResourceAttributes {
+        attrs,
+        all_enums,
+        description,
+    })
+}
+
+fn collect_resource_attributes(
+    res: &ResourceDef,
+    model: &SmithyModel,
+) -> Result<CollectedResourceAttributes> {
+    let mut collected = collect_resource_attributes_unvalidated(res, model)?;
+    let dispositions = res.read_dispositions();
+    apply_read_contract(res, model, &mut collected.attrs, &dispositions)?;
+    collected.all_enums.retain(|provider_name, _| {
+        collected
+            .attrs
+            .iter()
+            .any(|attr| attr.provider_name == *provider_name)
+    });
+    Ok(collected)
+}
+
+#[cfg(test)]
+fn validate_read_contract(
+    res: &ResourceDef,
+    model: &SmithyModel,
+    dispositions: &[resource_defs::ReadDisposition],
+) -> Result<()> {
+    let mut collected = collect_resource_attributes_unvalidated(res, model)?;
+    apply_read_contract(res, model, &mut collected.attrs, dispositions)
+}
+
+fn has_inferred_read_source(res: &ResourceDef, model: &SmithyModel, attr: &AttrInfo) -> bool {
+    let attr_snake = attr.provider_name.to_snake_case();
+    if res
+        .derived_attributes
+        .iter()
+        .any(|derived| derived.attr.to_snake_case() == attr_snake)
+    {
+        return true;
+    }
+
+    if res.read_ops.iter().any(|operation| {
+        operation
+            .fields
+            .iter()
+            .any(|(field, rename)| rename.unwrap_or(field).to_snake_case() == attr_snake)
+    }) {
+        return true;
+    }
+
+    let read_member = res
+        .extra_attributes
+        .iter()
+        .find(|extra| extra.name.to_snake_case() == attr_snake)
+        .and_then(|extra| extra.read_source)
+        .unwrap_or(attr.provider_name.as_str());
+    let Some(read_structure) = res.read_structure else {
+        return false;
+    };
+    let read_structure_id = format!("{}#{read_structure}", res.service_namespace);
+    model
+        .get_structure(&read_structure_id)
+        .is_some_and(|structure| {
+            structure
+                .members
+                .keys()
+                .any(|name| name.to_snake_case() == read_member.to_snake_case())
+        })
+}
+
+fn apply_read_contract(
+    res: &ResourceDef,
+    model: &SmithyModel,
+    attrs: &mut Vec<AttrInfo>,
+    dispositions: &[resource_defs::ReadDisposition],
+) -> Result<()> {
+    use resource_defs::ReadDisposition;
+
+    let mut seen = HashSet::new();
+    for disposition in dispositions {
+        let field = disposition.field();
+        let normalized = field.to_snake_case();
+        if !seen.insert(normalized.clone()) {
+            anyhow::bail!(
+                "{} has duplicate/conflicting read dispositions for {}",
+                res.name,
+                field
+            );
+        }
+
+        let Some(attr) = attrs
+            .iter_mut()
+            .find(|attr| attr.provider_name.to_snake_case() == normalized)
+        else {
+            anyhow::bail!(
+                "{} read disposition names unknown schema attribute {}",
+                res.name,
+                field
+            );
+        };
+
+        match disposition {
+            ReadDisposition::Read { presence, .. } => {
+                attr.read_presence = *presence;
+            }
+            ReadDisposition::WriteOnly { reason, .. } => {
+                if reason.trim().is_empty() {
+                    anyhow::bail!(
+                        "{} write-only attribute {} requires a non-empty reason",
+                        res.name,
+                        field
+                    );
+                }
+                if attr.is_read_only || !attr.is_create_only {
+                    anyhow::bail!(
+                        "{} write-only attribute {} must be writable and create-only",
+                        res.name,
+                        field
+                    );
+                }
+                attr.is_write_only = true;
+                attr.read_reason = Some((*reason).to_string());
+            }
+            ReadDisposition::OmitSchema { reason, .. } => {
+                if reason.trim().is_empty() {
+                    anyhow::bail!(
+                        "{} schema omission for {} requires a non-empty reason",
+                        res.name,
+                        field
+                    );
+                }
+                attr.read_reason = Some((*reason).to_string());
+            }
+        }
+    }
+
+    let omitted: HashSet<String> = dispositions
+        .iter()
+        .filter_map(|disposition| match disposition {
+            ReadDisposition::OmitSchema { field, .. } => Some(field.to_snake_case()),
+            _ => None,
+        })
+        .collect();
+    attrs.retain(|attr| !omitted.contains(&attr.provider_name.to_snake_case()));
+
+    let mut unclassified = Vec::new();
+    for attr in attrs.iter() {
+        let explicitly_readable = dispositions.iter().any(|disposition| {
+            matches!(disposition, ReadDisposition::Read { .. })
+                && disposition.field().to_snake_case() == attr.provider_name.to_snake_case()
+        });
+        if !attr.is_write_only
+            && !explicitly_readable
+            && !has_inferred_read_source(res, model, attr)
+        {
+            unclassified.push(attr.provider_name.as_str());
+        }
+    }
+
+    if !unclassified.is_empty() {
+        anyhow::bail!(
+            "{} schema attributes are unclassified: {}; add read dispositions or classify them as write-only/omitted with reasons",
+            res.name,
+            unclassified.join(", ")
+        );
+    }
+
+    Ok(())
+}
+
+/// Generate Rust schema code for a single resource.
+fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
+    let CollectedResourceAttributes {
+        attrs,
+        all_enums,
+        description,
+    } = collect_resource_attributes(res, model)?;
+    let ns = res.service_namespace;
+    let is_data_source = res.create_op.is_empty();
+    let namespace = format!("aws.{}", res.name);
+    let mut enum_alias_map: HashMap<&str, Vec<(&str, &str)>> = HashMap::new();
+    for (attr, alias, canonical) in &res.enum_aliases {
+        enum_alias_map
+            .entry(attr)
+            .or_default()
+            .push((canonical, alias));
+    }
+    let to_dsl_overrides: HashMap<&str, &str> = res.to_dsl_overrides.iter().copied().collect();
 
     // Determine needed imports
     let code_str = attrs
@@ -1235,16 +1477,8 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
         res.name,
     ));
 
-    // Description from read structure (or create input for multi-op resources)
-    let desc_traits = if let Some(read_struct) = read_structure {
-        Some(&read_struct.traits)
-    } else {
-        create_input.as_ref().map(|ci| &ci.traits)
-    };
-    if let Some(traits) = desc_traits
-        && let Some(desc) = SmithyModel::documentation(traits)
-    {
-        let escaped = escape_description(desc);
+    if let Some(description) = description {
+        let escaped = escape_description(&description);
         let truncated = truncate_str(&escaped, 200);
         code.push_str(&format!(
             "\x20       .with_description(\"{}\")\n",
@@ -1261,6 +1495,12 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
 
     // Generate attributes
     for attr in &attrs {
+        if let Some(reason) = &attr.read_reason {
+            code.push_str(&format!(
+                "\x20       // Read contract: {}\n",
+                reason.replace('\n', " ")
+            ));
+        }
         let type_code = if let Some(ref ei) = attr.enum_info {
             // Use shared schema enum type for constrained strings.
             //
@@ -1312,6 +1552,9 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
 
         if attr.is_create_only {
             attr_code.push_str("\n\x20               .create_only()");
+        }
+        if attr.is_write_only {
+            attr_code.push_str("\n\x20               .write_only()");
         }
         if attr.is_identity {
             attr_code.push_str("\n\x20               .identity()");
@@ -3091,6 +3334,112 @@ fn generate_provider_code(
     code
 }
 
+fn read_model_type_name(resource_name: &str) -> String {
+    let (service, resource) = split_service_resource(resource_name);
+    format!("{}{}ReadModel", service.to_upper_camel_case(), resource)
+}
+
+/// Generate the exhaustive managed-resource read models and their sole
+/// Value-map conversion seam.
+fn generate_read_models_code(
+    all_resources: &[ResourceDef],
+    models: &HashMap<&str, SmithyModel>,
+) -> Result<String> {
+    let mut code = String::from(
+        "//! Auto-generated managed-resource read models.\n\
+         //!\n\
+         //! DO NOT EDIT MANUALLY - regenerate with:\n\
+         //!   ./scripts/generate-provider.sh\n\n\
+         use std::collections::HashMap;\n\n\
+         use carina_core::provider::ProviderResult;\n\
+         use carina_core::resource::Value;\n\n\
+         use crate::read_model::{ManagedReadModel, sealed, validate_read_attributes};\n\n",
+    );
+
+    for res in all_resources {
+        let model = models
+            .get(res.service_namespace)
+            .with_context(|| format!("missing Smithy model for {}", res.name))?;
+        let collected = collect_resource_attributes(res, model)?;
+        let readable: Vec<&AttrInfo> = collected
+            .attrs
+            .iter()
+            .filter(|attr| !attr.is_write_only)
+            .collect();
+        let model_name = read_model_type_name(res.name);
+        let (service, resource) = split_service_resource_snake(res.name);
+        let config_fn = format!("{}_config", module_name(res.name));
+
+        code.push_str(&format!(
+            "/// Exhaustive canonical read state for `{}`.\n\
+             pub(crate) struct {} {{\n",
+            res.name, model_name
+        ));
+        for attr in &readable {
+            let field = escape_rust_keyword(&attr.snake_name);
+            let field_type = match attr.read_presence {
+                resource_defs::ReadPresence::Required => "Value",
+                resource_defs::ReadPresence::Optional => "Option<Value>",
+            };
+            code.push_str(&format!("    pub(crate) {field}: {field_type},\n"));
+        }
+        if res.has_tags {
+            code.push_str("    pub(crate) tags: Value,\n");
+        }
+        code.push_str("}\n\n");
+
+        code.push_str(&format!("impl sealed::Sealed for {model_name} {{}}\n\n"));
+        code.push_str(&format!(
+            "impl ManagedReadModel for {model_name} {{\n\
+             \x20   fn into_attributes(self) -> ProviderResult<HashMap<String, Value>> {{\n"
+        ));
+        code.push_str("        let Self {\n");
+        for attr in &readable {
+            let field = escape_rust_keyword(&attr.snake_name);
+            code.push_str(&format!("            {field},\n"));
+        }
+        if res.has_tags {
+            code.push_str("            tags,\n");
+        }
+        code.push_str("        } = self;\n");
+        code.push_str(&format!(
+            "        let mut attributes = HashMap::with_capacity({});\n",
+            readable.len() + usize::from(res.has_tags)
+        ));
+        for attr in &readable {
+            let field = escape_rust_keyword(&attr.snake_name);
+            match attr.read_presence {
+                resource_defs::ReadPresence::Required => code.push_str(&format!(
+                    "        attributes.insert(\"{}\".to_string(), {field});\n",
+                    attr.snake_name
+                )),
+                resource_defs::ReadPresence::Optional => code.push_str(&format!(
+                    "        if let Some(value) = {field} {{\n\
+                     \x20           attributes.insert(\"{}\".to_string(), value);\n\
+                     \x20       }}\n",
+                    attr.snake_name
+                )),
+            }
+        }
+        if res.has_tags {
+            code.push_str("        attributes.insert(\"tags\".to_string(), tags);\n");
+        }
+        code.push_str(&format!(
+            "        validate_read_attributes(\n\
+             \x20           \"{}\",\n\
+             \x20           crate::schemas::generated::{service}::{resource}::{config_fn}().schema,\n\
+             \x20           &mut attributes,\n\
+             \x20       )?;\n\
+             \x20       Ok(attributes)\n\
+             \x20   }}\n\
+             }}\n\n",
+            res.name
+        ));
+    }
+
+    Ok(code)
+}
+
 /// Returns true when `attr` (as a PascalCase / Smithy member name) is
 /// declared as a top-level attribute in the resource's generated schema.
 ///
@@ -3413,7 +3762,12 @@ fn generate_markdown_resource(
 
     let is_data_source = res.create_op.is_empty();
 
-    let exclude: HashSet<&str> = res.exclude_fields.iter().copied().collect();
+    let mut exclude: HashSet<&str> = res.exclude_fields.iter().copied().collect();
+    for disposition in res.read_dispositions() {
+        if let resource_defs::ReadDisposition::OmitSchema { field, .. } = disposition {
+            exclude.insert(field);
+        }
+    }
     let type_overrides: HashMap<&str, &str> = res.type_overrides.iter().copied().collect();
     let struct_field_type_overrides: HashMap<(&str, &str), &str> = res
         .struct_field_type_overrides
@@ -5125,6 +5479,68 @@ fn truncate_str(s: &str, max_len: usize) -> String {
 mod tests {
     use super::*;
 
+    fn fixture_model(service: &str, namespace: &str) -> SmithyModel {
+        let model_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../carina-provider-aws/tests/fixtures/smithy");
+        load_model(&model_dir, namespace)
+            .unwrap_or_else(|error| panic!("load {service} Smithy fixture: {error:#}"))
+    }
+
+    #[test]
+    fn unclassified_read_attribute_fails_generation() {
+        let model = fixture_model("sqs", "com.amazonaws.sqs");
+        let resource = resource_defs::sqs_resources()
+            .into_iter()
+            .find(|resource| resource.name == "sqs.Queue")
+            .expect("sqs.Queue definition");
+        let mut dispositions = resource.read_dispositions();
+        dispositions.retain(|disposition| disposition.field() != "QueueName");
+
+        let error = validate_read_contract(&resource, &model, &dispositions)
+            .expect_err("a schema attribute without a read disposition must fail generation");
+        assert!(error.to_string().contains("QueueName"), "{error:#}");
+    }
+
+    #[test]
+    fn write_only_read_disposition_requires_create_only_attribute() {
+        let model = fixture_model("logs", "com.amazonaws.cloudwatchlogs");
+        let resource = resource_defs::logs_resources()
+            .into_iter()
+            .find(|resource| resource.name == "logs.LogGroup")
+            .expect("logs.LogGroup definition");
+        let mut dispositions = resource.read_dispositions();
+        dispositions.retain(|disposition| disposition.field() != "RetentionInDays");
+        dispositions.push(resource_defs::ReadDisposition::WriteOnly {
+            field: "RetentionInDays",
+            reason: "test fixture",
+        });
+
+        let error = validate_read_contract(&resource, &model, &dispositions)
+            .expect_err("write-only must not hide an updatable attribute");
+        assert!(error.to_string().contains("RetentionInDays"), "{error:#}");
+        assert!(error.to_string().contains("create-only"), "{error:#}");
+    }
+
+    #[test]
+    fn schema_omission_requires_a_non_empty_reason() {
+        let model = fixture_model("acm", "com.amazonaws.acm");
+        let resource = resource_defs::acm_resources()
+            .into_iter()
+            .find(|resource| resource.name == "acm.Certificate")
+            .expect("acm.Certificate definition");
+        let mut dispositions = resource.read_dispositions();
+        dispositions.retain(|disposition| disposition.field() != "DomainName");
+        dispositions.push(resource_defs::ReadDisposition::OmitSchema {
+            field: "DomainName",
+            reason: "",
+        });
+
+        let error = validate_read_contract(&resource, &model, &dispositions)
+            .expect_err("omitting a schema attribute without a reason must fail generation");
+        assert!(error.to_string().contains("DomainName"), "{error:#}");
+        assert!(error.to_string().contains("reason"), "{error:#}");
+    }
+
     #[test]
     fn mode_constructor_golden() {
         let rendered = [(false, false), (true, false), (false, true), (true, true)]
@@ -5271,6 +5687,9 @@ mod tests {
             is_required: false,
             is_create_only: false,
             is_read_only,
+            is_write_only: false,
+            read_presence: resource_defs::ReadPresence::Optional,
+            read_reason: None,
             is_plain_string,
             is_identity,
             is_deferred_populate: false,

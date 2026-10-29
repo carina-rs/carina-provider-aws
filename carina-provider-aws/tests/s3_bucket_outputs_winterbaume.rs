@@ -302,7 +302,6 @@ fn ready_data_source_for_test(resource: DataSource) -> ProviderReadyDataSource {
 
 fn assert_bucket_outputs(state: &State, bucket: &str, region: &str, hosted_zone_id: &str) {
     assert!(state.exists);
-    assert_eq!(state.attributes.get("bucket"), Some(&string(bucket)));
     assert_eq!(
         state.attributes.get("arn"),
         Some(&string(&format!("arn:aws:s3:::{bucket}")))
@@ -358,6 +357,10 @@ async fn create_bucket_ignores_supplied_read_only_region_for_placement() {
     );
 
     assert_bucket_outputs(&state, bucket, PROVIDER_REGION, "Z3AQBSTGFYJSTF");
+    assert!(
+        !state.attributes.contains_key("bucket"),
+        "managed reads must not copy the write-only bucket name from the request"
+    );
     assert_ne!(
         state.attributes.get("region"),
         Some(&string(supplied_read_only_region))
@@ -493,6 +496,10 @@ async fn managed_and_data_source_reads_use_head_bucket_region_without_get_bucket
         .expect("read managed S3 bucket")
         .into_state();
     assert_bucket_outputs(&managed_state, bucket, BUCKET_REGION, "Z2M4EHUR26P7ZW");
+    assert!(
+        !managed_state.attributes.contains_key("bucket"),
+        "managed reads must leave write-only provenance to carina-core"
+    );
 
     let mut data_source = DataSource::with_provider("aws", RESOURCE_TYPE, "lookup", None);
     data_source.set_attr("bucket", string(bucket));
@@ -502,6 +509,11 @@ async fn managed_and_data_source_reads_use_head_bucket_region_without_get_bucket
         .await
         .expect("read S3 bucket data source");
     assert_bucket_outputs(&data_source_state, bucket, BUCKET_REGION, "Z2M4EHUR26P7ZW");
+    assert_eq!(
+        data_source_state.attributes.get("bucket"),
+        Some(&string(bucket)),
+        "the data source exposes its lookup input"
+    );
 
     assert_eq!(
         service.get_bucket_location_calls(),

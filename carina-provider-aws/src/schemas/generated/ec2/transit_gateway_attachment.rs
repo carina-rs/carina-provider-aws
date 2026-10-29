@@ -9,14 +9,6 @@ use super::tags_type;
 use carina_core::schema::{AttributeSchema, AttributeType, ResourceSchema, StructField};
 use carina_provider_protocol::types::ValidatorType;
 
-const VALID_APPLIANCE_MODE_SUPPORT: &[&str] = &["disable", "enable"];
-
-const VALID_DNS_SUPPORT: &[&str] = &["disable", "enable"];
-
-const VALID_IPV6_SUPPORT: &[&str] = &["disable", "enable"];
-
-const VALID_SECURITY_GROUP_REFERENCING_SUPPORT: &[&str] = &["disable", "enable"];
-
 /// Returns the schema config for ec2.TransitGatewayAttachment (Smithy: com.amazonaws.ec2)
 pub fn ec2_transit_gateway_attachment_config() -> AwsSchemaConfig {
     AwsSchemaConfig {
@@ -107,16 +99,5 @@ pub fn enum_valid_values() -> (
     &'static str,
     &'static [(&'static str, &'static [&'static str])],
 ) {
-    (
-        "ec2.TransitGatewayAttachment",
-        &[
-            ("appliance_mode_support", VALID_APPLIANCE_MODE_SUPPORT),
-            ("dns_support", VALID_DNS_SUPPORT),
-            ("ipv6_support", VALID_IPV6_SUPPORT),
-            (
-                "security_group_referencing_support",
-                VALID_SECURITY_GROUP_REFERENCING_SUPPORT,
-            ),
-        ],
-    )
+    ("ec2.TransitGatewayAttachment", &[])
 }

@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use carina_core::provider::{AppliedIdentifier, ReadOutcome};
 use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{ConcreteValue, Resource, ResourceId, Value};
@@ -8,6 +6,8 @@ use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
 use crate::helpers::require_string_attr;
 use crate::provider::CreateCompletion;
+use crate::read_model::found_managed_read;
+use crate::read_models_generated::Ec2VpcGatewayAttachmentReadModel;
 
 impl AwsProvider {
     /// Read an EC2 VPC Gateway Attachment
@@ -68,17 +68,14 @@ impl AwsProvider {
             // Check if the IGW is attached to the specified VPC
             for attachment in igw.attachments() {
                 if attachment.vpc_id() == Some(vpc_id) {
-                    let mut attributes = HashMap::new();
-                    attributes.insert(
-                        "vpc_id".to_string(),
-                        Value::Concrete(ConcreteValue::String(vpc_id.to_string().into())),
-                    );
-                    attributes.insert(
-                        "internet_gateway_id".to_string(),
-                        Value::Concrete(ConcreteValue::String(igw_id.to_string().into())),
-                    );
-
-                    return Ok(crate::helpers::found_read(id, identifier, attributes));
+                    let model = Ec2VpcGatewayAttachmentReadModel {
+                        internet_gateway_id: Some(Value::Concrete(ConcreteValue::String(
+                            igw_id.to_string().into(),
+                        ))),
+                        vpc_id: Value::Concrete(ConcreteValue::String(vpc_id.to_string().into())),
+                        vpn_gateway_id: None,
+                    };
+                    return found_managed_read(id, identifier, model);
                 }
             }
         }
@@ -115,17 +112,16 @@ impl AwsProvider {
                 if attachment.vpc_id() == Some(vpc_id) {
                     let state_str = attachment.state().map(|s| s.as_str());
                     if state_str == Some("attached") {
-                        let mut attributes = HashMap::new();
-                        attributes.insert(
-                            "vpc_id".to_string(),
-                            Value::Concrete(ConcreteValue::String(vpc_id.to_string().into())),
-                        );
-                        attributes.insert(
-                            "vpn_gateway_id".to_string(),
-                            Value::Concrete(ConcreteValue::String(vgw_id.to_string().into())),
-                        );
-
-                        return Ok(crate::helpers::found_read(id, identifier, attributes));
+                        let model = Ec2VpcGatewayAttachmentReadModel {
+                            internet_gateway_id: None,
+                            vpc_id: Value::Concrete(ConcreteValue::String(
+                                vpc_id.to_string().into(),
+                            )),
+                            vpn_gateway_id: Some(Value::Concrete(ConcreteValue::String(
+                                vgw_id.to_string().into(),
+                            ))),
+                        };
+                        return found_managed_read(id, identifier, model);
                     }
                 }
             }

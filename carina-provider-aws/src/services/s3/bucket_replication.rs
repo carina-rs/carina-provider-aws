@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use aws_sdk_s3::types::{
     DeleteMarkerReplication, DeleteMarkerReplicationStatus, Destination, ReplicationConfiguration,
     ReplicationRule, ReplicationRuleAndOperator, ReplicationRuleFilter, ReplicationRuleStatus,
@@ -19,6 +17,8 @@ use crate::helpers::{
     RetryPolicy, enum_attr_error, require_string_attr, retry_aws_operation, sdk_error_message,
 };
 use crate::provider::CreateCompletion;
+use crate::read_model::found_managed_read;
+use crate::read_models_generated::S3BucketReplicationConfigurationReadModel;
 use crate::services::s3::bucket::is_s3_not_configured_error;
 
 impl AwsProvider {
@@ -39,29 +39,19 @@ impl AwsProvider {
 
         match result {
             Ok(output) => {
-                let mut attributes = HashMap::new();
-                attributes.insert(
-                    "bucket".to_string(),
-                    Value::Concrete(ConcreteValue::String(bucket.to_string().into())),
-                );
-                if let Some(config) = output.replication_configuration() {
-                    attributes.insert(
-                        "role".to_string(),
-                        Value::Concrete(ConcreteValue::String(config.role().to_string().into())),
-                    );
-                    let rules: Vec<Value> = config.rules().iter().map(rule_to_value).collect();
-                    if !rules.is_empty() {
-                        attributes.insert(
-                            "rules".to_string(),
-                            Value::Concrete(ConcreteValue::List(rules)),
-                        );
-                    }
-                }
-                Ok(crate::helpers::found_read(
-                    id,
-                    applied_identifier,
-                    attributes,
-                ))
+                let config = output.replication_configuration().ok_or_else(|| {
+                    ProviderError::api_error(
+                        "GetBucketReplication returned no replication configuration",
+                    )
+                    .for_resource(id.clone())
+                })?;
+                let model = S3BucketReplicationConfigurationReadModel {
+                    role: Value::Concrete(ConcreteValue::String(config.role().to_string().into())),
+                    rules: Value::Concrete(ConcreteValue::List(
+                        config.rules().iter().map(rule_to_value).collect(),
+                    )),
+                };
+                found_managed_read(id, applied_identifier, model)
             }
             Err(e) => {
                 if is_s3_not_configured_error(&e, "ReplicationConfigurationNotFoundError")
@@ -387,32 +377,20 @@ fn build_destination(
 
 fn rule_to_value(rule: &ReplicationRule) -> Value {
     let mut map = IndexMap::new();
-    if let Some(s) = rule.id()
-        && !s.is_empty()
-    {
+    if let Some(s) = rule.id() {
         map.insert(
             "id".to_string(),
             Value::Concrete(ConcreteValue::String(s.to_string().into())),
         );
     }
-    // Surface priority only when non-zero. The provider defaults an
-    // omitted priority to 0, so reflecting 0 would diff against a DSL
-    // config that omits `priority`.
-    if let Some(p) = rule.priority()
-        && p != 0
-    {
+    if let Some(p) = rule.priority() {
         map.insert(
             "priority".to_string(),
             Value::Concrete(ConcreteValue::Int(p as i64)),
         );
     }
-    // Only surface a non-empty filter. S3 returns an empty `<Filter/>`
-    // for match-all rules; reflecting that as an empty map would diff
-    // against a DSL config that simply omits `filter`.
-    if let Some(filter) = rule.filter()
-        && let Some(filter_value) = filter_to_value(filter)
-    {
-        map.insert("filter".to_string(), filter_value);
+    if let Some(filter) = rule.filter() {
+        map.insert("filter".to_string(), filter_to_value(filter));
     }
     map.insert(
         "status".to_string(),
@@ -420,12 +398,8 @@ fn rule_to_value(rule: &ReplicationRule) -> Value {
             rule.status().as_str().to_string().into(),
         )),
     );
-    // Only surface delete_marker_replication when it is Enabled. The
-    // provider defaults it to Disabled, so reflecting Disabled would
-    // diff against a DSL config that omits it.
     if let Some(dm) = rule.delete_marker_replication()
         && let Some(status) = dm.status()
-        && *status == DeleteMarkerReplicationStatus::Enabled
     {
         let mut m = IndexMap::new();
         m.insert(
@@ -477,39 +451,30 @@ fn tag_to_value(tag: &Tag) -> Value {
     Value::Concrete(ConcreteValue::Map(m))
 }
 
-/// Convert a `ReplicationRuleAndOperator` into a map value, or `None`
-/// when every field is empty.
-fn filter_and_to_value(and: &ReplicationRuleAndOperator) -> Option<Value> {
+/// Convert a `ReplicationRuleAndOperator` without collapsing present empty
+/// strings or collections. Desired-driven diffing must distinguish an
+/// explicitly authored empty value from a missing read key.
+fn filter_and_to_value(and: &ReplicationRuleAndOperator) -> Value {
     let mut m = IndexMap::new();
-    if let Some(p) = and.prefix()
-        && !p.is_empty()
-    {
+    if let Some(p) = and.prefix() {
         m.insert(
             "prefix".to_string(),
             Value::Concrete(ConcreteValue::String(p.to_string().into())),
         );
     }
     let tags = and.tags();
-    if !tags.is_empty() {
-        m.insert(
-            "tags".to_string(),
-            Value::Concrete(ConcreteValue::List(tags.iter().map(tag_to_value).collect())),
-        );
-    }
-    if m.is_empty() {
-        None
-    } else {
-        Some(Value::Concrete(ConcreteValue::Map(m)))
-    }
+    m.insert(
+        "tags".to_string(),
+        Value::Concrete(ConcreteValue::List(tags.iter().map(tag_to_value).collect())),
+    );
+    Value::Concrete(ConcreteValue::Map(m))
 }
 
-/// Convert a `ReplicationRuleFilter` into a map value, or `None` when the
-/// filter is empty (a match-all `<Filter/>`).
-fn filter_to_value(filter: &ReplicationRuleFilter) -> Option<Value> {
+/// Convert a present `ReplicationRuleFilter`, including an empty match-all
+/// filter and present empty prefixes.
+fn filter_to_value(filter: &ReplicationRuleFilter) -> Value {
     let mut m = IndexMap::new();
-    if let Some(p) = filter.prefix()
-        && !p.is_empty()
-    {
+    if let Some(p) = filter.prefix() {
         m.insert(
             "prefix".to_string(),
             Value::Concrete(ConcreteValue::String(p.to_string().into())),
@@ -518,16 +483,10 @@ fn filter_to_value(filter: &ReplicationRuleFilter) -> Option<Value> {
     if let Some(tag) = filter.tag() {
         m.insert("tag".to_string(), tag_to_value(tag));
     }
-    if let Some(and) = filter.and()
-        && let Some(and_value) = filter_and_to_value(and)
-    {
-        m.insert("and".to_string(), and_value);
+    if let Some(and) = filter.and() {
+        m.insert("and".to_string(), filter_and_to_value(and));
     }
-    if m.is_empty() {
-        None
-    } else {
-        Some(Value::Concrete(ConcreteValue::Map(m)))
-    }
+    Value::Concrete(ConcreteValue::Map(m))
 }
 
 #[cfg(test)]
@@ -709,16 +668,16 @@ mod tests {
     }
 
     #[test]
-    fn empty_filter_is_not_surfaced_on_read() {
+    fn empty_filter_is_preserved_on_read() {
         let empty = ReplicationRuleFilter::builder().build();
-        assert!(filter_to_value(&empty).is_none());
+        assert_eq!(
+            filter_to_value(&empty),
+            Value::Concrete(ConcreteValue::Map(IndexMap::new()))
+        );
     }
 
     #[test]
-    fn disabled_delete_marker_not_surfaced_on_read() {
-        // The provider defaults delete_marker_replication to Disabled;
-        // reflecting Disabled on read would diff against a DSL that
-        // omits it. Only Enabled should round-trip.
+    fn disabled_delete_marker_is_preserved_on_read() {
         let built = build_rule(
             &rid(),
             &schema(),
@@ -732,10 +691,12 @@ mod tests {
         let Value::Concrete(ConcreteValue::Map(m)) = value else {
             panic!("expected map");
         };
-        assert!(
-            !m.contains_key("delete_marker_replication"),
-            "Disabled delete_marker_replication must not be surfaced"
-        );
+        let Value::Concrete(ConcreteValue::Map(delete_marker)) =
+            m.get("delete_marker_replication").expect("present")
+        else {
+            panic!("expected delete marker map");
+        };
+        assert_eq!(delete_marker.get("status"), Some(&str_val("Disabled")));
     }
 
     #[test]
@@ -768,9 +729,7 @@ mod tests {
     }
 
     #[test]
-    fn zero_priority_not_surfaced_on_read() {
-        // The provider defaults an omitted priority to 0; reflecting 0
-        // on read would diff against a DSL config that omits `priority`.
+    fn zero_priority_is_preserved_on_read() {
         let built = build_rule(
             &rid(),
             &schema(),
@@ -784,9 +743,9 @@ mod tests {
         let Value::Concrete(ConcreteValue::Map(m)) = value else {
             panic!("expected map");
         };
-        assert!(
-            !m.contains_key("priority"),
-            "a defaulted priority of 0 must not be surfaced"
+        assert_eq!(
+            m.get("priority"),
+            Some(&Value::Concrete(ConcreteValue::Int(0)))
         );
     }
 
@@ -810,5 +769,43 @@ mod tests {
             m.get("priority"),
             Some(&Value::Concrete(ConcreteValue::Int(3)))
         );
+    }
+
+    #[test]
+    fn explicit_empty_and_default_rule_fields_round_trip() {
+        let built = build_rule(
+            &rid(),
+            &schema(),
+            &map_val(vec![
+                ("id", str_val("")),
+                ("status", str_val("Enabled")),
+                ("filter", map_val(vec![("prefix", str_val(""))])),
+                (
+                    "delete_marker_replication",
+                    map_val(vec![("status", str_val("Disabled"))]),
+                ),
+                ("priority", Value::Concrete(ConcreteValue::Int(0))),
+                ("destination", dest()),
+            ]),
+        )
+        .unwrap();
+        let Value::Concrete(ConcreteValue::Map(read)) = rule_to_value(&built) else {
+            panic!("expected rule map");
+        };
+        assert_eq!(read.get("id"), Some(&str_val("")));
+        assert_eq!(
+            read.get("priority"),
+            Some(&Value::Concrete(ConcreteValue::Int(0)))
+        );
+        let Some(Value::Concrete(ConcreteValue::Map(filter))) = read.get("filter") else {
+            panic!("expected filter map");
+        };
+        assert_eq!(filter.get("prefix"), Some(&str_val("")));
+        let Some(Value::Concrete(ConcreteValue::Map(delete_marker))) =
+            read.get("delete_marker_replication")
+        else {
+            panic!("expected delete-marker map");
+        };
+        assert_eq!(delete_marker.get("status"), Some(&str_val("Disabled")));
     }
 }

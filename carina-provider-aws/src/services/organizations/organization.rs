@@ -9,6 +9,8 @@ use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
 use crate::helpers::optional_enum_attr;
 use crate::provider::CreateCompletion;
+use crate::read_model::{found_managed_read, take_optional};
+use crate::read_models_generated::OrganizationsOrganizationReadModel;
 
 impl AwsProvider {
     /// Extract attributes from an Organizations Organization object
@@ -84,11 +86,18 @@ impl AwsProvider {
                     let mut attributes = HashMap::new();
                     let _org_id =
                         Self::extract_organizations_organization_attributes(org, &mut attributes);
-                    Ok(crate::helpers::found_read(
-                        id,
-                        applied_identifier,
-                        attributes,
-                    ))
+                    let model = OrganizationsOrganizationReadModel {
+                        feature_set: take_optional(&mut attributes, "feature_set"),
+                        arn: take_optional(&mut attributes, "arn"),
+                        id: take_optional(&mut attributes, "id"),
+                        master_account_arn: take_optional(&mut attributes, "master_account_arn"),
+                        master_account_email: take_optional(
+                            &mut attributes,
+                            "master_account_email",
+                        ),
+                        master_account_id: take_optional(&mut attributes, "master_account_id"),
+                    };
+                    found_managed_read(id, applied_identifier, model)
                 } else {
                     Ok(ReadOutcome::not_found(id.clone()))
                 }
