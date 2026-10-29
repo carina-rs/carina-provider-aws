@@ -3685,6 +3685,21 @@ fn generate_markdown_resource_with_example(
         });
     }
 
+    let markdown_root_targets: HashMap<String, String> = writable_fields
+        .iter()
+        .chain(&read_only_fields)
+        .map(|(name, member_ref)| (name.to_snake_case(), member_ref.target.clone()))
+        .collect();
+    validate_markdown_heading_paths(
+        model,
+        &markdown_root_targets,
+        all_enums
+            .keys()
+            .map(|key| key.heading_path.as_slice())
+            .chain(struct_defs.keys().map(|key| key.heading_path.as_slice())),
+    )
+    .with_context(|| format!("validating Markdown heading paths for aws.{}", res.name))?;
+
     let enum_heading_texts = markdown_enum_heading_texts(&all_enums);
     let struct_heading_texts = markdown_struct_heading_texts(&struct_defs);
     let mut page = PageBuilder::new();
@@ -4215,26 +4230,63 @@ fn generate_markdown_data_source_with_example(
         .with_context(|| format!("generated invalid Markdown for aws.{}", ds.name))
 }
 
-fn markdown_nested_heading_path(
+fn validate_markdown_heading_paths<'a>(
     model: &SmithyModel,
-    parent_path: &[String],
-    field_name: &str,
-    target: &str,
-) -> Vec<String> {
-    let mut path = parent_path.to_vec();
-    let segment = match model.get_shape(target) {
-        Some(carina_smithy::Shape::List(list))
-            if model.shape_kind(&list.member.target) == Some(ShapeKind::Structure) =>
-        {
-            // A nested list section describes one item, so use its singular
-            // struct name. Top-level lists enter discovery with their actual
-            // attribute name and do not pass through this helper.
-            SmithyModel::shape_name(&list.member.target).to_snake_case()
+    root_targets: &HashMap<String, String>,
+    heading_paths: impl IntoIterator<Item = &'a [String]>,
+) -> Result<()> {
+    for path in heading_paths {
+        let Some((root, nested)) = path.split_first() else {
+            anyhow::bail!("Markdown heading path must not be empty");
+        };
+        let mut target = root_targets
+            .get(root)
+            .with_context(|| {
+                format!(
+                    "Markdown heading path `{}` has no root field",
+                    path.join(".")
+                )
+            })?
+            .clone();
+        let mut parent_path = root.clone();
+
+        for field in nested {
+            target = markdown_nested_field_target(model, &target, field).with_context(|| {
+                format!(
+                    "Markdown heading path `{}` has no field `{field}` below `{parent_path}`",
+                    path.join(".")
+                )
+            })?;
+            parent_path.push('.');
+            parent_path.push_str(field);
         }
-        _ => field_name.to_snake_case(),
-    };
-    path.push(segment);
-    path
+    }
+    Ok(())
+}
+
+fn markdown_nested_field_target(
+    model: &SmithyModel,
+    target: &str,
+    field_name: &str,
+) -> Result<String> {
+    let mut target = target.to_string();
+    loop {
+        match model.get_shape(&target) {
+            Some(carina_smithy::Shape::List(list)) => {
+                target.clone_from(&list.member.target);
+            }
+            Some(carina_smithy::Shape::Structure(structure)) => {
+                return structure
+                    .members
+                    .iter()
+                    .find(|(name, _)| name.to_snake_case() == field_name)
+                    .map(|(_, member)| member.target.clone())
+                    .with_context(|| format!("Smithy structure `{target}` has no such member"));
+            }
+            Some(_) => anyhow::bail!("Smithy shape `{target}` is not a structure"),
+            None => anyhow::bail!("Smithy shape `{target}` does not exist"),
+        }
+    }
 }
 
 /// Discover the semantic representation of a type used in markdown docs.
@@ -4381,12 +4433,8 @@ fn discover_markdown_type(
                     .members
                     .iter()
                     .map(|(name, member_ref)| {
-                        let child_heading_path = markdown_nested_heading_path(
-                            model,
-                            heading_path,
-                            name,
-                            &member_ref.target,
-                        );
+                        let mut child_heading_path = heading_path.to_vec();
+                        child_heading_path.push(name.to_snake_case());
                         let field_type = discover_markdown_type(
                             model,
                             &member_ref.target,
@@ -6305,12 +6353,42 @@ mod tests {
             "### domain_validation_options.resource_record.type (Type)",
             "### options",
             "### domain_validation_options",
-            "### renewal_summary.domain_validation",
+            "### renewal_summary.domain_validation_options",
         ] {
             assert!(markdown.contains(heading), "missing {heading}:\n{markdown}");
         }
         assert!(!markdown.contains("### CertificateOptions"), "{markdown}");
         assert!(!markdown.contains("### DomainValidation\n"), "{markdown}");
+    }
+
+    #[test]
+    fn markdown_heading_paths_only_use_schema_field_names() {
+        let model = markdown_read_shape_override_model();
+        let root_targets = HashMap::from([(
+            "renewal_summary".to_string(),
+            "com.amazonaws.acm#RenewalSummary".to_string(),
+        )]);
+        let valid = [
+            "renewal_summary",
+            "domain_validation_options",
+            "resource_record",
+            "type",
+        ]
+        .map(str::to_string);
+
+        validate_markdown_heading_paths(&model, &root_targets, [valid.as_slice()])
+            .expect("every qualified heading segment is a schema field");
+
+        let invalid = [
+            "renewal_summary",
+            "domain_validation",
+            "resource_record",
+            "type",
+        ]
+        .map(str::to_string);
+        let error = validate_markdown_heading_paths(&model, &root_targets, [invalid.as_slice()])
+            .expect_err("a Smithy shape name is not a DSL field path");
+        assert!(error.to_string().contains("domain_validation"), "{error:#}");
     }
 
     #[test]
