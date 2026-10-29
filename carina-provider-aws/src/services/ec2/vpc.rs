@@ -11,9 +11,8 @@ use crate::helpers::{
     optional_int_attr, optional_string_attr, retry_aws_operation,
 };
 use crate::provider::{AwsCreateAttempt, Ec2TaggedResourceKind};
-use crate::provider_generated::Ec2VpcReadFields;
 use crate::read_model::{empty_map_value, found_managed_read};
-use crate::read_models_generated::Ec2VpcReadModel;
+use crate::read_models_generated::Ec2VpcReadModelSupplement;
 
 impl AwsProvider {
     /// Read an EC2 VPC
@@ -40,12 +39,7 @@ impl AwsProvider {
             })?;
 
         if let Some(vpc) = result.vpcs().first() {
-            let Ec2VpcReadFields {
-                cidr_block,
-                instance_tenancy,
-                vpc_id,
-                applied_identifier: _,
-            } = Self::extract_ec2_vpc_attributes(vpc);
+            let fields = Self::extract_ec2_vpc_attributes(vpc);
 
             let tags = Self::ec2_tags_to_value(vpc.tags()).unwrap_or_else(empty_map_value);
 
@@ -87,25 +81,25 @@ impl AwsProvider {
                         .map(|prefix| Value::Concrete(ConcreteValue::Int(prefix)))
                 })
             });
-            let model = Ec2VpcReadModel {
-                cidr_block,
-                enable_dns_hostnames: Value::Concrete(ConcreteValue::Bool(
-                    dns_hostnames
-                        .enable_dns_hostnames()
-                        .and_then(|attribute| attribute.value)
-                        .unwrap_or(false),
-                )),
-                enable_dns_support: Value::Concrete(ConcreteValue::Bool(
-                    dns_support
-                        .enable_dns_support()
-                        .and_then(|attribute| attribute.value)
-                        .unwrap_or(false),
-                )),
-                instance_tenancy,
-                ipv4_netmask_length,
-                vpc_id,
-                tags,
-            };
+            let (_, model) = fields.into_model(
+                id,
+                Ec2VpcReadModelSupplement {
+                    enable_dns_hostnames: Value::Concrete(ConcreteValue::Bool(
+                        dns_hostnames
+                            .enable_dns_hostnames()
+                            .and_then(|attribute| attribute.value)
+                            .unwrap_or(false),
+                    )),
+                    enable_dns_support: Value::Concrete(ConcreteValue::Bool(
+                        dns_support
+                            .enable_dns_support()
+                            .and_then(|attribute| attribute.value)
+                            .unwrap_or(false),
+                    )),
+                    ipv4_netmask_length,
+                    tags,
+                },
+            )?;
 
             found_managed_read(id, applied_identifier, model)
         } else {

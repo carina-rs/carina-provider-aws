@@ -32,8 +32,8 @@ use crate::helpers::{
 };
 use crate::provider::CreateCompletion;
 use crate::provider_generated::AcmCertificateReadFields;
-use crate::read_model::{found_managed_read, require_read_value};
-use crate::read_models_generated::AcmCertificateReadModel;
+use crate::read_model::{ManagedReadModel, found_managed_read};
+use crate::read_models_generated::{AcmCertificateReadModel, AcmCertificateReadModelSupplement};
 
 const DVO_MISSING_ATTRIBUTE: &str = "domain_validation_options";
 
@@ -149,10 +149,9 @@ pub(crate) fn validate_acm_certificate_inputs<S>(resource: &Resource<S>) -> Prov
     if resource
         .get_attr("subject_alternative_names")
         .is_some_and(|value| {
-            extract_string_list(value).iter().any(|san| {
-                san.trim_end_matches('.')
-                    .eq_ignore_ascii_case(domain_name.expose_plaintext().trim_end_matches('.'))
-            })
+            extract_string_list(value)
+                .iter()
+                .any(|san| acm_dns_names_equal(san, domain_name.expose_plaintext()))
         })
     {
         return Err(ProviderError::invalid_input(
@@ -161,6 +160,39 @@ pub(crate) fn validate_acm_certificate_inputs<S>(resource: &Resource<S>) -> Prov
         .for_resource(resource.id.clone()));
     }
     Ok(())
+}
+
+fn normalize_acm_dns_name(name: &str) -> String {
+    name.trim_end_matches('.').to_ascii_lowercase()
+}
+
+fn acm_dns_names_equal(left: &str, right: &str) -> bool {
+    normalize_acm_dns_name(left) == normalize_acm_dns_name(right)
+}
+
+fn canonicalize_acm_subject_alternative_names(
+    domain_name: Option<&Value>,
+    subject_alternative_names: Option<Value>,
+) -> Value {
+    let primary_domain = match domain_name {
+        Some(Value::Concrete(ConcreteValue::String(domain))) => Some(domain.expose_plaintext()),
+        _ => None,
+    };
+    match subject_alternative_names {
+        Some(Value::Concrete(ConcreteValue::List(names))) => Value::Concrete(ConcreteValue::List(
+            names
+                .into_iter()
+                .filter(|name| match (name, primary_domain) {
+                    (Value::Concrete(ConcreteValue::String(name)), Some(primary_domain)) => {
+                        !acm_dns_names_equal(name.expose_plaintext(), primary_domain)
+                    }
+                    _ => true,
+                })
+                .collect(),
+        )),
+        Some(value) => value,
+        None => Value::Concrete(ConcreteValue::List(Vec::new())),
+    }
 }
 
 fn build_request_certificate(
@@ -264,57 +296,43 @@ fn build_create_certificate_options(
 }
 
 struct CertificateDetailReadFields {
-    domain_name: Option<Value>,
-    key_algorithm: Option<Value>,
+    extracted: AcmCertificateReadFields,
     options: Option<Value>,
-    subject_alternative_names: Value,
     validation_method: Option<Value>,
-    certificate_arn: Option<Value>,
     domain_validation_options: Option<Value>,
-    renewal_eligibility: Option<Value>,
     renewal_summary: Option<Value>,
-    status: Option<Value>,
-    r#type: Option<Value>,
 }
 
 impl CertificateDetailReadFields {
+    fn into_model(self, id: &ResourceId, tags: Value) -> ProviderResult<AcmCertificateReadModel> {
+        let Self {
+            extracted,
+            options,
+            validation_method,
+            domain_validation_options,
+            renewal_summary,
+        } = self;
+        let (_, model) = extracted.into_model(
+            id,
+            AcmCertificateReadModelSupplement {
+                options,
+                validation_method,
+                domain_validation_options,
+                renewal_summary,
+                tags,
+            },
+        )?;
+        Ok(model)
+    }
+
     /// Partial create results still use core's attribute map, but they cross
     /// that boundary only after the typed extraction is complete.
-    fn into_partial_attributes(self) -> HashMap<String, Value> {
-        let Self {
-            domain_name,
-            key_algorithm,
-            options,
-            subject_alternative_names,
-            validation_method,
-            certificate_arn,
-            domain_validation_options,
-            renewal_eligibility,
-            renewal_summary,
-            status,
-            r#type,
-        } = self;
-        let mut attributes = HashMap::from([(
-            "subject_alternative_names".to_string(),
-            subject_alternative_names,
-        )]);
-        for (name, value) in [
-            ("domain_name", domain_name),
-            ("key_algorithm", key_algorithm),
-            ("options", options),
-            ("validation_method", validation_method),
-            ("certificate_arn", certificate_arn),
-            ("domain_validation_options", domain_validation_options),
-            ("renewal_eligibility", renewal_eligibility),
-            ("renewal_summary", renewal_summary),
-            ("status", status),
-            ("type", r#type),
-        ] {
-            if let Some(value) = value {
-                attributes.insert(name.to_string(), value);
-            }
-        }
-        attributes
+    fn into_partial_attributes(
+        self,
+        id: &ResourceId,
+        tags: Value,
+    ) -> ProviderResult<HashMap<String, Value>> {
+        self.into_model(id, tags)?.into_attributes()
     }
 }
 
@@ -372,16 +390,7 @@ fn domain_validations_value(validations: &[aws_sdk_acm::types::DomainValidation]
 fn certificate_detail_read_fields(
     cert: &aws_sdk_acm::types::CertificateDetail,
 ) -> CertificateDetailReadFields {
-    let AcmCertificateReadFields {
-        certificate_arn,
-        domain_name,
-        key_algorithm,
-        renewal_eligibility,
-        status,
-        subject_alternative_names,
-        r#type,
-        applied_identifier: _,
-    } = AwsProvider::extract_acm_certificate_attributes(cert);
+    let extracted = AwsProvider::extract_acm_certificate_attributes(cert);
     let string_value =
         |value: &str| Value::Concrete(ConcreteValue::String(value.to_string().into()));
     let enum_value = |value: &str| Value::Concrete(ConcreteValue::String(value.to_string().into()));
@@ -402,27 +411,13 @@ fn certificate_detail_read_fields(
     // Measured with `aws acm describe-certificate --certificate-arn <arn>
     // --region ap-northeast-1` on 2026-10-29: ACM includes DomainName in
     // SubjectAlternativeNames. The DSL models only the additional names.
-    let primary_domain = match domain_name.as_ref() {
-        Some(Value::Concrete(ConcreteValue::String(domain))) => {
-            Some(domain.expose_plaintext().to_string())
-        }
-        _ => None,
-    };
-    let subject_alternative_names = match subject_alternative_names {
-        Some(Value::Concrete(ConcreteValue::List(names))) => Value::Concrete(ConcreteValue::List(
-            names
-                .into_iter()
-                .filter(|name| match name {
-                    Value::Concrete(ConcreteValue::String(name)) => {
-                        Some(name.expose_plaintext()) != primary_domain.as_deref()
-                    }
-                    _ => true,
-                })
-                .collect(),
-        )),
-        Some(value) => value,
-        None => Value::Concrete(ConcreteValue::List(Vec::new())),
-    };
+    let domain_name = extracted.domain_name().cloned();
+    let extracted = extracted.map_subject_alternative_names(|subject_alternative_names| {
+        Some(canonicalize_acm_subject_alternative_names(
+            domain_name.as_ref(),
+            subject_alternative_names,
+        ))
+    });
     let domain_validation_options = (!cert.domain_validation_options().is_empty())
         .then(|| domain_validations_value(cert.domain_validation_options()));
     let validation_method = cert
@@ -455,17 +450,11 @@ fn certificate_detail_read_fields(
     });
 
     CertificateDetailReadFields {
-        domain_name,
-        key_algorithm,
+        extracted,
         options,
-        subject_alternative_names,
         validation_method,
-        certificate_arn,
         domain_validation_options,
-        renewal_eligibility,
         renewal_summary,
-        status,
-        r#type,
     }
 }
 
@@ -494,12 +483,16 @@ fn partial_acm_certificate_state(
     resource: &Resource<impl Sized>,
     request_enums: &CertificateRequestEnums,
     cert: Option<&aws_sdk_acm::types::CertificateDetail>,
-) -> AppliedState {
+) -> ProviderResult<AppliedState> {
     let arn_value = arn.as_str();
-    let mut attributes = cert
-        .map(certificate_detail_read_fields)
-        .map(CertificateDetailReadFields::into_partial_attributes)
-        .unwrap_or_default();
+    let tags = resource
+        .get_attr("tags")
+        .cloned()
+        .unwrap_or_else(|| Value::Concrete(ConcreteValue::Map(IndexMap::new())));
+    let mut attributes = match cert {
+        Some(cert) => certificate_detail_read_fields(cert).into_partial_attributes(id, tags)?,
+        None => HashMap::new(),
+    };
 
     attributes.insert(
         "certificate_arn".to_string(),
@@ -552,7 +545,11 @@ fn partial_acm_certificate_state(
             .or_insert_with(|| tags.clone());
     }
 
-    AppliedState::from_identifier(id.clone(), arn.clone(), attributes)
+    Ok(AppliedState::from_identifier(
+        id.clone(),
+        arn.clone(),
+        attributes,
+    ))
 }
 
 fn partial_acm_certificate_create_outcome(
@@ -563,9 +560,13 @@ fn partial_acm_certificate_create_outcome(
     request_enums: &CertificateRequestEnums,
     cert: Option<&aws_sdk_acm::types::CertificateDetail>,
     reason: String,
-) -> CreateCompletion {
-    let state = partial_acm_certificate_state(id, arn, domain_name, resource, request_enums, cert);
-    CreateCompletion::partial(state, reason, vec![DVO_MISSING_ATTRIBUTE.to_string()])
+) -> ProviderResult<CreateCompletion> {
+    let state = partial_acm_certificate_state(id, arn, domain_name, resource, request_enums, cert)?;
+    Ok(CreateCompletion::partial(
+        state,
+        reason,
+        vec![DVO_MISSING_ATTRIBUTE.to_string()],
+    ))
 }
 
 impl AwsProvider {
@@ -683,7 +684,7 @@ impl AwsProvider {
                 DvoWaitOutcome::Incomplete {
                     certificate,
                     reason,
-                } => Ok(partial_acm_certificate_create_outcome(
+                } => partial_acm_certificate_create_outcome(
                     &id,
                     &arn,
                     &domain_name,
@@ -691,7 +692,7 @@ impl AwsProvider {
                     &request_enums,
                     certificate.as_ref(),
                     reason,
-                )),
+                ),
             };
         }
 
@@ -739,19 +740,7 @@ impl AwsProvider {
         };
         let arn = identifier.as_str();
 
-        let CertificateDetailReadFields {
-            domain_name,
-            key_algorithm,
-            options,
-            subject_alternative_names,
-            validation_method,
-            certificate_arn,
-            domain_validation_options,
-            renewal_eligibility,
-            renewal_summary,
-            status,
-            r#type,
-        } = certificate_detail_read_fields(cert);
+        let fields = certificate_detail_read_fields(cert);
 
         // Tags are fetched separately via `ListTagsForCertificate`.
         let tag_output = self
@@ -772,20 +761,7 @@ impl AwsProvider {
             );
         }
 
-        let model = AcmCertificateReadModel {
-            domain_name: require_read_value(id, domain_name, "domain_name")?,
-            key_algorithm,
-            options,
-            subject_alternative_names,
-            validation_method,
-            certificate_arn,
-            domain_validation_options,
-            renewal_eligibility,
-            renewal_summary,
-            status,
-            r#type,
-            tags: Value::Concrete(ConcreteValue::Map(tag_map)),
-        };
+        let model = fields.into_model(id, Value::Concrete(ConcreteValue::Map(tag_map)))?;
 
         found_managed_read(id, identifier, model)
     }
@@ -1118,6 +1094,37 @@ mod tests {
         resource
     }
 
+    #[test]
+    fn input_validation_and_read_filter_share_dns_name_normalization() {
+        let mut resource = Resource::with_provider("aws", "acm.Certificate", "test-cert", None);
+        resource.set_attr(
+            "domain_name",
+            Value::Concrete(ConcreteValue::String("Example.COM.".into())),
+        );
+        resource.set_attr(
+            "subject_alternative_names",
+            Value::Concrete(ConcreteValue::List(vec![Value::Concrete(
+                ConcreteValue::String("example.com".into()),
+            )])),
+        );
+
+        let error = validate_acm_certificate_inputs(&resource)
+            .expect_err("case and a trailing dot must not hide the primary domain");
+        assert!(error.to_string().contains("subject_alternative_names"));
+
+        let domain_name = Value::Concrete(ConcreteValue::String("Example.COM.".into()));
+        let returned = Value::Concrete(ConcreteValue::List(vec![
+            Value::Concrete(ConcreteValue::String("EXAMPLE.com".into())),
+            Value::Concrete(ConcreteValue::String("www.example.com.".into())),
+        ]));
+        assert_eq!(
+            canonicalize_acm_subject_alternative_names(Some(&domain_name), Some(returned)),
+            Value::Concrete(ConcreteValue::List(vec![Value::Concrete(
+                ConcreteValue::String("www.example.com.".into()),
+            )]))
+        );
+    }
+
     fn assert_partial_outcome_records_arn(
         outcome: CreateCompletion,
         arn: &str,
@@ -1182,7 +1189,7 @@ mod tests {
         let fields = certificate_detail_read_fields(&cert);
 
         assert_eq!(
-            fields.certificate_arn.as_ref(),
+            fields.extracted.certificate_arn(),
             Some(&Value::Concrete(ConcreteValue::String(
                 "arn:aws:acm:us-east-1:111:certificate/abc"
                     .to_string()
@@ -1194,7 +1201,7 @@ mod tests {
         // status must still be published (the wait predicate relies on
         // it; this guards against a regression that breaks the wait).
         assert_eq!(
-            fields.status.as_ref(),
+            fields.extracted.status(),
             Some(&Value::Concrete(ConcreteValue::String(
                 "ISSUED".to_string().into()
             )))
@@ -1476,7 +1483,8 @@ mod tests {
             &request_enums,
             Some(&cert),
             reason,
-        );
+        )
+        .expect("partial ACM state must be canonical");
         assert_partial_outcome_records_arn(
             outcome,
             arn,
@@ -1530,7 +1538,8 @@ mod tests {
             &request_enums,
             Some(&cert),
             reason,
-        );
+        )
+        .expect("partial ACM state must be canonical");
         assert_partial_outcome_records_arn(
             outcome,
             arn,

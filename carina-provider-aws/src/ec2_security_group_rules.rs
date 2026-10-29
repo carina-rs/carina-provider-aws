@@ -9,12 +9,9 @@ use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
 use crate::helpers::require_enum_attr;
 use crate::provider::CreateCompletion;
-use crate::provider_generated::{
-    Ec2SecurityGroupEgressReadFields, Ec2SecurityGroupIngressReadFields,
-};
-use crate::read_model::{found_managed_read, require_read_value};
+use crate::read_model::found_managed_read;
 use crate::read_models_generated::{
-    Ec2SecurityGroupEgressReadModel, Ec2SecurityGroupIngressReadModel,
+    Ec2SecurityGroupEgressReadModelSupplement, Ec2SecurityGroupIngressReadModelSupplement,
 };
 
 fn build_security_group_rule_permission(
@@ -183,56 +180,28 @@ impl AwsProvider {
             .map(|owner_id| Value::Concrete(ConcreteValue::String(owner_id.to_string().into())));
 
         if is_ingress {
-            let Ec2SecurityGroupIngressReadFields {
-                cidr_ipv6,
-                description,
-                from_port,
-                group_id,
-                ip_protocol,
-                security_group_rule_id,
-                source_prefix_list_id,
-                to_port,
-                applied_identifier: _,
-            } = Self::extract_ec2_security_group_ingress_attributes(first_rule);
-            let model = Ec2SecurityGroupIngressReadModel {
-                cidr_ip,
-                cidr_ipv6,
-                description,
-                from_port,
-                group_id,
-                ip_protocol: require_read_value(id, ip_protocol, "ip_protocol")?,
-                source_prefix_list_id,
-                source_security_group_owner_id,
-                to_port,
-                source_security_group_id: referenced_group_id,
-                security_group_rule_id: combined_rule_id.or(security_group_rule_id),
-            };
+            let fields = Self::extract_ec2_security_group_ingress_attributes(first_rule)
+                .map_security_group_rule_id(|rule_id| combined_rule_id.or(rule_id));
+            let (_, model) = fields.into_model(
+                id,
+                Ec2SecurityGroupIngressReadModelSupplement {
+                    cidr_ip,
+                    source_security_group_owner_id,
+                    source_security_group_id: referenced_group_id,
+                },
+            )?;
             found_managed_read(id, applied_identifier, model)
         } else {
-            let Ec2SecurityGroupEgressReadFields {
-                cidr_ipv6,
-                description,
-                destination_prefix_list_id,
-                from_port,
-                group_id,
-                ip_protocol,
-                security_group_rule_id,
-                to_port,
-                applied_identifier: _,
-            } = Self::extract_ec2_security_group_egress_attributes(first_rule);
-            let model = Ec2SecurityGroupEgressReadModel {
-                cidr_ip,
-                cidr_ipv6,
-                description,
-                destination_prefix_list_id,
-                from_port,
-                group_id: require_read_value(id, group_id, "group_id")?,
-                ip_protocol: require_read_value(id, ip_protocol, "ip_protocol")?,
-                source_security_group_owner_id,
-                to_port,
-                destination_security_group_id: referenced_group_id,
-                security_group_rule_id: combined_rule_id.or(security_group_rule_id),
-            };
+            let fields = Self::extract_ec2_security_group_egress_attributes(first_rule)
+                .map_security_group_rule_id(|rule_id| combined_rule_id.or(rule_id));
+            let (_, model) = fields.into_model(
+                id,
+                Ec2SecurityGroupEgressReadModelSupplement {
+                    cidr_ip,
+                    source_security_group_owner_id,
+                    destination_security_group_id: referenced_group_id,
+                },
+            )?;
             found_managed_read(id, applied_identifier, model)
         }
     }

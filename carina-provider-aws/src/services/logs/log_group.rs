@@ -9,9 +9,8 @@ use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
 use crate::helpers::{optional_enum_attr, require_string_attr};
 use crate::provider::AwsCreateAttempt;
-use crate::provider_generated::LogsLogGroupReadFields;
-use crate::read_model::{found_managed_read, require_read_value};
-use crate::read_models_generated::LogsLogGroupReadModel;
+use crate::read_model::found_managed_read;
+use crate::read_models_generated::LogsLogGroupReadModelSupplement;
 
 impl AwsProvider {
     /// Read a CloudWatch Logs Log Group
@@ -39,14 +38,7 @@ impl AwsProvider {
             .iter()
             .find(|lg| lg.log_group_name() == Some(identifier))
         {
-            let LogsLogGroupReadFields {
-                deletion_protection_enabled,
-                kms_key_id,
-                log_group_class,
-                log_group_name,
-                retention_in_days,
-                applied_identifier: _,
-            } = Self::extract_logs_log_group_attributes(lg);
+            let fields = Self::extract_logs_log_group_attributes(lg);
 
             // Read tags separately. Empty tags are canonical state, and a
             // failed side read must not erase configured tags.
@@ -58,8 +50,11 @@ impl AwsProvider {
                 .send()
                 .await
                 .map_err(|error| {
-                    api_error_with_meta("Failed to list log group tags", error)
-                        .for_resource(id.clone())
+                    api_error_with_meta(
+                        "ListTagsLogGroup failed; ensure logs:ListTagsLogGroup is allowed",
+                        error,
+                    )
+                    .for_resource(id.clone())
                 })?;
             let mut tag_map = IndexMap::new();
             if let Some(tags) = tags_output.tags() {
@@ -74,15 +69,15 @@ impl AwsProvider {
             // Measured with `aws logs describe-log-groups --log-group-name-prefix <name>
             // --region ap-northeast-1` on 2026-10-29: the response omits
             // deletionProtectionEnabled when it is false.
-            let model = LogsLogGroupReadModel {
-                deletion_protection_enabled: deletion_protection_enabled
-                    .unwrap_or_else(|| Value::Concrete(ConcreteValue::Bool(false))),
-                kms_key_id,
-                log_group_class,
-                log_group_name: require_read_value(id, log_group_name, "log_group_name")?,
-                retention_in_days,
-                tags: Value::Concrete(ConcreteValue::Map(tag_map)),
-            };
+            let fields = fields.map_deletion_protection_enabled(|value| {
+                Some(value.unwrap_or_else(|| Value::Concrete(ConcreteValue::Bool(false))))
+            });
+            let (_, model) = fields.into_model(
+                id,
+                LogsLogGroupReadModelSupplement {
+                    tags: Value::Concrete(ConcreteValue::Map(tag_map)),
+                },
+            )?;
 
             found_managed_read(id, applied_identifier, model)
         } else {
@@ -261,7 +256,6 @@ impl AwsProvider {
         };
         let desired_deletion_protection = match to.get_attr("deletion_protection_enabled") {
             Some(Value::Concrete(ConcreteValue::Bool(enabled))) => Some(*enabled),
-            None if current_deletion_protection.is_some() => Some(false),
             _ => None,
         };
         if let Some(enabled) = desired_deletion_protection

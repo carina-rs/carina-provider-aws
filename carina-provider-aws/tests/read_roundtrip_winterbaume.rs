@@ -3,13 +3,14 @@
 
 #![cfg(not(target_arch = "wasm32"))]
 
+use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
 use std::str;
 
 use carina_core::differ::{Diff, diff};
 use carina_core::provider::{
-    AppliedIdentifier, CreateRequest, Provider, ProviderNormalizer, ReadRequest,
+    AppliedIdentifier, CreateRequest, Provider, ProviderNormalizer, ReadRequest, UpdateRequest,
 };
 use carina_core::resource::{ConcreteValue, ResolvedResource, Resource, State, Value};
 use carina_core::schema::{SchemaKind, SchemaRegistry};
@@ -111,6 +112,27 @@ async fn create_request_for_test(resource: Resource) -> CreateRequest {
         .expect("test resource should pass checked create preparation")
 }
 
+async fn update_request_for_test(
+    resource: Resource,
+    from: State,
+    changed_attributes: &[String],
+) -> UpdateRequest {
+    let bindings = carina_core::binding_index::ResolvedBindings::default();
+    let module_gate = carina_core::executor::ModuleConstraintGate::from_live_compositions(&[]);
+    let schemas = schema_registry();
+    let preparation = carina_core::executor::ProviderPreparationContext::new(
+        &bindings,
+        &module_gate,
+        &[],
+        &AwsNormalizer,
+        &[],
+        &schemas,
+    );
+    carina_core::executor::prepare_update_request(resource, from, changed_attributes, &preparation)
+        .await
+        .expect("test resource should pass checked update preparation")
+}
+
 struct LogGroupService;
 
 impl MockService for LogGroupService {
@@ -138,6 +160,36 @@ impl MockService for LogGroupService {
     }
 }
 
+struct LogGroupTagsDeniedService;
+
+impl MockService for LogGroupTagsDeniedService {
+    fn service_name(&self) -> &str {
+        "logs"
+    }
+
+    fn url_patterns(&self) -> Vec<&str> {
+        vec![r"^https://logs\.[^/]+\.amazonaws\.com"]
+    }
+
+    fn handle(
+        &self,
+        request: MockRequest,
+    ) -> Pin<Box<dyn Future<Output = MockResponse> + Send + '_>> {
+        let response = match request_target(&request) {
+            "Logs_20140328.DescribeLogGroups" => MockResponse::json(
+                200,
+                format!(r#"{{"logGroups":[{{"logGroupName":"{LOG_GROUP_NAME}"}}]}}"#),
+            ),
+            "Logs_20140328.ListTagsLogGroup" => MockResponse::json(
+                403,
+                r#"{"__type":"AccessDeniedException","message":"not authorized"}"#,
+            ),
+            target => panic!("unexpected CloudWatch Logs operation {target}"),
+        };
+        Box::pin(async move { response })
+    }
+}
+
 struct AcmService;
 
 impl MockService for AcmService {
@@ -157,13 +209,48 @@ impl MockService for AcmService {
             "CertificateManager.DescribeCertificate" => MockResponse::json(
                 200,
                 format!(
-                    r#"{{"Certificate":{{"CertificateArn":"{CERTIFICATE_ARN}","DomainName":"example.com","SubjectAlternativeNames":["www.example.com","example.com"],"Status":"ISSUED","Type":"AMAZON_ISSUED","KeyAlgorithm":"RSA_2048"}}}}"#
+                    r#"{{"Certificate":{{"CertificateArn":"{CERTIFICATE_ARN}","DomainName":"example.com","SubjectAlternativeNames":["www.example.com","example.com"],"Status":"ISSUED","Type":"AMAZON_ISSUED","KeyAlgorithm":"POST_QUANTUM_2048"}}}}"#
                 ),
             ),
             "CertificateManager.ListTagsForCertificate" => {
                 MockResponse::json(200, r#"{"Tags":[]}"#)
             }
             target => panic!("unexpected ACM operation {target}"),
+        };
+        Box::pin(async move { response })
+    }
+}
+
+struct ProtectedLogGroupUpdateService;
+
+impl MockService for ProtectedLogGroupUpdateService {
+    fn service_name(&self) -> &str {
+        "logs"
+    }
+
+    fn url_patterns(&self) -> Vec<&str> {
+        vec![r"^https://logs\.[^/]+\.amazonaws\.com"]
+    }
+
+    fn handle(
+        &self,
+        request: MockRequest,
+    ) -> Pin<Box<dyn Future<Output = MockResponse> + Send + '_>> {
+        let response = match request_target(&request) {
+            "Logs_20140328.TagLogGroup" => MockResponse::json(200, r#"{}"#),
+            "Logs_20140328.DescribeLogGroups" => MockResponse::json(
+                200,
+                format!(
+                    r#"{{"logGroups":[{{"logGroupName":"{LOG_GROUP_NAME}","deletionProtectionEnabled":true}}]}}"#
+                ),
+            ),
+            "Logs_20140328.ListTagsLogGroup" => {
+                MockResponse::json(200, r#"{"tags":{"purpose":"roundtrip"}}"#)
+            }
+            "Logs_20140328.PutLogGroupDeletionProtection" => {
+                panic!("an omitted desired attribute must not disable deletion protection")
+            }
+            target => panic!("unexpected CloudWatch Logs operation {target}"),
         };
         Box::pin(async move { response })
     }
@@ -205,9 +292,39 @@ impl MockService for SqsService {
             }
             "AmazonSQS.GetQueueAttributes" => MockResponse::json(
                 200,
-                r#"{"Attributes":{"QueueArn":"arn:aws:sqs:ap-northeast-1:123456789012:carina-read-roundtrip","VisibilityTimeout":"30","MaximumMessageSize":"262144","MessageRetentionPeriod":"345600","DelaySeconds":"0","ReceiveMessageWaitTimeSeconds":"0","SqsManagedSseEnabled":"true","ApproximateNumberOfMessages":"0","ApproximateNumberOfMessagesDelayed":"0","ApproximateNumberOfMessagesNotVisible":"0","CreatedTimestamp":"1793260800","LastModifiedTimestamp":"1793260800"}}"#,
+                r#"{"Attributes":{"QueueArn":"arn:aws:sqs:ap-northeast-1:123456789012:carina-read-roundtrip","VisibilityTimeout":"30","MaximumMessageSize":"262144","MessageRetentionPeriod":"345600","DelaySeconds":"0","ReceiveMessageWaitTimeSeconds":"0","CreatedTimestamp":"1793260800","LastModifiedTimestamp":"1793260800"}}"#,
             ),
             "AmazonSQS.ListQueueTags" => MockResponse::json(200, r#"{"Tags":{}}"#),
+            target => panic!("unexpected SQS operation {target}"),
+        };
+        Box::pin(async move { response })
+    }
+}
+
+struct SqsTagsDeniedService;
+
+impl MockService for SqsTagsDeniedService {
+    fn service_name(&self) -> &str {
+        "sqs"
+    }
+
+    fn url_patterns(&self) -> Vec<&str> {
+        vec![r"^https://sqs\.[^/]+\.amazonaws\.com"]
+    }
+
+    fn handle(
+        &self,
+        request: MockRequest,
+    ) -> Pin<Box<dyn Future<Output = MockResponse> + Send + '_>> {
+        let response = match request_target(&request) {
+            "AmazonSQS.GetQueueAttributes" => MockResponse::json(
+                200,
+                r#"{"Attributes":{"QueueArn":"arn:aws:sqs:ap-northeast-1:123456789012:carina-read-roundtrip","VisibilityTimeout":"30","MaximumMessageSize":"262144","MessageRetentionPeriod":"345600","DelaySeconds":"0","ReceiveMessageWaitTimeSeconds":"0","CreatedTimestamp":"1793260800","LastModifiedTimestamp":"1793260800"}}"#,
+            ),
+            "AmazonSQS.ListQueueTags" => MockResponse::json(
+                403,
+                r#"{"__type":"AccessDeniedException","message":"not authorized"}"#,
+            ),
             target => panic!("unexpected SQS operation {target}"),
         };
         Box::pin(async move { response })
@@ -241,7 +358,57 @@ async fn log_group_false_deletion_protection_round_trips() {
 }
 
 #[tokio::test]
-async fn certificate_sans_exclude_the_primary_domain_and_round_trip_as_a_set() {
+async fn log_group_tag_side_read_failure_names_required_permission() {
+    let provider = provider_from_service(LogGroupTagsDeniedService).await;
+    let id = Resource::with_provider("aws", "logs.LogGroup", "roundtrip", None).id;
+
+    let error = provider
+        .read(&id, &applied_identifier(LOG_GROUP_NAME), ReadRequest)
+        .await
+        .expect_err("a denied ListTagsLogGroup call must fail the managed read");
+    let message = error.to_string();
+    assert!(message.contains("ListTagsLogGroup"), "{message}");
+    assert!(message.contains("logs:ListTagsLogGroup"), "{message}");
+}
+
+#[tokio::test]
+async fn unrelated_log_group_update_preserves_omitted_deletion_protection() {
+    let provider = provider_from_service(ProtectedLogGroupUpdateService).await;
+    let id = Resource::with_provider("aws", "logs.LogGroup", "roundtrip", None).id;
+    let from = State::existing(
+        id.clone(),
+        HashMap::from([
+            ("log_group_name".to_string(), string(LOG_GROUP_NAME)),
+            ("deletion_protection_enabled".to_string(), bool_value(true)),
+            ("tags".to_string(), empty_map()),
+        ]),
+    )
+    .with_identifier(LOG_GROUP_NAME);
+    let mut desired = Resource::from_id(id.clone());
+    desired.set_attr("log_group_name", string(LOG_GROUP_NAME));
+    desired.set_attr(
+        "tags",
+        Value::Concrete(ConcreteValue::Map(IndexMap::from([(
+            "purpose".to_string(),
+            string("roundtrip"),
+        )]))),
+    );
+    let request = update_request_for_test(desired, from, &["tags".to_string()]).await;
+
+    let state = provider
+        .update(&id, &applied_identifier(LOG_GROUP_NAME), request)
+        .await
+        .expect("update tags without changing deletion protection")
+        .into_state_for_writeback();
+
+    assert_eq!(
+        state.attributes.get("deletion_protection_enabled"),
+        Some(&bool_value(true))
+    );
+}
+
+#[tokio::test]
+async fn certificate_sans_and_unknown_enum_value_round_trip() {
     let provider = provider_from_service(AcmService).await;
     let mut desired = Resource::with_provider("aws", "acm.Certificate", "roundtrip", None);
     desired.set_attr("domain_name", string("example.com"));
@@ -261,6 +428,11 @@ async fn certificate_sans_exclude_the_primary_domain_and_round_trip_as_a_set() {
     assert_eq!(
         current.attributes.get("subject_alternative_names"),
         Some(&list(&["www.example.com"]))
+    );
+    assert_eq!(
+        current.attributes.get("key_algorithm"),
+        Some(&string("POST_QUANTUM_2048")),
+        "AWS values newer than the pinned closed enum must survive refresh"
     );
     assert_eq!(current.attributes.get("tags"), Some(&empty_map()));
     assert_no_diff(desired, current);
@@ -299,7 +471,32 @@ async fn standard_queue_false_fifo_flags_are_not_sent_and_round_trip() {
             .contains_key("kms_data_key_reuse_period_seconds"),
         "GetQueueAttributes(All) omits the reuse period when no KMS key is configured"
     );
+    for optional_attribute in [
+        "sqs_managed_sse_enabled",
+        "approximate_number_of_messages",
+        "approximate_number_of_messages_delayed",
+        "approximate_number_of_messages_not_visible",
+    ] {
+        assert!(
+            !current.attributes.contains_key(optional_attribute),
+            "GetQueueAttributes(All) may legitimately omit {optional_attribute}"
+        );
+    }
     assert_no_diff(desired, current);
+}
+
+#[tokio::test]
+async fn queue_tag_side_read_failure_names_required_permission() {
+    let provider = provider_from_service(SqsTagsDeniedService).await;
+    let id = Resource::with_provider("aws", "sqs.Queue", "roundtrip", None).id;
+
+    let error = provider
+        .read(&id, &applied_identifier(QUEUE_URL), ReadRequest)
+        .await
+        .expect_err("a denied ListQueueTags call must fail the managed read");
+    let message = error.to_string();
+    assert!(message.contains("ListQueueTags"), "{message}");
+    assert!(message.contains("sqs:ListQueueTags"), "{message}");
 }
 
 #[tokio::test]

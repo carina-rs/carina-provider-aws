@@ -13,9 +13,8 @@ use crate::helpers::{
     optional_enum_attr, optional_string_attr, require_string_attr, retry_aws_operation_with_token,
 };
 use crate::provider::{AwsCreateAttempt, Ec2TaggedResourceKind};
-use crate::provider_generated::Ec2NatGatewayReadFields;
-use crate::read_model::{empty_map_value, found_managed_read, require_read_value};
-use crate::read_models_generated::Ec2NatGatewayReadModel;
+use crate::read_model::{empty_map_value, found_managed_read};
+use crate::read_models_generated::Ec2NatGatewayReadModelSupplement;
 
 fn nat_gateway_create_poll_state(state: Option<&NatGatewayState>) -> CreatePoll<()> {
     match state {
@@ -161,15 +160,7 @@ impl AwsProvider {
                 return Ok(ReadOutcome::not_found(id.clone()));
             }
 
-            let Ec2NatGatewayReadFields {
-                allocation_id,
-                availability_mode,
-                connectivity_type,
-                nat_gateway_id,
-                subnet_id,
-                vpc_id,
-                applied_identifier: _,
-            } = Self::extract_ec2_nat_gateway_attributes(ngw);
+            let fields = Self::extract_ec2_nat_gateway_attributes(ngw);
 
             let mut grouped_addresses: indexmap::IndexMap<
                 (Option<String>, Option<String>),
@@ -224,19 +215,16 @@ impl AwsProvider {
                 .or_else(|| ngw.nat_gateway_addresses().first())
                 .and_then(|address| address.private_ip())
                 .map(|value| Value::Concrete(ConcreteValue::String(value.to_string().into())));
-            let model = Ec2NatGatewayReadModel {
-                allocation_id,
-                availability_mode,
-                availability_zone_addresses: Value::Concrete(ConcreteValue::List(
-                    availability_zone_addresses,
-                )),
-                connectivity_type,
-                private_ip_address,
-                subnet_id: require_read_value(id, subnet_id, "subnet_id")?,
-                vpc_id,
-                nat_gateway_id,
-                tags: Self::ec2_tags_to_value(ngw.tags()).unwrap_or_else(empty_map_value),
-            };
+            let (_, model) = fields.into_model(
+                id,
+                Ec2NatGatewayReadModelSupplement {
+                    availability_zone_addresses: Value::Concrete(ConcreteValue::List(
+                        availability_zone_addresses,
+                    )),
+                    private_ip_address,
+                    tags: Self::ec2_tags_to_value(ngw.tags()).unwrap_or_else(empty_map_value),
+                },
+            )?;
 
             found_managed_read(id, applied_identifier, model)
         } else {

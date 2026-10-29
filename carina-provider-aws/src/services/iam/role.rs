@@ -9,9 +9,8 @@ use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
 use crate::helpers::{require_string_attr, sdk_error_message};
 use crate::provider::CreateCompletion;
-use crate::provider_generated::IamRoleReadFields;
-use crate::read_model::{found_managed_read, require_read_value};
-use crate::read_models_generated::IamRoleReadModel;
+use crate::read_model::found_managed_read;
+use crate::read_models_generated::IamRoleReadModelSupplement;
 
 impl AwsProvider {
     /// Read an IAM Role
@@ -33,31 +32,21 @@ impl AwsProvider {
         match result {
             Ok(output) => {
                 if let Some(role) = output.role() {
-                    let IamRoleReadFields {
-                        arn,
-                        assume_role_policy_document,
-                        description,
-                        max_session_duration,
-                        path,
-                        role_id,
-                        role_name,
-                        applied_identifier: _,
-                    } = Self::extract_iam_role_attributes(role);
-                    let assume_role_policy_document = require_read_value(
-                        id,
-                        assume_role_policy_document,
-                        "assume_role_policy_document",
-                    )?;
-                    let assume_role_policy_document = match assume_role_policy_document {
-                        Value::Concrete(ConcreteValue::String(raw)) => {
-                            let decoded = urlencoding::decode(raw.expose_plaintext())
-                                .unwrap_or_else(|_| raw.expose_plaintext().into());
-                            iam_policy_json_to_value(&decoded).unwrap_or_else(|_| {
-                                Value::Concrete(ConcreteValue::String(decoded.into_owned().into()))
+                    let fields = Self::extract_iam_role_attributes(role)
+                        .map_assume_role_policy_document(|document| {
+                            document.map(|value| match value {
+                                Value::Concrete(ConcreteValue::String(raw)) => {
+                                    let decoded = urlencoding::decode(raw.expose_plaintext())
+                                        .unwrap_or_else(|_| raw.expose_plaintext().into());
+                                    iam_policy_json_to_value(&decoded).unwrap_or_else(|_| {
+                                        Value::Concrete(ConcreteValue::String(
+                                            decoded.into_owned().into(),
+                                        ))
+                                    })
+                                }
+                                value => value,
                             })
-                        }
-                        value => value,
-                    };
+                        });
 
                     let mut tag_map = IndexMap::new();
                     for tag in role.tags() {
@@ -67,16 +56,12 @@ impl AwsProvider {
                         );
                     }
 
-                    let model = IamRoleReadModel {
-                        assume_role_policy_document,
-                        description,
-                        max_session_duration,
-                        path,
-                        role_name: require_read_value(id, role_name, "role_name")?,
-                        arn,
-                        role_id,
-                        tags: Value::Concrete(ConcreteValue::Map(tag_map)),
-                    };
+                    let (_, model) = fields.into_model(
+                        id,
+                        IamRoleReadModelSupplement {
+                            tags: Value::Concrete(ConcreteValue::Map(tag_map)),
+                        },
+                    )?;
                     found_managed_read(id, applied_identifier, model)
                 } else {
                     Ok(ReadOutcome::not_found(id.clone()))

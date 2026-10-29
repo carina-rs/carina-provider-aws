@@ -10,9 +10,8 @@ use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
 use crate::helpers::{CreatePoll, optional_enum_attr, require_string_attr, sdk_error_message};
 use crate::provider::CreateCompletion;
-use crate::provider_generated::OrganizationsAccountReadFields;
-use crate::read_model::{found_managed_read, require_read_value};
-use crate::read_models_generated::OrganizationsAccountReadModel;
+use crate::read_model::found_managed_read;
+use crate::read_models_generated::OrganizationsAccountReadModelSupplement;
 
 fn organizations_account_create_poll_state(
     status: Option<&aws_sdk_organizations::types::CreateAccountStatus>,
@@ -54,15 +53,7 @@ impl AwsProvider {
         match account_result {
             Ok(response) => {
                 if let Some(account) = response.account() {
-                    let OrganizationsAccountReadFields {
-                        arn,
-                        email,
-                        id: account_id,
-                        joined_method,
-                        name,
-                        status,
-                        applied_identifier: _,
-                    } = Self::extract_organizations_account_attributes(account);
+                    let fields = Self::extract_organizations_account_attributes(account);
 
                     let tags_response = self
                         .organizations_client
@@ -82,20 +73,16 @@ impl AwsProvider {
                         );
                     }
 
-                    let account_name = require_read_value(id, name, "account_name")?;
                     let joined_timestamp = account.joined_timestamp().map(|timestamp| {
                         Value::Concrete(ConcreteValue::String(timestamp.to_string().into()))
                     });
-                    let model = OrganizationsAccountReadModel {
-                        account_name,
-                        email: require_read_value(id, email, "email")?,
-                        arn,
-                        id: account_id,
-                        joined_method,
-                        joined_timestamp,
-                        status,
-                        tags: Value::Concrete(ConcreteValue::Map(tag_map)),
-                    };
+                    let (_, model) = fields.into_model(
+                        id,
+                        OrganizationsAccountReadModelSupplement {
+                            joined_timestamp,
+                            tags: Value::Concrete(ConcreteValue::Map(tag_map)),
+                        },
+                    )?;
                     found_managed_read(id, applied_identifier, model)
                 } else {
                     Ok(ReadOutcome::not_found(id.clone()))

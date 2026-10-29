@@ -2376,6 +2376,14 @@ fn direct_read_fields<'a>(
     read_struct: &'a carina_smithy::StructureShape,
 ) -> Vec<DirectReadField<'a>> {
     let exclude: HashSet<&str> = res.exclude_fields.iter().copied().collect();
+    let omitted: HashSet<&str> = res
+        .read_dispositions()
+        .iter()
+        .filter_map(|disposition| match disposition {
+            resource_defs::ReadDisposition::OmitSchema { field, .. } => Some(*field),
+            _ => None,
+        })
+        .collect();
     let create_input = if !res.create_op.is_empty() {
         let create_op_id = format!("{}#{}", res.service_namespace, res.create_op);
         model.operation_input(&create_op_id)
@@ -2395,7 +2403,11 @@ fn direct_read_fields<'a>(
     let mut fields = Vec::new();
 
     for (member_name, member_ref) in &read_struct.members {
-        if exclude.contains(member_name.as_str()) || member_name.eq_ignore_ascii_case("tags") {
+        if exclude.contains(member_name.as_str())
+            || (omitted.contains(member_name.as_str())
+                && !is_read_model_alias_source(res.name, &member_name.to_snake_case()))
+            || member_name.eq_ignore_ascii_case("tags")
+        {
             continue;
         }
         let is_schema_attr = member_name == res.identifier
@@ -2438,13 +2450,19 @@ fn direct_read_fields<'a>(
 fn extracted_read_field_names(
     res: &ResourceDef,
     direct_fields: &[DirectReadField<'_>],
+    readable: &[&AttrInfo],
 ) -> Vec<String> {
+    let readable_names: HashSet<&str> = readable
+        .iter()
+        .map(|attribute| attribute.snake_name.as_str())
+        .collect();
     let mut names: Vec<String> = direct_fields
         .iter()
         .map(|field| field.attr_name.clone())
         .chain(
             res.derived_attributes
                 .iter()
+                .filter(|derived| readable_names.contains(derived.attr.to_snake_case().as_str()))
                 .map(|derived| derived.attr.to_snake_case()),
         )
         .collect();
@@ -2456,6 +2474,58 @@ fn extracted_read_field_names(
 fn read_fields_type_name(resource_name: &str) -> String {
     let (service, resource) = split_service_resource(resource_name);
     format!("{}{}ReadFields", service.to_upper_camel_case(), resource)
+}
+
+fn read_model_supplement_type_name(resource_name: &str) -> String {
+    let (service, resource) = split_service_resource(resource_name);
+    format!(
+        "{}{}ReadModelSupplement",
+        service.to_upper_camel_case(),
+        resource
+    )
+}
+
+/// Return the extracted SDK field that supplies a differently named canonical
+/// read-model field. Every other extracted field maps by snake_case name.
+fn read_model_field_alias(resource_name: &str, model_field: &str) -> Option<&'static str> {
+    match (resource_name, model_field) {
+        ("ec2.Eip", "address") => Some("public_ip"),
+        ("organizations.Account", "account_name") => Some("name"),
+        _ => None,
+    }
+}
+
+fn is_read_model_alias_source(resource_name: &str, source: &str) -> bool {
+    matches!(
+        (resource_name, source),
+        ("ec2.Eip", "public_ip") | ("organizations.Account", "name")
+    )
+}
+
+fn read_model_field_sources(
+    res: &ResourceDef,
+    extracted_field_names: &[String],
+    readable: &[&AttrInfo],
+) -> HashMap<String, String> {
+    let extracted: HashSet<&str> = extracted_field_names.iter().map(String::as_str).collect();
+    let mut sources = HashMap::new();
+    for attr in readable {
+        let source =
+            read_model_field_alias(res.name, &attr.snake_name).unwrap_or(attr.snake_name.as_str());
+        if extracted.contains(source) {
+            sources.insert(attr.snake_name.clone(), source.to_string());
+        }
+    }
+
+    for extracted_name in extracted_field_names {
+        if !sources.values().any(|source| source == extracted_name) {
+            panic!(
+                "codegen: typed read field {}.{} is not consumed by the canonical read model; add an explicit alias or classification",
+                res.name, extracted_name
+            );
+        }
+    }
+    sources
 }
 
 fn generate_provider_code(
@@ -2513,8 +2583,22 @@ fn generate_provider_code(
             continue;
         };
         let direct_fields = direct_read_fields(res, model, read_struct);
-        let field_names = extracted_read_field_names(res, &direct_fields);
         let fields_type = read_fields_type_name(res.name);
+        let model_type = read_model_type_name(res.name);
+        let supplement_type = read_model_supplement_type_name(res.name);
+        let collected = collect_resource_attributes(res, model)
+            .unwrap_or_else(|error| panic!("codegen: {} read model: {error}", res.name));
+        let readable: Vec<&AttrInfo> = collected
+            .attrs
+            .iter()
+            .filter(|attr| !attr.is_write_only)
+            .collect();
+        let field_names = extracted_read_field_names(res, &direct_fields, &readable);
+        let model_sources = read_model_field_sources(res, &field_names, &readable);
+        let supplemental: Vec<&&AttrInfo> = readable
+            .iter()
+            .filter(|attr| !model_sources.contains_key(&attr.snake_name))
+            .collect();
 
         code.push_str(&format!(
             "/// Typed values extracted from the AWS read shape for `{}`.\n\
@@ -2522,12 +2606,91 @@ fn generate_provider_code(
              pub(crate) struct {} {{\n",
             res.name, fields_type
         ));
-        for field in field_names {
-            let field = escape_rust_keyword(&field);
-            code.push_str(&format!("    pub(crate) {field}: Option<Value>,\n"));
+        for field in &field_names {
+            let field = escape_rust_keyword(field);
+            code.push_str(&format!("    {field}: Option<Value>,\n"));
         }
-        code.push_str("    pub(crate) applied_identifier: Option<String>,\n");
+        code.push_str("    applied_identifier: Option<String>,\n");
         code.push_str("}\n\n");
+
+        code.push_str(&format!(
+            "#[allow(dead_code, clippy::wrong_self_convention)]\nimpl {fields_type} {{\n"
+        ));
+        for field_name in &field_names {
+            let field = escape_rust_keyword(field_name);
+            let map_method = escape_rust_keyword(&format!("map_{field_name}"));
+            code.push_str(&format!(
+                "    pub(crate) fn {field}(&self) -> Option<&Value> {{\n\
+                         self.{field}.as_ref()\n\
+                     }}\n\n\
+                     pub(crate) fn {map_method}(\n\
+                         mut self,\n\
+                         map: impl FnOnce(Option<Value>) -> Option<Value>,\n\
+                     ) -> Self {{\n\
+                         self.{field} = map(self.{field});\n\
+                         self\n\
+                     }}\n\n"
+            ));
+        }
+        code.push_str(
+            "    pub(crate) fn applied_identifier(&self) -> &Option<String> {\n\
+                     &self.applied_identifier\n\
+                 }\n\n",
+        );
+        code.push_str(&format!(
+            "    pub(crate) fn into_model(\n\
+                     self,\n\
+                     resource_id: &ResourceId,\n\
+                     supplement: crate::read_models_generated::{supplement_type},\n\
+                 ) -> ProviderResult<(Option<String>, crate::read_models_generated::{model_type})> {{\n"
+        ));
+        code.push_str("        let Self {\n");
+        for field_name in &field_names {
+            let field = escape_rust_keyword(field_name);
+            code.push_str(&format!("            {field},\n"));
+        }
+        code.push_str("            applied_identifier,\n        } = self;\n");
+        code.push_str(&format!(
+            "        let crate::read_models_generated::{supplement_type} {{\n"
+        ));
+        for attr in &supplemental {
+            let field = escape_rust_keyword(&attr.snake_name);
+            code.push_str(&format!("            {field},\n"));
+        }
+        if res.has_tags {
+            code.push_str("            tags,\n");
+        }
+        code.push_str("        } = supplement;\n");
+        code.push_str("        let _ = resource_id;\n");
+        code.push_str(&format!(
+            "        let model = crate::read_models_generated::{model_type} {{\n"
+        ));
+        for attr in &readable {
+            let field = escape_rust_keyword(&attr.snake_name);
+            if let Some(source) = model_sources.get(&attr.snake_name) {
+                let source = escape_rust_keyword(source);
+                match attr.read_presence {
+                    resource_defs::ReadPresence::Required => code.push_str(&format!(
+                        "            {field}: crate::read_model::require_read_value(resource_id, {source}.clone(), \"{}\")?,\n",
+                        attr.snake_name
+                    )),
+                    resource_defs::ReadPresence::Optional => code.push_str(&format!(
+                        "            {field}: {source}.clone(),\n"
+                    )),
+                }
+            } else {
+                code.push_str(&format!("            {field},\n"));
+            }
+        }
+        if res.has_tags {
+            code.push_str("            tags,\n");
+        }
+        code.push_str(
+            "        };\n\
+                     Ok((applied_identifier, model))\n\
+                 }\n\
+             }\n\n",
+        );
     }
 
     // Some typed SDK projections are unused when a managed read needs a
@@ -2816,7 +2979,14 @@ fn generate_provider_code(
         }
         let sdk_crate = sdk_crate_name(ns);
         let direct_fields = direct_read_fields(res, model, read_struct);
-        let extracted_field_names = extracted_read_field_names(res, &direct_fields);
+        let collected = collect_resource_attributes(res, model)
+            .unwrap_or_else(|error| panic!("codegen: {} read extractor: {error}", res.name));
+        let readable: Vec<&AttrInfo> = collected
+            .attrs
+            .iter()
+            .filter(|attr| !attr.is_write_only)
+            .collect();
+        let extracted_field_names = extracted_read_field_names(res, &direct_fields, &readable);
         let fields_type = read_fields_type_name(res.name);
 
         // Generate method
@@ -3338,6 +3508,19 @@ fn generate_read_models_code(
         let model_name = read_model_type_name(res.name);
         let (service, resource) = split_service_resource_snake(res.name);
         let config_fn = format!("{}_config", module_name(res.name));
+        let model_supplement = res.read_structure.and_then(|read_structure| {
+            let read_struct_id = format!("{}#{read_structure}", res.service_namespace);
+            let read_struct = model.get_structure(&read_struct_id)?;
+            let direct_fields = direct_read_fields(res, model, read_struct);
+            let extracted = extracted_read_field_names(res, &direct_fields, &readable);
+            let sources = read_model_field_sources(res, &extracted, &readable);
+            let supplemental = readable
+                .iter()
+                .filter(|attr| !sources.contains_key(&attr.snake_name))
+                .copied()
+                .collect::<Vec<_>>();
+            Some((read_model_supplement_type_name(res.name), supplemental))
+        });
 
         code.push_str(&format!(
             "/// Exhaustive canonical read state for `{}`.\n\
@@ -3356,6 +3539,26 @@ fn generate_read_models_code(
             code.push_str("    pub(crate) tags: Value,\n");
         }
         code.push_str("}\n\n");
+
+        if let Some((supplement_name, supplemental)) = &model_supplement {
+            code.push_str(&format!(
+                "/// Canonical fields for `{}` supplied by identifiers, side reads, or complex SDK projections.\n\
+                 pub(crate) struct {supplement_name} {{\n",
+                res.name
+            ));
+            for attr in supplemental {
+                let field = escape_rust_keyword(&attr.snake_name);
+                let field_type = match attr.read_presence {
+                    resource_defs::ReadPresence::Required => "Value",
+                    resource_defs::ReadPresence::Optional => "Option<Value>",
+                };
+                code.push_str(&format!("    pub(crate) {field}: {field_type},\n"));
+            }
+            if res.has_tags {
+                code.push_str("    pub(crate) tags: Value,\n");
+            }
+            code.push_str("}\n\n");
+        }
 
         code.push_str(&format!("impl sealed::Sealed for {model_name} {{}}\n\n"));
         code.push_str(&format!(
@@ -6204,6 +6407,7 @@ mod tests {
                   "type": "structure",
                   "members": {
                     "FlatOptions": { "target": "smithy.api#String", "traits": {} },
+                    "Options": { "target": "com.amazonaws.ec2#Options", "traits": {} },
                     "VpcId": { "target": "smithy.api#String", "traits": {} },
                     "PeerVpcId": { "target": "smithy.api#String", "traits": {} }
                   },
@@ -6215,6 +6419,7 @@ mod tests {
                     "RequesterVpcInfo": { "target": "com.amazonaws.ec2#VpcInfo", "traits": {} },
                     "AccepterVpcInfo": { "target": "com.amazonaws.ec2#VpcInfo", "traits": {} },
                     "FlatOptions": { "target": "com.amazonaws.ec2#Options", "traits": {} },
+                    "FooBar": { "target": "smithy.api#String", "traits": {} },
                     "Options": { "target": "com.amazonaws.ec2#Options", "traits": {} }
                   },
                   "traits": {}
@@ -6261,7 +6466,10 @@ mod tests {
             identifier: "",
             has_tags: false,
             type_overrides: vec![],
-            exclude_fields: vec![],
+            exclude_fields: ["VpcId", "PeerVpcId"]
+                .into_iter()
+                .filter(|field| *field != attr)
+                .collect(),
             create_only_overrides: vec![],
             enum_aliases: vec![],
             to_dsl_overrides: vec![],
@@ -7281,6 +7489,16 @@ mod tests {
         assert!(
             code.contains("cidr_block: Option<Value>"),
             "SDK-optional fields must remain typed options: {code}"
+        );
+        assert!(
+            !code.contains("pub(crate) cidr_block: Option<Value>"),
+            "extracted fields must be private so handwritten reads cannot destructure them: {code}"
+        );
+        assert!(
+            code.contains("pub(crate) fn into_model(")
+                && code.contains("let Self {")
+                && code.contains("let crate::read_models_generated::Ec2VpcReadModelSupplement"),
+            "generated code must consume every extracted and hand-supplied field: {code}"
         );
         assert!(
             !code.contains("attributes: &mut HashMap<String, Value>"),

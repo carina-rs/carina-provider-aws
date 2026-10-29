@@ -18,9 +18,8 @@ use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
 use crate::helpers::{require_enum_attr, require_string_attr, sdk_error_message};
 use crate::provider::CreateCompletion;
-use crate::provider_generated::Route53RecordSetReadFields;
-use crate::read_model::{found_managed_read, require_read_value};
-use crate::read_models_generated::Route53RecordSetReadModel;
+use crate::read_model::found_managed_read;
+use crate::read_models_generated::Route53RecordSetReadModelSupplement;
 use crate::resend_safety_generated::Route53Client;
 
 /// Composite identifier format: `hosted_zone_id|name|type`
@@ -304,32 +303,29 @@ impl AwsProvider {
             match scan_page_for_record(result.resource_record_sets(), &normalized_name, record_type)
             {
                 PageScan::Found(rrs) => {
-                    let Route53RecordSetReadFields {
-                        name,
-                        ttl,
-                        r#type,
-                        applied_identifier: _,
-                    } = Self::extract_route53_record_set_attributes(rrs);
-                    let name = match require_read_value(id, name, "name")? {
-                        Value::Concrete(ConcreteValue::String(name)) => {
-                            Value::Concrete(ConcreteValue::String(
-                                strip_trailing_dot(name.expose_plaintext()).into(),
-                            ))
-                        }
-                        value => value,
-                    };
-                    let model = Route53RecordSetReadModel {
-                        alias_target: alias_target_value(rrs),
-                        name,
-                        resource_records: resource_records_value(rrs),
-                        ttl,
-                        r#type: require_read_value(id, r#type, "type")?,
-                        // HostedZoneId is the request target, not a member of
-                        // ResourceRecordSet.
-                        hosted_zone_id: Value::Concrete(ConcreteValue::String(
-                            zone_id.to_string().into(),
-                        )),
-                    };
+                    let fields =
+                        Self::extract_route53_record_set_attributes(rrs).map_name(|name| {
+                            name.map(|value| match value {
+                                Value::Concrete(ConcreteValue::String(name)) => {
+                                    Value::Concrete(ConcreteValue::String(
+                                        strip_trailing_dot(name.expose_plaintext()).into(),
+                                    ))
+                                }
+                                value => value,
+                            })
+                        });
+                    let (_, model) = fields.into_model(
+                        id,
+                        Route53RecordSetReadModelSupplement {
+                            alias_target: alias_target_value(rrs),
+                            resource_records: resource_records_value(rrs),
+                            // HostedZoneId is the request target, not a member of
+                            // ResourceRecordSet.
+                            hosted_zone_id: Value::Concrete(ConcreteValue::String(
+                                zone_id.to_string().into(),
+                            )),
+                        },
+                    )?;
                     return found_managed_read(id, applied_identifier, model);
                 }
                 PageScan::StopNotFound => return Ok(ReadOutcome::not_found(id.clone())),

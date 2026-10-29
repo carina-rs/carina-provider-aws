@@ -7,9 +7,8 @@ use crate::aws_operation::ClientToken;
 use crate::error_helpers::api_error_with_meta;
 use crate::helpers::build_tag_specification_with_create_token;
 use crate::provider::{AwsCreateAttempt, Ec2TaggedResourceKind};
-use crate::provider_generated::Ec2InternetGatewayReadFields;
 use crate::read_model::{empty_map_value, found_managed_read, require_read_value};
-use crate::read_models_generated::Ec2InternetGatewayReadModel;
+use crate::read_models_generated::Ec2InternetGatewayReadModelSupplement;
 
 impl AwsProvider {
     /// Read an EC2 Internet Gateway
@@ -40,10 +39,7 @@ impl AwsProvider {
             })?;
 
         if let Some(igw) = result.internet_gateways().first() {
-            let Ec2InternetGatewayReadFields {
-                internet_gateway_id,
-                applied_identifier: _,
-            } = Self::extract_ec2_internet_gateway_attributes(igw);
+            let fields = Self::extract_ec2_internet_gateway_attributes(igw);
 
             // Store attached VPC ID (from Attachments, not a direct member)
             let vpc_id = igw
@@ -52,11 +48,13 @@ impl AwsProvider {
                 .and_then(|attachment| attachment.vpc_id())
                 .map(|vpc_id| Value::Concrete(ConcreteValue::String(vpc_id.to_string().into())));
 
-            let model = Ec2InternetGatewayReadModel {
-                vpc_id: require_read_value(id, vpc_id, "vpc_id")?,
-                internet_gateway_id,
-                tags: Self::ec2_tags_to_value(igw.tags()).unwrap_or_else(empty_map_value),
-            };
+            let (_, model) = fields.into_model(
+                id,
+                Ec2InternetGatewayReadModelSupplement {
+                    vpc_id: require_read_value(id, vpc_id, "vpc_id")?,
+                    tags: Self::ec2_tags_to_value(igw.tags()).unwrap_or_else(empty_map_value),
+                },
+            )?;
 
             found_managed_read(id, applied_identifier, model)
         } else {

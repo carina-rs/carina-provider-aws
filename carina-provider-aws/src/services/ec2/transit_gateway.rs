@@ -13,9 +13,8 @@ use crate::helpers::{
     optional_int_struct_field, optional_string_list_struct_field,
 };
 use crate::provider::{AwsCreateAttempt, Ec2TaggedResourceKind};
-use crate::provider_generated::Ec2TransitGatewayReadFields;
 use crate::read_model::{empty_map_value, found_managed_read};
-use crate::read_models_generated::Ec2TransitGatewayReadModel;
+use crate::read_models_generated::Ec2TransitGatewayReadModelSupplement;
 
 fn transit_gateway_create_poll_state(state: Option<&TransitGatewayState>) -> CreatePoll<()> {
     match state {
@@ -161,19 +160,14 @@ impl AwsProvider {
                 return Ok(ReadOutcome::not_found(id.clone()));
             }
 
-            let Ec2TransitGatewayReadFields {
-                description,
-                options,
-                transit_gateway_id,
-                applied_identifier: _,
-            } = Self::extract_ec2_transit_gateway_attributes(tgw);
+            let fields = Self::extract_ec2_transit_gateway_attributes(tgw);
 
-            let model = Ec2TransitGatewayReadModel {
-                description,
-                options,
-                transit_gateway_id,
-                tags: Self::ec2_tags_to_value(tgw.tags()).unwrap_or_else(empty_map_value),
-            };
+            let (_, model) = fields.into_model(
+                id,
+                Ec2TransitGatewayReadModelSupplement {
+                    tags: Self::ec2_tags_to_value(tgw.tags()).unwrap_or_else(empty_map_value),
+                },
+            )?;
 
             found_managed_read(id, applied_identifier, model)
         } else {
@@ -580,7 +574,7 @@ mod tests {
             .build();
         let fields = AwsProvider::extract_ec2_transit_gateway_attributes(&tgw);
 
-        let Some(Value::Concrete(ConcreteValue::Map(options))) = fields.options.as_ref() else {
+        let Some(Value::Concrete(ConcreteValue::Map(options))) = fields.options() else {
             panic!("expected nested options map");
         };
         assert_eq!(

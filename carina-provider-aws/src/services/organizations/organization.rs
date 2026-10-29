@@ -7,9 +7,8 @@ use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
 use crate::helpers::optional_enum_attr;
 use crate::provider::CreateCompletion;
-use crate::provider_generated::OrganizationsOrganizationReadFields;
 use crate::read_model::{ManagedReadModel, found_managed_read};
-use crate::read_models_generated::OrganizationsOrganizationReadModel;
+use crate::read_models_generated::OrganizationsOrganizationReadModelSupplement;
 
 impl AwsProvider {
     /// Read an Organizations organization
@@ -29,23 +28,9 @@ impl AwsProvider {
         {
             Ok(response) => {
                 if let Some(org) = response.organization() {
-                    let OrganizationsOrganizationReadFields {
-                        arn,
-                        feature_set,
-                        id: organization_id,
-                        master_account_arn,
-                        master_account_email,
-                        master_account_id,
-                        applied_identifier: _,
-                    } = Self::extract_organizations_organization_attributes(org);
-                    let model = OrganizationsOrganizationReadModel {
-                        feature_set,
-                        arn,
-                        id: organization_id,
-                        master_account_arn,
-                        master_account_email,
-                        master_account_id,
-                    };
+                    let fields = Self::extract_organizations_organization_attributes(org);
+                    let (_, model) =
+                        fields.into_model(id, OrganizationsOrganizationReadModelSupplement {})?;
                     found_managed_read(id, applied_identifier, model)
                 } else {
                     Ok(ReadOutcome::not_found(id.clone()))
@@ -82,15 +67,11 @@ impl AwsProvider {
         })?;
 
         if let Some(org) = response.organization() {
-            let OrganizationsOrganizationReadFields {
-                arn,
-                feature_set,
-                id,
-                master_account_arn,
-                master_account_email,
-                master_account_id,
-                applied_identifier,
-            } = Self::extract_organizations_organization_attributes(org);
+            let fields = Self::extract_organizations_organization_attributes(org);
+            let (applied_identifier, model) = fields.into_model(
+                &resource.id,
+                OrganizationsOrganizationReadModelSupplement {},
+            )?;
             let org_id = applied_identifier.ok_or_else(|| {
                     ProviderError::api_error(
                         "organizations.CreateOrganization returned an organization with an empty provider identifier",
@@ -98,15 +79,7 @@ impl AwsProvider {
                     .for_resource(resource.id.clone())
                     .with_operation("organizations.CreateOrganization")
                 })?;
-            let attributes = OrganizationsOrganizationReadModel {
-                feature_set,
-                arn,
-                id,
-                master_account_arn,
-                master_account_email,
-                master_account_id,
-            }
-            .into_attributes()?;
+            let attributes = model.into_attributes()?;
             let identifier = crate::helpers::applied_identifier(
                 &resource.id,
                 "organizations.CreateOrganization",

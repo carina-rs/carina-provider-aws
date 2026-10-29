@@ -10,9 +10,8 @@ use crate::helpers::{
     build_tag_specification_with_create_token, optional_enum_attr, require_enum_attr,
 };
 use crate::provider::{AwsCreateAttempt, Ec2TaggedResourceKind};
-use crate::provider_generated::Ec2VpnGatewayReadFields;
-use crate::read_model::{empty_map_value, found_managed_read, require_read_value};
-use crate::read_models_generated::Ec2VpnGatewayReadModel;
+use crate::read_model::{empty_map_value, found_managed_read};
+use crate::read_models_generated::Ec2VpnGatewayReadModelSupplement;
 
 impl AwsProvider {
     /// Read an EC2 VPN Gateway
@@ -47,21 +46,14 @@ impl AwsProvider {
                 return Ok(ReadOutcome::not_found(id.clone()));
             }
 
-            let Ec2VpnGatewayReadFields {
-                amazon_side_asn,
-                availability_zone,
-                r#type,
-                vpn_gateway_id,
-                applied_identifier: _,
-            } = Self::extract_ec2_vpn_gateway_attributes(vgw);
+            let fields = Self::extract_ec2_vpn_gateway_attributes(vgw);
 
-            let model = Ec2VpnGatewayReadModel {
-                amazon_side_asn,
-                availability_zone,
-                r#type: require_read_value(id, r#type, "type")?,
-                vpn_gateway_id,
-                tags: Self::ec2_tags_to_value(vgw.tags()).unwrap_or_else(empty_map_value),
-            };
+            let (_, model) = fields.into_model(
+                id,
+                Ec2VpnGatewayReadModelSupplement {
+                    tags: Self::ec2_tags_to_value(vgw.tags()).unwrap_or_else(empty_map_value),
+                },
+            )?;
 
             found_managed_read(id, applied_identifier, model)
         } else {

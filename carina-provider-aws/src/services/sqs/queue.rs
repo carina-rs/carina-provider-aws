@@ -296,10 +296,10 @@ pub(crate) fn validate_sqs_queue_inputs<S>(resource: &Resource<S>) -> ProviderRe
         return Ok(());
     }
 
-    if resource
-        .get_attr("kms_data_key_reuse_period_seconds")
-        .is_some()
-        && resource.get_attr("kms_master_key_id").is_none()
+    if matches!(
+        resource.get_attr("kms_data_key_reuse_period_seconds"),
+        Some(Value::Concrete(_))
+    ) && resource.get_attr("kms_master_key_id").is_none()
     {
         return Err(ProviderError::invalid_input(
             "sqs.Queue attribute kms_data_key_reuse_period_seconds requires kms_master_key_id",
@@ -307,20 +307,26 @@ pub(crate) fn validate_sqs_queue_inputs<S>(resource: &Resource<S>) -> ProviderRe
         .for_resource(resource.id.clone()));
     }
 
-    let fifo = matches!(
+    let fifo_is_definitively_standard = matches!(
         resource.get_attr("fifo_queue"),
-        Some(Value::Concrete(ConcreteValue::Bool(true)))
+        None | Some(Value::Concrete(ConcreteValue::Bool(false)))
     );
-    if !fifo {
+    if fifo_is_definitively_standard {
         let content_dedup_enabled = matches!(
             resource.get_attr("content_based_deduplication"),
             Some(Value::Concrete(ConcreteValue::Bool(true)))
         );
         let unsupported = if content_dedup_enabled {
             Some("content_based_deduplication")
-        } else if resource.get_attr("deduplication_scope").is_some() {
+        } else if matches!(
+            resource.get_attr("deduplication_scope"),
+            Some(Value::Concrete(_))
+        ) {
             Some("deduplication_scope")
-        } else if resource.get_attr("fifo_throughput_limit").is_some() {
+        } else if matches!(
+            resource.get_attr("fifo_throughput_limit"),
+            Some(Value::Concrete(_))
+        ) {
             Some("fifo_throughput_limit")
         } else {
             None
@@ -508,7 +514,11 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|error| {
-                api_error_with_meta("Failed to list SQS queue tags", error).for_resource(id.clone())
+                api_error_with_meta(
+                    "ListQueueTags failed; ensure sqs:ListQueueTags is allowed",
+                    error,
+                )
+                .for_resource(id.clone())
             })?;
         let mut tags = IndexMap::new();
         if let Some(returned_tags) = tags_output.tags() {
@@ -601,13 +611,11 @@ impl AwsProvider {
                 &QueueAttributeName::KmsDataKeyReusePeriodSeconds,
                 AttrKind::Int,
             ),
-            sqs_managed_sse_enabled: required_queue_attribute(
-                id,
+            sqs_managed_sse_enabled: queue_attribute(
                 attributes,
-                "sqs_managed_sse_enabled",
                 &QueueAttributeName::SqsManagedSseEnabled,
                 AttrKind::Bool,
-            )?,
+            ),
             queue_arn: required_queue_attribute(
                 id,
                 attributes,
@@ -615,27 +623,21 @@ impl AwsProvider {
                 &QueueAttributeName::QueueArn,
                 AttrKind::String,
             )?,
-            approximate_number_of_messages: required_queue_attribute(
-                id,
+            approximate_number_of_messages: queue_attribute(
                 attributes,
-                "approximate_number_of_messages",
                 &QueueAttributeName::ApproximateNumberOfMessages,
                 AttrKind::Int,
-            )?,
-            approximate_number_of_messages_delayed: required_queue_attribute(
-                id,
+            ),
+            approximate_number_of_messages_delayed: queue_attribute(
                 attributes,
-                "approximate_number_of_messages_delayed",
                 &QueueAttributeName::ApproximateNumberOfMessagesDelayed,
                 AttrKind::Int,
-            )?,
-            approximate_number_of_messages_not_visible: required_queue_attribute(
-                id,
+            ),
+            approximate_number_of_messages_not_visible: queue_attribute(
                 attributes,
-                "approximate_number_of_messages_not_visible",
                 &QueueAttributeName::ApproximateNumberOfMessagesNotVisible,
                 AttrKind::Int,
-            )?,
+            ),
             created_timestamp: required_queue_attribute(
                 id,
                 attributes,
@@ -882,6 +884,63 @@ fn resource_tags_map(resource: &Resource<impl Sized>) -> Option<HashMap<String, 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use carina_core::resource::{DeferredValue, UnknownReason};
+
+    fn queue_resource() -> Resource {
+        Resource::with_provider("aws", "sqs.Queue", "test", None)
+    }
+
+    fn unknown() -> Value {
+        Value::Deferred(DeferredValue::Unknown(UnknownReason::ForValue))
+    }
+
+    #[test]
+    fn unresolved_fifo_queue_defers_fifo_only_validation() {
+        let mut resource = queue_resource();
+        resource.set_attr("fifo_queue", unknown());
+        resource.set_attr(
+            "deduplication_scope",
+            Value::Concrete(ConcreteValue::String("messageGroup".into())),
+        );
+
+        validate_sqs_queue_inputs(&resource)
+            .expect("an unresolved fifo_queue value must not be treated as false");
+    }
+
+    #[test]
+    fn unresolved_fifo_only_value_is_not_rejected_for_a_standard_queue() {
+        let mut resource = queue_resource();
+        resource.set_attr("fifo_queue", Value::Concrete(ConcreteValue::Bool(false)));
+        resource.set_attr(
+            "deduplication_scope",
+            Value::resource_ref("upstream", "deduplication_scope", vec![]),
+        );
+
+        validate_sqs_queue_inputs(&resource)
+            .expect("a deferred FIFO-only value must wait for resolution");
+    }
+
+    #[test]
+    fn unresolved_kms_key_is_not_treated_as_absent() {
+        let mut resource = queue_resource();
+        resource.set_attr(
+            "kms_data_key_reuse_period_seconds",
+            Value::Concrete(ConcreteValue::Int(300)),
+        );
+        resource.set_attr("kms_master_key_id", unknown());
+
+        validate_sqs_queue_inputs(&resource)
+            .expect("an unresolved KMS key is present but not yet decidable");
+    }
+
+    #[test]
+    fn unresolved_kms_reuse_period_defers_missing_key_validation() {
+        let mut resource = queue_resource();
+        resource.set_attr("kms_data_key_reuse_period_seconds", unknown());
+
+        validate_sqs_queue_inputs(&resource)
+            .expect("an unresolved reuse period must wait for resolution");
+    }
 
     #[test]
     #[should_panic(

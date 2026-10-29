@@ -12,9 +12,8 @@ use crate::helpers::{
     send_aws_operation_with_token,
 };
 use crate::provider::{AwsCreateAttempt, Ec2TaggedResourceKind};
-use crate::provider_generated::Ec2FlowLogReadFields;
 use crate::read_model::{empty_map_value, found_managed_read, require_read_value};
-use crate::read_models_generated::Ec2FlowLogReadModel;
+use crate::read_models_generated::Ec2FlowLogReadModelSupplement;
 
 /// Token state for one CreateFlowLogs request.
 ///
@@ -138,17 +137,7 @@ impl AwsProvider {
             })?;
 
         if let Some(fl) = result.flow_logs().first() {
-            let Ec2FlowLogReadFields {
-                deliver_logs_permission_arn,
-                flow_log_id,
-                log_destination,
-                log_destination_type,
-                log_format,
-                log_group_name,
-                max_aggregation_interval,
-                traffic_type,
-                applied_identifier: _,
-            } = Self::extract_ec2_flow_log_attributes(fl);
+            let fields = Self::extract_ec2_flow_log_attributes(fl);
 
             // A single CreateFlowLogs request can create one flow log per
             // requested resource. Preserve the complete set under one provider
@@ -183,19 +172,14 @@ impl AwsProvider {
                 )))
             });
 
-            let model = Ec2FlowLogReadModel {
-                deliver_logs_permission_arn,
-                log_destination,
-                log_destination_type,
-                log_format,
-                log_group_name,
-                max_aggregation_interval,
-                resource_ids,
-                resource_type: require_read_value(id, resource_type, "resource_type")?,
-                traffic_type,
-                flow_log_id,
-                tags: Self::ec2_tags_to_value(fl.tags()).unwrap_or_else(empty_map_value),
-            };
+            let (_, model) = fields.into_model(
+                id,
+                Ec2FlowLogReadModelSupplement {
+                    resource_ids,
+                    resource_type: require_read_value(id, resource_type, "resource_type")?,
+                    tags: Self::ec2_tags_to_value(fl.tags()).unwrap_or_else(empty_map_value),
+                },
+            )?;
 
             found_managed_read(id, applied_identifier, model)
         } else {

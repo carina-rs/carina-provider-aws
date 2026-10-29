@@ -13,8 +13,7 @@ use tokio::time::sleep;
 
 use carina_aws_types::SendOutcome;
 use carina_core::provider::{
-    AppliedIdentifier, AppliedState, PatchOp, ProviderError, ProviderResult, ReadOutcome,
-    UpdatePatch,
+    AppliedIdentifier, PatchOp, ProviderError, ProviderResult, UpdatePatch,
 };
 use carina_core::resource::{ConcreteValue, EnumAttrError, Resource, ResourceId, State, Value};
 use carina_core::schema::ResourceSchema;
@@ -40,20 +39,6 @@ pub(crate) fn applied_identifier(
         .for_resource(id.clone())
         .with_operation(operation)
     })
-}
-
-/// Build the present branch of a managed read from its already validated
-/// provider identifier.
-pub(crate) fn found_read(
-    id: &ResourceId,
-    identifier: &AppliedIdentifier,
-    attributes: std::collections::HashMap<String, Value>,
-) -> ReadOutcome {
-    ReadOutcome::found(AppliedState::from_identifier(
-        id.clone(),
-        identifier.clone(),
-        attributes,
-    ))
 }
 
 /// Borrow a `Value` as `&str` if it is a concrete string, otherwise `None`.

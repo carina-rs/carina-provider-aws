@@ -9,9 +9,8 @@ use crate::helpers::{
     build_tag_specification_with_create_token, require_string_attr, send_aws_operation_with_token,
 };
 use crate::provider::{AwsCreateAttempt, Ec2TaggedResourceKind};
-use crate::provider_generated::Ec2RouteTableReadFields;
-use crate::read_model::{empty_map_value, found_managed_read, require_read_value};
-use crate::read_models_generated::Ec2RouteTableReadModel;
+use crate::read_model::{empty_map_value, found_managed_read};
+use crate::read_models_generated::Ec2RouteTableReadModelSupplement;
 
 impl AwsProvider {
     /// Read an EC2 Route Table
@@ -41,17 +40,14 @@ impl AwsProvider {
             })?;
 
         if let Some(rt) = result.route_tables().first() {
-            let Ec2RouteTableReadFields {
-                route_table_id,
-                vpc_id,
-                applied_identifier: _,
-            } = Self::extract_ec2_route_table_attributes(rt);
+            let fields = Self::extract_ec2_route_table_attributes(rt);
 
-            let model = Ec2RouteTableReadModel {
-                vpc_id: require_read_value(id, vpc_id, "vpc_id")?,
-                route_table_id,
-                tags: Self::ec2_tags_to_value(rt.tags()).unwrap_or_else(empty_map_value),
-            };
+            let (_, model) = fields.into_model(
+                id,
+                Ec2RouteTableReadModelSupplement {
+                    tags: Self::ec2_tags_to_value(rt.tags()).unwrap_or_else(empty_map_value),
+                },
+            )?;
 
             found_managed_read(id, applied_identifier, model)
         } else {

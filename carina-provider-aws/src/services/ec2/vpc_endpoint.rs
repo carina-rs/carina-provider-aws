@@ -11,9 +11,8 @@ use crate::helpers::{
     optional_string_attr, require_string_attr, retry_aws_operation_with_token,
 };
 use crate::provider::{AwsCreateAttempt, Ec2TaggedResourceKind};
-use crate::provider_generated::Ec2VpcEndpointReadFields;
-use crate::read_model::{empty_map_value, found_managed_read, require_read_value};
-use crate::read_models_generated::Ec2VpcEndpointReadModel;
+use crate::read_model::{empty_map_value, found_managed_read};
+use crate::read_models_generated::Ec2VpcEndpointReadModelSupplement;
 
 impl AwsProvider {
     /// Read an EC2 VPC Endpoint
@@ -41,45 +40,30 @@ impl AwsProvider {
                 return Ok(ReadOutcome::not_found(id.clone()));
             }
 
-            let Ec2VpcEndpointReadFields {
-                policy_document,
-                private_dns_enabled,
-                resource_configuration_arn,
-                route_table_ids,
-                security_group_ids,
-                service_name,
-                service_network_arn,
-                service_region,
-                subnet_ids,
-                vpc_endpoint_id,
-                vpc_endpoint_type,
-                vpc_id,
-                applied_identifier: _,
-            } = Self::extract_ec2_vpc_endpoint_attributes(endpoint);
-            let policy_document = policy_document.map(|value| match value {
-                Value::Concrete(ConcreteValue::String(raw)) => {
-                    crate::services::iam::role::iam_policy_json_to_value(raw.expose_plaintext())
-                        .unwrap_or(Value::Concrete(ConcreteValue::String(raw)))
-                }
-                value => value,
-            });
+            let fields = Self::extract_ec2_vpc_endpoint_attributes(endpoint).map_policy_document(
+                |policy_document| {
+                    policy_document.map(|value| match value {
+                        Value::Concrete(ConcreteValue::String(raw)) => {
+                            crate::services::iam::role::iam_policy_json_to_value(
+                                raw.expose_plaintext(),
+                            )
+                            .unwrap_or(Value::Concrete(ConcreteValue::String(raw)))
+                        }
+                        value => value,
+                    })
+                },
+            );
             let empty_list = || Value::Concrete(ConcreteValue::List(Vec::new()));
-
-            let model = Ec2VpcEndpointReadModel {
-                policy_document,
-                private_dns_enabled,
-                resource_configuration_arn,
-                route_table_ids: route_table_ids.unwrap_or_else(empty_list),
-                security_group_ids: security_group_ids.unwrap_or_else(empty_list),
-                service_name: require_read_value(id, service_name, "service_name")?,
-                service_network_arn,
-                service_region,
-                subnet_ids: subnet_ids.unwrap_or_else(empty_list),
-                vpc_endpoint_type,
-                vpc_id: require_read_value(id, vpc_id, "vpc_id")?,
-                vpc_endpoint_id,
-                tags: Self::ec2_tags_to_value(endpoint.tags()).unwrap_or_else(empty_map_value),
-            };
+            let fields = fields
+                .map_route_table_ids(|value| Some(value.unwrap_or_else(empty_list)))
+                .map_security_group_ids(|value| Some(value.unwrap_or_else(empty_list)))
+                .map_subnet_ids(|value| Some(value.unwrap_or_else(empty_list)));
+            let (_, model) = fields.into_model(
+                id,
+                Ec2VpcEndpointReadModelSupplement {
+                    tags: Self::ec2_tags_to_value(endpoint.tags()).unwrap_or_else(empty_map_value),
+                },
+            )?;
 
             found_managed_read(id, applied_identifier, model)
         } else {

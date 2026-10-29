@@ -84,22 +84,22 @@ fn test_extract_ec2_vpc_attributes() {
         .instance_tenancy(aws_sdk_ec2::types::Tenancy::Default)
         .build();
     let fields = AwsProvider::extract_ec2_vpc_attributes(&vpc);
-    let identifier = fields.applied_identifier.clone();
+    let identifier = fields.applied_identifier().clone();
     assert_eq!(identifier, Some("vpc-12345678".to_string()));
     assert_eq!(
-        fields.vpc_id.as_ref(),
+        fields.vpc_id(),
         Some(&Value::Concrete(ConcreteValue::String(
             "vpc-12345678".to_string().into()
         )))
     );
     assert_eq!(
-        fields.cidr_block.as_ref(),
+        fields.cidr_block(),
         Some(&Value::Concrete(ConcreteValue::String(
             "10.0.0.0/16".to_string().into()
         )))
     );
     assert_eq!(
-        fields.instance_tenancy.as_ref(),
+        fields.instance_tenancy(),
         Some(&Value::Concrete(ConcreteValue::String(
             "default".to_string().into()
         )))
@@ -110,9 +110,9 @@ fn test_extract_ec2_vpc_attributes() {
 fn test_extract_ec2_vpc_attributes_minimal() {
     let vpc = aws_sdk_ec2::types::Vpc::builder().build();
     let fields = AwsProvider::extract_ec2_vpc_attributes(&vpc);
-    let identifier = fields.applied_identifier.clone();
+    let identifier = fields.applied_identifier().clone();
     assert_eq!(identifier, None);
-    assert!(fields.applied_identifier.is_none());
+    assert!(fields.applied_identifier().is_none());
 }
 
 // --- extract_ec2_subnet_attributes tests ---
@@ -127,34 +127,34 @@ fn test_extract_ec2_subnet_attributes() {
         .map_public_ip_on_launch(false)
         .build();
     let fields = AwsProvider::extract_ec2_subnet_attributes(&subnet);
-    let identifier = fields.applied_identifier.clone();
+    let identifier = fields.applied_identifier().clone();
     assert_eq!(identifier, Some("subnet-12345678".to_string()));
     assert_eq!(
-        fields.subnet_id.as_ref(),
+        fields.subnet_id(),
         Some(&Value::Concrete(ConcreteValue::String(
             "subnet-12345678".to_string().into()
         )))
     );
     assert_eq!(
-        fields.vpc_id.as_ref(),
+        fields.vpc_id(),
         Some(&Value::Concrete(ConcreteValue::String(
             "vpc-12345678".to_string().into()
         )))
     );
     assert_eq!(
-        fields.cidr_block.as_ref(),
+        fields.cidr_block(),
         Some(&Value::Concrete(ConcreteValue::String(
             "10.0.1.0/24".to_string().into()
         )))
     );
     assert_eq!(
-        fields.availability_zone.as_ref(),
+        fields.availability_zone(),
         Some(&Value::Concrete(ConcreteValue::String(
             "ap-northeast-1a".to_string().into()
         )))
     );
     assert_eq!(
-        fields.map_public_ip_on_launch.as_ref(),
+        fields.map_public_ip_on_launch(),
         Some(&Value::Concrete(ConcreteValue::Bool(false)))
     );
 }
@@ -163,7 +163,7 @@ fn test_extract_ec2_subnet_attributes() {
 fn test_extract_ec2_subnet_attributes_minimal() {
     let subnet = aws_sdk_ec2::types::Subnet::builder().build();
     let fields = AwsProvider::extract_ec2_subnet_attributes(&subnet);
-    let identifier = fields.applied_identifier.clone();
+    let identifier = fields.applied_identifier().clone();
     assert_eq!(identifier, None);
 }
 
@@ -185,13 +185,12 @@ fn test_extract_ec2_subnet_attributes_with_private_dns_name_options() {
         .build();
 
     let fields = AwsProvider::extract_ec2_subnet_attributes(&subnet);
-    let identifier = fields.applied_identifier.clone();
+    let identifier = fields.applied_identifier().clone();
     assert_eq!(identifier, Some("subnet-12345678".to_string()));
 
     // Verify the struct is extracted as a Value::Map
     let dns_value = fields
-        .private_dns_name_options_on_launch
-        .as_ref()
+        .private_dns_name_options_on_launch()
         .expect("private_dns_name_options_on_launch should be present");
 
     if let Value::Concrete(ConcreteValue::Map(fields)) = dns_value {
@@ -225,10 +224,10 @@ fn test_extract_ec2_internet_gateway_attributes() {
         .internet_gateway_id("igw-12345678")
         .build();
     let fields = AwsProvider::extract_ec2_internet_gateway_attributes(&igw);
-    let identifier = fields.applied_identifier.clone();
+    let identifier = fields.applied_identifier().clone();
     assert_eq!(identifier, Some("igw-12345678".to_string()));
     assert_eq!(
-        fields.internet_gateway_id.as_ref(),
+        fields.internet_gateway_id(),
         Some(&Value::Concrete(ConcreteValue::String(
             "igw-12345678".to_string().into()
         )))
@@ -239,9 +238,9 @@ fn test_extract_ec2_internet_gateway_attributes() {
 fn test_extract_ec2_internet_gateway_attributes_minimal() {
     let igw = aws_sdk_ec2::types::InternetGateway::builder().build();
     let fields = AwsProvider::extract_ec2_internet_gateway_attributes(&igw);
-    let identifier = fields.applied_identifier.clone();
+    let identifier = fields.applied_identifier().clone();
     assert_eq!(identifier, None);
-    assert!(fields.applied_identifier.is_none());
+    assert!(fields.applied_identifier().is_none());
 }
 
 // --- extract_ec2_route_table_attributes tests ---
@@ -253,16 +252,16 @@ fn test_extract_ec2_route_table_attributes() {
         .vpc_id("vpc-12345678")
         .build();
     let fields = AwsProvider::extract_ec2_route_table_attributes(&rt);
-    let identifier = fields.applied_identifier.clone();
+    let identifier = fields.applied_identifier().clone();
     assert_eq!(identifier, Some("rtb-12345678".to_string()));
     assert_eq!(
-        fields.route_table_id.as_ref(),
+        fields.route_table_id(),
         Some(&Value::Concrete(ConcreteValue::String(
             "rtb-12345678".to_string().into()
         )))
     );
     assert_eq!(
-        fields.vpc_id.as_ref(),
+        fields.vpc_id(),
         Some(&Value::Concrete(ConcreteValue::String(
             "vpc-12345678".to_string().into()
         )))
@@ -273,7 +272,7 @@ fn test_extract_ec2_route_table_attributes() {
 fn test_extract_ec2_route_table_attributes_minimal() {
     let rt = aws_sdk_ec2::types::RouteTable::builder().build();
     let fields = AwsProvider::extract_ec2_route_table_attributes(&rt);
-    let identifier = fields.applied_identifier.clone();
+    let identifier = fields.applied_identifier().clone();
     assert_eq!(identifier, None);
 }
 
@@ -286,17 +285,17 @@ fn test_extract_ec2_route_attributes() {
         .gateway_id("igw-12345678")
         .build();
     let fields = AwsProvider::extract_ec2_route_attributes(&route);
-    let identifier = fields.applied_identifier.clone();
+    let identifier = fields.applied_identifier().clone();
     // Route extraction returns None (no single identifier)
     assert_eq!(identifier, None);
     assert_eq!(
-        fields.destination_cidr_block.as_ref(),
+        fields.destination_cidr_block(),
         Some(&Value::Concrete(ConcreteValue::String(
             "0.0.0.0/0".to_string().into()
         )))
     );
     assert_eq!(
-        fields.gateway_id.as_ref(),
+        fields.gateway_id(),
         Some(&Value::Concrete(ConcreteValue::String(
             "igw-12345678".to_string().into()
         )))
@@ -311,13 +310,13 @@ fn test_extract_ec2_route_attributes_with_nat_gateway() {
         .build();
     let fields = AwsProvider::extract_ec2_route_attributes(&route);
     assert_eq!(
-        fields.destination_cidr_block.as_ref(),
+        fields.destination_cidr_block(),
         Some(&Value::Concrete(ConcreteValue::String(
             "10.0.0.0/8".to_string().into()
         )))
     );
     assert_eq!(
-        fields.nat_gateway_id.as_ref(),
+        fields.nat_gateway_id(),
         Some(&Value::Concrete(ConcreteValue::String(
             "nat-12345678".to_string().into()
         )))
@@ -333,7 +332,7 @@ fn test_extract_ec2_route_attributes_ignores_unsupported() {
         .build();
     let fields = AwsProvider::extract_ec2_route_attributes(&route);
     assert_eq!(
-        fields.destination_cidr_block.as_ref(),
+        fields.destination_cidr_block(),
         Some(&Value::Concrete(ConcreteValue::String(
             "172.16.0.0/12".to_string().into()
         )))
@@ -351,28 +350,28 @@ fn test_extract_ec2_security_group_attributes() {
         .vpc_id("vpc-12345678")
         .build();
     let fields = AwsProvider::extract_ec2_security_group_attributes(&sg);
-    let identifier = fields.applied_identifier.clone();
+    let identifier = fields.applied_identifier().clone();
     assert_eq!(identifier, Some("sg-12345678".to_string()));
     assert_eq!(
-        fields.group_id.as_ref(),
+        fields.group_id(),
         Some(&Value::Concrete(ConcreteValue::String(
             "sg-12345678".to_string().into()
         )))
     );
     assert_eq!(
-        fields.group_name.as_ref(),
+        fields.group_name(),
         Some(&Value::Concrete(ConcreteValue::String(
             "test-sg".to_string().into()
         )))
     );
     assert_eq!(
-        fields.description.as_ref(),
+        fields.description(),
         Some(&Value::Concrete(ConcreteValue::String(
             "Test security group".to_string().into()
         )))
     );
     assert_eq!(
-        fields.vpc_id.as_ref(),
+        fields.vpc_id(),
         Some(&Value::Concrete(ConcreteValue::String(
             "vpc-12345678".to_string().into()
         )))
@@ -383,7 +382,7 @@ fn test_extract_ec2_security_group_attributes() {
 fn test_extract_ec2_security_group_attributes_minimal() {
     let sg = aws_sdk_ec2::types::SecurityGroup::builder().build();
     let fields = AwsProvider::extract_ec2_security_group_attributes(&sg);
-    let identifier = fields.applied_identifier.clone();
+    let identifier = fields.applied_identifier().clone();
     assert_eq!(identifier, None);
 }
 
@@ -400,36 +399,36 @@ fn test_extract_ec2_security_group_ingress_attributes() {
         .description("HTTPS")
         .build();
     let fields = AwsProvider::extract_ec2_security_group_ingress_attributes(&rule);
-    let identifier = fields.applied_identifier.clone();
+    let identifier = fields.applied_identifier().clone();
     assert_eq!(identifier, Some("sgr-12345678".to_string()));
     assert_eq!(
-        fields.security_group_rule_id.as_ref(),
+        fields.security_group_rule_id(),
         Some(&Value::Concrete(ConcreteValue::String(
             "sgr-12345678".to_string().into()
         )))
     );
     assert_eq!(
-        fields.group_id.as_ref(),
+        fields.group_id(),
         Some(&Value::Concrete(ConcreteValue::String(
             "sg-12345678".to_string().into()
         )))
     );
     assert_eq!(
-        fields.ip_protocol.as_ref(),
+        fields.ip_protocol(),
         Some(&Value::Concrete(ConcreteValue::String(
             "tcp".to_string().into()
         )))
     );
     assert_eq!(
-        fields.from_port.as_ref(),
+        fields.from_port(),
         Some(&Value::Concrete(ConcreteValue::Int(443)))
     );
     assert_eq!(
-        fields.to_port.as_ref(),
+        fields.to_port(),
         Some(&Value::Concrete(ConcreteValue::Int(443)))
     );
     assert_eq!(
-        fields.description.as_ref(),
+        fields.description(),
         Some(&Value::Concrete(ConcreteValue::String(
             "HTTPS".to_string().into()
         )))
@@ -448,7 +447,7 @@ fn test_extract_ec2_security_group_ingress_attributes_with_prefix_list() {
         .build();
     let fields = AwsProvider::extract_ec2_security_group_ingress_attributes(&rule);
     assert_eq!(
-        fields.source_prefix_list_id.as_ref(),
+        fields.source_prefix_list_id(),
         Some(&Value::Concrete(ConcreteValue::String(
             "pl-12345678".to_string().into()
         )))
@@ -467,26 +466,26 @@ fn test_extract_ec2_security_group_egress_attributes() {
         .to_port(0)
         .build();
     let fields = AwsProvider::extract_ec2_security_group_egress_attributes(&rule);
-    let identifier = fields.applied_identifier.clone();
+    let identifier = fields.applied_identifier().clone();
     assert_eq!(identifier, Some("sgr-87654321".to_string()));
     assert_eq!(
-        fields.group_id.as_ref(),
+        fields.group_id(),
         Some(&Value::Concrete(ConcreteValue::String(
             "sg-12345678".to_string().into()
         )))
     );
     assert_eq!(
-        fields.ip_protocol.as_ref(),
+        fields.ip_protocol(),
         Some(&Value::Concrete(ConcreteValue::String(
             "-1".to_string().into()
         )))
     );
     assert_eq!(
-        fields.from_port.as_ref(),
+        fields.from_port(),
         Some(&Value::Concrete(ConcreteValue::Int(0)))
     );
     assert_eq!(
-        fields.to_port.as_ref(),
+        fields.to_port(),
         Some(&Value::Concrete(ConcreteValue::Int(0)))
     );
 }
@@ -503,7 +502,7 @@ fn test_extract_ec2_security_group_egress_attributes_with_prefix_list() {
         .build();
     let fields = AwsProvider::extract_ec2_security_group_egress_attributes(&rule);
     assert_eq!(
-        fields.destination_prefix_list_id.as_ref(),
+        fields.destination_prefix_list_id(),
         Some(&Value::Concrete(ConcreteValue::String(
             "pl-87654321".to_string().into()
         )))
@@ -522,7 +521,7 @@ fn test_extract_ec2_security_group_egress_attributes_with_ipv6() {
         .build();
     let fields = AwsProvider::extract_ec2_security_group_egress_attributes(&rule);
     assert_eq!(
-        fields.cidr_ipv6.as_ref(),
+        fields.cidr_ipv6(),
         Some(&Value::Concrete(ConcreteValue::String(
             "::/0".to_string().into()
         )))
@@ -674,10 +673,10 @@ fn test_extract_ec2_subnet_attributes_map_public_ip_true() {
         .map_public_ip_on_launch(true)
         .build();
     let fields = AwsProvider::extract_ec2_subnet_attributes(&subnet);
-    let identifier = fields.applied_identifier.clone();
+    let identifier = fields.applied_identifier().clone();
     assert_eq!(identifier, Some("subnet-12345678".to_string()));
     assert_eq!(
-        fields.map_public_ip_on_launch.as_ref(),
+        fields.map_public_ip_on_launch(),
         Some(&Value::Concrete(ConcreteValue::Bool(true)))
     );
 }
@@ -782,22 +781,22 @@ fn test_extract_ec2_eip_attributes() {
         .public_ip("203.0.113.1")
         .build();
     let fields = AwsProvider::extract_ec2_eip_attributes(&addr);
-    let identifier = fields.applied_identifier.clone();
+    let identifier = fields.applied_identifier().clone();
     assert_eq!(identifier, Some("eipalloc-12345678".to_string()));
     assert_eq!(
-        fields.allocation_id.as_ref(),
+        fields.allocation_id(),
         Some(&Value::Concrete(ConcreteValue::String(
             "eipalloc-12345678".to_string().into()
         )))
     );
     assert_eq!(
-        fields.domain.as_ref(),
+        fields.domain(),
         Some(&Value::Concrete(ConcreteValue::String(
             "vpc".to_string().into()
         )))
     );
     assert_eq!(
-        fields.public_ip.as_ref(),
+        fields.public_ip(),
         Some(&Value::Concrete(ConcreteValue::String(
             "203.0.113.1".to_string().into()
         )))
@@ -808,9 +807,9 @@ fn test_extract_ec2_eip_attributes() {
 fn test_extract_ec2_eip_attributes_minimal() {
     let addr = aws_sdk_ec2::types::Address::builder().build();
     let fields = AwsProvider::extract_ec2_eip_attributes(&addr);
-    let identifier = fields.applied_identifier.clone();
+    let identifier = fields.applied_identifier().clone();
     assert_eq!(identifier, None);
-    assert!(fields.applied_identifier.is_none());
+    assert!(fields.applied_identifier().is_none());
 }
 
 // --- extract_ec2_nat_gateway_attributes tests ---
@@ -827,28 +826,28 @@ fn test_extract_ec2_nat_gateway_attributes() {
         .nat_gateway_addresses(nat_addr)
         .build();
     let fields = AwsProvider::extract_ec2_nat_gateway_attributes(&ngw);
-    let identifier = fields.applied_identifier.clone();
+    let identifier = fields.applied_identifier().clone();
     assert_eq!(identifier, Some("nat-12345678".to_string()));
     assert_eq!(
-        fields.nat_gateway_id.as_ref(),
+        fields.nat_gateway_id(),
         Some(&Value::Concrete(ConcreteValue::String(
             "nat-12345678".to_string().into()
         )))
     );
     assert_eq!(
-        fields.subnet_id.as_ref(),
+        fields.subnet_id(),
         Some(&Value::Concrete(ConcreteValue::String(
             "subnet-12345678".to_string().into()
         )))
     );
     assert_eq!(
-        fields.connectivity_type.as_ref(),
+        fields.connectivity_type(),
         Some(&Value::Concrete(ConcreteValue::String(
             "public".to_string().into()
         )))
     );
     assert_eq!(
-        fields.allocation_id.as_ref(),
+        fields.allocation_id(),
         Some(&Value::Concrete(ConcreteValue::String(
             "eipalloc-12345678".to_string().into()
         )))
@@ -859,7 +858,7 @@ fn test_extract_ec2_nat_gateway_attributes() {
 fn test_extract_ec2_nat_gateway_attributes_minimal() {
     let ngw = aws_sdk_ec2::types::NatGateway::builder().build();
     let fields = AwsProvider::extract_ec2_nat_gateway_attributes(&ngw);
-    let identifier = fields.applied_identifier.clone();
+    let identifier = fields.applied_identifier().clone();
     assert_eq!(identifier, None);
 }
 
@@ -871,16 +870,16 @@ fn test_extract_ec2_nat_gateway_attributes_private() {
         .connectivity_type(aws_sdk_ec2::types::ConnectivityType::Private)
         .build();
     let fields = AwsProvider::extract_ec2_nat_gateway_attributes(&ngw);
-    let identifier = fields.applied_identifier.clone();
+    let identifier = fields.applied_identifier().clone();
     assert_eq!(identifier, Some("nat-87654321".to_string()));
     assert_eq!(
-        fields.connectivity_type.as_ref(),
+        fields.connectivity_type(),
         Some(&Value::Concrete(ConcreteValue::String(
             "private".to_string().into()
         )))
     );
     // Private NAT gateways don't have allocation_id
-    assert_eq!(fields.allocation_id.as_ref(), None);
+    assert_eq!(fields.allocation_id(), None);
 }
 
 // --- extract_ec2_vpc_endpoint_attributes tests ---
@@ -900,44 +899,44 @@ fn test_extract_ec2_vpc_endpoint_attributes() {
         .groups(group)
         .build();
     let fields = AwsProvider::extract_ec2_vpc_endpoint_attributes(&endpoint);
-    let identifier = fields.applied_identifier.clone();
+    let identifier = fields.applied_identifier().clone();
     assert_eq!(identifier, Some("vpce-12345678".to_string()));
     assert_eq!(
-        fields.vpc_endpoint_id.as_ref(),
+        fields.vpc_endpoint_id(),
         Some(&Value::Concrete(ConcreteValue::String(
             "vpce-12345678".to_string().into()
         )))
     );
     assert_eq!(
-        fields.vpc_endpoint_type.as_ref(),
+        fields.vpc_endpoint_type(),
         Some(&Value::Concrete(ConcreteValue::String(
             "Gateway".to_string().into()
         )))
     );
     assert_eq!(
-        fields.vpc_id.as_ref(),
+        fields.vpc_id(),
         Some(&Value::Concrete(ConcreteValue::String(
             "vpc-12345678".to_string().into()
         )))
     );
     assert_eq!(
-        fields.service_name.as_ref(),
+        fields.service_name(),
         Some(&Value::Concrete(ConcreteValue::String(
             "com.amazonaws.ap-northeast-1.s3".to_string().into()
         )))
     );
     assert_eq!(
-        fields.private_dns_enabled.as_ref(),
+        fields.private_dns_enabled(),
         Some(&Value::Concrete(ConcreteValue::Bool(false)))
     );
     assert_eq!(
-        fields.route_table_ids.as_ref(),
+        fields.route_table_ids(),
         Some(&Value::Concrete(ConcreteValue::List(vec![
             Value::Concrete(ConcreteValue::String("rtb-12345678".to_string().into()))
         ])))
     );
     assert_eq!(
-        fields.security_group_ids.as_ref(),
+        fields.security_group_ids(),
         Some(&Value::Concrete(ConcreteValue::List(vec![
             Value::Concrete(ConcreteValue::String("sg-12345678".to_string().into()))
         ])))
@@ -948,7 +947,7 @@ fn test_extract_ec2_vpc_endpoint_attributes() {
 fn test_extract_ec2_vpc_endpoint_attributes_minimal() {
     let endpoint = aws_sdk_ec2::types::VpcEndpoint::builder().build();
     let fields = AwsProvider::extract_ec2_vpc_endpoint_attributes(&endpoint);
-    let identifier = fields.applied_identifier.clone();
+    let identifier = fields.applied_identifier().clone();
     assert_eq!(identifier, None);
 }
 
@@ -967,20 +966,20 @@ fn test_extract_ec2_vpc_endpoint_attributes_interface() {
         .groups(group)
         .build();
     let fields = AwsProvider::extract_ec2_vpc_endpoint_attributes(&endpoint);
-    let identifier = fields.applied_identifier.clone();
+    let identifier = fields.applied_identifier().clone();
     assert_eq!(identifier, Some("vpce-99999999".to_string()));
     assert_eq!(
-        fields.vpc_endpoint_type.as_ref(),
+        fields.vpc_endpoint_type(),
         Some(&Value::Concrete(ConcreteValue::String(
             "Interface".to_string().into()
         )))
     );
     assert_eq!(
-        fields.private_dns_enabled.as_ref(),
+        fields.private_dns_enabled(),
         Some(&Value::Concrete(ConcreteValue::Bool(true)))
     );
     assert_eq!(
-        fields.subnet_ids.as_ref(),
+        fields.subnet_ids(),
         Some(&Value::Concrete(ConcreteValue::List(vec![
             Value::Concrete(ConcreteValue::String("subnet-12345678".to_string().into()))
         ])))
@@ -1001,34 +1000,34 @@ fn test_extract_ec2_flow_log_attributes() {
         .flow_log_status("ACTIVE")
         .build();
     let fields = AwsProvider::extract_ec2_flow_log_attributes(&fl);
-    let identifier = fields.applied_identifier.clone();
+    let identifier = fields.applied_identifier().clone();
     assert_eq!(identifier, Some("fl-12345678".to_string()));
     assert_eq!(
-        fields.flow_log_id.as_ref(),
+        fields.flow_log_id(),
         Some(&Value::Concrete(ConcreteValue::String(
             "fl-12345678".to_string().into()
         )))
     );
     assert_eq!(
-        fields.traffic_type.as_ref(),
+        fields.traffic_type(),
         Some(&Value::Concrete(ConcreteValue::String(
             "ALL".to_string().into()
         )))
     );
     assert_eq!(
-        fields.log_destination_type.as_ref(),
+        fields.log_destination_type(),
         Some(&Value::Concrete(ConcreteValue::String(
             "s3".to_string().into()
         )))
     );
     assert_eq!(
-        fields.log_destination.as_ref(),
+        fields.log_destination(),
         Some(&Value::Concrete(ConcreteValue::String(
             "arn:aws:s3:::my-bucket".to_string().into()
         )))
     );
     assert_eq!(
-        fields.max_aggregation_interval.as_ref(),
+        fields.max_aggregation_interval(),
         Some(&Value::Concrete(ConcreteValue::Int(600)))
     );
 }
@@ -1037,7 +1036,7 @@ fn test_extract_ec2_flow_log_attributes() {
 fn test_extract_ec2_flow_log_attributes_minimal() {
     let fl = aws_sdk_ec2::types::FlowLog::builder().build();
     let fields = AwsProvider::extract_ec2_flow_log_attributes(&fl);
-    let identifier = fields.applied_identifier.clone();
+    let identifier = fields.applied_identifier().clone();
     assert_eq!(identifier, None);
 }
 
@@ -1053,16 +1052,16 @@ fn test_extract_ec2_flow_log_attributes_cloudwatch() {
         .flow_log_status("ACTIVE")
         .build();
     let fields = AwsProvider::extract_ec2_flow_log_attributes(&fl);
-    let identifier = fields.applied_identifier.clone();
+    let identifier = fields.applied_identifier().clone();
     assert_eq!(identifier, Some("fl-87654321".to_string()));
     assert_eq!(
-        fields.log_group_name.as_ref(),
+        fields.log_group_name(),
         Some(&Value::Concrete(ConcreteValue::String(
             "/aws/vpc/flow-logs".to_string().into()
         )))
     );
     assert_eq!(
-        fields.deliver_logs_permission_arn.as_ref(),
+        fields.deliver_logs_permission_arn(),
         Some(&Value::Concrete(ConcreteValue::String(
             "arn:aws:iam::123456789012:role/flow-log-role"
                 .to_string()
@@ -1081,22 +1080,22 @@ fn test_extract_ec2_vpn_gateway_attributes() {
         .amazon_side_asn(64512)
         .build();
     let fields = AwsProvider::extract_ec2_vpn_gateway_attributes(&vgw);
-    let identifier = fields.applied_identifier.clone();
+    let identifier = fields.applied_identifier().clone();
     assert_eq!(identifier, Some("vgw-12345678".to_string()));
     assert_eq!(
-        fields.vpn_gateway_id.as_ref(),
+        fields.vpn_gateway_id(),
         Some(&Value::Concrete(ConcreteValue::String(
             "vgw-12345678".to_string().into()
         )))
     );
     assert_eq!(
-        fields.r#type.as_ref(),
+        fields.r#type(),
         Some(&Value::Concrete(ConcreteValue::String(
             "ipsec.1".to_string().into()
         )))
     );
     assert_eq!(
-        fields.amazon_side_asn.as_ref(),
+        fields.amazon_side_asn(),
         Some(&Value::Concrete(ConcreteValue::Int(64512)))
     );
 }
@@ -1105,9 +1104,9 @@ fn test_extract_ec2_vpn_gateway_attributes() {
 fn test_extract_ec2_vpn_gateway_attributes_minimal() {
     let vgw = aws_sdk_ec2::types::VpnGateway::builder().build();
     let fields = AwsProvider::extract_ec2_vpn_gateway_attributes(&vgw);
-    let identifier = fields.applied_identifier.clone();
+    let identifier = fields.applied_identifier().clone();
     assert_eq!(identifier, None);
-    assert!(fields.applied_identifier.is_none());
+    assert!(fields.applied_identifier().is_none());
 }
 
 // --- extract_iam_role_attributes tests ---
@@ -1128,22 +1127,22 @@ fn test_extract_iam_role_attributes() {
         .build()
         .expect("failed to build Role");
     let fields = AwsProvider::extract_iam_role_attributes(&role);
-    let identifier = fields.applied_identifier.clone();
+    let identifier = fields.applied_identifier().clone();
     assert_eq!(identifier, Some("test-role".to_string()));
     assert_eq!(
-        fields.role_name.as_ref(),
+        fields.role_name(),
         Some(&Value::Concrete(ConcreteValue::String(
             "test-role".to_string().into()
         )))
     );
     assert_eq!(
-        fields.role_id.as_ref(),
+        fields.role_id(),
         Some(&Value::Concrete(ConcreteValue::String(
             "AROAEXAMPLE12345".to_string().into()
         )))
     );
     assert_eq!(
-        fields.arn.as_ref(),
+        fields.arn(),
         Some(&Value::Concrete(ConcreteValue::String(
             "arn:aws:iam::123456789012:role/test-role"
                 .to_string()
@@ -1151,26 +1150,25 @@ fn test_extract_iam_role_attributes() {
         )))
     );
     assert_eq!(
-        fields.path.as_ref(),
+        fields.path(),
         Some(&Value::Concrete(ConcreteValue::String(
             "/".to_string().into()
         )))
     );
     assert_eq!(
-        fields.description.as_ref(),
+        fields.description(),
         Some(&Value::Concrete(ConcreteValue::String(
             "Test role".to_string().into()
         )))
     );
     assert_eq!(
-        fields.max_session_duration.as_ref(),
+        fields.max_session_duration(),
         Some(&Value::Concrete(ConcreteValue::Int(7200)))
     );
     // The generated extractor preserves the SDK string. The managed read
     // URL-decodes and parses it before constructing IamRoleReadModel.
     let policy_doc = fields
-        .assume_role_policy_document
-        .as_ref()
+        .assume_role_policy_document()
         .expect("assume_role_policy_document should be present");
     assert_eq!(
         policy_doc,
@@ -1193,10 +1191,10 @@ fn test_extract_iam_role_attributes_minimal() {
         .build()
         .expect("failed to build Role");
     let fields = AwsProvider::extract_iam_role_attributes(&role);
-    let identifier = fields.applied_identifier.clone();
+    let identifier = fields.applied_identifier().clone();
     assert_eq!(identifier, Some("minimal-role".to_string()));
-    assert_eq!(fields.description.as_ref(), None);
-    assert_eq!(fields.max_session_duration.as_ref(), None);
+    assert_eq!(fields.description(), None);
+    assert_eq!(fields.max_session_duration(), None);
 }
 
 // --- extract_ec2_transit_gateway_attributes tests ---
@@ -1223,21 +1221,21 @@ fn test_extract_ec2_transit_gateway_attributes() {
         .options(options)
         .build();
     let fields = AwsProvider::extract_ec2_transit_gateway_attributes(&tgw);
-    let identifier = fields.applied_identifier.clone();
+    let identifier = fields.applied_identifier().clone();
     assert_eq!(identifier, Some("tgw-12345678".to_string()));
     assert_eq!(
-        fields.transit_gateway_id.as_ref(),
+        fields.transit_gateway_id(),
         Some(&Value::Concrete(ConcreteValue::String(
             "tgw-12345678".to_string().into()
         )))
     );
     assert_eq!(
-        fields.description.as_ref(),
+        fields.description(),
         Some(&Value::Concrete(ConcreteValue::String(
             "Test TGW".to_string().into()
         )))
     );
-    let Some(Value::Concrete(ConcreteValue::Map(options))) = fields.options.as_ref() else {
+    let Some(Value::Concrete(ConcreteValue::Map(options))) = fields.options() else {
         panic!("expected nested options map");
     };
     assert_eq!(
@@ -1268,7 +1266,7 @@ fn test_extract_ec2_transit_gateway_attributes() {
 fn test_extract_ec2_transit_gateway_attributes_minimal() {
     let tgw = aws_sdk_ec2::types::TransitGateway::builder().build();
     let fields = AwsProvider::extract_ec2_transit_gateway_attributes(&tgw);
-    let identifier = fields.applied_identifier.clone();
+    let identifier = fields.applied_identifier().clone();
     assert_eq!(identifier, None);
 }
 
@@ -1284,28 +1282,28 @@ fn test_extract_ec2_transit_gateway_attachment_attributes() {
         .subnet_ids("subnet-87654321")
         .build();
     let fields = AwsProvider::extract_ec2_transit_gateway_attachment_attributes(&att);
-    let identifier = fields.applied_identifier.clone();
+    let identifier = fields.applied_identifier().clone();
     assert_eq!(identifier, Some("tgw-attach-12345678".to_string()));
     assert_eq!(
-        fields.transit_gateway_attachment_id.as_ref(),
+        fields.transit_gateway_attachment_id(),
         Some(&Value::Concrete(ConcreteValue::String(
             "tgw-attach-12345678".to_string().into()
         )))
     );
     assert_eq!(
-        fields.transit_gateway_id.as_ref(),
+        fields.transit_gateway_id(),
         Some(&Value::Concrete(ConcreteValue::String(
             "tgw-12345678".to_string().into()
         )))
     );
     assert_eq!(
-        fields.vpc_id.as_ref(),
+        fields.vpc_id(),
         Some(&Value::Concrete(ConcreteValue::String(
             "vpc-12345678".to_string().into()
         )))
     );
     assert_eq!(
-        fields.subnet_ids.as_ref(),
+        fields.subnet_ids(),
         Some(&Value::Concrete(ConcreteValue::List(vec![
             Value::Concrete(ConcreteValue::String("subnet-12345678".to_string().into())),
             Value::Concrete(ConcreteValue::String("subnet-87654321".to_string().into())),
@@ -1317,7 +1315,7 @@ fn test_extract_ec2_transit_gateway_attachment_attributes() {
 fn test_extract_ec2_transit_gateway_attachment_attributes_minimal() {
     let att = aws_sdk_ec2::types::TransitGatewayVpcAttachment::builder().build();
     let fields = AwsProvider::extract_ec2_transit_gateway_attachment_attributes(&att);
-    let identifier = fields.applied_identifier.clone();
+    let identifier = fields.applied_identifier().clone();
     assert_eq!(identifier, None);
 }
 
@@ -1339,28 +1337,28 @@ fn test_extract_ec2_vpc_peering_connection_attributes() {
         .accepter_vpc_info(accepter)
         .build();
     let fields = AwsProvider::extract_ec2_vpc_peering_connection_attributes(&pcx);
-    let identifier = fields.applied_identifier.clone();
+    let identifier = fields.applied_identifier().clone();
     assert_eq!(identifier, Some("pcx-12345678".to_string()));
     assert_eq!(
-        fields.vpc_peering_connection_id.as_ref(),
+        fields.vpc_peering_connection_id(),
         Some(&Value::Concrete(ConcreteValue::String(
             "pcx-12345678".to_string().into()
         )))
     );
     assert_eq!(
-        fields.vpc_id.as_ref(),
+        fields.vpc_id(),
         Some(&Value::Concrete(ConcreteValue::String(
             "vpc-11111111".to_string().into()
         )))
     );
     assert_eq!(
-        fields.peer_vpc_id.as_ref(),
+        fields.peer_vpc_id(),
         Some(&Value::Concrete(ConcreteValue::String(
             "vpc-22222222".to_string().into()
         )))
     );
     assert_eq!(
-        fields.peer_owner_id.as_ref(),
+        fields.peer_owner_id(),
         Some(&Value::Concrete(ConcreteValue::String(
             "123456789012".to_string().into()
         )))
@@ -1371,7 +1369,7 @@ fn test_extract_ec2_vpc_peering_connection_attributes() {
 fn test_extract_ec2_vpc_peering_connection_attributes_minimal() {
     let pcx = aws_sdk_ec2::types::VpcPeeringConnection::builder().build();
     let fields = AwsProvider::extract_ec2_vpc_peering_connection_attributes(&pcx);
-    let identifier = fields.applied_identifier.clone();
+    let identifier = fields.applied_identifier().clone();
     assert_eq!(identifier, None);
 }
 
@@ -1388,16 +1386,16 @@ fn test_extract_ec2_egress_only_internet_gateway_attributes() {
         .attachments(attachment)
         .build();
     let fields = AwsProvider::extract_ec2_egress_only_internet_gateway_attributes(&eigw);
-    let identifier = fields.applied_identifier.clone();
+    let identifier = fields.applied_identifier().clone();
     assert_eq!(identifier, Some("eigw-12345678".to_string()));
     assert_eq!(
-        fields.egress_only_internet_gateway_id.as_ref(),
+        fields.egress_only_internet_gateway_id(),
         Some(&Value::Concrete(ConcreteValue::String(
             "eigw-12345678".to_string().into()
         )))
     );
     assert_eq!(
-        fields.vpc_id.as_ref(),
+        fields.vpc_id(),
         Some(&Value::Concrete(ConcreteValue::String(
             "vpc-12345678".to_string().into()
         )))
@@ -1408,7 +1406,7 @@ fn test_extract_ec2_egress_only_internet_gateway_attributes() {
 fn test_extract_ec2_egress_only_internet_gateway_attributes_minimal() {
     let eigw = aws_sdk_ec2::types::EgressOnlyInternetGateway::builder().build();
     let fields = AwsProvider::extract_ec2_egress_only_internet_gateway_attributes(&eigw);
-    let identifier = fields.applied_identifier.clone();
+    let identifier = fields.applied_identifier().clone();
     assert_eq!(identifier, None);
 }
 
@@ -1425,16 +1423,16 @@ fn test_extract_organizations_organization_attributes() {
         .master_account_email("admin@example.com")
         .build();
     let fields = AwsProvider::extract_organizations_organization_attributes(&org);
-    let identifier = fields.applied_identifier.clone();
+    let identifier = fields.applied_identifier().clone();
     assert_eq!(identifier, Some("o-abc123".to_string()));
     assert_eq!(
-        fields.id.as_ref(),
+        fields.id(),
         Some(&Value::Concrete(ConcreteValue::String(
             "o-abc123".to_string().into()
         )))
     );
     assert_eq!(
-        fields.arn.as_ref(),
+        fields.arn(),
         Some(&Value::Concrete(ConcreteValue::String(
             "arn:aws:organizations::123456789012:organization/o-abc123"
                 .to_string()
@@ -1442,19 +1440,19 @@ fn test_extract_organizations_organization_attributes() {
         )))
     );
     assert_eq!(
-        fields.feature_set.as_ref(),
+        fields.feature_set(),
         Some(&Value::Concrete(ConcreteValue::String(
             "ALL".to_string().into()
         )))
     );
     assert_eq!(
-        fields.master_account_id.as_ref(),
+        fields.master_account_id(),
         Some(&Value::Concrete(ConcreteValue::String(
             "123456789012".to_string().into()
         )))
     );
     assert_eq!(
-        fields.master_account_arn.as_ref(),
+        fields.master_account_arn(),
         Some(&Value::Concrete(ConcreteValue::String(
             "arn:aws:organizations::123456789012:account/o-abc123/123456789012"
                 .to_string()
@@ -1462,7 +1460,7 @@ fn test_extract_organizations_organization_attributes() {
         )))
     );
     assert_eq!(
-        fields.master_account_email.as_ref(),
+        fields.master_account_email(),
         Some(&Value::Concrete(ConcreteValue::String(
             "admin@example.com".to_string().into()
         )))
@@ -1476,10 +1474,10 @@ fn test_extract_organizations_organization_attributes_consolidated_billing() {
         .feature_set(aws_sdk_organizations::types::OrganizationFeatureSet::ConsolidatedBilling)
         .build();
     let fields = AwsProvider::extract_organizations_organization_attributes(&org);
-    let identifier = fields.applied_identifier.clone();
+    let identifier = fields.applied_identifier().clone();
     assert_eq!(identifier, Some("o-xyz789".to_string()));
     assert_eq!(
-        fields.feature_set.as_ref(),
+        fields.feature_set(),
         Some(&Value::Concrete(ConcreteValue::String(
             "CONSOLIDATED_BILLING".to_string().into()
         )))
@@ -1490,9 +1488,9 @@ fn test_extract_organizations_organization_attributes_consolidated_billing() {
 fn test_extract_organizations_organization_attributes_minimal() {
     let org = aws_sdk_organizations::types::Organization::builder().build();
     let fields = AwsProvider::extract_organizations_organization_attributes(&org);
-    let identifier = fields.applied_identifier.clone();
+    let identifier = fields.applied_identifier().clone();
     assert_eq!(identifier, None);
-    assert!(fields.applied_identifier.is_none());
+    assert!(fields.applied_identifier().is_none());
 }
 
 #[test]
@@ -1533,16 +1531,16 @@ fn test_extract_organizations_account_attributes() {
         ))
         .build();
     let fields = AwsProvider::extract_organizations_account_attributes(&account);
-    let identifier = fields.applied_identifier.clone();
+    let identifier = fields.applied_identifier().clone();
     assert_eq!(identifier, Some("123456789012".to_string()));
     assert_eq!(
-        fields.id.as_ref(),
+        fields.id(),
         Some(&Value::Concrete(ConcreteValue::String(
             "123456789012".to_string().into()
         )))
     );
     assert_eq!(
-        fields.arn.as_ref(),
+        fields.arn(),
         Some(&Value::Concrete(ConcreteValue::String(
             "arn:aws:organizations::111111111111:account/o-abc123/123456789012"
                 .to_string()
@@ -1550,25 +1548,25 @@ fn test_extract_organizations_account_attributes() {
         )))
     );
     assert_eq!(
-        fields.name.as_ref(),
+        fields.name(),
         Some(&Value::Concrete(ConcreteValue::String(
             "production".to_string().into()
         )))
     );
     assert_eq!(
-        fields.email.as_ref(),
+        fields.email(),
         Some(&Value::Concrete(ConcreteValue::String(
             "prod@example.com".to_string().into()
         )))
     );
     assert_eq!(
-        fields.status.as_ref(),
+        fields.status(),
         Some(&Value::Concrete(ConcreteValue::String(
             "ACTIVE".to_string().into()
         )))
     );
     assert_eq!(
-        fields.joined_method.as_ref(),
+        fields.joined_method(),
         Some(&Value::Concrete(ConcreteValue::String(
             "CREATED".to_string().into()
         )))
@@ -1583,9 +1581,9 @@ fn test_extract_organizations_account_attributes() {
 fn test_extract_organizations_account_attributes_minimal() {
     let account = aws_sdk_organizations::types::Account::builder().build();
     let fields = AwsProvider::extract_organizations_account_attributes(&account);
-    let identifier = fields.applied_identifier.clone();
+    let identifier = fields.applied_identifier().clone();
     assert_eq!(identifier, None);
-    assert!(fields.applied_identifier.is_none());
+    assert!(fields.applied_identifier().is_none());
 }
 
 #[test]
@@ -1596,16 +1594,16 @@ fn test_extract_organizations_account_attributes_suspended() {
         .joined_method(aws_sdk_organizations::types::AccountJoinedMethod::Invited)
         .build();
     let fields = AwsProvider::extract_organizations_account_attributes(&account);
-    let identifier = fields.applied_identifier.clone();
+    let identifier = fields.applied_identifier().clone();
     assert_eq!(identifier, Some("999999999999".to_string()));
     assert_eq!(
-        fields.status.as_ref(),
+        fields.status(),
         Some(&Value::Concrete(ConcreteValue::String(
             "SUSPENDED".to_string().into()
         )))
     );
     assert_eq!(
-        fields.joined_method.as_ref(),
+        fields.joined_method(),
         Some(&Value::Concrete(ConcreteValue::String(
             "INVITED".to_string().into()
         )))

@@ -6,9 +6,8 @@ use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
 use crate::helpers::require_string_attr;
 use crate::provider::CreateCompletion;
-use crate::provider_generated::Ec2SubnetRouteTableAssociationReadFields;
-use crate::read_model::{found_managed_read, require_read_value};
-use crate::read_models_generated::Ec2SubnetRouteTableAssociationReadModel;
+use crate::read_model::found_managed_read;
+use crate::read_models_generated::Ec2SubnetRouteTableAssociationReadModelSupplement;
 
 impl AwsProvider {
     /// Read an EC2 Subnet Route Table Association
@@ -47,17 +46,10 @@ impl AwsProvider {
             // Find the association matching the association_id
             for assoc in rt.associations() {
                 if assoc.route_table_association_id() == Some(association_id) {
-                    let Ec2SubnetRouteTableAssociationReadFields {
-                        public_ipv4_pool: _,
-                        route_table_id,
-                        subnet_id,
-                        applied_identifier: _,
-                    } = Self::extract_ec2_subnet_route_table_association_attributes(assoc);
+                    let fields = Self::extract_ec2_subnet_route_table_association_attributes(assoc);
 
-                    let model = Ec2SubnetRouteTableAssociationReadModel {
-                        route_table_id: require_read_value(id, route_table_id, "route_table_id")?,
-                        subnet_id: require_read_value(id, subnet_id, "subnet_id")?,
-                    };
+                    let (_, model) = fields
+                        .into_model(id, Ec2SubnetRouteTableAssociationReadModelSupplement {})?;
                     return found_managed_read(id, applied_identifier, model);
                 }
             }

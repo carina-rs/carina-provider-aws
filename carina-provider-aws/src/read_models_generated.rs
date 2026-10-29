@@ -27,6 +27,14 @@ pub(crate) struct Ec2VpcReadModel {
     pub(crate) tags: Value,
 }
 
+/// Canonical fields for `ec2.Vpc` supplied by identifiers, side reads, or complex SDK projections.
+pub(crate) struct Ec2VpcReadModelSupplement {
+    pub(crate) enable_dns_hostnames: Value,
+    pub(crate) enable_dns_support: Value,
+    pub(crate) ipv4_netmask_length: Option<Value>,
+    pub(crate) tags: Value,
+}
+
 impl sealed::Sealed for Ec2VpcReadModel {}
 
 impl ManagedReadModel for Ec2VpcReadModel {
@@ -83,6 +91,14 @@ pub(crate) struct Ec2SubnetReadModel {
     pub(crate) private_dns_name_options_on_launch: Option<Value>,
     pub(crate) vpc_id: Value,
     pub(crate) subnet_id: Option<Value>,
+    pub(crate) tags: Value,
+}
+
+/// Canonical fields for `ec2.Subnet` supplied by identifiers, side reads, or complex SDK projections.
+pub(crate) struct Ec2SubnetReadModelSupplement {
+    pub(crate) ipv4_netmask_length: Option<Value>,
+    pub(crate) ipv6_cidr_block: Option<Value>,
+    pub(crate) ipv6_netmask_length: Option<Value>,
     pub(crate) tags: Value,
 }
 
@@ -170,6 +186,12 @@ pub(crate) struct Ec2InternetGatewayReadModel {
     pub(crate) tags: Value,
 }
 
+/// Canonical fields for `ec2.InternetGateway` supplied by identifiers, side reads, or complex SDK projections.
+pub(crate) struct Ec2InternetGatewayReadModelSupplement {
+    pub(crate) vpc_id: Value,
+    pub(crate) tags: Value,
+}
+
 impl sealed::Sealed for Ec2InternetGatewayReadModel {}
 
 impl ManagedReadModel for Ec2InternetGatewayReadModel {
@@ -204,6 +226,11 @@ pub(crate) struct Ec2RouteTableReadModel {
     pub(crate) tags: Value,
 }
 
+/// Canonical fields for `ec2.RouteTable` supplied by identifiers, side reads, or complex SDK projections.
+pub(crate) struct Ec2RouteTableReadModelSupplement {
+    pub(crate) tags: Value,
+}
+
 impl sealed::Sealed for Ec2RouteTableReadModel {}
 
 impl ManagedReadModel for Ec2RouteTableReadModel {
@@ -234,6 +261,11 @@ pub(crate) struct Ec2RouteReadModel {
     pub(crate) destination_cidr_block: Option<Value>,
     pub(crate) gateway_id: Option<Value>,
     pub(crate) nat_gateway_id: Option<Value>,
+    pub(crate) route_table_id: Value,
+}
+
+/// Canonical fields for `ec2.Route` supplied by identifiers, side reads, or complex SDK projections.
+pub(crate) struct Ec2RouteReadModelSupplement {
     pub(crate) route_table_id: Value,
 }
 
@@ -274,6 +306,11 @@ pub(crate) struct Ec2SecurityGroupReadModel {
     pub(crate) group_name: Value,
     pub(crate) vpc_id: Option<Value>,
     pub(crate) group_id: Option<Value>,
+    pub(crate) tags: Value,
+}
+
+/// Canonical fields for `ec2.SecurityGroup` supplied by identifiers, side reads, or complex SDK projections.
+pub(crate) struct Ec2SecurityGroupReadModelSupplement {
     pub(crate) tags: Value,
 }
 
@@ -321,6 +358,13 @@ pub(crate) struct Ec2SecurityGroupIngressReadModel {
     pub(crate) to_port: Option<Value>,
     pub(crate) source_security_group_id: Option<Value>,
     pub(crate) security_group_rule_id: Option<Value>,
+}
+
+/// Canonical fields for `ec2.SecurityGroupIngress` supplied by identifiers, side reads, or complex SDK projections.
+pub(crate) struct Ec2SecurityGroupIngressReadModelSupplement {
+    pub(crate) cidr_ip: Option<Value>,
+    pub(crate) source_security_group_owner_id: Option<Value>,
+    pub(crate) source_security_group_id: Option<Value>,
 }
 
 impl sealed::Sealed for Ec2SecurityGroupIngressReadModel {}
@@ -401,6 +445,13 @@ pub(crate) struct Ec2SecurityGroupEgressReadModel {
     pub(crate) security_group_rule_id: Option<Value>,
 }
 
+/// Canonical fields for `ec2.SecurityGroupEgress` supplied by identifiers, side reads, or complex SDK projections.
+pub(crate) struct Ec2SecurityGroupEgressReadModelSupplement {
+    pub(crate) cidr_ip: Option<Value>,
+    pub(crate) source_security_group_owner_id: Option<Value>,
+    pub(crate) destination_security_group_id: Option<Value>,
+}
+
 impl sealed::Sealed for Ec2SecurityGroupEgressReadModel {}
 
 impl ManagedReadModel for Ec2SecurityGroupEgressReadModel {
@@ -469,6 +520,11 @@ pub(crate) struct Ec2EgressOnlyInternetGatewayReadModel {
     pub(crate) tags: Value,
 }
 
+/// Canonical fields for `ec2.EgressOnlyInternetGateway` supplied by identifiers, side reads, or complex SDK projections.
+pub(crate) struct Ec2EgressOnlyInternetGatewayReadModelSupplement {
+    pub(crate) tags: Value,
+}
+
 impl sealed::Sealed for Ec2EgressOnlyInternetGatewayReadModel {}
 
 impl ManagedReadModel for Ec2EgressOnlyInternetGatewayReadModel {
@@ -505,6 +561,11 @@ pub(crate) struct Ec2EipReadModel {
     pub(crate) public_ipv4_pool: Option<Value>,
     pub(crate) allocation_id: Option<Value>,
     pub(crate) public_ip: Option<Value>,
+    pub(crate) tags: Value,
+}
+
+/// Canonical fields for `ec2.Eip` supplied by identifiers, side reads, or complex SDK projections.
+pub(crate) struct Ec2EipReadModelSupplement {
     pub(crate) tags: Value,
 }
 
@@ -559,6 +620,13 @@ pub(crate) struct Ec2FlowLogReadModel {
     pub(crate) resource_type: Value,
     pub(crate) traffic_type: Option<Value>,
     pub(crate) flow_log_id: Option<Value>,
+    pub(crate) tags: Value,
+}
+
+/// Canonical fields for `ec2.FlowLog` supplied by identifiers, side reads, or complex SDK projections.
+pub(crate) struct Ec2FlowLogReadModelSupplement {
+    pub(crate) resource_ids: Value,
+    pub(crate) resource_type: Value,
     pub(crate) tags: Value,
 }
 
@@ -630,6 +698,13 @@ pub(crate) struct Ec2NatGatewayReadModel {
     pub(crate) tags: Value,
 }
 
+/// Canonical fields for `ec2.NatGateway` supplied by identifiers, side reads, or complex SDK projections.
+pub(crate) struct Ec2NatGatewayReadModelSupplement {
+    pub(crate) availability_zone_addresses: Value,
+    pub(crate) private_ip_address: Option<Value>,
+    pub(crate) tags: Value,
+}
+
 impl sealed::Sealed for Ec2NatGatewayReadModel {}
 
 impl ManagedReadModel for Ec2NatGatewayReadModel {
@@ -686,6 +761,9 @@ pub(crate) struct Ec2SubnetRouteTableAssociationReadModel {
     pub(crate) subnet_id: Value,
 }
 
+/// Canonical fields for `ec2.SubnetRouteTableAssociation` supplied by identifiers, side reads, or complex SDK projections.
+pub(crate) struct Ec2SubnetRouteTableAssociationReadModelSupplement {}
+
 impl sealed::Sealed for Ec2SubnetRouteTableAssociationReadModel {}
 
 impl ManagedReadModel for Ec2SubnetRouteTableAssociationReadModel {
@@ -716,6 +794,11 @@ pub(crate) struct Ec2TransitGatewayReadModel {
     pub(crate) description: Option<Value>,
     pub(crate) options: Option<Value>,
     pub(crate) transit_gateway_id: Option<Value>,
+    pub(crate) tags: Value,
+}
+
+/// Canonical fields for `ec2.TransitGateway` supplied by identifiers, side reads, or complex SDK projections.
+pub(crate) struct Ec2TransitGatewayReadModelSupplement {
     pub(crate) tags: Value,
 }
 
@@ -757,6 +840,11 @@ pub(crate) struct Ec2TransitGatewayAttachmentReadModel {
     pub(crate) transit_gateway_id: Value,
     pub(crate) vpc_id: Value,
     pub(crate) transit_gateway_attachment_id: Option<Value>,
+    pub(crate) tags: Value,
+}
+
+/// Canonical fields for `ec2.TransitGatewayAttachment` supplied by identifiers, side reads, or complex SDK projections.
+pub(crate) struct Ec2TransitGatewayAttachmentReadModelSupplement {
     pub(crate) tags: Value,
 }
 
@@ -811,6 +899,11 @@ pub(crate) struct Ec2VpcEndpointReadModel {
     pub(crate) vpc_endpoint_type: Option<Value>,
     pub(crate) vpc_id: Value,
     pub(crate) vpc_endpoint_id: Option<Value>,
+    pub(crate) tags: Value,
+}
+
+/// Canonical fields for `ec2.VpcEndpoint` supplied by identifiers, side reads, or complex SDK projections.
+pub(crate) struct Ec2VpcEndpointReadModelSupplement {
     pub(crate) tags: Value,
 }
 
@@ -918,6 +1011,11 @@ pub(crate) struct Ec2VpcPeeringConnectionReadModel {
     pub(crate) tags: Value,
 }
 
+/// Canonical fields for `ec2.VpcPeeringConnection` supplied by identifiers, side reads, or complex SDK projections.
+pub(crate) struct Ec2VpcPeeringConnectionReadModelSupplement {
+    pub(crate) tags: Value,
+}
+
 impl sealed::Sealed for Ec2VpcPeeringConnectionReadModel {}
 
 impl ManagedReadModel for Ec2VpcPeeringConnectionReadModel {
@@ -959,6 +1057,11 @@ pub(crate) struct Ec2VpnGatewayReadModel {
     pub(crate) availability_zone: Option<Value>,
     pub(crate) r#type: Value,
     pub(crate) vpn_gateway_id: Option<Value>,
+    pub(crate) tags: Value,
+}
+
+/// Canonical fields for `ec2.VpnGateway` supplied by identifiers, side reads, or complex SDK projections.
+pub(crate) struct Ec2VpnGatewayReadModelSupplement {
     pub(crate) tags: Value,
 }
 
@@ -1485,6 +1588,9 @@ pub(crate) struct OrganizationsOrganizationReadModel {
     pub(crate) master_account_id: Option<Value>,
 }
 
+/// Canonical fields for `organizations.Organization` supplied by identifiers, side reads, or complex SDK projections.
+pub(crate) struct OrganizationsOrganizationReadModelSupplement {}
+
 impl sealed::Sealed for OrganizationsOrganizationReadModel {}
 
 impl ManagedReadModel for OrganizationsOrganizationReadModel {
@@ -1539,6 +1645,12 @@ pub(crate) struct OrganizationsAccountReadModel {
     pub(crate) joined_method: Option<Value>,
     pub(crate) joined_timestamp: Option<Value>,
     pub(crate) status: Option<Value>,
+    pub(crate) tags: Value,
+}
+
+/// Canonical fields for `organizations.Account` supplied by identifiers, side reads, or complex SDK projections.
+pub(crate) struct OrganizationsAccountReadModelSupplement {
+    pub(crate) joined_timestamp: Option<Value>,
     pub(crate) tags: Value,
 }
 
@@ -1597,6 +1709,13 @@ pub(crate) struct Route53RecordSetReadModel {
     pub(crate) hosted_zone_id: Value,
 }
 
+/// Canonical fields for `route53.RecordSet` supplied by identifiers, side reads, or complex SDK projections.
+pub(crate) struct Route53RecordSetReadModelSupplement {
+    pub(crate) alias_target: Option<Value>,
+    pub(crate) resource_records: Option<Value>,
+    pub(crate) hosted_zone_id: Value,
+}
+
 impl sealed::Sealed for Route53RecordSetReadModel {}
 
 impl ManagedReadModel for Route53RecordSetReadModel {
@@ -1641,6 +1760,11 @@ pub(crate) struct IamRoleReadModel {
     pub(crate) role_name: Value,
     pub(crate) arn: Option<Value>,
     pub(crate) role_id: Option<Value>,
+    pub(crate) tags: Value,
+}
+
+/// Canonical fields for `iam.Role` supplied by identifiers, side reads, or complex SDK projections.
+pub(crate) struct IamRoleReadModelSupplement {
     pub(crate) tags: Value,
 }
 
@@ -1700,6 +1824,11 @@ pub(crate) struct LogsLogGroupReadModel {
     pub(crate) tags: Value,
 }
 
+/// Canonical fields for `logs.LogGroup` supplied by identifiers, side reads, or complex SDK projections.
+pub(crate) struct LogsLogGroupReadModelSupplement {
+    pub(crate) tags: Value,
+}
+
 impl sealed::Sealed for LogsLogGroupReadModel {}
 
 impl ManagedReadModel for LogsLogGroupReadModel {
@@ -1751,6 +1880,15 @@ pub(crate) struct AcmCertificateReadModel {
     pub(crate) renewal_summary: Option<Value>,
     pub(crate) status: Option<Value>,
     pub(crate) r#type: Option<Value>,
+    pub(crate) tags: Value,
+}
+
+/// Canonical fields for `acm.Certificate` supplied by identifiers, side reads, or complex SDK projections.
+pub(crate) struct AcmCertificateReadModelSupplement {
+    pub(crate) options: Option<Value>,
+    pub(crate) validation_method: Option<Value>,
+    pub(crate) domain_validation_options: Option<Value>,
+    pub(crate) renewal_summary: Option<Value>,
     pub(crate) tags: Value,
 }
 
@@ -1833,11 +1971,11 @@ pub(crate) struct SqsQueueReadModel {
     pub(crate) fifo_throughput_limit: Option<Value>,
     pub(crate) kms_master_key_id: Option<Value>,
     pub(crate) kms_data_key_reuse_period_seconds: Option<Value>,
-    pub(crate) sqs_managed_sse_enabled: Value,
+    pub(crate) sqs_managed_sse_enabled: Option<Value>,
     pub(crate) queue_arn: Value,
-    pub(crate) approximate_number_of_messages: Value,
-    pub(crate) approximate_number_of_messages_delayed: Value,
-    pub(crate) approximate_number_of_messages_not_visible: Value,
+    pub(crate) approximate_number_of_messages: Option<Value>,
+    pub(crate) approximate_number_of_messages_delayed: Option<Value>,
+    pub(crate) approximate_number_of_messages_not_visible: Option<Value>,
     pub(crate) created_timestamp: Value,
     pub(crate) last_modified_timestamp: Value,
     pub(crate) tags: Value,
@@ -1911,23 +2049,22 @@ impl ManagedReadModel for SqsQueueReadModel {
         if let Some(value) = kms_data_key_reuse_period_seconds {
             attributes.insert("kms_data_key_reuse_period_seconds".to_string(), value);
         }
-        attributes.insert(
-            "sqs_managed_sse_enabled".to_string(),
-            sqs_managed_sse_enabled,
-        );
+        if let Some(value) = sqs_managed_sse_enabled {
+            attributes.insert("sqs_managed_sse_enabled".to_string(), value);
+        }
         attributes.insert("queue_arn".to_string(), queue_arn);
-        attributes.insert(
-            "approximate_number_of_messages".to_string(),
-            approximate_number_of_messages,
-        );
-        attributes.insert(
-            "approximate_number_of_messages_delayed".to_string(),
-            approximate_number_of_messages_delayed,
-        );
-        attributes.insert(
-            "approximate_number_of_messages_not_visible".to_string(),
-            approximate_number_of_messages_not_visible,
-        );
+        if let Some(value) = approximate_number_of_messages {
+            attributes.insert("approximate_number_of_messages".to_string(), value);
+        }
+        if let Some(value) = approximate_number_of_messages_delayed {
+            attributes.insert("approximate_number_of_messages_delayed".to_string(), value);
+        }
+        if let Some(value) = approximate_number_of_messages_not_visible {
+            attributes.insert(
+                "approximate_number_of_messages_not_visible".to_string(),
+                value,
+            );
+        }
         attributes.insert("created_timestamp".to_string(), created_timestamp);
         attributes.insert(
             "last_modified_timestamp".to_string(),
