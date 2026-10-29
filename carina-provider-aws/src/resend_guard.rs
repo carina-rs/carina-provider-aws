@@ -1,207 +1,4 @@
-//! SDK retry guard that refuses ambiguous resends of non-idempotent operations.
-
-use std::io;
-
-use aws_smithy_runtime_api::box_error::BoxError;
-use aws_smithy_runtime_api::client::interceptors::Intercept;
-use aws_smithy_runtime_api::client::interceptors::context::{
-    BeforeTransmitInterceptorContextRef, FinalizerInterceptorContextMut,
-    FinalizerInterceptorContextRef,
-};
-use aws_smithy_runtime_api::client::interceptors::error::ContextAttachedError;
-use aws_smithy_runtime_api::client::orchestrator::Metadata;
-use aws_smithy_runtime_api::client::orchestrator::OrchestratorError;
-use aws_smithy_runtime_api::client::retries::RequestAttempts;
-use aws_smithy_runtime_api::client::runtime_components::RuntimeComponents;
-use aws_smithy_types::config_bag::{ConfigBag, Storable, StoreReplace};
-use carina_aws_types::{Idempotency, SendOutcome};
-
-#[derive(Debug, Clone)]
-struct PreviousAttempt {
-    outcome: SendOutcome,
-    failure: String,
-}
-
-impl Storable for PreviousAttempt {
-    type Storer = StoreReplace<Self>;
-}
-
-#[derive(Debug, Clone, Copy)]
-struct MaybeSentAttempt;
-
-impl Storable for MaybeSentAttempt {
-    type Storer = StoreReplace<Self>;
-}
-
-fn rendered_failure(
-    error: &(dyn std::error::Error + 'static),
-    response: Option<&aws_smithy_runtime_api::client::orchestrator::HttpResponse>,
-) -> String {
-    let mut rendered = error.to_string();
-    let mut source = error.source();
-    while let Some(error) = source {
-        rendered.push_str(": ");
-        rendered.push_str(&error.to_string());
-        source = error.source();
-    }
-    if let Some(response) = response {
-        rendered.push_str(&format!("; status: {}", response.status().as_u16()));
-        for header in [
-            "x-amzn-requestid",
-            "x-amzn-request-id",
-            "x-amz-request-id",
-            "x-amz-id-2",
-        ] {
-            if let Some(request_id) = response.headers().get(header) {
-                rendered.push_str("; request_id: ");
-                rendered.push_str(request_id);
-                break;
-            }
-        }
-    }
-    rendered
-}
-
-/// Associates one service client's SDK metadata with generated resend policy.
-#[derive(Debug)]
-pub(crate) struct ResendGuard {
-    lookup: fn(&str) -> Idempotency,
-}
-
-impl ResendGuard {
-    pub(crate) fn new(lookup: fn(&str) -> Idempotency) -> Self {
-        Self { lookup }
-    }
-}
-
-impl Intercept for ResendGuard {
-    fn name(&self) -> &'static str {
-        "carina.ResendGuard"
-    }
-
-    fn read_before_attempt(
-        &self,
-        _context: &BeforeTransmitInterceptorContextRef<'_>,
-        _runtime_components: &RuntimeComponents,
-        cfg: &mut ConfigBag,
-    ) -> Result<(), BoxError> {
-        let attempt = cfg
-            .load::<RequestAttempts>()
-            .map(RequestAttempts::attempts)
-            .unwrap_or(1);
-        if attempt < 2 {
-            return Ok(());
-        }
-
-        let operation = cfg
-            .load::<Metadata>()
-            .map(|metadata| metadata.name().to_string());
-        let idempotency = operation
-            .as_deref()
-            .map(self.lookup)
-            .unwrap_or(Idempotency::NotIdempotent);
-        let previous = cfg.load::<PreviousAttempt>().cloned();
-        if previous
-            .as_ref()
-            .is_none_or(|previous| previous.outcome == SendOutcome::MaybeSent)
-        {
-            // The SDK's operation-attempt timeout wraps the attempt finalizers,
-            // so a timed-out attempt reaches this hook without running
-            // `read_after_attempt`. Absence is therefore ambiguous too.
-            cfg.interceptor_state().store_put(MaybeSentAttempt);
-        }
-        let previous = previous.unwrap_or_else(|| PreviousAttempt {
-            outcome: SendOutcome::MaybeSent,
-            failure: "failure details unavailable".to_string(),
-        });
-        cfg.interceptor_state().unset::<PreviousAttempt>();
-
-        if previous.outcome.resend_is_safe(idempotency) {
-            return Ok(());
-        }
-
-        let operation = operation.as_deref().unwrap_or("unknown operation");
-        Err(io::Error::other(format!(
-            "previous attempt may have reached AWS; refusing to resend non-idempotent {operation}; previous attempt failed: {}",
-            previous.failure
-        ))
-        .into())
-    }
-
-    fn read_after_attempt(
-        &self,
-        context: &FinalizerInterceptorContextRef<'_>,
-        runtime_components: &RuntimeComponents,
-        cfg: &mut ConfigBag,
-    ) -> Result<(), BoxError> {
-        let outcome = match context.output_or_error() {
-            Some(Ok(_)) => {
-                cfg.interceptor_state().unset::<PreviousAttempt>();
-                cfg.interceptor_state().unset::<MaybeSentAttempt>();
-                return Ok(());
-            }
-            Some(Err(_)) | None => {
-                SendOutcome::classify_orchestrator(context.inner(), runtime_components)
-            }
-        };
-        if outcome == SendOutcome::MaybeSent {
-            cfg.interceptor_state().store_put(MaybeSentAttempt);
-        }
-        // The interceptor only lends us the SDK error, and `SdkError` is not
-        // `Clone`. A later refusal can therefore carry the previous failure
-        // only as rendered source-chain text rather than as the typed error.
-        let failure = context
-            .output_or_error()
-            .and_then(Result::err)
-            .map(|error| rendered_failure(error, context.response()))
-            .unwrap_or_else(|| "failure details unavailable".to_string());
-        cfg.interceptor_state()
-            .store_put(PreviousAttempt { outcome, failure });
-        Ok(())
-    }
-
-    fn modify_before_completion(
-        &self,
-        context: &mut FinalizerInterceptorContextMut<'_>,
-        runtime_components: &RuntimeComponents,
-        cfg: &mut ConfigBag,
-    ) -> Result<(), BoxError> {
-        let idempotency = cfg
-            .load::<Metadata>()
-            .map(|metadata| (self.lookup)(metadata.name()))
-            .unwrap_or(Idempotency::NotIdempotent);
-        let preserve_maybe_sent = match idempotency {
-            Idempotency::ReadOnly => false,
-            Idempotency::Idempotent => false,
-            Idempotency::IdempotencyToken => true,
-            Idempotency::NotIdempotent => false,
-        };
-
-        if !preserve_maybe_sent
-            || cfg.load::<MaybeSentAttempt>().is_none()
-            || context
-                .output_or_error()
-                .is_none_or(|result| result.is_ok())
-            || SendOutcome::classify_orchestrator(context.inner(), runtime_components)
-                == SendOutcome::MaybeSent
-        {
-            return Ok(());
-        }
-
-        let Some(Err(error)) = context.output_or_error_mut() else {
-            return Ok(());
-        };
-        let original = std::mem::replace(
-            error,
-            OrchestratorError::other(io::Error::other("replacing final send failure")),
-        );
-        *error = OrchestratorError::other(ContextAttachedError::new(
-            "an earlier attempt of this send may have reached AWS",
-            original,
-        ));
-        Ok(())
-    }
-}
+//! Integration tests for the shared resend guard using real generated clients.
 
 #[cfg(test)]
 mod tests {
@@ -217,6 +14,7 @@ mod tests {
     use aws_smithy_types::body::SdkBody;
     use aws_smithy_types::error::metadata::ProvideErrorMetadata;
     use carina_aws_types::SendOutcome;
+    use carina_plugin_sdk::wasi_http::{SendPhase, transport_connector_error_for_test};
 
     use crate::aws_operation::ClientToken;
     use crate::helpers::send_aws_operation_with_token;
@@ -226,6 +24,7 @@ mod tests {
     enum Action {
         Io,
         Timeout,
+        Transport(SendPhase),
         DelayedTimeout(Duration),
         Response {
             status: u16,
@@ -293,6 +92,7 @@ mod tests {
                     Action::Timeout => Err(ConnectorError::timeout(
                         std::io::Error::other("post-send timeout").into(),
                     )),
+                    Action::Transport(phase) => Err(transport_connector_error_for_test(phase)),
                     Action::DelayedTimeout(delay) => {
                         tokio::time::sleep(delay).await;
                         state
@@ -355,6 +155,18 @@ mod tests {
         <Message>The bucket policy does not exist</Message><RequestId>request-id</RequestId>
         <HostId>host-id</HostId></Error>"#;
 
+    fn connector_error<E>(
+        error: &aws_smithy_runtime_api::client::result::SdkError<E, HttpResponse>,
+    ) -> &ConnectorError {
+        let aws_smithy_runtime_api::client::result::SdkError::DispatchFailure(context) = error
+        else {
+            panic!("expected dispatch failure");
+        };
+        context
+            .as_connector_error()
+            .expect("dispatch failure has a connector error")
+    }
+
     #[tokio::test]
     async fn non_idempotent_create_vpc_is_not_resent_after_io_failure() {
         let connector = ScriptedConnector::new([
@@ -366,15 +178,16 @@ mod tests {
         ]);
         let provider = provider(connector.clone());
 
-        let result = provider
+        let error = provider
             .ec2_client
             .create_vpc()
             .cidr_block("10.0.0.0/16")
             .send()
-            .await;
+            .await
+            .expect_err("the resend guard must refuse the ambiguous retry");
 
-        assert!(result.is_err());
         assert_eq!(connector.requests().len(), 1);
+        assert_eq!(SendOutcome::classify(&error), SendOutcome::MaybeSent);
     }
 
     #[tokio::test]
@@ -489,6 +302,144 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn token_operation_maybe_sent_then_not_sent_is_maybe_sent() {
+        let connector = ScriptedConnector::new([
+            Action::Timeout,
+            Action::Transport(SendPhase::NotSent),
+            Action::Transport(SendPhase::NotSent),
+        ]);
+        let provider = provider(connector.clone());
+        let token = ClientToken::new();
+        let request = provider
+            .ec2_client
+            .create_nat_gateway()
+            .configure(|builder| builder.subnet_id("subnet-123"));
+
+        let error = send_aws_operation_with_token(&token, request)
+            .await
+            .expect_err("all SDK attempts should fail");
+
+        assert_eq!(connector.requests().len(), 3);
+        assert_eq!(SendOutcome::classify(&error), SendOutcome::MaybeSent);
+        assert!(connector_error(&error).is_io());
+    }
+
+    #[tokio::test]
+    async fn idempotent_operation_maybe_sent_then_not_sent_is_maybe_sent() {
+        let connector = ScriptedConnector::new([
+            Action::Timeout,
+            Action::Transport(SendPhase::NotSent),
+            Action::Transport(SendPhase::NotSent),
+        ]);
+        let provider = provider(connector.clone());
+
+        let error = provider
+            .s3_client
+            .delete_bucket_policy()
+            .bucket("test-bucket")
+            .send()
+            .await
+            .expect_err("all SDK attempts should fail");
+
+        assert_eq!(connector.requests().len(), 3);
+        assert_eq!(SendOutcome::classify(&error), SendOutcome::MaybeSent);
+        assert!(connector_error(&error).is_io());
+    }
+
+    #[tokio::test]
+    async fn idempotent_operation_maybe_sent_then_4xx_is_typed_and_maybe_sent() {
+        let connector = ScriptedConnector::new([
+            Action::Timeout,
+            Action::Response {
+                status: 404,
+                body: NO_SUCH_BUCKET_POLICY,
+            },
+        ]);
+        let provider = provider(connector.clone());
+
+        let error = provider
+            .s3_client
+            .delete_bucket_policy()
+            .bucket("test-bucket")
+            .send()
+            .await
+            .expect_err("the second attempt should surface NoSuchBucketPolicy");
+
+        assert_eq!(connector.requests().len(), 2);
+        assert_eq!(SendOutcome::classify(&error), SendOutcome::MaybeSent);
+        let service_error = error.into_service_error();
+        assert_eq!(
+            ProvideErrorMetadata::code(&service_error),
+            Some("NoSuchBucketPolicy")
+        );
+    }
+
+    #[tokio::test]
+    async fn all_attempts_not_sent_is_not_sent() {
+        let connector = ScriptedConnector::new([
+            Action::Transport(SendPhase::NotSent),
+            Action::Transport(SendPhase::NotSent),
+            Action::Transport(SendPhase::NotSent),
+        ]);
+        let provider = provider(connector.clone());
+
+        let error = provider
+            .s3_client
+            .delete_bucket_policy()
+            .bucket("test-bucket")
+            .send()
+            .await
+            .expect_err("all SDK attempts should fail before sending");
+
+        assert_eq!(connector.requests().len(), 3);
+        assert_eq!(SendOutcome::classify(&error), SendOutcome::NotSent);
+        assert!(connector_error(&error).is_io());
+    }
+
+    #[tokio::test]
+    async fn final_connector_timeout_preserves_dispatch_kind() {
+        let connector = ScriptedConnector::new([Action::Timeout, Action::Timeout, Action::Timeout]);
+        let provider = provider(connector.clone());
+
+        let error = provider
+            .s3_client
+            .delete_bucket_policy()
+            .bucket("test-bucket")
+            .send()
+            .await
+            .expect_err("all SDK attempts should time out");
+
+        assert_eq!(connector.requests().len(), 3);
+        assert!(connector_error(&error).is_timeout());
+        assert_eq!(SendOutcome::classify(&error), SendOutcome::MaybeSent);
+    }
+
+    #[tokio::test]
+    async fn single_attempt_4xx_is_rejected_with_guard_verdict() {
+        let connector = ScriptedConnector::new([Action::Response {
+            status: 404,
+            body: NO_SUCH_BUCKET_POLICY,
+        }]);
+        let provider = provider(connector.clone());
+
+        let error = provider
+            .s3_client
+            .delete_bucket_policy()
+            .bucket("test-bucket")
+            .send()
+            .await
+            .expect_err("the service should reject the request");
+
+        assert_eq!(connector.requests().len(), 1);
+        assert_eq!(SendOutcome::classify(&error), SendOutcome::Rejected);
+        let service_error = error.into_service_error();
+        assert_eq!(
+            ProvideErrorMetadata::code(&service_error),
+            Some("NoSuchBucketPolicy")
+        );
+    }
+
+    #[tokio::test]
     async fn token_send_keeps_maybe_sent_after_final_throttling() {
         let connector = ScriptedConnector::new([
             Action::Timeout,
@@ -512,33 +463,19 @@ mod tests {
         let error = send_aws_operation_with_token(&token, request)
             .await
             .expect_err("all three SDK attempts should fail");
-        let rendered = crate::helpers::sdk_error_message("CreateNatGateway failed", &*error);
-
         assert_eq!(connector.requests().len(), 3);
-        assert!(matches!(
-            &*error,
-            aws_smithy_runtime_api::client::result::SdkError::ResponseError(_)
-        ));
-        assert_eq!(error.outcome(), SendOutcome::MaybeSent);
-        assert!(
-            rendered.contains("an earlier attempt of this send may have reached AWS"),
-            "{rendered}"
-        );
-        let readable_chain = rendered
-            .split(" (ResponseError")
-            .next()
-            .expect("rendered error has a readable source chain");
-        assert!(readable_chain.contains("throttled"), "{rendered}");
-        assert!(
-            readable_chain.contains("final-throttling-request-id"),
-            "{rendered}"
+        assert_eq!(SendOutcome::classify(&error), SendOutcome::MaybeSent);
+        let aws_smithy_runtime_api::client::result::SdkError::ServiceError(context) = &*error
+        else {
+            panic!("expected the modeled service error, got {error:?}");
+        };
+        assert_eq!(
+            ProvideErrorMetadata::code(context.err()),
+            Some("RequestLimitExceeded")
         );
         assert_eq!(
-            readable_chain
-                .matches("final-throttling-request-id")
-                .count(),
-            1,
-            "the attached source must render the final failure details exactly once: {rendered}"
+            context.raw().headers().get("x-amzn-requestid"),
+            Some("final-throttling-request-id")
         );
     }
 
@@ -568,7 +505,7 @@ mod tests {
 
         assert_eq!(connector.requests().len(), 3);
         assert_eq!(connector.completed_delayed_timeouts(), 0);
-        assert_eq!(error.outcome(), SendOutcome::MaybeSent);
+        assert_eq!(SendOutcome::classify(&error), SendOutcome::MaybeSent);
     }
 
     #[tokio::test]

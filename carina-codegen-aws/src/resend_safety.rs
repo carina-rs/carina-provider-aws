@@ -1151,10 +1151,9 @@ pub fn generate_provider_module(
          use std::future::Future;\n\n\
          use aws_smithy_runtime_api::client::orchestrator::HttpResponse;\n\
          use aws_smithy_runtime_api::client::result::SdkError;\n\
-         use carina_aws_types::Idempotency;\n\n\
+         use carina_aws_types::{Idempotency, ResendGuard};\n\n\
          use crate::aws_operation::{AwsOperation, ClientToken, DecidedOperationError, DecidedSend, NoToken, TokenBearing, TokenOperation, WithToken};\n\
          use crate::helpers::TokenSendPermit;\n\
-         use crate::resend_guard::ResendGuard;\n\
          use crate::sdk_config::BoundedSdkConfig;\n\n",
     );
 
@@ -1650,6 +1649,9 @@ mod tests {
         let overrides = [entry("CreateThing", Decision::Token("ClientToken"))];
 
         let generated = generate_provider_module(&models, &overrides).expect("generation succeeds");
+
+        assert!(generated.contains("use carina_aws_types::{Idempotency, ResendGuard};"));
+        assert!(!generated.contains("use crate::resend_guard::ResendGuard;"));
 
         assert!(generated.contains(
             "impl AwsOperation for aws_sdk_test::operation::create_thing::builders::CreateThingInputBuilder"

@@ -4,6 +4,7 @@ mod availability_zone;
 mod enums;
 mod provider;
 mod region;
+mod resend_guard;
 mod resource_id;
 mod send_outcome;
 mod tags;
@@ -14,6 +15,9 @@ pub use availability_zone::*;
 pub use enums::*;
 pub(crate) use provider::*;
 pub use region::*;
+pub use resend_guard::*;
 pub use resource_id::*;
-pub use send_outcome::*;
+#[cfg(feature = "test-utils")]
+pub use send_outcome::attach_single_attempt_verdict_for_test;
+pub use send_outcome::{Idempotency, SendOutcome};
 pub use tags::*;

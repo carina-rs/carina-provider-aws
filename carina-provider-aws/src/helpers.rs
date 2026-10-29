@@ -1275,6 +1275,7 @@ mod tests {
     use aws_smithy_types::error::ErrorMetadata;
     use aws_smithy_types::error::metadata::ProvideErrorMetadata;
     use aws_smithy_types::retry::{ErrorKind, ProvideErrorKind};
+    use carina_aws_types::attach_single_attempt_verdict_for_test;
 
     use crate::aws_operation::{
         AwsOperation, ClientToken, DecidedSend, NoToken, TokenBearing, TokenOperation, WithToken,
@@ -1326,15 +1327,23 @@ mod tests {
     ) -> SdkError<MockServiceError, HttpResponse> {
         let status = match code {
             "OperationAborted" => 409,
-            "RequestTimeout" => 400,
+            "RequestTimeout" | "ValidationException" => 400,
             "SlowDown" | "InternalError" => 503,
             "Throttling" | "RequestLimitExceeded" => 429,
             _ => 500,
         };
-        SdkError::service_error(
-            MockServiceError::new(code, retryable),
-            http_response(status),
-        )
+        let outcome = match (code, retryable, status) {
+            (_, Some(ErrorKind::ThrottlingError), _)
+            | ("Throttling" | "RequestLimitExceeded" | "SlowDown" | "OperationAborted", _, _) => {
+                SendOutcome::Rejected
+            }
+            ("RequestTimeout" | "InternalError", _, _) => SendOutcome::MaybeSent,
+            (_, _, 400..=499) => SendOutcome::Rejected,
+            _ => SendOutcome::MaybeSent,
+        };
+        let mut response = http_response(status);
+        attach_single_attempt_verdict_for_test(&mut response, outcome);
+        SdkError::service_error(MockServiceError::new(code, retryable), response)
     }
 
     #[derive(Debug, Clone, Copy)]

@@ -12,6 +12,7 @@ pub(crate) mod helpers;
 mod normalizer;
 mod provider;
 pub mod provider_generated;
+#[cfg(test)]
 mod resend_guard;
 mod resend_safety_generated;
 pub mod schemas;
