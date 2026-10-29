@@ -329,9 +329,19 @@ class DocsBundleTests(unittest.TestCase):
             )
             index_source = directory / "index.md"
             index_source.write_text("# AWS fixture\n", encoding="utf-8")
+            service_titles_source = directory / "service-titles.json"
+            service_titles_source.write_text(
+                json.dumps({"alpha": "Alpha"}),
+                encoding="utf-8",
+            )
             bundle = directory / "docs.tar.gz"
             with redirect_stdout(io.StringIO()):
-                DOCS_BUNDLE["build_bundle"](bundle, source_root, index_source)
+                DOCS_BUNDLE["build_bundle"](
+                    bundle,
+                    source_root,
+                    index_source,
+                    service_titles_source,
+                )
 
             with tarfile.open(bundle, "r:gz") as archive:
                 member = archive.extractfile("resources/alpha_example.md")
