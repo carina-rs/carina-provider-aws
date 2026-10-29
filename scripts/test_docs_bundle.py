@@ -305,6 +305,57 @@ class DocsBundleTests(unittest.TestCase):
         self.assertNotIn("---", first_lines)
         self.assertNotIn("title:", first_lines)
 
+    def test_build_ships_the_same_heading_list_codegen_validated(self):
+        validated = (
+            "# aws.alpha.Example\n\n"
+            "Fixture page.\n\n"
+            "## Example\n\n"
+            "```crn\nresource example \"fixture\" {}\n```\n\n"
+            "## Argument Reference\n\n"
+            "### `example`\n\n"
+            "## Struct Definitions\n\n"
+            "### Example\n"
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            directory = Path(directory)
+            source_root = directory / "generated-docs" / "aws"
+            source = source_root / "alpha" / "example.md"
+            source.parent.mkdir(parents=True)
+            source.write_text(
+                '---\ntitle: "aws.alpha.Example"\n'
+                'description: "Fixture page"\n---\n\n'
+                + validated.split("\n", 1)[1].lstrip("\n"),
+                encoding="utf-8",
+            )
+            index_source = directory / "index.md"
+            index_source.write_text("# AWS fixture\n", encoding="utf-8")
+            service_titles_source = directory / "service-titles.json"
+            service_titles_source.write_text(
+                json.dumps({"alpha": "Alpha"}),
+                encoding="utf-8",
+            )
+            bundle = directory / "docs.tar.gz"
+            with redirect_stdout(io.StringIO()):
+                DOCS_BUNDLE["build_bundle"](
+                    bundle,
+                    source_root,
+                    index_source,
+                    service_titles_source,
+                )
+
+            with tarfile.open(bundle, "r:gz") as archive:
+                member = archive.extractfile("resources/alpha_example.md")
+                self.assertIsNotNone(member)
+                shipped = member.read().decode("utf-8")
+
+        heading_lines = lambda markdown: [
+            line
+            for line in markdown.splitlines()
+            if line.startswith("#") and line.lstrip("#").startswith(" ")
+        ]
+        self.assertEqual(shipped, validated)
+        self.assertEqual(heading_lines(shipped), heading_lines(validated))
+
     def test_build_splits_resources_and_data_sources_and_indexes_both(self):
         with tempfile.TemporaryDirectory() as directory:
             bundle = self.build_fixture(directory)
