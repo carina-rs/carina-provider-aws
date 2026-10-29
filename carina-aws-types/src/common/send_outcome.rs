@@ -36,6 +36,14 @@ impl OperationSendOutcome {
     }
 }
 
+/// Attaches a single-attempt resend-guard verdict to a mock response.
+///
+/// This is test-only. Production verdicts come only from [`ResendGuard`](super::ResendGuard).
+#[cfg(feature = "test-utils")]
+pub fn attach_single_attempt_verdict_for_test(response: &mut HttpResponse, outcome: SendOutcome) {
+    response.add_extension(OperationSendOutcome::new(outcome));
+}
+
 /// A dispatch failure annotated with the resend guard's all-attempts verdict.
 #[derive(Debug)]
 pub(crate) struct OperationDispatchFailure {
