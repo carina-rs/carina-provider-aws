@@ -17,10 +17,11 @@ heading ids as each heading is written, resolves typed link targets when the
 page is finished, and validates the finished page. Generation fails on missing
 targets, dead local fragments, Markdown links hidden inside code spans, or
 duplicated enum/struct section headings. Codegen also inserts examples before
-validation; the script only adds frontmatter. The resulting `generated-docs/`
-tree is a transient build artifact and is not committed. The docs-bundle CI job
-also runs `carina-docgen-check` on the built tarball, after the bundle has
-reconstructed each page's H1 from its frontmatter title.
+validation; the script adds frontmatter and strips the generated H1 because
+Starlight renders the frontmatter title as the page heading. The resulting
+`generated-docs/` tree is a transient build artifact and is not committed. The
+docs-bundle CI job also runs `carina-docgen-check` on the built tarball, after
+the bundle has reconstructed each page's H1 from its frontmatter title.
 
 ## Prerequisites
 

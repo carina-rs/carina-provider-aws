@@ -438,6 +438,19 @@ fn load_markdown_example(
     }
 }
 
+fn validate_examples_dir(examples_dir: Option<&Path>) -> Result<()> {
+    let Some(examples_dir) = examples_dir else {
+        return Ok(());
+    };
+    if !examples_dir.is_dir() {
+        anyhow::bail!(
+            "--examples-dir must be an existing directory: {}",
+            examples_dir.display()
+        );
+    }
+    Ok(())
+}
+
 /// Escape Rust reserved keywords with the raw identifier prefix `r#`.
 ///
 /// AWS SDK method names are snake_case and may collide with Rust keywords
@@ -463,6 +476,8 @@ fn escape_rust_keyword(name: &str) -> String {
 
 fn main() -> Result<()> {
     let args = Args::parse();
+
+    validate_examples_dir(args.examples_dir.as_deref())?;
 
     std::fs::create_dir_all(&args.output_dir)?;
 
@@ -625,7 +640,8 @@ fn main() -> Result<()> {
                     service,
                     file_name.trim_end_matches(".md"),
                 )?;
-                let md = generate_markdown_resource_with_example(res, model, example.as_deref())?;
+                let md = generate_markdown_resource_with_example(res, model, example.as_deref())
+                    .with_context(|| format!("generating docs for aws.{}", res.name))?;
 
                 let service_dir = args.output_dir.join(service);
                 std::fs::create_dir_all(&service_dir)?;
@@ -643,7 +659,8 @@ fn main() -> Result<()> {
                     service,
                     file_name.trim_end_matches(".md"),
                 )?;
-                let md = generate_markdown_data_source_with_example(ds, model, example.as_deref())?;
+                let md = generate_markdown_data_source_with_example(ds, model, example.as_deref())
+                    .with_context(|| format!("generating docs for aws.{}", ds.name))?;
 
                 let service_dir = args.output_dir.join(service);
                 std::fs::create_dir_all(&service_dir)?;
@@ -3280,12 +3297,14 @@ enum MarkdownEnumSource {
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 struct MarkdownEnumKey {
     namespace: String,
+    heading_path: Vec<String>,
     source: MarkdownEnumSource,
 }
 
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 struct MarkdownStructKey {
     namespace: String,
+    heading_path: Vec<String>,
     target: String,
 }
 
@@ -3364,7 +3383,6 @@ struct MarkdownEnum {
 
 #[derive(Debug)]
 struct MarkdownStruct {
-    name: String,
     fields: Vec<MarkdownStructField>,
 }
 
@@ -3583,6 +3601,7 @@ fn generate_markdown_resource_with_example(
             model,
             &member_ref.target,
             name,
+            std::slice::from_ref(&snake_name),
             &namespace,
             &type_overrides,
             &struct_field_type_overrides,
@@ -3647,6 +3666,7 @@ fn generate_markdown_resource_with_example(
                 model,
                 &member_ref.target,
                 name,
+                std::slice::from_ref(&snake_name),
                 &namespace,
                 &type_overrides,
                 &struct_field_type_overrides,
@@ -3665,8 +3685,8 @@ fn generate_markdown_resource_with_example(
         });
     }
 
-    let enum_heading_texts = markdown_enum_heading_texts(&all_enums, &namespace);
-    let struct_heading_texts = markdown_struct_heading_texts(&struct_defs, &namespace);
+    let enum_heading_texts = markdown_enum_heading_texts(&all_enums);
+    let struct_heading_texts = markdown_struct_heading_texts(&struct_defs);
     let mut page = PageBuilder::new();
 
     page.heading(Heading::plain(1, format!("aws.{}", res.name)))
@@ -3864,25 +3884,22 @@ fn preprocess_markdown_example(source: &str) -> String {
 
 fn markdown_enum_heading_texts(
     enums: &BTreeMap<MarkdownEnumKey, MarkdownEnum>,
-    root_namespace: &str,
 ) -> Vec<(MarkdownEnumKey, String)> {
     let candidates: Vec<_> = enums
         .iter()
         .map(|(key, enum_doc)| {
             let base = format!(
                 "{} ({})",
-                enum_doc.prop_name.to_snake_case(),
+                key.heading_path.join("."),
                 enum_doc.info.type_name
             );
-            let heading = relative_heading_context(&key.namespace, root_namespace)
-                .map_or(base.clone(), |context| format!("{context}.{base}"));
             let identity = match &key.source {
                 MarkdownEnumSource::Smithy { target, type_name } => {
                     format!("{target} {type_name}")
                 }
                 MarkdownEnumSource::KnownOverride(field) => format!("known override {field}"),
             };
-            (key.clone(), heading, identity)
+            (key.clone(), base, identity)
         })
         .collect();
     let mut base_counts = HashMap::new();
@@ -3910,19 +3927,14 @@ fn markdown_enum_heading_texts(
 
 fn markdown_struct_heading_texts(
     structs: &BTreeMap<MarkdownStructKey, MarkdownStruct>,
-    root_namespace: &str,
 ) -> Vec<(MarkdownStructKey, String)> {
     let mut used_slugs = HashSet::new();
     let mut headings: Vec<_> = structs
-        .iter()
-        .map(|(key, struct_doc)| {
-            let base = struct_doc.name.clone();
-            let context = relative_heading_context(&key.namespace, root_namespace);
+        .keys()
+        .map(|key| {
+            let base = key.heading_path.join(".");
             let source = format!("{} {}", key.namespace, key.target);
-            let primary = context
-                .filter(|context| context.contains('.'))
-                .unwrap_or(base);
-            let heading = claim_unique_heading(primary, &source, &mut used_slugs);
+            let heading = claim_unique_heading(base, &source, &mut used_slugs);
             (key.clone(), heading)
         })
         .collect();
@@ -3936,20 +3948,6 @@ fn sort_markdown_headings<K: Ord>(headings: &mut [(K, String)]) {
             .cmp(right_heading)
             .then_with(|| left_key.cmp(right_key))
     });
-}
-
-fn relative_heading_context(namespace: &str, root_namespace: &str) -> Option<String> {
-    namespace
-        .strip_prefix(root_namespace)
-        .and_then(|context| context.strip_prefix('.'))
-        .filter(|context| !context.is_empty())
-        .map(|context| {
-            context
-                .split('.')
-                .map(|part| part.to_snake_case())
-                .collect::<Vec<_>>()
-                .join(".")
-        })
 }
 
 fn claim_unique_heading(
@@ -4217,6 +4215,28 @@ fn generate_markdown_data_source_with_example(
         .with_context(|| format!("generated invalid Markdown for aws.{}", ds.name))
 }
 
+fn markdown_nested_heading_path(
+    model: &SmithyModel,
+    parent_path: &[String],
+    field_name: &str,
+    target: &str,
+) -> Vec<String> {
+    let mut path = parent_path.to_vec();
+    let segment = match model.get_shape(target) {
+        Some(carina_smithy::Shape::List(list))
+            if model.shape_kind(&list.member.target) == Some(ShapeKind::Structure) =>
+        {
+            // A nested list section describes one item, so use its singular
+            // struct name. Top-level lists enter discovery with their actual
+            // attribute name and do not pass through this helper.
+            SmithyModel::shape_name(&list.member.target).to_snake_case()
+        }
+        _ => field_name.to_snake_case(),
+    };
+    path.push(segment);
+    path
+}
+
 /// Discover the semantic representation of a type used in markdown docs.
 ///
 /// `parent_struct` is `Some(struct_name)` when this is called for a
@@ -4228,6 +4248,7 @@ fn discover_markdown_type(
     model: &SmithyModel,
     target: &str,
     field_name: &str,
+    heading_path: &[String],
     enum_namespace: &str,
     type_overrides: &HashMap<&str, &str>,
     struct_field_type_overrides: &HashMap<(&str, &str), &str>,
@@ -4255,6 +4276,7 @@ fn discover_markdown_type(
             MarkdownEnumSource::KnownOverride(field_name.to_string()),
             field_name,
             &type_name,
+            heading_path,
             enum_namespace,
             values.iter().map(|value| value.to_string()).collect(),
             all_enums,
@@ -4297,6 +4319,7 @@ fn discover_markdown_type(
                     },
                     field_name,
                     &type_name,
+                    heading_path,
                     enum_namespace,
                     values.into_iter().map(|(_, value)| value).collect(),
                     all_enums,
@@ -4313,6 +4336,7 @@ fn discover_markdown_type(
                     model,
                     &list_shape.member.target,
                     field_name,
+                    heading_path,
                     enum_namespace,
                     type_overrides,
                     struct_field_type_overrides,
@@ -4348,6 +4372,7 @@ fn discover_markdown_type(
             let child_enum_namespace = format!("{enum_namespace}.{shape_name}");
             let key = MarkdownStructKey {
                 namespace: child_enum_namespace.clone(),
+                heading_path: heading_path.to_vec(),
                 target: target.to_string(),
             };
             if !struct_defs.contains_key(&key) {
@@ -4356,10 +4381,17 @@ fn discover_markdown_type(
                     .members
                     .iter()
                     .map(|(name, member_ref)| {
+                        let child_heading_path = markdown_nested_heading_path(
+                            model,
+                            heading_path,
+                            name,
+                            &member_ref.target,
+                        );
                         let field_type = discover_markdown_type(
                             model,
                             &member_ref.target,
                             name,
+                            &child_heading_path,
                             &child_enum_namespace,
                             type_overrides,
                             struct_field_type_overrides,
@@ -4385,13 +4417,7 @@ fn discover_markdown_type(
                     })
                     .collect();
                 discovering_structs.remove(target);
-                struct_defs.insert(
-                    key.clone(),
-                    MarkdownStruct {
-                        name: shape_name.clone(),
-                        fields,
-                    },
-                );
+                struct_defs.insert(key.clone(), MarkdownStruct { fields });
             }
             MarkdownType::Struct {
                 key,
@@ -4412,12 +4438,14 @@ fn register_markdown_enum(
     source: MarkdownEnumSource,
     prop_name: &str,
     type_name: &str,
+    heading_path: &[String],
     namespace: &str,
     values: Vec<String>,
     all_enums: &mut BTreeMap<MarkdownEnumKey, MarkdownEnum>,
 ) -> MarkdownEnumKey {
     let key = MarkdownEnumKey {
         namespace: namespace.to_string(),
+        heading_path: heading_path.to_vec(),
         source,
     };
     all_enums
@@ -5108,6 +5136,18 @@ mod tests {
             "caller_identity_data_source.md"
         );
         assert_eq!(markdown_file_name("Roles", true), "roles_data_source.md");
+    }
+
+    #[test]
+    fn markdown_examples_dir_must_be_an_existing_directory() {
+        let root = tempfile::tempdir().expect("temporary root");
+        let missing = root.path().join("missing");
+        let file = tempfile::NamedTempFile::new_in(root.path()).expect("temporary file");
+
+        assert!(validate_examples_dir(Some(root.path())).is_ok());
+        assert!(validate_examples_dir(None).is_ok());
+        assert!(validate_examples_dir(Some(&missing)).is_err());
+        assert!(validate_examples_dir(Some(file.path())).is_err());
     }
 
     #[test]
@@ -6002,6 +6042,64 @@ mod tests {
         .expect("parse struct-order model")
     }
 
+    fn markdown_transit_gateway_attachment_model() -> SmithyModel {
+        carina_smithy::parse(
+            r##"{
+              "smithy": "2.0",
+              "shapes": {
+                "com.amazonaws.ec2#CreateTransitGatewayVpcAttachment": {
+                  "type": "operation",
+                  "input": {
+                    "target": "com.amazonaws.ec2#CreateTransitGatewayVpcAttachmentRequest"
+                  },
+                  "output": { "target": "smithy.api#Unit" },
+                  "traits": {}
+                },
+                "com.amazonaws.ec2#CreateTransitGatewayVpcAttachmentRequest": {
+                  "type": "structure",
+                  "members": {
+                    "Options": {
+                      "target": "com.amazonaws.ec2#CreateTransitGatewayVpcAttachmentRequestOptions",
+                      "traits": {}
+                    }
+                  },
+                  "traits": { "smithy.api#input": {} }
+                },
+                "com.amazonaws.ec2#CreateTransitGatewayVpcAttachmentRequestOptions": {
+                  "type": "structure",
+                  "members": {
+                    "DnsSupport": {
+                      "target": "com.amazonaws.ec2#DnsSupportValue",
+                      "traits": {}
+                    }
+                  },
+                  "traits": {}
+                },
+                "com.amazonaws.ec2#DnsSupportValue": {
+                  "type": "enum",
+                  "members": {
+                    "ENABLE": {
+                      "target": "smithy.api#Unit",
+                      "traits": { "smithy.api#enumValue": "enable" }
+                    }
+                  }
+                },
+                "com.amazonaws.ec2#TransitGatewayVpcAttachment": {
+                  "type": "structure",
+                  "members": {
+                    "TransitGatewayAttachmentId": {
+                      "target": "smithy.api#String",
+                      "traits": {}
+                    }
+                  },
+                  "traits": {}
+                }
+              }
+            }"##,
+        )
+        .expect("parse transit gateway attachment model")
+    }
+
     fn markdown_read_shape_override_model() -> SmithyModel {
         carina_smithy::parse(
             r##"{
@@ -6016,12 +6114,35 @@ mod tests {
                 "com.amazonaws.acm#RequestCertificateRequest": {
                   "type": "structure",
                   "members": {
+                    "Options": {
+                      "target": "com.amazonaws.acm#CertificateOptions",
+                      "traits": {}
+                    },
                     "DomainValidationOptions": {
                       "target": "com.amazonaws.acm#RequestDomainValidationList",
                       "traits": {}
                     }
                   },
                   "traits": { "smithy.api#input": {} }
+                },
+                "com.amazonaws.acm#CertificateOptions": {
+                  "type": "structure",
+                  "members": {
+                    "Export": {
+                      "target": "com.amazonaws.acm#Export",
+                      "traits": {}
+                    }
+                  },
+                  "traits": {}
+                },
+                "com.amazonaws.acm#Export": {
+                  "type": "enum",
+                  "members": {
+                    "ENABLED": {
+                      "target": "smithy.api#Unit",
+                      "traits": { "smithy.api#enumValue": "ENABLED" }
+                    }
+                  }
                 },
                 "com.amazonaws.acm#RequestDomainValidationList": {
                   "type": "list",
@@ -6064,12 +6185,35 @@ mod tests {
                 "com.amazonaws.acm#DomainValidation": {
                   "type": "structure",
                   "members": {
+                    "ResourceRecord": {
+                      "target": "com.amazonaws.acm#ResourceRecord",
+                      "traits": {}
+                    },
                     "ValidationMethod": {
                       "target": "com.amazonaws.acm#ValidationMethod",
                       "traits": {}
                     }
                   },
                   "traits": {}
+                },
+                "com.amazonaws.acm#ResourceRecord": {
+                  "type": "structure",
+                  "members": {
+                    "Type": {
+                      "target": "com.amazonaws.acm#RecordType",
+                      "traits": {}
+                    }
+                  },
+                  "traits": {}
+                },
+                "com.amazonaws.acm#RecordType": {
+                  "type": "enum",
+                  "members": {
+                    "CNAME": {
+                      "target": "smithy.api#Unit",
+                      "traits": { "smithy.api#enumValue": "CNAME" }
+                    }
+                  }
                 },
                 "com.amazonaws.acm#RenewalSummary": {
                   "type": "structure",
@@ -6127,6 +6271,49 @@ mod tests {
     }
 
     #[test]
+    fn markdown_transit_gateway_attachment_headings_use_dsl_field_paths() {
+        let resource = resource_defs::ec2_resources()
+            .into_iter()
+            .find(|resource| resource.name == "ec2.TransitGatewayAttachment")
+            .expect("transit gateway attachment resource");
+        let markdown =
+            generate_markdown_resource(&resource, &markdown_transit_gateway_attachment_model())
+                .expect("generate transit gateway attachment markdown");
+
+        assert!(
+            markdown.contains("### options.dns_support (DnsSupport)"),
+            "{markdown}"
+        );
+        assert!(markdown.contains("### options\n\n| Field |"), "{markdown}");
+        assert!(
+            !markdown.contains("create_transit_gateway_vpc_attachment_request_options"),
+            "{markdown}"
+        );
+    }
+
+    #[test]
+    fn markdown_acm_headings_use_dsl_field_paths() {
+        let resource = resource_defs::acm_resources()
+            .into_iter()
+            .find(|resource| resource.name == "acm.Certificate")
+            .expect("certificate resource");
+        let markdown = generate_markdown_resource(&resource, &markdown_read_shape_override_model())
+            .expect("generate certificate markdown");
+
+        for heading in [
+            "### options.export (Export)",
+            "### domain_validation_options.resource_record.type (Type)",
+            "### options",
+            "### domain_validation_options",
+            "### renewal_summary.domain_validation",
+        ] {
+            assert!(markdown.contains(heading), "missing {heading}:\n{markdown}");
+        }
+        assert!(!markdown.contains("### CertificateOptions"), "{markdown}");
+        assert!(!markdown.contains("### DomainValidation\n"), "{markdown}");
+    }
+
+    #[test]
     fn markdown_uses_registered_slug_for_attribute_struct_collision() {
         let markdown = generate_markdown_resource(
             &markdown_regression_resource(),
@@ -6149,7 +6336,7 @@ mod tests {
         .expect("generate markdown");
 
         assert!(
-            markdown.contains("List\\<[Struct(Options)](#options-1)\\>"),
+            markdown.contains("List\\<[Struct(Options)](#items-1)\\>"),
             "{markdown}"
         );
         assert!(!markdown.contains("`List<["), "{markdown}");
