@@ -22,8 +22,11 @@ assert_state_resource_count "assert: 1 resource in state" "1" "$WORK_DIR"
 
 # account_id should be a 12-digit number persisted through the consumer role.
 printf "  %-50s" "assert: consumer.description is 12 digits"
-ACCOUNT_ID=$(jq -r '.resources[] | select(.attributes.role_name == "'"$CONSUMER_ROLE_NAME"'") | .attributes.description' "$WORK_DIR/carina.state.json" 2>/dev/null)
-if echo "$ACCOUNT_ID" | grep -qE '^[0-9]{12}$'; then
+CONSUMER_PATH=".resources[] | select(.current.attributes.role_name == \"$CONSUMER_ROLE_NAME\")"
+ACCOUNT_ID=""
+if ACCOUNT_ID=$(carina_state_query "$WORK_DIR" \
+    "$CONSUMER_PATH | .current.attributes.description") && \
+    echo "$ACCOUNT_ID" | grep -qE '^[0-9]{12}$'; then
     echo "OK ($ACCOUNT_ID)"
     TEST_PASSED=$((TEST_PASSED + 1))
 else
@@ -33,8 +36,10 @@ fi
 
 # arn should start with arn:aws and be persisted through the consumer role tag.
 printf "  %-50s" "assert: consumer CallerArn starts with arn:aws"
-ARN=$(jq -r '.resources[] | select(.attributes.role_name == "'"$CONSUMER_ROLE_NAME"'") | .attributes.tags.CallerArn' "$WORK_DIR/carina.state.json" 2>/dev/null)
-if echo "$ARN" | grep -q '^arn:aws'; then
+ARN=""
+if ARN=$(carina_state_query "$WORK_DIR" \
+    "$CONSUMER_PATH | .current.attributes.tags.CallerArn") && \
+    echo "$ARN" | grep -q '^arn:aws'; then
     echo "OK"
     TEST_PASSED=$((TEST_PASSED + 1))
 else

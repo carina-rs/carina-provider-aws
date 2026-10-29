@@ -17,8 +17,8 @@
 #
 # AWS authentication:
 #   Set AWS_PROFILE to one of the carina-test-00X profiles. The script
-#   resolves fresh STS credentials from that profile before each carina
-#   invocation (via `aws configure export-credentials`), so long-running
+#   resolves fresh STS credentials from that profile before each AWS-facing
+#   carina invocation (via `aws configure export-credentials`), so long-running
 #   replace/destroy cycles are not bound to a single SSO access-token
 #   lifetime (see carina-rs/carina-provider-awscc#157). The first run
 #   in a session needs `aws sso login --sso-session carina`.
@@ -128,12 +128,12 @@ run_expected_error() {
     return 1
 }
 
-# Extract all resource identifiers from carina.state.json as a sorted newline-separated string.
+# Extract all resource identifiers through `carina state show --json`.
 # Args: work_dir
-# Outputs: sorted identifiers (one per line), or empty if none found
+# Outputs: sorted identifiers (one per line); fails if any identifier is missing
 get_identifiers() {
     local work_dir="$1"
-    jq -r '.resources[].identifier // empty' "$work_dir/carina.state.json" 2>/dev/null | sort || true
+    carina_state_identifiers "$work_dir"
 }
 
 # Assert that two identifier sets match the expected relationship
@@ -227,6 +227,14 @@ assert_ec2_security_group_state() {
 
     printf "  %-55s " "$description"
 
+    local state_json
+    if ! state_json=$(carina_state_json "$work_dir"); then
+        echo "FAIL"
+        echo "  ERROR: could not read state"
+        TOTAL_FAILED=$((TOTAL_FAILED + 1))
+        return 1
+    fi
+
     local summary
     if ! summary=$(jq -r \
         --arg base_group_name "$base_group_name" \
@@ -234,14 +242,14 @@ assert_ec2_security_group_state() {
         [.resources[] | select(.resource_type == "ec2.SecurityGroup")] as $security_groups
         | ($base_group_name + "-") as $temporary_name_prefix
         | if (($security_groups | length) == 1
-            and (($security_groups[0].attributes.group_name // "") | startswith($temporary_name_prefix))
-            and ($security_groups[0].attributes.group_name != $base_group_name)
-            and ($security_groups[0].attributes.description == $expected_description)) then
+            and (($security_groups[0].current.attributes.group_name // "") | startswith($temporary_name_prefix))
+            and ($security_groups[0].current.attributes.group_name != $base_group_name)
+            and ($security_groups[0].current.attributes.description == $expected_description)) then
             "ok"
           else
-            "count=\($security_groups | length) group_names=\($security_groups | map(.attributes.group_name // "<missing>") | join(",")) descriptions=\($security_groups | map(.attributes.description // "<missing>") | join(","))"
+            "count=\($security_groups | length) group_names=\($security_groups | map(.current.attributes.group_name // "<missing>") | join(",")) descriptions=\($security_groups | map(.current.attributes.description // "<missing>") | join(","))"
           end
-    ' "$work_dir/carina.state.json" 2>&1); then
+    ' <<< "$state_json" 2>&1); then
         echo "FAIL"
         echo "  ERROR: could not inspect state:"
         echo "  $summary"
@@ -379,7 +387,15 @@ run_test() {
 
     # Capture identifiers after step 1
     local ids_after_step1
-    ids_after_step1=$(get_identifiers "$work_dir")
+    if ! ids_after_step1=$(get_identifiers "$work_dir"); then
+        echo "  assert: read identifiers after step 1                 FAIL"
+        echo "  ERROR: could not read identifiers after step 1"
+        TOTAL_FAILED=$((TOTAL_FAILED + 1))
+        destroy_work_dir "$work_dir"
+        rm -rf "$work_dir"
+        ACTIVE_WORK_DIR=""
+        return 1
+    fi
 
     # Swap in step2 config (providers are the same, lock already present)
     swap_crn "$step2" "$work_dir"
@@ -429,7 +445,15 @@ run_test() {
 
     # Capture identifiers after step 2
     local ids_after_step2
-    ids_after_step2=$(get_identifiers "$work_dir")
+    if ! ids_after_step2=$(get_identifiers "$work_dir"); then
+        echo "  assert: read identifiers after step 2                 FAIL"
+        echo "  ERROR: could not read identifiers after step 2"
+        TOTAL_FAILED=$((TOTAL_FAILED + 1))
+        destroy_work_dir "$work_dir"
+        rm -rf "$work_dir"
+        ACTIVE_WORK_DIR=""
+        return 1
+    fi
 
     # Assert identifiers changed (create_before_destroy should replace at least one resource)
     if ! assert_identifiers "assert: identifiers changed after replace" "$ids_after_step1" "$ids_after_step2" "different"; then
@@ -483,7 +507,7 @@ run_test "ec2_vpc" \
     "$SCRIPT_DIR/ec2_vpc_step1.crn" \
     "$SCRIPT_DIR/ec2_vpc_step2.crn" \
     "Test 1: EC2 VPC (conflicting replacement rejected)" \
-    "resource type 'ec2.Vpc' does not support create_before_destroy: the replacement cannot coexist with the original" || true
+    "resource type 'aws.ec2.Vpc' does not support create_before_destroy: the replacement cannot coexist with the original" || true
 
 # Test 2: EC2 Security Group - CBD succeeds with a temporary unique name
 # group_name is unique within a VPC, so the replacement uses a temporary name.

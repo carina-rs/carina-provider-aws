@@ -51,36 +51,36 @@ run_step "step1: apply (creates new + reads existing)" "$CARINA_BIN" apply --aut
 # end-to-end by tags on the managed bucket that consume existing.* outputs.
 assert_state_resource_count "assert: 1 resource in state" "1" "$WORK_DIR"
 
-MANAGED_PATH=".resources[] | select(.attributes.bucket == \"$NEW_BUCKET\")"
+MANAGED_PATH=".resources[] | select(.current.attributes.bucket == \"$NEW_BUCKET\")"
 
 assert_state_value "assert: new_bucket present in state" \
-    "$MANAGED_PATH | .attributes.bucket" \
+    "$MANAGED_PATH | .current.attributes.bucket" \
     "$NEW_BUCKET" \
     "$WORK_DIR"
 assert_state_value "assert: tag ExistingBucket = existing.bucket" \
-    "$MANAGED_PATH | .attributes.tags.ExistingBucket" \
+    "$MANAGED_PATH | .current.attributes.tags.ExistingBucket" \
     "$PRE_BUCKET" \
     "$WORK_DIR"
 assert_state_value "assert: tag ExistingRegion = existing.region" \
-    "$MANAGED_PATH | .attributes.tags.ExistingRegion" \
+    "$MANAGED_PATH | .current.attributes.tags.ExistingRegion" \
     "$REGION" \
     "$WORK_DIR"
 assert_state_value "assert: tag ExistingArn = existing.arn" \
-    "$MANAGED_PATH | .attributes.tags.ExistingArn" \
+    "$MANAGED_PATH | .current.attributes.tags.ExistingArn" \
     "arn:aws:s3:::$PRE_BUCKET" \
     "$WORK_DIR"
 assert_state_value "assert: tag ExistingDomain = existing.bucket_domain_name" \
-    "$MANAGED_PATH | .attributes.tags.ExistingDomain" \
+    "$MANAGED_PATH | .current.attributes.tags.ExistingDomain" \
     "$PRE_BUCKET.s3.amazonaws.com" \
     "$WORK_DIR"
 assert_state_value "assert: tag ExistingRegionalName = existing.bucket_regional_domain_name" \
-    "$MANAGED_PATH | .attributes.tags.ExistingRegionalName" \
+    "$MANAGED_PATH | .current.attributes.tags.ExistingRegionalName" \
     "$PRE_BUCKET.s3.$REGION.amazonaws.com" \
     "$WORK_DIR"
 # Hosted zone for ap-northeast-1 per
 # https://docs.aws.amazon.com/general/latest/gr/s3.html
 assert_state_value "assert: tag ExistingHostedZoneId = existing.hosted_zone_id" \
-    "$MANAGED_PATH | .attributes.tags.ExistingHostedZoneId" \
+    "$MANAGED_PATH | .current.attributes.tags.ExistingHostedZoneId" \
     "Z2M4EHUR26P7ZW" \
     "$WORK_DIR"
 

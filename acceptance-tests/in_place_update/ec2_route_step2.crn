@@ -21,7 +21,8 @@ let vpc = aws.ec2.Vpc {
   }
 }
 
-aws.ec2.InternetGateway {
+# This binding keeps the address identical across steps so the test measures an in-place update; anonymous-to-let changes it (carina-rs/carina#3003).
+let igw = aws.ec2.InternetGateway {
   vpc_id = vpc.vpc_id
 
   tags = {
