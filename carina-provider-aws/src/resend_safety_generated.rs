@@ -21,6 +21,53 @@ use crate::sdk_config::BoundedSdkConfig;
 /// operation, add a decision there and run `scripts/generate-provider.sh`.
 /// Token-bearing operations return `TokenOperation` and must be sent via
 /// `retry_aws_operation_with_token` or `send_aws_operation_with_token`.
+pub(crate) struct AccountClient {
+    inner: aws_sdk_account::Client,
+}
+
+// Decisions can outlive their current call sites; every decided operation remains
+// available through the closed generated client API.
+#[allow(dead_code)]
+impl AccountClient {
+    // Raw SDK client construction is confined to generated guarded wrappers.
+    #[allow(clippy::disallowed_methods)]
+    pub(crate) fn from_bounded_config(config: &BoundedSdkConfig) -> Self {
+        Self {
+            inner: aws_sdk_account::Client::from_conf(
+                aws_sdk_account::config::Builder::from(config.sdk_config())
+                    .interceptor(ResendGuard::new(account_idempotency))
+                    .build(),
+            ),
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn config(&self) -> &aws_sdk_account::Config {
+        self.inner.config()
+    }
+
+    /// PutAccountName: sets the name of the identified account; repeating the same account ID and name has no additional effect
+    pub(crate) fn put_account_name(
+        &self,
+    ) -> aws_sdk_account::operation::put_account_name::builders::PutAccountNameFluentBuilder {
+        self.inner.put_account_name()
+    }
+}
+
+pub(crate) fn account_idempotency(operation: &str) -> Idempotency {
+    match operation {
+        "PutAccountName" => Idempotency::Idempotent,
+        _ => Idempotency::NotIdempotent,
+    }
+}
+
+/// Guarded AWS service client with a closed, generated operation API.
+///
+/// Methods exist only for operations decided in
+/// `carina-codegen-aws/src/resend_safety.rs` (`OVERRIDES`). To call a new AWS
+/// operation, add a decision there and run `scripts/generate-provider.sh`.
+/// Token-bearing operations return `TokenOperation` and must be sent via
+/// `retry_aws_operation_with_token` or `send_aws_operation_with_token`.
 pub(crate) struct AcmClient {
     inner: aws_sdk_acm::Client,
 }
@@ -1643,6 +1690,35 @@ pub(crate) fn sts_idempotency(operation: &str) -> Idempotency {
     match operation {
         "GetCallerIdentity" => Idempotency::ReadOnly,
         _ => Idempotency::NotIdempotent,
+    }
+}
+
+/// PutAccountName: sets the name of the identified account; repeating the same account ID and name has no additional effect
+impl AwsOperation
+    for aws_sdk_account::operation::put_account_name::builders::PutAccountNameFluentBuilder
+{
+    type Resend = NoToken;
+    type Output = aws_sdk_account::operation::put_account_name::PutAccountNameOutput;
+    type Error = aws_sdk_account::operation::put_account_name::PutAccountNameError;
+
+    const NAME: &'static str = "account.PutAccountName";
+    const IDEMPOTENCY: Idempotency = Idempotency::Idempotent;
+}
+
+impl DecidedOperationError for aws_sdk_account::operation::put_account_name::PutAccountNameError {
+    const NAME: &'static str = <aws_sdk_account::operation::put_account_name::builders::PutAccountNameFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_account::operation::put_account_name::builders::PutAccountNameFluentBuilder as AwsOperation>::IDEMPOTENCY;
+}
+
+impl DecidedSend<()>
+    for aws_sdk_account::operation::put_account_name::builders::PutAccountNameFluentBuilder
+{
+    fn send(
+        self,
+        (): (),
+    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send
+    {
+        self.send()
     }
 }
 

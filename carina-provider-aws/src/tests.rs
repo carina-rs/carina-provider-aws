@@ -38,6 +38,10 @@ async fn provider_clients_have_bounded_sdk_policy() {
         provider.sts_client.config().retry_config(),
     );
     assert_bounded_policy(
+        provider.account_client.config().timeout_config(),
+        provider.account_client.config().retry_config(),
+    );
+    assert_bounded_policy(
         provider.organizations_client.config().timeout_config(),
         provider.organizations_client.config().retry_config(),
     );

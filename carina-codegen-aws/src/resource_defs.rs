@@ -484,6 +484,14 @@ pub enum DerivedSource {
 pub enum FieldLayout {
     /// Fields are top-level parameters of the API input.
     Flat(Vec<&'static str>),
+    /// Top-level parameters sent through a different AWS service. The
+    /// provider implementation is hand-written, while codegen still uses the
+    /// operation to classify schema fields as updatable and load the service
+    /// model for guarded-client generation.
+    CrossServiceFlat {
+        service_namespace: &'static str,
+        fields: Vec<&'static str>,
+    },
     /// Fields are nested inside a named struct in the API input.
     InsideStruct {
         name: &'static str,
@@ -496,7 +504,18 @@ impl FieldLayout {
     pub fn field_names(&self) -> &[&'static str] {
         match self {
             FieldLayout::Flat(fields) => fields,
+            FieldLayout::CrossServiceFlat { fields, .. } => fields,
             FieldLayout::InsideStruct { fields, .. } => fields,
+        }
+    }
+
+    /// Return the explicit service namespace for a cross-service operation.
+    pub fn cross_service_namespace(&self) -> Option<&'static str> {
+        match self {
+            FieldLayout::CrossServiceFlat {
+                service_namespace, ..
+            } => Some(service_namespace),
+            FieldLayout::Flat(_) | FieldLayout::InsideStruct { .. } => None,
         }
     }
 }
@@ -1627,22 +1646,23 @@ pub fn organizations_resources() -> Vec<ResourceDef> {
             service_namespace: "com.amazonaws.organizations",
             schema_structure: None,
             simple_delete: false,
-            noop_update: true,
+            noop_update: false,
             create_op: "CreateAccount",
             read_structure: Some("Account"),
             read_ops: vec![],
             delete_op: "CloseAccount",
-            update_ops: vec![],
+            update_ops: vec![UpdateOp {
+                operation: "PutAccountName",
+                fields: FieldLayout::CrossServiceFlat {
+                    service_namespace: "com.amazonaws.account",
+                    fields: vec!["AccountName"],
+                },
+            }],
             identifier: "Id",
             has_tags: true,
             type_overrides: vec![],
             exclude_fields: vec!["Paths", "State"],
-            create_only_overrides: vec![
-                "AccountName",
-                "Email",
-                "IamUserAccessToBilling",
-                "RoleName",
-            ],
+            create_only_overrides: vec!["Email", "IamUserAccessToBilling", "RoleName"],
             enum_aliases: vec![],
             to_dsl_overrides: vec![],
             required_overrides: vec!["AccountName", "Email"],

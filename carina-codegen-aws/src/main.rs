@@ -541,6 +541,19 @@ fn main() -> Result<()> {
         let model = load_model(&args.model_dir, res.service_namespace)?;
         models.insert(res.service_namespace, model);
     }
+    for res in &resources {
+        for namespace in res
+            .update_ops
+            .iter()
+            .filter_map(|operation| operation.fields.cross_service_namespace())
+        {
+            if models.contains_key(namespace) {
+                continue;
+            }
+            let model = load_model(&args.model_dir, namespace)?;
+            models.insert(namespace, model);
+        }
+    }
     for ds in &data_sources {
         if models.contains_key(ds.service_namespace) {
             continue;
@@ -5828,6 +5841,86 @@ mod tests {
         .replace("__CREATE_FIELDS__", &members(create_fields))
         .replace("__READ_FIELDS__", &members(read_fields));
         carina_smithy::parse(&document).expect("parse string-only fixture model")
+    }
+
+    fn organizations_account_fixture_model() -> SmithyModel {
+        carina_smithy::parse(
+            r##"{
+              "smithy": "2.0",
+              "shapes": {
+                "com.amazonaws.organizations#CreateAccount": {
+                  "type": "operation",
+                  "input": { "target": "com.amazonaws.organizations#CreateAccountRequest" },
+                  "output": { "target": "smithy.api#Unit" },
+                  "traits": {}
+                },
+                "com.amazonaws.organizations#CreateAccountRequest": {
+                  "type": "structure",
+                  "members": {
+                    "AccountName": { "target": "smithy.api#String", "traits": { "smithy.api#required": {} } },
+                    "Email": { "target": "smithy.api#String", "traits": { "smithy.api#required": {} } },
+                    "IamUserAccessToBilling": { "target": "smithy.api#String", "traits": {} },
+                    "RoleName": { "target": "smithy.api#String", "traits": {} }
+                  },
+                  "traits": { "smithy.api#input": {} }
+                },
+                "com.amazonaws.organizations#Account": {
+                  "type": "structure",
+                  "members": {
+                    "Id": { "target": "smithy.api#String", "traits": {} },
+                    "Arn": { "target": "smithy.api#String", "traits": {} },
+                    "Email": { "target": "smithy.api#String", "traits": {} },
+                    "Name": { "target": "smithy.api#String", "traits": {} },
+                    "Status": { "target": "smithy.api#String", "traits": {} },
+                    "JoinedMethod": { "target": "smithy.api#String", "traits": {} },
+                    "JoinedTimestamp": { "target": "smithy.api#String", "traits": {} }
+                  },
+                  "traits": {}
+                }
+              }
+            }"##,
+        )
+        .expect("parse inline Organizations account model")
+    }
+
+    #[test]
+    fn organizations_account_codegen_keeps_read_contract_while_allowing_name_updates() {
+        let resource = resource_defs::organizations_resources()
+            .into_iter()
+            .find(|resource| resource.name == "organizations.Account")
+            .expect("Organizations account resource definition");
+        let generated =
+            collect_resource_attributes(&resource, &organizations_account_fixture_model())
+                .expect("generate Organizations account attributes from inline Smithy");
+
+        let account_name = generated
+            .attrs
+            .iter()
+            .find(|attribute| attribute.snake_name == "account_name")
+            .expect("account_name attribute");
+        assert_eq!(account_name.provider_name, "AccountName");
+        assert!(account_name.is_required);
+        assert!(
+            !account_name.is_create_only,
+            "account_name must be updated in place"
+        );
+
+        let email = generated
+            .attrs
+            .iter()
+            .find(|attribute| attribute.snake_name == "email")
+            .expect("email attribute");
+        assert!(email.is_create_only, "email still requires replacement");
+
+        for name in ["role_name", "iam_user_access_to_billing"] {
+            let attribute = generated
+                .attrs
+                .iter()
+                .find(|attribute| attribute.snake_name == name)
+                .unwrap_or_else(|| panic!("{name} attribute"));
+            assert!(attribute.is_create_only, "{name} remains create-only");
+            assert!(attribute.is_write_only, "{name} remains write-only");
+        }
     }
 
     /// Minimal Smithy surface shared by codegen unit tests. Every shape here

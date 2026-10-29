@@ -43,6 +43,12 @@ const fn decision(
 /// Closed resend-safety decisions for every AWS operation called by the provider.
 pub const OVERRIDES: &[Override] = &[
     decision(
+        "account",
+        "PutAccountName",
+        Decision::Idempotent,
+        "PutAccountName: sets the name of the identified account; repeating the same account ID and name has no additional effect",
+    ),
+    decision(
         "acm",
         "AddTagsToCertificate",
         Decision::Idempotent,

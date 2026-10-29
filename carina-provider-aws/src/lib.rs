@@ -57,7 +57,7 @@ pub(crate) fn test_rootless_type(
 
 use carina_core::schema::{ResourceSchema, SchemaKind, SchemaRegistry};
 use resend_safety_generated::{
-    AcmClient, CloudWatchLogsClient, Ec2Client, IamClient, IdentityStoreClient,
+    AccountClient, AcmClient, CloudWatchLogsClient, Ec2Client, IamClient, IdentityStoreClient,
     OrganizationsClient, Route53Client, S3Client, SqsClient, StsClient,
 };
 
@@ -68,6 +68,7 @@ pub struct AwsProvider {
     iam_client: IamClient,
     logs_client: CloudWatchLogsClient,
     sts_client: StsClient,
+    account_client: AccountClient,
     organizations_client: OrganizationsClient,
     identitystore_client: IdentityStoreClient,
     route53_client: Route53Client,
