@@ -5,8 +5,8 @@ use std::collections::BTreeMap;
 use indexmap::IndexMap;
 
 use carina_core::provider::{
-    BoxFuture, CanonicalCustomTypeValue, CanonicalProviderConfigAttributes, ProviderError,
-    ProviderFactory, ProviderNormalizer, ProviderReadyConfig, ProviderResult,
+    BoxFuture, CanonicalProviderConfigAttributes, ProviderError, ProviderFactory,
+    ProviderNormalizer, ProviderReadyConfig, ProviderResult,
 };
 use carina_core::resource::Value;
 use carina_core::schema::{ValidatedConfigSchema, ValidatedResourceSchema};
@@ -63,15 +63,6 @@ impl ProviderFactory for AwsProviderFactory {
             check_cross_account(&ar.role_arn, &allowed).map_err(ProviderError::invalid_input)?;
         }
         Ok(())
-    }
-
-    fn validate_custom_type(
-        &self,
-        identity: &carina_core::schema::TypeIdentity,
-        value: &CanonicalCustomTypeValue,
-    ) -> ProviderResult<()> {
-        crate::schemas::config::validate_aws_custom_type(identity, value.as_str())
-            .map_err(ProviderError::invalid_input)
     }
 
     fn extract_region(&self, attributes: &IndexMap<String, Value>) -> String {
@@ -200,8 +191,8 @@ mod tests {
     }
 
     #[test]
-    fn validate_custom_type_uses_structured_availability_zone_identity() {
-        let identity = carina_aws_types::provider_bare_type(&["AvailabilityZone"], "ZoneName");
+    fn availability_zone_witness_uses_catalog_identity() {
+        let identity = carina_aws_types::AwsType::AvailabilityZone.identity();
         let zone_schema = carina_core::schema::ValidatedConfigSchema::validate(BTreeMap::from([(
             "availability_zone".to_string(),
             carina_aws_types::availability_zone(),

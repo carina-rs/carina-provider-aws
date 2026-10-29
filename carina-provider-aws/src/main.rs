@@ -1,7 +1,4 @@
 #[cfg(any(target_arch = "wasm32", test))]
-mod convert;
-
-#[cfg(any(target_arch = "wasm32", test))]
 use std::collections::{BTreeMap, HashMap};
 
 #[cfg(any(target_arch = "wasm32", test))]
@@ -20,11 +17,13 @@ use carina_provider_protocol::OperationStep;
 use carina_provider_protocol::types as proto;
 
 #[cfg(any(target_arch = "wasm32", test))]
+use carina_core::protocol_convert;
+#[cfg(any(target_arch = "wasm32", test))]
 use carina_core::provider::{
     AppliedIdentifier as CoreAppliedIdentifier, AppliedState as CoreAppliedState,
-    DeleteRequest as CoreDeleteRequest, Observation as CoreObservation, PatchOp as CorePatchOp,
-    Provider, ProviderError as CoreProviderError, ProviderFactory, ProviderNormalizer,
-    ReadRequest as CoreReadRequest, Sent as CoreSent, UpdatePatch as CoreUpdatePatch,
+    DeleteRequest as CoreDeleteRequest, Observation as CoreObservation, Provider,
+    ProviderError as CoreProviderError, ProviderFactory, ProviderNormalizer,
+    ReadOutcome as CoreReadOutcome, ReadRequest as CoreReadRequest, Sent as CoreSent,
 };
 #[cfg(any(target_arch = "wasm32", test))]
 use carina_core::resource::Value as CoreValue;
@@ -40,6 +39,35 @@ use carina_provider_aws::{
 
 #[cfg(any(target_arch = "wasm32", test))]
 const CREATE_POLL_AFTER_SECS: u32 = 5;
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn protocol_input_error(
+    context: &'static str,
+    error: protocol_convert::ProtocolConvertError,
+) -> CoreProviderError {
+    CoreProviderError::invalid_input_caused_by(context, error)
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn protocol_output_error(
+    context: &'static str,
+    error: protocol_convert::ProtocolConvertError,
+) -> CoreProviderError {
+    CoreProviderError::internal_caused_by(context, error)
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn read_outcome_to_proto(
+    outcome: &CoreReadOutcome,
+) -> Result<proto::ReadOutcome, CoreProviderError> {
+    protocol_convert::try_read_outcome_to_protocol(outcome).map_err(|error| {
+        let id = match outcome {
+            CoreReadOutcome::NotFound { id } => id,
+            CoreReadOutcome::Found { state } => state.id(),
+        };
+        protocol_output_error("failed to encode read result", error).for_resource(id.clone())
+    })
+}
 
 #[cfg(any(target_arch = "wasm32", test))]
 struct GuestCreateAttempt(SdkCreateAttempt);
@@ -59,9 +87,10 @@ fn observation_to_proto(
     observation: CoreObservation,
 ) -> proto::Observation<proto::ReadOutcome, proto::ProviderError> {
     match observation {
-        CoreObservation::Read(outcome) => {
-            proto::Observation::Read(convert::core_to_proto_read_outcome(outcome))
-        }
+        CoreObservation::Read(outcome) => match read_outcome_to_proto(&outcome) {
+            Ok(outcome) => proto::Observation::Read(outcome),
+            Err(error) => proto::Observation::ReadFailed(error.to_wire()),
+        },
         CoreObservation::ReadFailed(error) => proto::Observation::ReadFailed(error.to_wire()),
     }
 }
@@ -126,9 +155,21 @@ impl AwsIssuedCreate for GuestPolledIssuedCreate {
         self.0.identifier()
     }
 
-    fn succeeded(self, attributes: HashMap<String, CoreValue>) -> Self::Step {
-        self.0
-            .succeeded(convert::core_to_proto_value_map(&attributes))
+    fn succeeded(
+        self,
+        attributes: HashMap<String, CoreValue>,
+    ) -> Result<Self::Step, Self::Verdict> {
+        match protocol_convert::try_core_to_protocol_value_map(&attributes) {
+            Ok(attributes) => Ok(self.0.succeeded(attributes)),
+            Err(error) => {
+                let error =
+                    protocol_output_error("failed to encode create result", error).to_wire();
+                Err(self
+                    .0
+                    .failed(proto::Observation::ReadFailed(error.clone()), error)
+                    .into())
+            }
+        }
     }
 
     fn partial(
@@ -136,14 +177,24 @@ impl AwsIssuedCreate for GuestPolledIssuedCreate {
         attributes: HashMap<String, CoreValue>,
         reason: String,
         missing_attributes: Vec<String>,
-    ) -> Self::Step {
-        self.0.partial(
-            convert::core_to_proto_value_map(&attributes),
-            proto::PartialReadDiagnostic {
-                reason,
-                missing_attributes,
-            },
-        )
+    ) -> Result<Self::Step, Self::Verdict> {
+        match protocol_convert::try_core_to_protocol_value_map(&attributes) {
+            Ok(attributes) => Ok(self.0.partial(
+                attributes,
+                proto::PartialReadDiagnostic {
+                    reason,
+                    missing_attributes,
+                },
+            )),
+            Err(error) => {
+                let error = protocol_output_error("failed to encode partial create result", error)
+                    .to_wire();
+                Err(self
+                    .0
+                    .failed(proto::Observation::ReadFailed(error.clone()), error)
+                    .into())
+            }
+        }
     }
 
     fn failed(self, observation: CoreObservation, error: CoreProviderError) -> Self::Verdict {
@@ -174,9 +225,20 @@ impl AwsIssuedCreate for GuestIssuedCreate {
         self.0.identifier()
     }
 
-    fn succeeded(self, attributes: HashMap<String, CoreValue>) -> Self::Step {
-        self.0
-            .succeeded(convert::core_to_proto_value_map(&attributes))
+    fn succeeded(
+        self,
+        attributes: HashMap<String, CoreValue>,
+    ) -> Result<Self::Step, Self::Verdict> {
+        match protocol_convert::try_core_to_protocol_value_map(&attributes) {
+            Ok(attributes) => Ok(self.0.succeeded(attributes)),
+            Err(error) => {
+                let error =
+                    protocol_output_error("failed to encode create result", error).to_wire();
+                Err(self
+                    .0
+                    .failed(proto::Observation::ReadFailed(error.clone()), error))
+            }
+        }
     }
 
     fn partial(
@@ -184,14 +246,23 @@ impl AwsIssuedCreate for GuestIssuedCreate {
         attributes: HashMap<String, CoreValue>,
         reason: String,
         missing_attributes: Vec<String>,
-    ) -> Self::Step {
-        self.0.partial(
-            convert::core_to_proto_value_map(&attributes),
-            proto::PartialReadDiagnostic {
-                reason,
-                missing_attributes,
-            },
-        )
+    ) -> Result<Self::Step, Self::Verdict> {
+        match protocol_convert::try_core_to_protocol_value_map(&attributes) {
+            Ok(attributes) => Ok(self.0.partial(
+                attributes,
+                proto::PartialReadDiagnostic {
+                    reason,
+                    missing_attributes,
+                },
+            )),
+            Err(error) => {
+                let error = protocol_output_error("failed to encode partial create result", error)
+                    .to_wire();
+                Err(self
+                    .0
+                    .failed(proto::Observation::ReadFailed(error.clone()), error))
+            }
+        }
     }
 
     fn failed(self, observation: CoreObservation, error: CoreProviderError) -> Self::Verdict {
@@ -248,10 +319,17 @@ impl AwsResumedCreate for GuestResumedCreate {
         self.0.identifier()
     }
 
-    fn completed(self, state: CoreAppliedState) -> Self::Step {
-        self.0.completed(FoundRead::from_applied_state(
-            convert::core_to_proto_applied_state(&state),
-        ))
+    fn completed(self, state: CoreAppliedState) -> Result<Self::Step, Self::Verdict> {
+        match protocol_convert::try_applied_state_to_protocol(&state) {
+            Ok(state) => Ok(self.0.completed(FoundRead::from_applied_state(state))),
+            Err(error) => {
+                let error = protocol_output_error("failed to encode resumed create result", error)
+                    .to_wire();
+                Err(self
+                    .0
+                    .failed(proto::Observation::ReadFailed(error.clone()), error))
+            }
+        }
     }
 
     fn failed(self, observation: CoreObservation, error: CoreProviderError) -> Self::Verdict {
@@ -355,7 +433,9 @@ impl CarinaProvider for AwsProcessProvider {
         use carina_provider_aws::services::sts::assume_role::{
             check_cross_account, extract_assume_role,
         };
-        let core_attrs = convert::proto_to_core_value_map(attrs);
+        let core_attrs = protocol_convert::protocol_to_core_value_map(attrs).map_err(|error| {
+            protocol_input_error("failed to decode provider configuration", error).to_string()
+        })?;
         let assume_role = extract_assume_role(core_attrs.get("assume_role"))?;
         if let Some(ar) = &assume_role {
             let allowed = extract_string_list(core_attrs.get("allowed_account_ids"));
@@ -367,9 +447,14 @@ impl CarinaProvider for AwsProcessProvider {
     fn initialize(&mut self, attrs: &BTreeMap<String, proto::Value>) -> Result<(), String> {
         use carina_provider_aws::services::sts::account_guard::extract_string_list;
         use carina_provider_aws::services::sts::assume_role::extract_assume_role;
-        let core_attrs: indexmap::IndexMap<_, _> = convert::proto_to_core_value_map(attrs)
-            .into_iter()
-            .collect();
+        let core_attrs: indexmap::IndexMap<_, _> =
+            protocol_convert::protocol_to_core_value_map(attrs)
+                .map_err(|error| {
+                    protocol_input_error("failed to decode provider configuration", error)
+                        .to_string()
+                })?
+                .into_iter()
+                .collect();
         let region = carina_core::utils::extract_region_from_attrs(&core_attrs, "ap-northeast-1");
         let allowed = extract_string_list(core_attrs.get("allowed_account_ids"));
         let forbidden = extract_string_list(core_attrs.get("forbidden_account_ids"));
@@ -419,12 +504,12 @@ impl CarinaProvider for AwsProcessProvider {
         identifier: &proto::AppliedIdentifier,
         _request: proto::ReadRequest,
     ) -> Result<proto::ReadOutcome, proto::ProviderError> {
-        let core_id = convert::proto_to_core_resource_id(id);
+        let core_id = protocol_convert::protocol_to_resource_id(id);
         let result =
             self.runtime
                 .block_on(self.provider().read(&core_id, identifier, CoreReadRequest));
         match result {
-            Ok(outcome) => Ok(convert::core_to_proto_read_outcome(outcome)),
+            Ok(outcome) => read_outcome_to_proto(&outcome).map_err(Self::convert_error),
             Err(e) => Err(Self::convert_error(e)),
         }
     }
@@ -433,12 +518,23 @@ impl CarinaProvider for AwsProcessProvider {
         &self,
         resource: &proto::Resource,
     ) -> Result<proto::State, proto::ProviderError> {
-        let core_data_source = convert::proto_to_core_data_source(resource);
+        let core_data_source =
+            protocol_convert::protocol_to_data_source(resource).map_err(|error| {
+                Self::convert_error(
+                    protocol_input_error("failed to decode data source", error)
+                        .for_resource(protocol_convert::protocol_to_resource_id(&resource.id)),
+                )
+            })?;
         let result = self
             .runtime
             .block_on(self.provider().read_data_source_resource(&core_data_source));
         match result {
-            Ok(state) => Ok(convert::core_to_proto_state(&state)),
+            Ok(state) => protocol_convert::try_state_to_protocol(&state).map_err(|error| {
+                Self::convert_error(
+                    protocol_output_error("failed to encode data-source read result", error)
+                        .for_resource(core_data_source.id.clone()),
+                )
+            }),
             Err(e) => Err(Self::convert_error(e)),
         }
     }
@@ -449,7 +545,16 @@ impl CarinaProvider for AwsProcessProvider {
         request: proto::CreateRequest,
         attempt: SdkCreateAttempt,
     ) -> Result<SdkCreateStep<Self::CreateToken>, SdkCreateVerdict> {
-        let core_resource = convert::proto_to_core_resource(&request.resource);
+        let core_resource = match protocol_convert::protocol_to_resource(&request.resource) {
+            Ok(resource) => resource,
+            Err(error) => {
+                let error = protocol_input_error("failed to decode create request", error)
+                    .for_resource(protocol_convert::protocol_to_resource_id(
+                        &request.resource.id,
+                    ));
+                return Err(attempt.untracked(Self::convert_error(error)));
+            }
+        };
         let schemas = Self::schema_registry();
         let core_resource = match self.runtime.block_on(
             carina_core::executor::normalized::apply_desired_normalization(
@@ -474,7 +579,23 @@ impl CarinaProvider for AwsProcessProvider {
         request: proto::CreateRequest,
         poll: SdkPoll<Self::CreateToken>,
     ) -> Result<SdkCreateStep<Self::CreateToken>, SdkPollVerdict> {
-        let core_resource = convert::proto_to_core_resource(&request.resource);
+        let core_resource = match protocol_convert::protocol_to_resource(&request.resource) {
+            Ok(resource) => resource,
+            Err(error) => {
+                let error = Self::convert_error(
+                    protocol_input_error("failed to decode create poll request", error)
+                        .for_resource(protocol_convert::protocol_to_resource_id(
+                            &request.resource.id,
+                        )),
+                );
+                return match poll {
+                    SdkPoll::Unissued(attempt, _token) => Err(attempt.undetermined(error)),
+                    SdkPoll::Issued(issued, _token) => Err(issued
+                        .failed(proto::Observation::ReadFailed(error.clone()), error)
+                        .into()),
+                };
+            }
+        };
         let schemas = Self::schema_registry();
         let core_resource = match self.runtime.block_on(
             carina_core::executor::normalized::apply_desired_normalization(
@@ -517,7 +638,23 @@ impl CarinaProvider for AwsProcessProvider {
         request: proto::CreateRequest,
         resume: SdkResume<Self::CreateToken>,
     ) -> Result<SdkResumeStep<Self::CreateToken>, SdkResumeVerdict> {
-        let core_resource = convert::proto_to_core_resource(&request.resource);
+        let core_resource = match protocol_convert::protocol_to_resource(&request.resource) {
+            Ok(resource) => resource,
+            Err(error) => {
+                let error = Self::convert_error(
+                    protocol_input_error("failed to decode create resume request", error)
+                        .for_resource(protocol_convert::protocol_to_resource_id(
+                            &request.resource.id,
+                        )),
+                );
+                return match resume {
+                    SdkResume::Unissued(attempt, _token) => Err(attempt.undetermined(error)),
+                    SdkResume::Issued(resumed, _token) => {
+                        Err(resumed.failed(proto::Observation::ReadFailed(error.clone()), error))
+                    }
+                };
+            }
+        };
         let schemas = Self::schema_registry();
         let core_resource = match self.runtime.block_on(
             carina_core::executor::normalized::apply_desired_normalization(
@@ -560,39 +697,22 @@ impl CarinaProvider for AwsProcessProvider {
         identifier: &proto::AppliedIdentifier,
         request: proto::UpdateRequest,
     ) -> Result<SdkUpdateOutcome<Self::UpdateToken>, proto::ProviderError> {
-        let core_id = convert::proto_to_core_resource_id(id);
+        let core_id = protocol_convert::protocol_to_resource_id(id);
         let state_after_patch = request.state_after_patch();
-        let core_from = convert::proto_to_core_persisted_state(&request.from).map_err(|error| {
-            Self::convert_error(
-                CoreProviderError::internal_caused_by(
-                    "failed to decode persisted update state",
-                    error,
+        let core_from =
+            protocol_convert::protocol_persisted_state_to_core(&request.from).map_err(|error| {
+                Self::convert_error(
+                    protocol_input_error("failed to decode persisted update state", error)
+                        .for_resource(core_id.clone()),
                 )
-                .for_resource(core_id.clone()),
-            )
-        })?;
-        let core_patch = CoreUpdatePatch {
-            ops: request
-                .patch
-                .ops
-                .iter()
-                .map(|op| match op {
-                    proto::PatchOp::Add { key, value } => CorePatchOp::Add {
-                        key: key.clone(),
-                        value: convert::proto_to_core_value(value),
-                    },
-                    proto::PatchOp::Replace { key, value } => CorePatchOp::Replace {
-                        key: key.clone(),
-                        value: convert::proto_to_core_value(value),
-                    },
-                    proto::PatchOp::Reassert { key, value } => CorePatchOp::Reassert {
-                        key: key.clone(),
-                        value: convert::proto_to_core_value(value),
-                    },
-                    proto::PatchOp::Remove { key } => CorePatchOp::Remove { key: key.clone() },
-                })
-                .collect(),
-        };
+            })?;
+        let core_patch =
+            protocol_convert::protocol_update_patch_to_core(&request.patch).map_err(|error| {
+                Self::convert_error(
+                    protocol_input_error("failed to decode update patch", error)
+                        .for_resource(core_id.clone()),
+                )
+            })?;
         let result = self.runtime.block_on(self.provider().update_with_patch(
             &core_id,
             identifier,
@@ -600,9 +720,16 @@ impl CarinaProvider for AwsProcessProvider {
             &core_patch,
         ));
         match result {
-            Ok(outcome) => Ok(SdkUpdateOutcome::Done(
-                convert::core_to_proto_update_outcome(outcome, state_after_patch),
-            )),
+            Ok(outcome) => {
+                protocol_convert::try_update_outcome_to_protocol(&outcome, state_after_patch)
+                    .map(SdkUpdateOutcome::Done)
+                    .map_err(|error| {
+                        Self::convert_error(
+                            protocol_output_error("failed to encode update result", error)
+                                .for_resource(core_id.clone()),
+                        )
+                    })
+            }
             Err(e) => Err(Self::convert_error(e)),
         }
     }
@@ -623,16 +750,9 @@ impl CarinaProvider for AwsProcessProvider {
         identifier: &proto::AppliedIdentifier,
         request: proto::DeleteRequest,
     ) -> Result<SdkDeleteOutcome<Self::DeleteToken>, proto::ProviderError> {
-        let core_id = convert::proto_to_core_resource_id(id);
-        let core_directives = carina_core::resource::Directives {
-            force_delete: request.directives.force_delete,
-            create_before_destroy: request.directives.create_before_destroy,
-            prevent_destroy: request.directives.prevent_destroy,
-            depends_on: Vec::new(),
-            provider_instance: None,
-        };
+        let core_id = protocol_convert::protocol_to_resource_id(id);
         let core_request = CoreDeleteRequest {
-            directives: core_directives,
+            directives: protocol_convert::protocol_to_directives(&request.directives),
         };
         let result = self.runtime.block_on(self.provider().delete_step(
             &core_id,
@@ -660,7 +780,7 @@ impl CarinaProvider for AwsProcessProvider {
         _request: proto::DeleteRequest,
         pending: Pending<Self::DeleteToken>,
     ) -> Result<SdkDeleteOutcome<Self::DeleteToken>, proto::ProviderError> {
-        let core_id = convert::proto_to_core_resource_id(id);
+        let core_id = protocol_convert::protocol_to_resource_id(id);
         let result = self
             .runtime
             .block_on(self.provider().poll_delete_step(&core_id, pending.token));
@@ -682,10 +802,16 @@ impl CarinaProvider for AwsProcessProvider {
         &self,
         resources: Vec<proto::Resource>,
     ) -> Result<Vec<proto::Resource>, proto::ProviderError> {
-        let mut core_resources: Vec<_> = resources
-            .iter()
-            .map(|resource| convert::proto_to_core_resource(resource).into())
-            .collect();
+        let mut core_resources = Vec::with_capacity(resources.len());
+        for resource in &resources {
+            let resource = protocol_convert::protocol_to_resource(resource).map_err(|error| {
+                Self::convert_error(
+                    protocol_input_error("failed to decode desired resource", error)
+                        .for_resource(protocol_convert::protocol_to_resource_id(&resource.id)),
+                )
+            })?;
+            core_resources.push(resource.into());
+        }
         // Guest-side: drive the now-async normalizer on the guest's own
         // outermost runtime — the same pattern the `Provider` CRUD
         // methods use here (`self.runtime.block_on(...)`). Not a nested
@@ -694,10 +820,18 @@ impl CarinaProvider for AwsProcessProvider {
         self.runtime
             .block_on(self.normalizer.normalize_desired(&mut core_resources))
             .map_err(Self::convert_error)?;
-        Ok(core_resources
-            .iter()
-            .map(convert::core_to_proto_resource)
-            .collect())
+        let mut normalized = Vec::with_capacity(core_resources.len());
+        for resource in &core_resources {
+            let resource =
+                protocol_convert::try_resource_to_protocol(resource).map_err(|error| {
+                    Self::convert_error(
+                        protocol_output_error("failed to encode normalized resource", error)
+                            .for_resource(resource.id.clone()),
+                    )
+                })?;
+            normalized.push(resource);
+        }
+        Ok(normalized)
     }
 }
 
@@ -718,26 +852,129 @@ fn main() {}
 #[cfg(test)]
 mod tests {
     use super::*;
-    use carina_core::schema::{RawShape, ResourceValidation};
-    use carina_plugin_sdk::types::{TypeIdentity, ValidatorType};
+    use carina_core::resource::ConcreteValue;
+    use carina_core::schema::{
+        AttributeType, CustomValidator, RawShape, ResourceValidation,
+        TypeIdentity as CoreTypeIdentity,
+    };
+    use carina_plugin_sdk::types::{TypeIdentity as WireTypeIdentity, ValidatorType};
     use carina_plugin_sdk::{ProviderSchemaCache, dispatch_custom_type_validation};
 
-    fn ident(segments: &[&str], kind: &str) -> TypeIdentity {
-        TypeIdentity {
-            provider: "aws".to_string(),
-            segments: segments
-                .iter()
-                .map(|segment| (*segment).to_string())
-                .collect(),
-            kind: kind.to_string(),
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    enum CallbackScalar {
+        String,
+        Int,
+        Float,
+    }
+
+    struct CallbackBinding {
+        scalar: CallbackScalar,
+        callbacks: Vec<CustomValidator>,
+    }
+
+    fn wire_identity(identity: &CoreTypeIdentity) -> WireTypeIdentity {
+        WireTypeIdentity {
+            provider: identity.provider.clone().unwrap_or_default(),
+            segments: identity.segments.clone(),
+            kind: identity.kind.clone(),
         }
     }
 
-    fn dispatch(identity: &TypeIdentity, value: &str) -> Result<(), String> {
-        let provider = AwsProcessProvider::new();
-        let cache = ProviderSchemaCache::from_provider(&provider)
-            .expect("AWS resource and config schemas must form one valid dispatch table");
-        dispatch_custom_type_validation(&cache, identity, value)
+    fn scalar_kind(attribute_type: &AttributeType) -> CallbackScalar {
+        match attribute_type.raw_shape() {
+            RawShape::String { .. } => CallbackScalar::String,
+            RawShape::Int { .. } => CallbackScalar::Int,
+            RawShape::Float { .. } => CallbackScalar::Float,
+            RawShape::Enum { base, .. } => scalar_kind(base),
+            shape => panic!("callback identity must refine a scalar, got {shape:?}"),
+        }
+    }
+
+    fn record_callback(
+        bindings: &mut BTreeMap<CoreTypeIdentity, CallbackBinding>,
+        identity: &CoreTypeIdentity,
+        scalar: CallbackScalar,
+        callback: &CustomValidator,
+    ) {
+        let binding = bindings
+            .entry(identity.clone())
+            .or_insert_with(|| CallbackBinding {
+                scalar,
+                callbacks: Vec::new(),
+            });
+        assert_eq!(
+            binding.scalar, scalar,
+            "identity {identity} has conflicting scalar kinds in validated witnesses"
+        );
+        binding.callbacks.push(callback.clone());
+    }
+
+    fn collect_callbacks(
+        attribute_type: &AttributeType,
+        bindings: &mut BTreeMap<CoreTypeIdentity, CallbackBinding>,
+    ) {
+        match attribute_type.raw_shape() {
+            RawShape::String {
+                identity, validate, ..
+            }
+            | RawShape::Int {
+                identity, validate, ..
+            }
+            | RawShape::Float {
+                identity, validate, ..
+            } => {
+                if let Some(callback) = validate {
+                    let identity =
+                        identity.expect("validated callback-bearing scalar must carry an identity");
+                    record_callback(bindings, identity, scalar_kind(attribute_type), callback);
+                }
+            }
+            RawShape::Enum {
+                identity, validate, ..
+            } => {
+                if let Some(callback) = validate {
+                    record_callback(bindings, identity, scalar_kind(attribute_type), callback);
+                }
+            }
+            RawShape::List { element_type, .. } => collect_callbacks(element_type, bindings),
+            RawShape::Map { key, value } => {
+                collect_callbacks(key, bindings);
+                collect_callbacks(value, bindings);
+            }
+            RawShape::Struct { fields, .. } => {
+                for field in fields {
+                    collect_callbacks(field.field_type(), bindings);
+                }
+            }
+            RawShape::Union(members) => {
+                for member in members {
+                    collect_callbacks(member, bindings);
+                }
+            }
+            RawShape::Bool | RawShape::Duration | RawShape::Ref(_) => {}
+        }
+    }
+
+    fn bridge_probe(scalar: CallbackScalar, text: &str) -> CoreValue {
+        match scalar {
+            CallbackScalar::String => {
+                CoreValue::Concrete(ConcreteValue::String(text.to_string().into()))
+            }
+            CallbackScalar::Int => CoreValue::Concrete(ConcreteValue::Int(
+                text.parse().expect("integer bridge probe"),
+            )),
+            CallbackScalar::Float => CoreValue::Concrete(ConcreteValue::Float(
+                text.parse().expect("float bridge probe"),
+            )),
+        }
+    }
+
+    fn probe_texts(scalar: CallbackScalar) -> &'static [&'static str] {
+        match scalar {
+            CallbackScalar::String => &["", "__carina_sdk_bridge_probe__", "not-an-arn", "0"],
+            CallbackScalar::Int => &["0", "-1", "1", "9223372036854775807"],
+            CallbackScalar::Float => &["0", "-1", "1", "1.5"],
+        }
     }
 
     fn declared_validators(
@@ -747,6 +984,37 @@ mod tests {
             ResourceValidation::Declared(validators) => validators,
             ResourceValidation::None => &[],
         }
+    }
+
+    #[test]
+    fn non_finite_read_output_surfaces_as_a_provider_error() {
+        let id = carina_core::resource::ResourceId::pending_with_provider(
+            "aws",
+            "test.NonFiniteOutput",
+            None,
+        );
+        let state = CoreAppliedState::new(
+            id,
+            "provider-id",
+            HashMap::from([(
+                "value".to_string(),
+                CoreValue::Concrete(ConcreteValue::Float(f64::NAN)),
+            )]),
+        )
+        .expect("fixture identifier is non-empty");
+
+        let error = read_outcome_to_proto(&CoreReadOutcome::found(state))
+            .expect_err("non-finite provider output must be rejected without panicking")
+            .to_wire();
+        assert_eq!(error.kind, proto::ProviderErrorKind::Internal);
+        assert_eq!(error.message, "failed to encode read result");
+        assert!(
+            error
+                .cause
+                .as_deref()
+                .is_some_and(|cause| cause.contains("non-finite float")),
+            "typed protocol-conversion cause must be retained: {error:?}"
+        );
     }
 
     #[test]
@@ -799,60 +1067,107 @@ mod tests {
     }
 
     #[test]
-    fn provider_schema_cache_admits_all_schemas_and_dispatches_region() {
+    fn every_callback_bearing_witness_dispatches_through_the_sdk_bridge() {
         let provider = AwsProcessProvider::new();
         let expected_schema_count = carina_provider_aws::schemas::generated::configs().len();
         let cache = ProviderSchemaCache::from_provider(&provider)
             .expect("every AWS resource and config schema must pass v12 admission");
 
         assert_eq!(cache.schemas().len(), expected_schema_count);
-        assert!(cache.config().parts().contains_key("region"));
+        let mut bindings = BTreeMap::new();
+        for schema in cache.schemas() {
+            let parts = schema.parts();
+            for attribute in parts.attributes.values() {
+                collect_callbacks(attribute.attr_type(), &mut bindings);
+            }
+            for definition in parts.defs.values() {
+                collect_callbacks(definition, &mut bindings);
+            }
+        }
+        for attribute_type in cache.config().parts().values() {
+            collect_callbacks(attribute_type, &mut bindings);
+        }
 
-        let region = ident(&[], "Region");
-        dispatch_custom_type_validation(&cache, &region, "ap-northeast-1")
-            .expect("a valid AWS Region must pass every declared callback");
         assert!(
-            dispatch_custom_type_validation(&cache, &region, "not-a-region").is_err(),
-            "an invalid AWS Region must fail declared callback dispatch"
+            !bindings.is_empty(),
+            "generated resource and config witnesses must expose callback-bearing identities"
+        );
+        for (identity, binding) in bindings {
+            let mut observed_rejection = false;
+            for text in probe_texts(binding.scalar) {
+                let value = bridge_probe(binding.scalar, text);
+                let direct = binding
+                    .callbacks
+                    .iter()
+                    .all(|callback| callback(&value).is_ok());
+                let bridged =
+                    dispatch_custom_type_validation(&cache, &wire_identity(&identity), text)
+                        .is_ok();
+                assert_eq!(
+                    bridged, direct,
+                    "SDK dispatch for {identity} diverged from its validated witness callbacks on {text:?}"
+                );
+                observed_rejection |= !direct;
+            }
+            assert!(
+                observed_rejection,
+                "bridge probes must exercise a rejecting callback for {identity}"
+            );
+        }
+    }
+
+    #[test]
+    fn region_config_witness_dispatches_through_the_sdk_bridge() {
+        let provider = AwsProcessProvider::new();
+        let cache = ProviderSchemaCache::from_provider(&provider)
+            .expect("AWS schemas must build a dispatch table");
+        let expected = carina_aws_types::AwsType::Region.identity();
+        let region = cache
+            .config()
+            .parts()
+            .get("region")
+            .expect("provider config must declare region");
+        let RawShape::Enum { identity, .. } = region.raw_shape() else {
+            panic!("provider config region must be an identity-bearing enum");
+        };
+        assert_eq!(identity, &expected);
+
+        let identity = wire_identity(&expected);
+        dispatch_custom_type_validation(&cache, &identity, "ap-northeast-1")
+            .expect("a valid AWS Region must pass its witness callback");
+        assert!(
+            dispatch_custom_type_validation(&cache, &identity, "not-a-region").is_err(),
+            "an invalid AWS Region must fail witness-derived dispatch"
         );
     }
 
     #[test]
-    fn validate_custom_type_accepts_valid_vpc_id() {
-        assert!(dispatch(&ident(&["ec2", "Vpc"], "Id"), "vpc-12345678").is_ok());
-    }
+    fn generated_availability_zone_witness_dispatches_through_the_sdk_bridge() {
+        let provider = AwsProcessProvider::new();
+        let cache = ProviderSchemaCache::from_provider(&provider)
+            .expect("AWS schemas must build a dispatch table");
+        let expected = carina_aws_types::AwsType::AvailabilityZone.identity();
+        let subnet = cache
+            .schemas()
+            .iter()
+            .find(|schema| schema.parts().resource_type == "ec2.Subnet")
+            .expect("generated ec2.Subnet schema");
+        let availability_zone = subnet
+            .parts()
+            .attributes
+            .get("availability_zone")
+            .expect("generated ec2.Subnet.availability_zone attribute");
+        let RawShape::Enum { identity, .. } = availability_zone.attr_type().raw_shape() else {
+            panic!("generated availability_zone must be an identity-bearing enum");
+        };
+        assert_eq!(identity, &expected);
 
-    #[test]
-    fn validate_custom_type_rejects_invalid_vpc_id() {
-        assert!(dispatch(&ident(&["ec2", "Vpc"], "Id"), "subnet-12345678").is_err());
-    }
-
-    #[test]
-    fn validate_custom_type_accepts_valid_arn() {
-        assert!(dispatch(&ident(&[], "Arn"), "arn:aws:s3:::my-bucket").is_ok());
-    }
-
-    #[test]
-    fn validate_custom_type_rejects_invalid_arn() {
-        assert!(dispatch(&ident(&[], "Arn"), "not-an-arn").is_err());
-    }
-
-    #[test]
-    fn validate_custom_type_rejects_unknown_type() {
+        let identity = wire_identity(&expected);
+        dispatch_custom_type_validation(&cache, &identity, "ap-northeast-1a")
+            .expect("a valid AWS Availability Zone must pass its witness callback");
         assert!(
-            dispatch(&ident(&[], "UnknownType"), "any-value").is_err(),
-            "the SDK dispatch table rejects identities absent from validated schemas"
-        );
-    }
-
-    #[test]
-    fn validate_custom_type_uses_structured_availability_zone_identity() {
-        let identity = ident(&["AvailabilityZone"], "ZoneName");
-
-        assert!(dispatch(&identity, "ap-northeast-1a").is_ok());
-        assert!(
-            dispatch(&identity, "not-an-az").is_err(),
-            "the SDK dispatch table must find the structured AZ validator"
+            dispatch_custom_type_validation(&cache, &identity, "not-an-az").is_err(),
+            "an invalid AWS Availability Zone must fail witness-derived dispatch"
         );
     }
 
@@ -874,40 +1189,6 @@ mod tests {
                 other => panic!("{attr} must be a List, was {other:?}"),
             }
         }
-    }
-
-    #[test]
-    fn validate_custom_type_accepts_valid_iam_role_arn() {
-        assert!(
-            dispatch(
-                &ident(&["iam", "Role"], "Arn"),
-                "arn:aws:iam::123456789012:role/my-role"
-            )
-            .is_ok()
-        );
-    }
-
-    #[test]
-    fn validate_custom_type_rejects_iam_policy_arn_for_role() {
-        assert!(
-            dispatch(
-                &ident(&["iam", "Role"], "Arn"),
-                "arn:aws:iam::123456789012:policy/my-policy"
-            )
-            .is_err()
-        );
-    }
-
-    #[test]
-    fn validate_custom_type_uses_kms_key_id_callback() {
-        assert!(
-            dispatch(
-                &ident(&["kms", "Key"], "Id"),
-                "1234abcd-12ab-34cd-56ef-1234567890ab"
-            )
-            .is_ok()
-        );
-        assert!(dispatch(&ident(&["kms", "Key"], "Id"), "not-a-key-id").is_err());
     }
 
     #[test]

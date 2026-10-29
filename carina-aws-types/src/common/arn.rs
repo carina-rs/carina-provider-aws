@@ -1,8 +1,3 @@
-use carina_core::resource::{ConcreteValue, Value};
-use carina_core::schema::{AttributeType, legacy_validator};
-
-use super::provider_bare_type;
-
 // ========== ARN validators ==========
 
 /// Valid AWS partition values.
@@ -120,21 +115,4 @@ pub fn validate_iam_arn(arn: &str, resource_prefix: &str) -> Result<(), String> 
         ));
     }
     Ok(())
-}
-
-/// ARN type (e.g., "arn:aws:s3:::my-bucket")
-pub fn arn() -> AttributeType {
-    AttributeType::refined_string_with_validator(
-        provider_bare_type(&[], "Arn"),
-        Some("^arn:(aws|aws-cn|aws-us-gov):[^:]+:.*$".to_string()),
-        None,
-        legacy_validator(|value| {
-            if let Value::Concrete(ConcreteValue::String(value)) = value {
-                validate_arn(value.expose_plaintext())
-            } else {
-                Err("Expected string".to_string())
-            }
-        }),
-        None,
-    )
 }

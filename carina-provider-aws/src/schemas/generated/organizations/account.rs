@@ -16,12 +16,7 @@ const VALID_JOINED_METHOD: &[&str] = &["CREATED", "INVITED"];
 const VALID_STATUS: &[&str] = &["ACTIVE", "PENDING_CLOSURE", "SUSPENDED"];
 
 pub fn arn() -> AttributeType {
-    AttributeType::refined_string(
-        Some(super::provider_type("organizations", "Account", "Arn")),
-        Some("^arn:(aws|aws-cn|aws-us-gov):organizations:.*$".to_string()),
-        None,
-        None,
-    )
+    super::organizations_account_arn()
 }
 
 /// Returns the schema config for organizations.Account (Smithy: com.amazonaws.organizations)

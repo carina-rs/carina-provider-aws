@@ -1,8 +1,3 @@
-use carina_core::resource::{ConcreteValue, Value};
-use carina_core::schema::{AttributeType, legacy_validator};
-
-use super::provider_bare_type;
-
 // ========== Resource ID validators ==========
 
 /// Validate a generic AWS resource ID format: `{prefix}-{hex}` where hex is 8+ hex digits.
@@ -46,22 +41,4 @@ pub fn validate_prefixed_resource_id(id: &str, expected_prefix: &str) -> Result<
         return Err("ID part must contain only hex digits".to_string());
     }
     Ok(())
-}
-
-/// AWS resource ID type (e.g., "vpc-1a2b3c4d", "subnet-0123456789abcdef0")
-#[allow(dead_code)]
-pub fn aws_resource_id() -> AttributeType {
-    AttributeType::refined_string_with_validator(
-        provider_bare_type(&[], "ResourceId"),
-        Some("^[a-z-]+-[0-9a-f]{8,}$".to_string()),
-        None,
-        legacy_validator(|value| {
-            if let Value::Concrete(ConcreteValue::String(value)) = value {
-                validate_aws_resource_id(value.expose_plaintext())
-            } else {
-                Err("Expected string".to_string())
-            }
-        }),
-        None,
-    )
 }

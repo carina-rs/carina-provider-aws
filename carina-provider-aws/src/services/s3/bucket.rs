@@ -224,7 +224,7 @@ impl AwsProvider {
             resource.resolved_attributes(),
             outcome,
         );
-        Ok(self.finish_issued(issued, completion))
+        self.finish_issued(issued, completion)
     }
 
     /// Update an S3 bucket

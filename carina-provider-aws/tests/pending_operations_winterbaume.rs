@@ -164,12 +164,15 @@ impl AwsIssuedCreate for TestIssuedCreate {
         &self.identifier
     }
 
-    fn succeeded(self, attributes: std::collections::HashMap<String, Value>) -> Self::Step {
-        TestCreateStep::Success(AppliedState::from_identifier(
+    fn succeeded(
+        self,
+        attributes: std::collections::HashMap<String, Value>,
+    ) -> Result<Self::Step, Self::Verdict> {
+        Ok(TestCreateStep::Success(AppliedState::from_identifier(
             self.id,
             self.identifier,
             attributes,
-        ))
+        )))
     }
 
     fn partial(
@@ -177,12 +180,12 @@ impl AwsIssuedCreate for TestIssuedCreate {
         attributes: std::collections::HashMap<String, Value>,
         reason: String,
         missing_attributes: Vec<String>,
-    ) -> Self::Step {
-        TestCreateStep::Partial {
+    ) -> Result<Self::Step, Self::Verdict> {
+        Ok(TestCreateStep::Partial {
             state: AppliedState::from_identifier(self.id, self.identifier, attributes),
             reason,
             missing_attributes,
-        }
+        })
     }
 
     fn failed(self, observation: Observation, error: ProviderError) -> Self::Verdict {
@@ -284,8 +287,8 @@ impl AwsResumedCreate for TestResumedCreate {
         &self.identifier
     }
 
-    fn completed(self, state: AppliedState) -> Self::Step {
-        TestResumeStep::Completed(state)
+    fn completed(self, state: AppliedState) -> Result<Self::Step, Self::Verdict> {
+        Ok(TestResumeStep::Completed(state))
     }
 
     fn failed(self, _observation: Observation, error: ProviderError) -> Self::Verdict {

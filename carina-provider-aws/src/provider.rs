@@ -603,13 +603,13 @@ pub trait AwsIssuedCreate {
     type Verdict;
 
     fn identifier(&self) -> &AppliedIdentifier;
-    fn succeeded(self, attributes: HashMap<String, Value>) -> Self::Step;
+    fn succeeded(self, attributes: HashMap<String, Value>) -> Result<Self::Step, Self::Verdict>;
     fn partial(
         self,
         attributes: HashMap<String, Value>,
         reason: String,
         missing_attributes: Vec<String>,
-    ) -> Self::Step;
+    ) -> Result<Self::Step, Self::Verdict>;
     fn failed(self, observation: Observation, error: ProviderError) -> Self::Verdict;
     fn discarded(self, error: ProviderError) -> Self::Verdict;
     fn pending(
@@ -663,7 +663,7 @@ pub trait AwsResumedCreate {
     type Verdict;
 
     fn identifier(&self) -> &AppliedIdentifier;
-    fn completed(self, state: AppliedState) -> Self::Step;
+    fn completed(self, state: AppliedState) -> Result<Self::Step, Self::Verdict>;
     fn failed(self, observation: Observation, error: ProviderError) -> Self::Verdict;
     fn discarded(self, error: ProviderError) -> Self::Verdict;
     fn pending(
@@ -796,8 +796,8 @@ impl AwsIssuedCreate for IssuedCreate {
         self.identifier()
     }
 
-    fn succeeded(self, attributes: HashMap<String, Value>) -> Self::Step {
-        CoreCreateStep::Done(self.succeeded(attributes))
+    fn succeeded(self, attributes: HashMap<String, Value>) -> Result<Self::Step, Self::Verdict> {
+        Ok(CoreCreateStep::Done(self.succeeded(attributes)))
     }
 
     fn partial(
@@ -805,11 +805,13 @@ impl AwsIssuedCreate for IssuedCreate {
         attributes: HashMap<String, Value>,
         reason: String,
         missing_attributes: Vec<String>,
-    ) -> Self::Step {
-        match PartialReadDiagnostic::new(reason, missing_attributes) {
-            Some(diagnostic) => CoreCreateStep::Done(self.partial(attributes, diagnostic)),
-            None => CoreCreateStep::Done(self.succeeded(attributes)),
-        }
+    ) -> Result<Self::Step, Self::Verdict> {
+        Ok(
+            match PartialReadDiagnostic::new(reason, missing_attributes) {
+                Some(diagnostic) => CoreCreateStep::Done(self.partial(attributes, diagnostic)),
+                None => CoreCreateStep::Done(self.succeeded(attributes)),
+            },
+        )
     }
 
     fn failed(self, observation: Observation, error: ProviderError) -> Self::Verdict {
@@ -877,8 +879,8 @@ impl AwsResumedCreate for ResumedCreate {
         self.identifier()
     }
 
-    fn completed(self, state: AppliedState) -> Self::Step {
-        CoreResumeStep::Done(self.completed(state))
+    fn completed(self, state: AppliedState) -> Result<Self::Step, Self::Verdict> {
+        Ok(CoreResumeStep::Done(self.completed(state)))
     }
 
     fn failed(self, observation: Observation, error: ProviderError) -> Self::Verdict {
@@ -1118,7 +1120,7 @@ impl AwsProvider {
             .continue_acm_certificate_create(resource, schema, identifier)
             .await
         {
-            Ok(completion) => Ok(self.finish_issued(issued, completion)),
+            Ok(completion) => self.finish_issued(issued, completion),
             Err(error) => Err(self.failed_issued(&resource.id, issued, error).await),
         }
     }
@@ -1149,17 +1151,15 @@ impl AwsProvider {
             Ok(CreateCompletion::Success {
                 identifier,
                 attributes,
-            }) => Ok(attempt.issued(identifier, sent).succeeded(attributes)),
+            }) => attempt.issued(identifier, sent).succeeded(attributes),
             Ok(CreateCompletion::Partial {
                 identifier,
                 attributes,
                 reason,
                 missing_attributes,
-            }) => {
-                Ok(attempt
-                    .issued(identifier, sent)
-                    .partial(attributes, reason, missing_attributes))
-            }
+            }) => attempt
+                .issued(identifier, sent)
+                .partial(attributes, reason, missing_attributes),
             Err(error) => Err(attempt.untracked(error)),
         }
     }
@@ -1168,7 +1168,7 @@ impl AwsProvider {
         &self,
         issued: I,
         completion: CreateCompletion,
-    ) -> I::Step {
+    ) -> Result<I::Step, I::Verdict> {
         match completion {
             CreateCompletion::Success {
                 identifier: _identifier,
@@ -1640,7 +1640,7 @@ impl AwsProvider {
             .await
         {
             Ok(TaggedEc2Continuation::Complete(completion)) => {
-                Ok(self.finish_issued(issued, completion))
+                self.finish_issued(issued, completion)
             }
             Ok(TaggedEc2Continuation::Pending(token)) => issued.pending(token, POLL_AFTER_SECS),
             Err(error) => Err(self.failed_issued(&resource.id, issued, error).await),
@@ -2065,7 +2065,7 @@ impl AwsProvider {
                             resource.resolved_attributes(),
                             outcome,
                         );
-                        Ok(self.finish_issued(issued, completion))
+                        self.finish_issued(issued, completion)
                     }
                     CreatePoll::Failed => Err(issued.discarded(
                         ProviderError::api_error("NAT gateway creation failed")
@@ -2098,7 +2098,7 @@ impl AwsProvider {
                             resource.resolved_attributes(),
                             outcome,
                         );
-                        Ok(self.finish_issued(issued, completion))
+                        self.finish_issued(issued, completion)
                     }
                     CreatePoll::Failed => Err(issued.discarded(
                         ProviderError::api_error("Transit gateway creation failed")
@@ -2133,7 +2133,7 @@ impl AwsProvider {
                             resource.resolved_attributes(),
                             outcome,
                         );
-                        Ok(self.finish_issued(issued, completion))
+                        self.finish_issued(issued, completion)
                     }
                     CreatePoll::Failed => Err(issued.discarded(
                         ProviderError::api_error("Transit gateway attachment creation failed")
@@ -2192,7 +2192,7 @@ impl AwsProvider {
                             )
                             .await
                         {
-                            Ok(completion) => Ok(self.finish_issued(issued, completion)),
+                            Ok(completion) => self.finish_issued(issued, completion),
                             Err(error) => Err(self.failed_issued(id, issued, error).await),
                         }
                     }
@@ -2346,11 +2346,11 @@ impl AwsProvider {
             CreateCompletion::Success {
                 identifier,
                 attributes,
-            } => Ok(resumed.completed(AppliedState::from_identifier(
+            } => resumed.completed(AppliedState::from_identifier(
                 id.clone(),
                 identifier,
                 attributes,
-            ))),
+            )),
             CreateCompletion::Partial {
                 identifier: _identifier,
                 attributes: _attributes,
@@ -2378,7 +2378,7 @@ impl AwsProvider {
         // discarding the persisted record could let the next apply issue a
         // duplicate create.
         match outcome {
-            Ok(ReadOutcome::Found { state }) => Ok(resumed.completed(state)),
+            Ok(ReadOutcome::Found { state }) => resumed.completed(state),
             Ok(ReadOutcome::NotFound { id: _ }) | Err(_) => resumed.pending(token, POLL_AFTER_SECS),
         }
     }
@@ -3391,7 +3391,10 @@ mod pending_operation_tests {
             unreachable!("the pending-only test never issues a create")
         }
 
-        fn succeeded(self, _attributes: HashMap<String, Value>) -> Self::Step {
+        fn succeeded(
+            self,
+            _attributes: HashMap<String, Value>,
+        ) -> Result<Self::Step, Self::Verdict> {
             unreachable!("the pending-only test never succeeds")
         }
 
@@ -3400,7 +3403,7 @@ mod pending_operation_tests {
             _attributes: HashMap<String, Value>,
             _reason: String,
             _missing_attributes: Vec<String>,
-        ) -> Self::Step {
+        ) -> Result<Self::Step, Self::Verdict> {
             unreachable!("the pending-only test never completes partially")
         }
 
