@@ -18,8 +18,9 @@ cargo test
 # Build WASM target
 cargo build -p carina-provider-aws --target wasm32-wasip2 --release
 
-# Run clippy
-cargo clippy -- -D warnings
+# Run clippy (same command as CI; --all-targets covers tests, and the
+# generated clippy.toml forbids building raw SDK clients outside the wrappers)
+cargo clippy --workspace --all-targets -- -D warnings
 
 # Format check
 cargo fmt --check
