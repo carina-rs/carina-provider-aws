@@ -8,7 +8,7 @@ use aws_smithy_types::timeout::TimeoutConfig;
 
 use crate::AwsProvider;
 use crate::resend_safety_generated::{
-    AcmClient, CloudWatchLogsClient, Ec2Client, IamClient, IdentityStoreClient,
+    AccountClient, AcmClient, CloudWatchLogsClient, Ec2Client, IamClient, IdentityStoreClient,
     OrganizationsClient, Route53Client, S3Client, SqsClient, StsClient,
 };
 use crate::services::sts::assume_role::AssumeRoleConfig;
@@ -162,6 +162,7 @@ impl AwsProvider {
             iam_client: IamClient::from_bounded_config(config),
             logs_client: CloudWatchLogsClient::from_bounded_config(config),
             sts_client: StsClient::from_bounded_config(config),
+            account_client: AccountClient::from_bounded_config(config),
             organizations_client: OrganizationsClient::from_bounded_config(config),
             identitystore_client: IdentityStoreClient::from_bounded_config(config),
             route53_client: Route53Client::from_bounded_config(config),
@@ -258,6 +259,7 @@ mod tests {
             iam_client,
             logs_client,
             sts_client,
+            account_client,
             organizations_client,
             identitystore_client,
             route53_client,
@@ -287,6 +289,7 @@ mod tests {
         assert_guard!(iam_client);
         assert_guard!(logs_client);
         assert_guard!(sts_client);
+        assert_guard!(account_client);
         assert_guard!(organizations_client);
         assert_guard!(identitystore_client);
         assert_guard!(route53_client);

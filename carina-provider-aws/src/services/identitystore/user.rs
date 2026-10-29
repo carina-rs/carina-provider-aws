@@ -4,8 +4,6 @@
 //! `user_id` (via `DescribeUser` directly). One of the two must be set.
 //! `identity_store_id` is always required.
 
-use indexmap::IndexMap;
-use std::collections::HashMap;
 use std::fmt;
 
 use aws_sdk_identitystore::operation::describe_user::DescribeUserError;
@@ -17,6 +15,8 @@ use carina_core::resource::{ConcreteValue, DataSource, State, Value};
 use crate::AwsProvider;
 use crate::error_helpers::{AwsSdkError, api_error_with_meta_and_subject};
 use crate::helpers::{sdk_error_message, value_as_str};
+use crate::read_model::found_data_source_read;
+use crate::read_models_generated::IdentitystoreUserDataSourceReadModel;
 use crate::resend_safety_generated::IdentityStoreClient;
 
 #[derive(Debug)]
@@ -109,8 +109,8 @@ impl AwsProvider {
                         .for_resource(resource.id.clone())
                 })?;
 
-            let attributes = extract_identitystore_user(&describe);
-            Ok(State::existing(resource.id.clone(), attributes))
+            let model = extract_identitystore_user(&describe);
+            found_data_source_read(&resource.id, None, model)
         })
     }
 }
@@ -171,76 +171,31 @@ async fn resolve_user_id(
 /// unit-tested without hitting the AWS SDK.
 pub(crate) fn extract_identitystore_user(
     resp: &aws_sdk_identitystore::operation::describe_user::DescribeUserOutput,
-) -> HashMap<String, Value> {
-    let mut attributes = HashMap::new();
-
-    attributes.insert(
-        "user_id".to_string(),
-        Value::Concrete(ConcreteValue::String(resp.user_id().to_string().into())),
-    );
-    attributes.insert(
-        "identity_store_id".to_string(),
-        Value::Concrete(ConcreteValue::String(
-            resp.identity_store_id().to_string().into(),
-        )),
-    );
-    if let Some(user_name) = resp.user_name() {
-        attributes.insert(
-            "user_name".to_string(),
-            Value::Concrete(ConcreteValue::String(user_name.to_string().into())),
-        );
-    }
-    if let Some(display_name) = resp.display_name() {
-        attributes.insert(
-            "display_name".to_string(),
-            Value::Concrete(ConcreteValue::String(display_name.to_string().into())),
-        );
-    }
-    if let Some(name) = resp.name() {
-        let mut name_fields: IndexMap<String, Value> = IndexMap::new();
+) -> IdentitystoreUserDataSourceReadModel {
+    let string_value =
+        |value: &str| Value::Concrete(ConcreteValue::String(value.to_string().into()));
+    let name = resp.name().and_then(|name| {
+        let mut name_fields = indexmap::IndexMap::new();
         if let Some(v) = name.formatted() {
-            name_fields.insert(
-                "formatted".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string().into())),
-            );
+            name_fields.insert("formatted".to_string(), string_value(v));
         }
         if let Some(v) = name.family_name() {
-            name_fields.insert(
-                "family_name".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string().into())),
-            );
+            name_fields.insert("family_name".to_string(), string_value(v));
         }
         if let Some(v) = name.given_name() {
-            name_fields.insert(
-                "given_name".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string().into())),
-            );
+            name_fields.insert("given_name".to_string(), string_value(v));
         }
         if let Some(v) = name.middle_name() {
-            name_fields.insert(
-                "middle_name".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string().into())),
-            );
+            name_fields.insert("middle_name".to_string(), string_value(v));
         }
         if let Some(v) = name.honorific_prefix() {
-            name_fields.insert(
-                "honorific_prefix".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string().into())),
-            );
+            name_fields.insert("honorific_prefix".to_string(), string_value(v));
         }
         if let Some(v) = name.honorific_suffix() {
-            name_fields.insert(
-                "honorific_suffix".to_string(),
-                Value::Concrete(ConcreteValue::String(v.to_string().into())),
-            );
+            name_fields.insert("honorific_suffix".to_string(), string_value(v));
         }
-        if !name_fields.is_empty() {
-            attributes.insert(
-                "name".to_string(),
-                Value::Concrete(ConcreteValue::Map(name_fields)),
-            );
-        }
-    }
+        (!name_fields.is_empty()).then(|| Value::Concrete(ConcreteValue::Map(name_fields)))
+    });
     let email_values: Vec<Value> = resp
         .emails()
         .iter()
@@ -249,19 +204,21 @@ pub(crate) fn extract_identitystore_user(
                 .map(|v| Value::Concrete(ConcreteValue::String(v.to_string().into())))
         })
         .collect();
-    if !email_values.is_empty() {
-        attributes.insert(
-            "emails".to_string(),
-            Value::Concrete(ConcreteValue::List(email_values)),
-        );
+    IdentitystoreUserDataSourceReadModel {
+        identity_store_id: string_value(resp.identity_store_id()),
+        user_id: Some(string_value(resp.user_id())),
+        user_name: resp.user_name().map(string_value),
+        display_name: resp.display_name().map(string_value),
+        name,
+        emails: (!email_values.is_empty())
+            .then(|| Value::Concrete(ConcreteValue::List(email_values))),
     }
-
-    attributes
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::read_model::DataSourceReadModel;
     use aws_sdk_identitystore::error::SdkError;
     use aws_sdk_identitystore::operation::describe_user::{DescribeUserError, DescribeUserOutput};
     use aws_sdk_identitystore::types::error::AccessDeniedException;
@@ -269,6 +226,12 @@ mod tests {
     use aws_smithy_runtime_api::http::{Response, StatusCode};
     use aws_smithy_types::body::SdkBody;
     use aws_smithy_types::error::metadata::ErrorMetadata;
+
+    fn extract_attributes(resp: &DescribeUserOutput) -> std::collections::HashMap<String, Value> {
+        extract_identitystore_user(resp)
+            .into_attributes()
+            .expect("generated data-source model")
+    }
 
     #[test]
     fn describe_user_error_renders_typed_subject_once() {
@@ -331,7 +294,7 @@ mod tests {
     #[test]
     fn extract_populates_required_fields() {
         let resp = describe_user_full();
-        let attrs = extract_identitystore_user(&resp);
+        let attrs = extract_attributes(&resp);
 
         assert_eq!(
             attrs.get("user_id"),
@@ -362,7 +325,7 @@ mod tests {
     #[test]
     fn extract_populates_name_struct() {
         let resp = describe_user_full();
-        let attrs = extract_identitystore_user(&resp);
+        let attrs = extract_attributes(&resp);
 
         let Some(Value::Concrete(ConcreteValue::Map(name))) = attrs.get("name") else {
             panic!("expected name map, got {:?}", attrs.get("name"));
@@ -393,7 +356,7 @@ mod tests {
     #[test]
     fn extract_populates_emails_list() {
         let resp = describe_user_full();
-        let attrs = extract_identitystore_user(&resp);
+        let attrs = extract_attributes(&resp);
 
         let Some(Value::Concrete(ConcreteValue::List(emails))) = attrs.get("emails") else {
             panic!("expected emails list, got {:?}", attrs.get("emails"));
@@ -415,7 +378,7 @@ mod tests {
             .identity_store_id("d-min")
             .build()
             .unwrap();
-        let attrs = extract_identitystore_user(&resp);
+        let attrs = extract_attributes(&resp);
 
         assert_eq!(
             attrs.get("user_id"),
@@ -445,7 +408,7 @@ mod tests {
             .name(Name::builder().given_name("Gosuke").build())
             .build()
             .unwrap();
-        let attrs = extract_identitystore_user(&resp);
+        let attrs = extract_attributes(&resp);
 
         let Some(Value::Concrete(ConcreteValue::Map(name))) = attrs.get("name") else {
             panic!("expected name map, got {:?}", attrs.get("name"));
@@ -471,7 +434,7 @@ mod tests {
             .set_emails(Some(vec![]))
             .build()
             .unwrap();
-        let attrs = extract_identitystore_user(&resp);
+        let attrs = extract_attributes(&resp);
         assert!(!attrs.contains_key("emails"));
     }
 }

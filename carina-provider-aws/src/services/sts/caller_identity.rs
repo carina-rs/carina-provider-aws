@@ -1,10 +1,10 @@
-use std::collections::HashMap;
-
 use carina_core::provider::{BoxFuture, ProviderResult};
 use carina_core::resource::{ConcreteValue, DataSource, State, Value};
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
+use crate::read_model::found_data_source_read;
+use crate::read_models_generated::StsCallerIdentityDataSourceReadModel;
 
 impl AwsProvider {
     /// Read STS caller identity (data source).
@@ -28,27 +28,17 @@ impl AwsProvider {
                         .for_resource(id.clone())
                 })?;
 
-            let mut attributes = HashMap::new();
-            if let Some(account) = response.account() {
-                attributes.insert(
-                    "account_id".to_string(),
-                    Value::Concrete(ConcreteValue::String(account.to_string().into())),
-                );
-            }
-            if let Some(arn) = response.arn() {
-                attributes.insert(
-                    "arn".to_string(),
-                    Value::Concrete(ConcreteValue::String(arn.to_string().into())),
-                );
-            }
-            if let Some(user_id) = response.user_id() {
-                attributes.insert(
-                    "user_id".to_string(),
-                    Value::Concrete(ConcreteValue::String(user_id.to_string().into())),
-                );
-            }
-
-            Ok(State::existing(id, attributes))
+            let string_value =
+                |value: &str| Value::Concrete(ConcreteValue::String(value.to_string().into()));
+            found_data_source_read(
+                &id,
+                None,
+                StsCallerIdentityDataSourceReadModel {
+                    account_id: response.account().map(string_value),
+                    arn: response.arn().map(string_value),
+                    user_id: response.user_id().map(string_value),
+                },
+            )
         })
     }
 }

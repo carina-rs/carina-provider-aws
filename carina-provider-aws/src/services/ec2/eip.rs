@@ -1,8 +1,6 @@
-use std::collections::HashMap;
-
 use carina_core::provider::ProviderResult;
 use carina_core::provider::{AppliedIdentifier, ReadOutcome};
-use carina_core::resource::{Resource, ResourceId, State};
+use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
 use carina_core::schema::ResourceSchema;
 
 use crate::AwsProvider;
@@ -10,6 +8,8 @@ use crate::aws_operation::ClientToken;
 use crate::error_helpers::api_error_with_meta;
 use crate::helpers::{build_tag_specification_with_create_token, optional_enum_attr};
 use crate::provider::{AwsCreateAttempt, Ec2TaggedResourceKind};
+use crate::read_model::{empty_map_value, found_managed_read};
+use crate::read_models_generated::Ec2EipReadModelSupplement;
 
 impl AwsProvider {
     /// Read an EC2 Elastic IP
@@ -39,21 +39,15 @@ impl AwsProvider {
             })?;
 
         if let Some(addr) = result.addresses().first() {
-            let mut attributes = HashMap::new();
-
-            // Extract attributes
-            let _identifier_value = Self::extract_ec2_eip_attributes(addr, &mut attributes);
-
-            // Extract user-defined tags
-            if let Some(tags_value) = Self::ec2_tags_to_value(addr.tags()) {
-                attributes.insert("tags".to_string(), tags_value);
-            }
-
-            Ok(crate::helpers::found_read(
+            let fields = Self::extract_ec2_eip_attributes(addr);
+            let (_, model) = fields.into_model(
                 id,
-                applied_identifier,
-                attributes,
-            ))
+                Ec2EipReadModelSupplement {
+                    tags: Self::ec2_tags_to_value(addr.tags()).unwrap_or_else(empty_map_value),
+                },
+            )?;
+
+            found_managed_read(id, applied_identifier, model)
         } else {
             Ok(ReadOutcome::not_found(id.clone()))
         }
@@ -75,6 +69,16 @@ impl AwsProvider {
             ),
         );
 
+        if let Some(Value::Concrete(ConcreteValue::String(address))) = resource.get_attr("address")
+        {
+            req = req.address(address.expose_plaintext());
+        }
+        if let Some(Value::Concrete(ConcreteValue::String(pool))) =
+            resource.get_attr("public_ipv4_pool")
+        {
+            req = req.public_ipv4_pool(pool.expose_plaintext());
+        }
+
         let domain = match optional_enum_attr(resource, schema, "domain") {
             Ok(domain) => domain,
             Err(error) => return Err(attempt.untracked(error)),
@@ -87,7 +91,7 @@ impl AwsProvider {
             req = req.domain(aws_sdk_ec2::types::DomainType::Vpc);
         }
 
-        let sent = Self::sent_only(resource, &["domain", "tags"]);
+        let sent = self.sent_only(resource, &["address", "domain", "public_ipv4_pool", "tags"]);
         let result = req.send().await;
 
         self.finish_tagged_ec2_create(

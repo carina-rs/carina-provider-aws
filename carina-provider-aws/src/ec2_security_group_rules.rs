@@ -1,7 +1,5 @@
 //! EC2 security group rule shared CRUD operations
 
-use std::collections::HashMap;
-
 use carina_core::provider::{AppliedIdentifier, ReadOutcome};
 use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{ConcreteValue, Resource, ResourceId, Value};
@@ -11,6 +9,10 @@ use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
 use crate::helpers::require_enum_attr;
 use crate::provider::CreateCompletion;
+use crate::read_model::found_managed_read;
+use crate::read_models_generated::{
+    Ec2SecurityGroupEgressReadModelSupplement, Ec2SecurityGroupIngressReadModelSupplement,
+};
 
 fn build_security_group_rule_permission(
     resource: &Resource<impl Sized>,
@@ -95,6 +97,11 @@ fn build_security_group_rule_permission(
 
     if let Some(ref ref_sg_id) = ref_security_group_id {
         let mut pair_builder = aws_sdk_ec2::types::UserIdGroupPair::builder().group_id(ref_sg_id);
+        if let Some(Value::Concrete(ConcreteValue::String(owner_id))) =
+            resource.get_attr("source_security_group_owner_id")
+        {
+            pair_builder = pair_builder.user_id(owner_id.expose_plaintext());
+        }
         if let Some(ref desc) = description {
             pair_builder = pair_builder.description(desc);
         }
@@ -146,57 +153,57 @@ impl AwsProvider {
             return Ok(ReadOutcome::not_found(id.clone()));
         }
 
-        // Use the first rule for common attributes
+        // Use the first rule for common attributes.
         let first_rule = &rules[0];
-        let mut attributes = HashMap::new();
 
-        // Auto-generated attribute extraction (common fields)
-        if is_ingress {
-            Self::extract_ec2_security_group_ingress_attributes(first_rule, &mut attributes);
-        } else {
-            Self::extract_ec2_security_group_egress_attributes(first_rule, &mut attributes);
-        }
-
-        // Override rule IDs with comma-separated values (multi-rule support)
+        // Override rule IDs with comma-separated values (multi-rule support).
         let rule_ids: Vec<String> = rules
             .iter()
             .filter_map(|r| r.security_group_rule_id().map(String::from))
             .collect();
-        if !rule_ids.is_empty() {
-            attributes.insert(
-                "security_group_rule_id".to_string(),
-                Value::Concrete(ConcreteValue::String(rule_ids.join(",").into())),
-            );
-        }
+        let combined_rule_id = (!rule_ids.is_empty())
+            .then(|| Value::Concrete(ConcreteValue::String(rule_ids.join(",").into())));
 
-        // IPv4 CIDR (CidrIp in schema maps to CidrIpv4 in SDK)
-        if let Some(cidr_ip) = first_rule.cidr_ipv4() {
-            attributes.insert(
-                "cidr_ip".to_string(),
-                Value::Concrete(ConcreteValue::String(cidr_ip.to_string().into())),
-            );
-        }
+        // IPv4 CIDR (CidrIp in schema maps to CidrIpv4 in SDK).
+        let cidr_ip = first_rule
+            .cidr_ipv4()
+            .map(|cidr| Value::Concrete(ConcreteValue::String(cidr.to_string().into())));
 
-        // Referenced security group ID (nested struct, not auto-extracted)
-        if let Some(ref_group) = first_rule.referenced_group_info()
-            && let Some(group_id) = ref_group.group_id()
-        {
-            let attr_name = if is_ingress {
-                "source_security_group_id"
-            } else {
-                "destination_security_group_id"
-            };
-            attributes.insert(
-                attr_name.to_string(),
-                Value::Concrete(ConcreteValue::String(group_id.to_string().into())),
-            );
-        }
+        // Referenced security-group fields live in a nested SDK structure.
+        let referenced_group_id = first_rule
+            .referenced_group_info()
+            .and_then(|group| group.group_id())
+            .map(|group_id| Value::Concrete(ConcreteValue::String(group_id.to_string().into())));
+        let source_security_group_owner_id = first_rule
+            .referenced_group_info()
+            .and_then(|group| group.user_id())
+            .map(|owner_id| Value::Concrete(ConcreteValue::String(owner_id.to_string().into())));
 
-        Ok(crate::helpers::found_read(
-            id,
-            applied_identifier,
-            attributes,
-        ))
+        if is_ingress {
+            let fields = Self::extract_ec2_security_group_ingress_attributes(first_rule)
+                .map_security_group_rule_id(|rule_id| combined_rule_id.or(rule_id));
+            let (_, model) = fields.into_model(
+                id,
+                Ec2SecurityGroupIngressReadModelSupplement {
+                    cidr_ip,
+                    source_security_group_owner_id,
+                    source_security_group_id: referenced_group_id,
+                },
+            )?;
+            found_managed_read(id, applied_identifier, model)
+        } else {
+            let fields = Self::extract_ec2_security_group_egress_attributes(first_rule)
+                .map_security_group_rule_id(|rule_id| combined_rule_id.or(rule_id));
+            let (_, model) = fields.into_model(
+                id,
+                Ec2SecurityGroupEgressReadModelSupplement {
+                    cidr_ip,
+                    source_security_group_owner_id,
+                    destination_security_group_id: referenced_group_id,
+                },
+            )?;
+            found_managed_read(id, applied_identifier, model)
+        }
     }
 
     /// Create an EC2 Security Group Rule (shared between ingress and egress)
@@ -427,18 +434,13 @@ mod tests {
             .build();
 
         // Replicate logic from read_ec2_security_group_rule for ingress
-        let mut attributes = HashMap::new();
-        if let Some(ref_g) = rule.referenced_group_info()
-            && let Some(group_id) = ref_g.group_id()
-        {
-            attributes.insert(
-                "source_security_group_id".to_string(),
-                Value::Concrete(ConcreteValue::String(group_id.to_string().into())),
-            );
-        }
+        let source_security_group_id = rule
+            .referenced_group_info()
+            .and_then(|group| group.group_id())
+            .map(|group_id| Value::Concrete(ConcreteValue::String(group_id.to_string().into())));
 
         assert_eq!(
-            attributes.get("source_security_group_id"),
+            source_security_group_id.as_ref(),
             Some(&Value::Concrete(ConcreteValue::String(
                 "sg-ref-12345678".to_string().into()
             )))
@@ -457,16 +459,12 @@ mod tests {
             .build();
 
         // Replicate logic from read_ec2_security_group_rule
-        let mut attributes = HashMap::new();
-        if let Some(cidr_ip) = rule.cidr_ipv4() {
-            attributes.insert(
-                "cidr_ip".to_string(),
-                Value::Concrete(ConcreteValue::String(cidr_ip.to_string().into())),
-            );
-        }
+        let cidr_ip = rule
+            .cidr_ipv4()
+            .map(|cidr_ip| Value::Concrete(ConcreteValue::String(cidr_ip.to_string().into())));
 
         assert_eq!(
-            attributes.get("cidr_ip"),
+            cidr_ip.as_ref(),
             Some(&Value::Concrete(ConcreteValue::String(
                 "10.0.0.0/8".to_string().into()
             )))

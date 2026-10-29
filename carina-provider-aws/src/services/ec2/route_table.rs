@@ -1,6 +1,3 @@
-use indexmap::IndexMap;
-use std::collections::HashMap;
-
 use carina_core::provider::ProviderResult;
 use carina_core::provider::{AppliedIdentifier, ReadOutcome};
 use carina_core::resource::{ConcreteValue, Resource, ResourceId, Value};
@@ -12,6 +9,8 @@ use crate::helpers::{
     build_tag_specification_with_create_token, require_string_attr, send_aws_operation_with_token,
 };
 use crate::provider::{AwsCreateAttempt, Ec2TaggedResourceKind};
+use crate::read_model::{empty_map_value, found_managed_read};
+use crate::read_models_generated::Ec2RouteTableReadModelSupplement;
 
 impl AwsProvider {
     /// Read an EC2 Route Table
@@ -41,48 +40,16 @@ impl AwsProvider {
             })?;
 
         if let Some(rt) = result.route_tables().first() {
-            let mut attributes = HashMap::new();
+            let fields = Self::extract_ec2_route_table_attributes(rt);
 
-            // Auto-generated attribute extraction
-            let _identifier_value = Self::extract_ec2_route_table_attributes(rt, &mut attributes);
-
-            // Convert routes to list (complex nested structure)
-            let mut routes_list = Vec::new();
-            for route in rt.routes() {
-                let mut route_map: IndexMap<String, Value> = IndexMap::new();
-                if let Some(dest) = route.destination_cidr_block() {
-                    route_map.insert(
-                        "destination".to_string(),
-                        Value::Concrete(ConcreteValue::String(dest.to_string().into())),
-                    );
-                }
-                if let Some(gw) = route.gateway_id() {
-                    route_map.insert(
-                        "gateway_id".to_string(),
-                        Value::Concrete(ConcreteValue::String(gw.to_string().into())),
-                    );
-                }
-                if !route_map.is_empty() {
-                    routes_list.push(Value::Concrete(ConcreteValue::Map(route_map)));
-                }
-            }
-            if !routes_list.is_empty() {
-                attributes.insert(
-                    "routes".to_string(),
-                    Value::Concrete(ConcreteValue::List(routes_list)),
-                );
-            }
-
-            // Extract user-defined tags
-            if let Some(tags_value) = Self::ec2_tags_to_value(rt.tags()) {
-                attributes.insert("tags".to_string(), tags_value);
-            }
-
-            Ok(crate::helpers::found_read(
+            let (_, model) = fields.into_model(
                 id,
-                applied_identifier,
-                attributes,
-            ))
+                Ec2RouteTableReadModelSupplement {
+                    tags: Self::ec2_tags_to_value(rt.tags()).unwrap_or_else(empty_map_value),
+                },
+            )?;
+
+            found_managed_read(id, applied_identifier, model)
         } else {
             Ok(ReadOutcome::not_found(id.clone()))
         }
@@ -111,7 +78,7 @@ impl AwsProvider {
                 ))
         });
         let result = send_aws_operation_with_token(client_token, req).await;
-        let sent = Self::sent_only(resource, &["vpc_id", "tags"]);
+        let sent = self.sent_only(resource, &["vpc_id", "tags"]);
 
         self.finish_tagged_ec2_create(
             resource,

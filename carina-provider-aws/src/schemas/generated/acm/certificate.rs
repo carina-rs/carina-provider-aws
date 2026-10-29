@@ -9,10 +9,6 @@ use super::tags_type;
 use carina_core::schema::{AttributeSchema, AttributeType, ResourceSchema, StructField, types};
 use carina_provider_protocol::types::ValidatorType;
 
-const VALID_CERTIFICATE_TRANSPARENCY_LOGGING_PREFERENCE: &[&str] = &["DISABLED", "ENABLED"];
-
-const VALID_EXPORT: &[&str] = &["DISABLED", "ENABLED"];
-
 const VALID_KEY_ALGORITHM: &[&str] = &[
     "EC_prime256v1",
     "EC_secp384r1",
@@ -24,33 +20,6 @@ const VALID_KEY_ALGORITHM: &[&str] = &[
 ];
 
 const VALID_RENEWAL_ELIGIBILITY: &[&str] = &["ELIGIBLE", "INELIGIBLE"];
-
-const VALID_RENEWAL_STATUS: &[&str] = &[
-    "FAILED",
-    "PENDING_AUTO_RENEWAL",
-    "PENDING_VALIDATION",
-    "SUCCESS",
-];
-
-const VALID_RENEWAL_STATUS_REASON: &[&str] = &[
-    "ADDITIONAL_VERIFICATION_REQUIRED",
-    "CAA_ERROR",
-    "DOMAIN_NOT_ALLOWED",
-    "DOMAIN_VALIDATION_DENIED",
-    "INVALID_PUBLIC_DOMAIN",
-    "NO_AVAILABLE_CONTACTS",
-    "OTHER",
-    "PCA_ACCESS_DENIED",
-    "PCA_INVALID_ARGS",
-    "PCA_INVALID_ARN",
-    "PCA_INVALID_DURATION",
-    "PCA_INVALID_STATE",
-    "PCA_LIMIT_EXCEEDED",
-    "PCA_NAME_CONSTRAINTS_VALIDATION",
-    "PCA_REQUEST_FAILED",
-    "PCA_RESOURCE_NOT_FOUND",
-    "SLR_NOT_FOUND",
-];
 
 const VALID_STATUS: &[&str] = &[
     "EXPIRED",
@@ -66,8 +35,6 @@ const VALID_TYPE: &[&str] = &["CNAME"];
 
 const VALID_VALIDATION_METHOD: &[&str] = &["DNS", "EMAIL", "HTTP"];
 
-const VALID_VALIDATION_STATUS: &[&str] = &["FAILED", "PENDING_VALIDATION", "SUCCESS"];
-
 /// Returns the schema config for acm.Certificate (Smithy: com.amazonaws.acm)
 pub fn acm_certificate_config() -> AwsSchemaConfig {
     AwsSchemaConfig {
@@ -82,13 +49,6 @@ pub fn acm_certificate_config() -> AwsSchemaConfig {
                 .create_only()
                 .with_description("Fully qualified domain name (FQDN), such as www.example.com, that you want to secure with an ACM certificate. Use an asterisk (*) to create a wildcard...")
                 .with_provider_name("DomainName")
-                .build(),
-        )
-        .attribute(
-            AttributeSchema::optional("idempotency_token", AttributeType::string())
-                .create_only()
-                .with_description("Customer chosen string that can be used to distinguish between calls to RequestCertificate. Idempotency tokens time out after one hour. Therefore, if ...")
-                .with_provider_name("IdempotencyToken")
                 .build(),
         )
         .attribute(
@@ -137,7 +97,7 @@ pub fn acm_certificate_config() -> AwsSchemaConfig {
                 .build(),
         )
         .attribute(
-            AttributeSchema::optional("subject_alternative_names", AttributeType::list(AttributeType::string()))
+            AttributeSchema::optional("subject_alternative_names", AttributeType::unordered_list(AttributeType::string()))
                 .create_only()
                 .with_description("Additional FQDNs to be included in the Subject Alternative Name extension of the ACM certificate. For example, add the name www.example.net to a certi...")
                 .with_provider_name("SubjectAlternativeNames")
@@ -333,19 +293,11 @@ pub fn enum_valid_values() -> (
     (
         "acm.Certificate",
         &[
-            (
-                "certificate_transparency_logging_preference",
-                VALID_CERTIFICATE_TRANSPARENCY_LOGGING_PREFERENCE,
-            ),
-            ("export", VALID_EXPORT),
             ("key_algorithm", VALID_KEY_ALGORITHM),
             ("renewal_eligibility", VALID_RENEWAL_ELIGIBILITY),
-            ("renewal_status", VALID_RENEWAL_STATUS),
-            ("renewal_status_reason", VALID_RENEWAL_STATUS_REASON),
             ("status", VALID_STATUS),
             ("type", VALID_TYPE),
             ("validation_method", VALID_VALIDATION_METHOD),
-            ("validation_status", VALID_VALIDATION_STATUS),
         ],
     )
 }

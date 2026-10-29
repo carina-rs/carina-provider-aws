@@ -140,7 +140,12 @@ fn s3_replication_rule() -> AttributeType {
             StructField::required("status", s3_replication_status())
                 .with_provider_name("Status")
                 .build(),
-            StructField::optional("delete_marker_replication", s3_delete_marker_replication())
+            // S3 requires this member for V2 rules and the provider sends
+            // Disabled when the author omits it. Making the canonical field
+            // required ensures desired normalization and read-back compare the
+            // same nested shape instead of treating the read value as an
+            // unexpected non-default key.
+            StructField::required("delete_marker_replication", s3_delete_marker_replication())
                 .with_provider_name("DeleteMarkerReplication")
                 .with_block_name("delete_marker_replication")
                 .build(),

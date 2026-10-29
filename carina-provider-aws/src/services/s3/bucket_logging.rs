@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use aws_sdk_s3::types::{
     BucketLoggingStatus, LoggingEnabled, PartitionDateSource, PartitionedPrefix, SimplePrefix,
     TargetObjectKeyFormat,
@@ -18,6 +16,8 @@ use crate::helpers::{
     RetryPolicy, enum_attr_error, require_string_attr, retry_aws_operation, sdk_error_message,
 };
 use crate::provider::CreateCompletion;
+use crate::read_model::found_managed_read;
+use crate::read_models_generated::S3BucketLoggingReadModel;
 use crate::services::s3::bucket::is_s3_not_configured_error;
 
 impl AwsProvider {
@@ -26,7 +26,6 @@ impl AwsProvider {
         id: &ResourceId,
         identifier: &AppliedIdentifier,
     ) -> ProviderResult<ReadOutcome> {
-        let applied_identifier = identifier;
         let bucket = identifier.as_str();
 
         let result = self
@@ -38,36 +37,25 @@ impl AwsProvider {
 
         match result {
             Ok(output) => {
-                let mut attributes = HashMap::new();
-                attributes.insert(
-                    "bucket".to_string(),
-                    Value::Concrete(ConcreteValue::String(bucket.to_string().into())),
-                );
-                if let Some(le) = output.logging_enabled() {
-                    attributes.insert(
-                        "target_bucket".to_string(),
-                        Value::Concrete(ConcreteValue::String(
+                let Some(le) = output.logging_enabled() else {
+                    return Ok(ReadOutcome::not_found(id.clone()));
+                };
+                found_managed_read(
+                    id,
+                    identifier,
+                    S3BucketLoggingReadModel {
+                        bucket: crate::read_model::applied_identifier_value(identifier),
+                        target_bucket: Value::Concrete(ConcreteValue::String(
                             le.target_bucket().to_string().into(),
                         )),
-                    );
-                    attributes.insert(
-                        "target_prefix".to_string(),
-                        Value::Concrete(ConcreteValue::String(
+                        target_prefix: Value::Concrete(ConcreteValue::String(
                             le.target_prefix().to_string().into(),
                         )),
-                    );
-                    if let Some(fmt) = le.target_object_key_format() {
-                        attributes.insert(
-                            "target_object_key_format".to_string(),
-                            target_object_key_format_to_value(fmt),
-                        );
-                    }
-                }
-                Ok(crate::helpers::found_read(
-                    id,
-                    applied_identifier,
-                    attributes,
-                ))
+                        target_object_key_format: le
+                            .target_object_key_format()
+                            .map(target_object_key_format_to_value),
+                    },
+                )
             }
             Err(e) => {
                 if is_s3_not_configured_error(&e, "NoSuchBucket") {

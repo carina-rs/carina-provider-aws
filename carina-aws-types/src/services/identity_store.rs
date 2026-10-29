@@ -1,3 +1,5 @@
+use carina_core::schema::{AttributeType, StructField};
+
 /// Validate an IdentityStore id (`d-<10-hex>` or a 36-char UUID).
 pub fn validate_identity_store_id(id: &str) -> Result<(), String> {
     let looks_like_d = id
@@ -13,4 +15,22 @@ pub fn validate_identity_store_id(id: &str) -> Result<(), String> {
     } else {
         Err("must be d-<10 hex> or a 36-char UUID".to_string())
     }
+}
+
+/// Structured name returned by Identity Store's DescribeUser operation.
+pub fn identitystore_user_name() -> AttributeType {
+    AttributeType::struct_(
+        "IdentityStoreUserName".to_string(),
+        [
+            "formatted",
+            "family_name",
+            "given_name",
+            "middle_name",
+            "honorific_prefix",
+            "honorific_suffix",
+        ]
+        .into_iter()
+        .map(|name| StructField::optional(name, AttributeType::string()).build())
+        .collect(),
+    )
 }

@@ -16,6 +16,53 @@ pub struct ExtraField {
     pub description: Option<&'static str>,
 }
 
+/// Whether a readable schema attribute must always be present in the
+/// provider's canonical read model or may legitimately be absent from an AWS
+/// response.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReadPresence {
+    Required,
+    Optional,
+}
+
+/// A deliberate override to the read contract inferred from the Smithy read
+/// shape.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReadDisposition {
+    /// The attribute is populated by hand-written read logic. This is required
+    /// for synthetic schema attributes and values obtained through side reads.
+    Read {
+        field: &'static str,
+        presence: ReadPresence,
+    },
+    /// AWS accepts the value on create but never returns it. Core's write-only
+    /// provenance is the only place allowed to retain it.
+    WriteOnly {
+        field: &'static str,
+        reason: &'static str,
+    },
+    /// The API/model exposes a request member that this provider cannot
+    /// truthfully send and read back, so it must not be user-facing schema.
+    OmitSchema {
+        field: &'static str,
+        reason: &'static str,
+    },
+}
+
+impl ReadDisposition {
+    pub const fn read(field: &'static str, presence: ReadPresence) -> Self {
+        Self::Read { field, presence }
+    }
+
+    pub const fn field(self) -> &'static str {
+        match self {
+            Self::Read { field, .. }
+            | Self::WriteOnly { field, .. }
+            | Self::OmitSchema { field, .. } => field,
+        }
+    }
+}
+
 /// A read operation that retrieves specific fields from an API response.
 /// Used for resources that have no single "describe" structure (e.g., S3).
 pub struct ReadOp {
@@ -169,6 +216,224 @@ pub struct ResourceDef {
     pub derived_attributes: Vec<DerivedAttribute>,
 }
 
+impl ResourceDef {
+    /// Reasoned exceptions to the read contract inferred from Smithy.
+    ///
+    /// Keeping this exhaustive match beside the resource definitions makes a
+    /// synthetic schema addition fail generation until its read behavior is
+    /// chosen explicitly.
+    pub fn read_dispositions(&self) -> Vec<ReadDisposition> {
+        use ReadDisposition::{OmitSchema, WriteOnly};
+        use ReadPresence::{Optional, Required};
+
+        match self.name {
+            "ec2.Vpc" => vec![
+                ReadDisposition::read("EnableDnsHostnames", Required),
+                ReadDisposition::read("EnableDnsSupport", Required),
+                ReadDisposition::read("Ipv4NetmaskLength", Optional),
+                WriteOnly {
+                    field: "Ipv4IpamPoolId",
+                    reason: "CreateVpc accepts the IPAM pool ID, but DescribeVpcs returns only the allocated CIDR association",
+                },
+            ],
+            "ec2.Subnet" => vec![
+                ReadDisposition::read("Ipv4NetmaskLength", Optional),
+                ReadDisposition::read("Ipv6CidrBlock", Optional),
+                ReadDisposition::read("Ipv6NetmaskLength", Optional),
+                WriteOnly {
+                    field: "Ipv4IpamPoolId",
+                    reason: "CreateSubnet accepts the IPv4 IPAM pool ID, but DescribeSubnets returns only allocated CIDRs",
+                },
+                WriteOnly {
+                    field: "Ipv6IpamPoolId",
+                    reason: "CreateSubnet accepts the IPv6 IPAM pool ID, but DescribeSubnets returns only allocated CIDRs",
+                },
+            ],
+            "ec2.SecurityGroupIngress" => vec![
+                ReadDisposition::read("CidrIp", Optional),
+                OmitSchema {
+                    field: "GroupName",
+                    reason: "the provider manages rules against a security-group ID and cannot read this target alias back canonically",
+                },
+                OmitSchema {
+                    field: "SourceSecurityGroupName",
+                    reason: "EC2 rule responses identify the source group by ID, not by this create-side name alias",
+                },
+                ReadDisposition::read("SourceSecurityGroupOwnerId", Optional),
+                ReadDisposition::read("SourceSecurityGroupId", Optional),
+            ],
+            "ec2.SecurityGroupEgress" => vec![
+                ReadDisposition::read("CidrIp", Optional),
+                OmitSchema {
+                    field: "SourceSecurityGroupName",
+                    reason: "the egress API does not provide a canonical read-back for this unsupported source-group alias",
+                },
+                ReadDisposition::read("SourceSecurityGroupOwnerId", Optional),
+                ReadDisposition::read("DestinationSecurityGroupId", Optional),
+            ],
+            "ec2.InternetGateway" => vec![ReadDisposition::read("VpcId", Required)],
+            "ec2.Route" => vec![ReadDisposition::read("RouteTableId", Required)],
+            "ec2.NatGateway" => vec![
+                ReadDisposition::read("AvailabilityZoneAddresses", Required),
+                ReadDisposition::read("PrivateIpAddress", Optional),
+            ],
+            "ec2.VpcEndpoint" => vec![
+                ReadDisposition::read("RouteTableIds", Required),
+                ReadDisposition::read("SecurityGroupIds", Required),
+                ReadDisposition::read("SubnetIds", Required),
+            ],
+            "ec2.VpcGatewayAttachment" => vec![
+                ReadDisposition::read("InternetGatewayId", Optional),
+                ReadDisposition::read("VpcId", Required),
+                ReadDisposition::read("VpnGatewayId", Optional),
+            ],
+            "ec2.Eip" => vec![ReadDisposition::read("Address", Optional)],
+            "ec2.FlowLog" => vec![
+                ReadDisposition::read("ResourceType", Required),
+                ReadDisposition::read("ResourceIds", Required),
+                OmitSchema {
+                    field: "TagFieldSpecifications",
+                    reason: "the pinned SDK cannot send or read this modeled request member",
+                },
+            ],
+            "ec2.SubnetRouteTableAssociation" => vec![OmitSchema {
+                field: "PublicIpv4Pool",
+                reason: "this selects a different association API mode that the provider does not implement or read",
+            }],
+            "organizations.Account" => vec![
+                WriteOnly {
+                    field: "IamUserAccessToBilling",
+                    reason: "DescribeAccount does not return the create-time billing-access setting",
+                },
+                WriteOnly {
+                    field: "RoleName",
+                    reason: "DescribeAccount does not return the create-time organization role name",
+                },
+                ReadDisposition::read("AccountName", Required),
+                OmitSchema {
+                    field: "Name",
+                    reason: "the AWS Name response member is exposed canonically as account_name",
+                },
+            ],
+            "s3.Bucket" => vec![
+                ReadDisposition::read("Bucket", Required),
+                WriteOnly {
+                    field: "BucketNamespace",
+                    reason: "CreateBucket accepts the namespace selector but HeadBucket does not return it",
+                },
+                ReadDisposition::read("Arn", Required),
+                ReadDisposition::read("Region", Required),
+                ReadDisposition::read("BucketDomainName", Required),
+                ReadDisposition::read("BucketRegionalDomainName", Required),
+                ReadDisposition::read("HostedZoneId", Optional),
+            ],
+            "s3.BucketVersioning" => vec![
+                OmitSchema {
+                    field: "MFADelete",
+                    reason: "changing MFA delete also requires an MFA header that this resource cannot supply",
+                },
+                ReadDisposition::read("Bucket", Required),
+                ReadDisposition::read("Status", Required),
+            ],
+            "s3.BucketAcl" => vec![
+                ReadDisposition::read("Bucket", Required),
+                ReadDisposition::read("ACL", Required),
+            ],
+            "s3.BucketPolicy" => vec![
+                ReadDisposition::read("Bucket", Required),
+                ReadDisposition::read("Policy", Required),
+            ],
+            "s3.BucketCorsConfiguration" => vec![
+                ReadDisposition::read("Bucket", Required),
+                ReadDisposition::read("CORSRules", Required),
+            ],
+            "s3.BucketLifecycleConfiguration" => vec![
+                ReadDisposition::read("Bucket", Required),
+                ReadDisposition::read("Rules", Required),
+            ],
+            "s3.BucketLogging" => vec![
+                ReadDisposition::read("Bucket", Required),
+                ReadDisposition::read("TargetBucket", Required),
+                ReadDisposition::read("TargetPrefix", Required),
+                ReadDisposition::read("TargetObjectKeyFormat", Optional),
+            ],
+            "s3.BucketNotificationConfiguration" => vec![
+                ReadDisposition::read("Bucket", Required),
+                ReadDisposition::read("TopicConfigurations", Required),
+                ReadDisposition::read("QueueConfigurations", Required),
+                ReadDisposition::read("LambdaFunctionConfigurations", Required),
+                ReadDisposition::read("EventBridgeConfiguration", Optional),
+            ],
+            "s3.BucketObjectLockConfiguration" => vec![
+                ReadDisposition::read("Bucket", Required),
+                ReadDisposition::read("ObjectLockEnabled", Required),
+                ReadDisposition::read("Rule", Optional),
+            ],
+            "s3.BucketOwnershipControls" => vec![
+                ReadDisposition::read("Bucket", Required),
+                ReadDisposition::read("ObjectOwnership", Required),
+            ],
+            "s3.BucketPublicAccessBlock" => vec![
+                ReadDisposition::read("Bucket", Required),
+                ReadDisposition::read("BlockPublicAcls", Required),
+                ReadDisposition::read("IgnorePublicAcls", Required),
+                ReadDisposition::read("BlockPublicPolicy", Required),
+                ReadDisposition::read("RestrictPublicBuckets", Required),
+            ],
+            "s3.BucketReplicationConfiguration" => vec![
+                ReadDisposition::read("Bucket", Required),
+                ReadDisposition::read("Role", Required),
+                ReadDisposition::read("Rules", Required),
+            ],
+            "s3.BucketServerSideEncryptionConfiguration" => vec![
+                ReadDisposition::read("Bucket", Required),
+                ReadDisposition::read("Rules", Required),
+            ],
+            "s3.BucketWebsiteConfiguration" => vec![
+                ReadDisposition::read("Bucket", Required),
+                ReadDisposition::read("IndexDocument", Optional),
+                ReadDisposition::read("ErrorDocument", Optional),
+                ReadDisposition::read("RedirectAllRequestsTo", Optional),
+            ],
+            "route53.RecordSet" => vec![ReadDisposition::read("HostedZoneId", Required)],
+            "acm.Certificate" => vec![
+                OmitSchema {
+                    field: "IdempotencyToken",
+                    reason: "the provider owns resend tokens and users cannot observe or round-trip them",
+                },
+                ReadDisposition::read("SubjectAlternativeNames", Required),
+                ReadDisposition::read("ValidationMethod", Optional),
+            ],
+            "logs.LogGroup" => vec![ReadDisposition::read("DeletionProtectionEnabled", Required)],
+            "sqs.Queue" => vec![
+                ReadDisposition::read("QueueName", Required),
+                ReadDisposition::read("Policy", Optional),
+                ReadDisposition::read("VisibilityTimeout", Required),
+                ReadDisposition::read("MaximumMessageSize", Required),
+                ReadDisposition::read("MessageRetentionPeriod", Required),
+                ReadDisposition::read("DelaySeconds", Required),
+                ReadDisposition::read("ReceiveMessageWaitTimeSeconds", Required),
+                ReadDisposition::read("RedrivePolicy", Optional),
+                ReadDisposition::read("RedriveAllowPolicy", Optional),
+                ReadDisposition::read("FifoQueue", Required),
+                ReadDisposition::read("ContentBasedDeduplication", Required),
+                ReadDisposition::read("DeduplicationScope", Optional),
+                ReadDisposition::read("FifoThroughputLimit", Optional),
+                ReadDisposition::read("KmsMasterKeyId", Optional),
+                ReadDisposition::read("KmsDataKeyReusePeriodSeconds", Optional),
+                ReadDisposition::read("SqsManagedSseEnabled", Optional),
+                ReadDisposition::read("QueueArn", Required),
+                ReadDisposition::read("ApproximateNumberOfMessages", Optional),
+                ReadDisposition::read("ApproximateNumberOfMessagesDelayed", Optional),
+                ReadDisposition::read("ApproximateNumberOfMessagesNotVisible", Optional),
+                ReadDisposition::read("CreatedTimestamp", Required),
+                ReadDisposition::read("LastModifiedTimestamp", Required),
+            ],
+            _ => vec![],
+        }
+    }
+}
+
 /// One read-back projection for `extract_*_attributes`.
 ///
 /// `attr` is the DSL-side attribute name in the same spelling used
@@ -219,6 +484,14 @@ pub enum DerivedSource {
 pub enum FieldLayout {
     /// Fields are top-level parameters of the API input.
     Flat(Vec<&'static str>),
+    /// Top-level parameters sent through a different AWS service. The
+    /// provider implementation is hand-written, while codegen still uses the
+    /// operation to classify schema fields as updatable and load the service
+    /// model for guarded-client generation.
+    CrossServiceFlat {
+        service_namespace: &'static str,
+        fields: Vec<&'static str>,
+    },
     /// Fields are nested inside a named struct in the API input.
     InsideStruct {
         name: &'static str,
@@ -231,7 +504,18 @@ impl FieldLayout {
     pub fn field_names(&self) -> &[&'static str] {
         match self {
             FieldLayout::Flat(fields) => fields,
+            FieldLayout::CrossServiceFlat { fields, .. } => fields,
             FieldLayout::InsideStruct { fields, .. } => fields,
+        }
+    }
+
+    /// Return the explicit service namespace for a cross-service operation.
+    pub fn cross_service_namespace(&self) -> Option<&'static str> {
+        match self {
+            FieldLayout::CrossServiceFlat {
+                service_namespace, ..
+            } => Some(service_namespace),
+            FieldLayout::Flat(_) | FieldLayout::InsideStruct { .. } => None,
         }
     }
 }
@@ -864,7 +1148,16 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             update_ops: vec![],
             identifier: "NatGatewayId",
             has_tags: true,
-            type_overrides: vec![],
+            type_overrides: vec![(
+                "AvailabilityZoneAddresses",
+                "AttributeType::unordered_list(AttributeType::struct_(\
+                    \"AvailabilityZoneAddress\".to_string(),\
+                    vec![\
+                    StructField::optional(\"allocation_ids\", AttributeType::unordered_list(super::allocation_id())).with_description(\"The allocation IDs of the Elastic IP addresses (EIPs) to be used for handling outbound NAT traffic in this specific Availability Zone.\").with_provider_name(\"AllocationIds\").build(),\
+                    StructField::optional(\"availability_zone\", super::availability_zone()).with_description(\"For regional NAT gateways only: The Availability Zone where this specific NAT gateway configuration will be active. Each AZ in a regional NAT gateway has its own configuration to handle outbound NAT traffic from that AZ.\").with_provider_name(\"AvailabilityZone\").build()\
+                    ],\
+                ))",
+            )],
             exclude_fields: vec![
                 "DryRun",
                 "TagSpecifications",
@@ -876,7 +1169,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             create_only_overrides: vec![],
             enum_aliases: vec![],
             to_dsl_overrides: vec![],
-            required_overrides: vec!["SubnetId"],
+            required_overrides: vec![],
             extra_read_only: vec![],
             read_only_overrides: vec![],
             extra_attributes: vec![],
@@ -1289,10 +1582,16 @@ pub fn identitystore_data_sources() -> Vec<DataSourceDef> {
                     type_code: "AttributeType::string()",
                 },
                 DataSourceOutput {
+                    name: "name",
+                    provider_name: Some("Name"),
+                    description: "Structured components of the user's name.",
+                    type_code: "super::identitystore_user_name()",
+                },
+                DataSourceOutput {
                     name: "emails",
                     provider_name: Some("Emails"),
                     description: "Email addresses associated with the user.",
-                    type_code: "AttributeType::string()",
+                    type_code: "AttributeType::unordered_list(types::email())",
                 },
             ],
         },
@@ -1347,22 +1646,23 @@ pub fn organizations_resources() -> Vec<ResourceDef> {
             service_namespace: "com.amazonaws.organizations",
             schema_structure: None,
             simple_delete: false,
-            noop_update: true,
+            noop_update: false,
             create_op: "CreateAccount",
             read_structure: Some("Account"),
             read_ops: vec![],
             delete_op: "CloseAccount",
-            update_ops: vec![],
+            update_ops: vec![UpdateOp {
+                operation: "PutAccountName",
+                fields: FieldLayout::CrossServiceFlat {
+                    service_namespace: "com.amazonaws.account",
+                    fields: vec!["AccountName"],
+                },
+            }],
             identifier: "Id",
             has_tags: true,
             type_overrides: vec![],
             exclude_fields: vec!["Paths", "State"],
-            create_only_overrides: vec![
-                "AccountName",
-                "Email",
-                "IamUserAccessToBilling",
-                "RoleName",
-            ],
+            create_only_overrides: vec!["Email", "IamUserAccessToBilling", "RoleName"],
             enum_aliases: vec![],
             to_dsl_overrides: vec![],
             required_overrides: vec!["AccountName", "Email"],
@@ -2406,7 +2706,10 @@ pub fn acm_resources() -> Vec<ResourceDef> {
         update_ops: vec![],
         identifier: "CertificateArn",
         has_tags: true,
-        type_overrides: vec![],
+        type_overrides: vec![(
+            "SubjectAlternativeNames",
+            "AttributeType::unordered_list(AttributeType::string())",
+        )],
         exclude_fields: vec![
             // Imported / private-CA flows are out of scope for the
             // initial cut. The wait construct is the validation path,
@@ -2667,12 +2970,19 @@ pub fn logs_resources() -> Vec<ResourceDef> {
         read_structure: Some("LogGroup"),
         read_ops: vec![],
         delete_op: "DeleteLogGroup",
-        // PutRetentionPolicy is the real update path for retention_in_days.
-        // Listing it here lets the codegen mark the attribute as updatable.
-        update_ops: vec![UpdateOp {
-            operation: "PutRetentionPolicy",
-            fields: FieldLayout::Flat(vec!["retentionInDays"]),
-        }],
+        // These operations are the real update paths for the two fields.
+        // Listing them here keeps the generated schema from marking either
+        // attribute create-only.
+        update_ops: vec![
+            UpdateOp {
+                operation: "PutRetentionPolicy",
+                fields: FieldLayout::Flat(vec!["retentionInDays"]),
+            },
+            UpdateOp {
+                operation: "PutLogGroupDeletionProtection",
+                fields: FieldLayout::Flat(vec!["deletionProtectionEnabled"]),
+            },
+        ],
         identifier: "LogGroupName",
         has_tags: true,
         type_overrides: vec![
@@ -3004,9 +3314,10 @@ mod tests {
         let ds = &defs[0];
         let outs = ds.shape.single_outputs().expect("Single shape");
         let names: Vec<&str> = outs.iter().map(|o| o.name).collect();
-        assert_eq!(names, vec!["display_name", "emails"]);
+        assert_eq!(names, vec!["display_name", "name", "emails"]);
         assert_eq!(outs[0].provider_name, Some("DisplayName"));
-        assert_eq!(outs[1].provider_name, Some("Emails"));
+        assert_eq!(outs[1].provider_name, Some("Name"));
+        assert_eq!(outs[2].provider_name, Some("Emails"));
         assert_eq!(ds.inputs.len(), 3);
     }
 
@@ -3104,6 +3415,81 @@ mod tests {
         assert!(
             !resource.required_overrides.contains(&"Rule"),
             "rule must remain optional"
+        );
+    }
+
+    #[test]
+    fn every_s3_bucket_target_is_required_read_state() {
+        let resources = s3_resources();
+
+        for resource in &resources {
+            let bucket_disposition = resource
+                .read_dispositions()
+                .into_iter()
+                .find(|disposition| disposition.field() == "Bucket");
+
+            assert!(
+                matches!(
+                    bucket_disposition,
+                    Some(ReadDisposition::Read {
+                        presence: ReadPresence::Required,
+                        ..
+                    })
+                ),
+                "{} must read bucket from its applied identifier",
+                resource.name
+            );
+        }
+
+        let write_only_fields = resources
+            .iter()
+            .flat_map(|resource| {
+                resource
+                    .read_dispositions()
+                    .into_iter()
+                    .filter_map(move |disposition| match disposition {
+                        ReadDisposition::WriteOnly { field, .. } => Some((resource.name, field)),
+                        _ => None,
+                    })
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(write_only_fields, vec![("s3.Bucket", "BucketNamespace")]);
+    }
+
+    #[test]
+    fn write_only_fields_are_limited_to_unobservable_create_inputs() {
+        let write_only_fields = ec2_resources()
+            .into_iter()
+            .chain(sts_resources())
+            .chain(organizations_resources())
+            .chain(s3_resources())
+            .chain(acm_resources())
+            .chain(route53_resources())
+            .chain(iam_resources())
+            .chain(logs_resources())
+            .chain(sqs_resources())
+            .flat_map(|resource| {
+                let resource_name = resource.name;
+                resource
+                    .read_dispositions()
+                    .into_iter()
+                    .filter_map(move |disposition| match disposition {
+                        ReadDisposition::WriteOnly { field, .. } => Some((resource_name, field)),
+                        _ => None,
+                    })
+            })
+            .collect::<std::collections::BTreeSet<_>>();
+
+        assert_eq!(
+            write_only_fields,
+            std::collections::BTreeSet::from([
+                ("ec2.Subnet", "Ipv4IpamPoolId"),
+                ("ec2.Subnet", "Ipv6IpamPoolId"),
+                ("ec2.Vpc", "Ipv4IpamPoolId"),
+                ("organizations.Account", "IamUserAccessToBilling"),
+                ("organizations.Account", "RoleName"),
+                ("s3.Bucket", "BucketNamespace"),
+            ])
         );
     }
 }

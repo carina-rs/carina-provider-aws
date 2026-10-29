@@ -9,8 +9,6 @@ use super::tags_type;
 use carina_core::schema::{AttributeSchema, AttributeType, ResourceSchema, StructField, types};
 use carina_provider_protocol::types::ValidatorType;
 
-const VALID_HOSTNAME_TYPE: &[&str] = &["ip-name", "resource-name"];
-
 /// Returns the schema config for ec2.Subnet (Smithy: com.amazonaws.ec2)
 pub fn ec2_subnet_config() -> AwsSchemaConfig {
     AwsSchemaConfig {
@@ -59,9 +57,11 @@ pub fn ec2_subnet_config() -> AwsSchemaConfig {
                 .with_provider_name("EnableLniAtDeviceIndex")
                 .build(),
         )
+        // Read contract: CreateSubnet accepts the IPv4 IPAM pool ID, but DescribeSubnets returns only allocated CIDRs
         .attribute(
             AttributeSchema::optional("ipv4_ipam_pool_id", super::ipam_pool_id())
                 .create_only()
+                .write_only()
                 .with_description("An IPv4 IPAM pool ID for the subnet.")
                 .with_provider_name("Ipv4IpamPoolId")
                 .build(),
@@ -83,9 +83,11 @@ pub fn ec2_subnet_config() -> AwsSchemaConfig {
                 .with_provider_name("Ipv6CidrBlock")
                 .build(),
         )
+        // Read contract: CreateSubnet accepts the IPv6 IPAM pool ID, but DescribeSubnets returns only allocated CIDRs
         .attribute(
             AttributeSchema::optional("ipv6_ipam_pool_id", super::ipam_pool_id())
                 .create_only()
+                .write_only()
                 .with_description("An IPv6 IPAM pool ID for the subnet.")
                 .with_provider_name("Ipv6IpamPoolId")
                 .build(),
@@ -167,5 +169,5 @@ pub fn enum_valid_values() -> (
     &'static str,
     &'static [(&'static str, &'static [&'static str])],
 ) {
-    ("ec2.Subnet", &[("hostname_type", VALID_HOSTNAME_TYPE)])
+    ("ec2.Subnet", &[])
 }

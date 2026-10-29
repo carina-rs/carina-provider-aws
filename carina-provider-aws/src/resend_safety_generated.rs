@@ -21,6 +21,53 @@ use crate::sdk_config::BoundedSdkConfig;
 /// operation, add a decision there and run `scripts/generate-provider.sh`.
 /// Token-bearing operations return `TokenOperation` and must be sent via
 /// `retry_aws_operation_with_token` or `send_aws_operation_with_token`.
+pub(crate) struct AccountClient {
+    inner: aws_sdk_account::Client,
+}
+
+// Decisions can outlive their current call sites; every decided operation remains
+// available through the closed generated client API.
+#[allow(dead_code)]
+impl AccountClient {
+    // Raw SDK client construction is confined to generated guarded wrappers.
+    #[allow(clippy::disallowed_methods)]
+    pub(crate) fn from_bounded_config(config: &BoundedSdkConfig) -> Self {
+        Self {
+            inner: aws_sdk_account::Client::from_conf(
+                aws_sdk_account::config::Builder::from(config.sdk_config())
+                    .interceptor(ResendGuard::new(account_idempotency))
+                    .build(),
+            ),
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn config(&self) -> &aws_sdk_account::Config {
+        self.inner.config()
+    }
+
+    /// PutAccountName: sets the name of the identified account; repeating the same account ID and name has no additional effect
+    pub(crate) fn put_account_name(
+        &self,
+    ) -> aws_sdk_account::operation::put_account_name::builders::PutAccountNameFluentBuilder {
+        self.inner.put_account_name()
+    }
+}
+
+pub(crate) fn account_idempotency(operation: &str) -> Idempotency {
+    match operation {
+        "PutAccountName" => Idempotency::Idempotent,
+        _ => Idempotency::NotIdempotent,
+    }
+}
+
+/// Guarded AWS service client with a closed, generated operation API.
+///
+/// Methods exist only for operations decided in
+/// `carina-codegen-aws/src/resend_safety.rs` (`OVERRIDES`). To call a new AWS
+/// operation, add a decision there and run `scripts/generate-provider.sh`.
+/// Token-bearing operations return `TokenOperation` and must be sent via
+/// `retry_aws_operation_with_token` or `send_aws_operation_with_token`.
 pub(crate) struct AcmClient {
     inner: aws_sdk_acm::Client,
 }
@@ -189,6 +236,11 @@ impl CloudWatchLogsClient {
         self.inner.list_tags_log_group()
     }
 
+    /// PutLogGroupDeletionProtection: sets one boolean on the identified log group
+    pub(crate) fn put_log_group_deletion_protection(&self) -> aws_sdk_cloudwatchlogs::operation::put_log_group_deletion_protection::builders::PutLogGroupDeletionProtectionFluentBuilder{
+        self.inner.put_log_group_deletion_protection()
+    }
+
     /// PutRetentionPolicy: replaces the single retention policy keyed by log group
     pub(crate) fn put_retention_policy(&self) -> aws_sdk_cloudwatchlogs::operation::put_retention_policy::builders::PutRetentionPolicyFluentBuilder{
         self.inner.put_retention_policy()
@@ -235,6 +287,7 @@ pub(crate) fn cloudwatchlogs_idempotency(operation: &str) -> Idempotency {
         "DisassociateKmsKey" => Idempotency::Idempotent,
         "ListTagsForResource" => Idempotency::ReadOnly,
         "ListTagsLogGroup" => Idempotency::ReadOnly,
+        "PutLogGroupDeletionProtection" => Idempotency::Idempotent,
         "PutRetentionPolicy" => Idempotency::Idempotent,
         "TagLogGroup" => Idempotency::Idempotent,
         "TagResource" => Idempotency::Idempotent,
@@ -668,6 +721,14 @@ impl Ec2Client {
         self.inner.modify_subnet_attribute()
     }
 
+    /// ModifyTransitGateway: sets the complete transit-gateway description value
+    pub(crate) fn modify_transit_gateway(
+        &self,
+    ) -> aws_sdk_ec2::operation::modify_transit_gateway::builders::ModifyTransitGatewayFluentBuilder
+    {
+        self.inner.modify_transit_gateway()
+    }
+
     /// ModifyVpcAttribute: sets one named VPC attribute to a complete value
     pub(crate) fn modify_vpc_attribute(
         &self,
@@ -771,6 +832,7 @@ pub(crate) fn ec2_idempotency(operation: &str) -> Idempotency {
         "DetachVpnGateway" => Idempotency::NotIdempotent,
         "DisassociateRouteTable" => Idempotency::NotIdempotent,
         "ModifySubnetAttribute" => Idempotency::Idempotent,
+        "ModifyTransitGateway" => Idempotency::Idempotent,
         "ModifyVpcAttribute" => Idempotency::Idempotent,
         "ModifyVpcEndpoint" => Idempotency::NotIdempotent,
         "ReleaseAddress" => Idempotency::NotIdempotent,
@@ -1631,6 +1693,35 @@ pub(crate) fn sts_idempotency(operation: &str) -> Idempotency {
     }
 }
 
+/// PutAccountName: sets the name of the identified account; repeating the same account ID and name has no additional effect
+impl AwsOperation
+    for aws_sdk_account::operation::put_account_name::builders::PutAccountNameFluentBuilder
+{
+    type Resend = NoToken;
+    type Output = aws_sdk_account::operation::put_account_name::PutAccountNameOutput;
+    type Error = aws_sdk_account::operation::put_account_name::PutAccountNameError;
+
+    const NAME: &'static str = "account.PutAccountName";
+    const IDEMPOTENCY: Idempotency = Idempotency::Idempotent;
+}
+
+impl DecidedOperationError for aws_sdk_account::operation::put_account_name::PutAccountNameError {
+    const NAME: &'static str = <aws_sdk_account::operation::put_account_name::builders::PutAccountNameFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_account::operation::put_account_name::builders::PutAccountNameFluentBuilder as AwsOperation>::IDEMPOTENCY;
+}
+
+impl DecidedSend<()>
+    for aws_sdk_account::operation::put_account_name::builders::PutAccountNameFluentBuilder
+{
+    fn send(
+        self,
+        (): (),
+    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send
+    {
+        self.send()
+    }
+}
+
 /// AddTagsToCertificate: sets tag keys on one certificate; repeating the same key/value pairs has no additional effect
 impl AwsOperation
     for aws_sdk_acm::operation::add_tags_to_certificate::builders::AddTagsToCertificateFluentBuilder
@@ -2082,6 +2173,30 @@ impl DecidedOperationError
 }
 
 impl DecidedSend<()> for aws_sdk_cloudwatchlogs::operation::list_tags_log_group::builders::ListTagsLogGroupFluentBuilder {
+    fn send(
+        self,
+        (): (),
+    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
+        self.send()
+    }
+}
+
+/// PutLogGroupDeletionProtection: sets one boolean on the identified log group
+impl AwsOperation for aws_sdk_cloudwatchlogs::operation::put_log_group_deletion_protection::builders::PutLogGroupDeletionProtectionFluentBuilder {
+    type Resend = NoToken;
+    type Output = aws_sdk_cloudwatchlogs::operation::put_log_group_deletion_protection::PutLogGroupDeletionProtectionOutput;
+    type Error = aws_sdk_cloudwatchlogs::operation::put_log_group_deletion_protection::PutLogGroupDeletionProtectionError;
+
+    const NAME: &'static str = "cloudwatchlogs.PutLogGroupDeletionProtection";
+    const IDEMPOTENCY: Idempotency = Idempotency::Idempotent;
+}
+
+impl DecidedOperationError for aws_sdk_cloudwatchlogs::operation::put_log_group_deletion_protection::PutLogGroupDeletionProtectionError {
+    const NAME: &'static str = <aws_sdk_cloudwatchlogs::operation::put_log_group_deletion_protection::builders::PutLogGroupDeletionProtectionFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_cloudwatchlogs::operation::put_log_group_deletion_protection::builders::PutLogGroupDeletionProtectionFluentBuilder as AwsOperation>::IDEMPOTENCY;
+}
+
+impl DecidedSend<()> for aws_sdk_cloudwatchlogs::operation::put_log_group_deletion_protection::builders::PutLogGroupDeletionProtectionFluentBuilder {
     fn send(
         self,
         (): (),
@@ -3938,6 +4053,37 @@ impl DecidedSend<()> for aws_sdk_ec2::operation::modify_subnet_attribute::builde
         self,
         (): (),
     ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
+        self.send()
+    }
+}
+
+/// ModifyTransitGateway: sets the complete transit-gateway description value
+impl AwsOperation
+    for aws_sdk_ec2::operation::modify_transit_gateway::builders::ModifyTransitGatewayFluentBuilder
+{
+    type Resend = NoToken;
+    type Output = aws_sdk_ec2::operation::modify_transit_gateway::ModifyTransitGatewayOutput;
+    type Error = aws_sdk_ec2::operation::modify_transit_gateway::ModifyTransitGatewayError;
+
+    const NAME: &'static str = "ec2.ModifyTransitGateway";
+    const IDEMPOTENCY: Idempotency = Idempotency::Idempotent;
+}
+
+impl DecidedOperationError
+    for aws_sdk_ec2::operation::modify_transit_gateway::ModifyTransitGatewayError
+{
+    const NAME: &'static str = <aws_sdk_ec2::operation::modify_transit_gateway::builders::ModifyTransitGatewayFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::modify_transit_gateway::builders::ModifyTransitGatewayFluentBuilder as AwsOperation>::IDEMPOTENCY;
+}
+
+impl DecidedSend<()>
+    for aws_sdk_ec2::operation::modify_transit_gateway::builders::ModifyTransitGatewayFluentBuilder
+{
+    fn send(
+        self,
+        (): (),
+    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send
+    {
         self.send()
     }
 }

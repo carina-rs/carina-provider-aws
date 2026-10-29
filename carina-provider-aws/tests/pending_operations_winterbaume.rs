@@ -39,9 +39,9 @@ const ACM_CLIENT_TOKEN: &str = "abcdef0123456789abcdef0123456789";
 
 #[derive(Debug)]
 enum TestCreateStep {
-    Success(AppliedState),
+    Success(TestAppliedState),
     Partial {
-        state: AppliedState,
+        state: TestAppliedState,
         reason: String,
         missing_attributes: Vec<String>,
     },
@@ -50,6 +50,31 @@ enum TestCreateStep {
         identifier: Option<AppliedIdentifier>,
         poll_after_secs: u32,
     },
+}
+
+#[derive(Debug)]
+struct TestAppliedState {
+    _id: ResourceId,
+    identifier: AppliedIdentifier,
+    _attributes: std::collections::HashMap<String, Value>,
+}
+
+impl TestAppliedState {
+    fn new(
+        id: ResourceId,
+        identifier: AppliedIdentifier,
+        attributes: std::collections::HashMap<String, Value>,
+    ) -> Self {
+        Self {
+            _id: id,
+            identifier,
+            _attributes: attributes,
+        }
+    }
+
+    fn identifier(&self) -> &AppliedIdentifier {
+        &self.identifier
+    }
 }
 
 #[derive(Debug)]
@@ -168,7 +193,7 @@ impl AwsIssuedCreate for TestIssuedCreate {
         self,
         attributes: std::collections::HashMap<String, Value>,
     ) -> Result<Self::Step, Self::Verdict> {
-        Ok(TestCreateStep::Success(AppliedState::from_identifier(
+        Ok(TestCreateStep::Success(TestAppliedState::new(
             self.id,
             self.identifier,
             attributes,
@@ -182,7 +207,7 @@ impl AwsIssuedCreate for TestIssuedCreate {
         missing_attributes: Vec<String>,
     ) -> Result<Self::Step, Self::Verdict> {
         Ok(TestCreateStep::Partial {
-            state: AppliedState::from_identifier(self.id, self.identifier, attributes),
+            state: TestAppliedState::new(self.id, self.identifier, attributes),
             reason,
             missing_attributes,
         })
@@ -1124,8 +1149,24 @@ fn applied_identifier(value: &str) -> AppliedIdentifier {
     AppliedIdentifier::new(value).expect("test provider identifier must be non-empty")
 }
 
-fn assert_nat_gateway_state_identifier(state: &AppliedState) {
-    assert_eq!(state.identifier().as_str(), NAT_GATEWAY_ID);
+trait TestStateIdentifier {
+    fn test_identifier(&self) -> &AppliedIdentifier;
+}
+
+impl TestStateIdentifier for AppliedState {
+    fn test_identifier(&self) -> &AppliedIdentifier {
+        self.identifier()
+    }
+}
+
+impl TestStateIdentifier for TestAppliedState {
+    fn test_identifier(&self) -> &AppliedIdentifier {
+        self.identifier()
+    }
+}
+
+fn assert_nat_gateway_state_identifier(state: &impl TestStateIdentifier) {
+    assert_eq!(state.test_identifier().as_str(), NAT_GATEWAY_ID);
 }
 
 #[tokio::test]
@@ -1542,7 +1583,7 @@ async fn request_certificate_token_with_issued_resume_fails_without_resending() 
 
 #[tokio::test]
 async fn tagged_vpc_poll_with_one_match_hands_continuation_to_next_poll() {
-    let provider = provider_with_tagged_vpcs(&["vpc-0553"]).await;
+    let provider = provider_with_tagged_vpcs(&["vpc-00000553"]).await;
     let resource = vpc_resource();
 
     let step = provider
@@ -1558,7 +1599,7 @@ async fn tagged_vpc_poll_with_one_match_hands_continuation_to_next_poll() {
     else {
         panic!("one discovered VPC must hand continuation to a later poll");
     };
-    assert_eq!(identifier.as_str(), "vpc-0553");
+    assert_eq!(identifier.as_str(), "vpc-00000553");
     assert!(matches!(
         &token,
         AwsCreateToken::TaggedEc2Found {
@@ -1581,9 +1622,9 @@ async fn tagged_vpc_poll_with_one_match_hands_continuation_to_next_poll() {
         .expect("the later poll must run the normal continuation");
 
     let TestCreateStep::Success(state) = step else {
-        panic!("the continuation poll must complete the VPC");
+        panic!("the continuation poll must complete the VPC, got {step:?}");
     };
-    assert_eq!(state.identifier().as_str(), "vpc-0553");
+    assert_eq!(state.identifier().as_str(), "vpc-00000553");
 }
 
 #[tokio::test]

@@ -92,6 +92,13 @@ fn int(value: i64) -> Value {
     Value::Concrete(ConcreteValue::Int(value))
 }
 
+fn assert_canonical_enum(value: Option<&Value>, expected: &str) {
+    let Some(Value::Concrete(ConcreteValue::CanonicalEnum(value))) = value else {
+        panic!("expected canonical enum {expected}, got {value:?}");
+    };
+    assert_eq!(value.api_value(), expected);
+}
+
 fn schema_registry() -> carina_core::schema::SchemaRegistry {
     let mut schemas = carina_core::schema::SchemaRegistry::new();
     for schema in carina_provider_aws::schemas::all_schemas() {
@@ -191,10 +198,7 @@ async fn create_object_lock(provider: &AwsProvider, bucket: &str, rule: Option<V
 
 fn assert_enabled_without_rule(state: &State) {
     assert!(state.exists);
-    assert_eq!(
-        state.attributes.get("object_lock_enabled"),
-        Some(&string("Enabled"))
-    );
+    assert_canonical_enum(state.attributes.get("object_lock_enabled"), "Enabled");
     assert!(!state.attributes.contains_key("rule"));
 }
 
@@ -207,7 +211,7 @@ fn assert_retention(state: &State, mode: &str, period_name: &str, period: i64) {
     else {
         panic!("rule should contain default_retention: {rule:?}");
     };
-    assert_eq!(default_retention.get("mode"), Some(&string(mode)));
+    assert_canonical_enum(default_retention.get("mode"), mode);
     let Some(Value::Concrete(ConcreteValue::Map(retention_period))) =
         default_retention.get("retention_period")
     else {

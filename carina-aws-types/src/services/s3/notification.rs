@@ -1,12 +1,26 @@
 use carina_core::schema::{AttributeType, StructField};
 
+use crate::enum_with_dsl_aliases_and_legacy;
+
 fn s3_notification_filter_rule() -> AttributeType {
     AttributeType::struct_(
         "FilterRule".to_string(),
         vec![
-            StructField::required("name", AttributeType::string())
-                .with_provider_name("Name")
-                .build(),
+            StructField::required(
+                "name",
+                enum_with_dsl_aliases_and_legacy(
+                    &["prefix", "suffix"],
+                    &[("prefix", "Prefix"), ("suffix", "Suffix")],
+                    carina_core::schema::enum_identity(
+                        "Name",
+                        Some(
+                            "aws.s3.BucketNotificationConfiguration.NotificationFilter.FilterRule",
+                        ),
+                    ),
+                ),
+            )
+            .with_provider_name("Name")
+            .build(),
             StructField::required("value", AttributeType::string())
                 .with_provider_name("Value")
                 .build(),

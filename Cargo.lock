@@ -205,6 +205,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "aws-sdk-account"
+version = "1.100.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2bbc75bcce5b26fe7e2f37f9ebb51e934cad915924f7c0b88eb48ed07faeeba1"
+dependencies = [
+ "aws-credential-types",
+ "aws-runtime",
+ "aws-smithy-async",
+ "aws-smithy-http",
+ "aws-smithy-json",
+ "aws-smithy-observability",
+ "aws-smithy-runtime",
+ "aws-smithy-runtime-api",
+ "aws-smithy-types",
+ "aws-types",
+ "bytes",
+ "fastrand",
+ "http 0.2.12",
+ "http 1.4.0",
+ "regex-lite",
+ "tracing",
+]
+
+[[package]]
 name = "aws-sdk-acm"
 version = "1.101.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -904,6 +928,7 @@ version = "0.7.4"
 dependencies = [
  "aws-config",
  "aws-credential-types",
+ "aws-sdk-account",
  "aws-sdk-acm",
  "aws-sdk-cloudwatchlogs",
  "aws-sdk-ec2",
@@ -1222,7 +1247,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2276,7 +2301,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2574,7 +2599,7 @@ dependencies = [
  "getrandom 0.4.2",
  "once_cell",
  "rustix",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

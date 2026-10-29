@@ -9,20 +9,6 @@ use super::tags_type;
 use carina_core::schema::{AttributeSchema, AttributeType, ResourceSchema, StructField, types};
 use carina_provider_protocol::types::ValidatorType;
 
-const VALID_AUTO_ACCEPT_SHARED_ATTACHMENTS: &[&str] = &["disable", "enable"];
-
-const VALID_DEFAULT_ROUTE_TABLE_ASSOCIATION: &[&str] = &["disable", "enable"];
-
-const VALID_DEFAULT_ROUTE_TABLE_PROPAGATION: &[&str] = &["disable", "enable"];
-
-const VALID_DNS_SUPPORT: &[&str] = &["disable", "enable"];
-
-const VALID_MULTICAST_SUPPORT: &[&str] = &["disable", "enable"];
-
-const VALID_SECURITY_GROUP_REFERENCING_SUPPORT: &[&str] = &["disable", "enable"];
-
-const VALID_VPN_ECMP_SUPPORT: &[&str] = &["disable", "enable"];
-
 /// Returns the schema config for ec2.TransitGateway (Smithy: com.amazonaws.ec2)
 pub fn ec2_transit_gateway_config() -> AwsSchemaConfig {
     AwsSchemaConfig {
@@ -121,28 +107,5 @@ pub fn enum_valid_values() -> (
     &'static str,
     &'static [(&'static str, &'static [&'static str])],
 ) {
-    (
-        "ec2.TransitGateway",
-        &[
-            (
-                "auto_accept_shared_attachments",
-                VALID_AUTO_ACCEPT_SHARED_ATTACHMENTS,
-            ),
-            (
-                "default_route_table_association",
-                VALID_DEFAULT_ROUTE_TABLE_ASSOCIATION,
-            ),
-            (
-                "default_route_table_propagation",
-                VALID_DEFAULT_ROUTE_TABLE_PROPAGATION,
-            ),
-            ("dns_support", VALID_DNS_SUPPORT),
-            ("multicast_support", VALID_MULTICAST_SUPPORT),
-            (
-                "security_group_referencing_support",
-                VALID_SECURITY_GROUP_REFERENCING_SUPPORT,
-            ),
-            ("vpn_ecmp_support", VALID_VPN_ECMP_SUPPORT),
-        ],
-    )
+    ("ec2.TransitGateway", &[])
 }

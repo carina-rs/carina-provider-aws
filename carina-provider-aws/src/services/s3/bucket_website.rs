@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use aws_sdk_s3::types::{
     ErrorDocument, IndexDocument, Protocol, RedirectAllRequestsTo, WebsiteConfiguration,
 };
@@ -16,6 +14,8 @@ use crate::helpers::{
     sdk_error_message,
 };
 use crate::provider::CreateCompletion;
+use crate::read_model::found_managed_read;
+use crate::read_models_generated::S3BucketWebsiteConfigurationReadModel;
 use crate::services::s3::bucket::is_s3_not_configured_error;
 
 impl AwsProvider {
@@ -24,7 +24,6 @@ impl AwsProvider {
         id: &ResourceId,
         identifier: &AppliedIdentifier,
     ) -> ProviderResult<ReadOutcome> {
-        let applied_identifier = identifier;
         let bucket = identifier.as_str();
 
         let result = self
@@ -36,34 +35,23 @@ impl AwsProvider {
 
         match result {
             Ok(output) => {
-                let mut attributes = HashMap::new();
-                attributes.insert(
-                    "bucket".to_string(),
-                    Value::Concrete(ConcreteValue::String(bucket.to_string().into())),
-                );
-                if let Some(idx) = output.index_document() {
+                let index_document = output.index_document().map(|idx| {
                     let mut m = IndexMap::new();
                     m.insert(
                         "suffix".to_string(),
                         Value::Concrete(ConcreteValue::String(idx.suffix().to_string().into())),
                     );
-                    attributes.insert(
-                        "index_document".to_string(),
-                        Value::Concrete(ConcreteValue::Map(m)),
-                    );
-                }
-                if let Some(err) = output.error_document() {
+                    Value::Concrete(ConcreteValue::Map(m))
+                });
+                let error_document = output.error_document().map(|err| {
                     let mut m = IndexMap::new();
                     m.insert(
                         "key".to_string(),
                         Value::Concrete(ConcreteValue::String(err.key().to_string().into())),
                     );
-                    attributes.insert(
-                        "error_document".to_string(),
-                        Value::Concrete(ConcreteValue::Map(m)),
-                    );
-                }
-                if let Some(r) = output.redirect_all_requests_to() {
+                    Value::Concrete(ConcreteValue::Map(m))
+                });
+                let redirect_all_requests_to = output.redirect_all_requests_to().map(|r| {
                     let mut m = IndexMap::new();
                     m.insert(
                         "host_name".to_string(),
@@ -75,16 +63,18 @@ impl AwsProvider {
                             Value::Concrete(ConcreteValue::String(p.as_str().to_string().into())),
                         );
                     }
-                    attributes.insert(
-                        "redirect_all_requests_to".to_string(),
-                        Value::Concrete(ConcreteValue::Map(m)),
-                    );
-                }
-                Ok(crate::helpers::found_read(
+                    Value::Concrete(ConcreteValue::Map(m))
+                });
+                found_managed_read(
                     id,
-                    applied_identifier,
-                    attributes,
-                ))
+                    identifier,
+                    S3BucketWebsiteConfigurationReadModel {
+                        bucket: crate::read_model::applied_identifier_value(identifier),
+                        index_document,
+                        error_document,
+                        redirect_all_requests_to,
+                    },
+                )
             }
             Err(e) => {
                 if is_s3_not_configured_error(&e, "NoSuchWebsiteConfiguration")

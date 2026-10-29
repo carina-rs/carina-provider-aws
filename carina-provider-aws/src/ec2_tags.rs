@@ -157,7 +157,7 @@ mod tests {
 
     use carina_core::differ::{Diff, diff};
     use carina_core::provider::RawSavedAttrs;
-    use carina_core::resource::{ResolvedResource, Resource, State};
+    use carina_core::resource::{ResolvedResource, Resource};
     use carina_core::schema::SchemaRegistry;
     use winterbaume_core::{MockAws, MockRequest, MockResponse, MockService};
 
@@ -448,7 +448,7 @@ mod tests {
                 .build(),
         ];
         let read_tags = AwsProvider::ec2_tags_to_value(&aws_tags).expect("visible user tag");
-        let current = State::existing(
+        let current = crate::read_model::test_existing_state(
             desired.id.clone(),
             HashMap::from([("tags".to_string(), read_tags)]),
         )

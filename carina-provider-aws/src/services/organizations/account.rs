@@ -10,6 +10,10 @@ use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
 use crate::helpers::{CreatePoll, optional_enum_attr, require_string_attr, sdk_error_message};
 use crate::provider::CreateCompletion;
+use crate::read_model::found_managed_read;
+use crate::read_models_generated::OrganizationsAccountReadModelSupplement;
+
+const ACCOUNT_RENAME_SETUP_ERROR: &str = "Failed to rename account: AccessDenied can mean either a missing IAM permission account:PutAccountName or that Account Management trusted access is not enabled. Enable trusted access with `aws organizations enable-aws-service-access --service-principal account.amazonaws.com`";
 
 fn organizations_account_create_poll_state(
     status: Option<&aws_sdk_organizations::types::CreateAccountStatus>,
@@ -31,63 +35,6 @@ fn organizations_account_create_poll_state(
 }
 
 impl AwsProvider {
-    /// Extract attributes from an Organizations Account object
-    pub(crate) fn extract_organizations_account_attributes(
-        account: &aws_sdk_organizations::types::Account,
-        attributes: &mut HashMap<String, Value>,
-    ) -> Option<String> {
-        let mut identifier = None;
-
-        if let Some(id) = account.id() {
-            let id_string = id.to_string();
-            identifier = Some(id_string.clone());
-            attributes.insert(
-                "id".to_string(),
-                Value::Concrete(ConcreteValue::String(id_string.into())),
-            );
-        }
-        if let Some(arn) = account.arn() {
-            attributes.insert(
-                "arn".to_string(),
-                Value::Concrete(ConcreteValue::String(arn.to_string().into())),
-            );
-        }
-        if let Some(name) = account.name() {
-            attributes.insert(
-                "name".to_string(),
-                Value::Concrete(ConcreteValue::String(name.to_string().into())),
-            );
-        }
-        if let Some(email) = account.email() {
-            attributes.insert(
-                "email".to_string(),
-                Value::Concrete(ConcreteValue::String(email.to_string().into())),
-            );
-        }
-        if let Some(status) = account.status() {
-            attributes.insert(
-                "status".to_string(),
-                Value::Concrete(ConcreteValue::String(status.as_str().to_string().into())),
-            );
-        }
-        if let Some(joined_method) = account.joined_method() {
-            attributes.insert(
-                "joined_method".to_string(),
-                Value::Concrete(ConcreteValue::String(
-                    joined_method.as_str().to_string().into(),
-                )),
-            );
-        }
-        if let Some(joined_timestamp) = account.joined_timestamp() {
-            attributes.insert(
-                "joined_timestamp".to_string(),
-                Value::Concrete(ConcreteValue::String(joined_timestamp.to_string().into())),
-            );
-        }
-
-        identifier
-    }
-
     /// Read an Organizations account
     pub(crate) async fn read_organizations_account(
         &self,
@@ -108,59 +55,37 @@ impl AwsProvider {
         match account_result {
             Ok(response) => {
                 if let Some(account) = response.account() {
-                    let mut attributes = HashMap::new();
-                    let _account_id =
-                        Self::extract_organizations_account_attributes(account, &mut attributes);
+                    let fields = Self::extract_organizations_account_attributes(account);
 
-                    // ListParents for parent_id
-                    if let Ok(parents_response) = self
-                        .organizations_client
-                        .list_parents()
-                        .child_id(identifier)
-                        .send()
-                        .await
-                        && let Some(parent) = parents_response.parents().first()
-                        && let Some(parent_id) = parent.id()
-                    {
-                        attributes.insert(
-                            "parent_id".to_string(),
-                            Value::Concrete(ConcreteValue::String(parent_id.to_string().into())),
-                        );
-                    }
-
-                    // ListTagsForResource for tags
-                    if let Ok(tags_response) = self
+                    let tags_response = self
                         .organizations_client
                         .list_tags_for_resource()
                         .resource_id(identifier)
                         .send()
                         .await
-                    {
-                        let tags = tags_response.tags();
-                        if !tags.is_empty() {
-                            let mut tag_map = IndexMap::new();
-                            for tag in tags {
-                                tag_map.insert(
-                                    tag.key().to_string(),
-                                    Value::Concrete(ConcreteValue::String(
-                                        tag.value().to_string().into(),
-                                    )),
-                                );
-                            }
-                            if !tag_map.is_empty() {
-                                attributes.insert(
-                                    "tags".to_string(),
-                                    Value::Concrete(ConcreteValue::Map(tag_map)),
-                                );
-                            }
-                        }
+                        .map_err(|error| {
+                            api_error_with_meta("Failed to list account tags", error)
+                                .for_resource(id.clone())
+                        })?;
+                    let mut tag_map = IndexMap::new();
+                    for tag in tags_response.tags() {
+                        tag_map.insert(
+                            tag.key().to_string(),
+                            Value::Concrete(ConcreteValue::String(tag.value().to_string().into())),
+                        );
                     }
 
-                    Ok(crate::helpers::found_read(
+                    let joined_timestamp = account.joined_timestamp().map(|timestamp| {
+                        Value::Concrete(ConcreteValue::String(timestamp.to_string().into()))
+                    });
+                    let (_, model) = fields.into_model(
                         id,
-                        applied_identifier,
-                        attributes,
-                    ))
+                        OrganizationsAccountReadModelSupplement {
+                            joined_timestamp,
+                            tags: Value::Concrete(ConcreteValue::Map(tag_map)),
+                        },
+                    )?;
+                    found_managed_read(id, applied_identifier, model)
                 } else {
                     Ok(ReadOutcome::not_found(id.clone()))
                 }
@@ -264,40 +189,6 @@ impl AwsProvider {
         resource: &Resource<impl Sized>,
         account_id: &str,
     ) -> ProviderResult<CreateCompletion> {
-        // Move to parent OU if specified
-        if let Some(Value::Concrete(ConcreteValue::String(parent_id))) =
-            resource.get_attr("parent_id")
-        {
-            // Get current parent (root)
-            let parents_response = self
-                .organizations_client
-                .list_parents()
-                .child_id(account_id)
-                .send()
-                .await
-                .map_err(|e| {
-                    api_error_with_meta("Failed to list parents for new account", e)
-                        .for_resource(resource.id.clone())
-                })?;
-
-            if let Some(current_parent) = parents_response.parents().first()
-                && let Some(source_parent_id) = current_parent.id()
-                && source_parent_id != parent_id
-            {
-                self.organizations_client
-                    .move_account()
-                    .account_id(account_id)
-                    .source_parent_id(source_parent_id)
-                    .destination_parent_id(parent_id.expose_plaintext())
-                    .send()
-                    .await
-                    .map_err(|e| {
-                        api_error_with_meta("Failed to move account to parent", e)
-                            .for_resource(resource.id.clone())
-                    })?;
-            }
-        }
-
         let identifier = crate::helpers::applied_identifier(
             &resource.id,
             "organizations.CreateAccount",
@@ -323,29 +214,48 @@ impl AwsProvider {
         to: Resource,
         _schema: &ResourceSchema,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
-        // Handle parent_id change via MoveAccount
-        let desired_parent = to.get_attr("parent_id").and_then(|v| match v {
-            Value::Concrete(ConcreteValue::String(s)) => Some(s.expose_plaintext()),
-            _ => None,
-        });
-        let current_parent = from.attributes.get("parent_id").and_then(|v| match v {
-            Value::Concrete(ConcreteValue::String(s)) => Some(s.expose_plaintext()),
-            _ => None,
-        });
-
-        if desired_parent != current_parent
-            && let (Some(dest), Some(src)) = (desired_parent, current_parent)
-        {
-            self.organizations_client
-                .move_account()
-                .account_id(identifier.as_str())
-                .source_parent_id(src)
-                .destination_parent_id(dest)
+        if from.attributes.get("account_name") != to.get_attr("account_name") {
+            let account_name = require_string_attr(&to, "account_name")?;
+            let organization = self
+                .organizations_client
+                .describe_organization()
                 .send()
                 .await
-                .map_err(|e| {
-                    api_error_with_meta("Failed to move account", e).for_resource(id.clone())
+                .map_err(|error| {
+                    api_error_with_meta(
+                        "Failed to determine the management account before renaming account",
+                        error,
+                    )
+                    .for_resource(id.clone())
                 })?;
+            let management_account_id = organization
+                .organization()
+                .and_then(|organization| organization.master_account_id())
+                .ok_or_else(|| {
+                    ProviderError::api_error(
+                        "DescribeOrganization returned no management account ID",
+                    )
+                    .for_resource(id.clone())
+                })?;
+
+            let mut request = self
+                .account_client
+                .put_account_name()
+                .account_name(account_name);
+            if identifier.as_str() != management_account_id {
+                request = request.account_id(identifier.as_str());
+            }
+            request.send().await.map_err(|error| {
+                let requires_setup = error
+                    .as_service_error()
+                    .is_some_and(|service_error| service_error.is_access_denied_exception());
+                let context = if requires_setup {
+                    ACCOUNT_RENAME_SETUP_ERROR
+                } else {
+                    "Failed to rename account"
+                };
+                api_error_with_meta(context, error).for_resource(id.clone())
+            })?;
         }
 
         // Handle tag changes

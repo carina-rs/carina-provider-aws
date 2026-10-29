@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use carina_core::provider::{AppliedIdentifier, ReadOutcome};
 use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{ConcreteValue, Resource, ResourceId, Value};
@@ -12,6 +10,8 @@ use crate::helpers::{
     retry_aws_operation,
 };
 use crate::provider::{AwsCreateAttempt, Ec2TaggedResourceKind};
+use crate::read_model::{empty_map_value, found_managed_read};
+use crate::read_models_generated::Ec2SecurityGroupReadModelSupplement;
 
 impl AwsProvider {
     /// Read an EC2 Security Group
@@ -42,22 +42,16 @@ impl AwsProvider {
             })?;
 
         if let Some(sg) = result.security_groups().first() {
-            let mut attributes = HashMap::new();
+            let fields = Self::extract_ec2_security_group_attributes(sg);
 
-            // Auto-generated attribute extraction
-            let _identifier_value =
-                Self::extract_ec2_security_group_attributes(sg, &mut attributes);
-
-            // Extract user-defined tags
-            if let Some(tags_value) = Self::ec2_tags_to_value(sg.tags()) {
-                attributes.insert("tags".to_string(), tags_value);
-            }
-
-            Ok(crate::helpers::found_read(
+            let (_, model) = fields.into_model(
                 id,
-                applied_identifier,
-                attributes,
-            ))
+                Ec2SecurityGroupReadModelSupplement {
+                    tags: Self::ec2_tags_to_value(sg.tags()).unwrap_or_else(empty_map_value),
+                },
+            )?;
+
+            found_managed_read(id, applied_identifier, model)
         } else {
             Ok(ReadOutcome::not_found(id.clone()))
         }
@@ -103,7 +97,7 @@ impl AwsProvider {
             aws_sdk_ec2::types::ResourceType::SecurityGroup,
             client_token,
         );
-        let sent = Self::sent_only(resource, &["vpc_id", "description", "group_name", "tags"]);
+        let sent = self.sent_only(resource, &["vpc_id", "description", "group_name", "tags"]);
         let result = retry_aws_operation(RetryPolicy::default(), || {
             let group_name = group_name.clone();
             let description = description.clone();

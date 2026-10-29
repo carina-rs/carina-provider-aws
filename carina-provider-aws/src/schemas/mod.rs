@@ -25,7 +25,7 @@ mod tests {
     use carina_core::differ::{Diff, diff};
     use carina_core::executor::normalized::apply_desired_normalization;
     use carina_core::provider::normalize_provider_states;
-    use carina_core::resource::{ConcreteValue, Current, ResolvedResource, Resource, State, Value};
+    use carina_core::resource::{ConcreteValue, Current, ResolvedResource, Resource, Value};
     use carina_core::schema::{
         AttributeType, RawShape, ResourceSchema, SchemaKind, SchemaRegistry, Shape,
         ShapeWalkBudget, TypeInSchema, UniqueNameSpec,
@@ -557,8 +557,10 @@ mod tests {
                 read_back_hosted_zone_id.to_string().into(),
             )),
         )]);
-        let mut current_states =
-            HashMap::from([(id.clone(), State::existing(id.clone(), current_attributes))]);
+        let mut current_states = HashMap::from([(
+            id.clone(),
+            crate::read_model::test_existing_state(id.clone(), current_attributes),
+        )]);
         normalize_provider_states(&AwsNormalizer, &mut current_states)
             .await
             .expect("state normalization should succeed");

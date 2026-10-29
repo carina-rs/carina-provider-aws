@@ -13,8 +13,7 @@ use tokio::time::sleep;
 
 use carina_aws_types::SendOutcome;
 use carina_core::provider::{
-    AppliedIdentifier, AppliedState, PatchOp, ProviderError, ProviderResult, ReadOutcome,
-    UpdatePatch,
+    AppliedIdentifier, PatchOp, ProviderError, ProviderResult, UpdatePatch,
 };
 use carina_core::resource::{ConcreteValue, EnumAttrError, Resource, ResourceId, State, Value};
 use carina_core::schema::ResourceSchema;
@@ -42,20 +41,6 @@ pub(crate) fn applied_identifier(
     })
 }
 
-/// Build the present branch of a managed read from its already validated
-/// provider identifier.
-pub(crate) fn found_read(
-    id: &ResourceId,
-    identifier: &AppliedIdentifier,
-    attributes: std::collections::HashMap<String, Value>,
-) -> ReadOutcome {
-    ReadOutcome::found(AppliedState::from_identifier(
-        id.clone(),
-        identifier.clone(),
-        attributes,
-    ))
-}
-
 /// Borrow a `Value` as `&str` if it is a concrete string, otherwise `None`.
 pub fn value_as_str(v: &Value) -> Option<&str> {
     if let Value::Concrete(ConcreteValue::String(s)) = v {
@@ -76,6 +61,40 @@ pub fn require_string_attr(
         Some(Value::Concrete(ConcreteValue::String(s))) => Ok(s.expose_plaintext().to_string()),
         _ => Err(
             ProviderError::invalid_input(format!("{} is required", attr_name))
+                .for_resource(resource.id.clone()),
+        ),
+    }
+}
+
+/// Extract an optional concrete string attribute, rejecting a present value
+/// with a different shape instead of silently dropping it from the AWS
+/// request.
+pub(crate) fn optional_string_attr<'a>(
+    resource: &'a Resource<impl Sized>,
+    attr_name: &str,
+) -> ProviderResult<Option<&'a str>> {
+    match resource.get_attr(attr_name) {
+        Some(Value::Concrete(ConcreteValue::String(value))) => Ok(Some(value.expose_plaintext())),
+        None => Ok(None),
+        Some(_) => Err(
+            ProviderError::invalid_input(format!("{attr_name} must be a string"))
+                .for_resource(resource.id.clone()),
+        ),
+    }
+}
+
+/// Extract an optional concrete integer attribute, rejecting a present value
+/// with a different shape instead of silently dropping it from the AWS
+/// request.
+pub(crate) fn optional_int_attr(
+    resource: &Resource<impl Sized>,
+    attr_name: &str,
+) -> ProviderResult<Option<i64>> {
+    match resource.get_attr(attr_name) {
+        Some(Value::Concrete(ConcreteValue::Int(value))) => Ok(Some(*value)),
+        None => Ok(None),
+        Some(_) => Err(
+            ProviderError::invalid_input(format!("{attr_name} must be an integer"))
                 .for_resource(resource.id.clone()),
         ),
     }
@@ -694,7 +713,7 @@ mod tests {
             "write_only_token".into(),
             Value::Concrete(ConcreteValue::String("saved-placeholder".into())),
         );
-        let from = State::existing(id, from_attrs);
+        let from = crate::read_model::test_existing_state(id, from_attrs);
 
         let patch = UpdatePatch {
             ops: vec![

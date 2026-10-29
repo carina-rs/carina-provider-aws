@@ -12,6 +12,8 @@ pub(crate) mod helpers;
 mod normalizer;
 mod provider;
 pub mod provider_generated;
+mod read_model;
+mod read_models_generated;
 #[cfg(test)]
 mod resend_guard;
 mod resend_safety_generated;
@@ -31,6 +33,12 @@ pub use provider::{
     AwsPollAttempt, AwsResumeAttempt, AwsResumedCreate,
 };
 pub use provider::{AwsCreateToken, AwsDeleteToken, Ec2TaggedResourceKind};
+#[doc(hidden)]
+#[cfg(all(not(target_arch = "wasm32"), debug_assertions))]
+pub use read_model::non_finite_applied_state_for_protocol_test;
+#[doc(hidden)]
+#[cfg(debug_assertions)]
+pub use read_model::test_existing_state;
 pub use sdk_config::BoundedSdkConfig;
 
 #[cfg(test)]
@@ -49,7 +57,7 @@ pub(crate) fn test_rootless_type(
 
 use carina_core::schema::{ResourceSchema, SchemaKind, SchemaRegistry};
 use resend_safety_generated::{
-    AcmClient, CloudWatchLogsClient, Ec2Client, IamClient, IdentityStoreClient,
+    AccountClient, AcmClient, CloudWatchLogsClient, Ec2Client, IamClient, IdentityStoreClient,
     OrganizationsClient, Route53Client, S3Client, SqsClient, StsClient,
 };
 
@@ -60,6 +68,7 @@ pub struct AwsProvider {
     iam_client: IamClient,
     logs_client: CloudWatchLogsClient,
     sts_client: StsClient,
+    account_client: AccountClient,
     organizations_client: OrganizationsClient,
     identitystore_client: IdentityStoreClient,
     route53_client: Route53Client,

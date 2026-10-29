@@ -30,7 +30,6 @@ pub fn organizations_account_config() -> AwsSchemaConfig {
         .with_conflicting_replacement()
         .attribute(
             AttributeSchema::required("account_name", AttributeType::string())
-                .create_only()
                 .with_description("The friendly name of the member account.")
                 .with_provider_name("AccountName")
                 .build(),
@@ -42,6 +41,7 @@ pub fn organizations_account_config() -> AwsSchemaConfig {
                 .with_provider_name("Email")
                 .build(),
         )
+        // Read contract: DescribeAccount does not return the create-time billing-access setting
         .attribute(
             AttributeSchema::optional("iam_user_access_to_billing", AttributeType::enum_(
     carina_core::schema::enum_identity("IamUserAccessToBilling", Some("aws.organizations.Account")),
@@ -51,13 +51,16 @@ pub fn organizations_account_config() -> AwsSchemaConfig {
     None,
 ))
                 .create_only()
+                .write_only()
                 .with_description("If set to ALLOW, the new account enables IAM users to access account billing information if they have the required permissions. If set to DENY, only t...")
                 .with_provider_name("IamUserAccessToBilling")
                 .build(),
         )
+        // Read contract: DescribeAccount does not return the create-time organization role name
         .attribute(
             AttributeSchema::optional("role_name", AttributeType::string())
                 .create_only()
+                .write_only()
                 .with_description("The name of an IAM role that Organizations automatically preconfigures in the new member account. This role trusts the management account, allowing us...")
                 .with_provider_name("RoleName")
                 .build(),
@@ -90,12 +93,6 @@ pub fn organizations_account_config() -> AwsSchemaConfig {
             AttributeSchema::provider_populated("joined_timestamp", AttributeType::string())
                 .with_description("The date the account became a part of the organization. (read-only)")
                 .with_provider_name("JoinedTimestamp")
-                .build(),
-        )
-        .attribute(
-            AttributeSchema::provider_populated("name", AttributeType::string())
-                .with_description("The friendly name of the account. The regex pattern that is used to validate this parameter is a string of any of the characters in the ASCII characte... (read-only)")
-                .with_provider_name("Name")
                 .build(),
         )
         .attribute(

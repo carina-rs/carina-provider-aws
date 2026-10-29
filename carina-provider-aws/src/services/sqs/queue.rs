@@ -20,6 +20,8 @@ use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
 use crate::helpers::require_string_attr;
 use crate::provider::CreateCompletion;
+use crate::read_model::found_managed_read;
+use crate::read_models_generated::SqsQueueReadModel;
 // IAM policy doc Struct↔JSON converters are borrowed via pub(crate)
 // from services/iam/role.rs until aws#286 extracts them into a shared
 // module. SQS's Policy and RedriveAllowPolicy are IAM-shaped.
@@ -262,6 +264,84 @@ fn unpack_attr(raw: &str, kind: AttrKind) -> Option<Value> {
     }
 }
 
+fn queue_attribute(
+    attributes: Option<&HashMap<QueueAttributeName, String>>,
+    key: &QueueAttributeName,
+    kind: AttrKind,
+) -> Option<Value> {
+    attributes
+        .and_then(|attributes| attributes.get(key))
+        .and_then(|raw| unpack_attr(raw, kind))
+}
+
+fn required_queue_attribute(
+    id: &ResourceId,
+    attributes: Option<&HashMap<QueueAttributeName, String>>,
+    dsl_name: &str,
+    key: &QueueAttributeName,
+    kind: AttrKind,
+) -> ProviderResult<Value> {
+    queue_attribute(attributes, key, kind).ok_or_else(|| {
+        ProviderError::api_error(format!(
+            "GetQueueAttributes(All) omitted required SQS attribute {dsl_name}"
+        ))
+        .for_resource(id.clone())
+    })
+}
+
+/// Reject cross-field combinations before they reach an AWS API that would
+/// reject or silently ignore them.
+pub(crate) fn validate_sqs_queue_inputs<S>(resource: &Resource<S>) -> ProviderResult<()> {
+    if resource.id.provider != "aws" || resource.id.resource_type != "sqs.Queue" {
+        return Ok(());
+    }
+
+    if matches!(
+        resource.get_attr("kms_data_key_reuse_period_seconds"),
+        Some(Value::Concrete(_))
+    ) && resource.get_attr("kms_master_key_id").is_none()
+    {
+        return Err(ProviderError::invalid_input(
+            "sqs.Queue attribute kms_data_key_reuse_period_seconds requires kms_master_key_id",
+        )
+        .for_resource(resource.id.clone()));
+    }
+
+    let fifo_is_definitively_standard = matches!(
+        resource.get_attr("fifo_queue"),
+        None | Some(Value::Concrete(ConcreteValue::Bool(false)))
+    );
+    if fifo_is_definitively_standard {
+        let content_dedup_enabled = matches!(
+            resource.get_attr("content_based_deduplication"),
+            Some(Value::Concrete(ConcreteValue::Bool(true)))
+        );
+        let unsupported = if content_dedup_enabled {
+            Some("content_based_deduplication")
+        } else if matches!(
+            resource.get_attr("deduplication_scope"),
+            Some(Value::Concrete(_))
+        ) {
+            Some("deduplication_scope")
+        } else if matches!(
+            resource.get_attr("fifo_throughput_limit"),
+            Some(Value::Concrete(_))
+        ) {
+            Some("fifo_throughput_limit")
+        } else {
+            None
+        };
+        if let Some(attribute) = unsupported {
+            return Err(ProviderError::invalid_input(format!(
+                "sqs.Queue attribute {attribute} requires fifo_queue = true"
+            ))
+            .for_resource(resource.id.clone()));
+        }
+    }
+
+    Ok(())
+}
+
 /// Serialise a `Value::Map { dead_letter_target_arn, max_receive_count }`
 /// to the `{"deadLetterTargetArn": "...", "maxReceiveCount": N}` JSON
 /// string SQS expects.
@@ -289,7 +369,11 @@ fn redrive_policy_to_json_string(value: &Value) -> Option<String> {
 fn json_to_redrive_policy(json: &serde_json::Value) -> Option<Value> {
     let obj = json.as_object()?;
     let arn = obj.get("deadLetterTargetArn")?.as_str()?;
-    let count = obj.get("maxReceiveCount")?.as_i64()?;
+    let count = match obj.get("maxReceiveCount")? {
+        serde_json::Value::Number(number) => number.as_i64()?,
+        serde_json::Value::String(value) => value.parse::<i64>().ok()?,
+        _ => return None,
+    };
     let mut out = IndexMap::new();
     out.insert(
         "dead_letter_target_arn".to_string(),
@@ -411,63 +495,167 @@ impl AwsProvider {
             }
         };
 
-        let mut attributes: HashMap<String, Value> = HashMap::new();
+        let name = queue_url
+            .rsplit('/')
+            .next()
+            .filter(|name| !name.is_empty())
+            .ok_or_else(|| {
+                ProviderError::internal(format!("invalid SQS queue URL identifier: {queue_url}"))
+                    .for_resource(id.clone())
+            })?;
+        let attributes = result.attributes();
 
-        // Re-derive queue_name from the URL: SQS URLs end with `/{queue_name}`.
-        if let Some(name) = queue_url.rsplit('/').next() {
-            attributes.insert(
-                "queue_name".to_string(),
-                Value::Concrete(ConcreteValue::String(name.to_string().into())),
-            );
-        }
-
-        if let Some(map) = result.attributes() {
-            for (attr_name, sdk_key, kind, _) in QUEUE_ATTRS {
-                if let Some(raw) = map.get(sdk_key)
-                    && let Some(value) = unpack_attr(raw, *kind)
-                {
-                    attributes.insert((*attr_name).to_string(), value);
-                }
-            }
-        }
-
-        // Tags come from a separate API.
-        match self
+        // Tags come from a separate API. Empty tags are canonical state; a
+        // failed side read must not erase configured tags.
+        let tags_output = self
             .sqs_client
             .list_queue_tags()
             .queue_url(queue_url)
             .send()
             .await
-        {
-            Ok(tags_output) => {
-                if let Some(tags) = tags_output.tags()
-                    && !tags.is_empty()
-                {
-                    let mut tag_map = IndexMap::new();
-                    for (key, val) in tags {
-                        tag_map.insert(
-                            key.to_string(),
-                            Value::Concrete(ConcreteValue::String(val.to_string().into())),
-                        );
-                    }
-                    attributes.insert(
-                        "tags".to_string(),
-                        Value::Concrete(ConcreteValue::Map(tag_map)),
-                    );
-                }
-            }
-            Err(_) => {
-                // List-tags may fail with throttling or transient errors;
-                // skip rather than fail the whole read. Same pattern as
-                // logs.LogGroup.
+            .map_err(|error| {
+                api_error_with_meta(
+                    "ListQueueTags failed; ensure sqs:ListQueueTags is allowed",
+                    error,
+                )
+                .for_resource(id.clone())
+            })?;
+        let mut tags = IndexMap::new();
+        if let Some(returned_tags) = tags_output.tags() {
+            for (key, value) in returned_tags {
+                tags.insert(
+                    key.to_string(),
+                    Value::Concrete(ConcreteValue::String(value.to_string().into())),
+                );
             }
         }
 
-        Ok(crate::helpers::found_read(
-            id,
-            applied_identifier,
-            attributes,
-        ))
+        // Measured with `aws sqs get-queue-attributes --queue-url <standard-queue-url>
+        // --attribute-names All --region ap-northeast-1` on 2026-10-29:
+        // standard queues omit both
+        // FIFO booleans, so their canonical read value is false. The same
+        // measurement omits KmsDataKeyReusePeriodSeconds when no KMS key is set.
+        let model = SqsQueueReadModel {
+            queue_name: Value::Concrete(ConcreteValue::String(name.to_string().into())),
+            policy: queue_attribute(attributes, &QueueAttributeName::Policy, AttrKind::IamPolicy),
+            visibility_timeout: required_queue_attribute(
+                id,
+                attributes,
+                "visibility_timeout",
+                &QueueAttributeName::VisibilityTimeout,
+                AttrKind::Int,
+            )?,
+            message_retention_period: required_queue_attribute(
+                id,
+                attributes,
+                "message_retention_period",
+                &QueueAttributeName::MessageRetentionPeriod,
+                AttrKind::Int,
+            )?,
+            delay_seconds: required_queue_attribute(
+                id,
+                attributes,
+                "delay_seconds",
+                &QueueAttributeName::DelaySeconds,
+                AttrKind::Int,
+            )?,
+            maximum_message_size: required_queue_attribute(
+                id,
+                attributes,
+                "maximum_message_size",
+                &QueueAttributeName::MaximumMessageSize,
+                AttrKind::Int,
+            )?,
+            receive_message_wait_time_seconds: required_queue_attribute(
+                id,
+                attributes,
+                "receive_message_wait_time_seconds",
+                &QueueAttributeName::ReceiveMessageWaitTimeSeconds,
+                AttrKind::Int,
+            )?,
+            redrive_policy: queue_attribute(
+                attributes,
+                &QueueAttributeName::RedrivePolicy,
+                AttrKind::RedrivePolicyStruct,
+            ),
+            redrive_allow_policy: queue_attribute(
+                attributes,
+                &QueueAttributeName::RedriveAllowPolicy,
+                AttrKind::RedriveAllowPolicyStruct,
+            ),
+            fifo_queue: queue_attribute(attributes, &QueueAttributeName::FifoQueue, AttrKind::Bool)
+                .unwrap_or_else(|| Value::Concrete(ConcreteValue::Bool(false))),
+            content_based_deduplication: queue_attribute(
+                attributes,
+                &QueueAttributeName::ContentBasedDeduplication,
+                AttrKind::Bool,
+            )
+            .unwrap_or_else(|| Value::Concrete(ConcreteValue::Bool(false))),
+            deduplication_scope: queue_attribute(
+                attributes,
+                &QueueAttributeName::DeduplicationScope,
+                AttrKind::String,
+            ),
+            fifo_throughput_limit: queue_attribute(
+                attributes,
+                &QueueAttributeName::FifoThroughputLimit,
+                AttrKind::String,
+            ),
+            kms_master_key_id: queue_attribute(
+                attributes,
+                &QueueAttributeName::KmsMasterKeyId,
+                AttrKind::String,
+            ),
+            kms_data_key_reuse_period_seconds: queue_attribute(
+                attributes,
+                &QueueAttributeName::KmsDataKeyReusePeriodSeconds,
+                AttrKind::Int,
+            ),
+            sqs_managed_sse_enabled: queue_attribute(
+                attributes,
+                &QueueAttributeName::SqsManagedSseEnabled,
+                AttrKind::Bool,
+            ),
+            queue_arn: required_queue_attribute(
+                id,
+                attributes,
+                "queue_arn",
+                &QueueAttributeName::QueueArn,
+                AttrKind::String,
+            )?,
+            approximate_number_of_messages: queue_attribute(
+                attributes,
+                &QueueAttributeName::ApproximateNumberOfMessages,
+                AttrKind::Int,
+            ),
+            approximate_number_of_messages_delayed: queue_attribute(
+                attributes,
+                &QueueAttributeName::ApproximateNumberOfMessagesDelayed,
+                AttrKind::Int,
+            ),
+            approximate_number_of_messages_not_visible: queue_attribute(
+                attributes,
+                &QueueAttributeName::ApproximateNumberOfMessagesNotVisible,
+                AttrKind::Int,
+            ),
+            created_timestamp: required_queue_attribute(
+                id,
+                attributes,
+                "created_timestamp",
+                &QueueAttributeName::CreatedTimestamp,
+                AttrKind::Int,
+            )?,
+            last_modified_timestamp: required_queue_attribute(
+                id,
+                attributes,
+                "last_modified_timestamp",
+                &QueueAttributeName::LastModifiedTimestamp,
+                AttrKind::Int,
+            )?,
+            tags: Value::Concrete(ConcreteValue::Map(tags)),
+        };
+
+        found_managed_read(id, applied_identifier, model)
     }
 
     /// Create an SQS Queue and return its post-create state.
@@ -476,12 +664,32 @@ impl AwsProvider {
         resource: &Resource<impl Sized>,
         _schema: &ResourceSchema,
     ) -> ProviderResult<CreateCompletion> {
+        validate_sqs_queue_inputs(resource)?;
         let queue_name = require_string_attr(resource, "queue_name")?;
+        let fifo = matches!(
+            resource.get_attr("fifo_queue"),
+            Some(Value::Concrete(ConcreteValue::Bool(true)))
+        );
 
         // Pack every writable attribute the user actually set.
         let mut attr_map: HashMap<QueueAttributeName, String> = HashMap::new();
         for (attr_name, sdk_key, kind, writable) in QUEUE_ATTRS {
             if !writable {
+                continue;
+            }
+            // Measured with `aws sqs create-queue --queue-name <name>
+            // --attributes FifoQueue=false --region ap-northeast-1` and the
+            // same command with `ContentBasedDeduplication=false` on
+            // 2026-10-29: standard queues reject both attribute names.
+            if !fifo
+                && matches!(
+                    sdk_key,
+                    QueueAttributeName::FifoQueue
+                        | QueueAttributeName::ContentBasedDeduplication
+                        | QueueAttributeName::DeduplicationScope
+                        | QueueAttributeName::FifoThroughputLimit
+                )
+            {
                 continue;
             }
             if let Some(value) = resource.get_attr(attr_name)
@@ -530,6 +738,7 @@ impl AwsProvider {
         to: Resource,
         _schema: &ResourceSchema,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
+        validate_sqs_queue_inputs(&to)?;
         // Build a partial map of attributes whose value changed.
         // Create-only attributes (FifoQueue / FifoThroughputLimit /
         // DeduplicationScope) are dropped — schema marks them
@@ -675,6 +884,63 @@ fn resource_tags_map(resource: &Resource<impl Sized>) -> Option<HashMap<String, 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use carina_core::resource::{DeferredValue, UnknownReason};
+
+    fn queue_resource() -> Resource {
+        Resource::with_provider("aws", "sqs.Queue", "test", None)
+    }
+
+    fn unknown() -> Value {
+        Value::Deferred(DeferredValue::Unknown(UnknownReason::ForValue))
+    }
+
+    #[test]
+    fn unresolved_fifo_queue_defers_fifo_only_validation() {
+        let mut resource = queue_resource();
+        resource.set_attr("fifo_queue", unknown());
+        resource.set_attr(
+            "deduplication_scope",
+            Value::Concrete(ConcreteValue::String("messageGroup".into())),
+        );
+
+        validate_sqs_queue_inputs(&resource)
+            .expect("an unresolved fifo_queue value must not be treated as false");
+    }
+
+    #[test]
+    fn unresolved_fifo_only_value_is_not_rejected_for_a_standard_queue() {
+        let mut resource = queue_resource();
+        resource.set_attr("fifo_queue", Value::Concrete(ConcreteValue::Bool(false)));
+        resource.set_attr(
+            "deduplication_scope",
+            Value::resource_ref("upstream", "deduplication_scope", vec![]),
+        );
+
+        validate_sqs_queue_inputs(&resource)
+            .expect("a deferred FIFO-only value must wait for resolution");
+    }
+
+    #[test]
+    fn unresolved_kms_key_is_not_treated_as_absent() {
+        let mut resource = queue_resource();
+        resource.set_attr(
+            "kms_data_key_reuse_period_seconds",
+            Value::Concrete(ConcreteValue::Int(300)),
+        );
+        resource.set_attr("kms_master_key_id", unknown());
+
+        validate_sqs_queue_inputs(&resource)
+            .expect("an unresolved KMS key is present but not yet decidable");
+    }
+
+    #[test]
+    fn unresolved_kms_reuse_period_defers_missing_key_validation() {
+        let mut resource = queue_resource();
+        resource.set_attr("kms_data_key_reuse_period_seconds", unknown());
+
+        validate_sqs_queue_inputs(&resource)
+            .expect("an unresolved reuse period must wait for resolution");
+    }
 
     #[test]
     #[should_panic(
