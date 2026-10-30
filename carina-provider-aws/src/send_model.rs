@@ -1,7 +1,7 @@
 //! Typed boundary for desired managed-resource values sent to AWS.
 
 use carina_core::provider::{ProviderError, ProviderResult};
-use carina_core::resource::{ConcreteValue, Resource, Value};
+use carina_core::resource::{ConcreteValue, Resource, ResourceId, Value};
 use carina_core::schema::ResourceSchema;
 use indexmap::IndexMap;
 
@@ -64,8 +64,11 @@ impl<T> Drop for Sent<T> {
 }
 
 fn invalid_shape(resource: &Resource<impl Sized>, name: &str, expected: &str) -> ProviderError {
-    ProviderError::invalid_input(format!("{name} must be {expected}"))
-        .for_resource(resource.id.clone())
+    invalid_shape_for_id(&resource.id, name, expected)
+}
+
+fn invalid_shape_for_id(id: &ResourceId, name: &str, expected: &str) -> ProviderError {
+    ProviderError::invalid_input(format!("{name} must be {expected}")).for_resource(id.clone())
 }
 
 fn missing(resource: &Resource<impl Sized>, name: &str) -> ProviderError {
@@ -96,7 +99,15 @@ pub(crate) fn optional_string_list(
     resource: &Resource<impl Sized>,
     name: &str,
 ) -> ProviderResult<Option<StringList>> {
-    match resource.get_attr(name) {
+    optional_string_list_value(&resource.id, name, resource.get_attr(name))
+}
+
+pub(crate) fn optional_string_list_value(
+    id: &ResourceId,
+    name: &str,
+    value: Option<&Value>,
+) -> ProviderResult<Option<StringList>> {
+    match value {
         Some(Value::Concrete(ConcreteValue::StringList(values))) => Ok(Some(
             values
                 .iter()
@@ -109,12 +120,12 @@ pub(crate) fn optional_string_list(
                 Value::Concrete(ConcreteValue::String(value)) => {
                     Ok(value.expose_plaintext().to_string())
                 }
-                _ => Err(invalid_shape(resource, name, "a list of strings")),
+                _ => Err(invalid_shape_for_id(id, name, "a list of strings")),
             })
             .collect::<ProviderResult<Vec<_>>>()
             .map(Some),
         None => Ok(None),
-        Some(_) => Err(invalid_shape(resource, name, "a list of strings")),
+        Some(_) => Err(invalid_shape_for_id(id, name, "a list of strings")),
     }
 }
 

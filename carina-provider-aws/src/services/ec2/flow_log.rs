@@ -138,35 +138,11 @@ fn build_tag_field_specifications(
             )
             .map_err(|error| enum_attr_error(id, error))?
             .map(|value| aws_sdk_ec2::types::TaggableResourceType::from(value.api_value()));
-            let tag_keys = match fields.get("tag_keys") {
-                Some(Value::Concrete(ConcreteValue::StringList(values))) => Some(
-                    values
-                        .iter()
-                        .map(|value| value.expose_plaintext().to_string())
-                        .collect(),
-                ),
-                Some(Value::Concrete(ConcreteValue::List(values))) => Some(
-                    values
-                        .iter()
-                        .map(|value| match value {
-                            Value::Concrete(ConcreteValue::String(value)) => {
-                                Ok(value.expose_plaintext().to_string())
-                            }
-                            _ => Err(ProviderError::invalid_input(
-                                "tag_field_specifications.tag_keys must contain strings",
-                            )
-                            .for_resource(id.clone())),
-                        })
-                        .collect::<ProviderResult<Vec<_>>>()?,
-                ),
-                None => None,
-                Some(_) => {
-                    return Err(ProviderError::invalid_input(
-                        "tag_field_specifications.tag_keys must be a list of strings",
-                    )
-                    .for_resource(id.clone()));
-                }
-            };
+            let tag_keys = crate::send_model::optional_string_list_value(
+                id,
+                "tag_field_specifications.tag_keys",
+                fields.get("tag_keys"),
+            )?;
 
             Ok(aws_sdk_ec2::types::TagFieldSpecificationRequest::builder()
                 .set_resource_type(resource_type)

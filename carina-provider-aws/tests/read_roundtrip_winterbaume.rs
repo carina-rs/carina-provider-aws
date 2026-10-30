@@ -12,8 +12,8 @@ use std::sync::{Arc, Mutex};
 use carina_core::differ::{Diff, Orphans, PlanPriorStates, create_plan, diff};
 use carina_core::effect::Effect;
 use carina_core::provider::{
-    AppliedIdentifier, CreateRequest, NoopNormalizer, Provider, ProviderFactory,
-    ProviderNormalizer, RawSavedAttrs, ReadRequest, UpdateRequest,
+    AppliedIdentifier, CreateRequest, NestedWriteOnlyRecord, NoopNormalizer, PersistedAttributes,
+    Provider, ProviderFactory, ProviderNormalizer, RawSavedAttrs, ReadRequest, UpdateRequest,
 };
 use carina_core::resource::{
     ConcreteValue, Current, ResolvedResource, Resource, State, Value, into_plan_input_current_map,
@@ -209,6 +209,51 @@ fn assert_no_diff(desired: Resource, current: State) {
     assert!(matches!(result, Diff::NoChange(_)), "{result:?}");
 }
 
+fn assert_no_diff_with_nested_write_only(
+    desired: Resource,
+    current: State,
+    sent_attributes: &[&str],
+) {
+    let registry = schema_registry();
+    let schema = registry
+        .get(
+            "aws",
+            desired.id.resource_type.as_str(),
+            SchemaKind::Resource,
+        )
+        .expect("managed resource schema");
+    let mut nested_write_only = NestedWriteOnlyRecord::new();
+    nested_write_only
+        .record_sent(
+            schema.schema().as_schema(),
+            sent_attributes.iter().copied(),
+            &desired.attributes,
+            None,
+        )
+        .expect("accepted nested write-only values should be persistable");
+    let persisted =
+        PersistedAttributes::from_typed_persisted_wire_values(current.attributes.clone())
+            .expect("scripted provider state should be persistable");
+    let saved = RawSavedAttrs::from_persisted(
+        HashMap::from([(desired.id.clone(), persisted)]),
+        HashMap::from([(desired.id.clone(), nested_write_only)]),
+    )
+    .lift(&registry);
+    let explicit = carina_core::explicit::build_from_resource_for_stored_values(
+        &desired,
+        &current.attributes,
+        Some(schema.schema().as_schema()),
+    );
+    let result = diff(
+        &ResolvedResource::new(desired),
+        &current,
+        &saved,
+        Some(&explicit),
+        Some(schema.schema().as_schema()),
+    );
+    assert!(matches!(result, Diff::NoChange(_)), "{result:?}");
+}
+
 async fn create_request_for_test(resource: Resource) -> CreateRequest {
     let bindings = carina_core::binding_index::ResolvedBindings::default();
     let module_gate = carina_core::executor::ModuleConstraintGate::from_live_compositions(&[]);
@@ -363,10 +408,19 @@ impl MockService for AcmService {
         request: MockRequest,
     ) -> Pin<Box<dyn Future<Output = MockResponse> + Send + '_>> {
         let response = match request_target(&request) {
+            "CertificateManager.RequestCertificate" => {
+                let body = str::from_utf8(&request.body)
+                    .expect("RequestCertificate body must be UTF-8 JSON");
+                assert!(
+                    body.contains(r#""ValidationMethod":"DNS""#),
+                    "nested options validation method must reach RequestCertificate: {body}"
+                );
+                MockResponse::json(200, format!(r#"{{"CertificateArn":"{CERTIFICATE_ARN}"}}"#))
+            }
             "CertificateManager.DescribeCertificate" => MockResponse::json(
                 200,
                 format!(
-                    r#"{{"Certificate":{{"CertificateArn":"{CERTIFICATE_ARN}","DomainName":"example.com","SubjectAlternativeNames":["www.example.com","example.com"],"Status":"ISSUED","Type":"AMAZON_ISSUED","KeyAlgorithm":"POST_QUANTUM_2048","Options":{{"ValidationMethod":"DNS"}}}}}}"#
+                    r#"{{"Certificate":{{"CertificateArn":"{CERTIFICATE_ARN}","DomainName":"example.com","SubjectAlternativeNames":["www.example.com","example.com"],"Status":"ISSUED","Type":"AMAZON_ISSUED","KeyAlgorithm":"POST_QUANTUM_2048","Options":{{"CertificateTransparencyLoggingPreference":"ENABLED","Export":"DISABLED"}}}}}}"#
                 ),
             ),
             "CertificateManager.ListTagsForCertificate" => {
@@ -1213,7 +1267,7 @@ async fn unrelated_log_group_update_preserves_omitted_deletion_protection() {
 }
 
 #[tokio::test]
-async fn certificate_sans_unknown_enum_and_options_validation_method_round_trip() {
+async fn certificate_options_validation_method_create_read_diff_round_trip() {
     let provider = provider_from_service(AcmService).await;
     let mut desired = Resource::with_provider("aws", "acm.Certificate", "roundtrip", None);
     desired.set_attr("domain_name", string("example.com"));
@@ -1227,15 +1281,7 @@ async fn certificate_sans_unknown_enum_and_options_validation_method_round_trip(
     );
     desired.set_attr("tags", empty_map());
 
-    let current = provider
-        .read(
-            &desired.id,
-            &applied_identifier(CERTIFICATE_ARN),
-            ReadRequest,
-        )
-        .await
-        .expect("read ACM certificate")
-        .into_state();
+    let current = create_round_trip_state(&provider, &desired).await;
 
     assert_eq!(
         current.attributes.get("subject_alternative_names"),
@@ -1250,9 +1296,14 @@ async fn certificate_sans_unknown_enum_and_options_validation_method_round_trip(
     else {
         panic!("expected ACM options read state");
     };
-    assert_api_text(options.get("validation_method"), "DNS");
+    assert_api_text(
+        options.get("certificate_transparency_logging_preference"),
+        "ENABLED",
+    );
+    assert_api_text(options.get("export"), "DISABLED");
+    assert!(!options.contains_key("validation_method"));
     assert_eq!(current.attributes.get("tags"), Some(&empty_map()));
-    assert_no_diff(desired, current);
+    assert_no_diff_with_nested_write_only(desired, current, &["options"]);
 }
 
 #[tokio::test(start_paused = true)]

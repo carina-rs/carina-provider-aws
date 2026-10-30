@@ -88,7 +88,7 @@ pub fn acm_certificate_config() -> AwsSchemaConfig {
     vec![("DNS".to_string(), "dns".to_string()), ("EMAIL".to_string(), "email".to_string()), ("HTTP".to_string(), "http".to_string())],
     None,
     None,
-)).with_description("The domain validation method for the certificate. To migrate from email to DNS validation, specify DNS.").with_provider_name("ValidationMethod").build()
+)).write_only().with_description("The domain validation method for the certificate. To migrate from email to DNS validation, specify DNS.").with_provider_name("ValidationMethod").build()
                     ],
                 ))
                 .create_only()

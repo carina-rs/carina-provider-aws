@@ -874,6 +874,7 @@ struct CollectedResourceAttributes {
 fn collect_resource_attributes_unvalidated(
     res: &ResourceDef,
     model: &SmithyModel,
+    read_dispositions: &[resource_defs::ReadDisposition],
 ) -> Result<CollectedResourceAttributes> {
     let ns = res.service_namespace;
     let namespace = format!("aws.{}", res.name);
@@ -921,6 +922,19 @@ fn collect_resource_attributes_unvalidated(
         .deferred_populate_struct_field_overrides
         .iter()
         .copied()
+        .collect();
+
+    // Build nested write-only StructField set from the explicit read
+    // contract. The containing attribute remains readable; only the named
+    // user-input member is retained through core's write-only provenance.
+    let nested_write_only_struct_fields: HashSet<(&str, &str)> = read_dispositions
+        .iter()
+        .filter_map(|disposition| match disposition {
+            resource_defs::ReadDisposition::NestedWriteOnly { field, member, .. } => {
+                Some((*field, *member))
+            }
+            _ => None,
+        })
         .collect();
 
     // Build per-(parent_struct, member) type override map (aws#302).
@@ -1201,6 +1215,7 @@ fn collect_resource_attributes_unvalidated(
                 all_ranged_ints: &mut all_ranged_ints,
                 current_root_attr: Some(name.as_str()),
                 deferred_populate_struct_fields: &deferred_populate_struct_fields,
+                nested_write_only_struct_fields: &nested_write_only_struct_fields,
                 struct_field_type_overrides: &struct_field_type_overrides,
             },
             &member_ref.target,
@@ -1308,6 +1323,7 @@ fn collect_resource_attributes_unvalidated(
                 all_ranged_ints: &mut all_ranged_ints,
                 current_root_attr: Some(name.as_str()),
                 deferred_populate_struct_fields: &deferred_populate_struct_fields,
+                nested_write_only_struct_fields: &nested_write_only_struct_fields,
                 struct_field_type_overrides: &struct_field_type_overrides,
             },
             &member_ref.target,
@@ -1369,8 +1385,8 @@ fn collect_resource_attributes(
     res: &ResourceDef,
     model: &SmithyModel,
 ) -> Result<CollectedResourceAttributes> {
-    let mut collected = collect_resource_attributes_unvalidated(res, model)?;
     let dispositions = res.read_dispositions();
+    let mut collected = collect_resource_attributes_unvalidated(res, model, &dispositions)?;
     apply_read_contract(res, model, &mut collected.attrs, &dispositions)?;
     collected.all_enums.retain(|provider_name, _| {
         collected
@@ -1387,7 +1403,8 @@ fn validate_send_contract(
     model: &SmithyModel,
     dispositions: &[resource_defs::SendDisposition],
 ) -> Result<()> {
-    let mut collected = collect_resource_attributes_unvalidated(res, model)?;
+    let read_dispositions = res.read_dispositions();
+    let mut collected = collect_resource_attributes_unvalidated(res, model, &read_dispositions)?;
     apply_send_contract(res, &mut collected.attrs, dispositions).map(|_| ())
 }
 
@@ -1489,7 +1506,7 @@ fn validate_read_contract(
     model: &SmithyModel,
     dispositions: &[resource_defs::ReadDisposition],
 ) -> Result<()> {
-    let mut collected = collect_resource_attributes_unvalidated(res, model)?;
+    let mut collected = collect_resource_attributes_unvalidated(res, model, dispositions)?;
     apply_read_contract(res, model, &mut collected.attrs, dispositions)
 }
 
@@ -1541,15 +1558,30 @@ fn apply_read_contract(
     use resource_defs::ReadDisposition;
 
     let mut seen = HashSet::new();
+    let mut seen_nested = HashSet::new();
     for disposition in dispositions {
         let field = disposition.field();
         let normalized = field.to_snake_case();
-        if !seen.insert(normalized.clone()) {
-            anyhow::bail!(
-                "{} has duplicate/conflicting read dispositions for {}",
-                res.name,
-                field
-            );
+        match disposition {
+            ReadDisposition::NestedWriteOnly { member, .. } => {
+                if !seen_nested.insert((normalized.clone(), member.to_snake_case())) {
+                    anyhow::bail!(
+                        "{} has duplicate/conflicting nested read dispositions for {}.{}",
+                        res.name,
+                        field,
+                        member
+                    );
+                }
+            }
+            _ => {
+                if !seen.insert(normalized.clone()) {
+                    anyhow::bail!(
+                        "{} has duplicate/conflicting read dispositions for {}",
+                        res.name,
+                        field
+                    );
+                }
+            }
         }
 
         let Some(attr) = attrs
@@ -1584,6 +1616,74 @@ fn apply_read_contract(
                 }
                 attr.is_write_only = true;
                 attr.read_reason = Some((*reason).to_string());
+            }
+            ReadDisposition::NestedWriteOnly { member, reason, .. } => {
+                if reason.trim().is_empty() {
+                    anyhow::bail!(
+                        "{} nested write-only field {}.{} requires a non-empty reason",
+                        res.name,
+                        field,
+                        member
+                    );
+                }
+                if attr.is_read_only || !attr.is_create_only {
+                    anyhow::bail!(
+                        "{} nested write-only field {}.{} must belong to a writable, create-only attribute",
+                        res.name,
+                        field,
+                        member
+                    );
+                }
+
+                let writable_structure = if let Some(schema_structure) = res.schema_structure {
+                    model
+                        .get_structure(&format!("{}#{schema_structure}", res.service_namespace))
+                        .with_context(|| {
+                            format!(
+                                "Cannot find schema structure {}#{schema_structure}",
+                                res.service_namespace
+                            )
+                        })?
+                } else {
+                    model
+                        .operation_input(&format!("{}#{}", res.service_namespace, res.create_op))
+                        .with_context(|| {
+                            format!(
+                                "Cannot find create input {}#{}",
+                                res.service_namespace, res.create_op
+                            )
+                        })?
+                };
+                let parent = writable_structure
+                    .members
+                    .iter()
+                    .find(|(name, _)| name.to_snake_case() == normalized)
+                    .map(|(_, member)| member)
+                    .with_context(|| {
+                        format!(
+                            "{} nested write-only field {}.{} has no writable parent member",
+                            res.name, field, member
+                        )
+                    })?;
+                let nested_structure = model.get_structure(&parent.target).with_context(|| {
+                    format!(
+                        "{} nested write-only parent {} must target a structure",
+                        res.name, field
+                    )
+                })?;
+                if !nested_structure
+                    .members
+                    .keys()
+                    .any(|name| name.to_snake_case() == member.to_snake_case())
+                {
+                    anyhow::bail!(
+                        "{} nested write-only field {}.{} does not exist in {}",
+                        res.name,
+                        field,
+                        member,
+                        parent.target
+                    );
+                }
             }
             ReadDisposition::OmitSchema { reason, .. } => {
                 if reason.trim().is_empty() {
@@ -1964,6 +2064,11 @@ struct TypeResolutionContext<'a> {
     /// `generate_struct_type` checks `(current_root_attr, member)`
     /// against this set when emitting each field. carina#3034.
     deferred_populate_struct_fields: &'a HashSet<(&'a str, &'a str)>,
+    /// `(attr_pascal_name, member_pascal_name)` pairs whose user-input
+    /// StructField is accepted by AWS but absent from every read response.
+    /// The generated `.write_only()` marker lets core preserve and compare
+    /// the accepted leaf without projecting it from provider state.
+    nested_write_only_struct_fields: &'a HashSet<(&'a str, &'a str)>,
     /// `(parent_struct, member) -> type_code` overrides for struct
     /// fields, keyed by the immediate parent struct shape name (not the
     /// top-level attribute). Lets a member like `HostedZoneId` resolve
@@ -2188,6 +2293,13 @@ fn generate_struct_type(
                 .contains(&(root_attr, field_name.as_str()))
         {
             field_code.push_str(".deferred_populate()");
+        }
+        if let Some(root_attr) = ctx.current_root_attr
+            && ctx
+                .nested_write_only_struct_fields
+                .contains(&(root_attr, field_name.as_str()))
+        {
+            field_code.push_str(".write_only()");
         }
         if let Some(desc) = SmithyModel::documentation(&member_ref.traits) {
             let escaped = escape_description(desc);
@@ -4004,8 +4116,10 @@ fn generate_send_models_code(
                 res.service_namespace, res.name
             )
         })?;
-        let mut collected = collect_resource_attributes_unvalidated(res, model)?;
-        apply_read_contract(res, model, &mut collected.attrs, &res.read_dispositions())?;
+        let read_dispositions = res.read_dispositions();
+        let mut collected =
+            collect_resource_attributes_unvalidated(res, model, &read_dispositions)?;
+        apply_read_contract(res, model, &mut collected.attrs, &read_dispositions)?;
         apply_send_contract(res, &mut collected.attrs, dispositions)?;
 
         let mut create_fields = collected
@@ -6984,8 +7098,10 @@ mod tests {
                 reason: "tags are resolved by the fixture's external tag owner",
             },
         ];
+        let read_dispositions = resource.read_dispositions();
         let mut collected =
-            collect_resource_attributes_unvalidated(&resource, &model).expect("fixture attributes");
+            collect_resource_attributes_unvalidated(&resource, &model, &read_dispositions)
+                .expect("fixture attributes");
         let applied = apply_send_contract(&resource, &mut collected.attrs, &dispositions)
             .expect("classified synthetic tags");
         assert_eq!(
