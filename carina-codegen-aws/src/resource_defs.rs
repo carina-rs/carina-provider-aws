@@ -693,9 +693,12 @@ impl ResourceDef {
                 ReadDisposition::read("SourceSecurityGroupOwnerId", Optional),
                 ReadDisposition::read("DestinationSecurityGroupId", Optional),
             ],
-            // Acceptance-observed in ap-northeast-1 on 2026-10-30: a newly
-            // created, valid detached internet gateway has an empty
-            // attachment set, so there is no VpcId to project until attach.
+            // Observed by running acceptance fixture
+            // `acceptance-tests/ec2_vpc_gateway_attachment/basic.crn` with
+            // `run-tests.sh full` in account carina-test-005, ap-northeast-1,
+            // on 2026-10-30 (direction checked: detached create -> post-create
+            // read). The post-create DescribeInternetGateways read returned an
+            // empty Attachments list, so there is no VpcId.
             "ec2.InternetGateway" => vec![ReadDisposition::read("VpcId", Optional)],
             "ec2.Route" => vec![ReadDisposition::read("RouteTableId", Required)],
             "ec2.NatGateway" => vec![

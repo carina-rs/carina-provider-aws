@@ -191,7 +191,12 @@ pub(crate) fn validate_nat_gateway_inputs<S>(
     };
     let subnet = inputs.get("subnet_id");
     match mode {
-        "regional" if matches!(subnet, CrossFieldValue::Known(_)) => {
+        "regional"
+            if matches!(
+                subnet,
+                CrossFieldValue::Known(v) if concrete_string(v).is_some()
+            ) =>
+        {
             Err(ProviderError::invalid_input(
                 "ec2.NatGateway subnet_id must be omitted when availability_mode = regional",
             )
