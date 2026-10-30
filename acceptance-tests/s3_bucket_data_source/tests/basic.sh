@@ -11,9 +11,6 @@ NEW_BUCKET="carina-acc-test-aws-s3-ds-new-${SUFFIX}"
 PRE_BUCKET="carina-acc-test-aws-s3-ds-pre-${SUFFIX}"
 export NEW_BUCKET PRE_BUCKET
 
-WORK_DIR=$(mktemp -d)
-ACTIVE_WORK_DIR="$WORK_DIR"
-
 # Pre-create the bucket Carina will `read`. Cleanup on EXIT (in addition
 # to the helper-trap which destroys Carina-managed resources).
 cleanup_pre_bucket() {
@@ -34,8 +31,14 @@ else
     finish_test
 fi
 
-# Substitute env vars into the .crn template.
-envsubst < "$SCRIPT_DIR/basic.crn" > "$WORK_DIR/main.crn"
+# Substitute env vars into the .crn template, then register the resulting
+# configuration in persistent state before any Carina apply.
+CONFIG_DIR=$(mktemp -d)
+envsubst < "$SCRIPT_DIR/basic.crn" > "$CONFIG_DIR/main.crn"
+register_acceptance_work_dir \
+    "s3_bucket_data_source/basic.crn" "$CONFIG_DIR/main.crn" WORK_DIR
+rm -rf "$CONFIG_DIR"
+ACTIVE_WORK_DIR="$WORK_DIR"
 cd "$WORK_DIR"
 
 # `carina init` resolves `source = "file://..."` into a staged provider
@@ -85,8 +88,10 @@ assert_state_value "assert: tag ExistingHostedZoneId = existing.hosted_zone_id" 
     "$WORK_DIR"
 
 run_step "step2: destroy (only the Managed bucket)" "$CARINA_BIN" destroy --auto-approve .
+if ! release_acceptance_work_dir "$WORK_DIR"; then
+    TEST_FAILED=$((TEST_FAILED + 1))
+fi
 ACTIVE_WORK_DIR=""
-rm -rf "$WORK_DIR"
 
 # pre-bucket cleanup is handled by the EXIT trap.
 

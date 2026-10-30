@@ -11,11 +11,14 @@ SOURCE_BUCKET="carina-acc-test-aws-s3-source-${SUFFIX}"
 CONSUMER_BUCKET="carina-acc-test-aws-s3-consumer-${SUFFIX}"
 export SOURCE_BUCKET CONSUMER_BUCKET
 
-WORK_DIR=$(mktemp -d)
+CONFIG_DIR=$(mktemp -d)
+envsubst < "$SCRIPT_DIR/basic.crn" > "$CONFIG_DIR/main.crn"
+register_acceptance_work_dir \
+    "s3_bucket_outputs/basic.crn" "$CONFIG_DIR/main.crn" WORK_DIR
+rm -rf "$CONFIG_DIR"
 ACTIVE_WORK_DIR="$WORK_DIR"
 trap cleanup EXIT
 
-envsubst < "$SCRIPT_DIR/basic.crn" > "$WORK_DIR/main.crn"
 cd "$WORK_DIR"
 
 prepare_work_dir "$WORK_DIR"
@@ -70,7 +73,9 @@ assert_state_value "assert: consumer tag SourceHostedZoneId" \
     "$WORK_DIR"
 
 run_step "step2: destroy" "$CARINA_BIN" destroy --auto-approve .
+if ! release_acceptance_work_dir "$WORK_DIR"; then
+    TEST_FAILED=$((TEST_FAILED + 1))
+fi
 ACTIVE_WORK_DIR=""
-rm -rf "$WORK_DIR"
 
 finish_test
