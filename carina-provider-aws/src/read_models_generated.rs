@@ -182,14 +182,14 @@ impl ManagedReadModel for Ec2SubnetReadModel {
 
 /// Exhaustive canonical read state for `ec2.InternetGateway`.
 pub(crate) struct Ec2InternetGatewayReadModel {
-    pub(crate) vpc_id: Value,
+    pub(crate) vpc_id: Option<Value>,
     pub(crate) internet_gateway_id: Option<Value>,
     pub(crate) tags: Value,
 }
 
 /// Canonical fields for `ec2.InternetGateway` supplied by identifiers, side reads, or complex SDK projections.
 pub(crate) struct Ec2InternetGatewayReadModelSupplement {
-    pub(crate) vpc_id: Value,
+    pub(crate) vpc_id: Option<Value>,
     pub(crate) tags: Value,
 }
 
@@ -203,7 +203,9 @@ impl ManagedReadModel for Ec2InternetGatewayReadModel {
             tags,
         } = self;
         let mut attributes = HashMap::with_capacity(3);
-        attributes.insert("vpc_id".to_string(), vpc_id);
+        if let Some(value) = vpc_id {
+            attributes.insert("vpc_id".to_string(), value);
+        }
         if let Some(value) = internet_gateway_id {
             attributes.insert("internet_gateway_id".to_string(), value);
         }

@@ -101,9 +101,7 @@ fn s3_replication_rule_filter() -> AttributeType {
     )
 }
 
-/// Whether delete markers are replicated. A V2 replication rule that
-/// carries a `Filter` must also declare `DeleteMarkerReplication`; the
-/// provider defaults it to `Disabled` when omitted.
+/// Whether delete markers are replicated.
 fn s3_delete_marker_replication() -> AttributeType {
     AttributeType::struct_(
         "DeleteMarkerReplication".to_string(),
@@ -140,12 +138,11 @@ fn s3_replication_rule() -> AttributeType {
             StructField::required("status", s3_replication_status())
                 .with_provider_name("Status")
                 .build(),
-            // S3 requires this member for V2 rules and the provider sends
-            // Disabled when the author omits it. Making the canonical field
-            // required ensures desired normalization and read-back compare the
-            // same nested shape instead of treating the read value as an
-            // unexpected non-default key.
-            StructField::required("delete_marker_replication", s3_delete_marker_replication())
+            // Authored input may omit this. The provider's desired normalization
+            // (`normalize_delete_marker_replication`) fills `{ status = Disabled }`.
+            // This field must remain optional because core validates authored input
+            // before provider normalization runs (carina-rs/carina-provider-aws#581).
+            StructField::optional("delete_marker_replication", s3_delete_marker_replication())
                 .with_provider_name("DeleteMarkerReplication")
                 .with_block_name("delete_marker_replication")
                 .build(),

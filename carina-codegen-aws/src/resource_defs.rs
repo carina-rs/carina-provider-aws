@@ -693,7 +693,13 @@ impl ResourceDef {
                 ReadDisposition::read("SourceSecurityGroupOwnerId", Optional),
                 ReadDisposition::read("DestinationSecurityGroupId", Optional),
             ],
-            "ec2.InternetGateway" => vec![ReadDisposition::read("VpcId", Required)],
+            // Observed by running acceptance fixture
+            // `acceptance-tests/ec2_vpc_gateway_attachment/basic.crn` with
+            // `run-tests.sh full` in account carina-test-005, ap-northeast-1,
+            // on 2026-10-30 (direction checked: detached create -> post-create
+            // read). The post-create DescribeInternetGateways read returned an
+            // empty Attachments list, so there is no VpcId.
+            "ec2.InternetGateway" => vec![ReadDisposition::read("VpcId", Optional)],
             "ec2.Route" => vec![ReadDisposition::read("RouteTableId", Required)],
             "ec2.NatGateway" => vec![
                 ReadDisposition::read("AvailabilityZoneAddresses", Required),
@@ -3865,6 +3871,26 @@ mod tests {
             !resource.required_overrides.contains(&"Rule"),
             "rule must remain optional"
         );
+    }
+
+    #[test]
+    fn detached_internet_gateway_vpc_id_is_optional_read_state() {
+        let resource = ec2_resources()
+            .into_iter()
+            .find(|resource| resource.name == "ec2.InternetGateway")
+            .expect("missing ec2.InternetGateway ResourceDef");
+        let vpc_id = resource
+            .read_dispositions()
+            .into_iter()
+            .find(|disposition| disposition.field() == "VpcId");
+
+        assert!(matches!(
+            vpc_id,
+            Some(ReadDisposition::Read {
+                presence: ReadPresence::Optional,
+                ..
+            })
+        ));
     }
 
     #[test]

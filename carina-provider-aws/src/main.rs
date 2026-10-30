@@ -875,7 +875,7 @@ fn main() {}
 #[cfg(test)]
 mod tests {
     use super::*;
-    use carina_core::resource::ConcreteValue;
+    use carina_core::resource::{ConcreteValue, DeferredValue, Resource, Value};
     use carina_core::schema::{
         AttributeType, CustomValidator, RawShape, ResourceValidation,
         TypeIdentity as CoreTypeIdentity,
@@ -1044,6 +1044,132 @@ mod tests {
 
     fn non_finite_state() -> CoreAppliedState {
         carina_provider_aws::non_finite_applied_state_for_protocol_test()
+    }
+
+    #[test]
+    fn normalize_desired_defers_nat_gateway_check_for_host_hidden_resource_ref() {
+        let mut resource =
+            Resource::with_provider("aws", "ec2.NatGateway", "deferred-subnet", None);
+        resource.set_attr(
+            "availability_mode",
+            Value::Concrete(ConcreteValue::String("zonal".into())),
+        );
+        resource.set_attr(
+            "subnet_id",
+            Value::resource_ref("subnet", "subnet_id", vec![]),
+        );
+
+        let hidden = resource
+            .attributes
+            .shift_remove("subnet_id")
+            .expect("fixture must contain a real unresolved subnet reference");
+        assert!(matches!(
+            hidden,
+            Value::Deferred(DeferredValue::ResourceRef { .. })
+        ));
+
+        // WasmProviderNormalizer strips a top-level attribute containing a
+        // deferred reference before converting the resource to this ordinary
+        // protocol shape, then restores it after the guest returns.
+        let wire = protocol_convert::try_resource_to_protocol(&resource)
+            .expect("the host-visible projection must be protocol encodable");
+        assert!(!wire.attributes.contains_key("subnet_id"));
+
+        AwsProcessProvider::new()
+            .normalize_desired(vec![wire])
+            .expect("a host-hidden unresolved subnet reference must defer validation");
+    }
+
+    #[test]
+    fn normalize_desired_defers_sqs_checks_for_host_hidden_resource_refs() {
+        let mut fifo = Resource::with_provider("aws", "sqs.Queue", "deferred-fifo", None);
+        fifo.set_attr(
+            "fifo_queue",
+            Value::resource_ref("settings", "fifo_queue", vec![]),
+        );
+        fifo.set_attr(
+            "deduplication_scope",
+            Value::Concrete(ConcreteValue::String("messageGroup".into())),
+        );
+        let hidden_fifo = fifo
+            .attributes
+            .shift_remove("fifo_queue")
+            .expect("fixture must contain a real unresolved FIFO reference");
+        assert!(matches!(
+            hidden_fifo,
+            Value::Deferred(DeferredValue::ResourceRef { .. })
+        ));
+
+        let mut kms = Resource::with_provider("aws", "sqs.Queue", "deferred-kms", None);
+        kms.set_attr(
+            "kms_data_key_reuse_period_seconds",
+            Value::Concrete(ConcreteValue::Int(300)),
+        );
+        kms.set_attr(
+            "kms_master_key_id",
+            Value::resource_ref("key", "key_id", vec![]),
+        );
+        let hidden_key = kms
+            .attributes
+            .shift_remove("kms_master_key_id")
+            .expect("fixture must contain a real unresolved KMS-key reference");
+        assert!(matches!(
+            hidden_key,
+            Value::Deferred(DeferredValue::ResourceRef { .. })
+        ));
+
+        let wire_resources = [fifo, kms]
+            .iter()
+            .map(protocol_convert::try_resource_to_protocol)
+            .collect::<Result<Vec<_>, _>>()
+            .expect("host-visible projections must be protocol encodable");
+
+        AwsProcessProvider::new()
+            .normalize_desired(wire_resources)
+            .expect("host-hidden unresolved SQS inputs must defer cross-field validation");
+    }
+
+    #[test]
+    fn normalize_desired_rejects_decidable_cross_field_conflicts() {
+        let provider = AwsProcessProvider::new();
+
+        let mut nat_gateway =
+            Resource::with_provider("aws", "ec2.NatGateway", "regional-with-subnet", None);
+        nat_gateway.set_attr(
+            "availability_mode",
+            Value::Concrete(ConcreteValue::String("regional".into())),
+        );
+        nat_gateway.set_attr(
+            "subnet_id",
+            Value::Concrete(ConcreteValue::String("subnet-12345678".into())),
+        );
+        let nat_gateway = protocol_convert::try_resource_to_protocol(&nat_gateway)
+            .expect("the concrete NAT gateway must be protocol encodable");
+        let error = provider
+            .normalize_desired(vec![nat_gateway])
+            .expect_err("a regional NAT gateway with a subnet must be rejected at plan time");
+        assert!(
+            error
+                .message
+                .contains("must be omitted when availability_mode = regional"),
+            "unexpected NAT gateway validation error: {error:?}"
+        );
+
+        let mut queue = Resource::with_provider("aws", "sqs.Queue", "standard-with-fifo", None);
+        queue.set_attr("fifo_queue", Value::Concrete(ConcreteValue::Bool(false)));
+        queue.set_attr(
+            "deduplication_scope",
+            Value::Concrete(ConcreteValue::String("messageGroup".into())),
+        );
+        let queue = protocol_convert::try_resource_to_protocol(&queue)
+            .expect("the concrete SQS queue must be protocol encodable");
+        let error = provider.normalize_desired(vec![queue]).expect_err(
+            "a standard SQS queue with a FIFO-only attribute must be rejected at plan time",
+        );
+        assert!(
+            error.message.contains("requires fifo_queue = true"),
+            "unexpected SQS queue validation error: {error:?}"
+        );
     }
 
     fn assert_typed_conversion_error(error: CoreProviderError, message: &str) {

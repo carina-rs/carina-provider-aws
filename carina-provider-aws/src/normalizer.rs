@@ -3,7 +3,57 @@
 use carina_core::provider::{
     BoxFuture, ProviderNormalizer, ProviderResult, SavedAttrs, StateTransformMap, ready_noop,
 };
-use carina_core::resource::ProviderResource;
+use carina_core::resource::{ConcreteValue, ProviderResource, Resource, ResourceId, Value};
+
+/// What a provider-side cross-field check can prove about one input.
+///
+/// Desired normalization cannot prove that a missing attribute was omitted:
+/// over WASM, the host removes top-level deferred attributes before the call.
+/// Resolved create and update paths can prove absence. Keeping that distinction
+/// in this type prevents individual validators from guessing at the boundary.
+pub(crate) enum CrossFieldValue<'a> {
+    Known(&'a ConcreteValue),
+    Absent,
+    Deferred,
+}
+
+pub(crate) struct CrossFieldInputs<'a, S> {
+    resource: &'a Resource<S>,
+    missing_is_deferred: bool,
+}
+
+impl<'a, S> CrossFieldInputs<'a, S> {
+    fn at_desired_normalization(resource: &'a Resource<S>) -> Self {
+        Self {
+            resource,
+            missing_is_deferred: true,
+        }
+    }
+
+    pub(crate) fn resolved(resource: &'a Resource<S>) -> Self {
+        Self {
+            resource,
+            missing_is_deferred: false,
+        }
+    }
+
+    pub(crate) fn is_resource(&self, provider: &str, resource_type: &str) -> bool {
+        self.resource.id.provider == provider && self.resource.id.resource_type == resource_type
+    }
+
+    pub(crate) fn id(&self) -> &ResourceId {
+        &self.resource.id
+    }
+
+    pub(crate) fn get(&self, name: &str) -> CrossFieldValue<'_> {
+        match self.resource.get_attr(name) {
+            Some(Value::Concrete(value)) => CrossFieldValue::Known(value),
+            Some(Value::Deferred(_)) => CrossFieldValue::Deferred,
+            None if self.missing_is_deferred => CrossFieldValue::Deferred,
+            None => CrossFieldValue::Absent,
+        }
+    }
+}
 
 /// Schema extension for the AWS provider.
 ///
@@ -23,8 +73,9 @@ impl ProviderNormalizer for AwsNormalizer {
             crate::services::s3::bucket_replication::normalize_delete_marker_replication(resources);
             crate::services::ec2::subnet::normalize_subnet_ipv6_cidr_blocks(resources)?;
             for resource in resources.iter() {
-                crate::services::ec2::nat_gateway::validate_nat_gateway_inputs(resource)?;
-                crate::services::sqs::queue::validate_sqs_queue_inputs(resource)?;
+                let inputs = CrossFieldInputs::at_desired_normalization(resource);
+                crate::services::ec2::nat_gateway::validate_nat_gateway_inputs(&inputs)?;
+                crate::services::sqs::queue::validate_sqs_queue_inputs(&inputs)?;
             }
             Ok(())
         })

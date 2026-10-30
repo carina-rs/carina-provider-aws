@@ -23,8 +23,8 @@ use crate::send_models_generated::{
 use crate::services::s3::bucket::is_s3_not_configured_error;
 
 /// Insert the provider's canonical V2 replication default into authored
-/// rules. The schema declares the nested field required, so every plan and
-/// every read compares the same explicit `{ status = Disabled }` shape.
+/// rules. The authored schema permits omission; normalization and read-back
+/// still converge on the same explicit `{ status = Disabled }` shape.
 pub(crate) fn normalize_delete_marker_replication<S>(resources: &mut [Resource<S>]) {
     for resource in resources {
         if resource.id.provider != "aws"
