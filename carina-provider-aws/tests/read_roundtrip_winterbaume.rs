@@ -918,6 +918,50 @@ impl MockService for SqsService {
     }
 }
 
+struct RecordingSqsService {
+    inner: SqsService,
+    request_targets: Mutex<Vec<String>>,
+}
+
+impl RecordingSqsService {
+    fn request_targets(&self) -> Vec<String> {
+        self.request_targets
+            .lock()
+            .expect("SQS request recording lock")
+            .clone()
+    }
+}
+
+impl MockService for RecordingSqsService {
+    fn service_name(&self) -> &str {
+        self.inner.service_name()
+    }
+
+    fn url_patterns(&self) -> Vec<&str> {
+        self.inner.url_patterns()
+    }
+
+    fn handle(
+        &self,
+        request: MockRequest,
+    ) -> Pin<Box<dyn Future<Output = MockResponse> + Send + '_>> {
+        self.request_targets
+            .lock()
+            .expect("SQS request recording lock")
+            .push(request_target(&request).to_string());
+        self.inner.handle(request)
+    }
+}
+
+async fn provider_with_recording_sqs() -> (AwsProvider, Arc<RecordingSqsService>) {
+    let service = Arc::new(RecordingSqsService {
+        inner: SqsService,
+        request_targets: Mutex::new(Vec::new()),
+    });
+    let provider = provider_from_service(Arc::clone(&service)).await;
+    (provider, service)
+}
+
 struct SqsTagsDeniedService;
 
 impl MockService for SqsTagsDeniedService {
@@ -1863,19 +1907,31 @@ async fn queue_tag_side_read_failure_names_required_permission() {
 
 #[tokio::test]
 async fn queue_kms_reuse_period_without_master_key_is_rejected_before_dispatch() {
-    let mut resource = Resource::with_provider("aws", "sqs.Queue", "invalid-kms", None);
-    resource.set_attr("queue_name", string(QUEUE_NAME));
-    resource.set_attr(
+    let mut desired = Resource::with_provider("aws", "sqs.Queue", "invalid-kms", None);
+    desired.set_attr("queue_name", string(QUEUE_NAME));
+    desired.set_attr(
         "kms_data_key_reuse_period_seconds",
         Value::Concrete(ConcreteValue::Int(300)),
     );
-    let mut resources = vec![resource.into()];
+    let mut resources = vec![desired.clone().into()];
 
-    let error = AwsNormalizer
+    AwsNormalizer
         .normalize_desired(&mut resources)
         .await
-        .expect_err("reuse period without kms_master_key_id must be rejected");
-    let message = error.to_string();
+        .expect("desired normalization must defer absence-dependent KMS validation");
+
+    let (provider, recording_service) = provider_with_recording_sqs().await;
+    let id = desired.id.clone();
+    let request = create_request_for_test(desired).await;
+    let result = carina_core::executor::dispatch_create(&provider, &id, request).await;
+    let request_targets = recording_service.request_targets();
+    assert!(
+        request_targets.is_empty(),
+        "invalid queue must fail before any SQS request is dispatched: {request_targets:?}"
+    );
+
+    let error = result.expect_err("resolved create must reject reuse period without a KMS key");
+    let message = error.provider_error().to_string();
     assert!(
         message.contains("kms_data_key_reuse_period_seconds"),
         "{message}"
