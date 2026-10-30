@@ -1051,6 +1051,10 @@ mod tests {
         let mut resource =
             Resource::with_provider("aws", "ec2.NatGateway", "deferred-subnet", None);
         resource.set_attr(
+            "availability_mode",
+            Value::Concrete(ConcreteValue::String("zonal".into())),
+        );
+        resource.set_attr(
             "subnet_id",
             Value::resource_ref("subnet", "subnet_id", vec![]),
         );
@@ -1123,6 +1127,41 @@ mod tests {
         AwsProcessProvider::new()
             .normalize_desired(wire_resources)
             .expect("host-hidden unresolved SQS inputs must defer cross-field validation");
+    }
+
+    #[test]
+    fn normalize_desired_rejects_decidable_cross_field_conflicts() {
+        let provider = AwsProcessProvider::new();
+
+        let mut nat_gateway =
+            Resource::with_provider("aws", "ec2.NatGateway", "regional-with-subnet", None);
+        nat_gateway.set_attr(
+            "availability_mode",
+            Value::Concrete(ConcreteValue::String("regional".into())),
+        );
+        nat_gateway.set_attr(
+            "subnet_id",
+            Value::Concrete(ConcreteValue::String("subnet-12345678".into())),
+        );
+        let nat_gateway = protocol_convert::try_resource_to_protocol(&nat_gateway)
+            .expect("the concrete NAT gateway must be protocol encodable");
+        assert!(
+            provider.normalize_desired(vec![nat_gateway]).is_err(),
+            "a regional NAT gateway with a subnet must be rejected at plan time"
+        );
+
+        let mut queue = Resource::with_provider("aws", "sqs.Queue", "standard-with-fifo", None);
+        queue.set_attr("fifo_queue", Value::Concrete(ConcreteValue::Bool(false)));
+        queue.set_attr(
+            "deduplication_scope",
+            Value::Concrete(ConcreteValue::String("messageGroup".into())),
+        );
+        let queue = protocol_convert::try_resource_to_protocol(&queue)
+            .expect("the concrete SQS queue must be protocol encodable");
+        assert!(
+            provider.normalize_desired(vec![queue]).is_err(),
+            "a standard SQS queue with a FIFO-only attribute must be rejected at plan time"
+        );
     }
 
     fn assert_typed_conversion_error(error: CoreProviderError, message: &str) {
