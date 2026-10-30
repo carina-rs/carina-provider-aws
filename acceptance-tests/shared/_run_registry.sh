@@ -9,6 +9,21 @@
 
 CARINA_RUN_REGISTRY_SCHEMA=1
 
+# carina_registry_process_start_time: Print a process's start time without the
+# padding emitted by ps. A PID alone is not a stable process identity because
+# the operating system can reuse it.
+# Args: pid
+carina_registry_process_start_time() {
+    local pid="$1"
+    local process_start_time
+
+    process_start_time=$(ps -o lstart= -p "$pid" 2>/dev/null) || return 1
+    process_start_time=$(printf '%s\n' "$process_start_time" | sed \
+        -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+    [ -n "$process_start_time" ] || return 1
+    printf '%s\n' "$process_start_time"
+}
+
 # carina_registry_host: Print the host identity stored with each run.
 carina_registry_host() {
     local host
@@ -96,6 +111,7 @@ carina_registry_create_run() {
     local created_at
     local created_at_iso
     local host
+    local process_start_time
     local repo_name
     local run_id
     local runs_root
@@ -105,6 +121,10 @@ carina_registry_create_run() {
     created_at=$(date -u '+%Y%m%dT%H%M%SZ') || return $?
     created_at_iso=$(date -u '+%Y-%m-%dT%H:%M:%SZ') || return $?
     host=$(carina_registry_host) || return $?
+    if ! process_start_time=$(carina_registry_process_start_time "$$"); then
+        echo "ERROR: cannot determine the acceptance run process start time" >&2
+        return 1
+    fi
     repo_name=$(carina_registry_repo_name) || return $?
     run_id="${created_at}-$$"
     runs_root=$(carina_registry_runs_root) || return $?
@@ -119,8 +139,9 @@ carina_registry_create_run() {
             --arg run_id "$run_id" \
             --arg host "$host" \
             --argjson pid "$$" \
+            --arg process_start_time "$process_start_time" \
             --arg created_at "$created_at_iso" \
-            '{schema:$schema,repo:$repo,run_id:$run_id,host:$host,pid:$pid,created_at:$created_at}' \
+            '{schema:$schema,repo:$repo,run_id:$run_id,host:$host,pid:$pid,process_start_time:$process_start_time,created_at:$created_at}' \
             > "$run_meta_tmp" || ! mv "$run_meta_tmp" "$run_dir/run.json"; then
             rm -f "$run_meta_tmp"
             return 1
@@ -394,14 +415,16 @@ carina_registry_cleanup() {
     local fixture_path
     local run_dir
     local run_host
-    local run_id
     local run_pid
+    local run_process_start_time
+    local current_process_start_time
     local current_host
     local list_output
     local destroy_output
     local release_output
     local found=0
     local failed=0
+    local skipped=0
 
     current_host=$(carina_registry_host) || return $?
 
@@ -438,31 +461,43 @@ carina_registry_cleanup() {
     done <<< "$list_output"
 
     for entry_dir in ${entries[@]+"${entries[@]}"}; do
-        run_dir=$(dirname "$(dirname "$entry_dir")")
-        run_id=$(basename "$run_dir")
-        run_pid=${run_id##*-}
-        run_host=$(jq -r '.host // empty' "$run_dir/run.json" 2>/dev/null || true)
-        if [ -n "$run_host" ] && [ "$run_host" != "$current_host" ]; then
-            echo "$entry_dir: different host ($run_host), skipped"
-            found=1
-            continue
-        fi
-        case "$run_pid" in
-            ""|*[!0-9]*) ;;
-            *)
-                if [ "$run_host" = "$current_host" ] && kill -0 "$run_pid" 2>/dev/null; then
-                    echo "$entry_dir: in progress, skipped (PID $run_pid is alive on $run_host)"
-                    found=1
-                    continue
-                fi
-                ;;
-        esac
-
         account=$(basename "$(dirname "$entry_dir")")
         if ! carina_registry_account_selected \
             "$account" ${accounts[@]+"${accounts[@]}"}; then
             continue
         fi
+
+        run_dir=$(dirname "$(dirname "$entry_dir")")
+        run_host=$(jq -r '.host // empty' "$run_dir/run.json" 2>/dev/null || true)
+        if [ -n "$run_host" ] && [ "$run_host" != "$current_host" ]; then
+            echo "$entry_dir: different host ($run_host), skipped"
+            found=1
+            skipped=$((skipped + 1))
+            continue
+        fi
+        run_pid=$(jq -r \
+            'if (.pid | type) == "number" then
+                if .pid > 0 and .pid == (.pid | floor) then .pid else empty end
+             else empty end' \
+            "$run_dir/run.json" 2>/dev/null || true)
+        run_process_start_time=$(jq -r \
+            'if (.process_start_time | type) == "string" then .process_start_time else empty end' \
+            "$run_dir/run.json" 2>/dev/null || true)
+        case "$run_pid" in
+            ""|*[!0-9]*) ;;
+            *)
+                if [ "$run_host" = "$current_host" ] && \
+                   [ -n "$run_process_start_time" ] && \
+                   kill -0 "$run_pid" 2>/dev/null && \
+                   current_process_start_time=$(carina_registry_process_start_time "$run_pid") && \
+                   [ "$current_process_start_time" = "$run_process_start_time" ]; then
+                    echo "$entry_dir: in progress, skipped (PID $run_pid is alive with matching start time on $run_host)"
+                    found=1
+                    skipped=$((skipped + 1))
+                    continue
+                fi
+                ;;
+        esac
 
         if [ "${#filters[@]}" -ne 0 ]; then
             fixture_path=$(jq -r \
@@ -532,9 +567,19 @@ carina_registry_cleanup() {
         echo "No registry entries match"
         return 0
     fi
+    if [ "$skipped" -ne 0 ]; then
+        if [ "$failed" -ne 0 ]; then
+            echo "Cleanup summary: $skipped selected entr$(if [ "$skipped" -eq 1 ]; then printf 'y'; else printf 'ies'; fi) skipped (exit status 1 because cleanup failures take precedence)" >&2
+        else
+            echo "Cleanup summary: $skipped selected entr$(if [ "$skipped" -eq 1 ]; then printf 'y'; else printf 'ies'; fi) skipped (exit status 3)" >&2
+        fi
+    fi
     if [ "$failed" -ne 0 ]; then
         echo "ERROR: cleanup failed for $failed registered entr$(if [ "$failed" -eq 1 ]; then printf 'y'; else printf 'ies'; fi)" >&2
         return 1
+    fi
+    if [ "$skipped" -ne 0 ]; then
+        return 3
     fi
 
     return 0

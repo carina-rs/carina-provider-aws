@@ -17,6 +17,9 @@
 #   cleanup    - Destroy matching entries preserved in the persistent registry
 #   deep-cleanup - Scan and remove orphaned AWS resources across accounts
 #
+# Exit status 3 means selected registry entries are skipped because their run
+# is still active or belongs to another host. Cleanup/destroy failures use 1.
+#
 # AWS authentication:
 #   The runner selects credentials via AWS_PROFILE rather than wrapping in
 #   aws-vault. Each carina-test-00X profile shares a single sso-session
@@ -702,11 +705,11 @@ if [ "$COMMAND" = "cleanup" ] || [ "$COMMAND" = "destroy" ]; then
         REGISTRY_CLEANUP_ARGS+=(--filter "$FILTER")
     done
 
-    if ! carina_registry_cleanup \
-        ${REGISTRY_CLEANUP_ARGS[@]+"${REGISTRY_CLEANUP_ARGS[@]}"}; then
-        exit 1
-    fi
-    exit 0
+    REGISTRY_CLEANUP_STATUS=0
+    carina_registry_cleanup \
+        ${REGISTRY_CLEANUP_ARGS[@]+"${REGISTRY_CLEANUP_ARGS[@]}"} || \
+        REGISTRY_CLEANUP_STATUS=$?
+    exit "$REGISTRY_CLEANUP_STATUS"
 fi
 
 if [ ${#TESTS[@]} -eq 0 ]; then

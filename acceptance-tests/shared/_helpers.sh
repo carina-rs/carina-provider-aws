@@ -120,11 +120,6 @@ acceptance_registry_account() {
         echo "ERROR: set AWS_PROFILE to the profile name used by this acceptance test" >&2
         return 1
     fi
-    if [ -n "${CARINA_ACCEPTANCE_ACCOUNT:-}" ] && \
-       [ "$CARINA_ACCEPTANCE_ACCOUNT" != "$account" ]; then
-        echo "ERROR: CARINA_ACCEPTANCE_ACCOUNT ($CARINA_ACCEPTANCE_ACCOUNT) differs from AWS_PROFILE ($account); refusing to register acceptance state" >&2
-        return 1
-    fi
     printf '%s\n' "$account"
 }
 

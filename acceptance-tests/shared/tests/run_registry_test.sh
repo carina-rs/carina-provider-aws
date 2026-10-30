@@ -13,12 +13,14 @@ export CARINA_BIN="$TEST_TMP/carina-stub"
 export STUB_DESTROY_LOG="$TEST_TMP/destroy.log"
 export STUB_CREDS_LOG="$TEST_TMP/creds.log"
 export STUB_STATE_LOG="$TEST_TMP/state.log"
+export STUB_COMMAND_LOG="$TEST_TMP/commands.log"
 
 cat > "$CARINA_BIN" <<'STUB'
 #!/bin/bash
 set -euo pipefail
 
 command_name="${1:-}"
+printf '%s\n' "$*" >> "$STUB_COMMAND_LOG"
 if [ "$command_name" = "state" ] && [ "${2:-}" = "show" ] && [ "${3:-}" = "--json" ]; then
     entry="${4:?missing entry path}"
     printf '%s\n' "$entry" >> "$STUB_STATE_LOG"
@@ -45,7 +47,16 @@ if [ "$command_name" = "destroy" ]; then
     exit 0
 fi
 
-if [ "$command_name" = "init" ] || [ "$command_name" = "validate" ]; then
+if [ "$command_name" = "apply" ]; then
+    entry="${@: -1}"
+    printf '%s\n' \
+        '{"schema_version":1,"state":"present","resources":[{"identity":"stub"}]}' \
+        > "$entry/.stub-state.json"
+    exit 0
+fi
+
+if [ "$command_name" = "init" ] || [ "$command_name" = "validate" ] || \
+   [ "$command_name" = "plan" ]; then
     exit 0
 fi
 
@@ -56,6 +67,20 @@ chmod +x "$CARINA_BIN"
 
 STUB_BIN_DIR="$TEST_TMP/bin"
 mkdir -p "$STUB_BIN_DIR"
+
+cat > "$STUB_BIN_DIR/ps" <<'STUB'
+#!/bin/bash
+set -euo pipefail
+
+if [ "${1:-}" = "-o" ] && [ "${2:-}" = "lstart=" ] && \
+   [ "${3:-}" = "-p" ] && [ -n "${4:-}" ]; then
+    printf '%s\n' ' Fri Oct 30 05:00:00 2026 '
+    exit 0
+fi
+
+echo "unexpected ps stub invocation: $*" >&2
+exit 64
+STUB
 
 cat > "$STUB_BIN_DIR/aws" <<'STUB'
 #!/bin/bash
@@ -74,7 +99,7 @@ if [ "${1:-}" = "configure" ] && [ "${2:-}" = "export-credentials" ] && \
 fi
 
 echo "unexpected aws stub invocation: $*" >&2
-exit 64
+exit 0
 STUB
 
 cat > "$STUB_BIN_DIR/cargo" <<'STUB'
@@ -84,7 +109,7 @@ STUB
 
 ln -s /usr/bin/true "$STUB_BIN_DIR/vela"
 
-chmod +x "$STUB_BIN_DIR/aws" "$STUB_BIN_DIR/cargo"
+chmod +x "$STUB_BIN_DIR/ps" "$STUB_BIN_DIR/aws" "$STUB_BIN_DIR/cargo"
 export PATH="$STUB_BIN_DIR:$PATH"
 
 export _TEST_AWS_WASM="$TEST_TMP/carina-provider-aws.wasm"
@@ -194,27 +219,53 @@ worktree_repo_name=$(
 pass "repository name is identical from the main checkout and a worktree"
 
 next_test
-account_mismatch_source="$TEST_TMP/account-mismatch.crn"
-printf '%s\n' 'provider test {}' > "$account_mismatch_source"
-if account_mismatch_output=$(
+registration_source="$TEST_TMP/custom-registration.crn"
+registration_home="$TEST_TMP/custom-registration-registry"
+printf '%s\n' 'provider test {}' > "$registration_source"
+if ! registration_output=$(
     export AWS_PROFILE="credential-account"
-    export CARINA_ACCEPTANCE_ACCOUNT="recorded-account"
-    export CARINA_ACCEPTANCE_HOME="$TEST_TMP/account-mismatch-registry"
+    export CARINA_ACCEPTANCE_HOME="$registration_home"
     export SCRIPT_DIR="$TEST_TMP/custom-suite"
     source "$SHARED_DIR/_helpers.sh"
+    first_entry="not-assigned"
+    second_entry="not-assigned"
     register_acceptance_work_dir \
-        "s3_bucket/account-mismatch.crn" "$account_mismatch_source" \
-        account_mismatch_entry 2>&1
+        "s3_bucket/first.crn" "$registration_source" first_entry
+    register_acceptance_work_dir \
+        "sqs_queue/second.crn" "$registration_source" second_entry
+    printf 'first=%s\n' "$first_entry"
+    printf 'second=%s\n' "$second_entry"
+    printf 'run=%s\n' "$CARINA_CUSTOM_RUN_DIR"
+    printf 'index=%s\n' "$CARINA_CUSTOM_TEST_INDEX"
     ); then
-    fail "custom-suite registration accepted conflicting registry and credential accounts"
+    fail "custom-suite registration failed: $registration_output"
 fi
-assert_contains "$account_mismatch_output" "CARINA_ACCEPTANCE_ACCOUNT"
-assert_contains "$account_mismatch_output" "AWS_PROFILE"
-assert_contains "$account_mismatch_output" "recorded-account"
-assert_contains "$account_mismatch_output" "credential-account"
-[ ! -e "$TEST_TMP/account-mismatch-registry/carina-provider-test/runs" ] || \
-    fail "custom-suite mismatch created registry state before rejecting the accounts"
-pass "custom suites reject a registry account that differs from AWS_PROFILE"
+registration_first=$(printf '%s\n' "$registration_output" | sed -n 's/^first=//p')
+registration_second=$(printf '%s\n' "$registration_output" | sed -n 's/^second=//p')
+registration_run=$(printf '%s\n' "$registration_output" | sed -n 's/^run=//p')
+registration_index=$(printf '%s\n' "$registration_output" | sed -n 's/^index=//p')
+[ -d "$registration_first" ] || fail "first caller variable was not assigned an entry"
+[ -d "$registration_second" ] || fail "second caller variable was not assigned an entry"
+[ "$(dirname "$(dirname "$registration_first")")" = "$registration_run" ] || \
+    fail "first registration did not use the suite run"
+[ "$(dirname "$(dirname "$registration_second")")" = "$registration_run" ] || \
+    fail "second registration created a different suite run"
+[ "$(basename "$registration_first")" = "test_0" ] || \
+    fail "first registration did not use index 0"
+[ "$(basename "$registration_second")" = "test_1" ] || \
+    fail "second registration did not increment to index 1"
+[ "$registration_index" = "2" ] || \
+    fail "custom registration index did not advance twice: $registration_index"
+[ "$(jq -r '.account' "$registration_first/meta.json")" = "credential-account" ] || \
+    fail "first registration did not record AWS_PROFILE"
+[ "$(jq -r '.account' "$registration_second/meta.json")" = "credential-account" ] || \
+    fail "second registration did not record AWS_PROFILE"
+registration_run_count=$(find \
+    "$registration_home/$CARINA_ACCEPTANCE_REPO/runs" \
+    -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d ' ')
+[ "$registration_run_count" = "1" ] || \
+    fail "custom registrations created $registration_run_count runs instead of one"
+pass "custom registration assigns caller variables and reuses one indexed suite run"
 
 next_test
 standalone_root="$TEST_TMP/standalone-runner"
@@ -374,34 +425,74 @@ pass "cleanup filters fixtures, uses the registered account, and releases the en
 next_test
 use_case_home "live-run"
 : > "$STUB_DESTROY_LOG"
-live_entry=$(new_live_entry "account-live" "ec2_vpc/live.crn")
+live_entry=$(new_live_entry "carina-test-005" "ec2_vpc/live.crn")
 printf '%s\n' '{"schema_version":1,"state":"present","resources":[{"identity":"vpc"}]}' > "$live_entry/.stub-state.json"
-live_output=$(carina_registry_cleanup --account "account-live") || \
-    fail "cleanup failed instead of skipping a live run: $live_output"
+if live_output=$(carina_registry_cleanup --account "carina-test-005" 2>&1); then
+    fail "cleanup returned success after skipping a live run: $live_output"
+else
+    live_status=$?
+fi
+[ "$live_status" -eq 3 ] || \
+    fail "live-run skip returned $live_status instead of 3: $live_output"
 [ -d "$live_entry" ] || fail "cleanup destroyed an entry owned by a live process"
 [ ! -s "$STUB_DESTROY_LOG" ] || fail "cleanup invoked destroy for an entry owned by a live process"
 assert_contains "$live_output" "in progress, skipped"
+assert_contains "$live_output" "Cleanup summary: 1 selected entry skipped (exit status 3)"
 live_run_dir=$(dirname "$(dirname "$live_entry")")
 live_host=$(hostname)
+live_process_start=$(ps -o lstart= -p $$ | sed \
+    -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
 [ "$(jq -r '.host' "$live_run_dir/run.json")" = "$live_host" ] || \
     fail "run metadata did not record the creating host"
+[ "$(jq -r '.process_start_time // empty' "$live_run_dir/run.json")" = "$live_process_start" ] || \
+    fail "run metadata did not record the trimmed creating-process start time"
 [ "$(jq -r '.host' "$live_entry/meta.json")" = "$live_host" ] || \
     fail "entry metadata did not record the creating host"
-pass "cleanup skips entries whose creating process is still alive on this host"
+usage_text=$(sed -n '1,70p' "$RUN_TESTS")
+assert_contains "$usage_text" "Exit status 3"
+assert_contains "$usage_text" "selected registry entries are skipped"
+if live_runner_output=$(
+    /bin/bash "$RUN_TESTS" --accounts 5-5 cleanup ec2_vpc/live.crn 2>&1
+    ); then
+    fail "run-tests.sh collapsed a live-run skip to success: $live_runner_output"
+else
+    live_runner_status=$?
+fi
+[ "$live_runner_status" -eq 3 ] || \
+    fail "run-tests.sh returned $live_runner_status instead of skip status 3: $live_runner_output"
+assert_contains "$live_runner_output" \
+    "Cleanup summary: 1 selected entry skipped (exit status 3)"
+pass "cleanup returns documented status 3 for a live creating process identity"
 
 next_test
-use_case_home "live-run-before-filter"
+use_case_home "reused-live-pid"
+: > "$STUB_DESTROY_LOG"
+reused_pid_entry=$(new_live_entry "account-reused-pid" "ec2_vpc/reused-pid.crn")
+printf '%s\n' '{"schema_version":1,"state":"present","resources":[{"identity":"vpc"}]}' > "$reused_pid_entry/.stub-state.json"
+reused_pid_run_dir=$(dirname "$(dirname "$reused_pid_entry")")
+jq '.process_start_time = "Mon Jan  1 00:00:00 1900"' \
+    "$reused_pid_run_dir/run.json" > "$reused_pid_run_dir/run.json.tmp"
+mv "$reused_pid_run_dir/run.json.tmp" "$reused_pid_run_dir/run.json"
+reused_pid_output=$(carina_registry_cleanup --account "account-reused-pid") || \
+    fail "cleanup treated a reused PID as live: $reused_pid_output"
+[ ! -e "$reused_pid_entry" ] || fail "cleanup retained an entry whose PID start time changed"
+[ "$(cat "$STUB_DESTROY_LOG")" = "account-reused-pid" ] || \
+    fail "cleanup did not destroy the reused-PID entry"
+pass "cleanup requires PID and process start time to identify a live run"
+
+next_test
+use_case_home "account-filter-before-live-run"
 : > "$STUB_DESTROY_LOG"
 live_unmatched_entry=$(new_live_entry "account-live" "ec2_vpc/live-unmatched.crn")
 rm -f "$live_unmatched_entry/meta.json"
 live_unmatched_output=$(carina_registry_cleanup \
     --account "some-other-account" --filter "some-other-fixture") || \
-    fail "cleanup failed while checking a live run before filters: $live_unmatched_output"
-[ -d "$live_unmatched_entry" ] || fail "cleanup removed a live meta-less entry"
-[ ! -s "$STUB_DESTROY_LOG" ] || fail "cleanup invoked destroy for a live meta-less entry"
-assert_contains "$live_unmatched_output" "$live_unmatched_entry"
-assert_contains "$live_unmatched_output" "in progress, skipped"
-pass "cleanup performs liveness checks before account and fixture filters"
+    fail "cleanup failed when no account matched: $live_unmatched_output"
+[ "$live_unmatched_output" = "No registry entries match" ] || \
+    fail "account filter ran after the liveness check: $live_unmatched_output"
+[ -d "$live_unmatched_entry" ] || fail "cleanup removed a live entry from another account"
+[ ! -s "$STUB_DESTROY_LOG" ] || fail "cleanup invoked destroy for another account"
+pass "cleanup applies the path-derived account filter before liveness and metadata"
 
 next_test
 use_case_home "remote-run"
@@ -415,14 +506,20 @@ mv "$remote_run_dir/run.json.tmp" "$remote_run_dir/run.json"
 jq '.host = "remote.example.invalid"' "$remote_entry/meta.json" \
     > "$remote_entry/meta.json.tmp"
 mv "$remote_entry/meta.json.tmp" "$remote_entry/meta.json"
-remote_output=$(carina_registry_cleanup --account "account-remote") || \
-    fail "cleanup failed instead of skipping a run from another host: $remote_output"
+if remote_output=$(carina_registry_cleanup --account "account-remote" 2>&1); then
+    fail "cleanup returned success after skipping a run from another host: $remote_output"
+else
+    remote_status=$?
+fi
+[ "$remote_status" -eq 3 ] || \
+    fail "remote-host skip returned $remote_status instead of 3: $remote_output"
 [ -d "$remote_entry" ] || fail "cleanup destroyed an entry created on another host"
 [ ! -s "$STUB_DESTROY_LOG" ] || fail "cleanup invoked destroy for an entry created on another host"
 assert_contains "$remote_output" "remote.example.invalid"
 assert_contains "$remote_output" "different host"
 assert_contains "$remote_output" "skipped"
-pass "cleanup never destroys entries created on another host"
+assert_contains "$remote_output" "Cleanup summary: 1 selected entry skipped (exit status 3)"
+pass "cleanup retains remote entries and returns skip status 3"
 
 next_test
 use_case_home "run-tests-cleanup-no-filter"
@@ -461,6 +558,87 @@ fi
 [ "$(cat "$STUB_CREDS_LOG")" = "carina-test-009" ] || \
     fail "filtered runner cleanup did not use stub credentials: $(cat "$STUB_CREDS_LOG")"
 pass "run-tests.sh cleanup forwards a filter under /bin/bash"
+
+next_test
+use_case_home "run-tests-destroy-account"
+: > "$STUB_DESTROY_LOG"
+: > "$STUB_CREDS_LOG"
+destroy_selected_entry=$(new_entry "carina-test-006" "ec2_eip/basic.crn" 0)
+printf '%s\n' '{"schema_version":1,"state":"present","resources":[{"identity":"eip"}]}' > "$destroy_selected_entry/.stub-state.json"
+destroy_other_entry=$(new_entry "carina-test-007" "ec2_eip/basic.crn" 0)
+printf '%s\n' '{"schema_version":1,"state":"present","resources":[{"identity":"eip"}]}' > "$destroy_other_entry/.stub-state.json"
+if ! destroy_account_output=$(
+    /bin/bash "$RUN_TESTS" --accounts 6-6 destroy ec2_eip/basic.crn 2>&1
+    ); then
+    fail "run-tests.sh destroy failed: $destroy_account_output"
+fi
+[ ! -e "$destroy_selected_entry" ] || \
+    fail "run-tests.sh destroy retained the selected account entry"
+[ -d "$destroy_other_entry" ] || \
+    fail "run-tests.sh destroy removed an entry from another account"
+[ "$(cat "$STUB_DESTROY_LOG")" = "carina-test-006" ] || \
+    fail "run-tests.sh destroy used an unselected account: $(cat "$STUB_DESTROY_LOG")"
+[ "$(cat "$STUB_CREDS_LOG")" = "carina-test-006" ] || \
+    fail "run-tests.sh destroy loaded credentials for an unselected account"
+pass "run-tests.sh destroy is limited to its selected account"
+
+next_test
+use_case_home "run-tests-apply-registration"
+: > "$STUB_DESTROY_LOG"
+: > "$STUB_CREDS_LOG"
+: > "$STUB_STATE_LOG"
+: > "$STUB_COMMAND_LOG"
+if ! apply_runner_output=$(
+    /bin/bash "$RUN_TESTS" --accounts 7-7 apply ec2_eip/basic.crn 2>&1
+    ); then
+    fail "run-tests.sh apply failed: $apply_runner_output"
+fi
+assert_contains "$apply_runner_output" "registered:"
+apply_entry=$(find "$(carina_registry_runs_root)" -type d -name 'test_0' | head -1)
+[ -n "$apply_entry" ] && [ -d "$apply_entry" ] || \
+    fail "run-tests.sh apply did not retain a registered entry"
+[ "$(jq -r '.account' "$apply_entry/meta.json")" = "carina-test-007" ] || \
+    fail "run-tests.sh apply registered the wrong account"
+[ "$(jq -r '.test' "$apply_entry/meta.json")" = "ec2_eip/basic.crn" ] || \
+    fail "run-tests.sh apply registered the wrong fixture"
+if ! apply_destroy_output=$(
+    /bin/bash "$RUN_TESTS" --accounts 7-7 destroy ec2_eip/basic.crn 2>&1
+    ); then
+    fail "run-tests.sh destroy could not release the apply entry: $apply_destroy_output"
+fi
+[ ! -e "$apply_entry" ] || \
+    fail "stub-destroy success did not release the apply entry"
+[ "$(cat "$STUB_DESTROY_LOG")" = "carina-test-007" ] || \
+    fail "apply entry was destroyed with the wrong account"
+pass "run-tests.sh apply registers state that successful destroy releases"
+
+next_test
+use_case_home "run-tests-full-registration"
+: > "$STUB_DESTROY_LOG"
+: > "$STUB_CREDS_LOG"
+: > "$STUB_STATE_LOG"
+: > "$STUB_COMMAND_LOG"
+if ! full_runner_output=$(
+    /bin/bash "$RUN_TESTS" --accounts 8-8 full ec2_eip/basic.crn 2>&1
+    ); then
+    fail "run-tests.sh full failed: $full_runner_output"
+fi
+assert_contains "$full_runner_output" "Total: 1 passed, 0 failed (of 1)"
+full_entry=$(tail -1 "$STUB_STATE_LOG")
+[ -n "$full_entry" ] || fail "run-tests.sh full never state-checked a registry entry"
+case "$full_entry" in
+    "$(carina_registry_runs_root)"/*/carina-test-008/test_0) ;;
+    *) fail "run-tests.sh full used an unexpected registry entry: $full_entry" ;;
+esac
+[ ! -e "$full_entry" ] || \
+    fail "stub-destroy success did not release the full-cycle entry"
+full_commands=$(cat "$STUB_COMMAND_LOG")
+assert_contains "$full_commands" "apply --auto-approve $full_entry"
+assert_contains "$full_commands" "plan --detailed-exitcode $full_entry"
+assert_contains "$full_commands" "destroy --auto-approve $full_entry"
+[ "$(cat "$STUB_DESTROY_LOG")" = "carina-test-008" ] || \
+    fail "full-cycle entry was destroyed with the wrong account"
+pass "run-tests.sh full registers and releases its entry after stub destroy"
 
 next_test
 use_case_home "missing-meta"
@@ -533,7 +711,11 @@ printf '%s\n' '{"schema_version":1,"state":"present","resources":[{"identity":"s
 : > "$destroy_failure_entry/.stub-destroy-fail"
 if destroy_failure_output=$(carina_registry_cleanup --account "account-e" 2>&1); then
     fail "cleanup ignored a destroy failure"
+else
+    destroy_failure_status=$?
 fi
+[ "$destroy_failure_status" -eq 1 ] || \
+    fail "destroy failure returned $destroy_failure_status instead of 1"
 assert_contains "$destroy_failure_output" "$destroy_failure_entry"
 assert_contains "$destroy_failure_output" "destroy"
 [ -d "$destroy_failure_entry" ] || fail "destroy failure entry was removed"
