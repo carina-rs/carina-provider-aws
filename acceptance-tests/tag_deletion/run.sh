@@ -149,6 +149,7 @@ destroy_work_dir() {
     set -e
 
     if [ "$any_success" = false ]; then
+        report_failed_destroy "$work_dir"
         return 1
     fi
     release_acceptance_work_dir "$work_dir"
@@ -237,8 +238,6 @@ run_test() {
 
     # Step 4: Destroy
     if ! destroy_work_dir "$work_dir"; then
-        echo "  WARNING: All destroy attempts failed. Preserving work dir for debugging:"
-        echo "    $work_dir"
         TOTAL_FAILED=$((TOTAL_FAILED + 1))
         ACTIVE_WORK_DIR=""
         echo ""

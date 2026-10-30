@@ -5,6 +5,7 @@ set -euo pipefail
 TEST_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SHARED_DIR="$(cd "$TEST_DIR/.." && pwd)"
 RUN_TESTS="$SHARED_DIR/../run-tests.sh"
+TAG_DELETION_RUNNER="$SHARED_DIR/../tag_deletion/run.sh"
 TEST_TMP="$(mktemp -d)"
 trap 'rm -rf "$TEST_TMP"' EXIT
 
@@ -14,6 +15,7 @@ export STUB_DESTROY_LOG="$TEST_TMP/destroy.log"
 export STUB_CREDS_LOG="$TEST_TMP/creds.log"
 export STUB_STATE_LOG="$TEST_TMP/state.log"
 export STUB_COMMAND_LOG="$TEST_TMP/commands.log"
+export STUB_ENTRY_LOG="$TEST_TMP/entries.log"
 
 cat > "$CARINA_BIN" <<'STUB'
 #!/bin/bash
@@ -21,6 +23,15 @@ set -euo pipefail
 
 command_name="${1:-}"
 printf '%s\n' "$*" >> "$STUB_COMMAND_LOG"
+case "$command_name" in
+    init|validate|plan|apply|destroy)
+        entry="${@: -1}"
+        if [ -d "$entry" ]; then
+            (cd "$entry" && pwd -P) >> "$STUB_ENTRY_LOG"
+        fi
+        ;;
+esac
+
 if [ "$command_name" = "state" ] && [ "${2:-}" = "show" ] && [ "${3:-}" = "--json" ]; then
     entry="${4:?missing entry path}"
     printf '%s\n' "$entry" >> "$STUB_STATE_LOG"
@@ -53,6 +64,16 @@ if [ "$command_name" = "apply" ]; then
         '{"schema_version":1,"state":"present","resources":[{"identity":"stub"}]}' \
         > "$entry/.stub-state.json"
     exit 0
+fi
+
+if [ "$command_name" = "plan" ] && \
+   [ "${STUB_FAIL_PLAN_AFTER_APPLY:-0}" = "1" ]; then
+    entry="${@: -1}"
+    if [ -f "$entry/.stub-state.json" ]; then
+        : > "$entry/.stub-destroy-fail"
+        echo "stub plan failure after apply" >&2
+        exit 29
+    fi
 fi
 
 if [ "$command_name" = "init" ] || [ "$command_name" = "validate" ] || \
@@ -266,6 +287,72 @@ registration_run_count=$(find \
 [ "$registration_run_count" = "1" ] || \
     fail "custom registrations created $registration_run_count runs instead of one"
 pass "custom registration assigns caller variables and reuses one indexed suite run"
+
+next_test
+use_case_home "multi-step-runner-success"
+: > "$STUB_CREDS_LOG"
+: > "$STUB_COMMAND_LOG"
+: > "$STUB_ENTRY_LOG"
+if ! multi_step_output=$(
+    AWS_PROFILE="carina-test-multi" STUB_FAIL_PLAN_AFTER_APPLY= \
+        /bin/bash "$TAG_DELETION_RUNNER" s3_bucket_all_tags 2>&1
+    ); then
+    fail "tag_deletion runner failed with stubs: $multi_step_output"
+fi
+assert_contains "$multi_step_output" "Total: 4 passed, 0 failed"
+multi_step_entry_count=$(sort -u "$STUB_ENTRY_LOG" | wc -l | tr -d ' ')
+[ "$multi_step_entry_count" = "1" ] || \
+    fail "multi-step runner used $multi_step_entry_count registry entries: $(cat "$STUB_ENTRY_LOG")"
+multi_step_entry=$(sort -u "$STUB_ENTRY_LOG")
+multi_step_runs_root=$(cd "$(carina_registry_runs_root)" && pwd -P)
+case "$multi_step_entry" in
+    "$multi_step_runs_root"/*/carina-test-multi/test_0) ;;
+    *) fail "multi-step runner used an unexpected registry entry: $multi_step_entry" ;;
+esac
+[ ! -e "$multi_step_entry" ] || \
+    fail "multi-step runner did not release its registry entry: $multi_step_entry"
+[ "$(grep -c '^init ' "$STUB_COMMAND_LOG")" = "1" ] || \
+    fail "multi-step runner did not initialize exactly once"
+[ "$(grep -c '^apply ' "$STUB_COMMAND_LOG")" = "2" ] || \
+    fail "multi-step runner did not apply both configurations"
+[ "$(grep -c '^plan ' "$STUB_COMMAND_LOG")" = "2" ] || \
+    fail "multi-step runner did not verify both configurations"
+[ "$(grep -c '^destroy ' "$STUB_COMMAND_LOG")" = "2" ] || \
+    fail "multi-step runner did not run both destroy attempts"
+[ "$(sort -u "$STUB_CREDS_LOG")" = "carina-test-multi" ] || \
+    fail "multi-step runner did not consistently use stub credentials"
+pass "real multi-step runner reuses and releases one registry entry"
+
+next_test
+use_case_home "multi-step-runner-destroy-failure"
+: > "$STUB_CREDS_LOG"
+: > "$STUB_COMMAND_LOG"
+: > "$STUB_ENTRY_LOG"
+if multi_step_failure_output=$(
+    AWS_PROFILE="carina-test-multi-fail" STUB_FAIL_PLAN_AFTER_APPLY=1 \
+        /bin/bash "$TAG_DELETION_RUNNER" s3_bucket_all_tags 2>&1
+    ); then
+    fail "tag_deletion runner ignored the injected plan and destroy failures"
+else
+    multi_step_failure_status=$?
+fi
+[ "$multi_step_failure_status" = "1" ] || \
+    fail "multi-step runner returned $multi_step_failure_status instead of 1"
+multi_step_failure_entry_count=$(sort -u "$STUB_ENTRY_LOG" | wc -l | tr -d ' ')
+[ "$multi_step_failure_entry_count" = "1" ] || \
+    fail "failed multi-step runner used $multi_step_failure_entry_count registry entries: $(cat "$STUB_ENTRY_LOG")"
+multi_step_failure_entry=$(find "$(carina_registry_runs_root)" -type d -name 'test_0' | head -1)
+[ -n "$multi_step_failure_entry" ] || \
+    fail "failed multi-step runner did not leave a registry entry"
+[ -d "$multi_step_failure_entry" ] || \
+    fail "failed multi-step runner did not retain its registry entry: $multi_step_failure_entry"
+multi_step_failure_message=$(printf \
+    '  WARNING: All destroy attempts failed. Preserving work dir for debugging:\n    %s' \
+    "$multi_step_failure_entry")
+assert_contains "$multi_step_failure_output" "$multi_step_failure_message"
+[ "$(sort -u "$STUB_CREDS_LOG")" = "carina-test-multi-fail" ] || \
+    fail "failed multi-step runner did not consistently use stub credentials"
+pass "early failure retains and prints the real multi-step runner registry entry"
 
 next_test
 standalone_root="$TEST_TMP/standalone-runner"

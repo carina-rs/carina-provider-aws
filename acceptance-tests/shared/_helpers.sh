@@ -161,6 +161,16 @@ release_acceptance_work_dir() {
     return 1
 }
 
+# report_failed_destroy: Name the registry entry retained when every destroy
+# attempt fails. Keep this message shared so early and final failure paths match.
+# Args: work_dir
+report_failed_destroy() {
+    local work_dir="$1"
+
+    echo "  WARNING: All destroy attempts failed. Preserving work dir for debugging:"
+    echo "    $work_dir"
+}
+
 ACTIVE_WORK_DIR=""
 cleanup() {
     if [ -n "$ACTIVE_WORK_DIR" ] && [ -d "$ACTIVE_WORK_DIR" ] && \
