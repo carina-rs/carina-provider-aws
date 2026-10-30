@@ -41,6 +41,14 @@ pub enum ReadDisposition {
         field: &'static str,
         reason: &'static str,
     },
+    /// AWS accepts one member of a user-input structure but never returns it.
+    /// The containing attribute remains readable for its other members, while
+    /// core retains the accepted nested value as write-only provenance.
+    NestedWriteOnly {
+        field: &'static str,
+        member: &'static str,
+        reason: &'static str,
+    },
     /// The API/model exposes a request member that this provider cannot
     /// truthfully send and read back, so it must not be user-facing schema.
     OmitSchema {
@@ -58,6 +66,7 @@ impl ReadDisposition {
         match self {
             Self::Read { field, .. }
             | Self::WriteOnly { field, .. }
+            | Self::NestedWriteOnly { field, .. }
             | Self::OmitSchema { field, .. } => field,
         }
     }
@@ -426,6 +435,10 @@ impl ResourceDef {
                     "Tags",
                 ]);
                 dispositions.push(SendDisposition::sent_mapped("ResourceIds", &["ResourceId"]));
+                dispositions.push(SendDisposition::sent_mapped(
+                    "TagFieldSpecifications",
+                    &["TagFieldSpecification"],
+                ));
                 dispositions
             }
             "ec2.NatGateway" => {
@@ -645,7 +658,7 @@ impl ResourceDef {
     /// synthetic schema addition fail generation until its read behavior is
     /// chosen explicitly.
     pub fn read_dispositions(&self) -> Vec<ReadDisposition> {
-        use ReadDisposition::{OmitSchema, WriteOnly};
+        use ReadDisposition::{NestedWriteOnly, OmitSchema, WriteOnly};
         use ReadPresence::{Optional, Required};
 
         match self.name {
@@ -719,10 +732,7 @@ impl ResourceDef {
             "ec2.FlowLog" => vec![
                 ReadDisposition::read("ResourceType", Required),
                 ReadDisposition::read("ResourceIds", Required),
-                OmitSchema {
-                    field: "TagFieldSpecifications",
-                    reason: "the pinned SDK cannot send or read this modeled request member",
-                },
+                ReadDisposition::read("TagFieldSpecifications", Optional),
             ],
             "ec2.SubnetRouteTableAssociation" => vec![OmitSchema {
                 field: "PublicIpv4Pool",
@@ -831,6 +841,19 @@ impl ResourceDef {
                 },
                 ReadDisposition::read("SubjectAlternativeNames", Required),
                 ReadDisposition::read("ValidationMethod", Optional),
+                // Observed by running `acceptance-tests/run-tests.sh full`
+                // against the ACM options probe in carina-test-008/009,
+                // ap-northeast-1, on 2026-10-30. RequestCertificate accepted
+                // Options.ValidationMethod=DNS, but DescribeCertificate
+                // returned only CT=ENABLED and Export=DISABLED. The reverse
+                // direction was also checked with plain aws-cli: omitting the
+                // request option still returned only CT + Export. A request
+                // setting only CT logging round-tripped without a diff.
+                NestedWriteOnly {
+                    field: "Options",
+                    member: "ValidationMethod",
+                    reason: "RequestCertificate accepts Options.ValidationMethod, but DescribeCertificate never returns it",
+                },
             ],
             "logs.LogGroup" => vec![ReadDisposition::read("DeletionProtectionEnabled", Required)],
             "sqs.Queue" => vec![
@@ -1534,6 +1557,13 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             // different order from CreateFlowLogs' ResourceIds. Observed in
             // ap-northeast-1 on 2026-10-24; positional equality is not
             // meaningful for this attribute.
+            // TagFieldSpecifications deliberately keeps Smithy's ordered-list
+            // type (there is no override here). Observed with
+            // `acceptance-tests/run-tests.sh full` against the FlowLog tag
+            // probe in carina-test-008/009, ap-northeast-1, on 2026-10-30:
+            // TagKeys=[Name, Environment] read back in the same order. AWS
+            // rejected three keys and a specification without matching tag
+            // fields in LogFormat.
             type_overrides: vec![(
                 "ResourceIds",
                 "AttributeType::unordered_list(AttributeType::string())",
@@ -3134,37 +3164,10 @@ pub fn acm_resources() -> Vec<ResourceDef> {
         update_ops: vec![],
         identifier: "CertificateArn",
         has_tags: true,
-        type_overrides: vec![
-            (
-                "SubjectAlternativeNames",
-                "AttributeType::unordered_list(AttributeType::string())",
-            ),
-            // Nested-field omission: the pinned aws-sdk-acm CertificateOptions
-            // has no ValidationMethod member, so the provider cannot send it;
-            // revisit when aws-sdk-acm is upgraded.
-            (
-                "Options",
-                "AttributeType::struct_(\
-                    \"CertificateOptions\".to_string(),\
-                    vec![\
-                    StructField::optional(\"certificate_transparency_logging_preference\", AttributeType::enum_(\
-                        carina_core::schema::enum_identity(\"CertificateTransparencyLoggingPreference\", Some(\"aws.acm.Certificate.CertificateOptions\")),\
-                        Some(vec![\"DISABLED\".to_string(), \"ENABLED\".to_string()]),\
-                        vec![(\"DISABLED\".to_string(), \"disabled\".to_string()), (\"ENABLED\".to_string(), \"enabled\".to_string())],\
-                        None,\
-                        None,\
-                    )).with_description(\"This parameter has been deprecated. Certificate transparency logging opt-out is no longer available. All public certificates are recorded in a certifi...\").with_provider_name(\"CertificateTransparencyLoggingPreference\").build(),\
-                    StructField::optional(\"export\", AttributeType::enum_(\
-                        carina_core::schema::enum_identity(\"Export\", Some(\"aws.acm.Certificate.CertificateOptions\")),\
-                        Some(vec![\"DISABLED\".to_string(), \"ENABLED\".to_string()]),\
-                        vec![(\"DISABLED\".to_string(), \"disabled\".to_string()), (\"ENABLED\".to_string(), \"enabled\".to_string())],\
-                        None,\
-                        None,\
-                    )).with_description(\"You can opt in to allow the export of your certificates by specifying ENABLED. You cannot update the value of Export after the the certificate is crea...\").with_provider_name(\"Export\").build()\
-                    ],\
-                )",
-            ),
-        ],
+        type_overrides: vec![(
+            "SubjectAlternativeNames",
+            "AttributeType::unordered_list(AttributeType::string())",
+        )],
         exclude_fields: vec![
             // Imported / private-CA flows are out of scope for the
             // initial cut. The wait construct is the validation path,
@@ -3965,6 +3968,35 @@ mod tests {
                 ("organizations.Account", "RoleName"),
                 ("s3.Bucket", "BucketNamespace"),
             ])
+        );
+
+        let nested_write_only_fields = ec2_resources()
+            .into_iter()
+            .chain(sts_resources())
+            .chain(organizations_resources())
+            .chain(s3_resources())
+            .chain(acm_resources())
+            .chain(route53_resources())
+            .chain(iam_resources())
+            .chain(logs_resources())
+            .chain(sqs_resources())
+            .flat_map(|resource| {
+                let resource_name = resource.name;
+                resource
+                    .read_dispositions()
+                    .into_iter()
+                    .filter_map(move |disposition| match disposition {
+                        ReadDisposition::NestedWriteOnly { field, member, .. } => {
+                            Some((resource_name, field, member))
+                        }
+                        _ => None,
+                    })
+            })
+            .collect::<std::collections::BTreeSet<_>>();
+
+        assert_eq!(
+            nested_write_only_fields,
+            std::collections::BTreeSet::from([("acm.Certificate", "Options", "ValidationMethod",)])
         );
     }
 }

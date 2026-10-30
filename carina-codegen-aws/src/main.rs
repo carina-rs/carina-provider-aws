@@ -868,15 +868,140 @@ struct CollectedResourceAttributes {
     description: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct StructMemberKey {
+    parent_shape_id: String,
+    member_name: String,
+}
+
+#[derive(Debug)]
+struct ResolvedNestedWriteOnly {
+    field: &'static str,
+    member: &'static str,
+    key: StructMemberKey,
+}
+
+fn resolve_nested_write_only_fields(
+    res: &ResourceDef,
+    model: &SmithyModel,
+    dispositions: &[resource_defs::ReadDisposition],
+) -> Result<Vec<ResolvedNestedWriteOnly>> {
+    use resource_defs::ReadDisposition;
+
+    let nested_dispositions = dispositions
+        .iter()
+        .filter_map(|disposition| match disposition {
+            ReadDisposition::NestedWriteOnly { field, member, .. } => Some((*field, *member)),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    if nested_dispositions.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let conflicting_top_level = dispositions
+        .iter()
+        .filter_map(|disposition| match disposition {
+            ReadDisposition::WriteOnly { field, .. } => Some((field.to_snake_case(), "WriteOnly")),
+            ReadDisposition::OmitSchema { field, .. } => {
+                Some((field.to_snake_case(), "OmitSchema"))
+            }
+            _ => None,
+        })
+        .collect::<HashMap<_, _>>();
+
+    let writable_structure = if let Some(schema_structure) = res.schema_structure {
+        model
+            .get_structure(&format!("{}#{schema_structure}", res.service_namespace))
+            .with_context(|| {
+                format!(
+                    "Cannot find schema structure {}#{schema_structure}",
+                    res.service_namespace
+                )
+            })?
+    } else {
+        model
+            .operation_input(&format!("{}#{}", res.service_namespace, res.create_op))
+            .with_context(|| {
+                format!(
+                    "Cannot find create input {}#{}",
+                    res.service_namespace, res.create_op
+                )
+            })?
+    };
+
+    let mut resolved = Vec::with_capacity(nested_dispositions.len());
+    let mut resolved_keys = HashMap::new();
+    for (field, member) in nested_dispositions {
+        if let Some(conflict) = conflicting_top_level.get(&field.to_snake_case()) {
+            anyhow::bail!(
+                "{} nested write-only field {}.{} conflicts with top-level {} disposition for {}",
+                res.name,
+                field,
+                member,
+                conflict,
+                field
+            );
+        }
+
+        let parent = writable_structure.members.get(field).with_context(|| {
+            format!(
+                "{} nested write-only field {}.{} has no writable parent member named exactly {}; use the Smithy member spelling",
+                res.name, field, member, field
+            )
+        })?;
+        let nested_structure = model.get_structure(&parent.target).with_context(|| {
+            format!(
+                "{} nested write-only parent {} must target a structure",
+                res.name, field
+            )
+        })?;
+        let (resolved_member, _) =
+            nested_structure
+                .members
+                .get_key_value(member)
+                .with_context(|| {
+                    format!(
+                        "{} nested write-only field {}.{} does not name an exact member in {}; use the Smithy member spelling",
+                        res.name, field, member, parent.target
+                    )
+                })?;
+        let key = StructMemberKey {
+            parent_shape_id: parent.target.clone(),
+            member_name: resolved_member.clone(),
+        };
+        if let Some((previous_field, previous_member)) =
+            resolved_keys.insert(key.clone(), (field, member))
+        {
+            anyhow::bail!(
+                "{} nested write-only fields {}.{} and {}.{} resolve to the same Smithy member {}.{}",
+                res.name,
+                previous_field,
+                previous_member,
+                field,
+                member,
+                key.parent_shape_id,
+                key.member_name
+            );
+        }
+        resolved.push(ResolvedNestedWriteOnly { field, member, key });
+    }
+
+    Ok(resolved)
+}
+
 /// Collect the exact top-level schema attributes before rendering either the
 /// schema or its typed read model. Sharing this pass is the guard against the
 /// two generated contracts drifting apart.
 fn collect_resource_attributes_unvalidated(
     res: &ResourceDef,
     model: &SmithyModel,
+    read_dispositions: &[resource_defs::ReadDisposition],
 ) -> Result<CollectedResourceAttributes> {
     let ns = res.service_namespace;
     let namespace = format!("aws.{}", res.name);
+    let resolved_nested_write_only =
+        resolve_nested_write_only_fields(res, model, read_dispositions)?;
 
     // Build exclude set
     let exclude: HashSet<&str> = res.exclude_fields.iter().copied().collect();
@@ -922,6 +1047,15 @@ fn collect_resource_attributes_unvalidated(
         .iter()
         .copied()
         .collect();
+
+    // Nested write-only fields are keyed by the resolved Smithy parent shape
+    // and exact member name. Emission counts make resolution self-checking:
+    // a type override cannot silently bypass the StructField marker.
+    let nested_write_only_struct_fields: HashSet<StructMemberKey> = resolved_nested_write_only
+        .iter()
+        .map(|resolved| resolved.key.clone())
+        .collect();
+    let mut nested_write_only_emissions: HashMap<StructMemberKey, usize> = HashMap::new();
 
     // Build per-(parent_struct, member) type override map (aws#302).
     // Distinguishes struct fields by parent struct shape so the same
@@ -1201,6 +1335,8 @@ fn collect_resource_attributes_unvalidated(
                 all_ranged_ints: &mut all_ranged_ints,
                 current_root_attr: Some(name.as_str()),
                 deferred_populate_struct_fields: &deferred_populate_struct_fields,
+                nested_write_only_struct_fields: &nested_write_only_struct_fields,
+                nested_write_only_emissions: &mut nested_write_only_emissions,
                 struct_field_type_overrides: &struct_field_type_overrides,
             },
             &member_ref.target,
@@ -1308,6 +1444,8 @@ fn collect_resource_attributes_unvalidated(
                 all_ranged_ints: &mut all_ranged_ints,
                 current_root_attr: Some(name.as_str()),
                 deferred_populate_struct_fields: &deferred_populate_struct_fields,
+                nested_write_only_struct_fields: &nested_write_only_struct_fields,
+                nested_write_only_emissions: &mut nested_write_only_emissions,
                 struct_field_type_overrides: &struct_field_type_overrides,
             },
             &member_ref.target,
@@ -1358,6 +1496,23 @@ fn collect_resource_attributes_unvalidated(
             .map(str::to_string)
     };
 
+    for resolved in &resolved_nested_write_only {
+        let emission_count = nested_write_only_emissions
+            .get(&resolved.key)
+            .copied()
+            .unwrap_or_default();
+        anyhow::ensure!(
+            emission_count == 1,
+            "{} nested write-only field {}.{} resolved to {}.{}, but generated {} matching StructField markers; expected exactly one (a type override or reused shape may have bypassed exact emission)",
+            res.name,
+            resolved.field,
+            resolved.member,
+            resolved.key.parent_shape_id,
+            resolved.key.member_name,
+            emission_count
+        );
+    }
+
     Ok(CollectedResourceAttributes {
         attrs,
         all_enums,
@@ -1365,13 +1520,13 @@ fn collect_resource_attributes_unvalidated(
     })
 }
 
-fn collect_resource_attributes(
+fn collect_resource_attributes_with_read_dispositions(
     res: &ResourceDef,
     model: &SmithyModel,
+    dispositions: &[resource_defs::ReadDisposition],
 ) -> Result<CollectedResourceAttributes> {
-    let mut collected = collect_resource_attributes_unvalidated(res, model)?;
-    let dispositions = res.read_dispositions();
-    apply_read_contract(res, model, &mut collected.attrs, &dispositions)?;
+    let mut collected = collect_resource_attributes_unvalidated(res, model, dispositions)?;
+    apply_read_contract(res, model, &mut collected.attrs, dispositions)?;
     collected.all_enums.retain(|provider_name, _| {
         collected
             .attrs
@@ -1381,13 +1536,22 @@ fn collect_resource_attributes(
     Ok(collected)
 }
 
+fn collect_resource_attributes(
+    res: &ResourceDef,
+    model: &SmithyModel,
+) -> Result<CollectedResourceAttributes> {
+    let dispositions = res.read_dispositions();
+    collect_resource_attributes_with_read_dispositions(res, model, &dispositions)
+}
+
 #[cfg(test)]
 fn validate_send_contract(
     res: &ResourceDef,
     model: &SmithyModel,
     dispositions: &[resource_defs::SendDisposition],
 ) -> Result<()> {
-    let mut collected = collect_resource_attributes_unvalidated(res, model)?;
+    let read_dispositions = res.read_dispositions();
+    let mut collected = collect_resource_attributes_unvalidated(res, model, &read_dispositions)?;
     apply_send_contract(res, &mut collected.attrs, dispositions).map(|_| ())
 }
 
@@ -1489,8 +1653,7 @@ fn validate_read_contract(
     model: &SmithyModel,
     dispositions: &[resource_defs::ReadDisposition],
 ) -> Result<()> {
-    let mut collected = collect_resource_attributes_unvalidated(res, model)?;
-    apply_read_contract(res, model, &mut collected.attrs, dispositions)
+    collect_resource_attributes_with_read_dispositions(res, model, dispositions).map(|_| ())
 }
 
 fn has_inferred_read_source(res: &ResourceDef, model: &SmithyModel, attr: &AttrInfo) -> bool {
@@ -1540,22 +1703,47 @@ fn apply_read_contract(
 ) -> Result<()> {
     use resource_defs::ReadDisposition;
 
+    let conflicting_top_level = dispositions
+        .iter()
+        .filter_map(|disposition| match disposition {
+            ReadDisposition::WriteOnly { field, .. } => Some((field.to_snake_case(), "WriteOnly")),
+            ReadDisposition::OmitSchema { field, .. } => {
+                Some((field.to_snake_case(), "OmitSchema"))
+            }
+            _ => None,
+        })
+        .collect::<HashMap<_, _>>();
     let mut seen = HashSet::new();
+    let mut seen_nested = HashSet::new();
     for disposition in dispositions {
         let field = disposition.field();
         let normalized = field.to_snake_case();
-        if !seen.insert(normalized.clone()) {
-            anyhow::bail!(
-                "{} has duplicate/conflicting read dispositions for {}",
-                res.name,
-                field
-            );
+        match disposition {
+            ReadDisposition::NestedWriteOnly { member, .. } => {
+                if !seen_nested.insert((field, *member)) {
+                    anyhow::bail!(
+                        "{} has duplicate/conflicting nested read dispositions for {}.{}",
+                        res.name,
+                        field,
+                        member
+                    );
+                }
+            }
+            _ => {
+                if !seen.insert(normalized.clone()) {
+                    anyhow::bail!(
+                        "{} has duplicate/conflicting read dispositions for {}",
+                        res.name,
+                        field
+                    );
+                }
+            }
         }
 
-        let Some(attr) = attrs
-            .iter_mut()
-            .find(|attr| attr.provider_name.to_snake_case() == normalized)
-        else {
+        let Some(attr) = attrs.iter_mut().find(|attr| match disposition {
+            ReadDisposition::NestedWriteOnly { .. } => attr.provider_name == field,
+            _ => attr.provider_name.to_snake_case() == normalized,
+        }) else {
             anyhow::bail!(
                 "{} read disposition names unknown schema attribute {}",
                 res.name,
@@ -1584,6 +1772,46 @@ fn apply_read_contract(
                 }
                 attr.is_write_only = true;
                 attr.read_reason = Some((*reason).to_string());
+            }
+            ReadDisposition::NestedWriteOnly { member, reason, .. } => {
+                if let Some(conflict) = conflicting_top_level.get(&normalized) {
+                    anyhow::bail!(
+                        "{} nested write-only field {}.{} conflicts with top-level {} disposition for {}",
+                        res.name,
+                        field,
+                        member,
+                        conflict,
+                        field
+                    );
+                }
+                if reason.trim().is_empty() {
+                    anyhow::bail!(
+                        "{} nested write-only field {}.{} requires a non-empty reason",
+                        res.name,
+                        field,
+                        member
+                    );
+                }
+                if attr.is_read_only || !attr.is_create_only {
+                    anyhow::bail!(
+                        "{} nested write-only field {}.{} must belong to a writable, create-only attribute",
+                        res.name,
+                        field,
+                        member
+                    );
+                }
+                let explicitly_readable = dispositions.iter().any(|candidate| {
+                    matches!(candidate, ReadDisposition::Read { .. })
+                        && candidate.field().to_snake_case() == normalized
+                });
+                if !explicitly_readable && !has_inferred_read_source(res, model, attr) {
+                    anyhow::bail!(
+                        "{} nested write-only field {}.{} requires its parent attribute to be readable",
+                        res.name,
+                        field,
+                        member
+                    );
+                }
             }
             ReadDisposition::OmitSchema { reason, .. } => {
                 if reason.trim().is_empty() {
@@ -1964,6 +2192,14 @@ struct TypeResolutionContext<'a> {
     /// `generate_struct_type` checks `(current_root_attr, member)`
     /// against this set when emitting each field. carina#3034.
     deferred_populate_struct_fields: &'a HashSet<(&'a str, &'a str)>,
+    /// Resolved `(parent_shape_id, member_name)` keys whose user-input
+    /// StructField is accepted by AWS but absent from every read response.
+    /// The generated `.write_only()` marker lets core preserve and compare
+    /// the accepted leaf without projecting it from provider state.
+    nested_write_only_struct_fields: &'a HashSet<StructMemberKey>,
+    /// Number of StructFields emitted for each resolved nested write-only key.
+    /// Every configured disposition must finish with exactly one match.
+    nested_write_only_emissions: &'a mut HashMap<StructMemberKey, usize>,
     /// `(parent_struct, member) -> type_code` overrides for struct
     /// fields, keyed by the immediate parent struct shape name (not the
     /// top-level attribute). Lets a member like `HostedZoneId` resolve
@@ -2101,7 +2337,7 @@ fn resolve_type(
 
             // Generate struct type for nested structures
             if let Some(structure) = ctx.model.get_structure(target) {
-                let struct_code = generate_struct_type(ctx, shape_name, structure);
+                let struct_code = generate_struct_type(ctx, target, structure);
                 return (struct_code, None);
             }
             (PLAIN_STRING_TYPE_CODE.to_string(), None)
@@ -2120,9 +2356,10 @@ fn resolve_type(
 /// Generate Rust code for an AttributeType::Struct.
 fn generate_struct_type(
     ctx: &mut TypeResolutionContext<'_>,
-    struct_name: &str,
+    struct_shape_id: &str,
     structure: &carina_smithy::StructureShape,
 ) -> String {
+    let struct_name = SmithyModel::shape_name(struct_shape_id);
     ctx.struct_path.push(struct_name.to_string());
     let mut fields: Vec<String> = Vec::new();
     for (field_name, member_ref) in &structure.members {
@@ -2188,6 +2425,19 @@ fn generate_struct_type(
                 .contains(&(root_attr, field_name.as_str()))
         {
             field_code.push_str(".deferred_populate()");
+        }
+        let nested_write_only_key = StructMemberKey {
+            parent_shape_id: struct_shape_id.to_string(),
+            member_name: field_name.clone(),
+        };
+        if ctx
+            .nested_write_only_struct_fields
+            .contains(&nested_write_only_key)
+        {
+            field_code.push_str(".write_only()");
+            *ctx.nested_write_only_emissions
+                .entry(nested_write_only_key)
+                .or_default() += 1;
         }
         if let Some(desc) = SmithyModel::documentation(&member_ref.traits) {
             let escaped = escape_description(desc);
@@ -4004,8 +4254,10 @@ fn generate_send_models_code(
                 res.service_namespace, res.name
             )
         })?;
-        let mut collected = collect_resource_attributes_unvalidated(res, model)?;
-        apply_read_contract(res, model, &mut collected.attrs, &res.read_dispositions())?;
+        let read_dispositions = res.read_dispositions();
+        let mut collected =
+            collect_resource_attributes_unvalidated(res, model, &read_dispositions)?;
+        apply_read_contract(res, model, &mut collected.attrs, &read_dispositions)?;
         apply_send_contract(res, &mut collected.attrs, dispositions)?;
 
         let mut create_fields = collected
@@ -6454,6 +6706,52 @@ mod tests {
         carina_smithy::parse(&document).expect("parse string-only fixture model")
     }
 
+    fn nested_write_only_fixture_model() -> SmithyModel {
+        carina_smithy::parse(
+            r##"{
+              "smithy": "2.0",
+              "shapes": {
+                "com.amazonaws.test#CreateFixture": {
+                  "type": "operation",
+                  "input": { "target": "com.amazonaws.test#CreateFixtureRequest" },
+                  "output": { "target": "smithy.api#Unit" },
+                  "traits": {}
+                },
+                "com.amazonaws.test#CreateFixtureRequest": {
+                  "type": "structure",
+                  "members": {
+                    "Options": { "target": "com.amazonaws.test#OuterOptions", "traits": {} }
+                  },
+                  "traits": { "smithy.api#input": {} }
+                },
+                "com.amazonaws.test#ReadFixture": {
+                  "type": "structure",
+                  "members": {
+                    "Options": { "target": "com.amazonaws.test#OuterOptions", "traits": {} }
+                  },
+                  "traits": {}
+                },
+                "com.amazonaws.test#OuterOptions": {
+                  "type": "structure",
+                  "members": {
+                    "Nested": { "target": "com.amazonaws.test#InnerOptions", "traits": {} },
+                    "ValidationMethod": { "target": "smithy.api#String", "traits": {} }
+                  },
+                  "traits": {}
+                },
+                "com.amazonaws.test#InnerOptions": {
+                  "type": "structure",
+                  "members": {
+                    "ValidationMethod": { "target": "smithy.api#String", "traits": {} }
+                  },
+                  "traits": {}
+                }
+              }
+            }"##,
+        )
+        .expect("parse nested write-only fixture model")
+    }
+
     fn organizations_account_fixture_model() -> SmithyModel {
         carina_smithy::parse(
             r##"{
@@ -6943,6 +7241,180 @@ mod tests {
     }
 
     #[test]
+    fn nested_write_only_marks_only_the_resolved_parent_member() {
+        let model = nested_write_only_fixture_model();
+        let resource = provider_fixture_resource("test.NestedWriteOnly", "", &["Options"], vec![]);
+        let dispositions = [resource_defs::ReadDisposition::NestedWriteOnly {
+            field: "Options",
+            member: "ValidationMethod",
+            reason: "test fixture",
+        }];
+
+        let collected =
+            collect_resource_attributes_with_read_dispositions(&resource, &model, &dispositions)
+                .expect("generate nested write-only fixture");
+        let options_type = &collected
+            .attrs
+            .iter()
+            .find(|attr| attr.provider_name == "Options")
+            .expect("Options attribute")
+            .type_code;
+
+        assert_eq!(options_type.matches(".write_only()").count(), 1);
+        assert!(
+            options_type.contains(
+                "StructField::optional(\"validation_method\", AttributeType::string()).write_only().with_provider_name(\"ValidationMethod\")"
+            ),
+            "outer member was not marked write-only:\n{options_type}"
+        );
+        assert!(
+            options_type.contains(
+                "StructField::optional(\"validation_method\", AttributeType::string()).with_provider_name(\"ValidationMethod\")"
+            ),
+            "same-named member in the inner struct was incorrectly marked write-only:\n{options_type}"
+        );
+    }
+
+    #[test]
+    fn nested_write_only_requires_exact_smithy_spelling() {
+        let model = nested_write_only_fixture_model();
+        let resource = provider_fixture_resource("test.NestedWriteOnly", "", &["Options"], vec![]);
+
+        for (field, member) in [
+            ("options", "ValidationMethod"),
+            ("Options", "validation_method"),
+        ] {
+            let dispositions = [resource_defs::ReadDisposition::NestedWriteOnly {
+                field,
+                member,
+                reason: "test fixture",
+            }];
+            let error = validate_read_contract(&resource, &model, &dispositions)
+                .expect_err("normalized nested write-only spelling must fail generation");
+            assert!(
+                error.to_string().contains("Smithy member spelling"),
+                "{error:#}"
+            );
+        }
+    }
+
+    #[test]
+    fn nested_write_only_fails_when_a_type_override_bypasses_struct_emission() {
+        let model = nested_write_only_fixture_model();
+        let mut resource =
+            provider_fixture_resource("test.NestedWriteOnly", "", &["Options"], vec![]);
+        resource
+            .type_overrides
+            .push(("Options", "AttributeType::string()"));
+        let dispositions = [resource_defs::ReadDisposition::NestedWriteOnly {
+            field: "Options",
+            member: "ValidationMethod",
+            reason: "test fixture",
+        }];
+
+        let error = validate_read_contract(&resource, &model, &dispositions)
+            .expect_err("type override must not silently drop nested write-only emission");
+        let message = error.to_string();
+        assert!(message.contains("Options.ValidationMethod"), "{error:#}");
+        assert!(message.contains("generated 0"), "{error:#}");
+        assert!(message.contains("expected exactly one"), "{error:#}");
+    }
+
+    #[test]
+    fn nested_write_only_fails_when_a_parent_shape_is_emitted_twice() {
+        let mut model = nested_write_only_fixture_model();
+        for shape_id in [
+            "com.amazonaws.test#CreateFixtureRequest",
+            "com.amazonaws.test#ReadFixture",
+        ] {
+            let shape = model.shapes.get_mut(shape_id).expect("fixture shape");
+            let carina_smithy::Shape::Structure(structure) = shape else {
+                panic!("fixture shape must be a structure");
+            };
+            structure.members.insert(
+                "OtherOptions".to_string(),
+                carina_smithy::ShapeRef {
+                    target: "com.amazonaws.test#OuterOptions".to_string(),
+                    traits: Default::default(),
+                },
+            );
+        }
+        let resource = provider_fixture_resource("test.NestedWriteOnly", "", &["Options"], vec![]);
+        let dispositions = [resource_defs::ReadDisposition::NestedWriteOnly {
+            field: "Options",
+            member: "ValidationMethod",
+            reason: "test fixture",
+        }];
+
+        let error = validate_read_contract(&resource, &model, &dispositions)
+            .expect_err("reused parent shape must not emit nested write-only markers twice");
+        let message = error.to_string();
+        assert!(message.contains("generated 2"), "{error:#}");
+        assert!(message.contains("expected exactly one"), "{error:#}");
+    }
+
+    #[test]
+    fn nested_write_only_rejects_conflicting_top_level_dispositions() {
+        let model = nested_write_only_fixture_model();
+        let resource = provider_fixture_resource("test.NestedWriteOnly", "", &["Options"], vec![]);
+        let conflicts = [
+            resource_defs::ReadDisposition::WriteOnly {
+                field: "Options",
+                reason: "test fixture",
+            },
+            resource_defs::ReadDisposition::OmitSchema {
+                field: "Options",
+                reason: "test fixture",
+            },
+        ];
+
+        for conflict in conflicts {
+            let dispositions = [
+                resource_defs::ReadDisposition::NestedWriteOnly {
+                    field: "Options",
+                    member: "ValidationMethod",
+                    reason: "test fixture",
+                },
+                conflict,
+            ];
+            let error = validate_read_contract(&resource, &model, &dispositions)
+                .expect_err("conflicting top-level disposition must fail generation");
+            assert!(
+                error.to_string().contains("conflicts with top-level"),
+                "{error:#}"
+            );
+        }
+    }
+
+    #[test]
+    fn nested_write_only_requires_a_readable_parent_attribute() {
+        let mut model = nested_write_only_fixture_model();
+        let read_shape = model
+            .shapes
+            .get_mut("com.amazonaws.test#ReadFixture")
+            .expect("read fixture shape");
+        let carina_smithy::Shape::Structure(read_structure) = read_shape else {
+            panic!("read fixture must be a structure");
+        };
+        read_structure.members.remove("Options");
+        let resource = provider_fixture_resource("test.NestedWriteOnly", "", &["Options"], vec![]);
+        let dispositions = [resource_defs::ReadDisposition::NestedWriteOnly {
+            field: "Options",
+            member: "ValidationMethod",
+            reason: "test fixture",
+        }];
+
+        let error = validate_read_contract(&resource, &model, &dispositions)
+            .expect_err("nested write-only parent must remain readable");
+        assert!(
+            error
+                .to_string()
+                .contains("parent attribute to be readable"),
+            "{error:#}"
+        );
+    }
+
+    #[test]
     fn unclassified_writable_attribute_fails_send_generation() {
         let model = string_fixture_model(&[("Description", false)], &[("Description", false)]);
         let resource =
@@ -6984,8 +7456,10 @@ mod tests {
                 reason: "tags are resolved by the fixture's external tag owner",
             },
         ];
+        let read_dispositions = resource.read_dispositions();
         let mut collected =
-            collect_resource_attributes_unvalidated(&resource, &model).expect("fixture attributes");
+            collect_resource_attributes_unvalidated(&resource, &model, &read_dispositions)
+                .expect("fixture attributes");
         let applied = apply_send_contract(&resource, &mut collected.attrs, &dispositions)
             .expect("classified synthetic tags");
         assert_eq!(
@@ -8017,6 +8491,10 @@ mod tests {
                     "Export": {
                       "target": "com.amazonaws.acm#Export",
                       "traits": {}
+                    },
+                    "ValidationMethod": {
+                      "target": "com.amazonaws.acm#ValidationMethod",
+                      "traits": {}
                     }
                   },
                   "traits": {}
@@ -8200,8 +8678,8 @@ mod tests {
             assert!(markdown.contains(heading), "missing {heading}:\n{markdown}");
         }
         assert!(
-            !markdown.contains("### options.validation_method"),
-            "the pinned ACM SDK cannot send the nested validation method:\n{markdown}"
+            markdown.contains("### options.validation_method (ValidationMethod)"),
+            "missing nested ACM validation method:\n{markdown}"
         );
         assert!(!markdown.contains("### CertificateOptions"), "{markdown}");
         assert!(!markdown.contains("### DomainValidation\n"), "{markdown}");

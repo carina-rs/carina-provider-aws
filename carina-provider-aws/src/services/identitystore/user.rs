@@ -283,6 +283,8 @@ mod tests {
         DescribeUserOutput::builder()
             .user_id("37846ac8-4021-705b-1bf2-26861723348f")
             .identity_store_id("d-9567916d09")
+            .user_arn("arn:aws:identitystore:::user/37846ac8-4021-705b-1bf2-26861723348f")
+            .revision("1")
             .user_name("gosukenator@gmail.com")
             .display_name("Gosuke Miyashita")
             .name(name_block())
@@ -372,10 +374,12 @@ mod tests {
 
     #[test]
     fn extract_omits_optional_fields_when_absent() {
-        // Minimal response: only required fields (user_id, identity_store_id).
+        // Minimal response: only fields required by the current SDK model.
         let resp = DescribeUserOutput::builder()
             .user_id("uid-min")
             .identity_store_id("d-min")
+            .user_arn("arn:aws:identitystore:::user/uid-min")
+            .revision("1")
             .build()
             .unwrap();
         let attrs = extract_attributes(&resp);
@@ -405,6 +409,8 @@ mod tests {
         let resp = DescribeUserOutput::builder()
             .user_id("uid")
             .identity_store_id("d")
+            .user_arn("arn:aws:identitystore:::user/uid")
+            .revision("1")
             .name(Name::builder().given_name("Gosuke").build())
             .build()
             .unwrap();
@@ -431,6 +437,8 @@ mod tests {
         let resp = DescribeUserOutput::builder()
             .user_id("uid")
             .identity_store_id("d")
+            .user_arn("arn:aws:identitystore:::user/uid")
+            .revision("1")
             .set_emails(Some(vec![]))
             .build()
             .unwrap();

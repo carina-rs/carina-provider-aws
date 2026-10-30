@@ -12,8 +12,8 @@ use std::sync::{Arc, Mutex};
 use carina_core::differ::{Diff, Orphans, PlanPriorStates, create_plan, diff};
 use carina_core::effect::Effect;
 use carina_core::provider::{
-    AppliedIdentifier, CreateRequest, NoopNormalizer, Provider, ProviderFactory,
-    ProviderNormalizer, RawSavedAttrs, ReadRequest, UpdateRequest,
+    AppliedIdentifier, CreateRequest, NestedWriteOnlyRecord, NoopNormalizer, PersistedAttributes,
+    Provider, ProviderFactory, ProviderNormalizer, RawSavedAttrs, ReadRequest, UpdateRequest,
 };
 use carina_core::resource::{
     ConcreteValue, Current, ResolvedResource, Resource, State, Value, into_plan_input_current_map,
@@ -209,6 +209,51 @@ fn assert_no_diff(desired: Resource, current: State) {
     assert!(matches!(result, Diff::NoChange(_)), "{result:?}");
 }
 
+fn assert_no_diff_with_nested_write_only(
+    desired: Resource,
+    current: State,
+    sent_attributes: &[&str],
+) {
+    let registry = schema_registry();
+    let schema = registry
+        .get(
+            "aws",
+            desired.id.resource_type.as_str(),
+            SchemaKind::Resource,
+        )
+        .expect("managed resource schema");
+    let mut nested_write_only = NestedWriteOnlyRecord::new();
+    nested_write_only
+        .record_sent(
+            schema.schema().as_schema(),
+            sent_attributes.iter().copied(),
+            &desired.attributes,
+            None,
+        )
+        .expect("accepted nested write-only values should be persistable");
+    let persisted =
+        PersistedAttributes::from_typed_persisted_wire_values(current.attributes.clone())
+            .expect("scripted provider state should be persistable");
+    let saved = RawSavedAttrs::from_persisted(
+        HashMap::from([(desired.id.clone(), persisted)]),
+        HashMap::from([(desired.id.clone(), nested_write_only)]),
+    )
+    .lift(&registry);
+    let explicit = carina_core::explicit::build_from_resource_for_stored_values(
+        &desired,
+        &current.attributes,
+        Some(schema.schema().as_schema()),
+    );
+    let result = diff(
+        &ResolvedResource::new(desired),
+        &current,
+        &saved,
+        Some(&explicit),
+        Some(schema.schema().as_schema()),
+    );
+    assert!(matches!(result, Diff::NoChange(_)), "{result:?}");
+}
+
 async fn create_request_for_test(resource: Resource) -> CreateRequest {
     let bindings = carina_core::binding_index::ResolvedBindings::default();
     let module_gate = carina_core::executor::ModuleConstraintGate::from_live_compositions(&[]);
@@ -363,10 +408,19 @@ impl MockService for AcmService {
         request: MockRequest,
     ) -> Pin<Box<dyn Future<Output = MockResponse> + Send + '_>> {
         let response = match request_target(&request) {
+            "CertificateManager.RequestCertificate" => {
+                let body = str::from_utf8(&request.body)
+                    .expect("RequestCertificate body must be UTF-8 JSON");
+                assert!(
+                    body.contains(r#""ValidationMethod":"DNS""#),
+                    "nested options validation method must reach RequestCertificate: {body}"
+                );
+                MockResponse::json(200, format!(r#"{{"CertificateArn":"{CERTIFICATE_ARN}"}}"#))
+            }
             "CertificateManager.DescribeCertificate" => MockResponse::json(
                 200,
                 format!(
-                    r#"{{"Certificate":{{"CertificateArn":"{CERTIFICATE_ARN}","DomainName":"example.com","SubjectAlternativeNames":["www.example.com","example.com"],"Status":"ISSUED","Type":"AMAZON_ISSUED","KeyAlgorithm":"POST_QUANTUM_2048"}}}}"#
+                    r#"{{"Certificate":{{"CertificateArn":"{CERTIFICATE_ARN}","DomainName":"example.com","SubjectAlternativeNames":["www.example.com","example.com"],"Status":"ISSUED","Type":"AMAZON_ISSUED","KeyAlgorithm":"POST_QUANTUM_2048","Options":{{"CertificateTransparencyLoggingPreference":"ENABLED","Export":"DISABLED"}}}}}}"#
                 ),
             ),
             "CertificateManager.ListTagsForCertificate" => {
@@ -825,6 +879,9 @@ impl MockService for Ec2RoundTripService {
             (Ec2RoundTripCase::FlowLog, "CreateFlowLogs") => {
                 assert_query_contains(&request, "ResourceType=VPC");
                 assert_query_contains(&request, &format!("ResourceId.1={VPC_ID}"));
+                assert_query_contains(&request, "TagFieldSpecification.1.ResourceType=instance");
+                assert_query_contains(&request, "TagFieldSpecification.1.TagKey.1=Name");
+                assert_query_contains(&request, "TagFieldSpecification.1.TagKey.2=Environment");
                 MockResponse::xml(
                     200,
                     format!(
@@ -835,7 +892,7 @@ impl MockService for Ec2RoundTripService {
             (Ec2RoundTripCase::FlowLog, "DescribeFlowLogs") => MockResponse::xml(
                 200,
                 format!(
-                    r#"<DescribeFlowLogsResponse xmlns="http://ec2.amazonaws.com/doc/2016-11-15/"><requestId>flow-read</requestId><flowLogSet><item><flowLogId>{FLOW_LOG_ID}</flowLogId><resourceId>{VPC_ID}</resourceId><trafficType>ALL</trafficType><flowLogStatus>ACTIVE</flowLogStatus><tagSet/></item></flowLogSet></DescribeFlowLogsResponse>"#,
+                    r#"<DescribeFlowLogsResponse xmlns="http://ec2.amazonaws.com/doc/2016-11-15/"><requestId>flow-read</requestId><flowLogSet><item><flowLogId>{FLOW_LOG_ID}</flowLogId><resourceId>{VPC_ID}</resourceId><trafficType>ALL</trafficType><flowLogStatus>ACTIVE</flowLogStatus><tagFieldSpecificationSet><item><resourceType>instance</resourceType><tagKeySet><item>Name</item><item>Environment</item></tagKeySet></item></tagFieldSpecificationSet><tagSet/></item></flowLogSet></DescribeFlowLogsResponse>"#,
                 ),
             ),
             (Ec2RoundTripCase::VpcEndpoint, "CreateVpcEndpoint") => {
@@ -1210,22 +1267,21 @@ async fn unrelated_log_group_update_preserves_omitted_deletion_protection() {
 }
 
 #[tokio::test]
-async fn certificate_sans_and_unknown_enum_value_round_trip() {
+async fn certificate_options_validation_method_create_read_diff_round_trip() {
     let provider = provider_from_service(AcmService).await;
     let mut desired = Resource::with_provider("aws", "acm.Certificate", "roundtrip", None);
     desired.set_attr("domain_name", string("example.com"));
     desired.set_attr("subject_alternative_names", list(&["www.example.com"]));
+    desired.set_attr(
+        "options",
+        Value::Concrete(ConcreteValue::Map(IndexMap::from([(
+            "validation_method".to_string(),
+            string("DNS"),
+        )]))),
+    );
     desired.set_attr("tags", empty_map());
 
-    let current = provider
-        .read(
-            &desired.id,
-            &applied_identifier(CERTIFICATE_ARN),
-            ReadRequest,
-        )
-        .await
-        .expect("read ACM certificate")
-        .into_state();
+    let current = create_round_trip_state(&provider, &desired).await;
 
     assert_eq!(
         current.attributes.get("subject_alternative_names"),
@@ -1236,8 +1292,18 @@ async fn certificate_sans_and_unknown_enum_value_round_trip() {
         Some(&string("POST_QUANTUM_2048")),
         "AWS values newer than the pinned closed enum must survive refresh"
     );
+    let Some(Value::Concrete(ConcreteValue::Map(options))) = current.attributes.get("options")
+    else {
+        panic!("expected ACM options read state");
+    };
+    assert_api_text(
+        options.get("certificate_transparency_logging_preference"),
+        "ENABLED",
+    );
+    assert_api_text(options.get("export"), "DISABLED");
+    assert!(!options.contains_key("validation_method"));
     assert_eq!(current.attributes.get("tags"), Some(&empty_map()));
-    assert_no_diff(desired, current);
+    assert_no_diff_with_nested_write_only(desired, current, &["options"]);
 }
 
 #[tokio::test(start_paused = true)]
@@ -1704,10 +1770,32 @@ async fn flow_log_resource_type_round_trip() {
     desired.set_attr("resource_ids", list(&[VPC_ID]));
     desired.set_attr("resource_type", string("VPC"));
     desired.set_attr("traffic_type", string("ALL"));
+    desired.set_attr(
+        "tag_field_specifications",
+        Value::Concrete(ConcreteValue::List(vec![Value::Concrete(
+            ConcreteValue::Map(IndexMap::from([
+                ("resource_type".to_string(), string("instance")),
+                ("tag_keys".to_string(), list(&["Name", "Environment"])),
+            ])),
+        )])),
+    );
     desired.set_attr("tags", empty_map());
 
     let current = create_round_trip_state(&provider, &desired).await;
     assert_api_text(current.attributes.get("resource_type"), "VPC");
+    let Some(Value::Concrete(ConcreteValue::List(specifications))) =
+        current.attributes.get("tag_field_specifications")
+    else {
+        panic!("expected flow-log tag field specifications");
+    };
+    let Some(Value::Concrete(ConcreteValue::Map(specification))) = specifications.first() else {
+        panic!("expected one flow-log tag field specification");
+    };
+    assert_api_text(specification.get("resource_type"), "instance");
+    assert_eq!(
+        specification.get("tag_keys"),
+        Some(&list(&["Name", "Environment"]))
+    );
     assert_no_diff(desired, current);
 }
 

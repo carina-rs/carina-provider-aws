@@ -7,7 +7,9 @@ use carina_core::schema::ResourceSchema;
 use crate::AwsProvider;
 use crate::aws_operation::ClientToken;
 use crate::error_helpers::{SendFailure, api_error_with_meta};
-use crate::helpers::{build_tag_specification_with_create_token, send_aws_operation_with_token};
+use crate::helpers::{
+    build_tag_specification_with_create_token, enum_attr_error, send_aws_operation_with_token,
+};
 use crate::provider::{AwsCreateAttempt, Ec2TaggedResourceKind, TaggedEc2Create};
 use crate::read_model::{empty_map_value, found_managed_read, require_read_value};
 use crate::read_models_generated::Ec2FlowLogReadModelSupplement;
@@ -104,6 +106,93 @@ impl FlowLogMaybeSent {
     }
 }
 
+fn build_tag_field_specifications(
+    id: &ResourceId,
+    value: Option<&Value>,
+    schema: &ResourceSchema,
+) -> ProviderResult<Option<Vec<aws_sdk_ec2::types::TagFieldSpecificationRequest>>> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    let Value::Concrete(ConcreteValue::List(items)) = value else {
+        return Err(
+            ProviderError::invalid_input("tag_field_specifications must be a list")
+                .for_resource(id.clone()),
+        );
+    };
+
+    items
+        .iter()
+        .map(|item| {
+            let Value::Concrete(ConcreteValue::Map(fields)) = item else {
+                return Err(ProviderError::invalid_input(
+                    "each tag_field_specifications item must be a map",
+                )
+                .for_resource(id.clone()));
+            };
+            let resource_type = carina_core::resource::enum_attr_at_schema_path(
+                schema,
+                "tag_field_specifications",
+                &["resource_type"],
+                fields.get("resource_type"),
+            )
+            .map_err(|error| enum_attr_error(id, error))?
+            .map(|value| aws_sdk_ec2::types::TaggableResourceType::from(value.api_value()));
+            let tag_keys = crate::send_model::optional_string_list_value(
+                id,
+                "tag_field_specifications.tag_keys",
+                fields.get("tag_keys"),
+            )?;
+
+            Ok(aws_sdk_ec2::types::TagFieldSpecificationRequest::builder()
+                .set_resource_type(resource_type)
+                .set_tag_keys(tag_keys)
+                .build())
+        })
+        .collect::<ProviderResult<Vec<_>>>()
+        .map(Some)
+}
+
+fn tag_field_specifications_value(
+    specifications: &[aws_sdk_ec2::types::TagFieldSpecificationResponse],
+) -> Option<Value> {
+    (!specifications.is_empty()).then(|| {
+        Value::Concrete(ConcreteValue::List(
+            specifications
+                .iter()
+                .map(|specification| {
+                    let mut fields = indexmap::IndexMap::new();
+                    if let Some(resource_type) = specification.resource_type() {
+                        fields.insert(
+                            "resource_type".to_string(),
+                            Value::Concrete(ConcreteValue::String(
+                                resource_type.as_str().to_string().into(),
+                            )),
+                        );
+                    }
+                    if !specification.tag_keys().is_empty() {
+                        fields.insert(
+                            "tag_keys".to_string(),
+                            Value::Concrete(ConcreteValue::List(
+                                specification
+                                    .tag_keys()
+                                    .iter()
+                                    .map(|tag_key| {
+                                        Value::Concrete(ConcreteValue::String(
+                                            tag_key.to_string().into(),
+                                        ))
+                                    })
+                                    .collect(),
+                            )),
+                        );
+                    }
+                    Value::Concrete(ConcreteValue::Map(fields))
+                })
+                .collect(),
+        ))
+    })
+}
+
 impl AwsProvider {
     /// Read an EC2 Flow Log
     pub(crate) async fn read_ec2_flow_log(
@@ -175,6 +264,9 @@ impl AwsProvider {
                 Ec2FlowLogReadModelSupplement {
                     resource_ids,
                     resource_type: require_read_value(id, resource_type, "resource_type")?,
+                    tag_field_specifications: tag_field_specifications_value(
+                        fl.tag_field_specifications(),
+                    ),
                     tags: Self::ec2_tags_to_value(fl.tags()).unwrap_or_else(empty_map_value),
                 },
             )?;
@@ -189,7 +281,7 @@ impl AwsProvider {
     pub(crate) async fn create_ec2_flow_log<A: AwsCreateAttempt>(
         &self,
         resource: &Resource<impl Sized>,
-        _schema: &ResourceSchema,
+        schema: &ResourceSchema,
         client_token: &ClientToken,
         attempt: A,
     ) -> Result<A::Step, A::Verdict> {
@@ -207,6 +299,7 @@ impl AwsProvider {
             max_aggregation_interval,
             resource_ids,
             resource_type,
+            tag_field_specifications,
             tags,
             traffic_type,
         } = input.into_parts();
@@ -218,6 +311,15 @@ impl AwsProvider {
         let max_aggregation_interval = max_aggregation_interval.into_inner();
         let resource_ids = resource_ids.into_inner();
         let resource_type = resource_type.into_inner();
+        let tag_field_specifications = tag_field_specifications.into_inner();
+        let tag_field_specifications = match build_tag_field_specifications(
+            &resource.id,
+            tag_field_specifications.as_ref(),
+            schema,
+        ) {
+            Ok(specifications) => specifications,
+            Err(error) => return Err(attempt.untracked(error)),
+        };
         let tags = tags.into_inner();
         let tags = crate::send_model::optional_tags_value(tags);
         let traffic_type = traffic_type.into_inner();
@@ -236,6 +338,7 @@ impl AwsProvider {
                 .resource_type(aws_sdk_ec2::types::FlowLogsResourceType::from(
                     resource_type.as_str(),
                 ))
+                .set_tag_field_specifications(tag_field_specifications.clone())
         });
 
         if let Some(traffic_type) = traffic_type {

@@ -276,7 +276,7 @@ fn build_create_certificate_options(
     value: Option<&Value>,
     schema: &ResourceSchema,
 ) -> ProviderResult<Option<aws_sdk_acm::types::CertificateOptions>> {
-    use aws_sdk_acm::types::{CertificateExport, CertificateTransparencyLoggingPreference};
+    use aws_sdk_acm::types::CertificateExport;
 
     let mut options = aws_sdk_acm::types::CertificateOptions::builder();
     let mut has_options = false;
@@ -292,13 +292,19 @@ fn build_create_certificate_options(
     };
 
     if let Some(pref) = field("certificate_transparency_logging_preference")? {
-        options = options.certificate_transparency_logging_preference(
-            CertificateTransparencyLoggingPreference::from(pref.api_value()),
+        #[allow(deprecated)]
+        let configured = options.certificate_transparency_logging_preference(
+            aws_sdk_acm::types::CertificateTransparencyLoggingPreference::from(pref.api_value()),
         );
+        options = configured;
         has_options = true;
     }
     if let Some(export) = field("export")? {
         options = options.export(CertificateExport::from(export.api_value()));
+        has_options = true;
+    }
+    if let Some(validation_method) = field("validation_method")? {
+        options = options.validation_method(ValidationMethod::from(validation_method.api_value()));
         has_options = true;
     }
 
@@ -406,7 +412,9 @@ fn certificate_detail_read_fields(
     let enum_value = |value: &str| Value::Concrete(ConcreteValue::String(value.to_string().into()));
     let options = cert.options().and_then(|options| {
         let mut fields = IndexMap::new();
-        if let Some(value) = options.certificate_transparency_logging_preference() {
+        #[allow(deprecated)]
+        let logging_preference = options.certificate_transparency_logging_preference();
+        if let Some(value) = logging_preference {
             fields.insert(
                 "certificate_transparency_logging_preference".to_string(),
                 enum_value(value.as_str()),
@@ -974,8 +982,8 @@ mod tests {
         crate::schemas::generated::acm::certificate::acm_certificate_config().schema
     }
     use aws_sdk_acm::types::{
-        CertificateDetail, CertificateExport, CertificateOptions,
-        CertificateTransparencyLoggingPreference, DomainValidation, RecordType, ResourceRecord,
+        CertificateDetail, CertificateExport, CertificateOptions, DomainValidation, RecordType,
+        ResourceRecord,
     };
     use std::sync::Mutex;
     use std::time::Duration;
@@ -1218,15 +1226,15 @@ mod tests {
 
     #[test]
     fn state_read_emits_nested_options_map_when_logging_preference_present() {
+        #[allow(deprecated)]
+        let options = CertificateOptions::builder()
+            .certificate_transparency_logging_preference(
+                aws_sdk_acm::types::CertificateTransparencyLoggingPreference::Enabled,
+            )
+            .build();
         let cert = CertificateDetail::builder()
             .domain_name("registry.example.com")
-            .options(
-                CertificateOptions::builder()
-                    .certificate_transparency_logging_preference(
-                        CertificateTransparencyLoggingPreference::Enabled,
-                    )
-                    .build(),
-            )
+            .options(options)
             .build();
 
         let fields = certificate_detail_read_fields(&cert);
@@ -1267,6 +1275,32 @@ mod tests {
     }
 
     #[test]
+    fn certificate_detail_read_fields_omits_nested_options_validation_method() {
+        let cert = CertificateDetail::builder()
+            .domain_name("registry.example.com")
+            .options(
+                CertificateOptions::builder()
+                    .export(CertificateExport::Disabled)
+                    .validation_method(ValidationMethod::Dns)
+                    .build(),
+            )
+            .build();
+
+        let fields = certificate_detail_read_fields(&cert);
+
+        let Some(Value::Concrete(ConcreteValue::Map(options))) = fields.options.as_ref() else {
+            panic!("expected nested options map");
+        };
+        assert_eq!(
+            options.get("export"),
+            Some(&Value::Concrete(ConcreteValue::String(
+                "DISABLED".to_string().into()
+            )))
+        );
+        assert!(!options.contains_key("validation_method"));
+    }
+
+    #[test]
     fn create_acm_certificate_passes_options_export_to_sdk_request() {
         let mut options = IndexMap::new();
         options.insert(
@@ -1290,7 +1324,7 @@ mod tests {
     }
 
     #[test]
-    fn create_acm_certificate_passes_both_options_fields() {
+    fn create_acm_certificate_passes_all_options_fields() {
         let mut options = IndexMap::new();
         options.insert(
             "certificate_transparency_logging_preference".to_string(),
@@ -1299,6 +1333,10 @@ mod tests {
         options.insert(
             "export".to_string(),
             Value::Concrete(ConcreteValue::String("ENABLED".to_string().into())),
+        );
+        options.insert(
+            "validation_method".to_string(),
+            Value::Concrete(ConcreteValue::String("DNS".to_string().into())),
         );
         let mut resource = Resource::with_provider("aws", "acm.Certificate", "test-cert", None);
         resource.set_attr(
@@ -1313,11 +1351,16 @@ mod tests {
         )
         .expect("valid enum options")
         .expect("options");
-        assert_eq!(
-            request_options.certificate_transparency_logging_preference(),
-            Some(&CertificateTransparencyLoggingPreference::Disabled)
-        );
+        #[allow(deprecated)]
+        let logging_preference = request_options
+            .certificate_transparency_logging_preference()
+            .map(|value| value.as_str());
+        assert_eq!(logging_preference, Some("DISABLED"));
         assert_eq!(request_options.export(), Some(&CertificateExport::Enabled));
+        assert_eq!(
+            request_options.validation_method(),
+            Some(&ValidationMethod::Dns)
+        );
     }
 
     #[test]
@@ -1340,10 +1383,11 @@ mod tests {
         )
         .expect("valid enum options")
         .expect("options");
-        assert_eq!(
-            request_options.certificate_transparency_logging_preference(),
-            Some(&CertificateTransparencyLoggingPreference::Disabled)
-        );
+        #[allow(deprecated)]
+        let logging_preference = request_options
+            .certificate_transparency_logging_preference()
+            .map(|value| value.as_str());
+        assert_eq!(logging_preference, Some("DISABLED"));
     }
 
     #[tokio::test]

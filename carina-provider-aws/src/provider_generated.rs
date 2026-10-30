@@ -1196,6 +1196,7 @@ impl Ec2FlowLogReadFields {
         let crate::read_models_generated::Ec2FlowLogReadModelSupplement {
             resource_ids,
             resource_type,
+            tag_field_specifications,
             tags,
         } = supplement;
         let _ = resource_id;
@@ -1208,6 +1209,7 @@ impl Ec2FlowLogReadFields {
             max_aggregation_interval: max_aggregation_interval.clone(),
             resource_ids,
             resource_type,
+            tag_field_specifications,
             traffic_type: traffic_type.clone(),
             flow_log_id: flow_log_id.clone(),
             tags,
