@@ -5,9 +5,10 @@
 Stateful acceptance tests register each fixture under
 `${CARINA_ACCEPTANCE_HOME:-$HOME/.cache/carina-acceptance}/carina-provider-aws/runs/<run-id>/`.
 Each entry keeps its injected `main.crn`, local Carina state, and metadata for
-the fixture and AWS account. Temporary log directories may be removed, but a
-registry entry is removed only after `carina state show --json` reports absent
-state or an empty resource list.
+the fixture, AWS account, and creating host. Each run also records its creating
+host and PID. Temporary log directories may be removed, but a registry entry
+is removed only after `carina state show --json` reports absent state or an
+empty resource list.
 
 Use `./acceptance-tests/run-tests.sh cleanup` to destroy every registered
 entry. `--accounts START-END` restricts cleanup to those accounts, and any
@@ -19,13 +20,15 @@ remaining arguments filter the stored fixture path by substring. For example:
 
 Cleanup uses the account recorded in each entry. Unusable entries and failed or
 incomplete destroys produce a non-zero exit and remain registered, with their
-paths printed for investigation. If the registry has no matching entries, the
-command reports `No registered entries`.
+paths printed for investigation. Runs whose creating process is still alive on
+this host are reported as in progress and skipped. Runs created on another host
+are also skipped and are never destroyed automatically. If entries exist but
+none match the requested accounts or fixture filters, cleanup reports
+`No registry entries match`; an empty registry reports `No registered entries`.
 
 Custom suites that are run directly also use this registry. Set `AWS_PROFILE`
-to the account profile, or set `CARINA_ACCEPTANCE_ACCOUNT` to that profile name
-when credentials were exported separately, so a later cleanup can select the
-same account.
+to the account profile so the suite uses and records the same account for a
+later cleanup.
 
 ## Known coverage gaps
 

@@ -86,19 +86,6 @@ resolve_sibling_base() {
     dirname "$repo_root"
 }
 
-resolve_repo_name() {
-    local git_common_dir
-    local repo_root
-
-    git_common_dir="$(cd "$PROJECT_ROOT" && cd "$(git rev-parse --git-common-dir)" && pwd)"
-    repo_root="$(dirname "$git_common_dir")"
-    basename "$repo_root"
-}
-
-# Set the repo name in the caller so the shared registry file remains byte-for-
-# byte reusable by other provider repositories, including from Git worktrees.
-CARINA_ACCEPTANCE_REPO="${CARINA_ACCEPTANCE_REPO:-$(resolve_repo_name)}"
-export CARINA_ACCEPTANCE_REPO
 source "$SCRIPT_DIR/shared/_run_registry.sh"
 
 # ── Parse options ─────────────────────────────────────────────────────

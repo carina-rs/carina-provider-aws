@@ -4,10 +4,31 @@
 # This file is shared by provider repositories. Keep it repo-agnostic and
 # side-effect-free: only variable and function definitions belong here.
 # Empty account and run directories are left in place by design. Cleanup walks
-# entry directories and their meta.json files, so empty directories are harmless
-# and retaining them avoids racing active runs between entry registrations.
+# run metadata and entry directories, so empty directories are harmless and
+# retaining them avoids racing active runs between entry registrations.
 
 CARINA_RUN_REGISTRY_SCHEMA=1
+
+# carina_registry_host: Print the host identity stored with each run.
+carina_registry_host() {
+    local host
+
+    host=$(hostname) || return $?
+    if [ -z "$host" ]; then
+        echo "ERROR: cannot determine the acceptance run host" >&2
+        return 1
+    fi
+    printf '%s\n' "$host"
+}
+
+# carina_registry_path_has_parent_segment: Return success when a path contains
+# a component exactly equal to "..".
+carina_registry_path_has_parent_segment() {
+    case "/$1/" in
+        */../*) return 0 ;;
+    esac
+    return 1
+}
 
 # carina_state_json: Read local state through Carina's supported interface.
 # Reject any output whose schema_version is not 1 (carina#4106 contract).
@@ -73,16 +94,38 @@ carina_registry_runs_root() {
 # Run ids are a UTC timestamp followed by the current process id.
 carina_registry_create_run() {
     local created_at
+    local created_at_iso
+    local host
+    local repo_name
     local run_id
     local runs_root
     local run_dir
+    local run_meta_tmp
 
     created_at=$(date -u '+%Y%m%dT%H%M%SZ') || return $?
+    created_at_iso=$(date -u '+%Y-%m-%dT%H:%M:%SZ') || return $?
+    host=$(carina_registry_host) || return $?
+    repo_name=$(carina_registry_repo_name) || return $?
     run_id="${created_at}-$$"
     runs_root=$(carina_registry_runs_root) || return $?
     run_dir="$runs_root/$run_id"
 
     mkdir -p "$run_dir" || return $?
+    if [ ! -f "$run_dir/run.json" ]; then
+        run_meta_tmp="$run_dir/run.json.tmp.$$"
+        if ! jq -n \
+            --argjson schema "$CARINA_RUN_REGISTRY_SCHEMA" \
+            --arg repo "$repo_name" \
+            --arg run_id "$run_id" \
+            --arg host "$host" \
+            --argjson pid "$$" \
+            --arg created_at "$created_at_iso" \
+            '{schema:$schema,repo:$repo,run_id:$run_id,host:$host,pid:$pid,created_at:$created_at}' \
+            > "$run_meta_tmp" || ! mv "$run_meta_tmp" "$run_dir/run.json"; then
+            rm -f "$run_meta_tmp"
+            return 1
+        fi
+    fi
     printf '%s\n' "$run_dir"
 }
 
@@ -103,11 +146,16 @@ carina_registry_register_entry() {
     local run_id
     local repo_name
     local created_at
+    local host
     local account_dir
     local entry_dir
     local meta_tmp
 
     runs_root=$(carina_registry_runs_root) || return $?
+    if carina_registry_path_has_parent_segment "$run_dir"; then
+        echo "ERROR: run directory contains a .. path segment: $run_dir" >&2
+        return 1
+    fi
     case "$run_dir" in
         "$runs_root"/*) ;;
         *)
@@ -143,6 +191,11 @@ carina_registry_register_entry() {
     run_id=$(basename "$run_dir")
     repo_name=$(carina_registry_repo_name) || return $?
     created_at=$(date -u '+%Y-%m-%dT%H:%M:%SZ') || return $?
+    if ! host=$(jq -er '.host | select(type == "string" and length > 0)' \
+        "$run_dir/run.json" 2>/dev/null); then
+        echo "ERROR: run metadata is missing or invalid: $run_dir/run.json" >&2
+        return 1
+    fi
     account_dir="$run_dir/$account"
     entry_dir="$account_dir/test_$test_index"
 
@@ -164,8 +217,9 @@ carina_registry_register_entry() {
         --arg run_id "$run_id" \
         --arg account "$account" \
         --arg test "$fixture_path" \
+        --arg host "$host" \
         --arg created_at "$created_at" \
-        '{schema:$schema,repo:$repo,run_id:$run_id,account:$account,test:$test,created_at:$created_at}' \
+        '{schema:$schema,repo:$repo,run_id:$run_id,account:$account,test:$test,host:$host,created_at:$created_at}' \
         > "$meta_tmp" || ! mv "$meta_tmp" "$entry_dir/meta.json"; then
         rm -rf "$entry_dir"
         return 1
@@ -188,6 +242,10 @@ carina_registry_release_entry() {
     local state_json
 
     runs_root=$(carina_registry_runs_root) || return $?
+    if carina_registry_path_has_parent_segment "$entry_dir"; then
+        echo "ERROR: refusing to release path containing a .. segment: $entry_dir" >&2
+        return 1
+    fi
     case "$entry_dir" in
         "$runs_root"/*/*/test_*) ;;
         *)
@@ -270,6 +328,7 @@ carina_registry_validate_meta() {
     local repo_name
     local expected_run_id
     local expected_account
+    local expected_host
 
     if [ ! -f "$meta_file" ]; then
         echo "ERROR: $entry_dir: missing meta.json" >&2
@@ -279,16 +338,23 @@ carina_registry_validate_meta() {
     repo_name=$(carina_registry_repo_name) || return $?
     expected_run_id=$(basename "$(dirname "$(dirname "$entry_dir")")")
     expected_account=$(basename "$(dirname "$entry_dir")")
+    if ! expected_host=$(jq -er '.host | select(type == "string" and length > 0)' \
+        "$(dirname "$(dirname "$entry_dir")")/run.json" 2>/dev/null); then
+        echo "ERROR: $entry_dir: invalid run.json" >&2
+        return 1
+    fi
 
     if ! jq -e \
         --argjson schema "$CARINA_RUN_REGISTRY_SCHEMA" \
         --arg repo "$repo_name" \
         --arg run_id "$expected_run_id" \
         --arg account "$expected_account" \
+        --arg host "$expected_host" \
         '.schema == $schema
          and .repo == $repo
          and .run_id == $run_id
          and .account == $account
+         and .host == $host
          and (.test | type == "string" and length > 0)
          and (.created_at | type == "string" and length > 0)' \
         "$meta_file" >/dev/null 2>&1; then
@@ -326,11 +392,18 @@ carina_registry_cleanup() {
     local entry_dir
     local account
     local fixture_path
+    local run_dir
+    local run_host
+    local run_id
+    local run_pid
+    local current_host
     local list_output
     local destroy_output
     local release_output
     local found=0
     local failed=0
+
+    current_host=$(carina_registry_host) || return $?
 
     while [ "$#" -gt 0 ]; do
         case "$1" in
@@ -357,8 +430,7 @@ carina_registry_cleanup() {
         esac
     done
 
-    if ! list_output=$(carina_registry_list_entries \
-        ${accounts[@]+"${accounts[@]}"}); then
+    if ! list_output=$(carina_registry_list_entries); then
         return 1
     fi
     while IFS= read -r entry_dir; do
@@ -366,6 +438,46 @@ carina_registry_cleanup() {
     done <<< "$list_output"
 
     for entry_dir in ${entries[@]+"${entries[@]}"}; do
+        run_dir=$(dirname "$(dirname "$entry_dir")")
+        run_id=$(basename "$run_dir")
+        run_pid=${run_id##*-}
+        run_host=$(jq -r '.host // empty' "$run_dir/run.json" 2>/dev/null || true)
+        if [ -n "$run_host" ] && [ "$run_host" != "$current_host" ]; then
+            echo "$entry_dir: different host ($run_host), skipped"
+            found=1
+            continue
+        fi
+        case "$run_pid" in
+            ""|*[!0-9]*) ;;
+            *)
+                if [ "$run_host" = "$current_host" ] && kill -0 "$run_pid" 2>/dev/null; then
+                    echo "$entry_dir: in progress, skipped (PID $run_pid is alive on $run_host)"
+                    found=1
+                    continue
+                fi
+                ;;
+        esac
+
+        account=$(basename "$(dirname "$entry_dir")")
+        if ! carina_registry_account_selected \
+            "$account" ${accounts[@]+"${accounts[@]}"}; then
+            continue
+        fi
+
+        if [ "${#filters[@]}" -ne 0 ]; then
+            fixture_path=$(jq -r \
+                'if (.test | type) == "string" and (.test | length) > 0 then .test else empty end' \
+                "$entry_dir/meta.json" 2>/dev/null || true)
+            if [ -z "$fixture_path" ]; then
+                echo "WARNING: $entry_dir: fixture cannot be matched because meta.json is missing or unreadable; skipped" >&2
+                continue
+            fi
+            if ! carina_registry_fixture_selected \
+                "$fixture_path" ${filters[@]+"${filters[@]}"}; then
+                continue
+            fi
+        fi
+
         if ! carina_registry_validate_meta "$entry_dir"; then
             found=1
             failed=$((failed + 1))
@@ -374,10 +486,6 @@ carina_registry_cleanup() {
 
         account=$(jq -r '.account' "$entry_dir/meta.json")
         fixture_path=$(jq -r '.test' "$entry_dir/meta.json")
-        if ! carina_registry_fixture_selected \
-            "$fixture_path" ${filters[@]+"${filters[@]}"}; then
-            continue
-        fi
         found=1
 
         if [ ! -f "$entry_dir/main.crn" ]; then
@@ -416,8 +524,12 @@ carina_registry_cleanup() {
         echo "Destroyed and released: $entry_dir"
     done
 
-    if [ "$found" -eq 0 ]; then
+    if [ "${#entries[@]}" -eq 0 ]; then
         echo "No registered entries"
+        return 0
+    fi
+    if [ "$found" -eq 0 ]; then
+        echo "No registry entries match"
         return 0
     fi
     if [ "$failed" -ne 0 ]; then
