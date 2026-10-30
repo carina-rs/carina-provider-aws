@@ -749,12 +749,18 @@ fn existing_state_without(resource: &Resource, excluded: Option<&str>) -> State 
     )
 }
 
+enum MarkerExpectation {
+    Any,
+    Every,
+}
+
 fn assert_sample_reached_mutation(
     contract: &SendCaptureContract,
     attribute: &SendCaptureAttribute,
     resource: &Resource,
     requests: &[MockRequest],
     operation: &str,
+    marker_expectation: MarkerExpectation,
 ) {
     let value = resource.get_attr(attribute.name).unwrap_or_else(|| {
         panic!(
@@ -795,6 +801,20 @@ fn assert_sample_reached_mutation(
         contract.resource_type,
         attribute.name
     );
+    if matches!(marker_expectation, MarkerExpectation::Every) {
+        let missing_markers = markers
+            .iter()
+            .filter(|marker| !payload_contains_marker(&payload, marker))
+            .map(String::as_str)
+            .collect::<Vec<_>>();
+        assert!(
+            missing_markers.is_empty(),
+            "{}.{} missing markers {missing_markers:?} from mutating {operation} URI/query/body; required markers={markers:?}; mutating payload={payload:?}; requests={requests:?}",
+            contract.resource_type,
+            attribute.name,
+        );
+        return;
+    }
     let mappings = (attribute.provider_name, attribute.capture_names);
     // Do not put headers in the searchable haystack: generic headers such as
     // Content-Type caused the original false positives. The two Smithy
@@ -858,7 +878,20 @@ async fn every_sent_attribute_reaches_captured_create_and_update_mutations() {
                 attribute.name,
                 resource.attributes
             );
-            assert_sample_reached_mutation(contract, attribute, &resource, &requests, "create");
+            let marker_expectation =
+                if contract.resource_type == "acm.Certificate" && attribute.name == "options" {
+                    MarkerExpectation::Every
+                } else {
+                    MarkerExpectation::Any
+                };
+            assert_sample_reached_mutation(
+                contract,
+                attribute,
+                &resource,
+                &requests,
+                "create",
+                marker_expectation,
+            );
         }
 
         let update_targets: Vec<Option<&SendCaptureAttribute>> =
@@ -907,7 +940,14 @@ async fn every_sent_attribute_reaches_captured_create_and_update_mutations() {
                 resource.attributes,
             );
             if let Some(attribute) = target {
-                assert_sample_reached_mutation(contract, attribute, &resource, &requests, "update");
+                assert_sample_reached_mutation(
+                    contract,
+                    attribute,
+                    &resource,
+                    &requests,
+                    "update",
+                    MarkerExpectation::Any,
+                );
             }
         }
     }
