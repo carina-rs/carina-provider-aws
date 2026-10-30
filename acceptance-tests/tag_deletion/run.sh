@@ -69,7 +69,7 @@ signal_cleanup() {
         echo "Interrupted. Cleaning up resources..."
         (cd "$ACTIVE_WORK_DIR" && with_account_creds "$CARINA_BIN" destroy --auto-approve . 2>&1)
         (cd "$ACTIVE_WORK_DIR" && with_account_creds "$CARINA_BIN" destroy --auto-approve . 2>&1)
-        rm -rf "$ACTIVE_WORK_DIR"
+        echo "Registry entry retained after interruption: $ACTIVE_WORK_DIR"
         ACTIVE_WORK_DIR=""
     fi
     exit 1
@@ -151,7 +151,7 @@ destroy_work_dir() {
     if [ "$any_success" = false ]; then
         return 1
     fi
-    return 0
+    release_acceptance_work_dir "$work_dir"
 }
 
 # Swap the active .crn into work_dir/main.crn (with provider source injected).
@@ -179,7 +179,15 @@ run_test() {
     fi
 
     local work_dir
-    work_dir=$(mktemp -d)
+    local injected_dir
+    inject_provider_source "$step1" injected_dir || return 1
+    if ! register_acceptance_work_dir \
+        "tag_deletion/$test_name" "$injected_dir/main.crn" work_dir; then
+        rm -rf "$injected_dir"
+        TOTAL_FAILED=$((TOTAL_FAILED + 1))
+        return 1
+    fi
+    rm -rf "$injected_dir"
 
     # Register for signal cleanup
     ACTIVE_WORK_DIR="$work_dir"
@@ -187,12 +195,11 @@ run_test() {
     echo "$desc"
     echo ""
 
-    # Load step1 and initialize (creates backend lock + installs providers)
-    swap_crn "$step1" "$work_dir"
+    # Initialize the registered step1 configuration.
     if ! (cd "$work_dir" && with_account_creds "$CARINA_BIN" init . >/dev/null 2>&1); then
         echo "  step1: init                                             FAIL"
         TOTAL_FAILED=$((TOTAL_FAILED + 1))
-        rm -rf "$work_dir"
+        release_acceptance_work_dir "$work_dir" || true
         ACTIVE_WORK_DIR=""
         return 1
     fi
@@ -200,7 +207,6 @@ run_test() {
     # Step 1: Apply initial config (resource with two tags)
     if ! run_step "$work_dir" "step1: apply initial (two tags)" "apply" "--auto-approve"; then
         destroy_work_dir "$work_dir"
-        rm -rf "$work_dir"
         ACTIVE_WORK_DIR=""
         return 1
     fi
@@ -208,7 +214,6 @@ run_test() {
     # Step 1b: Plan-verify initial state
     if ! run_plan_verify "$work_dir" "step1: plan-verify initial"; then
         destroy_work_dir "$work_dir"
-        rm -rf "$work_dir"
         ACTIVE_WORK_DIR=""
         return 1
     fi
@@ -219,7 +224,6 @@ run_test() {
     # Step 2: Apply modified config (one tag removed)
     if ! run_step "$work_dir" "step2: apply tag removal" "apply" "--auto-approve"; then
         destroy_work_dir "$work_dir"
-        rm -rf "$work_dir"
         ACTIVE_WORK_DIR=""
         return 1
     fi
@@ -227,7 +231,6 @@ run_test() {
     # Step 3: Plan-verify after tag removal (must be idempotent)
     if ! run_plan_verify "$work_dir" "step3: plan-verify after tag removal"; then
         destroy_work_dir "$work_dir"
-        rm -rf "$work_dir"
         ACTIVE_WORK_DIR=""
         return 1
     fi
@@ -242,7 +245,6 @@ run_test() {
         return 1
     fi
 
-    rm -rf "$work_dir"
     ACTIVE_WORK_DIR=""
     echo ""
 }

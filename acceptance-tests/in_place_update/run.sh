@@ -73,7 +73,7 @@ signal_cleanup() {
         (cd "$ACTIVE_WORK_DIR" && with_account_creds "$CARINA_BIN" destroy --auto-approve . 2>&1)
         swap_crn "$ACTIVE_STEP1" "$ACTIVE_WORK_DIR"
         (cd "$ACTIVE_WORK_DIR" && with_account_creds "$CARINA_BIN" destroy --auto-approve . 2>&1)
-        rm -rf "$ACTIVE_WORK_DIR"
+        echo "Registry entry retained after interruption: $ACTIVE_WORK_DIR"
         ACTIVE_WORK_DIR=""
     fi
     exit 1
@@ -230,7 +230,7 @@ destroy_work_dir() {
     if [ "$any_success" = false ]; then
         return 1
     fi
-    return 0
+    release_acceptance_work_dir "$work_dir"
 }
 
 # Run a single multi-step test
@@ -247,14 +247,21 @@ run_test() {
     fi
 
     local work_dir
-    work_dir=$(mktemp -d)
+    local injected_dir
+    inject_provider_source "$step1" injected_dir || return 1
+    if ! register_acceptance_work_dir \
+        "in_place_update/$test_name" "$injected_dir/main.crn" work_dir; then
+        rm -rf "$injected_dir"
+        TOTAL_FAILED=$((TOTAL_FAILED + 1))
+        return 1
+    fi
+    rm -rf "$injected_dir"
 
-    # Load step1 and initialize (creates backend lock + installs providers).
-    swap_crn "$step1" "$work_dir"
+    # Initialize the registered step1 configuration.
     if ! prepare_work_dir "$work_dir"; then
         echo "  step0: init                                             FAIL"
         TOTAL_FAILED=$((TOTAL_FAILED + 1))
-        rm -rf "$work_dir"
+        release_acceptance_work_dir "$work_dir" || true
         ACTIVE_WORK_DIR=""
         return 1
     fi
@@ -270,7 +277,6 @@ run_test() {
     # Step 1: Apply initial config
     if ! run_step "$work_dir" "step1: apply initial" "apply" "--auto-approve"; then
         destroy_work_dir "$work_dir" "$step2" "$step1"
-        rm -rf "$work_dir"
         ACTIVE_WORK_DIR=""
         return 1
     fi
@@ -278,7 +284,6 @@ run_test() {
     # Step 1b: Plan-verify initial state
     if ! run_plan_verify "$work_dir" "step1: plan-verify initial"; then
         destroy_work_dir "$work_dir" "$step2" "$step1"
-        rm -rf "$work_dir"
         ACTIVE_WORK_DIR=""
         return 1
     fi
@@ -290,7 +295,6 @@ run_test() {
         echo "  ERROR: could not read identifiers after step 1"
         TOTAL_FAILED=$((TOTAL_FAILED + 1))
         destroy_work_dir "$work_dir" "$step2" "$step1"
-        rm -rf "$work_dir"
         ACTIVE_WORK_DIR=""
         return 1
     fi
@@ -301,7 +305,6 @@ run_test() {
     # Step 2: Apply modified config (in-place update)
     if ! run_step "$work_dir" "step2: apply in-place update" "apply" "--auto-approve"; then
         destroy_work_dir "$work_dir" "$step2" "$step1"
-        rm -rf "$work_dir"
         ACTIVE_WORK_DIR=""
         return 1
     fi
@@ -313,7 +316,6 @@ run_test() {
         echo "  ERROR: could not read identifiers after step 2"
         TOTAL_FAILED=$((TOTAL_FAILED + 1))
         destroy_work_dir "$work_dir" "$step2" "$step1"
-        rm -rf "$work_dir"
         ACTIVE_WORK_DIR=""
         return 1
     fi
@@ -321,7 +323,6 @@ run_test() {
     # Assert identifiers preserved (in-place update should NOT replace any resource)
     if ! assert_identifiers "assert: identifiers preserved after update" "$ids_after_step1" "$ids_after_step2" "equal"; then
         destroy_work_dir "$work_dir" "$step2" "$step1"
-        rm -rf "$work_dir"
         ACTIVE_WORK_DIR=""
         return 1
     fi
@@ -329,7 +330,6 @@ run_test() {
     # Step 3: Plan-verify after update
     if ! run_plan_verify "$work_dir" "step3: plan-verify after update"; then
         destroy_work_dir "$work_dir" "$step2" "$step1"
-        rm -rf "$work_dir"
         ACTIVE_WORK_DIR=""
         return 1
     fi
@@ -344,7 +344,6 @@ run_test() {
         return 1
     fi
 
-    rm -rf "$work_dir"
     ACTIVE_WORK_DIR=""
     echo ""
 }

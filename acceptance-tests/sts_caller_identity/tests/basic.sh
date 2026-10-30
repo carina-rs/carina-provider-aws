@@ -7,9 +7,9 @@ echo ""
 
 CONSUMER_ROLE_NAME="carina-acc-test-sts-caller-consumer"
 
-WORK_DIR=$(mktemp -d)
+register_acceptance_work_dir \
+    "sts_caller_identity/basic.crn" "$SCRIPT_DIR/basic.crn" WORK_DIR
 ACTIVE_WORK_DIR="$WORK_DIR"
-cp "$SCRIPT_DIR/basic.crn" "$WORK_DIR/main.crn"
 cd "$WORK_DIR"
 
 prepare_work_dir "$WORK_DIR"
@@ -48,7 +48,9 @@ else
 fi
 
 run_step "step3: destroy (consumer role only)" "$CARINA_BIN" destroy --auto-approve .
+if ! release_acceptance_work_dir "$WORK_DIR"; then
+    TEST_FAILED=$((TEST_FAILED + 1))
+fi
 ACTIVE_WORK_DIR=""
-rm -rf "$WORK_DIR"
 
 finish_test

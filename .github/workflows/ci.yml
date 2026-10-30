@@ -32,6 +32,8 @@ jobs:
           submodules: recursive
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      - name: Test acceptance run registry
+        run: bash acceptance-tests/shared/tests/run_registry_test.sh
       - run: cargo test
 
   clippy:

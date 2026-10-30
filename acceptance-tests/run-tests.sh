@@ -11,10 +11,10 @@
 # Commands:
 #   validate   - Validate .crn files (default, no AWS credentials needed)
 #   plan       - Run plan on .crn files (single account, needs AWS credentials)
-#   apply      - Apply .crn files (single account, needs AWS credentials)
-#   destroy    - Destroy resources created by .crn files (single account)
+#   apply      - Apply .crn files and retain their registered state (single account)
+#   destroy    - Destroy matching registered entries for a single account
 #   full       - Run apply+plan-verify+destroy per test, accounts in parallel
-#   cleanup    - Run destroy across accounts in parallel (recover from stuck state)
+#   cleanup    - Destroy matching entries preserved in the persistent registry
 #   deep-cleanup - Scan and remove orphaned AWS resources across accounts
 #
 # AWS authentication:
@@ -27,8 +27,11 @@
 #     aws sso login --sso-session carina
 #
 # For validate, no AWS credentials are needed.
-# For plan/apply/destroy, wrap with: with_account_creds "<profile>" ./run-tests.sh ...
-# For full, AWS_PROFILE is set internally per account (carina-test-000..009).
+# For plan/apply/destroy, the first selected account is used (default 000).
+# Pass --accounts N-N to select a different single account.
+# For full/cleanup, credentials are selected internally for each entry/account.
+# Registry entries are kept under:
+#   ${CARINA_ACCEPTANCE_HOME:-$HOME/.cache/carina-acceptance}/<repo>/runs/<run-id>/
 #
 # Filter (optional):
 #   One or more substrings to match against test paths.
@@ -42,7 +45,10 @@
 #   ./run-tests.sh full ec2_vpc                      # apply+plan-verify+destroy VPC tests only
 #   ./run-tests.sh full --accounts 0-3 iam_role      # use only accounts 000-003
 #   ./run-tests.sh full --accounts 4-6 ec2_vpc       # concurrent run with accounts 004-006
-#   ./run-tests.sh cleanup                           # destroy all matching tests across 10 accounts
+#   ./run-tests.sh apply --accounts 3-3 s3_bucket    # retain state under account 003
+#   ./run-tests.sh destroy --accounts 3-3 s3_bucket  # destroy matching account-003 entries
+#   ./run-tests.sh cleanup                           # destroy every registered entry
+#   ./run-tests.sh cleanup ec2_vpc                   # destroy matching registered entries
 #
 # Performance:
 #   WASM provider loading with debug builds is slow (JIT compilation ~4s per invocation).
@@ -79,6 +85,21 @@ resolve_sibling_base() {
     repo_root="$(dirname "$git_common_dir")"
     dirname "$repo_root"
 }
+
+resolve_repo_name() {
+    local git_common_dir
+    local repo_root
+
+    git_common_dir="$(cd "$PROJECT_ROOT" && cd "$(git rev-parse --git-common-dir)" && pwd)"
+    repo_root="$(dirname "$git_common_dir")"
+    basename "$repo_root"
+}
+
+# Set the repo name in the caller so the shared registry file remains byte-for-
+# byte reusable by other provider repositories, including from Git worktrees.
+CARINA_ACCEPTANCE_REPO="${CARINA_ACCEPTANCE_REPO:-$(resolve_repo_name)}"
+export CARINA_ACCEPTANCE_REPO
+source "$SCRIPT_DIR/shared/_run_registry.sh"
 
 # ── Parse options ─────────────────────────────────────────────────────
 ACCOUNT_START=""
@@ -152,6 +173,22 @@ else
     done
 fi
 NUM_ACCOUNTS=${#ACCOUNTS[@]}
+
+# The non-parallel stateful commands use exactly one account. Restricting the
+# lock/account list here also records an unambiguous account in registry meta.
+SINGLE_ACCOUNT=""
+case "$COMMAND" in
+    plan|apply|destroy)
+        if [ -n "$ACCOUNT_START" ] && [ "$NUM_ACCOUNTS" -ne 1 ]; then
+            echo "ERROR: $COMMAND requires exactly one account (use --accounts N-N)"
+            exit 1
+        fi
+        SINGLE_ACCOUNT="${ACCOUNTS[0]}"
+        ACCOUNTS=("$SINGLE_ACCOUNT")
+        ACCOUNT_INDICES=("${ACCOUNT_INDICES[0]}")
+        NUM_ACCOUNTS=1
+        ;;
+esac
 
 # ── Per-account lock files ────────────────────────────────────────────
 # Each account gets its own lock to allow concurrent runs with
@@ -253,6 +290,82 @@ with_account_creds() {
         unset AWS_PROFILE
         "$@"
     )
+}
+
+# release_registered_entry: state-check and release an entry, or emit a stable
+# RETAINED line that the top-level summary can collect.
+release_registered_entry() {
+    local entry_dir="$1"
+    local release_output
+
+    if release_output=$(carina_registry_release_entry "$entry_dir" 2>&1); then
+        return 0
+    fi
+
+    echo "RETAINED $entry_dir"
+    if [ -n "$release_output" ]; then
+        echo "  ERROR: $release_output"
+    fi
+    return 1
+}
+
+# destroy_registered_entry: destroy with the entry's account, then release it
+# only after the supported state interface reports absent/empty state.
+destroy_registered_entry() {
+    local account="$1"
+    local entry_dir="$2"
+    local destroy_output
+
+    if ! destroy_output=$(cd "$entry_dir" && \
+        with_account_creds "$account" "$CARINA_BIN" destroy --auto-approve "$entry_dir" 2>&1); then
+        echo "RETAINED $entry_dir"
+        echo "  ERROR: destroy failed: $destroy_output"
+        return 1
+    fi
+    if echo "$destroy_output" | grep -q "failed"; then
+        echo "RETAINED $entry_dir"
+        echo "  ERROR: destroy reported failure: $destroy_output"
+        return 1
+    fi
+
+    release_registered_entry "$entry_dir"
+}
+
+# interrupt_destroy_registered_entry: Best-effort destroy during interruption,
+# but deliberately never release the entry from a trap. A later cleanup will
+# state-check and release it even when this destroy completed successfully.
+interrupt_destroy_registered_entry() {
+    local account="$1"
+    local entry_dir="$2"
+    local destroy_output
+    local destroy_rc=0
+
+    destroy_output=$(cd "$entry_dir" && \
+        with_account_creds "$account" "$CARINA_BIN" destroy --auto-approve "$entry_dir" 2>&1) || destroy_rc=$?
+    echo "RETAINED $entry_dir"
+    if [ "$destroy_rc" -ne 0 ]; then
+        echo "  ERROR: interrupt destroy failed: $destroy_output"
+        return "$destroy_rc"
+    fi
+    echo "  Interrupt destroy completed; registry entry preserved for cleanup verification"
+    return 0
+}
+
+# report_retained_run_entries: Print every entry still present in one run.
+# Args: run_dir
+report_retained_run_entries() {
+    local run_dir="$1"
+    local entry_dir
+    local found=0
+
+    for entry_dir in "$run_dir"/*/test_*; do
+        [ -d "$entry_dir" ] || continue
+        if [ "$found" -eq 0 ]; then
+            echo "Retained registry entries:"
+            found=1
+        fi
+        echo "  $entry_dir"
+    done
 }
 
 # ── deep_cleanup_account: scan AWS for orphaned resources ────────────
@@ -524,7 +637,7 @@ matches_any_filter() {
     if [ ${#FILTERS[@]} -eq 0 ]; then
         return 0
     fi
-    for f in "${FILTERS[@]}"; do
+    for f in ${FILTERS[@]+"${FILTERS[@]}"}; do
         if [[ "$rel_path" == *"$f"* ]]; then
             return 0
         fi
@@ -545,15 +658,6 @@ while IFS= read -r -d '' file; do
     fi
     TESTS+=("$file")
 done < <(find "$SCRIPT_DIR" -name "*.crn" -print0 | sort -z)
-
-if [ ${#TESTS[@]} -eq 0 ]; then
-    if [ ${#FILTERS[@]} -gt 0 ]; then
-        echo "No test files found matching: ${FILTERS[*]}"
-    else
-        echo "No test files found"
-    fi
-    exit 0
-fi
 
 # ── deep-cleanup: scan and remove orphaned AWS resources ─────────────
 if [ "$COMMAND" = "deep-cleanup" ]; then
@@ -599,107 +703,32 @@ if [ "$COMMAND" = "deep-cleanup" ]; then
     exit $OVERALL_EXIT
 fi
 
-# ── cleanup: destroy across accounts in parallel ─────────────────────
-if [ "$COMMAND" = "cleanup" ]; then
-    TOTAL=${#TESTS[@]}
-    echo "Running cleanup (destroy) on $TOTAL test(s) across $NUM_ACCOUNTS accounts"
-    echo ""
-
-    WORK_DIR=$(mktemp -d)
-    trap 'for p in ${PIDS[@]+"${PIDS[@]}"}; do kill "$p" 2>/dev/null || true; done; rm -rf '"$WORK_DIR"'; release_account_locks' EXIT
-
-    # Pre-authenticate accounts
-    echo "Pre-authenticating AWS accounts..."
-    for SLOT in $(seq 0 $((NUM_ACCOUNTS - 1))); do
-        ACCOUNT="${ACCOUNTS[$SLOT]}"
-        echo "  Authenticating $ACCOUNT..."
-        if ! with_account_creds "$ACCOUNT" aws sts get-caller-identity >/dev/null 2>&1; then
-            echo "  WARNING: Failed to pre-authenticate $ACCOUNT"
-        fi
-    done
-    echo "Pre-authentication complete."
-    echo ""
-
-    # Each account tries to destroy all tests (we don't know which account
-    # created which resources, so every account attempts every test)
-    PIDS=()
-    for SLOT in $(seq 0 $((NUM_ACCOUNTS - 1))); do
-        ACCOUNT="${ACCOUNTS[$SLOT]}"
-        LOG_FILE="$WORK_DIR/slot_${SLOT}.log"
-        STATE_DIR="$WORK_DIR/state_${SLOT}"
-        mkdir -p "$STATE_DIR"
-
-        (
-            set +e
-            DESTROYED=0
-            SKIPPED=0
-
-            TEST_INDEX=0
-            for TEST_FILE in "${TESTS[@]}"; do
-                REL_PATH="${TEST_FILE#$SCRIPT_DIR/}"
-                inject_provider_source "$TEST_FILE" INJECTED_DIR || exit 1
-                TEST_STATE_DIR="$STATE_DIR/test_${TEST_INDEX}"
-                mkdir -p "$TEST_STATE_DIR"
-                cp "$INJECTED_DIR/main.crn" "$TEST_STATE_DIR/main.crn"
-                rm -rf "$INJECTED_DIR"
-                TEST_INDEX=$((TEST_INDEX + 1))
-                # Skip if no state file exists — nothing to destroy
-                if [ ! -f "$TEST_STATE_DIR/carina.state.json" ]; then
-                    SKIPPED=$((SKIPPED + 1))
-                    continue
-                fi
-                echo "RUNNING destroy $REL_PATH"
-                DESTROY_OUTPUT=$(cd "$TEST_STATE_DIR" && with_account_creds "$ACCOUNT" "$CARINA_BIN" destroy --auto-approve "$TEST_STATE_DIR" 2>&1)
-                DESTROY_RC=$?
-                if [ $DESTROY_RC -eq 0 ]; then
-                    if echo "$DESTROY_OUTPUT" | grep -q "No resources to destroy"; then
-                        SKIPPED=$((SKIPPED + 1))
-                    else
-                        echo "DESTROYED $REL_PATH"
-                        DESTROYED=$((DESTROYED + 1))
-                    fi
-                else
-                    echo "FAIL (destroy) $REL_PATH"
-                    echo "  ERROR: $DESTROY_OUTPUT"
-                fi
-            done
-
-            echo "---"
-            echo "SUMMARY $ACCOUNT: $DESTROYED destroyed, $SKIPPED already clean"
-        ) > "$LOG_FILE" 2>&1 &
-
-        PIDS+=($!)
-        echo "  [$ACCOUNT] started (PID $!)"
+# ── cleanup/destroy: operate on persistent registered entries ─────────
+if [ "$COMMAND" = "cleanup" ] || [ "$COMMAND" = "destroy" ]; then
+    REGISTRY_CLEANUP_ARGS=()
+    if [ "$COMMAND" = "destroy" ] || [ -n "$ACCOUNT_START" ]; then
+        for ACCOUNT in "${ACCOUNTS[@]}"; do
+            REGISTRY_CLEANUP_ARGS+=(--account "$ACCOUNT")
+        done
+    fi
+    for FILTER in ${FILTERS[@]+"${FILTERS[@]}"}; do
+        REGISTRY_CLEANUP_ARGS+=(--filter "$FILTER")
     done
 
-    echo ""
-    echo "Logs: $WORK_DIR/slot_*.log"
-    echo "Waiting for all accounts to finish cleanup..."
-    echo ""
+    if ! carina_registry_cleanup \
+        ${REGISTRY_CLEANUP_ARGS[@]+"${REGISTRY_CLEANUP_ARGS[@]}"}; then
+        exit 1
+    fi
+    exit 0
+fi
 
-    # Wait for all workers
-    OVERALL_EXIT=0
-    for PID in ${PIDS[@]+"${PIDS[@]}"}; do
-        wait "$PID" || OVERALL_EXIT=1
-    done
-
-    # Print results per account
-    for SLOT in $(seq 0 $((NUM_ACCOUNTS - 1))); do
-        LOG_FILE="$WORK_DIR/slot_${SLOT}.log"
-        if [ ! -f "$LOG_FILE" ]; then
-            continue
-        fi
-        ACCOUNT="${ACCOUNTS[$SLOT]}"
-        echo "── $ACCOUNT ──"
-        cat "$LOG_FILE"
-        echo ""
-    done
-
-    echo "════════════════════════════════════════"
-    echo "Cleanup complete."
-    echo "════════════════════════════════════════"
-
-    exit $OVERALL_EXIT
+if [ ${#TESTS[@]} -eq 0 ]; then
+    if [ ${#FILTERS[@]} -gt 0 ]; then
+        echo "No test files found matching: ${FILTERS[*]}"
+    else
+        echo "No test files found"
+    fi
+    exit 0
 fi
 
 # ── full: parallel execution across selected accounts ─────────────────
@@ -712,6 +741,9 @@ if [ "$COMMAND" = "full" ]; then
     echo ""
 
     WORK_DIR=$(mktemp -d)
+    RUN_DIR=$(carina_registry_create_run)
+    echo "Registry run: $RUN_DIR"
+    echo ""
 
     # Signal handling for the main process: forward signals to workers
     PIDS=()
@@ -726,6 +758,7 @@ if [ "$COMMAND" = "full" ]; then
             wait "$PID" 2>/dev/null || true
         done
         echo "All workers finished."
+        report_retained_run_entries "$RUN_DIR"
         rm -rf "$WORK_DIR"
         release_account_locks
         exit 1
@@ -772,8 +805,6 @@ if [ "$COMMAND" = "full" ]; then
 
         ACCOUNT="${ACCOUNTS[$SLOT]}"
         LOG_FILE="$WORK_DIR/slot_${SLOT}.log"
-        SLOT_DIR="$WORK_DIR/state_${SLOT}"
-        mkdir -p "$SLOT_DIR"
 
         (
             set +e
@@ -787,7 +818,8 @@ if [ "$COMMAND" = "full" ]; then
                 INTERRUPTED=1
                 if [ -n "$CURRENT_STATE_DIR" ]; then
                     echo "INTERRUPTED - destroying resources for current test"
-                    cd "$CURRENT_STATE_DIR" && with_account_creds "$ACCOUNT" "$CARINA_BIN" destroy --auto-approve "$CURRENT_STATE_DIR" 2>&1 || true
+                    interrupt_destroy_registered_entry \
+                        "$ACCOUNT" "$CURRENT_STATE_DIR" || true
                 fi
             }
             trap worker_cleanup INT TERM
@@ -801,11 +833,18 @@ if [ "$COMMAND" = "full" ]; then
                 REL_PATH="${TEST_FILE#$SCRIPT_DIR/}"
                 inject_provider_source "$TEST_FILE" INJECTED_DIR || exit 1
 
-                # Use a separate state directory per test to prevent
-                # state file cross-contamination between tests (issue #537)
-                CURRENT_STATE_DIR="$SLOT_DIR/test_${TEST_INDEX}"
-                mkdir -p "$CURRENT_STATE_DIR"
-                cp "$INJECTED_DIR/main.crn" "$CURRENT_STATE_DIR/main.crn"
+                # Every stateful test owns a persistent registry entry. Logs
+                # remain temporary, but state survives failures/interruptions.
+                if ! CURRENT_STATE_DIR=$(carina_registry_register_entry \
+                    "$RUN_DIR" "$ACCOUNT" "$TEST_INDEX" "$REL_PATH" \
+                    "$INJECTED_DIR/main.crn"); then
+                    echo "FAIL (register) $REL_PATH"
+                    rm -rf "$INJECTED_DIR"
+                    FAILED=$((FAILED + 1))
+                    TEST_INDEX=$((TEST_INDEX + 1))
+                    CURRENT_STATE_DIR=""
+                    continue
+                fi
                 rm -rf "$INJECTED_DIR"
                 TEST_INDEX=$((TEST_INDEX + 1))
 
@@ -814,6 +853,7 @@ if [ "$COMMAND" = "full" ]; then
                     echo "FAIL (init) $REL_PATH"
                     echo "  ERROR: $INIT_OUTPUT"
                     FAILED=$((FAILED + 1))
+                    release_registered_entry "$CURRENT_STATE_DIR" || true
                     CURRENT_STATE_DIR=""
                     continue
                 fi
@@ -830,7 +870,7 @@ if [ "$COMMAND" = "full" ]; then
                     echo "  ERROR: $APPLY_OUTPUT"
                     FAILED=$((FAILED + 1))
                     # Try to destroy whatever was partially created
-                    cd "$CURRENT_STATE_DIR" && with_account_creds "$ACCOUNT" "$CARINA_BIN" destroy --auto-approve "$CURRENT_STATE_DIR" 2>&1 || true
+                    destroy_registered_entry "$ACCOUNT" "$CURRENT_STATE_DIR" || true
                     CURRENT_STATE_DIR=""
                     continue
                 fi
@@ -848,25 +888,22 @@ if [ "$COMMAND" = "full" ]; then
                     echo "  $PLAN_OUTPUT"
                     FAILED=$((FAILED + 1))
                     # Still destroy to clean up
-                    cd "$CURRENT_STATE_DIR" && with_account_creds "$ACCOUNT" "$CARINA_BIN" destroy --auto-approve "$CURRENT_STATE_DIR" 2>&1 || true
+                    destroy_registered_entry "$ACCOUNT" "$CURRENT_STATE_DIR" || true
                     CURRENT_STATE_DIR=""
                     continue
                 elif [ $PLAN_RC -ne 0 ]; then
                     echo "FAIL (plan-verify) $REL_PATH"
                     echo "  ERROR: $PLAN_OUTPUT"
                     FAILED=$((FAILED + 1))
-                    cd "$CURRENT_STATE_DIR" && with_account_creds "$ACCOUNT" "$CARINA_BIN" destroy --auto-approve "$CURRENT_STATE_DIR" 2>&1 || true
+                    destroy_registered_entry "$ACCOUNT" "$CURRENT_STATE_DIR" || true
                     CURRENT_STATE_DIR=""
                     continue
                 fi
 
                 # Destroy
                 echo "RUNNING destroy $REL_PATH"
-                DESTROY_OUTPUT=$(cd "$CURRENT_STATE_DIR" && with_account_creds "$ACCOUNT" "$CARINA_BIN" destroy --auto-approve "$CURRENT_STATE_DIR" 2>&1)
-                DESTROY_RC=$?
-                if [ $DESTROY_RC -ne 0 ] || echo "$DESTROY_OUTPUT" | grep -q "failed"; then
+                if ! destroy_registered_entry "$ACCOUNT" "$CURRENT_STATE_DIR"; then
                     echo "FAIL (destroy) $REL_PATH"
-                    echo "  ERROR: $DESTROY_OUTPUT"
                     FAILED=$((FAILED + 1))
                     CURRENT_STATE_DIR=""
                     continue
@@ -879,6 +916,9 @@ if [ "$COMMAND" = "full" ]; then
 
             echo "---"
             echo "SUMMARY $ACCOUNT: $PASSED passed, $FAILED failed"
+            if [ "$FAILED" -ne 0 ] || [ "$INTERRUPTED" -ne 0 ]; then
+                exit 1
+            fi
         ) > "$LOG_FILE" 2>&1 &
 
         PIDS+=($!)
@@ -931,20 +971,21 @@ if [ "$COMMAND" = "full" ]; then
 
     echo "════════════════════════════════════════"
     echo "Total: $TOTAL_PASSED passed, $TOTAL_FAILED failed (of $TOTAL)"
+    report_retained_run_entries "$RUN_DIR"
     echo "════════════════════════════════════════"
 
     exit $OVERALL_EXIT
 fi
 
-# ── Single-command mode (validate/plan/apply/destroy) ────────────────
+# ── Single-command mode (validate/plan/apply) ────────────────────────
 echo "Running '$COMMAND' on ${#TESTS[@]} test file(s):"
 echo ""
 
-# Use per-test isolated state directories for commands that touch state
-# (plan/apply/destroy) to prevent cross-contamination between tests (issue #839)
 if [ "$COMMAND" != "validate" ]; then
-    WORK_DIR=$(mktemp -d)
-    trap 'for p in ${PIDS[@]+"${PIDS[@]}"}; do kill "$p" 2>/dev/null || true; done; rm -rf '"$WORK_DIR"'; release_account_locks' EXIT
+    RUN_DIR=$(carina_registry_create_run)
+    echo "Registry run: $RUN_DIR"
+    echo "Account: $SINGLE_ACCOUNT"
+    echo ""
 fi
 
 PASSED=0
@@ -958,16 +999,17 @@ for TEST_FILE in "${TESTS[@]}"; do
 
     inject_provider_source "$TEST_FILE" INJECTED_DIR || exit 1
 
-    AUTO_APPROVE=""
-    if [ "$COMMAND" = "apply" ] || [ "$COMMAND" = "destroy" ]; then
-        AUTO_APPROVE="--auto-approve"
-    fi
-
-    # Run from an isolated state directory for stateful commands
     if [ "$COMMAND" != "validate" ]; then
-        STATE_DIR="$WORK_DIR/test_${TEST_INDEX}"
-        mkdir -p "$STATE_DIR"
-        cp "$INJECTED_DIR/main.crn" "$STATE_DIR/main.crn"
+        if ! STATE_DIR=$(carina_registry_register_entry \
+            "$RUN_DIR" "$SINGLE_ACCOUNT" "$TEST_INDEX" "$REL_PATH" \
+            "$INJECTED_DIR/main.crn"); then
+            echo "FAIL (register)"
+            ERRORS+=("$REL_PATH: failed to register persistent state")
+            FAILED=$((FAILED + 1))
+            TEST_INDEX=$((TEST_INDEX + 1))
+            rm -rf "$INJECTED_DIR"
+            continue
+        fi
         rm -rf "$INJECTED_DIR"
         TEST_INDEX=$((TEST_INDEX + 1))
         TARGET_PATH="$STATE_DIR"
@@ -975,8 +1017,9 @@ for TEST_FILE in "${TESTS[@]}"; do
         # Initialize backend lock and install providers before the stateful command
         if ! INIT_OUTPUT=$("$CARINA_BIN" init "$STATE_DIR" 2>&1); then
             echo "FAIL (init)"
-            ERRORS+=("$REL_PATH: $INIT_OUTPUT")
+            ERRORS+=("$REL_PATH: $INIT_OUTPUT (registry: $STATE_DIR)")
             FAILED=$((FAILED + 1))
+            release_registered_entry "$STATE_DIR" || true
             continue
         fi
     else
@@ -998,34 +1041,64 @@ for TEST_FILE in "${TESTS[@]}"; do
         fi
     fi
 
-    RUN_PREFIX=""
-    if [ "$COMMAND" != "validate" ]; then
-        RUN_PREFIX="cd $STATE_DIR &&"
+    if [ "$COMMAND" = "validate" ]; then
+        COMMAND_RC=0
+        OUTPUT=$("$CARINA_BIN" validate "$TARGET_PATH" 2>&1) || COMMAND_RC=$?
+    else
+        COMMAND_ARGS=("$COMMAND")
+        if [ "$COMMAND" = "apply" ]; then
+            COMMAND_ARGS+=(--auto-approve)
+        fi
+        COMMAND_ARGS+=("$TARGET_PATH")
+        COMMAND_RC=0
+        OUTPUT=$(cd "$STATE_DIR" && with_account_creds "$SINGLE_ACCOUNT" \
+            "$CARINA_BIN" "${COMMAND_ARGS[@]}" 2>&1) || COMMAND_RC=$?
     fi
 
-    if OUTPUT=$(eval "$RUN_PREFIX \"$CARINA_BIN\" \"$COMMAND\" $AUTO_APPROVE \"$TARGET_PATH\"" 2>&1); then
+    if [ "$COMMAND_RC" -eq 0 ] && ! echo "$OUTPUT" | grep -q "failed"; then
         if [ "$COMMAND" = "apply" ]; then
             # Post-apply plan verification (idempotency check)
             # Use || to capture non-zero exit codes without triggering set -e
             PLAN_RC=0
-            PLAN_OUTPUT=$(eval "$RUN_PREFIX \"$CARINA_BIN\" plan --detailed-exitcode \"$TARGET_PATH\"" 2>&1) || PLAN_RC=$?
+            PLAN_OUTPUT=$(cd "$STATE_DIR" && with_account_creds "$SINGLE_ACCOUNT" \
+                "$CARINA_BIN" plan --detailed-exitcode "$TARGET_PATH" 2>&1) || PLAN_RC=$?
             if [ $PLAN_RC -eq 2 ]; then
                 echo "FAIL (plan-verify)"
-                ERRORS+=("$REL_PATH: Post-apply plan detected changes (not idempotent): $PLAN_OUTPUT")
+                ERRORS+=("$REL_PATH: Post-apply plan detected changes (not idempotent): $PLAN_OUTPUT (registry: $STATE_DIR)")
                 FAILED=$((FAILED + 1))
                 continue
             elif [ $PLAN_RC -ne 0 ]; then
                 echo "FAIL (plan-verify)"
-                ERRORS+=("$REL_PATH: $PLAN_OUTPUT")
+                ERRORS+=("$REL_PATH: $PLAN_OUTPUT (registry: $STATE_DIR)")
+                FAILED=$((FAILED + 1))
+                continue
+            fi
+        fi
+
+        if [ "$COMMAND" = "plan" ]; then
+            if ! RELEASE_OUTPUT=$(release_registered_entry "$STATE_DIR" 2>&1); then
+                echo "FAIL (state check)"
+                echo "$RELEASE_OUTPUT"
+                ERRORS+=("$REL_PATH: state check failed after plan (registry: $STATE_DIR)")
                 FAILED=$((FAILED + 1))
                 continue
             fi
         fi
         echo "OK"
+        if [ "$COMMAND" = "apply" ]; then
+            echo "    registered: $STATE_DIR"
+        fi
         PASSED=$((PASSED + 1))
     else
         echo "FAIL"
-        ERRORS+=("$REL_PATH: $OUTPUT")
+        if [ "$COMMAND" = "plan" ]; then
+            release_registered_entry "$STATE_DIR" || true
+        fi
+        if [ "$COMMAND" = "validate" ]; then
+            ERRORS+=("$REL_PATH: $OUTPUT")
+        else
+            ERRORS+=("$REL_PATH: $OUTPUT (registry: $STATE_DIR)")
+        fi
         FAILED=$((FAILED + 1))
     fi
     if [ "$COMMAND" = "validate" ]; then
@@ -1035,6 +1108,9 @@ done
 
 echo ""
 echo "Results: $PASSED passed, $FAILED failed (total: $((PASSED + FAILED)))"
+if [ "$COMMAND" != "validate" ]; then
+    report_retained_run_entries "$RUN_DIR"
+fi
 
 if [ ${#ERRORS[@]} -gt 0 ]; then
     echo ""

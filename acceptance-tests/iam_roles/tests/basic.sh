@@ -9,7 +9,7 @@ PRE_ROLE_NAME="carina-acc-test-iam-roles-preexisting"
 CONSUMER_ROLE_NAME="carina-acc-test-iam-roles-consumer"
 ASSUME_ROLE_POLICY='{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":"lambda.amazonaws.com"},"Action":"sts:AssumeRole"}]}'
 
-WORK_DIR=$(mktemp -d)
+register_acceptance_work_dir "iam_roles/basic.crn" "$SCRIPT_DIR/basic.crn" WORK_DIR
 ACTIVE_WORK_DIR="$WORK_DIR"
 
 delete_role_if_exists() {
@@ -58,7 +58,6 @@ else
     finish_test
 fi
 
-cp "$SCRIPT_DIR/basic.crn" "$WORK_DIR/main.crn"
 cd "$WORK_DIR"
 
 prepare_work_dir "$WORK_DIR"
@@ -87,8 +86,10 @@ assert_state_value "assert: consumer.description = $PRE_ROLE_NAME" \
     "$WORK_DIR"
 
 run_step "step3: destroy (consumer role only)" "$CARINA_BIN" destroy --auto-approve .
+if ! release_acceptance_work_dir "$WORK_DIR"; then
+    TEST_FAILED=$((TEST_FAILED + 1))
+fi
 ACTIVE_WORK_DIR=""
-rm -rf "$WORK_DIR"
 
 cleanup_pre_role
 
