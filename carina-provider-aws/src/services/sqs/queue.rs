@@ -674,7 +674,7 @@ impl AwsProvider {
         resource: &Resource<impl Sized>,
         _schema: &ResourceSchema,
     ) -> ProviderResult<TypedCreateCompletion> {
-        validate_sqs_queue_inputs(&CrossFieldInputs::complete(resource))?;
+        validate_sqs_queue_inputs(&CrossFieldInputs::resolved(resource))?;
         let input = SqsQueueCreateInput::decode(resource)?;
         let sent = input.sent();
         let crate::send_models_generated::SqsQueueCreateParts {
@@ -830,7 +830,7 @@ impl AwsProvider {
         to: Resource,
         _schema: &ResourceSchema,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
-        validate_sqs_queue_inputs(&CrossFieldInputs::complete(&to))?;
+        validate_sqs_queue_inputs(&CrossFieldInputs::resolved(&to))?;
         let input = SqsQueueUpdateInput::decode(&to)?;
         let crate::send_models_generated::SqsQueueUpdateParts {
             content_based_deduplication,
@@ -1060,7 +1060,7 @@ mod tests {
             Value::Concrete(ConcreteValue::String("messageGroup".into())),
         );
 
-        validate_sqs_queue_inputs(&CrossFieldInputs::complete(&resource))
+        validate_sqs_queue_inputs(&CrossFieldInputs::resolved(&resource))
             .expect("an unresolved fifo_queue value must not be treated as false");
     }
 
@@ -1073,7 +1073,7 @@ mod tests {
             Value::resource_ref("upstream", "deduplication_scope", vec![]),
         );
 
-        validate_sqs_queue_inputs(&CrossFieldInputs::complete(&resource))
+        validate_sqs_queue_inputs(&CrossFieldInputs::resolved(&resource))
             .expect("a deferred FIFO-only value must wait for resolution");
     }
 
@@ -1086,7 +1086,7 @@ mod tests {
         );
         resource.set_attr("kms_master_key_id", unknown());
 
-        validate_sqs_queue_inputs(&CrossFieldInputs::complete(&resource))
+        validate_sqs_queue_inputs(&CrossFieldInputs::resolved(&resource))
             .expect("an unresolved KMS key is present but not yet decidable");
     }
 
@@ -1095,7 +1095,7 @@ mod tests {
         let mut resource = queue_resource();
         resource.set_attr("kms_data_key_reuse_period_seconds", unknown());
 
-        validate_sqs_queue_inputs(&CrossFieldInputs::complete(&resource))
+        validate_sqs_queue_inputs(&CrossFieldInputs::resolved(&resource))
             .expect("an unresolved reuse period must wait for resolution");
     }
 

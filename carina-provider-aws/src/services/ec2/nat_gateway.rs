@@ -282,7 +282,7 @@ impl AwsProvider {
         client_token: &ClientToken,
         attempt: A,
     ) -> Result<A::Step, A::Verdict> {
-        if let Err(error) = validate_nat_gateway_inputs(&CrossFieldInputs::complete(resource)) {
+        if let Err(error) = validate_nat_gateway_inputs(&CrossFieldInputs::resolved(resource)) {
             return Err(attempt.untracked(error));
         }
         let input = match Ec2NatGatewayCreateInput::decode(resource) {
@@ -499,12 +499,12 @@ mod pending_tests {
             "availability_mode",
             Value::Concrete(ConcreteValue::String("zonal".into())),
         );
-        assert!(validate_nat_gateway_inputs(&CrossFieldInputs::complete(&zonal)).is_err());
+        assert!(validate_nat_gateway_inputs(&CrossFieldInputs::resolved(&zonal)).is_err());
         zonal.set_attr(
             "subnet_id",
             Value::Concrete(ConcreteValue::String("subnet-12345678".into())),
         );
-        validate_nat_gateway_inputs(&CrossFieldInputs::complete(&zonal))
+        validate_nat_gateway_inputs(&CrossFieldInputs::resolved(&zonal))
             .expect("zonal mode accepts a subnet");
 
         let mut regional = Resource::with_provider("aws", "ec2.NatGateway", "regional", None);
@@ -512,13 +512,13 @@ mod pending_tests {
             "availability_mode",
             Value::Concrete(ConcreteValue::String("regional".into())),
         );
-        validate_nat_gateway_inputs(&CrossFieldInputs::complete(&regional))
+        validate_nat_gateway_inputs(&CrossFieldInputs::resolved(&regional))
             .expect("regional mode omits subnet_id");
         regional.set_attr(
             "subnet_id",
             Value::Concrete(ConcreteValue::String("subnet-12345678".into())),
         );
-        assert!(validate_nat_gateway_inputs(&CrossFieldInputs::complete(&regional)).is_err());
+        assert!(validate_nat_gateway_inputs(&CrossFieldInputs::resolved(&regional)).is_err());
     }
 
     #[test]

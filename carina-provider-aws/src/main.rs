@@ -22,8 +22,8 @@ use carina_core::protocol_convert;
 use carina_core::provider::{
     AppliedIdentifier as CoreAppliedIdentifier, AppliedState as CoreAppliedState,
     DeleteRequest as CoreDeleteRequest, Observation as CoreObservation, Provider,
-    ProviderError as CoreProviderError, ProviderFactory, ReadOutcome as CoreReadOutcome,
-    ReadRequest as CoreReadRequest, Sent as CoreSent,
+    ProviderError as CoreProviderError, ProviderFactory, ProviderNormalizer,
+    ReadOutcome as CoreReadOutcome, ReadRequest as CoreReadRequest, Sent as CoreSent,
 };
 #[cfg(any(target_arch = "wasm32", test))]
 use carina_core::resource::Value as CoreValue;
@@ -841,7 +841,7 @@ impl CarinaProvider for AwsProcessProvider {
         // runtime: the host drives the WASM call, the guest drives its
         // internal async with this runtime (carina#3112 design Non-goal).
         self.runtime
-            .block_on(self.normalizer.normalize_wire_desired(&mut core_resources))
+            .block_on(self.normalizer.normalize_desired(&mut core_resources))
             .map_err(Self::convert_error)?;
         let mut normalized = Vec::with_capacity(core_resources.len());
         for resource in &core_resources {
