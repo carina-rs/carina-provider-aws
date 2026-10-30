@@ -130,9 +130,18 @@ run_step() {
 }
 
 # carina_state_json: Read local state through carina's supported interface.
+# Reject any output whose schema_version is not 1 (carina#4106 contract).
 # Args: work_dir
 carina_state_json() {
-    "$CARINA_BIN" state show --json "$1"
+    local state_json
+
+    state_json=$("$CARINA_BIN" state show --json "$1") || return $?
+    if ! jq -e '.schema_version == 1' <<< "$state_json" >/dev/null; then
+        echo "ERROR: carina state JSON schema_version must be 1" >&2
+        return 1
+    fi
+
+    printf '%s\n' "$state_json"
 }
 
 # carina_state_query: Extract exactly one non-empty value from local state.
@@ -158,7 +167,7 @@ carina_state_query() {
     " <<< "$state_json"
 }
 
-# carina_state_identifiers: Print every current v18 resource identifier, sorted.
+# carina_state_identifiers: Print every current schema-v1 resource identifier, sorted.
 # Args: work_dir
 carina_state_identifiers() {
     local state_json
@@ -224,7 +233,8 @@ assert_state_resource_count() {
 
     printf "  %-50s" "$description"
     local actual
-    if ! actual=$(carina_state_query "$work_dir" '.resources | length'); then
+    if ! actual=$(carina_state_query "$work_dir" \
+        'if .state == "present" then .resources | length else error("state is absent") end'); then
         echo "FAIL (state query failed)"
         TEST_FAILED=$((TEST_FAILED + 1))
         return 0
