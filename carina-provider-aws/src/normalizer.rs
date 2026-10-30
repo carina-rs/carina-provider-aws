@@ -3,12 +3,106 @@
 use carina_core::provider::{
     BoxFuture, ProviderNormalizer, ProviderResult, SavedAttrs, StateTransformMap, ready_noop,
 };
-use carina_core::resource::ProviderResource;
+use carina_core::resource::{ConcreteValue, ProviderResource, Resource, ResourceId, Value};
+
+#[derive(Clone, Copy)]
+enum DesiredAttributeVisibility {
+    Complete,
+    DeferredAttributesHidden,
+}
+
+/// What a provider-side cross-field check can prove about one input.
+///
+/// A WASM normalizer receives an ordinary-value projection. The host removes
+/// every top-level attribute containing a deferred value before the call and
+/// restores it afterward, so a missing wire attribute is not proof that the
+/// user omitted it. Keeping that distinction in this type prevents individual
+/// validators from accidentally treating transport-hidden values as absent.
+pub(crate) enum CrossFieldValue<'a> {
+    Known(&'a ConcreteValue),
+    Absent,
+    Deferred,
+}
+
+pub(crate) struct CrossFieldInputs<'a, S> {
+    resource: &'a Resource<S>,
+    visibility: DesiredAttributeVisibility,
+}
+
+impl<'a, S> CrossFieldInputs<'a, S> {
+    pub(crate) fn complete(resource: &'a Resource<S>) -> Self {
+        Self {
+            resource,
+            visibility: DesiredAttributeVisibility::Complete,
+        }
+    }
+
+    fn for_normalizer(resource: &'a Resource<S>, visibility: DesiredAttributeVisibility) -> Self {
+        Self {
+            resource,
+            visibility,
+        }
+    }
+
+    pub(crate) fn is_resource(&self, provider: &str, resource_type: &str) -> bool {
+        self.resource.id.provider == provider && self.resource.id.resource_type == resource_type
+    }
+
+    pub(crate) fn id(&self) -> &ResourceId {
+        &self.resource.id
+    }
+
+    pub(crate) fn get(&self, name: &str) -> CrossFieldValue<'_> {
+        match self.resource.get_attr(name) {
+            Some(Value::Concrete(value)) => CrossFieldValue::Known(value),
+            Some(Value::Deferred(_)) => CrossFieldValue::Deferred,
+            None if matches!(self.visibility, DesiredAttributeVisibility::Complete) => {
+                CrossFieldValue::Absent
+            }
+            None => CrossFieldValue::Deferred,
+        }
+    }
+}
 
 /// Schema extension for the AWS provider.
 ///
 /// Handles provider-local desired-state normalization.
 pub struct AwsNormalizer;
+
+impl AwsNormalizer {
+    fn normalize_desired_with_visibility<'a>(
+        &'a self,
+        resources: &'a mut [ProviderResource],
+        visibility: DesiredAttributeVisibility,
+    ) -> BoxFuture<'a, ProviderResult<()>> {
+        Box::pin(async move {
+            crate::services::route53::record_set::normalize_record_set_dns_names(resources);
+            crate::services::acm::certificate::normalize_acm_certificate_inputs(resources);
+            crate::services::s3::bucket_replication::normalize_delete_marker_replication(resources);
+            crate::services::ec2::subnet::normalize_subnet_ipv6_cidr_blocks(resources)?;
+            for resource in resources.iter() {
+                let inputs = CrossFieldInputs::for_normalizer(resource, visibility);
+                crate::services::ec2::nat_gateway::validate_nat_gateway_inputs(&inputs)?;
+                crate::services::sqs::queue::validate_sqs_queue_inputs(&inputs)?;
+            }
+            Ok(())
+        })
+    }
+
+    /// Normalize the partial ordinary-value projection used by the WASM
+    /// desired-state protocol. Missing attributes at this boundary may be
+    /// deferred values temporarily hidden by the host.
+    #[doc(hidden)]
+    pub fn normalize_wire_desired<'a>(
+        &'a self,
+        resources: &'a mut [ProviderResource],
+    ) -> BoxFuture<'a, ProviderResult<()>> {
+        self.normalize_desired_with_visibility(
+            resources,
+            DesiredAttributeVisibility::DeferredAttributesHidden,
+        )
+    }
+}
 
 impl ProviderNormalizer for AwsNormalizer {
     fn normalize_desired<'a>(
@@ -17,17 +111,7 @@ impl ProviderNormalizer for AwsNormalizer {
     ) -> BoxFuture<'a, ProviderResult<()>> {
         // Bodies are pure (dns-name strip — no I/O); the trait is async only
         // so the WASM host impl can `.await` the guest directly (carina#3112).
-        Box::pin(async move {
-            crate::services::route53::record_set::normalize_record_set_dns_names(resources);
-            crate::services::acm::certificate::normalize_acm_certificate_inputs(resources);
-            crate::services::s3::bucket_replication::normalize_delete_marker_replication(resources);
-            crate::services::ec2::subnet::normalize_subnet_ipv6_cidr_blocks(resources)?;
-            for resource in resources.iter() {
-                crate::services::ec2::nat_gateway::validate_nat_gateway_inputs(resource)?;
-                crate::services::sqs::queue::validate_sqs_queue_inputs(resource)?;
-            }
-            Ok(())
-        })
+        self.normalize_desired_with_visibility(resources, DesiredAttributeVisibility::Complete)
     }
 
     fn normalize_state<'a>(

@@ -18,6 +18,7 @@ use carina_core::schema::ResourceSchema;
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
+use crate::normalizer::{CrossFieldInputs, CrossFieldValue};
 use crate::provider::TypedCreateCompletion;
 use crate::read_model::found_managed_read;
 use crate::read_models_generated::SqsQueueReadModel;
@@ -303,41 +304,38 @@ fn required_queue_attribute(
 
 /// Reject cross-field combinations before they reach an AWS API that would
 /// reject or silently ignore them.
-pub(crate) fn validate_sqs_queue_inputs<S>(resource: &Resource<S>) -> ProviderResult<()> {
-    if resource.id.provider != "aws" || resource.id.resource_type != "sqs.Queue" {
+pub(crate) fn validate_sqs_queue_inputs<S>(inputs: &CrossFieldInputs<'_, S>) -> ProviderResult<()> {
+    if !inputs.is_resource("aws", "sqs.Queue") {
         return Ok(());
     }
 
     if matches!(
-        resource.get_attr("kms_data_key_reuse_period_seconds"),
-        Some(Value::Concrete(_))
-    ) && resource.get_attr("kms_master_key_id").is_none()
+        inputs.get("kms_data_key_reuse_period_seconds"),
+        CrossFieldValue::Known(_)
+    ) && matches!(inputs.get("kms_master_key_id"), CrossFieldValue::Absent)
     {
         return Err(ProviderError::invalid_input(
             "sqs.Queue attribute kms_data_key_reuse_period_seconds requires kms_master_key_id",
         )
-        .for_resource(resource.id.clone()));
+        .for_resource(inputs.id().clone()));
     }
 
     let fifo_is_definitively_standard = matches!(
-        resource.get_attr("fifo_queue"),
-        None | Some(Value::Concrete(ConcreteValue::Bool(false)))
+        inputs.get("fifo_queue"),
+        CrossFieldValue::Absent | CrossFieldValue::Known(ConcreteValue::Bool(false))
     );
     if fifo_is_definitively_standard {
         let content_dedup_enabled = matches!(
-            resource.get_attr("content_based_deduplication"),
-            Some(Value::Concrete(ConcreteValue::Bool(true)))
+            inputs.get("content_based_deduplication"),
+            CrossFieldValue::Known(ConcreteValue::Bool(true))
         );
         let unsupported = if content_dedup_enabled {
             Some("content_based_deduplication")
-        } else if matches!(
-            resource.get_attr("deduplication_scope"),
-            Some(Value::Concrete(_))
-        ) {
+        } else if matches!(inputs.get("deduplication_scope"), CrossFieldValue::Known(_)) {
             Some("deduplication_scope")
         } else if matches!(
-            resource.get_attr("fifo_throughput_limit"),
-            Some(Value::Concrete(_))
+            inputs.get("fifo_throughput_limit"),
+            CrossFieldValue::Known(_)
         ) {
             Some("fifo_throughput_limit")
         } else {
@@ -347,7 +345,7 @@ pub(crate) fn validate_sqs_queue_inputs<S>(resource: &Resource<S>) -> ProviderRe
             return Err(ProviderError::invalid_input(format!(
                 "sqs.Queue attribute {attribute} requires fifo_queue = true"
             ))
-            .for_resource(resource.id.clone()));
+            .for_resource(inputs.id().clone()));
         }
     }
 
@@ -676,7 +674,7 @@ impl AwsProvider {
         resource: &Resource<impl Sized>,
         _schema: &ResourceSchema,
     ) -> ProviderResult<TypedCreateCompletion> {
-        validate_sqs_queue_inputs(resource)?;
+        validate_sqs_queue_inputs(&CrossFieldInputs::complete(resource))?;
         let input = SqsQueueCreateInput::decode(resource)?;
         let sent = input.sent();
         let crate::send_models_generated::SqsQueueCreateParts {
@@ -832,7 +830,7 @@ impl AwsProvider {
         to: Resource,
         _schema: &ResourceSchema,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
-        validate_sqs_queue_inputs(&to)?;
+        validate_sqs_queue_inputs(&CrossFieldInputs::complete(&to))?;
         let input = SqsQueueUpdateInput::decode(&to)?;
         let crate::send_models_generated::SqsQueueUpdateParts {
             content_based_deduplication,
@@ -1062,7 +1060,7 @@ mod tests {
             Value::Concrete(ConcreteValue::String("messageGroup".into())),
         );
 
-        validate_sqs_queue_inputs(&resource)
+        validate_sqs_queue_inputs(&CrossFieldInputs::complete(&resource))
             .expect("an unresolved fifo_queue value must not be treated as false");
     }
 
@@ -1075,7 +1073,7 @@ mod tests {
             Value::resource_ref("upstream", "deduplication_scope", vec![]),
         );
 
-        validate_sqs_queue_inputs(&resource)
+        validate_sqs_queue_inputs(&CrossFieldInputs::complete(&resource))
             .expect("a deferred FIFO-only value must wait for resolution");
     }
 
@@ -1088,7 +1086,7 @@ mod tests {
         );
         resource.set_attr("kms_master_key_id", unknown());
 
-        validate_sqs_queue_inputs(&resource)
+        validate_sqs_queue_inputs(&CrossFieldInputs::complete(&resource))
             .expect("an unresolved KMS key is present but not yet decidable");
     }
 
@@ -1097,7 +1095,7 @@ mod tests {
         let mut resource = queue_resource();
         resource.set_attr("kms_data_key_reuse_period_seconds", unknown());
 
-        validate_sqs_queue_inputs(&resource)
+        validate_sqs_queue_inputs(&CrossFieldInputs::complete(&resource))
             .expect("an unresolved reuse period must wait for resolution");
     }
 

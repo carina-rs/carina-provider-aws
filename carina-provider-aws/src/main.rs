@@ -22,8 +22,8 @@ use carina_core::protocol_convert;
 use carina_core::provider::{
     AppliedIdentifier as CoreAppliedIdentifier, AppliedState as CoreAppliedState,
     DeleteRequest as CoreDeleteRequest, Observation as CoreObservation, Provider,
-    ProviderError as CoreProviderError, ProviderFactory, ProviderNormalizer,
-    ReadOutcome as CoreReadOutcome, ReadRequest as CoreReadRequest, Sent as CoreSent,
+    ProviderError as CoreProviderError, ProviderFactory, ReadOutcome as CoreReadOutcome,
+    ReadRequest as CoreReadRequest, Sent as CoreSent,
 };
 #[cfg(any(target_arch = "wasm32", test))]
 use carina_core::resource::Value as CoreValue;
@@ -841,7 +841,7 @@ impl CarinaProvider for AwsProcessProvider {
         // runtime: the host drives the WASM call, the guest drives its
         // internal async with this runtime (carina#3112 design Non-goal).
         self.runtime
-            .block_on(self.normalizer.normalize_desired(&mut core_resources))
+            .block_on(self.normalizer.normalize_wire_desired(&mut core_resources))
             .map_err(Self::convert_error)?;
         let mut normalized = Vec::with_capacity(core_resources.len());
         for resource in &core_resources {
@@ -875,7 +875,7 @@ fn main() {}
 #[cfg(test)]
 mod tests {
     use super::*;
-    use carina_core::resource::ConcreteValue;
+    use carina_core::resource::{ConcreteValue, DeferredValue, Resource, Value};
     use carina_core::schema::{
         AttributeType, CustomValidator, RawShape, ResourceValidation,
         TypeIdentity as CoreTypeIdentity,
@@ -1044,6 +1044,85 @@ mod tests {
 
     fn non_finite_state() -> CoreAppliedState {
         carina_provider_aws::non_finite_applied_state_for_protocol_test()
+    }
+
+    #[test]
+    fn normalize_desired_defers_nat_gateway_check_for_host_hidden_resource_ref() {
+        let mut resource =
+            Resource::with_provider("aws", "ec2.NatGateway", "deferred-subnet", None);
+        resource.set_attr(
+            "subnet_id",
+            Value::resource_ref("subnet", "subnet_id", vec![]),
+        );
+
+        let hidden = resource
+            .attributes
+            .shift_remove("subnet_id")
+            .expect("fixture must contain a real unresolved subnet reference");
+        assert!(matches!(
+            hidden,
+            Value::Deferred(DeferredValue::ResourceRef { .. })
+        ));
+
+        // WasmProviderNormalizer strips a top-level attribute containing a
+        // deferred reference before converting the resource to this ordinary
+        // protocol shape, then restores it after the guest returns.
+        let wire = protocol_convert::try_resource_to_protocol(&resource)
+            .expect("the host-visible projection must be protocol encodable");
+        assert!(!wire.attributes.contains_key("subnet_id"));
+
+        AwsProcessProvider::new()
+            .normalize_desired(vec![wire])
+            .expect("a host-hidden unresolved subnet reference must defer validation");
+    }
+
+    #[test]
+    fn normalize_desired_defers_sqs_checks_for_host_hidden_resource_refs() {
+        let mut fifo = Resource::with_provider("aws", "sqs.Queue", "deferred-fifo", None);
+        fifo.set_attr(
+            "fifo_queue",
+            Value::resource_ref("settings", "fifo_queue", vec![]),
+        );
+        fifo.set_attr(
+            "deduplication_scope",
+            Value::Concrete(ConcreteValue::String("messageGroup".into())),
+        );
+        let hidden_fifo = fifo
+            .attributes
+            .shift_remove("fifo_queue")
+            .expect("fixture must contain a real unresolved FIFO reference");
+        assert!(matches!(
+            hidden_fifo,
+            Value::Deferred(DeferredValue::ResourceRef { .. })
+        ));
+
+        let mut kms = Resource::with_provider("aws", "sqs.Queue", "deferred-kms", None);
+        kms.set_attr(
+            "kms_data_key_reuse_period_seconds",
+            Value::Concrete(ConcreteValue::Int(300)),
+        );
+        kms.set_attr(
+            "kms_master_key_id",
+            Value::resource_ref("key", "key_id", vec![]),
+        );
+        let hidden_key = kms
+            .attributes
+            .shift_remove("kms_master_key_id")
+            .expect("fixture must contain a real unresolved KMS-key reference");
+        assert!(matches!(
+            hidden_key,
+            Value::Deferred(DeferredValue::ResourceRef { .. })
+        ));
+
+        let wire_resources = [fifo, kms]
+            .iter()
+            .map(protocol_convert::try_resource_to_protocol)
+            .collect::<Result<Vec<_>, _>>()
+            .expect("host-visible projections must be protocol encodable");
+
+        AwsProcessProvider::new()
+            .normalize_desired(wire_resources)
+            .expect("host-hidden unresolved SQS inputs must defer cross-field validation");
     }
 
     fn assert_typed_conversion_error(error: CoreProviderError, message: &str) {

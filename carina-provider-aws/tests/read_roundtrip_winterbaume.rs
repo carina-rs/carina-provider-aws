@@ -12,14 +12,16 @@ use std::sync::{Arc, Mutex};
 use carina_core::differ::{Diff, Orphans, PlanPriorStates, create_plan, diff};
 use carina_core::effect::Effect;
 use carina_core::provider::{
-    AppliedIdentifier, CreateRequest, NoopNormalizer, Provider, ProviderNormalizer, RawSavedAttrs,
-    ReadRequest, UpdateRequest,
+    AppliedIdentifier, CreateRequest, NoopNormalizer, Provider, ProviderFactory,
+    ProviderNormalizer, RawSavedAttrs, ReadRequest, UpdateRequest,
 };
 use carina_core::resource::{
     ConcreteValue, Current, ResolvedResource, Resource, State, Value, into_plan_input_current_map,
 };
 use carina_core::schema::{SchemaKind, SchemaRegistry};
-use carina_provider_aws::{AwsNormalizer, AwsProvider, BoundedSdkConfig, test_existing_state};
+use carina_provider_aws::{
+    AwsNormalizer, AwsProvider, AwsProviderFactory, BoundedSdkConfig, test_existing_state,
+};
 use indexmap::IndexMap;
 use winterbaume_core::{
     MockAws, MockRequest, MockResponse, MockService, StatefulService, default_account_id,
@@ -41,6 +43,7 @@ const FIFO_QUEUE_URL: &str =
 const VPC_ID: &str = "vpc-0123456789abcdef0";
 const SUBNET_ID: &str = "subnet-0123456789abcdef0";
 const EIP_ALLOCATION_ID: &str = "eipalloc-0123456789abcdef0";
+const INTERNET_GATEWAY_ID: &str = "igw-0123456789abcdef0";
 const NAT_GATEWAY_ID: &str = "nat-0123456789abcdef0";
 const SECURITY_GROUP_ID: &str = "sg-0123456789abcdef0";
 const SOURCE_SECURITY_GROUP_ID: &str = "sg-0fedcba9876543210";
@@ -210,12 +213,13 @@ async fn create_request_for_test(resource: Resource) -> CreateRequest {
     let bindings = carina_core::binding_index::ResolvedBindings::default();
     let module_gate = carina_core::executor::ModuleConstraintGate::from_live_compositions(&[]);
     let schemas = schema_registry();
+    let factories: Vec<Box<dyn ProviderFactory>> = vec![Box::new(AwsProviderFactory)];
     let preparation = carina_core::executor::ProviderPreparationContext::new(
         &bindings,
         &module_gate,
         &[],
         &AwsNormalizer,
-        &[],
+        &factories,
         &schemas,
     );
     carina_core::executor::prepare_create_request(resource, &preparation)
@@ -272,12 +276,13 @@ async fn update_request_for_test(
     let bindings = carina_core::binding_index::ResolvedBindings::default();
     let module_gate = carina_core::executor::ModuleConstraintGate::from_live_compositions(&[]);
     let schemas = schema_registry();
+    let factories: Vec<Box<dyn ProviderFactory>> = vec![Box::new(AwsProviderFactory)];
     let preparation = carina_core::executor::ProviderPreparationContext::new(
         &bindings,
         &module_gate,
         &[],
         &AwsNormalizer,
-        &[],
+        &factories,
         &schemas,
     );
     carina_core::executor::prepare_update_request(resource, from, changed_attributes, &preparation)
@@ -689,6 +694,7 @@ enum Ec2RoundTripCase {
     VpcIpam,
     SubnetIpamIpv6,
     EipAddress,
+    DetachedInternetGateway,
     NatRegional,
     SecurityGroupIngress,
     FlowLog,
@@ -765,6 +771,14 @@ impl MockService for Ec2RoundTripService {
                     r#"<DescribeAddressesResponse xmlns="http://ec2.amazonaws.com/doc/2016-11-15/"><requestId>eip-read</requestId><addressesSet><item><publicIp>198.51.100.42</publicIp><allocationId>{EIP_ALLOCATION_ID}</allocationId><domain>vpc</domain><tagSet/></item></addressesSet></DescribeAddressesResponse>"#,
                 ),
             ),
+            (Ec2RoundTripCase::DetachedInternetGateway, "DescribeInternetGateways") => {
+                MockResponse::xml(
+                    200,
+                    format!(
+                        r#"<DescribeInternetGatewaysResponse xmlns="http://ec2.amazonaws.com/doc/2016-11-15/"><requestId>igw-read</requestId><internetGatewaySet><item><internetGatewayId>{INTERNET_GATEWAY_ID}</internetGatewayId><attachmentSet/><tagSet/></item></internetGatewaySet></DescribeInternetGatewaysResponse>"#,
+                    ),
+                )
+            }
             (Ec2RoundTripCase::NatRegional, "CreateNatGateway") => {
                 let body = query_body(&request);
                 assert_query_contains(&request, "AvailabilityMode=regional");
@@ -1572,6 +1586,24 @@ async fn eip_requested_address_round_trip() {
     assert_no_diff(desired, current);
 }
 
+#[tokio::test]
+async fn detached_internet_gateway_read_omits_vpc_id() {
+    let provider = provider_from_service(Ec2RoundTripService(
+        Ec2RoundTripCase::DetachedInternetGateway,
+    ))
+    .await;
+    let id = Resource::with_provider("aws", "ec2.InternetGateway", "detached", None).id;
+
+    let outcome = provider
+        .read(&id, &applied_identifier(INTERNET_GATEWAY_ID), ReadRequest)
+        .await
+        .expect("a detached internet gateway is a valid readable state");
+    let current = outcome.into_state();
+
+    assert!(current.exists);
+    assert!(!current.attributes.contains_key("vpc_id"));
+}
+
 #[tokio::test(start_paused = true)]
 async fn regional_nat_private_address_and_az_addresses_round_trip() {
     let provider = provider_from_service(Ec2RoundTripService(Ec2RoundTripCase::NatRegional)).await;
@@ -1856,7 +1888,12 @@ async fn replication_omitted_delete_marker_default_has_no_diff() {
     let provider = provider_with_replication_bucket().await;
     let rule = Value::Concrete(ConcreteValue::Map(IndexMap::from([
         ("id".to_string(), string("replicate-all")),
-        ("status".to_string(), string("Enabled")),
+        (
+            "status".to_string(),
+            Value::Concrete(ConcreteValue::enum_identifier(
+                "aws.s3.BucketReplicationConfiguration.ReplicationRule.Status.enabled",
+            )),
+        ),
         (
             "destination".to_string(),
             Value::Concrete(ConcreteValue::Map(IndexMap::from([(
@@ -1874,12 +1911,9 @@ async fn replication_omitted_delete_marker_default_has_no_diff() {
     desired.set_attr("bucket", string(REPLICATION_BUCKET));
     desired.set_attr("role", string("arn:aws:iam::123456789012:role/replication"));
     desired.set_attr("rules", Value::Concrete(ConcreteValue::List(vec![rule])));
-    let mut normalized = vec![desired.clone().into()];
-    AwsNormalizer
-        .normalize_desired(&mut normalized)
-        .await
-        .expect("replication defaults should normalize");
-    desired.attributes = normalized.remove(0).attributes;
+
+    let checked_request = create_request_for_test(desired.clone()).await;
+    desired.attributes = checked_request.resource().as_resource().attributes.clone();
 
     let Value::Concrete(ConcreteValue::List(rules)) = desired
         .get_attr("rules")
@@ -1890,23 +1924,18 @@ async fn replication_omitted_delete_marker_default_has_no_diff() {
     let Value::Concrete(ConcreteValue::Map(rule)) = &rules[0] else {
         panic!("rule must stay a map");
     };
-    assert_eq!(
-        rule.get("delete_marker_replication"),
-        Some(&Value::Concrete(ConcreteValue::Map(IndexMap::from([(
-            "status".to_string(),
-            string("Disabled"),
-        )]))))
-    );
+    let Some(Value::Concrete(ConcreteValue::Map(delete_marker_replication))) =
+        rule.get("delete_marker_replication")
+    else {
+        panic!("normalized rule must contain delete_marker_replication");
+    };
+    assert_api_text(delete_marker_replication.get("status"), "Disabled");
 
     let id = desired.id.clone();
     let current = carina_core::executor::complete_create_for_writeback(
-        carina_core::executor::dispatch_create(
-            &provider,
-            &id,
-            create_request_without_schema_for_test(desired.clone()).await,
-        )
-        .await
-        .expect("put and read back S3 replication configuration"),
+        carina_core::executor::dispatch_create(&provider, &id, checked_request)
+            .await
+            .expect("put and read back S3 replication configuration"),
     )
     .0;
     assert_no_diff(desired, current);

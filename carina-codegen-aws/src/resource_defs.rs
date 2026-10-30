@@ -693,7 +693,10 @@ impl ResourceDef {
                 ReadDisposition::read("SourceSecurityGroupOwnerId", Optional),
                 ReadDisposition::read("DestinationSecurityGroupId", Optional),
             ],
-            "ec2.InternetGateway" => vec![ReadDisposition::read("VpcId", Required)],
+            // Acceptance-observed in ap-northeast-1 on 2026-10-30: a newly
+            // created, valid detached internet gateway has an empty
+            // attachment set, so there is no VpcId to project until attach.
+            "ec2.InternetGateway" => vec![ReadDisposition::read("VpcId", Optional)],
             "ec2.Route" => vec![ReadDisposition::read("RouteTableId", Required)],
             "ec2.NatGateway" => vec![
                 ReadDisposition::read("AvailabilityZoneAddresses", Required),
@@ -3865,6 +3868,26 @@ mod tests {
             !resource.required_overrides.contains(&"Rule"),
             "rule must remain optional"
         );
+    }
+
+    #[test]
+    fn detached_internet_gateway_vpc_id_is_optional_read_state() {
+        let resource = ec2_resources()
+            .into_iter()
+            .find(|resource| resource.name == "ec2.InternetGateway")
+            .expect("missing ec2.InternetGateway ResourceDef");
+        let vpc_id = resource
+            .read_dispositions()
+            .into_iter()
+            .find(|disposition| disposition.field() == "VpcId");
+
+        assert!(matches!(
+            vpc_id,
+            Some(ReadDisposition::Read {
+                presence: ReadPresence::Optional,
+                ..
+            })
+        ));
     }
 
     #[test]
