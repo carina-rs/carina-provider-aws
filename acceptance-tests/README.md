@@ -18,15 +18,17 @@ remaining arguments filter the stored fixture path by substring. For example:
 ./acceptance-tests/run-tests.sh cleanup --accounts 3-3 ec2_vpc
 ```
 
-Cleanup uses the account recorded in each entry. Unusable entries and failed or
-incomplete destroys produce a non-zero exit and remain registered, with their
-paths printed for investigation. Runs whose creating process is still alive on
-this host are reported as in progress and skipped. Runs created on another host
-are also skipped and are never destroyed automatically. Skipped selected
-entries produce exit status 3; destroy or validation failures take precedence
-with exit status 1. If entries exist but none match the requested accounts or
-fixture filters, cleanup reports `No registry entries match`; an empty registry
-reports `No registered entries`.
+Cleanup uses the account recorded in each entry. Unusable entries remain
+registered and produce a non-zero exit: without fixture filters they are
+validation failures (exit status 1), while unusable metadata that cannot be
+matched against a fixture filter is skipped (exit status 3). Failed or
+incomplete destroys also produce exit status 1 and remain registered, with
+their paths printed for investigation. Runs whose creating process is still
+alive on this host are reported as in progress and skipped. Runs created on
+another host are also skipped and are never destroyed automatically. Destroy
+or validation failures take precedence over skipped entries. If entries exist
+but none match the requested accounts or fixture filters, cleanup reports `No
+registry entries match`; an empty registry reports `No registered entries`.
 
 Custom suites that are run directly also use this registry. Set `AWS_PROFILE`
 to the account profile so the suite uses and records the same account for a

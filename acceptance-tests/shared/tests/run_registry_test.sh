@@ -681,17 +681,24 @@ filtered_missing_meta_entry=$(new_entry "account-filter" "s3_bucket/missing.crn"
 rm -f "$filtered_missing_meta_entry/meta.json"
 filtered_partial_meta_entry=$(new_entry "account-filter" "s3_bucket/partial.crn" 1)
 printf '%s' '{"test":' > "$filtered_partial_meta_entry/meta.json"
-if ! filtered_orphaned_output=$(carina_registry_cleanup \
+if filtered_orphaned_output=$(carina_registry_cleanup \
     --account "account-filter" --filter "ec2_vpc" 2>&1); then
-    fail "filtered cleanup failed on metadata that could not be matched: $filtered_orphaned_output"
+    fail "filtered cleanup returned success for metadata that could not be matched: $filtered_orphaned_output"
+else
+    filtered_orphaned_status=$?
 fi
+[ "$filtered_orphaned_status" -eq 3 ] || \
+    fail "filtered cleanup returned $filtered_orphaned_status instead of skip status 3: $filtered_orphaned_output"
 [ -d "$filtered_missing_meta_entry" ] || fail "filtered cleanup removed a meta-less entry"
 [ -d "$filtered_partial_meta_entry" ] || fail "filtered cleanup removed a half-written entry"
 assert_contains "$filtered_orphaned_output" "WARNING"
 assert_contains "$filtered_orphaned_output" "$filtered_missing_meta_entry"
 assert_contains "$filtered_orphaned_output" "$filtered_partial_meta_entry"
-assert_contains "$filtered_orphaned_output" "cannot be matched"
-pass "filtered cleanup warns without failing when metadata cannot be matched"
+assert_contains "$filtered_orphaned_output" \
+    "cannot be matched against the filter: meta.json is missing or unreadable"
+assert_contains "$filtered_orphaned_output" \
+    "Cleanup summary: 2 selected entries skipped (exit status 3)"
+pass "filtered cleanup skips metadata that cannot be matched"
 
 next_test
 use_case_home "missing-main"

@@ -504,7 +504,9 @@ carina_registry_cleanup() {
                 'if (.test | type) == "string" and (.test | length) > 0 then .test else empty end' \
                 "$entry_dir/meta.json" 2>/dev/null || true)
             if [ -z "$fixture_path" ]; then
-                echo "WARNING: $entry_dir: fixture cannot be matched because meta.json is missing or unreadable; skipped" >&2
+                echo "WARNING: $entry_dir: skipped (cannot be matched against the filter: meta.json is missing or unreadable)" >&2
+                found=1
+                skipped=$((skipped + 1))
                 continue
             fi
             if ! carina_registry_fixture_selected \
