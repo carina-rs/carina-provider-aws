@@ -1145,9 +1145,14 @@ mod tests {
         );
         let nat_gateway = protocol_convert::try_resource_to_protocol(&nat_gateway)
             .expect("the concrete NAT gateway must be protocol encodable");
+        let error = provider
+            .normalize_desired(vec![nat_gateway])
+            .expect_err("a regional NAT gateway with a subnet must be rejected at plan time");
         assert!(
-            provider.normalize_desired(vec![nat_gateway]).is_err(),
-            "a regional NAT gateway with a subnet must be rejected at plan time"
+            error
+                .message
+                .contains("must be omitted when availability_mode = regional"),
+            "unexpected NAT gateway validation error: {error:?}"
         );
 
         let mut queue = Resource::with_provider("aws", "sqs.Queue", "standard-with-fifo", None);
@@ -1158,9 +1163,12 @@ mod tests {
         );
         let queue = protocol_convert::try_resource_to_protocol(&queue)
             .expect("the concrete SQS queue must be protocol encodable");
+        let error = provider.normalize_desired(vec![queue]).expect_err(
+            "a standard SQS queue with a FIFO-only attribute must be rejected at plan time",
+        );
         assert!(
-            provider.normalize_desired(vec![queue]).is_err(),
-            "a standard SQS queue with a FIFO-only attribute must be rejected at plan time"
+            error.message.contains("requires fifo_queue = true"),
+            "unexpected SQS queue validation error: {error:?}"
         );
     }
 
