@@ -70,7 +70,7 @@ pub fn route53_record_set_config() -> AwsSchemaConfig {
                 .build(),
         )
         .attribute(
-            AttributeSchema::optional("hosted_zone_id", AttributeType::string())
+            AttributeSchema::required("hosted_zone_id", AttributeType::string())
                 .create_only()
                 .with_description("The ID of the hosted zone that contains this record set.")
                 .with_provider_name("HostedZoneId")

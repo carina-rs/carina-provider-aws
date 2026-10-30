@@ -50,42 +50,10 @@ pub fn value_as_str(v: &Value) -> Option<&str> {
     }
 }
 
-/// Extract a required `String` attribute from a resource.
-///
-/// Returns the string value or a `ProviderError` with `"{attr_name} is required"`.
-pub fn require_string_attr(
-    resource: &Resource<impl Sized>,
-    attr_name: &str,
-) -> ProviderResult<String> {
-    match resource.get_attr(attr_name) {
-        Some(Value::Concrete(ConcreteValue::String(s))) => Ok(s.expose_plaintext().to_string()),
-        _ => Err(
-            ProviderError::invalid_input(format!("{} is required", attr_name))
-                .for_resource(resource.id.clone()),
-        ),
-    }
-}
-
-/// Extract an optional concrete string attribute, rejecting a present value
-/// with a different shape instead of silently dropping it from the AWS
-/// request.
-pub(crate) fn optional_string_attr<'a>(
-    resource: &'a Resource<impl Sized>,
-    attr_name: &str,
-) -> ProviderResult<Option<&'a str>> {
-    match resource.get_attr(attr_name) {
-        Some(Value::Concrete(ConcreteValue::String(value))) => Ok(Some(value.expose_plaintext())),
-        None => Ok(None),
-        Some(_) => Err(
-            ProviderError::invalid_input(format!("{attr_name} must be a string"))
-                .for_resource(resource.id.clone()),
-        ),
-    }
-}
-
 /// Extract an optional concrete integer attribute, rejecting a present value
 /// with a different shape instead of silently dropping it from the AWS
 /// request.
+#[cfg(test)]
 pub(crate) fn optional_int_attr(
     resource: &Resource<impl Sized>,
     attr_name: &str,
@@ -108,6 +76,7 @@ pub(crate) fn enum_attr_error(id: &ResourceId, error: EnumAttrError) -> Provider
 /// Required-attribute wrapper around [`optional_enum_attr`]. Returns the
 /// AWS API canonical spelling, or `ProviderError::invalid_input`
 /// when the attribute is absent or carries a non-enum-shaped value.
+#[cfg(test)]
 pub fn require_enum_attr(
     resource: &Resource<impl Sized>,
     schema: &ResourceSchema,
@@ -122,6 +91,7 @@ pub fn require_enum_attr(
 }
 
 /// Return the AWS API canonical spelling for an optional top-level enum.
+#[cfg(test)]
 pub fn optional_enum_attr<'a>(
     resource: &'a Resource<impl Sized>,
     schema: &'a ResourceSchema,
@@ -138,6 +108,7 @@ pub fn optional_enum_attr<'a>(
 /// `Value` shape. Sibling of [`optional_enum_attr`] /
 /// [`value_as_str`]; closes the symmetric top-level helper set for
 /// Bool reads (carina-rs/carina-provider-aws#451).
+#[cfg(test)]
 pub(crate) fn optional_bool_attr(resource: &Resource<impl Sized>, attr_name: &str) -> Option<bool> {
     match resource.get_attr(attr_name)? {
         Value::Concrete(ConcreteValue::Bool(b)) => Some(*b),
@@ -293,12 +264,12 @@ pub(crate) fn optional_string_list_struct_field(
 
 /// Build the create-time EC2 tags, including the provider discovery token.
 pub(crate) fn build_tag_specification_with_create_token(
-    resource: &Resource<impl Sized>,
+    tags: Option<&Value>,
     resource_type: ResourceType,
     token: &ClientToken,
 ) -> TagSpecification {
     let mut tag_spec = TagSpecification::builder().resource_type(resource_type);
-    if let Some(tags) = resource.get_attr("tags") {
+    if let Some(tags) = tags {
         for tag in value_to_ec2_tags(tags) {
             tag_spec = tag_spec.tags(tag);
         }
@@ -1265,8 +1236,11 @@ mod tests {
         );
         let token = ClientToken::new();
 
-        let tag_spec =
-            build_tag_specification_with_create_token(&resource, ResourceType::Vpc, &token);
+        let tag_spec = build_tag_specification_with_create_token(
+            resource.get_attr("tags"),
+            ResourceType::Vpc,
+            &token,
+        );
 
         assert_eq!(tag_spec.resource_type(), Some(&ResourceType::Vpc));
         let discovery_tags = tag_spec

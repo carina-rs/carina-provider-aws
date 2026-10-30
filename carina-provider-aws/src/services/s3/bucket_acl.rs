@@ -6,10 +6,11 @@ use carina_core::schema::ResourceSchema;
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
-use crate::helpers::{RetryPolicy, require_enum_attr, require_string_attr, retry_aws_operation};
-use crate::provider::CreateCompletion;
+use crate::helpers::{RetryPolicy, retry_aws_operation};
+use crate::provider::TypedCreateCompletion;
 use crate::read_model::found_managed_read;
 use crate::read_models_generated::S3BucketAclReadModel;
+use crate::send_models_generated::{S3BucketAclCreateInput, S3BucketAclUpdateInput};
 use crate::services::s3::bucket::is_s3_not_configured_error;
 
 /// AWS group URIs used to identify canned-ACL grant patterns.
@@ -145,19 +146,27 @@ impl AwsProvider {
     pub(crate) async fn create_s3_bucket_acl(
         &self,
         resource: &Resource<impl Sized>,
-        schema: &ResourceSchema,
-    ) -> ProviderResult<CreateCompletion> {
-        let bucket = require_string_attr(resource, "bucket")?;
+        _schema: &ResourceSchema,
+    ) -> ProviderResult<TypedCreateCompletion> {
+        let input = S3BucketAclCreateInput::decode(resource)?;
+        let sent = input.sent();
+        let crate::send_models_generated::S3BucketAclCreateParts { acl, bucket } =
+            input.into_parts();
+        let acl = acl.into_inner();
+        let bucket = bucket.into_inner();
         let identifier =
             crate::helpers::applied_identifier(&resource.id, "s3.PutBucketAcl", bucket)?;
         let outcome = self
-            .put_s3_bucket_acl(&resource.id, &identifier, resource, schema)
+            .put_s3_bucket_acl(&resource.id, &identifier, acl)
             .await?;
-        Ok(self.create_outcome_from_read(
-            &resource.id,
-            identifier,
-            resource.resolved_attributes(),
-            outcome,
+        Ok((
+            sent,
+            self.create_outcome_from_read(
+                &resource.id,
+                identifier,
+                resource.resolved_attributes(),
+                outcome,
+            ),
         ))
     }
 
@@ -167,26 +176,26 @@ impl AwsProvider {
         identifier: &AppliedIdentifier,
         _from: &State,
         to: Resource,
-        schema: &ResourceSchema,
+        _schema: &ResourceSchema,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
-        self.put_s3_bucket_acl(&id, identifier, &to, schema).await
+        let crate::send_models_generated::S3BucketAclUpdateParts { acl } =
+            S3BucketAclUpdateInput::decode(&to)?.into_parts();
+        let acl = acl.into_inner();
+        self.put_s3_bucket_acl(&id, identifier, acl).await
     }
 
     async fn put_s3_bucket_acl(
         &self,
         id: &ResourceId,
         bucket: &AppliedIdentifier,
-        resource: &Resource<impl Sized>,
-        schema: &ResourceSchema,
+        acl: String,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
         let applied_identifier = bucket;
         let bucket = bucket.as_str();
-        let acl_str = require_enum_attr(resource, schema, "acl")?;
-
         self.s3_client
             .put_bucket_acl()
             .bucket(bucket)
-            .acl(BucketCannedAcl::from(acl_str.as_str()))
+            .acl(BucketCannedAcl::from(acl.as_str()))
             .send()
             .await
             .map_err(|e| {

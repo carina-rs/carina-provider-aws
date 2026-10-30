@@ -7,10 +7,10 @@ use carina_core::schema::ResourceSchema;
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
-use crate::helpers::{optional_enum_attr, require_string_attr};
 use crate::provider::AwsCreateAttempt;
 use crate::read_model::found_managed_read;
 use crate::read_models_generated::LogsLogGroupReadModelSupplement;
+use crate::send_models_generated::{LogsLogGroupCreateInput, LogsLogGroupUpdateInput};
 
 impl AwsProvider {
     /// Read a CloudWatch Logs Log Group
@@ -89,13 +89,29 @@ impl AwsProvider {
     pub(crate) async fn create_logs_log_group<A: AwsCreateAttempt>(
         &self,
         resource: &Resource<impl Sized>,
-        schema: &ResourceSchema,
+        _schema: &ResourceSchema,
         attempt: A,
     ) -> Result<A::Step, A::Verdict> {
-        let log_group_name = match require_string_attr(resource, "log_group_name") {
-            Ok(log_group_name) => log_group_name,
+        let input = match LogsLogGroupCreateInput::decode(resource) {
+            Ok(input) => input,
             Err(error) => return Err(attempt.untracked(error)),
         };
+        let sent = input.sent();
+        let crate::send_models_generated::LogsLogGroupCreateParts {
+            deletion_protection_enabled,
+            kms_key_id,
+            log_group_class,
+            log_group_name,
+            retention_in_days,
+            tags,
+        } = input.into_parts();
+        let deletion_protection_enabled = deletion_protection_enabled.into_inner();
+        let kms_key_id = kms_key_id.into_inner();
+        let log_group_class = log_group_class.into_inner();
+        let log_group_name = log_group_name.into_inner();
+        let retention_in_days = retention_in_days.into_inner();
+        let tags = tags.into_inner();
+        let tags = crate::send_model::optional_tags_value(tags);
         let identifier = match crate::helpers::applied_identifier(
             &resource.id,
             "logs.CreateLogGroup",
@@ -110,28 +126,20 @@ impl AwsProvider {
             .create_log_group()
             .log_group_name(&log_group_name);
 
-        if let Some(Value::Concrete(ConcreteValue::Bool(enabled))) =
-            resource.get_attr("deletion_protection_enabled")
-        {
-            req = req.deletion_protection_enabled(*enabled);
+        if let Some(enabled) = deletion_protection_enabled {
+            req = req.deletion_protection_enabled(enabled);
         }
 
-        if let Some(Value::Concrete(ConcreteValue::String(kms_key))) =
-            resource.get_attr("kms_key_id")
-        {
-            req = req.kms_key_id(kms_key.expose_plaintext());
+        if let Some(kms_key_id) = kms_key_id {
+            req = req.kms_key_id(kms_key_id);
         }
 
-        let log_group_class = match optional_enum_attr(resource, schema, "log_group_class") {
-            Ok(log_group_class) => log_group_class,
-            Err(error) => return Err(attempt.untracked(error)),
-        };
         if let Some(class) = log_group_class {
             use aws_sdk_cloudwatchlogs::types::LogGroupClass;
-            req = req.log_group_class(LogGroupClass::from(class));
+            req = req.log_group_class(LogGroupClass::from(class.as_str()));
         }
 
-        if let Some(Value::Concrete(ConcreteValue::Map(tag_map))) = resource.get_attr("tags") {
+        if let Some(Value::Concrete(ConcreteValue::Map(tag_map))) = tags.as_ref() {
             let mut tags = HashMap::new();
             for (key, value) in tag_map {
                 if let Value::Concrete(ConcreteValue::String(val)) = value {
@@ -147,29 +155,15 @@ impl AwsProvider {
                     .for_resource(resource.id.clone()),
             ));
         }
-        let issued = attempt.issued(
-            identifier.clone(),
-            self.sent_only(
-                resource,
-                &[
-                    "log_group_name",
-                    "kms_key_id",
-                    "log_group_class",
-                    "deletion_protection_enabled",
-                    "tags",
-                ],
-            ),
-        );
+        let issued = attempt.issued(identifier.clone(), sent);
 
         // Set retention if specified
-        if let Some(Value::Concrete(ConcreteValue::Int(days))) =
-            resource.get_attr("retention_in_days")
-        {
+        if let Some(days) = retention_in_days {
             let result = self
                 .logs_client
                 .put_retention_policy()
                 .log_group_name(&log_group_name)
-                .retention_in_days(*days as i32)
+                .retention_in_days(days as i32)
                 .send()
                 .await;
             if let Err(error) = result {
@@ -198,13 +192,23 @@ impl AwsProvider {
         to: Resource,
         _schema: &ResourceSchema,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
+        let input = LogsLogGroupUpdateInput::decode(&to)?;
+        let crate::send_models_generated::LogsLogGroupUpdateParts {
+            deletion_protection_enabled,
+            retention_in_days,
+            tags,
+        } = input.into_parts();
+        let deletion_protection_enabled = deletion_protection_enabled.into_inner();
+        let retention_in_days = retention_in_days.into_inner();
+        let tags = tags.into_inner();
+        let tags = crate::send_model::optional_tags_value(tags);
         // Update retention
-        match to.get_attr("retention_in_days") {
-            Some(Value::Concrete(ConcreteValue::Int(days))) => {
+        match retention_in_days {
+            Some(days) => {
                 self.logs_client
                     .put_retention_policy()
                     .log_group_name(identifier.as_str())
-                    .retention_in_days(*days as i32)
+                    .retention_in_days(days as i32)
                     .send()
                     .await
                     .map_err(|e| {
@@ -227,37 +231,11 @@ impl AwsProvider {
             _ => {}
         }
 
-        // Update KMS key
-        if let Some(Value::Concrete(ConcreteValue::String(kms_key))) = to.get_attr("kms_key_id") {
-            self.logs_client
-                .associate_kms_key()
-                .log_group_name(identifier.as_str())
-                .kms_key_id(kms_key.expose_plaintext())
-                .send()
-                .await
-                .map_err(|e| {
-                    api_error_with_meta("Failed to associate KMS key", e).for_resource(id.clone())
-                })?;
-        } else if from.attributes.contains_key("kms_key_id") {
-            self.logs_client
-                .disassociate_kms_key()
-                .log_group_name(identifier.as_str())
-                .send()
-                .await
-                .map_err(|e| {
-                    api_error_with_meta("Failed to disassociate KMS key", e)
-                        .for_resource(id.clone())
-                })?;
-        }
-
         let current_deletion_protection = match from.attributes.get("deletion_protection_enabled") {
             Some(Value::Concrete(ConcreteValue::Bool(enabled))) => Some(*enabled),
             _ => None,
         };
-        let desired_deletion_protection = match to.get_attr("deletion_protection_enabled") {
-            Some(Value::Concrete(ConcreteValue::Bool(enabled))) => Some(*enabled),
-            _ => None,
-        };
+        let desired_deletion_protection = deletion_protection_enabled;
         if let Some(enabled) = desired_deletion_protection
             && desired_deletion_protection != current_deletion_protection
         {
@@ -277,7 +255,7 @@ impl AwsProvider {
         self.apply_logs_tags(
             &id,
             identifier.as_str(),
-            &to.resolved_attributes(),
+            tags.as_ref(),
             Some(&from.attributes),
         )
         .await?;
@@ -308,10 +286,10 @@ impl AwsProvider {
         &self,
         id: &ResourceId,
         log_group_name: &str,
-        desired: &HashMap<String, Value>,
+        desired: Option<&Value>,
         current: Option<&HashMap<String, Value>>,
     ) -> ProviderResult<()> {
-        let desired_tags = match desired.get("tags") {
+        let desired_tags = match desired {
             Some(Value::Concrete(ConcreteValue::Map(m))) => m.clone(),
             _ => IndexMap::new(),
         };

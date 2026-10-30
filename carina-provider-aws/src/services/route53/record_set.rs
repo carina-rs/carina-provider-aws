@@ -16,11 +16,12 @@ use carina_core::schema::ResourceSchema;
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
-use crate::helpers::{require_enum_attr, require_string_attr, sdk_error_message};
-use crate::provider::CreateCompletion;
+use crate::helpers::sdk_error_message;
+use crate::provider::TypedCreateCompletion;
 use crate::read_model::found_managed_read;
 use crate::read_models_generated::Route53RecordSetReadModelSupplement;
 use crate::resend_safety_generated::Route53Client;
+use crate::send_models_generated::{Route53RecordSetCreateInput, Route53RecordSetUpdateInput};
 
 /// Composite identifier format: `hosted_zone_id|name|type`
 fn make_identifier(hosted_zone_id: &str, name: &str, record_type: &str) -> String {
@@ -108,18 +109,17 @@ fn extract_string(value: &Value) -> Option<&str> {
     }
 }
 
-fn build_resource_records(records: &[Value]) -> Vec<ResourceRecord> {
+fn build_resource_records(
+    records: &[String],
+    id: &ResourceId,
+) -> ProviderResult<Vec<ResourceRecord>> {
     records
         .iter()
-        .filter_map(|v| {
-            if let Value::Concrete(ConcreteValue::String(s)) = v {
-                ResourceRecord::builder()
-                    .value(s.expose_plaintext())
-                    .build()
-                    .ok()
-            } else {
-                None
-            }
+        .map(|value| {
+            ResourceRecord::builder().value(value).build().map_err(|e| {
+                ProviderError::api_error(sdk_error_message("Invalid resource record", &e))
+                    .for_resource(id.clone())
+            })
         })
         .collect()
 }
@@ -160,33 +160,32 @@ fn build_alias_target_from_map(
 
 /// Build an AWS SDK ResourceRecordSet from carina resource attributes.
 fn build_record_set(
-    resource: &Resource<impl Sized>,
-    schema: &ResourceSchema,
+    id: &ResourceId,
+    alias_target: Option<&Value>,
+    name: &str,
+    resource_records: Option<&[String]>,
+    ttl: Option<i64>,
+    record_type: &str,
 ) -> ProviderResult<ResourceRecordSet> {
-    let name = require_string_attr(resource, "name")?;
-    let record_type = require_enum_attr(resource, schema, "type")?;
-
     let mut builder = ResourceRecordSet::builder()
-        .name(normalize_dns_name(&name))
-        .r#type(RrType::from(record_type.as_str()));
+        .name(normalize_dns_name(name))
+        .r#type(RrType::from(record_type));
 
-    if let Some(Value::Concrete(ConcreteValue::Int(ttl))) = resource.get_attr("ttl") {
-        builder = builder.ttl(*ttl);
+    if let Some(ttl) = ttl {
+        builder = builder.ttl(ttl);
     }
 
-    if let Some(Value::Concrete(ConcreteValue::List(records))) =
-        resource.get_attr("resource_records")
-    {
-        builder = builder.set_resource_records(Some(build_resource_records(records)));
+    if let Some(records) = resource_records {
+        builder = builder.set_resource_records(Some(build_resource_records(records, id)?));
     }
 
-    if let Some(Value::Concrete(ConcreteValue::Map(alias))) = resource.get_attr("alias_target") {
-        builder = builder.alias_target(build_alias_target_from_map(alias, &resource.id)?);
+    if let Some(Value::Concrete(ConcreteValue::Map(alias))) = alias_target {
+        builder = builder.alias_target(build_alias_target_from_map(alias, id)?);
     }
 
     builder.build().map_err(|e| {
         ProviderError::api_error(sdk_error_message("Failed to build ResourceRecordSet", &e))
-            .for_resource(resource.id.clone())
+            .for_resource(id.clone())
     })
 }
 
@@ -351,13 +350,33 @@ impl AwsProvider {
     pub(crate) async fn create_route53_record_set(
         &self,
         resource: &Resource<impl Sized>,
-        schema: &ResourceSchema,
-    ) -> ProviderResult<CreateCompletion> {
-        let hosted_zone_id = require_string_attr(resource, "hosted_zone_id")?;
-        let name = require_string_attr(resource, "name")?;
-        let record_type = require_enum_attr(resource, schema, "type")?;
+        _schema: &ResourceSchema,
+    ) -> ProviderResult<TypedCreateCompletion> {
+        let input = Route53RecordSetCreateInput::decode(resource)?;
+        let sent = input.sent();
+        let crate::send_models_generated::Route53RecordSetCreateParts {
+            alias_target,
+            hosted_zone_id,
+            name,
+            resource_records,
+            ttl,
+            r#type: record_type,
+        } = input.into_parts();
+        let alias_target = alias_target.into_inner();
+        let hosted_zone_id = hosted_zone_id.into_inner();
+        let name = name.into_inner();
+        let resource_records = resource_records.into_inner();
+        let ttl = ttl.into_inner();
+        let record_type = record_type.into_inner();
 
-        let record_set = build_record_set(resource, schema)?;
+        let record_set = build_record_set(
+            &resource.id,
+            alias_target.as_ref(),
+            &name,
+            resource_records.as_deref(),
+            ttl,
+            &record_type,
+        )?;
         change_record_set(
             &self.route53_client,
             &hosted_zone_id,
@@ -376,36 +395,63 @@ impl AwsProvider {
         let outcome = self
             .read_route53_record_set(&resource.id, &identifier)
             .await;
-        Ok(self.create_outcome_from_read(
-            &resource.id,
-            identifier,
-            resource.resolved_attributes(),
-            outcome,
+        Ok((
+            sent,
+            self.create_outcome_from_read(
+                &resource.id,
+                identifier,
+                resource.resolved_attributes(),
+                outcome,
+            ),
         ))
     }
 
     pub(crate) async fn update_route53_record_set(
         &self,
         id: ResourceId,
-        _identifier: &AppliedIdentifier,
+        identifier: &AppliedIdentifier,
         to: Resource,
-        schema: &ResourceSchema,
+        _schema: &ResourceSchema,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
-        let hosted_zone_id = require_string_attr(&to, "hosted_zone_id")?;
-        let name = require_string_attr(&to, "name")?;
-        let record_type = require_enum_attr(&to, schema, "type")?;
+        let input = Route53RecordSetUpdateInput::decode(&to)?;
+        let crate::send_models_generated::Route53RecordSetUpdateParts {
+            alias_target,
+            resource_records,
+            ttl,
+            r#type: record_type,
+        } = input.into_parts();
+        let alias_target = alias_target.into_inner();
+        let resource_records = resource_records.into_inner();
+        let ttl = ttl.into_inner();
+        let record_type = record_type.into_inner();
+        let Some((hosted_zone_id, name, _current_record_type)) =
+            parse_identifier(identifier.as_str())
+        else {
+            return Err(ProviderError::invalid_input(format!(
+                "Invalid record set identifier: {}",
+                identifier.as_str()
+            ))
+            .for_resource(id));
+        };
 
-        let record_set = build_record_set(&to, schema)?;
+        let record_set = build_record_set(
+            &id,
+            alias_target.as_ref(),
+            name,
+            resource_records.as_deref(),
+            ttl,
+            &record_type,
+        )?;
         change_record_set(
             &self.route53_client,
-            &hosted_zone_id,
+            hosted_zone_id,
             ChangeAction::Upsert,
             record_set,
             &id,
         )
         .await?;
 
-        let identifier = make_identifier(&hosted_zone_id, &name, &record_type);
+        let identifier = make_identifier(hosted_zone_id, name, &record_type);
         let identifier = crate::helpers::applied_identifier(
             &id,
             "route53.ChangeResourceRecordSets",
@@ -451,7 +497,19 @@ impl AwsProvider {
         if let Some(Value::Concrete(ConcreteValue::List(records))) =
             current_attributes.get("resource_records")
         {
-            builder = builder.set_resource_records(Some(build_resource_records(records)));
+            let records = records
+                .iter()
+                .map(|record| match record {
+                    Value::Concrete(ConcreteValue::String(record)) => {
+                        Ok(record.expose_plaintext().to_string())
+                    }
+                    _ => Err(ProviderError::internal(
+                        "read state resource_records contained a non-string value",
+                    )
+                    .for_resource(id.clone())),
+                })
+                .collect::<ProviderResult<Vec<_>>>()?;
+            builder = builder.set_resource_records(Some(build_resource_records(&records, &id)?));
         }
 
         if let Some(Value::Concrete(ConcreteValue::Map(alias))) =
@@ -581,11 +639,36 @@ mod tests {
             schema.canonicalize_state(Value::Concrete(ConcreteValue::String("AAAA".into())));
 
         let mut r = record_set("registry.example.com");
+        r.set_attr(
+            "hosted_zone_id".to_string(),
+            Value::Concrete(ConcreteValue::String("Z123".to_string().into())),
+        );
         r.set_attr("type".to_string(), canonical);
-        let resource_schema =
-            crate::schemas::generated::route53::record_set::route53_record_set_config().schema;
-        let record_set =
-            build_record_set(&r, &resource_schema).expect("canonical enum type should build");
+        let input = Route53RecordSetCreateInput::decode(&r).expect("decode typed create input");
+        let crate::send_models_generated::Route53RecordSetCreateParts {
+            alias_target,
+            hosted_zone_id,
+            name,
+            resource_records,
+            ttl,
+            r#type: record_type,
+        } = input.into_parts();
+        let alias_target = alias_target.into_inner();
+        let hosted_zone_id = hosted_zone_id.into_inner();
+        let name = name.into_inner();
+        let resource_records = resource_records.into_inner();
+        let ttl = ttl.into_inner();
+        let record_type = record_type.into_inner();
+        assert_eq!(hosted_zone_id, "Z123");
+        let record_set = build_record_set(
+            &r.id,
+            alias_target.as_ref(),
+            &name,
+            resource_records.as_deref(),
+            ttl,
+            &record_type,
+        )
+        .expect("canonical enum type should build");
 
         assert_eq!(record_set.r#type().as_str(), "AAAA");
     }

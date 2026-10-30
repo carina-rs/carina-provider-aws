@@ -18,10 +18,13 @@ use indexmap::IndexMap;
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
-use crate::helpers::{enum_attr_error, require_enum_attr, require_string_attr};
-use crate::provider::CreateCompletion;
+use crate::helpers::enum_attr_error;
+use crate::provider::TypedCreateCompletion;
 use crate::read_model::found_managed_read;
 use crate::read_models_generated::S3BucketObjectLockConfigurationReadModel;
+use crate::send_models_generated::{
+    S3BucketObjectLockConfigurationCreateInput, S3BucketObjectLockConfigurationUpdateInput,
+};
 use crate::services::s3::bucket::is_s3_not_configured_error;
 use crate::services::s3::{InvalidBucketStateReason, classify_invalid_bucket_state};
 
@@ -77,23 +80,45 @@ impl AwsProvider {
         &self,
         resource: &Resource<impl Sized>,
         schema: &ResourceSchema,
-    ) -> ProviderResult<CreateCompletion> {
-        let bucket = require_string_attr(resource, "bucket")?;
+    ) -> ProviderResult<TypedCreateCompletion> {
+        let input = S3BucketObjectLockConfigurationCreateInput::decode(resource)?;
+        let sent = input.sent();
+        let crate::send_models_generated::S3BucketObjectLockConfigurationCreateParts {
+            bucket,
+            object_lock_enabled,
+            rule,
+        } = input.into_parts();
+        let bucket = bucket.into_inner();
+        let object_lock_enabled = object_lock_enabled.into_inner();
+        let rule = rule.into_inner();
         let identifier = crate::helpers::applied_identifier(
             &resource.id,
             "s3.PutObjectLockConfiguration",
             bucket,
         )?;
-        self.ensure_create_does_not_omit_existing_rule(&resource.id, identifier.as_str(), resource)
-            .await?;
-        let outcome = self
-            .put_s3_bucket_object_lock_configuration(&resource.id, &identifier, resource, schema)
-            .await?;
-        Ok(self.create_outcome_from_read(
+        self.ensure_create_does_not_omit_existing_rule(
             &resource.id,
-            identifier,
-            resource.resolved_attributes(),
-            outcome,
+            identifier.as_str(),
+            rule.is_some(),
+        )
+        .await?;
+        let outcome = self
+            .put_s3_bucket_object_lock_configuration(
+                &resource.id,
+                &identifier,
+                object_lock_enabled,
+                rule.as_ref(),
+                schema,
+            )
+            .await?;
+        Ok((
+            sent,
+            self.create_outcome_from_read(
+                &resource.id,
+                identifier,
+                resource.resolved_attributes(),
+                outcome,
+            ),
         ))
     }
 
@@ -101,9 +126,9 @@ impl AwsProvider {
         &self,
         id: &ResourceId,
         bucket: &str,
-        resource: &Resource<impl Sized>,
+        has_rule: bool,
     ) -> ProviderResult<()> {
-        if resource.get_attr("rule").is_some() {
+        if has_rule {
             return Ok(());
         }
 
@@ -154,15 +179,29 @@ impl AwsProvider {
         to: Resource,
         schema: &ResourceSchema,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
-        self.put_s3_bucket_object_lock_configuration(&id, identifier, &to, schema)
-            .await
+        let input = S3BucketObjectLockConfigurationUpdateInput::decode(&to)?;
+        let crate::send_models_generated::S3BucketObjectLockConfigurationUpdateParts {
+            object_lock_enabled,
+            rule,
+        } = input.into_parts();
+        let object_lock_enabled = object_lock_enabled.into_inner();
+        let rule = rule.into_inner();
+        self.put_s3_bucket_object_lock_configuration(
+            &id,
+            identifier,
+            object_lock_enabled,
+            rule.as_ref(),
+            schema,
+        )
+        .await
     }
 
     async fn put_s3_bucket_object_lock_configuration(
         &self,
         id: &ResourceId,
         bucket: &AppliedIdentifier,
-        resource: &Resource<impl Sized>,
+        object_lock_enabled: String,
+        rule: Option<&Value>,
         schema: &ResourceSchema,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
         let applied_identifier = bucket;
@@ -170,16 +209,15 @@ impl AwsProvider {
         self.ensure_object_lock_versioning_enabled(id, bucket)
             .await?;
 
-        let enabled = require_enum_attr(resource, schema, "object_lock_enabled")?;
         let mut configuration = ObjectLockConfiguration::builder()
-            .object_lock_enabled(ObjectLockEnabled::from(enabled.as_str()));
+            .object_lock_enabled(ObjectLockEnabled::from(object_lock_enabled.as_str()));
 
         // A Put with Rule followed by a Put without Rule removed the bucket
         // default, and Get reflected the change. Measured in us-east-1 on
         // 2026-08-14, with present -> absent and absent -> present both
         // checked. Omitting Rule here is therefore a real in-place update;
         // create separately rejects that omission when AWS already has a Rule.
-        if let Some(rule) = resource.get_attr("rule") {
+        if let Some(rule) = rule {
             configuration = configuration.rule(build_rule(id, schema, rule)?);
         }
 

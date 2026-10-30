@@ -89,10 +89,19 @@ impl AwsProvider {
         &self,
         resource_id: &ResourceId,
         ec2_resource_id: &str,
-        attributes: &HashMap<String, Value>,
+        tags: Option<&Value>,
         from_attributes: Option<&HashMap<String, Value>>,
     ) -> ProviderResult<()> {
-        validate_ec2_user_tags(resource_id, attributes)?;
+        if matches!(
+            tags,
+            Some(Value::Concrete(ConcreteValue::Map(tags)))
+                if tags.contains_key(EC2_CREATE_TOKEN_TAG)
+        ) {
+            return Err(ProviderError::invalid_input(format!(
+                "tag key `{EC2_CREATE_TOKEN_TAG}` is reserved for provider-managed create discovery"
+            ))
+            .for_resource(resource_id.clone()));
+        }
 
         // Delete tags that were removed (present in from but not in to)
         if let Some(from_attrs) = from_attributes {
@@ -104,14 +113,12 @@ impl AwsProvider {
             } else {
                 std::collections::HashSet::new()
             };
-            let new_keys: std::collections::HashSet<&String> = if let Some(Value::Concrete(
-                ConcreteValue::Map(new_map),
-            )) = attributes.get("tags")
-            {
-                new_map.keys().collect()
-            } else {
-                std::collections::HashSet::new()
-            };
+            let new_keys: std::collections::HashSet<&String> =
+                if let Some(Value::Concrete(ConcreteValue::Map(new_map))) = tags {
+                    new_map.keys().collect()
+                } else {
+                    std::collections::HashSet::new()
+                };
             let removed_keys: Vec<&String> = old_keys
                 .difference(&new_keys)
                 .copied()
@@ -130,7 +137,7 @@ impl AwsProvider {
         }
 
         // Add/update tags
-        if let Some(tag_value) = attributes.get("tags") {
+        if let Some(tag_value) = tags {
             let tags = value_to_ec2_tags(tag_value);
             if !tags.is_empty() {
                 let mut req = self.ec2_client.create_tags().resources(ec2_resource_id);
@@ -415,7 +422,7 @@ mod tests {
             .apply_ec2_tags(
                 &id,
                 "vpc-12345678",
-                &HashMap::from([("tags".to_string(), new_tags)]),
+                Some(&new_tags),
                 Some(&HashMap::from([("tags".to_string(), old_tags)])),
             )
             .await

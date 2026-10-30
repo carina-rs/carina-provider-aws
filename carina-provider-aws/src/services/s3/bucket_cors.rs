@@ -6,10 +6,13 @@ use indexmap::IndexMap;
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
-use crate::helpers::{RetryPolicy, require_string_attr, retry_aws_operation, sdk_error_message};
-use crate::provider::CreateCompletion;
+use crate::helpers::{RetryPolicy, retry_aws_operation, sdk_error_message};
+use crate::provider::TypedCreateCompletion;
 use crate::read_model::found_managed_read;
 use crate::read_models_generated::S3BucketCorsConfigurationReadModel;
+use crate::send_models_generated::{
+    S3BucketCorsConfigurationCreateInput, S3BucketCorsConfigurationUpdateInput,
+};
 use crate::services::s3::bucket::is_s3_not_configured_error;
 
 impl AwsProvider {
@@ -51,18 +54,28 @@ impl AwsProvider {
     pub(crate) async fn create_s3_bucket_cors_configuration(
         &self,
         resource: &Resource<impl Sized>,
-    ) -> ProviderResult<CreateCompletion> {
-        let bucket = require_string_attr(resource, "bucket")?;
+    ) -> ProviderResult<TypedCreateCompletion> {
+        let input = S3BucketCorsConfigurationCreateInput::decode(resource)?;
+        let sent = input.sent();
+        let crate::send_models_generated::S3BucketCorsConfigurationCreateParts {
+            bucket,
+            cors_rules,
+        } = input.into_parts();
+        let bucket = bucket.into_inner();
+        let cors_rules = cors_rules.into_inner();
         let identifier =
             crate::helpers::applied_identifier(&resource.id, "s3.PutBucketCors", bucket)?;
         let outcome = self
-            .put_s3_bucket_cors(&resource.id, &identifier, resource)
+            .put_s3_bucket_cors(&resource.id, &identifier, &cors_rules)
             .await?;
-        Ok(self.create_outcome_from_read(
-            &resource.id,
-            identifier,
-            resource.resolved_attributes(),
-            outcome,
+        Ok((
+            sent,
+            self.create_outcome_from_read(
+                &resource.id,
+                identifier,
+                resource.resolved_attributes(),
+                outcome,
+            ),
         ))
     }
 
@@ -73,19 +86,23 @@ impl AwsProvider {
         _from: &State,
         to: Resource,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
-        self.put_s3_bucket_cors(&id, identifier, &to).await
+        let input = S3BucketCorsConfigurationUpdateInput::decode(&to)?;
+        let crate::send_models_generated::S3BucketCorsConfigurationUpdateParts { cors_rules } =
+            input.into_parts();
+        let cors_rules = cors_rules.into_inner();
+        self.put_s3_bucket_cors(&id, identifier, &cors_rules).await
     }
 
     async fn put_s3_bucket_cors(
         &self,
         id: &ResourceId,
         bucket: &AppliedIdentifier,
-        resource: &Resource<impl Sized>,
+        cors_rules: &Value,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
         let applied_identifier = bucket;
         let bucket = bucket.as_str();
-        let rules = match resource.get_attr("cors_rules") {
-            Some(Value::Concrete(ConcreteValue::List(items))) => items,
+        let rules = match cors_rules {
+            Value::Concrete(ConcreteValue::List(items)) => items,
             _ => {
                 return Err(ProviderError::invalid_input(
                     "cors_rules is required and must be a list",

@@ -13,12 +13,13 @@ use indexmap::IndexMap;
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
-use crate::helpers::{
-    RetryPolicy, enum_attr_error, require_string_attr, retry_aws_operation, sdk_error_message,
-};
-use crate::provider::CreateCompletion;
+use crate::helpers::{RetryPolicy, enum_attr_error, retry_aws_operation, sdk_error_message};
+use crate::provider::TypedCreateCompletion;
 use crate::read_model::found_managed_read;
 use crate::read_models_generated::S3BucketReplicationConfigurationReadModel;
+use crate::send_models_generated::{
+    S3BucketReplicationConfigurationCreateInput, S3BucketReplicationConfigurationUpdateInput,
+};
 use crate::services::s3::bucket::is_s3_not_configured_error;
 
 /// Insert the provider's canonical V2 replication default into authored
@@ -105,18 +106,30 @@ impl AwsProvider {
         &self,
         resource: &Resource<impl Sized>,
         schema: &ResourceSchema,
-    ) -> ProviderResult<CreateCompletion> {
-        let bucket = require_string_attr(resource, "bucket")?;
+    ) -> ProviderResult<TypedCreateCompletion> {
+        let input = S3BucketReplicationConfigurationCreateInput::decode(resource)?;
+        let sent = input.sent();
+        let crate::send_models_generated::S3BucketReplicationConfigurationCreateParts {
+            bucket,
+            role,
+            rules,
+        } = input.into_parts();
+        let bucket = bucket.into_inner();
+        let role = role.into_inner();
+        let rules = rules.into_inner();
         let identifier =
             crate::helpers::applied_identifier(&resource.id, "s3.PutBucketReplication", bucket)?;
         let outcome = self
-            .put_s3_bucket_replication(&resource.id, &identifier, resource, schema)
+            .put_s3_bucket_replication(&resource.id, &identifier, role, &rules, schema)
             .await?;
-        Ok(self.create_outcome_from_read(
-            &resource.id,
-            identifier,
-            resource.resolved_attributes(),
-            outcome,
+        Ok((
+            sent,
+            self.create_outcome_from_read(
+                &resource.id,
+                identifier,
+                resource.resolved_attributes(),
+                outcome,
+            ),
         ))
     }
 
@@ -128,7 +141,14 @@ impl AwsProvider {
         to: Resource,
         schema: &ResourceSchema,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
-        self.put_s3_bucket_replication(&id, identifier, &to, schema)
+        let input = S3BucketReplicationConfigurationUpdateInput::decode(&to)?;
+        let crate::send_models_generated::S3BucketReplicationConfigurationUpdateParts {
+            role,
+            rules,
+        } = input.into_parts();
+        let role = role.into_inner();
+        let rules = rules.into_inner();
+        self.put_s3_bucket_replication(&id, identifier, role, &rules, schema)
             .await
     }
 
@@ -136,14 +156,14 @@ impl AwsProvider {
         &self,
         id: &ResourceId,
         bucket: &AppliedIdentifier,
-        resource: &Resource<impl Sized>,
+        role: String,
+        rules: &Value,
         schema: &ResourceSchema,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
         let applied_identifier = bucket;
         let bucket = bucket.as_str();
-        let role = require_string_attr(resource, "role")?;
-        let rules = match resource.get_attr("rules") {
-            Some(Value::Concrete(ConcreteValue::List(items))) => items,
+        let rules = match rules {
+            Value::Concrete(ConcreteValue::List(items)) => items,
             _ => {
                 return Err(
                     ProviderError::invalid_input("rules is required and must be a list")
@@ -158,7 +178,7 @@ impl AwsProvider {
             .collect::<ProviderResult<Vec<_>>>()?;
 
         let config = ReplicationConfiguration::builder()
-            .role(&role)
+            .role(role)
             .set_rules(Some(sdk_rules))
             .build()
             .map_err(|e| {

@@ -6,13 +6,11 @@ use carina_core::schema::ResourceSchema;
 use crate::AwsProvider;
 use crate::aws_operation::ClientToken;
 use crate::error_helpers::api_error_with_meta;
-use crate::helpers::{
-    RetryPolicy, build_tag_specification_with_create_token, optional_bool_attr, optional_enum_attr,
-    optional_int_attr, optional_string_attr, retry_aws_operation,
-};
-use crate::provider::{AwsCreateAttempt, Ec2TaggedResourceKind};
+use crate::helpers::{RetryPolicy, build_tag_specification_with_create_token, retry_aws_operation};
+use crate::provider::{AwsCreateAttempt, TaggedEc2Create};
 use crate::read_model::{empty_map_value, found_managed_read};
 use crate::read_models_generated::Ec2VpcReadModelSupplement;
+use crate::send_models_generated::{Ec2VpcCreateInput, Ec2VpcUpdateInput};
 
 fn validate_vpc_cidr_source(
     id: &ResourceId,
@@ -138,27 +136,37 @@ impl AwsProvider {
     pub(crate) async fn create_ec2_vpc<A: AwsCreateAttempt>(
         &self,
         resource: &Resource<impl Sized>,
-        schema: &ResourceSchema,
+        _schema: &ResourceSchema,
         client_token: &ClientToken,
         attempt: A,
     ) -> Result<A::Step, A::Verdict> {
-        let cidr_block = match optional_string_attr(resource, "cidr_block") {
-            Ok(cidr_block) => cidr_block,
+        let input = match Ec2VpcCreateInput::decode(resource) {
+            Ok(input) => input,
             Err(error) => return Err(attempt.untracked(error)),
         };
-        let ipv4_ipam_pool_id = match optional_string_attr(resource, "ipv4_ipam_pool_id") {
-            Ok(value) => value,
-            Err(error) => return Err(attempt.untracked(error)),
-        };
-        let ipv4_netmask_length = match optional_int_attr(resource, "ipv4_netmask_length") {
-            Ok(value) => value,
-            Err(error) => return Err(attempt.untracked(error)),
-        };
+        let sent = input.sent();
+        let crate::send_models_generated::Ec2VpcCreateParts {
+            cidr_block,
+            enable_dns_hostnames,
+            enable_dns_support,
+            instance_tenancy,
+            ipv4_ipam_pool_id,
+            ipv4_netmask_length,
+            tags,
+        } = input.into_parts();
+        let cidr_block = cidr_block.into_inner();
+        let enable_dns_hostnames = enable_dns_hostnames.into_inner();
+        let enable_dns_support = enable_dns_support.into_inner();
+        let instance_tenancy = instance_tenancy.into_inner();
+        let ipv4_ipam_pool_id = ipv4_ipam_pool_id.into_inner();
+        let ipv4_netmask_length = ipv4_netmask_length.into_inner();
+        let tags = tags.into_inner();
+        let tags = crate::send_model::optional_tags_value(tags);
 
         if let Err(error) = validate_vpc_cidr_source(
             &resource.id,
-            cidr_block,
-            ipv4_ipam_pool_id,
+            cidr_block.as_deref(),
+            ipv4_ipam_pool_id.as_deref(),
             ipv4_netmask_length,
         ) {
             return Err(attempt.untracked(error));
@@ -167,7 +175,7 @@ impl AwsProvider {
         // Create VPC with optional instance_tenancy
         let mut create_vpc_builder = self.ec2_client.create_vpc().tag_specifications(
             build_tag_specification_with_create_token(
-                resource,
+                tags.as_ref(),
                 aws_sdk_ec2::types::ResourceType::Vpc,
                 client_token,
             ),
@@ -194,12 +202,8 @@ impl AwsProvider {
         }
 
         // Handle instance_tenancy if specified
-        let tenancy = match optional_enum_attr(resource, schema, "instance_tenancy") {
-            Ok(tenancy) => tenancy,
-            Err(error) => return Err(attempt.untracked(error)),
-        };
-        if let Some(tenancy) = tenancy {
-            let tenancy_enum = match tenancy {
+        if let Some(tenancy) = instance_tenancy {
+            let tenancy_enum = match tenancy.as_str() {
                 "dedicated" => aws_sdk_ec2::types::Tenancy::Dedicated,
                 "host" => aws_sdk_ec2::types::Tenancy::Host,
                 _ => aws_sdk_ec2::types::Tenancy::Default,
@@ -207,36 +211,31 @@ impl AwsProvider {
             create_vpc_builder = create_vpc_builder.instance_tenancy(tenancy_enum);
         }
 
-        let sent = self.sent_only(
-            resource,
-            &[
-                "cidr_block",
-                "ipv4_ipam_pool_id",
-                "ipv4_netmask_length",
-                "instance_tenancy",
-                "tags",
-            ],
-        );
         let result =
             retry_aws_operation(RetryPolicy::default(), || create_vpc_builder.clone()).await;
 
         self.finish_tagged_ec2_create(
             resource,
             attempt,
-            Ec2TaggedResourceKind::Vpc.create_context(client_token, sent),
+            TaggedEc2Create::Vpc {
+                enable_dns_hostnames,
+                enable_dns_support,
+            }
+            .create_context(client_token, sent),
             result,
             |output| output.vpc().and_then(|vpc| vpc.vpc_id()).map(str::to_owned),
         )
         .await
     }
 
-    pub(crate) async fn continue_ec2_vpc_create(
+    pub(crate) async fn continue_ec2_vpc_create_with(
         &self,
-        resource: &Resource<impl Sized>,
+        id: &ResourceId,
         vpc_id: &str,
+        enable_dns_hostnames: Option<bool>,
+        enable_dns_support: Option<bool>,
     ) -> ProviderResult<()> {
-        // Configure DNS support
-        if let Some(enabled) = optional_bool_attr(resource, "enable_dns_support") {
+        if let Some(enabled) = enable_dns_support {
             let result = self
                 .ec2_client
                 .modify_vpc_attribute()
@@ -250,13 +249,13 @@ impl AwsProvider {
                 .await;
             if let Err(error) = result {
                 let error = api_error_with_meta("Failed to set DNS support", error)
-                    .for_resource(resource.id.clone());
+                    .for_resource(id.clone());
                 return Err(error);
             }
         }
 
         // Configure DNS hostnames
-        if let Some(enabled) = optional_bool_attr(resource, "enable_dns_hostnames") {
+        if let Some(enabled) = enable_dns_hostnames {
             let result = self
                 .ec2_client
                 .modify_vpc_attribute()
@@ -270,7 +269,7 @@ impl AwsProvider {
                 .await;
             if let Err(error) = result {
                 let error = api_error_with_meta("Failed to set DNS hostnames", error)
-                    .for_resource(resource.id.clone());
+                    .for_resource(id.clone());
                 return Err(error);
             }
         }
@@ -286,11 +285,21 @@ impl AwsProvider {
         to: Resource,
         _schema: &ResourceSchema,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
+        let input = Ec2VpcUpdateInput::decode(&to)?;
+        let crate::send_models_generated::Ec2VpcUpdateParts {
+            enable_dns_hostnames,
+            enable_dns_support,
+            tags,
+        } = input.into_parts();
+        let enable_dns_hostnames = enable_dns_hostnames.into_inner();
+        let enable_dns_support = enable_dns_support.into_inner();
+        let tags = tags.into_inner();
+        let tags = crate::send_model::optional_tags_value(tags);
         // identifier is the VPC ID (e.g., vpc-12345678)
         let vpc_id = identifier.to_string();
 
         // Update DNS support
-        if let Some(enabled) = optional_bool_attr(&to, "enable_dns_support") {
+        if let Some(enabled) = enable_dns_support {
             self.ec2_client
                 .modify_vpc_attribute()
                 .vpc_id(&vpc_id)
@@ -307,7 +316,7 @@ impl AwsProvider {
         }
 
         // Update DNS hostnames
-        if let Some(enabled) = optional_bool_attr(&to, "enable_dns_hostnames") {
+        if let Some(enabled) = enable_dns_hostnames {
             self.ec2_client
                 .modify_vpc_attribute()
                 .vpc_id(&vpc_id)
@@ -325,13 +334,8 @@ impl AwsProvider {
         }
 
         // Update tags
-        self.apply_ec2_tags(
-            &id,
-            &vpc_id,
-            &to.resolved_attributes(),
-            Some(&from.attributes),
-        )
-        .await?;
+        self.apply_ec2_tags(&id, &vpc_id, tags.as_ref(), Some(&from.attributes))
+            .await?;
 
         Ok(self.read_ec2_vpc(&id, identifier).await)
     }

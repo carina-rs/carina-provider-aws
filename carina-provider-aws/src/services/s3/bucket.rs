@@ -1,5 +1,7 @@
-use indexmap::IndexMap;
+#[cfg(test)]
 use std::collections::HashMap;
+
+use indexmap::IndexMap;
 
 use carina_core::provider::{AppliedIdentifier, ReadOutcome};
 use carina_core::provider::{BoxFuture, ProviderError, ProviderResult};
@@ -14,6 +16,7 @@ use crate::provider::AwsCreateAttempt;
 use crate::read_model::found_data_source_read;
 use crate::read_model::{empty_map_value, found_managed_read};
 use crate::read_models_generated::{S3BucketDataSourceReadModel, S3BucketReadModel};
+use crate::send_models_generated::{S3BucketCreateInput, S3BucketUpdateInput};
 
 /// The complete read-only projection shared by managed and data-source
 /// reads of an S3 bucket.
@@ -172,15 +175,20 @@ impl AwsProvider {
         resource: &Resource<impl Sized>,
         attempt: A,
     ) -> Result<A::Step, A::Verdict> {
-        let bucket_name = match resource.get_attr("bucket") {
-            Some(Value::Concrete(ConcreteValue::String(s))) => s.expose_plaintext().to_string(),
-            _ => {
-                return Err(attempt.untracked(
-                    ProviderError::invalid_input("Bucket name is required")
-                        .for_resource(resource.id.clone()),
-                ));
-            }
+        let input = match S3BucketCreateInput::decode(resource) {
+            Ok(input) => input,
+            Err(error) => return Err(attempt.untracked(error)),
         };
+        let sent = input.sent();
+        let crate::send_models_generated::S3BucketCreateParts {
+            bucket: bucket_name,
+            bucket_namespace,
+            tags,
+        } = input.into_parts();
+        let bucket_name = bucket_name.into_inner();
+        let bucket_namespace = bucket_namespace.into_inner();
+        let tags = tags.into_inner();
+        let tags = crate::send_model::optional_tags_value(tags);
         let identifier = match crate::helpers::applied_identifier(
             &resource.id,
             "s3.CreateBucket",
@@ -193,21 +201,7 @@ impl AwsProvider {
         // Create bucket
         let mut req = self.s3_client.create_bucket().bucket(&bucket_name);
 
-        if let Some(value) = resource.get_attr("bucket_namespace") {
-            let namespace = match value {
-                Value::Concrete(ConcreteValue::String(value)) => {
-                    value.expose_plaintext().to_string()
-                }
-                Value::Concrete(ConcreteValue::CanonicalEnum(value)) => {
-                    value.api_value().to_string()
-                }
-                _ => {
-                    return Err(attempt.untracked(
-                        ProviderError::invalid_input("bucket_namespace must be an enum value")
-                            .for_resource(resource.id.clone()),
-                    ));
-                }
-            };
+        if let Some(namespace) = bucket_namespace {
             req =
                 req.bucket_namespace(aws_sdk_s3::types::BucketNamespace::from(namespace.as_str()));
         }
@@ -238,15 +232,11 @@ impl AwsProvider {
                 api_error_with_meta("Failed to create bucket", error).for_resource(rid),
             ));
         }
-        let issued = attempt.issued(
-            identifier.clone(),
-            self.sent_only(resource, &["bucket", "bucket_namespace"]),
-        );
+        let issued = attempt.issued(identifier.clone(), sent);
 
         // Set tags
-        let attrs = resource.resolved_attributes();
         if let Err(error) = self
-            .write_s3_bucket_tags(&resource.id, &bucket_name, &attrs)
+            .write_s3_bucket_tags(&resource.id, &bucket_name, tags.as_ref())
             .await
         {
             return Err(self.failed_issued(&resource.id, issued, error).await);
@@ -273,10 +263,13 @@ impl AwsProvider {
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
         let bucket_name = identifier.as_str();
 
-        let attrs = to.resolved_attributes();
+        let input = S3BucketUpdateInput::decode(&to)?;
+        let crate::send_models_generated::S3BucketUpdateParts { tags } = input.into_parts();
+        let tags = tags.into_inner();
+        let tags = crate::send_model::optional_tags_value(tags);
 
         // Update tags: if tags were removed entirely, delete all tags
-        if from.attributes.contains_key("tags") && !to.attributes.contains_key("tags") {
+        if from.attributes.contains_key("tags") && tags.is_none() {
             self.s3_client
                 .delete_bucket_tagging()
                 .bucket(bucket_name)
@@ -286,7 +279,8 @@ impl AwsProvider {
                     api_error_with_meta("Failed to delete bucket tags", e).for_resource(id.clone())
                 })?;
         } else {
-            self.write_s3_bucket_tags(&id, bucket_name, &attrs).await?;
+            self.write_s3_bucket_tags(&id, bucket_name, tags.as_ref())
+                .await?;
         }
 
         Ok(self.read_s3_bucket(&id, identifier).await)
@@ -446,9 +440,9 @@ impl AwsProvider {
         &self,
         id: &ResourceId,
         identifier: &str,
-        attributes: &HashMap<String, Value>,
+        tags: Option<&Value>,
     ) -> ProviderResult<()> {
-        if let Some(Value::Concrete(ConcreteValue::Map(tag_map))) = attributes.get("tags") {
+        if let Some(Value::Concrete(ConcreteValue::Map(tag_map))) = tags {
             use aws_sdk_s3::types::{Tag, Tagging};
             let tags: Vec<Tag> = tag_map
                 .iter()

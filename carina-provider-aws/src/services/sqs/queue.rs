@@ -18,10 +18,10 @@ use carina_core::schema::ResourceSchema;
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
-use crate::helpers::require_string_attr;
-use crate::provider::CreateCompletion;
+use crate::provider::TypedCreateCompletion;
 use crate::read_model::found_managed_read;
 use crate::read_models_generated::SqsQueueReadModel;
+use crate::send_models_generated::{SqsQueueCreateInput, SqsQueueUpdateInput};
 // IAM policy doc Struct↔JSON converters are borrowed via pub(crate)
 // from services/iam/role.rs until aws#286 extracts them into a shared
 // module. SQS's Policy and RedriveAllowPolicy are IAM-shaped.
@@ -231,6 +231,18 @@ fn pack_attr(value: &Value, kind: AttrKind) -> Option<String> {
         }
         _ => None,
     }
+}
+
+fn optional_bool_value(value: Option<bool>) -> Option<Value> {
+    value.map(|value| Value::Concrete(ConcreteValue::Bool(value)))
+}
+
+fn optional_int_value(value: Option<i64>) -> Option<Value> {
+    value.map(|value| Value::Concrete(ConcreteValue::Int(value)))
+}
+
+fn optional_string_value(value: Option<String>) -> Option<Value> {
+    value.map(|value| Value::Concrete(ConcreteValue::String(value.into())))
 }
 
 /// Reverse of `pack_attr`: deserialise the SQS wire string into a
@@ -663,13 +675,92 @@ impl AwsProvider {
         &self,
         resource: &Resource<impl Sized>,
         _schema: &ResourceSchema,
-    ) -> ProviderResult<CreateCompletion> {
+    ) -> ProviderResult<TypedCreateCompletion> {
         validate_sqs_queue_inputs(resource)?;
-        let queue_name = require_string_attr(resource, "queue_name")?;
-        let fifo = matches!(
-            resource.get_attr("fifo_queue"),
-            Some(Value::Concrete(ConcreteValue::Bool(true)))
-        );
+        let input = SqsQueueCreateInput::decode(resource)?;
+        let sent = input.sent();
+        let crate::send_models_generated::SqsQueueCreateParts {
+            content_based_deduplication,
+            deduplication_scope,
+            delay_seconds,
+            fifo_queue,
+            fifo_throughput_limit,
+            kms_data_key_reuse_period_seconds,
+            kms_master_key_id,
+            maximum_message_size,
+            message_retention_period,
+            policy,
+            queue_name,
+            receive_message_wait_time_seconds,
+            redrive_allow_policy,
+            redrive_policy,
+            sqs_managed_sse_enabled,
+            tags,
+            visibility_timeout,
+        } = input.into_parts();
+        let content_based_deduplication = content_based_deduplication.into_inner();
+        let deduplication_scope = deduplication_scope.into_inner();
+        let delay_seconds = delay_seconds.into_inner();
+        let fifo_queue = fifo_queue.into_inner();
+        let fifo_throughput_limit = fifo_throughput_limit.into_inner();
+        let kms_data_key_reuse_period_seconds = kms_data_key_reuse_period_seconds.into_inner();
+        let kms_master_key_id = kms_master_key_id.into_inner();
+        let maximum_message_size = maximum_message_size.into_inner();
+        let message_retention_period = message_retention_period.into_inner();
+        let policy = policy.into_inner();
+        let queue_name = queue_name.into_inner();
+        let receive_message_wait_time_seconds = receive_message_wait_time_seconds.into_inner();
+        let redrive_allow_policy = redrive_allow_policy.into_inner();
+        let redrive_policy = redrive_policy.into_inner();
+        let sqs_managed_sse_enabled = sqs_managed_sse_enabled.into_inner();
+        let tags = tags.into_inner();
+        let tags = crate::send_model::optional_tags_value(tags);
+        let visibility_timeout = visibility_timeout.into_inner();
+        let fifo = fifo_queue.unwrap_or(false);
+        let desired = HashMap::from([
+            (
+                "content_based_deduplication",
+                optional_bool_value(content_based_deduplication),
+            ),
+            (
+                "deduplication_scope",
+                optional_string_value(deduplication_scope),
+            ),
+            ("delay_seconds", optional_int_value(delay_seconds)),
+            ("fifo_queue", optional_bool_value(fifo_queue)),
+            (
+                "fifo_throughput_limit",
+                optional_string_value(fifo_throughput_limit),
+            ),
+            (
+                "kms_data_key_reuse_period_seconds",
+                optional_int_value(kms_data_key_reuse_period_seconds),
+            ),
+            (
+                "kms_master_key_id",
+                optional_string_value(kms_master_key_id),
+            ),
+            (
+                "maximum_message_size",
+                optional_int_value(maximum_message_size),
+            ),
+            (
+                "message_retention_period",
+                optional_int_value(message_retention_period),
+            ),
+            ("policy", policy),
+            (
+                "receive_message_wait_time_seconds",
+                optional_int_value(receive_message_wait_time_seconds),
+            ),
+            ("redrive_allow_policy", redrive_allow_policy),
+            ("redrive_policy", redrive_policy),
+            (
+                "sqs_managed_sse_enabled",
+                optional_bool_value(sqs_managed_sse_enabled),
+            ),
+            ("visibility_timeout", optional_int_value(visibility_timeout)),
+        ]);
 
         // Pack every writable attribute the user actually set.
         let mut attr_map: HashMap<QueueAttributeName, String> = HashMap::new();
@@ -692,14 +783,14 @@ impl AwsProvider {
             {
                 continue;
             }
-            if let Some(value) = resource.get_attr(attr_name)
+            if let Some(Some(value)) = desired.get(attr_name)
                 && let Some(serialized) = pack_attr(value, *kind)
             {
                 attr_map.insert(sdk_key.clone(), serialized);
             }
         }
 
-        let tags = resource_tags_map(resource);
+        let tags = tags_map(tags.as_ref());
 
         let mut req = self.sqs_client.create_queue().queue_name(&queue_name);
         if !attr_map.is_empty() {
@@ -721,11 +812,14 @@ impl AwsProvider {
         let identifier =
             crate::helpers::applied_identifier(&resource.id, "sqs.CreateQueue", queue_url)?;
         let outcome = self.read_sqs_queue(&resource.id, &identifier).await;
-        Ok(self.create_outcome_from_read(
-            &resource.id,
-            identifier,
-            resource.resolved_attributes(),
-            outcome,
+        Ok((
+            sent,
+            self.create_outcome_from_read(
+                &resource.id,
+                identifier,
+                resource.resolved_attributes(),
+                outcome,
+            ),
         ))
     }
 
@@ -739,6 +833,71 @@ impl AwsProvider {
         _schema: &ResourceSchema,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
         validate_sqs_queue_inputs(&to)?;
+        let input = SqsQueueUpdateInput::decode(&to)?;
+        let crate::send_models_generated::SqsQueueUpdateParts {
+            content_based_deduplication,
+            delay_seconds,
+            kms_data_key_reuse_period_seconds,
+            kms_master_key_id,
+            maximum_message_size,
+            message_retention_period,
+            policy,
+            receive_message_wait_time_seconds,
+            redrive_allow_policy,
+            redrive_policy,
+            sqs_managed_sse_enabled,
+            tags,
+            visibility_timeout,
+        } = input.into_parts();
+        let content_based_deduplication = content_based_deduplication.into_inner();
+        let delay_seconds = delay_seconds.into_inner();
+        let kms_data_key_reuse_period_seconds = kms_data_key_reuse_period_seconds.into_inner();
+        let kms_master_key_id = kms_master_key_id.into_inner();
+        let maximum_message_size = maximum_message_size.into_inner();
+        let message_retention_period = message_retention_period.into_inner();
+        let policy = policy.into_inner();
+        let receive_message_wait_time_seconds = receive_message_wait_time_seconds.into_inner();
+        let redrive_allow_policy = redrive_allow_policy.into_inner();
+        let redrive_policy = redrive_policy.into_inner();
+        let sqs_managed_sse_enabled = sqs_managed_sse_enabled.into_inner();
+        let tags = tags.into_inner();
+        let tags = crate::send_model::optional_tags_value(tags);
+        let visibility_timeout = visibility_timeout.into_inner();
+        let desired = HashMap::from([
+            (
+                "content_based_deduplication",
+                optional_bool_value(content_based_deduplication),
+            ),
+            ("delay_seconds", optional_int_value(delay_seconds)),
+            (
+                "kms_data_key_reuse_period_seconds",
+                optional_int_value(kms_data_key_reuse_period_seconds),
+            ),
+            (
+                "kms_master_key_id",
+                optional_string_value(kms_master_key_id),
+            ),
+            (
+                "maximum_message_size",
+                optional_int_value(maximum_message_size),
+            ),
+            (
+                "message_retention_period",
+                optional_int_value(message_retention_period),
+            ),
+            ("policy", policy),
+            (
+                "receive_message_wait_time_seconds",
+                optional_int_value(receive_message_wait_time_seconds),
+            ),
+            ("redrive_allow_policy", redrive_allow_policy),
+            ("redrive_policy", redrive_policy),
+            (
+                "sqs_managed_sse_enabled",
+                optional_bool_value(sqs_managed_sse_enabled),
+            ),
+            ("visibility_timeout", optional_int_value(visibility_timeout)),
+        ]);
         // Build a partial map of attributes whose value changed.
         // Create-only attributes (FifoQueue / FifoThroughputLimit /
         // DeduplicationScope) are dropped — schema marks them
@@ -748,7 +907,7 @@ impl AwsProvider {
             if !writable || is_create_only(sdk_key) {
                 continue;
             }
-            let desired = to.get_attr(attr_name);
+            let desired = desired.get(attr_name).and_then(Option::as_ref);
             let current = from.attributes.get(*attr_name);
             if desired == current {
                 continue;
@@ -776,7 +935,7 @@ impl AwsProvider {
         self.apply_sqs_tags(
             &id,
             identifier.as_str(),
-            &to.resolved_attributes(),
+            tags.as_ref(),
             Some(&from.attributes),
         )
         .await?;
@@ -807,10 +966,10 @@ impl AwsProvider {
         &self,
         id: &ResourceId,
         queue_url: &str,
-        desired: &HashMap<String, Value>,
+        desired: Option<&Value>,
         current: Option<&HashMap<String, Value>>,
     ) -> ProviderResult<()> {
-        let desired_tags = match desired.get("tags") {
+        let desired_tags = match desired {
             Some(Value::Concrete(ConcreteValue::Map(m))) => m.clone(),
             _ => IndexMap::new(),
         };
@@ -868,8 +1027,8 @@ impl AwsProvider {
 
 /// Extract a `tags = { ... }` block from the resource, dropping any
 /// non-string values. Returns `None` when no tags are set.
-fn resource_tags_map(resource: &Resource<impl Sized>) -> Option<HashMap<String, String>> {
-    let Some(Value::Concrete(ConcreteValue::Map(tag_map))) = resource.get_attr("tags") else {
+fn tags_map(tags: Option<&Value>) -> Option<HashMap<String, String>> {
+    let Some(Value::Concrete(ConcreteValue::Map(tag_map))) = tags else {
         return None;
     };
     let mut out = HashMap::new();

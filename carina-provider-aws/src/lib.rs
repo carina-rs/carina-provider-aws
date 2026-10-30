@@ -19,6 +19,10 @@ mod resend_guard;
 mod resend_safety_generated;
 pub mod schemas;
 mod sdk_config;
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod send_contract_test;
+mod send_model;
+mod send_models_generated;
 pub mod services;
 #[cfg(test)]
 mod tests;

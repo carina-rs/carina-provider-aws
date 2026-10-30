@@ -6,9 +6,10 @@ use crate::AwsProvider;
 use crate::aws_operation::ClientToken;
 use crate::error_helpers::api_error_with_meta;
 use crate::helpers::build_tag_specification_with_create_token;
-use crate::provider::{AwsCreateAttempt, Ec2TaggedResourceKind};
+use crate::provider::{AwsCreateAttempt, TaggedEc2Create};
 use crate::read_model::{empty_map_value, found_managed_read, require_read_value};
 use crate::read_models_generated::Ec2InternetGatewayReadModelSupplement;
+use crate::send_models_generated::Ec2InternetGatewayCreateInput;
 
 impl AwsProvider {
     /// Read an EC2 Internet Gateway
@@ -69,13 +70,21 @@ impl AwsProvider {
         client_token: &ClientToken,
         attempt: A,
     ) -> Result<A::Step, A::Verdict> {
-        // Create Internet Gateway
-        let sent = self.sent_only(resource, &["tags"]);
+        let input = match Ec2InternetGatewayCreateInput::decode(resource) {
+            Ok(input) => input,
+            Err(error) => return Err(attempt.untracked(error)),
+        };
+        let sent = input.sent();
+        let crate::send_models_generated::Ec2InternetGatewayCreateParts { tags, vpc_id } =
+            input.into_parts();
+        let tags = tags.into_inner();
+        let tags = crate::send_model::optional_tags_value(tags);
+        let vpc_id = vpc_id.into_inner();
         let result = self
             .ec2_client
             .create_internet_gateway()
             .tag_specifications(build_tag_specification_with_create_token(
-                resource,
+                tags.as_ref(),
                 aws_sdk_ec2::types::ResourceType::InternetGateway,
                 client_token,
             ))
@@ -85,7 +94,7 @@ impl AwsProvider {
         self.finish_tagged_ec2_create(
             resource,
             attempt,
-            Ec2TaggedResourceKind::InternetGateway.create_context(client_token, sent),
+            TaggedEc2Create::InternetGateway { vpc_id }.create_context(client_token, sent),
             result,
             |output| {
                 output
@@ -97,23 +106,23 @@ impl AwsProvider {
         .await
     }
 
-    pub(crate) async fn continue_ec2_internet_gateway_create(
+    pub(crate) async fn continue_ec2_internet_gateway_create_with(
         &self,
-        resource: &Resource<impl Sized>,
+        id: &ResourceId,
         igw_id: &str,
+        vpc_id: Option<&str>,
     ) -> ProviderResult<()> {
-        // Attach to VPC if specified
-        if let Some(Value::Concrete(ConcreteValue::String(vpc_id))) = resource.get_attr("vpc_id") {
+        if let Some(vpc_id) = vpc_id {
             let result = self
                 .ec2_client
                 .attach_internet_gateway()
                 .internet_gateway_id(igw_id)
-                .vpc_id(vpc_id.expose_plaintext())
+                .vpc_id(vpc_id)
                 .send()
                 .await;
             if let Err(error) = result {
                 let error = api_error_with_meta("Failed to attach internet gateway", error)
-                    .for_resource(resource.id.clone());
+                    .for_resource(id.clone());
                 return Err(error);
             }
         }

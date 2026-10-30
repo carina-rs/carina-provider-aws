@@ -2837,10 +2837,15 @@ impl AwsProvider {
         from: &State,
         to: Resource,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
+        let input = crate::send_models_generated::Ec2InternetGatewayUpdateInput::decode(&to)?;
+        let crate::send_models_generated::Ec2InternetGatewayUpdateParts { tags } =
+            input.into_parts();
+        let tags = tags.into_inner();
+        let tags = crate::send_model::optional_tags_value(tags);
         self.apply_ec2_tags(
             &id,
             identifier.as_str(),
-            &to.resolved_attributes(),
+            tags.as_ref(),
             Some(&from.attributes),
         )
         .await?;
@@ -2855,10 +2860,14 @@ impl AwsProvider {
         from: &State,
         to: Resource,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
+        let input = crate::send_models_generated::Ec2RouteTableUpdateInput::decode(&to)?;
+        let crate::send_models_generated::Ec2RouteTableUpdateParts { tags } = input.into_parts();
+        let tags = tags.into_inner();
+        let tags = crate::send_model::optional_tags_value(tags);
         self.apply_ec2_tags(
             &id,
             identifier.as_str(),
-            &to.resolved_attributes(),
+            tags.as_ref(),
             Some(&from.attributes),
         )
         .await?;
@@ -2873,10 +2882,14 @@ impl AwsProvider {
         from: &State,
         to: Resource,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
+        let input = crate::send_models_generated::Ec2SecurityGroupUpdateInput::decode(&to)?;
+        let crate::send_models_generated::Ec2SecurityGroupUpdateParts { tags } = input.into_parts();
+        let tags = tags.into_inner();
+        let tags = crate::send_model::optional_tags_value(tags);
         self.apply_ec2_tags(
             &id,
             identifier.as_str(),
-            &to.resolved_attributes(),
+            tags.as_ref(),
             Some(&from.attributes),
         )
         .await?;
@@ -2888,8 +2901,11 @@ impl AwsProvider {
         &self,
         id: ResourceId,
         identifier: &AppliedIdentifier,
-        _to: Resource,
+        to: Resource,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
+        let input =
+            crate::send_models_generated::OrganizationsOrganizationUpdateInput::decode(&to)?;
+        let crate::send_models_generated::OrganizationsOrganizationUpdateParts = input.into_parts();
         Ok(self.read_organizations_organization(&id, identifier).await)
     }
 

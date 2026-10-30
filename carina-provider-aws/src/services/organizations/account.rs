@@ -8,10 +8,13 @@ use carina_core::schema::ResourceSchema;
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
-use crate::helpers::{CreatePoll, optional_enum_attr, require_string_attr, sdk_error_message};
+use crate::helpers::{CreatePoll, sdk_error_message};
 use crate::provider::CreateCompletion;
 use crate::read_model::found_managed_read;
 use crate::read_models_generated::OrganizationsAccountReadModelSupplement;
+use crate::send_models_generated::{
+    OrganizationsAccountCreateInput, OrganizationsAccountUpdateInput,
+};
 
 const ACCOUNT_RENAME_SETUP_ERROR: &str = "Failed to rename account: AccessDenied can mean either a missing IAM permission account:PutAccountName or that Account Management trusted access is not enabled. Enable trusted access with `aws organizations enable-aws-service-access --service-principal account.amazonaws.com`";
 
@@ -105,10 +108,23 @@ impl AwsProvider {
     pub(crate) async fn create_organizations_account_start(
         &self,
         resource: &Resource<impl Sized>,
-        schema: &ResourceSchema,
-    ) -> ProviderResult<String> {
-        let name = require_string_attr(resource, "account_name")?;
-        let email = require_string_attr(resource, "email")?;
+        _schema: &ResourceSchema,
+    ) -> ProviderResult<(String, carina_core::provider::Sent)> {
+        let input = OrganizationsAccountCreateInput::decode(resource)?;
+        let sent = input.sent();
+        let crate::send_models_generated::OrganizationsAccountCreateParts {
+            account_name: name,
+            email,
+            iam_user_access_to_billing,
+            role_name,
+            tags,
+        } = input.into_parts();
+        let name = name.into_inner();
+        let email = email.into_inner();
+        let iam_user_access_to_billing = iam_user_access_to_billing.into_inner();
+        let role_name = role_name.into_inner();
+        let tags = tags.into_inner();
+        let tags = crate::send_model::optional_tags_value(tags);
 
         let mut req = self
             .organizations_client
@@ -116,20 +132,17 @@ impl AwsProvider {
             .account_name(&name)
             .email(&email);
 
-        if let Some(iam_billing) =
-            optional_enum_attr(resource, schema, "iam_user_access_to_billing")?
-        {
-            let val = aws_sdk_organizations::types::IamUserAccessToBilling::from(iam_billing);
+        if let Some(iam_billing) = iam_user_access_to_billing {
+            let val =
+                aws_sdk_organizations::types::IamUserAccessToBilling::from(iam_billing.as_str());
             req = req.iam_user_access_to_billing(val);
         }
 
-        if let Some(Value::Concrete(ConcreteValue::String(role_name))) =
-            resource.get_attr("role_name")
-        {
-            req = req.role_name(role_name.expose_plaintext());
+        if let Some(role_name) = role_name {
+            req = req.role_name(role_name);
         }
 
-        if let Some(Value::Concrete(ConcreteValue::Map(tag_map))) = resource.get_attr("tags") {
+        if let Some(Value::Concrete(ConcreteValue::Map(tag_map))) = tags.as_ref() {
             for (key, value) in tag_map {
                 if let Value::Concrete(ConcreteValue::String(val)) = value {
                     let tag = aws_sdk_organizations::types::Tag::builder()
@@ -159,7 +172,7 @@ impl AwsProvider {
                 .for_resource(resource.id.clone())
         })?;
 
-        Ok(request_id.to_string())
+        Ok((request_id.to_string(), sent))
     }
 
     /// Perform one describe call for a pending Organizations account create.
@@ -214,8 +227,15 @@ impl AwsProvider {
         to: Resource,
         _schema: &ResourceSchema,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
-        if from.attributes.get("account_name") != to.get_attr("account_name") {
-            let account_name = require_string_attr(&to, "account_name")?;
+        let input = OrganizationsAccountUpdateInput::decode(&to)?;
+        let crate::send_models_generated::OrganizationsAccountUpdateParts { account_name, tags } =
+            input.into_parts();
+        let account_name = account_name.into_inner();
+        let tags = tags.into_inner();
+        let tags = crate::send_model::optional_tags_value(tags);
+        let desired_account_name =
+            Value::Concrete(ConcreteValue::String(account_name.clone().into()));
+        if from.attributes.get("account_name") != Some(&desired_account_name) {
             let organization = self
                 .organizations_client
                 .describe_organization()
@@ -262,7 +282,7 @@ impl AwsProvider {
         self.apply_organizations_tags(
             &id,
             identifier.as_str(),
-            &to.resolved_attributes(),
+            tags.as_ref(),
             Some(&from.attributes),
         )
         .await?;
@@ -293,10 +313,10 @@ impl AwsProvider {
         &self,
         id: &ResourceId,
         resource_id: &str,
-        desired: &HashMap<String, Value>,
+        desired: Option<&Value>,
         current: Option<&HashMap<String, Value>>,
     ) -> ProviderResult<()> {
-        let desired_tags = match desired.get("tags") {
+        let desired_tags = match desired {
             Some(Value::Concrete(ConcreteValue::Map(m))) => m.clone(),
             _ => IndexMap::new(),
         };

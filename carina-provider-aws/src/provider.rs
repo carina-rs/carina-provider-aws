@@ -239,24 +239,188 @@ pub enum Ec2TaggedResourceKind {
 
 /// Inputs shared by every tag-discoverable EC2 create result handler.
 pub(crate) struct TaggedEc2CreateContext<'a> {
-    kind: Ec2TaggedResourceKind,
+    create: TaggedEc2Create,
     create_token: &'a ClientToken,
     sent: Sent,
 }
 
-impl Ec2TaggedResourceKind {
+/// A tagged EC2 create kind together with any values needed after the create
+/// request is accepted. Variant construction makes kind/continuation mismatch
+/// states unrepresentable.
+pub(crate) enum TaggedEc2Create {
+    Vpc {
+        enable_dns_hostnames: Option<bool>,
+        enable_dns_support: Option<bool>,
+    },
+    Subnet {
+        assign_ipv6_address_on_creation: Option<bool>,
+        enable_dns64: Option<bool>,
+        enable_lni_at_device_index: Option<i64>,
+        map_public_ip_on_launch: Option<bool>,
+        private_dns_name_options_on_launch: Option<Value>,
+    },
+    InternetGateway {
+        vpc_id: Option<String>,
+    },
+    RouteTable,
+    SecurityGroup,
+    EgressOnlyInternetGateway,
+    VpnGateway,
+    VpcPeeringConnection,
+    Address,
+    NatGateway,
+    VpcEndpoint,
+    FlowLog,
+    TransitGateway,
+    TransitGatewayVpcAttachment,
+}
+
+/// A resumed EC2 create only needs follow-up fields, but every generated
+/// create part still has to cross the `Sent<T>` consumption boundary. Keeping
+/// this as a generic helper avoids `drop(copy_value)` warnings while making
+/// the intentional projection explicit at each named field.
+fn consume_create_request_part_on_resume<T>(part: crate::send_model::Sent<T>) {
+    drop(part.into_inner());
+}
+
+impl TaggedEc2Create {
     pub(crate) fn create_context(
         self,
         create_token: &ClientToken,
         sent: Sent,
     ) -> TaggedEc2CreateContext<'_> {
         TaggedEc2CreateContext {
-            kind: self,
+            create: self,
             create_token,
             sent,
         }
     }
 
+    fn kind(&self) -> Ec2TaggedResourceKind {
+        match self {
+            Self::Vpc { .. } => Ec2TaggedResourceKind::Vpc,
+            Self::Subnet { .. } => Ec2TaggedResourceKind::Subnet,
+            Self::InternetGateway { .. } => Ec2TaggedResourceKind::InternetGateway,
+            Self::RouteTable => Ec2TaggedResourceKind::RouteTable,
+            Self::SecurityGroup => Ec2TaggedResourceKind::SecurityGroup,
+            Self::EgressOnlyInternetGateway => Ec2TaggedResourceKind::EgressOnlyInternetGateway,
+            Self::VpnGateway => Ec2TaggedResourceKind::VpnGateway,
+            Self::VpcPeeringConnection => Ec2TaggedResourceKind::VpcPeeringConnection,
+            Self::Address => Ec2TaggedResourceKind::Address,
+            Self::NatGateway => Ec2TaggedResourceKind::NatGateway,
+            Self::VpcEndpoint => Ec2TaggedResourceKind::VpcEndpoint,
+            Self::FlowLog => Ec2TaggedResourceKind::FlowLog,
+            Self::TransitGateway => Ec2TaggedResourceKind::TransitGateway,
+            Self::TransitGatewayVpcAttachment => Ec2TaggedResourceKind::TransitGatewayVpcAttachment,
+        }
+    }
+
+    fn decode_resumed(
+        kind: Ec2TaggedResourceKind,
+        resource: &Resource<impl Sized>,
+    ) -> ProviderResult<Self> {
+        match kind {
+            Ec2TaggedResourceKind::Vpc => {
+                let input = crate::send_models_generated::Ec2VpcCreateInput::decode(resource)?;
+                let crate::send_models_generated::Ec2VpcCreateParts {
+                    cidr_block,
+                    enable_dns_hostnames,
+                    enable_dns_support,
+                    instance_tenancy,
+                    ipv4_ipam_pool_id,
+                    ipv4_netmask_length,
+                    tags,
+                } = input.into_parts();
+                // Resume only needs the follow-up values. Explicitly consume
+                // the create-request values so the Sent<T> guard still proves
+                // that this projection was updated when the generated input grows.
+                consume_create_request_part_on_resume(cidr_block);
+                let enable_dns_hostnames = enable_dns_hostnames.into_inner();
+                let enable_dns_support = enable_dns_support.into_inner();
+                consume_create_request_part_on_resume(instance_tenancy);
+                consume_create_request_part_on_resume(ipv4_ipam_pool_id);
+                consume_create_request_part_on_resume(ipv4_netmask_length);
+                consume_create_request_part_on_resume(tags);
+                Ok(Self::Vpc {
+                    enable_dns_hostnames,
+                    enable_dns_support,
+                })
+            }
+            Ec2TaggedResourceKind::Subnet => {
+                let input = crate::send_models_generated::Ec2SubnetCreateInput::decode(resource)?;
+                let crate::send_models_generated::Ec2SubnetCreateParts {
+                    assign_ipv6_address_on_creation,
+                    availability_zone,
+                    availability_zone_id,
+                    cidr_block,
+                    enable_dns64,
+                    enable_lni_at_device_index,
+                    ipv4_ipam_pool_id,
+                    ipv4_netmask_length,
+                    ipv6_cidr_block,
+                    ipv6_ipam_pool_id,
+                    ipv6_native,
+                    ipv6_netmask_length,
+                    map_public_ip_on_launch,
+                    outpost_arn,
+                    private_dns_name_options_on_launch,
+                    tags,
+                    vpc_id,
+                } = input.into_parts();
+                let assign_ipv6_address_on_creation = assign_ipv6_address_on_creation.into_inner();
+                consume_create_request_part_on_resume(availability_zone);
+                consume_create_request_part_on_resume(availability_zone_id);
+                consume_create_request_part_on_resume(cidr_block);
+                let enable_dns64 = enable_dns64.into_inner();
+                let enable_lni_at_device_index = enable_lni_at_device_index.into_inner();
+                consume_create_request_part_on_resume(ipv4_ipam_pool_id);
+                consume_create_request_part_on_resume(ipv4_netmask_length);
+                consume_create_request_part_on_resume(ipv6_cidr_block);
+                consume_create_request_part_on_resume(ipv6_ipam_pool_id);
+                consume_create_request_part_on_resume(ipv6_native);
+                consume_create_request_part_on_resume(ipv6_netmask_length);
+                let map_public_ip_on_launch = map_public_ip_on_launch.into_inner();
+                consume_create_request_part_on_resume(outpost_arn);
+                let private_dns_name_options_on_launch =
+                    private_dns_name_options_on_launch.into_inner();
+                consume_create_request_part_on_resume(tags);
+                consume_create_request_part_on_resume(vpc_id);
+                Ok(Self::Subnet {
+                    assign_ipv6_address_on_creation,
+                    enable_dns64,
+                    enable_lni_at_device_index,
+                    map_public_ip_on_launch,
+                    private_dns_name_options_on_launch,
+                })
+            }
+            Ec2TaggedResourceKind::InternetGateway => {
+                let input =
+                    crate::send_models_generated::Ec2InternetGatewayCreateInput::decode(resource)?;
+                let crate::send_models_generated::Ec2InternetGatewayCreateParts { tags, vpc_id } =
+                    input.into_parts();
+                consume_create_request_part_on_resume(tags);
+                Ok(Self::InternetGateway {
+                    vpc_id: vpc_id.into_inner(),
+                })
+            }
+            Ec2TaggedResourceKind::RouteTable => Ok(Self::RouteTable),
+            Ec2TaggedResourceKind::SecurityGroup => Ok(Self::SecurityGroup),
+            Ec2TaggedResourceKind::EgressOnlyInternetGateway => Ok(Self::EgressOnlyInternetGateway),
+            Ec2TaggedResourceKind::VpnGateway => Ok(Self::VpnGateway),
+            Ec2TaggedResourceKind::VpcPeeringConnection => Ok(Self::VpcPeeringConnection),
+            Ec2TaggedResourceKind::Address => Ok(Self::Address),
+            Ec2TaggedResourceKind::NatGateway => Ok(Self::NatGateway),
+            Ec2TaggedResourceKind::VpcEndpoint => Ok(Self::VpcEndpoint),
+            Ec2TaggedResourceKind::FlowLog => Ok(Self::FlowLog),
+            Ec2TaggedResourceKind::TransitGateway => Ok(Self::TransitGateway),
+            Ec2TaggedResourceKind::TransitGatewayVpcAttachment => {
+                Ok(Self::TransitGatewayVpcAttachment)
+            }
+        }
+    }
+}
+
+impl Ec2TaggedResourceKind {
     fn create_operation(self) -> &'static str {
         match self {
             Self::Vpc => "ec2.CreateVpc",
@@ -534,8 +698,8 @@ enum AcmRequestTransition {
 /// outcome.
 #[derive(Debug)]
 enum InitialAcmRequestTransition {
-    Issued(AppliedIdentifier),
-    Pending(AwsCreateToken),
+    Issued(AppliedIdentifier, Sent),
+    Pending(AwsCreateToken, Sent),
     Untracked(ProviderError),
 }
 
@@ -574,6 +738,8 @@ pub(crate) enum CreateCompletion {
         missing_attributes: Vec<String>,
     },
 }
+
+pub(crate) type TypedCreateCompletion = (Sent, CreateCompletion);
 
 impl CreateCompletion {
     pub(crate) fn partial(
@@ -1015,39 +1181,6 @@ impl AwsProvider {
         UpdateOutcome::partial_success(state, reason, missing_attributes)
     }
 
-    fn sent_only_with_schema(
-        resource: &Resource<impl Sized>,
-        schema: Option<&carina_core::schema::ResourceSchema>,
-        names: &[&str],
-    ) -> Sent {
-        let mut sent = names
-            .iter()
-            .copied()
-            .filter(|name| resource.attributes.contains_key(*name))
-            .map(str::to_string)
-            .collect::<std::collections::BTreeSet<_>>();
-        if let Some(schema) = schema {
-            sent.extend(
-                schema
-                    .attributes()
-                    .iter()
-                    .filter(|(name, attribute)| {
-                        attribute.is_write_only() && resource.attributes.contains_key(*name)
-                    })
-                    .map(|(name, _attribute)| name.clone()),
-            );
-        }
-        Sent::only(sent)
-    }
-
-    pub(crate) fn sent_only(&self, resource: &Resource<impl Sized>, names: &[&str]) -> Sent {
-        Self::sent_only_with_schema(
-            resource,
-            self.resource_schema(resource.id.resource_type.as_str()),
-            names,
-        )
-    }
-
     async fn request_acm_certificate_transition(
         &self,
         resource: &Resource<impl Sized>,
@@ -1068,8 +1201,13 @@ impl AwsProvider {
             .request_acm_certificate(resource, schema, &client_token)
             .await
         {
-            Ok(Ok(identifier)) => AcmRequestTransition::Issued(identifier),
-            Ok(Err(error)) => match error.outcome() {
+            Ok((sent, result)) => {
+                // A retry/resume already carries the original Sent record in
+                // core's typestate; this decode is solely the replay input.
+                drop(sent);
+                match result {
+                    Ok(identifier) => AcmRequestTransition::Issued(identifier),
+                    Err(error) => match error.outcome() {
                 SendOutcome::MaybeSent if attempts_remaining > 1 => {
                     AcmRequestTransition::Pending(token(attempts_remaining - 1))
                 }
@@ -1085,7 +1223,9 @@ impl AwsProvider {
                         error,
                     ),
                 ),
-            },
+                    },
+                }
+            }
             Err(error) => AcmRequestTransition::Untracked(error),
         }
     }
@@ -1110,10 +1250,11 @@ impl AwsProvider {
             .request_acm_certificate(resource, schema, &client_token)
             .await
         {
-            Ok(Ok(identifier)) => InitialAcmRequestTransition::Issued(identifier),
-            Ok(Err(error)) => match error.outcome() {
-                SendOutcome::MaybeSent => InitialAcmRequestTransition::Pending(pending_token),
+            Ok((sent, Ok(identifier))) => InitialAcmRequestTransition::Issued(identifier, sent),
+            Ok((sent, Err(error))) => match error.outcome() {
+                SendOutcome::MaybeSent => InitialAcmRequestTransition::Pending(pending_token, sent),
                 SendOutcome::NotSent | SendOutcome::Rejected => {
+                    drop(sent);
                     InitialAcmRequestTransition::Untracked(
                         crate::services::acm::certificate::request_certificate_error(
                             &resource.id,
@@ -1177,6 +1318,17 @@ impl AwsProvider {
             }) => attempt
                 .issued(identifier, sent)
                 .partial(attributes, reason, missing_attributes),
+            Err(error) => Err(attempt.untracked(error)),
+        }
+    }
+
+    fn finish_typed_create<A: AwsCreateAttempt>(
+        &self,
+        attempt: A,
+        result: ProviderResult<TypedCreateCompletion>,
+    ) -> Result<A::Step, A::Verdict> {
+        match result {
+            Ok((sent, completion)) => self.finish_create(attempt, sent, Ok(completion)),
             Err(error) => Err(attempt.untracked(error)),
         }
     }
@@ -1292,10 +1444,11 @@ impl AwsProvider {
         Identifier: FnOnce(&O) -> Option<String>,
     {
         let TaggedEc2CreateContext {
-            kind,
+            create,
             create_token,
             sent,
         } = context;
+        let kind = create.kind();
         let output = match result {
             Ok(output) => output,
             Err(error) => {
@@ -1321,7 +1474,7 @@ impl AwsProvider {
             Err(error) => return Err(attempt.untracked(error)),
         };
         let issued = attempt.issued(identifier.clone(), sent);
-        self.finish_tagged_ec2_issued(resource, kind, identifier, issued)
+        self.finish_tagged_ec2_issued(resource, create, identifier, issued)
             .await
     }
 
@@ -1558,50 +1711,67 @@ impl AwsProvider {
     async fn continue_tagged_ec2_create(
         &self,
         resource: &Resource<impl Sized>,
-        kind: Ec2TaggedResourceKind,
+        create: TaggedEc2Create,
         identifier: AppliedIdentifier,
     ) -> ProviderResult<TaggedEc2Continuation> {
-        match kind {
-            Ec2TaggedResourceKind::Vpc => {
-                self.continue_ec2_vpc_create(resource, identifier.as_str())
-                    .await?;
+        let kind = create.kind();
+        match create {
+            TaggedEc2Create::Vpc {
+                enable_dns_hostnames,
+                enable_dns_support,
+            } => {
+                self.continue_ec2_vpc_create_with(
+                    &resource.id,
+                    identifier.as_str(),
+                    enable_dns_hostnames,
+                    enable_dns_support,
+                )
+                .await?;
             }
-            Ec2TaggedResourceKind::Subnet => {
+            TaggedEc2Create::Subnet {
+                assign_ipv6_address_on_creation,
+                enable_dns64,
+                enable_lni_at_device_index,
+                map_public_ip_on_launch,
+                private_dns_name_options_on_launch,
+            } => {
                 let schema = self
                     .resource_schema(resource.id.resource_type.as_str())
                     .ok_or_else(|| {
                         ProviderError::internal("missing EC2 subnet schema")
                             .for_resource(resource.id.clone())
                     })?;
-                self.continue_ec2_subnet_create(resource, schema, identifier.as_str())
-                    .await?;
-            }
-            Ec2TaggedResourceKind::RouteTable => {
-                self.continue_ec2_route_table_create(resource, identifier.as_str())
-                    .await?;
-            }
-            Ec2TaggedResourceKind::InternetGateway => {
-                self.continue_ec2_internet_gateway_create(resource, identifier.as_str())
-                    .await?;
-            }
-            Ec2TaggedResourceKind::VpcEndpoint => {
-                self.apply_ec2_tags(
+                self.continue_ec2_subnet_create_with(
                     &resource.id,
+                    schema,
                     identifier.as_str(),
-                    &resource.resolved_attributes(),
-                    None,
+                    assign_ipv6_address_on_creation,
+                    enable_dns64,
+                    enable_lni_at_device_index,
+                    map_public_ip_on_launch,
+                    private_dns_name_options_on_launch.as_ref(),
                 )
                 .await?;
             }
-            Ec2TaggedResourceKind::SecurityGroup
-            | Ec2TaggedResourceKind::EgressOnlyInternetGateway
-            | Ec2TaggedResourceKind::VpnGateway
-            | Ec2TaggedResourceKind::VpcPeeringConnection
-            | Ec2TaggedResourceKind::Address
-            | Ec2TaggedResourceKind::NatGateway
-            | Ec2TaggedResourceKind::FlowLog
-            | Ec2TaggedResourceKind::TransitGateway
-            | Ec2TaggedResourceKind::TransitGatewayVpcAttachment => {}
+            TaggedEc2Create::InternetGateway { vpc_id } => {
+                self.continue_ec2_internet_gateway_create_with(
+                    &resource.id,
+                    identifier.as_str(),
+                    vpc_id.as_deref(),
+                )
+                .await?;
+            }
+            TaggedEc2Create::RouteTable
+            | TaggedEc2Create::VpcEndpoint
+            | TaggedEc2Create::SecurityGroup
+            | TaggedEc2Create::EgressOnlyInternetGateway
+            | TaggedEc2Create::VpnGateway
+            | TaggedEc2Create::VpcPeeringConnection
+            | TaggedEc2Create::Address
+            | TaggedEc2Create::NatGateway
+            | TaggedEc2Create::FlowLog
+            | TaggedEc2Create::TransitGateway
+            | TaggedEc2Create::TransitGatewayVpcAttachment => {}
         }
 
         let pending = match kind {
@@ -1648,12 +1818,12 @@ impl AwsProvider {
     pub(crate) async fn finish_tagged_ec2_issued<I: AwsIssuedCreate>(
         &self,
         resource: &Resource<impl Sized>,
-        kind: Ec2TaggedResourceKind,
+        create: TaggedEc2Create,
         identifier: AppliedIdentifier,
         issued: I,
     ) -> Result<I::Step, I::Verdict> {
         match self
-            .continue_tagged_ec2_create(resource, kind, identifier)
+            .continue_tagged_ec2_create(resource, create, identifier)
             .await
         {
             Ok(TaggedEc2Continuation::Complete(completion)) => {
@@ -1671,8 +1841,12 @@ impl AwsProvider {
         identifier: AppliedIdentifier,
         resumed: R,
     ) -> Result<R::Step, R::Verdict> {
+        let create = match TaggedEc2Create::decode_resumed(kind, resource) {
+            Ok(create) => create,
+            Err(error) => return Err(self.failed_resumed(&resource.id, resumed, error).await),
+        };
         match self
-            .continue_tagged_ec2_create(resource, kind, identifier)
+            .continue_tagged_ec2_create(resource, create, identifier)
             .await
         {
             Ok(TaggedEc2Continuation::Complete(completion)) => {
@@ -1726,23 +1900,13 @@ impl AwsProvider {
                 .await
             }
             "organizations.Account" => {
-                let request_id = match self
+                let (request_id, sent) = match self
                     .create_organizations_account_start(resource, schema)
                     .await
                 {
                     Ok(request_id) => request_id,
                     Err(error) => return Err(attempt.untracked(error)),
                 };
-                let sent = self.sent_only(
-                    resource,
-                    &[
-                        "account_name",
-                        "email",
-                        "iam_user_access_to_billing",
-                        "role_name",
-                        "tags",
-                    ],
-                );
                 attempt.pending(
                     AwsCreateToken::OrganizationsAccount {
                         create_account_request_id: request_id,
@@ -1782,88 +1946,73 @@ impl AwsProvider {
                     )
                     .await
                 {
-                    InitialAcmRequestTransition::Issued(identifier) => {
-                        let issued = attempt.issued(identifier.clone(), Sent::AllRequestAttributes);
+                    InitialAcmRequestTransition::Issued(identifier, sent) => {
+                        let issued = attempt.issued(identifier.clone(), sent);
                         self.finish_acm_certificate_issued(resource, schema, identifier, issued)
                             .await
                     }
-                    InitialAcmRequestTransition::Pending(token) => {
-                        attempt.pending(token, Sent::AllRequestAttributes, POLL_AFTER_SECS)
+                    InitialAcmRequestTransition::Pending(token, sent) => {
+                        attempt.pending(token, sent, POLL_AFTER_SECS)
                     }
                     InitialAcmRequestTransition::Untracked(error) => Err(attempt.untracked(error)),
                 }
             }
             "s3.Bucket" => self.create_s3_bucket(resource, attempt).await,
-            "s3.BucketPolicy" => self.finish_create(
+            "s3.BucketPolicy" => {
+                self.finish_typed_create(attempt, self.create_s3_bucket_policy(resource).await)
+            }
+            "s3.BucketPublicAccessBlock" => self.finish_typed_create(
                 attempt,
-                Sent::AllRequestAttributes,
-                self.create_s3_bucket_policy(resource).await,
-            ),
-            "s3.BucketPublicAccessBlock" => self.finish_create(
-                attempt,
-                Sent::AllRequestAttributes,
                 self.create_s3_bucket_public_access_block(resource).await,
             ),
-            "s3.BucketVersioning" => self.finish_create(
+            "s3.BucketVersioning" => self.finish_typed_create(
                 attempt,
-                Sent::AllRequestAttributes,
                 self.create_s3_bucket_versioning(resource, schema).await,
             ),
-            "s3.BucketObjectLockConfiguration" => self.finish_create(
+            "s3.BucketObjectLockConfiguration" => self.finish_typed_create(
                 attempt,
-                Sent::AllRequestAttributes,
                 self.create_s3_bucket_object_lock_configuration(resource, schema)
                     .await,
             ),
-            "s3.BucketServerSideEncryptionConfiguration" => self.finish_create(
+            "s3.BucketServerSideEncryptionConfiguration" => self.finish_typed_create(
                 attempt,
-                Sent::AllRequestAttributes,
                 self.create_s3_bucket_server_side_encryption_configuration(resource, schema)
                     .await,
             ),
-            "s3.BucketAcl" => self.finish_create(
+            "s3.BucketAcl" => {
+                self.finish_typed_create(attempt, self.create_s3_bucket_acl(resource, schema).await)
+            }
+            "s3.BucketOwnershipControls" => self.finish_typed_create(
                 attempt,
-                Sent::AllRequestAttributes,
-                self.create_s3_bucket_acl(resource, schema).await,
-            ),
-            "s3.BucketOwnershipControls" => self.finish_create(
-                attempt,
-                Sent::AllRequestAttributes,
                 self.create_s3_bucket_ownership_controls(resource, schema)
                     .await,
             ),
-            "s3.BucketReplicationConfiguration" => self.finish_create(
+            "s3.BucketReplicationConfiguration" => self.finish_typed_create(
                 attempt,
-                Sent::AllRequestAttributes,
                 self.create_s3_bucket_replication_configuration(resource, schema)
                     .await,
             ),
-            "s3.BucketLifecycleConfiguration" => self.finish_create(
+            "s3.BucketLifecycleConfiguration" => self.finish_typed_create(
                 attempt,
-                Sent::AllRequestAttributes,
                 self.create_s3_bucket_lifecycle_configuration(resource, schema)
                     .await,
             ),
-            "s3.BucketWebsiteConfiguration" => self.finish_create(
+            "s3.BucketWebsiteConfiguration" => self.finish_typed_create(
                 attempt,
-                Sent::AllRequestAttributes,
                 self.create_s3_bucket_website_configuration(resource, schema)
                     .await,
             ),
-            "s3.BucketCorsConfiguration" => self.finish_create(
+            "s3.BucketCorsConfiguration" => self.finish_typed_create(
                 attempt,
-                Sent::AllRequestAttributes,
                 self.create_s3_bucket_cors_configuration(resource).await,
             ),
-            "s3.BucketNotificationConfiguration" => self.finish_create(
+            "s3.BucketNotificationConfiguration" => self.finish_typed_create(
                 attempt,
-                Sent::AllRequestAttributes,
                 self.create_s3_bucket_notification_configuration(resource)
                     .await,
             ),
-            "s3.BucketLogging" => self.finish_create(
+            "s3.BucketLogging" => self.finish_typed_create(
                 attempt,
-                Sent::AllRequestAttributes,
                 self.create_s3_bucket_logging(resource, schema).await,
             ),
             "ec2.Eip" => {
@@ -1886,30 +2035,23 @@ impl AwsProvider {
                 self.create_ec2_route_table(resource, &client_token, attempt)
                     .await
             }
-            "ec2.Route" => self.finish_create(
-                attempt,
-                Sent::AllRequestAttributes,
-                self.create_ec2_route(resource).await,
-            ),
+            "ec2.Route" => self.finish_typed_create(attempt, self.create_ec2_route(resource).await),
             "ec2.SecurityGroup" => {
                 self.create_ec2_security_group(resource, &client_token, attempt)
                     .await
             }
-            "ec2.SecurityGroupIngress" => self.finish_create(
+            "ec2.SecurityGroupIngress" => self.finish_typed_create(
                 attempt,
-                Sent::AllRequestAttributes,
                 self.create_ec2_security_group_ingress(resource, schema)
                     .await,
             ),
-            "ec2.SecurityGroupEgress" => self.finish_create(
+            "ec2.SecurityGroupEgress" => self.finish_typed_create(
                 attempt,
-                Sent::AllRequestAttributes,
                 self.create_ec2_security_group_egress(resource, schema)
                     .await,
             ),
-            "ec2.SubnetRouteTableAssociation" => self.finish_create(
+            "ec2.SubnetRouteTableAssociation" => self.finish_typed_create(
                 attempt,
-                Sent::AllRequestAttributes,
                 self.create_ec2_subnet_route_table_association(resource)
                     .await,
             ),
@@ -1921,9 +2063,8 @@ impl AwsProvider {
                 self.create_ec2_vpc_endpoint(resource, schema, &client_token, attempt)
                     .await
             }
-            "ec2.VpcGatewayAttachment" => self.finish_create(
+            "ec2.VpcGatewayAttachment" => self.finish_typed_create(
                 attempt,
-                Sent::AllRequestAttributes,
                 self.create_ec2_vpc_gateway_attachment(resource).await,
             ),
             "ec2.VpnGateway" => {
@@ -1938,28 +2079,20 @@ impl AwsProvider {
                 self.create_ec2_egress_only_internet_gateway(resource, &client_token, attempt)
                     .await
             }
-            "organizations.Organization" => self.finish_create(
+            "organizations.Organization" => self.finish_typed_create(
                 attempt,
-                Sent::AllRequestAttributes,
                 self.create_organizations_organization(resource, schema)
                     .await,
             ),
-            "iam.Role" => self.finish_create(
-                attempt,
-                Sent::AllRequestAttributes,
-                self.create_iam_role(resource).await,
-            ),
+            "iam.Role" => self.finish_typed_create(attempt, self.create_iam_role(resource).await),
             "logs.LogGroup" => self.create_logs_log_group(resource, schema, attempt).await,
-            "route53.RecordSet" => self.finish_create(
+            "route53.RecordSet" => self.finish_typed_create(
                 attempt,
-                Sent::AllRequestAttributes,
                 self.create_route53_record_set(resource, schema).await,
             ),
-            "sqs.Queue" => self.finish_create(
-                attempt,
-                Sent::AllRequestAttributes,
-                self.create_sqs_queue(resource, schema).await,
-            ),
+            "sqs.Queue" => {
+                self.finish_typed_create(attempt, self.create_sqs_queue(resource, schema).await)
+            }
             unknown => Err(attempt.untracked(
                 ProviderError::internal(format!("Unknown resource type: {unknown}"))
                     .for_resource(resource.id.clone()),
@@ -2068,7 +2201,7 @@ impl AwsProvider {
                             .apply_ec2_tags(
                                 id,
                                 nat_gateway_id.as_str(),
-                                &resource.resolved_attributes(),
+                                resource.get_attr("tags"),
                                 None,
                             )
                             .await
@@ -2294,7 +2427,13 @@ impl AwsProvider {
                     AwsCreatePoll::Unissued(attempt) => attempt.issued(identifier.clone()),
                     AwsCreatePoll::Issued(issued) => issued,
                 };
-                self.finish_tagged_ec2_issued(resource, kind, identifier, issued)
+                let create = match TaggedEc2Create::decode_resumed(kind, resource) {
+                    Ok(create) => create,
+                    Err(error) => {
+                        return Err(self.failed_issued(&resource.id, issued, error).await);
+                    }
+                };
+                self.finish_tagged_ec2_issued(resource, create, identifier, issued)
                     .await
             }
         }
@@ -2485,7 +2624,7 @@ impl AwsProvider {
                             .apply_ec2_tags(
                                 id,
                                 nat_gateway_id.as_str(),
-                                &resource.resolved_attributes(),
+                                resource.get_attr("tags"),
                                 None,
                             )
                             .await
@@ -2893,7 +3032,8 @@ impl AwsProvider {
                     .await
             }
             "ec2.VpcGatewayAttachment" => {
-                self.update_ec2_vpc_gateway_attachment(id, identifier).await
+                self.update_ec2_vpc_gateway_attachment(id, identifier, &to)
+                    .await
             }
             "ec2.VpnGateway" => {
                 self.update_ec2_vpn_gateway(id, identifier, from, to, schema)
@@ -3443,8 +3583,9 @@ mod pending_operation_tests {
                 "ipam-pool-12345678".into(),
             )),
         );
-        let schema = crate::schemas::generated::ec2::vpc::ec2_vpc_config().schema;
-        let sent = AwsProvider::sent_only_with_schema(&resource, Some(&schema), &[]);
+        let sent = crate::send_models_generated::Ec2VpcCreateInput::decode(&resource)
+            .expect("typed VPC input should decode")
+            .sent();
         let request_attributes = resource
             .attributes
             .keys()
