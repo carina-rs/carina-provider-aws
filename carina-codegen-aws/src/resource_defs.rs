@@ -426,6 +426,10 @@ impl ResourceDef {
                     "Tags",
                 ]);
                 dispositions.push(SendDisposition::sent_mapped("ResourceIds", &["ResourceId"]));
+                dispositions.push(SendDisposition::sent_mapped(
+                    "TagFieldSpecifications",
+                    &["TagFieldSpecification"],
+                ));
                 dispositions
             }
             "ec2.NatGateway" => {
@@ -719,10 +723,7 @@ impl ResourceDef {
             "ec2.FlowLog" => vec![
                 ReadDisposition::read("ResourceType", Required),
                 ReadDisposition::read("ResourceIds", Required),
-                OmitSchema {
-                    field: "TagFieldSpecifications",
-                    reason: "the pinned SDK cannot send or read this modeled request member",
-                },
+                ReadDisposition::read("TagFieldSpecifications", Optional),
             ],
             "ec2.SubnetRouteTableAssociation" => vec![OmitSchema {
                 field: "PublicIpv4Pool",
@@ -3134,37 +3135,10 @@ pub fn acm_resources() -> Vec<ResourceDef> {
         update_ops: vec![],
         identifier: "CertificateArn",
         has_tags: true,
-        type_overrides: vec![
-            (
-                "SubjectAlternativeNames",
-                "AttributeType::unordered_list(AttributeType::string())",
-            ),
-            // Nested-field omission: the pinned aws-sdk-acm CertificateOptions
-            // has no ValidationMethod member, so the provider cannot send it;
-            // revisit when aws-sdk-acm is upgraded.
-            (
-                "Options",
-                "AttributeType::struct_(\
-                    \"CertificateOptions\".to_string(),\
-                    vec![\
-                    StructField::optional(\"certificate_transparency_logging_preference\", AttributeType::enum_(\
-                        carina_core::schema::enum_identity(\"CertificateTransparencyLoggingPreference\", Some(\"aws.acm.Certificate.CertificateOptions\")),\
-                        Some(vec![\"DISABLED\".to_string(), \"ENABLED\".to_string()]),\
-                        vec![(\"DISABLED\".to_string(), \"disabled\".to_string()), (\"ENABLED\".to_string(), \"enabled\".to_string())],\
-                        None,\
-                        None,\
-                    )).with_description(\"This parameter has been deprecated. Certificate transparency logging opt-out is no longer available. All public certificates are recorded in a certifi...\").with_provider_name(\"CertificateTransparencyLoggingPreference\").build(),\
-                    StructField::optional(\"export\", AttributeType::enum_(\
-                        carina_core::schema::enum_identity(\"Export\", Some(\"aws.acm.Certificate.CertificateOptions\")),\
-                        Some(vec![\"DISABLED\".to_string(), \"ENABLED\".to_string()]),\
-                        vec![(\"DISABLED\".to_string(), \"disabled\".to_string()), (\"ENABLED\".to_string(), \"enabled\".to_string())],\
-                        None,\
-                        None,\
-                    )).with_description(\"You can opt in to allow the export of your certificates by specifying ENABLED. You cannot update the value of Export after the the certificate is crea...\").with_provider_name(\"Export\").build()\
-                    ],\
-                )",
-            ),
-        ],
+        type_overrides: vec![(
+            "SubjectAlternativeNames",
+            "AttributeType::unordered_list(AttributeType::string())",
+        )],
         exclude_fields: vec![
             // Imported / private-CA flows are out of scope for the
             // initial cut. The wait construct is the validation path,

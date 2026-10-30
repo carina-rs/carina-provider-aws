@@ -621,6 +621,7 @@ pub(crate) struct Ec2FlowLogReadModel {
     pub(crate) max_aggregation_interval: Option<Value>,
     pub(crate) resource_ids: Value,
     pub(crate) resource_type: Value,
+    pub(crate) tag_field_specifications: Option<Value>,
     pub(crate) traffic_type: Option<Value>,
     pub(crate) flow_log_id: Option<Value>,
     pub(crate) tags: Value,
@@ -630,6 +631,7 @@ pub(crate) struct Ec2FlowLogReadModel {
 pub(crate) struct Ec2FlowLogReadModelSupplement {
     pub(crate) resource_ids: Value,
     pub(crate) resource_type: Value,
+    pub(crate) tag_field_specifications: Option<Value>,
     pub(crate) tags: Value,
 }
 
@@ -646,11 +648,12 @@ impl ManagedReadModel for Ec2FlowLogReadModel {
             max_aggregation_interval,
             resource_ids,
             resource_type,
+            tag_field_specifications,
             traffic_type,
             flow_log_id,
             tags,
         } = self;
-        let mut attributes = HashMap::with_capacity(11);
+        let mut attributes = HashMap::with_capacity(12);
         if let Some(value) = deliver_logs_permission_arn {
             attributes.insert("deliver_logs_permission_arn".to_string(), value);
         }
@@ -671,6 +674,9 @@ impl ManagedReadModel for Ec2FlowLogReadModel {
         }
         attributes.insert("resource_ids".to_string(), resource_ids);
         attributes.insert("resource_type".to_string(), resource_type);
+        if let Some(value) = tag_field_specifications {
+            attributes.insert("tag_field_specifications".to_string(), value);
+        }
         if let Some(value) = traffic_type {
             attributes.insert("traffic_type".to_string(), value);
         }

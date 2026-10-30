@@ -366,7 +366,7 @@ impl MockService for AcmService {
             "CertificateManager.DescribeCertificate" => MockResponse::json(
                 200,
                 format!(
-                    r#"{{"Certificate":{{"CertificateArn":"{CERTIFICATE_ARN}","DomainName":"example.com","SubjectAlternativeNames":["www.example.com","example.com"],"Status":"ISSUED","Type":"AMAZON_ISSUED","KeyAlgorithm":"POST_QUANTUM_2048"}}}}"#
+                    r#"{{"Certificate":{{"CertificateArn":"{CERTIFICATE_ARN}","DomainName":"example.com","SubjectAlternativeNames":["www.example.com","example.com"],"Status":"ISSUED","Type":"AMAZON_ISSUED","KeyAlgorithm":"POST_QUANTUM_2048","Options":{{"ValidationMethod":"DNS"}}}}}}"#
                 ),
             ),
             "CertificateManager.ListTagsForCertificate" => {
@@ -825,6 +825,9 @@ impl MockService for Ec2RoundTripService {
             (Ec2RoundTripCase::FlowLog, "CreateFlowLogs") => {
                 assert_query_contains(&request, "ResourceType=VPC");
                 assert_query_contains(&request, &format!("ResourceId.1={VPC_ID}"));
+                assert_query_contains(&request, "TagFieldSpecification.1.ResourceType=instance");
+                assert_query_contains(&request, "TagFieldSpecification.1.TagKey.1=Name");
+                assert_query_contains(&request, "TagFieldSpecification.1.TagKey.2=Environment");
                 MockResponse::xml(
                     200,
                     format!(
@@ -835,7 +838,7 @@ impl MockService for Ec2RoundTripService {
             (Ec2RoundTripCase::FlowLog, "DescribeFlowLogs") => MockResponse::xml(
                 200,
                 format!(
-                    r#"<DescribeFlowLogsResponse xmlns="http://ec2.amazonaws.com/doc/2016-11-15/"><requestId>flow-read</requestId><flowLogSet><item><flowLogId>{FLOW_LOG_ID}</flowLogId><resourceId>{VPC_ID}</resourceId><trafficType>ALL</trafficType><flowLogStatus>ACTIVE</flowLogStatus><tagSet/></item></flowLogSet></DescribeFlowLogsResponse>"#,
+                    r#"<DescribeFlowLogsResponse xmlns="http://ec2.amazonaws.com/doc/2016-11-15/"><requestId>flow-read</requestId><flowLogSet><item><flowLogId>{FLOW_LOG_ID}</flowLogId><resourceId>{VPC_ID}</resourceId><trafficType>ALL</trafficType><flowLogStatus>ACTIVE</flowLogStatus><tagFieldSpecificationSet><item><resourceType>instance</resourceType><tagKeySet><item>Name</item><item>Environment</item></tagKeySet></item></tagFieldSpecificationSet><tagSet/></item></flowLogSet></DescribeFlowLogsResponse>"#,
                 ),
             ),
             (Ec2RoundTripCase::VpcEndpoint, "CreateVpcEndpoint") => {
@@ -1210,11 +1213,18 @@ async fn unrelated_log_group_update_preserves_omitted_deletion_protection() {
 }
 
 #[tokio::test]
-async fn certificate_sans_and_unknown_enum_value_round_trip() {
+async fn certificate_sans_unknown_enum_and_options_validation_method_round_trip() {
     let provider = provider_from_service(AcmService).await;
     let mut desired = Resource::with_provider("aws", "acm.Certificate", "roundtrip", None);
     desired.set_attr("domain_name", string("example.com"));
     desired.set_attr("subject_alternative_names", list(&["www.example.com"]));
+    desired.set_attr(
+        "options",
+        Value::Concrete(ConcreteValue::Map(IndexMap::from([(
+            "validation_method".to_string(),
+            string("DNS"),
+        )]))),
+    );
     desired.set_attr("tags", empty_map());
 
     let current = provider
@@ -1236,6 +1246,11 @@ async fn certificate_sans_and_unknown_enum_value_round_trip() {
         Some(&string("POST_QUANTUM_2048")),
         "AWS values newer than the pinned closed enum must survive refresh"
     );
+    let Some(Value::Concrete(ConcreteValue::Map(options))) = current.attributes.get("options")
+    else {
+        panic!("expected ACM options read state");
+    };
+    assert_api_text(options.get("validation_method"), "DNS");
     assert_eq!(current.attributes.get("tags"), Some(&empty_map()));
     assert_no_diff(desired, current);
 }
@@ -1704,10 +1719,32 @@ async fn flow_log_resource_type_round_trip() {
     desired.set_attr("resource_ids", list(&[VPC_ID]));
     desired.set_attr("resource_type", string("VPC"));
     desired.set_attr("traffic_type", string("ALL"));
+    desired.set_attr(
+        "tag_field_specifications",
+        Value::Concrete(ConcreteValue::List(vec![Value::Concrete(
+            ConcreteValue::Map(IndexMap::from([
+                ("resource_type".to_string(), string("instance")),
+                ("tag_keys".to_string(), list(&["Name", "Environment"])),
+            ])),
+        )])),
+    );
     desired.set_attr("tags", empty_map());
 
     let current = create_round_trip_state(&provider, &desired).await;
     assert_api_text(current.attributes.get("resource_type"), "VPC");
+    let Some(Value::Concrete(ConcreteValue::List(specifications))) =
+        current.attributes.get("tag_field_specifications")
+    else {
+        panic!("expected flow-log tag field specifications");
+    };
+    let Some(Value::Concrete(ConcreteValue::Map(specification))) = specifications.first() else {
+        panic!("expected one flow-log tag field specification");
+    };
+    assert_api_text(specification.get("resource_type"), "instance");
+    assert_eq!(
+        specification.get("tag_keys"),
+        Some(&list(&["Name", "Environment"]))
+    );
     assert_no_diff(desired, current);
 }
 

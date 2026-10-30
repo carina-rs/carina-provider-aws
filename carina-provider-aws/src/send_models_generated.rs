@@ -1235,6 +1235,7 @@ pub(crate) struct Ec2FlowLogCreateInput {
     max_aggregation_interval: Option<i64>,
     resource_ids: crate::send_model::StringList,
     resource_type: String,
+    tag_field_specifications: Option<Value>,
     tags: Option<crate::send_model::Tags>,
     traffic_type: Option<String>,
 }
@@ -1248,6 +1249,7 @@ pub(crate) struct Ec2FlowLogCreateParts {
     pub(crate) max_aggregation_interval: crate::send_model::Sent<Option<i64>>,
     pub(crate) resource_ids: crate::send_model::Sent<crate::send_model::StringList>,
     pub(crate) resource_type: crate::send_model::Sent<String>,
+    pub(crate) tag_field_specifications: crate::send_model::Sent<Option<Value>>,
     pub(crate) tags: crate::send_model::Sent<Option<crate::send_model::Tags>>,
     pub(crate) traffic_type: crate::send_model::Sent<Option<String>>,
 }
@@ -1274,6 +1276,10 @@ impl Ec2FlowLogCreateInput {
             )?,
             resource_ids: crate::send_model::required_string_list(_resource, "resource_ids")?,
             resource_type: crate::send_model::required_enum(_resource, _schema, "resource_type")?,
+            tag_field_specifications: crate::send_model::optional_value(
+                _resource,
+                "tag_field_specifications",
+            )?,
             tags: crate::send_model::optional_tags(_resource, "tags")?,
             traffic_type: crate::send_model::optional_enum(_resource, _schema, "traffic_type")?,
         })
@@ -1301,6 +1307,9 @@ impl Ec2FlowLogCreateInput {
         }
         sent.insert("resource_ids".to_string());
         sent.insert("resource_type".to_string());
+        if self.tag_field_specifications.is_some() {
+            sent.insert("tag_field_specifications".to_string());
+        }
         if self.tags.is_some() {
             sent.insert("tags".to_string());
         }
@@ -1320,6 +1329,7 @@ impl Ec2FlowLogCreateInput {
             max_aggregation_interval,
             resource_ids,
             resource_type,
+            tag_field_specifications,
             tags,
             traffic_type,
         } = self;
@@ -1352,6 +1362,10 @@ impl Ec2FlowLogCreateInput {
             resource_type: crate::send_model::Sent::new(
                 "ec2.FlowLog.create.resource_type",
                 resource_type,
+            ),
+            tag_field_specifications: crate::send_model::Sent::new(
+                "ec2.FlowLog.create.tag_field_specifications",
+                tag_field_specifications,
             ),
             tags: crate::send_model::Sent::new("ec2.FlowLog.create.tags", tags),
             traffic_type: crate::send_model::Sent::new(
@@ -5082,6 +5096,11 @@ pub(crate) fn capture_contracts() -> &'static [SendCaptureContract] {
                     name: "resource_type",
                     provider_name: "ResourceType",
                     capture_names: &[],
+                },
+                SendCaptureAttribute {
+                    name: "tag_field_specifications",
+                    provider_name: "TagFieldSpecifications",
+                    capture_names: &["TagFieldSpecification"],
                 },
                 SendCaptureAttribute {
                     name: "tags",

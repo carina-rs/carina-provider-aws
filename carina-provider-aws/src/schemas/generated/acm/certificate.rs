@@ -65,7 +65,32 @@ pub fn acm_certificate_config() -> AwsSchemaConfig {
                 .build(),
         )
         .attribute(
-            AttributeSchema::optional("options", AttributeType::struct_("CertificateOptions".to_string(),vec![StructField::optional("certificate_transparency_logging_preference", AttributeType::enum_(carina_core::schema::enum_identity("CertificateTransparencyLoggingPreference", Some("aws.acm.Certificate.CertificateOptions")),Some(vec!["DISABLED".to_string(), "ENABLED".to_string()]),vec![("DISABLED".to_string(), "disabled".to_string()), ("ENABLED".to_string(), "enabled".to_string())],None,None,)).with_description("This parameter has been deprecated. Certificate transparency logging opt-out is no longer available. All public certificates are recorded in a certifi...").with_provider_name("CertificateTransparencyLoggingPreference").build(),StructField::optional("export", AttributeType::enum_(carina_core::schema::enum_identity("Export", Some("aws.acm.Certificate.CertificateOptions")),Some(vec!["DISABLED".to_string(), "ENABLED".to_string()]),vec![("DISABLED".to_string(), "disabled".to_string()), ("ENABLED".to_string(), "enabled".to_string())],None,None,)).with_description("You can opt in to allow the export of your certificates by specifying ENABLED. You cannot update the value of Export after the the certificate is crea...").with_provider_name("Export").build()],))
+            AttributeSchema::optional("options", AttributeType::struct_(
+                    "CertificateOptions".to_string(),
+                    vec![
+                    StructField::optional("certificate_transparency_logging_preference", AttributeType::enum_(
+    carina_core::schema::enum_identity("CertificateTransparencyLoggingPreference", Some("aws.acm.Certificate.CertificateOptions")),
+    Some(vec!["DISABLED".to_string(), "ENABLED".to_string()]),
+    vec![("DISABLED".to_string(), "disabled".to_string()), ("ENABLED".to_string(), "enabled".to_string())],
+    None,
+    None,
+)).with_description("This parameter has been deprecated. Certificate transparency logging opt-out is no longer available. All public certificates are recorded in a certifi...").with_provider_name("CertificateTransparencyLoggingPreference").build(),
+                    StructField::optional("export", AttributeType::enum_(
+    carina_core::schema::enum_identity("Export", Some("aws.acm.Certificate.CertificateOptions")),
+    Some(vec!["DISABLED".to_string(), "ENABLED".to_string()]),
+    vec![("DISABLED".to_string(), "disabled".to_string()), ("ENABLED".to_string(), "enabled".to_string())],
+    None,
+    None,
+)).with_description("You can opt in to allow the export of your certificates by specifying ENABLED. You cannot update the value of Export after the the certificate is crea...").with_provider_name("Export").build(),
+                    StructField::optional("validation_method", AttributeType::enum_(
+    carina_core::schema::enum_identity("ValidationMethod", Some("aws.acm.Certificate.CertificateOptions")),
+    Some(vec!["DNS".to_string(), "EMAIL".to_string(), "HTTP".to_string()]),
+    vec![("DNS".to_string(), "dns".to_string()), ("EMAIL".to_string(), "email".to_string()), ("HTTP".to_string(), "http".to_string())],
+    None,
+    None,
+)).with_description("The domain validation method for the certificate. To migrate from email to DNS validation, specify DNS.").with_provider_name("ValidationMethod").build()
+                    ],
+                ))
                 .create_only()
                 .with_description("You can use this parameter to specify whether to export your certificate. Certificate transparency logging opt-out is no longer available. All public ...")
                 .with_provider_name("Options")

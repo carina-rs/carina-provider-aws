@@ -8017,6 +8017,10 @@ mod tests {
                     "Export": {
                       "target": "com.amazonaws.acm#Export",
                       "traits": {}
+                    },
+                    "ValidationMethod": {
+                      "target": "com.amazonaws.acm#ValidationMethod",
+                      "traits": {}
                     }
                   },
                   "traits": {}
@@ -8200,8 +8204,8 @@ mod tests {
             assert!(markdown.contains(heading), "missing {heading}:\n{markdown}");
         }
         assert!(
-            !markdown.contains("### options.validation_method"),
-            "the pinned ACM SDK cannot send the nested validation method:\n{markdown}"
+            markdown.contains("### options.validation_method (ValidationMethod)"),
+            "missing nested ACM validation method:\n{markdown}"
         );
         assert!(!markdown.contains("### CertificateOptions"), "{markdown}");
         assert!(!markdown.contains("### DomainValidation\n"), "{markdown}");

@@ -271,6 +271,7 @@ fn build_request_certificate_input(
         })
 }
 
+#[allow(deprecated)] // AWS still models this accepted field but deprecated it in SDK 1.125.0.
 fn build_create_certificate_options(
     id: &ResourceId,
     value: Option<&Value>,
@@ -299,6 +300,10 @@ fn build_create_certificate_options(
     }
     if let Some(export) = field("export")? {
         options = options.export(CertificateExport::from(export.api_value()));
+        has_options = true;
+    }
+    if let Some(validation_method) = field("validation_method")? {
+        options = options.validation_method(ValidationMethod::from(validation_method.api_value()));
         has_options = true;
     }
 
@@ -397,6 +402,7 @@ fn domain_validations_value(validations: &[aws_sdk_acm::types::DomainValidation]
 
 /// Typed projection of a `DescribeCertificate` response. Tags are fetched by
 /// the caller through ACM's separate tag API.
+#[allow(deprecated)] // DescribeCertificate still returns the deprecated preference.
 fn certificate_detail_read_fields(
     cert: &aws_sdk_acm::types::CertificateDetail,
 ) -> CertificateDetailReadFields {
@@ -414,6 +420,9 @@ fn certificate_detail_read_fields(
         }
         if let Some(value) = options.export() {
             fields.insert("export".to_string(), enum_value(value.as_str()));
+        }
+        if let Some(value) = options.validation_method() {
+            fields.insert("validation_method".to_string(), enum_value(value.as_str()));
         }
         (!fields.is_empty()).then(|| Value::Concrete(ConcreteValue::Map(fields)))
     });
@@ -962,6 +971,7 @@ where
 }
 
 #[cfg(test)]
+#[allow(deprecated)] // Retain coverage for the still-modeled legacy preference.
 mod tests {
     use super::*;
     use aws_sdk_acm::error::SdkError;
@@ -1267,6 +1277,30 @@ mod tests {
     }
 
     #[test]
+    fn certificate_detail_read_fields_emits_nested_options_validation_method() {
+        let cert = CertificateDetail::builder()
+            .domain_name("registry.example.com")
+            .options(
+                CertificateOptions::builder()
+                    .validation_method(ValidationMethod::Dns)
+                    .build(),
+            )
+            .build();
+
+        let fields = certificate_detail_read_fields(&cert);
+
+        let Some(Value::Concrete(ConcreteValue::Map(options))) = fields.options.as_ref() else {
+            panic!("expected nested options map");
+        };
+        assert_eq!(
+            options.get("validation_method"),
+            Some(&Value::Concrete(ConcreteValue::String(
+                "DNS".to_string().into()
+            )))
+        );
+    }
+
+    #[test]
     fn create_acm_certificate_passes_options_export_to_sdk_request() {
         let mut options = IndexMap::new();
         options.insert(
@@ -1290,7 +1324,7 @@ mod tests {
     }
 
     #[test]
-    fn create_acm_certificate_passes_both_options_fields() {
+    fn create_acm_certificate_passes_all_options_fields() {
         let mut options = IndexMap::new();
         options.insert(
             "certificate_transparency_logging_preference".to_string(),
@@ -1299,6 +1333,10 @@ mod tests {
         options.insert(
             "export".to_string(),
             Value::Concrete(ConcreteValue::String("ENABLED".to_string().into())),
+        );
+        options.insert(
+            "validation_method".to_string(),
+            Value::Concrete(ConcreteValue::String("DNS".to_string().into())),
         );
         let mut resource = Resource::with_provider("aws", "acm.Certificate", "test-cert", None);
         resource.set_attr(
@@ -1318,6 +1356,10 @@ mod tests {
             Some(&CertificateTransparencyLoggingPreference::Disabled)
         );
         assert_eq!(request_options.export(), Some(&CertificateExport::Enabled));
+        assert_eq!(
+            request_options.validation_method(),
+            Some(&ValidationMethod::Dns)
+        );
     }
 
     #[test]

@@ -565,6 +565,19 @@ fn focused_resource(
         }
         "acm.Certificate" => {
             set_canonical_string(&mut resource, schema, "validation_method", "EMAIL");
+            if target.name == "options" {
+                // The generic struct sampler chooses the first optional
+                // member. Pin this focused case to the SDK member restored in
+                // #580 so capture coverage fails if nested ValidationMethod
+                // is decoded but not placed on RequestCertificate.Options.
+                resource.set_attr(
+                    "options",
+                    Value::Concrete(ConcreteValue::Map(IndexMap::from([(
+                        "validation_method".to_string(),
+                        string("DNS"),
+                    )]))),
+                );
+            }
         }
         _ => {}
     }
