@@ -1,14 +1,15 @@
 use carina_core::provider::{AppliedIdentifier, ReadOutcome};
 use carina_core::provider::{ProviderError, ProviderResult};
-use carina_core::resource::{Resource, ResourceId, State};
+use carina_core::resource::{Resource, ResourceId, State, Value};
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
-use crate::helpers::{RetryPolicy, require_string_attr, retry_aws_operation};
-use crate::provider::CreateCompletion;
+use crate::helpers::{RetryPolicy, retry_aws_operation};
+use crate::provider::TypedCreateCompletion;
 use crate::read_model::found_managed_read;
 use crate::read_models_generated::S3BucketPolicyReadModel;
-use crate::services::iam::role::{iam_policy_json_to_value, resolve_iam_policy_attr};
+use crate::send_models_generated::{S3BucketPolicyCreateInput, S3BucketPolicyUpdateInput};
+use crate::services::iam::role::{iam_policy_json_to_value, resolve_iam_policy_value};
 use crate::services::s3::bucket::is_s3_not_configured_error;
 
 impl AwsProvider {
@@ -66,18 +67,23 @@ impl AwsProvider {
     pub(crate) async fn create_s3_bucket_policy(
         &self,
         resource: &Resource<impl Sized>,
-    ) -> ProviderResult<CreateCompletion> {
-        let bucket = require_string_attr(resource, "bucket")?;
+    ) -> ProviderResult<TypedCreateCompletion> {
+        let input = S3BucketPolicyCreateInput::decode(resource)?;
+        let sent = input.sent();
+        let (bucket, policy) = input.into_parts();
         let identifier =
             crate::helpers::applied_identifier(&resource.id, "s3.PutBucketPolicy", bucket)?;
         let outcome = self
-            .put_s3_bucket_policy(&resource.id, &identifier, resource)
+            .put_s3_bucket_policy(&resource.id, &identifier, &policy)
             .await?;
-        Ok(self.create_outcome_from_read(
-            &resource.id,
-            identifier,
-            resource.resolved_attributes(),
-            outcome,
+        Ok((
+            sent,
+            self.create_outcome_from_read(
+                &resource.id,
+                identifier,
+                resource.resolved_attributes(),
+                outcome,
+            ),
         ))
     }
 
@@ -89,18 +95,19 @@ impl AwsProvider {
         _from: &State,
         to: Resource,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
-        self.put_s3_bucket_policy(&id, identifier, &to).await
+        let (policy,) = S3BucketPolicyUpdateInput::decode(&to)?.into_parts();
+        self.put_s3_bucket_policy(&id, identifier, &policy).await
     }
 
     async fn put_s3_bucket_policy(
         &self,
         id: &ResourceId,
         bucket: &AppliedIdentifier,
-        resource: &Resource<impl Sized>,
+        policy: &Value,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
         let applied_identifier = bucket;
         let bucket = bucket.as_str();
-        let policy_json = resolve_iam_policy_attr(resource, "policy")?;
+        let policy_json = resolve_iam_policy_value(id, "policy", policy)?;
 
         self.s3_client
             .put_bucket_policy()

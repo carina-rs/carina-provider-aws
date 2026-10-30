@@ -1,16 +1,15 @@
 use carina_core::provider::ProviderResult;
 use carina_core::provider::{AppliedIdentifier, ReadOutcome};
-use carina_core::resource::{ConcreteValue, Resource, ResourceId, Value};
+use carina_core::resource::{Resource, ResourceId};
 
 use crate::AwsProvider;
 use crate::aws_operation::ClientToken;
 use crate::error_helpers::api_error_with_meta;
-use crate::helpers::{
-    build_tag_specification_with_create_token, require_string_attr, send_aws_operation_with_token,
-};
+use crate::helpers::{build_tag_specification_with_create_token, send_aws_operation_with_token};
 use crate::provider::{AwsCreateAttempt, Ec2TaggedResourceKind};
 use crate::read_model::{empty_map_value, found_managed_read};
 use crate::read_models_generated::Ec2RouteTableReadModelSupplement;
+use crate::send_models_generated::Ec2RouteTableCreateInput;
 
 impl AwsProvider {
     /// Read an EC2 Route Table
@@ -62,24 +61,24 @@ impl AwsProvider {
         client_token: &ClientToken,
         attempt: A,
     ) -> Result<A::Step, A::Verdict> {
-        let vpc_id = match require_string_attr(resource, "vpc_id") {
-            Ok(vpc_id) => vpc_id,
+        let input = match Ec2RouteTableCreateInput::decode(resource) {
+            Ok(input) => input,
             Err(error) => return Err(attempt.untracked(error)),
         };
+        let sent = input.sent();
+        let (tags, vpc_id) = input.into_parts();
 
         // Create Route Table
         let req = self.ec2_client.create_route_table().configure(|builder| {
             builder
                 .vpc_id(&vpc_id)
                 .tag_specifications(build_tag_specification_with_create_token(
-                    resource,
+                    tags.as_ref(),
                     aws_sdk_ec2::types::ResourceType::RouteTable,
                     client_token,
                 ))
         });
         let result = send_aws_operation_with_token(client_token, req).await;
-        let sent = self.sent_only(resource, &["vpc_id", "tags"]);
-
         self.finish_tagged_ec2_create(
             resource,
             attempt,
@@ -93,51 +92,5 @@ impl AwsProvider {
             },
         )
         .await
-    }
-
-    pub(crate) async fn continue_ec2_route_table_create(
-        &self,
-        resource: &Resource<impl Sized>,
-        rt_id: &str,
-    ) -> ProviderResult<()> {
-        // Add routes
-        if let Some(Value::Concrete(ConcreteValue::List(routes))) = resource.get_attr("routes") {
-            for route in routes {
-                if let Value::Concrete(ConcreteValue::Map(route_map)) = route {
-                    let destination = route_map.get("destination").and_then(|v| {
-                        if let Value::Concrete(ConcreteValue::String(s)) = v {
-                            Some(s)
-                        } else {
-                            None
-                        }
-                    });
-                    let gateway_id = route_map.get("gateway_id").and_then(|v| {
-                        if let Value::Concrete(ConcreteValue::String(s)) = v {
-                            Some(s)
-                        } else {
-                            None
-                        }
-                    });
-
-                    if let (Some(dest), Some(gw_id)) = (destination, gateway_id) {
-                        let result = self
-                            .ec2_client
-                            .create_route()
-                            .route_table_id(rt_id)
-                            .destination_cidr_block(dest.expose_plaintext())
-                            .gateway_id(gw_id.expose_plaintext())
-                            .send()
-                            .await;
-                        if let Err(error) = result {
-                            let error = api_error_with_meta("Failed to create route", error)
-                                .for_resource(resource.id.clone());
-                            return Err(error);
-                        }
-                    }
-                }
-            }
-        }
-
-        Ok(())
     }
 }

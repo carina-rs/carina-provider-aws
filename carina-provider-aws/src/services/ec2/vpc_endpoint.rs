@@ -7,12 +7,43 @@ use crate::AwsProvider;
 use crate::aws_operation::ClientToken;
 use crate::error_helpers::api_error_with_meta;
 use crate::helpers::{
-    RetryPolicy, build_tag_specification_with_create_token, optional_bool_attr, optional_enum_attr,
-    optional_string_attr, require_string_attr, retry_aws_operation_with_token,
+    RetryPolicy, build_tag_specification_with_create_token, retry_aws_operation_with_token,
 };
 use crate::provider::{AwsCreateAttempt, Ec2TaggedResourceKind};
 use crate::read_model::{empty_map_value, found_managed_read};
 use crate::read_models_generated::Ec2VpcEndpointReadModelSupplement;
+use crate::send_models_generated::{Ec2VpcEndpointCreateInput, Ec2VpcEndpointUpdateInput};
+
+fn string_list_value(
+    id: &ResourceId,
+    name: &str,
+    value: Option<&Value>,
+) -> ProviderResult<Vec<String>> {
+    let Some(value) = value else {
+        return Ok(Vec::new());
+    };
+    match value {
+        Value::Concrete(ConcreteValue::List(values)) => values
+            .iter()
+            .map(|value| match value {
+                Value::Concrete(ConcreteValue::String(value)) => {
+                    Ok(value.expose_plaintext().to_string())
+                }
+                _ => Err(
+                    ProviderError::invalid_input(format!("{name} must contain strings"))
+                        .for_resource(id.clone()),
+                ),
+            })
+            .collect(),
+        Value::Concrete(ConcreteValue::StringList(values)) => Ok(values
+            .iter()
+            .map(|value| value.expose_plaintext().to_string())
+            .collect()),
+        _ => Err(
+            ProviderError::invalid_input(format!("{name} must be a list")).for_resource(id.clone()),
+        ),
+    }
+}
 
 impl AwsProvider {
     /// Read an EC2 VPC Endpoint
@@ -75,115 +106,91 @@ impl AwsProvider {
     pub(crate) async fn create_ec2_vpc_endpoint<A: AwsCreateAttempt>(
         &self,
         resource: &Resource<impl Sized>,
-        schema: &ResourceSchema,
+        _schema: &ResourceSchema,
         client_token: &ClientToken,
         attempt: A,
     ) -> Result<A::Step, A::Verdict> {
-        let vpc_id = match require_string_attr(resource, "vpc_id") {
-            Ok(vpc_id) => vpc_id,
+        let input = match Ec2VpcEndpointCreateInput::decode(resource) {
+            Ok(input) => input,
             Err(error) => return Err(attempt.untracked(error)),
         };
-        let service_name = match require_string_attr(resource, "service_name") {
-            Ok(service_name) => service_name,
-            Err(error) => return Err(attempt.untracked(error)),
-        };
+        let sent = input.sent();
+        let (
+            policy_document,
+            private_dns_enabled,
+            resource_configuration_arn,
+            route_table_ids,
+            security_group_ids,
+            service_name,
+            service_network_arn,
+            service_region,
+            subnet_ids,
+            tags,
+            vpc_endpoint_type,
+            vpc_id,
+        ) = input.into_parts();
 
         let mut req = self.ec2_client.create_vpc_endpoint().configure(|builder| {
             builder
                 .vpc_id(&vpc_id)
                 .service_name(&service_name)
                 .tag_specifications(build_tag_specification_with_create_token(
-                    resource,
+                    tags.as_ref(),
                     aws_sdk_ec2::types::ResourceType::VpcEndpoint,
                     client_token,
                 ))
         });
 
-        let endpoint_type = match optional_enum_attr(resource, schema, "vpc_endpoint_type") {
-            Ok(endpoint_type) => endpoint_type,
+        if let Some(ep_type) = vpc_endpoint_type {
+            use aws_sdk_ec2::types::VpcEndpointType;
+            req = req.configure(|builder| {
+                builder.vpc_endpoint_type(VpcEndpointType::from(ep_type.as_str()))
+            });
+        }
+
+        let route_table_ids =
+            match string_list_value(&resource.id, "route_table_ids", route_table_ids.as_ref()) {
+                Ok(values) => values,
+                Err(error) => return Err(attempt.untracked(error)),
+            };
+        for route_table_id in route_table_ids {
+            req = req.configure(|builder| builder.route_table_ids(route_table_id));
+        }
+
+        let subnet_ids = match string_list_value(&resource.id, "subnet_ids", subnet_ids.as_ref()) {
+            Ok(values) => values,
             Err(error) => return Err(attempt.untracked(error)),
         };
-        if let Some(ep_type) = endpoint_type {
-            use aws_sdk_ec2::types::VpcEndpointType;
-            req =
-                req.configure(|builder| builder.vpc_endpoint_type(VpcEndpointType::from(ep_type)));
+        for subnet_id in subnet_ids {
+            req = req.configure(|builder| builder.subnet_ids(subnet_id));
         }
 
-        if let Some(Value::Concrete(ConcreteValue::List(ids))) =
-            resource.get_attr("route_table_ids")
-        {
-            for id_val in ids {
-                if let Value::Concrete(ConcreteValue::String(s)) = id_val {
-                    req = req.configure(|builder| builder.route_table_ids(s.expose_plaintext()));
-                }
-            }
+        let security_group_ids = match string_list_value(
+            &resource.id,
+            "security_group_ids",
+            security_group_ids.as_ref(),
+        ) {
+            Ok(values) => values,
+            Err(error) => return Err(attempt.untracked(error)),
+        };
+        for security_group_id in security_group_ids {
+            req = req.configure(|builder| builder.security_group_ids(security_group_id));
         }
 
-        if let Some(Value::Concrete(ConcreteValue::List(ids))) = resource.get_attr("subnet_ids") {
-            for id_val in ids {
-                if let Value::Concrete(ConcreteValue::String(s)) = id_val {
-                    req = req.configure(|builder| builder.subnet_ids(s.expose_plaintext()));
-                }
-            }
-        }
-
-        if let Some(Value::Concrete(ConcreteValue::List(ids))) =
-            resource.get_attr("security_group_ids")
-        {
-            for id_val in ids {
-                if let Value::Concrete(ConcreteValue::String(s)) = id_val {
-                    req = req.configure(|builder| builder.security_group_ids(s.expose_plaintext()));
-                }
-            }
-        }
-
-        if let Some(v) = optional_bool_attr(resource, "private_dns_enabled") {
+        if let Some(v) = private_dns_enabled {
             req = req.configure(|builder| builder.private_dns_enabled(v));
         }
 
-        if let Some(Value::Concrete(ConcreteValue::String(policy))) =
-            resource.get_attr("policy_document")
-        {
-            req = req.configure(|builder| builder.policy_document(policy.expose_plaintext()));
-        } else if let Some(Value::Concrete(ConcreteValue::Map(map))) =
-            resource.get_attr("policy_document")
-        {
-            // Convert Value::Map to JSON string for the API
-            let json_str = match crate::services::iam::role::value_to_iam_policy_json(
-                &Value::Concrete(ConcreteValue::Map(map.clone())),
-            ) {
-                Ok(json) => json,
-                Err(error) => {
-                    return Err(attempt.untracked(
-                        ProviderError::internal(format!(
-                            "Failed to serialize policy_document: {error}"
-                        ))
-                        .for_resource(resource.id.clone()),
-                    ));
-                }
-            };
-            req = req.configure(|builder| builder.policy_document(&json_str));
+        if let Some(policy_document) = policy_document {
+            req = req.configure(|builder| builder.policy_document(policy_document));
         }
 
-        let resource_configuration_arn =
-            match optional_string_attr(resource, "resource_configuration_arn") {
-                Ok(value) => value,
-                Err(error) => return Err(attempt.untracked(error)),
-            };
         if let Some(value) = resource_configuration_arn {
             req = req.configure(|builder| builder.resource_configuration_arn(value));
         }
-        let service_network_arn = match optional_string_attr(resource, "service_network_arn") {
-            Ok(value) => value,
-            Err(error) => return Err(attempt.untracked(error)),
-        };
         if let Some(value) = service_network_arn {
             req = req.configure(|builder| builder.service_network_arn(value));
         }
-        let service_region = match optional_enum_attr(resource, schema, "service_region") {
-            Ok(value) => value,
-            Err(error) => return Err(attempt.untracked(error)),
-        };
         if let Some(value) = service_region {
             req = req.configure(|builder| builder.service_region(value));
         }
@@ -191,24 +198,6 @@ impl AwsProvider {
         let result =
             retry_aws_operation_with_token(client_token, RetryPolicy::default(), || req.clone())
                 .await;
-        let sent = self.sent_only(
-            resource,
-            &[
-                "vpc_id",
-                "service_name",
-                "vpc_endpoint_type",
-                "route_table_ids",
-                "subnet_ids",
-                "security_group_ids",
-                "private_dns_enabled",
-                "policy_document",
-                "resource_configuration_arn",
-                "service_network_arn",
-                "service_region",
-                "tags",
-            ],
-        );
-
         self.finish_tagged_ec2_create(
             resource,
             attempt,
@@ -233,6 +222,8 @@ impl AwsProvider {
         to: Resource,
         _schema: &ResourceSchema,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
+        let input = Ec2VpcEndpointUpdateInput::decode(&to)?;
+        let (policy_document, private_dns_enabled, tags) = input.into_parts();
         let mut req = self
             .ec2_client
             .modify_vpc_endpoint()
@@ -240,157 +231,13 @@ impl AwsProvider {
 
         let mut has_modifications = false;
 
-        // Update route_table_ids
-        if let Some(Value::Concrete(ConcreteValue::List(new_ids))) = to.get_attr("route_table_ids")
-        {
-            let old_ids: Vec<String> = if let Some(Value::Concrete(ConcreteValue::List(old))) =
-                from.attributes.get("route_table_ids")
-            {
-                old.iter()
-                    .filter_map(|v| {
-                        if let Value::Concrete(ConcreteValue::String(s)) = v {
-                            Some(s.expose_plaintext().to_string())
-                        } else {
-                            None
-                        }
-                    })
-                    .collect()
-            } else {
-                vec![]
-            };
-            let new_id_strs: Vec<String> = new_ids
-                .iter()
-                .filter_map(|v| {
-                    if let Value::Concrete(ConcreteValue::String(s)) = v {
-                        Some(s.expose_plaintext().to_string())
-                    } else {
-                        None
-                    }
-                })
-                .collect();
-
-            for id_val in &new_id_strs {
-                if !old_ids.contains(id_val) {
-                    req = req.add_route_table_ids(id_val);
-                    has_modifications = true;
-                }
-            }
-            for id_val in &old_ids {
-                if !new_id_strs.contains(id_val) {
-                    req = req.remove_route_table_ids(id_val);
-                    has_modifications = true;
-                }
-            }
-        }
-
-        // Update subnet_ids
-        if let Some(Value::Concrete(ConcreteValue::List(new_ids))) = to.get_attr("subnet_ids") {
-            let old_ids: Vec<String> = if let Some(Value::Concrete(ConcreteValue::List(old))) =
-                from.attributes.get("subnet_ids")
-            {
-                old.iter()
-                    .filter_map(|v| {
-                        if let Value::Concrete(ConcreteValue::String(s)) = v {
-                            Some(s.expose_plaintext().to_string())
-                        } else {
-                            None
-                        }
-                    })
-                    .collect()
-            } else {
-                vec![]
-            };
-            let new_id_strs: Vec<String> = new_ids
-                .iter()
-                .filter_map(|v| {
-                    if let Value::Concrete(ConcreteValue::String(s)) = v {
-                        Some(s.expose_plaintext().to_string())
-                    } else {
-                        None
-                    }
-                })
-                .collect();
-
-            for id_val in &new_id_strs {
-                if !old_ids.contains(id_val) {
-                    req = req.add_subnet_ids(id_val);
-                    has_modifications = true;
-                }
-            }
-            for id_val in &old_ids {
-                if !new_id_strs.contains(id_val) {
-                    req = req.remove_subnet_ids(id_val);
-                    has_modifications = true;
-                }
-            }
-        }
-
-        // Update security_group_ids
-        if let Some(Value::Concrete(ConcreteValue::List(new_ids))) =
-            to.get_attr("security_group_ids")
-        {
-            let old_ids: Vec<String> = if let Some(Value::Concrete(ConcreteValue::List(old))) =
-                from.attributes.get("security_group_ids")
-            {
-                old.iter()
-                    .filter_map(|v| {
-                        if let Value::Concrete(ConcreteValue::String(s)) = v {
-                            Some(s.expose_plaintext().to_string())
-                        } else {
-                            None
-                        }
-                    })
-                    .collect()
-            } else {
-                vec![]
-            };
-            let new_id_strs: Vec<String> = new_ids
-                .iter()
-                .filter_map(|v| {
-                    if let Value::Concrete(ConcreteValue::String(s)) = v {
-                        Some(s.expose_plaintext().to_string())
-                    } else {
-                        None
-                    }
-                })
-                .collect();
-
-            for id_val in &new_id_strs {
-                if !old_ids.contains(id_val) {
-                    req = req.add_security_group_ids(id_val);
-                    has_modifications = true;
-                }
-            }
-            for id_val in &old_ids {
-                if !new_id_strs.contains(id_val) {
-                    req = req.remove_security_group_ids(id_val);
-                    has_modifications = true;
-                }
-            }
-        }
-
-        // Update private_dns_enabled
-        if let Some(v) = optional_bool_attr(&to, "private_dns_enabled") {
+        if let Some(v) = private_dns_enabled {
             req = req.private_dns_enabled(v);
             has_modifications = true;
         }
 
-        // Update policy_document
-        if let Some(Value::Concrete(ConcreteValue::String(policy))) = to.get_attr("policy_document")
-        {
-            req = req.policy_document(policy.expose_plaintext());
-            has_modifications = true;
-        } else if let Some(Value::Concrete(ConcreteValue::Map(map))) =
-            to.get_attr("policy_document")
-        {
-            let json_str = crate::services::iam::role::value_to_iam_policy_json(&Value::Concrete(
-                ConcreteValue::Map(map.clone()),
-            ))
-            .map_err(|e| {
-                ProviderError::internal(format!("Failed to serialize policy_document: {}", e))
-                    .for_resource(id.clone())
-            })?;
-            req = req.policy_document(&json_str);
+        if let Some(policy_document) = policy_document {
+            req = req.policy_document(policy_document);
             has_modifications = true;
         }
 
@@ -404,7 +251,7 @@ impl AwsProvider {
         self.apply_ec2_tags(
             &id,
             identifier.as_str(),
-            &to.resolved_attributes(),
+            tags.as_ref(),
             Some(&from.attributes),
         )
         .await?;

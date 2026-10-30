@@ -242,6 +242,25 @@ pub(crate) struct TaggedEc2CreateContext<'a> {
     kind: Ec2TaggedResourceKind,
     create_token: &'a ClientToken,
     sent: Sent,
+    continuation: Option<TaggedEc2CreateContinuationInput>,
+}
+
+/// Typed values used by EC2 create calls that require a follow-up mutation.
+pub(crate) enum TaggedEc2CreateContinuationInput {
+    Vpc {
+        enable_dns_hostnames: Option<bool>,
+        enable_dns_support: Option<bool>,
+    },
+    Subnet {
+        assign_ipv6_address_on_creation: Option<bool>,
+        enable_dns64: Option<bool>,
+        enable_lni_at_device_index: Option<i64>,
+        map_public_ip_on_launch: Option<bool>,
+        private_dns_name_options_on_launch: Option<Value>,
+    },
+    InternetGateway {
+        vpc_id: Option<String>,
+    },
 }
 
 impl Ec2TaggedResourceKind {
@@ -254,6 +273,7 @@ impl Ec2TaggedResourceKind {
             kind: self,
             create_token,
             sent,
+            continuation: None,
         }
     }
 
@@ -504,6 +524,15 @@ impl Ec2TaggedResourceKind {
     }
 }
 
+impl TaggedEc2CreateContext<'_> {
+    pub(crate) fn with_continuation(self, continuation: TaggedEc2CreateContinuationInput) -> Self {
+        Self {
+            continuation: Some(continuation),
+            ..self
+        }
+    }
+}
+
 #[derive(Debug)]
 enum TaggedDiscovery {
     Retry {
@@ -534,8 +563,8 @@ enum AcmRequestTransition {
 /// outcome.
 #[derive(Debug)]
 enum InitialAcmRequestTransition {
-    Issued(AppliedIdentifier),
-    Pending(AwsCreateToken),
+    Issued(AppliedIdentifier, Sent),
+    Pending(AwsCreateToken, Sent),
     Untracked(ProviderError),
 }
 
@@ -574,6 +603,8 @@ pub(crate) enum CreateCompletion {
         missing_attributes: Vec<String>,
     },
 }
+
+pub(crate) type TypedCreateCompletion = (Sent, CreateCompletion);
 
 impl CreateCompletion {
     pub(crate) fn partial(
@@ -1015,39 +1046,6 @@ impl AwsProvider {
         UpdateOutcome::partial_success(state, reason, missing_attributes)
     }
 
-    fn sent_only_with_schema(
-        resource: &Resource<impl Sized>,
-        schema: Option<&carina_core::schema::ResourceSchema>,
-        names: &[&str],
-    ) -> Sent {
-        let mut sent = names
-            .iter()
-            .copied()
-            .filter(|name| resource.attributes.contains_key(*name))
-            .map(str::to_string)
-            .collect::<std::collections::BTreeSet<_>>();
-        if let Some(schema) = schema {
-            sent.extend(
-                schema
-                    .attributes()
-                    .iter()
-                    .filter(|(name, attribute)| {
-                        attribute.is_write_only() && resource.attributes.contains_key(*name)
-                    })
-                    .map(|(name, _attribute)| name.clone()),
-            );
-        }
-        Sent::only(sent)
-    }
-
-    pub(crate) fn sent_only(&self, resource: &Resource<impl Sized>, names: &[&str]) -> Sent {
-        Self::sent_only_with_schema(
-            resource,
-            self.resource_schema(resource.id.resource_type.as_str()),
-            names,
-        )
-    }
-
     async fn request_acm_certificate_transition(
         &self,
         resource: &Resource<impl Sized>,
@@ -1068,8 +1066,13 @@ impl AwsProvider {
             .request_acm_certificate(resource, schema, &client_token)
             .await
         {
-            Ok(Ok(identifier)) => AcmRequestTransition::Issued(identifier),
-            Ok(Err(error)) => match error.outcome() {
+            Ok((sent, result)) => {
+                // A retry/resume already carries the original Sent record in
+                // core's typestate; this decode is solely the replay input.
+                drop(sent);
+                match result {
+                    Ok(identifier) => AcmRequestTransition::Issued(identifier),
+                    Err(error) => match error.outcome() {
                 SendOutcome::MaybeSent if attempts_remaining > 1 => {
                     AcmRequestTransition::Pending(token(attempts_remaining - 1))
                 }
@@ -1085,7 +1088,9 @@ impl AwsProvider {
                         error,
                     ),
                 ),
-            },
+                    },
+                }
+            }
             Err(error) => AcmRequestTransition::Untracked(error),
         }
     }
@@ -1110,10 +1115,11 @@ impl AwsProvider {
             .request_acm_certificate(resource, schema, &client_token)
             .await
         {
-            Ok(Ok(identifier)) => InitialAcmRequestTransition::Issued(identifier),
-            Ok(Err(error)) => match error.outcome() {
-                SendOutcome::MaybeSent => InitialAcmRequestTransition::Pending(pending_token),
+            Ok((sent, Ok(identifier))) => InitialAcmRequestTransition::Issued(identifier, sent),
+            Ok((sent, Err(error))) => match error.outcome() {
+                SendOutcome::MaybeSent => InitialAcmRequestTransition::Pending(pending_token, sent),
                 SendOutcome::NotSent | SendOutcome::Rejected => {
+                    drop(sent);
                     InitialAcmRequestTransition::Untracked(
                         crate::services::acm::certificate::request_certificate_error(
                             &resource.id,
@@ -1177,6 +1183,17 @@ impl AwsProvider {
             }) => attempt
                 .issued(identifier, sent)
                 .partial(attributes, reason, missing_attributes),
+            Err(error) => Err(attempt.untracked(error)),
+        }
+    }
+
+    fn finish_typed_create<A: AwsCreateAttempt>(
+        &self,
+        attempt: A,
+        result: ProviderResult<TypedCreateCompletion>,
+    ) -> Result<A::Step, A::Verdict> {
+        match result {
+            Ok((sent, completion)) => self.finish_create(attempt, sent, Ok(completion)),
             Err(error) => Err(attempt.untracked(error)),
         }
     }
@@ -1295,6 +1312,7 @@ impl AwsProvider {
             kind,
             create_token,
             sent,
+            continuation,
         } = context;
         let output = match result {
             Ok(output) => output,
@@ -1321,8 +1339,14 @@ impl AwsProvider {
             Err(error) => return Err(attempt.untracked(error)),
         };
         let issued = attempt.issued(identifier.clone(), sent);
-        self.finish_tagged_ec2_issued(resource, kind, identifier, issued)
-            .await
+        self.finish_tagged_ec2_issued_with_continuation(
+            resource,
+            kind,
+            identifier,
+            issued,
+            continuation,
+        )
+        .await
     }
 
     fn tagged_ec2_discovery_call_error<E>(
@@ -1560,12 +1584,33 @@ impl AwsProvider {
         resource: &Resource<impl Sized>,
         kind: Ec2TaggedResourceKind,
         identifier: AppliedIdentifier,
+        continuation: Option<TaggedEc2CreateContinuationInput>,
     ) -> ProviderResult<TaggedEc2Continuation> {
         match kind {
-            Ec2TaggedResourceKind::Vpc => {
-                self.continue_ec2_vpc_create(resource, identifier.as_str())
+            Ec2TaggedResourceKind::Vpc => match continuation {
+                Some(TaggedEc2CreateContinuationInput::Vpc {
+                    enable_dns_hostnames,
+                    enable_dns_support,
+                }) => {
+                    self.continue_ec2_vpc_create_with(
+                        &resource.id,
+                        identifier.as_str(),
+                        enable_dns_hostnames,
+                        enable_dns_support,
+                    )
                     .await?;
-            }
+                }
+                None => {
+                    self.continue_ec2_vpc_create(resource, identifier.as_str())
+                        .await?;
+                }
+                Some(_) => {
+                    return Err(ProviderError::internal(
+                        "mismatched typed EC2 create continuation for VPC",
+                    )
+                    .for_resource(resource.id.clone()));
+                }
+            },
             Ec2TaggedResourceKind::Subnet => {
                 let schema = self
                     .resource_schema(resource.id.resource_type.as_str())
@@ -1573,27 +1618,61 @@ impl AwsProvider {
                         ProviderError::internal("missing EC2 subnet schema")
                             .for_resource(resource.id.clone())
                     })?;
-                self.continue_ec2_subnet_create(resource, schema, identifier.as_str())
+                match continuation {
+                    Some(TaggedEc2CreateContinuationInput::Subnet {
+                        assign_ipv6_address_on_creation,
+                        enable_dns64,
+                        enable_lni_at_device_index,
+                        map_public_ip_on_launch,
+                        private_dns_name_options_on_launch,
+                    }) => {
+                        self.continue_ec2_subnet_create_with(
+                            &resource.id,
+                            schema,
+                            identifier.as_str(),
+                            assign_ipv6_address_on_creation,
+                            enable_dns64,
+                            enable_lni_at_device_index,
+                            map_public_ip_on_launch,
+                            private_dns_name_options_on_launch.as_ref(),
+                        )
+                        .await?;
+                    }
+                    None => {
+                        self.continue_ec2_subnet_create(resource, schema, identifier.as_str())
+                            .await?;
+                    }
+                    Some(_) => {
+                        return Err(ProviderError::internal(
+                            "mismatched typed EC2 create continuation for subnet",
+                        )
+                        .for_resource(resource.id.clone()));
+                    }
+                }
+            }
+            Ec2TaggedResourceKind::InternetGateway => match continuation {
+                Some(TaggedEc2CreateContinuationInput::InternetGateway { vpc_id }) => {
+                    self.continue_ec2_internet_gateway_create_with(
+                        &resource.id,
+                        identifier.as_str(),
+                        vpc_id.as_deref(),
+                    )
                     .await?;
-            }
-            Ec2TaggedResourceKind::RouteTable => {
-                self.continue_ec2_route_table_create(resource, identifier.as_str())
-                    .await?;
-            }
-            Ec2TaggedResourceKind::InternetGateway => {
-                self.continue_ec2_internet_gateway_create(resource, identifier.as_str())
-                    .await?;
-            }
-            Ec2TaggedResourceKind::VpcEndpoint => {
-                self.apply_ec2_tags(
-                    &resource.id,
-                    identifier.as_str(),
-                    &resource.resolved_attributes(),
-                    None,
-                )
-                .await?;
-            }
-            Ec2TaggedResourceKind::SecurityGroup
+                }
+                None => {
+                    self.continue_ec2_internet_gateway_create(resource, identifier.as_str())
+                        .await?;
+                }
+                Some(_) => {
+                    return Err(ProviderError::internal(
+                        "mismatched typed EC2 create continuation for internet gateway",
+                    )
+                    .for_resource(resource.id.clone()));
+                }
+            },
+            Ec2TaggedResourceKind::RouteTable
+            | Ec2TaggedResourceKind::VpcEndpoint
+            | Ec2TaggedResourceKind::SecurityGroup
             | Ec2TaggedResourceKind::EgressOnlyInternetGateway
             | Ec2TaggedResourceKind::VpnGateway
             | Ec2TaggedResourceKind::VpcPeeringConnection
@@ -1652,8 +1731,20 @@ impl AwsProvider {
         identifier: AppliedIdentifier,
         issued: I,
     ) -> Result<I::Step, I::Verdict> {
+        self.finish_tagged_ec2_issued_with_continuation(resource, kind, identifier, issued, None)
+            .await
+    }
+
+    async fn finish_tagged_ec2_issued_with_continuation<I: AwsIssuedCreate>(
+        &self,
+        resource: &Resource<impl Sized>,
+        kind: Ec2TaggedResourceKind,
+        identifier: AppliedIdentifier,
+        issued: I,
+        continuation: Option<TaggedEc2CreateContinuationInput>,
+    ) -> Result<I::Step, I::Verdict> {
         match self
-            .continue_tagged_ec2_create(resource, kind, identifier)
+            .continue_tagged_ec2_create(resource, kind, identifier, continuation)
             .await
         {
             Ok(TaggedEc2Continuation::Complete(completion)) => {
@@ -1672,7 +1763,7 @@ impl AwsProvider {
         resumed: R,
     ) -> Result<R::Step, R::Verdict> {
         match self
-            .continue_tagged_ec2_create(resource, kind, identifier)
+            .continue_tagged_ec2_create(resource, kind, identifier, None)
             .await
         {
             Ok(TaggedEc2Continuation::Complete(completion)) => {
@@ -1726,23 +1817,13 @@ impl AwsProvider {
                 .await
             }
             "organizations.Account" => {
-                let request_id = match self
+                let (request_id, sent) = match self
                     .create_organizations_account_start(resource, schema)
                     .await
                 {
                     Ok(request_id) => request_id,
                     Err(error) => return Err(attempt.untracked(error)),
                 };
-                let sent = self.sent_only(
-                    resource,
-                    &[
-                        "account_name",
-                        "email",
-                        "iam_user_access_to_billing",
-                        "role_name",
-                        "tags",
-                    ],
-                );
                 attempt.pending(
                     AwsCreateToken::OrganizationsAccount {
                         create_account_request_id: request_id,
@@ -1782,88 +1863,73 @@ impl AwsProvider {
                     )
                     .await
                 {
-                    InitialAcmRequestTransition::Issued(identifier) => {
-                        let issued = attempt.issued(identifier.clone(), Sent::AllRequestAttributes);
+                    InitialAcmRequestTransition::Issued(identifier, sent) => {
+                        let issued = attempt.issued(identifier.clone(), sent);
                         self.finish_acm_certificate_issued(resource, schema, identifier, issued)
                             .await
                     }
-                    InitialAcmRequestTransition::Pending(token) => {
-                        attempt.pending(token, Sent::AllRequestAttributes, POLL_AFTER_SECS)
+                    InitialAcmRequestTransition::Pending(token, sent) => {
+                        attempt.pending(token, sent, POLL_AFTER_SECS)
                     }
                     InitialAcmRequestTransition::Untracked(error) => Err(attempt.untracked(error)),
                 }
             }
             "s3.Bucket" => self.create_s3_bucket(resource, attempt).await,
-            "s3.BucketPolicy" => self.finish_create(
+            "s3.BucketPolicy" => {
+                self.finish_typed_create(attempt, self.create_s3_bucket_policy(resource).await)
+            }
+            "s3.BucketPublicAccessBlock" => self.finish_typed_create(
                 attempt,
-                Sent::AllRequestAttributes,
-                self.create_s3_bucket_policy(resource).await,
-            ),
-            "s3.BucketPublicAccessBlock" => self.finish_create(
-                attempt,
-                Sent::AllRequestAttributes,
                 self.create_s3_bucket_public_access_block(resource).await,
             ),
-            "s3.BucketVersioning" => self.finish_create(
+            "s3.BucketVersioning" => self.finish_typed_create(
                 attempt,
-                Sent::AllRequestAttributes,
                 self.create_s3_bucket_versioning(resource, schema).await,
             ),
-            "s3.BucketObjectLockConfiguration" => self.finish_create(
+            "s3.BucketObjectLockConfiguration" => self.finish_typed_create(
                 attempt,
-                Sent::AllRequestAttributes,
                 self.create_s3_bucket_object_lock_configuration(resource, schema)
                     .await,
             ),
-            "s3.BucketServerSideEncryptionConfiguration" => self.finish_create(
+            "s3.BucketServerSideEncryptionConfiguration" => self.finish_typed_create(
                 attempt,
-                Sent::AllRequestAttributes,
                 self.create_s3_bucket_server_side_encryption_configuration(resource, schema)
                     .await,
             ),
-            "s3.BucketAcl" => self.finish_create(
+            "s3.BucketAcl" => {
+                self.finish_typed_create(attempt, self.create_s3_bucket_acl(resource, schema).await)
+            }
+            "s3.BucketOwnershipControls" => self.finish_typed_create(
                 attempt,
-                Sent::AllRequestAttributes,
-                self.create_s3_bucket_acl(resource, schema).await,
-            ),
-            "s3.BucketOwnershipControls" => self.finish_create(
-                attempt,
-                Sent::AllRequestAttributes,
                 self.create_s3_bucket_ownership_controls(resource, schema)
                     .await,
             ),
-            "s3.BucketReplicationConfiguration" => self.finish_create(
+            "s3.BucketReplicationConfiguration" => self.finish_typed_create(
                 attempt,
-                Sent::AllRequestAttributes,
                 self.create_s3_bucket_replication_configuration(resource, schema)
                     .await,
             ),
-            "s3.BucketLifecycleConfiguration" => self.finish_create(
+            "s3.BucketLifecycleConfiguration" => self.finish_typed_create(
                 attempt,
-                Sent::AllRequestAttributes,
                 self.create_s3_bucket_lifecycle_configuration(resource, schema)
                     .await,
             ),
-            "s3.BucketWebsiteConfiguration" => self.finish_create(
+            "s3.BucketWebsiteConfiguration" => self.finish_typed_create(
                 attempt,
-                Sent::AllRequestAttributes,
                 self.create_s3_bucket_website_configuration(resource, schema)
                     .await,
             ),
-            "s3.BucketCorsConfiguration" => self.finish_create(
+            "s3.BucketCorsConfiguration" => self.finish_typed_create(
                 attempt,
-                Sent::AllRequestAttributes,
                 self.create_s3_bucket_cors_configuration(resource).await,
             ),
-            "s3.BucketNotificationConfiguration" => self.finish_create(
+            "s3.BucketNotificationConfiguration" => self.finish_typed_create(
                 attempt,
-                Sent::AllRequestAttributes,
                 self.create_s3_bucket_notification_configuration(resource)
                     .await,
             ),
-            "s3.BucketLogging" => self.finish_create(
+            "s3.BucketLogging" => self.finish_typed_create(
                 attempt,
-                Sent::AllRequestAttributes,
                 self.create_s3_bucket_logging(resource, schema).await,
             ),
             "ec2.Eip" => {
@@ -1886,30 +1952,23 @@ impl AwsProvider {
                 self.create_ec2_route_table(resource, &client_token, attempt)
                     .await
             }
-            "ec2.Route" => self.finish_create(
-                attempt,
-                Sent::AllRequestAttributes,
-                self.create_ec2_route(resource).await,
-            ),
+            "ec2.Route" => self.finish_typed_create(attempt, self.create_ec2_route(resource).await),
             "ec2.SecurityGroup" => {
                 self.create_ec2_security_group(resource, &client_token, attempt)
                     .await
             }
-            "ec2.SecurityGroupIngress" => self.finish_create(
+            "ec2.SecurityGroupIngress" => self.finish_typed_create(
                 attempt,
-                Sent::AllRequestAttributes,
                 self.create_ec2_security_group_ingress(resource, schema)
                     .await,
             ),
-            "ec2.SecurityGroupEgress" => self.finish_create(
+            "ec2.SecurityGroupEgress" => self.finish_typed_create(
                 attempt,
-                Sent::AllRequestAttributes,
                 self.create_ec2_security_group_egress(resource, schema)
                     .await,
             ),
-            "ec2.SubnetRouteTableAssociation" => self.finish_create(
+            "ec2.SubnetRouteTableAssociation" => self.finish_typed_create(
                 attempt,
-                Sent::AllRequestAttributes,
                 self.create_ec2_subnet_route_table_association(resource)
                     .await,
             ),
@@ -1921,9 +1980,8 @@ impl AwsProvider {
                 self.create_ec2_vpc_endpoint(resource, schema, &client_token, attempt)
                     .await
             }
-            "ec2.VpcGatewayAttachment" => self.finish_create(
+            "ec2.VpcGatewayAttachment" => self.finish_typed_create(
                 attempt,
-                Sent::AllRequestAttributes,
                 self.create_ec2_vpc_gateway_attachment(resource).await,
             ),
             "ec2.VpnGateway" => {
@@ -1938,28 +1996,20 @@ impl AwsProvider {
                 self.create_ec2_egress_only_internet_gateway(resource, &client_token, attempt)
                     .await
             }
-            "organizations.Organization" => self.finish_create(
+            "organizations.Organization" => self.finish_typed_create(
                 attempt,
-                Sent::AllRequestAttributes,
                 self.create_organizations_organization(resource, schema)
                     .await,
             ),
-            "iam.Role" => self.finish_create(
-                attempt,
-                Sent::AllRequestAttributes,
-                self.create_iam_role(resource).await,
-            ),
+            "iam.Role" => self.finish_typed_create(attempt, self.create_iam_role(resource).await),
             "logs.LogGroup" => self.create_logs_log_group(resource, schema, attempt).await,
-            "route53.RecordSet" => self.finish_create(
+            "route53.RecordSet" => self.finish_typed_create(
                 attempt,
-                Sent::AllRequestAttributes,
                 self.create_route53_record_set(resource, schema).await,
             ),
-            "sqs.Queue" => self.finish_create(
-                attempt,
-                Sent::AllRequestAttributes,
-                self.create_sqs_queue(resource, schema).await,
-            ),
+            "sqs.Queue" => {
+                self.finish_typed_create(attempt, self.create_sqs_queue(resource, schema).await)
+            }
             unknown => Err(attempt.untracked(
                 ProviderError::internal(format!("Unknown resource type: {unknown}"))
                     .for_resource(resource.id.clone()),
@@ -2068,7 +2118,7 @@ impl AwsProvider {
                             .apply_ec2_tags(
                                 id,
                                 nat_gateway_id.as_str(),
-                                &resource.resolved_attributes(),
+                                resource.get_attr("tags"),
                                 None,
                             )
                             .await
@@ -2485,7 +2535,7 @@ impl AwsProvider {
                             .apply_ec2_tags(
                                 id,
                                 nat_gateway_id.as_str(),
-                                &resource.resolved_attributes(),
+                                resource.get_attr("tags"),
                                 None,
                             )
                             .await
@@ -2893,7 +2943,8 @@ impl AwsProvider {
                     .await
             }
             "ec2.VpcGatewayAttachment" => {
-                self.update_ec2_vpc_gateway_attachment(id, identifier).await
+                self.update_ec2_vpc_gateway_attachment(id, identifier, &to)
+                    .await
             }
             "ec2.VpnGateway" => {
                 self.update_ec2_vpn_gateway(id, identifier, from, to, schema)
@@ -3443,8 +3494,9 @@ mod pending_operation_tests {
                 "ipam-pool-12345678".into(),
             )),
         );
-        let schema = crate::schemas::generated::ec2::vpc::ec2_vpc_config().schema;
-        let sent = AwsProvider::sent_only_with_schema(&resource, Some(&schema), &[]);
+        let sent = crate::send_models_generated::Ec2VpcCreateInput::decode(&resource)
+            .expect("typed VPC input should decode")
+            .sent();
         let request_attributes = resource
             .attributes
             .keys()

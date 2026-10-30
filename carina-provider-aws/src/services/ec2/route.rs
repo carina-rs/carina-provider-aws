@@ -4,10 +4,10 @@ use carina_core::resource::{ConcreteValue, Resource, ResourceId, Value};
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
-use crate::helpers::require_string_attr;
-use crate::provider::CreateCompletion;
+use crate::provider::TypedCreateCompletion;
 use crate::read_model::found_managed_read;
 use crate::read_models_generated::Ec2RouteReadModelSupplement;
+use crate::send_models_generated::{Ec2RouteCreateInput, Ec2RouteUpdateInput};
 
 impl AwsProvider {
     /// Read an EC2 Route (routes are identified by route_table_id + destination)
@@ -63,9 +63,14 @@ impl AwsProvider {
     pub(crate) async fn create_ec2_route(
         &self,
         resource: &Resource<impl Sized>,
-    ) -> ProviderResult<CreateCompletion> {
-        let route_table_id = require_string_attr(resource, "route_table_id")?;
-        let destination_cidr = require_string_attr(resource, "destination_cidr_block")?;
+    ) -> ProviderResult<TypedCreateCompletion> {
+        let input = Ec2RouteCreateInput::decode(resource)?;
+        let sent = input.sent();
+        let (destination_cidr, gateway_id, nat_gateway_id, route_table_id) = input.into_parts();
+        let destination_cidr = destination_cidr.ok_or_else(|| {
+            ProviderError::invalid_input("destination_cidr_block is required")
+                .for_resource(resource.id.clone())
+        })?;
 
         let mut req = self
             .ec2_client
@@ -74,16 +79,13 @@ impl AwsProvider {
             .destination_cidr_block(&destination_cidr);
 
         // Add gateway_id if specified
-        if let Some(Value::Concrete(ConcreteValue::String(gw_id))) = resource.get_attr("gateway_id")
-        {
-            req = req.gateway_id(gw_id.expose_plaintext());
+        if let Some(gateway_id) = gateway_id {
+            req = req.gateway_id(gateway_id);
         }
 
         // Add nat_gateway_id if specified
-        if let Some(Value::Concrete(ConcreteValue::String(nat_gw_id))) =
-            resource.get_attr("nat_gateway_id")
-        {
-            req = req.nat_gateway_id(nat_gw_id.expose_plaintext());
+        if let Some(nat_gateway_id) = nat_gateway_id {
+            req = req.nat_gateway_id(nat_gateway_id);
         }
 
         req.send().await.map_err(|e| {
@@ -95,11 +97,14 @@ impl AwsProvider {
         let identifier =
             crate::helpers::applied_identifier(&resource.id, "ec2.CreateRoute", identifier)?;
         let outcome = self.read_ec2_route(&resource.id, &identifier).await;
-        Ok(self.create_outcome_from_read(
-            &resource.id,
-            identifier,
-            resource.resolved_attributes(),
-            outcome,
+        Ok((
+            sent,
+            self.create_outcome_from_read(
+                &resource.id,
+                identifier,
+                resource.resolved_attributes(),
+                outcome,
+            ),
         ))
     }
 
@@ -107,43 +112,33 @@ impl AwsProvider {
     pub(crate) async fn update_ec2_route(
         &self,
         id: ResourceId,
-        _identifier: &AppliedIdentifier,
+        identifier: &AppliedIdentifier,
         to: Resource,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
-        let route_table_id = match to.get_attr("route_table_id") {
-            Some(Value::Concrete(ConcreteValue::String(s))) => s.expose_plaintext().to_string(),
-            _ => {
-                return Err(ProviderError::invalid_input("route_table_id is required")
-                    .for_resource(id.clone()));
-            }
-        };
-
-        let destination_cidr = match to.get_attr("destination_cidr_block") {
-            Some(Value::Concrete(ConcreteValue::String(s))) => s.expose_plaintext().to_string(),
-            _ => {
-                return Err(
-                    ProviderError::invalid_input("destination_cidr_block is required")
-                        .for_resource(id.clone()),
-                );
-            }
+        let input = Ec2RouteUpdateInput::decode(&to)?;
+        let (gateway_id, nat_gateway_id) = input.into_parts();
+        let Some((route_table_id, destination_cidr)) = identifier.as_str().split_once('|') else {
+            return Err(ProviderError::invalid_input(format!(
+                "Invalid route identifier: {}",
+                identifier.as_str()
+            ))
+            .for_resource(id.clone()));
         };
 
         let mut req = self
             .ec2_client
             .replace_route()
-            .route_table_id(&route_table_id)
-            .destination_cidr_block(&destination_cidr);
+            .route_table_id(route_table_id)
+            .destination_cidr_block(destination_cidr);
 
         // Add gateway_id if specified
-        if let Some(Value::Concrete(ConcreteValue::String(gw_id))) = to.get_attr("gateway_id") {
-            req = req.gateway_id(gw_id.expose_plaintext());
+        if let Some(gateway_id) = gateway_id {
+            req = req.gateway_id(gateway_id);
         }
 
         // Add nat_gateway_id if specified
-        if let Some(Value::Concrete(ConcreteValue::String(nat_gw_id))) =
-            to.get_attr("nat_gateway_id")
-        {
-            req = req.nat_gateway_id(nat_gw_id.expose_plaintext());
+        if let Some(nat_gateway_id) = nat_gateway_id {
+            req = req.nat_gateway_id(nat_gateway_id);
         }
 
         req.send().await.map_err(|e| {

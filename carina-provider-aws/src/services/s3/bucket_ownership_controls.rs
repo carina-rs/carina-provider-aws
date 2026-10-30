@@ -6,12 +6,13 @@ use carina_core::schema::ResourceSchema;
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
-use crate::helpers::{
-    RetryPolicy, require_enum_attr, require_string_attr, retry_aws_operation, sdk_error_message,
-};
-use crate::provider::CreateCompletion;
+use crate::helpers::{RetryPolicy, retry_aws_operation, sdk_error_message};
+use crate::provider::TypedCreateCompletion;
 use crate::read_model::found_managed_read;
 use crate::read_models_generated::S3BucketOwnershipControlsReadModel;
+use crate::send_models_generated::{
+    S3BucketOwnershipControlsCreateInput, S3BucketOwnershipControlsUpdateInput,
+};
 use crate::services::s3::bucket::is_s3_not_configured_error;
 
 impl AwsProvider {
@@ -66,22 +67,27 @@ impl AwsProvider {
     pub(crate) async fn create_s3_bucket_ownership_controls(
         &self,
         resource: &Resource<impl Sized>,
-        schema: &ResourceSchema,
-    ) -> ProviderResult<CreateCompletion> {
-        let bucket = require_string_attr(resource, "bucket")?;
+        _schema: &ResourceSchema,
+    ) -> ProviderResult<TypedCreateCompletion> {
+        let input = S3BucketOwnershipControlsCreateInput::decode(resource)?;
+        let sent = input.sent();
+        let (bucket, object_ownership) = input.into_parts();
         let identifier = crate::helpers::applied_identifier(
             &resource.id,
             "s3.PutBucketOwnershipControls",
             bucket,
         )?;
         let outcome = self
-            .put_s3_bucket_ownership_controls(&resource.id, &identifier, resource, schema)
+            .put_s3_bucket_ownership_controls(&resource.id, &identifier, object_ownership)
             .await?;
-        Ok(self.create_outcome_from_read(
-            &resource.id,
-            identifier,
-            resource.resolved_attributes(),
-            outcome,
+        Ok((
+            sent,
+            self.create_outcome_from_read(
+                &resource.id,
+                identifier,
+                resource.resolved_attributes(),
+                outcome,
+            ),
         ))
     }
 
@@ -91,9 +97,10 @@ impl AwsProvider {
         identifier: &AppliedIdentifier,
         _from: &State,
         to: Resource,
-        schema: &ResourceSchema,
+        _schema: &ResourceSchema,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
-        self.put_s3_bucket_ownership_controls(&id, identifier, &to, schema)
+        let (object_ownership,) = S3BucketOwnershipControlsUpdateInput::decode(&to)?.into_parts();
+        self.put_s3_bucket_ownership_controls(&id, identifier, object_ownership)
             .await
     }
 
@@ -101,15 +108,12 @@ impl AwsProvider {
         &self,
         id: &ResourceId,
         bucket: &AppliedIdentifier,
-        resource: &Resource<impl Sized>,
-        schema: &ResourceSchema,
+        object_ownership: String,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
         let applied_identifier = bucket;
         let bucket = bucket.as_str();
-        let ownership_str = require_enum_attr(resource, schema, "object_ownership")?;
-
         let rule = OwnershipControlsRule::builder()
-            .object_ownership(ObjectOwnership::from(ownership_str.as_str()))
+            .object_ownership(ObjectOwnership::from(object_ownership.as_str()))
             .build()
             .map_err(|e| {
                 ProviderError::api_error(sdk_error_message(

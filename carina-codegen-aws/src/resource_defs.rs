@@ -63,6 +63,58 @@ impl ReadDisposition {
     }
 }
 
+/// Whether a writable schema attribute is part of the provider's AWS send
+/// contract.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SendDisposition {
+    /// The hand-written create path sends this attribute. When the attribute
+    /// is not create-only, the hand-written update path sends it too.
+    Sent {
+        field: &'static str,
+        /// Additional normalized request-side names accepted by the generic
+        /// capture test when Smithy serializes this member under a nested or
+        /// operation-specific name instead of its schema `provider_name`.
+        capture_names: &'static [&'static str],
+    },
+    /// The attribute is deliberately consumed without being placed on an AWS
+    /// request. This is reserved for provider-side resolution such as deriving
+    /// an API identifier; unsupported request members belong in
+    /// `ReadDisposition::OmitSchema` instead.
+    NotSent {
+        field: &'static str,
+        reason: &'static str,
+    },
+}
+
+impl SendDisposition {
+    pub const fn sent(field: &'static str) -> Self {
+        Self::Sent {
+            field,
+            capture_names: &[],
+        }
+    }
+
+    pub const fn sent_mapped(field: &'static str, capture_names: &'static [&'static str]) -> Self {
+        Self::Sent {
+            field,
+            capture_names,
+        }
+    }
+
+    pub const fn field(self) -> &'static str {
+        match self {
+            Self::Sent { field, .. } | Self::NotSent { field, .. } => field,
+        }
+    }
+
+    pub const fn capture_names(self) -> &'static [&'static str] {
+        match self {
+            Self::Sent { capture_names, .. } => capture_names,
+            Self::NotSent { .. } => &[],
+        }
+    }
+}
+
 /// A read operation that retrieves specific fields from an API response.
 /// Used for resources that have no single "describe" structure (e.g., S3).
 pub struct ReadOp {
@@ -217,6 +269,307 @@ pub struct ResourceDef {
 }
 
 impl ResourceDef {
+    /// Exhaustive send classification for every writable schema attribute.
+    ///
+    /// Keep these declarations beside the Smithy resource definitions so a
+    /// model refresh cannot add a user-facing input without forcing an
+    /// explicit send decision.
+    pub fn send_dispositions(&self) -> Vec<SendDisposition> {
+        fn sent(fields: &[&'static str]) -> Vec<SendDisposition> {
+            fields.iter().copied().map(SendDisposition::sent).collect()
+        }
+
+        match self.name {
+            "ec2.Vpc" => sent(&[
+                "CidrBlock",
+                "EnableDnsHostnames",
+                "EnableDnsSupport",
+                "InstanceTenancy",
+                "Ipv4IpamPoolId",
+                "Ipv4NetmaskLength",
+                "Tags",
+            ]),
+            "ec2.Subnet" => {
+                let mut dispositions = sent(&[
+                    "AssignIpv6AddressOnCreation",
+                    "AvailabilityZone",
+                    "AvailabilityZoneId",
+                    "CidrBlock",
+                    "EnableDns64",
+                    "EnableLniAtDeviceIndex",
+                    "Ipv4IpamPoolId",
+                    "Ipv4NetmaskLength",
+                    "Ipv6CidrBlock",
+                    "Ipv6IpamPoolId",
+                    "Ipv6Native",
+                    "Ipv6NetmaskLength",
+                    "MapPublicIpOnLaunch",
+                    "OutpostArn",
+                    "VpcId",
+                    "Tags",
+                ]);
+                dispositions.push(SendDisposition::sent_mapped(
+                    "PrivateDnsNameOptionsOnLaunch",
+                    &[
+                        "HostnameType",
+                        "EnableResourceNameDnsARecordOnLaunch",
+                        "EnableResourceNameDnsAAAARecordOnLaunch",
+                    ],
+                ));
+                dispositions
+            }
+            "ec2.InternetGateway" => sent(&["VpcId", "Tags"]),
+            "ec2.RouteTable" => sent(&["VpcId", "Tags"]),
+            "ec2.Route" => sent(&[
+                "DestinationCidrBlock",
+                "GatewayId",
+                "NatGatewayId",
+                "RouteTableId",
+            ]),
+            "ec2.SecurityGroup" => sent(&["Description", "GroupName", "VpcId", "Tags"]),
+            "ec2.SecurityGroupIngress" => {
+                let mut dispositions = sent(&[
+                    "CidrIp",
+                    "CidrIpv6",
+                    "Description",
+                    "FromPort",
+                    "GroupId",
+                    "IpProtocol",
+                    "ToPort",
+                ]);
+                dispositions.extend([
+                    SendDisposition::sent_mapped("SourcePrefixListId", &["PrefixListIds"]),
+                    SendDisposition::sent_mapped("SourceSecurityGroupOwnerId", &["UserId"]),
+                    SendDisposition::sent_mapped("SourceSecurityGroupId", &["Groups"]),
+                ]);
+                dispositions
+            }
+            "ec2.SecurityGroupEgress" => {
+                let mut dispositions = sent(&[
+                    "CidrIp",
+                    "CidrIpv6",
+                    "Description",
+                    "FromPort",
+                    "GroupId",
+                    "IpProtocol",
+                    "ToPort",
+                ]);
+                dispositions.extend([
+                    SendDisposition::sent_mapped("DestinationPrefixListId", &["PrefixListIds"]),
+                    SendDisposition::sent_mapped("SourceSecurityGroupOwnerId", &["UserId"]),
+                    SendDisposition::sent_mapped("DestinationSecurityGroupId", &["Groups"]),
+                ]);
+                dispositions
+            }
+            "ec2.EgressOnlyInternetGateway" => sent(&["VpcId", "Tags"]),
+            "ec2.Eip" => sent(&["Address", "Domain", "PublicIpv4Pool", "Tags"]),
+            "ec2.FlowLog" => {
+                let mut dispositions = sent(&[
+                    "DeliverLogsPermissionArn",
+                    "LogDestination",
+                    "LogDestinationType",
+                    "LogFormat",
+                    "LogGroupName",
+                    "MaxAggregationInterval",
+                    "ResourceType",
+                    "TrafficType",
+                    "Tags",
+                ]);
+                dispositions.push(SendDisposition::sent_mapped("ResourceIds", &["ResourceId"]));
+                dispositions
+            }
+            "ec2.NatGateway" => {
+                let mut dispositions = sent(&[
+                    "AllocationId",
+                    "AvailabilityMode",
+                    "ConnectivityType",
+                    "PrivateIpAddress",
+                    "SubnetId",
+                    "VpcId",
+                    "Tags",
+                ]);
+                dispositions.push(SendDisposition::sent_mapped(
+                    "AvailabilityZoneAddresses",
+                    &["AvailabilityZoneAddress"],
+                ));
+                dispositions
+            }
+            "ec2.SubnetRouteTableAssociation" => sent(&["RouteTableId", "SubnetId"]),
+            "ec2.TransitGateway" => {
+                let mut dispositions = sent(&["Description", "Tags"]);
+                dispositions.push(SendDisposition::sent_mapped(
+                    "Options",
+                    &[
+                        "AmazonSideAsn",
+                        "AutoAcceptSharedAttachments",
+                        "DefaultRouteTableAssociation",
+                        "DefaultRouteTablePropagation",
+                        "DnsSupport",
+                        "MulticastSupport",
+                        "SecurityGroupReferencingSupport",
+                        "TransitGatewayCidrBlocks",
+                        "VpnEcmpSupport",
+                    ],
+                ));
+                dispositions
+            }
+            "ec2.TransitGatewayAttachment" => {
+                let mut dispositions = sent(&["TransitGatewayId", "VpcId", "Tags"]);
+                dispositions.extend([
+                    SendDisposition::sent_mapped(
+                        "Options",
+                        &[
+                            "ApplianceModeSupport",
+                            "DnsSupport",
+                            "Ipv6Support",
+                            "SecurityGroupReferencingSupport",
+                        ],
+                    ),
+                    SendDisposition::sent_mapped("SubnetIds", &["SubnetId"]),
+                ]);
+                dispositions
+            }
+            "ec2.VpcEndpoint" => {
+                let mut dispositions = sent(&[
+                    "PolicyDocument",
+                    "PrivateDnsEnabled",
+                    "ResourceConfigurationArn",
+                    "ServiceName",
+                    "ServiceNetworkArn",
+                    "ServiceRegion",
+                    "VpcEndpointType",
+                    "VpcId",
+                    "Tags",
+                ]);
+                dispositions.extend([
+                    SendDisposition::sent_mapped("RouteTableIds", &["RouteTableId"]),
+                    SendDisposition::sent_mapped("SecurityGroupIds", &["SecurityGroupId"]),
+                    SendDisposition::sent_mapped("SubnetIds", &["SubnetId"]),
+                ]);
+                dispositions
+            }
+            "ec2.VpcGatewayAttachment" => sent(&["InternetGatewayId", "VpcId", "VpnGatewayId"]),
+            "ec2.VpcPeeringConnection" => sent(&["PeerOwnerId", "PeerVpcId", "VpcId", "Tags"]),
+            "ec2.VpnGateway" => sent(&["AmazonSideAsn", "AvailabilityZone", "Type", "Tags"]),
+            "organizations.Organization" => sent(&["FeatureSet"]),
+            "organizations.Account" => sent(&[
+                "AccountName",
+                "Email",
+                "IamUserAccessToBilling",
+                "RoleName",
+                "Tags",
+            ]),
+            "s3.Bucket" => sent(&["Bucket", "BucketNamespace", "Tags"]),
+            "s3.BucketPolicy" => sent(&["Bucket", "Policy"]),
+            "s3.BucketVersioning" => sent(&["Bucket", "Status"]),
+            "s3.BucketObjectLockConfiguration" => sent(&["Bucket", "ObjectLockEnabled", "Rule"]),
+            "s3.BucketAcl" => sent(&["ACL", "Bucket"]),
+            "s3.BucketOwnershipControls" => sent(&["Bucket", "ObjectOwnership"]),
+            "s3.BucketServerSideEncryptionConfiguration" => {
+                let mut dispositions = sent(&["Bucket"]);
+                dispositions.push(SendDisposition::sent_mapped("Rules", &["Rule"]));
+                dispositions
+            }
+            "s3.BucketReplicationConfiguration" => {
+                let mut dispositions = sent(&["Bucket", "Role"]);
+                dispositions.push(SendDisposition::sent_mapped("Rules", &["Rule"]));
+                dispositions
+            }
+            "s3.BucketLifecycleConfiguration" => {
+                let mut dispositions = sent(&["Bucket"]);
+                dispositions.push(SendDisposition::sent_mapped("Rules", &["Rule"]));
+                dispositions
+            }
+            "s3.BucketWebsiteConfiguration" => sent(&[
+                "Bucket",
+                "IndexDocument",
+                "ErrorDocument",
+                "RedirectAllRequestsTo",
+            ]),
+            "s3.BucketCorsConfiguration" => {
+                let mut dispositions = sent(&["Bucket"]);
+                dispositions.push(SendDisposition::sent_mapped("CORSRules", &["CORSRule"]));
+                dispositions
+            }
+            "s3.BucketNotificationConfiguration" => {
+                let mut dispositions = sent(&["Bucket", "EventBridgeConfiguration"]);
+                dispositions.extend([
+                    SendDisposition::sent_mapped("TopicConfigurations", &["TopicConfiguration"]),
+                    SendDisposition::sent_mapped("QueueConfigurations", &["QueueConfiguration"]),
+                    SendDisposition::sent_mapped(
+                        "LambdaFunctionConfigurations",
+                        &["CloudFunctionConfiguration"],
+                    ),
+                ]);
+                dispositions
+            }
+            "s3.BucketLogging" => sent(&[
+                "Bucket",
+                "TargetBucket",
+                "TargetPrefix",
+                "TargetObjectKeyFormat",
+            ]),
+            "s3.BucketPublicAccessBlock" => sent(&[
+                "Bucket",
+                "BlockPublicAcls",
+                "IgnorePublicAcls",
+                "BlockPublicPolicy",
+                "RestrictPublicBuckets",
+            ]),
+            "acm.Certificate" => sent(&[
+                "DomainName",
+                "KeyAlgorithm",
+                "Options",
+                "SubjectAlternativeNames",
+                "ValidationMethod",
+                "Tags",
+            ]),
+            "route53.RecordSet" => sent(&["AliasTarget", "Name", "ResourceRecords", "TTL", "Type"])
+                .into_iter()
+                .chain([SendDisposition::sent_mapped(
+                    "HostedZoneId",
+                    &["hostedzone"],
+                )])
+                .collect(),
+            "iam.Role" => sent(&[
+                "AssumeRolePolicyDocument",
+                "Description",
+                "MaxSessionDuration",
+                "Path",
+                "RoleName",
+                "Tags",
+            ]),
+            "logs.LogGroup" => sent(&[
+                "DeletionProtectionEnabled",
+                "KmsKeyId",
+                "LogGroupClass",
+                "LogGroupName",
+                "RetentionInDays",
+                "Tags",
+            ]),
+            "sqs.Queue" => sent(&[
+                "QueueName",
+                "Policy",
+                "VisibilityTimeout",
+                "MessageRetentionPeriod",
+                "DelaySeconds",
+                "MaximumMessageSize",
+                "ReceiveMessageWaitTimeSeconds",
+                "RedrivePolicy",
+                "RedriveAllowPolicy",
+                "FifoQueue",
+                "ContentBasedDeduplication",
+                "DeduplicationScope",
+                "FifoThroughputLimit",
+                "KmsMasterKeyId",
+                "KmsDataKeyReusePeriodSeconds",
+                "SqsManagedSseEnabled",
+                "Tags",
+            ]),
+            _ => vec![],
+        }
+    }
+
     /// Reasoned exceptions to the read contract inferred from Smithy.
     ///
     /// Keeping this exhaustive match beside the resource definitions makes a
@@ -2847,7 +3200,7 @@ pub fn route53_resources() -> Vec<ResourceDef> {
             create_only_overrides: vec!["Name"],
             enum_aliases: vec![],
             to_dsl_overrides: vec![],
-            required_overrides: vec!["Name", "Type"],
+            required_overrides: vec!["HostedZoneId", "Name", "Type"],
             extra_read_only: vec![],
             read_only_overrides: vec![],
             extra_attributes: vec![ExtraField {

@@ -12,12 +12,14 @@ use indexmap::IndexMap;
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
-use crate::helpers::{
-    RetryPolicy, enum_attr_error, require_string_attr, retry_aws_operation, sdk_error_message,
-};
-use crate::provider::CreateCompletion;
+use crate::helpers::{RetryPolicy, enum_attr_error, retry_aws_operation, sdk_error_message};
+use crate::provider::TypedCreateCompletion;
 use crate::read_model::found_managed_read;
 use crate::read_models_generated::S3BucketServerSideEncryptionConfigurationReadModel;
+use crate::send_models_generated::{
+    S3BucketServerSideEncryptionConfigurationCreateInput,
+    S3BucketServerSideEncryptionConfigurationUpdateInput,
+};
 use crate::services::s3::bucket::is_s3_not_configured_error;
 
 impl AwsProvider {
@@ -69,18 +71,23 @@ impl AwsProvider {
         &self,
         resource: &Resource<impl Sized>,
         schema: &ResourceSchema,
-    ) -> ProviderResult<CreateCompletion> {
-        let bucket = require_string_attr(resource, "bucket")?;
+    ) -> ProviderResult<TypedCreateCompletion> {
+        let input = S3BucketServerSideEncryptionConfigurationCreateInput::decode(resource)?;
+        let sent = input.sent();
+        let (bucket, rules) = input.into_parts();
         let identifier =
             crate::helpers::applied_identifier(&resource.id, "s3.PutBucketEncryption", bucket)?;
         let outcome = self
-            .put_s3_bucket_encryption(&resource.id, &identifier, resource, schema)
+            .put_s3_bucket_encryption(&resource.id, &identifier, &rules, schema)
             .await?;
-        Ok(self.create_outcome_from_read(
-            &resource.id,
-            identifier,
-            resource.resolved_attributes(),
-            outcome,
+        Ok((
+            sent,
+            self.create_outcome_from_read(
+                &resource.id,
+                identifier,
+                resource.resolved_attributes(),
+                outcome,
+            ),
         ))
     }
 
@@ -92,7 +99,9 @@ impl AwsProvider {
         to: Resource,
         schema: &ResourceSchema,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
-        self.put_s3_bucket_encryption(&id, identifier, &to, schema)
+        let (rules,) =
+            S3BucketServerSideEncryptionConfigurationUpdateInput::decode(&to)?.into_parts();
+        self.put_s3_bucket_encryption(&id, identifier, &rules, schema)
             .await
     }
 
@@ -100,13 +109,13 @@ impl AwsProvider {
         &self,
         id: &ResourceId,
         bucket: &AppliedIdentifier,
-        resource: &Resource<impl Sized>,
+        rules: &Value,
         schema: &ResourceSchema,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
         let applied_identifier = bucket;
         let bucket = bucket.as_str();
-        let rules = match resource.get_attr("rules") {
-            Some(Value::Concrete(ConcreteValue::List(items))) => items,
+        let rules = match rules {
+            Value::Concrete(ConcreteValue::List(items)) => items,
             _ => {
                 return Err(
                     ProviderError::invalid_input("rules is required and must be a list")

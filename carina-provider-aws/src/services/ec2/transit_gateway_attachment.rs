@@ -1,4 +1,4 @@
-use carina_core::provider::{AppliedIdentifier, ReadOutcome, Sent};
+use carina_core::provider::{AppliedIdentifier, ReadOutcome};
 use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
 use carina_core::schema::ResourceSchema;
@@ -10,11 +10,13 @@ use crate::aws_operation::ClientToken;
 use crate::error_helpers::api_error_with_meta;
 use crate::helpers::{
     CreatePoll, DeletePoll, build_tag_specification_with_create_token, optional_enum_struct_field,
-    require_string_attr,
 };
 use crate::provider::{AwsCreateAttempt, Ec2TaggedResourceKind};
 use crate::read_model::{empty_map_value, found_managed_read};
 use crate::read_models_generated::Ec2TransitGatewayAttachmentReadModelSupplement;
+use crate::send_models_generated::{
+    Ec2TransitGatewayAttachmentCreateInput, Ec2TransitGatewayAttachmentUpdateInput,
+};
 
 fn transit_gateway_attachment_create_poll_state(
     state: Option<&TransitGatewayAttachmentState>,
@@ -70,7 +72,8 @@ fn transit_gateway_attachment_delete_poll_state(
 }
 
 fn build_create_transit_gateway_attachment_options(
-    resource: &Resource<impl Sized>,
+    id: &ResourceId,
+    options_value: Option<&Value>,
     schema: &ResourceSchema,
 ) -> ProviderResult<Option<aws_sdk_ec2::types::CreateTransitGatewayVpcAttachmentRequestOptions>> {
     use aws_sdk_ec2::types::{
@@ -78,6 +81,14 @@ fn build_create_transit_gateway_attachment_options(
         SecurityGroupReferencingSupportValue,
     };
 
+    let Some(options_value) = options_value else {
+        return Ok(None);
+    };
+    let mut projected = Resource::from_id(id.clone());
+    projected
+        .attributes
+        .insert("options".to_string(), options_value.clone());
+    let resource = &projected;
     let mut options =
         aws_sdk_ec2::types::CreateTransitGatewayVpcAttachmentRequestOptions::builder();
     let mut has_options = false;
@@ -164,19 +175,17 @@ impl AwsProvider {
         client_token: &ClientToken,
         attempt: A,
     ) -> Result<A::Step, A::Verdict> {
-        let transit_gateway_id = match require_string_attr(resource, "transit_gateway_id") {
-            Ok(value) => value,
+        let input = match Ec2TransitGatewayAttachmentCreateInput::decode(resource) {
+            Ok(input) => input,
             Err(error) => return Err(attempt.untracked(error)),
         };
-        let vpc_id = match require_string_attr(resource, "vpc_id") {
-            Ok(value) => value,
-            Err(error) => return Err(attempt.untracked(error)),
-        };
+        let sent = input.sent();
+        let (options, subnet_ids, tags, transit_gateway_id, vpc_id) = input.into_parts();
 
-        let subnet_ids = match resource.get_attr("subnet_ids") {
-            Some(Value::Concrete(ConcreteValue::List(ids))) => {
+        let subnet_ids = match subnet_ids {
+            Value::Concrete(ConcreteValue::List(ids)) => {
                 let mut result = Vec::new();
-                for id_val in ids {
+                for id_val in &ids {
                     if let Value::Concrete(ConcreteValue::String(s)) = id_val {
                         result.push(s.expose_plaintext().to_string());
                     }
@@ -207,7 +216,11 @@ impl AwsProvider {
             req = req.subnet_ids(subnet_id);
         }
 
-        let options = match build_create_transit_gateway_attachment_options(resource, schema) {
+        let options = match build_create_transit_gateway_attachment_options(
+            &resource.id,
+            options.as_ref(),
+            schema,
+        ) {
             Ok(options) => options,
             Err(error) => return Err(attempt.untracked(error)),
         };
@@ -216,7 +229,7 @@ impl AwsProvider {
         }
 
         req = req.tag_specifications(build_tag_specification_with_create_token(
-            resource,
+            tags.as_ref(),
             aws_sdk_ec2::types::ResourceType::TransitGatewayAttachment,
             client_token,
         ));
@@ -226,8 +239,7 @@ impl AwsProvider {
         self.finish_tagged_ec2_create(
             resource,
             attempt,
-            Ec2TaggedResourceKind::TransitGatewayVpcAttachment
-                .create_context(client_token, Sent::AllRequestAttributes),
+            Ec2TaggedResourceKind::TransitGatewayVpcAttachment.create_context(client_token, sent),
             result,
             |output| {
                 output
@@ -248,10 +260,12 @@ impl AwsProvider {
         to: Resource,
         _schema: &ResourceSchema,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
+        let input = Ec2TransitGatewayAttachmentUpdateInput::decode(&to)?;
+        let (tags,) = input.into_parts();
         self.apply_ec2_tags(
             &id,
             identifier.as_str(),
-            &to.resolved_attributes(),
+            tags.as_ref(),
             Some(&from.attributes),
         )
         .await?;
@@ -412,9 +426,13 @@ mod tests {
     #[test]
     fn create_reads_nested_options_appliance_mode_support() {
         let resource = one_enum_option("appliance_mode_support", "enable");
-        let options = build_create_transit_gateway_attachment_options(&resource, &schema())
-            .expect("valid options")
-            .expect("options");
+        let options = build_create_transit_gateway_attachment_options(
+            &resource.id,
+            resource.get_attr("options"),
+            &schema(),
+        )
+        .expect("valid options")
+        .expect("options");
         assert_eq!(
             options.appliance_mode_support(),
             Some(&ApplianceModeSupportValue::Enable)
@@ -424,27 +442,39 @@ mod tests {
     #[test]
     fn create_reads_nested_options_dns_support() {
         let resource = one_enum_option("dns_support", "disable");
-        let options = build_create_transit_gateway_attachment_options(&resource, &schema())
-            .expect("valid options")
-            .expect("options");
+        let options = build_create_transit_gateway_attachment_options(
+            &resource.id,
+            resource.get_attr("options"),
+            &schema(),
+        )
+        .expect("valid options")
+        .expect("options");
         assert_eq!(options.dns_support(), Some(&DnsSupportValue::Disable));
     }
 
     #[test]
     fn create_reads_nested_options_ipv6_support() {
         let resource = one_enum_option("ipv6_support", "enable");
-        let options = build_create_transit_gateway_attachment_options(&resource, &schema())
-            .expect("valid options")
-            .expect("options");
+        let options = build_create_transit_gateway_attachment_options(
+            &resource.id,
+            resource.get_attr("options"),
+            &schema(),
+        )
+        .expect("valid options")
+        .expect("options");
         assert_eq!(options.ipv6_support(), Some(&Ipv6SupportValue::Enable));
     }
 
     #[test]
     fn create_reads_nested_options_security_group_referencing_support() {
         let resource = one_enum_option("security_group_referencing_support", "enable");
-        let options = build_create_transit_gateway_attachment_options(&resource, &schema())
-            .expect("valid options")
-            .expect("options");
+        let options = build_create_transit_gateway_attachment_options(
+            &resource.id,
+            resource.get_attr("options"),
+            &schema(),
+        )
+        .expect("valid options")
+        .expect("options");
         assert_eq!(
             options.security_group_referencing_support(),
             Some(&SecurityGroupReferencingSupportValue::Enable)
@@ -499,9 +529,13 @@ mod tests {
             Value::Concrete(ConcreteValue::String("disable".to_string().into())),
         );
         assert!(
-            build_create_transit_gateway_attachment_options(&resource, &schema())
-                .expect("valid options")
-                .is_none()
+            build_create_transit_gateway_attachment_options(
+                &resource.id,
+                resource.get_attr("options"),
+                &schema(),
+            )
+            .expect("valid options")
+            .is_none()
         );
     }
 }

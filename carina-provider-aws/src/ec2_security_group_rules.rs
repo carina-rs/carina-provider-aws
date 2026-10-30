@@ -3,122 +3,75 @@
 use carina_core::provider::{AppliedIdentifier, ReadOutcome};
 use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{ConcreteValue, Resource, ResourceId, Value};
-use carina_core::schema::ResourceSchema;
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
-use crate::helpers::require_enum_attr;
 use crate::provider::CreateCompletion;
 use crate::read_model::found_managed_read;
 use crate::read_models_generated::{
     Ec2SecurityGroupEgressReadModelSupplement, Ec2SecurityGroupIngressReadModelSupplement,
 };
 
+pub(crate) struct SecurityGroupRuleSendInput {
+    pub(crate) cidr_ip: Option<String>,
+    pub(crate) cidr_ipv6: Option<String>,
+    pub(crate) description: Option<String>,
+    pub(crate) from_port: Option<i64>,
+    pub(crate) group_id: Option<String>,
+    pub(crate) ip_protocol: String,
+    pub(crate) prefix_list_id: Option<String>,
+    pub(crate) referenced_security_group_id: Option<String>,
+    pub(crate) source_security_group_owner_id: Option<String>,
+    pub(crate) to_port: Option<i64>,
+}
+
 fn build_security_group_rule_permission(
-    resource: &Resource<impl Sized>,
-    schema: &ResourceSchema,
-    is_ingress: bool,
-) -> ProviderResult<aws_sdk_ec2::types::IpPermission> {
-    let protocol = require_enum_attr(resource, schema, "ip_protocol")?;
-
-    let from_port = match resource.get_attr("from_port") {
-        Some(Value::Concrete(ConcreteValue::Int(n))) => *n as i32,
-        _ => 0,
-    };
-
-    let to_port = match resource.get_attr("to_port") {
-        Some(Value::Concrete(ConcreteValue::Int(n))) => *n as i32,
-        _ => 0,
-    };
-
-    let cidr_ip = match resource.get_attr("cidr_ip") {
-        Some(Value::Concrete(ConcreteValue::String(s))) => Some(s.expose_plaintext().to_string()),
-        _ => None,
-    };
-
-    let cidr_ipv6 = match resource.get_attr("cidr_ipv6") {
-        Some(Value::Concrete(ConcreteValue::String(s))) => Some(s.expose_plaintext().to_string()),
-        _ => None,
-    };
-
-    let description = match resource.get_attr("description") {
-        Some(Value::Concrete(ConcreteValue::String(s))) => Some(s.expose_plaintext().to_string()),
-        _ => None,
-    };
-
-    let prefix_list_attr = if is_ingress {
-        "source_prefix_list_id"
-    } else {
-        "destination_prefix_list_id"
-    };
-    let prefix_list_id = match resource.get_attr(prefix_list_attr) {
-        Some(Value::Concrete(ConcreteValue::String(s))) => Some(s.expose_plaintext().to_string()),
-        _ => None,
-    };
-
-    let sg_ref_attr = if is_ingress {
-        "source_security_group_id"
-    } else {
-        "destination_security_group_id"
-    };
-    let ref_security_group_id = match resource.get_attr(sg_ref_attr) {
-        Some(Value::Concrete(ConcreteValue::String(s))) => Some(s.expose_plaintext().to_string()),
-        _ => None,
-    };
+    input: &SecurityGroupRuleSendInput,
+) -> aws_sdk_ec2::types::IpPermission {
+    let from_port = input.from_port.unwrap_or_default() as i32;
+    let to_port = input.to_port.unwrap_or_default() as i32;
 
     let mut permission_builder = aws_sdk_ec2::types::IpPermission::builder()
-        .ip_protocol(&protocol)
+        .ip_protocol(&input.ip_protocol)
         .from_port(from_port)
         .to_port(to_port);
 
-    if let Some(ref cidr) = cidr_ip {
+    if let Some(ref cidr) = input.cidr_ip {
         let mut range_builder = aws_sdk_ec2::types::IpRange::builder().cidr_ip(cidr);
-        if let Some(ref desc) = description {
+        if let Some(ref desc) = input.description {
             range_builder = range_builder.description(desc);
         }
         permission_builder = permission_builder.ip_ranges(range_builder.build());
     }
 
-    if let Some(ref cidr_v6) = cidr_ipv6 {
+    if let Some(ref cidr_v6) = input.cidr_ipv6 {
         let mut range_builder = aws_sdk_ec2::types::Ipv6Range::builder().cidr_ipv6(cidr_v6);
-        if let Some(ref desc) = description {
+        if let Some(ref desc) = input.description {
             range_builder = range_builder.description(desc);
         }
         permission_builder = permission_builder.ipv6_ranges(range_builder.build());
     }
 
-    if let Some(ref pl_id) = prefix_list_id {
+    if let Some(ref pl_id) = input.prefix_list_id {
         let mut pl_builder = aws_sdk_ec2::types::PrefixListId::builder().prefix_list_id(pl_id);
-        if let Some(ref desc) = description {
+        if let Some(ref desc) = input.description {
             pl_builder = pl_builder.description(desc);
         }
         permission_builder = permission_builder.prefix_list_ids(pl_builder.build());
     }
 
-    if let Some(ref ref_sg_id) = ref_security_group_id {
+    if let Some(ref ref_sg_id) = input.referenced_security_group_id {
         let mut pair_builder = aws_sdk_ec2::types::UserIdGroupPair::builder().group_id(ref_sg_id);
-        if let Some(Value::Concrete(ConcreteValue::String(owner_id))) =
-            resource.get_attr("source_security_group_owner_id")
-        {
-            pair_builder = pair_builder.user_id(owner_id.expose_plaintext());
+        if let Some(owner_id) = &input.source_security_group_owner_id {
+            pair_builder = pair_builder.user_id(owner_id);
         }
-        if let Some(ref desc) = description {
+        if let Some(ref desc) = input.description {
             pair_builder = pair_builder.description(desc);
         }
         permission_builder = permission_builder.user_id_group_pairs(pair_builder.build());
     }
 
-    Ok(permission_builder.build())
-}
-
-fn require_security_group_rule_group_id(resource: &Resource<impl Sized>) -> ProviderResult<String> {
-    match resource.get_attr("group_id") {
-        Some(Value::Concrete(ConcreteValue::String(s))) => Ok(s.expose_plaintext().to_string()),
-        _ => Err(
-            ProviderError::invalid_input("Security Group ID (group_id) is required")
-                .for_resource(resource.id.clone()),
-        ),
-    }
+    permission_builder.build()
 }
 
 impl AwsProvider {
@@ -210,11 +163,14 @@ impl AwsProvider {
     pub(crate) async fn create_ec2_security_group_rule(
         &self,
         resource: &Resource<impl Sized>,
-        schema: &ResourceSchema,
+        input: SecurityGroupRuleSendInput,
         is_ingress: bool,
     ) -> ProviderResult<CreateCompletion> {
-        let sg_id = require_security_group_rule_group_id(resource)?;
-        let permission = build_security_group_rule_permission(resource, schema, is_ingress)?;
+        let sg_id = input.group_id.clone().ok_or_else(|| {
+            ProviderError::invalid_input("Security Group ID (group_id) is required")
+                .for_resource(resource.id.clone())
+        })?;
+        let permission = build_security_group_rule_permission(&input);
         let (identifier, outcome) = self
             .create_ec2_security_group_rule_with_permission(resource, sg_id, permission, is_ingress)
             .await?;
@@ -288,28 +244,6 @@ impl AwsProvider {
         Ok((identifier, outcome))
     }
 
-    /// Update an EC2 Security Group Rule (rules are immutable, so recreate)
-    pub(crate) async fn update_ec2_security_group_rule(
-        &self,
-        id: ResourceId,
-        identifier: &AppliedIdentifier,
-        to: Resource,
-        schema: &ResourceSchema,
-        is_ingress: bool,
-    ) -> ProviderResult<ProviderResult<ReadOutcome>> {
-        // Validate and build every fallible local input before deleting the
-        // existing immutable rule. An invalid replacement must leave it intact.
-        let sg_id = require_security_group_rule_group_id(&to)?;
-        let permission = build_security_group_rule_permission(&to, schema, is_ingress)?;
-
-        self.delete_ec2_security_group_rule(id.clone(), identifier, is_ingress)
-            .await?;
-        let (_, outcome) = self
-            .create_ec2_security_group_rule_with_permission(&to, sg_id, permission, is_ingress)
-            .await?;
-        Ok(outcome)
-    }
-
     /// Delete an EC2 Security Group Rule (deletes all rules by identifier)
     pub(crate) async fn delete_ec2_security_group_rule(
         &self,
@@ -377,15 +311,18 @@ mod tests {
 
     #[test]
     fn invalid_ip_protocol_is_an_error_not_an_all_protocols_default() {
-        let schema = crate::schemas::generated::ec2::security_group_ingress::ec2_security_group_ingress_config().schema;
         let mut resource = Resource::with_provider("aws", "ec2.SecurityGroupIngress", "test", None);
         resource.set_attr(
             "ip_protocol".to_string(),
             Value::Concrete(ConcreteValue::String("not-a-protocol".into())),
         );
 
-        let error = build_security_group_rule_permission(&resource, &schema, true)
-            .expect_err("invalid ip_protocol must not fall back to -1");
+        let error = match crate::send_models_generated::Ec2SecurityGroupIngressCreateInput::decode(
+            &resource,
+        ) {
+            Ok(_) => panic!("invalid ip_protocol must not fall back to -1"),
+            Err(error) => error,
+        };
         assert!(
             error
                 .to_string()

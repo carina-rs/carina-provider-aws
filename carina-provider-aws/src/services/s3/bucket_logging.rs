@@ -12,12 +12,11 @@ use indexmap::IndexMap;
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
-use crate::helpers::{
-    RetryPolicy, enum_attr_error, require_string_attr, retry_aws_operation, sdk_error_message,
-};
-use crate::provider::CreateCompletion;
+use crate::helpers::{RetryPolicy, enum_attr_error, retry_aws_operation, sdk_error_message};
+use crate::provider::TypedCreateCompletion;
 use crate::read_model::found_managed_read;
 use crate::read_models_generated::S3BucketLoggingReadModel;
+use crate::send_models_generated::{S3BucketLoggingCreateInput, S3BucketLoggingUpdateInput};
 use crate::services::s3::bucket::is_s3_not_configured_error;
 
 impl AwsProvider {
@@ -70,18 +69,30 @@ impl AwsProvider {
         &self,
         resource: &Resource<impl Sized>,
         schema: &ResourceSchema,
-    ) -> ProviderResult<CreateCompletion> {
-        let bucket = require_string_attr(resource, "bucket")?;
+    ) -> ProviderResult<TypedCreateCompletion> {
+        let input = S3BucketLoggingCreateInput::decode(resource)?;
+        let sent = input.sent();
+        let (bucket, target_bucket, target_object_key_format, target_prefix) = input.into_parts();
         let identifier =
             crate::helpers::applied_identifier(&resource.id, "s3.PutBucketLogging", bucket)?;
         let outcome = self
-            .put_s3_bucket_logging(&resource.id, &identifier, resource, schema)
+            .put_s3_bucket_logging(
+                &resource.id,
+                &identifier,
+                target_bucket,
+                target_object_key_format.as_ref(),
+                target_prefix,
+                schema,
+            )
             .await?;
-        Ok(self.create_outcome_from_read(
-            &resource.id,
-            identifier,
-            resource.resolved_attributes(),
-            outcome,
+        Ok((
+            sent,
+            self.create_outcome_from_read(
+                &resource.id,
+                identifier,
+                resource.resolved_attributes(),
+                outcome,
+            ),
         ))
     }
 
@@ -93,36 +104,37 @@ impl AwsProvider {
         to: Resource,
         schema: &ResourceSchema,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
-        self.put_s3_bucket_logging(&id, identifier, &to, schema)
-            .await
+        let input = S3BucketLoggingUpdateInput::decode(&to)?;
+        let (target_bucket, target_object_key_format, target_prefix) = input.into_parts();
+        self.put_s3_bucket_logging(
+            &id,
+            identifier,
+            target_bucket,
+            target_object_key_format.as_ref(),
+            target_prefix,
+            schema,
+        )
+        .await
     }
 
     async fn put_s3_bucket_logging(
         &self,
         id: &ResourceId,
         bucket: &AppliedIdentifier,
-        resource: &Resource<impl Sized>,
+        target_bucket: String,
+        target_object_key_format: Option<&Value>,
+        target_prefix: Option<String>,
         schema: &ResourceSchema,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
         let applied_identifier = bucket;
         let bucket = bucket.as_str();
-        let target_bucket = require_string_attr(resource, "target_bucket")?;
-        let target_prefix = match resource.get_attr("target_prefix") {
-            Some(Value::Concrete(ConcreteValue::String(s))) => s.expose_plaintext().to_string(),
-            None => String::new(),
-            _ => {
-                return Err(
-                    ProviderError::invalid_input("target_prefix must be a string")
-                        .for_resource(id.clone()),
-                );
-            }
-        };
+        let target_prefix = target_prefix.unwrap_or_default();
 
         let mut le_builder = LoggingEnabled::builder()
             .target_bucket(target_bucket)
             .target_prefix(target_prefix);
 
-        if let Some(v) = resource.get_attr("target_object_key_format") {
+        if let Some(v) = target_object_key_format {
             le_builder = le_builder.target_object_key_format(build_key_format(id, schema, v)?);
         }
 

@@ -2,10 +2,11 @@ use std::io::{self, Write};
 
 use crate::AwsProvider;
 use crate::error_helpers::{IntoSendFailure, api_error_with_meta};
-use crate::helpers::{RetryPolicy, require_enum_attr, require_string_attr, retry_aws_operation};
-use crate::provider::CreateCompletion;
+use crate::helpers::{RetryPolicy, retry_aws_operation};
+use crate::provider::TypedCreateCompletion;
 use crate::read_model::found_managed_read;
 use crate::read_models_generated::S3BucketVersioningReadModel;
+use crate::send_models_generated::{S3BucketVersioningCreateInput, S3BucketVersioningUpdateInput};
 use crate::services::s3::bucket::is_s3_not_configured_error;
 use crate::services::s3::{InvalidBucketStateReason, classify_invalid_bucket_state};
 use aws_sdk_s3::error::ProvideErrorMetadata;
@@ -63,19 +64,24 @@ impl AwsProvider {
     pub(crate) async fn create_s3_bucket_versioning(
         &self,
         resource: &Resource<impl Sized>,
-        schema: &ResourceSchema,
-    ) -> ProviderResult<CreateCompletion> {
-        let bucket = require_string_attr(resource, "bucket")?;
+        _schema: &ResourceSchema,
+    ) -> ProviderResult<TypedCreateCompletion> {
+        let input = S3BucketVersioningCreateInput::decode(resource)?;
+        let sent = input.sent();
+        let (bucket, status) = input.into_parts();
         let identifier =
             crate::helpers::applied_identifier(&resource.id, "s3.PutBucketVersioning", bucket)?;
         let outcome = self
-            .put_s3_bucket_versioning(&resource.id, &identifier, resource, schema)
+            .put_s3_bucket_versioning(&resource.id, &identifier, status)
             .await?;
-        Ok(self.create_outcome_from_read(
-            &resource.id,
-            identifier,
-            resource.resolved_attributes(),
-            outcome,
+        Ok((
+            sent,
+            self.create_outcome_from_read(
+                &resource.id,
+                identifier,
+                resource.resolved_attributes(),
+                outcome,
+            ),
         ))
     }
 
@@ -85,23 +91,21 @@ impl AwsProvider {
         identifier: &AppliedIdentifier,
         _from: &State,
         to: Resource,
-        schema: &ResourceSchema,
+        _schema: &ResourceSchema,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
-        self.put_s3_bucket_versioning(&id, identifier, &to, schema)
-            .await
+        let (status,) = S3BucketVersioningUpdateInput::decode(&to)?.into_parts();
+        self.put_s3_bucket_versioning(&id, identifier, status).await
     }
 
     async fn put_s3_bucket_versioning(
         &self,
         id: &ResourceId,
         bucket: &AppliedIdentifier,
-        resource: &Resource<impl Sized>,
-        schema: &ResourceSchema,
+        status: String,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
         let applied_identifier = bucket;
         let bucket = bucket.as_str();
-        let status_str = require_enum_attr(resource, schema, "status")?;
-        let status = BucketVersioningStatus::from(status_str.as_str());
+        let status = BucketVersioningStatus::from(status.as_str());
 
         let config_builder = VersioningConfiguration::builder().status(status);
 

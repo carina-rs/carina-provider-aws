@@ -1,17 +1,15 @@
+use carina_core::provider::ProviderResult;
 use carina_core::provider::{AppliedIdentifier, ReadOutcome};
-use carina_core::provider::{ProviderError, ProviderResult};
-use carina_core::resource::{ConcreteValue, Resource, ResourceId, Value};
+use carina_core::resource::{Resource, ResourceId};
 
 use crate::AwsProvider;
 use crate::aws_operation::ClientToken;
 use crate::error_helpers::api_error_with_meta;
-use crate::helpers::{
-    RetryPolicy, build_tag_specification_with_create_token, require_string_attr,
-    retry_aws_operation,
-};
+use crate::helpers::{RetryPolicy, build_tag_specification_with_create_token, retry_aws_operation};
 use crate::provider::{AwsCreateAttempt, Ec2TaggedResourceKind};
 use crate::read_model::{empty_map_value, found_managed_read};
 use crate::read_models_generated::Ec2SecurityGroupReadModelSupplement;
+use crate::send_models_generated::Ec2SecurityGroupCreateInput;
 
 impl AwsProvider {
     /// Read an EC2 Security Group
@@ -64,49 +62,33 @@ impl AwsProvider {
         client_token: &ClientToken,
         attempt: A,
     ) -> Result<A::Step, A::Verdict> {
-        let vpc_id = match require_string_attr(resource, "vpc_id") {
-            Ok(vpc_id) => vpc_id,
+        let input = match Ec2SecurityGroupCreateInput::decode(resource) {
+            Ok(input) => input,
             Err(error) => return Err(attempt.untracked(error)),
         };
-
-        let description = match resource.get_attr("description") {
-            Some(Value::Concrete(ConcreteValue::String(s))) => s.expose_plaintext().to_string(),
-            _ => String::new(),
-        };
-
-        // group_name is required for CreateSecurityGroup API
-        let group_name = match resource.get_attr("group_name") {
-            Some(Value::Concrete(ConcreteValue::String(s))) => s.expose_plaintext().to_string(),
-            _ => match resource.id.identity_str() {
-                Some(identity) => identity.to_string(),
-                None => {
-                    return Err(attempt.untracked(
-                        ProviderError::invalid_input(
-                        "security group without group_name requires a resolved resource identity",
-                    )
-                        .for_resource(resource.id.clone()),
-                    ));
-                }
-            },
-        };
+        let sent = input.sent();
+        let (description, group_name, tags, vpc_id) = input.into_parts();
 
         // Create Security Group
         let ec2 = &self.ec2_client;
         let tag_specification = build_tag_specification_with_create_token(
-            resource,
+            tags.as_ref(),
             aws_sdk_ec2::types::ResourceType::SecurityGroup,
             client_token,
         );
-        let sent = self.sent_only(resource, &["vpc_id", "description", "group_name", "tags"]);
         let result = retry_aws_operation(RetryPolicy::default(), || {
             let group_name = group_name.clone();
             let description = description.clone();
             let vpc_id = vpc_id.clone();
-            ec2.create_security_group()
+            let mut request = ec2
+                .create_security_group()
                 .group_name(&group_name)
                 .description(&description)
-                .vpc_id(&vpc_id)
-                .tag_specifications(tag_specification.clone())
+                .tag_specifications(tag_specification.clone());
+            if let Some(vpc_id) = &vpc_id {
+                request = request.vpc_id(vpc_id);
+            }
+            request
         })
         .await;
 

@@ -10,11 +10,12 @@ use crate::aws_operation::ClientToken;
 use crate::error_helpers::api_error_with_meta;
 use crate::helpers::{
     CreatePoll, DeletePoll, RetryPolicy, build_tag_specification_with_create_token,
-    optional_enum_attr, optional_string_attr, retry_aws_operation_with_token,
+    retry_aws_operation_with_token,
 };
 use crate::provider::{AwsCreateAttempt, Ec2TaggedResourceKind};
 use crate::read_model::{empty_map_value, found_managed_read};
 use crate::read_models_generated::Ec2NatGatewayReadModelSupplement;
+use crate::send_models_generated::{Ec2NatGatewayCreateInput, Ec2NatGatewayUpdateInput};
 
 fn nat_gateway_create_poll_state(state: Option<&NatGatewayState>) -> CreatePoll<()> {
     match state {
@@ -268,21 +269,32 @@ impl AwsProvider {
     pub(crate) async fn create_ec2_nat_gateway_start<A: AwsCreateAttempt>(
         &self,
         resource: &Resource<impl Sized>,
-        schema: &ResourceSchema,
+        _schema: &ResourceSchema,
         client_token: &ClientToken,
         attempt: A,
     ) -> Result<A::Step, A::Verdict> {
         if let Err(error) = validate_nat_gateway_inputs(resource) {
             return Err(attempt.untracked(error));
         }
-        let subnet_id = match optional_string_attr(resource, "subnet_id") {
-            Ok(subnet_id) => subnet_id,
+        let input = match Ec2NatGatewayCreateInput::decode(resource) {
+            Ok(input) => input,
             Err(error) => return Err(attempt.untracked(error)),
         };
+        let sent = input.sent();
+        let (
+            allocation_id,
+            availability_mode,
+            availability_zone_addresses,
+            connectivity_type,
+            private_ip_address,
+            subnet_id,
+            tags,
+            vpc_id,
+        ) = input.into_parts();
 
         let mut req = self.ec2_client.create_nat_gateway().configure(|builder| {
             builder.tag_specifications(build_tag_specification_with_create_token(
-                resource,
+                tags.as_ref(),
                 aws_sdk_ec2::types::ResourceType::Natgateway,
                 client_token,
             ))
@@ -291,50 +303,33 @@ impl AwsProvider {
             req = req.configure(|builder| builder.subnet_id(subnet_id));
         }
 
-        if let Some(Value::Concrete(ConcreteValue::String(alloc_id))) =
-            resource.get_attr("allocation_id")
-        {
-            req = req.configure(|builder| builder.allocation_id(alloc_id.expose_plaintext()));
+        if let Some(allocation_id) = allocation_id {
+            req = req.configure(|builder| builder.allocation_id(allocation_id));
         }
 
-        let connectivity_type = match optional_enum_attr(resource, schema, "connectivity_type") {
-            Ok(connectivity_type) => connectivity_type,
-            Err(error) => return Err(attempt.untracked(error)),
-        };
         if let Some(conn_type) = connectivity_type {
             use aws_sdk_ec2::types::ConnectivityType;
-            req = req
-                .configure(|builder| builder.connectivity_type(ConnectivityType::from(conn_type)));
+            req = req.configure(|builder| {
+                builder.connectivity_type(ConnectivityType::from(conn_type.as_str()))
+            });
         }
 
-        let availability_mode = match optional_enum_attr(resource, schema, "availability_mode") {
-            Ok(value) => value,
-            Err(error) => return Err(attempt.untracked(error)),
-        };
         if let Some(availability_mode) = availability_mode {
             req = req.configure(|builder| {
                 builder.availability_mode(aws_sdk_ec2::types::AvailabilityMode::from(
-                    availability_mode,
+                    availability_mode.as_str(),
                 ))
             });
         }
-        let vpc_id = match optional_string_attr(resource, "vpc_id") {
-            Ok(value) => value,
-            Err(error) => return Err(attempt.untracked(error)),
-        };
         if let Some(vpc_id) = vpc_id {
             req = req.configure(|builder| builder.vpc_id(vpc_id));
         }
-        let private_ip_address = match optional_string_attr(resource, "private_ip_address") {
-            Ok(value) => value,
-            Err(error) => return Err(attempt.untracked(error)),
-        };
         if let Some(private_ip_address) = private_ip_address {
             req = req.configure(|builder| builder.private_ip_address(private_ip_address));
         }
         let availability_zone_addresses = match build_availability_zone_addresses(
             &resource.id,
-            resource.get_attr("availability_zone_addresses"),
+            availability_zone_addresses.as_ref(),
         ) {
             Ok(value) => value,
             Err(error) => return Err(attempt.untracked(error)),
@@ -348,20 +343,6 @@ impl AwsProvider {
         let result =
             retry_aws_operation_with_token(client_token, RetryPolicy::default(), || req.clone())
                 .await;
-        let sent = self.sent_only(
-            resource,
-            &[
-                "subnet_id",
-                "allocation_id",
-                "availability_mode",
-                "availability_zone_addresses",
-                "connectivity_type",
-                "private_ip_address",
-                "vpc_id",
-                "tags",
-            ],
-        );
-
         self.finish_tagged_ec2_create(
             resource,
             attempt,
@@ -386,10 +367,12 @@ impl AwsProvider {
         to: Resource,
         _schema: &ResourceSchema,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
+        let input = Ec2NatGatewayUpdateInput::decode(&to)?;
+        let (tags,) = input.into_parts();
         self.apply_ec2_tags(
             &id,
             identifier.as_str(),
-            &to.resolved_attributes(),
+            tags.as_ref(),
             Some(&from.attributes),
         )
         .await?;

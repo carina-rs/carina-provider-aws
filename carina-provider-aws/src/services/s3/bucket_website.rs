@@ -9,13 +9,13 @@ use indexmap::IndexMap;
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
-use crate::helpers::{
-    RetryPolicy, optional_enum_struct_field, require_string_attr, retry_aws_operation,
-    sdk_error_message,
-};
-use crate::provider::CreateCompletion;
+use crate::helpers::{RetryPolicy, enum_attr_error, retry_aws_operation, sdk_error_message};
+use crate::provider::TypedCreateCompletion;
 use crate::read_model::found_managed_read;
 use crate::read_models_generated::S3BucketWebsiteConfigurationReadModel;
+use crate::send_models_generated::{
+    S3BucketWebsiteConfigurationCreateInput, S3BucketWebsiteConfigurationUpdateInput,
+};
 use crate::services::s3::bucket::is_s3_not_configured_error;
 
 impl AwsProvider {
@@ -94,18 +94,30 @@ impl AwsProvider {
         &self,
         resource: &Resource<impl Sized>,
         schema: &ResourceSchema,
-    ) -> ProviderResult<CreateCompletion> {
-        let bucket = require_string_attr(resource, "bucket")?;
+    ) -> ProviderResult<TypedCreateCompletion> {
+        let input = S3BucketWebsiteConfigurationCreateInput::decode(resource)?;
+        let sent = input.sent();
+        let (bucket, error_document, index_document, redirect_all_requests_to) = input.into_parts();
         let identifier =
             crate::helpers::applied_identifier(&resource.id, "s3.PutBucketWebsite", bucket)?;
         let outcome = self
-            .put_s3_bucket_website(&resource.id, &identifier, resource, schema)
+            .put_s3_bucket_website(
+                &resource.id,
+                &identifier,
+                error_document.as_ref(),
+                index_document.as_ref(),
+                redirect_all_requests_to.as_ref(),
+                schema,
+            )
             .await?;
-        Ok(self.create_outcome_from_read(
-            &resource.id,
-            identifier,
-            resource.resolved_attributes(),
-            outcome,
+        Ok((
+            sent,
+            self.create_outcome_from_read(
+                &resource.id,
+                identifier,
+                resource.resolved_attributes(),
+                outcome,
+            ),
         ))
     }
 
@@ -117,20 +129,37 @@ impl AwsProvider {
         to: Resource,
         schema: &ResourceSchema,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
-        self.put_s3_bucket_website(&id, identifier, &to, schema)
-            .await
+        let input = S3BucketWebsiteConfigurationUpdateInput::decode(&to)?;
+        let (error_document, index_document, redirect_all_requests_to) = input.into_parts();
+        self.put_s3_bucket_website(
+            &id,
+            identifier,
+            error_document.as_ref(),
+            index_document.as_ref(),
+            redirect_all_requests_to.as_ref(),
+            schema,
+        )
+        .await
     }
 
     async fn put_s3_bucket_website(
         &self,
         id: &ResourceId,
         bucket: &AppliedIdentifier,
-        resource: &Resource<impl Sized>,
+        error_document: Option<&Value>,
+        index_document: Option<&Value>,
+        redirect_all_requests_to: Option<&Value>,
         schema: &ResourceSchema,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
         let applied_identifier = bucket;
         let bucket = bucket.as_str();
-        let config = build_website_configuration(id, resource, schema)?;
+        let config = build_website_configuration(
+            id,
+            error_document,
+            index_document,
+            redirect_all_requests_to,
+            schema,
+        )?;
 
         self.s3_client
             .put_bucket_website()
@@ -177,12 +206,14 @@ impl AwsProvider {
 
 fn build_website_configuration(
     id: &ResourceId,
-    resource: &Resource<impl Sized>,
+    error_document: Option<&Value>,
+    index_document: Option<&Value>,
+    redirect_all_requests_to: Option<&Value>,
     schema: &ResourceSchema,
 ) -> ProviderResult<WebsiteConfiguration> {
     let mut config_builder = WebsiteConfiguration::builder();
 
-    match resource.get_attr("index_document") {
+    match index_document {
         Some(Value::Concrete(ConcreteValue::Map(map))) => {
             let suffix = match map.get("suffix") {
                 Some(Value::Concrete(ConcreteValue::String(s))) => s.expose_plaintext(),
@@ -213,7 +244,7 @@ fn build_website_configuration(
         None => {}
     }
 
-    match resource.get_attr("error_document") {
+    match error_document {
         Some(Value::Concrete(ConcreteValue::Map(map))) => {
             let key = match map.get("key") {
                 Some(Value::Concrete(ConcreteValue::String(s))) => s.expose_plaintext(),
@@ -238,7 +269,7 @@ fn build_website_configuration(
         None => {}
     }
 
-    match resource.get_attr("redirect_all_requests_to") {
+    match redirect_all_requests_to {
         Some(Value::Concrete(ConcreteValue::Map(map))) => {
             let host_name = match map.get("host_name") {
                 Some(Value::Concrete(ConcreteValue::String(s))) => s.expose_plaintext(),
@@ -250,13 +281,15 @@ fn build_website_configuration(
                 }
             };
             let mut rb = RedirectAllRequestsTo::builder().host_name(host_name);
-            if let Some(protocol) = optional_enum_struct_field(
-                resource,
+            let protocol = carina_core::resource::enum_attr_at_schema_path(
                 schema,
                 "redirect_all_requests_to",
-                "protocol",
-            )? {
-                rb = rb.protocol(Protocol::from(protocol));
+                &["protocol"],
+                map.get("protocol"),
+            )
+            .map_err(|error| enum_attr_error(id, error))?;
+            if let Some(protocol) = protocol {
+                rb = rb.protocol(Protocol::from(protocol.api_value()));
             }
             config_builder = config_builder.redirect_all_requests_to(rb.build().map_err(|e| {
                 ProviderError::api_error(sdk_error_message(
@@ -297,16 +330,28 @@ mod tests {
     fn non_map_index_document_is_rejected() {
         let resource = resource_with("index_document", Value::Concrete(ConcreteValue::Bool(true)));
 
-        build_website_configuration(&resource.id, &resource, &schema())
-            .expect_err("a present index_document must be a map");
+        build_website_configuration(
+            &resource.id,
+            None,
+            resource.get_attr("index_document"),
+            None,
+            &schema(),
+        )
+        .expect_err("a present index_document must be a map");
     }
 
     #[test]
     fn non_map_error_document_is_rejected() {
         let resource = resource_with("error_document", Value::Concrete(ConcreteValue::Bool(true)));
 
-        build_website_configuration(&resource.id, &resource, &schema())
-            .expect_err("a present error_document must be a map");
+        build_website_configuration(
+            &resource.id,
+            resource.get_attr("error_document"),
+            None,
+            None,
+            &schema(),
+        )
+        .expect_err("a present error_document must be a map");
     }
 
     #[test]
@@ -316,7 +361,13 @@ mod tests {
             Value::Concrete(ConcreteValue::Bool(true)),
         );
 
-        build_website_configuration(&resource.id, &resource, &schema())
-            .expect_err("a present redirect_all_requests_to must be a map");
+        build_website_configuration(
+            &resource.id,
+            None,
+            None,
+            resource.get_attr("redirect_all_requests_to"),
+            &schema(),
+        )
+        .expect_err("a present redirect_all_requests_to must be a map");
     }
 }

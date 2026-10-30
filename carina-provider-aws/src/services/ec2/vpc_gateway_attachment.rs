@@ -4,10 +4,12 @@ use carina_core::resource::{ConcreteValue, Resource, ResourceId, Value};
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
-use crate::helpers::require_string_attr;
-use crate::provider::CreateCompletion;
+use crate::provider::TypedCreateCompletion;
 use crate::read_model::found_managed_read;
 use crate::read_models_generated::Ec2VpcGatewayAttachmentReadModel;
+use crate::send_models_generated::{
+    Ec2VpcGatewayAttachmentCreateInput, Ec2VpcGatewayAttachmentUpdateInput,
+};
 
 impl AwsProvider {
     /// Read an EC2 VPC Gateway Attachment
@@ -134,16 +136,16 @@ impl AwsProvider {
     pub(crate) async fn create_ec2_vpc_gateway_attachment(
         &self,
         resource: &Resource<impl Sized>,
-    ) -> ProviderResult<CreateCompletion> {
-        let vpc_id = require_string_attr(resource, "vpc_id")?;
+    ) -> ProviderResult<TypedCreateCompletion> {
+        let input = Ec2VpcGatewayAttachmentCreateInput::decode(resource)?;
+        let sent = input.sent();
+        let (internet_gateway_id, vpc_id, vpn_gateway_id) = input.into_parts();
 
-        if let Some(Value::Concrete(ConcreteValue::String(igw_id))) =
-            resource.get_attr("internet_gateway_id")
-        {
+        if let Some(igw_id) = internet_gateway_id {
             // Attach Internet Gateway
             self.ec2_client
                 .attach_internet_gateway()
-                .internet_gateway_id(igw_id.expose_plaintext())
+                .internet_gateway_id(&igw_id)
                 .vpc_id(&vpc_id)
                 .send()
                 .await
@@ -152,7 +154,7 @@ impl AwsProvider {
                         .for_resource(resource.id.clone())
                 })?;
 
-            let composite = format!("{}|{}", vpc_id, igw_id.expose_plaintext());
+            let composite = format!("{vpc_id}|{igw_id}");
             let identifier = crate::helpers::applied_identifier(
                 &resource.id,
                 "ec2.AttachInternetGateway",
@@ -161,19 +163,20 @@ impl AwsProvider {
             let outcome = self
                 .read_ec2_vpc_gateway_attachment(&resource.id, &identifier)
                 .await;
-            Ok(self.create_outcome_from_read(
-                &resource.id,
-                identifier,
-                resource.resolved_attributes(),
-                outcome,
+            Ok((
+                sent,
+                self.create_outcome_from_read(
+                    &resource.id,
+                    identifier,
+                    resource.resolved_attributes(),
+                    outcome,
+                ),
             ))
-        } else if let Some(Value::Concrete(ConcreteValue::String(vgw_id))) =
-            resource.get_attr("vpn_gateway_id")
-        {
+        } else if let Some(vgw_id) = vpn_gateway_id {
             // Attach VPN Gateway
             self.ec2_client
                 .attach_vpn_gateway()
-                .vpn_gateway_id(vgw_id.expose_plaintext())
+                .vpn_gateway_id(&vgw_id)
                 .vpc_id(&vpc_id)
                 .send()
                 .await
@@ -182,7 +185,7 @@ impl AwsProvider {
                         .for_resource(resource.id.clone())
                 })?;
 
-            let composite = format!("{}|{}", vpc_id, vgw_id.expose_plaintext());
+            let composite = format!("{vpc_id}|{vgw_id}");
             let identifier = crate::helpers::applied_identifier(
                 &resource.id,
                 "ec2.AttachVpnGateway",
@@ -191,11 +194,14 @@ impl AwsProvider {
             let outcome = self
                 .read_ec2_vpc_gateway_attachment(&resource.id, &identifier)
                 .await;
-            Ok(self.create_outcome_from_read(
-                &resource.id,
-                identifier,
-                resource.resolved_attributes(),
-                outcome,
+            Ok((
+                sent,
+                self.create_outcome_from_read(
+                    &resource.id,
+                    identifier,
+                    resource.resolved_attributes(),
+                    outcome,
+                ),
             ))
         } else {
             Err(ProviderError::invalid_input(
@@ -210,7 +216,10 @@ impl AwsProvider {
         &self,
         id: ResourceId,
         identifier: &AppliedIdentifier,
+        to: &Resource<impl Sized>,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
+        let input = Ec2VpcGatewayAttachmentUpdateInput::decode(to)?;
+        let () = input.into_parts();
         // VPC Gateway Attachment attributes are all create_only,
         // so updates should not occur. Read back the current state.
         Ok(self.read_ec2_vpc_gateway_attachment(&id, identifier).await)

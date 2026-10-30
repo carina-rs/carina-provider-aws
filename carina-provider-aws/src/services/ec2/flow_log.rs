@@ -1,5 +1,5 @@
 use carina_aws_types::SendOutcome;
-use carina_core::provider::{AppliedIdentifier, ReadOutcome};
+use carina_core::provider::{AppliedIdentifier, ReadOutcome, Sent};
 use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
 use carina_core::schema::ResourceSchema;
@@ -7,13 +7,11 @@ use carina_core::schema::ResourceSchema;
 use crate::AwsProvider;
 use crate::aws_operation::ClientToken;
 use crate::error_helpers::{SendFailure, api_error_with_meta};
-use crate::helpers::{
-    build_tag_specification_with_create_token, optional_enum_attr, require_enum_attr,
-    send_aws_operation_with_token,
-};
+use crate::helpers::{build_tag_specification_with_create_token, send_aws_operation_with_token};
 use crate::provider::{AwsCreateAttempt, Ec2TaggedResourceKind};
 use crate::read_model::{empty_map_value, found_managed_read, require_read_value};
 use crate::read_models_generated::Ec2FlowLogReadModelSupplement;
+use crate::send_models_generated::{Ec2FlowLogCreateInput, Ec2FlowLogUpdateInput};
 
 /// Token state for one CreateFlowLogs request.
 ///
@@ -191,12 +189,29 @@ impl AwsProvider {
     pub(crate) async fn create_ec2_flow_log<A: AwsCreateAttempt>(
         &self,
         resource: &Resource<impl Sized>,
-        schema: &ResourceSchema,
+        _schema: &ResourceSchema,
         client_token: &ClientToken,
         attempt: A,
     ) -> Result<A::Step, A::Verdict> {
-        let resource_ids_val: Vec<String> = match resource.get_attr("resource_ids") {
-            Some(Value::Concrete(ConcreteValue::List(items))) => items
+        let input = match Ec2FlowLogCreateInput::decode(resource) {
+            Ok(input) => input,
+            Err(error) => return Err(attempt.untracked(error)),
+        };
+        let sent = input.sent();
+        let (
+            deliver_logs_permission_arn,
+            log_destination,
+            log_destination_type,
+            log_format,
+            log_group_name,
+            max_aggregation_interval,
+            resource_ids,
+            resource_type,
+            tags,
+            traffic_type,
+        ) = input.into_parts();
+        let resource_ids_val: Vec<String> = match resource_ids {
+            Value::Concrete(ConcreteValue::List(items)) => items
                 .iter()
                 .filter_map(|v| {
                     if let Value::Concrete(ConcreteValue::String(s)) = v {
@@ -217,70 +232,48 @@ impl AwsProvider {
             ));
         }
 
-        let resource_type_val = match require_enum_attr(resource, schema, "resource_type") {
-            Ok(resource_type) => resource_type,
-            Err(error) => return Err(attempt.untracked(error)),
-        };
-
         let mut req = self.ec2_client.create_flow_logs().configure(|builder| {
             builder
                 .set_resource_ids(Some(resource_ids_val.clone()))
                 .resource_type(aws_sdk_ec2::types::FlowLogsResourceType::from(
-                    resource_type_val.as_str(),
+                    resource_type.as_str(),
                 ))
         });
 
-        let traffic_type = match optional_enum_attr(resource, schema, "traffic_type") {
-            Ok(traffic_type) => traffic_type,
-            Err(error) => return Err(attempt.untracked(error)),
-        };
         if let Some(traffic_type) = traffic_type {
             use aws_sdk_ec2::types::TrafficType;
-            req = req.configure(|builder| builder.traffic_type(TrafficType::from(traffic_type)));
+            req = req.configure(|builder| {
+                builder.traffic_type(TrafficType::from(traffic_type.as_str()))
+            });
         }
 
-        let log_destination_type =
-            match optional_enum_attr(resource, schema, "log_destination_type") {
-                Ok(destination_type) => destination_type,
-                Err(error) => return Err(attempt.untracked(error)),
-            };
         if let Some(log_dest_type) = log_destination_type {
             use aws_sdk_ec2::types::LogDestinationType;
             req = req.configure(|builder| {
-                builder.log_destination_type(LogDestinationType::from(log_dest_type))
+                builder.log_destination_type(LogDestinationType::from(log_dest_type.as_str()))
             });
         }
 
-        if let Some(Value::Concrete(ConcreteValue::String(log_dest))) =
-            resource.get_attr("log_destination")
-        {
-            req = req.configure(|builder| builder.log_destination(log_dest.expose_plaintext()));
+        if let Some(log_destination) = log_destination {
+            req = req.configure(|builder| builder.log_destination(log_destination));
         }
 
-        if let Some(Value::Concrete(ConcreteValue::String(log_group))) =
-            resource.get_attr("log_group_name")
-        {
-            req = req.configure(|builder| builder.log_group_name(log_group.expose_plaintext()));
+        if let Some(log_group_name) = log_group_name {
+            req = req.configure(|builder| builder.log_group_name(log_group_name));
         }
 
-        if let Some(Value::Concrete(ConcreteValue::String(perm_arn))) =
-            resource.get_attr("deliver_logs_permission_arn")
-        {
+        if let Some(deliver_logs_permission_arn) = deliver_logs_permission_arn {
             req = req.configure(|builder| {
-                builder.deliver_logs_permission_arn(perm_arn.expose_plaintext())
+                builder.deliver_logs_permission_arn(deliver_logs_permission_arn)
             });
         }
 
-        if let Some(Value::Concrete(ConcreteValue::String(log_format))) =
-            resource.get_attr("log_format")
-        {
-            req = req.configure(|builder| builder.log_format(log_format.expose_plaintext()));
+        if let Some(log_format) = log_format {
+            req = req.configure(|builder| builder.log_format(log_format));
         }
 
-        if let Some(Value::Concrete(ConcreteValue::Int(interval))) =
-            resource.get_attr("max_aggregation_interval")
-        {
-            req = req.configure(|builder| builder.max_aggregation_interval(*interval as i32));
+        if let Some(interval) = max_aggregation_interval {
+            req = req.configure(|builder| builder.max_aggregation_interval(interval as i32));
         }
 
         // Retry loop for IAM eventual consistency: newly created IAM roles may
@@ -293,7 +286,7 @@ impl AwsProvider {
             }
             let request = req.clone().configure(|builder| {
                 builder.tag_specifications(build_tag_specification_with_create_token(
-                    resource,
+                    tags.as_ref(),
                     aws_sdk_ec2::types::ResourceType::VpcFlowLog,
                     request_token.as_client_token(),
                 ))
@@ -310,7 +303,7 @@ impl AwsProvider {
                             &resource.id,
                             Ec2TaggedResourceKind::FlowLog,
                             &discovery_token,
-                            carina_core::provider::Sent::AllRequestAttributes,
+                            sent.clone(),
                             error,
                         );
                     }
@@ -326,7 +319,7 @@ impl AwsProvider {
                         &resource.id,
                         Ec2TaggedResourceKind::FlowLog,
                         request_token.as_client_token(),
-                        carina_core::provider::Sent::AllRequestAttributes,
+                        sent.clone(),
                         error,
                     );
                 }
@@ -347,17 +340,19 @@ impl AwsProvider {
                     Ok(identifier) => identifier,
                     Err(error) => return Err(attempt.untracked(error)),
                 };
-                let sent = if unsuccessful.is_some() {
-                    carina_core::provider::Sent::only(
-                        resource
-                            .attributes
-                            .keys()
-                            .filter(|name| name.as_str() != "resource_ids"),
-                    )
+                let issued_sent = if unsuccessful.is_some() {
+                    match &sent {
+                        Sent::Only(names) => {
+                            let mut names = names.clone();
+                            names.remove("resource_ids");
+                            Sent::Only(names)
+                        }
+                        Sent::AllRequestAttributes => Sent::AllRequestAttributes,
+                    }
                 } else {
-                    carina_core::provider::Sent::AllRequestAttributes
+                    sent.clone()
                 };
-                let issued = attempt.issued(identifier.clone(), sent);
+                let issued = attempt.issued(identifier.clone(), issued_sent);
                 if let Some(error_item) = unsuccessful {
                     let message = error_item
                         .error()
@@ -400,7 +395,7 @@ impl AwsProvider {
                 attempt,
                 Ec2TaggedResourceKind::FlowLog,
                 request_token.as_client_token(),
-                carina_core::provider::Sent::AllRequestAttributes,
+                sent,
             );
         }
 
@@ -421,14 +416,11 @@ impl AwsProvider {
         to: Resource,
         _schema: &ResourceSchema,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
+        let input = Ec2FlowLogUpdateInput::decode(&to)?;
+        let (tags,) = input.into_parts();
         for flow_log_id in identifier.as_str().split(',') {
-            self.apply_ec2_tags(
-                &id,
-                flow_log_id,
-                &to.resolved_attributes(),
-                Some(&from.attributes),
-            )
-            .await?;
+            self.apply_ec2_tags(&id, flow_log_id, tags.as_ref(), Some(&from.attributes))
+                .await?;
         }
         Ok(self.read_ec2_flow_log(&id, identifier).await)
     }

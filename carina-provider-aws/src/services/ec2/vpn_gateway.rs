@@ -1,17 +1,16 @@
 use carina_core::provider::ProviderResult;
 use carina_core::provider::{AppliedIdentifier, ReadOutcome};
-use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
+use carina_core::resource::{Resource, ResourceId, State};
 use carina_core::schema::ResourceSchema;
 
 use crate::AwsProvider;
 use crate::aws_operation::ClientToken;
 use crate::error_helpers::api_error_with_meta;
-use crate::helpers::{
-    build_tag_specification_with_create_token, optional_enum_attr, require_enum_attr,
-};
+use crate::helpers::build_tag_specification_with_create_token;
 use crate::provider::{AwsCreateAttempt, Ec2TaggedResourceKind};
 use crate::read_model::{empty_map_value, found_managed_read};
 use crate::read_models_generated::Ec2VpnGatewayReadModelSupplement;
+use crate::send_models_generated::{Ec2VpnGatewayCreateInput, Ec2VpnGatewayUpdateInput};
 
 impl AwsProvider {
     /// Read an EC2 VPN Gateway
@@ -65,41 +64,34 @@ impl AwsProvider {
     pub(crate) async fn create_ec2_vpn_gateway<A: AwsCreateAttempt>(
         &self,
         resource: &Resource<impl Sized>,
-        schema: &ResourceSchema,
+        _schema: &ResourceSchema,
         client_token: &ClientToken,
         attempt: A,
     ) -> Result<A::Step, A::Verdict> {
-        let gw_type = match require_enum_attr(resource, schema, "type") {
-            Ok(gateway_type) => gateway_type,
+        let input = match Ec2VpnGatewayCreateInput::decode(resource) {
+            Ok(input) => input,
             Err(error) => return Err(attempt.untracked(error)),
         };
+        let sent = input.sent();
+        let (amazon_side_asn, availability_zone, tags, gateway_type) = input.into_parts();
 
         let mut req = self
             .ec2_client
             .create_vpn_gateway()
-            .r#type(aws_sdk_ec2::types::GatewayType::from(gw_type.as_str()))
+            .r#type(aws_sdk_ec2::types::GatewayType::from(gateway_type.as_str()))
             .tag_specifications(build_tag_specification_with_create_token(
-                resource,
+                tags.as_ref(),
                 aws_sdk_ec2::types::ResourceType::VpnGateway,
                 client_token,
             ));
 
-        if let Some(Value::Concrete(ConcreteValue::Int(asn))) = resource.get_attr("amazon_side_asn")
-        {
-            req = req.amazon_side_asn(*asn);
+        if let Some(asn) = amazon_side_asn {
+            req = req.amazon_side_asn(asn);
         }
-        let availability_zone = match optional_enum_attr(resource, schema, "availability_zone") {
-            Ok(value) => value,
-            Err(error) => return Err(attempt.untracked(error)),
-        };
         if let Some(availability_zone) = availability_zone {
             req = req.availability_zone(availability_zone);
         }
 
-        let sent = self.sent_only(
-            resource,
-            &["type", "amazon_side_asn", "availability_zone", "tags"],
-        );
         let result = req.send().await;
 
         self.finish_tagged_ec2_create(
@@ -126,10 +118,12 @@ impl AwsProvider {
         to: Resource,
         _schema: &ResourceSchema,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
+        let input = Ec2VpnGatewayUpdateInput::decode(&to)?;
+        let (tags,) = input.into_parts();
         self.apply_ec2_tags(
             &id,
             identifier.as_str(),
-            &to.resolved_attributes(),
+            tags.as_ref(),
             Some(&from.attributes),
         )
         .await?;

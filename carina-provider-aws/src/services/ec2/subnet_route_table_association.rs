@@ -1,13 +1,15 @@
 use carina_core::provider::{AppliedIdentifier, ReadOutcome};
 use carina_core::provider::{ProviderError, ProviderResult};
-use carina_core::resource::{ConcreteValue, Resource, ResourceId, Value};
+use carina_core::resource::{Resource, ResourceId};
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
-use crate::helpers::require_string_attr;
-use crate::provider::CreateCompletion;
+use crate::provider::TypedCreateCompletion;
 use crate::read_model::found_managed_read;
 use crate::read_models_generated::Ec2SubnetRouteTableAssociationReadModelSupplement;
+use crate::send_models_generated::{
+    Ec2SubnetRouteTableAssociationCreateInput, Ec2SubnetRouteTableAssociationUpdateInput,
+};
 
 impl AwsProvider {
     /// Read an EC2 Subnet Route Table Association
@@ -62,9 +64,10 @@ impl AwsProvider {
     pub(crate) async fn create_ec2_subnet_route_table_association(
         &self,
         resource: &Resource<impl Sized>,
-    ) -> ProviderResult<CreateCompletion> {
-        let route_table_id = require_string_attr(resource, "route_table_id")?;
-        let subnet_id = require_string_attr(resource, "subnet_id")?;
+    ) -> ProviderResult<TypedCreateCompletion> {
+        let input = Ec2SubnetRouteTableAssociationCreateInput::decode(resource)?;
+        let sent = input.sent();
+        let (route_table_id, subnet_id) = input.into_parts();
 
         let result = self
             .ec2_client
@@ -94,11 +97,14 @@ impl AwsProvider {
         let outcome = self
             .read_ec2_subnet_route_table_association(&resource.id, &identifier)
             .await;
-        Ok(self.create_outcome_from_read(
-            &resource.id,
-            identifier,
-            resource.resolved_attributes(),
-            outcome,
+        Ok((
+            sent,
+            self.create_outcome_from_read(
+                &resource.id,
+                identifier,
+                resource.resolved_attributes(),
+                outcome,
+            ),
         ))
     }
 
@@ -109,53 +115,10 @@ impl AwsProvider {
         identifier: &AppliedIdentifier,
         to: Resource,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
-        // Parse composite identifier: association_id|subnet_id
-        let Some((association_id, subnet_id)) = identifier.as_str().split_once('|') else {
-            return Err(ProviderError::invalid_input(format!(
-                "Invalid association identifier: {}",
-                identifier
-            ))
-            .for_resource(id.clone()));
-        };
-
-        let route_table_id = match to.get_attr("route_table_id") {
-            Some(Value::Concrete(ConcreteValue::String(s))) => s.expose_plaintext().to_string(),
-            _ => {
-                return Err(ProviderError::invalid_input("route_table_id is required")
-                    .for_resource(id.clone()));
-            }
-        };
-
-        // Replace the association with a new route table
-        let result = self
-            .ec2_client
-            .replace_route_table_association()
-            .association_id(association_id)
-            .route_table_id(&route_table_id)
-            .send()
-            .await
-            .map_err(|e| {
-                api_error_with_meta("Failed to replace route table association", e)
-                    .for_resource(id.clone())
-            })?;
-
-        let new_assoc_id = result.new_association_id().ok_or_else(|| {
-            ProviderError::api_error(
-                "Route table association replaced but no new association ID returned",
-            )
-            .for_resource(id.clone())
-        })?;
-        let new_assoc_id = crate::helpers::applied_identifier(
-            &id,
-            "ec2.ReplaceRouteTableAssociation",
-            new_assoc_id,
-        )?;
-
-        let composite = format!("{}|{}", new_assoc_id.as_str(), subnet_id);
-        let identifier =
-            crate::helpers::applied_identifier(&id, "ec2.ReplaceRouteTableAssociation", composite)?;
+        let input = Ec2SubnetRouteTableAssociationUpdateInput::decode(&to)?;
+        let () = input.into_parts();
         Ok(self
-            .read_ec2_subnet_route_table_association(&id, &identifier)
+            .read_ec2_subnet_route_table_association(&id, identifier)
             .await)
     }
 

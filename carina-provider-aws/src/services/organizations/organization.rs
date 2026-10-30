@@ -5,10 +5,10 @@ use carina_core::schema::ResourceSchema;
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
-use crate::helpers::optional_enum_attr;
-use crate::provider::CreateCompletion;
+use crate::provider::TypedCreateCompletion;
 use crate::read_model::{ManagedReadModel, found_managed_read};
 use crate::read_models_generated::OrganizationsOrganizationReadModelSupplement;
+use crate::send_models_generated::OrganizationsOrganizationCreateInput;
 
 impl AwsProvider {
     /// Read an Organizations organization
@@ -52,12 +52,16 @@ impl AwsProvider {
     pub(crate) async fn create_organizations_organization(
         &self,
         resource: &Resource<impl Sized>,
-        schema: &ResourceSchema,
-    ) -> ProviderResult<CreateCompletion> {
+        _schema: &ResourceSchema,
+    ) -> ProviderResult<TypedCreateCompletion> {
+        let input = OrganizationsOrganizationCreateInput::decode(resource)?;
+        let sent = input.sent();
+        let (feature_set,) = input.into_parts();
         let mut req = self.organizations_client.create_organization();
 
-        if let Some(feature_set) = optional_enum_attr(resource, schema, "feature_set")? {
-            let fs = aws_sdk_organizations::types::OrganizationFeatureSet::from(feature_set);
+        if let Some(feature_set) = feature_set {
+            let fs =
+                aws_sdk_organizations::types::OrganizationFeatureSet::from(feature_set.as_str());
             req = req.feature_set(fs);
         }
 
@@ -88,7 +92,10 @@ impl AwsProvider {
             let outcome = self
                 .read_organizations_organization(&resource.id, &identifier)
                 .await;
-            Ok(self.create_outcome_from_read(&resource.id, identifier, attributes, outcome))
+            Ok((
+                sent,
+                self.create_outcome_from_read(&resource.id, identifier, attributes, outcome),
+            ))
         } else {
             Err(
                 ProviderError::api_error("CreateOrganization returned no organization")

@@ -5,10 +5,13 @@ use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
-use crate::helpers::{RetryPolicy, optional_bool_attr, require_string_attr, retry_aws_operation};
-use crate::provider::CreateCompletion;
+use crate::helpers::{RetryPolicy, retry_aws_operation};
+use crate::provider::TypedCreateCompletion;
 use crate::read_model::found_managed_read;
 use crate::read_models_generated::S3BucketPublicAccessBlockReadModel;
+use crate::send_models_generated::{
+    S3BucketPublicAccessBlockCreateInput, S3BucketPublicAccessBlockUpdateInput,
+};
 use crate::services::s3::bucket::is_s3_not_configured_error;
 
 impl AwsProvider {
@@ -69,18 +72,36 @@ impl AwsProvider {
     pub(crate) async fn create_s3_bucket_public_access_block(
         &self,
         resource: &Resource<impl Sized>,
-    ) -> ProviderResult<CreateCompletion> {
-        let bucket = require_string_attr(resource, "bucket")?;
+    ) -> ProviderResult<TypedCreateCompletion> {
+        let input = S3BucketPublicAccessBlockCreateInput::decode(resource)?;
+        let sent = input.sent();
+        let (
+            block_public_acls,
+            block_public_policy,
+            bucket,
+            ignore_public_acls,
+            restrict_public_buckets,
+        ) = input.into_parts();
         let identifier =
             crate::helpers::applied_identifier(&resource.id, "s3.PutPublicAccessBlock", bucket)?;
         let outcome = self
-            .put_s3_bucket_public_access_block(&resource.id, &identifier, resource)
+            .put_s3_bucket_public_access_block(
+                &resource.id,
+                &identifier,
+                block_public_acls,
+                block_public_policy,
+                ignore_public_acls,
+                restrict_public_buckets,
+            )
             .await?;
-        Ok(self.create_outcome_from_read(
-            &resource.id,
-            identifier,
-            resource.resolved_attributes(),
-            outcome,
+        Ok((
+            sent,
+            self.create_outcome_from_read(
+                &resource.id,
+                identifier,
+                resource.resolved_attributes(),
+                outcome,
+            ),
         ))
     }
 
@@ -91,29 +112,42 @@ impl AwsProvider {
         _from: &State,
         to: Resource,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
-        self.put_s3_bucket_public_access_block(&id, identifier, &to)
-            .await
+        let input = S3BucketPublicAccessBlockUpdateInput::decode(&to)?;
+        let (block_public_acls, block_public_policy, ignore_public_acls, restrict_public_buckets) =
+            input.into_parts();
+        self.put_s3_bucket_public_access_block(
+            &id,
+            identifier,
+            block_public_acls,
+            block_public_policy,
+            ignore_public_acls,
+            restrict_public_buckets,
+        )
+        .await
     }
 
     async fn put_s3_bucket_public_access_block(
         &self,
         id: &ResourceId,
         bucket: &AppliedIdentifier,
-        resource: &Resource<impl Sized>,
+        block_public_acls: Option<bool>,
+        block_public_policy: Option<bool>,
+        ignore_public_acls: Option<bool>,
+        restrict_public_buckets: Option<bool>,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
         let applied_identifier = bucket;
         let bucket = bucket.as_str();
         let mut builder = PublicAccessBlockConfiguration::builder();
-        if let Some(v) = optional_bool_attr(resource, "block_public_acls") {
+        if let Some(v) = block_public_acls {
             builder = builder.block_public_acls(v);
         }
-        if let Some(v) = optional_bool_attr(resource, "ignore_public_acls") {
+        if let Some(v) = ignore_public_acls {
             builder = builder.ignore_public_acls(v);
         }
-        if let Some(v) = optional_bool_attr(resource, "block_public_policy") {
+        if let Some(v) = block_public_policy {
             builder = builder.block_public_policy(v);
         }
-        if let Some(v) = optional_bool_attr(resource, "restrict_public_buckets") {
+        if let Some(v) = restrict_public_buckets {
             builder = builder.restrict_public_buckets(v);
         }
         let config = builder.build();

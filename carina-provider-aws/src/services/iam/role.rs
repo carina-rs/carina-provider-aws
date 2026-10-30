@@ -7,10 +7,11 @@ use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
-use crate::helpers::{require_string_attr, sdk_error_message};
-use crate::provider::CreateCompletion;
+use crate::helpers::sdk_error_message;
+use crate::provider::TypedCreateCompletion;
 use crate::read_model::found_managed_read;
 use crate::read_models_generated::IamRoleReadModelSupplement;
+use crate::send_models_generated::{IamRoleCreateInput, IamRoleUpdateInput};
 
 impl AwsProvider {
     /// Read an IAM Role
@@ -83,11 +84,16 @@ impl AwsProvider {
     pub(crate) async fn create_iam_role(
         &self,
         resource: &Resource<impl Sized>,
-    ) -> ProviderResult<CreateCompletion> {
-        let role_name = require_string_attr(resource, "role_name")?;
-
-        let assume_role_policy_document =
-            resolve_iam_policy_attr(resource, "assume_role_policy_document")?;
+    ) -> ProviderResult<TypedCreateCompletion> {
+        let input = IamRoleCreateInput::decode(resource)?;
+        let sent = input.sent();
+        let (assume_role_policy_document, description, max_session_duration, path, role_name, tags) =
+            input.into_parts();
+        let assume_role_policy_document = resolve_iam_policy_value(
+            &resource.id,
+            "assume_role_policy_document",
+            &assume_role_policy_document,
+        )?;
 
         let mut req = self
             .iam_client
@@ -95,23 +101,20 @@ impl AwsProvider {
             .role_name(&role_name)
             .assume_role_policy_document(&assume_role_policy_document);
 
-        if let Some(Value::Concrete(ConcreteValue::String(desc))) = resource.get_attr("description")
-        {
-            req = req.description(desc.expose_plaintext());
+        if let Some(description) = description {
+            req = req.description(description);
         }
 
-        if let Some(Value::Concrete(ConcreteValue::String(path))) = resource.get_attr("path") {
-            req = req.path(path.expose_plaintext());
+        if let Some(path) = path {
+            req = req.path(path);
         }
 
-        if let Some(Value::Concrete(ConcreteValue::Int(duration))) =
-            resource.get_attr("max_session_duration")
-        {
-            req = req.max_session_duration(*duration as i32);
+        if let Some(max_session_duration) = max_session_duration {
+            req = req.max_session_duration(max_session_duration as i32);
         }
 
         // Apply tags at creation time
-        if let Some(Value::Concrete(ConcreteValue::Map(tag_map))) = resource.get_attr("tags") {
+        if let Some(Value::Concrete(ConcreteValue::Map(tag_map))) = tags.as_ref() {
             for (key, value) in tag_map {
                 if let Value::Concrete(ConcreteValue::String(val)) = value {
                     let tag = aws_sdk_iam::types::Tag::builder()
@@ -134,11 +137,14 @@ impl AwsProvider {
         let identifier =
             crate::helpers::applied_identifier(&resource.id, "iam.CreateRole", role_name)?;
         let outcome = self.read_iam_role(&resource.id, &identifier).await;
-        Ok(self.create_outcome_from_read(
-            &resource.id,
-            identifier,
-            resource.resolved_attributes(),
-            outcome,
+        Ok((
+            sent,
+            self.create_outcome_from_read(
+                &resource.id,
+                identifier,
+                resource.resolved_attributes(),
+                outcome,
+            ),
         ))
     }
 
@@ -150,48 +156,14 @@ impl AwsProvider {
         from: &State,
         to: Resource,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
-        // Update assume role policy document
-        if to.get_attr("assume_role_policy_document").is_some() {
-            let policy_doc = resolve_iam_policy_attr(&to, "assume_role_policy_document")?;
-            self.iam_client
-                .update_assume_role_policy()
-                .role_name(identifier.as_str())
-                .policy_document(&policy_doc)
-                .send()
-                .await
-                .map_err(|e| {
-                    api_error_with_meta("Failed to update assume role policy", e)
-                        .for_resource(id.clone())
-                })?;
-        }
-
-        // Update description and max_session_duration via update_role
-        let mut needs_update = false;
-        let mut req = self.iam_client.update_role().role_name(identifier.as_str());
-
-        if let Some(Value::Concrete(ConcreteValue::String(desc))) = to.get_attr("description") {
-            req = req.description(desc.expose_plaintext());
-            needs_update = true;
-        }
-
-        if let Some(Value::Concrete(ConcreteValue::Int(duration))) =
-            to.get_attr("max_session_duration")
-        {
-            req = req.max_session_duration(*duration as i32);
-            needs_update = true;
-        }
-
-        if needs_update {
-            req.send().await.map_err(|e| {
-                api_error_with_meta("Failed to update IAM role", e).for_resource(id.clone())
-            })?;
-        }
+        let input = IamRoleUpdateInput::decode(&to)?;
+        let (tags,) = input.into_parts();
 
         // Update tags
         self.apply_iam_tags(
             &id,
             identifier.as_str(),
-            &to.resolved_attributes(),
+            tags.as_ref(),
             Some(&from.attributes),
         )
         .await?;
@@ -222,10 +194,10 @@ impl AwsProvider {
         &self,
         id: &ResourceId,
         role_name: &str,
-        desired: &HashMap<String, Value>,
+        desired: Option<&Value>,
         current: Option<&HashMap<String, Value>>,
     ) -> ProviderResult<()> {
-        let desired_tags = match desired.get("tags") {
+        let desired_tags = match desired {
             Some(Value::Concrete(ConcreteValue::Map(m))) => m.clone(),
             _ => IndexMap::new(),
         };
@@ -314,18 +286,33 @@ pub fn resolve_iam_policy_attr(
     resource: &Resource<impl Sized>,
     attr_name: &str,
 ) -> ProviderResult<String> {
-    match resource.get_attr(attr_name) {
-        Some(Value::Concrete(ConcreteValue::String(s))) => Ok(s.expose_plaintext().to_string()),
-        Some(value @ Value::Concrete(ConcreteValue::Map(_))) => value_to_iam_policy_json(value)
-            .map_err(|e| {
-                ProviderError::invalid_input(format!("Failed to convert {}: {}", attr_name, e))
-                    .for_resource(resource.id.clone())
-            }),
-        _ => Err(ProviderError::invalid_input(format!(
+    let value = resource.get_attr(attr_name).ok_or_else(|| {
+        ProviderError::invalid_input(format!(
             "{} is required (must be a JSON string or block)",
             attr_name
         ))
-        .for_resource(resource.id.clone())),
+        .for_resource(resource.id.clone())
+    })?;
+    resolve_iam_policy_value(&resource.id, attr_name, value)
+}
+
+pub(crate) fn resolve_iam_policy_value(
+    id: &ResourceId,
+    attr_name: &str,
+    value: &Value,
+) -> ProviderResult<String> {
+    match value {
+        Value::Concrete(ConcreteValue::String(s)) => Ok(s.expose_plaintext().to_string()),
+        value @ Value::Concrete(ConcreteValue::Map(_)) => {
+            value_to_iam_policy_json(value).map_err(|error| {
+                ProviderError::invalid_input(format!("Failed to convert {attr_name}: {error}"))
+                    .for_resource(id.clone())
+            })
+        }
+        _ => Err(ProviderError::invalid_input(format!(
+            "{attr_name} is required (must be a JSON string or block)"
+        ))
+        .for_resource(id.clone())),
     }
 }
 

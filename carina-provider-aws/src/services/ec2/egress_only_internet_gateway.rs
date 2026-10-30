@@ -1,16 +1,17 @@
 use carina_core::provider::ProviderResult;
-use carina_core::provider::{AppliedIdentifier, ReadOutcome, Sent};
+use carina_core::provider::{AppliedIdentifier, ReadOutcome};
 use carina_core::resource::{Resource, ResourceId, State};
 
 use crate::AwsProvider;
 use crate::aws_operation::ClientToken;
 use crate::error_helpers::api_error_with_meta;
-use crate::helpers::{
-    build_tag_specification_with_create_token, require_string_attr, send_aws_operation_with_token,
-};
+use crate::helpers::{build_tag_specification_with_create_token, send_aws_operation_with_token};
 use crate::provider::{AwsCreateAttempt, Ec2TaggedResourceKind};
 use crate::read_model::{empty_map_value, found_managed_read};
 use crate::read_models_generated::Ec2EgressOnlyInternetGatewayReadModelSupplement;
+use crate::send_models_generated::{
+    Ec2EgressOnlyInternetGatewayCreateInput, Ec2EgressOnlyInternetGatewayUpdateInput,
+};
 
 impl AwsProvider {
     /// Read an EC2 Egress-Only Internet Gateway
@@ -56,10 +57,12 @@ impl AwsProvider {
         client_token: &ClientToken,
         attempt: A,
     ) -> Result<A::Step, A::Verdict> {
-        let vpc_id = match require_string_attr(resource, "vpc_id") {
-            Ok(vpc_id) => vpc_id,
+        let input = match Ec2EgressOnlyInternetGatewayCreateInput::decode(resource) {
+            Ok(input) => input,
             Err(error) => return Err(attempt.untracked(error)),
         };
+        let sent = input.sent();
+        let (tags, vpc_id) = input.into_parts();
 
         let req = self
             .ec2_client
@@ -67,7 +70,7 @@ impl AwsProvider {
             .configure(|builder| {
                 builder.vpc_id(&vpc_id).tag_specifications(
                     build_tag_specification_with_create_token(
-                        resource,
+                        tags.as_ref(),
                         aws_sdk_ec2::types::ResourceType::EgressOnlyInternetGateway,
                         client_token,
                     ),
@@ -78,8 +81,7 @@ impl AwsProvider {
         self.finish_tagged_ec2_create(
             resource,
             attempt,
-            Ec2TaggedResourceKind::EgressOnlyInternetGateway
-                .create_context(client_token, Sent::AllRequestAttributes),
+            Ec2TaggedResourceKind::EgressOnlyInternetGateway.create_context(client_token, sent),
             result,
             |output| {
                 output
@@ -99,10 +101,12 @@ impl AwsProvider {
         from: &State,
         to: Resource,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
+        let input = Ec2EgressOnlyInternetGatewayUpdateInput::decode(&to)?;
+        let (tags,) = input.into_parts();
         self.apply_ec2_tags(
             &id,
             identifier.as_str(),
-            &to.resolved_attributes(),
+            tags.as_ref(),
             Some(&from.attributes),
         )
         .await?;

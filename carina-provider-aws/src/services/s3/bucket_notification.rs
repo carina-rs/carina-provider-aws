@@ -10,10 +10,13 @@ use indexmap::IndexMap;
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
-use crate::helpers::{RetryPolicy, require_string_attr, retry_aws_operation, sdk_error_message};
-use crate::provider::CreateCompletion;
+use crate::helpers::{RetryPolicy, retry_aws_operation, sdk_error_message};
+use crate::provider::TypedCreateCompletion;
 use crate::read_model::found_managed_read;
 use crate::read_models_generated::S3BucketNotificationConfigurationReadModel;
+use crate::send_models_generated::{
+    S3BucketNotificationConfigurationCreateInput, S3BucketNotificationConfigurationUpdateInput,
+};
 use crate::services::s3::bucket::is_s3_not_configured_error;
 
 impl AwsProvider {
@@ -81,21 +84,39 @@ impl AwsProvider {
     pub(crate) async fn create_s3_bucket_notification_configuration(
         &self,
         resource: &Resource<impl Sized>,
-    ) -> ProviderResult<CreateCompletion> {
-        let bucket = require_string_attr(resource, "bucket")?;
+    ) -> ProviderResult<TypedCreateCompletion> {
+        let input = S3BucketNotificationConfigurationCreateInput::decode(resource)?;
+        let sent = input.sent();
+        let (
+            bucket,
+            event_bridge_configuration,
+            lambda_function_configurations,
+            queue_configurations,
+            topic_configurations,
+        ) = input.into_parts();
         let identifier = crate::helpers::applied_identifier(
             &resource.id,
             "s3.PutBucketNotificationConfiguration",
             bucket,
         )?;
         let outcome = self
-            .put_s3_bucket_notification(&resource.id, &identifier, resource)
+            .put_s3_bucket_notification(
+                &resource.id,
+                &identifier,
+                event_bridge_configuration.as_ref(),
+                lambda_function_configurations.as_ref(),
+                queue_configurations.as_ref(),
+                topic_configurations.as_ref(),
+            )
             .await?;
-        Ok(self.create_outcome_from_read(
-            &resource.id,
-            identifier,
-            resource.resolved_attributes(),
-            outcome,
+        Ok((
+            sent,
+            self.create_outcome_from_read(
+                &resource.id,
+                identifier,
+                resource.resolved_attributes(),
+                outcome,
+            ),
         ))
     }
 
@@ -106,41 +127,58 @@ impl AwsProvider {
         _from: &State,
         to: Resource,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
-        self.put_s3_bucket_notification(&id, identifier, &to).await
+        let input = S3BucketNotificationConfigurationUpdateInput::decode(&to)?;
+        let (
+            event_bridge_configuration,
+            lambda_function_configurations,
+            queue_configurations,
+            topic_configurations,
+        ) = input.into_parts();
+        self.put_s3_bucket_notification(
+            &id,
+            identifier,
+            event_bridge_configuration.as_ref(),
+            lambda_function_configurations.as_ref(),
+            queue_configurations.as_ref(),
+            topic_configurations.as_ref(),
+        )
+        .await
     }
 
     async fn put_s3_bucket_notification(
         &self,
         id: &ResourceId,
         bucket: &AppliedIdentifier,
-        resource: &Resource<impl Sized>,
+        event_bridge_configuration: Option<&Value>,
+        lambda_function_configurations: Option<&Value>,
+        queue_configurations: Option<&Value>,
+        topic_configurations: Option<&Value>,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
         let applied_identifier = bucket;
         let bucket = bucket.as_str();
-        let topics = match resource.get_attr("topic_configurations") {
+        let topics = match topic_configurations {
             Some(Value::Concrete(ConcreteValue::List(items))) => items
                 .iter()
                 .map(|v| build_topic(id, v))
                 .collect::<ProviderResult<Vec<_>>>()?,
             _ => Vec::new(),
         };
-        let queues = match resource.get_attr("queue_configurations") {
+        let queues = match queue_configurations {
             Some(Value::Concrete(ConcreteValue::List(items))) => items
                 .iter()
                 .map(|v| build_queue(id, v))
                 .collect::<ProviderResult<Vec<_>>>()?,
             _ => Vec::new(),
         };
-        let lambdas = match resource.get_attr("lambda_function_configurations") {
+        let lambdas = match lambda_function_configurations {
             Some(Value::Concrete(ConcreteValue::List(items))) => items
                 .iter()
                 .map(|v| build_lambda(id, v))
                 .collect::<ProviderResult<Vec<_>>>()?,
             _ => Vec::new(),
         };
-        let event_bridge = resource
-            .get_attr("event_bridge_configuration")
-            .map(|_| EventBridgeConfiguration::builder().build());
+        let event_bridge =
+            event_bridge_configuration.map(|_| EventBridgeConfiguration::builder().build());
 
         let mut config = NotificationConfiguration::builder()
             .set_topic_configurations(if topics.is_empty() {
