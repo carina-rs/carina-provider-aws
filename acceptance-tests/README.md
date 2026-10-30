@@ -3,7 +3,9 @@
 ## Persistent run registry and cleanup
 
 Stateful acceptance tests register each fixture under
-`${CARINA_ACCEPTANCE_HOME:-$HOME/.cache/carina-acceptance}/carina-provider-aws/runs/<run-id>/`.
+`${CARINA_ACCEPTANCE_HOME:-$HOME/.cache/carina-acceptance}/<repo>/runs/<run-id>/`.
+`<repo>` is derived from the Git checkout's common directory unless
+`CARINA_ACCEPTANCE_REPO` is explicitly exported to override it.
 Each entry keeps its injected `main.crn`, local Carina state, and metadata for
 the fixture, AWS account, and creating host. Each run also records its creating
 host, PID, and process start time so PID reuse is not mistaken for a live run.

@@ -240,6 +240,74 @@ worktree_repo_name=$(
 pass "repository name is identical from the main checkout and a worktree"
 
 next_test
+renamed_clone_source="$TEST_TMP/carina-provider-aws"
+renamed_clone="$TEST_TMP/renamed-acceptance-checkout"
+renamed_home="$TEST_TMP/renamed-clone-registry"
+mkdir -p "$renamed_clone_source/acceptance-tests/shared"
+cp "$RUN_TESTS" "$renamed_clone_source/acceptance-tests/run-tests.sh"
+cp "$SHARED_DIR/_helpers.sh" \
+    "$renamed_clone_source/acceptance-tests/shared/_helpers.sh"
+cp "$SHARED_DIR/_provider_env.sh" \
+    "$renamed_clone_source/acceptance-tests/shared/_provider_env.sh"
+cp "$SHARED_DIR/_run_registry.sh" \
+    "$renamed_clone_source/acceptance-tests/shared/_run_registry.sh"
+printf '%s\n' 'version = "0.0.0"' > "$renamed_clone_source/Cargo.toml"
+git init -q -b main "$renamed_clone_source"
+git -C "$renamed_clone_source" add Cargo.toml acceptance-tests
+git -C "$renamed_clone_source" \
+    -c user.name="Acceptance Test" \
+    -c user.email="acceptance-test@example.invalid" \
+    commit -qm "temporary acceptance fixture"
+source_repo_name=$(
+    unset CARINA_ACCEPTANCE_REPO
+    PROJECT_ROOT="$renamed_clone_source"
+    carina_registry_repo_name
+)
+git clone -q "$renamed_clone_source" "$renamed_clone"
+[ "$(basename "$renamed_clone")" != "$source_repo_name" ] || \
+    fail "temporary clone directory unexpectedly matches the source repository name"
+renamed_source="$TEST_TMP/renamed-clone-registration.crn"
+printf '%s\n' 'provider test {}' > "$renamed_source"
+if ! renamed_entry=$(
+    unset CARINA_ACCEPTANCE_REPO
+    export AWS_PROFILE="carina-test-009"
+    export CARINA_ACCEPTANCE_HOME="$renamed_home"
+    export SCRIPT_DIR="$renamed_clone/acceptance-tests/custom-suite"
+    /bin/bash -c '
+        source "$1"
+        registered_entry=""
+        register_acceptance_work_dir \
+            "s3_bucket/renamed-clone.crn" "$2" registered_entry
+        printf "%s\n" "$registered_entry"
+    ' _ "$renamed_clone/acceptance-tests/shared/_helpers.sh" "$renamed_source"
+    ); then
+    fail "custom-suite registration in renamed clone failed: $renamed_entry"
+fi
+renamed_runs_root="$renamed_home/$(basename "$renamed_clone")/runs"
+case "$renamed_entry" in
+    "$renamed_runs_root"/*/carina-test-009/test_0) ;;
+    *) fail "custom suite used an unexpected registry root: $renamed_entry" ;;
+esac
+printf '%s\n' \
+    '{"schema_version":1,"state":"present","resources":[{"identity":"bucket"}]}' \
+    > "$renamed_entry/.stub-state.json"
+: > "$STUB_DESTROY_LOG"
+: > "$STUB_CREDS_LOG"
+if ! renamed_cleanup_output=$(
+    unset CARINA_ACCEPTANCE_REPO
+    CARINA_ACCEPTANCE_HOME="$renamed_home" \
+        /bin/bash "$renamed_clone/acceptance-tests/run-tests.sh" \
+        --accounts 9-9 cleanup 2>&1
+    ); then
+    fail "run-tests.sh cleanup in renamed clone failed: $renamed_cleanup_output"
+fi
+[ ! -e "$renamed_entry" ] || \
+    fail "run-tests.sh cleanup did not find the custom-suite registry entry"
+[ "$(cat "$STUB_DESTROY_LOG")" = "carina-test-009" ] || \
+    fail "renamed-clone cleanup used the wrong account: $(cat "$STUB_DESTROY_LOG")"
+pass "custom suite registration and run-tests.sh cleanup share the derived clone registry root"
+
+next_test
 registration_source="$TEST_TMP/custom-registration.crn"
 registration_home="$TEST_TMP/custom-registration-registry"
 printf '%s\n' 'provider test {}' > "$registration_source"

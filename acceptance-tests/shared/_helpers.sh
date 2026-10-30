@@ -16,8 +16,6 @@ PROJECT_ROOT="$(cd "$HELPERS_DIR/../.." && pwd)"
 
 # Registry/state helpers are kept in a side-effect-free shared file so the
 # top-level runner can use them without inheriting this file's EXIT trap.
-CARINA_ACCEPTANCE_REPO="${CARINA_ACCEPTANCE_REPO:-carina-provider-aws}"
-export CARINA_ACCEPTANCE_REPO
 source "$HELPERS_DIR/_run_registry.sh"
 
 # See run-tests.sh for the rationale: `$PROJECT_ROOT/..` breaks when
