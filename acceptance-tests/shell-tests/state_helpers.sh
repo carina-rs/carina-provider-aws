@@ -1,5 +1,5 @@
 #!/bin/bash
-# Test state helpers against the v18 JSON emitted by `carina state show --json`.
+# Test state helpers against schema-v1 JSON emitted by `carina state show --json`.
 #
 # Usage:
 #   bash acceptance-tests/shell-tests/state_helpers.sh
@@ -18,6 +18,9 @@ trap cleanup_test_dir EXIT
 
 STATE_DIR="$TEST_DIR/state"
 STATE_JSON="$TEST_DIR/state.json"
+ABSENT_STATE_JSON="$TEST_DIR/absent-state.json"
+EMPTY_STATE_JSON="$TEST_DIR/empty-state.json"
+SCHEMA_V2_JSON="$TEST_DIR/schema-v2.json"
 STUB_BIN="$TEST_DIR/carina"
 AWS_WASM="$TEST_DIR/provider.wasm"
 STDOUT_FILE="$TEST_DIR/helper.stdout"
@@ -27,17 +30,15 @@ touch "$AWS_WASM"
 
 cat > "$STATE_JSON" <<'JSON'
 {
-  "version": 18,
-  "exports_version": 1,
-  "serial": 1,
-  "lineage": "state-helper-test",
-  "carina_version": "0.6.0",
+  "schema_version": 1,
+  "state": "present",
   "resources": [
     {
       "binding": "source",
-      "resource_type": "s3.Bucket",
-      "provider": "aws",
       "identity": "source-bucket",
+      "provider": "aws",
+      "resource_type": "s3.Bucket",
+      "protected": false,
       "current": {
         "kind": "applied",
         "identifier": "zeta-id",
@@ -45,26 +46,32 @@ cat > "$STATE_JSON" <<'JSON'
           "bucket": "source-bucket",
           "tags": {"Environment": "test"}
         }
-      }
+      },
+      "deposed": []
     },
     {
       "binding": "consumer",
-      "resource_type": "iam.Role",
-      "provider": "aws",
       "identity": "consumer-role",
+      "provider": "aws",
+      "resource_type": "iam.Role",
+      "protected": false,
       "current": {
         "kind": "applied",
         "identifier": "alpha-id",
         "attributes": {
           "role_name": "consumer-role",
-          "description": "from-state-v18"
+          "description": "from-schema-v1"
         }
-      }
+      },
+      "deposed": []
     }
-  ],
-  "exports": {}
+  ]
 }
 JSON
+
+jq '.state = "absent" | .resources = []' "$STATE_JSON" > "$ABSENT_STATE_JSON"
+jq '.resources = []' "$STATE_JSON" > "$EMPTY_STATE_JSON"
+jq '.schema_version = 2' "$STATE_JSON" > "$SCHEMA_V2_JSON"
 
 cat > "$STUB_BIN" <<'STUB'
 #!/bin/bash
@@ -157,20 +164,28 @@ assert_helper_failure() {
     source "$HELPERS_SH"
 
     state_json="$(carina_state_json "$STATE_DIR" 2>"$STDERR_FILE")"
-    version="$(jq -r '.version' <<< "$state_json")"
-    assert_equal "state JSON version" "18" "$version"
+    assert_equal "state JSON schema version" "1" \
+        "$(jq -r '.schema_version' <<< "$state_json")"
+    assert_not_contains "state JSON stdout stays clean" "$state_json" "stub warning"
     assert_contains "state JSON preserves warning on stderr" \
         "$(<"$STDERR_FILE")" "stub warning on stderr"
 
+    export EXPECTED_STATE_JSON="$SCHEMA_V2_JSON"
+    assert_helper_failure "unsupported state schema" "schema_version must be 1" \
+        carina_state_json "$STATE_DIR"
+    export EXPECTED_STATE_JSON="$STATE_JSON"
+
     identifiers="$(carina_state_identifiers "$STATE_DIR" 2>"$STDERR_FILE")"
-    assert_equal "sorted v18 identifiers" $'alpha-id\nzeta-id' "$identifiers"
+    assert_equal "sorted schema-v1 identifiers" $'alpha-id\nzeta-id' "$identifiers"
+    assert_not_contains "identifier stdout stays clean" "$identifiers" "stub warning"
     assert_contains "identifier read preserves warning on stderr" \
         "$(<"$STDERR_FILE")" "stub warning on stderr"
 
     description="$(carina_state_query "$STATE_DIR" \
         '.resources[] | select(.binding == "consumer") | .current.attributes.description' \
         2>"$STDERR_FILE")"
-    assert_equal "v18 current attribute" "from-state-v18" "$description"
+    assert_equal "schema-v1 current attribute" "from-schema-v1" "$description"
+    assert_not_contains "query stdout stays clean" "$description" "stub warning"
     assert_contains "query preserves warning on stderr" \
         "$(<"$STDERR_FILE")" "stub warning on stderr"
 
@@ -192,7 +207,7 @@ assert_helper_failure() {
         '.resources[] | select(.binding == "consumer") | .current.attributes.description'
 
     MISSING_IDENTIFIER_JSON="$TEST_DIR/missing-identifier.json"
-    jq '.resources[0].current |= del(.identifier)' \
+    jq '.resources[0].current.identifier = null' \
         "$STATE_JSON" > "$MISSING_IDENTIFIER_JSON"
     export EXPECTED_STATE_JSON="$MISSING_IDENTIFIER_JSON"
 
@@ -203,8 +218,12 @@ assert_helper_failure() {
 
     NON_APPLIED_JSON="$TEST_DIR/non-applied.json"
     jq '
-        .resources[0].current = {"kind": "none"}
-        | .resources[1].current = {"kind": "create_in_flight"}
+        .resources[0].current = {"kind": "none", "identifier": null, "attributes": {}}
+        | .resources[1].current = {
+            "kind": "create_in_flight",
+            "identifier": "alpha-id",
+            "attributes": {}
+          }
     ' "$STATE_JSON" > "$NON_APPLIED_JSON"
     export EXPECTED_STATE_JSON="$NON_APPLIED_JSON"
 
@@ -218,8 +237,6 @@ assert_helper_failure() {
     assert_not_contains "non-applied rows are not reported as missing identifiers" \
         "$(<"$STDERR_FILE")" "missing current.identifier"
 
-    EMPTY_STATE_JSON="$TEST_DIR/empty-state.json"
-    jq '.resources = []' "$STATE_JSON" > "$EMPTY_STATE_JSON"
     export EXPECTED_STATE_JSON="$EMPTY_STATE_JSON"
 
     assert_helper_failure "empty state" "state contains no resources" \
@@ -227,12 +244,39 @@ assert_helper_failure() {
 
     export EXPECTED_STATE_JSON="$STATE_JSON"
     export STUB_FAIL=1
-    assert_helper_failure "state JSON failure" "stub carina state failure" \
-        carina_state_json "$STATE_DIR"
+    : > "$STDOUT_FILE"
+    : > "$STDERR_FILE"
+    state_json_rc=0
+    carina_state_json "$STATE_DIR" > "$STDOUT_FILE" 2> "$STDERR_FILE" || state_json_rc=$?
+    assert_equal "state JSON failure preserves exit code" "23" "$state_json_rc"
+    assert_equal "state JSON failure keeps stdout empty" "" "$(<"$STDOUT_FILE")"
+    assert_contains "state JSON failure reports the stub error" \
+        "$(<"$STDERR_FILE")" "stub carina state failure"
     assert_helper_failure "state query failure" "stub carina state failure" \
-        carina_state_query "$STATE_DIR" '.version'
+        carina_state_query "$STATE_DIR" '.schema_version'
     assert_helper_failure "identifier failure" "stub carina state failure" \
         carina_state_identifiers "$STATE_DIR"
+
+    unset STUB_FAIL
+    export EXPECTED_STATE_JSON="$ABSENT_STATE_JSON"
+    TEST_PASSED=0
+    TEST_FAILED=0
+    assert_state_resource_count "assert: strict zero-resource read" "0" "$STATE_DIR" \
+        > "$STDOUT_FILE" 2> "$STDERR_FILE"
+    assert_equal "absent-state resource count cannot pass" "0" "$TEST_PASSED"
+    assert_equal "absent-state resource count records failure" "1" "$TEST_FAILED"
+    assert_contains "absent-state resource count reports query failure" \
+        "$(<"$STDOUT_FILE")" "FAIL (state query failed)"
+    assert_contains "absent-state resource count explains rejection" \
+        "$(<"$STDERR_FILE")" "state is absent"
+
+    export EXPECTED_STATE_JSON="$EMPTY_STATE_JSON"
+    TEST_PASSED=0
+    TEST_FAILED=0
+    assert_state_resource_count "assert: zero resources in real state" "0" "$STATE_DIR" \
+        > "$STDOUT_FILE" 2> "$STDERR_FILE"
+    assert_equal "real empty-state resource count passes" "1" "$TEST_PASSED"
+    assert_equal "real empty-state resource count records no failure" "0" "$TEST_FAILED"
 )
 
 echo "PASS: state helpers"
