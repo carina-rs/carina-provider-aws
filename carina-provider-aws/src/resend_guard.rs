@@ -24,6 +24,7 @@ mod tests {
     enum Action {
         Io,
         Timeout,
+        User,
         Transport(SendPhase),
         DelayedTimeout(Duration),
         Response {
@@ -91,6 +92,9 @@ mod tests {
                     )),
                     Action::Timeout => Err(ConnectorError::timeout(
                         std::io::Error::other("post-send timeout").into(),
+                    )),
+                    Action::User => Err(ConnectorError::user(
+                        std::io::Error::other("invalid test request").into(),
                     )),
                     Action::Transport(phase) => Err(transport_connector_error_for_test(phase)),
                     Action::DelayedTimeout(delay) => {
@@ -239,6 +243,157 @@ mod tests {
             .send()
             .await
             .expect("read-only request should be retried");
+
+        assert_eq!(connector.requests().len(), 2);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn generated_ec2_client_retries_only_readonly_maybe_sent_operation() {
+        let readonly_connector = ScriptedConnector::new([
+            Action::Transport(SendPhase::MaybeSent),
+            Action::Response {
+                status: 200,
+                body: DESCRIBE_VPCS_OK,
+            },
+        ]);
+        let readonly_provider = provider(readonly_connector.clone());
+
+        readonly_provider
+            .ec2_client
+            .describe_vpcs()
+            .send()
+            .await
+            .expect("generated read-only operation should retry a maybe-sent failure");
+
+        assert_eq!(readonly_connector.requests().len(), 2);
+
+        let mutating_connector = ScriptedConnector::new([
+            Action::Transport(SendPhase::MaybeSent),
+            Action::Response {
+                status: 200,
+                body: CREATE_VPC_OK,
+            },
+        ]);
+        let mutating_provider = provider(mutating_connector.clone());
+
+        let error = mutating_provider
+            .ec2_client
+            .create_vpc()
+            .cidr_block("10.0.0.0/16")
+            .send()
+            .await
+            .expect_err("generated non-idempotent operation must not retry a maybe-sent failure");
+
+        assert_eq!(mutating_connector.requests().len(), 1);
+        assert_eq!(SendOutcome::classify(&error), SendOutcome::MaybeSent);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn readonly_maybe_sent_failures_exhaust_attempts_and_remain_maybe_sent() {
+        let connector = ScriptedConnector::new([
+            Action::Transport(SendPhase::MaybeSent),
+            Action::Transport(SendPhase::MaybeSent),
+            Action::Transport(SendPhase::MaybeSent),
+        ]);
+        let provider = provider(connector.clone());
+
+        let error = provider
+            .ec2_client
+            .describe_vpcs()
+            .send()
+            .await
+            .expect_err("three maybe-sent failures should exhaust the retry budget");
+
+        assert_eq!(connector.requests().len(), 3);
+        assert_eq!(SendOutcome::classify(&error), SendOutcome::MaybeSent);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn idempotent_and_token_operations_do_not_retry_maybe_sent_transport_failures() {
+        let idempotent_connector = ScriptedConnector::new([
+            Action::Transport(SendPhase::MaybeSent),
+            Action::Response {
+                status: 200,
+                body: "",
+            },
+        ]);
+        let idempotent_provider = provider(idempotent_connector.clone());
+
+        let idempotent_error = idempotent_provider
+            .s3_client
+            .delete_bucket_policy()
+            .bucket("test-bucket")
+            .send()
+            .await
+            .expect_err("idempotent operation should retain the current no-retry behavior");
+
+        assert_eq!(idempotent_connector.requests().len(), 1);
+        assert_eq!(
+            SendOutcome::classify(&idempotent_error),
+            SendOutcome::MaybeSent
+        );
+
+        let token_connector = ScriptedConnector::new([
+            Action::Transport(SendPhase::MaybeSent),
+            Action::Response {
+                status: 200,
+                body: CREATE_NAT_GATEWAY_OK,
+            },
+        ]);
+        let token_provider = provider(token_connector.clone());
+        let request = token_provider
+            .ec2_client
+            .create_nat_gateway()
+            .configure(|builder| builder.subnet_id("subnet-123"));
+
+        let token_error = send_aws_operation_with_token(&ClientToken::new(), request)
+            .await
+            .expect_err("token operation should retain the current no-retry behavior");
+
+        assert_eq!(token_connector.requests().len(), 1);
+        assert_eq!(SendOutcome::classify(&token_error), SendOutcome::MaybeSent);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn readonly_user_failure_is_not_retried() {
+        let connector = ScriptedConnector::new([
+            Action::User,
+            Action::Response {
+                status: 200,
+                body: DESCRIBE_VPCS_OK,
+            },
+        ]);
+        let provider = provider(connector.clone());
+
+        let error = provider
+            .ec2_client
+            .describe_vpcs()
+            .send()
+            .await
+            .expect_err("user connector failures must not be retried");
+
+        assert_eq!(connector.requests().len(), 1);
+        assert!(connector_error(&error).is_user());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn not_sent_failure_is_retried_for_non_idempotent_operation() {
+        let connector = ScriptedConnector::new([
+            Action::Transport(SendPhase::NotSent),
+            Action::Response {
+                status: 200,
+                body: CREATE_VPC_OK,
+            },
+        ]);
+        let provider = provider(connector.clone());
+
+        provider
+            .ec2_client
+            .create_vpc()
+            .cidr_block("10.0.0.0/16")
+            .send()
+            .await
+            .expect("a proven not-sent mutation should be retried");
 
         assert_eq!(connector.requests().len(), 2);
     }

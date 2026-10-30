@@ -163,6 +163,44 @@ impl Intercept for ResendGuard {
         .into())
     }
 
+    fn modify_before_attempt_completion(
+        &self,
+        context: &mut FinalizerInterceptorContextMut<'_>,
+        _runtime_components: &RuntimeComponents,
+        cfg: &mut ConfigBag,
+    ) -> Result<(), BoxError> {
+        let is_read_only = cfg
+            .load::<Metadata>()
+            .is_some_and(|metadata| (self.lookup)(metadata.name()) == Idempotency::ReadOnly);
+        if !is_read_only {
+            return Ok(());
+        }
+
+        let is_unclassified_connector_failure = context
+            .output_or_error()
+            .and_then(Result::err)
+            .and_then(OrchestratorError::as_connector_error)
+            .is_some_and(|error| error.is_other() && error.as_other().is_none());
+        if !is_unclassified_connector_failure {
+            return Ok(());
+        }
+
+        let Some(Err(error)) = context.output_or_error_mut() else {
+            return Ok(());
+        };
+        let original = std::mem::replace(
+            error,
+            OrchestratorError::other(io::Error::other(
+                "replacing read-only unclassified connector failure",
+            )),
+        );
+        // Smithy's attempt finalizers run before retry classification. Preserve
+        // the original MaybeSent failure as the source while making only this
+        // read-only attempt transient to the standard classifier.
+        *error = OrchestratorError::connector(ConnectorError::io(Box::new(original)));
+        Ok(())
+    }
+
     fn read_after_attempt(
         &self,
         context: &FinalizerInterceptorContextRef<'_>,
