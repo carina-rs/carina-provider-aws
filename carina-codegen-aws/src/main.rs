@@ -7321,6 +7321,39 @@ mod tests {
     }
 
     #[test]
+    fn nested_write_only_fails_when_a_parent_shape_is_emitted_twice() {
+        let mut model = nested_write_only_fixture_model();
+        for shape_id in [
+            "com.amazonaws.test#CreateFixtureRequest",
+            "com.amazonaws.test#ReadFixture",
+        ] {
+            let shape = model.shapes.get_mut(shape_id).expect("fixture shape");
+            let carina_smithy::Shape::Structure(structure) = shape else {
+                panic!("fixture shape must be a structure");
+            };
+            structure.members.insert(
+                "OtherOptions".to_string(),
+                carina_smithy::ShapeRef {
+                    target: "com.amazonaws.test#OuterOptions".to_string(),
+                    traits: Default::default(),
+                },
+            );
+        }
+        let resource = provider_fixture_resource("test.NestedWriteOnly", "", &["Options"], vec![]);
+        let dispositions = [resource_defs::ReadDisposition::NestedWriteOnly {
+            field: "Options",
+            member: "ValidationMethod",
+            reason: "test fixture",
+        }];
+
+        let error = validate_read_contract(&resource, &model, &dispositions)
+            .expect_err("reused parent shape must not emit nested write-only markers twice");
+        let message = error.to_string();
+        assert!(message.contains("generated 2"), "{error:#}");
+        assert!(message.contains("expected exactly one"), "{error:#}");
+    }
+
+    #[test]
     fn nested_write_only_rejects_conflicting_top_level_dispositions() {
         let model = nested_write_only_fixture_model();
         let resource = provider_fixture_resource("test.NestedWriteOnly", "", &["Options"], vec![]);
