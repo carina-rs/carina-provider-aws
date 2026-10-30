@@ -66,7 +66,16 @@ impl AwsProvider {
     ) -> ProviderResult<TypedCreateCompletion> {
         let input = Ec2RouteCreateInput::decode(resource)?;
         let sent = input.sent();
-        let (destination_cidr, gateway_id, nat_gateway_id, route_table_id) = input.into_parts();
+        let crate::send_models_generated::Ec2RouteCreateParts {
+            destination_cidr_block: destination_cidr,
+            gateway_id,
+            nat_gateway_id,
+            route_table_id,
+        } = input.into_parts();
+        let destination_cidr = destination_cidr.into_inner();
+        let gateway_id = gateway_id.into_inner();
+        let nat_gateway_id = nat_gateway_id.into_inner();
+        let route_table_id = route_table_id.into_inner();
         let destination_cidr = destination_cidr.ok_or_else(|| {
             ProviderError::invalid_input("destination_cidr_block is required")
                 .for_resource(resource.id.clone())
@@ -116,7 +125,12 @@ impl AwsProvider {
         to: Resource,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
         let input = Ec2RouteUpdateInput::decode(&to)?;
-        let (gateway_id, nat_gateway_id) = input.into_parts();
+        let crate::send_models_generated::Ec2RouteUpdateParts {
+            gateway_id,
+            nat_gateway_id,
+        } = input.into_parts();
+        let gateway_id = gateway_id.into_inner();
+        let nat_gateway_id = nat_gateway_id.into_inner();
         let Some((route_table_id, destination_cidr)) = identifier.as_str().split_once('|') else {
             return Err(ProviderError::invalid_input(format!(
                 "Invalid route identifier: {}",

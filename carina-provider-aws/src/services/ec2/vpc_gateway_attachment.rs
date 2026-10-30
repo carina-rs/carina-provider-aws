@@ -139,7 +139,14 @@ impl AwsProvider {
     ) -> ProviderResult<TypedCreateCompletion> {
         let input = Ec2VpcGatewayAttachmentCreateInput::decode(resource)?;
         let sent = input.sent();
-        let (internet_gateway_id, vpc_id, vpn_gateway_id) = input.into_parts();
+        let crate::send_models_generated::Ec2VpcGatewayAttachmentCreateParts {
+            internet_gateway_id,
+            vpc_id,
+            vpn_gateway_id,
+        } = input.into_parts();
+        let internet_gateway_id = internet_gateway_id.into_inner();
+        let vpc_id = vpc_id.into_inner();
+        let vpn_gateway_id = vpn_gateway_id.into_inner();
 
         if let Some(igw_id) = internet_gateway_id {
             // Attach Internet Gateway
@@ -219,7 +226,7 @@ impl AwsProvider {
         to: &Resource<impl Sized>,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
         let input = Ec2VpcGatewayAttachmentUpdateInput::decode(to)?;
-        let () = input.into_parts();
+        let crate::send_models_generated::Ec2VpcGatewayAttachmentUpdateParts = input.into_parts();
         // VPC Gateway Attachment attributes are all create_only,
         // so updates should not occur. Read back the current state.
         Ok(self.read_ec2_vpc_gateway_attachment(&id, identifier).await)

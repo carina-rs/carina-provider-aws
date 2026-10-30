@@ -97,14 +97,21 @@ impl AwsProvider {
             Err(error) => return Err(attempt.untracked(error)),
         };
         let sent = input.sent();
-        let (
+        let crate::send_models_generated::LogsLogGroupCreateParts {
             deletion_protection_enabled,
             kms_key_id,
             log_group_class,
             log_group_name,
             retention_in_days,
             tags,
-        ) = input.into_parts();
+        } = input.into_parts();
+        let deletion_protection_enabled = deletion_protection_enabled.into_inner();
+        let kms_key_id = kms_key_id.into_inner();
+        let log_group_class = log_group_class.into_inner();
+        let log_group_name = log_group_name.into_inner();
+        let retention_in_days = retention_in_days.into_inner();
+        let tags = tags.into_inner();
+        let tags = crate::send_model::optional_tags_value(tags);
         let identifier = match crate::helpers::applied_identifier(
             &resource.id,
             "logs.CreateLogGroup",
@@ -186,7 +193,15 @@ impl AwsProvider {
         _schema: &ResourceSchema,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
         let input = LogsLogGroupUpdateInput::decode(&to)?;
-        let (deletion_protection_enabled, retention_in_days, tags) = input.into_parts();
+        let crate::send_models_generated::LogsLogGroupUpdateParts {
+            deletion_protection_enabled,
+            retention_in_days,
+            tags,
+        } = input.into_parts();
+        let deletion_protection_enabled = deletion_protection_enabled.into_inner();
+        let retention_in_days = retention_in_days.into_inner();
+        let tags = tags.into_inner();
+        let tags = crate::send_model::optional_tags_value(tags);
         // Update retention
         match retention_in_days {
             Some(days) => {

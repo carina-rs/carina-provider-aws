@@ -7,7 +7,7 @@ use crate::AwsProvider;
 use crate::aws_operation::ClientToken;
 use crate::error_helpers::api_error_with_meta;
 use crate::helpers::build_tag_specification_with_create_token;
-use crate::provider::{AwsCreateAttempt, Ec2TaggedResourceKind};
+use crate::provider::{AwsCreateAttempt, TaggedEc2Create};
 use crate::read_model::{empty_map_value, found_managed_read};
 use crate::read_models_generated::Ec2EipReadModelSupplement;
 use crate::send_models_generated::{Ec2EipCreateInput, Ec2EipUpdateInput};
@@ -67,7 +67,17 @@ impl AwsProvider {
             Err(error) => return Err(attempt.untracked(error)),
         };
         let sent = input.sent();
-        let (address, domain, public_ipv4_pool, tags) = input.into_parts();
+        let crate::send_models_generated::Ec2EipCreateParts {
+            address,
+            domain,
+            public_ipv4_pool,
+            tags,
+        } = input.into_parts();
+        let address = address.into_inner();
+        let domain = domain.into_inner();
+        let public_ipv4_pool = public_ipv4_pool.into_inner();
+        let tags = tags.into_inner();
+        let tags = crate::send_model::optional_tags_value(tags);
         let mut req = self.ec2_client.allocate_address().tag_specifications(
             build_tag_specification_with_create_token(
                 tags.as_ref(),
@@ -96,7 +106,7 @@ impl AwsProvider {
         self.finish_tagged_ec2_create(
             resource,
             attempt,
-            Ec2TaggedResourceKind::Address.create_context(client_token, sent),
+            TaggedEc2Create::Address.create_context(client_token, sent),
             result,
             |output| output.allocation_id().map(str::to_owned),
         )
@@ -113,7 +123,9 @@ impl AwsProvider {
         _schema: &ResourceSchema,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
         let input = Ec2EipUpdateInput::decode(&to)?;
-        let (tags,) = input.into_parts();
+        let crate::send_models_generated::Ec2EipUpdateParts { tags } = input.into_parts();
+        let tags = tags.into_inner();
+        let tags = crate::send_model::optional_tags_value(tags);
         self.apply_ec2_tags(
             &id,
             identifier.as_str(),

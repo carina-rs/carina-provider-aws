@@ -2838,7 +2838,10 @@ impl AwsProvider {
         to: Resource,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
         let input = crate::send_models_generated::Ec2InternetGatewayUpdateInput::decode(&to)?;
-        let (tags,) = input.into_parts();
+        let crate::send_models_generated::Ec2InternetGatewayUpdateParts { tags } =
+            input.into_parts();
+        let tags = tags.into_inner();
+        let tags = crate::send_model::optional_tags_value(tags);
         self.apply_ec2_tags(
             &id,
             identifier.as_str(),
@@ -2858,7 +2861,9 @@ impl AwsProvider {
         to: Resource,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
         let input = crate::send_models_generated::Ec2RouteTableUpdateInput::decode(&to)?;
-        let (tags,) = input.into_parts();
+        let crate::send_models_generated::Ec2RouteTableUpdateParts { tags } = input.into_parts();
+        let tags = tags.into_inner();
+        let tags = crate::send_model::optional_tags_value(tags);
         self.apply_ec2_tags(
             &id,
             identifier.as_str(),
@@ -2878,7 +2883,9 @@ impl AwsProvider {
         to: Resource,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
         let input = crate::send_models_generated::Ec2SecurityGroupUpdateInput::decode(&to)?;
-        let (tags,) = input.into_parts();
+        let crate::send_models_generated::Ec2SecurityGroupUpdateParts { tags } = input.into_parts();
+        let tags = tags.into_inner();
+        let tags = crate::send_model::optional_tags_value(tags);
         self.apply_ec2_tags(
             &id,
             identifier.as_str(),
@@ -2898,7 +2905,7 @@ impl AwsProvider {
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
         let input =
             crate::send_models_generated::OrganizationsOrganizationUpdateInput::decode(&to)?;
-        let () = input.into_parts();
+        let crate::send_models_generated::OrganizationsOrganizationUpdateParts = input.into_parts();
         Ok(self.read_organizations_organization(&id, identifier).await)
     }
 

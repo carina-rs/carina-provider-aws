@@ -70,7 +70,10 @@ impl AwsProvider {
     ) -> ProviderResult<TypedCreateCompletion> {
         let input = S3BucketPolicyCreateInput::decode(resource)?;
         let sent = input.sent();
-        let (bucket, policy) = input.into_parts();
+        let crate::send_models_generated::S3BucketPolicyCreateParts { bucket, policy } =
+            input.into_parts();
+        let bucket = bucket.into_inner();
+        let policy = policy.into_inner();
         let identifier =
             crate::helpers::applied_identifier(&resource.id, "s3.PutBucketPolicy", bucket)?;
         let outcome = self
@@ -95,7 +98,9 @@ impl AwsProvider {
         _from: &State,
         to: Resource,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
-        let (policy,) = S3BucketPolicyUpdateInput::decode(&to)?.into_parts();
+        let crate::send_models_generated::S3BucketPolicyUpdateParts { policy } =
+            S3BucketPolicyUpdateInput::decode(&to)?.into_parts();
+        let policy = policy.into_inner();
         self.put_s3_bucket_policy(&id, identifier, &policy).await
     }
 

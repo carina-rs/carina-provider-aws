@@ -83,7 +83,14 @@ impl AwsProvider {
     ) -> ProviderResult<TypedCreateCompletion> {
         let input = S3BucketObjectLockConfigurationCreateInput::decode(resource)?;
         let sent = input.sent();
-        let (bucket, object_lock_enabled, rule) = input.into_parts();
+        let crate::send_models_generated::S3BucketObjectLockConfigurationCreateParts {
+            bucket,
+            object_lock_enabled,
+            rule,
+        } = input.into_parts();
+        let bucket = bucket.into_inner();
+        let object_lock_enabled = object_lock_enabled.into_inner();
+        let rule = rule.into_inner();
         let identifier = crate::helpers::applied_identifier(
             &resource.id,
             "s3.PutObjectLockConfiguration",
@@ -173,7 +180,12 @@ impl AwsProvider {
         schema: &ResourceSchema,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
         let input = S3BucketObjectLockConfigurationUpdateInput::decode(&to)?;
-        let (object_lock_enabled, rule) = input.into_parts();
+        let crate::send_models_generated::S3BucketObjectLockConfigurationUpdateParts {
+            object_lock_enabled,
+            rule,
+        } = input.into_parts();
+        let object_lock_enabled = object_lock_enabled.into_inner();
+        let rule = rule.into_inner();
         self.put_s3_bucket_object_lock_configuration(
             &id,
             identifier,

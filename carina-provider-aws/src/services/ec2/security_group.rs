@@ -6,7 +6,7 @@ use crate::AwsProvider;
 use crate::aws_operation::ClientToken;
 use crate::error_helpers::api_error_with_meta;
 use crate::helpers::{RetryPolicy, build_tag_specification_with_create_token, retry_aws_operation};
-use crate::provider::{AwsCreateAttempt, Ec2TaggedResourceKind};
+use crate::provider::{AwsCreateAttempt, TaggedEc2Create};
 use crate::read_model::{empty_map_value, found_managed_read};
 use crate::read_models_generated::Ec2SecurityGroupReadModelSupplement;
 use crate::send_models_generated::Ec2SecurityGroupCreateInput;
@@ -67,7 +67,17 @@ impl AwsProvider {
             Err(error) => return Err(attempt.untracked(error)),
         };
         let sent = input.sent();
-        let (description, group_name, tags, vpc_id) = input.into_parts();
+        let crate::send_models_generated::Ec2SecurityGroupCreateParts {
+            description,
+            group_name,
+            tags,
+            vpc_id,
+        } = input.into_parts();
+        let description = description.into_inner();
+        let group_name = group_name.into_inner();
+        let tags = tags.into_inner();
+        let tags = crate::send_model::optional_tags_value(tags);
+        let vpc_id = vpc_id.into_inner();
 
         // Create Security Group
         let ec2 = &self.ec2_client;
@@ -95,7 +105,7 @@ impl AwsProvider {
         self.finish_tagged_ec2_create(
             resource,
             attempt,
-            Ec2TaggedResourceKind::SecurityGroup.create_context(client_token, sent),
+            TaggedEc2Create::SecurityGroup.create_context(client_token, sent),
             result,
             |output| output.group_id().map(str::to_owned),
         )

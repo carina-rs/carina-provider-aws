@@ -87,13 +87,18 @@ impl AwsProvider {
     ) -> ProviderResult<TypedCreateCompletion> {
         let input = S3BucketNotificationConfigurationCreateInput::decode(resource)?;
         let sent = input.sent();
-        let (
+        let crate::send_models_generated::S3BucketNotificationConfigurationCreateParts {
             bucket,
             event_bridge_configuration,
             lambda_function_configurations,
             queue_configurations,
             topic_configurations,
-        ) = input.into_parts();
+        } = input.into_parts();
+        let bucket = bucket.into_inner();
+        let event_bridge_configuration = event_bridge_configuration.into_inner();
+        let lambda_function_configurations = lambda_function_configurations.into_inner();
+        let queue_configurations = queue_configurations.into_inner();
+        let topic_configurations = topic_configurations.into_inner();
         let identifier = crate::helpers::applied_identifier(
             &resource.id,
             "s3.PutBucketNotificationConfiguration",
@@ -128,12 +133,16 @@ impl AwsProvider {
         to: Resource,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
         let input = S3BucketNotificationConfigurationUpdateInput::decode(&to)?;
-        let (
+        let crate::send_models_generated::S3BucketNotificationConfigurationUpdateParts {
             event_bridge_configuration,
             lambda_function_configurations,
             queue_configurations,
             topic_configurations,
-        ) = input.into_parts();
+        } = input.into_parts();
+        let event_bridge_configuration = event_bridge_configuration.into_inner();
+        let lambda_function_configurations = lambda_function_configurations.into_inner();
+        let queue_configurations = queue_configurations.into_inner();
+        let topic_configurations = topic_configurations.into_inner();
         self.put_s3_bucket_notification(
             &id,
             identifier,

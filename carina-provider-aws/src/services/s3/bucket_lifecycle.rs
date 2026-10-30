@@ -76,7 +76,12 @@ impl AwsProvider {
     ) -> ProviderResult<TypedCreateCompletion> {
         let input = S3BucketLifecycleConfigurationCreateInput::decode(resource)?;
         let sent = input.sent();
-        let (bucket, rules) = input.into_parts();
+        let crate::send_models_generated::S3BucketLifecycleConfigurationCreateParts {
+            bucket,
+            rules,
+        } = input.into_parts();
+        let bucket = bucket.into_inner();
+        let rules = rules.into_inner();
         let identifier = crate::helpers::applied_identifier(
             &resource.id,
             "s3.PutBucketLifecycleConfiguration",
@@ -105,7 +110,9 @@ impl AwsProvider {
         schema: &ResourceSchema,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
         let input = S3BucketLifecycleConfigurationUpdateInput::decode(&to)?;
-        let (rules,) = input.into_parts();
+        let crate::send_models_generated::S3BucketLifecycleConfigurationUpdateParts { rules } =
+            input.into_parts();
+        let rules = rules.into_inner();
         self.put_s3_bucket_lifecycle(&id, identifier, &rules, schema)
             .await
     }

@@ -180,7 +180,15 @@ impl AwsProvider {
             Err(error) => return Err(attempt.untracked(error)),
         };
         let sent = input.sent();
-        let (bucket_name, bucket_namespace, tags) = input.into_parts();
+        let crate::send_models_generated::S3BucketCreateParts {
+            bucket: bucket_name,
+            bucket_namespace,
+            tags,
+        } = input.into_parts();
+        let bucket_name = bucket_name.into_inner();
+        let bucket_namespace = bucket_namespace.into_inner();
+        let tags = tags.into_inner();
+        let tags = crate::send_model::optional_tags_value(tags);
         let identifier = match crate::helpers::applied_identifier(
             &resource.id,
             "s3.CreateBucket",
@@ -256,7 +264,9 @@ impl AwsProvider {
         let bucket_name = identifier.as_str();
 
         let input = S3BucketUpdateInput::decode(&to)?;
-        let (tags,) = input.into_parts();
+        let crate::send_models_generated::S3BucketUpdateParts { tags } = input.into_parts();
+        let tags = tags.into_inner();
+        let tags = crate::send_model::optional_tags_value(tags);
 
         // Update tags: if tags were removed entirely, delete all tags
         if from.attributes.contains_key("tags") && tags.is_none() {

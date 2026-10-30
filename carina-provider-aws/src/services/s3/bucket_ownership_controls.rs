@@ -71,7 +71,12 @@ impl AwsProvider {
     ) -> ProviderResult<TypedCreateCompletion> {
         let input = S3BucketOwnershipControlsCreateInput::decode(resource)?;
         let sent = input.sent();
-        let (bucket, object_ownership) = input.into_parts();
+        let crate::send_models_generated::S3BucketOwnershipControlsCreateParts {
+            bucket,
+            object_ownership,
+        } = input.into_parts();
+        let bucket = bucket.into_inner();
+        let object_ownership = object_ownership.into_inner();
         let identifier = crate::helpers::applied_identifier(
             &resource.id,
             "s3.PutBucketOwnershipControls",
@@ -99,7 +104,9 @@ impl AwsProvider {
         to: Resource,
         _schema: &ResourceSchema,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
-        let (object_ownership,) = S3BucketOwnershipControlsUpdateInput::decode(&to)?.into_parts();
+        let crate::send_models_generated::S3BucketOwnershipControlsUpdateParts { object_ownership } =
+            S3BucketOwnershipControlsUpdateInput::decode(&to)?.into_parts();
+        let object_ownership = object_ownership.into_inner();
         self.put_s3_bucket_ownership_controls(&id, identifier, object_ownership)
             .await
     }

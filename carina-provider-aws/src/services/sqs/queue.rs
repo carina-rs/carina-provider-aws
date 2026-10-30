@@ -679,7 +679,7 @@ impl AwsProvider {
         validate_sqs_queue_inputs(resource)?;
         let input = SqsQueueCreateInput::decode(resource)?;
         let sent = input.sent();
-        let (
+        let crate::send_models_generated::SqsQueueCreateParts {
             content_based_deduplication,
             deduplication_scope,
             delay_seconds,
@@ -697,7 +697,25 @@ impl AwsProvider {
             sqs_managed_sse_enabled,
             tags,
             visibility_timeout,
-        ) = input.into_parts();
+        } = input.into_parts();
+        let content_based_deduplication = content_based_deduplication.into_inner();
+        let deduplication_scope = deduplication_scope.into_inner();
+        let delay_seconds = delay_seconds.into_inner();
+        let fifo_queue = fifo_queue.into_inner();
+        let fifo_throughput_limit = fifo_throughput_limit.into_inner();
+        let kms_data_key_reuse_period_seconds = kms_data_key_reuse_period_seconds.into_inner();
+        let kms_master_key_id = kms_master_key_id.into_inner();
+        let maximum_message_size = maximum_message_size.into_inner();
+        let message_retention_period = message_retention_period.into_inner();
+        let policy = policy.into_inner();
+        let queue_name = queue_name.into_inner();
+        let receive_message_wait_time_seconds = receive_message_wait_time_seconds.into_inner();
+        let redrive_allow_policy = redrive_allow_policy.into_inner();
+        let redrive_policy = redrive_policy.into_inner();
+        let sqs_managed_sse_enabled = sqs_managed_sse_enabled.into_inner();
+        let tags = tags.into_inner();
+        let tags = crate::send_model::optional_tags_value(tags);
+        let visibility_timeout = visibility_timeout.into_inner();
         let fifo = fifo_queue.unwrap_or(false);
         let desired = HashMap::from([
             (
@@ -816,7 +834,7 @@ impl AwsProvider {
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
         validate_sqs_queue_inputs(&to)?;
         let input = SqsQueueUpdateInput::decode(&to)?;
-        let (
+        let crate::send_models_generated::SqsQueueUpdateParts {
             content_based_deduplication,
             delay_seconds,
             kms_data_key_reuse_period_seconds,
@@ -830,7 +848,21 @@ impl AwsProvider {
             sqs_managed_sse_enabled,
             tags,
             visibility_timeout,
-        ) = input.into_parts();
+        } = input.into_parts();
+        let content_based_deduplication = content_based_deduplication.into_inner();
+        let delay_seconds = delay_seconds.into_inner();
+        let kms_data_key_reuse_period_seconds = kms_data_key_reuse_period_seconds.into_inner();
+        let kms_master_key_id = kms_master_key_id.into_inner();
+        let maximum_message_size = maximum_message_size.into_inner();
+        let message_retention_period = message_retention_period.into_inner();
+        let policy = policy.into_inner();
+        let receive_message_wait_time_seconds = receive_message_wait_time_seconds.into_inner();
+        let redrive_allow_policy = redrive_allow_policy.into_inner();
+        let redrive_policy = redrive_policy.into_inner();
+        let sqs_managed_sse_enabled = sqs_managed_sse_enabled.into_inner();
+        let tags = tags.into_inner();
+        let tags = crate::send_model::optional_tags_value(tags);
+        let visibility_timeout = visibility_timeout.into_inner();
         let desired = HashMap::from([
             (
                 "content_based_deduplication",

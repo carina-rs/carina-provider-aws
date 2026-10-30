@@ -74,7 +74,12 @@ impl AwsProvider {
     ) -> ProviderResult<TypedCreateCompletion> {
         let input = S3BucketServerSideEncryptionConfigurationCreateInput::decode(resource)?;
         let sent = input.sent();
-        let (bucket, rules) = input.into_parts();
+        let crate::send_models_generated::S3BucketServerSideEncryptionConfigurationCreateParts {
+            bucket,
+            rules,
+        } = input.into_parts();
+        let bucket = bucket.into_inner();
+        let rules = rules.into_inner();
         let identifier =
             crate::helpers::applied_identifier(&resource.id, "s3.PutBucketEncryption", bucket)?;
         let outcome = self
@@ -99,8 +104,10 @@ impl AwsProvider {
         to: Resource,
         schema: &ResourceSchema,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
-        let (rules,) =
-            S3BucketServerSideEncryptionConfigurationUpdateInput::decode(&to)?.into_parts();
+        let crate::send_models_generated::S3BucketServerSideEncryptionConfigurationUpdateParts {
+            rules,
+        } = S3BucketServerSideEncryptionConfigurationUpdateInput::decode(&to)?.into_parts();
+        let rules = rules.into_inner();
         self.put_s3_bucket_encryption(&id, identifier, &rules, schema)
             .await
     }

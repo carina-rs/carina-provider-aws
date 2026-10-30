@@ -292,6 +292,8 @@ struct AttrInfo {
     read_reason: Option<String>,
     /// Whether this writable attribute is part of the generated send input.
     is_sent: bool,
+    /// Which create phase carries this value when it is sent.
+    send_via: Option<resource_defs::SendVia>,
     /// Reason attached to a deliberate `NotSent` classification.
     send_reason: Option<String>,
     /// Rust value shape used by generated create/update inputs.
@@ -314,6 +316,8 @@ struct AttrInfo {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SendFieldType {
     String,
+    StringList,
+    Tags,
     Enum,
     Bool,
     Int,
@@ -327,6 +331,13 @@ fn send_field_type(
     type_code: &str,
     enum_info: Option<&EnumInfo>,
 ) -> SendFieldType {
+    if type_code == "AttributeType::list(AttributeType::string())"
+        || type_code == "AttributeType::unordered_list(AttributeType::string())"
+        || (matches!(model.get_shape(target), Some(Shape::List(list))
+            if matches!(model.shape_kind(&list.member.target), Some(ShapeKind::String))))
+    {
+        return SendFieldType::StringList;
+    }
     // Classify containers before looking for scalar helper names: generated
     // list/struct expressions can themselves contain an enum helper (for
     // example AvailabilityZoneAddresses contains availability_zone()).
@@ -1216,6 +1227,7 @@ fn collect_resource_attributes_unvalidated(
             },
             read_reason: None,
             is_sent: false,
+            send_via: None,
             send_reason: None,
             send_type,
             is_plain_string,
@@ -1268,6 +1280,7 @@ fn collect_resource_attributes_unvalidated(
             },
             read_reason: None,
             is_sent: false,
+            send_via: None,
             send_reason: None,
             send_type,
             is_plain_string: false,
@@ -1314,6 +1327,7 @@ fn collect_resource_attributes_unvalidated(
             read_presence: resource_defs::ReadPresence::Optional,
             read_reason: None,
             is_sent: false,
+            send_via: None,
             send_reason: None,
             send_type,
             is_plain_string,
@@ -1374,16 +1388,24 @@ fn validate_send_contract(
     dispositions: &[resource_defs::SendDisposition],
 ) -> Result<()> {
     let mut collected = collect_resource_attributes_unvalidated(res, model)?;
-    apply_send_contract(res, &mut collected.attrs, dispositions)
+    apply_send_contract(res, &mut collected.attrs, dispositions).map(|_| ())
+}
+
+#[derive(Debug, Default, PartialEq, Eq)]
+struct AppliedSendContract {
+    /// Synthetic tags are emitted outside `AttrInfo`; retain their deliberate
+    /// omission reason here so it is not lost merely because tags are special.
+    tags_not_sent_reason: Option<String>,
 }
 
 fn apply_send_contract(
     res: &ResourceDef,
     attrs: &mut [AttrInfo],
     dispositions: &[resource_defs::SendDisposition],
-) -> Result<()> {
+) -> Result<AppliedSendContract> {
     use resource_defs::SendDisposition;
 
+    let mut applied = AppliedSendContract::default();
     let mut classified = HashSet::new();
     for disposition in dispositions {
         let field = disposition.field();
@@ -1396,30 +1418,17 @@ fn apply_send_contract(
             );
         }
 
-        if normalized == "tags" && res.has_tags {
-            if let SendDisposition::NotSent { reason, .. } = disposition
-                && reason.trim().is_empty()
-            {
-                anyhow::bail!(
-                    "{} NotSent attribute {} requires a non-empty reason",
-                    res.name,
-                    field
-                );
-            }
-            continue;
-        }
-
-        let Some(attr) = attrs
+        let attr = attrs
             .iter_mut()
-            .find(|attr| attr.provider_name.to_snake_case() == normalized)
-        else {
+            .find(|attr| attr.provider_name.to_snake_case() == normalized);
+        if attr.is_none() && !(normalized == "tags" && res.has_tags) {
             anyhow::bail!(
                 "{} send disposition names unknown schema attribute {}",
                 res.name,
                 field
             );
-        };
-        if attr.is_read_only {
+        }
+        if attr.as_ref().is_some_and(|attr| attr.is_read_only) {
             anyhow::bail!(
                 "{} send disposition names provider-populated/read-only attribute {}",
                 res.name,
@@ -1428,8 +1437,11 @@ fn apply_send_contract(
         }
 
         match disposition {
-            SendDisposition::Sent { .. } => {
-                attr.is_sent = true;
+            SendDisposition::Sent { via, .. } => {
+                if let Some(attr) = attr {
+                    attr.is_sent = true;
+                    attr.send_via = Some(*via);
+                }
             }
             SendDisposition::NotSent { reason, .. } => {
                 if reason.trim().is_empty() {
@@ -1439,7 +1451,12 @@ fn apply_send_contract(
                         field
                     );
                 }
-                attr.send_reason = Some((*reason).to_string());
+                if let Some(attr) = attr {
+                    attr.send_reason = Some((*reason).to_string());
+                } else {
+                    debug_assert_eq!(normalized, "tags");
+                    applied.tags_not_sent_reason = Some((*reason).to_string());
+                }
             }
         }
     }
@@ -1463,7 +1480,7 @@ fn apply_send_contract(
         );
     }
 
-    Ok(())
+    Ok(applied)
 }
 
 #[cfg(test)]
@@ -1627,10 +1644,12 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
     // producing the typed send models. Inline `com.amazonaws.test` fixtures
     // exercise schema rendering in isolation and validate send classification
     // explicitly in the send-contract tests below.
-    if res.service_namespace != "com.amazonaws.test" {
+    let applied_send_contract = if res.service_namespace != "com.amazonaws.test" {
         let send_dispositions = res.send_dispositions();
-        apply_send_contract(res, &mut attrs, &send_dispositions)?;
-    }
+        Some(apply_send_contract(res, &mut attrs, &send_dispositions)?)
+    } else {
+        None
+    };
     let ns = res.service_namespace;
     let is_data_source = res.create_op.is_empty();
     let namespace = format!("aws.{}", res.name);
@@ -1861,6 +1880,15 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
 
     // Tags attribute
     if res.has_tags {
+        if let Some(reason) = applied_send_contract
+            .as_ref()
+            .and_then(|contract| contract.tags_not_sent_reason.as_deref())
+        {
+            code.push_str(&format!(
+                "        // Send contract: {}\n",
+                reason.replace('\n', " ")
+            ));
+        }
         code.push_str(
             "\x20       .attribute(\n\
              \x20           AttributeSchema::optional(\"tags\", tags_type())\n\
@@ -3011,6 +3039,7 @@ fn generate_provider_code(
         }
         let read_method = format!("read_{}", module_name(res.name));
         let update_input = send_input_type_name(res.name, "Update");
+        let update_parts = send_parts_type_name(res.name, "Update");
 
         if res.has_tags {
             // Tag-enabled noop update: apply tags then read back
@@ -3024,12 +3053,14 @@ fn generate_provider_code(
                  \x20       to: Resource,\n\
                  \x20   ) -> ProviderResult<ProviderResult<ReadOutcome>> {{\n\
                  \x20       let input = crate::send_models_generated::{}::decode(&to)?;\n\
-                 \x20       let (tags,) = input.into_parts();\n\
+                 \x20       let crate::send_models_generated::{} {{ tags }} = input.into_parts();\n\
+                 \x20       let tags = tags.into_inner();\n\
+                 \x20       let tags = crate::send_model::optional_tags_value(tags);\n\
                  \x20       self.apply_ec2_tags(&id, identifier.as_str(), tags.as_ref(), Some(&from.attributes))\n\
                  \x20           .await?;\n\
                  \x20       Ok(self.{}(&id, identifier).await)\n\
                  \x20   }}\n\n",
-                res.name, method_name, update_input, read_method,
+                res.name, method_name, update_input, update_parts, read_method,
             ));
         } else {
             code.push_str(&format!(
@@ -3041,10 +3072,10 @@ fn generate_provider_code(
                  \x20       to: Resource,\n\
                  \x20   ) -> ProviderResult<ProviderResult<ReadOutcome>> {{\n\
                  \x20       let input = crate::send_models_generated::{}::decode(&to)?;\n\
-                 \x20       let () = input.into_parts();\n\
+                 \x20       let crate::send_models_generated::{} = input.into_parts();\n\
                  \x20       Ok(self.{}(&id, identifier).await)\n\
                  \x20   }}\n\n",
-                res.name, method_name, update_input, read_method,
+                res.name, method_name, update_input, update_parts, read_method,
             ));
         }
     }
@@ -3763,6 +3794,7 @@ struct SendInputField {
     snake_name: String,
     provider_name: String,
     capture_names: &'static [&'static str],
+    via: resource_defs::SendVia,
     is_required: bool,
     is_create_only: bool,
     send_type: SendFieldType,
@@ -3778,9 +3810,15 @@ fn send_input_type_name(resource_name: &str, operation: &str) -> String {
     )
 }
 
+fn send_parts_type_name(resource_name: &str, operation: &str) -> String {
+    send_input_type_name(resource_name, operation).replace("Input", "Parts")
+}
+
 fn send_field_rust_type(field: &SendInputField) -> String {
     let inner = match field.send_type {
         SendFieldType::String | SendFieldType::Enum => "String",
+        SendFieldType::StringList => "crate::send_model::StringList",
+        SendFieldType::Tags => "crate::send_model::Tags",
         SendFieldType::Bool => "bool",
         SendFieldType::Int => "i64",
         SendFieldType::Float => "f64",
@@ -3801,6 +3839,8 @@ fn send_decode_expression(field: &SendInputField) -> String {
     };
     let kind = match field.send_type {
         SendFieldType::String => "string",
+        SendFieldType::StringList => "string_list",
+        SendFieldType::Tags => "tags",
         SendFieldType::Enum => "enum",
         SendFieldType::Bool => "bool",
         SendFieldType::Int => "int",
@@ -3825,6 +3865,7 @@ fn emit_send_input(
     fields: &[SendInputField],
 ) {
     let type_name = send_input_type_name(res.name, operation);
+    let parts_name = send_parts_type_name(res.name, operation);
     let is_create = operation == "Create";
     let (service, resource) = split_service_resource(res.name);
     let resource_module = pascal_to_snake(resource);
@@ -3841,6 +3882,20 @@ fn emit_send_input(
         for field in fields {
             code.push_str(&format!(
                 "    {}: {},\n",
+                escape_rust_keyword(&field.snake_name),
+                send_field_rust_type(field)
+            ));
+        }
+        code.push_str("}\n\n");
+    }
+
+    if fields.is_empty() {
+        code.push_str(&format!("pub(crate) struct {parts_name};\n\n"));
+    } else {
+        code.push_str(&format!("pub(crate) struct {parts_name} {{\n"));
+        for field in fields {
+            code.push_str(&format!(
+                "    pub(crate) {}: crate::send_model::Sent<{}>,\n",
                 escape_rust_keyword(&field.snake_name),
                 send_field_rust_type(field)
             ));
@@ -3873,9 +3928,12 @@ fn emit_send_input(
     code.push_str("    }\n\n");
 
     if is_create {
-        code.push_str("    pub(crate) fn sent(&self) -> Sent {\n");
+        code.push_str("    pub(crate) fn sent(&self) -> CreateSent {\n");
         code.push_str("        let mut sent = BTreeSet::new();\n");
         for field in fields {
+            if field.via != resource_defs::SendVia::CreateRequest {
+                continue;
+            }
             if field.is_required {
                 code.push_str(&format!(
                     "        sent.insert(\"{}\".to_string());\n",
@@ -3889,25 +3947,16 @@ fn emit_send_input(
                 ));
             }
         }
-        code.push_str("        Sent::only(sent)\n");
+        code.push_str("        CreateSent::only(sent)\n");
         code.push_str("    }\n\n");
     }
 
-    if fields.is_empty() {
-        code.push_str("    pub(crate) fn into_parts(self) {\n");
-    } else {
-        let tuple_types = fields.iter().map(send_field_rust_type).collect::<Vec<_>>();
-        let return_type = format!("({},)", tuple_types.join(", "));
-        // The deliberately exhaustive tuple can be large for broad AWS input
-        // shapes. Keeping it structural is what makes unused bindings visible
-        // to rustc, so suppress only Clippy's cosmetic complexity warning.
-        code.push_str("    #[allow(clippy::type_complexity)]\n");
-        code.push_str(&format!(
-            "    pub(crate) fn into_parts(self) -> {return_type} {{\n"
-        ));
-    }
+    code.push_str(&format!(
+        "    pub(crate) fn into_parts(self) -> {parts_name} {{\n"
+    ));
     if fields.is_empty() {
         code.push_str("        let Self = self;\n");
+        code.push_str(&format!("        {parts_name}\n"));
     } else {
         code.push_str("        let Self {\n");
         for field in fields {
@@ -3917,14 +3966,17 @@ fn emit_send_input(
             ));
         }
         code.push_str("        } = self;\n");
-        code.push_str("        (\n");
+        code.push_str(&format!("        {parts_name} {{\n"));
         for field in fields {
+            let ident = escape_rust_keyword(&field.snake_name);
             code.push_str(&format!(
-                "            {},\n",
-                escape_rust_keyword(&field.snake_name)
+                "            {ident}: crate::send_model::Sent::new(\"{}.{}.{}\", {ident}),\n",
+                res.name,
+                operation.to_lowercase(),
+                field.snake_name,
             ));
         }
-        code.push_str("        )\n");
+        code.push_str("        }\n");
     }
     code.push_str("    }\n");
     code.push_str("}\n\n");
@@ -3940,7 +3992,7 @@ fn generate_send_models_code(
          //! DO NOT EDIT MANUALLY - regenerate with:\n\
          //!   ./scripts/generate-provider.sh\n\n\
          use std::collections::BTreeSet;\n\n\
-         use carina_core::provider::{ProviderResult, Sent};\n\
+         use carina_core::provider::{ProviderResult, Sent as CreateSent};\n\
          use carina_core::resource::{Resource, Value};\n\n",
     );
     let mut capture_contracts = Vec::new();
@@ -3966,12 +4018,11 @@ fn generate_send_models_code(
                 capture_names: dispositions
                     .iter()
                     .find(|disposition| {
-                        disposition
-                            .field()
-                            .eq_ignore_ascii_case(&attr.provider_name)
+                        disposition.field().to_snake_case() == attr.provider_name.to_snake_case()
                     })
                     .map(|disposition| disposition.capture_names())
                     .unwrap_or_default(),
+                via: attr.send_via.expect("Sent attributes have a send phase"),
                 is_required: attr.is_required,
                 is_create_only: attr.is_create_only,
                 send_type: attr.send_type,
@@ -3979,21 +4030,22 @@ fn generate_send_models_code(
             .collect::<Vec<_>>();
         let tags_sent = res.has_tags
             && dispositions.iter().any(|disposition| {
-                disposition.field().eq_ignore_ascii_case("tags")
+                disposition.field().to_snake_case() == "tags"
                     && matches!(disposition, resource_defs::SendDisposition::Sent { .. })
             });
         if tags_sent {
+            let disposition = dispositions
+                .iter()
+                .find(|disposition| disposition.field().to_snake_case() == "tags")
+                .expect("classified tags");
             create_fields.push(SendInputField {
                 snake_name: "tags".to_string(),
                 provider_name: "Tags".to_string(),
-                capture_names: dispositions
-                    .iter()
-                    .find(|disposition| disposition.field().eq_ignore_ascii_case("tags"))
-                    .map(|disposition| disposition.capture_names())
-                    .unwrap_or_default(),
+                capture_names: disposition.capture_names(),
+                via: disposition.via().expect("Sent tags have a send phase"),
                 is_required: false,
                 is_create_only: false,
-                send_type: SendFieldType::Value,
+                send_type: SendFieldType::Tags,
             });
         }
         create_fields.sort_by(|left, right| left.snake_name.cmp(&right.snake_name));
@@ -4005,25 +4057,29 @@ fn generate_send_models_code(
 
         emit_send_input(&mut code, res, "Create", &create_fields);
         emit_send_input(&mut code, res, "Update", &update_fields);
-        let attributes = create_fields
-            .iter()
-            .map(|field| {
-                let capture_names = field
-                    .capture_names
-                    .iter()
-                    .map(|name| format!("\"{name}\""))
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                format!(
-                    "SendCaptureAttribute {{ name: \"{}\", provider_name: \"{}\", capture_names: &[{}] }}",
-                    field.snake_name, field.provider_name, capture_names
-                )
-            })
-            .collect::<Vec<_>>()
-            .join(", ");
+        let render_attributes = |fields: &[SendInputField]| {
+            fields
+                .iter()
+                .map(|field| {
+                    let capture_names = field
+                        .capture_names
+                        .iter()
+                        .map(|name| format!("\"{name}\""))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    format!(
+                        "SendCaptureAttribute {{ name: \"{}\", provider_name: \"{}\", capture_names: &[{}] }}",
+                        field.snake_name, field.provider_name, capture_names
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+        let create_attributes = render_attributes(&create_fields);
+        let update_attributes = render_attributes(&update_fields);
         capture_contracts.push(format!(
-            "    SendCaptureContract {{ resource_type: \"{}\", attributes: &[{}] }},\n",
-            res.name, attributes
+            "    SendCaptureContract {{ resource_type: \"{}\", create_attributes: &[{}], update_attributes: &[{}] }},\n",
+            res.name, create_attributes, update_attributes
         ));
     }
 
@@ -4037,7 +4093,8 @@ fn generate_send_models_code(
          #[cfg(test)]\n\
          pub(crate) struct SendCaptureContract {\n\
              pub(crate) resource_type: &'static str,\n\
-             pub(crate) attributes: &'static [SendCaptureAttribute],\n\
+             pub(crate) create_attributes: &'static [SendCaptureAttribute],\n\
+             pub(crate) update_attributes: &'static [SendCaptureAttribute],\n\
          }\n\n\
          #[cfg(test)]\n\
          pub(crate) fn capture_contracts() -> &'static [SendCaptureContract] {\n\
@@ -6915,6 +6972,41 @@ mod tests {
     }
 
     #[test]
+    fn synthetic_tags_not_sent_reason_is_validated_and_retained() {
+        let model = string_fixture_model(&[("Description", false)], &[("Description", false)]);
+        let mut resource =
+            provider_fixture_resource("test.TagsSendFixture", "", &["Description"], vec![]);
+        resource.has_tags = true;
+        let dispositions = [
+            resource_defs::SendDisposition::sent("Description"),
+            resource_defs::SendDisposition::NotSent {
+                field: "Tags",
+                reason: "tags are resolved by the fixture's external tag owner",
+            },
+        ];
+        let mut collected =
+            collect_resource_attributes_unvalidated(&resource, &model).expect("fixture attributes");
+        let applied = apply_send_contract(&resource, &mut collected.attrs, &dispositions)
+            .expect("classified synthetic tags");
+        assert_eq!(
+            applied.tags_not_sent_reason.as_deref(),
+            Some("tags are resolved by the fixture's external tag owner")
+        );
+
+        let empty_reason = [
+            resource_defs::SendDisposition::sent("Description"),
+            resource_defs::SendDisposition::NotSent {
+                field: "Tags",
+                reason: "",
+            },
+        ];
+        let error = validate_send_contract(&resource, &model, &empty_reason)
+            .expect_err("synthetic tags still require a NotSent reason");
+        assert!(error.to_string().contains("Tags"), "{error:#}");
+        assert!(error.to_string().contains("reason"), "{error:#}");
+    }
+
+    #[test]
     fn generated_send_inputs_exclude_not_sent_and_create_only_from_update() {
         let model = string_fixture_model(
             &[("Description", false), ("Name", true), ("Path", false)],
@@ -6931,7 +7023,7 @@ mod tests {
             fields: resource_defs::FieldLayout::Flat(vec!["Description"]),
         });
         let dispositions = [
-            resource_defs::SendDisposition::sent("Description"),
+            resource_defs::SendDisposition::follow_up_mapped("description", &["WireDescription"]),
             resource_defs::SendDisposition::sent("Name"),
             resource_defs::SendDisposition::NotSent {
                 field: "Path",
@@ -6955,6 +7047,18 @@ mod tests {
         assert!(create.contains("description"), "{create}");
         assert!(create.contains("name"), "{create}");
         assert!(!create.contains("path"), "{create}");
+        let create_sent = create
+            .split("pub(crate) fn sent(&self)")
+            .nth(1)
+            .expect("create sent method")
+            .split("pub(crate) fn into_parts")
+            .next()
+            .expect("create sent body");
+        assert!(
+            !create_sent.contains("sent.insert(\"description\"")
+                && create_sent.contains("sent.insert(\"name\""),
+            "follow-up fields must stay out of the protocol create-request Sent set: {create_sent}"
+        );
 
         let update = code
             .split("pub(crate) struct TestTypedSendFixtureUpdateInput")
@@ -6966,6 +7070,15 @@ mod tests {
         assert!(update.contains("description"), "{update}");
         assert!(!update.contains("name"), "{update}");
         assert!(!update.contains("path"), "{update}");
+        assert!(
+            code.contains("pub(crate) struct TestTypedSendFixtureCreateParts {")
+                && code.contains("pub(crate) description: crate::send_model::Sent<Option<String>>"),
+            "generated parts must be named and guarded: {code}"
+        );
+        assert!(
+            code.contains("capture_names: &[\"WireDescription\"]"),
+            "capture lookup must use the same snake_case normalization as classification: {code}"
+        );
     }
 
     #[test]
@@ -7118,6 +7231,7 @@ mod tests {
             read_presence: resource_defs::ReadPresence::Optional,
             read_reason: None,
             is_sent: false,
+            send_via: None,
             send_reason: None,
             send_type: SendFieldType::Value,
             is_plain_string,
@@ -8078,14 +8192,17 @@ mod tests {
                 .expect("generate certificate markdown");
 
         for heading in [
-            "### options.export (Export)",
             "### domain_validation_options.resource_record.type (Type)",
-            "### options",
+            "### `options`",
             "### domain_validation_options",
             "### renewal_summary.domain_validation_options",
         ] {
             assert!(markdown.contains(heading), "missing {heading}:\n{markdown}");
         }
+        assert!(
+            !markdown.contains("### options.validation_method"),
+            "the pinned ACM SDK cannot send the nested validation method:\n{markdown}"
+        );
         assert!(!markdown.contains("### CertificateOptions"), "{markdown}");
         assert!(!markdown.contains("### DomainValidation\n"), "{markdown}");
     }

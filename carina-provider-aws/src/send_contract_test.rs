@@ -10,8 +10,10 @@ use std::str;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use carina_core::provider::{AppliedIdentifier, Observation, ProviderError, Sent};
-use carina_core::resource::{ConcreteValue, Resource, Value};
+use carina_core::provider::{
+    AppliedIdentifier, Observation, PatchOp, ProviderError, Sent, UpdatePatch,
+};
+use carina_core::resource::{ConcreteValue, Resource, State, Value};
 use carina_core::schema::{
     AttributeType, ResourceSchema, SchemaKind, Shape, ShapeWalkBudget, ValidatedResourceSchema,
 };
@@ -37,61 +39,6 @@ fn every_managed_resource_has_a_generated_capture_contract() {
         .collect::<BTreeSet<_>>();
 
     assert_eq!(covered, managed);
-}
-
-#[test]
-fn send_input_consumers_do_not_use_wildcard_or_underscore_holes() {
-    fn visit(path: &std::path::Path, sources: &mut Vec<std::path::PathBuf>) {
-        if path.is_dir() {
-            for entry in std::fs::read_dir(path).expect("read provider source directory") {
-                visit(&entry.expect("read provider source entry").path(), sources);
-            }
-        } else if path.extension().is_some_and(|extension| extension == "rs") {
-            sources.push(path.to_path_buf());
-        }
-    }
-
-    let mut sources = Vec::new();
-    visit(
-        &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src"),
-        &mut sources,
-    );
-    const INTO_PARTS_CALL: &str = concat!("input.into_", "parts()");
-    for path in sources {
-        let source = std::fs::read_to_string(&path).expect("read provider source");
-        for (call_offset, _) in source.match_indices(INTO_PARTS_CALL) {
-            let prefix = &source[..call_offset];
-            let let_offset = prefix.rfind("let ").unwrap_or_else(|| {
-                panic!("{} has into_parts() without a let binding", path.display())
-            });
-            let binding = &prefix[let_offset + 4..];
-            let tuple_pattern = binding
-                .trim()
-                .strip_suffix('=')
-                .map(str::trim)
-                .unwrap_or(binding);
-            assert!(
-                tuple_pattern.starts_with('(') && tuple_pattern.ends_with(')'),
-                "{} stores into_parts() without exhaustive tuple destructuring in `{binding}`",
-                path.display()
-            );
-            assert!(
-                !binding.contains(".."),
-                "{} uses a rest hole in `{binding}`",
-                path.display()
-            );
-            let identifiers = binding
-                .split(|character: char| !(character.is_ascii_alphanumeric() || character == '_'))
-                .filter(|identifier| !identifier.is_empty());
-            for identifier in identifiers {
-                assert!(
-                    !identifier.starts_with('_'),
-                    "{} uses an underscore hole `{identifier}` in `{binding}`",
-                    path.display()
-                );
-            }
-        }
-    }
 }
 
 #[derive(Default)]
@@ -168,7 +115,7 @@ impl CaptureService {
                 r#"{"CertificateArn":"arn:aws:acm:us-east-1:123456789012:certificate/00000000-0000-0000-0000-000000000000"}"#,
             );
         }
-        if target.ends_with("CreateOrganization") {
+        if target.ends_with("CreateOrganization") || target.ends_with("DescribeOrganization") {
             return MockResponse::json(
                 200,
                 r#"{"Organization":{"Id":"o-exampleorgid","Arn":"arn:aws:organizations::123456789012:organization/o-exampleorgid","FeatureSet":"ALL","MasterAccountArn":"arn:aws:organizations::123456789012:account/o-exampleorgid/123456789012","MasterAccountEmail":"root@example.com","MasterAccountId":"123456789012"}}"#,
@@ -282,57 +229,69 @@ fn string(value: impl Into<String>) -> Value {
 
 fn sample_string(resource_type: &str, path: &[String]) -> String {
     let name = path.last().map(String::as_str).unwrap_or_default();
+    let hash = resource_type
+        .bytes()
+        .chain(path.iter().flat_map(|part| part.bytes()))
+        .fold(0xcbf29ce484222325_u64, |hash, byte| {
+            hash.wrapping_mul(0x100000001b3) ^ u64::from(byte)
+        });
+    let suffix = format!("{:08x}", hash as u32);
+    let ec2_id = |prefix: &str| format!("{prefix}-0{hash:016x}");
     match name {
-        "account_name" => "send-contract-account".to_string(),
-        "address" => "198.51.100.10".to_string(),
-        "allocation_id" | "allocation_ids" => "eipalloc-0123456789abcdef0".to_string(),
+        "account_name" => format!("send-contract-{suffix}"),
+        "address" => format!("198.51.100.{}", 10 + hash % 200),
+        "allocation_id" | "allocation_ids" => ec2_id("eipalloc"),
         "arn"
         | "deliver_logs_permission_arn"
         | "kms_key_id"
         | "log_destination"
         | "resource_configuration_arn"
         | "role"
-        | "service_network_arn" => "arn:aws:iam::123456789012:role/send-contract".to_string(),
+        | "service_network_arn" => {
+            format!("arn:aws:iam::123456789012:role/send-contract-{suffix}")
+        }
         "availability_zone" => "us-east-1a".to_string(),
         "availability_zone_id" => "use1-az1".to_string(),
-        "bucket" | "target_bucket" => "carina-send-contract-bucket".to_string(),
-        "cidr_block" | "cidr_ip" | "destination_cidr_block" => "10.0.0.0/24".to_string(),
-        "cidr_ipv6" | "ipv6_cidr_block" => "2001:db8::/64".to_string(),
-        "description" => "send contract".to_string(),
+        "bucket" | "target_bucket" => format!("carina-send-{suffix}"),
+        "cidr_block" | "cidr_ip" | "destination_cidr_block" => {
+            format!("10.{}.{}.0/24", 1 + (hash >> 8) % 200, 1 + hash % 200)
+        }
+        "cidr_ipv6" | "ipv6_cidr_block" => {
+            format!("2001:db8:{:x}::/64", hash as u16)
+        }
+        "description" => format!("send contract {suffix}"),
         "dns_name" | "domain_name" | "host_name" | "name" => {
-            "send-contract.example.com".to_string()
+            format!("send-{suffix}.example.com")
         }
-        "email" => "send-contract@example.com".to_string(),
-        "gateway_id" | "internet_gateway_id" => "igw-0123456789abcdef0".to_string(),
-        "group_id" | "destination_security_group_id" | "source_security_group_id" => {
-            "sg-0123456789abcdef0".to_string()
-        }
-        "group_name" => "send-contract-group".to_string(),
-        "hosted_zone_id" => "Z0123456789ABCDEF".to_string(),
-        "ipv4_ipam_pool_id" | "ipv6_ipam_pool_id" => "ipam-pool-0123456789abcdef0".to_string(),
-        "log_group_name" => "/carina/send-contract".to_string(),
-        "nat_gateway_id" => "nat-0123456789abcdef0".to_string(),
+        "email" => format!("send-{suffix}@example.com"),
+        "gateway_id" | "internet_gateway_id" => ec2_id("igw"),
+        "group_id" | "destination_security_group_id" | "source_security_group_id" => ec2_id("sg"),
+        "group_name" => format!("send-contract-{suffix}"),
+        "hosted_zone_id" => format!("Z{hash:016X}"),
+        "ipv4_ipam_pool_id" | "ipv6_ipam_pool_id" => ec2_id("ipam-pool"),
+        "log_group_name" => format!("/carina/send-{suffix}"),
+        "nat_gateway_id" => ec2_id("nat"),
         "outpost_arn" => {
             "arn:aws:outposts:us-east-1:123456789012:outpost/op-0123456789abcdef0".to_string()
         }
         "path" => "/".to_string(),
         "peer_owner_id" | "source_security_group_owner_id" => "123456789012".to_string(),
-        "peer_vpc_id" | "vpc_id" => "vpc-0123456789abcdef0".to_string(),
-        "private_ip_address" => "10.0.0.10".to_string(),
+        "peer_vpc_id" | "vpc_id" => ec2_id("vpc"),
+        "private_ip_address" => format!("10.0.0.{}", 10 + hash % 200),
         "public_ipv4_pool" => "amazon".to_string(),
-        "queue_name" => "carina-send-contract.fifo".to_string(),
+        "queue_name" => format!("carina-send-{suffix}.fifo"),
         "resource_records" => "192.0.2.10".to_string(),
-        "role_name" => "CarinaSendContract".to_string(),
-        "route_table_id" | "route_table_ids" => "rtb-0123456789abcdef0".to_string(),
+        "role_name" => format!("CarinaSend{suffix}"),
+        "route_table_id" | "route_table_ids" => ec2_id("rtb"),
         "service_name" => "com.amazonaws.us-east-1.s3".to_string(),
         "service_region" => REGION.to_string(),
-        "subnet_id" | "subnet_ids" => "subnet-0123456789abcdef0".to_string(),
+        "subnet_id" | "subnet_ids" => ec2_id("subnet"),
         "suffix" => "index.html".to_string(),
         "target_prefix" => "logs/".to_string(),
-        "transit_gateway_id" => "tgw-0123456789abcdef0".to_string(),
+        "transit_gateway_id" => ec2_id("tgw"),
         "value" if resource_type == "route53.RecordSet" => "192.0.2.10".to_string(),
-        "vpn_gateway_id" => "vgw-0123456789abcdef0".to_string(),
-        _ => "send-contract-value".to_string(),
+        "vpn_gateway_id" => ec2_id("vgw"),
+        _ => format!("send-contract-{suffix}"),
     }
 }
 
@@ -399,24 +358,31 @@ fn sample_value(
             let has_required = fields
                 .iter()
                 .any(|field| field.parts().declared_input_mode.is_required());
-            let first_writable = fields
+            let mut fallback = None;
+            for field in fields
                 .iter()
-                .find(|field| !field.parts().declared_input_mode.is_provider_populated())
-                .map(|field| field.name());
-            for field in fields {
+                .filter(|field| !field.parts().declared_input_mode.is_provider_populated())
+            {
                 let parts = field.parts();
-                if parts.declared_input_mode.is_provider_populated()
-                    || (!parts.declared_input_mode.is_required()
-                        && (has_required || Some(parts.name) != first_writable))
-                {
+                if has_required && !parts.declared_input_mode.is_required() {
                     continue;
                 }
                 path.push(parts.name.to_string());
-                map.insert(
-                    parts.name.to_string(),
-                    sample_value(resource_type, schema, parts.field_type, path, budget),
-                );
+                let sample = sample_value(resource_type, schema, parts.field_type, path, budget);
                 path.pop();
+                if has_required {
+                    map.insert(parts.name.to_string(), sample);
+                } else if value_has_scalar(&sample) {
+                    map.insert(parts.name.to_string(), sample);
+                    break;
+                } else if fallback.is_none() {
+                    fallback = Some((parts.name.to_string(), sample));
+                }
+            }
+            if map.is_empty()
+                && let Some((name, sample)) = fallback
+            {
+                map.insert(name, sample);
             }
             Value::Concrete(ConcreteValue::Map(map))
         }
@@ -424,13 +390,36 @@ fn sample_value(
             let members = schema
                 .union_members_with_budget(attribute_type, budget)
                 .expect("send-contract union walk must stay within its budget");
-            let member = members
+            let samples = members
                 .iter()
                 .flatten()
-                .next()
-                .expect("generated send-contract union must have a resolvable member");
-            sample_value(resource_type, schema, member.as_attr(), path, budget)
+                .map(|member| sample_value(resource_type, schema, member.as_attr(), path, budget))
+                .collect::<Vec<_>>();
+            samples
+                .iter()
+                .find(|sample| value_has_scalar(sample))
+                .cloned()
+                .or_else(|| samples.into_iter().next())
+                .expect("generated send-contract union must have a resolvable member")
         }
+    }
+}
+
+fn value_has_scalar(value: &Value) -> bool {
+    match value {
+        Value::Concrete(
+            ConcreteValue::String(_)
+            | ConcreteValue::StringList(_)
+            | ConcreteValue::CanonicalEnum(_)
+            | ConcreteValue::EnumIdentifier(_)
+            | ConcreteValue::Int(_)
+            | ConcreteValue::Float(_)
+            | ConcreteValue::Bool(_)
+            | ConcreteValue::Duration(_),
+        ) => true,
+        Value::Concrete(ConcreteValue::List(values)) => values.iter().any(value_has_scalar),
+        Value::Concrete(ConcreteValue::Map(values)) => values.values().any(value_has_scalar),
+        Value::Deferred(_) => false,
     }
 }
 
@@ -564,6 +553,12 @@ fn focused_resource(
         "sqs.Queue" => {
             set_bool(&mut resource, "fifo_queue", true);
             resource.set_attr("queue_name", string("carina-send-contract.fifo"));
+            if matches!(
+                target.name,
+                "content_based_deduplication" | "sqs_managed_sse_enabled"
+            ) {
+                set_bool(&mut resource, target.name, false);
+            }
             if target.name == "kms_data_key_reuse_period_seconds" {
                 set_sample(&mut resource, schema, "kms_master_key_id");
             }
@@ -576,34 +571,244 @@ fn focused_resource(
     resource
 }
 
-fn normalize_request_text(value: &str) -> String {
-    let decoded = urlencoding::decode(value)
+fn decoded_request_body(request: &MockRequest) -> String {
+    let body = str::from_utf8(&request.body).unwrap_or_default();
+    urlencoding::decode(body)
         .map(|value| value.into_owned())
-        .unwrap_or_else(|_| value.to_string());
-    decoded
-        .chars()
-        .filter(|character| character.is_ascii_alphanumeric())
-        .flat_map(char::to_lowercase)
-        .collect()
+        .unwrap_or_else(|_| body.to_string())
 }
 
-fn request_haystack(requests: &[MockRequest]) -> String {
-    let mut text = String::new();
-    for request in requests {
-        text.push_str(&request.uri);
-        for (name, value) in &request.headers {
-            text.push_str(name.as_str());
-            if let Ok(value) = value.to_str() {
-                text.push_str(value);
+fn request_operation(request: &MockRequest) -> String {
+    let target = request
+        .headers
+        .get("x-amz-target")
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.rsplit('.').next())
+        .unwrap_or_default();
+    if !target.is_empty() {
+        return target.to_string();
+    }
+    decoded_request_body(request)
+        .split('&')
+        .find_map(|parameter| parameter.strip_prefix("Action="))
+        .unwrap_or_default()
+        .to_string()
+}
+
+fn is_mutating_request(request: &MockRequest) -> bool {
+    if matches!(request.method.as_str(), "GET" | "HEAD") {
+        return false;
+    }
+    let operation = request_operation(request);
+    !["Describe", "Get", "List", "Head", "Lookup"]
+        .iter()
+        .any(|prefix| operation.starts_with(prefix))
+}
+
+fn mutating_request_payload(requests: &[MockRequest]) -> String {
+    requests
+        .iter()
+        .filter(|request| is_mutating_request(request))
+        .map(|request| format!("{}\n{}", request.uri, decoded_request_body(request)))
+        .collect::<Vec<_>>()
+        .join("\n")
+        .to_ascii_lowercase()
+}
+
+fn sample_markers(value: &Value, markers: &mut Vec<String>) {
+    match value {
+        Value::Concrete(ConcreteValue::String(value)) => {
+            markers.push(value.expose_plaintext().to_string())
+        }
+        Value::Concrete(ConcreteValue::CanonicalEnum(value)) => {
+            markers.push(value.api_value().to_string())
+        }
+        Value::Concrete(ConcreteValue::Int(value)) => markers.push(value.to_string()),
+        Value::Concrete(ConcreteValue::Float(value)) => markers.push(value.to_string()),
+        Value::Concrete(ConcreteValue::Bool(value)) => markers.push(value.to_string()),
+        Value::Concrete(ConcreteValue::Duration(value)) => {
+            markers.push(value.as_secs().to_string())
+        }
+        Value::Concrete(ConcreteValue::List(values)) => {
+            for value in values {
+                sample_markers(value, markers);
             }
         }
-        text.push_str(str::from_utf8(&request.body).unwrap_or_default());
+        Value::Concrete(ConcreteValue::StringList(values)) => {
+            markers.extend(
+                values
+                    .iter()
+                    .map(|value| value.expose_plaintext().to_string()),
+            );
+        }
+        Value::Concrete(ConcreteValue::Map(values)) => {
+            for value in values.values() {
+                sample_markers(value, markers);
+            }
+        }
+        Value::Concrete(ConcreteValue::EnumIdentifier(value)) => {
+            markers.push(format!("{value:?}"));
+        }
+        Value::Deferred(_) => panic!("send-contract samples must be concrete"),
     }
-    normalize_request_text(&text)
+}
+
+fn payload_contains_marker(payload: &str, marker: &str) -> bool {
+    let marker = marker.to_ascii_lowercase();
+    if marker.len() > 3 && payload.contains(&marker) {
+        return true;
+    }
+    if payload.ends_with(&format!("={marker}")) {
+        return true;
+    }
+    [
+        format!("={marker}&"),
+        format!("={marker}\n"),
+        format!("={marker}<"),
+        format!(">{marker}<"),
+        format!(":{marker},"),
+        format!(":{marker}}}"),
+        format!(":\"{marker}\""),
+        format!("/{marker}/"),
+    ]
+    .iter()
+    .any(|needle| payload.contains(needle))
+}
+
+fn capture_identifier(resource_type: &str) -> &'static str {
+    match resource_type {
+        "acm.Certificate" => {
+            "arn:aws:acm:us-east-1:123456789012:certificate/00000000-0000-0000-0000-000000000000"
+        }
+        "iam.Role" => "CarinaSendContract",
+        "logs.LogGroup" => "/carina/send-contract",
+        "organizations.Account" => "123456789012",
+        "route53.RecordSet" => "Z0123456789ABCDEF|send-contract.example.com|A",
+        "s3.Bucket"
+        | "s3.BucketAcl"
+        | "s3.BucketCorsConfiguration"
+        | "s3.BucketLifecycleConfiguration"
+        | "s3.BucketLogging"
+        | "s3.BucketNotificationConfiguration"
+        | "s3.BucketObjectLockConfiguration"
+        | "s3.BucketOwnershipControls"
+        | "s3.BucketPolicy"
+        | "s3.BucketPublicAccessBlock"
+        | "s3.BucketReplicationConfiguration"
+        | "s3.BucketServerSideEncryptionConfiguration"
+        | "s3.BucketVersioning"
+        | "s3.BucketWebsiteConfiguration" => "carina-send-contract-bucket",
+        "sqs.Queue" => "https://sqs.us-east-1.amazonaws.com/123456789012/carina-send-contract.fifo",
+        "ec2.Vpc" => "vpc-0123456789abcdef0",
+        "ec2.Subnet" => "subnet-0123456789abcdef0",
+        "ec2.InternetGateway" => "igw-0123456789abcdef0",
+        "ec2.RouteTable" => "rtb-0123456789abcdef0",
+        "ec2.Route" => "rtb-0123456789abcdef0|10.0.0.0/24",
+        "ec2.SecurityGroup" => "sg-0123456789abcdef0",
+        "ec2.Eip" => "eipalloc-0123456789abcdef0",
+        "ec2.NatGateway" => "nat-0123456789abcdef0",
+        "ec2.VpnGateway" => "vgw-0123456789abcdef0",
+        "ec2.TransitGateway" => "tgw-0123456789abcdef0",
+        "ec2.TransitGatewayAttachment" => "tgw-attach-0123456789abcdef0",
+        "ec2.VpcEndpoint" => "vpce-0123456789abcdef0",
+        "ec2.VpcPeeringConnection" => "pcx-0123456789abcdef0",
+        "ec2.FlowLog" => "fl-0123456789abcdef0",
+        "ec2.EgressOnlyInternetGateway" => "eigw-0123456789abcdef0",
+        "ec2.VpcGatewayAttachment" => "vpc-0123456789abcdef0|igw-0123456789abcdef0",
+        "ec2.SubnetRouteTableAssociation" => "rtbassoc-0123456789abcdef0|subnet-0123456789abcdef0",
+        _ => "send-contract-identifier",
+    }
+}
+
+fn existing_state_without(resource: &Resource, excluded: Option<&str>) -> State {
+    crate::read_model::test_existing_state(
+        resource.id.clone(),
+        resource
+            .attributes
+            .iter()
+            .filter(|(name, _)| excluded != Some(name.as_str()))
+            .map(|(name, value)| (name.clone(), value.clone()))
+            .collect(),
+    )
+}
+
+fn assert_sample_reached_mutation(
+    contract: &SendCaptureContract,
+    attribute: &SendCaptureAttribute,
+    resource: &Resource,
+    requests: &[MockRequest],
+    operation: &str,
+) {
+    let value = resource.get_attr(attribute.name).unwrap_or_else(|| {
+        panic!(
+            "missing synthesized {}.{}",
+            contract.resource_type, attribute.name
+        )
+    });
+    let mut markers = Vec::new();
+    sample_markers(value, &mut markers);
+    let other_markers = resource
+        .attributes
+        .iter()
+        .filter(|(name, _)| name.as_str() != attribute.name)
+        .flat_map(|(_, value)| {
+            let mut markers = Vec::new();
+            sample_markers(value, &mut markers);
+            markers
+        })
+        .map(|marker| marker.to_ascii_lowercase())
+        .collect::<BTreeSet<_>>();
+    let markers = markers
+        .into_iter()
+        .filter(|marker| !other_markers.contains(&marker.to_ascii_lowercase()))
+        .collect::<Vec<_>>();
+    let payload = mutating_request_payload(requests);
+    // Smithy models EventBridgeConfiguration as an empty structure: its
+    // presence is the entire value, so there is no scalar sample to search
+    // for. Require its explicitly declared structural token instead.
+    let exact_presence_match = attribute.capture_names.iter().any(|mapping| {
+        mapping.strip_prefix("presence:").is_some_and(|name| {
+            let name = name.to_ascii_lowercase();
+            payload.contains(&format!("<{name}")) || payload.contains(&format!("%3c{name}"))
+        })
+    });
+    assert!(
+        !markers.is_empty() || exact_presence_match,
+        "{}.{} synthesized no scalar request marker unique among desired attributes",
+        contract.resource_type,
+        attribute.name
+    );
+    let mappings = (attribute.provider_name, attribute.capture_names);
+    // Do not put headers in the searchable haystack: generic headers such as
+    // Content-Type caused the original false positives. The two Smithy
+    // `@httpHeader` inputs have explicit `header:` mappings and are compared
+    // by exact header name and exact synthesized value instead.
+    let exact_header_match = attribute.capture_names.iter().any(|mapping| {
+        let Some(header_name) = mapping.strip_prefix("header:") else {
+            return false;
+        };
+        requests
+            .iter()
+            .filter(|request| is_mutating_request(request))
+            .filter_map(|request| request.headers.get(header_name))
+            .filter_map(|value| value.to_str().ok())
+            .any(|value| markers.iter().any(|marker| value == marker))
+    });
+    assert!(
+        exact_header_match
+            || exact_presence_match
+            || markers
+                .iter()
+                .any(|marker| payload_contains_marker(&payload, marker)),
+        "{}.{} synthesized values {:?} were absent from mutating {operation} URI/query/body (mapping={mappings:?}); mutating payload={payload:?}; requests={requests:?}",
+        contract.resource_type,
+        attribute.name,
+        markers,
+    );
 }
 
 #[tokio::test]
-async fn every_sent_attribute_reaches_a_captured_create_request() {
+async fn every_sent_attribute_reaches_captured_create_and_update_mutations() {
     let service = Arc::new(CaptureService::default());
     let mock = MockAws::builder()
         .with_service(Arc::clone(&service))
@@ -624,7 +829,7 @@ async fn every_sent_attribute_reaches_a_captured_create_request() {
                     && schema.as_schema().resource_type() == contract.resource_type
             })
             .unwrap_or_else(|| panic!("missing schema for {}", contract.resource_type));
-        for attribute in contract.attributes {
+        for attribute in contract.create_attributes {
             service.clear();
             let resource = focused_resource(schema, contract, attribute);
             let result = provider.create_step(&resource, CaptureAttempt).await;
@@ -636,19 +841,57 @@ async fn every_sent_attribute_reaches_a_captured_create_request() {
                 attribute.name,
                 resource.attributes
             );
-            let haystack = request_haystack(&requests);
-            let mut names = vec![attribute.provider_name];
-            names.extend_from_slice(attribute.capture_names);
+            assert_sample_reached_mutation(contract, attribute, &resource, &requests, "create");
+        }
+
+        let update_targets: Vec<Option<&SendCaptureAttribute>> =
+            if contract.update_attributes.is_empty() {
+                vec![None]
+            } else {
+                contract.update_attributes.iter().map(Some).collect()
+            };
+        for target in update_targets {
+            service.clear();
+            let builder_attribute = target.unwrap_or_else(|| {
+                contract
+                    .create_attributes
+                    .first()
+                    .expect("managed create contract has at least one field")
+            });
+            let resource = focused_resource(schema, contract, builder_attribute);
+            let from = existing_state_without(&resource, target.map(|attribute| attribute.name));
+            let patch = UpdatePatch {
+                ops: target
+                    .map(|attribute| PatchOp::Add {
+                        key: attribute.name.to_string(),
+                        value: resource
+                            .get_attr(attribute.name)
+                            .expect("focused update value")
+                            .clone(),
+                    })
+                    .into_iter()
+                    .collect(),
+            };
+            let identifier = crate::helpers::applied_identifier(
+                &resource.id,
+                "send-contract.Update",
+                capture_identifier(contract.resource_type),
+            )
+            .expect("capture identifier");
+            let result = provider
+                .update_with_patch(&resource.id, &identifier, &from, &patch)
+                .await;
+            let requests = service.snapshot();
             assert!(
-                names
-                    .iter()
-                    .map(|name| normalize_request_text(name))
-                    .any(|name| haystack.contains(&name)),
-                "{}.{} was absent from captured requests (accepted names: {:?}); requests={requests:?}",
+                !requests.is_empty(),
+                "{} update failed before reaching the capture transport; target={:?}; result={result:?}; desired={:?}",
                 contract.resource_type,
-                attribute.name,
-                names
+                target.map(|attribute| attribute.name),
+                resource.attributes,
             );
+            if let Some(attribute) = target {
+                assert_sample_reached_mutation(contract, attribute, &resource, &requests, "update");
+            }
         }
     }
 }

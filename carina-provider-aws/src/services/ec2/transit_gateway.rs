@@ -12,7 +12,7 @@ use crate::helpers::{
     CreatePoll, DeletePoll, build_tag_specification_with_create_token, optional_enum_struct_field,
     optional_int_struct_field, optional_string_list_struct_field,
 };
-use crate::provider::{AwsCreateAttempt, Ec2TaggedResourceKind};
+use crate::provider::{AwsCreateAttempt, TaggedEc2Create};
 use crate::read_model::{empty_map_value, found_managed_read};
 use crate::read_models_generated::Ec2TransitGatewayReadModelSupplement;
 use crate::send_models_generated::{Ec2TransitGatewayCreateInput, Ec2TransitGatewayUpdateInput};
@@ -198,7 +198,15 @@ impl AwsProvider {
             Err(error) => return Err(attempt.untracked(error)),
         };
         let sent = input.sent();
-        let (description, options, tags) = input.into_parts();
+        let crate::send_models_generated::Ec2TransitGatewayCreateParts {
+            description,
+            options,
+            tags,
+        } = input.into_parts();
+        let description = description.into_inner();
+        let options = options.into_inner();
+        let tags = tags.into_inner();
+        let tags = crate::send_model::optional_tags_value(tags);
         let mut req = self.ec2_client.create_transit_gateway();
 
         if let Some(description) = description {
@@ -225,7 +233,7 @@ impl AwsProvider {
         self.finish_tagged_ec2_create(
             resource,
             attempt,
-            Ec2TaggedResourceKind::TransitGateway.create_context(client_token, sent),
+            TaggedEc2Create::TransitGateway.create_context(client_token, sent),
             result,
             |output| {
                 output
@@ -247,7 +255,11 @@ impl AwsProvider {
         _schema: &ResourceSchema,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
         let input = Ec2TransitGatewayUpdateInput::decode(&to)?;
-        let (description, tags) = input.into_parts();
+        let crate::send_models_generated::Ec2TransitGatewayUpdateParts { description, tags } =
+            input.into_parts();
+        let description = description.into_inner();
+        let tags = tags.into_inner();
+        let tags = crate::send_model::optional_tags_value(tags);
         let from_description = match from.attributes.get("description") {
             Some(Value::Concrete(ConcreteValue::String(value))) => Some(value.expose_plaintext()),
             _ => None,

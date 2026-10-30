@@ -112,7 +112,19 @@ impl AwsProvider {
     ) -> ProviderResult<(String, carina_core::provider::Sent)> {
         let input = OrganizationsAccountCreateInput::decode(resource)?;
         let sent = input.sent();
-        let (name, email, iam_user_access_to_billing, role_name, tags) = input.into_parts();
+        let crate::send_models_generated::OrganizationsAccountCreateParts {
+            account_name: name,
+            email,
+            iam_user_access_to_billing,
+            role_name,
+            tags,
+        } = input.into_parts();
+        let name = name.into_inner();
+        let email = email.into_inner();
+        let iam_user_access_to_billing = iam_user_access_to_billing.into_inner();
+        let role_name = role_name.into_inner();
+        let tags = tags.into_inner();
+        let tags = crate::send_model::optional_tags_value(tags);
 
         let mut req = self
             .organizations_client
@@ -216,7 +228,11 @@ impl AwsProvider {
         _schema: &ResourceSchema,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
         let input = OrganizationsAccountUpdateInput::decode(&to)?;
-        let (account_name, tags) = input.into_parts();
+        let crate::send_models_generated::OrganizationsAccountUpdateParts { account_name, tags } =
+            input.into_parts();
+        let account_name = account_name.into_inner();
+        let tags = tags.into_inner();
+        let tags = crate::send_model::optional_tags_value(tags);
         let desired_account_name =
             Value::Concrete(ConcreteValue::String(account_name.clone().into()));
         if from.attributes.get("account_name") != Some(&desired_account_name) {

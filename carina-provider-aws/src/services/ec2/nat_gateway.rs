@@ -12,7 +12,7 @@ use crate::helpers::{
     CreatePoll, DeletePoll, RetryPolicy, build_tag_specification_with_create_token,
     retry_aws_operation_with_token,
 };
-use crate::provider::{AwsCreateAttempt, Ec2TaggedResourceKind};
+use crate::provider::{AwsCreateAttempt, TaggedEc2Create};
 use crate::read_model::{empty_map_value, found_managed_read};
 use crate::read_models_generated::Ec2NatGatewayReadModelSupplement;
 use crate::send_models_generated::{Ec2NatGatewayCreateInput, Ec2NatGatewayUpdateInput};
@@ -281,7 +281,7 @@ impl AwsProvider {
             Err(error) => return Err(attempt.untracked(error)),
         };
         let sent = input.sent();
-        let (
+        let crate::send_models_generated::Ec2NatGatewayCreateParts {
             allocation_id,
             availability_mode,
             availability_zone_addresses,
@@ -290,7 +290,16 @@ impl AwsProvider {
             subnet_id,
             tags,
             vpc_id,
-        ) = input.into_parts();
+        } = input.into_parts();
+        let allocation_id = allocation_id.into_inner();
+        let availability_mode = availability_mode.into_inner();
+        let availability_zone_addresses = availability_zone_addresses.into_inner();
+        let connectivity_type = connectivity_type.into_inner();
+        let private_ip_address = private_ip_address.into_inner();
+        let subnet_id = subnet_id.into_inner();
+        let tags = tags.into_inner();
+        let tags = crate::send_model::optional_tags_value(tags);
+        let vpc_id = vpc_id.into_inner();
 
         let mut req = self.ec2_client.create_nat_gateway().configure(|builder| {
             builder.tag_specifications(build_tag_specification_with_create_token(
@@ -346,7 +355,7 @@ impl AwsProvider {
         self.finish_tagged_ec2_create(
             resource,
             attempt,
-            Ec2TaggedResourceKind::NatGateway.create_context(client_token, sent),
+            TaggedEc2Create::NatGateway.create_context(client_token, sent),
             result,
             |output| {
                 output
@@ -368,7 +377,9 @@ impl AwsProvider {
         _schema: &ResourceSchema,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
         let input = Ec2NatGatewayUpdateInput::decode(&to)?;
-        let (tags,) = input.into_parts();
+        let crate::send_models_generated::Ec2NatGatewayUpdateParts { tags } = input.into_parts();
+        let tags = tags.into_inner();
+        let tags = crate::send_model::optional_tags_value(tags);
         self.apply_ec2_tags(
             &id,
             identifier.as_str(),

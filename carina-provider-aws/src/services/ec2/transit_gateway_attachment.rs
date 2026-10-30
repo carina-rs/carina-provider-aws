@@ -1,6 +1,8 @@
 use carina_core::provider::{AppliedIdentifier, ReadOutcome};
 use carina_core::provider::{ProviderError, ProviderResult};
-use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
+#[cfg(test)]
+use carina_core::resource::ConcreteValue;
+use carina_core::resource::{Resource, ResourceId, State, Value};
 use carina_core::schema::ResourceSchema;
 
 use aws_sdk_ec2::types::TransitGatewayAttachmentState;
@@ -11,7 +13,7 @@ use crate::error_helpers::api_error_with_meta;
 use crate::helpers::{
     CreatePoll, DeletePoll, build_tag_specification_with_create_token, optional_enum_struct_field,
 };
-use crate::provider::{AwsCreateAttempt, Ec2TaggedResourceKind};
+use crate::provider::{AwsCreateAttempt, TaggedEc2Create};
 use crate::read_model::{empty_map_value, found_managed_read};
 use crate::read_models_generated::Ec2TransitGatewayAttachmentReadModelSupplement;
 use crate::send_models_generated::{
@@ -180,31 +182,26 @@ impl AwsProvider {
             Err(error) => return Err(attempt.untracked(error)),
         };
         let sent = input.sent();
-        let (options, subnet_ids, tags, transit_gateway_id, vpc_id) = input.into_parts();
+        let crate::send_models_generated::Ec2TransitGatewayAttachmentCreateParts {
+            options,
+            subnet_ids,
+            tags,
+            transit_gateway_id,
+            vpc_id,
+        } = input.into_parts();
+        let options = options.into_inner();
+        let subnet_ids = subnet_ids.into_inner();
+        let tags = tags.into_inner();
+        let tags = crate::send_model::optional_tags_value(tags);
+        let transit_gateway_id = transit_gateway_id.into_inner();
+        let vpc_id = vpc_id.into_inner();
 
-        let subnet_ids = match subnet_ids {
-            Value::Concrete(ConcreteValue::List(ids)) => {
-                let mut result = Vec::new();
-                for id_val in &ids {
-                    if let Value::Concrete(ConcreteValue::String(s)) = id_val {
-                        result.push(s.expose_plaintext().to_string());
-                    }
-                }
-                if result.is_empty() {
-                    return Err(attempt.untracked(
-                        ProviderError::invalid_input("subnet_ids must not be empty")
-                            .for_resource(resource.id.clone()),
-                    ));
-                }
-                result
-            }
-            _ => {
-                return Err(attempt.untracked(
-                    ProviderError::invalid_input("subnet_ids is required")
-                        .for_resource(resource.id.clone()),
-                ));
-            }
-        };
+        if subnet_ids.is_empty() {
+            return Err(attempt.untracked(
+                ProviderError::invalid_input("subnet_ids must not be empty")
+                    .for_resource(resource.id.clone()),
+            ));
+        }
 
         let mut req = self
             .ec2_client
@@ -239,7 +236,7 @@ impl AwsProvider {
         self.finish_tagged_ec2_create(
             resource,
             attempt,
-            Ec2TaggedResourceKind::TransitGatewayVpcAttachment.create_context(client_token, sent),
+            TaggedEc2Create::TransitGatewayVpcAttachment.create_context(client_token, sent),
             result,
             |output| {
                 output
@@ -261,7 +258,10 @@ impl AwsProvider {
         _schema: &ResourceSchema,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
         let input = Ec2TransitGatewayAttachmentUpdateInput::decode(&to)?;
-        let (tags,) = input.into_parts();
+        let crate::send_models_generated::Ec2TransitGatewayAttachmentUpdateParts { tags } =
+            input.into_parts();
+        let tags = tags.into_inner();
+        let tags = crate::send_model::optional_tags_value(tags);
         self.apply_ec2_tags(
             &id,
             identifier.as_str(),

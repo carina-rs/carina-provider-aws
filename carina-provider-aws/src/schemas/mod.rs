@@ -273,6 +273,14 @@ mod tests {
             )
         );
         assert_eq!(
+            by_path.get("options.export"),
+            Some(&"aws.acm.Certificate.CertificateOptions.Export".to_string())
+        );
+        assert!(
+            !by_path.contains_key("options.validation_method"),
+            "the pinned aws-sdk-acm cannot send CertificateOptions.ValidationMethod"
+        );
+        assert_eq!(
             by_path.get("domain_validation_options[].resource_record.type"),
             Some(&"aws.acm.Certificate.DomainValidation.ResourceRecord.Type".to_string())
         );

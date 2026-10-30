@@ -67,7 +67,12 @@ impl AwsProvider {
     ) -> ProviderResult<TypedCreateCompletion> {
         let input = Ec2SubnetRouteTableAssociationCreateInput::decode(resource)?;
         let sent = input.sent();
-        let (route_table_id, subnet_id) = input.into_parts();
+        let crate::send_models_generated::Ec2SubnetRouteTableAssociationCreateParts {
+            route_table_id,
+            subnet_id,
+        } = input.into_parts();
+        let route_table_id = route_table_id.into_inner();
+        let subnet_id = subnet_id.into_inner();
 
         let result = self
             .ec2_client
@@ -116,7 +121,8 @@ impl AwsProvider {
         to: Resource,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
         let input = Ec2SubnetRouteTableAssociationUpdateInput::decode(&to)?;
-        let () = input.into_parts();
+        let crate::send_models_generated::Ec2SubnetRouteTableAssociationUpdateParts =
+            input.into_parts();
         Ok(self
             .read_ec2_subnet_route_table_association(&id, identifier)
             .await)

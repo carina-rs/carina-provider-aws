@@ -6,7 +6,7 @@ use crate::AwsProvider;
 use crate::aws_operation::ClientToken;
 use crate::error_helpers::api_error_with_meta;
 use crate::helpers::build_tag_specification_with_create_token;
-use crate::provider::{AwsCreateAttempt, Ec2TaggedResourceKind};
+use crate::provider::{AwsCreateAttempt, TaggedEc2Create};
 use crate::read_model::{empty_map_value, found_managed_read};
 use crate::read_models_generated::Ec2VpcPeeringConnectionReadModelSupplement;
 use crate::send_models_generated::{
@@ -74,7 +74,17 @@ impl AwsProvider {
             Err(error) => return Err(attempt.untracked(error)),
         };
         let sent = input.sent();
-        let (peer_owner_id, peer_vpc_id, tags, vpc_id) = input.into_parts();
+        let crate::send_models_generated::Ec2VpcPeeringConnectionCreateParts {
+            peer_owner_id,
+            peer_vpc_id,
+            tags,
+            vpc_id,
+        } = input.into_parts();
+        let peer_owner_id = peer_owner_id.into_inner();
+        let peer_vpc_id = peer_vpc_id.into_inner();
+        let tags = tags.into_inner();
+        let tags = crate::send_model::optional_tags_value(tags);
+        let vpc_id = vpc_id.into_inner();
 
         let mut req = self
             .ec2_client
@@ -104,7 +114,7 @@ impl AwsProvider {
         self.finish_tagged_ec2_create(
             resource,
             attempt,
-            Ec2TaggedResourceKind::VpcPeeringConnection.create_context(client_token, sent),
+            TaggedEc2Create::VpcPeeringConnection.create_context(client_token, sent),
             result,
             |output| {
                 output
@@ -125,7 +135,10 @@ impl AwsProvider {
         to: Resource,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
         let input = Ec2VpcPeeringConnectionUpdateInput::decode(&to)?;
-        let (tags,) = input.into_parts();
+        let crate::send_models_generated::Ec2VpcPeeringConnectionUpdateParts { tags } =
+            input.into_parts();
+        let tags = tags.into_inner();
+        let tags = crate::send_model::optional_tags_value(tags);
         self.apply_ec2_tags(
             &id,
             identifier.as_str(),

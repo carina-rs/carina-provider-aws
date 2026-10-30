@@ -97,7 +97,16 @@ impl AwsProvider {
     ) -> ProviderResult<TypedCreateCompletion> {
         let input = S3BucketWebsiteConfigurationCreateInput::decode(resource)?;
         let sent = input.sent();
-        let (bucket, error_document, index_document, redirect_all_requests_to) = input.into_parts();
+        let crate::send_models_generated::S3BucketWebsiteConfigurationCreateParts {
+            bucket,
+            error_document,
+            index_document,
+            redirect_all_requests_to,
+        } = input.into_parts();
+        let bucket = bucket.into_inner();
+        let error_document = error_document.into_inner();
+        let index_document = index_document.into_inner();
+        let redirect_all_requests_to = redirect_all_requests_to.into_inner();
         let identifier =
             crate::helpers::applied_identifier(&resource.id, "s3.PutBucketWebsite", bucket)?;
         let outcome = self
@@ -130,7 +139,14 @@ impl AwsProvider {
         schema: &ResourceSchema,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
         let input = S3BucketWebsiteConfigurationUpdateInput::decode(&to)?;
-        let (error_document, index_document, redirect_all_requests_to) = input.into_parts();
+        let crate::send_models_generated::S3BucketWebsiteConfigurationUpdateParts {
+            error_document,
+            index_document,
+            redirect_all_requests_to,
+        } = input.into_parts();
+        let error_document = error_document.into_inner();
+        let index_document = index_document.into_inner();
+        let redirect_all_requests_to = redirect_all_requests_to.into_inner();
         self.put_s3_bucket_website(
             &id,
             identifier,

@@ -8,7 +8,7 @@ use crate::AwsProvider;
 use crate::aws_operation::ClientToken;
 use crate::error_helpers::{SendFailure, api_error_with_meta};
 use crate::helpers::{build_tag_specification_with_create_token, send_aws_operation_with_token};
-use crate::provider::{AwsCreateAttempt, Ec2TaggedResourceKind};
+use crate::provider::{AwsCreateAttempt, Ec2TaggedResourceKind, TaggedEc2Create};
 use crate::read_model::{empty_map_value, found_managed_read, require_read_value};
 use crate::read_models_generated::Ec2FlowLogReadModelSupplement;
 use crate::send_models_generated::{Ec2FlowLogCreateInput, Ec2FlowLogUpdateInput};
@@ -198,7 +198,7 @@ impl AwsProvider {
             Err(error) => return Err(attempt.untracked(error)),
         };
         let sent = input.sent();
-        let (
+        let crate::send_models_generated::Ec2FlowLogCreateParts {
             deliver_logs_permission_arn,
             log_destination,
             log_destination_type,
@@ -209,21 +209,19 @@ impl AwsProvider {
             resource_type,
             tags,
             traffic_type,
-        ) = input.into_parts();
-        let resource_ids_val: Vec<String> = match resource_ids {
-            Value::Concrete(ConcreteValue::List(items)) => items
-                .iter()
-                .filter_map(|v| {
-                    if let Value::Concrete(ConcreteValue::String(s)) = v {
-                        Some(s.expose_plaintext().to_string())
-                    } else {
-                        None
-                    }
-                })
-                .collect(),
-            _ => Vec::new(),
-        };
-        if resource_ids_val.is_empty() {
+        } = input.into_parts();
+        let deliver_logs_permission_arn = deliver_logs_permission_arn.into_inner();
+        let log_destination = log_destination.into_inner();
+        let log_destination_type = log_destination_type.into_inner();
+        let log_format = log_format.into_inner();
+        let log_group_name = log_group_name.into_inner();
+        let max_aggregation_interval = max_aggregation_interval.into_inner();
+        let resource_ids = resource_ids.into_inner();
+        let resource_type = resource_type.into_inner();
+        let tags = tags.into_inner();
+        let tags = crate::send_model::optional_tags_value(tags);
+        let traffic_type = traffic_type.into_inner();
+        if resource_ids.is_empty() {
             return Err(attempt.untracked(
                 ProviderError::invalid_input(
                     "resource_ids must be a non-empty list of resource identifiers",
@@ -234,7 +232,7 @@ impl AwsProvider {
 
         let mut req = self.ec2_client.create_flow_logs().configure(|builder| {
             builder
-                .set_resource_ids(Some(resource_ids_val.clone()))
+                .set_resource_ids(Some(resource_ids.clone()))
                 .resource_type(aws_sdk_ec2::types::FlowLogsResourceType::from(
                     resource_type.as_str(),
                 ))
@@ -369,7 +367,7 @@ impl AwsProvider {
                 return self
                     .finish_tagged_ec2_issued(
                         resource,
-                        Ec2TaggedResourceKind::FlowLog,
+                        TaggedEc2Create::FlowLog,
                         identifier,
                         issued,
                     )
@@ -417,7 +415,9 @@ impl AwsProvider {
         _schema: &ResourceSchema,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
         let input = Ec2FlowLogUpdateInput::decode(&to)?;
-        let (tags,) = input.into_parts();
+        let crate::send_models_generated::Ec2FlowLogUpdateParts { tags } = input.into_parts();
+        let tags = tags.into_inner();
+        let tags = crate::send_model::optional_tags_value(tags);
         for flow_log_id in identifier.as_str().split(',') {
             self.apply_ec2_tags(&id, flow_log_id, tags.as_ref(), Some(&from.attributes))
                 .await?;

@@ -68,7 +68,10 @@ impl AwsProvider {
     ) -> ProviderResult<TypedCreateCompletion> {
         let input = S3BucketVersioningCreateInput::decode(resource)?;
         let sent = input.sent();
-        let (bucket, status) = input.into_parts();
+        let crate::send_models_generated::S3BucketVersioningCreateParts { bucket, status } =
+            input.into_parts();
+        let bucket = bucket.into_inner();
+        let status = status.into_inner();
         let identifier =
             crate::helpers::applied_identifier(&resource.id, "s3.PutBucketVersioning", bucket)?;
         let outcome = self
@@ -93,7 +96,9 @@ impl AwsProvider {
         to: Resource,
         _schema: &ResourceSchema,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
-        let (status,) = S3BucketVersioningUpdateInput::decode(&to)?.into_parts();
+        let crate::send_models_generated::S3BucketVersioningUpdateParts { status } =
+            S3BucketVersioningUpdateInput::decode(&to)?.into_parts();
+        let status = status.into_inner();
         self.put_s3_bucket_versioning(&id, identifier, status).await
     }
 

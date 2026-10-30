@@ -109,7 +109,14 @@ impl AwsProvider {
     ) -> ProviderResult<TypedCreateCompletion> {
         let input = S3BucketReplicationConfigurationCreateInput::decode(resource)?;
         let sent = input.sent();
-        let (bucket, role, rules) = input.into_parts();
+        let crate::send_models_generated::S3BucketReplicationConfigurationCreateParts {
+            bucket,
+            role,
+            rules,
+        } = input.into_parts();
+        let bucket = bucket.into_inner();
+        let role = role.into_inner();
+        let rules = rules.into_inner();
         let identifier =
             crate::helpers::applied_identifier(&resource.id, "s3.PutBucketReplication", bucket)?;
         let outcome = self
@@ -135,7 +142,12 @@ impl AwsProvider {
         schema: &ResourceSchema,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
         let input = S3BucketReplicationConfigurationUpdateInput::decode(&to)?;
-        let (role, rules) = input.into_parts();
+        let crate::send_models_generated::S3BucketReplicationConfigurationUpdateParts {
+            role,
+            rules,
+        } = input.into_parts();
+        let role = role.into_inner();
+        let rules = rules.into_inner();
         self.put_s3_bucket_replication(&id, identifier, role, &rules, schema)
             .await
     }

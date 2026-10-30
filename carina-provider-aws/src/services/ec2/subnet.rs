@@ -7,10 +7,12 @@ use crate::AwsProvider;
 use crate::aws_operation::ClientToken;
 use crate::error_helpers::api_error_with_meta;
 use crate::helpers::{
-    build_tag_specification_with_create_token, optional_bool_attr, optional_bool_struct_field,
-    optional_enum_struct_field, optional_int_attr,
+    build_tag_specification_with_create_token, optional_bool_struct_field,
+    optional_enum_struct_field,
 };
-use crate::provider::{AwsCreateAttempt, Ec2TaggedResourceKind, TaggedEc2CreateContinuationInput};
+#[cfg(test)]
+use crate::helpers::{optional_bool_attr, optional_int_attr};
+use crate::provider::{AwsCreateAttempt, TaggedEc2Create};
 use crate::read_model::{empty_map_value, found_managed_read};
 use crate::read_models_generated::Ec2SubnetReadModelSupplement;
 use crate::send_models_generated::{Ec2SubnetCreateInput, Ec2SubnetUpdateInput};
@@ -35,6 +37,7 @@ struct ModifySubnetAttrs {
     enable_resource_name_dns_aaaa_record: Option<bool>,
 }
 
+#[cfg(test)]
 fn resolve_modify_subnet_enum_attrs(
     resource: &Resource<impl Sized>,
     schema: &ResourceSchema,
@@ -264,7 +267,7 @@ impl AwsProvider {
             Err(error) => return Err(attempt.untracked(error)),
         };
         let sent = input.sent();
-        let (
+        let crate::send_models_generated::Ec2SubnetCreateParts {
             assign_ipv6_address_on_creation,
             availability_zone,
             availability_zone_id,
@@ -282,7 +285,25 @@ impl AwsProvider {
             private_dns_name_options_on_launch,
             tags,
             vpc_id,
-        ) = input.into_parts();
+        } = input.into_parts();
+        let assign_ipv6_address_on_creation = assign_ipv6_address_on_creation.into_inner();
+        let availability_zone = availability_zone.into_inner();
+        let availability_zone_id = availability_zone_id.into_inner();
+        let cidr_block = cidr_block.into_inner();
+        let enable_dns64 = enable_dns64.into_inner();
+        let enable_lni_at_device_index = enable_lni_at_device_index.into_inner();
+        let ipv4_ipam_pool_id = ipv4_ipam_pool_id.into_inner();
+        let ipv4_netmask_length = ipv4_netmask_length.into_inner();
+        let ipv6_cidr_block = ipv6_cidr_block.into_inner();
+        let ipv6_ipam_pool_id = ipv6_ipam_pool_id.into_inner();
+        let ipv6_native = ipv6_native.into_inner();
+        let ipv6_netmask_length = ipv6_netmask_length.into_inner();
+        let map_public_ip_on_launch = map_public_ip_on_launch.into_inner();
+        let outpost_arn = outpost_arn.into_inner();
+        let private_dns_name_options_on_launch = private_dns_name_options_on_launch.into_inner();
+        let tags = tags.into_inner();
+        let tags = crate::send_model::optional_tags_value(tags);
+        let vpc_id = vpc_id.into_inner();
         if availability_zone.is_some() && availability_zone_id.is_some() {
             return Err(attempt.untracked(
                 ProviderError::invalid_input(
@@ -371,15 +392,14 @@ impl AwsProvider {
         self.finish_tagged_ec2_create(
             resource,
             attempt,
-            Ec2TaggedResourceKind::Subnet
-                .create_context(client_token, sent)
-                .with_continuation(TaggedEc2CreateContinuationInput::Subnet {
-                    assign_ipv6_address_on_creation,
-                    enable_dns64,
-                    enable_lni_at_device_index,
-                    map_public_ip_on_launch,
-                    private_dns_name_options_on_launch,
-                }),
+            TaggedEc2Create::Subnet {
+                assign_ipv6_address_on_creation,
+                enable_dns64,
+                enable_lni_at_device_index,
+                map_public_ip_on_launch,
+                private_dns_name_options_on_launch,
+            }
+            .create_context(client_token, sent),
             result,
             |output| {
                 output
@@ -389,17 +409,6 @@ impl AwsProvider {
             },
         )
         .await
-    }
-
-    pub(crate) async fn continue_ec2_subnet_create(
-        &self,
-        resource: &Resource<impl Sized>,
-        schema: &ResourceSchema,
-        subnet_id: &str,
-    ) -> ProviderResult<()> {
-        let modify_attrs = resolve_modify_subnet_enum_attrs(resource, schema)?;
-        self.modify_subnet_attributes(&resource.id, subnet_id, &modify_attrs)
-            .await
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -437,14 +446,21 @@ impl AwsProvider {
         schema: &ResourceSchema,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
         let input = Ec2SubnetUpdateInput::decode(&to)?;
-        let (
+        let crate::send_models_generated::Ec2SubnetUpdateParts {
             assign_ipv6_address_on_creation,
             enable_dns64,
             enable_lni_at_device_index,
             map_public_ip_on_launch,
             private_dns_name_options_on_launch,
             tags,
-        ) = input.into_parts();
+        } = input.into_parts();
+        let assign_ipv6_address_on_creation = assign_ipv6_address_on_creation.into_inner();
+        let enable_dns64 = enable_dns64.into_inner();
+        let enable_lni_at_device_index = enable_lni_at_device_index.into_inner();
+        let map_public_ip_on_launch = map_public_ip_on_launch.into_inner();
+        let private_dns_name_options_on_launch = private_dns_name_options_on_launch.into_inner();
+        let tags = tags.into_inner();
+        let tags = crate::send_model::optional_tags_value(tags);
         let modify_attrs = resolve_modify_subnet_attrs(
             &id,
             schema,

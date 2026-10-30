@@ -6,7 +6,7 @@ use crate::AwsProvider;
 use crate::aws_operation::ClientToken;
 use crate::error_helpers::api_error_with_meta;
 use crate::helpers::build_tag_specification_with_create_token;
-use crate::provider::{AwsCreateAttempt, Ec2TaggedResourceKind, TaggedEc2CreateContinuationInput};
+use crate::provider::{AwsCreateAttempt, TaggedEc2Create};
 use crate::read_model::{empty_map_value, found_managed_read, require_read_value};
 use crate::read_models_generated::Ec2InternetGatewayReadModelSupplement;
 use crate::send_models_generated::Ec2InternetGatewayCreateInput;
@@ -75,7 +75,11 @@ impl AwsProvider {
             Err(error) => return Err(attempt.untracked(error)),
         };
         let sent = input.sent();
-        let (tags, vpc_id) = input.into_parts();
+        let crate::send_models_generated::Ec2InternetGatewayCreateParts { tags, vpc_id } =
+            input.into_parts();
+        let tags = tags.into_inner();
+        let tags = crate::send_model::optional_tags_value(tags);
+        let vpc_id = vpc_id.into_inner();
         let result = self
             .ec2_client
             .create_internet_gateway()
@@ -90,9 +94,7 @@ impl AwsProvider {
         self.finish_tagged_ec2_create(
             resource,
             attempt,
-            Ec2TaggedResourceKind::InternetGateway
-                .create_context(client_token, sent)
-                .with_continuation(TaggedEc2CreateContinuationInput::InternetGateway { vpc_id }),
+            TaggedEc2Create::InternetGateway { vpc_id }.create_context(client_token, sent),
             result,
             |output| {
                 output
@@ -102,19 +104,6 @@ impl AwsProvider {
             },
         )
         .await
-    }
-
-    pub(crate) async fn continue_ec2_internet_gateway_create(
-        &self,
-        resource: &Resource<impl Sized>,
-        igw_id: &str,
-    ) -> ProviderResult<()> {
-        let vpc_id = match resource.get_attr("vpc_id") {
-            Some(Value::Concrete(ConcreteValue::String(vpc_id))) => Some(vpc_id.expose_plaintext()),
-            _ => None,
-        };
-        self.continue_ec2_internet_gateway_create_with(&resource.id, igw_id, vpc_id)
-            .await
     }
 
     pub(crate) async fn continue_ec2_internet_gateway_create_with(

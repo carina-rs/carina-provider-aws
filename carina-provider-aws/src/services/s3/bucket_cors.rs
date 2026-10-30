@@ -57,7 +57,12 @@ impl AwsProvider {
     ) -> ProviderResult<TypedCreateCompletion> {
         let input = S3BucketCorsConfigurationCreateInput::decode(resource)?;
         let sent = input.sent();
-        let (bucket, cors_rules) = input.into_parts();
+        let crate::send_models_generated::S3BucketCorsConfigurationCreateParts {
+            bucket,
+            cors_rules,
+        } = input.into_parts();
+        let bucket = bucket.into_inner();
+        let cors_rules = cors_rules.into_inner();
         let identifier =
             crate::helpers::applied_identifier(&resource.id, "s3.PutBucketCors", bucket)?;
         let outcome = self
@@ -82,7 +87,9 @@ impl AwsProvider {
         to: Resource,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
         let input = S3BucketCorsConfigurationUpdateInput::decode(&to)?;
-        let (cors_rules,) = input.into_parts();
+        let crate::send_models_generated::S3BucketCorsConfigurationUpdateParts { cors_rules } =
+            input.into_parts();
+        let cors_rules = cors_rules.into_inner();
         self.put_s3_bucket_cors(&id, identifier, &cors_rules).await
     }
 

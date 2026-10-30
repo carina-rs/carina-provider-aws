@@ -53,6 +53,7 @@ pub fn value_as_str(v: &Value) -> Option<&str> {
 /// Extract an optional concrete integer attribute, rejecting a present value
 /// with a different shape instead of silently dropping it from the AWS
 /// request.
+#[cfg(test)]
 pub(crate) fn optional_int_attr(
     resource: &Resource<impl Sized>,
     attr_name: &str,
@@ -107,6 +108,7 @@ pub fn optional_enum_attr<'a>(
 /// `Value` shape. Sibling of [`optional_enum_attr`] /
 /// [`value_as_str`]; closes the symmetric top-level helper set for
 /// Bool reads (carina-rs/carina-provider-aws#451).
+#[cfg(test)]
 pub(crate) fn optional_bool_attr(resource: &Resource<impl Sized>, attr_name: &str) -> Option<bool> {
     match resource.get_attr(attr_name)? {
         Value::Concrete(ConcreteValue::Bool(b)) => Some(*b),

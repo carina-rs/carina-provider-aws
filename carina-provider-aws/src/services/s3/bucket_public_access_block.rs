@@ -75,13 +75,18 @@ impl AwsProvider {
     ) -> ProviderResult<TypedCreateCompletion> {
         let input = S3BucketPublicAccessBlockCreateInput::decode(resource)?;
         let sent = input.sent();
-        let (
+        let crate::send_models_generated::S3BucketPublicAccessBlockCreateParts {
             block_public_acls,
             block_public_policy,
             bucket,
             ignore_public_acls,
             restrict_public_buckets,
-        ) = input.into_parts();
+        } = input.into_parts();
+        let block_public_acls = block_public_acls.into_inner();
+        let block_public_policy = block_public_policy.into_inner();
+        let bucket = bucket.into_inner();
+        let ignore_public_acls = ignore_public_acls.into_inner();
+        let restrict_public_buckets = restrict_public_buckets.into_inner();
         let identifier =
             crate::helpers::applied_identifier(&resource.id, "s3.PutPublicAccessBlock", bucket)?;
         let outcome = self
@@ -113,8 +118,16 @@ impl AwsProvider {
         to: Resource,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
         let input = S3BucketPublicAccessBlockUpdateInput::decode(&to)?;
-        let (block_public_acls, block_public_policy, ignore_public_acls, restrict_public_buckets) =
-            input.into_parts();
+        let crate::send_models_generated::S3BucketPublicAccessBlockUpdateParts {
+            block_public_acls,
+            block_public_policy,
+            ignore_public_acls,
+            restrict_public_buckets,
+        } = input.into_parts();
+        let block_public_acls = block_public_acls.into_inner();
+        let block_public_policy = block_public_policy.into_inner();
+        let ignore_public_acls = ignore_public_acls.into_inner();
+        let restrict_public_buckets = restrict_public_buckets.into_inner();
         self.put_s3_bucket_public_access_block(
             &id,
             identifier,

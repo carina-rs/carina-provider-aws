@@ -28,7 +28,7 @@ pub fn ec2_vpc_endpoint_config() -> AwsSchemaConfig {
         .with_description("Describes a VPC endpoint.")
         .with_conflicting_replacement()
         .attribute(
-            AttributeSchema::optional("policy_document", AttributeType::string())
+            AttributeSchema::optional("policy_document", super::iam_policy_document())
                 .with_description("(Interface and gateway endpoints) A policy to attach to the endpoint that controls access to the service. The policy must be in valid JSON format. If ...")
                 .with_provider_name("PolicyDocument")
                 .build(),

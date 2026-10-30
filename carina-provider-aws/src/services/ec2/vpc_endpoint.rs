@@ -9,41 +9,10 @@ use crate::error_helpers::api_error_with_meta;
 use crate::helpers::{
     RetryPolicy, build_tag_specification_with_create_token, retry_aws_operation_with_token,
 };
-use crate::provider::{AwsCreateAttempt, Ec2TaggedResourceKind};
+use crate::provider::{AwsCreateAttempt, TaggedEc2Create};
 use crate::read_model::{empty_map_value, found_managed_read};
 use crate::read_models_generated::Ec2VpcEndpointReadModelSupplement;
 use crate::send_models_generated::{Ec2VpcEndpointCreateInput, Ec2VpcEndpointUpdateInput};
-
-fn string_list_value(
-    id: &ResourceId,
-    name: &str,
-    value: Option<&Value>,
-) -> ProviderResult<Vec<String>> {
-    let Some(value) = value else {
-        return Ok(Vec::new());
-    };
-    match value {
-        Value::Concrete(ConcreteValue::List(values)) => values
-            .iter()
-            .map(|value| match value {
-                Value::Concrete(ConcreteValue::String(value)) => {
-                    Ok(value.expose_plaintext().to_string())
-                }
-                _ => Err(
-                    ProviderError::invalid_input(format!("{name} must contain strings"))
-                        .for_resource(id.clone()),
-                ),
-            })
-            .collect(),
-        Value::Concrete(ConcreteValue::StringList(values)) => Ok(values
-            .iter()
-            .map(|value| value.expose_plaintext().to_string())
-            .collect()),
-        _ => Err(
-            ProviderError::invalid_input(format!("{name} must be a list")).for_resource(id.clone()),
-        ),
-    }
-}
 
 impl AwsProvider {
     /// Read an EC2 VPC Endpoint
@@ -115,7 +84,7 @@ impl AwsProvider {
             Err(error) => return Err(attempt.untracked(error)),
         };
         let sent = input.sent();
-        let (
+        let crate::send_models_generated::Ec2VpcEndpointCreateParts {
             policy_document,
             private_dns_enabled,
             resource_configuration_arn,
@@ -128,7 +97,34 @@ impl AwsProvider {
             tags,
             vpc_endpoint_type,
             vpc_id,
-        ) = input.into_parts();
+        } = input.into_parts();
+        let policy_document = policy_document.into_inner();
+        let policy_document = match policy_document
+            .as_ref()
+            .map(|value| {
+                crate::services::iam::role::resolve_iam_policy_value(
+                    &resource.id,
+                    "policy_document",
+                    value,
+                )
+            })
+            .transpose()
+        {
+            Ok(value) => value,
+            Err(error) => return Err(attempt.untracked(error)),
+        };
+        let private_dns_enabled = private_dns_enabled.into_inner();
+        let resource_configuration_arn = resource_configuration_arn.into_inner();
+        let route_table_ids = route_table_ids.into_inner();
+        let security_group_ids = security_group_ids.into_inner();
+        let service_name = service_name.into_inner();
+        let service_network_arn = service_network_arn.into_inner();
+        let service_region = service_region.into_inner();
+        let subnet_ids = subnet_ids.into_inner();
+        let tags = tags.into_inner();
+        let tags = crate::send_model::optional_tags_value(tags);
+        let vpc_endpoint_type = vpc_endpoint_type.into_inner();
+        let vpc_id = vpc_id.into_inner();
 
         let mut req = self.ec2_client.create_vpc_endpoint().configure(|builder| {
             builder
@@ -148,32 +144,15 @@ impl AwsProvider {
             });
         }
 
-        let route_table_ids =
-            match string_list_value(&resource.id, "route_table_ids", route_table_ids.as_ref()) {
-                Ok(values) => values,
-                Err(error) => return Err(attempt.untracked(error)),
-            };
-        for route_table_id in route_table_ids {
+        for route_table_id in route_table_ids.unwrap_or_default() {
             req = req.configure(|builder| builder.route_table_ids(route_table_id));
         }
 
-        let subnet_ids = match string_list_value(&resource.id, "subnet_ids", subnet_ids.as_ref()) {
-            Ok(values) => values,
-            Err(error) => return Err(attempt.untracked(error)),
-        };
-        for subnet_id in subnet_ids {
+        for subnet_id in subnet_ids.unwrap_or_default() {
             req = req.configure(|builder| builder.subnet_ids(subnet_id));
         }
 
-        let security_group_ids = match string_list_value(
-            &resource.id,
-            "security_group_ids",
-            security_group_ids.as_ref(),
-        ) {
-            Ok(values) => values,
-            Err(error) => return Err(attempt.untracked(error)),
-        };
-        for security_group_id in security_group_ids {
+        for security_group_id in security_group_ids.unwrap_or_default() {
             req = req.configure(|builder| builder.security_group_ids(security_group_id));
         }
 
@@ -201,7 +180,7 @@ impl AwsProvider {
         self.finish_tagged_ec2_create(
             resource,
             attempt,
-            Ec2TaggedResourceKind::VpcEndpoint.create_context(client_token, sent),
+            TaggedEc2Create::VpcEndpoint.create_context(client_token, sent),
             result,
             |output| {
                 output
@@ -223,7 +202,21 @@ impl AwsProvider {
         _schema: &ResourceSchema,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
         let input = Ec2VpcEndpointUpdateInput::decode(&to)?;
-        let (policy_document, private_dns_enabled, tags) = input.into_parts();
+        let crate::send_models_generated::Ec2VpcEndpointUpdateParts {
+            policy_document,
+            private_dns_enabled,
+            tags,
+        } = input.into_parts();
+        let policy_document = policy_document.into_inner();
+        let policy_document = policy_document
+            .as_ref()
+            .map(|value| {
+                crate::services::iam::role::resolve_iam_policy_value(&id, "policy_document", value)
+            })
+            .transpose()?;
+        let private_dns_enabled = private_dns_enabled.into_inner();
+        let tags = tags.into_inner();
+        let tags = crate::send_model::optional_tags_value(tags);
         let mut req = self
             .ec2_client
             .modify_vpc_endpoint()

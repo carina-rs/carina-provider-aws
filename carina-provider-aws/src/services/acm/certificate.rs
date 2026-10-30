@@ -208,41 +208,49 @@ fn build_request_certificate_input(
     schema: &ResourceSchema,
     input: AcmCertificateCreateInput,
 ) -> ProviderResult<RequestCertificateInput> {
-    let (domain_name, key_algorithm, options, subject_alternative_names, tags, validation_method) =
-        input.into_parts();
-    let domain_name_value = Value::Concrete(ConcreteValue::String(domain_name.clone().into()));
+    let crate::send_models_generated::AcmCertificateCreateParts {
+        domain_name,
+        key_algorithm,
+        options,
+        subject_alternative_names,
+        tags,
+        validation_method,
+    } = input.into_parts();
+    let domain_name = domain_name.into_inner();
+    let key_algorithm = key_algorithm.into_inner();
+    let options = options.into_inner();
+    let subject_alternative_names = subject_alternative_names.into_inner();
+    let tags = tags.into_inner();
+    let validation_method = validation_method.into_inner();
     let request_enums = CertificateRequestEnums {
         validation_method: validation_method.as_deref().map(ValidationMethod::from),
         key_algorithm: key_algorithm.as_deref().map(KeyAlgorithm::from),
     };
 
     let sans = subject_alternative_names
-        .map(|value| {
-            canonicalize_acm_subject_alternative_names(Some(&domain_name_value), Some(value))
+        .map(|names| {
+            names
+                .into_iter()
+                .map(|name| normalize_acm_dns_name(&name))
+                .filter(|name| !acm_dns_names_equal(name, &domain_name))
+                .collect::<Vec<_>>()
         })
-        .as_ref()
-        .map(extract_string_list)
         .filter(|values| !values.is_empty());
     let options = build_create_certificate_options(&resource.id, options.as_ref(), schema)?;
 
     let mut sdk_tags = Vec::new();
-    if let Some(Value::Concrete(ConcreteValue::Map(tag_map))) = tags.as_ref() {
+    if let Some(tag_map) = tags {
         for (key, value) in tag_map {
-            if let Value::Concrete(ConcreteValue::String(val)) = value {
-                sdk_tags.push(
-                    aws_sdk_acm::types::Tag::builder()
-                        .key(key)
-                        .value(val.expose_plaintext())
-                        .build()
-                        .map_err(|e| {
-                            ProviderError::api_error(sdk_error_message(
-                                "Failed to build ACM tag",
-                                &e,
-                            ))
+            sdk_tags.push(
+                aws_sdk_acm::types::Tag::builder()
+                    .key(key)
+                    .value(value)
+                    .build()
+                    .map_err(|e| {
+                        ProviderError::api_error(sdk_error_message("Failed to build ACM tag", &e))
                             .for_resource(resource.id.clone())
-                        })?,
-                );
-            }
+                    })?,
+            );
         }
     }
 
@@ -784,7 +792,9 @@ impl AwsProvider {
         _schema: &ResourceSchema,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
         let input = AcmCertificateUpdateInput::decode(&to)?;
-        let (tags,) = input.into_parts();
+        let crate::send_models_generated::AcmCertificateUpdateParts { tags } = input.into_parts();
+        let tags = tags.into_inner();
+        let tags = crate::send_model::optional_tags_value(tags);
         self.apply_acm_tags(&id, identifier.as_str(), tags.as_ref(), from)
             .await?;
 

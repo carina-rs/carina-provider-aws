@@ -87,8 +87,21 @@ impl AwsProvider {
     ) -> ProviderResult<TypedCreateCompletion> {
         let input = IamRoleCreateInput::decode(resource)?;
         let sent = input.sent();
-        let (assume_role_policy_document, description, max_session_duration, path, role_name, tags) =
-            input.into_parts();
+        let crate::send_models_generated::IamRoleCreateParts {
+            assume_role_policy_document,
+            description,
+            max_session_duration,
+            path,
+            role_name,
+            tags,
+        } = input.into_parts();
+        let assume_role_policy_document = assume_role_policy_document.into_inner();
+        let description = description.into_inner();
+        let max_session_duration = max_session_duration.into_inner();
+        let path = path.into_inner();
+        let role_name = role_name.into_inner();
+        let tags = tags.into_inner();
+        let tags = crate::send_model::optional_tags_value(tags);
         let assume_role_policy_document = resolve_iam_policy_value(
             &resource.id,
             "assume_role_policy_document",
@@ -157,7 +170,9 @@ impl AwsProvider {
         to: Resource,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
         let input = IamRoleUpdateInput::decode(&to)?;
-        let (tags,) = input.into_parts();
+        let crate::send_models_generated::IamRoleUpdateParts { tags } = input.into_parts();
+        let tags = tags.into_inner();
+        let tags = crate::send_model::optional_tags_value(tags);
 
         // Update tags
         self.apply_iam_tags(

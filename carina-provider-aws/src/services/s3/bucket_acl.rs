@@ -150,7 +150,10 @@ impl AwsProvider {
     ) -> ProviderResult<TypedCreateCompletion> {
         let input = S3BucketAclCreateInput::decode(resource)?;
         let sent = input.sent();
-        let (acl, bucket) = input.into_parts();
+        let crate::send_models_generated::S3BucketAclCreateParts { acl, bucket } =
+            input.into_parts();
+        let acl = acl.into_inner();
+        let bucket = bucket.into_inner();
         let identifier =
             crate::helpers::applied_identifier(&resource.id, "s3.PutBucketAcl", bucket)?;
         let outcome = self
@@ -175,7 +178,9 @@ impl AwsProvider {
         to: Resource,
         _schema: &ResourceSchema,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
-        let (acl,) = S3BucketAclUpdateInput::decode(&to)?.into_parts();
+        let crate::send_models_generated::S3BucketAclUpdateParts { acl } =
+            S3BucketAclUpdateInput::decode(&to)?.into_parts();
+        let acl = acl.into_inner();
         self.put_s3_bucket_acl(&id, identifier, acl).await
     }
 

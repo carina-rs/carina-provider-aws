@@ -239,14 +239,15 @@ pub enum Ec2TaggedResourceKind {
 
 /// Inputs shared by every tag-discoverable EC2 create result handler.
 pub(crate) struct TaggedEc2CreateContext<'a> {
-    kind: Ec2TaggedResourceKind,
+    create: TaggedEc2Create,
     create_token: &'a ClientToken,
     sent: Sent,
-    continuation: Option<TaggedEc2CreateContinuationInput>,
 }
 
-/// Typed values used by EC2 create calls that require a follow-up mutation.
-pub(crate) enum TaggedEc2CreateContinuationInput {
+/// A tagged EC2 create kind together with any values needed after the create
+/// request is accepted. Variant construction makes kind/continuation mismatch
+/// states unrepresentable.
+pub(crate) enum TaggedEc2Create {
     Vpc {
         enable_dns_hostnames: Option<bool>,
         enable_dns_support: Option<bool>,
@@ -261,22 +262,165 @@ pub(crate) enum TaggedEc2CreateContinuationInput {
     InternetGateway {
         vpc_id: Option<String>,
     },
+    RouteTable,
+    SecurityGroup,
+    EgressOnlyInternetGateway,
+    VpnGateway,
+    VpcPeeringConnection,
+    Address,
+    NatGateway,
+    VpcEndpoint,
+    FlowLog,
+    TransitGateway,
+    TransitGatewayVpcAttachment,
 }
 
-impl Ec2TaggedResourceKind {
+/// A resumed EC2 create only needs follow-up fields, but every generated
+/// create part still has to cross the `Sent<T>` consumption boundary. Keeping
+/// this as a generic helper avoids `drop(copy_value)` warnings while making
+/// the intentional projection explicit at each named field.
+fn consume_create_request_part_on_resume<T>(part: crate::send_model::Sent<T>) {
+    drop(part.into_inner());
+}
+
+impl TaggedEc2Create {
     pub(crate) fn create_context(
         self,
         create_token: &ClientToken,
         sent: Sent,
     ) -> TaggedEc2CreateContext<'_> {
         TaggedEc2CreateContext {
-            kind: self,
+            create: self,
             create_token,
             sent,
-            continuation: None,
         }
     }
 
+    fn kind(&self) -> Ec2TaggedResourceKind {
+        match self {
+            Self::Vpc { .. } => Ec2TaggedResourceKind::Vpc,
+            Self::Subnet { .. } => Ec2TaggedResourceKind::Subnet,
+            Self::InternetGateway { .. } => Ec2TaggedResourceKind::InternetGateway,
+            Self::RouteTable => Ec2TaggedResourceKind::RouteTable,
+            Self::SecurityGroup => Ec2TaggedResourceKind::SecurityGroup,
+            Self::EgressOnlyInternetGateway => Ec2TaggedResourceKind::EgressOnlyInternetGateway,
+            Self::VpnGateway => Ec2TaggedResourceKind::VpnGateway,
+            Self::VpcPeeringConnection => Ec2TaggedResourceKind::VpcPeeringConnection,
+            Self::Address => Ec2TaggedResourceKind::Address,
+            Self::NatGateway => Ec2TaggedResourceKind::NatGateway,
+            Self::VpcEndpoint => Ec2TaggedResourceKind::VpcEndpoint,
+            Self::FlowLog => Ec2TaggedResourceKind::FlowLog,
+            Self::TransitGateway => Ec2TaggedResourceKind::TransitGateway,
+            Self::TransitGatewayVpcAttachment => Ec2TaggedResourceKind::TransitGatewayVpcAttachment,
+        }
+    }
+
+    fn decode_resumed(
+        kind: Ec2TaggedResourceKind,
+        resource: &Resource<impl Sized>,
+    ) -> ProviderResult<Self> {
+        match kind {
+            Ec2TaggedResourceKind::Vpc => {
+                let input = crate::send_models_generated::Ec2VpcCreateInput::decode(resource)?;
+                let crate::send_models_generated::Ec2VpcCreateParts {
+                    cidr_block,
+                    enable_dns_hostnames,
+                    enable_dns_support,
+                    instance_tenancy,
+                    ipv4_ipam_pool_id,
+                    ipv4_netmask_length,
+                    tags,
+                } = input.into_parts();
+                // Resume only needs the follow-up values. Explicitly consume
+                // the create-request values so the Sent<T> guard still proves
+                // that this projection was updated when the generated input grows.
+                consume_create_request_part_on_resume(cidr_block);
+                let enable_dns_hostnames = enable_dns_hostnames.into_inner();
+                let enable_dns_support = enable_dns_support.into_inner();
+                consume_create_request_part_on_resume(instance_tenancy);
+                consume_create_request_part_on_resume(ipv4_ipam_pool_id);
+                consume_create_request_part_on_resume(ipv4_netmask_length);
+                consume_create_request_part_on_resume(tags);
+                Ok(Self::Vpc {
+                    enable_dns_hostnames,
+                    enable_dns_support,
+                })
+            }
+            Ec2TaggedResourceKind::Subnet => {
+                let input = crate::send_models_generated::Ec2SubnetCreateInput::decode(resource)?;
+                let crate::send_models_generated::Ec2SubnetCreateParts {
+                    assign_ipv6_address_on_creation,
+                    availability_zone,
+                    availability_zone_id,
+                    cidr_block,
+                    enable_dns64,
+                    enable_lni_at_device_index,
+                    ipv4_ipam_pool_id,
+                    ipv4_netmask_length,
+                    ipv6_cidr_block,
+                    ipv6_ipam_pool_id,
+                    ipv6_native,
+                    ipv6_netmask_length,
+                    map_public_ip_on_launch,
+                    outpost_arn,
+                    private_dns_name_options_on_launch,
+                    tags,
+                    vpc_id,
+                } = input.into_parts();
+                let assign_ipv6_address_on_creation = assign_ipv6_address_on_creation.into_inner();
+                consume_create_request_part_on_resume(availability_zone);
+                consume_create_request_part_on_resume(availability_zone_id);
+                consume_create_request_part_on_resume(cidr_block);
+                let enable_dns64 = enable_dns64.into_inner();
+                let enable_lni_at_device_index = enable_lni_at_device_index.into_inner();
+                consume_create_request_part_on_resume(ipv4_ipam_pool_id);
+                consume_create_request_part_on_resume(ipv4_netmask_length);
+                consume_create_request_part_on_resume(ipv6_cidr_block);
+                consume_create_request_part_on_resume(ipv6_ipam_pool_id);
+                consume_create_request_part_on_resume(ipv6_native);
+                consume_create_request_part_on_resume(ipv6_netmask_length);
+                let map_public_ip_on_launch = map_public_ip_on_launch.into_inner();
+                consume_create_request_part_on_resume(outpost_arn);
+                let private_dns_name_options_on_launch =
+                    private_dns_name_options_on_launch.into_inner();
+                consume_create_request_part_on_resume(tags);
+                consume_create_request_part_on_resume(vpc_id);
+                Ok(Self::Subnet {
+                    assign_ipv6_address_on_creation,
+                    enable_dns64,
+                    enable_lni_at_device_index,
+                    map_public_ip_on_launch,
+                    private_dns_name_options_on_launch,
+                })
+            }
+            Ec2TaggedResourceKind::InternetGateway => {
+                let input =
+                    crate::send_models_generated::Ec2InternetGatewayCreateInput::decode(resource)?;
+                let crate::send_models_generated::Ec2InternetGatewayCreateParts { tags, vpc_id } =
+                    input.into_parts();
+                consume_create_request_part_on_resume(tags);
+                Ok(Self::InternetGateway {
+                    vpc_id: vpc_id.into_inner(),
+                })
+            }
+            Ec2TaggedResourceKind::RouteTable => Ok(Self::RouteTable),
+            Ec2TaggedResourceKind::SecurityGroup => Ok(Self::SecurityGroup),
+            Ec2TaggedResourceKind::EgressOnlyInternetGateway => Ok(Self::EgressOnlyInternetGateway),
+            Ec2TaggedResourceKind::VpnGateway => Ok(Self::VpnGateway),
+            Ec2TaggedResourceKind::VpcPeeringConnection => Ok(Self::VpcPeeringConnection),
+            Ec2TaggedResourceKind::Address => Ok(Self::Address),
+            Ec2TaggedResourceKind::NatGateway => Ok(Self::NatGateway),
+            Ec2TaggedResourceKind::VpcEndpoint => Ok(Self::VpcEndpoint),
+            Ec2TaggedResourceKind::FlowLog => Ok(Self::FlowLog),
+            Ec2TaggedResourceKind::TransitGateway => Ok(Self::TransitGateway),
+            Ec2TaggedResourceKind::TransitGatewayVpcAttachment => {
+                Ok(Self::TransitGatewayVpcAttachment)
+            }
+        }
+    }
+}
+
+impl Ec2TaggedResourceKind {
     fn create_operation(self) -> &'static str {
         match self {
             Self::Vpc => "ec2.CreateVpc",
@@ -521,15 +665,6 @@ impl Ec2TaggedResourceKind {
             identifiers.dedup();
         }
         Ok(identifiers)
-    }
-}
-
-impl TaggedEc2CreateContext<'_> {
-    pub(crate) fn with_continuation(self, continuation: TaggedEc2CreateContinuationInput) -> Self {
-        Self {
-            continuation: Some(continuation),
-            ..self
-        }
     }
 }
 
@@ -1309,11 +1444,11 @@ impl AwsProvider {
         Identifier: FnOnce(&O) -> Option<String>,
     {
         let TaggedEc2CreateContext {
-            kind,
+            create,
             create_token,
             sent,
-            continuation,
         } = context;
+        let kind = create.kind();
         let output = match result {
             Ok(output) => output,
             Err(error) => {
@@ -1339,14 +1474,8 @@ impl AwsProvider {
             Err(error) => return Err(attempt.untracked(error)),
         };
         let issued = attempt.issued(identifier.clone(), sent);
-        self.finish_tagged_ec2_issued_with_continuation(
-            resource,
-            kind,
-            identifier,
-            issued,
-            continuation,
-        )
-        .await
+        self.finish_tagged_ec2_issued(resource, create, identifier, issued)
+            .await
     }
 
     fn tagged_ec2_discovery_call_error<E>(
@@ -1582,105 +1711,67 @@ impl AwsProvider {
     async fn continue_tagged_ec2_create(
         &self,
         resource: &Resource<impl Sized>,
-        kind: Ec2TaggedResourceKind,
+        create: TaggedEc2Create,
         identifier: AppliedIdentifier,
-        continuation: Option<TaggedEc2CreateContinuationInput>,
     ) -> ProviderResult<TaggedEc2Continuation> {
-        match kind {
-            Ec2TaggedResourceKind::Vpc => match continuation {
-                Some(TaggedEc2CreateContinuationInput::Vpc {
+        let kind = create.kind();
+        match create {
+            TaggedEc2Create::Vpc {
+                enable_dns_hostnames,
+                enable_dns_support,
+            } => {
+                self.continue_ec2_vpc_create_with(
+                    &resource.id,
+                    identifier.as_str(),
                     enable_dns_hostnames,
                     enable_dns_support,
-                }) => {
-                    self.continue_ec2_vpc_create_with(
-                        &resource.id,
-                        identifier.as_str(),
-                        enable_dns_hostnames,
-                        enable_dns_support,
-                    )
-                    .await?;
-                }
-                None => {
-                    self.continue_ec2_vpc_create(resource, identifier.as_str())
-                        .await?;
-                }
-                Some(_) => {
-                    return Err(ProviderError::internal(
-                        "mismatched typed EC2 create continuation for VPC",
-                    )
-                    .for_resource(resource.id.clone()));
-                }
-            },
-            Ec2TaggedResourceKind::Subnet => {
+                )
+                .await?;
+            }
+            TaggedEc2Create::Subnet {
+                assign_ipv6_address_on_creation,
+                enable_dns64,
+                enable_lni_at_device_index,
+                map_public_ip_on_launch,
+                private_dns_name_options_on_launch,
+            } => {
                 let schema = self
                     .resource_schema(resource.id.resource_type.as_str())
                     .ok_or_else(|| {
                         ProviderError::internal("missing EC2 subnet schema")
                             .for_resource(resource.id.clone())
                     })?;
-                match continuation {
-                    Some(TaggedEc2CreateContinuationInput::Subnet {
-                        assign_ipv6_address_on_creation,
-                        enable_dns64,
-                        enable_lni_at_device_index,
-                        map_public_ip_on_launch,
-                        private_dns_name_options_on_launch,
-                    }) => {
-                        self.continue_ec2_subnet_create_with(
-                            &resource.id,
-                            schema,
-                            identifier.as_str(),
-                            assign_ipv6_address_on_creation,
-                            enable_dns64,
-                            enable_lni_at_device_index,
-                            map_public_ip_on_launch,
-                            private_dns_name_options_on_launch.as_ref(),
-                        )
-                        .await?;
-                    }
-                    None => {
-                        self.continue_ec2_subnet_create(resource, schema, identifier.as_str())
-                            .await?;
-                    }
-                    Some(_) => {
-                        return Err(ProviderError::internal(
-                            "mismatched typed EC2 create continuation for subnet",
-                        )
-                        .for_resource(resource.id.clone()));
-                    }
-                }
+                self.continue_ec2_subnet_create_with(
+                    &resource.id,
+                    schema,
+                    identifier.as_str(),
+                    assign_ipv6_address_on_creation,
+                    enable_dns64,
+                    enable_lni_at_device_index,
+                    map_public_ip_on_launch,
+                    private_dns_name_options_on_launch.as_ref(),
+                )
+                .await?;
             }
-            Ec2TaggedResourceKind::InternetGateway => match continuation {
-                Some(TaggedEc2CreateContinuationInput::InternetGateway { vpc_id }) => {
-                    self.continue_ec2_internet_gateway_create_with(
-                        &resource.id,
-                        identifier.as_str(),
-                        vpc_id.as_deref(),
-                    )
-                    .await?;
-                }
-                None => {
-                    self.continue_ec2_internet_gateway_create(resource, identifier.as_str())
-                        .await?;
-                }
-                Some(_) => {
-                    return Err(ProviderError::internal(
-                        "mismatched typed EC2 create continuation for internet gateway",
-                    )
-                    .for_resource(resource.id.clone()));
-                }
-            },
-            Ec2TaggedResourceKind::RouteTable
-            | Ec2TaggedResourceKind::VpcEndpoint
-            | Ec2TaggedResourceKind::SecurityGroup
-            | Ec2TaggedResourceKind::EgressOnlyInternetGateway
-            | Ec2TaggedResourceKind::VpnGateway
-            | Ec2TaggedResourceKind::VpcPeeringConnection
-            | Ec2TaggedResourceKind::Address
-            | Ec2TaggedResourceKind::NatGateway
-            | Ec2TaggedResourceKind::FlowLog
-            | Ec2TaggedResourceKind::TransitGateway
-            | Ec2TaggedResourceKind::TransitGatewayVpcAttachment => {}
+            TaggedEc2Create::InternetGateway { vpc_id } => {
+                self.continue_ec2_internet_gateway_create_with(
+                    &resource.id,
+                    identifier.as_str(),
+                    vpc_id.as_deref(),
+                )
+                .await?;
+            }
+            TaggedEc2Create::RouteTable
+            | TaggedEc2Create::VpcEndpoint
+            | TaggedEc2Create::SecurityGroup
+            | TaggedEc2Create::EgressOnlyInternetGateway
+            | TaggedEc2Create::VpnGateway
+            | TaggedEc2Create::VpcPeeringConnection
+            | TaggedEc2Create::Address
+            | TaggedEc2Create::NatGateway
+            | TaggedEc2Create::FlowLog
+            | TaggedEc2Create::TransitGateway
+            | TaggedEc2Create::TransitGatewayVpcAttachment => {}
         }
 
         let pending = match kind {
@@ -1727,24 +1818,12 @@ impl AwsProvider {
     pub(crate) async fn finish_tagged_ec2_issued<I: AwsIssuedCreate>(
         &self,
         resource: &Resource<impl Sized>,
-        kind: Ec2TaggedResourceKind,
+        create: TaggedEc2Create,
         identifier: AppliedIdentifier,
         issued: I,
-    ) -> Result<I::Step, I::Verdict> {
-        self.finish_tagged_ec2_issued_with_continuation(resource, kind, identifier, issued, None)
-            .await
-    }
-
-    async fn finish_tagged_ec2_issued_with_continuation<I: AwsIssuedCreate>(
-        &self,
-        resource: &Resource<impl Sized>,
-        kind: Ec2TaggedResourceKind,
-        identifier: AppliedIdentifier,
-        issued: I,
-        continuation: Option<TaggedEc2CreateContinuationInput>,
     ) -> Result<I::Step, I::Verdict> {
         match self
-            .continue_tagged_ec2_create(resource, kind, identifier, continuation)
+            .continue_tagged_ec2_create(resource, create, identifier)
             .await
         {
             Ok(TaggedEc2Continuation::Complete(completion)) => {
@@ -1762,8 +1841,12 @@ impl AwsProvider {
         identifier: AppliedIdentifier,
         resumed: R,
     ) -> Result<R::Step, R::Verdict> {
+        let create = match TaggedEc2Create::decode_resumed(kind, resource) {
+            Ok(create) => create,
+            Err(error) => return Err(self.failed_resumed(&resource.id, resumed, error).await),
+        };
         match self
-            .continue_tagged_ec2_create(resource, kind, identifier, None)
+            .continue_tagged_ec2_create(resource, create, identifier)
             .await
         {
             Ok(TaggedEc2Continuation::Complete(completion)) => {
@@ -2344,7 +2427,13 @@ impl AwsProvider {
                     AwsCreatePoll::Unissued(attempt) => attempt.issued(identifier.clone()),
                     AwsCreatePoll::Issued(issued) => issued,
                 };
-                self.finish_tagged_ec2_issued(resource, kind, identifier, issued)
+                let create = match TaggedEc2Create::decode_resumed(kind, resource) {
+                    Ok(create) => create,
+                    Err(error) => {
+                        return Err(self.failed_issued(&resource.id, issued, error).await);
+                    }
+                };
+                self.finish_tagged_ec2_issued(resource, create, identifier, issued)
                     .await
             }
         }

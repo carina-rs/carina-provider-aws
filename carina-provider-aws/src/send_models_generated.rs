@@ -5,7 +5,7 @@
 
 use std::collections::BTreeSet;
 
-use carina_core::provider::{ProviderResult, Sent};
+use carina_core::provider::{ProviderResult, Sent as CreateSent};
 use carina_core::resource::{Resource, Value};
 
 /// Exhaustive typed create input for `ec2.Vpc`.
@@ -16,7 +16,17 @@ pub(crate) struct Ec2VpcCreateInput {
     instance_tenancy: Option<String>,
     ipv4_ipam_pool_id: Option<String>,
     ipv4_netmask_length: Option<i64>,
-    tags: Option<Value>,
+    tags: Option<crate::send_model::Tags>,
+}
+
+pub(crate) struct Ec2VpcCreateParts {
+    pub(crate) cidr_block: crate::send_model::Sent<Option<String>>,
+    pub(crate) enable_dns_hostnames: crate::send_model::Sent<Option<bool>>,
+    pub(crate) enable_dns_support: crate::send_model::Sent<Option<bool>>,
+    pub(crate) instance_tenancy: crate::send_model::Sent<Option<String>>,
+    pub(crate) ipv4_ipam_pool_id: crate::send_model::Sent<Option<String>>,
+    pub(crate) ipv4_netmask_length: crate::send_model::Sent<Option<i64>>,
+    pub(crate) tags: crate::send_model::Sent<Option<crate::send_model::Tags>>,
 }
 
 impl Ec2VpcCreateInput {
@@ -36,20 +46,14 @@ impl Ec2VpcCreateInput {
             )?,
             ipv4_ipam_pool_id: crate::send_model::optional_string(_resource, "ipv4_ipam_pool_id")?,
             ipv4_netmask_length: crate::send_model::optional_int(_resource, "ipv4_netmask_length")?,
-            tags: crate::send_model::optional_value(_resource, "tags")?,
+            tags: crate::send_model::optional_tags(_resource, "tags")?,
         })
     }
 
-    pub(crate) fn sent(&self) -> Sent {
+    pub(crate) fn sent(&self) -> CreateSent {
         let mut sent = BTreeSet::new();
         if self.cidr_block.is_some() {
             sent.insert("cidr_block".to_string());
-        }
-        if self.enable_dns_hostnames.is_some() {
-            sent.insert("enable_dns_hostnames".to_string());
-        }
-        if self.enable_dns_support.is_some() {
-            sent.insert("enable_dns_support".to_string());
         }
         if self.instance_tenancy.is_some() {
             sent.insert("instance_tenancy".to_string());
@@ -63,21 +67,10 @@ impl Ec2VpcCreateInput {
         if self.tags.is_some() {
             sent.insert("tags".to_string());
         }
-        Sent::only(sent)
+        CreateSent::only(sent)
     }
 
-    #[allow(clippy::type_complexity)]
-    pub(crate) fn into_parts(
-        self,
-    ) -> (
-        Option<String>,
-        Option<bool>,
-        Option<bool>,
-        Option<String>,
-        Option<String>,
-        Option<i64>,
-        Option<Value>,
-    ) {
+    pub(crate) fn into_parts(self) -> Ec2VpcCreateParts {
         let Self {
             cidr_block,
             enable_dns_hostnames,
@@ -87,15 +80,30 @@ impl Ec2VpcCreateInput {
             ipv4_netmask_length,
             tags,
         } = self;
-        (
-            cidr_block,
-            enable_dns_hostnames,
-            enable_dns_support,
-            instance_tenancy,
-            ipv4_ipam_pool_id,
-            ipv4_netmask_length,
-            tags,
-        )
+        Ec2VpcCreateParts {
+            cidr_block: crate::send_model::Sent::new("ec2.Vpc.create.cidr_block", cidr_block),
+            enable_dns_hostnames: crate::send_model::Sent::new(
+                "ec2.Vpc.create.enable_dns_hostnames",
+                enable_dns_hostnames,
+            ),
+            enable_dns_support: crate::send_model::Sent::new(
+                "ec2.Vpc.create.enable_dns_support",
+                enable_dns_support,
+            ),
+            instance_tenancy: crate::send_model::Sent::new(
+                "ec2.Vpc.create.instance_tenancy",
+                instance_tenancy,
+            ),
+            ipv4_ipam_pool_id: crate::send_model::Sent::new(
+                "ec2.Vpc.create.ipv4_ipam_pool_id",
+                ipv4_ipam_pool_id,
+            ),
+            ipv4_netmask_length: crate::send_model::Sent::new(
+                "ec2.Vpc.create.ipv4_netmask_length",
+                ipv4_netmask_length,
+            ),
+            tags: crate::send_model::Sent::new("ec2.Vpc.create.tags", tags),
+        }
     }
 }
 
@@ -103,7 +111,13 @@ impl Ec2VpcCreateInput {
 pub(crate) struct Ec2VpcUpdateInput {
     enable_dns_hostnames: Option<bool>,
     enable_dns_support: Option<bool>,
-    tags: Option<Value>,
+    tags: Option<crate::send_model::Tags>,
+}
+
+pub(crate) struct Ec2VpcUpdateParts {
+    pub(crate) enable_dns_hostnames: crate::send_model::Sent<Option<bool>>,
+    pub(crate) enable_dns_support: crate::send_model::Sent<Option<bool>>,
+    pub(crate) tags: crate::send_model::Sent<Option<crate::send_model::Tags>>,
 }
 
 impl Ec2VpcUpdateInput {
@@ -115,18 +129,27 @@ impl Ec2VpcUpdateInput {
                 "enable_dns_hostnames",
             )?,
             enable_dns_support: crate::send_model::optional_bool(_resource, "enable_dns_support")?,
-            tags: crate::send_model::optional_value(_resource, "tags")?,
+            tags: crate::send_model::optional_tags(_resource, "tags")?,
         })
     }
 
-    #[allow(clippy::type_complexity)]
-    pub(crate) fn into_parts(self) -> (Option<bool>, Option<bool>, Option<Value>) {
+    pub(crate) fn into_parts(self) -> Ec2VpcUpdateParts {
         let Self {
             enable_dns_hostnames,
             enable_dns_support,
             tags,
         } = self;
-        (enable_dns_hostnames, enable_dns_support, tags)
+        Ec2VpcUpdateParts {
+            enable_dns_hostnames: crate::send_model::Sent::new(
+                "ec2.Vpc.update.enable_dns_hostnames",
+                enable_dns_hostnames,
+            ),
+            enable_dns_support: crate::send_model::Sent::new(
+                "ec2.Vpc.update.enable_dns_support",
+                enable_dns_support,
+            ),
+            tags: crate::send_model::Sent::new("ec2.Vpc.update.tags", tags),
+        }
     }
 }
 
@@ -147,8 +170,28 @@ pub(crate) struct Ec2SubnetCreateInput {
     map_public_ip_on_launch: Option<bool>,
     outpost_arn: Option<String>,
     private_dns_name_options_on_launch: Option<Value>,
-    tags: Option<Value>,
+    tags: Option<crate::send_model::Tags>,
     vpc_id: String,
+}
+
+pub(crate) struct Ec2SubnetCreateParts {
+    pub(crate) assign_ipv6_address_on_creation: crate::send_model::Sent<Option<bool>>,
+    pub(crate) availability_zone: crate::send_model::Sent<Option<String>>,
+    pub(crate) availability_zone_id: crate::send_model::Sent<Option<String>>,
+    pub(crate) cidr_block: crate::send_model::Sent<Option<String>>,
+    pub(crate) enable_dns64: crate::send_model::Sent<Option<bool>>,
+    pub(crate) enable_lni_at_device_index: crate::send_model::Sent<Option<i64>>,
+    pub(crate) ipv4_ipam_pool_id: crate::send_model::Sent<Option<String>>,
+    pub(crate) ipv4_netmask_length: crate::send_model::Sent<Option<i64>>,
+    pub(crate) ipv6_cidr_block: crate::send_model::Sent<Option<String>>,
+    pub(crate) ipv6_ipam_pool_id: crate::send_model::Sent<Option<String>>,
+    pub(crate) ipv6_native: crate::send_model::Sent<Option<bool>>,
+    pub(crate) ipv6_netmask_length: crate::send_model::Sent<Option<i64>>,
+    pub(crate) map_public_ip_on_launch: crate::send_model::Sent<Option<bool>>,
+    pub(crate) outpost_arn: crate::send_model::Sent<Option<String>>,
+    pub(crate) private_dns_name_options_on_launch: crate::send_model::Sent<Option<Value>>,
+    pub(crate) tags: crate::send_model::Sent<Option<crate::send_model::Tags>>,
+    pub(crate) vpc_id: crate::send_model::Sent<String>,
 }
 
 impl Ec2SubnetCreateInput {
@@ -189,16 +232,13 @@ impl Ec2SubnetCreateInput {
                 _resource,
                 "private_dns_name_options_on_launch",
             )?,
-            tags: crate::send_model::optional_value(_resource, "tags")?,
+            tags: crate::send_model::optional_tags(_resource, "tags")?,
             vpc_id: crate::send_model::required_string(_resource, "vpc_id")?,
         })
     }
 
-    pub(crate) fn sent(&self) -> Sent {
+    pub(crate) fn sent(&self) -> CreateSent {
         let mut sent = BTreeSet::new();
-        if self.assign_ipv6_address_on_creation.is_some() {
-            sent.insert("assign_ipv6_address_on_creation".to_string());
-        }
         if self.availability_zone.is_some() {
             sent.insert("availability_zone".to_string());
         }
@@ -207,12 +247,6 @@ impl Ec2SubnetCreateInput {
         }
         if self.cidr_block.is_some() {
             sent.insert("cidr_block".to_string());
-        }
-        if self.enable_dns64.is_some() {
-            sent.insert("enable_dns64".to_string());
-        }
-        if self.enable_lni_at_device_index.is_some() {
-            sent.insert("enable_lni_at_device_index".to_string());
         }
         if self.ipv4_ipam_pool_id.is_some() {
             sent.insert("ipv4_ipam_pool_id".to_string());
@@ -232,44 +266,17 @@ impl Ec2SubnetCreateInput {
         if self.ipv6_netmask_length.is_some() {
             sent.insert("ipv6_netmask_length".to_string());
         }
-        if self.map_public_ip_on_launch.is_some() {
-            sent.insert("map_public_ip_on_launch".to_string());
-        }
         if self.outpost_arn.is_some() {
             sent.insert("outpost_arn".to_string());
-        }
-        if self.private_dns_name_options_on_launch.is_some() {
-            sent.insert("private_dns_name_options_on_launch".to_string());
         }
         if self.tags.is_some() {
             sent.insert("tags".to_string());
         }
         sent.insert("vpc_id".to_string());
-        Sent::only(sent)
+        CreateSent::only(sent)
     }
 
-    #[allow(clippy::type_complexity)]
-    pub(crate) fn into_parts(
-        self,
-    ) -> (
-        Option<bool>,
-        Option<String>,
-        Option<String>,
-        Option<String>,
-        Option<bool>,
-        Option<i64>,
-        Option<String>,
-        Option<i64>,
-        Option<String>,
-        Option<String>,
-        Option<bool>,
-        Option<i64>,
-        Option<bool>,
-        Option<String>,
-        Option<Value>,
-        Option<Value>,
-        String,
-    ) {
+    pub(crate) fn into_parts(self) -> Ec2SubnetCreateParts {
         let Self {
             assign_ipv6_address_on_creation,
             availability_zone,
@@ -289,25 +296,61 @@ impl Ec2SubnetCreateInput {
             tags,
             vpc_id,
         } = self;
-        (
-            assign_ipv6_address_on_creation,
-            availability_zone,
-            availability_zone_id,
-            cidr_block,
-            enable_dns64,
-            enable_lni_at_device_index,
-            ipv4_ipam_pool_id,
-            ipv4_netmask_length,
-            ipv6_cidr_block,
-            ipv6_ipam_pool_id,
-            ipv6_native,
-            ipv6_netmask_length,
-            map_public_ip_on_launch,
-            outpost_arn,
-            private_dns_name_options_on_launch,
-            tags,
-            vpc_id,
-        )
+        Ec2SubnetCreateParts {
+            assign_ipv6_address_on_creation: crate::send_model::Sent::new(
+                "ec2.Subnet.create.assign_ipv6_address_on_creation",
+                assign_ipv6_address_on_creation,
+            ),
+            availability_zone: crate::send_model::Sent::new(
+                "ec2.Subnet.create.availability_zone",
+                availability_zone,
+            ),
+            availability_zone_id: crate::send_model::Sent::new(
+                "ec2.Subnet.create.availability_zone_id",
+                availability_zone_id,
+            ),
+            cidr_block: crate::send_model::Sent::new("ec2.Subnet.create.cidr_block", cidr_block),
+            enable_dns64: crate::send_model::Sent::new(
+                "ec2.Subnet.create.enable_dns64",
+                enable_dns64,
+            ),
+            enable_lni_at_device_index: crate::send_model::Sent::new(
+                "ec2.Subnet.create.enable_lni_at_device_index",
+                enable_lni_at_device_index,
+            ),
+            ipv4_ipam_pool_id: crate::send_model::Sent::new(
+                "ec2.Subnet.create.ipv4_ipam_pool_id",
+                ipv4_ipam_pool_id,
+            ),
+            ipv4_netmask_length: crate::send_model::Sent::new(
+                "ec2.Subnet.create.ipv4_netmask_length",
+                ipv4_netmask_length,
+            ),
+            ipv6_cidr_block: crate::send_model::Sent::new(
+                "ec2.Subnet.create.ipv6_cidr_block",
+                ipv6_cidr_block,
+            ),
+            ipv6_ipam_pool_id: crate::send_model::Sent::new(
+                "ec2.Subnet.create.ipv6_ipam_pool_id",
+                ipv6_ipam_pool_id,
+            ),
+            ipv6_native: crate::send_model::Sent::new("ec2.Subnet.create.ipv6_native", ipv6_native),
+            ipv6_netmask_length: crate::send_model::Sent::new(
+                "ec2.Subnet.create.ipv6_netmask_length",
+                ipv6_netmask_length,
+            ),
+            map_public_ip_on_launch: crate::send_model::Sent::new(
+                "ec2.Subnet.create.map_public_ip_on_launch",
+                map_public_ip_on_launch,
+            ),
+            outpost_arn: crate::send_model::Sent::new("ec2.Subnet.create.outpost_arn", outpost_arn),
+            private_dns_name_options_on_launch: crate::send_model::Sent::new(
+                "ec2.Subnet.create.private_dns_name_options_on_launch",
+                private_dns_name_options_on_launch,
+            ),
+            tags: crate::send_model::Sent::new("ec2.Subnet.create.tags", tags),
+            vpc_id: crate::send_model::Sent::new("ec2.Subnet.create.vpc_id", vpc_id),
+        }
     }
 }
 
@@ -318,7 +361,16 @@ pub(crate) struct Ec2SubnetUpdateInput {
     enable_lni_at_device_index: Option<i64>,
     map_public_ip_on_launch: Option<bool>,
     private_dns_name_options_on_launch: Option<Value>,
-    tags: Option<Value>,
+    tags: Option<crate::send_model::Tags>,
+}
+
+pub(crate) struct Ec2SubnetUpdateParts {
+    pub(crate) assign_ipv6_address_on_creation: crate::send_model::Sent<Option<bool>>,
+    pub(crate) enable_dns64: crate::send_model::Sent<Option<bool>>,
+    pub(crate) enable_lni_at_device_index: crate::send_model::Sent<Option<i64>>,
+    pub(crate) map_public_ip_on_launch: crate::send_model::Sent<Option<bool>>,
+    pub(crate) private_dns_name_options_on_launch: crate::send_model::Sent<Option<Value>>,
+    pub(crate) tags: crate::send_model::Sent<Option<crate::send_model::Tags>>,
 }
 
 impl Ec2SubnetUpdateInput {
@@ -342,21 +394,11 @@ impl Ec2SubnetUpdateInput {
                 _resource,
                 "private_dns_name_options_on_launch",
             )?,
-            tags: crate::send_model::optional_value(_resource, "tags")?,
+            tags: crate::send_model::optional_tags(_resource, "tags")?,
         })
     }
 
-    #[allow(clippy::type_complexity)]
-    pub(crate) fn into_parts(
-        self,
-    ) -> (
-        Option<bool>,
-        Option<bool>,
-        Option<i64>,
-        Option<bool>,
-        Option<Value>,
-        Option<Value>,
-    ) {
+    pub(crate) fn into_parts(self) -> Ec2SubnetUpdateParts {
         let Self {
             assign_ipv6_address_on_creation,
             enable_dns64,
@@ -365,21 +407,41 @@ impl Ec2SubnetUpdateInput {
             private_dns_name_options_on_launch,
             tags,
         } = self;
-        (
-            assign_ipv6_address_on_creation,
-            enable_dns64,
-            enable_lni_at_device_index,
-            map_public_ip_on_launch,
-            private_dns_name_options_on_launch,
-            tags,
-        )
+        Ec2SubnetUpdateParts {
+            assign_ipv6_address_on_creation: crate::send_model::Sent::new(
+                "ec2.Subnet.update.assign_ipv6_address_on_creation",
+                assign_ipv6_address_on_creation,
+            ),
+            enable_dns64: crate::send_model::Sent::new(
+                "ec2.Subnet.update.enable_dns64",
+                enable_dns64,
+            ),
+            enable_lni_at_device_index: crate::send_model::Sent::new(
+                "ec2.Subnet.update.enable_lni_at_device_index",
+                enable_lni_at_device_index,
+            ),
+            map_public_ip_on_launch: crate::send_model::Sent::new(
+                "ec2.Subnet.update.map_public_ip_on_launch",
+                map_public_ip_on_launch,
+            ),
+            private_dns_name_options_on_launch: crate::send_model::Sent::new(
+                "ec2.Subnet.update.private_dns_name_options_on_launch",
+                private_dns_name_options_on_launch,
+            ),
+            tags: crate::send_model::Sent::new("ec2.Subnet.update.tags", tags),
+        }
     }
 }
 
 /// Exhaustive typed create input for `ec2.InternetGateway`.
 pub(crate) struct Ec2InternetGatewayCreateInput {
-    tags: Option<Value>,
+    tags: Option<crate::send_model::Tags>,
     vpc_id: Option<String>,
+}
+
+pub(crate) struct Ec2InternetGatewayCreateParts {
+    pub(crate) tags: crate::send_model::Sent<Option<crate::send_model::Tags>>,
+    pub(crate) vpc_id: crate::send_model::Sent<Option<String>>,
 }
 
 impl Ec2InternetGatewayCreateInput {
@@ -387,32 +449,35 @@ impl Ec2InternetGatewayCreateInput {
         let _schema =
             &crate::schemas::generated::ec2::internet_gateway::ec2_internet_gateway_config().schema;
         Ok(Self {
-            tags: crate::send_model::optional_value(_resource, "tags")?,
+            tags: crate::send_model::optional_tags(_resource, "tags")?,
             vpc_id: crate::send_model::optional_string(_resource, "vpc_id")?,
         })
     }
 
-    pub(crate) fn sent(&self) -> Sent {
+    pub(crate) fn sent(&self) -> CreateSent {
         let mut sent = BTreeSet::new();
         if self.tags.is_some() {
             sent.insert("tags".to_string());
         }
-        if self.vpc_id.is_some() {
-            sent.insert("vpc_id".to_string());
-        }
-        Sent::only(sent)
+        CreateSent::only(sent)
     }
 
-    #[allow(clippy::type_complexity)]
-    pub(crate) fn into_parts(self) -> (Option<Value>, Option<String>) {
+    pub(crate) fn into_parts(self) -> Ec2InternetGatewayCreateParts {
         let Self { tags, vpc_id } = self;
-        (tags, vpc_id)
+        Ec2InternetGatewayCreateParts {
+            tags: crate::send_model::Sent::new("ec2.InternetGateway.create.tags", tags),
+            vpc_id: crate::send_model::Sent::new("ec2.InternetGateway.create.vpc_id", vpc_id),
+        }
     }
 }
 
 /// Exhaustive typed update input for `ec2.InternetGateway`.
 pub(crate) struct Ec2InternetGatewayUpdateInput {
-    tags: Option<Value>,
+    tags: Option<crate::send_model::Tags>,
+}
+
+pub(crate) struct Ec2InternetGatewayUpdateParts {
+    pub(crate) tags: crate::send_model::Sent<Option<crate::send_model::Tags>>,
 }
 
 impl Ec2InternetGatewayUpdateInput {
@@ -420,65 +485,78 @@ impl Ec2InternetGatewayUpdateInput {
         let _schema =
             &crate::schemas::generated::ec2::internet_gateway::ec2_internet_gateway_config().schema;
         Ok(Self {
-            tags: crate::send_model::optional_value(_resource, "tags")?,
+            tags: crate::send_model::optional_tags(_resource, "tags")?,
         })
     }
 
-    #[allow(clippy::type_complexity)]
-    pub(crate) fn into_parts(self) -> (Option<Value>,) {
+    pub(crate) fn into_parts(self) -> Ec2InternetGatewayUpdateParts {
         let Self { tags } = self;
-        (tags,)
+        Ec2InternetGatewayUpdateParts {
+            tags: crate::send_model::Sent::new("ec2.InternetGateway.update.tags", tags),
+        }
     }
 }
 
 /// Exhaustive typed create input for `ec2.RouteTable`.
 pub(crate) struct Ec2RouteTableCreateInput {
-    tags: Option<Value>,
+    tags: Option<crate::send_model::Tags>,
     vpc_id: String,
+}
+
+pub(crate) struct Ec2RouteTableCreateParts {
+    pub(crate) tags: crate::send_model::Sent<Option<crate::send_model::Tags>>,
+    pub(crate) vpc_id: crate::send_model::Sent<String>,
 }
 
 impl Ec2RouteTableCreateInput {
     pub(crate) fn decode(_resource: &Resource<impl Sized>) -> ProviderResult<Self> {
         let _schema = &crate::schemas::generated::ec2::route_table::ec2_route_table_config().schema;
         Ok(Self {
-            tags: crate::send_model::optional_value(_resource, "tags")?,
+            tags: crate::send_model::optional_tags(_resource, "tags")?,
             vpc_id: crate::send_model::required_string(_resource, "vpc_id")?,
         })
     }
 
-    pub(crate) fn sent(&self) -> Sent {
+    pub(crate) fn sent(&self) -> CreateSent {
         let mut sent = BTreeSet::new();
         if self.tags.is_some() {
             sent.insert("tags".to_string());
         }
         sent.insert("vpc_id".to_string());
-        Sent::only(sent)
+        CreateSent::only(sent)
     }
 
-    #[allow(clippy::type_complexity)]
-    pub(crate) fn into_parts(self) -> (Option<Value>, String) {
+    pub(crate) fn into_parts(self) -> Ec2RouteTableCreateParts {
         let Self { tags, vpc_id } = self;
-        (tags, vpc_id)
+        Ec2RouteTableCreateParts {
+            tags: crate::send_model::Sent::new("ec2.RouteTable.create.tags", tags),
+            vpc_id: crate::send_model::Sent::new("ec2.RouteTable.create.vpc_id", vpc_id),
+        }
     }
 }
 
 /// Exhaustive typed update input for `ec2.RouteTable`.
 pub(crate) struct Ec2RouteTableUpdateInput {
-    tags: Option<Value>,
+    tags: Option<crate::send_model::Tags>,
+}
+
+pub(crate) struct Ec2RouteTableUpdateParts {
+    pub(crate) tags: crate::send_model::Sent<Option<crate::send_model::Tags>>,
 }
 
 impl Ec2RouteTableUpdateInput {
     pub(crate) fn decode(_resource: &Resource<impl Sized>) -> ProviderResult<Self> {
         let _schema = &crate::schemas::generated::ec2::route_table::ec2_route_table_config().schema;
         Ok(Self {
-            tags: crate::send_model::optional_value(_resource, "tags")?,
+            tags: crate::send_model::optional_tags(_resource, "tags")?,
         })
     }
 
-    #[allow(clippy::type_complexity)]
-    pub(crate) fn into_parts(self) -> (Option<Value>,) {
+    pub(crate) fn into_parts(self) -> Ec2RouteTableUpdateParts {
         let Self { tags } = self;
-        (tags,)
+        Ec2RouteTableUpdateParts {
+            tags: crate::send_model::Sent::new("ec2.RouteTable.update.tags", tags),
+        }
     }
 }
 
@@ -488,6 +566,13 @@ pub(crate) struct Ec2RouteCreateInput {
     gateway_id: Option<String>,
     nat_gateway_id: Option<String>,
     route_table_id: String,
+}
+
+pub(crate) struct Ec2RouteCreateParts {
+    pub(crate) destination_cidr_block: crate::send_model::Sent<Option<String>>,
+    pub(crate) gateway_id: crate::send_model::Sent<Option<String>>,
+    pub(crate) nat_gateway_id: crate::send_model::Sent<Option<String>>,
+    pub(crate) route_table_id: crate::send_model::Sent<String>,
 }
 
 impl Ec2RouteCreateInput {
@@ -504,7 +589,7 @@ impl Ec2RouteCreateInput {
         })
     }
 
-    pub(crate) fn sent(&self) -> Sent {
+    pub(crate) fn sent(&self) -> CreateSent {
         let mut sent = BTreeSet::new();
         if self.destination_cidr_block.is_some() {
             sent.insert("destination_cidr_block".to_string());
@@ -516,23 +601,31 @@ impl Ec2RouteCreateInput {
             sent.insert("nat_gateway_id".to_string());
         }
         sent.insert("route_table_id".to_string());
-        Sent::only(sent)
+        CreateSent::only(sent)
     }
 
-    #[allow(clippy::type_complexity)]
-    pub(crate) fn into_parts(self) -> (Option<String>, Option<String>, Option<String>, String) {
+    pub(crate) fn into_parts(self) -> Ec2RouteCreateParts {
         let Self {
             destination_cidr_block,
             gateway_id,
             nat_gateway_id,
             route_table_id,
         } = self;
-        (
-            destination_cidr_block,
-            gateway_id,
-            nat_gateway_id,
-            route_table_id,
-        )
+        Ec2RouteCreateParts {
+            destination_cidr_block: crate::send_model::Sent::new(
+                "ec2.Route.create.destination_cidr_block",
+                destination_cidr_block,
+            ),
+            gateway_id: crate::send_model::Sent::new("ec2.Route.create.gateway_id", gateway_id),
+            nat_gateway_id: crate::send_model::Sent::new(
+                "ec2.Route.create.nat_gateway_id",
+                nat_gateway_id,
+            ),
+            route_table_id: crate::send_model::Sent::new(
+                "ec2.Route.create.route_table_id",
+                route_table_id,
+            ),
+        }
     }
 }
 
@@ -540,6 +633,11 @@ impl Ec2RouteCreateInput {
 pub(crate) struct Ec2RouteUpdateInput {
     gateway_id: Option<String>,
     nat_gateway_id: Option<String>,
+}
+
+pub(crate) struct Ec2RouteUpdateParts {
+    pub(crate) gateway_id: crate::send_model::Sent<Option<String>>,
+    pub(crate) nat_gateway_id: crate::send_model::Sent<Option<String>>,
 }
 
 impl Ec2RouteUpdateInput {
@@ -551,13 +649,18 @@ impl Ec2RouteUpdateInput {
         })
     }
 
-    #[allow(clippy::type_complexity)]
-    pub(crate) fn into_parts(self) -> (Option<String>, Option<String>) {
+    pub(crate) fn into_parts(self) -> Ec2RouteUpdateParts {
         let Self {
             gateway_id,
             nat_gateway_id,
         } = self;
-        (gateway_id, nat_gateway_id)
+        Ec2RouteUpdateParts {
+            gateway_id: crate::send_model::Sent::new("ec2.Route.update.gateway_id", gateway_id),
+            nat_gateway_id: crate::send_model::Sent::new(
+                "ec2.Route.update.nat_gateway_id",
+                nat_gateway_id,
+            ),
+        }
     }
 }
 
@@ -565,8 +668,15 @@ impl Ec2RouteUpdateInput {
 pub(crate) struct Ec2SecurityGroupCreateInput {
     description: String,
     group_name: String,
-    tags: Option<Value>,
+    tags: Option<crate::send_model::Tags>,
     vpc_id: Option<String>,
+}
+
+pub(crate) struct Ec2SecurityGroupCreateParts {
+    pub(crate) description: crate::send_model::Sent<String>,
+    pub(crate) group_name: crate::send_model::Sent<String>,
+    pub(crate) tags: crate::send_model::Sent<Option<crate::send_model::Tags>>,
+    pub(crate) vpc_id: crate::send_model::Sent<Option<String>>,
 }
 
 impl Ec2SecurityGroupCreateInput {
@@ -576,12 +686,12 @@ impl Ec2SecurityGroupCreateInput {
         Ok(Self {
             description: crate::send_model::required_string(_resource, "description")?,
             group_name: crate::send_model::required_string(_resource, "group_name")?,
-            tags: crate::send_model::optional_value(_resource, "tags")?,
+            tags: crate::send_model::optional_tags(_resource, "tags")?,
             vpc_id: crate::send_model::optional_string(_resource, "vpc_id")?,
         })
     }
 
-    pub(crate) fn sent(&self) -> Sent {
+    pub(crate) fn sent(&self) -> CreateSent {
         let mut sent = BTreeSet::new();
         sent.insert("description".to_string());
         sent.insert("group_name".to_string());
@@ -591,24 +701,38 @@ impl Ec2SecurityGroupCreateInput {
         if self.vpc_id.is_some() {
             sent.insert("vpc_id".to_string());
         }
-        Sent::only(sent)
+        CreateSent::only(sent)
     }
 
-    #[allow(clippy::type_complexity)]
-    pub(crate) fn into_parts(self) -> (String, String, Option<Value>, Option<String>) {
+    pub(crate) fn into_parts(self) -> Ec2SecurityGroupCreateParts {
         let Self {
             description,
             group_name,
             tags,
             vpc_id,
         } = self;
-        (description, group_name, tags, vpc_id)
+        Ec2SecurityGroupCreateParts {
+            description: crate::send_model::Sent::new(
+                "ec2.SecurityGroup.create.description",
+                description,
+            ),
+            group_name: crate::send_model::Sent::new(
+                "ec2.SecurityGroup.create.group_name",
+                group_name,
+            ),
+            tags: crate::send_model::Sent::new("ec2.SecurityGroup.create.tags", tags),
+            vpc_id: crate::send_model::Sent::new("ec2.SecurityGroup.create.vpc_id", vpc_id),
+        }
     }
 }
 
 /// Exhaustive typed update input for `ec2.SecurityGroup`.
 pub(crate) struct Ec2SecurityGroupUpdateInput {
-    tags: Option<Value>,
+    tags: Option<crate::send_model::Tags>,
+}
+
+pub(crate) struct Ec2SecurityGroupUpdateParts {
+    pub(crate) tags: crate::send_model::Sent<Option<crate::send_model::Tags>>,
 }
 
 impl Ec2SecurityGroupUpdateInput {
@@ -616,14 +740,15 @@ impl Ec2SecurityGroupUpdateInput {
         let _schema =
             &crate::schemas::generated::ec2::security_group::ec2_security_group_config().schema;
         Ok(Self {
-            tags: crate::send_model::optional_value(_resource, "tags")?,
+            tags: crate::send_model::optional_tags(_resource, "tags")?,
         })
     }
 
-    #[allow(clippy::type_complexity)]
-    pub(crate) fn into_parts(self) -> (Option<Value>,) {
+    pub(crate) fn into_parts(self) -> Ec2SecurityGroupUpdateParts {
         let Self { tags } = self;
-        (tags,)
+        Ec2SecurityGroupUpdateParts {
+            tags: crate::send_model::Sent::new("ec2.SecurityGroup.update.tags", tags),
+        }
     }
 }
 
@@ -639,6 +764,19 @@ pub(crate) struct Ec2SecurityGroupIngressCreateInput {
     source_security_group_id: Option<String>,
     source_security_group_owner_id: Option<String>,
     to_port: Option<i64>,
+}
+
+pub(crate) struct Ec2SecurityGroupIngressCreateParts {
+    pub(crate) cidr_ip: crate::send_model::Sent<Option<String>>,
+    pub(crate) cidr_ipv6: crate::send_model::Sent<Option<String>>,
+    pub(crate) description: crate::send_model::Sent<Option<String>>,
+    pub(crate) from_port: crate::send_model::Sent<Option<i64>>,
+    pub(crate) group_id: crate::send_model::Sent<Option<String>>,
+    pub(crate) ip_protocol: crate::send_model::Sent<String>,
+    pub(crate) source_prefix_list_id: crate::send_model::Sent<Option<String>>,
+    pub(crate) source_security_group_id: crate::send_model::Sent<Option<String>>,
+    pub(crate) source_security_group_owner_id: crate::send_model::Sent<Option<String>>,
+    pub(crate) to_port: crate::send_model::Sent<Option<i64>>,
 }
 
 impl Ec2SecurityGroupIngressCreateInput {
@@ -667,7 +805,7 @@ impl Ec2SecurityGroupIngressCreateInput {
         })
     }
 
-    pub(crate) fn sent(&self) -> Sent {
+    pub(crate) fn sent(&self) -> CreateSent {
         let mut sent = BTreeSet::new();
         if self.cidr_ip.is_some() {
             sent.insert("cidr_ip".to_string());
@@ -697,24 +835,10 @@ impl Ec2SecurityGroupIngressCreateInput {
         if self.to_port.is_some() {
             sent.insert("to_port".to_string());
         }
-        Sent::only(sent)
+        CreateSent::only(sent)
     }
 
-    #[allow(clippy::type_complexity)]
-    pub(crate) fn into_parts(
-        self,
-    ) -> (
-        Option<String>,
-        Option<String>,
-        Option<String>,
-        Option<i64>,
-        Option<String>,
-        String,
-        Option<String>,
-        Option<String>,
-        Option<String>,
-        Option<i64>,
-    ) {
+    pub(crate) fn into_parts(self) -> Ec2SecurityGroupIngressCreateParts {
         let Self {
             cidr_ip,
             cidr_ipv6,
@@ -727,23 +851,55 @@ impl Ec2SecurityGroupIngressCreateInput {
             source_security_group_owner_id,
             to_port,
         } = self;
-        (
-            cidr_ip,
-            cidr_ipv6,
-            description,
-            from_port,
-            group_id,
-            ip_protocol,
-            source_prefix_list_id,
-            source_security_group_id,
-            source_security_group_owner_id,
-            to_port,
-        )
+        Ec2SecurityGroupIngressCreateParts {
+            cidr_ip: crate::send_model::Sent::new(
+                "ec2.SecurityGroupIngress.create.cidr_ip",
+                cidr_ip,
+            ),
+            cidr_ipv6: crate::send_model::Sent::new(
+                "ec2.SecurityGroupIngress.create.cidr_ipv6",
+                cidr_ipv6,
+            ),
+            description: crate::send_model::Sent::new(
+                "ec2.SecurityGroupIngress.create.description",
+                description,
+            ),
+            from_port: crate::send_model::Sent::new(
+                "ec2.SecurityGroupIngress.create.from_port",
+                from_port,
+            ),
+            group_id: crate::send_model::Sent::new(
+                "ec2.SecurityGroupIngress.create.group_id",
+                group_id,
+            ),
+            ip_protocol: crate::send_model::Sent::new(
+                "ec2.SecurityGroupIngress.create.ip_protocol",
+                ip_protocol,
+            ),
+            source_prefix_list_id: crate::send_model::Sent::new(
+                "ec2.SecurityGroupIngress.create.source_prefix_list_id",
+                source_prefix_list_id,
+            ),
+            source_security_group_id: crate::send_model::Sent::new(
+                "ec2.SecurityGroupIngress.create.source_security_group_id",
+                source_security_group_id,
+            ),
+            source_security_group_owner_id: crate::send_model::Sent::new(
+                "ec2.SecurityGroupIngress.create.source_security_group_owner_id",
+                source_security_group_owner_id,
+            ),
+            to_port: crate::send_model::Sent::new(
+                "ec2.SecurityGroupIngress.create.to_port",
+                to_port,
+            ),
+        }
     }
 }
 
 /// Exhaustive typed update input for `ec2.SecurityGroupIngress`.
 pub(crate) struct Ec2SecurityGroupIngressUpdateInput;
+
+pub(crate) struct Ec2SecurityGroupIngressUpdateParts;
 
 impl Ec2SecurityGroupIngressUpdateInput {
     pub(crate) fn decode(_resource: &Resource<impl Sized>) -> ProviderResult<Self> {
@@ -751,8 +907,9 @@ impl Ec2SecurityGroupIngressUpdateInput {
         Ok(Self)
     }
 
-    pub(crate) fn into_parts(self) {
+    pub(crate) fn into_parts(self) -> Ec2SecurityGroupIngressUpdateParts {
         let Self = self;
+        Ec2SecurityGroupIngressUpdateParts
     }
 }
 
@@ -768,6 +925,19 @@ pub(crate) struct Ec2SecurityGroupEgressCreateInput {
     ip_protocol: String,
     source_security_group_owner_id: Option<String>,
     to_port: Option<i64>,
+}
+
+pub(crate) struct Ec2SecurityGroupEgressCreateParts {
+    pub(crate) cidr_ip: crate::send_model::Sent<Option<String>>,
+    pub(crate) cidr_ipv6: crate::send_model::Sent<Option<String>>,
+    pub(crate) description: crate::send_model::Sent<Option<String>>,
+    pub(crate) destination_prefix_list_id: crate::send_model::Sent<Option<String>>,
+    pub(crate) destination_security_group_id: crate::send_model::Sent<Option<String>>,
+    pub(crate) from_port: crate::send_model::Sent<Option<i64>>,
+    pub(crate) group_id: crate::send_model::Sent<String>,
+    pub(crate) ip_protocol: crate::send_model::Sent<String>,
+    pub(crate) source_security_group_owner_id: crate::send_model::Sent<Option<String>>,
+    pub(crate) to_port: crate::send_model::Sent<Option<i64>>,
 }
 
 impl Ec2SecurityGroupEgressCreateInput {
@@ -796,7 +966,7 @@ impl Ec2SecurityGroupEgressCreateInput {
         })
     }
 
-    pub(crate) fn sent(&self) -> Sent {
+    pub(crate) fn sent(&self) -> CreateSent {
         let mut sent = BTreeSet::new();
         if self.cidr_ip.is_some() {
             sent.insert("cidr_ip".to_string());
@@ -824,24 +994,10 @@ impl Ec2SecurityGroupEgressCreateInput {
         if self.to_port.is_some() {
             sent.insert("to_port".to_string());
         }
-        Sent::only(sent)
+        CreateSent::only(sent)
     }
 
-    #[allow(clippy::type_complexity)]
-    pub(crate) fn into_parts(
-        self,
-    ) -> (
-        Option<String>,
-        Option<String>,
-        Option<String>,
-        Option<String>,
-        Option<String>,
-        Option<i64>,
-        String,
-        String,
-        Option<String>,
-        Option<i64>,
-    ) {
+    pub(crate) fn into_parts(self) -> Ec2SecurityGroupEgressCreateParts {
         let Self {
             cidr_ip,
             cidr_ipv6,
@@ -854,23 +1010,55 @@ impl Ec2SecurityGroupEgressCreateInput {
             source_security_group_owner_id,
             to_port,
         } = self;
-        (
-            cidr_ip,
-            cidr_ipv6,
-            description,
-            destination_prefix_list_id,
-            destination_security_group_id,
-            from_port,
-            group_id,
-            ip_protocol,
-            source_security_group_owner_id,
-            to_port,
-        )
+        Ec2SecurityGroupEgressCreateParts {
+            cidr_ip: crate::send_model::Sent::new(
+                "ec2.SecurityGroupEgress.create.cidr_ip",
+                cidr_ip,
+            ),
+            cidr_ipv6: crate::send_model::Sent::new(
+                "ec2.SecurityGroupEgress.create.cidr_ipv6",
+                cidr_ipv6,
+            ),
+            description: crate::send_model::Sent::new(
+                "ec2.SecurityGroupEgress.create.description",
+                description,
+            ),
+            destination_prefix_list_id: crate::send_model::Sent::new(
+                "ec2.SecurityGroupEgress.create.destination_prefix_list_id",
+                destination_prefix_list_id,
+            ),
+            destination_security_group_id: crate::send_model::Sent::new(
+                "ec2.SecurityGroupEgress.create.destination_security_group_id",
+                destination_security_group_id,
+            ),
+            from_port: crate::send_model::Sent::new(
+                "ec2.SecurityGroupEgress.create.from_port",
+                from_port,
+            ),
+            group_id: crate::send_model::Sent::new(
+                "ec2.SecurityGroupEgress.create.group_id",
+                group_id,
+            ),
+            ip_protocol: crate::send_model::Sent::new(
+                "ec2.SecurityGroupEgress.create.ip_protocol",
+                ip_protocol,
+            ),
+            source_security_group_owner_id: crate::send_model::Sent::new(
+                "ec2.SecurityGroupEgress.create.source_security_group_owner_id",
+                source_security_group_owner_id,
+            ),
+            to_port: crate::send_model::Sent::new(
+                "ec2.SecurityGroupEgress.create.to_port",
+                to_port,
+            ),
+        }
     }
 }
 
 /// Exhaustive typed update input for `ec2.SecurityGroupEgress`.
 pub(crate) struct Ec2SecurityGroupEgressUpdateInput;
+
+pub(crate) struct Ec2SecurityGroupEgressUpdateParts;
 
 impl Ec2SecurityGroupEgressUpdateInput {
     pub(crate) fn decode(_resource: &Resource<impl Sized>) -> ProviderResult<Self> {
@@ -878,59 +1066,75 @@ impl Ec2SecurityGroupEgressUpdateInput {
         Ok(Self)
     }
 
-    pub(crate) fn into_parts(self) {
+    pub(crate) fn into_parts(self) -> Ec2SecurityGroupEgressUpdateParts {
         let Self = self;
+        Ec2SecurityGroupEgressUpdateParts
     }
 }
 
 /// Exhaustive typed create input for `ec2.EgressOnlyInternetGateway`.
 pub(crate) struct Ec2EgressOnlyInternetGatewayCreateInput {
-    tags: Option<Value>,
+    tags: Option<crate::send_model::Tags>,
     vpc_id: String,
+}
+
+pub(crate) struct Ec2EgressOnlyInternetGatewayCreateParts {
+    pub(crate) tags: crate::send_model::Sent<Option<crate::send_model::Tags>>,
+    pub(crate) vpc_id: crate::send_model::Sent<String>,
 }
 
 impl Ec2EgressOnlyInternetGatewayCreateInput {
     pub(crate) fn decode(_resource: &Resource<impl Sized>) -> ProviderResult<Self> {
         let _schema = &crate::schemas::generated::ec2::egress_only_internet_gateway::ec2_egress_only_internet_gateway_config().schema;
         Ok(Self {
-            tags: crate::send_model::optional_value(_resource, "tags")?,
+            tags: crate::send_model::optional_tags(_resource, "tags")?,
             vpc_id: crate::send_model::required_string(_resource, "vpc_id")?,
         })
     }
 
-    pub(crate) fn sent(&self) -> Sent {
+    pub(crate) fn sent(&self) -> CreateSent {
         let mut sent = BTreeSet::new();
         if self.tags.is_some() {
             sent.insert("tags".to_string());
         }
         sent.insert("vpc_id".to_string());
-        Sent::only(sent)
+        CreateSent::only(sent)
     }
 
-    #[allow(clippy::type_complexity)]
-    pub(crate) fn into_parts(self) -> (Option<Value>, String) {
+    pub(crate) fn into_parts(self) -> Ec2EgressOnlyInternetGatewayCreateParts {
         let Self { tags, vpc_id } = self;
-        (tags, vpc_id)
+        Ec2EgressOnlyInternetGatewayCreateParts {
+            tags: crate::send_model::Sent::new("ec2.EgressOnlyInternetGateway.create.tags", tags),
+            vpc_id: crate::send_model::Sent::new(
+                "ec2.EgressOnlyInternetGateway.create.vpc_id",
+                vpc_id,
+            ),
+        }
     }
 }
 
 /// Exhaustive typed update input for `ec2.EgressOnlyInternetGateway`.
 pub(crate) struct Ec2EgressOnlyInternetGatewayUpdateInput {
-    tags: Option<Value>,
+    tags: Option<crate::send_model::Tags>,
+}
+
+pub(crate) struct Ec2EgressOnlyInternetGatewayUpdateParts {
+    pub(crate) tags: crate::send_model::Sent<Option<crate::send_model::Tags>>,
 }
 
 impl Ec2EgressOnlyInternetGatewayUpdateInput {
     pub(crate) fn decode(_resource: &Resource<impl Sized>) -> ProviderResult<Self> {
         let _schema = &crate::schemas::generated::ec2::egress_only_internet_gateway::ec2_egress_only_internet_gateway_config().schema;
         Ok(Self {
-            tags: crate::send_model::optional_value(_resource, "tags")?,
+            tags: crate::send_model::optional_tags(_resource, "tags")?,
         })
     }
 
-    #[allow(clippy::type_complexity)]
-    pub(crate) fn into_parts(self) -> (Option<Value>,) {
+    pub(crate) fn into_parts(self) -> Ec2EgressOnlyInternetGatewayUpdateParts {
         let Self { tags } = self;
-        (tags,)
+        Ec2EgressOnlyInternetGatewayUpdateParts {
+            tags: crate::send_model::Sent::new("ec2.EgressOnlyInternetGateway.update.tags", tags),
+        }
     }
 }
 
@@ -939,7 +1143,14 @@ pub(crate) struct Ec2EipCreateInput {
     address: Option<String>,
     domain: Option<String>,
     public_ipv4_pool: Option<String>,
-    tags: Option<Value>,
+    tags: Option<crate::send_model::Tags>,
+}
+
+pub(crate) struct Ec2EipCreateParts {
+    pub(crate) address: crate::send_model::Sent<Option<String>>,
+    pub(crate) domain: crate::send_model::Sent<Option<String>>,
+    pub(crate) public_ipv4_pool: crate::send_model::Sent<Option<String>>,
+    pub(crate) tags: crate::send_model::Sent<Option<crate::send_model::Tags>>,
 }
 
 impl Ec2EipCreateInput {
@@ -949,11 +1160,11 @@ impl Ec2EipCreateInput {
             address: crate::send_model::optional_string(_resource, "address")?,
             domain: crate::send_model::optional_enum(_resource, _schema, "domain")?,
             public_ipv4_pool: crate::send_model::optional_string(_resource, "public_ipv4_pool")?,
-            tags: crate::send_model::optional_value(_resource, "tags")?,
+            tags: crate::send_model::optional_tags(_resource, "tags")?,
         })
     }
 
-    pub(crate) fn sent(&self) -> Sent {
+    pub(crate) fn sent(&self) -> CreateSent {
         let mut sent = BTreeSet::new();
         if self.address.is_some() {
             sent.insert("address".to_string());
@@ -967,45 +1178,50 @@ impl Ec2EipCreateInput {
         if self.tags.is_some() {
             sent.insert("tags".to_string());
         }
-        Sent::only(sent)
+        CreateSent::only(sent)
     }
 
-    #[allow(clippy::type_complexity)]
-    pub(crate) fn into_parts(
-        self,
-    ) -> (
-        Option<String>,
-        Option<String>,
-        Option<String>,
-        Option<Value>,
-    ) {
+    pub(crate) fn into_parts(self) -> Ec2EipCreateParts {
         let Self {
             address,
             domain,
             public_ipv4_pool,
             tags,
         } = self;
-        (address, domain, public_ipv4_pool, tags)
+        Ec2EipCreateParts {
+            address: crate::send_model::Sent::new("ec2.Eip.create.address", address),
+            domain: crate::send_model::Sent::new("ec2.Eip.create.domain", domain),
+            public_ipv4_pool: crate::send_model::Sent::new(
+                "ec2.Eip.create.public_ipv4_pool",
+                public_ipv4_pool,
+            ),
+            tags: crate::send_model::Sent::new("ec2.Eip.create.tags", tags),
+        }
     }
 }
 
 /// Exhaustive typed update input for `ec2.Eip`.
 pub(crate) struct Ec2EipUpdateInput {
-    tags: Option<Value>,
+    tags: Option<crate::send_model::Tags>,
+}
+
+pub(crate) struct Ec2EipUpdateParts {
+    pub(crate) tags: crate::send_model::Sent<Option<crate::send_model::Tags>>,
 }
 
 impl Ec2EipUpdateInput {
     pub(crate) fn decode(_resource: &Resource<impl Sized>) -> ProviderResult<Self> {
         let _schema = &crate::schemas::generated::ec2::eip::ec2_eip_config().schema;
         Ok(Self {
-            tags: crate::send_model::optional_value(_resource, "tags")?,
+            tags: crate::send_model::optional_tags(_resource, "tags")?,
         })
     }
 
-    #[allow(clippy::type_complexity)]
-    pub(crate) fn into_parts(self) -> (Option<Value>,) {
+    pub(crate) fn into_parts(self) -> Ec2EipUpdateParts {
         let Self { tags } = self;
-        (tags,)
+        Ec2EipUpdateParts {
+            tags: crate::send_model::Sent::new("ec2.Eip.update.tags", tags),
+        }
     }
 }
 
@@ -1017,10 +1233,23 @@ pub(crate) struct Ec2FlowLogCreateInput {
     log_format: Option<String>,
     log_group_name: Option<String>,
     max_aggregation_interval: Option<i64>,
-    resource_ids: Value,
+    resource_ids: crate::send_model::StringList,
     resource_type: String,
-    tags: Option<Value>,
+    tags: Option<crate::send_model::Tags>,
     traffic_type: Option<String>,
+}
+
+pub(crate) struct Ec2FlowLogCreateParts {
+    pub(crate) deliver_logs_permission_arn: crate::send_model::Sent<Option<String>>,
+    pub(crate) log_destination: crate::send_model::Sent<Option<String>>,
+    pub(crate) log_destination_type: crate::send_model::Sent<Option<String>>,
+    pub(crate) log_format: crate::send_model::Sent<Option<String>>,
+    pub(crate) log_group_name: crate::send_model::Sent<Option<String>>,
+    pub(crate) max_aggregation_interval: crate::send_model::Sent<Option<i64>>,
+    pub(crate) resource_ids: crate::send_model::Sent<crate::send_model::StringList>,
+    pub(crate) resource_type: crate::send_model::Sent<String>,
+    pub(crate) tags: crate::send_model::Sent<Option<crate::send_model::Tags>>,
+    pub(crate) traffic_type: crate::send_model::Sent<Option<String>>,
 }
 
 impl Ec2FlowLogCreateInput {
@@ -1043,14 +1272,14 @@ impl Ec2FlowLogCreateInput {
                 _resource,
                 "max_aggregation_interval",
             )?,
-            resource_ids: crate::send_model::required_value(_resource, "resource_ids")?,
+            resource_ids: crate::send_model::required_string_list(_resource, "resource_ids")?,
             resource_type: crate::send_model::required_enum(_resource, _schema, "resource_type")?,
-            tags: crate::send_model::optional_value(_resource, "tags")?,
+            tags: crate::send_model::optional_tags(_resource, "tags")?,
             traffic_type: crate::send_model::optional_enum(_resource, _schema, "traffic_type")?,
         })
     }
 
-    pub(crate) fn sent(&self) -> Sent {
+    pub(crate) fn sent(&self) -> CreateSent {
         let mut sent = BTreeSet::new();
         if self.deliver_logs_permission_arn.is_some() {
             sent.insert("deliver_logs_permission_arn".to_string());
@@ -1078,24 +1307,10 @@ impl Ec2FlowLogCreateInput {
         if self.traffic_type.is_some() {
             sent.insert("traffic_type".to_string());
         }
-        Sent::only(sent)
+        CreateSent::only(sent)
     }
 
-    #[allow(clippy::type_complexity)]
-    pub(crate) fn into_parts(
-        self,
-    ) -> (
-        Option<String>,
-        Option<String>,
-        Option<String>,
-        Option<String>,
-        Option<String>,
-        Option<i64>,
-        Value,
-        String,
-        Option<Value>,
-        Option<String>,
-    ) {
+    pub(crate) fn into_parts(self) -> Ec2FlowLogCreateParts {
         let Self {
             deliver_logs_permission_arn,
             log_destination,
@@ -1108,38 +1323,67 @@ impl Ec2FlowLogCreateInput {
             tags,
             traffic_type,
         } = self;
-        (
-            deliver_logs_permission_arn,
-            log_destination,
-            log_destination_type,
-            log_format,
-            log_group_name,
-            max_aggregation_interval,
-            resource_ids,
-            resource_type,
-            tags,
-            traffic_type,
-        )
+        Ec2FlowLogCreateParts {
+            deliver_logs_permission_arn: crate::send_model::Sent::new(
+                "ec2.FlowLog.create.deliver_logs_permission_arn",
+                deliver_logs_permission_arn,
+            ),
+            log_destination: crate::send_model::Sent::new(
+                "ec2.FlowLog.create.log_destination",
+                log_destination,
+            ),
+            log_destination_type: crate::send_model::Sent::new(
+                "ec2.FlowLog.create.log_destination_type",
+                log_destination_type,
+            ),
+            log_format: crate::send_model::Sent::new("ec2.FlowLog.create.log_format", log_format),
+            log_group_name: crate::send_model::Sent::new(
+                "ec2.FlowLog.create.log_group_name",
+                log_group_name,
+            ),
+            max_aggregation_interval: crate::send_model::Sent::new(
+                "ec2.FlowLog.create.max_aggregation_interval",
+                max_aggregation_interval,
+            ),
+            resource_ids: crate::send_model::Sent::new(
+                "ec2.FlowLog.create.resource_ids",
+                resource_ids,
+            ),
+            resource_type: crate::send_model::Sent::new(
+                "ec2.FlowLog.create.resource_type",
+                resource_type,
+            ),
+            tags: crate::send_model::Sent::new("ec2.FlowLog.create.tags", tags),
+            traffic_type: crate::send_model::Sent::new(
+                "ec2.FlowLog.create.traffic_type",
+                traffic_type,
+            ),
+        }
     }
 }
 
 /// Exhaustive typed update input for `ec2.FlowLog`.
 pub(crate) struct Ec2FlowLogUpdateInput {
-    tags: Option<Value>,
+    tags: Option<crate::send_model::Tags>,
+}
+
+pub(crate) struct Ec2FlowLogUpdateParts {
+    pub(crate) tags: crate::send_model::Sent<Option<crate::send_model::Tags>>,
 }
 
 impl Ec2FlowLogUpdateInput {
     pub(crate) fn decode(_resource: &Resource<impl Sized>) -> ProviderResult<Self> {
         let _schema = &crate::schemas::generated::ec2::flow_log::ec2_flow_log_config().schema;
         Ok(Self {
-            tags: crate::send_model::optional_value(_resource, "tags")?,
+            tags: crate::send_model::optional_tags(_resource, "tags")?,
         })
     }
 
-    #[allow(clippy::type_complexity)]
-    pub(crate) fn into_parts(self) -> (Option<Value>,) {
+    pub(crate) fn into_parts(self) -> Ec2FlowLogUpdateParts {
         let Self { tags } = self;
-        (tags,)
+        Ec2FlowLogUpdateParts {
+            tags: crate::send_model::Sent::new("ec2.FlowLog.update.tags", tags),
+        }
     }
 }
 
@@ -1151,8 +1395,19 @@ pub(crate) struct Ec2NatGatewayCreateInput {
     connectivity_type: Option<String>,
     private_ip_address: Option<String>,
     subnet_id: Option<String>,
-    tags: Option<Value>,
+    tags: Option<crate::send_model::Tags>,
     vpc_id: Option<String>,
+}
+
+pub(crate) struct Ec2NatGatewayCreateParts {
+    pub(crate) allocation_id: crate::send_model::Sent<Option<String>>,
+    pub(crate) availability_mode: crate::send_model::Sent<Option<String>>,
+    pub(crate) availability_zone_addresses: crate::send_model::Sent<Option<Value>>,
+    pub(crate) connectivity_type: crate::send_model::Sent<Option<String>>,
+    pub(crate) private_ip_address: crate::send_model::Sent<Option<String>>,
+    pub(crate) subnet_id: crate::send_model::Sent<Option<String>>,
+    pub(crate) tags: crate::send_model::Sent<Option<crate::send_model::Tags>>,
+    pub(crate) vpc_id: crate::send_model::Sent<Option<String>>,
 }
 
 impl Ec2NatGatewayCreateInput {
@@ -1179,12 +1434,12 @@ impl Ec2NatGatewayCreateInput {
                 "private_ip_address",
             )?,
             subnet_id: crate::send_model::optional_string(_resource, "subnet_id")?,
-            tags: crate::send_model::optional_value(_resource, "tags")?,
+            tags: crate::send_model::optional_tags(_resource, "tags")?,
             vpc_id: crate::send_model::optional_string(_resource, "vpc_id")?,
         })
     }
 
-    pub(crate) fn sent(&self) -> Sent {
+    pub(crate) fn sent(&self) -> CreateSent {
         let mut sent = BTreeSet::new();
         if self.allocation_id.is_some() {
             sent.insert("allocation_id".to_string());
@@ -1210,22 +1465,10 @@ impl Ec2NatGatewayCreateInput {
         if self.vpc_id.is_some() {
             sent.insert("vpc_id".to_string());
         }
-        Sent::only(sent)
+        CreateSent::only(sent)
     }
 
-    #[allow(clippy::type_complexity)]
-    pub(crate) fn into_parts(
-        self,
-    ) -> (
-        Option<String>,
-        Option<String>,
-        Option<Value>,
-        Option<String>,
-        Option<String>,
-        Option<String>,
-        Option<Value>,
-        Option<String>,
-    ) {
+    pub(crate) fn into_parts(self) -> Ec2NatGatewayCreateParts {
         let Self {
             allocation_id,
             availability_mode,
@@ -1236,36 +1479,56 @@ impl Ec2NatGatewayCreateInput {
             tags,
             vpc_id,
         } = self;
-        (
-            allocation_id,
-            availability_mode,
-            availability_zone_addresses,
-            connectivity_type,
-            private_ip_address,
-            subnet_id,
-            tags,
-            vpc_id,
-        )
+        Ec2NatGatewayCreateParts {
+            allocation_id: crate::send_model::Sent::new(
+                "ec2.NatGateway.create.allocation_id",
+                allocation_id,
+            ),
+            availability_mode: crate::send_model::Sent::new(
+                "ec2.NatGateway.create.availability_mode",
+                availability_mode,
+            ),
+            availability_zone_addresses: crate::send_model::Sent::new(
+                "ec2.NatGateway.create.availability_zone_addresses",
+                availability_zone_addresses,
+            ),
+            connectivity_type: crate::send_model::Sent::new(
+                "ec2.NatGateway.create.connectivity_type",
+                connectivity_type,
+            ),
+            private_ip_address: crate::send_model::Sent::new(
+                "ec2.NatGateway.create.private_ip_address",
+                private_ip_address,
+            ),
+            subnet_id: crate::send_model::Sent::new("ec2.NatGateway.create.subnet_id", subnet_id),
+            tags: crate::send_model::Sent::new("ec2.NatGateway.create.tags", tags),
+            vpc_id: crate::send_model::Sent::new("ec2.NatGateway.create.vpc_id", vpc_id),
+        }
     }
 }
 
 /// Exhaustive typed update input for `ec2.NatGateway`.
 pub(crate) struct Ec2NatGatewayUpdateInput {
-    tags: Option<Value>,
+    tags: Option<crate::send_model::Tags>,
+}
+
+pub(crate) struct Ec2NatGatewayUpdateParts {
+    pub(crate) tags: crate::send_model::Sent<Option<crate::send_model::Tags>>,
 }
 
 impl Ec2NatGatewayUpdateInput {
     pub(crate) fn decode(_resource: &Resource<impl Sized>) -> ProviderResult<Self> {
         let _schema = &crate::schemas::generated::ec2::nat_gateway::ec2_nat_gateway_config().schema;
         Ok(Self {
-            tags: crate::send_model::optional_value(_resource, "tags")?,
+            tags: crate::send_model::optional_tags(_resource, "tags")?,
         })
     }
 
-    #[allow(clippy::type_complexity)]
-    pub(crate) fn into_parts(self) -> (Option<Value>,) {
+    pub(crate) fn into_parts(self) -> Ec2NatGatewayUpdateParts {
         let Self { tags } = self;
-        (tags,)
+        Ec2NatGatewayUpdateParts {
+            tags: crate::send_model::Sent::new("ec2.NatGateway.update.tags", tags),
+        }
     }
 }
 
@@ -1273,6 +1536,11 @@ impl Ec2NatGatewayUpdateInput {
 pub(crate) struct Ec2SubnetRouteTableAssociationCreateInput {
     route_table_id: String,
     subnet_id: String,
+}
+
+pub(crate) struct Ec2SubnetRouteTableAssociationCreateParts {
+    pub(crate) route_table_id: crate::send_model::Sent<String>,
+    pub(crate) subnet_id: crate::send_model::Sent<String>,
 }
 
 impl Ec2SubnetRouteTableAssociationCreateInput {
@@ -1284,25 +1552,35 @@ impl Ec2SubnetRouteTableAssociationCreateInput {
         })
     }
 
-    pub(crate) fn sent(&self) -> Sent {
+    pub(crate) fn sent(&self) -> CreateSent {
         let mut sent = BTreeSet::new();
         sent.insert("route_table_id".to_string());
         sent.insert("subnet_id".to_string());
-        Sent::only(sent)
+        CreateSent::only(sent)
     }
 
-    #[allow(clippy::type_complexity)]
-    pub(crate) fn into_parts(self) -> (String, String) {
+    pub(crate) fn into_parts(self) -> Ec2SubnetRouteTableAssociationCreateParts {
         let Self {
             route_table_id,
             subnet_id,
         } = self;
-        (route_table_id, subnet_id)
+        Ec2SubnetRouteTableAssociationCreateParts {
+            route_table_id: crate::send_model::Sent::new(
+                "ec2.SubnetRouteTableAssociation.create.route_table_id",
+                route_table_id,
+            ),
+            subnet_id: crate::send_model::Sent::new(
+                "ec2.SubnetRouteTableAssociation.create.subnet_id",
+                subnet_id,
+            ),
+        }
     }
 }
 
 /// Exhaustive typed update input for `ec2.SubnetRouteTableAssociation`.
 pub(crate) struct Ec2SubnetRouteTableAssociationUpdateInput;
+
+pub(crate) struct Ec2SubnetRouteTableAssociationUpdateParts;
 
 impl Ec2SubnetRouteTableAssociationUpdateInput {
     pub(crate) fn decode(_resource: &Resource<impl Sized>) -> ProviderResult<Self> {
@@ -1310,8 +1588,9 @@ impl Ec2SubnetRouteTableAssociationUpdateInput {
         Ok(Self)
     }
 
-    pub(crate) fn into_parts(self) {
+    pub(crate) fn into_parts(self) -> Ec2SubnetRouteTableAssociationUpdateParts {
         let Self = self;
+        Ec2SubnetRouteTableAssociationUpdateParts
     }
 }
 
@@ -1319,7 +1598,13 @@ impl Ec2SubnetRouteTableAssociationUpdateInput {
 pub(crate) struct Ec2TransitGatewayCreateInput {
     description: Option<String>,
     options: Option<Value>,
-    tags: Option<Value>,
+    tags: Option<crate::send_model::Tags>,
+}
+
+pub(crate) struct Ec2TransitGatewayCreateParts {
+    pub(crate) description: crate::send_model::Sent<Option<String>>,
+    pub(crate) options: crate::send_model::Sent<Option<Value>>,
+    pub(crate) tags: crate::send_model::Sent<Option<crate::send_model::Tags>>,
 }
 
 impl Ec2TransitGatewayCreateInput {
@@ -1329,11 +1614,11 @@ impl Ec2TransitGatewayCreateInput {
         Ok(Self {
             description: crate::send_model::optional_string(_resource, "description")?,
             options: crate::send_model::optional_value(_resource, "options")?,
-            tags: crate::send_model::optional_value(_resource, "tags")?,
+            tags: crate::send_model::optional_tags(_resource, "tags")?,
         })
     }
 
-    pub(crate) fn sent(&self) -> Sent {
+    pub(crate) fn sent(&self) -> CreateSent {
         let mut sent = BTreeSet::new();
         if self.description.is_some() {
             sent.insert("description".to_string());
@@ -1344,24 +1629,35 @@ impl Ec2TransitGatewayCreateInput {
         if self.tags.is_some() {
             sent.insert("tags".to_string());
         }
-        Sent::only(sent)
+        CreateSent::only(sent)
     }
 
-    #[allow(clippy::type_complexity)]
-    pub(crate) fn into_parts(self) -> (Option<String>, Option<Value>, Option<Value>) {
+    pub(crate) fn into_parts(self) -> Ec2TransitGatewayCreateParts {
         let Self {
             description,
             options,
             tags,
         } = self;
-        (description, options, tags)
+        Ec2TransitGatewayCreateParts {
+            description: crate::send_model::Sent::new(
+                "ec2.TransitGateway.create.description",
+                description,
+            ),
+            options: crate::send_model::Sent::new("ec2.TransitGateway.create.options", options),
+            tags: crate::send_model::Sent::new("ec2.TransitGateway.create.tags", tags),
+        }
     }
 }
 
 /// Exhaustive typed update input for `ec2.TransitGateway`.
 pub(crate) struct Ec2TransitGatewayUpdateInput {
     description: Option<String>,
-    tags: Option<Value>,
+    tags: Option<crate::send_model::Tags>,
+}
+
+pub(crate) struct Ec2TransitGatewayUpdateParts {
+    pub(crate) description: crate::send_model::Sent<Option<String>>,
+    pub(crate) tags: crate::send_model::Sent<Option<crate::send_model::Tags>>,
 }
 
 impl Ec2TransitGatewayUpdateInput {
@@ -1370,24 +1666,37 @@ impl Ec2TransitGatewayUpdateInput {
             &crate::schemas::generated::ec2::transit_gateway::ec2_transit_gateway_config().schema;
         Ok(Self {
             description: crate::send_model::optional_string(_resource, "description")?,
-            tags: crate::send_model::optional_value(_resource, "tags")?,
+            tags: crate::send_model::optional_tags(_resource, "tags")?,
         })
     }
 
-    #[allow(clippy::type_complexity)]
-    pub(crate) fn into_parts(self) -> (Option<String>, Option<Value>) {
+    pub(crate) fn into_parts(self) -> Ec2TransitGatewayUpdateParts {
         let Self { description, tags } = self;
-        (description, tags)
+        Ec2TransitGatewayUpdateParts {
+            description: crate::send_model::Sent::new(
+                "ec2.TransitGateway.update.description",
+                description,
+            ),
+            tags: crate::send_model::Sent::new("ec2.TransitGateway.update.tags", tags),
+        }
     }
 }
 
 /// Exhaustive typed create input for `ec2.TransitGatewayAttachment`.
 pub(crate) struct Ec2TransitGatewayAttachmentCreateInput {
     options: Option<Value>,
-    subnet_ids: Value,
-    tags: Option<Value>,
+    subnet_ids: crate::send_model::StringList,
+    tags: Option<crate::send_model::Tags>,
     transit_gateway_id: String,
     vpc_id: String,
+}
+
+pub(crate) struct Ec2TransitGatewayAttachmentCreateParts {
+    pub(crate) options: crate::send_model::Sent<Option<Value>>,
+    pub(crate) subnet_ids: crate::send_model::Sent<crate::send_model::StringList>,
+    pub(crate) tags: crate::send_model::Sent<Option<crate::send_model::Tags>>,
+    pub(crate) transit_gateway_id: crate::send_model::Sent<String>,
+    pub(crate) vpc_id: crate::send_model::Sent<String>,
 }
 
 impl Ec2TransitGatewayAttachmentCreateInput {
@@ -1395,8 +1704,8 @@ impl Ec2TransitGatewayAttachmentCreateInput {
         let _schema = &crate::schemas::generated::ec2::transit_gateway_attachment::ec2_transit_gateway_attachment_config().schema;
         Ok(Self {
             options: crate::send_model::optional_value(_resource, "options")?,
-            subnet_ids: crate::send_model::required_value(_resource, "subnet_ids")?,
-            tags: crate::send_model::optional_value(_resource, "tags")?,
+            subnet_ids: crate::send_model::required_string_list(_resource, "subnet_ids")?,
+            tags: crate::send_model::optional_tags(_resource, "tags")?,
             transit_gateway_id: crate::send_model::required_string(
                 _resource,
                 "transit_gateway_id",
@@ -1405,7 +1714,7 @@ impl Ec2TransitGatewayAttachmentCreateInput {
         })
     }
 
-    pub(crate) fn sent(&self) -> Sent {
+    pub(crate) fn sent(&self) -> CreateSent {
         let mut sent = BTreeSet::new();
         if self.options.is_some() {
             sent.insert("options".to_string());
@@ -1416,11 +1725,10 @@ impl Ec2TransitGatewayAttachmentCreateInput {
         }
         sent.insert("transit_gateway_id".to_string());
         sent.insert("vpc_id".to_string());
-        Sent::only(sent)
+        CreateSent::only(sent)
     }
 
-    #[allow(clippy::type_complexity)]
-    pub(crate) fn into_parts(self) -> (Option<Value>, Value, Option<Value>, String, String) {
+    pub(crate) fn into_parts(self) -> Ec2TransitGatewayAttachmentCreateParts {
         let Self {
             options,
             subnet_ids,
@@ -1428,44 +1736,82 @@ impl Ec2TransitGatewayAttachmentCreateInput {
             transit_gateway_id,
             vpc_id,
         } = self;
-        (options, subnet_ids, tags, transit_gateway_id, vpc_id)
+        Ec2TransitGatewayAttachmentCreateParts {
+            options: crate::send_model::Sent::new(
+                "ec2.TransitGatewayAttachment.create.options",
+                options,
+            ),
+            subnet_ids: crate::send_model::Sent::new(
+                "ec2.TransitGatewayAttachment.create.subnet_ids",
+                subnet_ids,
+            ),
+            tags: crate::send_model::Sent::new("ec2.TransitGatewayAttachment.create.tags", tags),
+            transit_gateway_id: crate::send_model::Sent::new(
+                "ec2.TransitGatewayAttachment.create.transit_gateway_id",
+                transit_gateway_id,
+            ),
+            vpc_id: crate::send_model::Sent::new(
+                "ec2.TransitGatewayAttachment.create.vpc_id",
+                vpc_id,
+            ),
+        }
     }
 }
 
 /// Exhaustive typed update input for `ec2.TransitGatewayAttachment`.
 pub(crate) struct Ec2TransitGatewayAttachmentUpdateInput {
-    tags: Option<Value>,
+    tags: Option<crate::send_model::Tags>,
+}
+
+pub(crate) struct Ec2TransitGatewayAttachmentUpdateParts {
+    pub(crate) tags: crate::send_model::Sent<Option<crate::send_model::Tags>>,
 }
 
 impl Ec2TransitGatewayAttachmentUpdateInput {
     pub(crate) fn decode(_resource: &Resource<impl Sized>) -> ProviderResult<Self> {
         let _schema = &crate::schemas::generated::ec2::transit_gateway_attachment::ec2_transit_gateway_attachment_config().schema;
         Ok(Self {
-            tags: crate::send_model::optional_value(_resource, "tags")?,
+            tags: crate::send_model::optional_tags(_resource, "tags")?,
         })
     }
 
-    #[allow(clippy::type_complexity)]
-    pub(crate) fn into_parts(self) -> (Option<Value>,) {
+    pub(crate) fn into_parts(self) -> Ec2TransitGatewayAttachmentUpdateParts {
         let Self { tags } = self;
-        (tags,)
+        Ec2TransitGatewayAttachmentUpdateParts {
+            tags: crate::send_model::Sent::new("ec2.TransitGatewayAttachment.update.tags", tags),
+        }
     }
 }
 
 /// Exhaustive typed create input for `ec2.VpcEndpoint`.
 pub(crate) struct Ec2VpcEndpointCreateInput {
-    policy_document: Option<String>,
+    policy_document: Option<Value>,
     private_dns_enabled: Option<bool>,
     resource_configuration_arn: Option<String>,
-    route_table_ids: Option<Value>,
-    security_group_ids: Option<Value>,
+    route_table_ids: Option<crate::send_model::StringList>,
+    security_group_ids: Option<crate::send_model::StringList>,
     service_name: String,
     service_network_arn: Option<String>,
     service_region: Option<String>,
-    subnet_ids: Option<Value>,
-    tags: Option<Value>,
+    subnet_ids: Option<crate::send_model::StringList>,
+    tags: Option<crate::send_model::Tags>,
     vpc_endpoint_type: Option<String>,
     vpc_id: String,
+}
+
+pub(crate) struct Ec2VpcEndpointCreateParts {
+    pub(crate) policy_document: crate::send_model::Sent<Option<Value>>,
+    pub(crate) private_dns_enabled: crate::send_model::Sent<Option<bool>>,
+    pub(crate) resource_configuration_arn: crate::send_model::Sent<Option<String>>,
+    pub(crate) route_table_ids: crate::send_model::Sent<Option<crate::send_model::StringList>>,
+    pub(crate) security_group_ids: crate::send_model::Sent<Option<crate::send_model::StringList>>,
+    pub(crate) service_name: crate::send_model::Sent<String>,
+    pub(crate) service_network_arn: crate::send_model::Sent<Option<String>>,
+    pub(crate) service_region: crate::send_model::Sent<Option<String>>,
+    pub(crate) subnet_ids: crate::send_model::Sent<Option<crate::send_model::StringList>>,
+    pub(crate) tags: crate::send_model::Sent<Option<crate::send_model::Tags>>,
+    pub(crate) vpc_endpoint_type: crate::send_model::Sent<Option<String>>,
+    pub(crate) vpc_id: crate::send_model::Sent<String>,
 }
 
 impl Ec2VpcEndpointCreateInput {
@@ -1473,7 +1819,7 @@ impl Ec2VpcEndpointCreateInput {
         let _schema =
             &crate::schemas::generated::ec2::vpc_endpoint::ec2_vpc_endpoint_config().schema;
         Ok(Self {
-            policy_document: crate::send_model::optional_string(_resource, "policy_document")?,
+            policy_document: crate::send_model::optional_value(_resource, "policy_document")?,
             private_dns_enabled: crate::send_model::optional_bool(
                 _resource,
                 "private_dns_enabled",
@@ -1482,16 +1828,19 @@ impl Ec2VpcEndpointCreateInput {
                 _resource,
                 "resource_configuration_arn",
             )?,
-            route_table_ids: crate::send_model::optional_value(_resource, "route_table_ids")?,
-            security_group_ids: crate::send_model::optional_value(_resource, "security_group_ids")?,
+            route_table_ids: crate::send_model::optional_string_list(_resource, "route_table_ids")?,
+            security_group_ids: crate::send_model::optional_string_list(
+                _resource,
+                "security_group_ids",
+            )?,
             service_name: crate::send_model::required_string(_resource, "service_name")?,
             service_network_arn: crate::send_model::optional_string(
                 _resource,
                 "service_network_arn",
             )?,
             service_region: crate::send_model::optional_enum(_resource, _schema, "service_region")?,
-            subnet_ids: crate::send_model::optional_value(_resource, "subnet_ids")?,
-            tags: crate::send_model::optional_value(_resource, "tags")?,
+            subnet_ids: crate::send_model::optional_string_list(_resource, "subnet_ids")?,
+            tags: crate::send_model::optional_tags(_resource, "tags")?,
             vpc_endpoint_type: crate::send_model::optional_enum(
                 _resource,
                 _schema,
@@ -1501,7 +1850,7 @@ impl Ec2VpcEndpointCreateInput {
         })
     }
 
-    pub(crate) fn sent(&self) -> Sent {
+    pub(crate) fn sent(&self) -> CreateSent {
         let mut sent = BTreeSet::new();
         if self.policy_document.is_some() {
             sent.insert("policy_document".to_string());
@@ -1535,26 +1884,10 @@ impl Ec2VpcEndpointCreateInput {
             sent.insert("vpc_endpoint_type".to_string());
         }
         sent.insert("vpc_id".to_string());
-        Sent::only(sent)
+        CreateSent::only(sent)
     }
 
-    #[allow(clippy::type_complexity)]
-    pub(crate) fn into_parts(
-        self,
-    ) -> (
-        Option<String>,
-        Option<bool>,
-        Option<String>,
-        Option<Value>,
-        Option<Value>,
-        String,
-        Option<String>,
-        Option<String>,
-        Option<Value>,
-        Option<Value>,
-        Option<String>,
-        String,
-    ) {
+    pub(crate) fn into_parts(self) -> Ec2VpcEndpointCreateParts {
         let Self {
             policy_document,
             private_dns_enabled,
@@ -1569,28 +1902,64 @@ impl Ec2VpcEndpointCreateInput {
             vpc_endpoint_type,
             vpc_id,
         } = self;
-        (
-            policy_document,
-            private_dns_enabled,
-            resource_configuration_arn,
-            route_table_ids,
-            security_group_ids,
-            service_name,
-            service_network_arn,
-            service_region,
-            subnet_ids,
-            tags,
-            vpc_endpoint_type,
-            vpc_id,
-        )
+        Ec2VpcEndpointCreateParts {
+            policy_document: crate::send_model::Sent::new(
+                "ec2.VpcEndpoint.create.policy_document",
+                policy_document,
+            ),
+            private_dns_enabled: crate::send_model::Sent::new(
+                "ec2.VpcEndpoint.create.private_dns_enabled",
+                private_dns_enabled,
+            ),
+            resource_configuration_arn: crate::send_model::Sent::new(
+                "ec2.VpcEndpoint.create.resource_configuration_arn",
+                resource_configuration_arn,
+            ),
+            route_table_ids: crate::send_model::Sent::new(
+                "ec2.VpcEndpoint.create.route_table_ids",
+                route_table_ids,
+            ),
+            security_group_ids: crate::send_model::Sent::new(
+                "ec2.VpcEndpoint.create.security_group_ids",
+                security_group_ids,
+            ),
+            service_name: crate::send_model::Sent::new(
+                "ec2.VpcEndpoint.create.service_name",
+                service_name,
+            ),
+            service_network_arn: crate::send_model::Sent::new(
+                "ec2.VpcEndpoint.create.service_network_arn",
+                service_network_arn,
+            ),
+            service_region: crate::send_model::Sent::new(
+                "ec2.VpcEndpoint.create.service_region",
+                service_region,
+            ),
+            subnet_ids: crate::send_model::Sent::new(
+                "ec2.VpcEndpoint.create.subnet_ids",
+                subnet_ids,
+            ),
+            tags: crate::send_model::Sent::new("ec2.VpcEndpoint.create.tags", tags),
+            vpc_endpoint_type: crate::send_model::Sent::new(
+                "ec2.VpcEndpoint.create.vpc_endpoint_type",
+                vpc_endpoint_type,
+            ),
+            vpc_id: crate::send_model::Sent::new("ec2.VpcEndpoint.create.vpc_id", vpc_id),
+        }
     }
 }
 
 /// Exhaustive typed update input for `ec2.VpcEndpoint`.
 pub(crate) struct Ec2VpcEndpointUpdateInput {
-    policy_document: Option<String>,
+    policy_document: Option<Value>,
     private_dns_enabled: Option<bool>,
-    tags: Option<Value>,
+    tags: Option<crate::send_model::Tags>,
+}
+
+pub(crate) struct Ec2VpcEndpointUpdateParts {
+    pub(crate) policy_document: crate::send_model::Sent<Option<Value>>,
+    pub(crate) private_dns_enabled: crate::send_model::Sent<Option<bool>>,
+    pub(crate) tags: crate::send_model::Sent<Option<crate::send_model::Tags>>,
 }
 
 impl Ec2VpcEndpointUpdateInput {
@@ -1598,23 +1967,32 @@ impl Ec2VpcEndpointUpdateInput {
         let _schema =
             &crate::schemas::generated::ec2::vpc_endpoint::ec2_vpc_endpoint_config().schema;
         Ok(Self {
-            policy_document: crate::send_model::optional_string(_resource, "policy_document")?,
+            policy_document: crate::send_model::optional_value(_resource, "policy_document")?,
             private_dns_enabled: crate::send_model::optional_bool(
                 _resource,
                 "private_dns_enabled",
             )?,
-            tags: crate::send_model::optional_value(_resource, "tags")?,
+            tags: crate::send_model::optional_tags(_resource, "tags")?,
         })
     }
 
-    #[allow(clippy::type_complexity)]
-    pub(crate) fn into_parts(self) -> (Option<String>, Option<bool>, Option<Value>) {
+    pub(crate) fn into_parts(self) -> Ec2VpcEndpointUpdateParts {
         let Self {
             policy_document,
             private_dns_enabled,
             tags,
         } = self;
-        (policy_document, private_dns_enabled, tags)
+        Ec2VpcEndpointUpdateParts {
+            policy_document: crate::send_model::Sent::new(
+                "ec2.VpcEndpoint.update.policy_document",
+                policy_document,
+            ),
+            private_dns_enabled: crate::send_model::Sent::new(
+                "ec2.VpcEndpoint.update.private_dns_enabled",
+                private_dns_enabled,
+            ),
+            tags: crate::send_model::Sent::new("ec2.VpcEndpoint.update.tags", tags),
+        }
     }
 }
 
@@ -1623,6 +2001,12 @@ pub(crate) struct Ec2VpcGatewayAttachmentCreateInput {
     internet_gateway_id: Option<String>,
     vpc_id: String,
     vpn_gateway_id: Option<String>,
+}
+
+pub(crate) struct Ec2VpcGatewayAttachmentCreateParts {
+    pub(crate) internet_gateway_id: crate::send_model::Sent<Option<String>>,
+    pub(crate) vpc_id: crate::send_model::Sent<String>,
+    pub(crate) vpn_gateway_id: crate::send_model::Sent<Option<String>>,
 }
 
 impl Ec2VpcGatewayAttachmentCreateInput {
@@ -1638,7 +2022,7 @@ impl Ec2VpcGatewayAttachmentCreateInput {
         })
     }
 
-    pub(crate) fn sent(&self) -> Sent {
+    pub(crate) fn sent(&self) -> CreateSent {
         let mut sent = BTreeSet::new();
         if self.internet_gateway_id.is_some() {
             sent.insert("internet_gateway_id".to_string());
@@ -1647,22 +2031,33 @@ impl Ec2VpcGatewayAttachmentCreateInput {
         if self.vpn_gateway_id.is_some() {
             sent.insert("vpn_gateway_id".to_string());
         }
-        Sent::only(sent)
+        CreateSent::only(sent)
     }
 
-    #[allow(clippy::type_complexity)]
-    pub(crate) fn into_parts(self) -> (Option<String>, String, Option<String>) {
+    pub(crate) fn into_parts(self) -> Ec2VpcGatewayAttachmentCreateParts {
         let Self {
             internet_gateway_id,
             vpc_id,
             vpn_gateway_id,
         } = self;
-        (internet_gateway_id, vpc_id, vpn_gateway_id)
+        Ec2VpcGatewayAttachmentCreateParts {
+            internet_gateway_id: crate::send_model::Sent::new(
+                "ec2.VpcGatewayAttachment.create.internet_gateway_id",
+                internet_gateway_id,
+            ),
+            vpc_id: crate::send_model::Sent::new("ec2.VpcGatewayAttachment.create.vpc_id", vpc_id),
+            vpn_gateway_id: crate::send_model::Sent::new(
+                "ec2.VpcGatewayAttachment.create.vpn_gateway_id",
+                vpn_gateway_id,
+            ),
+        }
     }
 }
 
 /// Exhaustive typed update input for `ec2.VpcGatewayAttachment`.
 pub(crate) struct Ec2VpcGatewayAttachmentUpdateInput;
+
+pub(crate) struct Ec2VpcGatewayAttachmentUpdateParts;
 
 impl Ec2VpcGatewayAttachmentUpdateInput {
     pub(crate) fn decode(_resource: &Resource<impl Sized>) -> ProviderResult<Self> {
@@ -1670,8 +2065,9 @@ impl Ec2VpcGatewayAttachmentUpdateInput {
         Ok(Self)
     }
 
-    pub(crate) fn into_parts(self) {
+    pub(crate) fn into_parts(self) -> Ec2VpcGatewayAttachmentUpdateParts {
         let Self = self;
+        Ec2VpcGatewayAttachmentUpdateParts
     }
 }
 
@@ -1679,8 +2075,15 @@ impl Ec2VpcGatewayAttachmentUpdateInput {
 pub(crate) struct Ec2VpcPeeringConnectionCreateInput {
     peer_owner_id: Option<String>,
     peer_vpc_id: String,
-    tags: Option<Value>,
+    tags: Option<crate::send_model::Tags>,
     vpc_id: String,
+}
+
+pub(crate) struct Ec2VpcPeeringConnectionCreateParts {
+    pub(crate) peer_owner_id: crate::send_model::Sent<Option<String>>,
+    pub(crate) peer_vpc_id: crate::send_model::Sent<String>,
+    pub(crate) tags: crate::send_model::Sent<Option<crate::send_model::Tags>>,
+    pub(crate) vpc_id: crate::send_model::Sent<String>,
 }
 
 impl Ec2VpcPeeringConnectionCreateInput {
@@ -1689,12 +2092,12 @@ impl Ec2VpcPeeringConnectionCreateInput {
         Ok(Self {
             peer_owner_id: crate::send_model::optional_string(_resource, "peer_owner_id")?,
             peer_vpc_id: crate::send_model::required_string(_resource, "peer_vpc_id")?,
-            tags: crate::send_model::optional_value(_resource, "tags")?,
+            tags: crate::send_model::optional_tags(_resource, "tags")?,
             vpc_id: crate::send_model::required_string(_resource, "vpc_id")?,
         })
     }
 
-    pub(crate) fn sent(&self) -> Sent {
+    pub(crate) fn sent(&self) -> CreateSent {
         let mut sent = BTreeSet::new();
         if self.peer_owner_id.is_some() {
             sent.insert("peer_owner_id".to_string());
@@ -1704,38 +2107,53 @@ impl Ec2VpcPeeringConnectionCreateInput {
             sent.insert("tags".to_string());
         }
         sent.insert("vpc_id".to_string());
-        Sent::only(sent)
+        CreateSent::only(sent)
     }
 
-    #[allow(clippy::type_complexity)]
-    pub(crate) fn into_parts(self) -> (Option<String>, String, Option<Value>, String) {
+    pub(crate) fn into_parts(self) -> Ec2VpcPeeringConnectionCreateParts {
         let Self {
             peer_owner_id,
             peer_vpc_id,
             tags,
             vpc_id,
         } = self;
-        (peer_owner_id, peer_vpc_id, tags, vpc_id)
+        Ec2VpcPeeringConnectionCreateParts {
+            peer_owner_id: crate::send_model::Sent::new(
+                "ec2.VpcPeeringConnection.create.peer_owner_id",
+                peer_owner_id,
+            ),
+            peer_vpc_id: crate::send_model::Sent::new(
+                "ec2.VpcPeeringConnection.create.peer_vpc_id",
+                peer_vpc_id,
+            ),
+            tags: crate::send_model::Sent::new("ec2.VpcPeeringConnection.create.tags", tags),
+            vpc_id: crate::send_model::Sent::new("ec2.VpcPeeringConnection.create.vpc_id", vpc_id),
+        }
     }
 }
 
 /// Exhaustive typed update input for `ec2.VpcPeeringConnection`.
 pub(crate) struct Ec2VpcPeeringConnectionUpdateInput {
-    tags: Option<Value>,
+    tags: Option<crate::send_model::Tags>,
+}
+
+pub(crate) struct Ec2VpcPeeringConnectionUpdateParts {
+    pub(crate) tags: crate::send_model::Sent<Option<crate::send_model::Tags>>,
 }
 
 impl Ec2VpcPeeringConnectionUpdateInput {
     pub(crate) fn decode(_resource: &Resource<impl Sized>) -> ProviderResult<Self> {
         let _schema = &crate::schemas::generated::ec2::vpc_peering_connection::ec2_vpc_peering_connection_config().schema;
         Ok(Self {
-            tags: crate::send_model::optional_value(_resource, "tags")?,
+            tags: crate::send_model::optional_tags(_resource, "tags")?,
         })
     }
 
-    #[allow(clippy::type_complexity)]
-    pub(crate) fn into_parts(self) -> (Option<Value>,) {
+    pub(crate) fn into_parts(self) -> Ec2VpcPeeringConnectionUpdateParts {
         let Self { tags } = self;
-        (tags,)
+        Ec2VpcPeeringConnectionUpdateParts {
+            tags: crate::send_model::Sent::new("ec2.VpcPeeringConnection.update.tags", tags),
+        }
     }
 }
 
@@ -1743,8 +2161,15 @@ impl Ec2VpcPeeringConnectionUpdateInput {
 pub(crate) struct Ec2VpnGatewayCreateInput {
     amazon_side_asn: Option<i64>,
     availability_zone: Option<String>,
-    tags: Option<Value>,
+    tags: Option<crate::send_model::Tags>,
     r#type: String,
+}
+
+pub(crate) struct Ec2VpnGatewayCreateParts {
+    pub(crate) amazon_side_asn: crate::send_model::Sent<Option<i64>>,
+    pub(crate) availability_zone: crate::send_model::Sent<Option<String>>,
+    pub(crate) tags: crate::send_model::Sent<Option<crate::send_model::Tags>>,
+    pub(crate) r#type: crate::send_model::Sent<String>,
 }
 
 impl Ec2VpnGatewayCreateInput {
@@ -1757,12 +2182,12 @@ impl Ec2VpnGatewayCreateInput {
                 _schema,
                 "availability_zone",
             )?,
-            tags: crate::send_model::optional_value(_resource, "tags")?,
+            tags: crate::send_model::optional_tags(_resource, "tags")?,
             r#type: crate::send_model::required_enum(_resource, _schema, "type")?,
         })
     }
 
-    pub(crate) fn sent(&self) -> Sent {
+    pub(crate) fn sent(&self) -> CreateSent {
         let mut sent = BTreeSet::new();
         if self.amazon_side_asn.is_some() {
             sent.insert("amazon_side_asn".to_string());
@@ -1774,38 +2199,53 @@ impl Ec2VpnGatewayCreateInput {
             sent.insert("tags".to_string());
         }
         sent.insert("type".to_string());
-        Sent::only(sent)
+        CreateSent::only(sent)
     }
 
-    #[allow(clippy::type_complexity)]
-    pub(crate) fn into_parts(self) -> (Option<i64>, Option<String>, Option<Value>, String) {
+    pub(crate) fn into_parts(self) -> Ec2VpnGatewayCreateParts {
         let Self {
             amazon_side_asn,
             availability_zone,
             tags,
             r#type,
         } = self;
-        (amazon_side_asn, availability_zone, tags, r#type)
+        Ec2VpnGatewayCreateParts {
+            amazon_side_asn: crate::send_model::Sent::new(
+                "ec2.VpnGateway.create.amazon_side_asn",
+                amazon_side_asn,
+            ),
+            availability_zone: crate::send_model::Sent::new(
+                "ec2.VpnGateway.create.availability_zone",
+                availability_zone,
+            ),
+            tags: crate::send_model::Sent::new("ec2.VpnGateway.create.tags", tags),
+            r#type: crate::send_model::Sent::new("ec2.VpnGateway.create.type", r#type),
+        }
     }
 }
 
 /// Exhaustive typed update input for `ec2.VpnGateway`.
 pub(crate) struct Ec2VpnGatewayUpdateInput {
-    tags: Option<Value>,
+    tags: Option<crate::send_model::Tags>,
+}
+
+pub(crate) struct Ec2VpnGatewayUpdateParts {
+    pub(crate) tags: crate::send_model::Sent<Option<crate::send_model::Tags>>,
 }
 
 impl Ec2VpnGatewayUpdateInput {
     pub(crate) fn decode(_resource: &Resource<impl Sized>) -> ProviderResult<Self> {
         let _schema = &crate::schemas::generated::ec2::vpn_gateway::ec2_vpn_gateway_config().schema;
         Ok(Self {
-            tags: crate::send_model::optional_value(_resource, "tags")?,
+            tags: crate::send_model::optional_tags(_resource, "tags")?,
         })
     }
 
-    #[allow(clippy::type_complexity)]
-    pub(crate) fn into_parts(self) -> (Option<Value>,) {
+    pub(crate) fn into_parts(self) -> Ec2VpnGatewayUpdateParts {
         let Self { tags } = self;
-        (tags,)
+        Ec2VpnGatewayUpdateParts {
+            tags: crate::send_model::Sent::new("ec2.VpnGateway.update.tags", tags),
+        }
     }
 }
 
@@ -1813,7 +2253,13 @@ impl Ec2VpnGatewayUpdateInput {
 pub(crate) struct S3BucketCreateInput {
     bucket: String,
     bucket_namespace: Option<String>,
-    tags: Option<Value>,
+    tags: Option<crate::send_model::Tags>,
+}
+
+pub(crate) struct S3BucketCreateParts {
+    pub(crate) bucket: crate::send_model::Sent<String>,
+    pub(crate) bucket_namespace: crate::send_model::Sent<Option<String>>,
+    pub(crate) tags: crate::send_model::Sent<Option<crate::send_model::Tags>>,
 }
 
 impl S3BucketCreateInput {
@@ -1826,50 +2272,58 @@ impl S3BucketCreateInput {
                 _schema,
                 "bucket_namespace",
             )?,
-            tags: crate::send_model::optional_value(_resource, "tags")?,
+            tags: crate::send_model::optional_tags(_resource, "tags")?,
         })
     }
 
-    pub(crate) fn sent(&self) -> Sent {
+    pub(crate) fn sent(&self) -> CreateSent {
         let mut sent = BTreeSet::new();
         sent.insert("bucket".to_string());
         if self.bucket_namespace.is_some() {
             sent.insert("bucket_namespace".to_string());
         }
-        if self.tags.is_some() {
-            sent.insert("tags".to_string());
-        }
-        Sent::only(sent)
+        CreateSent::only(sent)
     }
 
-    #[allow(clippy::type_complexity)]
-    pub(crate) fn into_parts(self) -> (String, Option<String>, Option<Value>) {
+    pub(crate) fn into_parts(self) -> S3BucketCreateParts {
         let Self {
             bucket,
             bucket_namespace,
             tags,
         } = self;
-        (bucket, bucket_namespace, tags)
+        S3BucketCreateParts {
+            bucket: crate::send_model::Sent::new("s3.Bucket.create.bucket", bucket),
+            bucket_namespace: crate::send_model::Sent::new(
+                "s3.Bucket.create.bucket_namespace",
+                bucket_namespace,
+            ),
+            tags: crate::send_model::Sent::new("s3.Bucket.create.tags", tags),
+        }
     }
 }
 
 /// Exhaustive typed update input for `s3.Bucket`.
 pub(crate) struct S3BucketUpdateInput {
-    tags: Option<Value>,
+    tags: Option<crate::send_model::Tags>,
+}
+
+pub(crate) struct S3BucketUpdateParts {
+    pub(crate) tags: crate::send_model::Sent<Option<crate::send_model::Tags>>,
 }
 
 impl S3BucketUpdateInput {
     pub(crate) fn decode(_resource: &Resource<impl Sized>) -> ProviderResult<Self> {
         let _schema = &crate::schemas::generated::s3::bucket::s3_bucket_config().schema;
         Ok(Self {
-            tags: crate::send_model::optional_value(_resource, "tags")?,
+            tags: crate::send_model::optional_tags(_resource, "tags")?,
         })
     }
 
-    #[allow(clippy::type_complexity)]
-    pub(crate) fn into_parts(self) -> (Option<Value>,) {
+    pub(crate) fn into_parts(self) -> S3BucketUpdateParts {
         let Self { tags } = self;
-        (tags,)
+        S3BucketUpdateParts {
+            tags: crate::send_model::Sent::new("s3.Bucket.update.tags", tags),
+        }
     }
 }
 
@@ -1877,6 +2331,11 @@ impl S3BucketUpdateInput {
 pub(crate) struct S3BucketPolicyCreateInput {
     bucket: String,
     policy: Value,
+}
+
+pub(crate) struct S3BucketPolicyCreateParts {
+    pub(crate) bucket: crate::send_model::Sent<String>,
+    pub(crate) policy: crate::send_model::Sent<Value>,
 }
 
 impl S3BucketPolicyCreateInput {
@@ -1889,23 +2348,29 @@ impl S3BucketPolicyCreateInput {
         })
     }
 
-    pub(crate) fn sent(&self) -> Sent {
+    pub(crate) fn sent(&self) -> CreateSent {
         let mut sent = BTreeSet::new();
         sent.insert("bucket".to_string());
         sent.insert("policy".to_string());
-        Sent::only(sent)
+        CreateSent::only(sent)
     }
 
-    #[allow(clippy::type_complexity)]
-    pub(crate) fn into_parts(self) -> (String, Value) {
+    pub(crate) fn into_parts(self) -> S3BucketPolicyCreateParts {
         let Self { bucket, policy } = self;
-        (bucket, policy)
+        S3BucketPolicyCreateParts {
+            bucket: crate::send_model::Sent::new("s3.BucketPolicy.create.bucket", bucket),
+            policy: crate::send_model::Sent::new("s3.BucketPolicy.create.policy", policy),
+        }
     }
 }
 
 /// Exhaustive typed update input for `s3.BucketPolicy`.
 pub(crate) struct S3BucketPolicyUpdateInput {
     policy: Value,
+}
+
+pub(crate) struct S3BucketPolicyUpdateParts {
+    pub(crate) policy: crate::send_model::Sent<Value>,
 }
 
 impl S3BucketPolicyUpdateInput {
@@ -1917,10 +2382,11 @@ impl S3BucketPolicyUpdateInput {
         })
     }
 
-    #[allow(clippy::type_complexity)]
-    pub(crate) fn into_parts(self) -> (Value,) {
+    pub(crate) fn into_parts(self) -> S3BucketPolicyUpdateParts {
         let Self { policy } = self;
-        (policy,)
+        S3BucketPolicyUpdateParts {
+            policy: crate::send_model::Sent::new("s3.BucketPolicy.update.policy", policy),
+        }
     }
 }
 
@@ -1928,6 +2394,11 @@ impl S3BucketPolicyUpdateInput {
 pub(crate) struct S3BucketVersioningCreateInput {
     bucket: String,
     status: String,
+}
+
+pub(crate) struct S3BucketVersioningCreateParts {
+    pub(crate) bucket: crate::send_model::Sent<String>,
+    pub(crate) status: crate::send_model::Sent<String>,
 }
 
 impl S3BucketVersioningCreateInput {
@@ -1940,23 +2411,29 @@ impl S3BucketVersioningCreateInput {
         })
     }
 
-    pub(crate) fn sent(&self) -> Sent {
+    pub(crate) fn sent(&self) -> CreateSent {
         let mut sent = BTreeSet::new();
         sent.insert("bucket".to_string());
         sent.insert("status".to_string());
-        Sent::only(sent)
+        CreateSent::only(sent)
     }
 
-    #[allow(clippy::type_complexity)]
-    pub(crate) fn into_parts(self) -> (String, String) {
+    pub(crate) fn into_parts(self) -> S3BucketVersioningCreateParts {
         let Self { bucket, status } = self;
-        (bucket, status)
+        S3BucketVersioningCreateParts {
+            bucket: crate::send_model::Sent::new("s3.BucketVersioning.create.bucket", bucket),
+            status: crate::send_model::Sent::new("s3.BucketVersioning.create.status", status),
+        }
     }
 }
 
 /// Exhaustive typed update input for `s3.BucketVersioning`.
 pub(crate) struct S3BucketVersioningUpdateInput {
     status: String,
+}
+
+pub(crate) struct S3BucketVersioningUpdateParts {
+    pub(crate) status: crate::send_model::Sent<String>,
 }
 
 impl S3BucketVersioningUpdateInput {
@@ -1968,10 +2445,11 @@ impl S3BucketVersioningUpdateInput {
         })
     }
 
-    #[allow(clippy::type_complexity)]
-    pub(crate) fn into_parts(self) -> (String,) {
+    pub(crate) fn into_parts(self) -> S3BucketVersioningUpdateParts {
         let Self { status } = self;
-        (status,)
+        S3BucketVersioningUpdateParts {
+            status: crate::send_model::Sent::new("s3.BucketVersioning.update.status", status),
+        }
     }
 }
 
@@ -1980,6 +2458,12 @@ pub(crate) struct S3BucketObjectLockConfigurationCreateInput {
     bucket: String,
     object_lock_enabled: String,
     rule: Option<Value>,
+}
+
+pub(crate) struct S3BucketObjectLockConfigurationCreateParts {
+    pub(crate) bucket: crate::send_model::Sent<String>,
+    pub(crate) object_lock_enabled: crate::send_model::Sent<String>,
+    pub(crate) rule: crate::send_model::Sent<Option<Value>>,
 }
 
 impl S3BucketObjectLockConfigurationCreateInput {
@@ -1996,24 +2480,36 @@ impl S3BucketObjectLockConfigurationCreateInput {
         })
     }
 
-    pub(crate) fn sent(&self) -> Sent {
+    pub(crate) fn sent(&self) -> CreateSent {
         let mut sent = BTreeSet::new();
         sent.insert("bucket".to_string());
         sent.insert("object_lock_enabled".to_string());
         if self.rule.is_some() {
             sent.insert("rule".to_string());
         }
-        Sent::only(sent)
+        CreateSent::only(sent)
     }
 
-    #[allow(clippy::type_complexity)]
-    pub(crate) fn into_parts(self) -> (String, String, Option<Value>) {
+    pub(crate) fn into_parts(self) -> S3BucketObjectLockConfigurationCreateParts {
         let Self {
             bucket,
             object_lock_enabled,
             rule,
         } = self;
-        (bucket, object_lock_enabled, rule)
+        S3BucketObjectLockConfigurationCreateParts {
+            bucket: crate::send_model::Sent::new(
+                "s3.BucketObjectLockConfiguration.create.bucket",
+                bucket,
+            ),
+            object_lock_enabled: crate::send_model::Sent::new(
+                "s3.BucketObjectLockConfiguration.create.object_lock_enabled",
+                object_lock_enabled,
+            ),
+            rule: crate::send_model::Sent::new(
+                "s3.BucketObjectLockConfiguration.create.rule",
+                rule,
+            ),
+        }
     }
 }
 
@@ -2021,6 +2517,11 @@ impl S3BucketObjectLockConfigurationCreateInput {
 pub(crate) struct S3BucketObjectLockConfigurationUpdateInput {
     object_lock_enabled: String,
     rule: Option<Value>,
+}
+
+pub(crate) struct S3BucketObjectLockConfigurationUpdateParts {
+    pub(crate) object_lock_enabled: crate::send_model::Sent<String>,
+    pub(crate) rule: crate::send_model::Sent<Option<Value>>,
 }
 
 impl S3BucketObjectLockConfigurationUpdateInput {
@@ -2036,13 +2537,21 @@ impl S3BucketObjectLockConfigurationUpdateInput {
         })
     }
 
-    #[allow(clippy::type_complexity)]
-    pub(crate) fn into_parts(self) -> (String, Option<Value>) {
+    pub(crate) fn into_parts(self) -> S3BucketObjectLockConfigurationUpdateParts {
         let Self {
             object_lock_enabled,
             rule,
         } = self;
-        (object_lock_enabled, rule)
+        S3BucketObjectLockConfigurationUpdateParts {
+            object_lock_enabled: crate::send_model::Sent::new(
+                "s3.BucketObjectLockConfiguration.update.object_lock_enabled",
+                object_lock_enabled,
+            ),
+            rule: crate::send_model::Sent::new(
+                "s3.BucketObjectLockConfiguration.update.rule",
+                rule,
+            ),
+        }
     }
 }
 
@@ -2050,6 +2559,11 @@ impl S3BucketObjectLockConfigurationUpdateInput {
 pub(crate) struct S3BucketAclCreateInput {
     acl: String,
     bucket: String,
+}
+
+pub(crate) struct S3BucketAclCreateParts {
+    pub(crate) acl: crate::send_model::Sent<String>,
+    pub(crate) bucket: crate::send_model::Sent<String>,
 }
 
 impl S3BucketAclCreateInput {
@@ -2061,23 +2575,29 @@ impl S3BucketAclCreateInput {
         })
     }
 
-    pub(crate) fn sent(&self) -> Sent {
+    pub(crate) fn sent(&self) -> CreateSent {
         let mut sent = BTreeSet::new();
         sent.insert("acl".to_string());
         sent.insert("bucket".to_string());
-        Sent::only(sent)
+        CreateSent::only(sent)
     }
 
-    #[allow(clippy::type_complexity)]
-    pub(crate) fn into_parts(self) -> (String, String) {
+    pub(crate) fn into_parts(self) -> S3BucketAclCreateParts {
         let Self { acl, bucket } = self;
-        (acl, bucket)
+        S3BucketAclCreateParts {
+            acl: crate::send_model::Sent::new("s3.BucketAcl.create.acl", acl),
+            bucket: crate::send_model::Sent::new("s3.BucketAcl.create.bucket", bucket),
+        }
     }
 }
 
 /// Exhaustive typed update input for `s3.BucketAcl`.
 pub(crate) struct S3BucketAclUpdateInput {
     acl: String,
+}
+
+pub(crate) struct S3BucketAclUpdateParts {
+    pub(crate) acl: crate::send_model::Sent<String>,
 }
 
 impl S3BucketAclUpdateInput {
@@ -2088,10 +2608,11 @@ impl S3BucketAclUpdateInput {
         })
     }
 
-    #[allow(clippy::type_complexity)]
-    pub(crate) fn into_parts(self) -> (String,) {
+    pub(crate) fn into_parts(self) -> S3BucketAclUpdateParts {
         let Self { acl } = self;
-        (acl,)
+        S3BucketAclUpdateParts {
+            acl: crate::send_model::Sent::new("s3.BucketAcl.update.acl", acl),
+        }
     }
 }
 
@@ -2099,6 +2620,11 @@ impl S3BucketAclUpdateInput {
 pub(crate) struct S3BucketOwnershipControlsCreateInput {
     bucket: String,
     object_ownership: String,
+}
+
+pub(crate) struct S3BucketOwnershipControlsCreateParts {
+    pub(crate) bucket: crate::send_model::Sent<String>,
+    pub(crate) object_ownership: crate::send_model::Sent<String>,
 }
 
 impl S3BucketOwnershipControlsCreateInput {
@@ -2114,26 +2640,38 @@ impl S3BucketOwnershipControlsCreateInput {
         })
     }
 
-    pub(crate) fn sent(&self) -> Sent {
+    pub(crate) fn sent(&self) -> CreateSent {
         let mut sent = BTreeSet::new();
         sent.insert("bucket".to_string());
         sent.insert("object_ownership".to_string());
-        Sent::only(sent)
+        CreateSent::only(sent)
     }
 
-    #[allow(clippy::type_complexity)]
-    pub(crate) fn into_parts(self) -> (String, String) {
+    pub(crate) fn into_parts(self) -> S3BucketOwnershipControlsCreateParts {
         let Self {
             bucket,
             object_ownership,
         } = self;
-        (bucket, object_ownership)
+        S3BucketOwnershipControlsCreateParts {
+            bucket: crate::send_model::Sent::new(
+                "s3.BucketOwnershipControls.create.bucket",
+                bucket,
+            ),
+            object_ownership: crate::send_model::Sent::new(
+                "s3.BucketOwnershipControls.create.object_ownership",
+                object_ownership,
+            ),
+        }
     }
 }
 
 /// Exhaustive typed update input for `s3.BucketOwnershipControls`.
 pub(crate) struct S3BucketOwnershipControlsUpdateInput {
     object_ownership: String,
+}
+
+pub(crate) struct S3BucketOwnershipControlsUpdateParts {
+    pub(crate) object_ownership: crate::send_model::Sent<String>,
 }
 
 impl S3BucketOwnershipControlsUpdateInput {
@@ -2148,10 +2686,14 @@ impl S3BucketOwnershipControlsUpdateInput {
         })
     }
 
-    #[allow(clippy::type_complexity)]
-    pub(crate) fn into_parts(self) -> (String,) {
+    pub(crate) fn into_parts(self) -> S3BucketOwnershipControlsUpdateParts {
         let Self { object_ownership } = self;
-        (object_ownership,)
+        S3BucketOwnershipControlsUpdateParts {
+            object_ownership: crate::send_model::Sent::new(
+                "s3.BucketOwnershipControls.update.object_ownership",
+                object_ownership,
+            ),
+        }
     }
 }
 
@@ -2159,6 +2701,11 @@ impl S3BucketOwnershipControlsUpdateInput {
 pub(crate) struct S3BucketServerSideEncryptionConfigurationCreateInput {
     bucket: String,
     rules: Value,
+}
+
+pub(crate) struct S3BucketServerSideEncryptionConfigurationCreateParts {
+    pub(crate) bucket: crate::send_model::Sent<String>,
+    pub(crate) rules: crate::send_model::Sent<Value>,
 }
 
 impl S3BucketServerSideEncryptionConfigurationCreateInput {
@@ -2170,23 +2717,35 @@ impl S3BucketServerSideEncryptionConfigurationCreateInput {
         })
     }
 
-    pub(crate) fn sent(&self) -> Sent {
+    pub(crate) fn sent(&self) -> CreateSent {
         let mut sent = BTreeSet::new();
         sent.insert("bucket".to_string());
         sent.insert("rules".to_string());
-        Sent::only(sent)
+        CreateSent::only(sent)
     }
 
-    #[allow(clippy::type_complexity)]
-    pub(crate) fn into_parts(self) -> (String, Value) {
+    pub(crate) fn into_parts(self) -> S3BucketServerSideEncryptionConfigurationCreateParts {
         let Self { bucket, rules } = self;
-        (bucket, rules)
+        S3BucketServerSideEncryptionConfigurationCreateParts {
+            bucket: crate::send_model::Sent::new(
+                "s3.BucketServerSideEncryptionConfiguration.create.bucket",
+                bucket,
+            ),
+            rules: crate::send_model::Sent::new(
+                "s3.BucketServerSideEncryptionConfiguration.create.rules",
+                rules,
+            ),
+        }
     }
 }
 
 /// Exhaustive typed update input for `s3.BucketServerSideEncryptionConfiguration`.
 pub(crate) struct S3BucketServerSideEncryptionConfigurationUpdateInput {
     rules: Value,
+}
+
+pub(crate) struct S3BucketServerSideEncryptionConfigurationUpdateParts {
+    pub(crate) rules: crate::send_model::Sent<Value>,
 }
 
 impl S3BucketServerSideEncryptionConfigurationUpdateInput {
@@ -2197,10 +2756,14 @@ impl S3BucketServerSideEncryptionConfigurationUpdateInput {
         })
     }
 
-    #[allow(clippy::type_complexity)]
-    pub(crate) fn into_parts(self) -> (Value,) {
+    pub(crate) fn into_parts(self) -> S3BucketServerSideEncryptionConfigurationUpdateParts {
         let Self { rules } = self;
-        (rules,)
+        S3BucketServerSideEncryptionConfigurationUpdateParts {
+            rules: crate::send_model::Sent::new(
+                "s3.BucketServerSideEncryptionConfiguration.update.rules",
+                rules,
+            ),
+        }
     }
 }
 
@@ -2209,6 +2772,12 @@ pub(crate) struct S3BucketReplicationConfigurationCreateInput {
     bucket: String,
     role: String,
     rules: Value,
+}
+
+pub(crate) struct S3BucketReplicationConfigurationCreateParts {
+    pub(crate) bucket: crate::send_model::Sent<String>,
+    pub(crate) role: crate::send_model::Sent<String>,
+    pub(crate) rules: crate::send_model::Sent<Value>,
 }
 
 impl S3BucketReplicationConfigurationCreateInput {
@@ -2221,22 +2790,34 @@ impl S3BucketReplicationConfigurationCreateInput {
         })
     }
 
-    pub(crate) fn sent(&self) -> Sent {
+    pub(crate) fn sent(&self) -> CreateSent {
         let mut sent = BTreeSet::new();
         sent.insert("bucket".to_string());
         sent.insert("role".to_string());
         sent.insert("rules".to_string());
-        Sent::only(sent)
+        CreateSent::only(sent)
     }
 
-    #[allow(clippy::type_complexity)]
-    pub(crate) fn into_parts(self) -> (String, String, Value) {
+    pub(crate) fn into_parts(self) -> S3BucketReplicationConfigurationCreateParts {
         let Self {
             bucket,
             role,
             rules,
         } = self;
-        (bucket, role, rules)
+        S3BucketReplicationConfigurationCreateParts {
+            bucket: crate::send_model::Sent::new(
+                "s3.BucketReplicationConfiguration.create.bucket",
+                bucket,
+            ),
+            role: crate::send_model::Sent::new(
+                "s3.BucketReplicationConfiguration.create.role",
+                role,
+            ),
+            rules: crate::send_model::Sent::new(
+                "s3.BucketReplicationConfiguration.create.rules",
+                rules,
+            ),
+        }
     }
 }
 
@@ -2244,6 +2825,11 @@ impl S3BucketReplicationConfigurationCreateInput {
 pub(crate) struct S3BucketReplicationConfigurationUpdateInput {
     role: String,
     rules: Value,
+}
+
+pub(crate) struct S3BucketReplicationConfigurationUpdateParts {
+    pub(crate) role: crate::send_model::Sent<String>,
+    pub(crate) rules: crate::send_model::Sent<Value>,
 }
 
 impl S3BucketReplicationConfigurationUpdateInput {
@@ -2255,10 +2841,18 @@ impl S3BucketReplicationConfigurationUpdateInput {
         })
     }
 
-    #[allow(clippy::type_complexity)]
-    pub(crate) fn into_parts(self) -> (String, Value) {
+    pub(crate) fn into_parts(self) -> S3BucketReplicationConfigurationUpdateParts {
         let Self { role, rules } = self;
-        (role, rules)
+        S3BucketReplicationConfigurationUpdateParts {
+            role: crate::send_model::Sent::new(
+                "s3.BucketReplicationConfiguration.update.role",
+                role,
+            ),
+            rules: crate::send_model::Sent::new(
+                "s3.BucketReplicationConfiguration.update.rules",
+                rules,
+            ),
+        }
     }
 }
 
@@ -2266,6 +2860,11 @@ impl S3BucketReplicationConfigurationUpdateInput {
 pub(crate) struct S3BucketLifecycleConfigurationCreateInput {
     bucket: String,
     rules: Value,
+}
+
+pub(crate) struct S3BucketLifecycleConfigurationCreateParts {
+    pub(crate) bucket: crate::send_model::Sent<String>,
+    pub(crate) rules: crate::send_model::Sent<Value>,
 }
 
 impl S3BucketLifecycleConfigurationCreateInput {
@@ -2277,23 +2876,35 @@ impl S3BucketLifecycleConfigurationCreateInput {
         })
     }
 
-    pub(crate) fn sent(&self) -> Sent {
+    pub(crate) fn sent(&self) -> CreateSent {
         let mut sent = BTreeSet::new();
         sent.insert("bucket".to_string());
         sent.insert("rules".to_string());
-        Sent::only(sent)
+        CreateSent::only(sent)
     }
 
-    #[allow(clippy::type_complexity)]
-    pub(crate) fn into_parts(self) -> (String, Value) {
+    pub(crate) fn into_parts(self) -> S3BucketLifecycleConfigurationCreateParts {
         let Self { bucket, rules } = self;
-        (bucket, rules)
+        S3BucketLifecycleConfigurationCreateParts {
+            bucket: crate::send_model::Sent::new(
+                "s3.BucketLifecycleConfiguration.create.bucket",
+                bucket,
+            ),
+            rules: crate::send_model::Sent::new(
+                "s3.BucketLifecycleConfiguration.create.rules",
+                rules,
+            ),
+        }
     }
 }
 
 /// Exhaustive typed update input for `s3.BucketLifecycleConfiguration`.
 pub(crate) struct S3BucketLifecycleConfigurationUpdateInput {
     rules: Value,
+}
+
+pub(crate) struct S3BucketLifecycleConfigurationUpdateParts {
+    pub(crate) rules: crate::send_model::Sent<Value>,
 }
 
 impl S3BucketLifecycleConfigurationUpdateInput {
@@ -2304,10 +2915,14 @@ impl S3BucketLifecycleConfigurationUpdateInput {
         })
     }
 
-    #[allow(clippy::type_complexity)]
-    pub(crate) fn into_parts(self) -> (Value,) {
+    pub(crate) fn into_parts(self) -> S3BucketLifecycleConfigurationUpdateParts {
         let Self { rules } = self;
-        (rules,)
+        S3BucketLifecycleConfigurationUpdateParts {
+            rules: crate::send_model::Sent::new(
+                "s3.BucketLifecycleConfiguration.update.rules",
+                rules,
+            ),
+        }
     }
 }
 
@@ -2317,6 +2932,13 @@ pub(crate) struct S3BucketWebsiteConfigurationCreateInput {
     error_document: Option<Value>,
     index_document: Option<Value>,
     redirect_all_requests_to: Option<Value>,
+}
+
+pub(crate) struct S3BucketWebsiteConfigurationCreateParts {
+    pub(crate) bucket: crate::send_model::Sent<String>,
+    pub(crate) error_document: crate::send_model::Sent<Option<Value>>,
+    pub(crate) index_document: crate::send_model::Sent<Option<Value>>,
+    pub(crate) redirect_all_requests_to: crate::send_model::Sent<Option<Value>>,
 }
 
 impl S3BucketWebsiteConfigurationCreateInput {
@@ -2333,7 +2955,7 @@ impl S3BucketWebsiteConfigurationCreateInput {
         })
     }
 
-    pub(crate) fn sent(&self) -> Sent {
+    pub(crate) fn sent(&self) -> CreateSent {
         let mut sent = BTreeSet::new();
         sent.insert("bucket".to_string());
         if self.error_document.is_some() {
@@ -2345,23 +2967,34 @@ impl S3BucketWebsiteConfigurationCreateInput {
         if self.redirect_all_requests_to.is_some() {
             sent.insert("redirect_all_requests_to".to_string());
         }
-        Sent::only(sent)
+        CreateSent::only(sent)
     }
 
-    #[allow(clippy::type_complexity)]
-    pub(crate) fn into_parts(self) -> (String, Option<Value>, Option<Value>, Option<Value>) {
+    pub(crate) fn into_parts(self) -> S3BucketWebsiteConfigurationCreateParts {
         let Self {
             bucket,
             error_document,
             index_document,
             redirect_all_requests_to,
         } = self;
-        (
-            bucket,
-            error_document,
-            index_document,
-            redirect_all_requests_to,
-        )
+        S3BucketWebsiteConfigurationCreateParts {
+            bucket: crate::send_model::Sent::new(
+                "s3.BucketWebsiteConfiguration.create.bucket",
+                bucket,
+            ),
+            error_document: crate::send_model::Sent::new(
+                "s3.BucketWebsiteConfiguration.create.error_document",
+                error_document,
+            ),
+            index_document: crate::send_model::Sent::new(
+                "s3.BucketWebsiteConfiguration.create.index_document",
+                index_document,
+            ),
+            redirect_all_requests_to: crate::send_model::Sent::new(
+                "s3.BucketWebsiteConfiguration.create.redirect_all_requests_to",
+                redirect_all_requests_to,
+            ),
+        }
     }
 }
 
@@ -2370,6 +3003,12 @@ pub(crate) struct S3BucketWebsiteConfigurationUpdateInput {
     error_document: Option<Value>,
     index_document: Option<Value>,
     redirect_all_requests_to: Option<Value>,
+}
+
+pub(crate) struct S3BucketWebsiteConfigurationUpdateParts {
+    pub(crate) error_document: crate::send_model::Sent<Option<Value>>,
+    pub(crate) index_document: crate::send_model::Sent<Option<Value>>,
+    pub(crate) redirect_all_requests_to: crate::send_model::Sent<Option<Value>>,
 }
 
 impl S3BucketWebsiteConfigurationUpdateInput {
@@ -2385,14 +3024,26 @@ impl S3BucketWebsiteConfigurationUpdateInput {
         })
     }
 
-    #[allow(clippy::type_complexity)]
-    pub(crate) fn into_parts(self) -> (Option<Value>, Option<Value>, Option<Value>) {
+    pub(crate) fn into_parts(self) -> S3BucketWebsiteConfigurationUpdateParts {
         let Self {
             error_document,
             index_document,
             redirect_all_requests_to,
         } = self;
-        (error_document, index_document, redirect_all_requests_to)
+        S3BucketWebsiteConfigurationUpdateParts {
+            error_document: crate::send_model::Sent::new(
+                "s3.BucketWebsiteConfiguration.update.error_document",
+                error_document,
+            ),
+            index_document: crate::send_model::Sent::new(
+                "s3.BucketWebsiteConfiguration.update.index_document",
+                index_document,
+            ),
+            redirect_all_requests_to: crate::send_model::Sent::new(
+                "s3.BucketWebsiteConfiguration.update.redirect_all_requests_to",
+                redirect_all_requests_to,
+            ),
+        }
     }
 }
 
@@ -2400,6 +3051,11 @@ impl S3BucketWebsiteConfigurationUpdateInput {
 pub(crate) struct S3BucketCorsConfigurationCreateInput {
     bucket: String,
     cors_rules: Value,
+}
+
+pub(crate) struct S3BucketCorsConfigurationCreateParts {
+    pub(crate) bucket: crate::send_model::Sent<String>,
+    pub(crate) cors_rules: crate::send_model::Sent<Value>,
 }
 
 impl S3BucketCorsConfigurationCreateInput {
@@ -2411,23 +3067,35 @@ impl S3BucketCorsConfigurationCreateInput {
         })
     }
 
-    pub(crate) fn sent(&self) -> Sent {
+    pub(crate) fn sent(&self) -> CreateSent {
         let mut sent = BTreeSet::new();
         sent.insert("bucket".to_string());
         sent.insert("cors_rules".to_string());
-        Sent::only(sent)
+        CreateSent::only(sent)
     }
 
-    #[allow(clippy::type_complexity)]
-    pub(crate) fn into_parts(self) -> (String, Value) {
+    pub(crate) fn into_parts(self) -> S3BucketCorsConfigurationCreateParts {
         let Self { bucket, cors_rules } = self;
-        (bucket, cors_rules)
+        S3BucketCorsConfigurationCreateParts {
+            bucket: crate::send_model::Sent::new(
+                "s3.BucketCorsConfiguration.create.bucket",
+                bucket,
+            ),
+            cors_rules: crate::send_model::Sent::new(
+                "s3.BucketCorsConfiguration.create.cors_rules",
+                cors_rules,
+            ),
+        }
     }
 }
 
 /// Exhaustive typed update input for `s3.BucketCorsConfiguration`.
 pub(crate) struct S3BucketCorsConfigurationUpdateInput {
     cors_rules: Value,
+}
+
+pub(crate) struct S3BucketCorsConfigurationUpdateParts {
+    pub(crate) cors_rules: crate::send_model::Sent<Value>,
 }
 
 impl S3BucketCorsConfigurationUpdateInput {
@@ -2438,10 +3106,14 @@ impl S3BucketCorsConfigurationUpdateInput {
         })
     }
 
-    #[allow(clippy::type_complexity)]
-    pub(crate) fn into_parts(self) -> (Value,) {
+    pub(crate) fn into_parts(self) -> S3BucketCorsConfigurationUpdateParts {
         let Self { cors_rules } = self;
-        (cors_rules,)
+        S3BucketCorsConfigurationUpdateParts {
+            cors_rules: crate::send_model::Sent::new(
+                "s3.BucketCorsConfiguration.update.cors_rules",
+                cors_rules,
+            ),
+        }
     }
 }
 
@@ -2452,6 +3124,14 @@ pub(crate) struct S3BucketNotificationConfigurationCreateInput {
     lambda_function_configurations: Option<Value>,
     queue_configurations: Option<Value>,
     topic_configurations: Option<Value>,
+}
+
+pub(crate) struct S3BucketNotificationConfigurationCreateParts {
+    pub(crate) bucket: crate::send_model::Sent<String>,
+    pub(crate) event_bridge_configuration: crate::send_model::Sent<Option<Value>>,
+    pub(crate) lambda_function_configurations: crate::send_model::Sent<Option<Value>>,
+    pub(crate) queue_configurations: crate::send_model::Sent<Option<Value>>,
+    pub(crate) topic_configurations: crate::send_model::Sent<Option<Value>>,
 }
 
 impl S3BucketNotificationConfigurationCreateInput {
@@ -2478,7 +3158,7 @@ impl S3BucketNotificationConfigurationCreateInput {
         })
     }
 
-    pub(crate) fn sent(&self) -> Sent {
+    pub(crate) fn sent(&self) -> CreateSent {
         let mut sent = BTreeSet::new();
         sent.insert("bucket".to_string());
         if self.event_bridge_configuration.is_some() {
@@ -2493,19 +3173,10 @@ impl S3BucketNotificationConfigurationCreateInput {
         if self.topic_configurations.is_some() {
             sent.insert("topic_configurations".to_string());
         }
-        Sent::only(sent)
+        CreateSent::only(sent)
     }
 
-    #[allow(clippy::type_complexity)]
-    pub(crate) fn into_parts(
-        self,
-    ) -> (
-        String,
-        Option<Value>,
-        Option<Value>,
-        Option<Value>,
-        Option<Value>,
-    ) {
+    pub(crate) fn into_parts(self) -> S3BucketNotificationConfigurationCreateParts {
         let Self {
             bucket,
             event_bridge_configuration,
@@ -2513,13 +3184,28 @@ impl S3BucketNotificationConfigurationCreateInput {
             queue_configurations,
             topic_configurations,
         } = self;
-        (
-            bucket,
-            event_bridge_configuration,
-            lambda_function_configurations,
-            queue_configurations,
-            topic_configurations,
-        )
+        S3BucketNotificationConfigurationCreateParts {
+            bucket: crate::send_model::Sent::new(
+                "s3.BucketNotificationConfiguration.create.bucket",
+                bucket,
+            ),
+            event_bridge_configuration: crate::send_model::Sent::new(
+                "s3.BucketNotificationConfiguration.create.event_bridge_configuration",
+                event_bridge_configuration,
+            ),
+            lambda_function_configurations: crate::send_model::Sent::new(
+                "s3.BucketNotificationConfiguration.create.lambda_function_configurations",
+                lambda_function_configurations,
+            ),
+            queue_configurations: crate::send_model::Sent::new(
+                "s3.BucketNotificationConfiguration.create.queue_configurations",
+                queue_configurations,
+            ),
+            topic_configurations: crate::send_model::Sent::new(
+                "s3.BucketNotificationConfiguration.create.topic_configurations",
+                topic_configurations,
+            ),
+        }
     }
 }
 
@@ -2529,6 +3215,13 @@ pub(crate) struct S3BucketNotificationConfigurationUpdateInput {
     lambda_function_configurations: Option<Value>,
     queue_configurations: Option<Value>,
     topic_configurations: Option<Value>,
+}
+
+pub(crate) struct S3BucketNotificationConfigurationUpdateParts {
+    pub(crate) event_bridge_configuration: crate::send_model::Sent<Option<Value>>,
+    pub(crate) lambda_function_configurations: crate::send_model::Sent<Option<Value>>,
+    pub(crate) queue_configurations: crate::send_model::Sent<Option<Value>>,
+    pub(crate) topic_configurations: crate::send_model::Sent<Option<Value>>,
 }
 
 impl S3BucketNotificationConfigurationUpdateInput {
@@ -2554,20 +3247,31 @@ impl S3BucketNotificationConfigurationUpdateInput {
         })
     }
 
-    #[allow(clippy::type_complexity)]
-    pub(crate) fn into_parts(self) -> (Option<Value>, Option<Value>, Option<Value>, Option<Value>) {
+    pub(crate) fn into_parts(self) -> S3BucketNotificationConfigurationUpdateParts {
         let Self {
             event_bridge_configuration,
             lambda_function_configurations,
             queue_configurations,
             topic_configurations,
         } = self;
-        (
-            event_bridge_configuration,
-            lambda_function_configurations,
-            queue_configurations,
-            topic_configurations,
-        )
+        S3BucketNotificationConfigurationUpdateParts {
+            event_bridge_configuration: crate::send_model::Sent::new(
+                "s3.BucketNotificationConfiguration.update.event_bridge_configuration",
+                event_bridge_configuration,
+            ),
+            lambda_function_configurations: crate::send_model::Sent::new(
+                "s3.BucketNotificationConfiguration.update.lambda_function_configurations",
+                lambda_function_configurations,
+            ),
+            queue_configurations: crate::send_model::Sent::new(
+                "s3.BucketNotificationConfiguration.update.queue_configurations",
+                queue_configurations,
+            ),
+            topic_configurations: crate::send_model::Sent::new(
+                "s3.BucketNotificationConfiguration.update.topic_configurations",
+                topic_configurations,
+            ),
+        }
     }
 }
 
@@ -2577,6 +3281,13 @@ pub(crate) struct S3BucketLoggingCreateInput {
     target_bucket: String,
     target_object_key_format: Option<Value>,
     target_prefix: Option<String>,
+}
+
+pub(crate) struct S3BucketLoggingCreateParts {
+    pub(crate) bucket: crate::send_model::Sent<String>,
+    pub(crate) target_bucket: crate::send_model::Sent<String>,
+    pub(crate) target_object_key_format: crate::send_model::Sent<Option<Value>>,
+    pub(crate) target_prefix: crate::send_model::Sent<Option<String>>,
 }
 
 impl S3BucketLoggingCreateInput {
@@ -2594,7 +3305,7 @@ impl S3BucketLoggingCreateInput {
         })
     }
 
-    pub(crate) fn sent(&self) -> Sent {
+    pub(crate) fn sent(&self) -> CreateSent {
         let mut sent = BTreeSet::new();
         sent.insert("bucket".to_string());
         sent.insert("target_bucket".to_string());
@@ -2604,23 +3315,31 @@ impl S3BucketLoggingCreateInput {
         if self.target_prefix.is_some() {
             sent.insert("target_prefix".to_string());
         }
-        Sent::only(sent)
+        CreateSent::only(sent)
     }
 
-    #[allow(clippy::type_complexity)]
-    pub(crate) fn into_parts(self) -> (String, String, Option<Value>, Option<String>) {
+    pub(crate) fn into_parts(self) -> S3BucketLoggingCreateParts {
         let Self {
             bucket,
             target_bucket,
             target_object_key_format,
             target_prefix,
         } = self;
-        (
-            bucket,
-            target_bucket,
-            target_object_key_format,
-            target_prefix,
-        )
+        S3BucketLoggingCreateParts {
+            bucket: crate::send_model::Sent::new("s3.BucketLogging.create.bucket", bucket),
+            target_bucket: crate::send_model::Sent::new(
+                "s3.BucketLogging.create.target_bucket",
+                target_bucket,
+            ),
+            target_object_key_format: crate::send_model::Sent::new(
+                "s3.BucketLogging.create.target_object_key_format",
+                target_object_key_format,
+            ),
+            target_prefix: crate::send_model::Sent::new(
+                "s3.BucketLogging.create.target_prefix",
+                target_prefix,
+            ),
+        }
     }
 }
 
@@ -2629,6 +3348,12 @@ pub(crate) struct S3BucketLoggingUpdateInput {
     target_bucket: String,
     target_object_key_format: Option<Value>,
     target_prefix: Option<String>,
+}
+
+pub(crate) struct S3BucketLoggingUpdateParts {
+    pub(crate) target_bucket: crate::send_model::Sent<String>,
+    pub(crate) target_object_key_format: crate::send_model::Sent<Option<Value>>,
+    pub(crate) target_prefix: crate::send_model::Sent<Option<String>>,
 }
 
 impl S3BucketLoggingUpdateInput {
@@ -2645,14 +3370,26 @@ impl S3BucketLoggingUpdateInput {
         })
     }
 
-    #[allow(clippy::type_complexity)]
-    pub(crate) fn into_parts(self) -> (String, Option<Value>, Option<String>) {
+    pub(crate) fn into_parts(self) -> S3BucketLoggingUpdateParts {
         let Self {
             target_bucket,
             target_object_key_format,
             target_prefix,
         } = self;
-        (target_bucket, target_object_key_format, target_prefix)
+        S3BucketLoggingUpdateParts {
+            target_bucket: crate::send_model::Sent::new(
+                "s3.BucketLogging.update.target_bucket",
+                target_bucket,
+            ),
+            target_object_key_format: crate::send_model::Sent::new(
+                "s3.BucketLogging.update.target_object_key_format",
+                target_object_key_format,
+            ),
+            target_prefix: crate::send_model::Sent::new(
+                "s3.BucketLogging.update.target_prefix",
+                target_prefix,
+            ),
+        }
     }
 }
 
@@ -2663,6 +3400,14 @@ pub(crate) struct S3BucketPublicAccessBlockCreateInput {
     bucket: String,
     ignore_public_acls: Option<bool>,
     restrict_public_buckets: Option<bool>,
+}
+
+pub(crate) struct S3BucketPublicAccessBlockCreateParts {
+    pub(crate) block_public_acls: crate::send_model::Sent<Option<bool>>,
+    pub(crate) block_public_policy: crate::send_model::Sent<Option<bool>>,
+    pub(crate) bucket: crate::send_model::Sent<String>,
+    pub(crate) ignore_public_acls: crate::send_model::Sent<Option<bool>>,
+    pub(crate) restrict_public_buckets: crate::send_model::Sent<Option<bool>>,
 }
 
 impl S3BucketPublicAccessBlockCreateInput {
@@ -2683,7 +3428,7 @@ impl S3BucketPublicAccessBlockCreateInput {
         })
     }
 
-    pub(crate) fn sent(&self) -> Sent {
+    pub(crate) fn sent(&self) -> CreateSent {
         let mut sent = BTreeSet::new();
         if self.block_public_acls.is_some() {
             sent.insert("block_public_acls".to_string());
@@ -2698,19 +3443,10 @@ impl S3BucketPublicAccessBlockCreateInput {
         if self.restrict_public_buckets.is_some() {
             sent.insert("restrict_public_buckets".to_string());
         }
-        Sent::only(sent)
+        CreateSent::only(sent)
     }
 
-    #[allow(clippy::type_complexity)]
-    pub(crate) fn into_parts(
-        self,
-    ) -> (
-        Option<bool>,
-        Option<bool>,
-        String,
-        Option<bool>,
-        Option<bool>,
-    ) {
+    pub(crate) fn into_parts(self) -> S3BucketPublicAccessBlockCreateParts {
         let Self {
             block_public_acls,
             block_public_policy,
@@ -2718,13 +3454,28 @@ impl S3BucketPublicAccessBlockCreateInput {
             ignore_public_acls,
             restrict_public_buckets,
         } = self;
-        (
-            block_public_acls,
-            block_public_policy,
-            bucket,
-            ignore_public_acls,
-            restrict_public_buckets,
-        )
+        S3BucketPublicAccessBlockCreateParts {
+            block_public_acls: crate::send_model::Sent::new(
+                "s3.BucketPublicAccessBlock.create.block_public_acls",
+                block_public_acls,
+            ),
+            block_public_policy: crate::send_model::Sent::new(
+                "s3.BucketPublicAccessBlock.create.block_public_policy",
+                block_public_policy,
+            ),
+            bucket: crate::send_model::Sent::new(
+                "s3.BucketPublicAccessBlock.create.bucket",
+                bucket,
+            ),
+            ignore_public_acls: crate::send_model::Sent::new(
+                "s3.BucketPublicAccessBlock.create.ignore_public_acls",
+                ignore_public_acls,
+            ),
+            restrict_public_buckets: crate::send_model::Sent::new(
+                "s3.BucketPublicAccessBlock.create.restrict_public_buckets",
+                restrict_public_buckets,
+            ),
+        }
     }
 }
 
@@ -2734,6 +3485,13 @@ pub(crate) struct S3BucketPublicAccessBlockUpdateInput {
     block_public_policy: Option<bool>,
     ignore_public_acls: Option<bool>,
     restrict_public_buckets: Option<bool>,
+}
+
+pub(crate) struct S3BucketPublicAccessBlockUpdateParts {
+    pub(crate) block_public_acls: crate::send_model::Sent<Option<bool>>,
+    pub(crate) block_public_policy: crate::send_model::Sent<Option<bool>>,
+    pub(crate) ignore_public_acls: crate::send_model::Sent<Option<bool>>,
+    pub(crate) restrict_public_buckets: crate::send_model::Sent<Option<bool>>,
 }
 
 impl S3BucketPublicAccessBlockUpdateInput {
@@ -2753,26 +3511,41 @@ impl S3BucketPublicAccessBlockUpdateInput {
         })
     }
 
-    #[allow(clippy::type_complexity)]
-    pub(crate) fn into_parts(self) -> (Option<bool>, Option<bool>, Option<bool>, Option<bool>) {
+    pub(crate) fn into_parts(self) -> S3BucketPublicAccessBlockUpdateParts {
         let Self {
             block_public_acls,
             block_public_policy,
             ignore_public_acls,
             restrict_public_buckets,
         } = self;
-        (
-            block_public_acls,
-            block_public_policy,
-            ignore_public_acls,
-            restrict_public_buckets,
-        )
+        S3BucketPublicAccessBlockUpdateParts {
+            block_public_acls: crate::send_model::Sent::new(
+                "s3.BucketPublicAccessBlock.update.block_public_acls",
+                block_public_acls,
+            ),
+            block_public_policy: crate::send_model::Sent::new(
+                "s3.BucketPublicAccessBlock.update.block_public_policy",
+                block_public_policy,
+            ),
+            ignore_public_acls: crate::send_model::Sent::new(
+                "s3.BucketPublicAccessBlock.update.ignore_public_acls",
+                ignore_public_acls,
+            ),
+            restrict_public_buckets: crate::send_model::Sent::new(
+                "s3.BucketPublicAccessBlock.update.restrict_public_buckets",
+                restrict_public_buckets,
+            ),
+        }
     }
 }
 
 /// Exhaustive typed create input for `organizations.Organization`.
 pub(crate) struct OrganizationsOrganizationCreateInput {
     feature_set: Option<String>,
+}
+
+pub(crate) struct OrganizationsOrganizationCreateParts {
+    pub(crate) feature_set: crate::send_model::Sent<Option<String>>,
 }
 
 impl OrganizationsOrganizationCreateInput {
@@ -2783,23 +3556,29 @@ impl OrganizationsOrganizationCreateInput {
         })
     }
 
-    pub(crate) fn sent(&self) -> Sent {
+    pub(crate) fn sent(&self) -> CreateSent {
         let mut sent = BTreeSet::new();
         if self.feature_set.is_some() {
             sent.insert("feature_set".to_string());
         }
-        Sent::only(sent)
+        CreateSent::only(sent)
     }
 
-    #[allow(clippy::type_complexity)]
-    pub(crate) fn into_parts(self) -> (Option<String>,) {
+    pub(crate) fn into_parts(self) -> OrganizationsOrganizationCreateParts {
         let Self { feature_set } = self;
-        (feature_set,)
+        OrganizationsOrganizationCreateParts {
+            feature_set: crate::send_model::Sent::new(
+                "organizations.Organization.create.feature_set",
+                feature_set,
+            ),
+        }
     }
 }
 
 /// Exhaustive typed update input for `organizations.Organization`.
 pub(crate) struct OrganizationsOrganizationUpdateInput;
+
+pub(crate) struct OrganizationsOrganizationUpdateParts;
 
 impl OrganizationsOrganizationUpdateInput {
     pub(crate) fn decode(_resource: &Resource<impl Sized>) -> ProviderResult<Self> {
@@ -2807,8 +3586,9 @@ impl OrganizationsOrganizationUpdateInput {
         Ok(Self)
     }
 
-    pub(crate) fn into_parts(self) {
+    pub(crate) fn into_parts(self) -> OrganizationsOrganizationUpdateParts {
         let Self = self;
+        OrganizationsOrganizationUpdateParts
     }
 }
 
@@ -2818,7 +3598,15 @@ pub(crate) struct OrganizationsAccountCreateInput {
     email: String,
     iam_user_access_to_billing: Option<String>,
     role_name: Option<String>,
-    tags: Option<Value>,
+    tags: Option<crate::send_model::Tags>,
+}
+
+pub(crate) struct OrganizationsAccountCreateParts {
+    pub(crate) account_name: crate::send_model::Sent<String>,
+    pub(crate) email: crate::send_model::Sent<String>,
+    pub(crate) iam_user_access_to_billing: crate::send_model::Sent<Option<String>>,
+    pub(crate) role_name: crate::send_model::Sent<Option<String>>,
+    pub(crate) tags: crate::send_model::Sent<Option<crate::send_model::Tags>>,
 }
 
 impl OrganizationsAccountCreateInput {
@@ -2835,11 +3623,11 @@ impl OrganizationsAccountCreateInput {
                 "iam_user_access_to_billing",
             )?,
             role_name: crate::send_model::optional_string(_resource, "role_name")?,
-            tags: crate::send_model::optional_value(_resource, "tags")?,
+            tags: crate::send_model::optional_tags(_resource, "tags")?,
         })
     }
 
-    pub(crate) fn sent(&self) -> Sent {
+    pub(crate) fn sent(&self) -> CreateSent {
         let mut sent = BTreeSet::new();
         sent.insert("account_name".to_string());
         sent.insert("email".to_string());
@@ -2852,19 +3640,10 @@ impl OrganizationsAccountCreateInput {
         if self.tags.is_some() {
             sent.insert("tags".to_string());
         }
-        Sent::only(sent)
+        CreateSent::only(sent)
     }
 
-    #[allow(clippy::type_complexity)]
-    pub(crate) fn into_parts(
-        self,
-    ) -> (
-        String,
-        String,
-        Option<String>,
-        Option<String>,
-        Option<Value>,
-    ) {
+    pub(crate) fn into_parts(self) -> OrganizationsAccountCreateParts {
         let Self {
             account_name,
             email,
@@ -2872,20 +3651,34 @@ impl OrganizationsAccountCreateInput {
             role_name,
             tags,
         } = self;
-        (
-            account_name,
-            email,
-            iam_user_access_to_billing,
-            role_name,
-            tags,
-        )
+        OrganizationsAccountCreateParts {
+            account_name: crate::send_model::Sent::new(
+                "organizations.Account.create.account_name",
+                account_name,
+            ),
+            email: crate::send_model::Sent::new("organizations.Account.create.email", email),
+            iam_user_access_to_billing: crate::send_model::Sent::new(
+                "organizations.Account.create.iam_user_access_to_billing",
+                iam_user_access_to_billing,
+            ),
+            role_name: crate::send_model::Sent::new(
+                "organizations.Account.create.role_name",
+                role_name,
+            ),
+            tags: crate::send_model::Sent::new("organizations.Account.create.tags", tags),
+        }
     }
 }
 
 /// Exhaustive typed update input for `organizations.Account`.
 pub(crate) struct OrganizationsAccountUpdateInput {
     account_name: String,
-    tags: Option<Value>,
+    tags: Option<crate::send_model::Tags>,
+}
+
+pub(crate) struct OrganizationsAccountUpdateParts {
+    pub(crate) account_name: crate::send_model::Sent<String>,
+    pub(crate) tags: crate::send_model::Sent<Option<crate::send_model::Tags>>,
 }
 
 impl OrganizationsAccountUpdateInput {
@@ -2895,14 +3688,19 @@ impl OrganizationsAccountUpdateInput {
                 .schema;
         Ok(Self {
             account_name: crate::send_model::required_string(_resource, "account_name")?,
-            tags: crate::send_model::optional_value(_resource, "tags")?,
+            tags: crate::send_model::optional_tags(_resource, "tags")?,
         })
     }
 
-    #[allow(clippy::type_complexity)]
-    pub(crate) fn into_parts(self) -> (String, Option<Value>) {
+    pub(crate) fn into_parts(self) -> OrganizationsAccountUpdateParts {
         let Self { account_name, tags } = self;
-        (account_name, tags)
+        OrganizationsAccountUpdateParts {
+            account_name: crate::send_model::Sent::new(
+                "organizations.Account.update.account_name",
+                account_name,
+            ),
+            tags: crate::send_model::Sent::new("organizations.Account.update.tags", tags),
+        }
     }
 }
 
@@ -2911,9 +3709,18 @@ pub(crate) struct Route53RecordSetCreateInput {
     alias_target: Option<Value>,
     hosted_zone_id: String,
     name: String,
-    resource_records: Option<Value>,
+    resource_records: Option<crate::send_model::StringList>,
     ttl: Option<i64>,
     r#type: String,
+}
+
+pub(crate) struct Route53RecordSetCreateParts {
+    pub(crate) alias_target: crate::send_model::Sent<Option<Value>>,
+    pub(crate) hosted_zone_id: crate::send_model::Sent<String>,
+    pub(crate) name: crate::send_model::Sent<String>,
+    pub(crate) resource_records: crate::send_model::Sent<Option<crate::send_model::StringList>>,
+    pub(crate) ttl: crate::send_model::Sent<Option<i64>>,
+    pub(crate) r#type: crate::send_model::Sent<String>,
 }
 
 impl Route53RecordSetCreateInput {
@@ -2924,13 +3731,16 @@ impl Route53RecordSetCreateInput {
             alias_target: crate::send_model::optional_value(_resource, "alias_target")?,
             hosted_zone_id: crate::send_model::required_string(_resource, "hosted_zone_id")?,
             name: crate::send_model::required_string(_resource, "name")?,
-            resource_records: crate::send_model::optional_value(_resource, "resource_records")?,
+            resource_records: crate::send_model::optional_string_list(
+                _resource,
+                "resource_records",
+            )?,
             ttl: crate::send_model::optional_int(_resource, "ttl")?,
             r#type: crate::send_model::required_enum(_resource, _schema, "type")?,
         })
     }
 
-    pub(crate) fn sent(&self) -> Sent {
+    pub(crate) fn sent(&self) -> CreateSent {
         let mut sent = BTreeSet::new();
         if self.alias_target.is_some() {
             sent.insert("alias_target".to_string());
@@ -2944,20 +3754,10 @@ impl Route53RecordSetCreateInput {
             sent.insert("ttl".to_string());
         }
         sent.insert("type".to_string());
-        Sent::only(sent)
+        CreateSent::only(sent)
     }
 
-    #[allow(clippy::type_complexity)]
-    pub(crate) fn into_parts(
-        self,
-    ) -> (
-        Option<Value>,
-        String,
-        String,
-        Option<Value>,
-        Option<i64>,
-        String,
-    ) {
+    pub(crate) fn into_parts(self) -> Route53RecordSetCreateParts {
         let Self {
             alias_target,
             hosted_zone_id,
@@ -2966,23 +3766,39 @@ impl Route53RecordSetCreateInput {
             ttl,
             r#type,
         } = self;
-        (
-            alias_target,
-            hosted_zone_id,
-            name,
-            resource_records,
-            ttl,
-            r#type,
-        )
+        Route53RecordSetCreateParts {
+            alias_target: crate::send_model::Sent::new(
+                "route53.RecordSet.create.alias_target",
+                alias_target,
+            ),
+            hosted_zone_id: crate::send_model::Sent::new(
+                "route53.RecordSet.create.hosted_zone_id",
+                hosted_zone_id,
+            ),
+            name: crate::send_model::Sent::new("route53.RecordSet.create.name", name),
+            resource_records: crate::send_model::Sent::new(
+                "route53.RecordSet.create.resource_records",
+                resource_records,
+            ),
+            ttl: crate::send_model::Sent::new("route53.RecordSet.create.ttl", ttl),
+            r#type: crate::send_model::Sent::new("route53.RecordSet.create.type", r#type),
+        }
     }
 }
 
 /// Exhaustive typed update input for `route53.RecordSet`.
 pub(crate) struct Route53RecordSetUpdateInput {
     alias_target: Option<Value>,
-    resource_records: Option<Value>,
+    resource_records: Option<crate::send_model::StringList>,
     ttl: Option<i64>,
     r#type: String,
+}
+
+pub(crate) struct Route53RecordSetUpdateParts {
+    pub(crate) alias_target: crate::send_model::Sent<Option<Value>>,
+    pub(crate) resource_records: crate::send_model::Sent<Option<crate::send_model::StringList>>,
+    pub(crate) ttl: crate::send_model::Sent<Option<i64>>,
+    pub(crate) r#type: crate::send_model::Sent<String>,
 }
 
 impl Route53RecordSetUpdateInput {
@@ -2991,21 +3807,34 @@ impl Route53RecordSetUpdateInput {
             &crate::schemas::generated::route53::record_set::route53_record_set_config().schema;
         Ok(Self {
             alias_target: crate::send_model::optional_value(_resource, "alias_target")?,
-            resource_records: crate::send_model::optional_value(_resource, "resource_records")?,
+            resource_records: crate::send_model::optional_string_list(
+                _resource,
+                "resource_records",
+            )?,
             ttl: crate::send_model::optional_int(_resource, "ttl")?,
             r#type: crate::send_model::required_enum(_resource, _schema, "type")?,
         })
     }
 
-    #[allow(clippy::type_complexity)]
-    pub(crate) fn into_parts(self) -> (Option<Value>, Option<Value>, Option<i64>, String) {
+    pub(crate) fn into_parts(self) -> Route53RecordSetUpdateParts {
         let Self {
             alias_target,
             resource_records,
             ttl,
             r#type,
         } = self;
-        (alias_target, resource_records, ttl, r#type)
+        Route53RecordSetUpdateParts {
+            alias_target: crate::send_model::Sent::new(
+                "route53.RecordSet.update.alias_target",
+                alias_target,
+            ),
+            resource_records: crate::send_model::Sent::new(
+                "route53.RecordSet.update.resource_records",
+                resource_records,
+            ),
+            ttl: crate::send_model::Sent::new("route53.RecordSet.update.ttl", ttl),
+            r#type: crate::send_model::Sent::new("route53.RecordSet.update.type", r#type),
+        }
     }
 }
 
@@ -3016,7 +3845,16 @@ pub(crate) struct IamRoleCreateInput {
     max_session_duration: Option<i64>,
     path: Option<String>,
     role_name: String,
-    tags: Option<Value>,
+    tags: Option<crate::send_model::Tags>,
+}
+
+pub(crate) struct IamRoleCreateParts {
+    pub(crate) assume_role_policy_document: crate::send_model::Sent<Value>,
+    pub(crate) description: crate::send_model::Sent<Option<String>>,
+    pub(crate) max_session_duration: crate::send_model::Sent<Option<i64>>,
+    pub(crate) path: crate::send_model::Sent<Option<String>>,
+    pub(crate) role_name: crate::send_model::Sent<String>,
+    pub(crate) tags: crate::send_model::Sent<Option<crate::send_model::Tags>>,
 }
 
 impl IamRoleCreateInput {
@@ -3034,11 +3872,11 @@ impl IamRoleCreateInput {
             )?,
             path: crate::send_model::optional_string(_resource, "path")?,
             role_name: crate::send_model::required_string(_resource, "role_name")?,
-            tags: crate::send_model::optional_value(_resource, "tags")?,
+            tags: crate::send_model::optional_tags(_resource, "tags")?,
         })
     }
 
-    pub(crate) fn sent(&self) -> Sent {
+    pub(crate) fn sent(&self) -> CreateSent {
         let mut sent = BTreeSet::new();
         sent.insert("assume_role_policy_document".to_string());
         if self.description.is_some() {
@@ -3054,20 +3892,10 @@ impl IamRoleCreateInput {
         if self.tags.is_some() {
             sent.insert("tags".to_string());
         }
-        Sent::only(sent)
+        CreateSent::only(sent)
     }
 
-    #[allow(clippy::type_complexity)]
-    pub(crate) fn into_parts(
-        self,
-    ) -> (
-        Value,
-        Option<String>,
-        Option<i64>,
-        Option<String>,
-        String,
-        Option<Value>,
-    ) {
+    pub(crate) fn into_parts(self) -> IamRoleCreateParts {
         let Self {
             assume_role_policy_document,
             description,
@@ -3076,34 +3904,45 @@ impl IamRoleCreateInput {
             role_name,
             tags,
         } = self;
-        (
-            assume_role_policy_document,
-            description,
-            max_session_duration,
-            path,
-            role_name,
-            tags,
-        )
+        IamRoleCreateParts {
+            assume_role_policy_document: crate::send_model::Sent::new(
+                "iam.Role.create.assume_role_policy_document",
+                assume_role_policy_document,
+            ),
+            description: crate::send_model::Sent::new("iam.Role.create.description", description),
+            max_session_duration: crate::send_model::Sent::new(
+                "iam.Role.create.max_session_duration",
+                max_session_duration,
+            ),
+            path: crate::send_model::Sent::new("iam.Role.create.path", path),
+            role_name: crate::send_model::Sent::new("iam.Role.create.role_name", role_name),
+            tags: crate::send_model::Sent::new("iam.Role.create.tags", tags),
+        }
     }
 }
 
 /// Exhaustive typed update input for `iam.Role`.
 pub(crate) struct IamRoleUpdateInput {
-    tags: Option<Value>,
+    tags: Option<crate::send_model::Tags>,
+}
+
+pub(crate) struct IamRoleUpdateParts {
+    pub(crate) tags: crate::send_model::Sent<Option<crate::send_model::Tags>>,
 }
 
 impl IamRoleUpdateInput {
     pub(crate) fn decode(_resource: &Resource<impl Sized>) -> ProviderResult<Self> {
         let _schema = &crate::schemas::generated::iam::role::iam_role_config().schema;
         Ok(Self {
-            tags: crate::send_model::optional_value(_resource, "tags")?,
+            tags: crate::send_model::optional_tags(_resource, "tags")?,
         })
     }
 
-    #[allow(clippy::type_complexity)]
-    pub(crate) fn into_parts(self) -> (Option<Value>,) {
+    pub(crate) fn into_parts(self) -> IamRoleUpdateParts {
         let Self { tags } = self;
-        (tags,)
+        IamRoleUpdateParts {
+            tags: crate::send_model::Sent::new("iam.Role.update.tags", tags),
+        }
     }
 }
 
@@ -3114,7 +3953,16 @@ pub(crate) struct LogsLogGroupCreateInput {
     log_group_class: Option<String>,
     log_group_name: String,
     retention_in_days: Option<i64>,
-    tags: Option<Value>,
+    tags: Option<crate::send_model::Tags>,
+}
+
+pub(crate) struct LogsLogGroupCreateParts {
+    pub(crate) deletion_protection_enabled: crate::send_model::Sent<Option<bool>>,
+    pub(crate) kms_key_id: crate::send_model::Sent<Option<String>>,
+    pub(crate) log_group_class: crate::send_model::Sent<Option<String>>,
+    pub(crate) log_group_name: crate::send_model::Sent<String>,
+    pub(crate) retention_in_days: crate::send_model::Sent<Option<i64>>,
+    pub(crate) tags: crate::send_model::Sent<Option<crate::send_model::Tags>>,
 }
 
 impl LogsLogGroupCreateInput {
@@ -3133,11 +3981,11 @@ impl LogsLogGroupCreateInput {
             )?,
             log_group_name: crate::send_model::required_string(_resource, "log_group_name")?,
             retention_in_days: crate::send_model::optional_int(_resource, "retention_in_days")?,
-            tags: crate::send_model::optional_value(_resource, "tags")?,
+            tags: crate::send_model::optional_tags(_resource, "tags")?,
         })
     }
 
-    pub(crate) fn sent(&self) -> Sent {
+    pub(crate) fn sent(&self) -> CreateSent {
         let mut sent = BTreeSet::new();
         if self.deletion_protection_enabled.is_some() {
             sent.insert("deletion_protection_enabled".to_string());
@@ -3149,26 +3997,13 @@ impl LogsLogGroupCreateInput {
             sent.insert("log_group_class".to_string());
         }
         sent.insert("log_group_name".to_string());
-        if self.retention_in_days.is_some() {
-            sent.insert("retention_in_days".to_string());
-        }
         if self.tags.is_some() {
             sent.insert("tags".to_string());
         }
-        Sent::only(sent)
+        CreateSent::only(sent)
     }
 
-    #[allow(clippy::type_complexity)]
-    pub(crate) fn into_parts(
-        self,
-    ) -> (
-        Option<bool>,
-        Option<String>,
-        Option<String>,
-        String,
-        Option<i64>,
-        Option<Value>,
-    ) {
+    pub(crate) fn into_parts(self) -> LogsLogGroupCreateParts {
         let Self {
             deletion_protection_enabled,
             kms_key_id,
@@ -3177,14 +4012,26 @@ impl LogsLogGroupCreateInput {
             retention_in_days,
             tags,
         } = self;
-        (
-            deletion_protection_enabled,
-            kms_key_id,
-            log_group_class,
-            log_group_name,
-            retention_in_days,
-            tags,
-        )
+        LogsLogGroupCreateParts {
+            deletion_protection_enabled: crate::send_model::Sent::new(
+                "logs.LogGroup.create.deletion_protection_enabled",
+                deletion_protection_enabled,
+            ),
+            kms_key_id: crate::send_model::Sent::new("logs.LogGroup.create.kms_key_id", kms_key_id),
+            log_group_class: crate::send_model::Sent::new(
+                "logs.LogGroup.create.log_group_class",
+                log_group_class,
+            ),
+            log_group_name: crate::send_model::Sent::new(
+                "logs.LogGroup.create.log_group_name",
+                log_group_name,
+            ),
+            retention_in_days: crate::send_model::Sent::new(
+                "logs.LogGroup.create.retention_in_days",
+                retention_in_days,
+            ),
+            tags: crate::send_model::Sent::new("logs.LogGroup.create.tags", tags),
+        }
     }
 }
 
@@ -3192,7 +4039,13 @@ impl LogsLogGroupCreateInput {
 pub(crate) struct LogsLogGroupUpdateInput {
     deletion_protection_enabled: Option<bool>,
     retention_in_days: Option<i64>,
-    tags: Option<Value>,
+    tags: Option<crate::send_model::Tags>,
+}
+
+pub(crate) struct LogsLogGroupUpdateParts {
+    pub(crate) deletion_protection_enabled: crate::send_model::Sent<Option<bool>>,
+    pub(crate) retention_in_days: crate::send_model::Sent<Option<i64>>,
+    pub(crate) tags: crate::send_model::Sent<Option<crate::send_model::Tags>>,
 }
 
 impl LogsLogGroupUpdateInput {
@@ -3204,18 +4057,27 @@ impl LogsLogGroupUpdateInput {
                 "deletion_protection_enabled",
             )?,
             retention_in_days: crate::send_model::optional_int(_resource, "retention_in_days")?,
-            tags: crate::send_model::optional_value(_resource, "tags")?,
+            tags: crate::send_model::optional_tags(_resource, "tags")?,
         })
     }
 
-    #[allow(clippy::type_complexity)]
-    pub(crate) fn into_parts(self) -> (Option<bool>, Option<i64>, Option<Value>) {
+    pub(crate) fn into_parts(self) -> LogsLogGroupUpdateParts {
         let Self {
             deletion_protection_enabled,
             retention_in_days,
             tags,
         } = self;
-        (deletion_protection_enabled, retention_in_days, tags)
+        LogsLogGroupUpdateParts {
+            deletion_protection_enabled: crate::send_model::Sent::new(
+                "logs.LogGroup.update.deletion_protection_enabled",
+                deletion_protection_enabled,
+            ),
+            retention_in_days: crate::send_model::Sent::new(
+                "logs.LogGroup.update.retention_in_days",
+                retention_in_days,
+            ),
+            tags: crate::send_model::Sent::new("logs.LogGroup.update.tags", tags),
+        }
     }
 }
 
@@ -3224,9 +4086,19 @@ pub(crate) struct AcmCertificateCreateInput {
     domain_name: String,
     key_algorithm: Option<String>,
     options: Option<Value>,
-    subject_alternative_names: Option<Value>,
-    tags: Option<Value>,
+    subject_alternative_names: Option<crate::send_model::StringList>,
+    tags: Option<crate::send_model::Tags>,
     validation_method: Option<String>,
+}
+
+pub(crate) struct AcmCertificateCreateParts {
+    pub(crate) domain_name: crate::send_model::Sent<String>,
+    pub(crate) key_algorithm: crate::send_model::Sent<Option<String>>,
+    pub(crate) options: crate::send_model::Sent<Option<Value>>,
+    pub(crate) subject_alternative_names:
+        crate::send_model::Sent<Option<crate::send_model::StringList>>,
+    pub(crate) tags: crate::send_model::Sent<Option<crate::send_model::Tags>>,
+    pub(crate) validation_method: crate::send_model::Sent<Option<String>>,
 }
 
 impl AcmCertificateCreateInput {
@@ -3236,11 +4108,11 @@ impl AcmCertificateCreateInput {
             domain_name: crate::send_model::required_string(_resource, "domain_name")?,
             key_algorithm: crate::send_model::optional_enum(_resource, _schema, "key_algorithm")?,
             options: crate::send_model::optional_value(_resource, "options")?,
-            subject_alternative_names: crate::send_model::optional_value(
+            subject_alternative_names: crate::send_model::optional_string_list(
                 _resource,
                 "subject_alternative_names",
             )?,
-            tags: crate::send_model::optional_value(_resource, "tags")?,
+            tags: crate::send_model::optional_tags(_resource, "tags")?,
             validation_method: crate::send_model::optional_enum(
                 _resource,
                 _schema,
@@ -3249,7 +4121,7 @@ impl AcmCertificateCreateInput {
         })
     }
 
-    pub(crate) fn sent(&self) -> Sent {
+    pub(crate) fn sent(&self) -> CreateSent {
         let mut sent = BTreeSet::new();
         sent.insert("domain_name".to_string());
         if self.key_algorithm.is_some() {
@@ -3267,20 +4139,10 @@ impl AcmCertificateCreateInput {
         if self.validation_method.is_some() {
             sent.insert("validation_method".to_string());
         }
-        Sent::only(sent)
+        CreateSent::only(sent)
     }
 
-    #[allow(clippy::type_complexity)]
-    pub(crate) fn into_parts(
-        self,
-    ) -> (
-        String,
-        Option<String>,
-        Option<Value>,
-        Option<Value>,
-        Option<Value>,
-        Option<String>,
-    ) {
+    pub(crate) fn into_parts(self) -> AcmCertificateCreateParts {
         let Self {
             domain_name,
             key_algorithm,
@@ -3289,34 +4151,51 @@ impl AcmCertificateCreateInput {
             tags,
             validation_method,
         } = self;
-        (
-            domain_name,
-            key_algorithm,
-            options,
-            subject_alternative_names,
-            tags,
-            validation_method,
-        )
+        AcmCertificateCreateParts {
+            domain_name: crate::send_model::Sent::new(
+                "acm.Certificate.create.domain_name",
+                domain_name,
+            ),
+            key_algorithm: crate::send_model::Sent::new(
+                "acm.Certificate.create.key_algorithm",
+                key_algorithm,
+            ),
+            options: crate::send_model::Sent::new("acm.Certificate.create.options", options),
+            subject_alternative_names: crate::send_model::Sent::new(
+                "acm.Certificate.create.subject_alternative_names",
+                subject_alternative_names,
+            ),
+            tags: crate::send_model::Sent::new("acm.Certificate.create.tags", tags),
+            validation_method: crate::send_model::Sent::new(
+                "acm.Certificate.create.validation_method",
+                validation_method,
+            ),
+        }
     }
 }
 
 /// Exhaustive typed update input for `acm.Certificate`.
 pub(crate) struct AcmCertificateUpdateInput {
-    tags: Option<Value>,
+    tags: Option<crate::send_model::Tags>,
+}
+
+pub(crate) struct AcmCertificateUpdateParts {
+    pub(crate) tags: crate::send_model::Sent<Option<crate::send_model::Tags>>,
 }
 
 impl AcmCertificateUpdateInput {
     pub(crate) fn decode(_resource: &Resource<impl Sized>) -> ProviderResult<Self> {
         let _schema = &crate::schemas::generated::acm::certificate::acm_certificate_config().schema;
         Ok(Self {
-            tags: crate::send_model::optional_value(_resource, "tags")?,
+            tags: crate::send_model::optional_tags(_resource, "tags")?,
         })
     }
 
-    #[allow(clippy::type_complexity)]
-    pub(crate) fn into_parts(self) -> (Option<Value>,) {
+    pub(crate) fn into_parts(self) -> AcmCertificateUpdateParts {
         let Self { tags } = self;
-        (tags,)
+        AcmCertificateUpdateParts {
+            tags: crate::send_model::Sent::new("acm.Certificate.update.tags", tags),
+        }
     }
 }
 
@@ -3337,8 +4216,28 @@ pub(crate) struct SqsQueueCreateInput {
     redrive_allow_policy: Option<Value>,
     redrive_policy: Option<Value>,
     sqs_managed_sse_enabled: Option<bool>,
-    tags: Option<Value>,
+    tags: Option<crate::send_model::Tags>,
     visibility_timeout: Option<i64>,
+}
+
+pub(crate) struct SqsQueueCreateParts {
+    pub(crate) content_based_deduplication: crate::send_model::Sent<Option<bool>>,
+    pub(crate) deduplication_scope: crate::send_model::Sent<Option<String>>,
+    pub(crate) delay_seconds: crate::send_model::Sent<Option<i64>>,
+    pub(crate) fifo_queue: crate::send_model::Sent<Option<bool>>,
+    pub(crate) fifo_throughput_limit: crate::send_model::Sent<Option<String>>,
+    pub(crate) kms_data_key_reuse_period_seconds: crate::send_model::Sent<Option<i64>>,
+    pub(crate) kms_master_key_id: crate::send_model::Sent<Option<String>>,
+    pub(crate) maximum_message_size: crate::send_model::Sent<Option<i64>>,
+    pub(crate) message_retention_period: crate::send_model::Sent<Option<i64>>,
+    pub(crate) policy: crate::send_model::Sent<Option<Value>>,
+    pub(crate) queue_name: crate::send_model::Sent<String>,
+    pub(crate) receive_message_wait_time_seconds: crate::send_model::Sent<Option<i64>>,
+    pub(crate) redrive_allow_policy: crate::send_model::Sent<Option<Value>>,
+    pub(crate) redrive_policy: crate::send_model::Sent<Option<Value>>,
+    pub(crate) sqs_managed_sse_enabled: crate::send_model::Sent<Option<bool>>,
+    pub(crate) tags: crate::send_model::Sent<Option<crate::send_model::Tags>>,
+    pub(crate) visibility_timeout: crate::send_model::Sent<Option<i64>>,
 }
 
 impl SqsQueueCreateInput {
@@ -3387,12 +4286,12 @@ impl SqsQueueCreateInput {
                 _resource,
                 "sqs_managed_sse_enabled",
             )?,
-            tags: crate::send_model::optional_value(_resource, "tags")?,
+            tags: crate::send_model::optional_tags(_resource, "tags")?,
             visibility_timeout: crate::send_model::optional_int(_resource, "visibility_timeout")?,
         })
     }
 
-    pub(crate) fn sent(&self) -> Sent {
+    pub(crate) fn sent(&self) -> CreateSent {
         let mut sent = BTreeSet::new();
         if self.content_based_deduplication.is_some() {
             sent.insert("content_based_deduplication".to_string());
@@ -3443,31 +4342,10 @@ impl SqsQueueCreateInput {
         if self.visibility_timeout.is_some() {
             sent.insert("visibility_timeout".to_string());
         }
-        Sent::only(sent)
+        CreateSent::only(sent)
     }
 
-    #[allow(clippy::type_complexity)]
-    pub(crate) fn into_parts(
-        self,
-    ) -> (
-        Option<bool>,
-        Option<String>,
-        Option<i64>,
-        Option<bool>,
-        Option<String>,
-        Option<i64>,
-        Option<String>,
-        Option<i64>,
-        Option<i64>,
-        Option<Value>,
-        String,
-        Option<i64>,
-        Option<Value>,
-        Option<Value>,
-        Option<bool>,
-        Option<Value>,
-        Option<i64>,
-    ) {
+    pub(crate) fn into_parts(self) -> SqsQueueCreateParts {
         let Self {
             content_based_deduplication,
             deduplication_scope,
@@ -3487,25 +4365,64 @@ impl SqsQueueCreateInput {
             tags,
             visibility_timeout,
         } = self;
-        (
-            content_based_deduplication,
-            deduplication_scope,
-            delay_seconds,
-            fifo_queue,
-            fifo_throughput_limit,
-            kms_data_key_reuse_period_seconds,
-            kms_master_key_id,
-            maximum_message_size,
-            message_retention_period,
-            policy,
-            queue_name,
-            receive_message_wait_time_seconds,
-            redrive_allow_policy,
-            redrive_policy,
-            sqs_managed_sse_enabled,
-            tags,
-            visibility_timeout,
-        )
+        SqsQueueCreateParts {
+            content_based_deduplication: crate::send_model::Sent::new(
+                "sqs.Queue.create.content_based_deduplication",
+                content_based_deduplication,
+            ),
+            deduplication_scope: crate::send_model::Sent::new(
+                "sqs.Queue.create.deduplication_scope",
+                deduplication_scope,
+            ),
+            delay_seconds: crate::send_model::Sent::new(
+                "sqs.Queue.create.delay_seconds",
+                delay_seconds,
+            ),
+            fifo_queue: crate::send_model::Sent::new("sqs.Queue.create.fifo_queue", fifo_queue),
+            fifo_throughput_limit: crate::send_model::Sent::new(
+                "sqs.Queue.create.fifo_throughput_limit",
+                fifo_throughput_limit,
+            ),
+            kms_data_key_reuse_period_seconds: crate::send_model::Sent::new(
+                "sqs.Queue.create.kms_data_key_reuse_period_seconds",
+                kms_data_key_reuse_period_seconds,
+            ),
+            kms_master_key_id: crate::send_model::Sent::new(
+                "sqs.Queue.create.kms_master_key_id",
+                kms_master_key_id,
+            ),
+            maximum_message_size: crate::send_model::Sent::new(
+                "sqs.Queue.create.maximum_message_size",
+                maximum_message_size,
+            ),
+            message_retention_period: crate::send_model::Sent::new(
+                "sqs.Queue.create.message_retention_period",
+                message_retention_period,
+            ),
+            policy: crate::send_model::Sent::new("sqs.Queue.create.policy", policy),
+            queue_name: crate::send_model::Sent::new("sqs.Queue.create.queue_name", queue_name),
+            receive_message_wait_time_seconds: crate::send_model::Sent::new(
+                "sqs.Queue.create.receive_message_wait_time_seconds",
+                receive_message_wait_time_seconds,
+            ),
+            redrive_allow_policy: crate::send_model::Sent::new(
+                "sqs.Queue.create.redrive_allow_policy",
+                redrive_allow_policy,
+            ),
+            redrive_policy: crate::send_model::Sent::new(
+                "sqs.Queue.create.redrive_policy",
+                redrive_policy,
+            ),
+            sqs_managed_sse_enabled: crate::send_model::Sent::new(
+                "sqs.Queue.create.sqs_managed_sse_enabled",
+                sqs_managed_sse_enabled,
+            ),
+            tags: crate::send_model::Sent::new("sqs.Queue.create.tags", tags),
+            visibility_timeout: crate::send_model::Sent::new(
+                "sqs.Queue.create.visibility_timeout",
+                visibility_timeout,
+            ),
+        }
     }
 }
 
@@ -3522,8 +4439,24 @@ pub(crate) struct SqsQueueUpdateInput {
     redrive_allow_policy: Option<Value>,
     redrive_policy: Option<Value>,
     sqs_managed_sse_enabled: Option<bool>,
-    tags: Option<Value>,
+    tags: Option<crate::send_model::Tags>,
     visibility_timeout: Option<i64>,
+}
+
+pub(crate) struct SqsQueueUpdateParts {
+    pub(crate) content_based_deduplication: crate::send_model::Sent<Option<bool>>,
+    pub(crate) delay_seconds: crate::send_model::Sent<Option<i64>>,
+    pub(crate) kms_data_key_reuse_period_seconds: crate::send_model::Sent<Option<i64>>,
+    pub(crate) kms_master_key_id: crate::send_model::Sent<Option<String>>,
+    pub(crate) maximum_message_size: crate::send_model::Sent<Option<i64>>,
+    pub(crate) message_retention_period: crate::send_model::Sent<Option<i64>>,
+    pub(crate) policy: crate::send_model::Sent<Option<Value>>,
+    pub(crate) receive_message_wait_time_seconds: crate::send_model::Sent<Option<i64>>,
+    pub(crate) redrive_allow_policy: crate::send_model::Sent<Option<Value>>,
+    pub(crate) redrive_policy: crate::send_model::Sent<Option<Value>>,
+    pub(crate) sqs_managed_sse_enabled: crate::send_model::Sent<Option<bool>>,
+    pub(crate) tags: crate::send_model::Sent<Option<crate::send_model::Tags>>,
+    pub(crate) visibility_timeout: crate::send_model::Sent<Option<i64>>,
 }
 
 impl SqsQueueUpdateInput {
@@ -3562,29 +4495,12 @@ impl SqsQueueUpdateInput {
                 _resource,
                 "sqs_managed_sse_enabled",
             )?,
-            tags: crate::send_model::optional_value(_resource, "tags")?,
+            tags: crate::send_model::optional_tags(_resource, "tags")?,
             visibility_timeout: crate::send_model::optional_int(_resource, "visibility_timeout")?,
         })
     }
 
-    #[allow(clippy::type_complexity)]
-    pub(crate) fn into_parts(
-        self,
-    ) -> (
-        Option<bool>,
-        Option<i64>,
-        Option<i64>,
-        Option<String>,
-        Option<i64>,
-        Option<i64>,
-        Option<Value>,
-        Option<i64>,
-        Option<Value>,
-        Option<Value>,
-        Option<bool>,
-        Option<Value>,
-        Option<i64>,
-    ) {
+    pub(crate) fn into_parts(self) -> SqsQueueUpdateParts {
         let Self {
             content_based_deduplication,
             delay_seconds,
@@ -3600,21 +4516,54 @@ impl SqsQueueUpdateInput {
             tags,
             visibility_timeout,
         } = self;
-        (
-            content_based_deduplication,
-            delay_seconds,
-            kms_data_key_reuse_period_seconds,
-            kms_master_key_id,
-            maximum_message_size,
-            message_retention_period,
-            policy,
-            receive_message_wait_time_seconds,
-            redrive_allow_policy,
-            redrive_policy,
-            sqs_managed_sse_enabled,
-            tags,
-            visibility_timeout,
-        )
+        SqsQueueUpdateParts {
+            content_based_deduplication: crate::send_model::Sent::new(
+                "sqs.Queue.update.content_based_deduplication",
+                content_based_deduplication,
+            ),
+            delay_seconds: crate::send_model::Sent::new(
+                "sqs.Queue.update.delay_seconds",
+                delay_seconds,
+            ),
+            kms_data_key_reuse_period_seconds: crate::send_model::Sent::new(
+                "sqs.Queue.update.kms_data_key_reuse_period_seconds",
+                kms_data_key_reuse_period_seconds,
+            ),
+            kms_master_key_id: crate::send_model::Sent::new(
+                "sqs.Queue.update.kms_master_key_id",
+                kms_master_key_id,
+            ),
+            maximum_message_size: crate::send_model::Sent::new(
+                "sqs.Queue.update.maximum_message_size",
+                maximum_message_size,
+            ),
+            message_retention_period: crate::send_model::Sent::new(
+                "sqs.Queue.update.message_retention_period",
+                message_retention_period,
+            ),
+            policy: crate::send_model::Sent::new("sqs.Queue.update.policy", policy),
+            receive_message_wait_time_seconds: crate::send_model::Sent::new(
+                "sqs.Queue.update.receive_message_wait_time_seconds",
+                receive_message_wait_time_seconds,
+            ),
+            redrive_allow_policy: crate::send_model::Sent::new(
+                "sqs.Queue.update.redrive_allow_policy",
+                redrive_allow_policy,
+            ),
+            redrive_policy: crate::send_model::Sent::new(
+                "sqs.Queue.update.redrive_policy",
+                redrive_policy,
+            ),
+            sqs_managed_sse_enabled: crate::send_model::Sent::new(
+                "sqs.Queue.update.sqs_managed_sse_enabled",
+                sqs_managed_sse_enabled,
+            ),
+            tags: crate::send_model::Sent::new("sqs.Queue.update.tags", tags),
+            visibility_timeout: crate::send_model::Sent::new(
+                "sqs.Queue.update.visibility_timeout",
+                visibility_timeout,
+            ),
+        }
     }
 }
 
@@ -3628,7 +4577,8 @@ pub(crate) struct SendCaptureAttribute {
 #[cfg(test)]
 pub(crate) struct SendCaptureContract {
     pub(crate) resource_type: &'static str,
-    pub(crate) attributes: &'static [SendCaptureAttribute],
+    pub(crate) create_attributes: &'static [SendCaptureAttribute],
+    pub(crate) update_attributes: &'static [SendCaptureAttribute],
 }
 
 #[cfg(test)]
@@ -3636,7 +4586,7 @@ pub(crate) fn capture_contracts() -> &'static [SendCaptureContract] {
     &[
         SendCaptureContract {
             resource_type: "ec2.Vpc",
-            attributes: &[
+            create_attributes: &[
                 SendCaptureAttribute {
                     name: "cidr_block",
                     provider_name: "CidrBlock",
@@ -3673,10 +4623,27 @@ pub(crate) fn capture_contracts() -> &'static [SendCaptureContract] {
                     capture_names: &[],
                 },
             ],
+            update_attributes: &[
+                SendCaptureAttribute {
+                    name: "enable_dns_hostnames",
+                    provider_name: "EnableDnsHostnames",
+                    capture_names: &[],
+                },
+                SendCaptureAttribute {
+                    name: "enable_dns_support",
+                    provider_name: "EnableDnsSupport",
+                    capture_names: &[],
+                },
+                SendCaptureAttribute {
+                    name: "tags",
+                    provider_name: "Tags",
+                    capture_names: &[],
+                },
+            ],
         },
         SendCaptureContract {
             resource_type: "ec2.Subnet",
-            attributes: &[
+            create_attributes: &[
                 SendCaptureAttribute {
                     name: "assign_ipv6_address_on_creation",
                     provider_name: "AssignIpv6AddressOnCreation",
@@ -3767,10 +4734,46 @@ pub(crate) fn capture_contracts() -> &'static [SendCaptureContract] {
                     capture_names: &[],
                 },
             ],
+            update_attributes: &[
+                SendCaptureAttribute {
+                    name: "assign_ipv6_address_on_creation",
+                    provider_name: "AssignIpv6AddressOnCreation",
+                    capture_names: &[],
+                },
+                SendCaptureAttribute {
+                    name: "enable_dns64",
+                    provider_name: "EnableDns64",
+                    capture_names: &[],
+                },
+                SendCaptureAttribute {
+                    name: "enable_lni_at_device_index",
+                    provider_name: "EnableLniAtDeviceIndex",
+                    capture_names: &[],
+                },
+                SendCaptureAttribute {
+                    name: "map_public_ip_on_launch",
+                    provider_name: "MapPublicIpOnLaunch",
+                    capture_names: &[],
+                },
+                SendCaptureAttribute {
+                    name: "private_dns_name_options_on_launch",
+                    provider_name: "PrivateDnsNameOptionsOnLaunch",
+                    capture_names: &[
+                        "HostnameType",
+                        "EnableResourceNameDnsARecordOnLaunch",
+                        "EnableResourceNameDnsAAAARecordOnLaunch",
+                    ],
+                },
+                SendCaptureAttribute {
+                    name: "tags",
+                    provider_name: "Tags",
+                    capture_names: &[],
+                },
+            ],
         },
         SendCaptureContract {
             resource_type: "ec2.InternetGateway",
-            attributes: &[
+            create_attributes: &[
                 SendCaptureAttribute {
                     name: "tags",
                     provider_name: "Tags",
@@ -3782,10 +4785,15 @@ pub(crate) fn capture_contracts() -> &'static [SendCaptureContract] {
                     capture_names: &[],
                 },
             ],
+            update_attributes: &[SendCaptureAttribute {
+                name: "tags",
+                provider_name: "Tags",
+                capture_names: &[],
+            }],
         },
         SendCaptureContract {
             resource_type: "ec2.RouteTable",
-            attributes: &[
+            create_attributes: &[
                 SendCaptureAttribute {
                     name: "tags",
                     provider_name: "Tags",
@@ -3797,10 +4805,15 @@ pub(crate) fn capture_contracts() -> &'static [SendCaptureContract] {
                     capture_names: &[],
                 },
             ],
+            update_attributes: &[SendCaptureAttribute {
+                name: "tags",
+                provider_name: "Tags",
+                capture_names: &[],
+            }],
         },
         SendCaptureContract {
             resource_type: "ec2.Route",
-            attributes: &[
+            create_attributes: &[
                 SendCaptureAttribute {
                     name: "destination_cidr_block",
                     provider_name: "DestinationCidrBlock",
@@ -3822,10 +4835,22 @@ pub(crate) fn capture_contracts() -> &'static [SendCaptureContract] {
                     capture_names: &[],
                 },
             ],
+            update_attributes: &[
+                SendCaptureAttribute {
+                    name: "gateway_id",
+                    provider_name: "GatewayId",
+                    capture_names: &[],
+                },
+                SendCaptureAttribute {
+                    name: "nat_gateway_id",
+                    provider_name: "NatGatewayId",
+                    capture_names: &[],
+                },
+            ],
         },
         SendCaptureContract {
             resource_type: "ec2.SecurityGroup",
-            attributes: &[
+            create_attributes: &[
                 SendCaptureAttribute {
                     name: "description",
                     provider_name: "Description",
@@ -3847,10 +4872,15 @@ pub(crate) fn capture_contracts() -> &'static [SendCaptureContract] {
                     capture_names: &[],
                 },
             ],
+            update_attributes: &[SendCaptureAttribute {
+                name: "tags",
+                provider_name: "Tags",
+                capture_names: &[],
+            }],
         },
         SendCaptureContract {
             resource_type: "ec2.SecurityGroupIngress",
-            attributes: &[
+            create_attributes: &[
                 SendCaptureAttribute {
                     name: "cidr_ip",
                     provider_name: "CidrIp",
@@ -3902,10 +4932,11 @@ pub(crate) fn capture_contracts() -> &'static [SendCaptureContract] {
                     capture_names: &[],
                 },
             ],
+            update_attributes: &[],
         },
         SendCaptureContract {
             resource_type: "ec2.SecurityGroupEgress",
-            attributes: &[
+            create_attributes: &[
                 SendCaptureAttribute {
                     name: "cidr_ip",
                     provider_name: "CidrIp",
@@ -3957,10 +4988,11 @@ pub(crate) fn capture_contracts() -> &'static [SendCaptureContract] {
                     capture_names: &[],
                 },
             ],
+            update_attributes: &[],
         },
         SendCaptureContract {
             resource_type: "ec2.EgressOnlyInternetGateway",
-            attributes: &[
+            create_attributes: &[
                 SendCaptureAttribute {
                     name: "tags",
                     provider_name: "Tags",
@@ -3972,10 +5004,15 @@ pub(crate) fn capture_contracts() -> &'static [SendCaptureContract] {
                     capture_names: &[],
                 },
             ],
+            update_attributes: &[SendCaptureAttribute {
+                name: "tags",
+                provider_name: "Tags",
+                capture_names: &[],
+            }],
         },
         SendCaptureContract {
             resource_type: "ec2.Eip",
-            attributes: &[
+            create_attributes: &[
                 SendCaptureAttribute {
                     name: "address",
                     provider_name: "Address",
@@ -3997,10 +5034,15 @@ pub(crate) fn capture_contracts() -> &'static [SendCaptureContract] {
                     capture_names: &[],
                 },
             ],
+            update_attributes: &[SendCaptureAttribute {
+                name: "tags",
+                provider_name: "Tags",
+                capture_names: &[],
+            }],
         },
         SendCaptureContract {
             resource_type: "ec2.FlowLog",
-            attributes: &[
+            create_attributes: &[
                 SendCaptureAttribute {
                     name: "deliver_logs_permission_arn",
                     provider_name: "DeliverLogsPermissionArn",
@@ -4052,10 +5094,15 @@ pub(crate) fn capture_contracts() -> &'static [SendCaptureContract] {
                     capture_names: &[],
                 },
             ],
+            update_attributes: &[SendCaptureAttribute {
+                name: "tags",
+                provider_name: "Tags",
+                capture_names: &[],
+            }],
         },
         SendCaptureContract {
             resource_type: "ec2.NatGateway",
-            attributes: &[
+            create_attributes: &[
                 SendCaptureAttribute {
                     name: "allocation_id",
                     provider_name: "AllocationId",
@@ -4097,10 +5144,15 @@ pub(crate) fn capture_contracts() -> &'static [SendCaptureContract] {
                     capture_names: &[],
                 },
             ],
+            update_attributes: &[SendCaptureAttribute {
+                name: "tags",
+                provider_name: "Tags",
+                capture_names: &[],
+            }],
         },
         SendCaptureContract {
             resource_type: "ec2.SubnetRouteTableAssociation",
-            attributes: &[
+            create_attributes: &[
                 SendCaptureAttribute {
                     name: "route_table_id",
                     provider_name: "RouteTableId",
@@ -4112,10 +5164,11 @@ pub(crate) fn capture_contracts() -> &'static [SendCaptureContract] {
                     capture_names: &[],
                 },
             ],
+            update_attributes: &[],
         },
         SendCaptureContract {
             resource_type: "ec2.TransitGateway",
-            attributes: &[
+            create_attributes: &[
                 SendCaptureAttribute {
                     name: "description",
                     provider_name: "Description",
@@ -4142,10 +5195,22 @@ pub(crate) fn capture_contracts() -> &'static [SendCaptureContract] {
                     capture_names: &[],
                 },
             ],
+            update_attributes: &[
+                SendCaptureAttribute {
+                    name: "description",
+                    provider_name: "Description",
+                    capture_names: &[],
+                },
+                SendCaptureAttribute {
+                    name: "tags",
+                    provider_name: "Tags",
+                    capture_names: &[],
+                },
+            ],
         },
         SendCaptureContract {
             resource_type: "ec2.TransitGatewayAttachment",
-            attributes: &[
+            create_attributes: &[
                 SendCaptureAttribute {
                     name: "options",
                     provider_name: "Options",
@@ -4177,10 +5242,15 @@ pub(crate) fn capture_contracts() -> &'static [SendCaptureContract] {
                     capture_names: &[],
                 },
             ],
+            update_attributes: &[SendCaptureAttribute {
+                name: "tags",
+                provider_name: "Tags",
+                capture_names: &[],
+            }],
         },
         SendCaptureContract {
             resource_type: "ec2.VpcEndpoint",
-            attributes: &[
+            create_attributes: &[
                 SendCaptureAttribute {
                     name: "policy_document",
                     provider_name: "PolicyDocument",
@@ -4242,10 +5312,27 @@ pub(crate) fn capture_contracts() -> &'static [SendCaptureContract] {
                     capture_names: &[],
                 },
             ],
+            update_attributes: &[
+                SendCaptureAttribute {
+                    name: "policy_document",
+                    provider_name: "PolicyDocument",
+                    capture_names: &[],
+                },
+                SendCaptureAttribute {
+                    name: "private_dns_enabled",
+                    provider_name: "PrivateDnsEnabled",
+                    capture_names: &[],
+                },
+                SendCaptureAttribute {
+                    name: "tags",
+                    provider_name: "Tags",
+                    capture_names: &[],
+                },
+            ],
         },
         SendCaptureContract {
             resource_type: "ec2.VpcGatewayAttachment",
-            attributes: &[
+            create_attributes: &[
                 SendCaptureAttribute {
                     name: "internet_gateway_id",
                     provider_name: "InternetGatewayId",
@@ -4262,10 +5349,11 @@ pub(crate) fn capture_contracts() -> &'static [SendCaptureContract] {
                     capture_names: &[],
                 },
             ],
+            update_attributes: &[],
         },
         SendCaptureContract {
             resource_type: "ec2.VpcPeeringConnection",
-            attributes: &[
+            create_attributes: &[
                 SendCaptureAttribute {
                     name: "peer_owner_id",
                     provider_name: "PeerOwnerId",
@@ -4287,10 +5375,15 @@ pub(crate) fn capture_contracts() -> &'static [SendCaptureContract] {
                     capture_names: &[],
                 },
             ],
+            update_attributes: &[SendCaptureAttribute {
+                name: "tags",
+                provider_name: "Tags",
+                capture_names: &[],
+            }],
         },
         SendCaptureContract {
             resource_type: "ec2.VpnGateway",
-            attributes: &[
+            create_attributes: &[
                 SendCaptureAttribute {
                     name: "amazon_side_asn",
                     provider_name: "AmazonSideAsn",
@@ -4312,10 +5405,15 @@ pub(crate) fn capture_contracts() -> &'static [SendCaptureContract] {
                     capture_names: &[],
                 },
             ],
+            update_attributes: &[SendCaptureAttribute {
+                name: "tags",
+                provider_name: "Tags",
+                capture_names: &[],
+            }],
         },
         SendCaptureContract {
             resource_type: "s3.Bucket",
-            attributes: &[
+            create_attributes: &[
                 SendCaptureAttribute {
                     name: "bucket",
                     provider_name: "Bucket",
@@ -4324,7 +5422,7 @@ pub(crate) fn capture_contracts() -> &'static [SendCaptureContract] {
                 SendCaptureAttribute {
                     name: "bucket_namespace",
                     provider_name: "BucketNamespace",
-                    capture_names: &[],
+                    capture_names: &["header:x-amz-bucket-namespace"],
                 },
                 SendCaptureAttribute {
                     name: "tags",
@@ -4332,10 +5430,15 @@ pub(crate) fn capture_contracts() -> &'static [SendCaptureContract] {
                     capture_names: &[],
                 },
             ],
+            update_attributes: &[SendCaptureAttribute {
+                name: "tags",
+                provider_name: "Tags",
+                capture_names: &[],
+            }],
         },
         SendCaptureContract {
             resource_type: "s3.BucketPolicy",
-            attributes: &[
+            create_attributes: &[
                 SendCaptureAttribute {
                     name: "bucket",
                     provider_name: "Bucket",
@@ -4347,10 +5450,15 @@ pub(crate) fn capture_contracts() -> &'static [SendCaptureContract] {
                     capture_names: &[],
                 },
             ],
+            update_attributes: &[SendCaptureAttribute {
+                name: "policy",
+                provider_name: "Policy",
+                capture_names: &[],
+            }],
         },
         SendCaptureContract {
             resource_type: "s3.BucketVersioning",
-            attributes: &[
+            create_attributes: &[
                 SendCaptureAttribute {
                     name: "bucket",
                     provider_name: "Bucket",
@@ -4362,10 +5470,15 @@ pub(crate) fn capture_contracts() -> &'static [SendCaptureContract] {
                     capture_names: &[],
                 },
             ],
+            update_attributes: &[SendCaptureAttribute {
+                name: "status",
+                provider_name: "Status",
+                capture_names: &[],
+            }],
         },
         SendCaptureContract {
             resource_type: "s3.BucketObjectLockConfiguration",
-            attributes: &[
+            create_attributes: &[
                 SendCaptureAttribute {
                     name: "bucket",
                     provider_name: "Bucket",
@@ -4382,14 +5495,26 @@ pub(crate) fn capture_contracts() -> &'static [SendCaptureContract] {
                     capture_names: &[],
                 },
             ],
+            update_attributes: &[
+                SendCaptureAttribute {
+                    name: "object_lock_enabled",
+                    provider_name: "ObjectLockEnabled",
+                    capture_names: &[],
+                },
+                SendCaptureAttribute {
+                    name: "rule",
+                    provider_name: "Rule",
+                    capture_names: &[],
+                },
+            ],
         },
         SendCaptureContract {
             resource_type: "s3.BucketAcl",
-            attributes: &[
+            create_attributes: &[
                 SendCaptureAttribute {
                     name: "acl",
                     provider_name: "ACL",
-                    capture_names: &[],
+                    capture_names: &["header:x-amz-acl"],
                 },
                 SendCaptureAttribute {
                     name: "bucket",
@@ -4397,10 +5522,15 @@ pub(crate) fn capture_contracts() -> &'static [SendCaptureContract] {
                     capture_names: &[],
                 },
             ],
+            update_attributes: &[SendCaptureAttribute {
+                name: "acl",
+                provider_name: "ACL",
+                capture_names: &["header:x-amz-acl"],
+            }],
         },
         SendCaptureContract {
             resource_type: "s3.BucketOwnershipControls",
-            attributes: &[
+            create_attributes: &[
                 SendCaptureAttribute {
                     name: "bucket",
                     provider_name: "Bucket",
@@ -4412,10 +5542,15 @@ pub(crate) fn capture_contracts() -> &'static [SendCaptureContract] {
                     capture_names: &[],
                 },
             ],
+            update_attributes: &[SendCaptureAttribute {
+                name: "object_ownership",
+                provider_name: "ObjectOwnership",
+                capture_names: &[],
+            }],
         },
         SendCaptureContract {
             resource_type: "s3.BucketServerSideEncryptionConfiguration",
-            attributes: &[
+            create_attributes: &[
                 SendCaptureAttribute {
                     name: "bucket",
                     provider_name: "Bucket",
@@ -4427,10 +5562,15 @@ pub(crate) fn capture_contracts() -> &'static [SendCaptureContract] {
                     capture_names: &["Rule"],
                 },
             ],
+            update_attributes: &[SendCaptureAttribute {
+                name: "rules",
+                provider_name: "Rules",
+                capture_names: &["Rule"],
+            }],
         },
         SendCaptureContract {
             resource_type: "s3.BucketReplicationConfiguration",
-            attributes: &[
+            create_attributes: &[
                 SendCaptureAttribute {
                     name: "bucket",
                     provider_name: "Bucket",
@@ -4447,10 +5587,22 @@ pub(crate) fn capture_contracts() -> &'static [SendCaptureContract] {
                     capture_names: &["Rule"],
                 },
             ],
+            update_attributes: &[
+                SendCaptureAttribute {
+                    name: "role",
+                    provider_name: "Role",
+                    capture_names: &[],
+                },
+                SendCaptureAttribute {
+                    name: "rules",
+                    provider_name: "Rules",
+                    capture_names: &["Rule"],
+                },
+            ],
         },
         SendCaptureContract {
             resource_type: "s3.BucketLifecycleConfiguration",
-            attributes: &[
+            create_attributes: &[
                 SendCaptureAttribute {
                     name: "bucket",
                     provider_name: "Bucket",
@@ -4462,10 +5614,15 @@ pub(crate) fn capture_contracts() -> &'static [SendCaptureContract] {
                     capture_names: &["Rule"],
                 },
             ],
+            update_attributes: &[SendCaptureAttribute {
+                name: "rules",
+                provider_name: "Rules",
+                capture_names: &["Rule"],
+            }],
         },
         SendCaptureContract {
             resource_type: "s3.BucketWebsiteConfiguration",
-            attributes: &[
+            create_attributes: &[
                 SendCaptureAttribute {
                     name: "bucket",
                     provider_name: "Bucket",
@@ -4487,10 +5644,27 @@ pub(crate) fn capture_contracts() -> &'static [SendCaptureContract] {
                     capture_names: &[],
                 },
             ],
+            update_attributes: &[
+                SendCaptureAttribute {
+                    name: "error_document",
+                    provider_name: "ErrorDocument",
+                    capture_names: &[],
+                },
+                SendCaptureAttribute {
+                    name: "index_document",
+                    provider_name: "IndexDocument",
+                    capture_names: &[],
+                },
+                SendCaptureAttribute {
+                    name: "redirect_all_requests_to",
+                    provider_name: "RedirectAllRequestsTo",
+                    capture_names: &[],
+                },
+            ],
         },
         SendCaptureContract {
             resource_type: "s3.BucketCorsConfiguration",
-            attributes: &[
+            create_attributes: &[
                 SendCaptureAttribute {
                     name: "bucket",
                     provider_name: "Bucket",
@@ -4502,10 +5676,15 @@ pub(crate) fn capture_contracts() -> &'static [SendCaptureContract] {
                     capture_names: &["CORSRule"],
                 },
             ],
+            update_attributes: &[SendCaptureAttribute {
+                name: "cors_rules",
+                provider_name: "CORSRules",
+                capture_names: &["CORSRule"],
+            }],
         },
         SendCaptureContract {
             resource_type: "s3.BucketNotificationConfiguration",
-            attributes: &[
+            create_attributes: &[
                 SendCaptureAttribute {
                     name: "bucket",
                     provider_name: "Bucket",
@@ -4514,7 +5693,29 @@ pub(crate) fn capture_contracts() -> &'static [SendCaptureContract] {
                 SendCaptureAttribute {
                     name: "event_bridge_configuration",
                     provider_name: "EventBridgeConfiguration",
-                    capture_names: &[],
+                    capture_names: &["presence:EventBridgeConfiguration"],
+                },
+                SendCaptureAttribute {
+                    name: "lambda_function_configurations",
+                    provider_name: "LambdaFunctionConfigurations",
+                    capture_names: &["CloudFunctionConfiguration"],
+                },
+                SendCaptureAttribute {
+                    name: "queue_configurations",
+                    provider_name: "QueueConfigurations",
+                    capture_names: &["QueueConfiguration"],
+                },
+                SendCaptureAttribute {
+                    name: "topic_configurations",
+                    provider_name: "TopicConfigurations",
+                    capture_names: &["TopicConfiguration"],
+                },
+            ],
+            update_attributes: &[
+                SendCaptureAttribute {
+                    name: "event_bridge_configuration",
+                    provider_name: "EventBridgeConfiguration",
+                    capture_names: &["presence:EventBridgeConfiguration"],
                 },
                 SendCaptureAttribute {
                     name: "lambda_function_configurations",
@@ -4535,7 +5736,7 @@ pub(crate) fn capture_contracts() -> &'static [SendCaptureContract] {
         },
         SendCaptureContract {
             resource_type: "s3.BucketLogging",
-            attributes: &[
+            create_attributes: &[
                 SendCaptureAttribute {
                     name: "bucket",
                     provider_name: "Bucket",
@@ -4557,10 +5758,27 @@ pub(crate) fn capture_contracts() -> &'static [SendCaptureContract] {
                     capture_names: &[],
                 },
             ],
+            update_attributes: &[
+                SendCaptureAttribute {
+                    name: "target_bucket",
+                    provider_name: "TargetBucket",
+                    capture_names: &[],
+                },
+                SendCaptureAttribute {
+                    name: "target_object_key_format",
+                    provider_name: "TargetObjectKeyFormat",
+                    capture_names: &[],
+                },
+                SendCaptureAttribute {
+                    name: "target_prefix",
+                    provider_name: "TargetPrefix",
+                    capture_names: &[],
+                },
+            ],
         },
         SendCaptureContract {
             resource_type: "s3.BucketPublicAccessBlock",
-            attributes: &[
+            create_attributes: &[
                 SendCaptureAttribute {
                     name: "block_public_acls",
                     provider_name: "BlockPublicAcls",
@@ -4587,18 +5805,41 @@ pub(crate) fn capture_contracts() -> &'static [SendCaptureContract] {
                     capture_names: &[],
                 },
             ],
+            update_attributes: &[
+                SendCaptureAttribute {
+                    name: "block_public_acls",
+                    provider_name: "BlockPublicAcls",
+                    capture_names: &[],
+                },
+                SendCaptureAttribute {
+                    name: "block_public_policy",
+                    provider_name: "BlockPublicPolicy",
+                    capture_names: &[],
+                },
+                SendCaptureAttribute {
+                    name: "ignore_public_acls",
+                    provider_name: "IgnorePublicAcls",
+                    capture_names: &[],
+                },
+                SendCaptureAttribute {
+                    name: "restrict_public_buckets",
+                    provider_name: "RestrictPublicBuckets",
+                    capture_names: &[],
+                },
+            ],
         },
         SendCaptureContract {
             resource_type: "organizations.Organization",
-            attributes: &[SendCaptureAttribute {
+            create_attributes: &[SendCaptureAttribute {
                 name: "feature_set",
                 provider_name: "FeatureSet",
                 capture_names: &[],
             }],
+            update_attributes: &[],
         },
         SendCaptureContract {
             resource_type: "organizations.Account",
-            attributes: &[
+            create_attributes: &[
                 SendCaptureAttribute {
                     name: "account_name",
                     provider_name: "AccountName",
@@ -4625,10 +5866,22 @@ pub(crate) fn capture_contracts() -> &'static [SendCaptureContract] {
                     capture_names: &[],
                 },
             ],
+            update_attributes: &[
+                SendCaptureAttribute {
+                    name: "account_name",
+                    provider_name: "AccountName",
+                    capture_names: &[],
+                },
+                SendCaptureAttribute {
+                    name: "tags",
+                    provider_name: "Tags",
+                    capture_names: &[],
+                },
+            ],
         },
         SendCaptureContract {
             resource_type: "route53.RecordSet",
-            attributes: &[
+            create_attributes: &[
                 SendCaptureAttribute {
                     name: "alias_target",
                     provider_name: "AliasTarget",
@@ -4660,10 +5913,32 @@ pub(crate) fn capture_contracts() -> &'static [SendCaptureContract] {
                     capture_names: &[],
                 },
             ],
+            update_attributes: &[
+                SendCaptureAttribute {
+                    name: "alias_target",
+                    provider_name: "AliasTarget",
+                    capture_names: &[],
+                },
+                SendCaptureAttribute {
+                    name: "resource_records",
+                    provider_name: "ResourceRecords",
+                    capture_names: &[],
+                },
+                SendCaptureAttribute {
+                    name: "ttl",
+                    provider_name: "TTL",
+                    capture_names: &[],
+                },
+                SendCaptureAttribute {
+                    name: "type",
+                    provider_name: "Type",
+                    capture_names: &[],
+                },
+            ],
         },
         SendCaptureContract {
             resource_type: "iam.Role",
-            attributes: &[
+            create_attributes: &[
                 SendCaptureAttribute {
                     name: "assume_role_policy_document",
                     provider_name: "AssumeRolePolicyDocument",
@@ -4695,10 +5970,15 @@ pub(crate) fn capture_contracts() -> &'static [SendCaptureContract] {
                     capture_names: &[],
                 },
             ],
+            update_attributes: &[SendCaptureAttribute {
+                name: "tags",
+                provider_name: "Tags",
+                capture_names: &[],
+            }],
         },
         SendCaptureContract {
             resource_type: "logs.LogGroup",
-            attributes: &[
+            create_attributes: &[
                 SendCaptureAttribute {
                     name: "deletion_protection_enabled",
                     provider_name: "deletionProtectionEnabled",
@@ -4730,10 +6010,27 @@ pub(crate) fn capture_contracts() -> &'static [SendCaptureContract] {
                     capture_names: &[],
                 },
             ],
+            update_attributes: &[
+                SendCaptureAttribute {
+                    name: "deletion_protection_enabled",
+                    provider_name: "deletionProtectionEnabled",
+                    capture_names: &[],
+                },
+                SendCaptureAttribute {
+                    name: "retention_in_days",
+                    provider_name: "retentionInDays",
+                    capture_names: &[],
+                },
+                SendCaptureAttribute {
+                    name: "tags",
+                    provider_name: "Tags",
+                    capture_names: &[],
+                },
+            ],
         },
         SendCaptureContract {
             resource_type: "acm.Certificate",
-            attributes: &[
+            create_attributes: &[
                 SendCaptureAttribute {
                     name: "domain_name",
                     provider_name: "DomainName",
@@ -4765,10 +6062,15 @@ pub(crate) fn capture_contracts() -> &'static [SendCaptureContract] {
                     capture_names: &[],
                 },
             ],
+            update_attributes: &[SendCaptureAttribute {
+                name: "tags",
+                provider_name: "Tags",
+                capture_names: &[],
+            }],
         },
         SendCaptureContract {
             resource_type: "sqs.Queue",
-            attributes: &[
+            create_attributes: &[
                 SendCaptureAttribute {
                     name: "content_based_deduplication",
                     provider_name: "ContentBasedDeduplication",
@@ -4822,6 +6124,73 @@ pub(crate) fn capture_contracts() -> &'static [SendCaptureContract] {
                 SendCaptureAttribute {
                     name: "queue_name",
                     provider_name: "QueueName",
+                    capture_names: &[],
+                },
+                SendCaptureAttribute {
+                    name: "receive_message_wait_time_seconds",
+                    provider_name: "ReceiveMessageWaitTimeSeconds",
+                    capture_names: &[],
+                },
+                SendCaptureAttribute {
+                    name: "redrive_allow_policy",
+                    provider_name: "RedriveAllowPolicy",
+                    capture_names: &[],
+                },
+                SendCaptureAttribute {
+                    name: "redrive_policy",
+                    provider_name: "RedrivePolicy",
+                    capture_names: &[],
+                },
+                SendCaptureAttribute {
+                    name: "sqs_managed_sse_enabled",
+                    provider_name: "SqsManagedSseEnabled",
+                    capture_names: &[],
+                },
+                SendCaptureAttribute {
+                    name: "tags",
+                    provider_name: "Tags",
+                    capture_names: &[],
+                },
+                SendCaptureAttribute {
+                    name: "visibility_timeout",
+                    provider_name: "VisibilityTimeout",
+                    capture_names: &[],
+                },
+            ],
+            update_attributes: &[
+                SendCaptureAttribute {
+                    name: "content_based_deduplication",
+                    provider_name: "ContentBasedDeduplication",
+                    capture_names: &[],
+                },
+                SendCaptureAttribute {
+                    name: "delay_seconds",
+                    provider_name: "DelaySeconds",
+                    capture_names: &[],
+                },
+                SendCaptureAttribute {
+                    name: "kms_data_key_reuse_period_seconds",
+                    provider_name: "KmsDataKeyReusePeriodSeconds",
+                    capture_names: &[],
+                },
+                SendCaptureAttribute {
+                    name: "kms_master_key_id",
+                    provider_name: "KmsMasterKeyId",
+                    capture_names: &[],
+                },
+                SendCaptureAttribute {
+                    name: "maximum_message_size",
+                    provider_name: "MaximumMessageSize",
+                    capture_names: &[],
+                },
+                SendCaptureAttribute {
+                    name: "message_retention_period",
+                    provider_name: "MessageRetentionPeriod",
+                    capture_names: &[],
+                },
+                SendCaptureAttribute {
+                    name: "policy",
+                    provider_name: "Policy",
                     capture_names: &[],
                 },
                 SendCaptureAttribute {

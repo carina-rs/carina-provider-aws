@@ -6,7 +6,7 @@ use crate::AwsProvider;
 use crate::aws_operation::ClientToken;
 use crate::error_helpers::api_error_with_meta;
 use crate::helpers::{build_tag_specification_with_create_token, send_aws_operation_with_token};
-use crate::provider::{AwsCreateAttempt, Ec2TaggedResourceKind};
+use crate::provider::{AwsCreateAttempt, TaggedEc2Create};
 use crate::read_model::{empty_map_value, found_managed_read};
 use crate::read_models_generated::Ec2RouteTableReadModelSupplement;
 use crate::send_models_generated::Ec2RouteTableCreateInput;
@@ -66,7 +66,11 @@ impl AwsProvider {
             Err(error) => return Err(attempt.untracked(error)),
         };
         let sent = input.sent();
-        let (tags, vpc_id) = input.into_parts();
+        let crate::send_models_generated::Ec2RouteTableCreateParts { tags, vpc_id } =
+            input.into_parts();
+        let tags = tags.into_inner();
+        let tags = crate::send_model::optional_tags_value(tags);
+        let vpc_id = vpc_id.into_inner();
 
         // Create Route Table
         let req = self.ec2_client.create_route_table().configure(|builder| {
@@ -82,7 +86,7 @@ impl AwsProvider {
         self.finish_tagged_ec2_create(
             resource,
             attempt,
-            Ec2TaggedResourceKind::RouteTable.create_context(client_token, sent),
+            TaggedEc2Create::RouteTable.create_context(client_token, sent),
             result,
             |output| {
                 output

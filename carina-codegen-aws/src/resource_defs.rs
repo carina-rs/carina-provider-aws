@@ -66,11 +66,24 @@ impl ReadDisposition {
 /// Whether a writable schema attribute is part of the provider's AWS send
 /// contract.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SendVia {
+    /// The value is carried by the create request whose acceptance establishes
+    /// core's `Sent` provenance.
+    CreateRequest,
+    /// The value is carried by a mutation after the create request has been
+    /// accepted. It is still part of the typed send contract, but must not be
+    /// recorded in the create attempt's `Sent` value.
+    FollowUp,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SendDisposition {
-    /// The hand-written create path sends this attribute. When the attribute
-    /// is not create-only, the hand-written update path sends it too.
+    /// The hand-written create path sends this attribute through the declared
+    /// phase. When the attribute is not create-only, the hand-written update
+    /// path sends it too.
     Sent {
         field: &'static str,
+        via: SendVia,
         /// Additional normalized request-side names accepted by the generic
         /// capture test when Smithy serializes this member under a nested or
         /// operation-specific name instead of its schema `provider_name`.
@@ -90,6 +103,7 @@ impl SendDisposition {
     pub const fn sent(field: &'static str) -> Self {
         Self::Sent {
             field,
+            via: SendVia::CreateRequest,
             capture_names: &[],
         }
     }
@@ -97,6 +111,26 @@ impl SendDisposition {
     pub const fn sent_mapped(field: &'static str, capture_names: &'static [&'static str]) -> Self {
         Self::Sent {
             field,
+            via: SendVia::CreateRequest,
+            capture_names,
+        }
+    }
+
+    pub const fn follow_up(field: &'static str) -> Self {
+        Self::Sent {
+            field,
+            via: SendVia::FollowUp,
+            capture_names: &[],
+        }
+    }
+
+    pub const fn follow_up_mapped(
+        field: &'static str,
+        capture_names: &'static [&'static str],
+    ) -> Self {
+        Self::Sent {
+            field,
+            via: SendVia::FollowUp,
             capture_names,
         }
     }
@@ -111,6 +145,13 @@ impl SendDisposition {
         match self {
             Self::Sent { capture_names, .. } => capture_names,
             Self::NotSent { .. } => &[],
+        }
+    }
+
+    pub const fn via(self) -> Option<SendVia> {
+        match self {
+            Self::Sent { via, .. } => Some(via),
+            Self::NotSent { .. } => None,
         }
     }
 }
@@ -282,33 +323,39 @@ impl ResourceDef {
         match self.name {
             "ec2.Vpc" => sent(&[
                 "CidrBlock",
-                "EnableDnsHostnames",
-                "EnableDnsSupport",
                 "InstanceTenancy",
                 "Ipv4IpamPoolId",
                 "Ipv4NetmaskLength",
                 "Tags",
-            ]),
+            ])
+            .into_iter()
+            .chain([
+                SendDisposition::follow_up("EnableDnsHostnames"),
+                SendDisposition::follow_up("EnableDnsSupport"),
+            ])
+            .collect(),
             "ec2.Subnet" => {
                 let mut dispositions = sent(&[
-                    "AssignIpv6AddressOnCreation",
                     "AvailabilityZone",
                     "AvailabilityZoneId",
                     "CidrBlock",
-                    "EnableDns64",
-                    "EnableLniAtDeviceIndex",
                     "Ipv4IpamPoolId",
                     "Ipv4NetmaskLength",
                     "Ipv6CidrBlock",
                     "Ipv6IpamPoolId",
                     "Ipv6Native",
                     "Ipv6NetmaskLength",
-                    "MapPublicIpOnLaunch",
                     "OutpostArn",
                     "VpcId",
                     "Tags",
                 ]);
-                dispositions.push(SendDisposition::sent_mapped(
+                dispositions.extend([
+                    SendDisposition::follow_up("AssignIpv6AddressOnCreation"),
+                    SendDisposition::follow_up("EnableDns64"),
+                    SendDisposition::follow_up("EnableLniAtDeviceIndex"),
+                    SendDisposition::follow_up("MapPublicIpOnLaunch"),
+                ]);
+                dispositions.push(SendDisposition::follow_up_mapped(
                     "PrivateDnsNameOptionsOnLaunch",
                     &[
                         "HostnameType",
@@ -318,7 +365,10 @@ impl ResourceDef {
                 ));
                 dispositions
             }
-            "ec2.InternetGateway" => sent(&["VpcId", "Tags"]),
+            "ec2.InternetGateway" => sent(&["Tags"])
+                .into_iter()
+                .chain([SendDisposition::follow_up("VpcId")])
+                .collect(),
             "ec2.RouteTable" => sent(&["VpcId", "Tags"]),
             "ec2.Route" => sent(&[
                 "DestinationCidrBlock",
@@ -459,11 +509,24 @@ impl ResourceDef {
                 "RoleName",
                 "Tags",
             ]),
-            "s3.Bucket" => sent(&["Bucket", "BucketNamespace", "Tags"]),
+            "s3.Bucket" => sent(&["Bucket"])
+                .into_iter()
+                .chain([
+                    SendDisposition::sent_mapped(
+                        "BucketNamespace",
+                        &["header:x-amz-bucket-namespace"],
+                    ),
+                    SendDisposition::follow_up("Tags"),
+                ])
+                .collect(),
             "s3.BucketPolicy" => sent(&["Bucket", "Policy"]),
             "s3.BucketVersioning" => sent(&["Bucket", "Status"]),
             "s3.BucketObjectLockConfiguration" => sent(&["Bucket", "ObjectLockEnabled", "Rule"]),
-            "s3.BucketAcl" => sent(&["ACL", "Bucket"]),
+            "s3.BucketAcl" => {
+                let mut dispositions = sent(&["Bucket"]);
+                dispositions.push(SendDisposition::sent_mapped("ACL", &["header:x-amz-acl"]));
+                dispositions
+            }
             "s3.BucketOwnershipControls" => sent(&["Bucket", "ObjectOwnership"]),
             "s3.BucketServerSideEncryptionConfiguration" => {
                 let mut dispositions = sent(&["Bucket"]);
@@ -492,8 +555,12 @@ impl ResourceDef {
                 dispositions
             }
             "s3.BucketNotificationConfiguration" => {
-                let mut dispositions = sent(&["Bucket", "EventBridgeConfiguration"]);
+                let mut dispositions = sent(&["Bucket"]);
                 dispositions.extend([
+                    SendDisposition::sent_mapped(
+                        "EventBridgeConfiguration",
+                        &["presence:EventBridgeConfiguration"],
+                    ),
                     SendDisposition::sent_mapped("TopicConfigurations", &["TopicConfiguration"]),
                     SendDisposition::sent_mapped("QueueConfigurations", &["QueueConfiguration"]),
                     SendDisposition::sent_mapped(
@@ -544,9 +611,11 @@ impl ResourceDef {
                 "KmsKeyId",
                 "LogGroupClass",
                 "LogGroupName",
-                "RetentionInDays",
                 "Tags",
-            ]),
+            ])
+            .into_iter()
+            .chain([SendDisposition::follow_up("RetentionInDays")])
+            .collect(),
             "sqs.Queue" => sent(&[
                 "QueueName",
                 "Policy",
@@ -1691,7 +1760,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             }],
             identifier: "VpcEndpointId",
             has_tags: true,
-            type_overrides: vec![],
+            type_overrides: vec![("PolicyDocument", "super::iam_policy_document()")],
             exclude_fields: vec![
                 "DryRun",
                 "TagSpecifications",
@@ -3059,10 +3128,37 @@ pub fn acm_resources() -> Vec<ResourceDef> {
         update_ops: vec![],
         identifier: "CertificateArn",
         has_tags: true,
-        type_overrides: vec![(
-            "SubjectAlternativeNames",
-            "AttributeType::unordered_list(AttributeType::string())",
-        )],
+        type_overrides: vec![
+            (
+                "SubjectAlternativeNames",
+                "AttributeType::unordered_list(AttributeType::string())",
+            ),
+            // Nested-field omission: the pinned aws-sdk-acm CertificateOptions
+            // has no ValidationMethod member, so the provider cannot send it;
+            // revisit when aws-sdk-acm is upgraded.
+            (
+                "Options",
+                "AttributeType::struct_(\
+                    \"CertificateOptions\".to_string(),\
+                    vec![\
+                    StructField::optional(\"certificate_transparency_logging_preference\", AttributeType::enum_(\
+                        carina_core::schema::enum_identity(\"CertificateTransparencyLoggingPreference\", Some(\"aws.acm.Certificate.CertificateOptions\")),\
+                        Some(vec![\"DISABLED\".to_string(), \"ENABLED\".to_string()]),\
+                        vec![(\"DISABLED\".to_string(), \"disabled\".to_string()), (\"ENABLED\".to_string(), \"enabled\".to_string())],\
+                        None,\
+                        None,\
+                    )).with_description(\"This parameter has been deprecated. Certificate transparency logging opt-out is no longer available. All public certificates are recorded in a certifi...\").with_provider_name(\"CertificateTransparencyLoggingPreference\").build(),\
+                    StructField::optional(\"export\", AttributeType::enum_(\
+                        carina_core::schema::enum_identity(\"Export\", Some(\"aws.acm.Certificate.CertificateOptions\")),\
+                        Some(vec![\"DISABLED\".to_string(), \"ENABLED\".to_string()]),\
+                        vec![(\"DISABLED\".to_string(), \"disabled\".to_string()), (\"ENABLED\".to_string(), \"enabled\".to_string())],\
+                        None,\
+                        None,\
+                    )).with_description(\"You can opt in to allow the export of your certificates by specifying ENABLED. You cannot update the value of Export after the the certificate is crea...\").with_provider_name(\"Export\").build()\
+                    ],\
+                )",
+            ),
+        ],
         exclude_fields: vec![
             // Imported / private-CA flows are out of scope for the
             // initial cut. The wait construct is the validation path,

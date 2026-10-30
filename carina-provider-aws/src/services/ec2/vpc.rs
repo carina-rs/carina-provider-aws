@@ -6,10 +6,8 @@ use carina_core::schema::ResourceSchema;
 use crate::AwsProvider;
 use crate::aws_operation::ClientToken;
 use crate::error_helpers::api_error_with_meta;
-use crate::helpers::{
-    RetryPolicy, build_tag_specification_with_create_token, optional_bool_attr, retry_aws_operation,
-};
-use crate::provider::{AwsCreateAttempt, Ec2TaggedResourceKind, TaggedEc2CreateContinuationInput};
+use crate::helpers::{RetryPolicy, build_tag_specification_with_create_token, retry_aws_operation};
+use crate::provider::{AwsCreateAttempt, TaggedEc2Create};
 use crate::read_model::{empty_map_value, found_managed_read};
 use crate::read_models_generated::Ec2VpcReadModelSupplement;
 use crate::send_models_generated::{Ec2VpcCreateInput, Ec2VpcUpdateInput};
@@ -147,7 +145,7 @@ impl AwsProvider {
             Err(error) => return Err(attempt.untracked(error)),
         };
         let sent = input.sent();
-        let (
+        let crate::send_models_generated::Ec2VpcCreateParts {
             cidr_block,
             enable_dns_hostnames,
             enable_dns_support,
@@ -155,7 +153,15 @@ impl AwsProvider {
             ipv4_ipam_pool_id,
             ipv4_netmask_length,
             tags,
-        ) = input.into_parts();
+        } = input.into_parts();
+        let cidr_block = cidr_block.into_inner();
+        let enable_dns_hostnames = enable_dns_hostnames.into_inner();
+        let enable_dns_support = enable_dns_support.into_inner();
+        let instance_tenancy = instance_tenancy.into_inner();
+        let ipv4_ipam_pool_id = ipv4_ipam_pool_id.into_inner();
+        let ipv4_netmask_length = ipv4_netmask_length.into_inner();
+        let tags = tags.into_inner();
+        let tags = crate::send_model::optional_tags_value(tags);
 
         if let Err(error) = validate_vpc_cidr_source(
             &resource.id,
@@ -211,28 +217,13 @@ impl AwsProvider {
         self.finish_tagged_ec2_create(
             resource,
             attempt,
-            Ec2TaggedResourceKind::Vpc
-                .create_context(client_token, sent)
-                .with_continuation(TaggedEc2CreateContinuationInput::Vpc {
-                    enable_dns_hostnames,
-                    enable_dns_support,
-                }),
+            TaggedEc2Create::Vpc {
+                enable_dns_hostnames,
+                enable_dns_support,
+            }
+            .create_context(client_token, sent),
             result,
             |output| output.vpc().and_then(|vpc| vpc.vpc_id()).map(str::to_owned),
-        )
-        .await
-    }
-
-    pub(crate) async fn continue_ec2_vpc_create(
-        &self,
-        resource: &Resource<impl Sized>,
-        vpc_id: &str,
-    ) -> ProviderResult<()> {
-        self.continue_ec2_vpc_create_with(
-            &resource.id,
-            vpc_id,
-            optional_bool_attr(resource, "enable_dns_hostnames"),
-            optional_bool_attr(resource, "enable_dns_support"),
         )
         .await
     }
@@ -295,7 +286,15 @@ impl AwsProvider {
         _schema: &ResourceSchema,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
         let input = Ec2VpcUpdateInput::decode(&to)?;
-        let (enable_dns_hostnames, enable_dns_support, tags) = input.into_parts();
+        let crate::send_models_generated::Ec2VpcUpdateParts {
+            enable_dns_hostnames,
+            enable_dns_support,
+            tags,
+        } = input.into_parts();
+        let enable_dns_hostnames = enable_dns_hostnames.into_inner();
+        let enable_dns_support = enable_dns_support.into_inner();
+        let tags = tags.into_inner();
+        let tags = crate::send_model::optional_tags_value(tags);
         // identifier is the VPC ID (e.g., vpc-12345678)
         let vpc_id = identifier.to_string();
 

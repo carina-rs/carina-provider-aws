@@ -56,7 +56,9 @@ impl AwsProvider {
     ) -> ProviderResult<TypedCreateCompletion> {
         let input = OrganizationsOrganizationCreateInput::decode(resource)?;
         let sent = input.sent();
-        let (feature_set,) = input.into_parts();
+        let crate::send_models_generated::OrganizationsOrganizationCreateParts { feature_set } =
+            input.into_parts();
+        let feature_set = feature_set.into_inner();
         let mut req = self.organizations_client.create_organization();
 
         if let Some(feature_set) = feature_set {

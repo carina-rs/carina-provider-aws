@@ -72,7 +72,16 @@ impl AwsProvider {
     ) -> ProviderResult<TypedCreateCompletion> {
         let input = S3BucketLoggingCreateInput::decode(resource)?;
         let sent = input.sent();
-        let (bucket, target_bucket, target_object_key_format, target_prefix) = input.into_parts();
+        let crate::send_models_generated::S3BucketLoggingCreateParts {
+            bucket,
+            target_bucket,
+            target_object_key_format,
+            target_prefix,
+        } = input.into_parts();
+        let bucket = bucket.into_inner();
+        let target_bucket = target_bucket.into_inner();
+        let target_object_key_format = target_object_key_format.into_inner();
+        let target_prefix = target_prefix.into_inner();
         let identifier =
             crate::helpers::applied_identifier(&resource.id, "s3.PutBucketLogging", bucket)?;
         let outcome = self
@@ -105,7 +114,14 @@ impl AwsProvider {
         schema: &ResourceSchema,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
         let input = S3BucketLoggingUpdateInput::decode(&to)?;
-        let (target_bucket, target_object_key_format, target_prefix) = input.into_parts();
+        let crate::send_models_generated::S3BucketLoggingUpdateParts {
+            target_bucket,
+            target_object_key_format,
+            target_prefix,
+        } = input.into_parts();
+        let target_bucket = target_bucket.into_inner();
+        let target_object_key_format = target_object_key_format.into_inner();
+        let target_prefix = target_prefix.into_inner();
         self.put_s3_bucket_logging(
             &id,
             identifier,

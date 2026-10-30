@@ -109,18 +109,17 @@ fn extract_string(value: &Value) -> Option<&str> {
     }
 }
 
-fn build_resource_records(records: &[Value]) -> Vec<ResourceRecord> {
+fn build_resource_records(
+    records: &[String],
+    id: &ResourceId,
+) -> ProviderResult<Vec<ResourceRecord>> {
     records
         .iter()
-        .filter_map(|v| {
-            if let Value::Concrete(ConcreteValue::String(s)) = v {
-                ResourceRecord::builder()
-                    .value(s.expose_plaintext())
-                    .build()
-                    .ok()
-            } else {
-                None
-            }
+        .map(|value| {
+            ResourceRecord::builder().value(value).build().map_err(|e| {
+                ProviderError::api_error(sdk_error_message("Invalid resource record", &e))
+                    .for_resource(id.clone())
+            })
         })
         .collect()
 }
@@ -164,7 +163,7 @@ fn build_record_set(
     id: &ResourceId,
     alias_target: Option<&Value>,
     name: &str,
-    resource_records: Option<&Value>,
+    resource_records: Option<&[String]>,
     ttl: Option<i64>,
     record_type: &str,
 ) -> ProviderResult<ResourceRecordSet> {
@@ -176,8 +175,8 @@ fn build_record_set(
         builder = builder.ttl(ttl);
     }
 
-    if let Some(Value::Concrete(ConcreteValue::List(records))) = resource_records {
-        builder = builder.set_resource_records(Some(build_resource_records(records)));
+    if let Some(records) = resource_records {
+        builder = builder.set_resource_records(Some(build_resource_records(records, id)?));
     }
 
     if let Some(Value::Concrete(ConcreteValue::Map(alias))) = alias_target {
@@ -355,14 +354,26 @@ impl AwsProvider {
     ) -> ProviderResult<TypedCreateCompletion> {
         let input = Route53RecordSetCreateInput::decode(resource)?;
         let sent = input.sent();
-        let (alias_target, hosted_zone_id, name, resource_records, ttl, record_type) =
-            input.into_parts();
+        let crate::send_models_generated::Route53RecordSetCreateParts {
+            alias_target,
+            hosted_zone_id,
+            name,
+            resource_records,
+            ttl,
+            r#type: record_type,
+        } = input.into_parts();
+        let alias_target = alias_target.into_inner();
+        let hosted_zone_id = hosted_zone_id.into_inner();
+        let name = name.into_inner();
+        let resource_records = resource_records.into_inner();
+        let ttl = ttl.into_inner();
+        let record_type = record_type.into_inner();
 
         let record_set = build_record_set(
             &resource.id,
             alias_target.as_ref(),
             &name,
-            resource_records.as_ref(),
+            resource_records.as_deref(),
             ttl,
             &record_type,
         )?;
@@ -403,7 +414,16 @@ impl AwsProvider {
         _schema: &ResourceSchema,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
         let input = Route53RecordSetUpdateInput::decode(&to)?;
-        let (alias_target, resource_records, ttl, record_type) = input.into_parts();
+        let crate::send_models_generated::Route53RecordSetUpdateParts {
+            alias_target,
+            resource_records,
+            ttl,
+            r#type: record_type,
+        } = input.into_parts();
+        let alias_target = alias_target.into_inner();
+        let resource_records = resource_records.into_inner();
+        let ttl = ttl.into_inner();
+        let record_type = record_type.into_inner();
         let Some((hosted_zone_id, name, _current_record_type)) =
             parse_identifier(identifier.as_str())
         else {
@@ -418,7 +438,7 @@ impl AwsProvider {
             &id,
             alias_target.as_ref(),
             name,
-            resource_records.as_ref(),
+            resource_records.as_deref(),
             ttl,
             &record_type,
         )?;
@@ -477,7 +497,19 @@ impl AwsProvider {
         if let Some(Value::Concrete(ConcreteValue::List(records))) =
             current_attributes.get("resource_records")
         {
-            builder = builder.set_resource_records(Some(build_resource_records(records)));
+            let records = records
+                .iter()
+                .map(|record| match record {
+                    Value::Concrete(ConcreteValue::String(record)) => {
+                        Ok(record.expose_plaintext().to_string())
+                    }
+                    _ => Err(ProviderError::internal(
+                        "read state resource_records contained a non-string value",
+                    )
+                    .for_resource(id.clone())),
+                })
+                .collect::<ProviderResult<Vec<_>>>()?;
+            builder = builder.set_resource_records(Some(build_resource_records(&records, &id)?));
         }
 
         if let Some(Value::Concrete(ConcreteValue::Map(alias))) =
@@ -613,14 +645,26 @@ mod tests {
         );
         r.set_attr("type".to_string(), canonical);
         let input = Route53RecordSetCreateInput::decode(&r).expect("decode typed create input");
-        let (alias_target, hosted_zone_id, name, resource_records, ttl, record_type) =
-            input.into_parts();
+        let crate::send_models_generated::Route53RecordSetCreateParts {
+            alias_target,
+            hosted_zone_id,
+            name,
+            resource_records,
+            ttl,
+            r#type: record_type,
+        } = input.into_parts();
+        let alias_target = alias_target.into_inner();
+        let hosted_zone_id = hosted_zone_id.into_inner();
+        let name = name.into_inner();
+        let resource_records = resource_records.into_inner();
+        let ttl = ttl.into_inner();
+        let record_type = record_type.into_inner();
         assert_eq!(hosted_zone_id, "Z123");
         let record_set = build_record_set(
             &r.id,
             alias_target.as_ref(),
             &name,
-            resource_records.as_ref(),
+            resource_records.as_deref(),
             ttl,
             &record_type,
         )
