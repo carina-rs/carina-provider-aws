@@ -162,75 +162,254 @@ fn s3_lifecycle_date_type(identity: TypeIdentity) -> AttributeType {
     )
 }
 
-macro_rules! define_aws_types {
+fn aws_identity(segments: &[&str], kind: &str) -> TypeIdentity {
+    if let [service, resource] = segments {
+        crate::common::provider_type(service, resource, kind)
+    } else {
+        crate::common::provider_bare_type(segments, kind)
+    }
+}
+
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __carina_aws_catalog_identity {
     (
-        $(
-            $(#[$meta:meta])*
-            $variant:ident => $wrapper:ident {
-                segments: [$($segment:literal),* $(,)?],
-                kind: $kind:literal,
-                valid_sample: $valid_sample:literal,
-                has_validator: $has_validator:literal,
-                constructor: $constructor:expr $(,)?
-            }
-        ),* $(,)?
+        $identity_constructor:expr;
+        segments: [$($segment:literal),* $(,)?],
+        kind: $kind:literal,
+    ) => {{
+        let segments: &[&str] = &[$($segment),*];
+        ($identity_constructor)(segments, $kind)
+    }};
+    (
+        $identity_constructor:expr;
+        refines: $refined_type:path,
     ) => {
-        /// Every reusable AWS identity currently declared by this crate.
+        ($refined_type).identity()
+    };
+}
+
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __carina_aws_catalog_valid_sample {
+    (valid_sample: $valid_sample:literal,) => {
+        $valid_sample
+    };
+    (refines: $refined_type:path,) => {
+        ($refined_type).valid_sample()
+    };
+}
+
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __carina_aws_catalog_refines {
+    () => {
+        None
+    };
+    (refines: $refined_type:path,) => {
+        Some($refined_type)
+    };
+}
+
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __carina_aws_catalog_allowed_int_values {
+    () => {
+        None
+    };
+    (values: [$($value:literal),+ $(,)?],) => {
+        Some(&[$($value),+])
+    };
+}
+
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __carina_aws_catalog_has_validator {
+    () => {
+        false
+    };
+    (has_validator: $has_validator:literal,) => {
+        $has_validator
+    };
+}
+
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __carina_aws_catalog_attribute_type {
+    (
+        $constructor:expr;
+        identity: $identity:expr,
+    ) => {
+        ($constructor)($identity)
+    };
+    (
+        $constructor:expr;
+        identity: $identity:expr,
+        values: [$($value:literal),+ $(,)?],
+    ) => {
+        ($constructor)($identity, &[$($value),+])
+    };
+}
+
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __carina_aws_catalog_constructor_path {
+    (
+        visibility: $visibility:vis,
+        catalog: $catalog:ident,
+        rows: {$($variant:ident => $wrapper:ident),* $(,)?},
+    ) => {};
+    (
+        constructor_path_prefix: $constructor_path_prefix:literal,
+        visibility: $visibility:vis,
+        catalog: $catalog:ident,
+        rows: {$($variant:ident => $wrapper:ident),* $(,)?},
+    ) => {
+        impl $catalog {
+            /// Rust constructor expression emitted by schema codegen.
+            $visibility const fn constructor_path(self) -> &'static str {
+                match self {
+                    $(Self::$variant => concat!(
+                        $constructor_path_prefix,
+                        stringify!($wrapper),
+                        "()",
+                    )),*
+                }
+            }
+        }
+    };
+}
+
+/// Defines a closed catalog of identity-bearing AWS attribute types.
+///
+/// Each row uses the same grammar. An own-identity row supplies `segments`,
+/// `kind`, and `valid_sample`; a refinement supplies `refines`; and an integer
+/// enum additionally supplies `values`. `has_validator` is optional and
+/// defaults to `false`. `constructor_path_prefix` is optional at catalog level;
+/// when present, the macro generates `constructor_path()` by appending the row's
+/// wrapper name and `()` to that literal prefix.
+///
+/// The fields are intentionally captured once in this matcher. To add a future
+/// optional per-row field such as `reference_form`, add one optional capture
+/// beside the existing fields and generate its accessor here. Only rows that set
+/// the field then need to change; downstream catalogs keep using this macro.
+#[macro_export]
+macro_rules! define_aws_type_catalog {
+    (
+        $(#[$catalog_meta:meta])*
+        $visibility:vis enum $catalog:ident {
+            identity_constructor: $identity_constructor:expr,
+            refinement_type: $refinement_type:ty,
+            $(constructor_path_prefix: $constructor_path_prefix:literal,)?
+            rows: {
+                $(
+                    $(#[$row_meta:meta])*
+                    $variant:ident => $wrapper:ident {
+                        $(segments: [$($segment:literal),* $(,)?],)?
+                        $(kind: $kind:literal,)?
+                        $(refines: $refined_type:path,)?
+                        $(valid_sample: $valid_sample:literal,)?
+                        $(values: [$($int_value:literal),+ $(,)?],)?
+                        $(has_validator: $has_validator:literal,)?
+                        constructor: $constructor:expr $(,)?
+                    }
+                ),* $(,)?
+            }
+        }
+    ) => {
+        $(#[$catalog_meta])*
         #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-        pub enum AwsType {
+        $visibility enum $catalog {
             $($variant),*
         }
 
-        impl AwsType {
+        impl $catalog {
             /// Closed enumeration of the catalog rows.
             pub const ALL: &'static [Self] = &[$(Self::$variant),*];
 
             /// Structured identity declared by this row.
-            pub fn identity(self) -> TypeIdentity {
+            pub fn identity(self) -> $crate::__private::TypeIdentity {
                 match self {
-                    $(Self::$variant => {
-                        let segments: &[&str] = &[$($segment),*];
-                        if let [service, resource] = segments {
-                            crate::common::provider_type(service, resource, $kind)
-                        } else {
-                            crate::common::provider_bare_type(segments, $kind)
-                        }
-                    }),*
+                    $(Self::$variant => $crate::__carina_aws_catalog_identity!(
+                        $identity_constructor;
+                        $(segments: [$($segment),*],)?
+                        $(kind: $kind,)?
+                        $(refines: $refined_type,)?
+                    )),*
+                }
+            }
+
+            /// Catalog row whose identity and valid sample this row refines.
+            pub const fn refines(self) -> Option<$refinement_type> {
+                match self {
+                    $(Self::$variant => $crate::__carina_aws_catalog_refines!(
+                        $(refines: $refined_type,)?
+                    )),*
                 }
             }
 
             /// Known-valid provider-facing value for this row.
             pub const fn valid_sample(self) -> &'static str {
                 match self {
-                    $(Self::$variant => $valid_sample),*
+                    $(Self::$variant => $crate::__carina_aws_catalog_valid_sample!(
+                        $(refines: $refined_type,)?
+                        $(valid_sample: $valid_sample,)?
+                    )),*
+                }
+            }
+
+            /// Allowed values for an integer-enum row.
+            pub const fn allowed_int_values(self) -> Option<&'static [i64]> {
+                match self {
+                    $(Self::$variant => $crate::__carina_aws_catalog_allowed_int_values!(
+                        $(values: [$($int_value),+],)?
+                    )),*
                 }
             }
 
             /// Whether this row's constructor carries a custom validator.
             pub const fn has_validator(self) -> bool {
                 match self {
-                    $(Self::$variant => $has_validator),*
+                    $(Self::$variant => $crate::__carina_aws_catalog_has_validator!(
+                        $(has_validator: $has_validator,)?
+                    )),*
                 }
             }
 
             /// Construct this row's identity-bearing attribute type.
-            pub fn attribute_type(self) -> AttributeType {
+            pub fn attribute_type(self) -> $crate::__private::AttributeType {
                 match self {
-                    $(Self::$variant => ($constructor)(self.identity())),*
+                    $(Self::$variant => $crate::__carina_aws_catalog_attribute_type!(
+                        $constructor;
+                        identity: self.identity(),
+                        $(values: [$($int_value),+],)?
+                    )),*
                 }
             }
         }
 
+        $crate::__carina_aws_catalog_constructor_path! {
+            $(constructor_path_prefix: $constructor_path_prefix,)?
+            visibility: $visibility,
+            catalog: $catalog,
+            rows: {$($variant => $wrapper),*},
+        }
+
         $(
-            $(#[$meta])*
-            pub fn $wrapper() -> AttributeType {
-                AwsType::$variant.attribute_type()
+            $(#[$row_meta])*
+            $visibility fn $wrapper() -> $crate::__private::AttributeType {
+                $catalog::$variant.attribute_type()
             }
         )*
     };
 }
 
-define_aws_types! {
+define_aws_type_catalog! {
+    /// Every reusable AWS identity currently declared by this crate.
+    pub enum AwsType {
+        identity_constructor: aws_identity,
+        refinement_type: AwsType,
+        rows: {
     /// Generic AWS ARN.
     Arn => arn {
         segments: [],
@@ -725,6 +904,8 @@ define_aws_types! {
         has_validator: true,
         constructor: |identity| prefixed_resource_id(identity, "sgr"),
     },
+        }
+    }
 }
 
 #[cfg(test)]
@@ -734,6 +915,62 @@ mod tests {
     use carina_core::schema::{CustomValidator, RawShape};
 
     use super::*;
+
+    fn test_catalog_identity(segments: &[&str], kind: &str) -> TypeIdentity {
+        TypeIdentity {
+            provider: Some("test".to_string()),
+            segments: segments
+                .iter()
+                .map(|segment| (*segment).to_string())
+                .collect(),
+            kind: kind.to_string(),
+        }
+    }
+
+    fn test_string_constructor(identity: TypeIdentity) -> AttributeType {
+        metadata_string(identity, ".*", None)
+    }
+
+    fn test_int_constructor(
+        identity: TypeIdentity,
+        _allowed_values: &'static [i64],
+    ) -> AttributeType {
+        metadata_string(identity, "^[0-9]+$", None)
+    }
+
+    crate::define_aws_type_catalog! {
+        enum TestCatalog {
+            identity_constructor: test_catalog_identity,
+            refinement_type: TestCatalog,
+            constructor_path_prefix: "test::catalog::",
+            rows: {
+                Own => test_own {
+                    segments: ["service", "Resource"],
+                    kind: "Name",
+                    valid_sample: "example",
+                    constructor: test_string_constructor,
+                },
+                ValidatedOwn => test_validated_own {
+                    segments: ["service", "ValidatedResource"],
+                    kind: "Name",
+                    valid_sample: "validated-example",
+                    has_validator: true,
+                    constructor: test_string_constructor,
+                },
+                Refinement => test_refinement {
+                    refines: TestCatalog::Own,
+                    constructor: test_string_constructor,
+                },
+                IntEnum => test_int_enum {
+                    segments: ["service", "Resource"],
+                    kind: "Count",
+                    valid_sample: "7",
+                    values: [7, 9],
+                    constructor: test_int_constructor,
+                },
+            }
+        }
+    }
 
     fn attribute_type_identity(attribute_type: &AttributeType) -> &TypeIdentity {
         match attribute_type.raw_shape() {
@@ -876,5 +1113,126 @@ mod tests {
                 "{noncanonical} must be rejected before an S3 request is built"
             );
         }
+    }
+
+    #[test]
+    fn catalog_metadata_snapshot() {
+        const EXPECTED: &str = r#"Arn|aws||Arn|arn:aws:s3:::example-bucket|true
+ResourceId|aws||ResourceId|resource-12345678|true
+AccountId|aws||AccountId|123456789012|true
+Region|aws||Region|ap-northeast-1|true
+AvailabilityZone|aws|AvailabilityZone|ZoneName|ap-northeast-1a|true
+AvailabilityZoneId|aws|AvailabilityZone|ZoneId|use1-az1|true
+S3LifecycleDate|aws|s3/BucketLifecycleConfiguration|LifecycleDate|2026-01-01T00:00:00Z|true
+IamRoleId|aws|iam/Role|Id|AROA1234567890EXAMPLE|true
+IamRoleArn|aws|iam/Role|Arn|arn:aws:iam::123456789012:role/example-role|true
+IamPolicyArn|aws|iam/Policy|Arn|arn:aws:iam::123456789012:policy/example-policy|true
+IamOidcProviderArn|aws|iam/OidcProvider|Arn|arn:aws:iam::123456789012:oidc-provider/example.com|false
+KmsKeyId|aws|kms/Key|Id|12345678-1234-1234-1234-123456789abc|true
+KmsKeyArn|aws|kms/Key|Arn|arn:aws:kms:ap-northeast-1:123456789012:key/12345678-1234-1234-1234-123456789abc|true
+IpamPoolId|aws|ec2/IpamPool|Id|ipam-pool-12345678|true
+Route53HostedZoneId|aws|route53/HostedZone|Id|Z2FDTNDATAQYW2|false
+IdentityStoreId|aws|identitystore/Store|Id|d-1234567890|false
+SsoPrincipalId|aws|sso/Principal|Id|12345678-1234-1234-1234-123456789abc|false
+SsoInstanceArn|aws|sso/Instance|Arn|arn:aws:sso:::instance/ssoins-1234567890abcdef|false
+SsoPermissionSetArn|aws|sso/PermissionSet|Arn|arn:aws:sso:::permissionSet/ssoins-1234567890abcdef/ps-1234567890abcdef|false
+S3Grantee|aws|s3|Grantee|id=canonical-user-id|false
+CloudFrontHostedZoneId|aws|cloudfront|HostedZoneId|Z2FDTNDATAQYW2|false
+S3BucketArn|aws|s3/Bucket|Arn|arn:aws:s3:::example-bucket|false
+StsCallerIdentityArn|aws|sts/CallerIdentity|Arn|arn:aws:sts::123456789012:assumed-role/example-role/example-session|false
+OrganizationsAccountArn|aws|organizations/Account|Arn|arn:aws:organizations::123456789012:account/o-example/123456789012|false
+OrganizationsOrganizationArn|aws|organizations/Organization|Arn|arn:aws:organizations::123456789012:organization/o-example|false
+VpcId|aws|ec2/Vpc|Id|vpc-12345678|true
+SubnetId|aws|ec2/Subnet|Id|subnet-12345678|true
+SecurityGroupId|aws|ec2/SecurityGroup|Id|sg-12345678|true
+InternetGatewayId|aws|ec2/InternetGateway|Id|igw-12345678|true
+RouteTableId|aws|ec2/RouteTable|Id|rtb-12345678|true
+NatGatewayId|aws|ec2/NatGateway|Id|nat-12345678|true
+VpcPeeringConnectionId|aws|ec2/VpcPeeringConnection|Id|pcx-12345678|true
+TransitGatewayId|aws|ec2/TransitGateway|Id|tgw-12345678|true
+VpcCidrBlockAssociationId|aws|ec2/VpcCidrBlockAssociation|Id|vpc-cidr-assoc-12345678|true
+TransitGatewayRouteTableId|aws|ec2/TransitGatewayRouteTable|Id|tgw-rtb-12345678|true
+VpnGatewayId|aws|ec2/VpnGateway|Id|vgw-12345678|true
+EgressOnlyInternetGatewayId|aws|ec2/EgressOnlyInternetGateway|Id|eigw-12345678|true
+VpcEndpointId|aws|ec2/VpcEndpoint|Id|vpce-12345678|true
+InstanceId|aws|ec2/Instance|Id|i-12345678|true
+NetworkInterfaceId|aws|ec2/NetworkInterface|Id|eni-12345678|true
+AllocationId|aws|ec2/Eip|AllocationId|eipalloc-12345678|true
+PrefixListId|aws|ec2/PrefixList|Id|pl-12345678|true
+CarrierGatewayId|aws|ec2/CarrierGateway|Id|cagw-12345678|true
+LocalGatewayId|aws|ec2/LocalGateway|Id|lgw-12345678|true
+NetworkAclId|aws|ec2/NetworkAcl|Id|acl-12345678|true
+TransitGatewayAttachmentId|aws|ec2/TransitGatewayAttachment|Id|tgw-attach-12345678|true
+FlowLogId|aws|ec2/FlowLog|Id|fl-12345678|true
+IpamId|aws|ec2/Ipam|Id|ipam-12345678|true
+SubnetRouteTableAssociationId|aws|ec2/SubnetRouteTableAssociation|Id|rtbassoc-12345678|true
+SecurityGroupRuleId|aws|ec2/SecurityGroupRule|Id|sgr-12345678|true"#;
+
+        let snapshot = AwsType::ALL
+            .iter()
+            .copied()
+            .map(|aws_type| {
+                let identity = aws_type.identity();
+                format!(
+                    "{aws_type:?}|{}|{}|{}|{}|{}",
+                    identity.provider.as_deref().unwrap_or("<none>"),
+                    identity.segments.join("/"),
+                    identity.kind,
+                    aws_type.valid_sample(),
+                    aws_type.has_validator(),
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert_eq!(snapshot, EXPECTED);
+    }
+
+    #[test]
+    fn exported_macro_supports_each_optional_row_field_present_and_absent() {
+        assert_eq!(
+            TestCatalog::ALL,
+            &[
+                TestCatalog::Own,
+                TestCatalog::ValidatedOwn,
+                TestCatalog::Refinement,
+                TestCatalog::IntEnum,
+            ]
+        );
+
+        assert_eq!(TestCatalog::Own.refines(), None);
+        assert_eq!(TestCatalog::Refinement.refines(), Some(TestCatalog::Own));
+        assert_eq!(TestCatalog::Refinement.valid_sample(), "example");
+        assert_eq!(TestCatalog::Own.allowed_int_values(), None);
+        assert_eq!(TestCatalog::IntEnum.allowed_int_values(), Some(&[7, 9][..]));
+        assert!(!TestCatalog::Own.has_validator());
+        assert!(TestCatalog::ValidatedOwn.has_validator());
+        assert_eq!(
+            TestCatalog::Refinement.constructor_path(),
+            "test::catalog::test_refinement()"
+        );
+
+        let own_identity = TestCatalog::Own.identity();
+        assert_eq!(own_identity.provider.as_deref(), Some("test"));
+        assert_eq!(own_identity.segments, ["service", "Resource"]);
+        assert_eq!(own_identity.kind, "Name");
+        assert_eq!(TestCatalog::Refinement.identity(), own_identity);
+
+        assert_eq!(
+            attribute_type_identity(&test_own()),
+            &TestCatalog::Own.identity()
+        );
+        assert_eq!(
+            attribute_type_identity(&test_validated_own()),
+            &TestCatalog::ValidatedOwn.identity()
+        );
+        assert_eq!(
+            attribute_type_identity(&test_refinement()),
+            &TestCatalog::Refinement.identity()
+        );
+        assert_eq!(
+            attribute_type_identity(&test_int_enum()),
+            &TestCatalog::IntEnum.identity()
+        );
     }
 }
