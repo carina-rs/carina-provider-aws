@@ -11,13 +11,13 @@ use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
 use anyhow::{Context, Result};
-use carina_core::parser::{ProviderContext, parse_file};
 use carina_smithy::{Shape, ShapeKind, SmithyModel};
 use clap::{Parser, ValueEnum};
 use heck::{ToSnakeCase, ToUpperCamelCase};
 
 use carina_aws_types::{AwsType, dsl_enum_value};
 use carina_codegen_aws::resource_defs::{self, ReplacementClass, ResourceDef};
+use carina_docgen::example::{self, DocExample, ExampleKind};
 use carina_docgen::{Heading, PageBuilder, TableCell};
 
 const PLAIN_STRING_TYPE_CODE: &str = "AttributeType::string()";
@@ -588,105 +588,6 @@ fn markdown_example_dir_name(service: &str, page_stem: &str) -> String {
     format!("{service}_{page_stem}")
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum MarkdownExampleKind {
-    DataSource,
-    Resource,
-}
-
-impl MarkdownExampleKind {
-    fn description(self) -> &'static str {
-        match self {
-            Self::DataSource => "data source",
-            Self::Resource => "resource",
-        }
-    }
-
-    fn missing_expression(self, path: &Path, dsl_name: &str) -> anyhow::Error {
-        match self {
-            Self::DataSource => anyhow::anyhow!(
-                "Example {} does not read expected data source {dsl_name}",
-                path.display()
-            ),
-            Self::Resource => anyhow::anyhow!(
-                "Example {} does not declare expected resource {dsl_name}",
-                path.display()
-            ),
-        }
-    }
-}
-
-fn load_markdown_example(
-    examples_dir: &Path,
-    service: &str,
-    page_stem: &str,
-    page_dsl_name: &str,
-    kind: MarkdownExampleKind,
-) -> Result<String> {
-    let path = examples_dir
-        .join(markdown_example_dir_name(service, page_stem))
-        .join("main.crn");
-    let dsl_name = format!("aws.{page_dsl_name}");
-    let source = match std::fs::read_to_string(&path) {
-        Ok(source) => source,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            anyhow::bail!(
-                "Example file not found: {}; expected {} {dsl_name}",
-                path.display(),
-                kind.description()
-            )
-        }
-        Err(error) => {
-            return Err(error).with_context(|| format!("Failed to read {}", path.display()));
-        }
-    };
-    let example = preprocess_markdown_example(&source);
-    if example.trim().is_empty() {
-        anyhow::bail!(
-            "Example {} is empty after preprocessing; expected {} {dsl_name}",
-            path.display(),
-            kind.description()
-        );
-    }
-    require_documented_expression(&source, &path, &dsl_name, kind)?;
-
-    Ok(example)
-}
-
-fn require_documented_expression(
-    source: &str,
-    path: &Path,
-    expected_dsl_name: &str,
-    kind: MarkdownExampleKind,
-) -> Result<()> {
-    let parse_context = match kind {
-        MarkdownExampleKind::DataSource => format!(
-            "Example {} must parse and read data source {expected_dsl_name}",
-            path.display()
-        ),
-        MarkdownExampleKind::Resource => format!(
-            "Example {} must parse and declare resource {expected_dsl_name}",
-            path.display()
-        ),
-    };
-    let parsed = parse_file(source, path, &ProviderContext::default()).context(parse_context)?;
-    let matches = match kind {
-        MarkdownExampleKind::DataSource => parsed.data_sources.iter().any(|data_source| {
-            data_source.id.provider == "aws"
-                && data_source.id.resource_type == expected_dsl_name.trim_start_matches("aws.")
-        }),
-        MarkdownExampleKind::Resource => parsed.resources.iter().any(|resource| {
-            resource.id.provider == "aws"
-                && resource.id.resource_type == expected_dsl_name.trim_start_matches("aws.")
-        }),
-    };
-    if !matches {
-        return Err(kind.missing_expression(path, expected_dsl_name));
-    }
-
-    Ok(())
-}
-
 fn ensure_examples_match_rendered_pages(
     examples_dir: &Path,
     rendered_example_dirs: &HashSet<String>,
@@ -970,12 +871,12 @@ fn run_markdown(
         let (service, resource) = split_service_resource(res.name);
         let file_name = markdown_file_name(resource, false);
         let page_stem = file_name.trim_end_matches(".md");
-        let example = load_markdown_example(
+        let example = example::load(
             examples_dir,
-            service,
-            page_stem,
+            &markdown_example_dir_name(service, page_stem),
+            "aws",
             res.name,
-            MarkdownExampleKind::Resource,
+            ExampleKind::Resource,
         )?;
         let md = generate_markdown_resource(res, model, &example)
             .with_context(|| format!("generating docs for aws.{}", res.name))?;
@@ -992,12 +893,12 @@ fn run_markdown(
         let (service, resource) = split_service_resource(ds.name);
         let file_name = markdown_file_name(resource, true);
         let page_stem = file_name.trim_end_matches(".md");
-        let example = load_markdown_example(
+        let example = example::load(
             examples_dir,
-            service,
-            page_stem,
+            &markdown_example_dir_name(service, page_stem),
+            "aws",
             ds.name,
-            MarkdownExampleKind::DataSource,
+            ExampleKind::DataSource,
         )?;
         let md = generate_markdown_data_source(ds, model, &example)
             .with_context(|| format!("generating docs for aws.{}", ds.name))?;
@@ -5228,8 +5129,9 @@ struct MarkdownAttrInfo {
 fn generate_markdown_resource(
     res: &ResourceDef,
     model: &SmithyModel,
-    example: &str,
+    example: &DocExample,
 ) -> Result<String> {
+    example.ensure_matches("aws", res.name, ExampleKind::Resource)?;
     let ns = res.service_namespace;
     let namespace = format!("aws.{}", res.name);
 
@@ -5667,7 +5569,11 @@ fn generate_markdown_resource(
         .with_context(|| format!("generated invalid Markdown for aws.{}", res.name))
 }
 
-fn write_markdown_example(page: &mut PageBuilder<MarkdownTarget>, example: &str) -> Result<()> {
+fn write_markdown_example(
+    page: &mut PageBuilder<MarkdownTarget>,
+    example: &DocExample,
+) -> Result<()> {
+    let example = example.as_str();
     page.heading(Heading::plain(2, "Example"))?;
     page.push_str("```crn\n");
     page.push_str(example);
@@ -5676,33 +5582,6 @@ fn write_markdown_example(page: &mut PageBuilder<MarkdownTarget>, example: &str)
     }
     page.push_str("```\n\n");
     Ok(())
-}
-
-fn preprocess_markdown_example(source: &str) -> String {
-    let mut filtered = Vec::new();
-    let mut in_provider_block = false;
-    for line in source.split_inclusive('\n') {
-        if !in_provider_block && line.starts_with("provider ") {
-            in_provider_block = true;
-            continue;
-        }
-        if in_provider_block {
-            if line.starts_with('}') {
-                in_provider_block = false;
-            }
-            continue;
-        }
-        if line.starts_with('#') {
-            continue;
-        }
-        filtered.push(line);
-    }
-
-    let first_content = filtered
-        .iter()
-        .position(|line| !line.strip_suffix('\n').unwrap_or(line).is_empty())
-        .unwrap_or(filtered.len());
-    filtered[first_content..].concat()
 }
 
 fn markdown_enum_heading_texts(
@@ -5962,8 +5841,9 @@ fn generate_data_source(
 fn generate_markdown_data_source(
     ds: &resource_defs::DataSourceDef,
     _model: &SmithyModel,
-    example: &str,
+    example: &DocExample,
 ) -> Result<String> {
+    example.ensure_matches("aws", ds.name, ExampleKind::DataSource)?;
     struct MarkdownDataSourceOutput<'a> {
         name: &'a str,
         type_display: String,
@@ -6969,7 +6849,29 @@ fn truncate_str(s: &str, max_len: usize) -> String {
 mod tests {
     use super::*;
 
-    const MARKDOWN_FIXTURE_EXAMPLE: &str = "aws.test.fixture {}\n";
+    fn markdown_resource_example(dsl_name: &str) -> DocExample {
+        let source = format!("aws.{dsl_name} {{}}\n");
+        example::check(
+            &source,
+            Path::new("resource-markdown-fixture.crn"),
+            "aws",
+            dsl_name,
+            ExampleKind::Resource,
+        )
+        .expect("checked resource Markdown fixture")
+    }
+
+    fn markdown_data_source_example(dsl_name: &str) -> DocExample {
+        let source = format!("let fixture = read aws.{dsl_name} {{}}\n");
+        example::check(
+            &source,
+            Path::new("data-source-markdown-fixture.crn"),
+            "aws",
+            dsl_name,
+            ExampleKind::DataSource,
+        )
+        .expect("checked data-source Markdown fixture")
+    }
 
     const PROVIDER_FIXTURE_FIELDS: &[&str] = &[
         "AllocationId",
@@ -8112,29 +8014,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn missing_markdown_example_reports_expected_path() {
-        let examples_dir = tempfile::tempdir().expect("temporary examples directory");
-        let expected = examples_dir.path().join("ec2_vpc").join("main.crn");
-
-        let error = load_markdown_example(
-            examples_dir.path(),
-            "ec2",
-            "vpc",
-            "ec2.Vpc",
-            MarkdownExampleKind::Resource,
-        )
-        .expect_err("a missing example must fail documentation generation");
-
-        assert_eq!(
-            error.to_string(),
-            format!(
-                "Example file not found: {}; expected resource aws.ec2.Vpc",
-                expected.display()
-            )
-        );
-    }
-
     fn write_markdown_example_fixture(
         examples_dir: &Path,
         service: &str,
@@ -8149,213 +8028,30 @@ mod tests {
     }
 
     #[test]
-    fn empty_markdown_example_after_preprocessing_is_rejected() {
-        let examples_dir = tempfile::tempdir().expect("temporary examples directory");
-        let path = write_markdown_example_fixture(
-            examples_dir.path(),
-            "ec2",
-            "vpc",
-            concat!(
-                "# VPC example\n",
-                "provider aws {\n",
-                "  region = aws.Region.ap_northeast_1\n",
-                "}\n",
-            ),
-        );
+    fn markdown_renderers_reject_examples_checked_for_another_page() {
+        let model = provider_fixture_model();
+        let resource = provider_fixture_resource("test.Fixture", "Name", &["Name"], vec![]);
+        let wrong_resource = markdown_resource_example("test.Other");
 
-        let error = load_markdown_example(
-            examples_dir.path(),
-            "ec2",
-            "vpc",
-            "ec2.Vpc",
-            MarkdownExampleKind::Resource,
-        )
-        .expect_err("an empty preprocessed example must fail documentation generation");
-
+        let error = generate_markdown_resource(&resource, &model, &wrong_resource)
+            .expect_err("resource renderer must verify the checked type");
         assert_eq!(
             error.to_string(),
-            format!(
-                "Example {} is empty after preprocessing; expected resource aws.ec2.Vpc",
-                path.display()
-            )
-        );
-    }
-
-    #[test]
-    fn markdown_example_without_documented_resource_is_rejected() {
-        let examples_dir = tempfile::tempdir().expect("temporary examples directory");
-        let path = write_markdown_example_fixture(
-            examples_dir.path(),
-            "ec2",
-            "vpc",
-            concat!(
-                "aws.ec2.VpcPeeringConnection {}\n",
-                "  # aws.ec2.Vpc { is only a reader-facing note.\n",
-            ),
+            "Documentation example checked for resource aws.test.Other cannot render resource \
+             aws.test.Fixture"
         );
 
-        let error = load_markdown_example(
-            examples_dir.path(),
-            "ec2",
-            "vpc",
-            "ec2.Vpc",
-            MarkdownExampleKind::Resource,
-        )
-        .expect_err("an example for another resource must fail documentation generation");
-
+        let data_source = resource_defs::sts_data_sources()
+            .into_iter()
+            .next()
+            .expect("STS data source");
+        let wrong_kind = markdown_resource_example(data_source.name);
+        let error = generate_markdown_data_source(&data_source, &model, &wrong_kind)
+            .expect_err("data-source renderer must verify the checked kind");
         assert_eq!(
             error.to_string(),
-            format!(
-                "Example {} does not declare expected resource aws.ec2.Vpc",
-                path.display()
-            )
-        );
-    }
-
-    #[test]
-    fn markdown_example_with_documented_resource_is_accepted() {
-        let examples_dir = tempfile::tempdir().expect("temporary examples directory");
-        write_markdown_example_fixture(
-            examples_dir.path(),
-            "ec2",
-            "vpc",
-            "let vpc = aws.ec2.Vpc {\n  cidr_block = '10.0.0.0/16'\n}\n",
-        );
-
-        let example = load_markdown_example(
-            examples_dir.path(),
-            "ec2",
-            "vpc",
-            "ec2.Vpc",
-            MarkdownExampleKind::Resource,
-        )
-        .expect("the documented resource is declared");
-
-        assert!(example.contains("aws.ec2.Vpc {"), "{example}");
-    }
-
-    #[test]
-    fn markdown_example_reading_documented_data_source_is_accepted() {
-        let examples_dir = tempfile::tempdir().expect("temporary examples directory");
-        write_markdown_example_fixture(
-            examples_dir.path(),
-            "sts",
-            "caller_identity_data_source",
-            "let caller = read aws.sts.CallerIdentity {}\n",
-        );
-
-        let example = load_markdown_example(
-            examples_dir.path(),
-            "sts",
-            "caller_identity_data_source",
-            "sts.CallerIdentity",
-            MarkdownExampleKind::DataSource,
-        )
-        .expect("the documented data source is read");
-
-        assert!(
-            example.contains("read aws.sts.CallerIdentity {"),
-            "{example}"
-        );
-    }
-
-    #[test]
-    fn markdown_data_source_example_declared_as_resource_is_rejected() {
-        let examples_dir = tempfile::tempdir().expect("temporary examples directory");
-        let path = write_markdown_example_fixture(
-            examples_dir.path(),
-            "sts",
-            "caller_identity_data_source",
-            "aws.sts.CallerIdentity {}\n",
-        );
-
-        let error = load_markdown_example(
-            examples_dir.path(),
-            "sts",
-            "caller_identity_data_source",
-            "sts.CallerIdentity",
-            MarkdownExampleKind::DataSource,
-        )
-        .expect_err("a data source example must use read");
-
-        assert_eq!(
-            error.to_string(),
-            format!(
-                "Example {} does not read expected data source aws.sts.CallerIdentity",
-                path.display()
-            )
-        );
-    }
-
-    #[test]
-    fn markdown_resource_under_wrong_provider_is_rejected() {
-        let examples_dir = tempfile::tempdir().expect("temporary examples directory");
-        let path =
-            write_markdown_example_fixture(examples_dir.path(), "ec2", "vpc", "awscc.ec2.Vpc {}\n");
-
-        let error = load_markdown_example(
-            examples_dir.path(),
-            "ec2",
-            "vpc",
-            "ec2.Vpc",
-            MarkdownExampleKind::Resource,
-        )
-        .expect_err("the provider must match the documented resource");
-
-        assert_eq!(
-            error.to_string(),
-            format!(
-                "Example {} does not declare expected resource aws.ec2.Vpc",
-                path.display()
-            )
-        );
-    }
-
-    #[test]
-    fn markdown_example_parse_error_reports_raw_source_line() {
-        let examples_dir = tempfile::tempdir().expect("temporary examples directory");
-        let path = write_markdown_example_fixture(
-            examples_dir.path(),
-            "ec2",
-            "vpc",
-            concat!(
-                "# Header line 1\n",
-                "# Header line 2\n",
-                "# Header line 3\n",
-                "# Header line 4\n",
-                "provider aws {\n",
-                "  region = aws.Region.ap_northeast_1\n",
-                "}\n",
-                "@\n",
-            ),
-        );
-
-        let error = load_markdown_example(
-            examples_dir.path(),
-            "ec2",
-            "vpc",
-            "ec2.Vpc",
-            MarkdownExampleKind::Resource,
-        )
-        .expect_err("invalid raw example source must fail");
-
-        assert_eq!(
-            error.to_string(),
-            format!(
-                "Example {} must parse and declare resource aws.ec2.Vpc",
-                path.display()
-            )
-        );
-        assert!(
-            error.chain().count() > 1,
-            "the parser error must remain in the error chain: {error:#}"
-        );
-        assert!(
-            error
-                .chain()
-                .skip(1)
-                .any(|cause| cause.to_string().contains("8:1")),
-            "the parser error must report the raw source line: {error:#}"
+            "Documentation example checked for resource aws.sts.CallerIdentity cannot render data \
+             source aws.sts.CallerIdentity"
         );
     }
 
@@ -8654,7 +8350,8 @@ mod tests {
             .next()
             .unwrap();
 
-        let md = generate_markdown_data_source(&ds, &model, MARKDOWN_FIXTURE_EXAMPLE).expect("md");
+        let md = generate_markdown_data_source(&ds, &model, &markdown_data_source_example(ds.name))
+            .expect("md");
 
         assert!(md.contains("### `account_id`"), "{md}");
         assert!(md.contains("### `arn`"), "{md}");
@@ -8726,7 +8423,8 @@ mod tests {
             .next()
             .unwrap();
 
-        let md = generate_markdown_data_source(&ds, &model, MARKDOWN_FIXTURE_EXAMPLE).expect("md");
+        let md = generate_markdown_data_source(&ds, &model, &markdown_data_source_example(ds.name))
+            .expect("md");
 
         assert!(md.contains("### `arns`"), "arns section: {md}");
         assert!(md.contains("### `names`"), "names section: {md}");
@@ -8743,7 +8441,8 @@ mod tests {
         res.extra_read_only = vec!["Arn"];
         res.type_overrides = vec![("Arn", "super::super::iam::role::arn()")];
 
-        let md = generate_markdown_resource(&res, &model, MARKDOWN_FIXTURE_EXAMPLE).expect("md");
+        let md = generate_markdown_resource(&res, &model, &markdown_resource_example(res.name))
+            .expect("md");
 
         assert!(md.contains("### `arn`"), "{md}");
         assert!(md.contains("- **Type:** IamRoleArn"), "{md}");
@@ -8777,8 +8476,12 @@ mod tests {
             .find(|resource| resource.name == "s3.BucketObjectLockConfiguration")
             .expect("missing Object Lock resource");
 
-        let markdown = generate_markdown_resource(&resource, &model, MARKDOWN_FIXTURE_EXAMPLE)
-            .expect("markdown");
+        let markdown = generate_markdown_resource(
+            &resource,
+            &model,
+            &markdown_resource_example(resource.name),
+        )
+        .expect("markdown");
         let object_lock_section = markdown
             .split("### `object_lock_enabled`")
             .nth(1)
@@ -9411,7 +9114,7 @@ mod tests {
         let markdown = generate_markdown_resource(
             &markdown_regression_resource(),
             &markdown_regression_model(),
-            MARKDOWN_FIXTURE_EXAMPLE,
+            &markdown_resource_example("ec2.Vpc"),
         )
         .expect("generate markdown");
 
@@ -9427,7 +9130,7 @@ mod tests {
         let markdown = generate_markdown_resource(
             &markdown_regression_resource(),
             &markdown_regression_model(),
-            MARKDOWN_FIXTURE_EXAMPLE,
+            &markdown_resource_example("ec2.Vpc"),
         )
         .expect("generate markdown");
 
@@ -9462,7 +9165,7 @@ mod tests {
         let markdown = generate_markdown_resource(
             &resource,
             &markdown_transit_gateway_attachment_model(),
-            MARKDOWN_FIXTURE_EXAMPLE,
+            &markdown_resource_example(resource.name),
         )
         .expect("generate transit gateway attachment markdown");
 
@@ -9486,7 +9189,7 @@ mod tests {
         let markdown = generate_markdown_resource(
             &resource,
             &markdown_read_shape_override_model(),
-            MARKDOWN_FIXTURE_EXAMPLE,
+            &markdown_resource_example(resource.name),
         )
         .expect("generate certificate markdown");
 
@@ -9547,7 +9250,7 @@ mod tests {
         let markdown = generate_markdown_resource(
             &resource,
             &markdown_read_shape_override_model(),
-            MARKDOWN_FIXTURE_EXAMPLE,
+            &markdown_resource_example(resource.name),
         )
         .expect("generate certificate markdown");
 
@@ -9600,7 +9303,7 @@ mod tests {
         let markdown = generate_markdown_resource(
             &markdown_regression_resource(),
             &markdown_regression_model(),
-            MARKDOWN_FIXTURE_EXAMPLE,
+            &markdown_resource_example("ec2.Vpc"),
         )
         .expect("generate markdown");
 
@@ -9615,7 +9318,7 @@ mod tests {
         let markdown = generate_markdown_resource(
             &markdown_regression_resource(),
             &markdown_regression_model(),
-            MARKDOWN_FIXTURE_EXAMPLE,
+            &markdown_resource_example("ec2.Vpc"),
         )
         .expect("generate markdown");
 
@@ -9631,7 +9334,7 @@ mod tests {
         let markdown = generate_markdown_resource(
             &markdown_regression_resource(),
             &markdown_regression_model(),
-            MARKDOWN_FIXTURE_EXAMPLE,
+            &markdown_resource_example("ec2.Vpc"),
         )
         .expect("generate markdown");
 
@@ -9653,7 +9356,7 @@ mod tests {
         let markdown = generate_markdown_resource(
             &markdown_regression_resource(),
             &markdown_regression_model(),
-            MARKDOWN_FIXTURE_EXAMPLE,
+            &markdown_resource_example("ec2.Vpc"),
         )
         .expect("generate markdown");
         let enum_section = markdown
@@ -9678,7 +9381,7 @@ mod tests {
         let markdown = generate_markdown_resource(
             &markdown_regression_resource(),
             &markdown_struct_order_model(),
-            MARKDOWN_FIXTURE_EXAMPLE,
+            &markdown_resource_example("ec2.Vpc"),
         )
         .expect("generate markdown");
         let struct_section = markdown
@@ -9700,13 +9403,13 @@ mod tests {
         let without_collision = generate_markdown_resource(
             &markdown_regression_resource(),
             &markdown_nested_enum_model(),
-            MARKDOWN_FIXTURE_EXAMPLE,
+            &markdown_resource_example("ec2.Vpc"),
         )
         .expect("generate markdown without collision");
         let with_collision = generate_markdown_resource(
             &markdown_regression_resource(),
             &markdown_regression_model(),
-            MARKDOWN_FIXTURE_EXAMPLE,
+            &markdown_resource_example("ec2.Vpc"),
         )
         .expect("generate markdown with collision");
 
@@ -9727,15 +9430,18 @@ mod tests {
             .next()
             .expect("STS data source");
 
-        let markdown =
-            generate_markdown_data_source(&data_source, &model, MARKDOWN_FIXTURE_EXAMPLE)
-                .expect("markdown");
+        let markdown = generate_markdown_data_source(
+            &data_source,
+            &model,
+            &markdown_data_source_example(data_source.name),
+        )
+        .expect("markdown");
 
         assert!(!markdown.contains("CloudFormation Type"), "{markdown}");
         let markdown = generate_markdown_resource(
             &markdown_regression_resource(),
             &markdown_regression_model(),
-            MARKDOWN_FIXTURE_EXAMPLE,
+            &markdown_resource_example("ec2.Vpc"),
         )
         .expect("resource markdown");
         assert!(!markdown.contains("CloudFormation Type"), "{markdown}");
@@ -9746,7 +9452,7 @@ mod tests {
         let markdown = generate_markdown_resource(
             &markdown_regression_resource(),
             &markdown_regression_model(),
-            MARKDOWN_FIXTURE_EXAMPLE,
+            &markdown_resource_example("ec2.Vpc"),
         )
         .expect("generate markdown");
 
@@ -9772,8 +9478,12 @@ mod tests {
         resource.extra_read_only = vec!["DomainValidationOptions", "RenewalSummary"];
         resource.read_shape_overrides = vec!["DomainValidationOptions"];
 
-        let markdown = generate_markdown_resource(&resource, &model, MARKDOWN_FIXTURE_EXAMPLE)
-            .expect("generate markdown");
+        let markdown = generate_markdown_resource(
+            &resource,
+            &model,
+            &markdown_resource_example(resource.name),
+        )
+        .expect("generate markdown");
 
         assert!(
             markdown.contains("`aws.acm.Certificate.DomainValidation.ValidationMethod.dns`"),
@@ -9849,7 +9559,7 @@ mod tests {
         let markdown = generate_markdown_resource(
             &markdown_regression_resource(),
             &model,
-            MARKDOWN_FIXTURE_EXAMPLE,
+            &markdown_resource_example("ec2.Vpc"),
         )
         .expect("distinct enums must generate unique headings");
         let ids = carina_docgen::heading_ids(&markdown);
@@ -9859,31 +9569,6 @@ mod tests {
         assert!(markdown.contains("`aws.ec2.Vpc.Options.Protocol.two`"));
         assert!(markdown.contains("`aws.ec2.Vpc.FirstProtocol.one`"));
         assert!(markdown.contains("`aws.ec2.Vpc.SecondProtocol.one`"));
-    }
-
-    #[test]
-    fn markdown_example_preprocessing_matches_the_previous_script_pipeline() {
-        let source = concat!(
-            "\n",
-            "# leading comment\n",
-            "provider aws {\n",
-            "  region = \"us-east-1\"\n",
-            "}\n",
-            "\n",
-            "resource bucket \"fixture\" {}\n",
-            "# trailing comment\n",
-        );
-
-        assert_eq!(
-            preprocess_markdown_example(source),
-            "resource bucket \"fixture\" {}\n"
-        );
-
-        let trailing_blank = "resource bucket \"fixture\" {}\n\n# trailing comment\n";
-        assert_eq!(
-            preprocess_markdown_example(trailing_blank),
-            "resource bucket \"fixture\" {}\n\n"
-        );
     }
 
     fn provider_code_panic_for_single_resource_with_model(

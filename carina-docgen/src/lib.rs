@@ -1,5 +1,7 @@
 //! Registry-compatible Markdown page construction and generated-page checks.
 
+pub mod example;
+
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::hash::Hash;
