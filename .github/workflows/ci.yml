@@ -34,6 +34,10 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Test acceptance run registry
         run: bash acceptance-tests/shared/tests/run_registry_test.sh
+      - name: Test trusted local provider environment
+        run: bash acceptance-tests/shell-tests/trusted_local_provider.sh
+      - name: Test acceptance state helpers
+        run: bash acceptance-tests/shell-tests/state_helpers.sh
       - run: cargo test
 
   validate-examples:

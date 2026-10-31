@@ -1,5 +1,5 @@
 #!/bin/bash
-# Test local-provider trust setup without invoking carina or AWS.
+# Test local-provider trust and egress consent setup without invoking carina or AWS.
 #
 # Usage:
 #   bash acceptance-tests/shell-tests/trusted_local_provider.sh
@@ -22,16 +22,29 @@ AWSCC_WASM="$WORK_DIR/providers/awscc.wasm"
 RELATIVE_AWS_WASM="$WORK_DIR/relative/aws.wasm"
 OPERATOR_WASM="$WORK_DIR/providers/operator.wasm"
 COLON_AWS_WASM="$WORK_DIR/providers/aws:local.wasm"
-touch "$AWS_WASM" "$AWSCC_WASM" "$RELATIVE_AWS_WASM" "$OPERATOR_WASM" "$COLON_AWS_WASM"
+COMMA_AWS_WASM="$WORK_DIR/providers/aws,local.wasm"
+COLON_TARGET_DIR="$WORK_DIR/provider:target"
+COMMA_TARGET_DIR="$WORK_DIR/provider,target"
+COLON_LINK_DIR="$WORK_DIR/colon-link"
+COMMA_LINK_DIR="$WORK_DIR/comma-link"
+COLON_LINK_AWS_WASM="$COLON_LINK_DIR/aws.wasm"
+COMMA_LINK_AWS_WASM="$COMMA_LINK_DIR/aws.wasm"
+mkdir -p "$COLON_TARGET_DIR" "$COMMA_TARGET_DIR"
+touch "$AWS_WASM" "$AWSCC_WASM" "$RELATIVE_AWS_WASM" "$OPERATOR_WASM" \
+    "$COLON_AWS_WASM" "$COMMA_AWS_WASM" \
+    "$COLON_TARGET_DIR/aws.wasm" "$COMMA_TARGET_DIR/aws.wasm"
+ln -s "$COLON_TARGET_DIR" "$COLON_LINK_DIR"
+ln -s "$COMMA_TARGET_DIR" "$COMMA_LINK_DIR"
 MIXED_CRN="$WORK_DIR/mixed.crn"
 printf '%s\n' 'provider aws {' '}' 'provider awscc {' '}' > "$MIXED_CRN"
 
-read_exported_grant() {
+read_exported_access() {
     local working_dir="$1"
     local aws_wasm="$2"
     local awscc_wasm="$3"
-    local operator_value="$4"
-    local config_file="${5:-}"
+    local operator_trust="$4"
+    local operator_acceptance="$5"
+    local config_file="${6:-}"
     local aws_block
     local awscc_block
 
@@ -44,10 +57,15 @@ read_exported_grant() {
         else
             unset _TEST_AWSCC_WASM
         fi
-        if [ -n "$operator_value" ]; then
-            CARINA_TRUST_LOCAL_PROVIDER="$operator_value"
+        if [ -n "$operator_trust" ]; then
+            CARINA_TRUST_LOCAL_PROVIDER="$operator_trust"
         else
             unset CARINA_TRUST_LOCAL_PROVIDER
+        fi
+        if [ -n "$operator_acceptance" ]; then
+            CARINA_ACCEPT_EGRESS="$operator_acceptance"
+        else
+            unset CARINA_ACCEPT_EGRESS
         fi
 
         source "$HELPERS_SH"
@@ -71,7 +89,7 @@ read_exported_grant() {
         fi
 
         # A fresh process sees only exported variables, just like carina does.
-        bash -c 'printf "%s\n" "$CARINA_TRUST_LOCAL_PROVIDER"'
+        bash -c 'printf "%s\n%s\n" "$CARINA_TRUST_LOCAL_PROVIDER" "$CARINA_ACCEPT_EGRESS"'
     )
 }
 
@@ -88,22 +106,46 @@ assert_equal() {
     fi
 }
 
-actual="$(read_exported_grant "$WORK_DIR" "$AWS_WASM" "" "")"
-assert_equal "single provider" "$AWS_WASM=aws" "$actual"
+assert_rejected_provider_path() {
+    local description="$1"
+    local provider_path="$2"
+    local expected_fragment="$3"
+    local output=""
+    local status=0
 
-actual="$(read_exported_grant "$WORK_DIR" "$AWS_WASM" "$AWSCC_WASM" "" "$MIXED_CRN")"
-assert_equal "two providers" "$AWS_WASM=aws:$AWSCC_WASM=aws" "$actual"
+    output="$(read_exported_access "$WORK_DIR" "$provider_path" "" "" "" 2>&1)" || status=$?
+    if [ "$status" -eq 0 ]; then
+        echo "FAIL: $description unexpectedly succeeded" >&2
+        exit 1
+    fi
+    if [[ "$output" != *"$expected_fragment"* ]]; then
+        echo "FAIL: $description did not name the configured variable" >&2
+        echo "  output: $output" >&2
+        exit 1
+    fi
+}
 
-actual="$(read_exported_grant "$WORK_DIR" "relative/aws.wasm" "" "")"
-assert_equal "relative provider path" "$RELATIVE_AWS_WASM=aws" "$actual"
+actual="$(read_exported_access "$WORK_DIR" "$AWS_WASM" "" "" "")"
+expected="$AWS_WASM=aws"$'\n'"file://$AWS_WASM"
+assert_equal "single provider" "$expected" "$actual"
 
-operator_value="$OPERATOR_WASM=github"
-actual="$(read_exported_grant "$WORK_DIR" "$AWS_WASM" "" "$operator_value")"
-assert_equal "operator preset" "$operator_value:$AWS_WASM=aws" "$actual"
+actual="$(read_exported_access "$WORK_DIR" "$AWS_WASM" "$AWSCC_WASM" "" "" "$MIXED_CRN")"
+expected="$AWS_WASM=aws:$AWSCC_WASM=aws"$'\n'"file://$AWS_WASM,file://$AWSCC_WASM"
+assert_equal "two providers" "$expected" "$actual"
+
+actual="$(read_exported_access "$WORK_DIR" "relative/aws.wasm" "" "" "")"
+expected="$RELATIVE_AWS_WASM=aws"$'\n'"file://$RELATIVE_AWS_WASM"
+assert_equal "relative provider path" "$expected" "$actual"
+
+operator_trust="$OPERATOR_WASM=github"
+operator_acceptance="github.com/example/provider"
+actual="$(read_exported_access "$WORK_DIR" "$AWS_WASM" "" "$operator_trust" "$operator_acceptance")"
+expected="$operator_trust:$AWS_WASM=aws"$'\n'"$operator_acceptance,file://$AWS_WASM"
+assert_equal "operator preset" "$expected" "$actual"
 
 missing_output=""
 missing_status=0
-missing_output="$(read_exported_grant "$WORK_DIR" "providers/missing.wasm" "" "" 2>&1)" || missing_status=$?
+missing_output="$(read_exported_access "$WORK_DIR" "providers/missing.wasm" "" "" "" 2>&1)" || missing_status=$?
 if [ "$missing_status" -eq 0 ]; then
     echo "FAIL: missing provider path unexpectedly succeeded" >&2
     exit 1
@@ -114,17 +156,17 @@ if [[ "$missing_output" != *"configured provider WASM does not exist (_TEST_AWS_
     exit 1
 fi
 
-colon_output=""
-colon_status=0
-colon_output="$(read_exported_grant "$WORK_DIR" "$COLON_AWS_WASM" "" "" 2>&1)" || colon_status=$?
-if [ "$colon_status" -eq 0 ]; then
-    echo "FAIL: provider path containing ':' unexpectedly succeeded" >&2
-    exit 1
-fi
-if [[ "$colon_output" != *"ERROR: _TEST_AWS_WASM provider WASM path contains ':' and cannot be used in CARINA_TRUST_LOCAL_PROVIDER:"* ]]; then
-    echo "FAIL: provider path containing ':' did not name the configured variable" >&2
-    echo "  output: $colon_output" >&2
-    exit 1
-fi
+assert_rejected_provider_path \
+    "provider path containing ':'" "$COLON_AWS_WASM" \
+    "ERROR: _TEST_AWS_WASM provider WASM path contains ':' and cannot be used in CARINA_TRUST_LOCAL_PROVIDER:"
+assert_rejected_provider_path \
+    "provider path containing ','" "$COMMA_AWS_WASM" \
+    "ERROR: _TEST_AWS_WASM provider WASM path contains ',' and cannot be used in CARINA_ACCEPT_EGRESS:"
+assert_rejected_provider_path \
+    "canonical symlink target containing ':'" "$COLON_LINK_AWS_WASM" \
+    "ERROR: _TEST_AWS_WASM provider WASM path contains ':' and cannot be used in CARINA_TRUST_LOCAL_PROVIDER:"
+assert_rejected_provider_path \
+    "canonical symlink target containing ','" "$COMMA_LINK_AWS_WASM" \
+    "ERROR: _TEST_AWS_WASM provider WASM path contains ',' and cannot be used in CARINA_ACCEPT_EGRESS:"
 
-echo "PASS: trusted local provider grants"
+echo "PASS: trusted local provider grants and egress consent"

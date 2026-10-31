@@ -1020,7 +1020,11 @@ fn main() {
 }
 
 #[cfg(target_arch = "wasm32")]
-carina_plugin_sdk::export_provider!(AwsProcessProvider, http);
+carina_plugin_sdk::export_provider!(
+    AwsProcessProvider,
+    http,
+    egress: ["**.amazonaws.com", "**.amazonaws.com.cn"],
+);
 
 #[cfg(target_arch = "wasm32")]
 fn main() {}
