@@ -23,8 +23,18 @@ RELATIVE_AWS_WASM="$WORK_DIR/relative/aws.wasm"
 OPERATOR_WASM="$WORK_DIR/providers/operator.wasm"
 COLON_AWS_WASM="$WORK_DIR/providers/aws:local.wasm"
 COMMA_AWS_WASM="$WORK_DIR/providers/aws,local.wasm"
+COLON_TARGET_DIR="$WORK_DIR/provider:target"
+COMMA_TARGET_DIR="$WORK_DIR/provider,target"
+COLON_LINK_DIR="$WORK_DIR/colon-link"
+COMMA_LINK_DIR="$WORK_DIR/comma-link"
+COLON_LINK_AWS_WASM="$COLON_LINK_DIR/aws.wasm"
+COMMA_LINK_AWS_WASM="$COMMA_LINK_DIR/aws.wasm"
+mkdir -p "$COLON_TARGET_DIR" "$COMMA_TARGET_DIR"
 touch "$AWS_WASM" "$AWSCC_WASM" "$RELATIVE_AWS_WASM" "$OPERATOR_WASM" \
-    "$COLON_AWS_WASM" "$COMMA_AWS_WASM"
+    "$COLON_AWS_WASM" "$COMMA_AWS_WASM" \
+    "$COLON_TARGET_DIR/aws.wasm" "$COMMA_TARGET_DIR/aws.wasm"
+ln -s "$COLON_TARGET_DIR" "$COLON_LINK_DIR"
+ln -s "$COMMA_TARGET_DIR" "$COMMA_LINK_DIR"
 MIXED_CRN="$WORK_DIR/mixed.crn"
 printf '%s\n' 'provider aws {' '}' 'provider awscc {' '}' > "$MIXED_CRN"
 
@@ -96,6 +106,25 @@ assert_equal() {
     fi
 }
 
+assert_rejected_provider_path() {
+    local description="$1"
+    local provider_path="$2"
+    local expected_fragment="$3"
+    local output=""
+    local status=0
+
+    output="$(read_exported_access "$WORK_DIR" "$provider_path" "" "" "" 2>&1)" || status=$?
+    if [ "$status" -eq 0 ]; then
+        echo "FAIL: $description unexpectedly succeeded" >&2
+        exit 1
+    fi
+    if [[ "$output" != *"$expected_fragment"* ]]; then
+        echo "FAIL: $description did not name the configured variable" >&2
+        echo "  output: $output" >&2
+        exit 1
+    fi
+}
+
 actual="$(read_exported_access "$WORK_DIR" "$AWS_WASM" "" "" "")"
 expected="$AWS_WASM=aws"$'\n'"file://$AWS_WASM"
 assert_equal "single provider" "$expected" "$actual"
@@ -127,30 +156,17 @@ if [[ "$missing_output" != *"configured provider WASM does not exist (_TEST_AWS_
     exit 1
 fi
 
-colon_output=""
-colon_status=0
-colon_output="$(read_exported_access "$WORK_DIR" "$COLON_AWS_WASM" "" "" "" 2>&1)" || colon_status=$?
-if [ "$colon_status" -eq 0 ]; then
-    echo "FAIL: provider path containing ':' unexpectedly succeeded" >&2
-    exit 1
-fi
-if [[ "$colon_output" != *"ERROR: _TEST_AWS_WASM provider WASM path contains ':' and cannot be used in CARINA_TRUST_LOCAL_PROVIDER:"* ]]; then
-    echo "FAIL: provider path containing ':' did not name the configured variable" >&2
-    echo "  output: $colon_output" >&2
-    exit 1
-fi
-
-comma_output=""
-comma_status=0
-comma_output="$(read_exported_access "$WORK_DIR" "$COMMA_AWS_WASM" "" "" "" 2>&1)" || comma_status=$?
-if [ "$comma_status" -eq 0 ]; then
-    echo "FAIL: provider path containing ',' unexpectedly succeeded" >&2
-    exit 1
-fi
-if [[ "$comma_output" != *"ERROR: _TEST_AWS_WASM provider WASM path contains ',' and cannot be used in CARINA_ACCEPT_EGRESS:"* ]]; then
-    echo "FAIL: provider path containing ',' did not name the configured variable" >&2
-    echo "  output: $comma_output" >&2
-    exit 1
-fi
+assert_rejected_provider_path \
+    "provider path containing ':'" "$COLON_AWS_WASM" \
+    "ERROR: _TEST_AWS_WASM provider WASM path contains ':' and cannot be used in CARINA_TRUST_LOCAL_PROVIDER:"
+assert_rejected_provider_path \
+    "provider path containing ','" "$COMMA_AWS_WASM" \
+    "ERROR: _TEST_AWS_WASM provider WASM path contains ',' and cannot be used in CARINA_ACCEPT_EGRESS:"
+assert_rejected_provider_path \
+    "canonical symlink target containing ':'" "$COLON_LINK_AWS_WASM" \
+    "ERROR: _TEST_AWS_WASM provider WASM path contains ':' and cannot be used in CARINA_TRUST_LOCAL_PROVIDER:"
+assert_rejected_provider_path \
+    "canonical symlink target containing ','" "$COMMA_LINK_AWS_WASM" \
+    "ERROR: _TEST_AWS_WASM provider WASM path contains ',' and cannot be used in CARINA_ACCEPT_EGRESS:"
 
 echo "PASS: trusted local provider grants and egress consent"

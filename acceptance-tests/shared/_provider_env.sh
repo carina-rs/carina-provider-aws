@@ -35,14 +35,6 @@ resolve_provider_wasm_path() {
         echo "ERROR: configured provider WASM is not a file ($variable_name): $configured_path" >&2
         return 1
     fi
-    if [[ "$configured_path" == *:* ]]; then
-        echo "ERROR: $variable_name provider WASM path contains ':' and cannot be used in CARINA_TRUST_LOCAL_PROVIDER: $configured_path" >&2
-        return 1
-    fi
-    if [[ "$configured_path" == *,* ]]; then
-        echo "ERROR: $variable_name provider WASM path contains ',' and cannot be used in CARINA_ACCEPT_EGRESS: $configured_path" >&2
-        return 1
-    fi
     if [[ "$configured_path" != *.wasm ]]; then
         echo "ERROR: $variable_name points to a non-WASM binary: $configured_path" >&2
         echo "       Provider binaries must be .wasm components." >&2
@@ -51,6 +43,14 @@ resolve_provider_wasm_path() {
 
     provider_dir="$(cd "$(dirname "$configured_path")" && pwd -P)"
     configured_path="$provider_dir/$(basename "$configured_path")"
+    if [[ "$configured_path" == *:* ]]; then
+        echo "ERROR: $variable_name provider WASM path contains ':' and cannot be used in CARINA_TRUST_LOCAL_PROVIDER: $configured_path" >&2
+        return 1
+    fi
+    if [[ "$configured_path" == *,* ]]; then
+        echo "ERROR: $variable_name provider WASM path contains ',' and cannot be used in CARINA_ACCEPT_EGRESS: $configured_path" >&2
+        return 1
+    fi
     printf -v "$variable_name" '%s' "$configured_path"
 }
 
