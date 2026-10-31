@@ -1,0 +1,69 @@
+# S3 Bucket Replication Configuration
+#
+# Replicates objects from a versioned source bucket to a versioned destination.
+
+provider aws {
+  region = aws.Region.ap_northeast_1
+}
+
+let source_bucket = aws.s3.Bucket {
+  bucket = 'carina-example-replication-source'
+
+  tags = {
+    Environment = 'example'
+  }
+}
+
+let source_versioning = aws.s3.BucketVersioning {
+  bucket = source_bucket.bucket
+  status = aws.s3.BucketVersioning.VersioningStatus.enabled
+}
+
+let destination_bucket = aws.s3.Bucket {
+  bucket = 'carina-example-replication-destination'
+
+  tags = {
+    Environment = 'example'
+  }
+}
+
+aws.s3.BucketVersioning {
+  bucket = destination_bucket.bucket
+  status = aws.s3.BucketVersioning.VersioningStatus.enabled
+}
+
+let replication_role = aws.iam.Role {
+  role_name = 'carina-example-s3-replication-role'
+
+  assume_role_policy_document = {
+    version = aws.iam.PolicyDocument.Version.2012_10_17
+    statement {
+      effect = aws.iam.PolicyDocument.Statement.Effect.allow
+
+      principal = {
+        service = 's3.amazonaws.com'
+      }
+
+      action = 'sts:AssumeRole'
+    }
+  }
+
+  tags = {
+    Environment = 'example'
+  }
+}
+
+aws.s3.BucketReplicationConfiguration {
+  bucket = source_versioning.bucket
+  role   = replication_role.arn
+
+  rules = [
+    {
+      id          = 'replicate-all'
+      status      = aws.s3.BucketReplicationConfiguration.ReplicationRule.Status.enabled
+      destination = {
+        bucket = destination_bucket.arn
+      }
+    },
+  ]
+}

@@ -1,0 +1,30 @@
+# S3 Bucket CORS Configuration
+#
+# Allows browser GET requests from example.com.
+
+provider aws {
+  region = aws.Region.ap_northeast_1
+}
+
+let bucket = aws.s3.Bucket {
+  bucket = 'carina-example-cors-bucket'
+
+  tags = {
+    Environment = 'example'
+  }
+}
+
+aws.s3.BucketCorsConfiguration {
+  bucket = bucket.bucket
+
+  cors_rules = [
+    {
+      id              = 'allow-example-get'
+      allowed_methods = ['GET']
+      allowed_origins = ['https://example.com']
+      allowed_headers = ['*']
+      expose_headers  = ['ETag']
+      max_age_seconds = 3000
+    },
+  ]
+}

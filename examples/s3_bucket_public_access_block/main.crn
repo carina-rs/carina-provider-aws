@@ -1,0 +1,24 @@
+# S3 Bucket Public Access Block
+#
+# Enables all public-access protections for an S3 bucket.
+
+provider aws {
+  region = aws.Region.ap_northeast_1
+}
+
+let bucket = aws.s3.Bucket {
+  bucket = 'carina-example-private-bucket'
+
+  tags = {
+    Environment = 'example'
+  }
+}
+
+aws.s3.BucketPublicAccessBlock {
+  bucket = bucket.bucket
+
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}

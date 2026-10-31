@@ -518,25 +518,23 @@ fn markdown_file_name(resource: &str, data_source: bool) -> String {
     format!("{}{suffix}.md", pascal_to_snake(resource))
 }
 
-fn load_markdown_example(
-    examples_dir: Option<&Path>,
-    service: &str,
-    page_stem: &str,
-) -> Result<Option<String>> {
-    let Some(examples_dir) = examples_dir else {
-        return Ok(None);
-    };
+fn load_markdown_example(examples_dir: &Path, service: &str, page_stem: &str) -> Result<String> {
     let path = examples_dir
         .join(format!("{service}_{page_stem}"))
         .join("main.crn");
     match std::fs::read_to_string(&path) {
-        Ok(source) => Ok(Some(preprocess_markdown_example(&source))),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Ok(source) => Ok(preprocess_markdown_example(&source)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            anyhow::bail!("Example file not found: {}", path.display())
+        }
         Err(error) => Err(error).with_context(|| format!("Failed to read {}", path.display())),
     }
 }
 
-fn validate_examples_dir(examples_dir: Option<&Path>) -> Result<()> {
+fn validate_examples_dir(format: &str, examples_dir: Option<&Path>) -> Result<()> {
+    if matches!(format, "markdown" | "md") && examples_dir.is_none() {
+        anyhow::bail!("--examples-dir is required when --format is markdown");
+    }
     let Some(examples_dir) = examples_dir else {
         return Ok(());
     };
@@ -575,7 +573,7 @@ fn escape_rust_keyword(name: &str) -> String {
 fn main() -> Result<()> {
     let args = Args::parse();
 
-    validate_examples_dir(args.examples_dir.as_deref())?;
+    validate_examples_dir(&args.format, args.examples_dir.as_deref())?;
 
     std::fs::create_dir_all(&args.output_dir)?;
 
@@ -769,16 +767,20 @@ fn main() -> Result<()> {
             }
         }
         "markdown" | "md" => {
+            let examples_dir = args
+                .examples_dir
+                .as_deref()
+                .expect("markdown examples directory was validated");
             for res in &resources {
                 let model = models.get(res.service_namespace).unwrap();
                 let (service, resource) = split_service_resource(res.name);
                 let file_name = markdown_file_name(resource, false);
                 let example = load_markdown_example(
-                    args.examples_dir.as_deref(),
+                    examples_dir,
                     service,
                     file_name.trim_end_matches(".md"),
                 )?;
-                let md = generate_markdown_resource(res, model, example.as_deref())
+                let md = generate_markdown_resource(res, model, &example)
                     .with_context(|| format!("generating docs for aws.{}", res.name))?;
 
                 let service_dir = args.output_dir.join(service);
@@ -793,11 +795,11 @@ fn main() -> Result<()> {
                 let (service, resource) = split_service_resource(ds.name);
                 let file_name = markdown_file_name(resource, true);
                 let example = load_markdown_example(
-                    args.examples_dir.as_deref(),
+                    examples_dir,
                     service,
                     file_name.trim_end_matches(".md"),
                 )?;
-                let md = generate_markdown_data_source(ds, model, example.as_deref())
+                let md = generate_markdown_data_source(ds, model, &example)
                     .with_context(|| format!("generating docs for aws.{}", ds.name))?;
 
                 let service_dir = args.output_dir.join(service);
@@ -5014,7 +5016,7 @@ struct MarkdownAttrInfo {
 fn generate_markdown_resource(
     res: &ResourceDef,
     model: &SmithyModel,
-    example: Option<&str>,
+    example: &str,
 ) -> Result<String> {
     let ns = res.service_namespace;
     let namespace = format!("aws.{}", res.name);
@@ -5453,14 +5455,7 @@ fn generate_markdown_resource(
         .with_context(|| format!("generated invalid Markdown for aws.{}", res.name))
 }
 
-fn write_markdown_example(
-    page: &mut PageBuilder<MarkdownTarget>,
-    example: Option<&str>,
-) -> Result<()> {
-    let Some(example) = example else {
-        return Ok(());
-    };
-
+fn write_markdown_example(page: &mut PageBuilder<MarkdownTarget>, example: &str) -> Result<()> {
     page.heading(Heading::plain(2, "Example"))?;
     page.push_str("```crn\n");
     page.push_str(example);
@@ -5755,7 +5750,7 @@ fn generate_data_source(
 fn generate_markdown_data_source(
     ds: &resource_defs::DataSourceDef,
     _model: &SmithyModel,
-    example: Option<&str>,
+    example: &str,
 ) -> Result<String> {
     struct MarkdownDataSourceOutput<'a> {
         name: &'a str,
@@ -6762,6 +6757,8 @@ fn truncate_str(s: &str, max_len: usize) -> String {
 mod tests {
     use super::*;
 
+    const MARKDOWN_FIXTURE_EXAMPLE: &str = "aws.test.fixture {}\n";
+
     const PROVIDER_FIXTURE_FIELDS: &[&str] = &[
         "AllocationId",
         "AvailabilityMode",
@@ -7717,10 +7714,35 @@ mod tests {
         let missing = root.path().join("missing");
         let file = tempfile::NamedTempFile::new_in(root.path()).expect("temporary file");
 
-        assert!(validate_examples_dir(Some(root.path())).is_ok());
-        assert!(validate_examples_dir(None).is_ok());
-        assert!(validate_examples_dir(Some(&missing)).is_err());
-        assert!(validate_examples_dir(Some(file.path())).is_err());
+        assert!(validate_examples_dir("markdown", Some(root.path())).is_ok());
+        assert!(validate_examples_dir("rust", None).is_ok());
+        assert!(validate_examples_dir("markdown", Some(&missing)).is_err());
+        assert!(validate_examples_dir("markdown", Some(file.path())).is_err());
+    }
+
+    #[test]
+    fn markdown_format_requires_examples_dir() {
+        let error = validate_examples_dir("markdown", None)
+            .expect_err("markdown generation must require --examples-dir");
+
+        assert_eq!(
+            error.to_string(),
+            "--examples-dir is required when --format is markdown"
+        );
+    }
+
+    #[test]
+    fn missing_markdown_example_reports_expected_path() {
+        let examples_dir = tempfile::tempdir().expect("temporary examples directory");
+        let expected = examples_dir.path().join("ec2_vpc").join("main.crn");
+
+        let error = load_markdown_example(examples_dir.path(), "ec2", "vpc")
+            .expect_err("a missing example must fail documentation generation");
+
+        assert_eq!(
+            error.to_string(),
+            format!("Example file not found: {}", expected.display())
+        );
     }
 
     #[test]
@@ -8018,7 +8040,7 @@ mod tests {
             .next()
             .unwrap();
 
-        let md = generate_markdown_data_source(&ds, &model, None).expect("md");
+        let md = generate_markdown_data_source(&ds, &model, MARKDOWN_FIXTURE_EXAMPLE).expect("md");
 
         assert!(md.contains("### `account_id`"), "{md}");
         assert!(md.contains("### `arn`"), "{md}");
@@ -8090,7 +8112,7 @@ mod tests {
             .next()
             .unwrap();
 
-        let md = generate_markdown_data_source(&ds, &model, None).expect("md");
+        let md = generate_markdown_data_source(&ds, &model, MARKDOWN_FIXTURE_EXAMPLE).expect("md");
 
         assert!(md.contains("### `arns`"), "arns section: {md}");
         assert!(md.contains("### `names`"), "names section: {md}");
@@ -8107,7 +8129,7 @@ mod tests {
         res.extra_read_only = vec!["Arn"];
         res.type_overrides = vec![("Arn", "super::super::iam::role::arn()")];
 
-        let md = generate_markdown_resource(&res, &model, None).expect("md");
+        let md = generate_markdown_resource(&res, &model, MARKDOWN_FIXTURE_EXAMPLE).expect("md");
 
         assert!(md.contains("### `arn`"), "{md}");
         assert!(md.contains("- **Type:** IamRoleArn"), "{md}");
@@ -8141,7 +8163,8 @@ mod tests {
             .find(|resource| resource.name == "s3.BucketObjectLockConfiguration")
             .expect("missing Object Lock resource");
 
-        let markdown = generate_markdown_resource(&resource, &model, None).expect("markdown");
+        let markdown = generate_markdown_resource(&resource, &model, MARKDOWN_FIXTURE_EXAMPLE)
+            .expect("markdown");
         let object_lock_section = markdown
             .split("### `object_lock_enabled`")
             .nth(1)
@@ -8774,7 +8797,7 @@ mod tests {
         let markdown = generate_markdown_resource(
             &markdown_regression_resource(),
             &markdown_regression_model(),
-            None,
+            MARKDOWN_FIXTURE_EXAMPLE,
         )
         .expect("generate markdown");
 
@@ -8790,7 +8813,7 @@ mod tests {
         let markdown = generate_markdown_resource(
             &markdown_regression_resource(),
             &markdown_regression_model(),
-            None,
+            MARKDOWN_FIXTURE_EXAMPLE,
         )
         .expect("generate markdown");
 
@@ -8825,7 +8848,7 @@ mod tests {
         let markdown = generate_markdown_resource(
             &resource,
             &markdown_transit_gateway_attachment_model(),
-            None,
+            MARKDOWN_FIXTURE_EXAMPLE,
         )
         .expect("generate transit gateway attachment markdown");
 
@@ -8846,9 +8869,12 @@ mod tests {
             .into_iter()
             .find(|resource| resource.name == "acm.Certificate")
             .expect("certificate resource");
-        let markdown =
-            generate_markdown_resource(&resource, &markdown_read_shape_override_model(), None)
-                .expect("generate certificate markdown");
+        let markdown = generate_markdown_resource(
+            &resource,
+            &markdown_read_shape_override_model(),
+            MARKDOWN_FIXTURE_EXAMPLE,
+        )
+        .expect("generate certificate markdown");
 
         for heading in [
             "### domain_validation_options.resource_record.type (Type)",
@@ -8904,9 +8930,12 @@ mod tests {
             .into_iter()
             .find(|resource| resource.name == "acm.Certificate")
             .expect("certificate resource");
-        let markdown =
-            generate_markdown_resource(&resource, &markdown_read_shape_override_model(), None)
-                .expect("generate certificate markdown");
+        let markdown = generate_markdown_resource(
+            &resource,
+            &markdown_read_shape_override_model(),
+            MARKDOWN_FIXTURE_EXAMPLE,
+        )
+        .expect("generate certificate markdown");
 
         assert!(
             markdown.contains("| `CNAME` | `aws.route53.RecordSet.Type.cname` |"),
@@ -8957,7 +8986,7 @@ mod tests {
         let markdown = generate_markdown_resource(
             &markdown_regression_resource(),
             &markdown_regression_model(),
-            None,
+            MARKDOWN_FIXTURE_EXAMPLE,
         )
         .expect("generate markdown");
 
@@ -8972,7 +9001,7 @@ mod tests {
         let markdown = generate_markdown_resource(
             &markdown_regression_resource(),
             &markdown_regression_model(),
-            None,
+            MARKDOWN_FIXTURE_EXAMPLE,
         )
         .expect("generate markdown");
 
@@ -8988,7 +9017,7 @@ mod tests {
         let markdown = generate_markdown_resource(
             &markdown_regression_resource(),
             &markdown_regression_model(),
-            None,
+            MARKDOWN_FIXTURE_EXAMPLE,
         )
         .expect("generate markdown");
 
@@ -9010,7 +9039,7 @@ mod tests {
         let markdown = generate_markdown_resource(
             &markdown_regression_resource(),
             &markdown_regression_model(),
-            None,
+            MARKDOWN_FIXTURE_EXAMPLE,
         )
         .expect("generate markdown");
         let enum_section = markdown
@@ -9035,7 +9064,7 @@ mod tests {
         let markdown = generate_markdown_resource(
             &markdown_regression_resource(),
             &markdown_struct_order_model(),
-            None,
+            MARKDOWN_FIXTURE_EXAMPLE,
         )
         .expect("generate markdown");
         let struct_section = markdown
@@ -9057,13 +9086,13 @@ mod tests {
         let without_collision = generate_markdown_resource(
             &markdown_regression_resource(),
             &markdown_nested_enum_model(),
-            None,
+            MARKDOWN_FIXTURE_EXAMPLE,
         )
         .expect("generate markdown without collision");
         let with_collision = generate_markdown_resource(
             &markdown_regression_resource(),
             &markdown_regression_model(),
-            None,
+            MARKDOWN_FIXTURE_EXAMPLE,
         )
         .expect("generate markdown with collision");
 
@@ -9084,13 +9113,15 @@ mod tests {
             .next()
             .expect("STS data source");
 
-        let markdown = generate_markdown_data_source(&data_source, &model, None).expect("markdown");
+        let markdown =
+            generate_markdown_data_source(&data_source, &model, MARKDOWN_FIXTURE_EXAMPLE)
+                .expect("markdown");
 
         assert!(!markdown.contains("CloudFormation Type"), "{markdown}");
         let markdown = generate_markdown_resource(
             &markdown_regression_resource(),
             &markdown_regression_model(),
-            None,
+            MARKDOWN_FIXTURE_EXAMPLE,
         )
         .expect("resource markdown");
         assert!(!markdown.contains("CloudFormation Type"), "{markdown}");
@@ -9101,7 +9132,7 @@ mod tests {
         let markdown = generate_markdown_resource(
             &markdown_regression_resource(),
             &markdown_regression_model(),
-            None,
+            MARKDOWN_FIXTURE_EXAMPLE,
         )
         .expect("generate markdown");
 
@@ -9127,8 +9158,8 @@ mod tests {
         resource.extra_read_only = vec!["DomainValidationOptions", "RenewalSummary"];
         resource.read_shape_overrides = vec!["DomainValidationOptions"];
 
-        let markdown =
-            generate_markdown_resource(&resource, &model, None).expect("generate markdown");
+        let markdown = generate_markdown_resource(&resource, &model, MARKDOWN_FIXTURE_EXAMPLE)
+            .expect("generate markdown");
 
         assert!(
             markdown.contains("`aws.acm.Certificate.DomainValidation.ValidationMethod.dns`"),
@@ -9201,8 +9232,12 @@ mod tests {
         )
         .expect("parse same-namespace enum model");
 
-        let markdown = generate_markdown_resource(&markdown_regression_resource(), &model, None)
-            .expect("distinct enums must generate unique headings");
+        let markdown = generate_markdown_resource(
+            &markdown_regression_resource(),
+            &model,
+            MARKDOWN_FIXTURE_EXAMPLE,
+        )
+        .expect("distinct enums must generate unique headings");
         let ids = carina_docgen::heading_ids(&markdown);
         let unique: HashSet<_> = ids.iter().collect();
         assert_eq!(ids.len(), unique.len(), "{markdown}");

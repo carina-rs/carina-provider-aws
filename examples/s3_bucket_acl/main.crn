@@ -1,0 +1,25 @@
+# S3 Bucket ACL
+#
+# Applies a private ACL after enabling ACL-compatible object ownership.
+
+provider aws {
+  region = aws.Region.ap_northeast_1
+}
+
+let bucket = aws.s3.Bucket {
+  bucket = 'carina-example-acl-bucket'
+
+  tags = {
+    Environment = 'example'
+  }
+}
+
+let ownership = aws.s3.BucketOwnershipControls {
+  bucket           = bucket.bucket
+  object_ownership = aws.s3.BucketOwnershipControls.ObjectOwnership.bucket_owner_preferred
+}
+
+aws.s3.BucketAcl {
+  bucket = ownership.bucket
+  acl    = aws.s3.BucketAcl.Acl.private
+}

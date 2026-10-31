@@ -1,0 +1,11 @@
+# AWS Organization
+#
+# Creates an organization with all AWS Organizations features enabled.
+
+provider aws {
+  region = aws.Region.ap_northeast_1
+}
+
+aws.organizations.Organization {
+  feature_set = aws.organizations.Organization.FeatureSet.all
+}

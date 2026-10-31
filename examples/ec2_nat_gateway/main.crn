@@ -1,0 +1,51 @@
+# EC2 NAT Gateway
+#
+# Creates a public NAT gateway in a subnet using an Elastic IP address.
+
+provider aws {
+  region = aws.Region.ap_northeast_1
+}
+
+let vpc = aws.ec2.Vpc {
+  cidr_block = '10.0.0.0/16'
+
+  tags = {
+    Environment = 'example'
+  }
+}
+
+aws.ec2.InternetGateway {
+  vpc_id = vpc.vpc_id
+
+  tags = {
+    Environment = 'example'
+  }
+}
+
+let subnet = aws.ec2.Subnet {
+  vpc_id            = vpc.vpc_id
+  cidr_block        = '10.0.1.0/24'
+  availability_zone = aws.AvailabilityZone.ZoneName.ap_northeast_1a
+
+  tags = {
+    Environment = 'example'
+  }
+}
+
+let eip = aws.ec2.Eip {
+  domain = aws.ec2.Eip.Domain.vpc
+
+  tags = {
+    Environment = 'example'
+  }
+}
+
+aws.ec2.NatGateway {
+  allocation_id     = eip.allocation_id
+  subnet_id         = subnet.subnet_id
+  connectivity_type = aws.ec2.NatGateway.ConnectivityType.public
+
+  tags = {
+    Environment = 'example'
+  }
+}

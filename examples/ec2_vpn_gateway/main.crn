@@ -1,0 +1,15 @@
+# EC2 VPN Gateway
+#
+# Creates a virtual private gateway for IPsec VPN connections.
+
+provider aws {
+  region = aws.Region.ap_northeast_1
+}
+
+aws.ec2.VpnGateway {
+  type = aws.ec2.VpnGateway.Type.ipsec_1
+
+  tags = {
+    Environment = 'example'
+  }
+}

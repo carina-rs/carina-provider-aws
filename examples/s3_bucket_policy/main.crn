@@ -1,0 +1,40 @@
+# S3 Bucket Policy
+#
+# Denies insecure bucket-level requests to an S3 bucket.
+
+provider aws {
+  region = aws.Region.ap_northeast_1
+}
+
+let bucket = aws.s3.Bucket {
+  bucket = 'carina-example-policy-bucket'
+
+  tags = {
+    Environment = 'example'
+  }
+}
+
+aws.s3.BucketPolicy {
+  bucket = bucket.bucket
+
+  policy = {
+    version = aws.iam.PolicyDocument.Version.2012_10_17
+    statement {
+      sid    = 'DenyInsecureTransport'
+      effect = aws.iam.PolicyDocument.Statement.Effect.deny
+
+      principal = {
+        aws = '*'
+      }
+
+      action   = 's3:GetBucketLocation'
+      resource = [bucket.arn]
+
+      condition = {
+        bool = {
+          'aws:SecureTransport' = 'false'
+        }
+      }
+    }
+  }
+}

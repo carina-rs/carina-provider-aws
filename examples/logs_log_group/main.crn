@@ -1,0 +1,17 @@
+# CloudWatch Logs Log Group
+#
+# Creates a standard log group with a seven-day retention period.
+
+provider aws {
+  region = aws.Region.ap_northeast_1
+}
+
+aws.logs.LogGroup {
+  log_group_name    = '/carina/example'
+  log_group_class   = aws.logs.LogGroup.LogGroupClass.standard
+  retention_in_days = 7
+
+  tags = {
+    Environment = 'example'
+  }
+}

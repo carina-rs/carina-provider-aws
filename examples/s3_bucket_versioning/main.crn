@@ -1,0 +1,20 @@
+# S3 Bucket Versioning
+#
+# Enables versioning on an S3 bucket.
+
+provider aws {
+  region = aws.Region.ap_northeast_1
+}
+
+let bucket = aws.s3.Bucket {
+  bucket = 'carina-example-versioned-bucket'
+
+  tags = {
+    Environment = 'example'
+  }
+}
+
+aws.s3.BucketVersioning {
+  bucket = bucket.bucket
+  status = aws.s3.BucketVersioning.VersioningStatus.enabled
+}

@@ -1,0 +1,35 @@
+# S3 Bucket Lifecycle Configuration
+#
+# Transitions objects to Standard-IA and expires them after one year.
+
+provider aws {
+  region = aws.Region.ap_northeast_1
+}
+
+let bucket = aws.s3.Bucket {
+  bucket = 'carina-example-lifecycle-bucket'
+
+  tags = {
+    Environment = 'example'
+  }
+}
+
+aws.s3.BucketLifecycleConfiguration {
+  bucket = bucket.bucket
+
+  rules = [
+    {
+      id          = 'transition-then-expire'
+      status      = aws.s3.BucketLifecycleConfiguration.LifecycleRule.Status.enabled
+      transitions = [
+        {
+          days          = 30
+          storage_class = aws.s3.BucketLifecycleConfiguration.LifecycleRule.LifecycleTransition.StorageClass.standard_ia
+        },
+      ]
+      expiration  = {
+        days = 365
+      }
+    },
+  ]
+}

@@ -1,0 +1,58 @@
+# EC2 Flow Log
+#
+# Sends VPC flow logs to a CloudWatch Logs log group.
+
+provider aws {
+  region = aws.Region.ap_northeast_1
+}
+
+let vpc = aws.ec2.Vpc {
+  cidr_block = '10.0.0.0/16'
+
+  tags = {
+    Environment = 'example'
+  }
+}
+
+let log_group = aws.logs.LogGroup {
+  log_group_name    = '/example/vpc-flow-logs'
+  retention_in_days = 7
+
+  tags = {
+    Environment = 'example'
+  }
+}
+
+let flow_log_role = aws.iam.Role {
+  role_name = 'carina-example-flow-log-role'
+
+  assume_role_policy_document = {
+    version = aws.iam.PolicyDocument.Version.2012_10_17
+    statement {
+      effect = aws.iam.PolicyDocument.Statement.Effect.allow
+
+      principal = {
+        service = 'vpc-flow-logs.amazonaws.com'
+      }
+
+      action = 'sts:AssumeRole'
+    }
+  }
+
+  tags = {
+    Environment = 'example'
+  }
+}
+
+aws.ec2.FlowLog {
+  resource_ids                = [vpc.vpc_id]
+  resource_type               = aws.ec2.FlowLog.ResourceType.vpc
+  traffic_type                = aws.ec2.FlowLog.TrafficType.all
+  log_destination_type        = aws.ec2.FlowLog.LogDestinationType.cloud_watch_logs
+  log_group_name              = log_group.log_group_name
+  deliver_logs_permission_arn = flow_log_role.arn
+
+  tags = {
+    Environment = 'example'
+  }
+}

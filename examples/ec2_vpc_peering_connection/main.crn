@@ -1,0 +1,32 @@
+# EC2 VPC Peering Connection
+#
+# Creates a peering connection between two VPCs.
+
+provider aws {
+  region = aws.Region.ap_northeast_1
+}
+
+let requester_vpc = aws.ec2.Vpc {
+  cidr_block = '10.0.0.0/16'
+
+  tags = {
+    Environment = 'example'
+  }
+}
+
+let accepter_vpc = aws.ec2.Vpc {
+  cidr_block = '10.1.0.0/16'
+
+  tags = {
+    Environment = 'example'
+  }
+}
+
+aws.ec2.VpcPeeringConnection {
+  vpc_id      = requester_vpc.vpc_id
+  peer_vpc_id = accepter_vpc.vpc_id
+
+  tags = {
+    Environment = 'example'
+  }
+}

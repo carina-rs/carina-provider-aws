@@ -1,0 +1,15 @@
+# EC2 Elastic IP
+#
+# Allocates an Elastic IP address for use in a VPC.
+
+provider aws {
+  region = aws.Region.ap_northeast_1
+}
+
+aws.ec2.Eip {
+  domain = aws.ec2.Eip.Domain.vpc
+
+  tags = {
+    Environment = 'example'
+  }
+}

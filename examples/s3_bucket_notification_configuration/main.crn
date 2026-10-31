@@ -1,0 +1,20 @@
+# S3 Bucket Notification Configuration
+#
+# Sends bucket events to Amazon EventBridge.
+
+provider aws {
+  region = aws.Region.ap_northeast_1
+}
+
+let bucket = aws.s3.Bucket {
+  bucket = 'carina-example-notification-bucket'
+
+  tags = {
+    Environment = 'example'
+  }
+}
+
+aws.s3.BucketNotificationConfiguration {
+  bucket                     = bucket.bucket
+  event_bridge_configuration = {}
+}

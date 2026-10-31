@@ -1,0 +1,28 @@
+# S3 Bucket Server-Side Encryption Configuration
+#
+# Configures default AES-256 encryption for an S3 bucket.
+
+provider aws {
+  region = aws.Region.ap_northeast_1
+}
+
+let bucket = aws.s3.Bucket {
+  bucket = 'carina-example-encrypted-bucket'
+
+  tags = {
+    Environment = 'example'
+  }
+}
+
+aws.s3.BucketServerSideEncryptionConfiguration {
+  bucket = bucket.bucket
+
+  rules = [
+    {
+      apply_server_side_encryption_by_default = {
+        sse_algorithm = aws.s3.BucketServerSideEncryptionConfiguration.SseRule.SseByDefault.SseAlgorithm.aes256
+      }
+      bucket_key_enabled                      = true
+    },
+  ]
+}
