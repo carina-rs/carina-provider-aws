@@ -9,11 +9,11 @@ use aws_sdk_s3::types::{
     ObjectLockRule, VersioningConfiguration,
 };
 use carina_core::provider::{
-    AppliedIdentifier, CreateRequest, DeleteRequest, NoopNormalizer, Provider, ProviderError,
-    ReadRequest, UpdateRequest,
+    AppliedIdentifier, CreateFailure, CreateOutcome, CreateRequest, DeleteRequest, NoopNormalizer,
+    Provider, ProviderDirectiveSchema, ProviderError, ReadRequest, UpdateRequest,
 };
 use carina_core::resource::{
-    ConcreteValue, Resource, ResourceIdentity, ResourceIdentityError, State, Value,
+    ConcreteValue, Directives, Resource, ResourceIdentity, ResourceIdentityError, State, Value,
 };
 use carina_provider_aws::{AwsProvider, BoundedSdkConfig};
 use indexmap::IndexMap;
@@ -25,6 +25,10 @@ const RESOURCE_TYPE: &str = "s3.BucketObjectLockConfiguration";
 
 fn applied_identifier(value: &str) -> AppliedIdentifier {
     AppliedIdentifier::new(value).expect("test provider identifier must be non-empty")
+}
+
+fn delete_request() -> DeleteRequest {
+    DeleteRequest::resolve(&Directives::default(), ProviderDirectiveSchema::Unavailable)
 }
 
 fn provider_from_config(sdk_config: aws_types::SdkConfig) -> AwsProvider {
@@ -100,11 +104,7 @@ fn assert_canonical_enum(value: Option<&Value>, expected: &str) {
 }
 
 fn schema_registry() -> carina_core::schema::SchemaRegistry {
-    let mut schemas = carina_core::schema::SchemaRegistry::new();
-    for schema in carina_provider_aws::schemas::all_schemas() {
-        schemas.insert("aws", schema);
-    }
-    schemas
+    carina_provider_aws::schemas::schema_registry()
 }
 
 async fn create_request_for_test(resource: Resource) -> CreateRequest {
@@ -122,6 +122,26 @@ async fn create_request_for_test(resource: Resource) -> CreateRequest {
     carina_core::executor::prepare_create_request(resource, &preparation)
         .await
         .expect("test resource should pass checked create preparation")
+}
+
+async fn create_outcome_for_test(
+    provider: &AwsProvider,
+    id: &carina_core::resource::ResourceId,
+    request: CreateRequest,
+) -> Result<CreateOutcome, CreateFailure> {
+    let (create, _cancellation) = carina_core::executor::dispatch_create(provider, id, request);
+    create.await
+}
+
+async fn create_state_for_test(
+    provider: &AwsProvider,
+    id: &carina_core::resource::ResourceId,
+    request: CreateRequest,
+) -> Result<State, CreateFailure> {
+    let accepted = carina_core::executor::AcceptedRequest::from_create_request(&request);
+    create_outcome_for_test(provider, id, request)
+        .await
+        .map(|outcome| carina_core::executor::complete_create_for_writeback(outcome, accepted).0)
 }
 
 async fn update_request_for_test(
@@ -188,12 +208,9 @@ async fn create_object_lock(provider: &AwsProvider, bucket: &str, rule: Option<V
     let resource = object_lock_resource(bucket, rule);
     let id = resource.id.clone();
     let request = create_request_for_test(resource).await;
-    carina_core::executor::complete_create_for_writeback(
-        carina_core::executor::dispatch_create(provider, &id, request)
-            .await
-            .expect("create Object Lock configuration"),
-    )
-    .0
+    create_state_for_test(provider, &id, request)
+        .await
+        .expect("create Object Lock configuration")
 }
 
 fn assert_enabled_without_rule(state: &State) {
@@ -292,10 +309,7 @@ async fn host_canonicalizes_dsl_enum_identifiers_before_create() {
             "aws.s3.BucketObjectLockConfiguration.ObjectLockEnabled.enabled",
         )),
     );
-    let mut registry = carina_core::schema::SchemaRegistry::new();
-    for schema in carina_provider_aws::schemas::all_schemas() {
-        registry.insert("aws", schema);
-    }
+    let registry = carina_provider_aws::schemas::schema_registry();
     carina_core::value::canonicalize_resources_with_schemas(
         std::slice::from_mut(&mut resource),
         &registry,
@@ -304,12 +318,9 @@ async fn host_canonicalizes_dsl_enum_identifiers_before_create() {
     let id = resource.id.clone();
     let request = create_request_for_test(resource).await;
 
-    let _state = carina_core::executor::complete_create_for_writeback(
-        carina_core::executor::dispatch_create(&provider, &id, request)
-            .await
-            .expect("create Object Lock configuration from DSL enum identifiers"),
-    )
-    .0;
+    let _state = create_state_for_test(&provider, &id, request)
+        .await
+        .expect("create Object Lock configuration from DSL enum identifiers");
 
     let stored = client
         .get_object_lock_configuration()
@@ -413,7 +424,7 @@ async fn create_requires_versioning_with_actionable_bucket_error() {
     let id = resource.id.clone();
     let request = create_request_for_test(resource).await;
 
-    let error = carina_core::executor::dispatch_create(&provider, &id, request)
+    let error = create_outcome_for_test(&provider, &id, request)
         .await
         .expect_err("Object Lock create must reject a bucket without versioning");
     let message = error.provider_error().to_string();
@@ -505,7 +516,7 @@ async fn create_rejects_all_reachable_invalid_rule_shapes() {
         let resource = object_lock_resource(bucket, Some(rule));
         let id = resource.id.clone();
         let request = create_request_for_test(resource).await;
-        let result = carina_core::executor::dispatch_create(&provider, &id, request).await;
+        let result = create_outcome_for_test(&provider, &id, request).await;
         let error = match result {
             Ok(_) => panic!("{case}: provider.create must reject the value"),
             Err(error) => error,
@@ -530,7 +541,7 @@ async fn destroy_succeeds_when_no_s3_service_is_registered() {
     let id = object_lock_resource(bucket, None).id;
 
     provider
-        .delete(&id, &applied_identifier(bucket), DeleteRequest::default())
+        .delete(&id, &applied_identifier(bucket), delete_request())
         .await
         .expect("destroy must be a local state-only operation");
 }
@@ -549,11 +560,7 @@ async fn destroy_preserves_remote_configuration_for_later_read() {
     .await;
 
     provider
-        .delete(
-            &created.id,
-            &applied_identifier(bucket),
-            DeleteRequest::default(),
-        )
+        .delete(&created.id, &applied_identifier(bucket), delete_request())
         .await
         .expect("Object Lock destroy should be a no-op");
     let reread = provider
@@ -579,17 +586,13 @@ async fn recreate_without_rule_refuses_to_clobber_retained_compliance_rule() {
     .await;
 
     provider
-        .delete(
-            &created.id,
-            &applied_identifier(bucket),
-            DeleteRequest::default(),
-        )
+        .delete(&created.id, &applied_identifier(bucket), delete_request())
         .await
         .expect("Object Lock destroy should be a no-op");
     let resource = object_lock_resource(bucket, None);
     let id = resource.id.clone();
     let request = create_request_for_test(resource).await;
-    let recreate = carina_core::executor::dispatch_create(&provider, &id, request).await;
+    let recreate = create_outcome_for_test(&provider, &id, request).await;
 
     let stored = client
         .get_object_lock_configuration()

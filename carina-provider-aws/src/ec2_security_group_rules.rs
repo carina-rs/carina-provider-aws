@@ -371,7 +371,7 @@ mod tests {
             .build();
 
         // Replicate logic from read_ec2_security_group_rule for ingress
-        let source_security_group_id = rule
+        let source_security_group_id: Option<Value> = rule
             .referenced_group_info()
             .and_then(|group| group.group_id())
             .map(|group_id| Value::Concrete(ConcreteValue::String(group_id.to_string().into())));
@@ -396,7 +396,7 @@ mod tests {
             .build();
 
         // Replicate logic from read_ec2_security_group_rule
-        let cidr_ip = rule
+        let cidr_ip: Option<Value> = rule
             .cidr_ipv4()
             .map(|cidr_ip| Value::Concrete(ConcreteValue::String(cidr_ip.to_string().into())));
 

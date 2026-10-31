@@ -23,11 +23,12 @@ fn policy_arn_rejects_role_arn() {
         carina_aws_types::iam_policy_arn(),
     )]))
     .expect("IAM policy ARN type must pass admission");
+    let value: Value = Value::Concrete(ConcreteValue::String(
+        "arn:aws:iam::123456789012:role/MyRole".into(),
+    ));
     let result = schema
         .rootless_type("value")
         .expect("IAM policy ARN type")
-        .validate(&Value::Concrete(ConcreteValue::String(
-            "arn:aws:iam::123456789012:role/MyRole".into(),
-        )));
+        .validate(&value);
     assert!(result.is_err());
 }

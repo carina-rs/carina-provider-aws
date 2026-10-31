@@ -554,7 +554,7 @@ fn test_route_table_routes_extraction() {
         .build();
 
     // Replicate route extraction logic from read_ec2_route_table
-    let mut routes_list = Vec::new();
+    let mut routes_list: Vec<Value> = Vec::new();
     for route in rt.routes() {
         let mut route_map = IndexMap::new();
         if let Some(dest) = route.destination_cidr_block() {
@@ -628,7 +628,7 @@ fn test_internet_gateway_attachment_extraction() {
         .build();
 
     // Replicate logic from read_ec2_internet_gateway
-    let mut manual_attributes = HashMap::new();
+    let mut manual_attributes: HashMap<String, Value> = HashMap::new();
     if let Some(att) = igw.attachments().first()
         && let Some(vpc_id) = att.vpc_id()
     {
@@ -652,7 +652,7 @@ fn test_internet_gateway_no_attachment() {
         .internet_gateway_id("igw-12345678")
         .build();
 
-    let mut manual_attributes = HashMap::new();
+    let mut manual_attributes: HashMap<String, Value> = HashMap::new();
     if let Some(att) = igw.attachments().first()
         && let Some(vpc_id) = att.vpc_id()
     {
@@ -734,7 +734,7 @@ fn test_subnet_hostname_type_canonical_value_to_aws_sdk() {
 #[test]
 fn test_subnet_dns_options_fields_parsed_separately() {
     // Simulate the attributes map that would be passed to modify_subnet_attributes
-    let mut fields = HashMap::new();
+    let mut fields: HashMap<String, Value> = HashMap::new();
     fields.insert(
         "hostname_type".to_string(),
         Value::Concrete(ConcreteValue::String("ip-name".to_string().into())),
@@ -1706,22 +1706,13 @@ fn test_security_group_ingress_schema_keeps_all_as_alias_only() {
 fn test_organization_feature_set_host_canonicalizes_snake_case_alias() {
     use carina_core::resource::{ConcreteValue, Resource, Value};
 
-    let config =
-        crate::schemas::generated::organizations::organization::organizations_organization_config();
-    let mut registry = carina_core::schema::SchemaRegistry::new();
-    registry.insert(
-        "aws",
-        config
-            .schema
-            .validate()
-            .expect("Organizations schema must pass admission"),
-    );
+    let registry = crate::schemas::schema_registry();
 
     for (authored, api) in [
         ("all", "ALL"),
         ("consolidated_billing", "CONSOLIDATED_BILLING"),
     ] {
-        let mut resource =
+        let mut resource: Resource =
             Resource::with_provider("aws", "organizations.Organization", authored, None);
         resource.set_attr(
             "feature_set",
@@ -1737,7 +1728,8 @@ fn test_organization_feature_set_host_canonicalizes_snake_case_alias() {
         ));
     }
 
-    let mut invalid = Resource::with_provider("aws", "organizations.Organization", "invalid", None);
+    let mut invalid: Resource =
+        Resource::with_provider("aws", "organizations.Organization", "invalid", None);
     invalid.set_attr(
         "feature_set",
         Value::Concrete(ConcreteValue::enum_identifier("not_a_value")),
@@ -1754,15 +1746,7 @@ fn test_organization_feature_set_host_canonicalizes_snake_case_alias() {
 fn test_route53_record_type_host_canonicalizes_snake_case_alias() {
     use carina_core::resource::{ConcreteValue, Resource, Value};
 
-    let config = crate::schemas::generated::route53::record_set::route53_record_set_config();
-    let mut registry = carina_core::schema::SchemaRegistry::new();
-    registry.insert(
-        "aws",
-        config
-            .schema
-            .validate()
-            .expect("Route 53 RecordSet schema must pass admission"),
-    );
+    let registry = crate::schemas::schema_registry();
 
     for (authored, api) in [
         ("a", "A"),
@@ -1770,7 +1754,8 @@ fn test_route53_record_type_host_canonicalizes_snake_case_alias() {
         ("Type.cname", "CNAME"),
         ("aws.route53.RecordSet.Type.cname", "CNAME"),
     ] {
-        let mut resource = Resource::with_provider("aws", "route53.RecordSet", authored, None);
+        let mut resource: Resource =
+            Resource::with_provider("aws", "route53.RecordSet", authored, None);
         resource.set_attr(
             "type",
             Value::Concrete(ConcreteValue::enum_identifier(authored)),

@@ -181,7 +181,7 @@ pub(crate) fn validate_nat_gateway_inputs<S>(
         return Ok(());
     }
 
-    let mode = match inputs.get("availability_mode") {
+    let mode = match inputs.attr("availability_mode") {
         CrossFieldValue::Absent => Some("zonal"),
         CrossFieldValue::Known(value) => concrete_string(value),
         CrossFieldValue::Deferred => None,
@@ -189,7 +189,7 @@ pub(crate) fn validate_nat_gateway_inputs<S>(
     let Some(mode) = mode else {
         return Ok(());
     };
-    let subnet = inputs.get("subnet_id");
+    let subnet = inputs.attr("subnet_id");
     match mode {
         "regional"
             if matches!(
@@ -452,7 +452,6 @@ mod pending_tests {
     use carina_core::differ::{Diff, diff};
     use carina_core::provider::RawSavedAttrs;
     use carina_core::resource::{ResolvedResource, Resource};
-    use carina_core::schema::SchemaRegistry;
     use std::collections::HashMap;
 
     #[test]
@@ -568,15 +567,26 @@ mod pending_tests {
             ]),
         )
         .with_identifier("nat-12345678");
-        let registry = SchemaRegistry::new();
+        let registry = crate::schemas::schema_registry();
         let saved = RawSavedAttrs::default().lift(&registry);
-        let schema = crate::schemas::generated::ec2::nat_gateway::ec2_nat_gateway_config().schema;
+        let schema = registry
+            .get(
+                "aws",
+                "ec2.NatGateway",
+                carina_core::schema::SchemaKind::Resource,
+            )
+            .expect("NAT gateway schema");
+        let router = crate::test_comparison_router();
+        let comparison = router
+            .comparison_for(&registry, &desired.id)
+            .expect("NAT gateway comparison context");
         let result = diff(
             &ResolvedResource::new(desired),
             &current,
             &saved,
             None,
-            Some(&schema),
+            Some(schema.schema().as_schema()),
+            comparison.context(),
         );
         assert!(matches!(result, Diff::NoChange(_)), "{result:?}");
     }

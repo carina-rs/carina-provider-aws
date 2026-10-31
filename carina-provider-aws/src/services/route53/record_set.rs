@@ -17,6 +17,7 @@ use carina_core::schema::ResourceSchema;
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
 use crate::helpers::sdk_error_message;
+use crate::normalizer::DesiredNormalizationInput;
 use crate::provider::TypedCreateCompletion;
 use crate::read_model::found_managed_read;
 use crate::read_models_generated::Route53RecordSetReadModelSupplement;
@@ -550,35 +551,25 @@ impl AwsProvider {
 /// the apply would just re-UPSERT the same DNS name.
 ///
 /// See aws#300, follow-up to aws#117.
-pub(crate) fn normalize_record_set_dns_names<S>(resources: &mut [Resource<S>]) {
-    for resource in resources.iter_mut() {
-        if resource.id.provider != "aws" || resource.id.resource_type != "route53.RecordSet" {
-            continue;
-        }
+pub(crate) fn normalize_record_set_dns_names<S>(input: &mut DesiredNormalizationInput<'_, S>) {
+    if !input.is_resource("aws", "route53.RecordSet") {
+        return;
+    }
 
-        if let Some(Value::Concrete(ConcreteValue::String(name))) = resource.get_attr("name")
-            && let Some(stripped) = name.expose_plaintext().strip_suffix('.')
-        {
-            resource.set_attr(
-                "name".to_string(),
-                Value::Concrete(ConcreteValue::String(stripped.to_string().into())),
-            );
-        }
+    if let Some(ConcreteValue::String(name)) = input.known_attr_mut("name")
+        && let Some(stripped) = name.expose_plaintext().strip_suffix('.').map(str::to_owned)
+    {
+        *name = stripped.into();
+    }
 
-        if let Some(Value::Concrete(ConcreteValue::Map(alias))) = resource.get_attr("alias_target")
-            && let Some(Value::Concrete(ConcreteValue::String(dns_name))) = alias.get("dns_name")
-            && let Some(stripped) = dns_name.expose_plaintext().strip_suffix('.')
-        {
-            let mut new_alias = alias.clone();
-            new_alias.insert(
-                "dns_name".to_string(),
-                Value::Concrete(ConcreteValue::String(stripped.to_string().into())),
-            );
-            resource.set_attr(
-                "alias_target".to_string(),
-                Value::Concrete(ConcreteValue::Map(new_alias)),
-            );
-        }
+    if let Some(ConcreteValue::Map(alias)) = input.known_attr_mut("alias_target")
+        && let Some(Value::Concrete(ConcreteValue::String(dns_name))) = alias.get_mut("dns_name")
+        && let Some(stripped) = dns_name
+            .expose_plaintext()
+            .strip_suffix('.')
+            .map(str::to_owned)
+    {
+        *dns_name = stripped.into();
     }
 }
 
@@ -586,6 +577,11 @@ pub(crate) fn normalize_record_set_dns_names<S>(resources: &mut [Resource<S>]) {
 mod tests {
     use super::*;
     use carina_core::resource::Resource;
+
+    fn normalize(resource: &mut Resource) {
+        let mut input = DesiredNormalizationInput::in_process(resource);
+        normalize_record_set_dns_names(&mut input);
+    }
 
     fn record_set(name: &str) -> Resource {
         let mut r = Resource::with_provider("aws", "route53.RecordSet", "test-rec", None);
@@ -598,10 +594,10 @@ mod tests {
 
     #[test]
     fn strips_trailing_dot_on_name() {
-        let mut resources = vec![record_set("_abc.example.com.")];
-        normalize_record_set_dns_names(&mut resources);
+        let mut resource = record_set("_abc.example.com.");
+        normalize(&mut resource);
         assert_eq!(
-            resources[0].get_attr("name"),
+            resource.get_attr("name"),
             Some(&Value::Concrete(ConcreteValue::String(
                 "_abc.example.com".to_string().into()
             )))
@@ -610,10 +606,10 @@ mod tests {
 
     #[test]
     fn leaves_name_without_trailing_dot_untouched() {
-        let mut resources = vec![record_set("_abc.example.com")];
-        normalize_record_set_dns_names(&mut resources);
+        let mut resource = record_set("_abc.example.com");
+        normalize(&mut resource);
         assert_eq!(
-            resources[0].get_attr("name"),
+            resource.get_attr("name"),
             Some(&Value::Concrete(ConcreteValue::String(
                 "_abc.example.com".to_string().into()
             )))
@@ -695,10 +691,8 @@ mod tests {
             "alias_target".to_string(),
             Value::Concrete(ConcreteValue::Map(alias)),
         );
-        let mut resources = vec![r];
-        normalize_record_set_dns_names(&mut resources);
-        let Some(Value::Concrete(ConcreteValue::Map(out))) = resources[0].get_attr("alias_target")
-        else {
+        normalize(&mut r);
+        let Some(Value::Concrete(ConcreteValue::Map(out))) = r.get_attr("alias_target") else {
             panic!("expected alias_target map");
         };
         assert_eq!(
@@ -718,10 +712,9 @@ mod tests {
                 "bucket.with.trailing.dot.".to_string().into(),
             )),
         );
-        let mut resources = vec![r];
-        normalize_record_set_dns_names(&mut resources);
+        normalize(&mut r);
         assert_eq!(
-            resources[0].get_attr("name"),
+            r.get_attr("name"),
             Some(&Value::Concrete(ConcreteValue::String(
                 "bucket.with.trailing.dot.".to_string().into()
             )))
@@ -735,11 +728,10 @@ mod tests {
             "name".to_string(),
             Value::Concrete(ConcreteValue::String("foo.example.com.".to_string().into())),
         );
-        let mut resources = vec![r];
-        normalize_record_set_dns_names(&mut resources);
+        normalize(&mut r);
         // unchanged: awscc has its own normalizer
         assert_eq!(
-            resources[0].get_attr("name"),
+            r.get_attr("name"),
             Some(&Value::Concrete(ConcreteValue::String(
                 "foo.example.com.".to_string().into()
             )))

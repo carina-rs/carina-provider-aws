@@ -14,6 +14,7 @@ use indexmap::IndexMap;
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
 use crate::helpers::{RetryPolicy, enum_attr_error, retry_aws_operation, sdk_error_message};
+use crate::normalizer::DesiredNormalizationInput;
 use crate::provider::TypedCreateCompletion;
 use crate::read_model::found_managed_read;
 use crate::read_models_generated::S3BucketReplicationConfigurationReadModel;
@@ -25,35 +26,25 @@ use crate::services::s3::bucket::is_s3_not_configured_error;
 /// Insert the provider's canonical V2 replication default into authored
 /// rules. The authored schema permits omission; normalization and read-back
 /// still converge on the same explicit `{ status = Disabled }` shape.
-pub(crate) fn normalize_delete_marker_replication<S>(resources: &mut [Resource<S>]) {
-    for resource in resources {
-        if resource.id.provider != "aws"
-            || resource.id.resource_type != "s3.BucketReplicationConfiguration"
-        {
-            continue;
-        }
-        let Some(Value::Concrete(ConcreteValue::List(rules))) = resource.get_attr("rules") else {
+pub(crate) fn normalize_delete_marker_replication<S>(input: &mut DesiredNormalizationInput<'_, S>) {
+    if !input.is_resource("aws", "s3.BucketReplicationConfiguration") {
+        return;
+    }
+    let Some(ConcreteValue::List(rules)) = input.known_attr_mut("rules") else {
+        return;
+    };
+    for rule in rules {
+        let Value::Concrete(ConcreteValue::Map(fields)) = rule else {
             continue;
         };
-        let normalized = rules
-            .iter()
-            .map(|rule| {
-                let Value::Concrete(ConcreteValue::Map(fields)) = rule else {
-                    return rule.clone();
-                };
-                let mut fields = fields.clone();
-                fields
-                    .entry("delete_marker_replication".to_string())
-                    .or_insert_with(|| {
-                        Value::Concrete(ConcreteValue::Map(indexmap::IndexMap::from([(
-                            "status".to_string(),
-                            Value::Concrete(ConcreteValue::String("Disabled".into())),
-                        )])))
-                    });
-                Value::Concrete(ConcreteValue::Map(fields))
-            })
-            .collect();
-        resource.set_attr("rules", Value::Concrete(ConcreteValue::List(normalized)));
+        fields
+            .entry("delete_marker_replication".to_string())
+            .or_insert_with(|| {
+                Value::Concrete(ConcreteValue::Map(indexmap::IndexMap::from([(
+                    "status".to_string(),
+                    Value::Concrete(ConcreteValue::String("Disabled".into())),
+                )])))
+            });
     }
 }
 

@@ -221,6 +221,10 @@ impl AwsIssuedCreate for CaptureIssued {
     ) -> Result<Self::Step, Self::Verdict> {
         Ok(())
     }
+
+    fn preserve(self, _token: AwsCreateToken, error: ProviderError) -> Self::Verdict {
+        error
+    }
 }
 
 fn string(value: impl Into<String>) -> Value {

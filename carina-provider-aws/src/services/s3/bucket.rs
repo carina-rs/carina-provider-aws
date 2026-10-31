@@ -3,11 +3,9 @@ use std::collections::HashMap;
 
 use indexmap::IndexMap;
 
-use carina_core::provider::{AppliedIdentifier, ReadOutcome};
+use carina_core::provider::{AppliedIdentifier, ProviderDirectives, ReadOutcome};
 use carina_core::provider::{BoxFuture, ProviderError, ProviderResult};
-use carina_core::resource::{
-    ConcreteValue, DataSource, Directives, Resource, ResourceId, State, Value,
-};
+use carina_core::resource::{ConcreteValue, DataSource, Resource, ResourceId, State, Value};
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
@@ -291,11 +289,11 @@ impl AwsProvider {
         &self,
         id: ResourceId,
         identifier: &AppliedIdentifier,
-        directives: &Directives,
+        directives: &ProviderDirectives,
     ) -> ProviderResult<()> {
         let identifier = identifier.as_str();
         // If force_delete is enabled, empty the bucket before deletion
-        if directives.force_delete {
+        if directives.force_delete() {
             self.empty_s3_bucket(&id, identifier).await?;
         }
 
@@ -884,9 +882,9 @@ mod tests {
         let schema = crate::test_rootless_type(carina_aws_types::route53_hosted_zone_id());
         for &(region, hosted_zone_id) in S3_HOSTED_ZONE_IDS {
             assert_eq!(s3_hosted_zone_id(region).as_deref(), Ok(hosted_zone_id));
-            let result = schema.validate(&Value::Concrete(ConcreteValue::String(
-                hosted_zone_id.to_string().into(),
-            )));
+            let value: Value =
+                Value::Concrete(ConcreteValue::String(hosted_zone_id.to_string().into()));
+            let result = schema.validate(&value);
             assert!(
                 result.is_ok(),
                 "{region} hosted-zone ID {hosted_zone_id} must validate: {result:?}"

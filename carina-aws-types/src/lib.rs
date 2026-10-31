@@ -30,12 +30,32 @@ mod tests {
 
     use crate::*;
 
-    pub(crate) fn rootless(attr: AttributeType) -> RootlessType {
+    pub(crate) struct TestRootlessType(RootlessType);
+
+    impl TestRootlessType {
+        fn validate(&self, value: &Value) -> Result<(), carina_core::schema::TypeError> {
+            self.0.validate(value)
+        }
+
+        pub(crate) fn validate_collect(
+            &self,
+            value: &Value,
+        ) -> Vec<(
+            carina_core::schema::FieldPath,
+            carina_core::schema::TypeError,
+        )> {
+            self.0.validate_collect(value)
+        }
+    }
+
+    pub(crate) fn rootless(attr: AttributeType) -> TestRootlessType {
         const NAME: &str = "test_value";
-        ValidatedConfigSchema::validate(BTreeMap::from([(NAME.to_string(), attr)]))
-            .expect("test attribute type must pass config-schema admission")
-            .rootless_type(NAME)
-            .expect("test attribute type must be present")
+        TestRootlessType(
+            ValidatedConfigSchema::validate(BTreeMap::from([(NAME.to_string(), attr)]))
+                .expect("test attribute type must pass config-schema admission")
+                .rootless_type(NAME)
+                .expect("test attribute type must be present"),
+        )
     }
 
     // Custom type shape tests
@@ -299,22 +319,13 @@ mod tests {
             ],
         );
 
+        let _schema = schema;
         assert!(
-            carina_core::diff_helpers::resource_attribute_values_equal(
-                &original,
-                &reordered,
-                Some(&schema),
-                "assume_role_policy_document",
-            ),
+            original.semantically_equal(&reordered),
             "IAM action and principal ARN order must not produce a diff"
         );
         assert!(
-            !carina_core::diff_helpers::resource_attribute_values_equal(
-                &original,
-                &changed,
-                Some(&schema),
-                "assume_role_policy_document",
-            ),
+            !original.semantically_equal(&changed),
             "a changed principal ARN must produce a diff"
         );
     }

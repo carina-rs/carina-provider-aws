@@ -5,11 +5,14 @@ use std::collections::BTreeMap;
 use indexmap::IndexMap;
 
 use carina_core::provider::{
-    BoxFuture, CanonicalProviderConfigAttributes, ProviderError, ProviderFactory,
-    ProviderNormalizer, ProviderReadyConfig, ProviderResult,
+    BoxFuture, CanonicalProviderConfigAttributes, InitializeOutcome, InitializeOutcomeMint,
+    ProviderError, ProviderFactory, ProviderInitialization, ProviderNormalizer,
+    ProviderReadyConfig, ProviderResult,
 };
 use carina_core::resource::Value;
-use carina_core::schema::{ValidatedConfigSchema, ValidatedResourceSchema};
+use carina_core::schema::{
+    ValidatedConfigSchema, ValidatedProviderSchemaWitness, ValidatedResourceSchema,
+};
 
 use crate::AwsProvider;
 use crate::normalizer::AwsNormalizer;
@@ -73,10 +76,8 @@ impl ProviderFactory for AwsProviderFactory {
         &self,
         _binding: Option<&str>,
         config: &ProviderReadyConfig,
-    ) -> BoxFuture<
-        '_,
-        carina_core::provider::ProviderResult<Box<dyn carina_core::provider::Provider>>,
-    > {
+        _initialize_outcome: InitializeOutcomeMint,
+    ) -> BoxFuture<'_, ProviderResult<ProviderInitialization>> {
         // `_binding` is intentionally unused: the AWS factory does not
         // cache instances, so each call already produces an
         // independent `AwsProvider`. The host uses the binding name
@@ -97,9 +98,9 @@ impl ProviderFactory for AwsProviderFactory {
             }
         };
         Box::pin(async move {
-            Ok(Box::new(
-                AwsProvider::new_with_account_guard(&region, allowed, forbidden, assume_role).await,
-            ) as Box<dyn carina_core::provider::Provider>)
+            let provider =
+                AwsProvider::new_with_account_guard(&region, allowed, forbidden, assume_role).await;
+            Ok(InitializeOutcome::unavailable().with_provider(Box::new(provider)))
         })
     }
 
@@ -113,6 +114,10 @@ impl ProviderFactory for AwsProviderFactory {
 
     fn schemas(&self) -> Vec<ValidatedResourceSchema> {
         crate::schemas::all_schemas()
+    }
+
+    fn schema_witness(&self) -> ValidatedProviderSchemaWitness {
+        crate::schemas::provider_schema_witness()
     }
 
     fn identity_attributes(&self) -> Vec<&str> {

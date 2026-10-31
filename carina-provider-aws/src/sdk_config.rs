@@ -66,11 +66,28 @@ impl BoundedSdkConfig {
 
     /// Load a bounded SDK configuration for the region and optional assumed role.
     pub(crate) async fn load(region: &str, assume_role: Option<AssumeRoleConfig>) -> Self {
+        Self::load_with_overrides(region, assume_role, None, None).await
+    }
+
+    async fn load_with_overrides(
+        region: &str,
+        assume_role: Option<AssumeRoleConfig>,
+        http_client: Option<aws_smithy_runtime_api::client::http::SharedHttpClient>,
+        credentials_provider: Option<aws_credential_types::provider::SharedCredentialsProvider>,
+    ) -> Self {
         // Give the loader the policy too so invalid AWS retry settings cannot panic first.
         let loader = aws_config::defaults(aws_config::BehaviorVersion::latest())
             .region(Region::new(region.to_string()))
             .timeout_config(timeout_config())
             .retry_config(retry_config());
+        let loader = match http_client {
+            Some(http_client) => loader.http_client(http_client),
+            None => loader,
+        };
+        let loader = match credentials_provider {
+            Some(credentials_provider) => loader.credentials_provider(credentials_provider),
+            None => loader,
+        };
         #[cfg(target_arch = "wasm32")]
         let loader = loader.http_client(carina_plugin_sdk::wasi_http::WasiHttpClient::new());
         let base = Self::new(loader.load().await);
@@ -243,7 +260,14 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     #[tokio::test]
     async fn load_applies_bounded_policy() {
-        let bounded = BoundedSdkConfig::load("us-east-1", None).await;
+        let mock = winterbaume_core::MockAws::builder().build();
+        let bounded = BoundedSdkConfig::load_with_overrides(
+            "us-east-1",
+            None,
+            Some(mock.http_client()),
+            Some(mock.credentials_provider()),
+        )
+        .await;
         assert_bounded_policy(bounded.0.timeout_config(), bounded.0.retry_config());
     }
 

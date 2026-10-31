@@ -186,6 +186,15 @@ pub enum ReplacementClass {
     Conflicting,
 }
 
+/// Whether a managed resource is intrinsically dangerous to destroy.
+///
+/// Keep this as an explicit codegen override rather than editing generated
+/// schemas: closing an Organizations member account is materially different
+/// from deleting ordinary AWS infrastructure and must require a user opt-out.
+pub fn defaults_to_prevent_destroy(resource_name: &str) -> bool {
+    matches!(resource_name, "organizations.Account")
+}
+
 /// Defines how to map an AWS API resource to a Carina schema.
 pub struct ResourceDef {
     /// Carina DSL resource name (e.g., "ec2.Vpc")

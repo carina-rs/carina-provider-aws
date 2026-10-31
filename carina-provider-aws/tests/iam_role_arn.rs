@@ -7,10 +7,11 @@ fn validates(attribute_type: AttributeType, value: &str) -> bool {
     let schema =
         ValidatedConfigSchema::validate(BTreeMap::from([("value".to_string(), attribute_type)]))
             .expect("test type must pass schema admission");
+    let value: Value = Value::Concrete(ConcreteValue::String(value.into()));
     schema
         .rootless_type("value")
         .expect("test type")
-        .validate(&Value::Concrete(ConcreteValue::String(value.into())))
+        .validate(&value)
         .is_ok()
 }
 
