@@ -22,6 +22,7 @@ pub fn all_schemas() -> Vec<ValidatedResourceSchema> {
 mod tests {
     use std::collections::HashMap;
 
+    use carina_aws_types::AwsType;
     use carina_core::differ::{Diff, diff};
     use carina_core::executor::normalized::apply_desired_normalization;
     use carina_core::provider::normalize_provider_states;
@@ -241,7 +242,7 @@ mod tests {
     }
 
     #[test]
-    fn acm_certificate_nested_string_enum_identities_are_structural_and_unique() {
+    fn acm_certificate_nested_string_enum_identities_are_unique_except_shared_dns_record_type() {
         let config = super::generated::acm::certificate::acm_certificate_config();
         let mut identities = Vec::new();
         for (name, attr) in config.schema.attributes() {
@@ -255,13 +256,24 @@ mod tests {
                 .or_default()
                 .push(path.as_str());
         }
-        let duplicates: Vec<_> = by_identity
+        let mut duplicates: Vec<_> = by_identity
             .into_iter()
             .filter(|(_, paths)| paths.len() > 1)
             .collect();
-        assert!(
-            duplicates.is_empty(),
-            "enum identities must be unique within acm.Certificate; duplicates: {duplicates:?}"
+        for (_, paths) in &mut duplicates {
+            paths.sort_unstable();
+        }
+        duplicates.sort_unstable_by_key(|(identity, _)| *identity);
+        assert_eq!(
+            duplicates,
+            vec![(
+                "aws.route53.RecordSet.Type",
+                vec![
+                    "domain_validation_options[].resource_record.type",
+                    "renewal_summary.domain_validation_options[].resource_record.type",
+                ],
+            )],
+            "only the two ACM projections of the shared Smithy ResourceRecord.Type shape may share an enum identity"
         );
 
         let by_path: HashMap<_, _> = identities.into_iter().collect();
@@ -282,7 +294,7 @@ mod tests {
         );
         assert_eq!(
             by_path.get("domain_validation_options[].resource_record.type"),
-            Some(&"aws.acm.Certificate.DomainValidation.ResourceRecord.Type".to_string())
+            Some(&"aws.route53.RecordSet.Type".to_string())
         );
         assert_eq!(
             by_path.get("domain_validation_options[].validation_method"),
@@ -290,16 +302,138 @@ mod tests {
         );
         assert_eq!(
             by_path.get("renewal_summary.domain_validation_options[].resource_record.type"),
-            Some(
-                &"aws.acm.Certificate.RenewalSummary.DomainValidation.ResourceRecord.Type"
-                    .to_string()
-            )
+            Some(&"aws.route53.RecordSet.Type".to_string())
         );
         assert_eq!(
             by_path.get("renewal_summary.domain_validation_options[].validation_method"),
             Some(
                 &"aws.acm.Certificate.RenewalSummary.DomainValidation.ValidationMethod".to_string()
             )
+        );
+    }
+
+    fn list_element_type(attr: &AttributeType) -> &AttributeType {
+        let Shape::List { element_type, .. } =
+            attr.shape_ref_free().expect("generated schema is Ref-free")
+        else {
+            panic!("expected list, got {:?}", attr.raw_shape());
+        };
+        element_type
+    }
+
+    fn nested_struct_field_type<'a>(
+        attr: &'a AttributeType,
+        field_name: &str,
+    ) -> &'a AttributeType {
+        let mut budget = ShapeWalkBudget::new(16);
+        attr.struct_fields_ref_free_with_budget(&mut budget)
+            .expect("generated schema is Ref-free")
+            .unwrap_or_else(|| panic!("expected struct while looking for {field_name}"))
+            .iter()
+            .find(|field| field.name() == field_name)
+            .unwrap_or_else(|| panic!("missing nested field {field_name}"))
+            .field_type()
+    }
+
+    fn enum_values(attr: &AttributeType) -> &[String] {
+        let Shape::Enum {
+            values: Some(values),
+            ..
+        } = attr.shape_ref_free().expect("generated schema is Ref-free")
+        else {
+            panic!("expected closed enum, got {:?}", attr.raw_shape());
+        };
+        values
+    }
+
+    #[test]
+    fn acm_resource_record_type_is_assignable_to_route53_record_set_type() {
+        let acm = super::generated::acm::certificate::acm_certificate_config();
+        let route53 = super::generated::route53::record_set::route53_record_set_config();
+
+        let domain_validation =
+            list_element_type(attr_type(&acm.schema, "domain_validation_options"));
+        let resource_record = nested_struct_field_type(domain_validation, "resource_record");
+        let acm_record_type = nested_struct_field_type(resource_record, "type");
+        let route53_record_type = attr_type(&route53.schema, "type");
+
+        let Shape::Enum {
+            identity: acm_identity,
+            ..
+        } = acm_record_type
+            .shape_ref_free()
+            .expect("generated schema is Ref-free")
+        else {
+            panic!("ACM ResourceRecord.Type must be an enum");
+        };
+        let Shape::Enum {
+            identity: route53_identity,
+            ..
+        } = route53_record_type
+            .shape_ref_free()
+            .expect("generated schema is Ref-free")
+        else {
+            panic!("Route 53 RecordSet.Type must be an enum");
+        };
+
+        assert_eq!(acm_identity, route53_identity);
+        assert!(
+            acm.schema
+                .type_in_schema(acm_record_type)
+                .is_assignable_to(route53.schema.type_in_schema(route53_record_type)),
+            "ACM's computed ResourceRecord.Type must feed Route 53 RecordSet.Type"
+        );
+    }
+
+    #[test]
+    fn acm_resource_record_type_values_are_subset_of_route53_record_set_type_values() {
+        let acm = super::generated::acm::certificate::acm_certificate_config();
+        let route53 = super::generated::route53::record_set::route53_record_set_config();
+
+        let domain_validation =
+            list_element_type(attr_type(&acm.schema, "domain_validation_options"));
+        let resource_record = nested_struct_field_type(domain_validation, "resource_record");
+        let acm_values = enum_values(nested_struct_field_type(resource_record, "type"));
+        let route53_values = enum_values(attr_type(&route53.schema, "type"));
+
+        assert_eq!(acm_values, &["CNAME".to_string()]);
+        assert!(
+            acm_values
+                .iter()
+                .all(|value| route53_values.contains(value)),
+            "ACM values {acm_values:?} must remain a subset of Route 53 values {route53_values:?}"
+        );
+    }
+
+    #[test]
+    fn route53_record_set_type_values_and_aliases_match_dns_record_type_catalog() {
+        let route53 = super::generated::route53::record_set::route53_record_set_config();
+        let route53_record_type = attr_type(&route53.schema, "type");
+        let dns_record_type = AwsType::DnsRecordType.attribute_type();
+
+        let Shape::Enum {
+            values: Some(generated_values),
+            dsl_aliases: generated_aliases,
+            ..
+        } = route53_record_type
+            .shape_ref_free()
+            .expect("generated schema is Ref-free")
+        else {
+            panic!("Route 53 RecordSet.Type must be a closed enum");
+        };
+        let RawShape::Enum {
+            values: Some(catalog_values),
+            dsl_aliases: catalog_aliases,
+            ..
+        } = dns_record_type.raw_shape()
+        else {
+            panic!("AwsType::DnsRecordType must be a closed enum");
+        };
+
+        assert_eq!(
+            (generated_values, generated_aliases),
+            (catalog_values, catalog_aliases),
+            "Route 53 RecordSet.Type values and DSL aliases drifted from the shared catalog; update DNS_RECORD_TYPE_VALUES"
         );
     }
 

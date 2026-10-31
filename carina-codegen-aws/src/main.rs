@@ -15,7 +15,7 @@ use carina_smithy::{Shape, ShapeKind, SmithyModel};
 use clap::Parser;
 use heck::{ToSnakeCase, ToUpperCamelCase};
 
-use carina_aws_types::dsl_enum_value;
+use carina_aws_types::{AwsType, dsl_enum_value};
 use carina_codegen_aws::resource_defs::{self, ReplacementClass, ResourceDef};
 use carina_docgen::{Heading, PageBuilder, TableCell};
 
@@ -64,6 +64,8 @@ enum TypeOverride {
     IntRange(i64, i64),
     /// Override to an integer enum with specific allowed values
     IntEnum(Vec<i64>),
+    /// Override only the enum identity, retaining Smithy values and DSL aliases.
+    EnumIdentity(AwsType),
 }
 
 /// Information about a detected enum type
@@ -73,6 +75,8 @@ struct EnumInfo {
     type_name: String,
     /// Valid enum values (e.g., ["default", "dedicated", "host"])
     values: Vec<String>,
+    /// Shared catalog identity to use instead of the structural Smithy identity.
+    identity_override: Option<AwsType>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1326,6 +1330,7 @@ fn collect_resource_attributes_unvalidated(
         let (type_code, enum_info) = resolve_type(
             &mut TypeResolutionContext {
                 model,
+                resource_name: res.name,
                 namespace: &namespace,
                 struct_path: Vec::new(),
                 type_overrides: &type_overrides,
@@ -1435,6 +1440,7 @@ fn collect_resource_attributes_unvalidated(
         let (type_code, enum_info) = resolve_type(
             &mut TypeResolutionContext {
                 model,
+                resource_name: res.name,
                 namespace: &namespace,
                 struct_path: Vec::new(),
                 type_overrides: &type_overrides,
@@ -2040,15 +2046,16 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
                 .map(|v| format!("\"{}\".to_string()", v))
                 .collect::<Vec<_>>()
                 .join(", ");
+            let identity_code = enum_identity_code(ei, &namespace);
             format!(
                 "AttributeType::enum_(\n\
-                 \x20   carina_core::schema::enum_identity(\"{}\", Some(\"{}\")),\n\
+                 \x20   {},\n\
                  \x20   Some(vec![{}]),\n\
                  \x20   {},\n\
                  \x20   None,\n\
                  \x20   None,\n\
                  )",
-                ei.type_name, namespace, values_str, dsl_aliases_code
+                identity_code, values_str, dsl_aliases_code
             )
         } else {
             attr.type_code.clone()
@@ -2170,6 +2177,8 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
 /// that are passed to both `resolve_type` and `generate_struct_type`.
 struct TypeResolutionContext<'a> {
     model: &'a SmithyModel,
+    /// Resource name used by resource-specific type overrides, e.g. `acm.Certificate`.
+    resource_name: &'a str,
     /// Base resource namespace, e.g. `aws.acm.Certificate`.
     namespace: &'a str,
     /// Containing Smithy struct type names between the resource and the
@@ -2216,6 +2225,57 @@ fn enum_namespace(ctx: &TypeResolutionContext<'_>) -> String {
     }
 }
 
+fn enum_identity_override(
+    resource_name: &str,
+    parent_struct: Option<&str>,
+    field_name: &str,
+) -> Option<AwsType> {
+    let nested_property;
+    let property_name = if let Some(parent_struct) = parent_struct {
+        nested_property = format!("{parent_struct}.{field_name}");
+        nested_property.as_str()
+    } else {
+        field_name
+    };
+
+    match resource_type_overrides().get(&(resource_name, property_name)) {
+        Some(TypeOverride::EnumIdentity(identity)) => Some(*identity),
+        _ => None,
+    }
+}
+
+fn enum_identity_code(enum_info: &EnumInfo, default_namespace: &str) -> String {
+    if let Some(aws_type) = enum_info.identity_override {
+        return format!(
+            "carina_aws_types::AwsType::{}.identity()",
+            aws_type.rust_variant_name()
+        );
+    }
+
+    let (namespace, type_name) =
+        effective_enum_identity(None, default_namespace, &enum_info.type_name);
+    format!(
+        "carina_core::schema::enum_identity(\"{}\", Some(\"{}\"))",
+        type_name, namespace
+    )
+}
+
+fn effective_enum_identity(
+    identity_override: Option<AwsType>,
+    default_namespace: &str,
+    default_type_name: &str,
+) -> (String, String) {
+    if let Some(aws_type) = identity_override {
+        let identity = aws_type.identity();
+        let namespace = identity
+            .dotted_prefix()
+            .expect("AWS catalog identities always have a provider or segments");
+        (namespace, identity.kind)
+    } else {
+        (default_namespace.to_string(), default_type_name.to_string())
+    }
+}
+
 /// Resolve a Smithy type to a Carina type code string.
 /// Returns (type_code, Option<EnumInfo>).
 /// Also populates collectors for enums and ranged ints discovered during resolution.
@@ -2235,6 +2295,11 @@ fn resolve_type(
         let enum_info = EnumInfo {
             type_name,
             values: values.iter().map(|s| s.to_string()).collect(),
+            identity_override: enum_identity_override(
+                ctx.resource_name,
+                ctx.struct_path.last().map(String::as_str),
+                field_name,
+            ),
         };
         ctx.all_enums
             .entry(field_name.to_string())
@@ -2298,6 +2363,11 @@ fn resolve_type(
                 let enum_info = EnumInfo {
                     type_name,
                     values: string_values,
+                    identity_override: enum_identity_override(
+                        ctx.resource_name,
+                        ctx.struct_path.last().map(String::as_str),
+                        field_name,
+                    ),
                 };
                 ctx.all_enums
                     .entry(field_name.to_string())
@@ -2400,15 +2470,16 @@ fn generate_struct_type(
                 .map(|v| format!("\"{}\".to_string()", v))
                 .collect::<Vec<_>>()
                 .join(", ");
+            let identity_code = enum_identity_code(&ei, &namespace);
             format!(
                 "AttributeType::enum_(\n\
-                 \x20   carina_core::schema::enum_identity(\"{}\", Some(\"{}\")),\n\
+                 \x20   {},\n\
                  \x20   Some(vec![{}]),\n\
                  \x20   {},\n\
                  \x20   None,\n\
                  \x20   None,\n\
                  )",
-                ei.type_name, namespace, values_str, dsl_aliases_code
+                identity_code, values_str, dsl_aliases_code
             )
         } else {
             field_type
@@ -5132,6 +5203,7 @@ fn generate_markdown_resource(
         };
         let attr_type = discover_markdown_type(
             model,
+            res.name,
             &member_ref.target,
             name,
             std::slice::from_ref(&snake_name),
@@ -5197,6 +5269,7 @@ fn generate_markdown_resource(
         .unwrap_or_else(|| {
             discover_markdown_type(
                 model,
+                res.name,
                 &member_ref.target,
                 name,
                 std::slice::from_ref(&snake_name),
@@ -5802,6 +5875,7 @@ fn markdown_nested_field_target(
 #[allow(clippy::too_many_arguments)]
 fn discover_markdown_type(
     model: &SmithyModel,
+    resource_name: &str,
     target: &str,
     field_name: &str,
     heading_path: &[String],
@@ -5827,13 +5901,15 @@ fn discover_markdown_type(
 
     // Check known enum overrides
     if let Some(values) = known_enum_overrides().get(field_name) {
-        let type_name = field_name.to_string();
+        let identity_override = enum_identity_override(resource_name, parent_struct, field_name);
+        let (enum_namespace, type_name) =
+            effective_enum_identity(identity_override, enum_namespace, field_name);
         let key = register_markdown_enum(
             MarkdownEnumSource::KnownOverride(field_name.to_string()),
             field_name,
             &type_name,
             heading_path,
-            enum_namespace,
+            &enum_namespace,
             values.iter().map(|value| value.to_string()).collect(),
             all_enums,
         );
@@ -5868,6 +5944,10 @@ fn discover_markdown_type(
                 // the rendered enum heading reads naturally.
                 let type_name =
                     pascalize_enum_type_name(SmithyModel::shape_name(target), field_name);
+                let identity_override =
+                    enum_identity_override(resource_name, parent_struct, field_name);
+                let (enum_namespace, type_name) =
+                    effective_enum_identity(identity_override, enum_namespace, &type_name);
                 let key = register_markdown_enum(
                     MarkdownEnumSource::Smithy {
                         target: target.to_string(),
@@ -5876,7 +5956,7 @@ fn discover_markdown_type(
                     field_name,
                     &type_name,
                     heading_path,
-                    enum_namespace,
+                    &enum_namespace,
                     values.into_iter().map(|(_, value)| value).collect(),
                     all_enums,
                 );
@@ -5890,6 +5970,7 @@ fn discover_markdown_type(
             if let Some(carina_smithy::Shape::List(list_shape)) = model.get_shape(target) {
                 let item = discover_markdown_type(
                     model,
+                    resource_name,
                     &list_shape.member.target,
                     field_name,
                     heading_path,
@@ -5941,6 +6022,7 @@ fn discover_markdown_type(
                         child_heading_path.push(name.to_snake_case());
                         let field_type = discover_markdown_type(
                             model,
+                            resource_name,
                             &member_ref.target,
                             name,
                             &child_heading_path,
@@ -6007,6 +6089,7 @@ fn register_markdown_enum(
             info: EnumInfo {
                 type_name: type_name.to_string(),
                 values,
+                identity_override: None,
             },
         });
     key
@@ -6278,10 +6361,20 @@ fn known_int_range_overrides() -> &'static HashMap<&'static str, (i64, i64)> {
 /// Maps (Smithy resource name, property name) to a TypeOverride.
 /// Use this when a property needs resource-specific type treatment that differs
 /// from global overrides or pattern-based inference.
-#[allow(dead_code)]
 fn resource_type_overrides() -> &'static HashMap<(&'static str, &'static str), TypeOverride> {
     static OVERRIDES: LazyLock<HashMap<(&'static str, &'static str), TypeOverride>> =
-        LazyLock::new(HashMap::new);
+        LazyLock::new(|| {
+            HashMap::from([
+                (
+                    ("route53.RecordSet", "Type"),
+                    TypeOverride::EnumIdentity(AwsType::DnsRecordType),
+                ),
+                (
+                    ("acm.Certificate", "ResourceRecord.Type"),
+                    TypeOverride::EnumIdentity(AwsType::DnsRecordType),
+                ),
+            ])
+        });
     &OVERRIDES
 }
 
@@ -8496,12 +8589,23 @@ mod tests {
                 "com.amazonaws.acm#RequestCertificateRequest": {
                   "type": "structure",
                   "members": {
+                    "DomainName": { "target": "smithy.api#String", "traits": {} },
+                    "IdempotencyToken": { "target": "smithy.api#String", "traits": {} },
+                    "KeyAlgorithm": { "target": "smithy.api#String", "traits": {} },
                     "Options": {
                       "target": "com.amazonaws.acm#CertificateOptions",
                       "traits": {}
                     },
                     "DomainValidationOptions": {
                       "target": "com.amazonaws.acm#RequestDomainValidationList",
+                      "traits": {}
+                    },
+                    "SubjectAlternativeNames": {
+                      "target": "smithy.api#String",
+                      "traits": {}
+                    },
+                    "ValidationMethod": {
+                      "target": "com.amazonaws.acm#ValidationMethod",
                       "traits": {}
                     }
                   },
@@ -8549,6 +8653,20 @@ mod tests {
                   "type": "structure",
                   "members": {
                     "CertificateArn": { "target": "smithy.api#String", "traits": {} },
+                    "DomainName": { "target": "smithy.api#String", "traits": {} },
+                    "KeyAlgorithm": { "target": "smithy.api#String", "traits": {} },
+                    "Options": {
+                      "target": "com.amazonaws.acm#CertificateOptions",
+                      "traits": {}
+                    },
+                    "SubjectAlternativeNames": {
+                      "target": "smithy.api#String",
+                      "traits": {}
+                    },
+                    "ValidationMethod": {
+                      "target": "com.amazonaws.acm#ValidationMethod",
+                      "traits": {}
+                    },
                     "DomainValidationOptions": {
                       "target": "com.amazonaws.acm#DomainValidationList",
                       "traits": {}
@@ -8736,6 +8854,62 @@ mod tests {
         );
         assert!(!markdown.contains("### CertificateOptions"), "{markdown}");
         assert!(!markdown.contains("### DomainValidation\n"), "{markdown}");
+    }
+
+    #[test]
+    fn acm_resource_record_enum_identity_override_preserves_values_and_aliases() {
+        let resource = resource_defs::acm_resources()
+            .into_iter()
+            .find(|resource| resource.name == "acm.Certificate")
+            .expect("certificate resource");
+        let generated = generate_resource(&resource, &markdown_read_shape_override_model())
+            .expect("generate certificate schema");
+
+        assert_eq!(
+            generated
+                .matches("carina_aws_types::AwsType::DnsRecordType.identity()")
+                .count(),
+            2,
+            "both projections of ACM's shared ResourceRecord shape need the shared DNS identity: {generated}"
+        );
+        assert_eq!(
+            generated
+                .matches("Some(vec![\"CNAME\".to_string()])")
+                .count(),
+            2,
+            "identity override must retain ACM's own CNAME-only model values: {generated}"
+        );
+        assert_eq!(
+            generated
+                .matches("vec![(\"CNAME\".to_string(), \"cname\".to_string())]")
+                .count(),
+            2,
+            "identity override must retain generated DSL aliases: {generated}"
+        );
+    }
+
+    #[test]
+    fn markdown_acm_resource_record_enum_uses_shared_identity_and_model_values() {
+        let resource = resource_defs::acm_resources()
+            .into_iter()
+            .find(|resource| resource.name == "acm.Certificate")
+            .expect("certificate resource");
+        let markdown =
+            generate_markdown_resource(&resource, &markdown_read_shape_override_model(), None)
+                .expect("generate certificate markdown");
+
+        assert!(
+            markdown.contains("| `CNAME` | `aws.route53.RecordSet.Type.cname` |"),
+            "the identifier table must use the shared DNS identity: {markdown}"
+        );
+        assert!(
+            !markdown.contains("| `A` | `aws.route53.RecordSet.Type.a` |"),
+            "the identity override must not replace ACM's CNAME-only value list: {markdown}"
+        );
+        assert!(
+            !markdown.contains("aws.acm.Certificate.DomainValidation.ResourceRecord.Type.cname"),
+            "the old structural identity must not leak into the identifier table: {markdown}"
+        );
     }
 
     #[test]

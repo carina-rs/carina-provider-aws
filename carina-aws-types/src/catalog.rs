@@ -162,6 +162,15 @@ fn s3_lifecycle_date_type(identity: TypeIdentity) -> AttributeType {
     )
 }
 
+const DNS_RECORD_TYPE_VALUES: &[&str] = &[
+    "A", "AAAA", "CAA", "CNAME", "DS", "HTTPS", "MX", "NAPTR", "NS", "PTR", "SOA", "SPF", "SRV",
+    "SSHFP", "SVCB", "TLSA", "TXT",
+];
+
+fn dns_record_type_type(identity: TypeIdentity) -> AttributeType {
+    crate::common::enum_with_dsl_aliases(DNS_RECORD_TYPE_VALUES, identity)
+}
+
 fn aws_identity(segments: &[&str], kind: &str) -> TypeIdentity {
     if let [service, resource] = segments {
         crate::common::provider_type(service, resource, kind)
@@ -326,6 +335,14 @@ macro_rules! define_aws_type_catalog {
         impl $catalog {
             /// Closed enumeration of the catalog rows.
             pub const ALL: &'static [Self] = &[$(Self::$variant),*];
+
+            /// Rust variant name used by schema code generation.
+            #[doc(hidden)]
+            $visibility const fn rust_variant_name(self) -> &'static str {
+                match self {
+                    $(Self::$variant => stringify!($variant)),*
+                }
+            }
 
             /// Structured identity declared by this row.
             pub fn identity(self) -> $crate::__private::TypeIdentity {
@@ -585,6 +602,18 @@ define_aws_type_catalog! {
             "^Z[A-Z0-9]+$",
             Some((None, Some(32))),
         ),
+    },
+    /// DNS record type shared by Route 53 and ACM.
+    ///
+    /// The identity intentionally keeps the Route 53 name
+    /// `aws.route53.RecordSet.Type`: carina-core has no identity aliases, so
+    /// renaming it would break existing configurations that use that identity.
+    DnsRecordType => dns_record_type {
+        segments: ["route53", "RecordSet"],
+        kind: "Type",
+        valid_sample: "CNAME",
+        has_validator: false,
+        constructor: dns_record_type_type,
     },
     /// Identity Store ID.
     IdentityStoreId => identity_store_id {
@@ -1096,6 +1125,45 @@ mod tests {
     }
 
     #[test]
+    fn dns_record_type_catalog_identity_values_and_aliases() {
+        const VALUES: &[&str] = &[
+            "A", "AAAA", "CAA", "CNAME", "DS", "HTTPS", "MX", "NAPTR", "NS", "PTR", "SOA", "SPF",
+            "SRV", "SSHFP", "SVCB", "TLSA", "TXT",
+        ];
+
+        let attribute_type = dns_record_type();
+        let RawShape::Enum {
+            identity,
+            values: Some(values),
+            dsl_aliases,
+            ..
+        } = attribute_type.raw_shape()
+        else {
+            panic!("DNS record type must be a closed enum");
+        };
+
+        assert_eq!(
+            AwsType::DnsRecordType.identity().to_string(),
+            "aws.route53.RecordSet.Type"
+        );
+        assert_eq!(identity, &AwsType::DnsRecordType.identity());
+        assert_eq!(
+            values,
+            &VALUES
+                .iter()
+                .map(|value| (*value).to_string())
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            dsl_aliases,
+            &VALUES
+                .iter()
+                .map(|value| ((*value).to_string(), value.to_ascii_lowercase()))
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
     fn s3_lifecycle_date_accepts_only_canonical_utc_rfc3339() {
         let attribute_type = AwsType::S3LifecycleDate.attribute_type();
         let validator = attribute_type_validator(&attribute_type)
@@ -1132,6 +1200,7 @@ KmsKeyId|aws|kms/Key|Id|12345678-1234-1234-1234-123456789abc|true
 KmsKeyArn|aws|kms/Key|Arn|arn:aws:kms:ap-northeast-1:123456789012:key/12345678-1234-1234-1234-123456789abc|true
 IpamPoolId|aws|ec2/IpamPool|Id|ipam-pool-12345678|true
 Route53HostedZoneId|aws|route53/HostedZone|Id|Z2FDTNDATAQYW2|false
+DnsRecordType|aws|route53/RecordSet|Type|CNAME|false
 IdentityStoreId|aws|identitystore/Store|Id|d-1234567890|false
 SsoPrincipalId|aws|sso/Principal|Id|12345678-1234-1234-1234-123456789abc|false
 SsoInstanceArn|aws|sso/Instance|Arn|arn:aws:sso:::instance/ssoins-1234567890abcdef|false
@@ -1199,6 +1268,7 @@ SecurityGroupRuleId|aws|ec2/SecurityGroupRule|Id|sgr-12345678|true"#;
                 TestCatalog::IntEnum,
             ]
         );
+        assert_eq!(TestCatalog::Own.rust_variant_name(), "Own");
 
         assert_eq!(TestCatalog::Own.refines(), None);
         assert_eq!(TestCatalog::Refinement.refines(), Some(TestCatalog::Own));

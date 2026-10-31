@@ -1764,7 +1764,12 @@ fn test_route53_record_type_host_canonicalizes_snake_case_alias() {
             .expect("Route 53 RecordSet schema must pass admission"),
     );
 
-    for (authored, api) in [("a", "A"), ("cname", "CNAME")] {
+    for (authored, api) in [
+        ("a", "A"),
+        ("cname", "CNAME"),
+        ("Type.cname", "CNAME"),
+        ("aws.route53.RecordSet.Type.cname", "CNAME"),
+    ] {
         let mut resource = Resource::with_provider("aws", "route53.RecordSet", authored, None);
         resource.set_attr(
             "type",
