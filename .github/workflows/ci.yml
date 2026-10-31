@@ -36,6 +36,27 @@ jobs:
         run: bash acceptance-tests/shared/tests/run_registry_test.sh
       - run: cargo test
 
+  validate-examples:
+    name: Validate Examples
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-wasip2
+      - uses: Swatinem/rust-cache@v2
+      - name: Build provider WASM
+        run: cargo build -p carina-provider-aws --target wasm32-wasip2 --release
+      - name: Install pinned Carina CLI
+        run: |
+          rev=$(sed -n '/^name = "carina-core"$/,/^source/ { s/^source = ".*#\([0-9a-f]*\)"$/\1/p; }' Cargo.lock)
+          test -n "$rev"
+          cargo install --locked --git https://github.com/carina-rs/carina --rev "$rev" --bin carina carina-cli
+      - name: Validate examples
+        run: ./scripts/validate-examples.sh
+
   clippy:
     name: Clippy
     runs-on: ubuntu-latest
@@ -156,7 +177,7 @@ jobs:
 
   publish-dev:
     name: Publish to Carina Registry (dev)
-    needs: [check, test, clippy, fmt, carina-pin, string-enum-aliases, docs-bundle, wasm-build, codegen-check]
+    needs: [check, test, validate-examples, clippy, fmt, carina-pin, string-enum-aliases, docs-bundle, wasm-build, codegen-check]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:

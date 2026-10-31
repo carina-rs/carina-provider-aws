@@ -139,7 +139,7 @@ pub fn acm_certificate_config() -> AwsSchemaConfig {
                     vec![
                     StructField::required("name", AttributeType::string()).with_description("The name of the DNS record to create in your domain. This is supplied by ACM.").with_provider_name("Name").build(),
                     StructField::required("type", AttributeType::enum_(
-    carina_core::schema::enum_identity("Type", Some("aws.acm.Certificate.DomainValidation.ResourceRecord")),
+    carina_aws_types::AwsType::DnsRecordType.identity(),
     Some(vec!["CNAME".to_string()]),
     vec![("CNAME".to_string(), "cname".to_string())],
     None,
@@ -202,7 +202,7 @@ pub fn acm_certificate_config() -> AwsSchemaConfig {
                     vec![
                     StructField::required("name", AttributeType::string()).with_description("The name of the DNS record to create in your domain. This is supplied by ACM.").with_provider_name("Name").build(),
                     StructField::required("type", AttributeType::enum_(
-    carina_core::schema::enum_identity("Type", Some("aws.acm.Certificate.RenewalSummary.DomainValidation.ResourceRecord")),
+    carina_aws_types::AwsType::DnsRecordType.identity(),
     Some(vec!["CNAME".to_string()]),
     vec![("CNAME".to_string(), "cname".to_string())],
     None,

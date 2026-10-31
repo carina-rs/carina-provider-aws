@@ -58,7 +58,7 @@ pub fn route53_record_set_config() -> AwsSchemaConfig {
         )
         .attribute(
             AttributeSchema::required("type", AttributeType::enum_(
-    carina_core::schema::enum_identity("Type", Some("aws.route53.RecordSet")),
+    carina_aws_types::AwsType::DnsRecordType.identity(),
     Some(vec!["A".to_string(), "AAAA".to_string(), "CAA".to_string(), "CNAME".to_string(), "DS".to_string(), "HTTPS".to_string(), "MX".to_string(), "NAPTR".to_string(), "NS".to_string(), "PTR".to_string(), "SOA".to_string(), "SPF".to_string(), "SRV".to_string(), "SSHFP".to_string(), "SVCB".to_string(), "TLSA".to_string(), "TXT".to_string()]),
     vec![("A".to_string(), "a".to_string()), ("AAAA".to_string(), "aaaa".to_string()), ("CAA".to_string(), "caa".to_string()), ("CNAME".to_string(), "cname".to_string()), ("DS".to_string(), "ds".to_string()), ("HTTPS".to_string(), "https".to_string()), ("MX".to_string(), "mx".to_string()), ("NAPTR".to_string(), "naptr".to_string()), ("NS".to_string(), "ns".to_string()), ("PTR".to_string(), "ptr".to_string()), ("SOA".to_string(), "soa".to_string()), ("SPF".to_string(), "spf".to_string()), ("SRV".to_string(), "srv".to_string()), ("SSHFP".to_string(), "sshfp".to_string()), ("SVCB".to_string(), "svcb".to_string()), ("TLSA".to_string(), "tlsa".to_string()), ("TXT".to_string(), "txt".to_string())],
     None,

@@ -27,7 +27,7 @@ provider aws {
 
 let cert = aws.acm.Certificate {
   domain_name       = 'registry.example.com'
-  validation_method = 'DNS'
+  validation_method = aws.acm.Certificate.ValidationMethod.dns
 
   tags = {
     Environment = 'example'
