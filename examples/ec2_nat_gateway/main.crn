@@ -32,6 +32,25 @@ let subnet = aws.ec2.Subnet {
   }
 }
 
+let public_route_table = aws.ec2.RouteTable {
+  vpc_id = vpc.vpc_id
+
+  tags = {
+    Environment = 'example'
+  }
+}
+
+let internet_route = aws.ec2.Route {
+  route_table_id         = public_route_table.route_table_id
+  destination_cidr_block = '0.0.0.0/0'
+  gateway_id             = internet_gateway.internet_gateway_id
+}
+
+let public_subnet_route_table_association = aws.ec2.SubnetRouteTableAssociation {
+  subnet_id      = subnet.subnet_id
+  route_table_id = public_route_table.route_table_id
+}
+
 let eip = aws.ec2.Eip {
   domain = aws.ec2.Eip.Domain.vpc
 
@@ -46,7 +65,11 @@ aws.ec2.NatGateway {
   connectivity_type = aws.ec2.NatGateway.ConnectivityType.public
 
   directives {
-    depends_on = [internet_gateway]
+    depends_on = [
+      internet_gateway,
+      internet_route,
+      public_subnet_route_table_association,
+    ]
   }
 
   tags = {

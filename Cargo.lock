@@ -891,6 +891,7 @@ version = "0.7.4"
 dependencies = [
  "anyhow",
  "carina-aws-types",
+ "carina-core",
  "carina-docgen",
  "carina-smithy",
  "clap",

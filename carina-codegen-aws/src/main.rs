@@ -11,6 +11,7 @@ use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
 use anyhow::{Context, Result};
+use carina_core::parser::{ProviderContext, parse_file};
 use carina_smithy::{Shape, ShapeKind, SmithyModel};
 use clap::{Parser, ValueEnum};
 use heck::{ToSnakeCase, ToUpperCamelCase};
@@ -647,45 +648,43 @@ fn load_markdown_example(
             kind.description()
         );
     }
-    if !markdown_example_contains(&example, &dsl_name, kind) {
-        return Err(kind.missing_expression(&path, &dsl_name));
-    }
+    require_documented_expression(&source, &path, &dsl_name, kind)?;
 
     Ok(example)
 }
 
-fn markdown_example_contains(
-    example: &str,
+fn require_documented_expression(
+    source: &str,
+    path: &Path,
     expected_dsl_name: &str,
     kind: MarkdownExampleKind,
-) -> bool {
-    example.lines().any(|line| {
-        let expression = line.trim_start();
-        if expression.starts_with('#') {
-            return false;
-        }
-        let expression = expression
-            .strip_prefix("let ")
-            .and_then(|binding| binding.split_once('=').map(|(_, value)| value.trim_start()))
-            .unwrap_or(expression);
-        let expression = match kind {
-            MarkdownExampleKind::DataSource => {
-                let Some(after_read) = expression.strip_prefix("read") else {
-                    return false;
-                };
-                if !after_read.chars().next().is_some_and(char::is_whitespace) {
-                    return false;
-                }
-                after_read.trim_start()
-            }
-            MarkdownExampleKind::Resource => expression,
-        };
-        let Some(after_name) = expression.strip_prefix(expected_dsl_name) else {
-            return false;
-        };
-        after_name.chars().next().is_some_and(char::is_whitespace)
-            && after_name.trim_start().starts_with('{')
-    })
+) -> Result<()> {
+    let parse_context = match kind {
+        MarkdownExampleKind::DataSource => format!(
+            "Example {} must parse and read data source {expected_dsl_name}",
+            path.display()
+        ),
+        MarkdownExampleKind::Resource => format!(
+            "Example {} must parse and declare resource {expected_dsl_name}",
+            path.display()
+        ),
+    };
+    let parsed = parse_file(source, path, &ProviderContext::default()).context(parse_context)?;
+    let matches = match kind {
+        MarkdownExampleKind::DataSource => parsed.data_sources.iter().any(|data_source| {
+            data_source.id.provider == "aws"
+                && data_source.id.resource_type == expected_dsl_name.trim_start_matches("aws.")
+        }),
+        MarkdownExampleKind::Resource => parsed.resources.iter().any(|resource| {
+            resource.id.provider == "aws"
+                && resource.id.resource_type == expected_dsl_name.trim_start_matches("aws.")
+        }),
+    };
+    if !matches {
+        return Err(kind.missing_expression(path, expected_dsl_name));
+    }
+
+    Ok(())
 }
 
 fn ensure_examples_match_rendered_pages(
@@ -746,8 +745,10 @@ fn escape_rust_keyword(name: &str) -> String {
 }
 
 fn main() -> Result<()> {
-    let args = ResolvedArgs::try_from(Args::parse())?;
+    run(ResolvedArgs::try_from(Args::parse())?)
+}
 
+fn run(args: ResolvedArgs) -> Result<()> {
     std::fs::create_dir_all(&args.output_dir)?;
 
     // Collect all resource definitions
@@ -940,56 +941,89 @@ fn main() -> Result<()> {
             }
         }
         OutputMode::Markdown { examples_dir } => {
-            let mut rendered_example_dirs = HashSet::new();
-            for res in &resources {
-                let model = models.get(res.service_namespace).unwrap();
-                let (service, resource) = split_service_resource(res.name);
-                let file_name = markdown_file_name(resource, false);
-                let page_stem = file_name.trim_end_matches(".md");
-                rendered_example_dirs.insert(markdown_example_dir_name(service, page_stem));
-                let example = load_markdown_example(
-                    examples_dir,
-                    service,
-                    page_stem,
-                    res.name,
-                    MarkdownExampleKind::Resource,
-                )?;
-                let md = generate_markdown_resource(res, model, &example)
-                    .with_context(|| format!("generating docs for aws.{}", res.name))?;
-
-                let service_dir = args.output_dir.join(service);
-                std::fs::create_dir_all(&service_dir)?;
-                let output_path = service_dir.join(file_name);
-                std::fs::write(&output_path, &md)
-                    .with_context(|| format!("Failed to write {}", output_path.display()))?;
-                eprintln!("Generated: {}", output_path.display());
-            }
-            for ds in &data_sources {
-                let model = models.get(ds.service_namespace).unwrap();
-                let (service, resource) = split_service_resource(ds.name);
-                let file_name = markdown_file_name(resource, true);
-                let page_stem = file_name.trim_end_matches(".md");
-                rendered_example_dirs.insert(markdown_example_dir_name(service, page_stem));
-                let example = load_markdown_example(
-                    examples_dir,
-                    service,
-                    page_stem,
-                    ds.name,
-                    MarkdownExampleKind::DataSource,
-                )?;
-                let md = generate_markdown_data_source(ds, model, &example)
-                    .with_context(|| format!("generating docs for aws.{}", ds.name))?;
-
-                let service_dir = args.output_dir.join(service);
-                std::fs::create_dir_all(&service_dir)?;
-                let output_path = service_dir.join(file_name);
-                std::fs::write(&output_path, &md)
-                    .with_context(|| format!("Failed to write {}", output_path.display()))?;
-                eprintln!("Generated: {}", output_path.display());
-            }
-            ensure_examples_match_rendered_pages(examples_dir, &rendered_example_dirs)?;
+            run_markdown(
+                &args.output_dir,
+                examples_dir,
+                &resources,
+                &data_sources,
+                &all_resources,
+                &all_data_sources,
+                &models,
+            )?;
         }
     }
+
+    Ok(())
+}
+
+fn run_markdown(
+    output_dir: &Path,
+    examples_dir: &Path,
+    resources: &[&ResourceDef],
+    data_sources: &[&resource_defs::DataSourceDef],
+    all_resources: &[ResourceDef],
+    all_data_sources: &[resource_defs::DataSourceDef],
+    models: &HashMap<&str, SmithyModel>,
+) -> Result<()> {
+    for res in resources {
+        let model = models.get(res.service_namespace).unwrap();
+        let (service, resource) = split_service_resource(res.name);
+        let file_name = markdown_file_name(resource, false);
+        let page_stem = file_name.trim_end_matches(".md");
+        let example = load_markdown_example(
+            examples_dir,
+            service,
+            page_stem,
+            res.name,
+            MarkdownExampleKind::Resource,
+        )?;
+        let md = generate_markdown_resource(res, model, &example)
+            .with_context(|| format!("generating docs for aws.{}", res.name))?;
+
+        let service_dir = output_dir.join(service);
+        std::fs::create_dir_all(&service_dir)?;
+        let output_path = service_dir.join(file_name);
+        std::fs::write(&output_path, &md)
+            .with_context(|| format!("Failed to write {}", output_path.display()))?;
+        eprintln!("Generated: {}", output_path.display());
+    }
+    for ds in data_sources {
+        let model = models.get(ds.service_namespace).unwrap();
+        let (service, resource) = split_service_resource(ds.name);
+        let file_name = markdown_file_name(resource, true);
+        let page_stem = file_name.trim_end_matches(".md");
+        let example = load_markdown_example(
+            examples_dir,
+            service,
+            page_stem,
+            ds.name,
+            MarkdownExampleKind::DataSource,
+        )?;
+        let md = generate_markdown_data_source(ds, model, &example)
+            .with_context(|| format!("generating docs for aws.{}", ds.name))?;
+
+        let service_dir = output_dir.join(service);
+        std::fs::create_dir_all(&service_dir)?;
+        let output_path = service_dir.join(file_name);
+        std::fs::write(&output_path, &md)
+            .with_context(|| format!("Failed to write {}", output_path.display()))?;
+        eprintln!("Generated: {}", output_path.display());
+    }
+    let documentable_example_dirs = all_resources
+        .iter()
+        .map(|resource| (resource.name, false))
+        .chain(
+            all_data_sources
+                .iter()
+                .map(|data_source| (data_source.name, true)),
+        )
+        .map(|(name, data_source)| {
+            let (service, resource) = split_service_resource(name);
+            let file_name = markdown_file_name(resource, data_source);
+            markdown_example_dir_name(service, file_name.trim_end_matches(".md"))
+        })
+        .collect();
+    ensure_examples_match_rendered_pages(examples_dir, &documentable_example_dirs)?;
 
     Ok(())
 }
@@ -7989,6 +8023,96 @@ mod tests {
     }
 
     #[test]
+    fn filtered_markdown_invocation_uses_all_documentable_pages_for_reverse_check() {
+        let model_dir = tempfile::tempdir().expect("temporary model directory");
+        let output_dir = tempfile::tempdir().expect("temporary output directory");
+        std::fs::write(
+            model_dir.path().join("ec2.json"),
+            r##"{
+              "smithy": "2.0",
+              "shapes": {
+                "com.amazonaws.ec2#CreateVpc": {
+                  "type": "operation",
+                  "input": { "target": "com.amazonaws.ec2#CreateVpcRequest" },
+                  "output": { "target": "smithy.api#Unit" },
+                  "traits": {}
+                },
+                "com.amazonaws.ec2#CreateVpcRequest": {
+                  "type": "structure",
+                  "members": {
+                    "CidrBlock": { "target": "smithy.api#String", "traits": {} }
+                  },
+                  "traits": { "smithy.api#input": {} }
+                },
+                "com.amazonaws.ec2#Vpc": {
+                  "type": "structure",
+                  "members": {
+                    "VpcId": { "target": "smithy.api#String", "traits": {} }
+                  },
+                  "traits": {}
+                }
+              }
+            }"##,
+        )
+        .expect("EC2 model fixture");
+        let examples_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples");
+
+        run(ResolvedArgs {
+            model_dir: model_dir.path().to_path_buf(),
+            output_dir: output_dir.path().to_path_buf(),
+            resource: Some("ec2.Vpc".to_string()),
+            output_mode: OutputMode::Markdown { examples_dir },
+            clippy_config: None,
+        })
+        .expect("--resource must not make other page examples look unmatched");
+
+        assert!(output_dir.path().join("ec2/vpc.md").is_file());
+        assert!(!output_dir.path().join("ec2/subnet.md").exists());
+    }
+
+    #[test]
+    fn markdown_run_rejects_an_example_directory_without_a_documentable_page() {
+        let examples_dir = tempfile::tempdir().expect("temporary examples directory");
+        let output_dir = tempfile::tempdir().expect("temporary output directory");
+        write_markdown_example_fixture(
+            examples_dir.path(),
+            "test",
+            "fixture",
+            "aws.test.Fixture { name = 'fixture' }\n",
+        );
+        std::fs::create_dir(examples_dir.path().join("extra_unmatched"))
+            .expect("unmatched example directory");
+
+        let all_resources = vec![provider_fixture_resource(
+            "test.Fixture",
+            "Name",
+            &["Name"],
+            vec![],
+        )];
+        let resources = vec![&all_resources[0]];
+        let all_data_sources = Vec::new();
+        let data_sources = Vec::new();
+        let models: HashMap<&str, SmithyModel> =
+            HashMap::from([("com.amazonaws.test", provider_fixture_model())]);
+
+        let error = run_markdown(
+            output_dir.path(),
+            examples_dir.path(),
+            &resources,
+            &data_sources,
+            &all_resources,
+            &all_data_sources,
+            &models,
+        )
+        .expect_err("the markdown run must execute its reverse example check");
+
+        assert_eq!(
+            error.to_string(),
+            "Example directories without rendered pages: extra_unmatched"
+        );
+    }
+
+    #[test]
     fn missing_markdown_example_reports_expected_path() {
         let examples_dir = tempfile::tempdir().expect("temporary examples directory");
         let expected = examples_dir.path().join("ec2_vpc").join("main.crn");
@@ -8132,6 +8256,106 @@ mod tests {
         assert!(
             example.contains("read aws.sts.CallerIdentity {"),
             "{example}"
+        );
+    }
+
+    #[test]
+    fn markdown_data_source_example_declared_as_resource_is_rejected() {
+        let examples_dir = tempfile::tempdir().expect("temporary examples directory");
+        let path = write_markdown_example_fixture(
+            examples_dir.path(),
+            "sts",
+            "caller_identity_data_source",
+            "aws.sts.CallerIdentity {}\n",
+        );
+
+        let error = load_markdown_example(
+            examples_dir.path(),
+            "sts",
+            "caller_identity_data_source",
+            "sts.CallerIdentity",
+            MarkdownExampleKind::DataSource,
+        )
+        .expect_err("a data source example must use read");
+
+        assert_eq!(
+            error.to_string(),
+            format!(
+                "Example {} does not read expected data source aws.sts.CallerIdentity",
+                path.display()
+            )
+        );
+    }
+
+    #[test]
+    fn markdown_resource_under_wrong_provider_is_rejected() {
+        let examples_dir = tempfile::tempdir().expect("temporary examples directory");
+        let path =
+            write_markdown_example_fixture(examples_dir.path(), "ec2", "vpc", "awscc.ec2.Vpc {}\n");
+
+        let error = load_markdown_example(
+            examples_dir.path(),
+            "ec2",
+            "vpc",
+            "ec2.Vpc",
+            MarkdownExampleKind::Resource,
+        )
+        .expect_err("the provider must match the documented resource");
+
+        assert_eq!(
+            error.to_string(),
+            format!(
+                "Example {} does not declare expected resource aws.ec2.Vpc",
+                path.display()
+            )
+        );
+    }
+
+    #[test]
+    fn markdown_example_parse_error_reports_raw_source_line() {
+        let examples_dir = tempfile::tempdir().expect("temporary examples directory");
+        let path = write_markdown_example_fixture(
+            examples_dir.path(),
+            "ec2",
+            "vpc",
+            concat!(
+                "# Header line 1\n",
+                "# Header line 2\n",
+                "# Header line 3\n",
+                "# Header line 4\n",
+                "provider aws {\n",
+                "  region = aws.Region.ap_northeast_1\n",
+                "}\n",
+                "@\n",
+            ),
+        );
+
+        let error = load_markdown_example(
+            examples_dir.path(),
+            "ec2",
+            "vpc",
+            "ec2.Vpc",
+            MarkdownExampleKind::Resource,
+        )
+        .expect_err("invalid raw example source must fail");
+
+        assert_eq!(
+            error.to_string(),
+            format!(
+                "Example {} must parse and declare resource aws.ec2.Vpc",
+                path.display()
+            )
+        );
+        assert!(
+            error.chain().count() > 1,
+            "the parser error must remain in the error chain: {error:#}"
+        );
+        assert!(
+            error
+                .chain()
+                .skip(1)
+                .any(|cause| cause.to_string().contains("8:1")),
+            "the parser error must report the raw source line: {error:#}"
         );
     }
 
