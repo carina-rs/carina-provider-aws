@@ -1049,15 +1049,11 @@ mod tests {
             &carina_core::parser::ProviderContext::default(),
         )
         .expect("parse fixture");
-        let resource = parsed.resources[0].clone();
-        let schema = crate::schemas::generated::iam::role::iam_role_config().schema;
-        let mut registry = carina_core::schema::SchemaRegistry::new();
-        registry.insert(
-            "aws",
-            schema
-                .validate()
-                .expect("IAM Role fixture schema must pass admission"),
-        );
+        let resource = parsed.resources[0]
+            .clone()
+            .into_expanded()
+            .expect("fixture contains no loop placeholders");
+        let registry = crate::schemas::schema_registry();
         let mut resources = vec![resource];
         carina_core::value::canonicalize_resources_with_schemas(&mut resources, &registry)
             .expect("host desired canonicalization");

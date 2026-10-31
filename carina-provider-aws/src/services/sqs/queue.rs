@@ -310,9 +310,9 @@ pub(crate) fn validate_sqs_queue_inputs<S>(inputs: &CrossFieldInputs<'_, S>) -> 
     }
 
     if matches!(
-        inputs.get("kms_data_key_reuse_period_seconds"),
+        inputs.attr("kms_data_key_reuse_period_seconds"),
         CrossFieldValue::Known(_)
-    ) && matches!(inputs.get("kms_master_key_id"), CrossFieldValue::Absent)
+    ) && matches!(inputs.attr("kms_master_key_id"), CrossFieldValue::Absent)
     {
         return Err(ProviderError::invalid_input(
             "sqs.Queue attribute kms_data_key_reuse_period_seconds requires kms_master_key_id",
@@ -321,20 +321,23 @@ pub(crate) fn validate_sqs_queue_inputs<S>(inputs: &CrossFieldInputs<'_, S>) -> 
     }
 
     let fifo_is_definitively_standard = matches!(
-        inputs.get("fifo_queue"),
+        inputs.attr("fifo_queue"),
         CrossFieldValue::Absent | CrossFieldValue::Known(ConcreteValue::Bool(false))
     );
     if fifo_is_definitively_standard {
         let content_dedup_enabled = matches!(
-            inputs.get("content_based_deduplication"),
+            inputs.attr("content_based_deduplication"),
             CrossFieldValue::Known(ConcreteValue::Bool(true))
         );
         let unsupported = if content_dedup_enabled {
             Some("content_based_deduplication")
-        } else if matches!(inputs.get("deduplication_scope"), CrossFieldValue::Known(_)) {
+        } else if matches!(
+            inputs.attr("deduplication_scope"),
+            CrossFieldValue::Known(_)
+        ) {
             Some("deduplication_scope")
         } else if matches!(
-            inputs.get("fifo_throughput_limit"),
+            inputs.attr("fifo_throughput_limit"),
             CrossFieldValue::Known(_)
         ) {
             Some("fifo_throughput_limit")
@@ -1041,20 +1044,19 @@ fn tags_map(tags: Option<&Value>) -> Option<HashMap<String, String>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use carina_core::resource::{DeferredValue, UnknownReason};
 
     fn queue_resource() -> Resource {
         Resource::with_provider("aws", "sqs.Queue", "test", None)
     }
 
-    fn unknown() -> Value {
-        Value::Deferred(DeferredValue::Unknown(UnknownReason::ForValue))
+    fn plan_time_unknown() -> Value {
+        Value::resource_ref("upstream", "fifo_queue", vec![])
     }
 
     #[test]
     fn unresolved_fifo_queue_defers_fifo_only_validation() {
         let mut resource = queue_resource();
-        resource.set_attr("fifo_queue", unknown());
+        resource.set_attr("fifo_queue", plan_time_unknown());
         resource.set_attr(
             "deduplication_scope",
             Value::Concrete(ConcreteValue::String("messageGroup".into())),
@@ -1086,7 +1088,7 @@ mod tests {
             "kms_data_key_reuse_period_seconds",
             Value::Concrete(ConcreteValue::Int(300)),
         );
-        resource.set_attr("kms_master_key_id", unknown());
+        resource.set_attr("kms_master_key_id", plan_time_unknown());
 
         // Defensively check that a deferred value reaching the resolved view still defers.
         validate_sqs_queue_inputs(&CrossFieldInputs::resolved(&resource))
@@ -1096,7 +1098,7 @@ mod tests {
     #[test]
     fn unresolved_kms_reuse_period_defers_missing_key_validation() {
         let mut resource = queue_resource();
-        resource.set_attr("kms_data_key_reuse_period_seconds", unknown());
+        resource.set_attr("kms_data_key_reuse_period_seconds", plan_time_unknown());
 
         // Defensively check that a deferred value reaching the resolved view still defers.
         validate_sqs_queue_inputs(&CrossFieldInputs::resolved(&resource))

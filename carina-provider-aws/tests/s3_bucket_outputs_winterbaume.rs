@@ -7,8 +7,8 @@ use aws_sdk_s3::Client as S3Client;
 use carina_core::differ::{Diff, diff};
 use carina_core::provider::RawSavedAttrs;
 use carina_core::provider::{
-    AppliedIdentifier, CreateOutcomeKind, CreateRequest, NoopNormalizer, Provider,
-    ProviderReadyDataSource, ReadRequest, UpdateOutcome, UpdateRequest,
+    AppliedIdentifier, CreateFailure, CreateOutcome, CreateOutcomeKind, CreateRequest,
+    NoopNormalizer, Provider, ProviderReadyDataSource, ReadRequest, UpdateOutcome, UpdateRequest,
 };
 use carina_core::resource::{ConcreteValue, DataSource, ResolvedResource, Resource, State, Value};
 use carina_core::schema::SchemaKind;
@@ -284,11 +284,7 @@ fn string(value: &str) -> Value {
 }
 
 fn schema_registry() -> carina_core::schema::SchemaRegistry {
-    let mut schemas = carina_core::schema::SchemaRegistry::new();
-    for schema in carina_provider_aws::schemas::all_schemas() {
-        schemas.insert("aws", schema);
-    }
-    schemas
+    carina_provider_aws::schemas::schema_registry()
 }
 
 fn assert_no_diff(desired: Resource, current: State) {
@@ -296,6 +292,10 @@ fn assert_no_diff(desired: Resource, current: State) {
     let schema = registry
         .get("aws", RESOURCE_TYPE, SchemaKind::Resource)
         .expect("S3 bucket schema");
+    let router = carina_provider_aws::test_comparison_router();
+    let comparison = router
+        .comparison_for(&registry, &desired.id)
+        .expect("S3 bucket comparison context");
     let saved = RawSavedAttrs::default().lift(&registry);
     let result = diff(
         &ResolvedResource::new(desired),
@@ -303,6 +303,7 @@ fn assert_no_diff(desired: Resource, current: State) {
         &saved,
         None,
         Some(schema.schema().as_schema()),
+        comparison.context(),
     );
     assert!(matches!(result, Diff::NoChange(_)), "{result:?}");
 }
@@ -339,6 +340,26 @@ async fn create_request_without_schema_for_test(resource: Resource) -> CreateReq
     carina_core::executor::prepare_create_request(resource, &preparation)
         .await
         .expect("test resource should become a provider-ready create request")
+}
+
+async fn create_outcome_for_test(
+    provider: &AwsProvider,
+    id: &carina_core::resource::ResourceId,
+    request: CreateRequest,
+) -> Result<CreateOutcome, CreateFailure> {
+    let (create, _cancellation) = carina_core::executor::dispatch_create(provider, id, request);
+    create.await
+}
+
+async fn create_state_for_test(
+    provider: &AwsProvider,
+    id: &carina_core::resource::ResourceId,
+    request: CreateRequest,
+) -> Result<State, CreateFailure> {
+    let accepted = carina_core::executor::AcceptedRequest::from_create_request(&request);
+    create_outcome_for_test(provider, id, request)
+        .await
+        .map(|outcome| carina_core::executor::complete_create_for_writeback(outcome, accepted).0)
 }
 
 async fn update_request_for_test(
@@ -417,12 +438,9 @@ async fn create_bucket_ignores_supplied_read_only_region_for_placement() {
     let id = resource.id.clone();
     let request = create_request_for_test(resource).await;
 
-    let state = carina_core::executor::complete_create_for_writeback(
-        carina_core::executor::dispatch_create(&provider, &id, request)
-            .await
-            .expect("create S3 bucket"),
-    )
-    .0;
+    let state = create_state_for_test(&provider, &id, request)
+        .await
+        .expect("create S3 bucket");
 
     let raw_location = client
         .get_bucket_location()
@@ -457,12 +475,9 @@ async fn bucket_namespace_is_sent_and_import_style_read_has_no_diff() {
     let id = desired.id.clone();
     let request = create_request_without_schema_for_test(desired.clone()).await;
 
-    let current = carina_core::executor::complete_create_for_writeback(
-        carina_core::executor::dispatch_create(&provider, &id, request)
-            .await
-            .expect("create namespaced S3 bucket"),
-    )
-    .0;
+    let current = create_state_for_test(&provider, &id, request)
+        .await
+        .expect("create namespaced S3 bucket");
 
     assert_eq!(
         service
@@ -488,7 +503,7 @@ async fn create_bucket_read_back_not_found_is_partial_success_with_created_ident
     let id = resource.id.clone();
     let request = create_request_for_test(resource).await;
 
-    let outcome = carina_core::executor::dispatch_create(&provider, &id, request)
+    let outcome = create_outcome_for_test(&provider, &id, request)
         .await
         .expect("the create API succeeded, so a missing read-back must stay successful");
 
@@ -504,7 +519,8 @@ async fn create_bucket_read_back_not_found_is_partial_success_with_created_ident
 async fn update_bucket_read_back_not_found_is_partial_success_with_updated_identifier() {
     let bucket = "carina-bucket-update-read-back-not-found";
     let provider = provider_with_not_found_read_back(Some(bucket)).await;
-    let id = Resource::with_provider("aws", RESOURCE_TYPE, "partial-update", None).id;
+    let resource: Resource = Resource::with_provider("aws", RESOURCE_TYPE, "partial-update", None);
+    let id = resource.id;
     let from = test_existing_state(
         id.clone(),
         HashMap::from([("bucket".to_string(), string(bucket))]),
@@ -543,7 +559,7 @@ async fn create_bucket_read_back_error_is_partial_success_with_created_identifie
     let id = resource.id.clone();
     let request = create_request_for_test(resource).await;
 
-    let outcome = carina_core::executor::dispatch_create(&provider, &id, request)
+    let outcome = create_outcome_for_test(&provider, &id, request)
         .await
         .expect("the create API succeeded, so a failed read-back must stay successful");
 
@@ -560,7 +576,9 @@ async fn create_bucket_read_back_error_is_partial_success_with_created_identifie
 async fn update_bucket_read_back_error_is_partial_success_with_updated_identifier() {
     let bucket = "carina-bucket-update-read-back-error";
     let provider = provider_with_error_read_back(Some(bucket)).await;
-    let id = Resource::with_provider("aws", RESOURCE_TYPE, "partial-update-error", None).id;
+    let resource: Resource =
+        Resource::with_provider("aws", RESOURCE_TYPE, "partial-update-error", None);
+    let id = resource.id;
     let from = test_existing_state(
         id.clone(),
         HashMap::from([("bucket".to_string(), string(bucket))]),
@@ -601,7 +619,8 @@ async fn managed_and_data_source_reads_use_head_bucket_region_without_get_bucket
     let bucket = "carina-bucket-head-region";
     let (provider, service) = provider_with_staged_bucket(bucket).await;
 
-    let managed_id = Resource::with_provider("aws", RESOURCE_TYPE, "managed", None).id;
+    let managed_resource: Resource = Resource::with_provider("aws", RESOURCE_TYPE, "managed", None);
+    let managed_id = managed_resource.id;
     let managed_state = provider
         .read(&managed_id, &applied_identifier(bucket), ReadRequest)
         .await

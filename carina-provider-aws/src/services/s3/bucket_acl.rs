@@ -239,7 +239,6 @@ mod tests {
     use carina_core::differ::{Diff, diff};
     use carina_core::provider::RawSavedAttrs;
     use carina_core::resource::{ResolvedResource, Resource};
-    use carina_core::schema::SchemaRegistry;
     use std::collections::HashMap;
 
     fn owner_full_control(owner_id: &str) -> Grant {
@@ -378,16 +377,27 @@ mod tests {
             ]),
         )
         .with_identifier("example");
-        let registry = SchemaRegistry::new();
+        let registry = crate::schemas::schema_registry();
         let saved = RawSavedAttrs::default().lift(&registry);
-        let schema = crate::schemas::generated::s3::bucket_acl::s3_bucket_acl_config().schema;
+        let schema = registry
+            .get(
+                "aws",
+                "s3.BucketAcl",
+                carina_core::schema::SchemaKind::Resource,
+            )
+            .expect("bucket ACL schema");
+        let router = crate::test_comparison_router();
+        let comparison = router
+            .comparison_for(&registry, &desired.id)
+            .expect("bucket ACL comparison context");
 
         let result = diff(
             &ResolvedResource::new(desired),
             &current,
             &saved,
             None,
-            Some(&schema),
+            Some(schema.schema().as_schema()),
+            comparison.context(),
         );
         assert!(matches!(result, Diff::Update { .. }), "{result:?}");
     }

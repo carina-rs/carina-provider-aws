@@ -12,8 +12,9 @@ use std::sync::{Arc, Mutex};
 use carina_core::differ::{Diff, Orphans, PlanPriorStates, create_plan, diff};
 use carina_core::effect::Effect;
 use carina_core::provider::{
-    AppliedIdentifier, CreateRequest, NestedWriteOnlyRecord, NoopNormalizer, PersistedAttributes,
-    Provider, ProviderFactory, ProviderNormalizer, RawSavedAttrs, ReadRequest, UpdateRequest,
+    AppliedIdentifier, CreateFailure, CreateOutcome, CreateRequest, NestedWriteOnlyRecord,
+    NoopNormalizer, PersistedAttributes, Provider, ProviderFactory, ProviderNormalizer,
+    RawSavedAttrs, ReadRequest, UpdateRequest,
 };
 use carina_core::resource::{
     ConcreteValue, Current, ResolvedResource, Resource, State, Value, into_plan_input_current_map,
@@ -105,11 +106,7 @@ fn assert_query_contains(request: &MockRequest, parameter: &str) {
 }
 
 fn schema_registry() -> SchemaRegistry {
-    let mut schemas = SchemaRegistry::new();
-    for schema in carina_provider_aws::schemas::all_schemas() {
-        schemas.insert("aws", schema);
-    }
-    schemas
+    carina_provider_aws::schemas::schema_registry()
 }
 
 async fn provider_from_service(service: impl MockService + 'static) -> AwsProvider {
@@ -198,6 +195,10 @@ fn assert_no_diff(desired: Resource, current: State) {
             SchemaKind::Resource,
         )
         .expect("managed resource schema");
+    let router = carina_provider_aws::test_comparison_router();
+    let comparison = router
+        .comparison_for(&registry, &desired.id)
+        .expect("managed resource comparison context");
     let saved = carina_core::provider::RawSavedAttrs::default().lift(&registry);
     let result = diff(
         &ResolvedResource::new(desired),
@@ -205,11 +206,12 @@ fn assert_no_diff(desired: Resource, current: State) {
         &saved,
         None,
         Some(schema.schema().as_schema()),
+        comparison.context(),
     );
     assert!(matches!(result, Diff::NoChange(_)), "{result:?}");
 }
 
-fn assert_no_diff_with_nested_write_only(
+async fn assert_no_diff_with_nested_write_only(
     desired: Resource,
     current: State,
     sent_attributes: &[&str],
@@ -222,6 +224,10 @@ fn assert_no_diff_with_nested_write_only(
             SchemaKind::Resource,
         )
         .expect("managed resource schema");
+    let router = carina_provider_aws::test_comparison_router();
+    let comparison = router
+        .comparison_for(&registry, &desired.id)
+        .expect("managed resource comparison context");
     let mut nested_write_only = NestedWriteOnlyRecord::new();
     nested_write_only
         .record_sent(
@@ -239,10 +245,16 @@ fn assert_no_diff_with_nested_write_only(
         HashMap::from([(desired.id.clone(), nested_write_only)]),
     )
     .lift(&registry);
-    let explicit = carina_core::explicit::build_from_resource_for_stored_values(
+    let request = create_request_without_schema_for_test(desired.clone()).await;
+    let accepted = carina_core::executor::AcceptedRequest::from_create_request(&request);
+    let sent_desired = accepted.sent_desired_attributes(&desired);
+    let explicit = carina_core::explicit::build_from_resource_for_stored_values_after_send(
         &desired,
+        None,
         &current.attributes,
+        &sent_desired,
         Some(schema.schema().as_schema()),
+        comparison.context(),
     );
     let result = diff(
         &ResolvedResource::new(desired),
@@ -250,6 +262,7 @@ fn assert_no_diff_with_nested_write_only(
         &saved,
         Some(&explicit),
         Some(schema.schema().as_schema()),
+        comparison.context(),
     );
     assert!(matches!(result, Diff::NoChange(_)), "{result:?}");
 }
@@ -289,6 +302,26 @@ async fn create_request_without_schema_for_test(resource: Resource) -> CreateReq
         .expect("test resource should become a provider-ready create request")
 }
 
+async fn create_outcome_for_test(
+    provider: &AwsProvider,
+    id: &carina_core::resource::ResourceId,
+    request: CreateRequest,
+) -> Result<CreateOutcome, CreateFailure> {
+    let (create, _cancellation) = carina_core::executor::dispatch_create(provider, id, request);
+    create.await
+}
+
+async fn create_state_for_test(
+    provider: &AwsProvider,
+    id: &carina_core::resource::ResourceId,
+    request: CreateRequest,
+) -> Result<State, CreateFailure> {
+    let accepted = carina_core::executor::AcceptedRequest::from_create_request(&request);
+    create_outcome_for_test(provider, id, request)
+        .await
+        .map(|outcome| carina_core::executor::complete_create_for_writeback(outcome, accepted).0)
+}
+
 async fn normalize_desired_for_test(mut resource: Resource) -> Resource {
     let mut resources = vec![resource.clone().into()];
     AwsNormalizer
@@ -303,14 +336,13 @@ async fn normalize_desired_for_test(mut resource: Resource) -> Resource {
 }
 
 async fn create_round_trip_state(provider: &AwsProvider, desired: &Resource) -> State {
-    let outcome = carina_core::executor::dispatch_create(
+    create_state_for_test(
         provider,
         &desired.id,
         create_request_without_schema_for_test(desired.clone()).await,
     )
     .await
-    .expect("scripted AWS create should succeed");
-    carina_core::executor::complete_create_for_writeback(outcome).0
+    .expect("scripted AWS create should succeed")
 }
 
 async fn update_request_for_test(
@@ -975,50 +1007,6 @@ impl MockService for SqsService {
     }
 }
 
-struct RecordingSqsService {
-    inner: SqsService,
-    request_targets: Mutex<Vec<String>>,
-}
-
-impl RecordingSqsService {
-    fn request_targets(&self) -> Vec<String> {
-        self.request_targets
-            .lock()
-            .expect("SQS request recording lock")
-            .clone()
-    }
-}
-
-impl MockService for RecordingSqsService {
-    fn service_name(&self) -> &str {
-        self.inner.service_name()
-    }
-
-    fn url_patterns(&self) -> Vec<&str> {
-        self.inner.url_patterns()
-    }
-
-    fn handle(
-        &self,
-        request: MockRequest,
-    ) -> Pin<Box<dyn Future<Output = MockResponse> + Send + '_>> {
-        self.request_targets
-            .lock()
-            .expect("SQS request recording lock")
-            .push(request_target(&request).to_string());
-        self.inner.handle(request)
-    }
-}
-
-async fn provider_with_recording_sqs() -> (AwsProvider, Arc<RecordingSqsService>) {
-    let service = Arc::new(RecordingSqsService {
-        inner: SqsService,
-        request_targets: Mutex::new(Vec::new()),
-    });
-    let provider = provider_from_service(Arc::clone(&service)).await;
-    (provider, service)
-}
-
 struct SqsTagsDeniedService;
 
 impl MockService for SqsTagsDeniedService {
@@ -1219,7 +1207,8 @@ async fn log_group_false_deletion_protection_round_trips() {
 #[tokio::test]
 async fn log_group_tag_side_read_failure_names_required_permission() {
     let provider = provider_from_service(LogGroupTagsDeniedService).await;
-    let id = Resource::with_provider("aws", "logs.LogGroup", "roundtrip", None).id;
+    let resource: Resource = Resource::with_provider("aws", "logs.LogGroup", "roundtrip", None);
+    let id = resource.id;
 
     let error = provider
         .read(&id, &applied_identifier(LOG_GROUP_NAME), ReadRequest)
@@ -1233,7 +1222,8 @@ async fn log_group_tag_side_read_failure_names_required_permission() {
 #[tokio::test]
 async fn unrelated_log_group_update_preserves_omitted_deletion_protection() {
     let provider = provider_from_service(ProtectedLogGroupUpdateService).await;
-    let id = Resource::with_provider("aws", "logs.LogGroup", "roundtrip", None).id;
+    let resource: Resource = Resource::with_provider("aws", "logs.LogGroup", "roundtrip", None);
+    let id = resource.id;
     let from = test_existing_state(
         id.clone(),
         HashMap::from([
@@ -1303,7 +1293,7 @@ async fn certificate_options_validation_method_create_read_diff_round_trip() {
     assert_api_text(options.get("export"), "DISABLED");
     assert!(!options.contains_key("validation_method"));
     assert_eq!(current.attributes.get("tags"), Some(&empty_map()));
-    assert_no_diff_with_nested_write_only(desired, current, &["options"]);
+    assert_no_diff_with_nested_write_only(desired, current, &["options"]).await;
 }
 
 #[tokio::test(start_paused = true)]
@@ -1317,16 +1307,13 @@ async fn account_write_only_create_inputs_and_import_read_round_trip() {
     desired.set_attr("tags", empty_map());
     let id = desired.id.clone();
 
-    let created = carina_core::executor::complete_create_for_writeback(
-        carina_core::executor::dispatch_create(
-            &provider,
-            &id,
-            create_request_without_schema_for_test(desired.clone()).await,
-        )
-        .await
-        .expect("create and read back Organizations account"),
+    let created = create_state_for_test(
+        &provider,
+        &id,
+        create_request_without_schema_for_test(desired.clone()).await,
     )
-    .0;
+    .await
+    .expect("create and read back Organizations account");
     assert!(!created.attributes.contains_key("role_name"));
     assert!(
         !created
@@ -1383,6 +1370,11 @@ fn served_account_schema_updates_name_but_not_email_in_place() {
 #[tokio::test]
 async fn account_name_change_plans_an_update_instead_of_replacement() {
     let provider = provider_from_service(OrganizationsAccountService).await;
+    let mut providers = carina_core::provider::ProviderRouter::new();
+    providers.add_provider(
+        "aws".to_string(),
+        carina_core::provider::InitializedProvider::unavailable(Box::new(provider)),
+    );
     let schemas = schema_registry();
     let desired = organizations_account_resource("desired-name");
     let current = organizations_account_state(&desired, "renamed-outside-carina");
@@ -1398,7 +1390,7 @@ async fn account_name_change_plans_an_update_instead_of_replacement() {
     let plan = create_plan(
         &managed,
         &[],
-        &provider,
+        &providers,
         PlanPriorStates::new(&current_states, &orphans),
         &HashMap::new(),
         &schemas,
@@ -1702,7 +1694,9 @@ async fn detached_internet_gateway_read_omits_vpc_id() {
         Ec2RoundTripCase::DetachedInternetGateway,
     ))
     .await;
-    let id = Resource::with_provider("aws", "ec2.InternetGateway", "detached", None).id;
+    let resource: Resource =
+        Resource::with_provider("aws", "ec2.InternetGateway", "detached", None);
+    let id = resource.id;
 
     let outcome = provider
         .read(&id, &applied_identifier(INTERNET_GATEWAY_ID), ReadRequest)
@@ -1848,12 +1842,9 @@ async fn standard_queue_false_fifo_flags_are_not_sent_and_round_trip() {
     let id = desired.id.clone();
     let request = create_request_for_test(desired.clone()).await;
 
-    let current = carina_core::executor::complete_create_for_writeback(
-        carina_core::executor::dispatch_create(&provider, &id, request)
-            .await
-            .expect("create standard queue"),
-    )
-    .0;
+    let current = create_state_for_test(&provider, &id, request)
+        .await
+        .expect("create standard queue");
 
     assert_eq!(
         current.attributes.get("fifo_queue"),
@@ -1894,12 +1885,9 @@ async fn fifo_queue_aws_defaults_round_trip_without_becoming_desired() {
     desired.set_attr("tags", empty_map());
     let id = desired.id.clone();
     let request = create_request_for_test(desired.clone()).await;
-    let current = carina_core::executor::complete_create_for_writeback(
-        carina_core::executor::dispatch_create(&provider, &id, request)
-            .await
-            .expect("create FIFO queue"),
-    )
-    .0;
+    let current = create_state_for_test(&provider, &id, request)
+        .await
+        .expect("create FIFO queue");
 
     assert_eq!(
         current.attributes.get("fifo_queue"),
@@ -1942,12 +1930,9 @@ async fn redrive_numeric_string_count_round_trips_as_an_integer() {
     desired.set_attr("tags", empty_map());
     let id = desired.id.clone();
     let request = create_request_for_test(desired.clone()).await;
-    let current = carina_core::executor::complete_create_for_writeback(
-        carina_core::executor::dispatch_create(&provider, &id, request)
-            .await
-            .expect("create redrive queue"),
-    )
-    .0;
+    let current = create_state_for_test(&provider, &id, request)
+        .await
+        .expect("create redrive queue");
 
     assert_eq!(
         current.attributes.get("redrive_policy"),
@@ -1965,12 +1950,9 @@ async fn kms_alias_round_trips_without_arn_rewriting() {
     desired.set_attr("tags", empty_map());
     let id = desired.id.clone();
     let request = create_request_for_test(desired.clone()).await;
-    let current = carina_core::executor::complete_create_for_writeback(
-        carina_core::executor::dispatch_create(&provider, &id, request)
-            .await
-            .expect("create KMS-encrypted queue"),
-    )
-    .0;
+    let current = create_state_for_test(&provider, &id, request)
+        .await
+        .expect("create KMS-encrypted queue");
 
     assert_eq!(
         current.attributes.get("kms_master_key_id"),
@@ -1982,7 +1964,8 @@ async fn kms_alias_round_trips_without_arn_rewriting() {
 #[tokio::test]
 async fn queue_tag_side_read_failure_names_required_permission() {
     let provider = provider_from_service(SqsTagsDeniedService).await;
-    let id = Resource::with_provider("aws", "sqs.Queue", "roundtrip", None).id;
+    let resource: Resource = Resource::with_provider("aws", "sqs.Queue", "roundtrip", None);
+    let id = resource.id;
 
     let error = provider
         .read(&id, &applied_identifier(QUEUE_URL), ReadRequest)
@@ -1994,7 +1977,7 @@ async fn queue_tag_side_read_failure_names_required_permission() {
 }
 
 #[tokio::test]
-async fn queue_kms_reuse_period_without_master_key_is_rejected_before_dispatch() {
+async fn queue_kms_reuse_period_without_master_key_is_rejected_during_normalization() {
     let mut desired = Resource::with_provider("aws", "sqs.Queue", "invalid-kms", None);
     desired.set_attr("queue_name", string(QUEUE_NAME));
     desired.set_attr(
@@ -2003,23 +1986,11 @@ async fn queue_kms_reuse_period_without_master_key_is_rejected_before_dispatch()
     );
     let mut resources = vec![desired.clone().into()];
 
-    AwsNormalizer
+    let error = AwsNormalizer
         .normalize_desired(&mut resources)
         .await
-        .expect("desired normalization must defer absence-dependent KMS validation");
-
-    let (provider, recording_service) = provider_with_recording_sqs().await;
-    let id = desired.id.clone();
-    let request = create_request_for_test(desired).await;
-    let result = carina_core::executor::dispatch_create(&provider, &id, request).await;
-    let request_targets = recording_service.request_targets();
-    assert!(
-        request_targets.is_empty(),
-        "invalid queue must fail before any SQS request is dispatched: {request_targets:?}"
-    );
-
-    let error = result.expect_err("resolved create must reject reuse period without a KMS key");
-    let message = error.provider_error().to_string();
+        .expect_err("a truly absent KMS key must be rejected during v13 normalization");
+    let message = error.to_string();
     assert!(
         message.contains("kms_data_key_reuse_period_seconds"),
         "{message}"
@@ -2076,11 +2047,8 @@ async fn replication_omitted_delete_marker_default_has_no_diff() {
     assert_api_text(delete_marker_replication.get("status"), "Disabled");
 
     let id = desired.id.clone();
-    let current = carina_core::executor::complete_create_for_writeback(
-        carina_core::executor::dispatch_create(&provider, &id, checked_request)
-            .await
-            .expect("put and read back S3 replication configuration"),
-    )
-    .0;
+    let current = create_state_for_test(&provider, &id, checked_request)
+        .await
+        .expect("put and read back S3 replication configuration");
     assert_no_diff(desired, current);
 }

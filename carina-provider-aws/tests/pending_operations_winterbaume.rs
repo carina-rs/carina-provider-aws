@@ -13,10 +13,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use aws_smithy_runtime_api::client::http::{SharedHttpConnector, http_client_fn};
 use carina_core::provider::{
-    AppliedIdentifier, AppliedState, CreateRequest, DeleteRequest, Observation, ProviderError,
-    ReadOutcome, Sent,
+    AppliedIdentifier, AppliedState, CreateFailure, CreateRequest, DeleteRequest, Observation,
+    ProviderDirectiveSchema, ProviderError, ReadOutcome, Sent,
 };
-use carina_core::resource::{ConcreteValue, Resource, ResourceId, Value};
+use carina_core::resource::{ConcreteValue, Directives, Resource, ResourceId, State, Value};
 use carina_provider_aws::{
     AwsCreateAttempt, AwsCreatePoll, AwsCreateResume, AwsCreateToken, AwsDeleteToken,
     AwsIssuedCreate, AwsNormalizer, AwsPollAttempt, AwsProvider, AwsResumeAttempt,
@@ -80,7 +80,11 @@ impl TestAppliedState {
 #[derive(Debug)]
 enum TestCreateVerdict {
     Untracked(ProviderError),
-    Undetermined(ProviderError),
+    InFlight {
+        token: AwsCreateToken,
+        identifier: Option<AppliedIdentifier>,
+        error: ProviderError,
+    },
     Created(Box<TestCreatedVerdict>),
     Discarded(ProviderError),
 }
@@ -96,8 +100,18 @@ struct TestCreatedVerdict {
 impl TestCreateVerdict {
     fn provider_error(&self) -> &ProviderError {
         match self {
-            Self::Untracked(error) | Self::Undetermined(error) | Self::Discarded(error) => error,
+            Self::Untracked(error) | Self::Discarded(error) => error,
+            Self::InFlight { error, .. } => error,
             Self::Created(created) => &created.error,
+        }
+    }
+
+    fn in_flight(&self) -> (&AwsCreateToken, Option<&AppliedIdentifier>) {
+        match self {
+            Self::InFlight {
+                token, identifier, ..
+            } => (token, identifier.as_ref()),
+            other => panic!("expected in-flight create verdict, got {other:?}"),
         }
     }
 }
@@ -156,8 +170,12 @@ impl AwsPollAttempt for TestPollAttempt {
         TestCreateVerdict::Untracked(error)
     }
 
-    fn undetermined(self, _token: AwsCreateToken, error: ProviderError) -> Self::Verdict {
-        TestCreateVerdict::Undetermined(error)
+    fn preserve(self, token: AwsCreateToken, error: ProviderError) -> Self::Verdict {
+        TestCreateVerdict::InFlight {
+            token,
+            identifier: None,
+            error,
+        }
     }
 
     fn issued(self, identifier: AppliedIdentifier) -> Self::Issued {
@@ -237,6 +255,14 @@ impl AwsIssuedCreate for TestIssuedCreate {
             poll_after_secs,
         })
     }
+
+    fn preserve(self, token: AwsCreateToken, error: ProviderError) -> Self::Verdict {
+        TestCreateVerdict::InFlight {
+            token,
+            identifier: Some(self.identifier),
+            error,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -252,7 +278,11 @@ enum TestResumeStep {
 #[derive(Debug)]
 enum TestResumeVerdict {
     Untracked(ProviderError),
-    Undetermined(ProviderError),
+    InFlight {
+        token: AwsCreateToken,
+        identifier: Option<AppliedIdentifier>,
+        error: ProviderError,
+    },
     Created(ProviderError),
     Discarded(ProviderError),
 }
@@ -260,10 +290,17 @@ enum TestResumeVerdict {
 impl TestResumeVerdict {
     fn provider_error(&self) -> &ProviderError {
         match self {
-            Self::Untracked(error)
-            | Self::Undetermined(error)
-            | Self::Created(error)
-            | Self::Discarded(error) => error,
+            Self::Untracked(error) | Self::Created(error) | Self::Discarded(error) => error,
+            Self::InFlight { error, .. } => error,
+        }
+    }
+
+    fn in_flight(&self) -> (&AwsCreateToken, Option<&AppliedIdentifier>) {
+        match self {
+            Self::InFlight {
+                token, identifier, ..
+            } => (token, identifier.as_ref()),
+            other => panic!("expected in-flight resume verdict, got {other:?}"),
         }
     }
 }
@@ -283,8 +320,12 @@ impl AwsResumeAttempt for TestResumeAttempt {
         TestResumeVerdict::Untracked(error)
     }
 
-    fn undetermined(self, error: ProviderError) -> Self::Verdict {
-        TestResumeVerdict::Undetermined(error)
+    fn preserve(self, token: AwsCreateToken, error: ProviderError) -> Self::Verdict {
+        TestResumeVerdict::InFlight {
+            token,
+            identifier: None,
+            error,
+        }
     }
 
     fn issued(self, identifier: AppliedIdentifier) -> Self::Resumed {
@@ -302,6 +343,10 @@ impl AwsResumeAttempt for TestResumeAttempt {
             poll_after_secs,
         })
     }
+}
+
+fn delete_request() -> DeleteRequest {
+    DeleteRequest::resolve(&Directives::default(), ProviderDirectiveSchema::Unavailable)
 }
 
 impl AwsResumedCreate for TestResumedCreate {
@@ -334,6 +379,14 @@ impl AwsResumedCreate for TestResumedCreate {
             identifier: Some(self.identifier),
             poll_after_secs,
         })
+    }
+
+    fn preserve(self, token: AwsCreateToken, error: ProviderError) -> Self::Verdict {
+        TestResumeVerdict::InFlight {
+            token,
+            identifier: Some(self.identifier),
+            error,
+        }
     }
 }
 
@@ -1060,11 +1113,7 @@ fn unix_now() -> u64 {
 }
 
 fn schema_registry() -> carina_core::schema::SchemaRegistry {
-    let mut schemas = carina_core::schema::SchemaRegistry::new();
-    for schema in carina_provider_aws::schemas::all_schemas() {
-        schemas.insert("aws", schema);
-    }
-    schemas
+    carina_provider_aws::schemas::schema_registry()
 }
 
 async fn create_request_for_test(resource: Resource) -> CreateRequest {
@@ -1082,6 +1131,18 @@ async fn create_request_for_test(resource: Resource) -> CreateRequest {
     carina_core::executor::prepare_create_request(resource, &preparation)
         .await
         .expect("test NAT gateway should pass checked create preparation")
+}
+
+async fn create_state_for_test(
+    provider: &AwsProvider,
+    id: &ResourceId,
+    request: CreateRequest,
+) -> Result<State, CreateFailure> {
+    let accepted = carina_core::executor::AcceptedRequest::from_create_request(&request);
+    let (create, _cancellation) = carina_core::executor::dispatch_create(provider, id, request);
+    create
+        .await
+        .map(|outcome| carina_core::executor::complete_create_for_writeback(outcome, accepted).0)
 }
 
 fn expect_create_pending(step: TestCreateStep) -> AwsCreateToken {
@@ -1373,21 +1434,19 @@ async fn maybe_sent_request_certificate_poll_repends_with_a_bounded_attempt() {
 }
 
 #[tokio::test]
-async fn maybe_sent_request_certificate_poll_exhaustion_is_undetermined() {
+async fn maybe_sent_request_certificate_poll_exhaustion_stays_in_flight() {
     let (provider, _request_bodies) =
         provider_with_recording_post_send_failure("example.com").await;
     let resource = acm_certificate_resource();
 
+    let token = acm_request_token(unix_now(), 1);
     let verdict = provider
-        .poll_create_step(
-            &resource,
-            acm_request_token(unix_now(), 1),
-            poll_attempt(&resource),
-        )
+        .poll_create_step(&resource, token.clone(), poll_attempt(&resource))
         .await
-        .expect_err("the bounded ACM resend budget must end as undetermined");
+        .expect_err("the bounded ACM resend budget must stay in flight");
 
-    assert!(matches!(verdict, TestCreateVerdict::Undetermined(_)));
+    assert!(matches!(verdict, TestCreateVerdict::InFlight { .. }));
+    assert_eq!(verdict.in_flight(), (&token, None));
     assert_eq!(
         verdict.provider_error().to_wire().message,
         "acm.Certificate may have been created; check before re-applying"
@@ -1395,7 +1454,7 @@ async fn maybe_sent_request_certificate_poll_exhaustion_is_undetermined() {
 }
 
 #[tokio::test]
-async fn expired_request_certificate_poll_is_undetermined_without_resending() {
+async fn expired_request_certificate_poll_stays_in_flight_without_resending() {
     let (provider, request_bodies) = provider_with_recording_post_send_failure("example.com").await;
     let resource = acm_certificate_resource();
 
@@ -1409,7 +1468,7 @@ async fn expired_request_certificate_poll_is_undetermined_without_resending() {
         .expect_err("an expired ACM token must not be resent by poll");
 
     match &verdict {
-        TestCreateVerdict::Undetermined(error) => assert_eq!(
+        TestCreateVerdict::InFlight { error, .. } => assert_eq!(
             error.to_wire().message,
             "acm.Certificate may have been created; check before re-applying"
         ),
@@ -1454,8 +1513,8 @@ async fn request_certificate_token_with_issued_poll_fails_without_resending() {
         TestCreateVerdict::Untracked(_) => {
             panic!("impossible issued poll was untracked")
         }
-        TestCreateVerdict::Undetermined(_) => {
-            panic!("impossible issued poll was undetermined")
+        TestCreateVerdict::InFlight { .. } => {
+            panic!("impossible issued poll stayed in flight")
         }
         TestCreateVerdict::Discarded(_) => {
             panic!("impossible issued poll was discarded")
@@ -1520,20 +1579,22 @@ async fn request_certificate_resume_within_window_resends_the_same_token() {
 }
 
 #[tokio::test]
-async fn expired_request_certificate_resume_is_undetermined_without_resending() {
+async fn expired_request_certificate_resume_stays_in_flight_without_resending() {
     let (provider, request_bodies) = provider_with_recording_post_send_failure("example.com").await;
     let resource = acm_certificate_resource();
 
+    let token = acm_request_token(unix_now().saturating_sub(3_600), 3);
     let verdict = provider
         .resume_create_step(
             &resource,
-            acm_request_token(unix_now().saturating_sub(3_600), 3),
+            token.clone(),
             AwsCreateResume::Unissued(TestResumeAttempt),
         )
         .await
         .expect_err("an expired ACM token must not be resent");
 
-    assert!(matches!(verdict, TestResumeVerdict::Undetermined(_)));
+    assert!(matches!(verdict, TestResumeVerdict::InFlight { .. }));
+    assert_eq!(verdict.in_flight(), (&token, None));
     assert_eq!(
         verdict.provider_error().to_wire().message,
         "acm.Certificate may have been created; check before re-applying"
@@ -1565,8 +1626,8 @@ async fn request_certificate_token_with_issued_resume_fails_without_resending() 
         TestResumeVerdict::Untracked(_) => {
             panic!("impossible issued resume was untracked")
         }
-        TestResumeVerdict::Undetermined(_) => {
-            panic!("impossible issued resume was undetermined")
+        TestResumeVerdict::InFlight { .. } => {
+            panic!("impossible issued resume stayed in flight")
         }
         TestResumeVerdict::Discarded(_) => {
             panic!("impossible issued resume was discarded")
@@ -1628,7 +1689,7 @@ async fn tagged_vpc_poll_with_one_match_hands_continuation_to_next_poll() {
 }
 
 #[tokio::test]
-async fn tagged_vpc_poll_with_no_match_uses_full_window_then_is_undetermined() {
+async fn tagged_vpc_poll_with_no_match_uses_full_window_then_stays_in_flight() {
     let provider = provider_with_tagged_vpcs(&[]).await;
     let resource = vpc_resource();
 
@@ -1659,11 +1720,13 @@ async fn tagged_vpc_poll_with_no_match_uses_full_window_then_is_undetermined() {
         token = next;
     }
 
+    let expected_token = token.clone();
     let verdict = provider
         .poll_create_step(&resource, token, poll_attempt(&resource))
         .await
         .expect_err("exhaustion cannot prove the create was not applied");
-    assert!(matches!(verdict, TestCreateVerdict::Undetermined(_)));
+    assert!(matches!(verdict, TestCreateVerdict::InFlight { .. }));
+    assert_eq!(verdict.in_flight(), (&expected_token, None));
     assert_eq!(
         verdict.provider_error().to_wire().message,
         format!(
@@ -1698,7 +1761,7 @@ async fn tagged_vpc_discovery_stops_after_the_bounded_page_count() {
 }
 
 #[tokio::test]
-async fn tagged_vpc_resume_with_no_match_at_exhaustion_is_undetermined() {
+async fn tagged_vpc_resume_with_no_match_at_exhaustion_stays_in_flight() {
     let provider = provider_with_tagged_vpcs(&[]).await;
     let resource = vpc_resource();
 
@@ -1711,7 +1774,7 @@ async fn tagged_vpc_resume_with_no_match_at_exhaustion_is_undetermined() {
         .await
         .expect_err("resume exhaustion must preserve the in-flight create");
 
-    assert!(matches!(verdict, TestResumeVerdict::Undetermined(_)));
+    assert!(matches!(verdict, TestResumeVerdict::InFlight { .. }));
     assert_eq!(
         verdict.provider_error().to_wire().message,
         format!(
@@ -1730,7 +1793,7 @@ async fn tagged_vpc_discovery_error_consumes_final_attempt_and_keeps_cause() {
         .await
         .expect_err("a final discovery error must not re-pend forever");
 
-    assert!(matches!(verdict, TestCreateVerdict::Undetermined(_)));
+    assert!(matches!(verdict, TestCreateVerdict::InFlight { .. }));
     let wire = verdict.provider_error().to_wire();
     assert_eq!(
         wire.message,
@@ -1769,7 +1832,7 @@ async fn tagged_vpc_exhaustion_keeps_the_original_send_failure_summary() {
         .await
         .expect_err("final discovery must retain the ambiguous send metadata");
 
-    assert!(matches!(verdict, TestCreateVerdict::Undetermined(_)));
+    assert!(matches!(verdict, TestCreateVerdict::InFlight { .. }));
     let rendered = verdict.provider_error().to_string();
     assert!(
         rendered.contains("ec2.CreateVpc"),
@@ -1819,7 +1882,7 @@ async fn partial_flow_log_discovery_keeps_polling_for_every_requested_resource_i
 }
 
 #[tokio::test]
-async fn tagged_vpc_poll_with_two_matches_is_undetermined() {
+async fn tagged_vpc_poll_with_two_matches_stays_in_flight() {
     let provider = provider_with_tagged_vpcs(&["vpc-0553-a", "vpc-0553-b"]).await;
     let resource = vpc_resource();
 
@@ -1828,7 +1891,7 @@ async fn tagged_vpc_poll_with_two_matches_is_undetermined() {
         .await
         .expect_err("multiple matches cannot choose an identifier safely");
 
-    assert!(matches!(verdict, TestCreateVerdict::Undetermined(_)));
+    assert!(matches!(verdict, TestCreateVerdict::InFlight { .. }));
     let rendered = verdict.provider_error().to_string();
     assert!(
         rendered.contains("vpc-0553-a"),
@@ -1838,6 +1901,27 @@ async fn tagged_vpc_poll_with_two_matches_is_undetermined() {
         rendered.contains("vpc-0553-b"),
         "rendered discovery error should include the second matching identifier"
     );
+}
+
+#[tokio::test]
+async fn tagged_vpc_issued_poll_with_two_matches_preserves_identifier_and_token() {
+    let provider = provider_with_tagged_vpcs(&["vpc-0553-a", "vpc-0553-b"]).await;
+    let resource = vpc_resource();
+    let token = tagged_vpc_token(4, 5);
+    let identifier = applied_identifier("vpc-previously-issued");
+    let poll: AwsCreatePoll<TestPollAttempt, TestIssuedCreate> =
+        AwsCreatePoll::Issued(TestIssuedCreate {
+            id: resource.id.clone(),
+            identifier: identifier.clone(),
+            sent: Sent::AllRequestAttributes,
+        });
+
+    let verdict = provider
+        .poll_create_step(&resource, token.clone(), poll)
+        .await
+        .expect_err("ambiguous discovery must preserve an issued continuation");
+
+    assert_eq!(verdict.in_flight(), (&token, Some(&identifier)));
 }
 
 #[tokio::test]
@@ -2032,7 +2116,7 @@ async fn resume_of_issued_create_found_completes() {
 }
 
 #[tokio::test]
-async fn resume_transient_error_without_identifier_is_undetermined() {
+async fn resume_transient_error_without_identifier_stays_in_flight() {
     let provider = provider_without_services().await;
     let resource = Resource::with_provider("aws", "organizations.Account", "resume", None);
     let token = AwsCreateToken::OrganizationsAccount {
@@ -2040,11 +2124,13 @@ async fn resume_transient_error_without_identifier_is_undetermined() {
     };
     let resume = AwsCreateResume::Unissued(TestResumeAttempt);
 
+    let expected_token = token.clone();
     let verdict = provider
         .resume_create_step(&resource, token, resume)
         .await
-        .expect_err("a transient unissued resume error must be undetermined");
-    assert!(matches!(verdict, TestResumeVerdict::Undetermined(_)));
+        .expect_err("a transient unissued resume error must stay in flight");
+    assert!(matches!(verdict, TestResumeVerdict::InFlight { .. }));
+    assert_eq!(verdict.in_flight(), (&expected_token, None));
     assert!(!verdict.provider_error().to_wire().message.is_empty());
 }
 
@@ -2206,7 +2292,7 @@ async fn nat_gateway_failed_create_poll_returns_api_error() {
 async fn nat_gateway_delete_steps_issue_once_and_poll_to_gone() {
     let (provider, service) = provider_with_ec2(&["deleting", "deleted"]).await;
     let id = ResourceId::with_provider_identity("aws", RESOURCE_TYPE, "pending", None);
-    let request = DeleteRequest::default();
+    let request = delete_request();
 
     let mut token = expect_delete_pending(
         provider
@@ -2241,12 +2327,9 @@ async fn native_provider_create_drives_nat_gateway_to_read_back_state() {
     let id = resource.id.clone();
     let request = create_request_for_test(resource).await;
 
-    let state = carina_core::executor::complete_create_for_writeback(
-        carina_core::executor::dispatch_create(&provider, &id, request)
-            .await
-            .expect("drive native NAT gateway create"),
-    )
-    .0;
+    let state = create_state_for_test(&provider, &id, request)
+        .await
+        .expect("drive native NAT gateway create");
 
     assert_eq!(state.identifier.as_deref(), Some(NAT_GATEWAY_ID));
     assert_eq!(service.create_nat_gateway_calls(), 1);

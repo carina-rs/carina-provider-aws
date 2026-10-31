@@ -27,6 +27,7 @@ use crate::AwsProvider;
 use crate::aws_operation::ClientToken;
 use crate::error_helpers::{SendFailure, api_error_with_meta};
 use crate::helpers::{enum_attr_error, sdk_error_message, send_aws_operation_with_token};
+use crate::normalizer::DesiredNormalizationInput;
 use crate::provider::CreateCompletion;
 use crate::provider_generated::AcmCertificateReadFields;
 use crate::read_model::{ManagedReadModel, found_managed_read};
@@ -165,21 +166,31 @@ fn canonicalize_acm_subject_alternative_names(
 /// Canonicalize authored SANs to the same representation returned by ACM.
 /// ACM accepts the apex in the request and adds it to the response, so the
 /// provider models only additional names and removes the apex on both sides.
-pub(crate) fn normalize_acm_certificate_inputs<S>(resources: &mut [Resource<S>]) {
-    for resource in resources {
-        if resource.id.provider != "aws" || resource.id.resource_type != "acm.Certificate" {
-            continue;
-        }
-        let Some(subject_alternative_names) =
-            resource.get_attr("subject_alternative_names").cloned()
-        else {
-            continue;
-        };
-        let normalized = canonicalize_acm_subject_alternative_names(
-            resource.get_attr("domain_name"),
-            Some(subject_alternative_names),
-        );
-        resource.set_attr("subject_alternative_names", normalized);
+pub(crate) fn normalize_acm_certificate_inputs<S>(input: &mut DesiredNormalizationInput<'_, S>) {
+    if !input.is_resource("aws", "acm.Certificate") {
+        return;
+    }
+
+    let domain_name = input
+        .known_attr("domain_name")
+        .cloned()
+        .map(Value::Concrete);
+    let Some(subject_alternative_names) = input
+        .known_attr("subject_alternative_names")
+        .cloned()
+        .map(Value::Concrete)
+    else {
+        return;
+    };
+    let normalized = canonicalize_acm_subject_alternative_names(
+        domain_name.as_ref(),
+        Some(subject_alternative_names),
+    );
+    let Value::Concrete(normalized) = normalized else {
+        unreachable!("known ACM SAN normalization must remain concrete")
+    };
+    if let Some(subject_alternative_names) = input.known_attr_mut("subject_alternative_names") {
+        *subject_alternative_names = normalized;
     }
 }
 
@@ -1121,10 +1132,10 @@ mod tests {
             )])),
         );
 
-        let mut resources = vec![resource];
-        normalize_acm_certificate_inputs(&mut resources);
+        let mut input = DesiredNormalizationInput::in_process(&mut resource);
+        normalize_acm_certificate_inputs(&mut input);
         assert_eq!(
-            resources[0].get_attr("subject_alternative_names"),
+            resource.get_attr("subject_alternative_names"),
             Some(&Value::Concrete(ConcreteValue::List(Vec::new())))
         );
 

@@ -165,7 +165,6 @@ mod tests {
     use carina_core::differ::{Diff, diff};
     use carina_core::provider::RawSavedAttrs;
     use carina_core::resource::{ResolvedResource, Resource};
-    use carina_core::schema::SchemaRegistry;
     use winterbaume_core::{MockAws, MockRequest, MockResponse, MockService};
 
     #[derive(Default)]
@@ -460,15 +459,23 @@ mod tests {
             HashMap::from([("tags".to_string(), read_tags)]),
         )
         .with_identifier("vpc-12345678");
-        let saved = RawSavedAttrs::default().lift(&SchemaRegistry::new());
-        let schema = crate::schemas::generated::ec2::vpc::ec2_vpc_config().schema;
+        let registry = crate::schemas::schema_registry();
+        let saved = RawSavedAttrs::default().lift(&registry);
+        let schema = registry
+            .get("aws", "ec2.Vpc", carina_core::schema::SchemaKind::Resource)
+            .expect("VPC schema");
+        let router = crate::test_comparison_router();
+        let comparison = router
+            .comparison_for(&registry, &desired.id)
+            .expect("VPC comparison context");
 
         let result = diff(
             &ResolvedResource::new(desired),
             &current,
             &saved,
             None,
-            Some(&schema),
+            Some(schema.schema().as_schema()),
+            comparison.context(),
         );
 
         assert!(matches!(result, Diff::NoChange(_)), "{result:?}");

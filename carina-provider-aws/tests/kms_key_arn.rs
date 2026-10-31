@@ -15,7 +15,7 @@ fn assert_kms_key_id_validator_accepts(value: &str) {
 
 fn assert_schema_accepts(t: carina_core::schema::AttributeType, value: &str) {
     let schema = rootless_type(t);
-    let value = carina_core::resource::Value::Concrete(
+    let value: carina_core::resource::Value = carina_core::resource::Value::Concrete(
         carina_core::resource::ConcreteValue::String(value.to_string().into()),
     );
     assert!(schema.validate(&value).is_ok());
@@ -23,7 +23,7 @@ fn assert_schema_accepts(t: carina_core::schema::AttributeType, value: &str) {
 
 fn assert_schema_rejects(t: carina_core::schema::AttributeType, value: &str) {
     let schema = rootless_type(t);
-    let value = carina_core::resource::Value::Concrete(
+    let value: carina_core::resource::Value = carina_core::resource::Value::Concrete(
         carina_core::resource::ConcreteValue::String(value.to_string().into()),
     );
     assert!(schema.validate(&value).is_err());

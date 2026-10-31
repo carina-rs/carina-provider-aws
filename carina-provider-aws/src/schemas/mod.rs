@@ -3,7 +3,10 @@
 pub mod config;
 pub mod generated;
 
-use carina_core::schema::ValidatedResourceSchema;
+use carina_core::provider::ProviderFactory;
+use carina_core::schema::{
+    SchemaRegistry, ValidatedProviderSchemaWitness, ValidatedResourceSchema,
+};
 
 /// Returns all AWS schemas
 pub fn all_schemas() -> Vec<ValidatedResourceSchema> {
@@ -16,6 +19,28 @@ pub fn all_schemas() -> Vec<ValidatedResourceSchema> {
                 .unwrap_or_else(|error| panic!("{error}"))
         })
         .collect()
+}
+
+/// Return the provider's one aggregate schema witness. Reference forms are
+/// intentionally empty until AWS name-or-ARN forms are designed separately.
+pub fn provider_schema_witness() -> ValidatedProviderSchemaWitness {
+    ValidatedProviderSchemaWitness::new(
+        all_schemas(),
+        crate::AwsProviderFactory.provider_config_attribute_types(),
+        Default::default(),
+    )
+    .expect("AWS provider schemas must form one valid aggregate witness")
+}
+
+/// Build a registry from the aggregate witness rather than admitting schemas
+/// one by one without their provider-wide declarations.
+pub fn schema_registry() -> SchemaRegistry {
+    let witness = provider_schema_witness();
+    let mut registry = SchemaRegistry::new();
+    registry
+        .insert_provider_witness("aws", &witness)
+        .expect("AWS provider witness must populate its schema registry");
+    registry
 }
 
 #[cfg(test)]
@@ -52,6 +77,26 @@ mod tests {
             data_source.is_some(),
             "DataSource s3.Bucket missing from configs()"
         );
+    }
+
+    #[test]
+    fn only_organizations_account_prevents_destroy_by_default() {
+        let protected = super::all_schemas()
+            .into_iter()
+            .filter(|schema| schema.as_schema().prevents_destroy_by_default())
+            .map(|schema| schema.as_schema().resource_type().to_string())
+            .collect::<Vec<_>>();
+
+        assert_eq!(protected, vec!["organizations.Account"]);
+
+        let bucket = super::all_schemas()
+            .into_iter()
+            .find(|schema| {
+                let schema = schema.as_schema();
+                schema.resource_type() == "s3.Bucket" && schema.kind() == SchemaKind::Resource
+            })
+            .expect("validated managed s3.Bucket schema");
+        assert!(!bucket.as_schema().prevents_destroy_by_default());
     }
 
     fn collect_enum_identities(
@@ -209,11 +254,7 @@ mod tests {
     }
 
     fn aws_schema_registry() -> SchemaRegistry {
-        let mut registry = SchemaRegistry::new();
-        for schema in super::all_schemas() {
-            registry.insert("aws", schema);
-        }
-        registry
+        super::schema_registry()
     }
 
     fn assert_refined_string(
@@ -717,11 +758,18 @@ mod tests {
             Current::CreateInFlight(_pending) => {
                 panic!("test fixture must not become an in-flight create")
             }
+            Current::CreateOutcomeUnknown(_unknown) => {
+                panic!("test fixture must not become an unknown create outcome")
+            }
             Current::MissingIdentifier(state) => state.into_state(),
         };
         let schema = registry
             .get("aws", "route53.RecordSet", SchemaKind::Resource)
             .expect("RecordSet resource schema");
+        let router = crate::test_comparison_router();
+        let comparison = router
+            .comparison_for(&registry, &id)
+            .expect("RecordSet comparison context");
         let saved_attrs = carina_core::provider::RawSavedAttrs::default().lift(&registry);
         let result = diff(
             &ResolvedResource::new(normalized.as_resource().clone()),
@@ -729,6 +777,7 @@ mod tests {
             &saved_attrs,
             None,
             Some(schema.schema().as_schema()),
+            comparison.context(),
         );
         assert!(
             matches!(result, Diff::NoChange(_)),

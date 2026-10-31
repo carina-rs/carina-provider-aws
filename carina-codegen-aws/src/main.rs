@@ -2009,6 +2009,10 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
         ));
     }
 
+    if resource_defs::defaults_to_prevent_destroy(res.name) {
+        code.push_str("        .default_prevent_destroy()\n");
+    }
+
     // Mark data sources
     if is_data_source {
         code.push_str("\x20       .as_data_source()\n");
@@ -5323,6 +5327,12 @@ fn generate_markdown_resource(
     {
         let cleaned = collapse_whitespace(&strip_html_tags(desc).replace(['\n', '\t'], " "));
         page.push_str(&format!("{}\n\n", cleaned.trim()));
+    }
+
+    if resource_defs::defaults_to_prevent_destroy(res.name) {
+        page.push_str(
+            "This resource is protected from destruction by default. To destroy it, explicitly set `prevent_destroy = false`.\n\n",
+        );
     }
 
     write_markdown_example(&mut page, example)?;

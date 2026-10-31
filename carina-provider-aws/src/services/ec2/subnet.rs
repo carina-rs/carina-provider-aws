@@ -12,6 +12,7 @@ use crate::helpers::{
 };
 #[cfg(test)]
 use crate::helpers::{optional_bool_attr, optional_int_attr};
+use crate::normalizer::DesiredNormalizationInput;
 use crate::provider::{AwsCreateAttempt, TaggedEc2Create};
 use crate::read_model::{empty_map_value, found_managed_read};
 use crate::read_models_generated::Ec2SubnetReadModelSupplement;
@@ -169,25 +170,21 @@ fn associated_ipv6_cidr(
 }
 
 pub(crate) fn normalize_subnet_ipv6_cidr_blocks<S>(
-    resources: &mut [Resource<S>],
+    input: &mut DesiredNormalizationInput<'_, S>,
 ) -> ProviderResult<()> {
-    for resource in resources {
-        if resource.id.provider != "aws" || resource.id.resource_type != "ec2.Subnet" {
-            continue;
-        }
-        let Some(Value::Concrete(ConcreteValue::String(value))) =
-            resource.get_attr("ipv6_cidr_block")
-        else {
-            continue;
-        };
-        let canonical = canonical_ipv6_cidr(value.expose_plaintext()).map_err(|error| {
-            ProviderError::invalid_input(format!("invalid ipv6_cidr_block: {error}"))
-                .for_resource(resource.id.clone())
-        })?;
-        resource.set_attr(
-            "ipv6_cidr_block",
-            Value::Concrete(ConcreteValue::String(canonical.into())),
-        );
+    if !input.is_resource("aws", "ec2.Subnet") {
+        return Ok(());
+    }
+    let Some(ConcreteValue::String(value)) = input.known_attr("ipv6_cidr_block") else {
+        return Ok(());
+    };
+    let value = value.expose_plaintext().to_string();
+    let id = input.id().clone();
+    let canonical = canonical_ipv6_cidr(&value).map_err(|error| {
+        ProviderError::invalid_input(format!("invalid ipv6_cidr_block: {error}")).for_resource(id)
+    })?;
+    if let Some(ConcreteValue::String(value)) = input.known_attr_mut("ipv6_cidr_block") {
+        *value = canonical.into();
     }
     Ok(())
 }
@@ -675,10 +672,10 @@ mod tests {
                 "2001:0DB8:0000:0000:0000:0000:0000:0000/64".into(),
             )),
         );
-        let mut resources = vec![resource];
-        normalize_subnet_ipv6_cidr_blocks(&mut resources).unwrap();
+        let mut input = DesiredNormalizationInput::in_process(&mut resource);
+        normalize_subnet_ipv6_cidr_blocks(&mut input).unwrap();
         assert_eq!(
-            resources[0].get_attr("ipv6_cidr_block"),
+            resource.get_attr("ipv6_cidr_block"),
             Some(&Value::Concrete(ConcreteValue::String(
                 "2001:db8::/64".into()
             )))

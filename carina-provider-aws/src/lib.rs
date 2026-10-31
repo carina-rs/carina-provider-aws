@@ -45,6 +45,101 @@ pub use read_model::non_finite_applied_state_for_protocol_test;
 pub use read_model::test_existing_state;
 pub use sdk_config::BoundedSdkConfig;
 
+#[cfg(debug_assertions)]
+struct ComparisonOnlyProvider;
+
+#[cfg(debug_assertions)]
+impl carina_core::provider::Provider for ComparisonOnlyProvider {
+    fn name(&self) -> &str {
+        "aws-comparison-only"
+    }
+
+    fn read(
+        &self,
+        _id: &carina_core::resource::ResourceId,
+        _identifier: &carina_core::provider::AppliedIdentifier,
+        _request: carina_core::provider::ReadRequest,
+    ) -> carina_core::provider::BoxFuture<
+        '_,
+        carina_core::provider::ProviderResult<carina_core::provider::ReadOutcome>,
+    > {
+        panic!("comparison-only provider must not dispatch read")
+    }
+
+    fn read_data_source(
+        &self,
+        _resource: &carina_core::provider::ProviderReadyDataSource,
+    ) -> carina_core::provider::BoxFuture<
+        '_,
+        carina_core::provider::ProviderResult<carina_core::resource::State>,
+    > {
+        panic!("comparison-only provider must not dispatch data-source read")
+    }
+
+    fn create(
+        &self,
+        _id: &carina_core::resource::ResourceId,
+        _request: carina_core::provider::CreateRequest,
+        _attempt: carina_core::provider::CreateAttempt,
+    ) -> carina_core::provider::BoxFuture<
+        '_,
+        Result<carina_core::provider::CreateOutcome, carina_core::provider::CreateFailure>,
+    > {
+        panic!("comparison-only provider must not dispatch create")
+    }
+
+    fn resume_create(
+        &self,
+        _request: carina_core::provider::ResumeCreateRequest,
+    ) -> carina_core::provider::BoxFuture<
+        '_,
+        Result<carina_core::provider::ResumeOutcome, carina_core::provider::ResumeFailure>,
+    > {
+        panic!("comparison-only provider must not dispatch resume-create")
+    }
+
+    fn update(
+        &self,
+        _id: &carina_core::resource::ResourceId,
+        _identifier: &carina_core::provider::AppliedIdentifier,
+        _request: carina_core::provider::UpdateRequest,
+    ) -> carina_core::provider::BoxFuture<
+        '_,
+        carina_core::provider::ProviderResult<carina_core::provider::UpdateOutcome>,
+    > {
+        panic!("comparison-only provider must not dispatch update")
+    }
+
+    fn delete(
+        &self,
+        _id: &carina_core::resource::ResourceId,
+        _identifier: &carina_core::provider::AppliedIdentifier,
+        _request: carina_core::provider::DeleteRequest,
+    ) -> carina_core::provider::BoxFuture<'_, carina_core::provider::ProviderResult<()>> {
+        panic!("comparison-only provider must not dispatch delete")
+    }
+
+    fn required_permissions(
+        &self,
+        _id: &carina_core::resource::ResourceId,
+        _op: carina_core::effect::PlanOp,
+    ) -> carina_core::provider::ProviderResult<Vec<String>> {
+        panic!("comparison-only provider must not dispatch permission lookup")
+    }
+}
+
+/// Build a scope-unavailable provider router for downstream test comparisons.
+#[doc(hidden)]
+#[cfg(debug_assertions)]
+pub fn test_comparison_router() -> carina_core::provider::ProviderRouter {
+    let mut router = carina_core::provider::ProviderRouter::new();
+    router.add_provider(
+        "aws".to_string(),
+        carina_core::provider::InitializedProvider::unavailable(Box::new(ComparisonOnlyProvider)),
+    );
+    router
+}
+
 #[cfg(test)]
 pub(crate) fn test_rootless_type(
     attr: carina_core::schema::AttributeType,
@@ -122,11 +217,7 @@ impl AwsProvider {
     }
 
     fn schema_registry() -> SchemaRegistry {
-        let mut registry = SchemaRegistry::new();
-        for schema in crate::schemas::all_schemas() {
-            registry.insert("aws", schema);
-        }
-        registry
+        crate::schemas::schema_registry()
     }
 
     pub(crate) fn resource_schema(&self, resource_type: &str) -> Option<&ResourceSchema> {
