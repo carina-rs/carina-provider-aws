@@ -68,6 +68,14 @@ let replication_role = aws.iam.Role {
 
 aws.s3.BucketReplicationConfiguration {
   bucket = source_versioning.bucket
+  # aws.iam.Role creates only this role's trust policy. Before uploading
+  # objects, attach a permissions policy to replication_role that grants:
+  # - s3:GetReplicationConfiguration and s3:ListBucket on source_bucket.arn
+  # - s3:GetObjectVersionForReplication, s3:GetObjectVersionAcl, and
+  #   s3:GetObjectVersionTagging on "${source_bucket.arn}/*"
+  # - s3:ReplicateObject, s3:ReplicateDelete, and s3:ReplicateTags on
+  #   "${destination_bucket.arn}/*"
+  # Without it, this configuration applies but S3 cannot copy objects.
   role   = replication_role.arn
 
   rules = [

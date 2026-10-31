@@ -25,6 +25,8 @@ let accepter_vpc = aws.ec2.Vpc {
 }
 
 aws.ec2.VpcPeeringConnection {
+  # Accept the request before routing traffic. Same-account requests are not
+  # auto-accepted, and an unaccepted request expires after 7 days.
   vpc_id      = requester_vpc.vpc_id
   peer_vpc_id = accepter_vpc.vpc_id
 

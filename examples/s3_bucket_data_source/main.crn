@@ -7,5 +7,6 @@ provider aws {
 }
 
 let bucket = read aws.s3.Bucket {
+  # Replace with the name of an existing S3 bucket that the caller can read.
   bucket = 'carina-example-existing-bucket'
 }

@@ -21,5 +21,6 @@ let versioning = aws.s3.BucketVersioning {
 
 aws.s3.BucketObjectLockConfiguration {
   bucket              = versioning.bucket
+  # Object Lock cannot be disabled after it is enabled for a bucket.
   object_lock_enabled = aws.s3.BucketObjectLockConfiguration.ObjectLockEnabled.enabled
 }

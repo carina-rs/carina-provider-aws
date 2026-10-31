@@ -7,7 +7,9 @@ provider aws {
 }
 
 aws.organizations.Account {
+  # Run this resource from the organization's management account.
   account_name               = 'carina-example-member'
+  # Replace with a real email address that is not used by another AWS account.
   email                      = 'carina-example@example.com'
   iam_user_access_to_billing = aws.organizations.Account.IamUserAccessToBilling.deny
   role_name                  = 'OrganizationAccountAccessRole'

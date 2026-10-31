@@ -15,6 +15,8 @@ let vpc = aws.ec2.Vpc {
 }
 
 aws.ec2.EgressOnlyInternetGateway {
+  # The VPC needs an IPv6 CIDR and an IPv6 route to this gateway before it
+  # can carry traffic.
   vpc_id = vpc.vpc_id
 
   tags = {

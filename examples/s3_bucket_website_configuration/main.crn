@@ -18,10 +18,12 @@ aws.s3.BucketWebsiteConfiguration {
   bucket = bucket.bucket
 
   index_document = {
+    # Upload an index object for each served prefix, or replace this suffix.
     suffix = 'index.html'
   }
 
   error_document = {
+    # Upload this error object, or replace the key with one that exists.
     key = 'error.html'
   }
 }
