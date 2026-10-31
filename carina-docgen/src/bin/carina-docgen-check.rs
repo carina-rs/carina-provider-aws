@@ -15,6 +15,7 @@ struct CheckSummary {
     unresolved_fragments: usize,
     links_inside_code_spans: usize,
     duplicated_section_headings: usize,
+    table_column_mismatches: usize,
     reports: Vec<String>,
 }
 
@@ -29,6 +30,9 @@ impl CheckSummary {
                     PageViolationKind::DuplicateSectionHeading => {
                         self.duplicated_section_headings += 1;
                     }
+                    PageViolationKind::TableColumnMismatch => {
+                        self.table_column_mismatches += 1;
+                    }
                 }
             }
             self.reports.push(format!("{name}:\n{error}"));
@@ -41,19 +45,21 @@ impl CheckSummary {
         }
         let violations = self.unresolved_fragments
             + self.links_inside_code_spans
-            + self.duplicated_section_headings;
+            + self.duplicated_section_headings
+            + self.table_column_mismatches;
         if violations != 0 {
             return Err(format!(
-                "{}\nchecked {} Markdown page(s): {} unresolved fragments, {} links inside code spans, {} duplicated section headings",
+                "{}\nchecked {} Markdown page(s): {} unresolved fragments, {} links inside code spans, {} duplicated section headings, {} table column mismatches",
                 self.reports.join("\n"),
                 self.pages,
                 self.unresolved_fragments,
                 self.links_inside_code_spans,
-                self.duplicated_section_headings
+                self.duplicated_section_headings,
+                self.table_column_mismatches
             ));
         }
         println!(
-            "checked {} Markdown page(s): 0 unresolved fragments, 0 links inside code spans, 0 duplicated section headings",
+            "checked {} Markdown page(s): 0 unresolved fragments, 0 links inside code spans, 0 duplicated section headings, 0 table column mismatches",
             self.pages
         );
         Ok(())

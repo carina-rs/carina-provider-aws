@@ -6,7 +6,7 @@ use std::hash::Hash;
 use std::sync::Mutex;
 
 use comrak::adapters::{HeadingAdapter, HeadingMeta};
-use comrak::nodes::{NodeValue, Sourcepos};
+use comrak::nodes::{AstNode, NodeValue, Sourcepos};
 use comrak::options::Plugins;
 use comrak::{Arena, Options, format_html_with_plugins, parse_document};
 use finl_unicode::categories::CharacterCategories;
@@ -76,6 +76,69 @@ enum PageChunk<K> {
     Link { target: K, label: String },
 }
 
+#[derive(Debug)]
+enum TableCellPart<K> {
+    Text(String),
+    Code(String),
+    Link { target: K, label: String },
+}
+
+/// One table cell made only from table-safe inline parts.
+///
+/// Text parts remain inline Markdown: this is not a general Markdown escaper.
+/// Only table delimiters (`|`) are escaped and line breaks are collapsed when
+/// the table is written. There is intentionally no raw part that can bypass
+/// that table-specific escaping.
+#[derive(Debug)]
+pub struct TableCell<K> {
+    parts: Vec<TableCellPart<K>>,
+}
+
+impl<K> Default for TableCell<K> {
+    fn default() -> Self {
+        Self { parts: Vec::new() }
+    }
+}
+
+impl<K> TableCell<K> {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn text(text: impl Into<String>) -> Self {
+        let mut cell = Self::new();
+        cell.push_text(text);
+        cell
+    }
+
+    pub fn code(code: impl Into<String>) -> Self {
+        let mut cell = Self::new();
+        cell.push_code(code);
+        cell
+    }
+
+    pub fn link(target: K, label: impl Into<String>) -> Self {
+        let mut cell = Self::new();
+        cell.push_link(target, label);
+        cell
+    }
+
+    pub fn push_text(&mut self, text: impl Into<String>) {
+        self.parts.push(TableCellPart::Text(text.into()));
+    }
+
+    pub fn push_code(&mut self, code: impl Into<String>) {
+        self.parts.push(TableCellPart::Code(code.into()));
+    }
+
+    pub fn push_link(&mut self, target: K, label: impl Into<String>) {
+        self.parts.push(TableCellPart::Link {
+            target,
+            label: label.into(),
+        });
+    }
+}
+
 /// Builds one Markdown page while owning heading order and typed link targets.
 ///
 /// A target link may be written before its heading. The link is held as a
@@ -141,6 +204,64 @@ where
         });
     }
 
+    /// Write a GFM table whose rows must all match the fixed header width.
+    pub fn table<H, R, C>(&mut self, header: H, rows: R) -> Result<(), DocgenError>
+    where
+        H: IntoIterator,
+        H::Item: AsRef<str>,
+        R: IntoIterator<Item = C>,
+        C: IntoIterator<Item = TableCell<K>>,
+    {
+        let header: Vec<String> = header
+            .into_iter()
+            .map(|label| escape_table_cell(label.as_ref()))
+            .collect();
+        if header.is_empty() {
+            return Err(DocgenError::build(
+                "Markdown tables must have at least one column",
+            ));
+        }
+
+        let rows: Vec<Vec<TableCell<K>>> = rows
+            .into_iter()
+            .map(|row| row.into_iter().collect())
+            .collect();
+        for (index, row) in rows.iter().enumerate() {
+            if row.len() != header.len() {
+                return Err(DocgenError::build(format!(
+                    "table row {} expected {} cells, got {}",
+                    index + 1,
+                    header.len(),
+                    row.len()
+                )));
+            }
+        }
+
+        self.push_str("|");
+        for label in &header {
+            self.push_str(" ");
+            self.push_str(label);
+            self.push_str(" |");
+        }
+        self.push_str("\n|");
+        for label in &header {
+            self.push_str(&"-".repeat((label.chars().count() + 2).max(3)));
+            self.push_str("|");
+        }
+        self.push_str("\n");
+
+        for row in rows {
+            self.push_str("|");
+            for cell in row {
+                self.push_str(" ");
+                self.write_table_cell(cell);
+                self.push_str(" |");
+            }
+            self.push_str("\n");
+        }
+        Ok(())
+    }
+
     /// Resolve links, verify the builder's headings against Comrak's flattened
     /// heading text, and run the generated-page checker over the finished page.
     pub fn finish(self) -> Result<String, DocgenError> {
@@ -182,6 +303,115 @@ where
         self.push_str(&markdown);
         self.push_str("\n\n");
         Ok(slug)
+    }
+
+    fn write_table_cell(&mut self, cell: TableCell<K>) {
+        for part in cell.parts {
+            match part {
+                TableCellPart::Text(text) => self.push_str(&escape_table_cell(&text)),
+                TableCellPart::Code(code) => self.push_str(&inline_code(&code)),
+                TableCellPart::Link { target, label } => {
+                    self.link(target, escape_table_link_label(&label));
+                }
+            }
+        }
+    }
+}
+
+fn escape_table_cell(value: &str) -> String {
+    let mut escaped = String::with_capacity(value.len());
+    let mut preceding_backslashes = 0_usize;
+    let mut characters = value.chars().peekable();
+
+    while let Some(character) = characters.next() {
+        match character {
+            '\r' => {
+                if characters.peek() == Some(&'\n') {
+                    characters.next();
+                }
+                escaped.push(' ');
+                preceding_backslashes = 0;
+            }
+            '\n' => {
+                escaped.push(' ');
+                preceding_backslashes = 0;
+            }
+            '\\' => {
+                escaped.push(character);
+                preceding_backslashes += 1;
+            }
+            '|' => {
+                if preceding_backslashes.is_multiple_of(2) {
+                    escaped.push('\\');
+                }
+                escaped.push(character);
+                preceding_backslashes = 0;
+            }
+            _ => {
+                escaped.push(character);
+                preceding_backslashes = 0;
+            }
+        }
+    }
+
+    escaped
+}
+
+fn escape_table_link_label(value: &str) -> String {
+    let value = escape_table_cell(value);
+    let mut escaped = String::with_capacity(value.len());
+    let mut preceding_backslashes = 0_usize;
+
+    for character in value.chars() {
+        match character {
+            '\\' => {
+                escaped.push(character);
+                preceding_backslashes += 1;
+            }
+            '[' | ']' => {
+                if preceding_backslashes.is_multiple_of(2) {
+                    escaped.push('\\');
+                }
+                escaped.push(character);
+                preceding_backslashes = 0;
+            }
+            _ => {
+                escaped.push(character);
+                preceding_backslashes = 0;
+            }
+        }
+    }
+
+    escaped
+}
+
+fn inline_code(value: &str) -> String {
+    let value = escape_table_cell(value);
+    if value.is_empty() {
+        return value;
+    }
+
+    let mut longest_run = 0_usize;
+    let mut current_run = 0_usize;
+    for character in value.chars() {
+        if character == '`' {
+            current_run += 1;
+            longest_run = longest_run.max(current_run);
+        } else {
+            current_run = 0;
+        }
+    }
+
+    let delimiter = "`".repeat(longest_run + 1);
+    let needs_padding = value.starts_with('`')
+        || value.ends_with('`')
+        || (value.starts_with(' ')
+            && value.ends_with(' ')
+            && !value.chars().all(char::is_whitespace));
+    if needs_padding {
+        format!("{delimiter} {value} {delimiter}")
+    } else {
+        format!("{delimiter}{value}{delimiter}")
     }
 }
 
@@ -227,6 +457,7 @@ pub enum PageViolationKind {
     UnresolvedFragment,
     LinkInsideCodeSpan,
     DuplicateSectionHeading,
+    TableColumnMismatch,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -315,6 +546,7 @@ fn analyze_page(markdown: &str) -> PageAnalysis {
     let mut heading_lines = Vec::new();
     let mut raw_links = Vec::new();
     let mut code_links = Vec::new();
+    let mut tables = Vec::new();
 
     for node in root.descendants() {
         let data = node.data.borrow();
@@ -326,6 +558,7 @@ fn analyze_page(markdown: &str) -> PageAnalysis {
             NodeValue::Code(code) if contains_markdown_link(&code.literal) => {
                 code_links.push((data.sourcepos.start.line, code.literal.clone()));
             }
+            NodeValue::Table(_) => tables.push(node),
             _ => {}
         }
     }
@@ -365,6 +598,10 @@ fn analyze_page(markdown: &str) -> PageAnalysis {
 
     let heading_ids: HashSet<&str> = headings.iter().map(|heading| heading.id.as_str()).collect();
     let mut violations = duplicate_section_headings(&headings);
+    let source_lines: Vec<&str> = markdown.lines().collect();
+    for table in tables {
+        violations.extend(table_column_mismatches(table, &source_lines));
+    }
     for (line, url) in raw_links {
         if let Some(fragment) = url.strip_prefix('#')
             && !heading_ids.contains(fragment)
@@ -388,6 +625,73 @@ fn analyze_page(markdown: &str) -> PageAnalysis {
         headings,
         violations,
     }
+}
+
+fn table_column_mismatches<'a>(
+    table: &'a AstNode<'a>,
+    source_lines: &[&str],
+) -> Vec<PageViolation> {
+    let rows: Vec<(bool, Sourcepos)> = table
+        .children()
+        .filter_map(|row| {
+            let data = row.data.borrow();
+            match &data.value {
+                NodeValue::TableRow(is_header) => Some((*is_header, data.sourcepos)),
+                _ => None,
+            }
+        })
+        .collect();
+    let Some((_, header_sourcepos)) = rows.iter().find(|(is_header, _)| *is_header) else {
+        return Vec::new();
+    };
+    let Some(header_source) = table_row_source(source_lines, *header_sourcepos) else {
+        return Vec::new();
+    };
+    let expected = table_cell_count(header_source);
+
+    rows.into_iter()
+        .filter(|(is_header, _)| !is_header)
+        .filter_map(|(_, sourcepos)| {
+            let source = table_row_source(source_lines, sourcepos)?;
+            let actual = table_cell_count(source);
+            (actual != expected).then(|| PageViolation {
+                kind: PageViolationKind::TableColumnMismatch,
+                line: sourcepos.start.line,
+                detail: format!("table row has {actual} columns, but its header has {expected}"),
+            })
+        })
+        .collect()
+}
+
+fn table_row_source<'a>(source_lines: &'a [&'a str], sourcepos: Sourcepos) -> Option<&'a str> {
+    let line = *source_lines.get(sourcepos.start.line.checked_sub(1)?)?;
+    let start = sourcepos.start.column.saturating_sub(1);
+    line.get(start..).or(Some(line))
+}
+
+fn table_cell_count(source: &str) -> usize {
+    let source = source.trim();
+    let bytes = source.as_bytes();
+    let delimiters = bytes
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| is_unescaped_pipe(bytes, *index))
+        .count();
+    let leading = usize::from(is_unescaped_pipe(bytes, 0));
+    let trailing = usize::from(
+        bytes
+            .len()
+            .checked_sub(1)
+            .is_some_and(|index| is_unescaped_pipe(bytes, index)),
+    );
+
+    (delimiters + 1)
+        .saturating_sub(leading)
+        .saturating_sub(trailing)
+}
+
+fn is_unescaped_pipe(bytes: &[u8], index: usize) -> bool {
+    bytes.get(index) == Some(&b'|') && !is_escaped(bytes, index)
 }
 
 fn registry_options() -> Options<'static> {
