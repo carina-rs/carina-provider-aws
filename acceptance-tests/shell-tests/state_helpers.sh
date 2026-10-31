@@ -81,6 +81,10 @@ if [ "${CARINA_TRUST_LOCAL_PROVIDER:-}" != "$EXPECTED_TRUST_GRANT" ]; then
     echo "missing trust grant: ${CARINA_TRUST_LOCAL_PROVIDER:-<unset>}" >&2
     exit 1
 fi
+if [ "${CARINA_ACCEPT_EGRESS:-}" != "$EXPECTED_ACCEPT_EGRESS" ]; then
+    echo "missing egress acceptance: ${CARINA_ACCEPT_EGRESS:-<unset>}" >&2
+    exit 1
+fi
 if [ "$#" -ne 4 ] || [ "$1" != "state" ] || [ "$2" != "show" ] || \
    [ "$3" != "--json" ] || [ "$4" != "$EXPECTED_STATE_DIR" ]; then
     echo "unexpected arguments: $*" >&2
@@ -156,9 +160,10 @@ assert_helper_failure() {
 (
     export CARINA_BIN="$STUB_BIN"
     export _TEST_AWS_WASM="$AWS_WASM"
-    unset _TEST_AWSCC_WASM CARINA_TRUST_LOCAL_PROVIDER
+    unset _TEST_AWSCC_WASM CARINA_ACCEPT_EGRESS CARINA_TRUST_LOCAL_PROVIDER
     export EXPECTED_STATE_DIR="$STATE_DIR"
     export EXPECTED_STATE_JSON="$STATE_JSON"
+    export EXPECTED_ACCEPT_EGRESS="file://$AWS_WASM"
     export EXPECTED_TRUST_GRANT="$AWS_WASM=aws"
 
     source "$HELPERS_SH"
