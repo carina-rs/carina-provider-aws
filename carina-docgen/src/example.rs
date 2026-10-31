@@ -4,8 +4,13 @@ use std::ops::Range;
 use std::path::Path;
 
 use anyhow::{Context, Result};
-use carina_core::parser::{ParsedFile, ProviderConfig, ProviderContext, parse_file};
-use carina_core::resource::{DataSource, Resource, ResourceId, ResourceIdentityState};
+use carina_core::parser::{
+    DeferredForBody, DeferredForTarget, ParsedDeferredForExpression, ParsedFile, ProviderConfig,
+    ProviderContext, parse_file,
+};
+use carina_core::resource::{
+    DataSource, ModuleSource, ParserPlaceholder, Resource, ResourceId, ResourceIdentityState,
+};
 
 /// The kind of declaration a documentation example must contain.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -203,6 +208,8 @@ fn ensure_semantically_equal(
     rendered: &ParsedFile,
     path: &Path,
 ) -> Result<()> {
+    let authored_deferred_for_expressions = authored.parsed_deferred_for_expressions();
+    let rendered_deferred_for_expressions = rendered.parsed_deferred_for_expressions();
     let ParsedFile {
         // Unnamed provider blocks are the only intentional parsed difference: rendering removes them.
         providers: authored_providers,
@@ -225,9 +232,12 @@ fn ensure_semantically_equal(
         // Evaluator-only parser bookkeeping is not authored DSL semantics.
         parser_binding_metadata: _,
         warnings: authored_warnings,
-        deferred_for_expressions: authored_deferred_for_expressions,
+        deferred_module_ifs: authored_deferred_module_ifs,
         // Module-expansion lineage is not produced when parsing these standalone files.
         expansion_trace: _,
+        // `..` stands only for crate-private `parsed_binding_uses`, `deferred_for_phase`, and
+        // `template_placeholder`; new public fields must be added by name.
+        ..
     } = authored;
     let ParsedFile {
         providers: rendered_providers,
@@ -250,10 +260,27 @@ fn ensure_semantically_equal(
         // Evaluator-only parser bookkeeping is not authored DSL semantics.
         parser_binding_metadata: _,
         warnings: rendered_warnings,
-        deferred_for_expressions: rendered_deferred_for_expressions,
+        deferred_module_ifs: rendered_deferred_module_ifs,
         // Module-expansion lineage is not produced when parsing these standalone files.
         expansion_trace: _,
+        // `..` stands only for crate-private `parsed_binding_uses`, `deferred_for_phase`, and
+        // `template_placeholder`; new public fields must be added by name.
+        ..
     } = rendered;
+
+    if authored_deferred_module_ifs.len() != rendered_deferred_module_ifs.len() {
+        anyhow::bail!(
+            "Rendered example from {} changed parsed deferred structural `if` expressions",
+            path.display()
+        );
+    }
+    if !authored_deferred_module_ifs.is_empty() || !rendered_deferred_module_ifs.is_empty() {
+        anyhow::bail!(
+            "Example {} contains a deferred structural `if`; such examples cannot be checked for \
+             render equivalence",
+            path.display()
+        );
+    }
 
     let mismatch = if !same_named_providers(authored_providers, rendered_providers) {
         Some("named provider blocks")
@@ -309,13 +336,19 @@ fn ensure_semantically_equal(
     Ok(())
 }
 
-fn same_named_providers(left: &[ProviderConfig], right: &[ProviderConfig]) -> bool {
+fn same_named_providers(
+    left: &[ProviderConfig<ParserPlaceholder>],
+    right: &[ProviderConfig<ParserPlaceholder>],
+) -> bool {
     left.iter()
         .filter(|provider| provider.binding.is_some())
         .eq(right.iter().filter(|provider| provider.binding.is_some()))
 }
 
-fn same_resources(left: &[Resource], right: &[Resource]) -> bool {
+fn same_resources(
+    left: &[Resource<ModuleSource, ParserPlaceholder>],
+    right: &[Resource<ModuleSource, ParserPlaceholder>],
+) -> bool {
     left.len() == right.len()
         && left.iter().zip(right).all(|(left, right)| {
             let mut right = right.clone();
@@ -324,7 +357,10 @@ fn same_resources(left: &[Resource], right: &[Resource]) -> bool {
         })
 }
 
-fn same_data_sources(left: &[DataSource], right: &[DataSource]) -> bool {
+fn same_data_sources(
+    left: &[DataSource<ModuleSource, ParserPlaceholder>],
+    right: &[DataSource<ModuleSource, ParserPlaceholder>],
+) -> bool {
     left.len() == right.len()
         && left.iter().zip(right).all(|(left, right)| {
             let mut right = right.clone();
@@ -380,7 +416,7 @@ fn same_arguments(
     left.len() == right.len()
         && left.iter().zip(right).all(|(left, right)| {
             left.name == right.name
-                && left.type_expr == right.type_expr
+                && left.static_type == right.static_type
                 && left.default == right.default
                 && left.description == right.description
                 && left.validations.len() == right.validations.len()
@@ -402,14 +438,14 @@ fn same_attribute_params(
     left.len() == right.len()
         && left.iter().zip(right).all(|(left, right)| {
             left.name == right.name
-                && left.type_expr == right.type_expr
+                && left.static_type == right.static_type
                 && left.value == right.value
         })
 }
 
 fn same_backend(
-    left: Option<&carina_core::parser::BackendConfig>,
-    right: Option<&carina_core::parser::BackendConfig>,
+    left: Option<&carina_core::parser::BackendConfig<ParserPlaceholder>>,
+    right: Option<&carina_core::parser::BackendConfig<ParserPlaceholder>>,
 ) -> bool {
     match (left, right) {
         (Some(left), Some(right)) => {
@@ -474,8 +510,8 @@ fn same_wait_bindings(
 }
 
 fn same_requires(
-    left: &[carina_core::parser::RequireBlock],
-    right: &[carina_core::parser::RequireBlock],
+    left: &[carina_core::parser::RequireBlock<ParserPlaceholder>],
+    right: &[carina_core::parser::RequireBlock<ParserPlaceholder>],
 ) -> bool {
     left.len() == right.len()
         && left.iter().zip(right).all(|(left, right)| {
@@ -495,23 +531,40 @@ fn same_warnings(
 }
 
 fn same_deferred_for_expressions(
-    left: &[carina_core::parser::DeferredForExpression],
-    right: &[carina_core::parser::DeferredForExpression],
+    left: &[ParsedDeferredForExpression],
+    right: &[ParsedDeferredForExpression],
 ) -> bool {
     left.len() == right.len()
         && left.iter().zip(right).all(|(left, right)| {
-            let resources_match = same_resources(
-                std::slice::from_ref(&left.template_resource),
-                std::slice::from_ref(&right.template_resource),
-            );
             left.header == right.header
-                && left.resource_type == right.resource_type
-                && left.attributes == right.attributes
-                && left.binding_name == right.binding_name
+                && same_deferred_for_targets(&left.target, &right.target)
                 && left.iterable == right.iterable
                 && left.binding == right.binding
-                && resources_match
+                && same_deferred_for_bodies(&left.body, &right.body)
         })
+}
+
+fn same_deferred_for_targets(left: &DeferredForTarget, right: &DeferredForTarget) -> bool {
+    left == right
+}
+
+fn same_deferred_for_bodies(left: &DeferredForBody, right: &DeferredForBody) -> bool {
+    match (left, right) {
+        (DeferredForBody::Resource(left), DeferredForBody::Resource(right)) => same_resources(
+            std::slice::from_ref(left.as_ref()),
+            std::slice::from_ref(right.as_ref()),
+        ),
+        (DeferredForBody::Read(left), DeferredForBody::Read(right)) => same_data_sources(
+            std::slice::from_ref(left.as_ref()),
+            std::slice::from_ref(right.as_ref()),
+        ),
+        (DeferredForBody::ModuleCall(left), DeferredForBody::ModuleCall(right)) => {
+            same_module_calls(std::slice::from_ref(left), std::slice::from_ref(right))
+        }
+        (DeferredForBody::Resource(_), _)
+        | (DeferredForBody::Read(_), _)
+        | (DeferredForBody::ModuleCall(_), _) => false,
+    }
 }
 
 fn preprocess(source: &str) -> Result<String> {
@@ -1398,6 +1451,106 @@ mod tests {
         assert_eq!(
             error.to_string(),
             "Rendered example from semantic-mismatch.crn changed parsed resources"
+        );
+    }
+
+    #[test]
+    fn deferred_structural_if_cannot_be_checked_for_render_equivalence() {
+        let path = Path::new("deferred-structural-if.crn");
+        let parsed = parse_file(
+            concat!(
+                "arguments { enabled: Bool }\n",
+                "let selected = if enabled {\n",
+                "  aws.ec2.Vpc {}\n",
+                "}\n",
+            ),
+            path,
+            &ProviderContext::default(),
+        )
+        .expect("deferred structural if parses");
+        assert_eq!(parsed.deferred_module_ifs.len(), 1);
+
+        let error = ensure_semantically_equal(&parsed, &parsed, path)
+            .expect_err("deferred structural if must fail closed");
+
+        assert_eq!(
+            error.to_string(),
+            "Example deferred-structural-if.crn contains a deferred structural `if`; such \
+             examples cannot be checked for render equivalence"
+        );
+    }
+
+    #[test]
+    fn deferred_structural_if_length_difference_is_a_semantic_mismatch() {
+        let path = Path::new("deferred-structural-if-mismatch.crn");
+        let without_deferred_if =
+            parse_file("", path, &ProviderContext::default()).expect("empty file parses");
+        let with_deferred_if = parse_file(
+            concat!(
+                "arguments { enabled: Bool }\n",
+                "let selected = if enabled {\n",
+                "  aws.ec2.Vpc {}\n",
+                "}\n",
+            ),
+            path,
+            &ProviderContext::default(),
+        )
+        .expect("deferred structural if parses");
+
+        let error = ensure_semantically_equal(&without_deferred_if, &with_deferred_if, path)
+            .expect_err("different deferred structural if counts must be a mismatch");
+
+        assert_eq!(
+            error.to_string(),
+            "Rendered example from deferred-structural-if-mismatch.crn changed parsed deferred \
+             structural `if` expressions"
+        );
+    }
+
+    #[test]
+    fn different_unbound_deferred_for_templates_are_a_semantic_mismatch() {
+        let source = concat!(
+            "let orgs = upstream_state { source = \"../orgs\" }\n",
+            "for account_id in orgs.accounts {\n",
+            "  aws.ec2.Vpc { description = account_id }\n",
+            "}\n",
+        );
+        let authored = parse_file(
+            source,
+            Path::new("authored-deferred-for.crn"),
+            &ProviderContext::default(),
+        )
+        .expect("authored deferred for parses");
+        let rendered = parse_file(
+            source,
+            Path::new("rendered-deferred-for.crn"),
+            &ProviderContext::default(),
+        )
+        .expect("rendered deferred for parses");
+        let [authored_deferred] = authored.parsed_deferred_for_expressions() else {
+            panic!("authored fixture must contain one deferred for")
+        };
+        let [rendered_deferred] = rendered.parsed_deferred_for_expressions() else {
+            panic!("rendered fixture must contain one deferred for")
+        };
+        assert!(matches!(
+            authored_deferred.target,
+            DeferredForTarget::Unbound { .. }
+        ));
+        assert!(matches!(
+            rendered_deferred.target,
+            DeferredForTarget::Unbound { .. }
+        ));
+        assert_ne!(authored_deferred.target, rendered_deferred.target);
+
+        let path = Path::new("unbound-template-mismatch.crn");
+        let error = ensure_semantically_equal(&authored, &rendered, path)
+            .expect_err("different unbound templates must be a mismatch");
+
+        assert_eq!(
+            error.to_string(),
+            "Rendered example from unbound-template-mismatch.crn changed parsed deferred for \
+             expressions"
         );
     }
 

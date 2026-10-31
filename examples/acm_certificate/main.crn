@@ -1,32 +1,17 @@
-# ACM Certificate with DNS validation and `wait` synchronisation.
+# ACM Certificate
 #
-# This is the canonical pattern for ACM in Carina:
-#
-#   1. `aws.acm.Certificate` requests the certificate; AWS returns
-#      `domain_validation_options` with the CNAME records the user
-#      must publish to satisfy DNS validation.
-#   2. `aws.route53.RecordSet` publishes those records into the
-#      hosted zone.
-#   3. `wait cert { until = cert.status == ISSUED }` (carina#2825)
-#      blocks downstream resources until ACM marks the cert ISSUED.
-#      The wait references `cert.status` directly — no separate
-#      `aws.acm.CertificateValidation` waiter resource is needed.
-#
-# Downstream resources reference `cert_issued.arn` to inherit the
-# wait. Reading `cert.arn` directly would skip the synchronisation
-# (useful for audit-log resources that don't care whether the cert
-# has actually been issued yet).
-#
-# CloudFront viewer certificates require ACM in `us-east-1`. The
-# `provider aws` block here is region-pinned for the registry-on-
-# CloudFront case (see carina-rs/infra Issue #29 / T6).
+# Requests and validates an ACM certificate with Route 53.
 
 provider aws {
   region = aws.Region.us_east_1
 }
 
 let cert = aws.acm.Certificate {
+  # CloudFront viewer certificates must be requested in us-east-1.
+  # cert_issued waits for issuance; downstream resources should use cert_issued.arn.
+  # cert.arn skips that wait. No CertificateValidation resource is needed.
   domain_name       = 'registry.example.com'
+  # DNS validation returns the CNAME published by validation_record below.
   validation_method = aws.acm.Certificate.ValidationMethod.dns
 
   tags = {
@@ -34,19 +19,16 @@ let cert = aws.acm.Certificate {
   }
 }
 
-# The Route 53 record that satisfies the DNS challenge. The
-# domain_validation_options entries are computed by AWS on
-# `RequestCertificate`; carina-core resolves the reference at
-# apply time after the cert resource finishes its create.
 let validation_record = aws.route53.RecordSet {
+  # Replace this placeholder with the hosted zone ID for the domain.
   hosted_zone_id   = 'Z123EXAMPLE'
+  # Publish the DNS challenge returned by ACM.
   name             = cert.domain_validation_options[0].resource_record.name
   type             = cert.domain_validation_options[0].resource_record.type
   ttl              = 60
   resource_records = [cert.domain_validation_options[0].resource_record.value]
 }
 
-# Block downstream resources until the cert is ISSUED.
 let cert_issued = wait cert {
   until      = cert.status == 'ISSUED'
   depends_on = [validation_record]
