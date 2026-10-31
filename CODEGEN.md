@@ -24,9 +24,11 @@ The shared `carina_docgen::example` module removes provider blocks and top-level
 comment lines while preserving heredocs and quoted strings. Put reader-facing
 notes in indented comments inside a resource or data-source body so they remain
 on the generated page. The module parses both the authored source and the exact
-text passed to the renderer; that rendered text must be non-empty and must
-declare the documented resource or read the documented data source. Generation
-also fails when an example directory has no corresponding rendered page.
+text passed to the renderer; generation fails closed when those parses differ,
+apart from intentionally removed unnamed provider blocks. The rendered text
+must be non-empty and must declare the documented resource or read the
+documented data source. Generation also fails when an example directory has no
+corresponding rendered page.
 Codegen inserts each required example before validation. The script adds
 frontmatter and strips the generated H1 because Starlight renders the
 frontmatter title as the page heading. The resulting `generated-docs/` tree is

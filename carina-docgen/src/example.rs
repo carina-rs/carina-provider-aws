@@ -525,11 +525,19 @@ fn preprocess(source: &str) -> Result<String> {
     filtered.push_str(&source[kept_from..]);
 
     let lines: Vec<&str> = filtered.split_inclusive('\n').collect();
-    let first_content = lines
+    let Some(first_content) = lines.iter().position(|line| !line.trim().is_empty()) else {
+        return Ok(String::new());
+    };
+    let last_content = lines
         .iter()
-        .position(|line| !line.trim_end_matches(['\r', '\n']).is_empty())
-        .unwrap_or(lines.len());
-    Ok(lines[first_content..].concat())
+        .rposition(|line| !line.trim().is_empty())
+        .expect("first content line guarantees a last content line")
+        + 1;
+    let mut rendered = lines[first_content..last_content].concat();
+    if !rendered.ends_with('\n') {
+        rendered.push('\n');
+    }
+    Ok(rendered)
 }
 
 fn removals(masked: &[u8]) -> Result<Vec<Range<usize>>> {
@@ -571,7 +579,7 @@ fn removals(masked: &[u8]) -> Result<Vec<Range<usize>>> {
             b'/' if masked.get(cursor + 1) == Some(&b'*') => {
                 let end = skip_block_comment(masked, cursor);
                 if update_line_start(masked, cursor, end, &mut line_start) {
-                    line_has_code = false;
+                    line_has_code = true;
                 }
                 cursor = end;
             }
@@ -1103,6 +1111,30 @@ mod tests {
     }
 
     #[test]
+    fn multiline_block_comment_before_top_level_hash_comment_loads() {
+        let source = "/* note\n   more */ # trailing\naws.ec2.Vpc {}\n";
+        let example = load_fixture(source, ExampleKind::Resource)
+            .expect("valid comment after a multiline block comment");
+
+        assert!(resource_text(&example).contains("more */"));
+        assert!(resource_text(&example).contains("aws.ec2.Vpc {}\n"));
+    }
+
+    #[test]
+    fn multiline_block_comment_before_provider_loads() {
+        let source = concat!(
+            "/* n\n",
+            " */ provider aws { region = aws.Region.ap_northeast_1 }\n",
+            "aws.ec2.Vpc {}\n",
+        );
+        let example = load_fixture(source, ExampleKind::Resource)
+            .expect("valid provider after a multiline block comment");
+
+        assert!(resource_text(&example).contains(" */"));
+        assert!(resource_text(&example).contains("aws.ec2.Vpc {}\n"));
+    }
+
+    #[test]
     fn interpolation_braces_and_quotes_do_not_change_comment_depth() {
         let source = concat!(
             "aws.ec2.Vpc {\n",
@@ -1244,6 +1276,14 @@ mod tests {
         .expect("valid CRLF example");
 
         assert_eq!(resource_text(&example), "aws.ec2.Vpc {}\r\n");
+    }
+
+    #[test]
+    fn trailing_blank_lines_are_trimmed_to_one_newline() {
+        let example = load_fixture("\n\t\naws.ec2.Vpc {}\n\n \t\r\n", ExampleKind::Resource)
+            .expect("valid example surrounded by blank lines");
+
+        assert_eq!(resource_text(&example), "aws.ec2.Vpc {}\n");
     }
 
     #[test]
