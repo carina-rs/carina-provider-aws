@@ -1,4 +1,9 @@
-use carina_docgen::{Heading, PageBuilder, PageViolationKind, check_page, heading_ids};
+use carina_docgen::{
+    DocgenError, Heading, PageBuilder, PageViolationKind, TableCell, check_page, heading_ids,
+};
+
+const IPV6_DESCRIPTION: &str =
+    "Indicates whether to enable Ipv6 Support for Vpc Attachment. Valid Values: enable | disable";
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 enum Target {
@@ -170,4 +175,184 @@ fn page_builder_rejects_a_heading_that_bypasses_the_builder() {
         error.to_string().contains("heading order differed"),
         "{error}"
     );
+}
+
+#[test]
+fn table_escapes_unescaped_pipes_in_text_cells() {
+    let mut page: PageBuilder<Target> = PageBuilder::new();
+    page.table(["Description"], [[TableCell::text(IPV6_DESCRIPTION)]])
+        .expect("valid table");
+
+    let markdown = page.finish().expect("valid finished page");
+
+    assert_eq!(
+        markdown,
+        concat!(
+            "| Description |\n",
+            "|-------------|\n",
+            r"| Indicates whether to enable Ipv6 Support for Vpc Attachment. Valid Values: enable \| disable |",
+            "\n",
+        )
+    );
+}
+
+#[test]
+fn table_preserves_already_escaped_pipes() {
+    let mut page: PageBuilder<Target> = PageBuilder::new();
+    page.table(
+        ["Description"],
+        [[TableCell::text(r"Valid Values: enable \| disable")]],
+    )
+    .expect("valid table");
+
+    let markdown = page.finish().expect("valid finished page");
+
+    assert!(
+        markdown.contains(r"Valid Values: enable \| disable"),
+        "{markdown}"
+    );
+    assert!(!markdown.contains(r"Valid Values: enable \\| disable"));
+}
+
+#[test]
+fn table_collapses_newlines_in_cells() {
+    let mut page: PageBuilder<Target> = PageBuilder::new();
+    page.table(
+        ["Description"],
+        [[TableCell::text("first line\nsecond line\r\nthird line")]],
+    )
+    .expect("valid table");
+
+    let markdown = page.finish().expect("valid finished page");
+
+    assert!(
+        markdown.contains("| first line second line third line |"),
+        "{markdown}"
+    );
+}
+
+#[test]
+fn table_resolves_keyed_links_in_cells() {
+    let mut page = PageBuilder::new();
+    page.table(
+        ["Type", "Example"],
+        [[
+            TableCell::link(Target::Options, "Struct(Options | Settings)"),
+            TableCell::code("enable | disable"),
+        ]],
+    )
+    .expect("valid table");
+    page.push_str("\n");
+    page.target_heading(Target::Options, Heading::plain(2, "Options"))
+        .expect("valid target heading");
+
+    let markdown = page.finish().expect("valid finished page");
+
+    assert!(
+        markdown.contains(r"| [Struct(Options \| Settings)](#options) | `enable \| disable` |"),
+        "{markdown}"
+    );
+}
+
+#[test]
+fn table_renders_empty_code_as_an_empty_cell() {
+    let mut page: PageBuilder<Target> = PageBuilder::new();
+    page.table(["Value"], [[TableCell::code("")]])
+        .expect("valid table");
+
+    let markdown = page.finish().expect("valid finished page");
+
+    assert_eq!(markdown, "| Value |\n|-------|\n|  |\n");
+}
+
+#[test]
+fn table_escapes_brackets_in_link_labels() {
+    let mut page = PageBuilder::new();
+    page.table(
+        ["Type"],
+        [[TableCell::link(
+            Target::Options,
+            "Struct[Options] | Settings",
+        )]],
+    )
+    .expect("valid table");
+    page.push_str("\n");
+    page.target_heading(Target::Options, Heading::plain(2, "Options"))
+        .expect("valid target heading");
+
+    let markdown = page.finish().expect("valid finished page");
+
+    assert!(
+        markdown.contains(r"| [Struct\[Options\] \| Settings](#options) |"),
+        "{markdown}"
+    );
+}
+
+#[test]
+fn table_rejects_rows_with_wrong_cell_count() {
+    let mut page: PageBuilder<Target> = PageBuilder::new();
+
+    let result = page.table(["Field", "Description"], [[TableCell::text("field")]]);
+    assert_std_error(&result);
+    let error = result.expect_err("short row must fail");
+
+    assert!(matches!(error, DocgenError::Build(_)), "{error}");
+    assert!(
+        error.to_string().contains("expected 2 cells, got 1"),
+        "{error}"
+    );
+}
+
+#[test]
+fn check_page_rejects_table_rows_with_extra_unescaped_pipes() {
+    let markdown = format!("| Description |\n|-------------|\n| {IPV6_DESCRIPTION} |\n");
+
+    assert_eq!(
+        violation_kinds(&markdown),
+        [PageViolationKind::TableColumnMismatch]
+    );
+}
+
+#[test]
+fn check_page_accepts_table_rows_with_escaped_pipes() {
+    let markdown = format!(
+        "| Description |\n|-------------|\n| {} |\n",
+        IPV6_DESCRIPTION.replace('|', r"\|")
+    );
+
+    check_page(&markdown).expect("escaped pipe stays within one table cell");
+}
+
+#[test]
+fn check_page_accepts_an_escaped_final_pipe_and_keeps_backslash_parity() {
+    check_page("| Value |\n|-------|\n| a \\|\n")
+        .expect("escaped final pipe stays within one table cell");
+
+    assert_eq!(
+        violation_kinds("| Value |\n|-------|\n| a \\\\| b |\n"),
+        [PageViolationKind::TableColumnMismatch]
+    );
+}
+
+#[test]
+fn check_page_handles_optional_outer_pipes_and_rejects_short_rows() {
+    check_page("First | Second\n------|-------\none | two\n").expect("outer pipes are optional");
+
+    assert_eq!(
+        violation_kinds("First | Second\n------|-------\nonly one\n"),
+        [PageViolationKind::TableColumnMismatch]
+    );
+}
+
+#[test]
+fn check_page_skips_table_like_rows_inside_fenced_code_blocks() {
+    let markdown = concat!(
+        "```markdown\n",
+        "| Description |\n",
+        "|-------------|\n",
+        "| Indicates whether to enable Ipv6 Support for Vpc Attachment. Valid Values: enable | disable |\n",
+        "```\n",
+    );
+
+    check_page(markdown).expect("fenced code does not contain a GFM table");
 }

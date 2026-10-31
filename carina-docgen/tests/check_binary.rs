@@ -62,6 +62,7 @@ fn checker_reads_markdown_recursively_from_a_directory() {
     assert!(stdout.contains("0 unresolved fragments"), "{stdout}");
     assert!(stdout.contains("0 links inside code spans"), "{stdout}");
     assert!(stdout.contains("0 duplicated section headings"), "{stdout}");
+    assert!(stdout.contains("0 table column mismatches"), "{stdout}");
 }
 
 #[test]
@@ -89,4 +90,27 @@ fn checker_reads_the_shipped_tarball_and_reports_violations() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("resources/widget.md"), "{stderr}");
     assert!(stderr.contains("#not-a-heading"), "{stderr}");
+}
+
+#[test]
+fn checker_reports_table_column_mismatches() {
+    let temp = tempfile::tempdir().expect("create temp directory");
+    let page = temp.path().join("widget.md");
+    let markdown = concat!(
+        "| Description |\n",
+        "|-------------|\n",
+        "| Indicates whether to enable Ipv6 Support for Vpc Attachment. Valid Values: enable | disable |\n",
+    );
+    File::create(&page)
+        .expect("create page")
+        .write_all(markdown.as_bytes())
+        .expect("write page");
+
+    let output = run_checker(temp.path());
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("widget.md"), "{stderr}");
+    assert!(stderr.contains("table row has 2 columns"), "{stderr}");
+    assert!(stderr.contains("1 table column mismatches"), "{stderr}");
 }

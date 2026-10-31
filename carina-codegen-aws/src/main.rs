@@ -17,7 +17,7 @@ use heck::{ToSnakeCase, ToUpperCamelCase};
 
 use carina_aws_types::dsl_enum_value;
 use carina_codegen_aws::resource_defs::{self, ReplacementClass, ResourceDef};
-use carina_docgen::{Heading, PageBuilder};
+use carina_docgen::{Heading, PageBuilder, TableCell};
 
 const PLAIN_STRING_TYPE_CODE: &str = "AttributeType::string()";
 
@@ -4880,6 +4880,32 @@ impl MarkdownType {
             Self::List(item) => page.push_str(&format!("`List<{}>`", item.plain_text())),
         }
     }
+
+    fn table_cell(&self) -> TableCell<MarkdownTarget> {
+        let mut cell = TableCell::new();
+        self.write_to_table_cell(&mut cell);
+        cell
+    }
+
+    fn write_to_table_cell(&self, cell: &mut TableCell<MarkdownTarget>) {
+        match self {
+            Self::Plain(value) => cell.push_text(value),
+            Self::Enum { key, type_name } => cell.push_link(
+                MarkdownTarget::Enum(key.clone()),
+                format!("Enum ({type_name})"),
+            ),
+            Self::Struct { key, name } => cell.push_link(
+                MarkdownTarget::Struct(key.clone()),
+                format!("Struct({name})"),
+            ),
+            Self::List(item) if item.contains_link() => {
+                cell.push_text("List\\<");
+                item.write_to_table_cell(cell);
+                cell.push_text("\\>");
+            }
+            Self::List(item) => cell.push_code(format!("List<{}>", item.plain_text())),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -5288,14 +5314,12 @@ fn generate_markdown_resource(
                 MarkdownTarget::Enum(key.clone()),
                 Heading::plain(3, heading_text),
             )?;
-            page.push_str("| Value | DSL Identifier |\n");
-            page.push_str("|-------|----------------|\n");
-
-            for value in &enum_info.values {
+            let rows = enum_info.values.iter().map(|value| {
                 let dsl_value = dsl_for(value);
                 let dsl_id = format!("{}.{}.{}", key.namespace, enum_info.type_name, dsl_value);
-                page.push_str(&format!("| `{}` | `{}` |\n", value, dsl_id));
-            }
+                [TableCell::code(value), TableCell::code(dsl_id)]
+            });
+            page.table(["Value", "DSL Identifier"], rows)?;
             page.push_str("\n");
 
             let first_value = enum_info.values.first().map(|s| s.as_str()).unwrap_or("");
@@ -5318,17 +5342,15 @@ fn generate_markdown_resource(
                 MarkdownTarget::Struct(key.clone()),
                 Heading::plain(3, heading_text),
             )?;
-            page.push_str("| Field | Type | Required | Description |\n");
-            page.push_str("|-------|------|----------|-------------|\n");
-            for field in &struct_doc.fields {
-                page.push_str(&format!("| `{}` | ", field.snake_name));
-                field.field_type.write_to(&mut page);
-                page.push_str(&format!(
-                    " | {} | {} |\n",
-                    if field.is_required { "Yes" } else { "No" },
-                    field.description
-                ));
-            }
+            let rows = struct_doc.fields.iter().map(|field| {
+                [
+                    TableCell::code(&field.snake_name),
+                    field.field_type.table_cell(),
+                    TableCell::text(if field.is_required { "Yes" } else { "No" }),
+                    TableCell::text(&field.description),
+                ]
+            });
+            page.table(["Field", "Type", "Required", "Description"], rows)?;
             page.push_str("\n");
         }
     }
@@ -8631,6 +8653,37 @@ mod tests {
         assert!(markdown.contains("## Enum Values"), "{markdown}");
         assert!(
             markdown.contains("### options.hostname_type (HostnameType)"),
+            "{markdown}"
+        );
+    }
+
+    #[test]
+    fn markdown_table_rows_without_pipes_keep_previous_format() {
+        let markdown = generate_markdown_resource(
+            &markdown_regression_resource(),
+            &markdown_regression_model(),
+            None,
+        )
+        .expect("generate markdown");
+
+        assert!(
+            markdown.contains(concat!(
+                "|",
+                " Value | DSL Identifier |\n",
+                "|-------|----------------|\n",
+                "|",
+                " `TOP` | `aws.ec2.Vpc.Type.top` |\n",
+            )),
+            "{markdown}"
+        );
+        assert!(
+            markdown.contains(concat!(
+                "|",
+                " Field | Type | Required | Description |\n",
+                "|-------|------|----------|-------------|\n",
+                "|",
+                " `name` | String | No |  |\n",
+            )),
             "{markdown}"
         );
     }
