@@ -12,7 +12,7 @@ use std::sync::LazyLock;
 
 use anyhow::{Context, Result};
 use carina_smithy::{Shape, ShapeKind, SmithyModel};
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 use heck::{ToSnakeCase, ToUpperCamelCase};
 
 use carina_aws_types::{AwsType, dsl_enum_value};
@@ -37,9 +37,9 @@ struct Args {
     #[arg(long)]
     resource: Option<String>,
 
-    /// Output format: rust (default) or markdown (for documentation)
-    #[arg(long, default_value = "rust")]
-    format: String,
+    /// Output format: rust (default), provider, or markdown (for documentation)
+    #[arg(long, value_enum, default_value = "rust")]
+    format: OutputFormat,
 
     /// Workspace Clippy configuration generated with provider resend safety.
     #[arg(long)]
@@ -48,6 +48,71 @@ struct Args {
     /// Directory containing generated-doc examples (`<service>_<page>/main.crn`).
     #[arg(long)]
     examples_dir: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+enum OutputFormat {
+    #[value(alias = "md")]
+    Markdown,
+    Provider,
+    Rust,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum OutputMode {
+    Markdown { examples_dir: PathBuf },
+    Provider,
+    Rust,
+}
+
+#[derive(Debug)]
+struct ResolvedArgs {
+    model_dir: PathBuf,
+    output_dir: PathBuf,
+    resource: Option<String>,
+    output_mode: OutputMode,
+    clippy_config: Option<PathBuf>,
+}
+
+impl TryFrom<Args> for ResolvedArgs {
+    type Error = anyhow::Error;
+
+    fn try_from(args: Args) -> Result<Self> {
+        let Args {
+            model_dir,
+            output_dir,
+            resource,
+            format,
+            clippy_config,
+            examples_dir,
+        } = args;
+
+        if let Some(examples_dir) = &examples_dir
+            && !examples_dir.is_dir()
+        {
+            anyhow::bail!(
+                "--examples-dir must be an existing directory: {}",
+                examples_dir.display()
+            );
+        }
+
+        let output_mode = match format {
+            OutputFormat::Markdown => OutputMode::Markdown {
+                examples_dir: examples_dir
+                    .context("--examples-dir is required when --format is markdown")?,
+            },
+            OutputFormat::Provider => OutputMode::Provider,
+            OutputFormat::Rust => OutputMode::Rust,
+        };
+
+        Ok(Self {
+            model_dir,
+            output_dir,
+            resource,
+            output_mode,
+            clippy_config,
+        })
+    }
 }
 
 /// Unified type override for resource-scoped property overrides.
@@ -518,9 +583,13 @@ fn markdown_file_name(resource: &str, data_source: bool) -> String {
     format!("{}{suffix}.md", pascal_to_snake(resource))
 }
 
+fn markdown_example_dir_name(service: &str, page_stem: &str) -> String {
+    format!("{service}_{page_stem}")
+}
+
 fn load_markdown_example(examples_dir: &Path, service: &str, page_stem: &str) -> Result<String> {
     let path = examples_dir
-        .join(format!("{service}_{page_stem}"))
+        .join(markdown_example_dir_name(service, page_stem))
         .join("main.crn");
     match std::fs::read_to_string(&path) {
         Ok(source) => Ok(preprocess_markdown_example(&source)),
@@ -531,19 +600,37 @@ fn load_markdown_example(examples_dir: &Path, service: &str, page_stem: &str) ->
     }
 }
 
-fn validate_examples_dir(format: &str, examples_dir: Option<&Path>) -> Result<()> {
-    if matches!(format, "markdown" | "md") && examples_dir.is_none() {
-        anyhow::bail!("--examples-dir is required when --format is markdown");
+fn ensure_examples_match_rendered_pages(
+    examples_dir: &Path,
+    rendered_example_dirs: &HashSet<String>,
+) -> Result<()> {
+    let entries = std::fs::read_dir(examples_dir)
+        .with_context(|| format!("Failed to read {}", examples_dir.display()))?;
+    let mut unmatched = Vec::new();
+    for entry in entries {
+        let entry = entry.with_context(|| format!("Failed to read {}", examples_dir.display()))?;
+        if !entry
+            .file_type()
+            .with_context(|| format!("Failed to inspect example path {}", entry.path().display()))?
+            .is_dir()
+        {
+            continue;
+        }
+
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if !rendered_example_dirs.contains(&name) {
+            unmatched.push(name);
+        }
     }
-    let Some(examples_dir) = examples_dir else {
-        return Ok(());
-    };
-    if !examples_dir.is_dir() {
+
+    unmatched.sort();
+    if !unmatched.is_empty() {
         anyhow::bail!(
-            "--examples-dir must be an existing directory: {}",
-            examples_dir.display()
+            "Example directories without rendered pages: {}",
+            unmatched.join(", ")
         );
     }
+
     Ok(())
 }
 
@@ -571,9 +658,7 @@ fn escape_rust_keyword(name: &str) -> String {
 }
 
 fn main() -> Result<()> {
-    let args = Args::parse();
-
-    validate_examples_dir(&args.format, args.examples_dir.as_deref())?;
+    let args = ResolvedArgs::try_from(Args::parse())?;
 
     std::fs::create_dir_all(&args.output_dir)?;
 
@@ -655,8 +740,8 @@ fn main() -> Result<()> {
         validate_cross_service_update_operations(res, &models)?;
     }
 
-    match args.format.as_str() {
-        "rust" => {
+    match &args.output_mode {
+        OutputMode::Rust => {
             // Generate each resource into service/resource directory structure
             let mut generated_modules: Vec<GeneratedModule> = Vec::new();
             let managed_names: std::collections::HashSet<&str> =
@@ -717,7 +802,7 @@ fn main() -> Result<()> {
                 .with_context(|| format!("Failed to write {}", mod_path.display()))?;
             eprintln!("Generated: {}", mod_path.display());
         }
-        "provider" => {
+        OutputMode::Provider => {
             let manual_methods = scan_manual_methods(&args.output_dir.join("services"));
             let code =
                 generate_provider_code(&all_resources, &all_data_sources, &models, &manual_methods);
@@ -766,20 +851,15 @@ fn main() -> Result<()> {
                 eprintln!("Generated: {}", clippy_config_path.display());
             }
         }
-        "markdown" | "md" => {
-            let examples_dir = args
-                .examples_dir
-                .as_deref()
-                .expect("markdown examples directory was validated");
+        OutputMode::Markdown { examples_dir } => {
+            let mut rendered_example_dirs = HashSet::new();
             for res in &resources {
                 let model = models.get(res.service_namespace).unwrap();
                 let (service, resource) = split_service_resource(res.name);
                 let file_name = markdown_file_name(resource, false);
-                let example = load_markdown_example(
-                    examples_dir,
-                    service,
-                    file_name.trim_end_matches(".md"),
-                )?;
+                let page_stem = file_name.trim_end_matches(".md");
+                rendered_example_dirs.insert(markdown_example_dir_name(service, page_stem));
+                let example = load_markdown_example(examples_dir, service, page_stem)?;
                 let md = generate_markdown_resource(res, model, &example)
                     .with_context(|| format!("generating docs for aws.{}", res.name))?;
 
@@ -794,11 +874,9 @@ fn main() -> Result<()> {
                 let model = models.get(ds.service_namespace).unwrap();
                 let (service, resource) = split_service_resource(ds.name);
                 let file_name = markdown_file_name(resource, true);
-                let example = load_markdown_example(
-                    examples_dir,
-                    service,
-                    file_name.trim_end_matches(".md"),
-                )?;
+                let page_stem = file_name.trim_end_matches(".md");
+                rendered_example_dirs.insert(markdown_example_dir_name(service, page_stem));
+                let example = load_markdown_example(examples_dir, service, page_stem)?;
                 let md = generate_markdown_data_source(ds, model, &example)
                     .with_context(|| format!("generating docs for aws.{}", ds.name))?;
 
@@ -809,8 +887,8 @@ fn main() -> Result<()> {
                     .with_context(|| format!("Failed to write {}", output_path.display()))?;
                 eprintln!("Generated: {}", output_path.display());
             }
+            ensure_examples_match_rendered_pages(examples_dir, &rendered_example_dirs)?;
         }
-        other => anyhow::bail!("Unknown format: {}. Use 'rust' or 'markdown'.", other),
     }
 
     Ok(())
@@ -7708,26 +7786,105 @@ mod tests {
         assert_eq!(markdown_file_name("Roles", true), "roles_data_source.md");
     }
 
+    fn test_args(format: OutputFormat, examples_dir: Option<PathBuf>) -> Args {
+        Args {
+            model_dir: PathBuf::from("models"),
+            output_dir: PathBuf::from("output"),
+            resource: None,
+            format,
+            clippy_config: None,
+            examples_dir,
+        }
+    }
+
     #[test]
     fn markdown_examples_dir_must_be_an_existing_directory() {
         let root = tempfile::tempdir().expect("temporary root");
         let missing = root.path().join("missing");
         let file = tempfile::NamedTempFile::new_in(root.path()).expect("temporary file");
 
-        assert!(validate_examples_dir("markdown", Some(root.path())).is_ok());
-        assert!(validate_examples_dir("rust", None).is_ok());
-        assert!(validate_examples_dir("markdown", Some(&missing)).is_err());
-        assert!(validate_examples_dir("markdown", Some(file.path())).is_err());
+        let resolved = ResolvedArgs::try_from(test_args(
+            OutputFormat::Markdown,
+            Some(root.path().to_path_buf()),
+        ))
+        .expect("existing examples directory");
+        assert_eq!(
+            resolved.output_mode,
+            OutputMode::Markdown {
+                examples_dir: root.path().to_path_buf()
+            }
+        );
+        assert!(ResolvedArgs::try_from(test_args(OutputFormat::Rust, None)).is_ok());
+        assert!(ResolvedArgs::try_from(test_args(OutputFormat::Markdown, Some(missing))).is_err());
+        assert!(
+            ResolvedArgs::try_from(test_args(
+                OutputFormat::Markdown,
+                Some(file.path().to_path_buf())
+            ))
+            .is_err()
+        );
     }
 
     #[test]
     fn markdown_format_requires_examples_dir() {
-        let error = validate_examples_dir("markdown", None)
+        let error = ResolvedArgs::try_from(test_args(OutputFormat::Markdown, None))
             .expect_err("markdown generation must require --examples-dir");
 
         assert_eq!(
             error.to_string(),
             "--examples-dir is required when --format is markdown"
+        );
+    }
+
+    #[test]
+    fn output_format_is_parsed_as_a_value_enum_with_md_alias() {
+        for (value, expected) in [
+            ("markdown", OutputFormat::Markdown),
+            ("md", OutputFormat::Markdown),
+            ("provider", OutputFormat::Provider),
+            ("rust", OutputFormat::Rust),
+        ] {
+            let args = Args::try_parse_from([
+                "smithy-codegen",
+                "--model-dir",
+                "models",
+                "--output-dir",
+                "output",
+                "--format",
+                value,
+            ])
+            .expect("known output format");
+            assert_eq!(args.format, expected);
+        }
+
+        assert!(
+            Args::try_parse_from([
+                "smithy-codegen",
+                "--model-dir",
+                "models",
+                "--output-dir",
+                "output",
+                "--format",
+                "html",
+            ])
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn unmatched_example_directories_are_reported_in_sorted_order() {
+        let examples_dir = tempfile::tempdir().expect("temporary examples directory");
+        for name in ["ec2_vpc", "z_unmatched", "a_unmatched"] {
+            std::fs::create_dir(examples_dir.path().join(name)).expect("example directory");
+        }
+
+        let rendered = HashSet::from(["ec2_vpc".to_string()]);
+        let error = ensure_examples_match_rendered_pages(examples_dir.path(), &rendered)
+            .expect_err("unmatched example directories must fail generation");
+
+        assert_eq!(
+            error.to_string(),
+            "Example directories without rendered pages: a_unmatched, z_unmatched"
         );
     }
 

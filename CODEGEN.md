@@ -20,7 +20,8 @@ targets, dead local fragments, Markdown links hidden inside code spans, or
 duplicated enum/struct section headings. Markdown generation requires
 `--examples-dir`, and every generated resource or data-source page must have a
 matching `<service>_<page-stem>/main.crn`; generation fails if one is missing.
-Codegen inserts that required example before validation. The script adds
+Generation also fails when an example directory has no corresponding rendered
+page. Codegen inserts each required example before validation. The script adds
 frontmatter and strips the generated H1 because Starlight renders the
 frontmatter title as the page heading. The resulting `generated-docs/` tree is
 a transient build artifact and is not committed. The docs-bundle CI job also

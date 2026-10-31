@@ -14,7 +14,7 @@ let vpc = aws.ec2.Vpc {
   }
 }
 
-aws.ec2.InternetGateway {
+let internet_gateway = aws.ec2.InternetGateway {
   vpc_id = vpc.vpc_id
 
   tags = {
@@ -44,6 +44,10 @@ aws.ec2.NatGateway {
   allocation_id     = eip.allocation_id
   subnet_id         = subnet.subnet_id
   connectivity_type = aws.ec2.NatGateway.ConnectivityType.public
+
+  directives {
+    depends_on = [internet_gateway]
+  }
 
   tags = {
     Environment = 'example'

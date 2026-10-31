@@ -6,6 +6,8 @@ provider aws {
   region = aws.Region.ap_northeast_1
 }
 
+let caller = read aws.sts.CallerIdentity {}
+
 let source_bucket = aws.s3.Bucket {
   bucket = 'carina-example-logging-source'
 
@@ -36,7 +38,16 @@ let log_bucket_policy = aws.s3.BucketPolicy {
       }
 
       action   = 's3:PutObject'
-      resource = ['*']
+      resource = ["${log_bucket.arn}/access-logs/*"]
+
+      condition = {
+        arn_like = {
+          'aws:SourceArn' = source_bucket.arn
+        }
+        string_equals = {
+          'aws:SourceAccount' = caller.account_id
+        }
+      }
     }
   }
 }

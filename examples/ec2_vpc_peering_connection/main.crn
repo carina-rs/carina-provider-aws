@@ -1,6 +1,8 @@
 # EC2 VPC Peering Connection
 #
 # Creates a peering connection between two VPCs.
+# The request must be accepted before it can carry traffic. EC2 does not
+# auto-accept same-account requests; an unaccepted request expires after 7 days.
 
 provider aws {
   region = aws.Region.ap_northeast_1
