@@ -37,7 +37,6 @@ class BundleError(Exception):
 @dataclass(frozen=True)
 class Page:
     archive_path: str
-    title: str
     content: bytes
 
 
@@ -50,7 +49,7 @@ def _validate_source_slug(slug, description):
         raise BundleError(f"{description} slug {slug!r} exceeds 128 bytes")
 
 
-def _frontmatter_title_and_body(path):
+def _page_content(path):
     try:
         text = path.read_text(encoding="utf-8")
     except UnicodeDecodeError as error:
@@ -87,7 +86,7 @@ def _frontmatter_title_and_body(path):
         raise BundleError(f"{path}: YAML frontmatter title must be a non-empty string")
 
     body = "".join(lines[closing + 1 :]).lstrip("\r\n")
-    return title, f"# {title}\n\n{body}".encode("utf-8")
+    return f"# {title}\n\n{body}".encode("utf-8")
 
 
 def _collect_pages(source_root=GENERATED_DOCS):
@@ -119,8 +118,8 @@ def _collect_pages(source_root=GENERATED_DOCS):
                 f"two sources map to {archive_path}: {previous} and {source}"
             )
 
-        title, content = _frontmatter_title_and_body(source)
-        destinations[archive_path] = (source, Page(archive_path, title, content))
+        content = _page_content(source)
+        destinations[archive_path] = (source, Page(archive_path, content))
 
     if not destinations:
         raise BundleError(
@@ -131,7 +130,7 @@ def _collect_pages(source_root=GENERATED_DOCS):
     return [value[1] for value in destinations.values()]
 
 
-def _build_index(pages, index_source=INDEX_SOURCE):
+def _build_index(index_source=INDEX_SOURCE):
     try:
         introduction = index_source.read_text(encoding="utf-8")
     except FileNotFoundError as error:
@@ -143,26 +142,7 @@ def _build_index(pages, index_source=INDEX_SOURCE):
             f"{index_source}: provider index is not UTF-8: {error}"
         ) from error
 
-    sections = []
-    for heading, prefix in (
-        ("Resources", "resources/"),
-        ("Data Sources", "data-sources/"),
-    ):
-        section_pages = sorted(
-            (page for page in pages if page.archive_path.startswith(prefix)),
-            key=lambda page: page.archive_path,
-        )
-        if not section_pages:
-            continue
-        lines = [f"## {heading}", ""]
-        lines.extend(
-            f"- [{page.title}]({page.archive_path})" for page in section_pages
-        )
-        sections.append("\n".join(lines).rstrip())
-
-    return (introduction.rstrip() + "\n\n" + "\n\n".join(sections) + "\n").encode(
-        "utf-8"
-    )
+    return (introduction.rstrip() + "\n").encode("utf-8")
 
 
 def _tar_info(name, *, size=0, directory=False):
@@ -180,7 +160,7 @@ def _tar_info(name, *, size=0, directory=False):
 
 def build_bundle(output, source_root=GENERATED_DOCS, index_source=INDEX_SOURCE):
     pages = _collect_pages(source_root)
-    index = _build_index(pages, index_source)
+    index = _build_index(index_source)
 
     entries = [("index.md", False, index)]
     for directory in ("resources", "data-sources"):

@@ -115,7 +115,7 @@ def create_build_fixture(
 
     if reverse_creation:
         index_source.write_text(
-            "# AWS fixture\n\nFixture introduction.\n", encoding="utf-8"
+            "# AWS fixture\n\nFixture introduction.\n\n \t\n", encoding="utf-8"
         )
         pages.reverse()
 
@@ -127,7 +127,7 @@ def create_build_fixture(
 
     if not reverse_creation:
         index_source.write_text(
-            "# AWS fixture\n\nFixture introduction.\n", encoding="utf-8"
+            "# AWS fixture\n\nFixture introduction.\n\n \t\n", encoding="utf-8"
         )
 
     for fixture_file in [index_source, *page_paths]:
@@ -206,19 +206,30 @@ class DocsBundleTests(unittest.TestCase):
 
             self.assertEqual(first.read_bytes(), second.read_bytes())
 
-    def test_build_replaces_frontmatter_with_title_heading(self):
+    def test_build_replaces_frontmatter_with_title_heading_for_each_page_type(self):
         with tempfile.TemporaryDirectory() as directory:
             bundle = self.build_fixture(directory)
 
             with tarfile.open(bundle, "r:gz") as archive:
-                member = archive.extractfile("resources/alpha_standalone.md")
-                self.assertIsNotNone(member)
-                content = member.read().decode("utf-8")
-
-        self.assertTrue(content.startswith("# aws.alpha.Standalone\n\n"))
-        first_lines = "\n".join(content.splitlines()[:6])
-        self.assertNotIn("---", first_lines)
-        self.assertNotIn("title:", first_lines)
+                cases = (
+                    (
+                        "resources/alpha_standalone.md",
+                        "# aws.alpha.Standalone\n\n",
+                    ),
+                    (
+                        "data-sources/gamma_lookup.md",
+                        "# aws.gamma.Lookup\n\n",
+                    ),
+                )
+                for archive_path, heading in cases:
+                    with self.subTest(archive_path=archive_path):
+                        member = archive.extractfile(archive_path)
+                        self.assertIsNotNone(member)
+                        content = member.read().decode("utf-8")
+                        self.assertTrue(content.startswith(heading))
+                        first_lines = "\n".join(content.splitlines()[:6])
+                        self.assertNotIn("---", first_lines)
+                        self.assertNotIn("title:", first_lines)
 
     def test_build_ships_the_same_heading_list_codegen_validated(self):
         validated = (
@@ -261,7 +272,7 @@ class DocsBundleTests(unittest.TestCase):
         self.assertEqual(shipped, validated)
         self.assertEqual(heading_lines(shipped), heading_lines(validated))
 
-    def test_build_splits_resources_and_data_sources_and_indexes_both(self):
+    def test_build_splits_pages_and_copies_only_provider_introduction_to_index(self):
         with tempfile.TemporaryDirectory() as directory:
             bundle = self.build_fixture(directory)
             with tarfile.open(bundle, "r:gz") as archive:
@@ -281,14 +292,7 @@ class DocsBundleTests(unittest.TestCase):
                 self.assertIsNotNone(member)
                 index = member.read().decode("utf-8")
 
-        self.assertIn("## Resources", index)
-        self.assertIn(
-            "[aws.alpha.Standalone](resources/alpha_standalone.md)", index
-        )
-        self.assertIn("[aws.beta.Shared](resources/beta_shared.md)", index)
-        self.assertIn("## Data Sources", index)
-        self.assertIn("[aws.beta.Shared](data-sources/beta_shared.md)", index)
-        self.assertIn("[aws.gamma.Lookup](data-sources/gamma_lookup.md)", index)
+        self.assertEqual(index, "# AWS fixture\n\nFixture introduction.\n")
 
     def test_build_rejects_empty_generated_docs(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -305,37 +309,6 @@ class DocsBundleTests(unittest.TestCase):
                 DOCS_BUNDLE["build_bundle"](
                     directory / "docs.tar.gz", source_root, index_source
                 )
-
-    def test_index_omits_empty_sections(self):
-        Page = DOCS_BUNDLE["Page"]
-        cases = (
-            (
-                [Page("resources/s3_bucket.md", "aws.s3.Bucket", b"")],
-                "## Resources",
-                "## Data Sources",
-            ),
-            (
-                [
-                    Page(
-                        "data-sources/s3_bucket.md",
-                        "aws.s3.Bucket",
-                        b"",
-                    )
-                ],
-                "## Data Sources",
-                "## Resources",
-            ),
-        )
-        with tempfile.TemporaryDirectory() as directory:
-            index_source = Path(directory) / "index.md"
-            index_source.write_text("# AWS\n", encoding="utf-8")
-            for pages, present, absent in cases:
-                with self.subTest(present=present):
-                    index = DOCS_BUNDLE["_build_index"](
-                        pages, index_source
-                    ).decode("utf-8")
-                    self.assertIn(present, index)
-                    self.assertNotIn(absent, index)
 
     def test_check_rejects_removed_service_manifest(self):
         self.assert_check_rejects(
