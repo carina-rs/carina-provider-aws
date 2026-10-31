@@ -7,7 +7,7 @@ provider aws {
 }
 
 aws.logs.LogGroup {
-  log_group_name    = '/carina/example'
+  log_group_name    = 'carina-example-log-group'
   log_group_class   = aws.logs.LogGroup.LogGroupClass.standard
   retention_in_days = 7
 

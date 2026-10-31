@@ -45,7 +45,7 @@ struct Args {
     #[arg(long)]
     clippy_config: Option<PathBuf>,
 
-    /// Directory containing generated-doc examples (`<service>_<page>/main.crn`).
+    /// Directory containing generated-doc examples (`<service>_<page>/main.crn`); required for markdown.
     #[arg(long)]
     examples_dir: Option<PathBuf>,
 }
@@ -587,17 +587,105 @@ fn markdown_example_dir_name(service: &str, page_stem: &str) -> String {
     format!("{service}_{page_stem}")
 }
 
-fn load_markdown_example(examples_dir: &Path, service: &str, page_stem: &str) -> Result<String> {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MarkdownExampleKind {
+    DataSource,
+    Resource,
+}
+
+impl MarkdownExampleKind {
+    fn description(self) -> &'static str {
+        match self {
+            Self::DataSource => "data source",
+            Self::Resource => "resource",
+        }
+    }
+
+    fn missing_expression(self, path: &Path, dsl_name: &str) -> anyhow::Error {
+        match self {
+            Self::DataSource => anyhow::anyhow!(
+                "Example {} does not read expected data source {dsl_name}",
+                path.display()
+            ),
+            Self::Resource => anyhow::anyhow!(
+                "Example {} does not declare expected resource {dsl_name}",
+                path.display()
+            ),
+        }
+    }
+}
+
+fn load_markdown_example(
+    examples_dir: &Path,
+    service: &str,
+    page_stem: &str,
+    page_dsl_name: &str,
+    kind: MarkdownExampleKind,
+) -> Result<String> {
     let path = examples_dir
         .join(markdown_example_dir_name(service, page_stem))
         .join("main.crn");
-    match std::fs::read_to_string(&path) {
-        Ok(source) => Ok(preprocess_markdown_example(&source)),
+    let dsl_name = format!("aws.{page_dsl_name}");
+    let source = match std::fs::read_to_string(&path) {
+        Ok(source) => source,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            anyhow::bail!("Example file not found: {}", path.display())
+            anyhow::bail!(
+                "Example file not found: {}; expected {} {dsl_name}",
+                path.display(),
+                kind.description()
+            )
         }
-        Err(error) => Err(error).with_context(|| format!("Failed to read {}", path.display())),
+        Err(error) => {
+            return Err(error).with_context(|| format!("Failed to read {}", path.display()));
+        }
+    };
+    let example = preprocess_markdown_example(&source);
+    if example.trim().is_empty() {
+        anyhow::bail!(
+            "Example {} is empty after preprocessing; expected {} {dsl_name}",
+            path.display(),
+            kind.description()
+        );
     }
+    if !markdown_example_contains(&example, &dsl_name, kind) {
+        return Err(kind.missing_expression(&path, &dsl_name));
+    }
+
+    Ok(example)
+}
+
+fn markdown_example_contains(
+    example: &str,
+    expected_dsl_name: &str,
+    kind: MarkdownExampleKind,
+) -> bool {
+    example.lines().any(|line| {
+        let expression = line.trim_start();
+        if expression.starts_with('#') {
+            return false;
+        }
+        let expression = expression
+            .strip_prefix("let ")
+            .and_then(|binding| binding.split_once('=').map(|(_, value)| value.trim_start()))
+            .unwrap_or(expression);
+        let expression = match kind {
+            MarkdownExampleKind::DataSource => {
+                let Some(after_read) = expression.strip_prefix("read") else {
+                    return false;
+                };
+                if !after_read.chars().next().is_some_and(char::is_whitespace) {
+                    return false;
+                }
+                after_read.trim_start()
+            }
+            MarkdownExampleKind::Resource => expression,
+        };
+        let Some(after_name) = expression.strip_prefix(expected_dsl_name) else {
+            return false;
+        };
+        after_name.chars().next().is_some_and(char::is_whitespace)
+            && after_name.trim_start().starts_with('{')
+    })
 }
 
 fn ensure_examples_match_rendered_pages(
@@ -859,7 +947,13 @@ fn main() -> Result<()> {
                 let file_name = markdown_file_name(resource, false);
                 let page_stem = file_name.trim_end_matches(".md");
                 rendered_example_dirs.insert(markdown_example_dir_name(service, page_stem));
-                let example = load_markdown_example(examples_dir, service, page_stem)?;
+                let example = load_markdown_example(
+                    examples_dir,
+                    service,
+                    page_stem,
+                    res.name,
+                    MarkdownExampleKind::Resource,
+                )?;
                 let md = generate_markdown_resource(res, model, &example)
                     .with_context(|| format!("generating docs for aws.{}", res.name))?;
 
@@ -876,7 +970,13 @@ fn main() -> Result<()> {
                 let file_name = markdown_file_name(resource, true);
                 let page_stem = file_name.trim_end_matches(".md");
                 rendered_example_dirs.insert(markdown_example_dir_name(service, page_stem));
-                let example = load_markdown_example(examples_dir, service, page_stem)?;
+                let example = load_markdown_example(
+                    examples_dir,
+                    service,
+                    page_stem,
+                    ds.name,
+                    MarkdownExampleKind::DataSource,
+                )?;
                 let md = generate_markdown_data_source(ds, model, &example)
                     .with_context(|| format!("generating docs for aws.{}", ds.name))?;
 
@@ -7893,12 +7993,145 @@ mod tests {
         let examples_dir = tempfile::tempdir().expect("temporary examples directory");
         let expected = examples_dir.path().join("ec2_vpc").join("main.crn");
 
-        let error = load_markdown_example(examples_dir.path(), "ec2", "vpc")
-            .expect_err("a missing example must fail documentation generation");
+        let error = load_markdown_example(
+            examples_dir.path(),
+            "ec2",
+            "vpc",
+            "ec2.Vpc",
+            MarkdownExampleKind::Resource,
+        )
+        .expect_err("a missing example must fail documentation generation");
 
         assert_eq!(
             error.to_string(),
-            format!("Example file not found: {}", expected.display())
+            format!(
+                "Example file not found: {}; expected resource aws.ec2.Vpc",
+                expected.display()
+            )
+        );
+    }
+
+    fn write_markdown_example_fixture(
+        examples_dir: &Path,
+        service: &str,
+        page_stem: &str,
+        source: &str,
+    ) -> PathBuf {
+        let directory = examples_dir.join(markdown_example_dir_name(service, page_stem));
+        std::fs::create_dir(&directory).expect("example directory");
+        let path = directory.join("main.crn");
+        std::fs::write(&path, source).expect("example source");
+        path
+    }
+
+    #[test]
+    fn empty_markdown_example_after_preprocessing_is_rejected() {
+        let examples_dir = tempfile::tempdir().expect("temporary examples directory");
+        let path = write_markdown_example_fixture(
+            examples_dir.path(),
+            "ec2",
+            "vpc",
+            concat!(
+                "# VPC example\n",
+                "provider aws {\n",
+                "  region = aws.Region.ap_northeast_1\n",
+                "}\n",
+            ),
+        );
+
+        let error = load_markdown_example(
+            examples_dir.path(),
+            "ec2",
+            "vpc",
+            "ec2.Vpc",
+            MarkdownExampleKind::Resource,
+        )
+        .expect_err("an empty preprocessed example must fail documentation generation");
+
+        assert_eq!(
+            error.to_string(),
+            format!(
+                "Example {} is empty after preprocessing; expected resource aws.ec2.Vpc",
+                path.display()
+            )
+        );
+    }
+
+    #[test]
+    fn markdown_example_without_documented_resource_is_rejected() {
+        let examples_dir = tempfile::tempdir().expect("temporary examples directory");
+        let path = write_markdown_example_fixture(
+            examples_dir.path(),
+            "ec2",
+            "vpc",
+            concat!(
+                "aws.ec2.VpcPeeringConnection {}\n",
+                "  # aws.ec2.Vpc { is only a reader-facing note.\n",
+            ),
+        );
+
+        let error = load_markdown_example(
+            examples_dir.path(),
+            "ec2",
+            "vpc",
+            "ec2.Vpc",
+            MarkdownExampleKind::Resource,
+        )
+        .expect_err("an example for another resource must fail documentation generation");
+
+        assert_eq!(
+            error.to_string(),
+            format!(
+                "Example {} does not declare expected resource aws.ec2.Vpc",
+                path.display()
+            )
+        );
+    }
+
+    #[test]
+    fn markdown_example_with_documented_resource_is_accepted() {
+        let examples_dir = tempfile::tempdir().expect("temporary examples directory");
+        write_markdown_example_fixture(
+            examples_dir.path(),
+            "ec2",
+            "vpc",
+            "let vpc = aws.ec2.Vpc {\n  cidr_block = '10.0.0.0/16'\n}\n",
+        );
+
+        let example = load_markdown_example(
+            examples_dir.path(),
+            "ec2",
+            "vpc",
+            "ec2.Vpc",
+            MarkdownExampleKind::Resource,
+        )
+        .expect("the documented resource is declared");
+
+        assert!(example.contains("aws.ec2.Vpc {"), "{example}");
+    }
+
+    #[test]
+    fn markdown_example_reading_documented_data_source_is_accepted() {
+        let examples_dir = tempfile::tempdir().expect("temporary examples directory");
+        write_markdown_example_fixture(
+            examples_dir.path(),
+            "sts",
+            "caller_identity_data_source",
+            "let caller = read aws.sts.CallerIdentity {}\n",
+        );
+
+        let example = load_markdown_example(
+            examples_dir.path(),
+            "sts",
+            "caller_identity_data_source",
+            "sts.CallerIdentity",
+            MarkdownExampleKind::DataSource,
+        )
+        .expect("the documented data source is read");
+
+        assert!(
+            example.contains("read aws.sts.CallerIdentity {"),
+            "{example}"
         );
     }
 

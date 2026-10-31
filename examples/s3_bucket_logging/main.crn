@@ -41,7 +41,7 @@ let log_bucket_policy = aws.s3.BucketPolicy {
       resource = ["${log_bucket.arn}/access-logs/*"]
 
       condition = {
-        arn_like = {
+        arn_like      = {
           'aws:SourceArn' = source_bucket.arn
         }
         string_equals = {

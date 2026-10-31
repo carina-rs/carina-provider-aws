@@ -23,11 +23,11 @@ let flow_log_bucket = aws.s3.Bucket {
 }
 
 aws.ec2.FlowLog {
-  resource_ids                = [vpc.vpc_id]
-  resource_type               = aws.ec2.FlowLog.ResourceType.vpc
-  traffic_type                = aws.ec2.FlowLog.TrafficType.all
-  log_destination_type        = aws.ec2.FlowLog.LogDestinationType.s3
-  log_destination             = flow_log_bucket.arn
+  resource_ids         = [vpc.vpc_id]
+  resource_type        = aws.ec2.FlowLog.ResourceType.vpc
+  traffic_type         = aws.ec2.FlowLog.TrafficType.all
+  log_destination_type = aws.ec2.FlowLog.LogDestinationType.s3
+  log_destination      = flow_log_bucket.arn
 
   tags = {
     Environment = 'example'
