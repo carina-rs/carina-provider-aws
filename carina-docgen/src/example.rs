@@ -4,7 +4,8 @@ use std::ops::Range;
 use std::path::Path;
 
 use anyhow::{Context, Result};
-use carina_core::parser::{ProviderContext, parse_file};
+use carina_core::parser::{ParsedFile, ProviderConfig, ProviderContext, parse_file};
+use carina_core::resource::{DataSource, Resource, ResourceId, ResourceIdentityState};
 
 /// The kind of declaration a documentation example must contain.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -77,9 +78,8 @@ impl ExpectedDeclaration {
 
 /// Renderable example text that has been parsed and checked for one declaration.
 ///
-/// The fields are private so callers cannot bypass [`check`]. Before embedding an
-/// example, renderers should call [`DocExample::ensure_matches`] for the page
-/// they are generating.
+/// The fields are private so callers cannot bypass [`check`] or obtain the text
+/// without checking its declaration identity.
 #[derive(Debug)]
 pub struct DocExample {
     rendered: String,
@@ -87,13 +87,13 @@ pub struct DocExample {
 }
 
 impl DocExample {
-    /// Ensure this example was checked for the declaration rendered by a page.
-    pub fn ensure_matches(
+    /// Return the checked text only when it belongs to the requested page.
+    pub fn text_for(
         &self,
         provider_prefix: &str,
         dsl_name: &str,
         kind: ExampleKind,
-    ) -> Result<()> {
+    ) -> Result<&str> {
         let requested = ExpectedDeclaration::new(provider_prefix, dsl_name, kind);
         if self.checked_for != requested {
             anyhow::bail!(
@@ -102,12 +102,7 @@ impl DocExample {
                 requested.description()
             );
         }
-        Ok(())
-    }
-
-    /// Return the exact source text that was parsed and declaration-checked.
-    pub fn as_str(&self) -> &str {
-        &self.rendered
+        Ok(&self.rendered)
     }
 }
 
@@ -147,7 +142,7 @@ pub fn check(
     kind: ExampleKind,
 ) -> Result<DocExample> {
     let expected = ExpectedDeclaration::new(provider_prefix, dsl_name, kind);
-    parse_file(source, path, &ProviderContext::default()).with_context(|| {
+    let authored = parse_file(source, path, &ProviderContext::default()).with_context(|| {
         format!(
             "Example {} must {}",
             path.display(),
@@ -162,6 +157,16 @@ pub fn check(
             expected.description()
         )
     })?;
+
+    check_rendered(&authored, rendered, path, expected)
+}
+
+fn check_rendered(
+    authored: &ParsedFile,
+    rendered: String,
+    path: &Path,
+    expected: ExpectedDeclaration,
+) -> Result<DocExample> {
     if rendered.trim().is_empty() {
         anyhow::bail!(
             "Example {} is empty after stripping; expected {}",
@@ -185,6 +190,7 @@ pub fn check(
             expected.description()
         );
     }
+    ensure_semantically_equal(authored, &parsed, path)?;
 
     Ok(DocExample {
         rendered,
@@ -192,34 +198,324 @@ pub fn check(
     })
 }
 
-fn preprocess(source: &str) -> Result<String> {
-    let heredocs = carina_core::heredoc::preprocess_heredocs(source)
-        .context("Failed to preprocess heredocs")?
-        .heredocs;
-    let mut heredoc_ranges = Vec::with_capacity(heredocs.len());
-    let mut search_from = 0;
-    for heredoc in heredocs {
-        let relative_start = source[search_from..].find(&heredoc).ok_or_else(|| {
-            anyhow::anyhow!("carina-core returned a heredoc absent from its source")
-        })?;
-        let start = search_from + relative_start;
-        let end = start + heredoc.len();
-        heredoc_ranges.push(start..end);
-        search_from = end;
-    }
+fn ensure_semantically_equal(
+    authored: &ParsedFile,
+    rendered: &ParsedFile,
+    path: &Path,
+) -> Result<()> {
+    let ParsedFile {
+        // Unnamed provider blocks are the only intentional parsed difference: rendering removes them.
+        providers: authored_providers,
+        resources: authored_resources,
+        data_sources: authored_data_sources,
+        compositions: authored_compositions,
+        variables: authored_variables,
+        uses: authored_uses,
+        module_calls: authored_module_calls,
+        arguments: authored_arguments,
+        attribute_params: authored_attribute_params,
+        export_params: authored_export_params,
+        backend: authored_backend,
+        state_blocks: authored_state_blocks,
+        user_functions: authored_user_functions,
+        upstream_states: authored_upstream_states,
+        wait_bindings: authored_wait_bindings,
+        requires: authored_requires,
+        structural_bindings: authored_structural_bindings,
+        // Evaluator-only parser bookkeeping is not authored DSL semantics.
+        parser_binding_metadata: _,
+        warnings: authored_warnings,
+        deferred_for_expressions: authored_deferred_for_expressions,
+        // Module-expansion lineage is not produced when parsing these standalone files.
+        expansion_trace: _,
+    } = authored;
+    let ParsedFile {
+        providers: rendered_providers,
+        resources: rendered_resources,
+        data_sources: rendered_data_sources,
+        compositions: rendered_compositions,
+        variables: rendered_variables,
+        uses: rendered_uses,
+        module_calls: rendered_module_calls,
+        arguments: rendered_arguments,
+        attribute_params: rendered_attribute_params,
+        export_params: rendered_export_params,
+        backend: rendered_backend,
+        state_blocks: rendered_state_blocks,
+        user_functions: rendered_user_functions,
+        upstream_states: rendered_upstream_states,
+        wait_bindings: rendered_wait_bindings,
+        requires: rendered_requires,
+        structural_bindings: rendered_structural_bindings,
+        // Evaluator-only parser bookkeeping is not authored DSL semantics.
+        parser_binding_metadata: _,
+        warnings: rendered_warnings,
+        deferred_for_expressions: rendered_deferred_for_expressions,
+        // Module-expansion lineage is not produced when parsing these standalone files.
+        expansion_trace: _,
+    } = rendered;
 
-    // Preserve byte positions and newlines while hiding heredoc syntax and
-    // bodies from the structural scan below.
-    let mut masked = source.as_bytes().to_vec();
-    for range in heredoc_ranges {
-        for byte in &mut masked[range] {
-            if *byte != b'\n' {
-                *byte = b' ';
-            }
+    let mismatch = if !same_named_providers(authored_providers, rendered_providers) {
+        Some("named provider blocks")
+    } else if !same_resources(authored_resources, rendered_resources) {
+        Some("resources")
+    } else if !same_data_sources(authored_data_sources, rendered_data_sources) {
+        Some("data sources")
+    } else if authored_compositions != rendered_compositions {
+        Some("compositions")
+    } else if authored_variables != rendered_variables {
+        Some("let bindings")
+    } else if !same_uses(authored_uses, rendered_uses) {
+        Some("imports")
+    } else if !same_module_calls(authored_module_calls, rendered_module_calls) {
+        Some("module calls")
+    } else if !same_arguments(authored_arguments, rendered_arguments) {
+        Some("arguments")
+    } else if !same_attribute_params(authored_attribute_params, rendered_attribute_params) {
+        Some("attribute parameters")
+    } else if authored_export_params != rendered_export_params {
+        Some("exports")
+    } else if !same_backend(authored_backend.as_ref(), rendered_backend.as_ref()) {
+        Some("backend")
+    } else if authored_state_blocks != rendered_state_blocks {
+        Some("state blocks")
+    } else if !same_user_functions(authored_user_functions, rendered_user_functions) {
+        Some("functions")
+    } else if !same_upstream_states(authored_upstream_states, rendered_upstream_states) {
+        Some("upstream states")
+    } else if !same_wait_bindings(authored_wait_bindings, rendered_wait_bindings) {
+        Some("wait bindings")
+    } else if !same_requires(authored_requires, rendered_requires) {
+        Some("requirements")
+    } else if authored_structural_bindings != rendered_structural_bindings {
+        Some("structural bindings")
+    } else if !same_warnings(authored_warnings, rendered_warnings) {
+        Some("warnings")
+    } else if !same_deferred_for_expressions(
+        authored_deferred_for_expressions,
+        rendered_deferred_for_expressions,
+    ) {
+        Some("deferred for expressions")
+    } else {
+        None
+    };
+
+    if let Some(section) = mismatch {
+        anyhow::bail!(
+            "Rendered example from {} changed parsed {section}",
+            path.display()
+        );
+    }
+    Ok(())
+}
+
+fn same_named_providers(left: &[ProviderConfig], right: &[ProviderConfig]) -> bool {
+    left.iter()
+        .filter(|provider| provider.binding.is_some())
+        .eq(right.iter().filter(|provider| provider.binding.is_some()))
+}
+
+fn same_resources(left: &[Resource], right: &[Resource]) -> bool {
+    left.len() == right.len()
+        && left.iter().zip(right).all(|(left, right)| {
+            let mut right = right.clone();
+            normalize_pending_identity(&left.id, &mut right.id);
+            left == &right
+        })
+}
+
+fn same_data_sources(left: &[DataSource], right: &[DataSource]) -> bool {
+    left.len() == right.len()
+        && left.iter().zip(right).all(|(left, right)| {
+            let mut right = right.clone();
+            normalize_pending_identity(&left.id, &mut right.id);
+            left == &right
+        })
+}
+
+fn normalize_pending_identity(left: &ResourceId, right: &mut ResourceId) {
+    if matches!(left.identity_state(), ResourceIdentityState::Pending(_))
+        && matches!(right.identity_state(), ResourceIdentityState::Pending(_))
+    {
+        let provider = std::mem::take(&mut right.provider);
+        let resource_type = std::mem::take(&mut right.resource_type);
+        let provider_instance = right.provider_instance.take();
+        *right = left.clone();
+        right.provider = provider;
+        right.resource_type = resource_type;
+        right.provider_instance = provider_instance;
+    }
+}
+
+fn same_uses(
+    left: &[carina_core::parser::UseStatement],
+    right: &[carina_core::parser::UseStatement],
+) -> bool {
+    left.len() == right.len()
+        && left
+            .iter()
+            .zip(right)
+            .all(|(left, right)| left.path == right.path && left.alias == right.alias)
+}
+
+fn same_module_calls(
+    left: &[carina_core::parser::ModuleCall],
+    right: &[carina_core::parser::ModuleCall],
+) -> bool {
+    left.len() == right.len()
+        && left.iter().zip(right).all(|(left, right)| {
+            left.module_name == right.module_name
+                && left.binding_name == right.binding_name
+                && left.arguments().count() == right.arguments().count()
+                && left
+                    .arguments()
+                    .all(|(name, argument)| right.argument(name) == Some(argument))
+        })
+}
+
+fn same_arguments(
+    left: &[carina_core::parser::ArgumentParameter],
+    right: &[carina_core::parser::ArgumentParameter],
+) -> bool {
+    left.len() == right.len()
+        && left.iter().zip(right).all(|(left, right)| {
+            left.name == right.name
+                && left.type_expr == right.type_expr
+                && left.default == right.default
+                && left.description == right.description
+                && left.validations.len() == right.validations.len()
+                && left
+                    .validations
+                    .iter()
+                    .zip(&right.validations)
+                    .all(|(left, right)| {
+                        left.condition == right.condition
+                            && left.error_message == right.error_message
+                    })
+        })
+}
+
+fn same_attribute_params(
+    left: &[carina_core::parser::AttributeParameter],
+    right: &[carina_core::parser::AttributeParameter],
+) -> bool {
+    left.len() == right.len()
+        && left.iter().zip(right).all(|(left, right)| {
+            left.name == right.name
+                && left.type_expr == right.type_expr
+                && left.value == right.value
+        })
+}
+
+fn same_backend(
+    left: Option<&carina_core::parser::BackendConfig>,
+    right: Option<&carina_core::parser::BackendConfig>,
+) -> bool {
+    match (left, right) {
+        (Some(left), Some(right)) => {
+            left.backend_type == right.backend_type && left.attributes == right.attributes
         }
+        (None, None) => true,
+        _ => false,
     }
+}
 
-    let removals = removals(&masked)?;
+fn same_user_functions(
+    left: &std::collections::HashMap<String, carina_core::parser::UserFunction>,
+    right: &std::collections::HashMap<String, carina_core::parser::UserFunction>,
+) -> bool {
+    left.len() == right.len()
+        && left.iter().all(|(name, left)| {
+            right.get(name).is_some_and(|right| {
+                left.name == right.name
+                    && left.return_type == right.return_type
+                    && left.params.len() == right.params.len()
+                    && left.params.iter().zip(&right.params).all(|(left, right)| {
+                        left.name == right.name
+                            && left.param_type == right.param_type
+                            && left.default == right.default
+                    })
+                    && left.local_lets.len() == right.local_lets.len()
+                    && left.local_lets.iter().zip(&right.local_lets).all(
+                        |((left_name, left_value, _), (right_name, right_value, _))| {
+                            left_name == right_name && left_value == right_value
+                        },
+                    )
+                    && left.body.value == right.body.value
+            })
+        })
+}
+
+fn same_upstream_states(
+    left: &[carina_core::parser::UpstreamState],
+    right: &[carina_core::parser::UpstreamState],
+) -> bool {
+    left.len() == right.len()
+        && left
+            .iter()
+            .zip(right)
+            .all(|(left, right)| left.binding == right.binding && left.source == right.source)
+}
+
+fn same_wait_bindings(
+    left: &[carina_core::parser::WaitBinding],
+    right: &[carina_core::parser::WaitBinding],
+) -> bool {
+    left.len() == right.len()
+        && left.iter().zip(right).all(|(left, right)| {
+            left.binding == right.binding
+                && left.target == right.target
+                && left.until_raw == right.until_raw
+                && left.until_predicate.lhs_segments == right.until_predicate.lhs_segments
+                && left.until_predicate.rhs == right.until_predicate.rhs
+                && left.timeout_secs == right.timeout_secs
+                && left.depends_on == right.depends_on
+        })
+}
+
+fn same_requires(
+    left: &[carina_core::parser::RequireBlock],
+    right: &[carina_core::parser::RequireBlock],
+) -> bool {
+    left.len() == right.len()
+        && left.iter().zip(right).all(|(left, right)| {
+            left.condition == right.condition && left.error_message == right.error_message
+        })
+}
+
+fn same_warnings(
+    left: &[carina_core::parser::ParseWarning],
+    right: &[carina_core::parser::ParseWarning],
+) -> bool {
+    left.len() == right.len()
+        && left
+            .iter()
+            .zip(right)
+            .all(|(left, right)| left.kind == right.kind && left.message == right.message)
+}
+
+fn same_deferred_for_expressions(
+    left: &[carina_core::parser::DeferredForExpression],
+    right: &[carina_core::parser::DeferredForExpression],
+) -> bool {
+    left.len() == right.len()
+        && left.iter().zip(right).all(|(left, right)| {
+            let resources_match = same_resources(
+                std::slice::from_ref(&left.template_resource),
+                std::slice::from_ref(&right.template_resource),
+            );
+            left.header == right.header
+                && left.resource_type == right.resource_type
+                && left.attributes == right.attributes
+                && left.binding_name == right.binding_name
+                && left.iterable == right.iterable
+                && left.binding == right.binding
+                && resources_match
+        })
+}
+
+fn preprocess(source: &str) -> Result<String> {
+    let removals = removals(source.as_bytes())?;
     let mut filtered = String::with_capacity(source.len());
     let mut kept_from = 0;
     for removal in removals {
@@ -231,7 +527,7 @@ fn preprocess(source: &str) -> Result<String> {
     let lines: Vec<&str> = filtered.split_inclusive('\n').collect();
     let first_content = lines
         .iter()
-        .position(|line| !line.strip_suffix('\n').unwrap_or(line).is_empty())
+        .position(|line| !line.trim_end_matches(['\r', '\n']).is_empty())
         .unwrap_or(lines.len());
     Ok(lines[first_content..].concat())
 }
@@ -240,29 +536,33 @@ fn removals(masked: &[u8]) -> Result<Vec<Range<usize>>> {
     let mut removals = Vec::new();
     let mut cursor = 0;
     let mut line_start = 0;
-    let mut brace_depth = 0usize;
+    let mut nesting_depth = 0usize;
+    let mut line_has_code = false;
 
     while cursor < masked.len() {
         match masked[cursor] {
             b'\n' => {
                 cursor += 1;
                 line_start = cursor;
+                line_has_code = false;
             }
             b' ' | b'\t' | b'\r' => cursor += 1,
-            b'#' if brace_depth == 0 && line_prefix_is_whitespace(masked, line_start, cursor) => {
+            b'#' if nesting_depth == 0 && !line_has_code => {
                 let end = line_removal_end(masked, cursor);
                 removals.push(line_start..end);
                 cursor = end;
                 line_start = cursor;
+                line_has_code = false;
             }
             b'/' if masked.get(cursor + 1) == Some(&b'/')
-                && brace_depth == 0
-                && line_prefix_is_whitespace(masked, line_start, cursor) =>
+                && nesting_depth == 0
+                && !line_has_code =>
             {
                 let end = line_removal_end(masked, cursor);
                 removals.push(line_start..end);
                 cursor = end;
                 line_start = cursor;
+                line_has_code = false;
             }
             b'#' => cursor = skip_line_comment(masked, cursor),
             b'/' if masked.get(cursor + 1) == Some(&b'/') => {
@@ -270,25 +570,44 @@ fn removals(masked: &[u8]) -> Result<Vec<Range<usize>>> {
             }
             b'/' if masked.get(cursor + 1) == Some(&b'*') => {
                 let end = skip_block_comment(masked, cursor);
-                update_line_start(masked, cursor, end, &mut line_start);
+                if update_line_start(masked, cursor, end, &mut line_start) {
+                    line_has_code = false;
+                }
                 cursor = end;
             }
             b'\'' => {
                 let end = skip_single_quoted_string(masked, cursor);
                 update_line_start(masked, cursor, end, &mut line_start);
+                line_has_code = true;
                 cursor = end;
             }
             b'"' => {
                 let end = skip_double_quoted_string(masked, cursor);
+                if contains_heredoc_syntax(masked, cursor, end) {
+                    anyhow::bail!("heredoc text inside a multiline string is ambiguous");
+                }
                 update_line_start(masked, cursor, end, &mut line_start);
+                line_has_code = true;
                 cursor = end;
             }
-            b'{' => {
-                brace_depth += 1;
+            b'<' if masked.get(cursor + 1) == Some(&b'<') => {
+                let Some(end) = heredoc_end(masked, cursor) else {
+                    line_has_code = true;
+                    cursor += 1;
+                    continue;
+                };
+                update_line_start(masked, cursor, end, &mut line_start);
+                line_has_code = true;
+                cursor = end;
+            }
+            b'{' | b'[' | b'(' => {
+                nesting_depth += 1;
+                line_has_code = true;
                 cursor += 1;
             }
-            b'}' => {
-                brace_depth = brace_depth.saturating_sub(1);
+            b'}' | b']' | b')' => {
+                nesting_depth = nesting_depth.saturating_sub(1);
+                line_has_code = true;
                 cursor += 1;
             }
             byte if byte.is_ascii_alphabetic() || byte == b'_' => {
@@ -301,12 +620,13 @@ fn removals(masked: &[u8]) -> Result<Vec<Range<usize>>> {
                     cursor += 1;
                 }
                 let is_provider = &masked[token_start..cursor] == b"provider"
-                    && brace_depth == 0
-                    && line_prefix_is_whitespace(masked, line_start, token_start)
+                    && nesting_depth == 0
+                    && !line_has_code
                     && masked
                         .get(cursor)
                         .is_some_and(|byte| byte.is_ascii_whitespace());
                 if !is_provider {
+                    line_has_code = true;
                     continue;
                 }
 
@@ -317,18 +637,93 @@ fn removals(masked: &[u8]) -> Result<Vec<Range<usize>>> {
                 removals.push(line_start..removal_end);
                 update_line_start(masked, cursor, removal_end, &mut line_start);
                 cursor = removal_end;
+                line_has_code = false;
             }
-            _ => cursor += 1,
+            _ => {
+                line_has_code = true;
+                cursor += 1;
+            }
         }
     }
 
     Ok(removals)
 }
 
-fn line_prefix_is_whitespace(source: &[u8], start: usize, end: usize) -> bool {
-    source[start..end]
+fn contains_heredoc_syntax(source: &[u8], start: usize, end: usize) -> bool {
+    let mut cursor = start;
+    while cursor + 1 < end {
+        if source[cursor..].starts_with(b"<<")
+            && heredoc_end(source, cursor).is_some_and(|heredoc_end| heredoc_end <= end)
+        {
+            return true;
+        }
+        cursor += 1;
+    }
+    false
+}
+
+fn heredoc_end(source: &[u8], start: usize) -> Option<usize> {
+    let opening_line_end = source[start..]
         .iter()
-        .all(|byte| matches!(byte, b' ' | b'\t' | b'\r'))
+        .position(|byte| *byte == b'\n')
+        .map_or(source.len(), |relative| start + relative);
+    let mut cursor = start + 2;
+    if source.get(cursor) == Some(&b'-') {
+        cursor += 1;
+    }
+    let quoted = source.get(cursor) == Some(&b'\'');
+    if quoted {
+        cursor += 1;
+    }
+    let marker_start = cursor;
+    while source
+        .get(cursor)
+        .is_some_and(|byte| byte.is_ascii_alphanumeric() || *byte == b'_')
+    {
+        cursor += 1;
+    }
+    if cursor == marker_start {
+        return None;
+    }
+    let marker = &source[marker_start..cursor];
+    if quoted {
+        if source.get(cursor) != Some(&b'\'') {
+            return None;
+        }
+        cursor += 1;
+    }
+    if !source[cursor..opening_line_end]
+        .iter()
+        .all(u8::is_ascii_whitespace)
+    {
+        return None;
+    }
+
+    let mut line_start = opening_line_end.checked_add(1)?;
+    while line_start <= source.len() {
+        let line_end = source[line_start..]
+            .iter()
+            .position(|byte| *byte == b'\n')
+            .map_or(source.len(), |relative| line_start + relative);
+        if trim_ascii_whitespace(&source[line_start..line_end]) == marker {
+            return Some(line_end);
+        }
+        if line_end == source.len() {
+            return None;
+        }
+        line_start = line_end + 1;
+    }
+    None
+}
+
+fn trim_ascii_whitespace(mut source: &[u8]) -> &[u8] {
+    while source.first().is_some_and(u8::is_ascii_whitespace) {
+        source = &source[1..];
+    }
+    while source.last().is_some_and(u8::is_ascii_whitespace) {
+        source = &source[..source.len() - 1];
+    }
+    source
 }
 
 fn line_removal_end(source: &[u8], start: usize) -> usize {
@@ -343,7 +738,8 @@ fn provider_removal_end(source: &[u8], block_end: usize) -> usize {
         .iter()
         .position(|byte| *byte == b'\n')
         .map_or(source.len(), |relative| block_end + relative);
-    if line_prefix_is_whitespace(source, block_end, line_end) {
+    let trailing = trim_ascii_whitespace(&source[block_end..line_end]);
+    if trailing.is_empty() || trailing.starts_with(b"#") || trailing.starts_with(b"//") {
         (line_end + usize::from(line_end < source.len())).min(source.len())
     } else {
         block_end
@@ -361,6 +757,9 @@ fn find_provider_block_end(source: &[u8], mut cursor: usize) -> Option<usize> {
             }
             b'/' if source.get(cursor + 1) == Some(&b'*') => {
                 cursor = skip_block_comment(source, cursor);
+            }
+            b'<' if source.get(cursor + 1) == Some(&b'<') => {
+                cursor = heredoc_end(source, cursor)?;
             }
             b'\'' => cursor = skip_single_quoted_string(source, cursor),
             b'"' => cursor = skip_double_quoted_string(source, cursor),
@@ -466,9 +865,12 @@ fn skip_interpolation(source: &[u8], mut cursor: usize) -> usize {
     source.len()
 }
 
-fn update_line_start(source: &[u8], start: usize, end: usize, line_start: &mut usize) {
+fn update_line_start(source: &[u8], start: usize, end: usize, line_start: &mut usize) -> bool {
     if let Some(relative) = source[start..end].iter().rposition(|byte| *byte == b'\n') {
         *line_start = start + relative + 1;
+        true
+    } else {
+        false
     }
 }
 
@@ -489,6 +891,12 @@ mod tests {
         let examples_dir = tempfile::tempdir().expect("temporary examples directory");
         write_fixture(examples_dir.path(), "ec2_vpc", source);
         load(examples_dir.path(), "ec2_vpc", "aws", "ec2.Vpc", kind)
+    }
+
+    fn resource_text(example: &DocExample) -> &str {
+        example
+            .text_for("aws", "ec2.Vpc", ExampleKind::Resource)
+            .expect("fixture identity")
     }
 
     #[test]
@@ -593,7 +1001,7 @@ mod tests {
         )
         .expect("valid example");
 
-        assert_eq!(example.as_str(), "aws.ec2.Vpc {}\n");
+        assert_eq!(resource_text(&example), "aws.ec2.Vpc {}\n");
     }
 
     #[test]
@@ -609,7 +1017,7 @@ mod tests {
         )
         .expect("valid example");
 
-        assert_eq!(example.as_str(), "aws.ec2.Vpc {}\n");
+        assert_eq!(resource_text(&example), "aws.ec2.Vpc {}\n");
     }
 
     #[test]
@@ -628,7 +1036,7 @@ mod tests {
         .expect("valid heredoc example");
 
         assert_eq!(
-            example.as_str(),
+            resource_text(&example),
             concat!(
                 "aws.ec2.Vpc {\n",
                 "  description = <<EOT\n",
@@ -649,7 +1057,308 @@ mod tests {
         );
         let example = load_fixture(source, ExampleKind::Resource).expect("valid quoted string");
 
-        assert_eq!(example.as_str(), source);
+        assert_eq!(resource_text(&example), source);
+    }
+
+    #[test]
+    fn text_is_unavailable_for_the_wrong_identity() {
+        let example =
+            load_fixture("aws.ec2.Vpc {}\n", ExampleKind::Resource).expect("valid checked example");
+
+        let error = example
+            .text_for("aws", "ec2.Subnet", ExampleKind::Resource)
+            .expect_err("wrong identity must not expose text");
+
+        assert_eq!(
+            error.to_string(),
+            "Documentation example checked for resource aws.ec2.Vpc cannot render resource \
+             aws.ec2.Subnet"
+        );
+    }
+
+    #[test]
+    fn block_comment_tokens_do_not_affect_top_level_scanning() {
+        let source = concat!(
+            "/*\n",
+            "provider aws {\n",
+            "# not a page comment\n",
+            "}\n",
+            "*/\n",
+            "# page-only note\n",
+            "aws.ec2.Vpc {}\n",
+        );
+        let example = load_fixture(source, ExampleKind::Resource).expect("valid block comment");
+
+        assert_eq!(
+            resource_text(&example),
+            concat!(
+                "/*\n",
+                "provider aws {\n",
+                "# not a page comment\n",
+                "}\n",
+                "*/\n",
+                "aws.ec2.Vpc {}\n",
+            )
+        );
+    }
+
+    #[test]
+    fn interpolation_braces_and_quotes_do_not_change_comment_depth() {
+        let source = concat!(
+            "aws.ec2.Vpc {\n",
+            "  description = \"${ \"}\" }\"\n",
+            "  # reader-facing note\n",
+            "}\n",
+            "# page-only note\n",
+        );
+        let example = load_fixture(source, ExampleKind::Resource).expect("valid interpolation");
+
+        assert_eq!(
+            resource_text(&example),
+            concat!(
+                "aws.ec2.Vpc {\n",
+                "  description = \"${ \"}\" }\"\n",
+                "  # reader-facing note\n",
+                "}\n",
+            )
+        );
+    }
+
+    #[test]
+    fn escaped_single_quote_does_not_change_comment_depth() {
+        let source = concat!(
+            "aws.ec2.Vpc {\n",
+            "  description = 'it\\'s }'\n",
+            "  another = 'it\\'s quoted'\n",
+            "  # reader-facing note\n",
+            "}\n",
+        );
+        let example = load_fixture(source, ExampleKind::Resource).expect("valid quoted string");
+
+        assert_eq!(resource_text(&example), source);
+    }
+
+    #[test]
+    fn top_level_let_heredoc_is_preserved() {
+        let source = concat!(
+            "let x = <<EOT\n",
+            "# not a comment\n",
+            "EOT\n",
+            "aws.ec2.Vpc { description = x }\n",
+        );
+        let example = load_fixture(source, ExampleKind::Resource).expect("valid let heredoc");
+
+        assert_eq!(resource_text(&example), source);
+    }
+
+    #[test]
+    fn top_level_slash_comment_is_stripped() {
+        let example = load_fixture("// page-only note\naws.ec2.Vpc {}\n", ExampleKind::Resource)
+            .expect("valid slash comment");
+
+        assert_eq!(resource_text(&example), "aws.ec2.Vpc {}\n");
+    }
+
+    #[test]
+    fn provider_prefixed_identifier_is_not_a_provider_block() {
+        let source = concat!(
+            "let provider_x = \"x\"\n",
+            "let p = provider_x\n",
+            "aws.ec2.Vpc { description = p }\n",
+        );
+        let example = load_fixture(source, ExampleKind::Resource)
+            .expect("valid provider-prefixed identifier");
+
+        assert_eq!(resource_text(&example), source);
+    }
+
+    #[test]
+    fn let_bound_provider_is_not_a_top_level_provider_block() {
+        let source = "let p = provider aws {}\naws.ec2.Vpc {}\n";
+        let example =
+            load_fixture(source, ExampleKind::Resource).expect("valid named provider block");
+
+        assert_eq!(resource_text(&example), source);
+    }
+
+    #[test]
+    fn provider_keyword_as_a_resource_prefix_is_not_a_provider_block() {
+        let source = "provider.foo.Bar {}\naws.ec2.Vpc {}\n";
+        let example = load_fixture(source, ExampleKind::Resource)
+            .expect("valid resource whose provider is named provider");
+
+        assert_eq!(resource_text(&example), source);
+    }
+
+    #[test]
+    fn provider_block_in_the_middle_leaves_no_blank_line() {
+        let example = load_fixture(
+            concat!(
+                "aws.ec2.Subnet {}\n",
+                "provider aws { region = aws.Region.ap_northeast_1 }\n",
+                "aws.ec2.Vpc {}\n",
+            ),
+            ExampleKind::Resource,
+        )
+        .expect("valid mid-file provider");
+
+        assert_eq!(
+            resource_text(&example),
+            "aws.ec2.Subnet {}\naws.ec2.Vpc {}\n"
+        );
+    }
+
+    #[test]
+    fn provider_trailing_comment_is_removed_with_the_block() {
+        let example = load_fixture(
+            concat!("provider aws {} # provider-only note\n", "aws.ec2.Vpc {}\n",),
+            ExampleKind::Resource,
+        )
+        .expect("valid provider comment");
+
+        assert_eq!(resource_text(&example), "aws.ec2.Vpc {}\n");
+    }
+
+    #[test]
+    fn block_comment_before_provider_is_removed_with_the_block() {
+        let example = load_fixture(
+            "/* provider note */ provider aws {}\naws.ec2.Vpc {}\n",
+            ExampleKind::Resource,
+        )
+        .expect("valid provider prefix comment");
+
+        assert_eq!(resource_text(&example), "aws.ec2.Vpc {}\n");
+    }
+
+    #[test]
+    fn crlf_blank_lines_after_provider_are_trimmed() {
+        let example = load_fixture(
+            concat!(
+                "provider aws {}\r\n",
+                "\r\n",
+                "# page-only note\r\n",
+                "aws.ec2.Vpc {}\r\n",
+            ),
+            ExampleKind::Resource,
+        )
+        .expect("valid CRLF example");
+
+        assert_eq!(resource_text(&example), "aws.ec2.Vpc {}\r\n");
+    }
+
+    #[test]
+    fn comments_inside_square_and_round_brackets_are_preserved() {
+        let source = concat!(
+            "let xs = [\n",
+            "  # list note\n",
+            "]\n",
+            "let x = (\n",
+            "  // expression note\n",
+            ")\n",
+            "# page-only note\n",
+            "aws.ec2.Vpc {}\n",
+        );
+
+        assert_eq!(
+            preprocess(source).expect("preprocess succeeds"),
+            concat!(
+                "let xs = [\n",
+                "  # list note\n",
+                "]\n",
+                "let x = (\n",
+                "  // expression note\n",
+                ")\n",
+                "aws.ec2.Vpc {}\n",
+            )
+        );
+    }
+
+    #[test]
+    fn identical_heredoc_text_in_a_block_comment_does_not_mask_the_real_body() {
+        let source = concat!(
+            "/* copy:\n",
+            "  d = <<EOT\n",
+            "}\n",
+            "EOT\n",
+            "*/\n",
+            "aws.ec2.Vpc {\n",
+            "  d = <<EOT\n",
+            "}\n",
+            "EOT\n",
+            "  # reader-facing note\n",
+            "}\n",
+            "# page-only note\n",
+        );
+        let example = load_fixture(source, ExampleKind::Resource)
+            .expect("comment copy must not relocate the heredoc");
+
+        assert_eq!(
+            resource_text(&example),
+            source.strip_suffix("# page-only note\n").unwrap()
+        );
+    }
+
+    #[test]
+    fn heredoc_text_inside_multiline_string_fails_closed() {
+        let examples_dir = tempfile::tempdir().expect("temporary examples directory");
+        let source = concat!(
+            "aws.ec2.Vpc {\n",
+            "  a = \"<<EOT\n",
+            "}\n",
+            "EOT\n",
+            "\"\n",
+            "  b = <<EOT\n",
+            "}\n",
+            "EOT\n",
+            "  # inner note kept?\n",
+            "  provider = \"x\"\n",
+            "  cidr_block = \"10.0.0.0/16\"\n",
+            "  tags = { Name = \"y\" }\n",
+            "}\n",
+            "aws.ec2.Subnet {\n",
+            "}\n",
+        );
+        let path = write_fixture(examples_dir.path(), "ec2_vpc", source);
+
+        let error = load(
+            examples_dir.path(),
+            "ec2_vpc",
+            "aws",
+            "ec2.Vpc",
+            ExampleKind::Resource,
+        )
+        .expect_err("ambiguous heredoc text must fail closed");
+
+        assert!(error.to_string().contains(&path.display().to_string()));
+        assert!(
+            error.chain().any(|cause| cause
+                .to_string()
+                .contains("heredoc text inside a multiline string")),
+            "{error:#}"
+        );
+    }
+
+    #[test]
+    fn semantic_mismatch_reports_the_example_path() {
+        let path = Path::new("semantic-mismatch.crn");
+        let authored = parse_file(
+            "let x = \"original\"\naws.ec2.Vpc { description = x }\n",
+            path,
+            &ProviderContext::default(),
+        )
+        .expect("authored source parses");
+        let error = check_rendered(
+            &authored,
+            "let x = \"changed\"\naws.ec2.Vpc { description = x }\n".to_string(),
+            path,
+            ExpectedDeclaration::new("aws", "ec2.Vpc", ExampleKind::Resource),
+        )
+        .expect_err("semantic mismatch must fail");
+
+        assert_eq!(
+            error.to_string(),
+            "Rendered example from semantic-mismatch.crn changed parsed resources"
+        );
     }
 
     #[test]

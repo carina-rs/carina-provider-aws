@@ -5131,7 +5131,7 @@ fn generate_markdown_resource(
     model: &SmithyModel,
     example: &DocExample,
 ) -> Result<String> {
-    example.ensure_matches("aws", res.name, ExampleKind::Resource)?;
+    let example = example.text_for("aws", res.name, ExampleKind::Resource)?;
     let ns = res.service_namespace;
     let namespace = format!("aws.{}", res.name);
 
@@ -5569,11 +5569,7 @@ fn generate_markdown_resource(
         .with_context(|| format!("generated invalid Markdown for aws.{}", res.name))
 }
 
-fn write_markdown_example(
-    page: &mut PageBuilder<MarkdownTarget>,
-    example: &DocExample,
-) -> Result<()> {
-    let example = example.as_str();
+fn write_markdown_example(page: &mut PageBuilder<MarkdownTarget>, example: &str) -> Result<()> {
     page.heading(Heading::plain(2, "Example"))?;
     page.push_str("```crn\n");
     page.push_str(example);
@@ -5843,7 +5839,7 @@ fn generate_markdown_data_source(
     _model: &SmithyModel,
     example: &DocExample,
 ) -> Result<String> {
-    example.ensure_matches("aws", ds.name, ExampleKind::DataSource)?;
+    let example = example.text_for("aws", ds.name, ExampleKind::DataSource)?;
     struct MarkdownDataSourceOutput<'a> {
         name: &'a str,
         type_display: String,
