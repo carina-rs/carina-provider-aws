@@ -8,6 +8,7 @@ mod catalog;
 mod common;
 #[cfg(any(target_arch = "wasm32", test))]
 mod host_credentials;
+mod read_back;
 mod services;
 
 /// Implementation details used by exported catalog macros.
@@ -20,6 +21,7 @@ pub use catalog::*;
 pub use common::*;
 #[cfg(any(target_arch = "wasm32", test))]
 pub use host_credentials::HostCredentialsProvider;
+pub use read_back::ReadBackPredicate;
 pub use services::*;
 
 #[cfg(test)]

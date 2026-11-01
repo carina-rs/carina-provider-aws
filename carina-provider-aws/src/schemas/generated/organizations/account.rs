@@ -25,6 +25,7 @@ pub fn organizations_account_config() -> AwsSchemaConfig {
         aws_type_name: "AWS::Organizations::Account",
         resource_type_name: "organizations.Account",
         has_tags: true,
+        await_on_read_back: vec![],
         schema: ResourceSchema::new("organizations.Account")
         .with_description("Contains information about an Amazon Web Services account that is a member of an organization.")
         .default_prevent_destroy()

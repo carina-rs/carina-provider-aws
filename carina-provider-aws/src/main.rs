@@ -5,8 +5,8 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use carina_plugin_sdk::{
     CarinaProvider, CreateAttempt as SdkCreateAttempt, CreateStep as SdkCreateStep,
     CreateVerdict as SdkCreateVerdict, DeleteOutcome as SdkDeleteOutcome, DesiredAttribute,
-    DesiredResource, FoundRead, IssuedCreate as SdkIssuedCreate, Never, NormalizedResource,
-    Pending, PendingDelete, Poll as SdkPoll, PollAttempt as SdkPollAttempt, PollRequest,
+    DesiredResource, FoundRead, IssuedCreate as SdkIssuedCreate, NormalizedResource, Pending,
+    PendingDelete, Poll as SdkPoll, PollAttempt as SdkPollAttempt, PollRequest,
     PollVerdict as SdkPollVerdict, Resume as SdkResume, ResumeAttempt as SdkResumeAttempt,
     ResumeStep as SdkResumeStep, ResumeVerdict as SdkResumeVerdict,
     ResumedCreate as SdkResumedCreate, UpdateOutcome as SdkUpdateOutcome,
@@ -38,9 +38,9 @@ use carina_core::schema::{
 
 #[cfg(any(target_arch = "wasm32", test))]
 use carina_provider_aws::{
-    AwsCreateAttempt, AwsCreatePoll, AwsCreateResume, AwsCreateToken, AwsDeleteToken,
-    AwsIssuedCreate, AwsNormalizer, AwsPollAttempt, AwsProvider, AwsResumeAttempt,
-    AwsResumedCreate,
+    AwsCreateAttempt, AwsCreateOperation, AwsCreatePoll, AwsCreateResume, AwsCreateToken,
+    AwsDeleteToken, AwsIssuedCreate, AwsNormalizer, AwsPollAttempt, AwsProvider, AwsResumeAttempt,
+    AwsResumedCreate, AwsUpdateToken, NonEmptyAttributeNames,
 };
 
 #[cfg(any(target_arch = "wasm32", test))]
@@ -146,6 +146,30 @@ fn update_outcome_to_proto(
 }
 
 #[cfg(any(target_arch = "wasm32", test))]
+fn update_step_to_proto(
+    result: carina_core::provider::ProviderResult<
+        OperationStep<carina_core::provider::UpdateOutcome, CoreProviderError, AwsUpdateToken>,
+    >,
+    state_after_patch: proto::PersistedState,
+    id: &carina_core::resource::ResourceId,
+) -> Result<SdkUpdateOutcome<AwsUpdateToken>, CoreProviderError> {
+    match result {
+        Ok(OperationStep::Done(outcome)) => {
+            update_outcome_to_proto(&outcome, state_after_patch, id).map(SdkUpdateOutcome::Done)
+        }
+        Ok(OperationStep::Pending {
+            pending,
+            poll_after_secs,
+            ..
+        }) => Ok(SdkUpdateOutcome::Pending(Pending::new(
+            pending,
+            poll_after_secs,
+        ))),
+        Ok(OperationStep::Verdict(error)) | Err(error) => Err(error),
+    }
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
 struct GuestCreateAttempt(SdkCreateAttempt);
 #[cfg(any(target_arch = "wasm32", test))]
 struct GuestPollAttempt(SdkPollAttempt);
@@ -187,7 +211,7 @@ impl AwsCreateAttempt for GuestCreateAttempt {
 
     fn pending(
         self,
-        token: AwsCreateToken,
+        token: AwsCreateOperation,
         sent: CoreSent,
         poll_after_secs: u32,
     ) -> Result<Self::Step, Self::Verdict> {
@@ -205,7 +229,7 @@ impl AwsPollAttempt for GuestPollAttempt {
         self.0.untracked(error.to_wire())
     }
 
-    fn preserve(self, token: AwsCreateToken, error: CoreProviderError) -> Self::Verdict {
+    fn preserve(self, token: AwsCreateOperation, error: CoreProviderError) -> Self::Verdict {
         let poll_after_secs = token.poll_after_secs();
         self.0.preserve(token, poll_after_secs, error.to_wire())
     }
@@ -216,7 +240,7 @@ impl AwsPollAttempt for GuestPollAttempt {
 
     fn pending(
         self,
-        token: AwsCreateToken,
+        token: AwsCreateOperation,
         poll_after_secs: u32,
     ) -> Result<Self::Step, Self::Verdict> {
         Ok(self.0.pending(token, poll_after_secs))
@@ -251,15 +275,15 @@ impl AwsIssuedCreate for GuestPolledIssuedCreate {
     fn partial(
         self,
         attributes: HashMap<String, CoreValue>,
-        reason: String,
-        missing_attributes: Vec<String>,
+        reason: CoreProviderError,
+        missing_attributes: NonEmptyAttributeNames,
     ) -> Result<Self::Step, Self::Verdict> {
         match partial_create_attributes_to_proto(&attributes) {
             Ok(attributes) => Ok(self.0.partial(
                 attributes,
                 proto::PartialReadDiagnostic {
-                    reason,
-                    missing_attributes,
+                    reason: reason.to_string(),
+                    missing_attributes: missing_attributes.into(),
                 },
             )),
             Err(error) => {
@@ -325,15 +349,15 @@ impl AwsIssuedCreate for GuestIssuedCreate {
     fn partial(
         self,
         attributes: HashMap<String, CoreValue>,
-        reason: String,
-        missing_attributes: Vec<String>,
+        reason: CoreProviderError,
+        missing_attributes: NonEmptyAttributeNames,
     ) -> Result<Self::Step, Self::Verdict> {
         match partial_create_attributes_to_proto(&attributes) {
             Ok(attributes) => Ok(self.0.partial(
                 attributes,
                 proto::PartialReadDiagnostic {
-                    reason,
-                    missing_attributes,
+                    reason: reason.to_string(),
+                    missing_attributes: missing_attributes.into(),
                 },
             )),
             Err(error) => {
@@ -378,7 +402,7 @@ impl AwsResumeAttempt for GuestResumeAttempt {
         self.0.untracked(error.to_wire())
     }
 
-    fn preserve(self, token: AwsCreateToken, error: CoreProviderError) -> Self::Verdict {
+    fn preserve(self, token: AwsCreateOperation, error: CoreProviderError) -> Self::Verdict {
         let poll_after_secs = token.poll_after_secs();
         self.0.preserve(token, poll_after_secs, error.to_wire())
     }
@@ -389,7 +413,7 @@ impl AwsResumeAttempt for GuestResumeAttempt {
 
     fn pending(
         self,
-        token: AwsCreateToken,
+        token: AwsCreateOperation,
         poll_after_secs: u32,
     ) -> Result<Self::Step, Self::Verdict> {
         Ok(self.0.pending(token, poll_after_secs))
@@ -408,6 +432,29 @@ impl AwsResumedCreate for GuestResumedCreate {
     fn completed(self, state: CoreAppliedState) -> Result<Self::Step, Self::Verdict> {
         match resumed_state_to_proto(&state) {
             Ok(state) => Ok(self.0.completed(FoundRead::from_applied_state(state))),
+            Err(error) => {
+                let error = error.to_wire();
+                Err(self
+                    .0
+                    .failed(proto::Observation::ReadFailed(error.clone()), error))
+            }
+        }
+    }
+
+    fn partial(
+        self,
+        attributes: HashMap<String, CoreValue>,
+        reason: CoreProviderError,
+        missing_attributes: NonEmptyAttributeNames,
+    ) -> Result<Self::Step, Self::Verdict> {
+        match partial_create_attributes_to_proto(&attributes) {
+            Ok(attributes) => Ok(self.0.partial(
+                attributes,
+                proto::PartialReadDiagnostic {
+                    reason: reason.to_string(),
+                    missing_attributes: missing_attributes.into(),
+                },
+            )),
             Err(error) => {
                 let error = error.to_wire();
                 Err(self
@@ -514,7 +561,7 @@ impl AwsProcessProvider {
 #[cfg(any(target_arch = "wasm32", test))]
 impl CarinaProvider for AwsProcessProvider {
     type CreateToken = AwsCreateToken;
-    type UpdateToken = Never;
+    type UpdateToken = AwsUpdateToken;
     type DeleteToken = AwsDeleteToken;
 
     fn info(&self) -> proto::ProviderInfo {
@@ -698,7 +745,7 @@ impl CarinaProvider for AwsProcessProvider {
         _id: &proto::ResourceId,
         request: proto::CreateRequest,
         poll: SdkPoll<Self::CreateToken>,
-        _poll_request: PollRequest,
+        poll_request: PollRequest,
     ) -> Result<SdkCreateStep<Self::CreateToken>, SdkPollVerdict<Self::CreateToken>> {
         let core_resource = match protocol_resource_to_core(&request.resource) {
             Ok(resource) => resource,
@@ -745,19 +792,18 @@ impl CarinaProvider for AwsProcessProvider {
                 };
             }
         };
-        let (token, poll) = match poll {
+        let poll = match poll {
             SdkPoll::Unissued(attempt, token) => {
-                (token, AwsCreatePoll::Unissued(GuestPollAttempt(attempt)))
+                AwsCreatePoll::Unissued(GuestPollAttempt(attempt), token)
             }
-            SdkPoll::Issued(issued, token) => (
-                token,
-                AwsCreatePoll::Issued(GuestPolledIssuedCreate(issued)),
-            ),
+            SdkPoll::Issued(issued, token) => {
+                AwsCreatePoll::Issued(GuestPolledIssuedCreate(issued), token)
+            }
         };
         self.runtime.block_on(self.provider().poll_create_step(
             core_resource.as_resource(),
-            token,
             poll,
+            poll_request,
         ))
     }
 
@@ -766,7 +812,7 @@ impl CarinaProvider for AwsProcessProvider {
         _id: &proto::ResourceId,
         request: proto::CreateRequest,
         resume: SdkResume<Self::CreateToken>,
-        _poll_request: PollRequest,
+        poll_request: PollRequest,
     ) -> Result<SdkResumeStep<Self::CreateToken>, SdkResumeVerdict<Self::CreateToken>> {
         let core_resource = match protocol_resource_to_core(&request.resource) {
             Ok(resource) => resource,
@@ -813,19 +859,18 @@ impl CarinaProvider for AwsProcessProvider {
                 };
             }
         };
-        let (token, resume) = match resume {
-            SdkResume::Unissued(attempt, token) => (
-                token,
-                AwsCreateResume::Unissued(GuestResumeAttempt(attempt)),
-            ),
+        let resume = match resume {
+            SdkResume::Unissued(attempt, token) => {
+                AwsCreateResume::Unissued(GuestResumeAttempt(attempt), token)
+            }
             SdkResume::Issued(resumed, token) => {
-                (token, AwsCreateResume::Issued(GuestResumedCreate(resumed)))
+                AwsCreateResume::Issued(GuestResumedCreate(resumed), token)
             }
         };
         self.runtime.block_on(self.provider().resume_create_step(
             core_resource.as_resource(),
-            token,
             resume,
+            poll_request,
         ))
     }
 
@@ -851,29 +896,41 @@ impl CarinaProvider for AwsProcessProvider {
                         .for_resource(core_id.clone()),
                 )
             })?;
-        let result = self.runtime.block_on(self.provider().update_with_patch(
+        let result = self.runtime.block_on(self.provider().update_step(
             &core_id,
             identifier,
             &core_from,
             &core_patch,
         ));
-        match result {
-            Ok(outcome) => update_outcome_to_proto(&outcome, state_after_patch, &core_id)
-                .map(SdkUpdateOutcome::Done)
-                .map_err(Self::convert_error),
-            Err(e) => Err(Self::convert_error(e)),
-        }
+        update_step_to_proto(result, state_after_patch, &core_id).map_err(Self::convert_error)
     }
 
     fn poll_update(
         &self,
-        _id: &proto::ResourceId,
-        _identifier: &proto::AppliedIdentifier,
-        _request: proto::UpdateRequest,
+        id: &proto::ResourceId,
+        identifier: &proto::AppliedIdentifier,
+        request: proto::UpdateRequest,
         pending: Pending<Self::UpdateToken>,
-        _poll_request: PollRequest,
+        poll_request: PollRequest,
     ) -> Result<SdkUpdateOutcome<Self::UpdateToken>, proto::ProviderError> {
-        match pending.token {}
+        let core_id = protocol_convert::protocol_to_resource_id(id);
+        let state_after_patch = request.state_after_patch();
+        let state = protocol_convert::protocol_persisted_state_to_core(&state_after_patch)
+            .map_err(|error| {
+                Self::convert_error(
+                    protocol_input_error("failed to decode read-back update state", error)
+                        .for_resource(core_id.clone()),
+                )
+            })?;
+        let mut resource = CoreResource::from_id(core_id.clone());
+        resource.attributes = state.attributes.into_iter().collect();
+        let result = self.runtime.block_on(self.provider().poll_update_step(
+            &resource,
+            identifier,
+            pending.token,
+            poll_request,
+        ));
+        update_step_to_proto(result, state_after_patch, &core_id).map_err(Self::convert_error)
     }
 
     fn delete(
@@ -1036,6 +1093,7 @@ fn main() {}
 
 #[cfg(test)]
 mod tests {
+
     use super::*;
     use carina_core::resource::{ConcreteValue, DeferredValue, Resource, Value};
     use carina_core::schema::{

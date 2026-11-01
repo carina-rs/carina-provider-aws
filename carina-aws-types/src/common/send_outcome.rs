@@ -42,7 +42,7 @@ pub enum FinalAttempt {
     Sent,
 }
 
-/// Whether retrying a pre-transport failure may succeed without configuration changes.
+/// Whether retrying a failure may succeed without configuration changes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Transience {
     /// The failure may clear on a later attempt.
@@ -348,7 +348,7 @@ pub(crate) fn not_sent_transience<E>(
     }
 }
 
-fn connector_transience(
+pub(super) fn connector_transience(
     error: &aws_smithy_runtime_api::client::result::ConnectorError,
 ) -> Transience {
     if error.is_timeout() {

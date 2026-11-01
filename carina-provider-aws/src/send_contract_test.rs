@@ -21,7 +21,7 @@ use carina_core::schema::{
 use indexmap::IndexMap;
 use winterbaume_core::{MockAws, MockRequest, MockResponse, MockService};
 
-use crate::provider::{AwsCreateAttempt, AwsCreateToken, AwsIssuedCreate};
+use crate::provider::{AwsCreateAttempt, AwsCreateOperation, AwsCreateToken, AwsIssuedCreate};
 use crate::send_models_generated::{SendCaptureAttribute, SendCaptureContract};
 use crate::{AwsProvider, BoundedSdkConfig};
 
@@ -72,11 +72,62 @@ impl CaptureService {
             .unwrap_or_default();
 
         if request.uri.contains("ec2.") {
+            // These are the synthetic resources addressed by capture_identifier.
+            // Reads must find them immediately: this test checks mutation payloads,
+            // while eventual consistency and read-back budgets have separate tests.
             let inner = match action {
                 "CreateVpc" => "<vpc><vpcId>vpc-0123456789abcdef0</vpcId></vpc>",
                 "CreateSubnet" => "<subnet><subnetId>subnet-0123456789abcdef0</subnetId></subnet>",
                 "CreateInternetGateway" => {
                     "<internetGateway><internetGatewayId>igw-0123456789abcdef0</internetGatewayId></internetGateway>"
+                }
+                "DescribeVpcs" => {
+                    "<vpcSet><item><vpcId>vpc-0123456789abcdef0</vpcId><cidrBlock>10.0.0.0/16</cidrBlock><instanceTenancy>default</instanceTenancy></item></vpcSet>"
+                }
+                "DescribeVpcAttribute" => {
+                    "<vpcId>vpc-0123456789abcdef0</vpcId><enableDnsSupport><value>true</value></enableDnsSupport><enableDnsHostnames><value>true</value></enableDnsHostnames>"
+                }
+                "DescribeSubnets" => {
+                    "<subnetSet><item><subnetId>subnet-0123456789abcdef0</subnetId><vpcId>vpc-0123456789abcdef0</vpcId><cidrBlock>10.0.0.0/24</cidrBlock></item></subnetSet>"
+                }
+                "DescribeInternetGateways" => {
+                    "<internetGatewaySet><item><internetGatewayId>igw-0123456789abcdef0</internetGatewayId><attachmentSet><item><vpcId>vpc-0123456789abcdef0</vpcId><state>available</state></item></attachmentSet></item></internetGatewaySet>"
+                }
+                "DescribeRouteTables" => {
+                    "<routeTableSet><item><routeTableId>rtb-0123456789abcdef0</routeTableId><vpcId>vpc-0123456789abcdef0</vpcId><routeSet><item><destinationCidrBlock>10.0.0.0/24</destinationCidrBlock><gatewayId>igw-0123456789abcdef0</gatewayId></item></routeSet><associationSet><item><routeTableAssociationId>rtbassoc-0123456789abcdef0</routeTableAssociationId><routeTableId>rtb-0123456789abcdef0</routeTableId><subnetId>subnet-0123456789abcdef0</subnetId></item></associationSet></item></routeTableSet>"
+                }
+                "DescribeSecurityGroups" => {
+                    "<securityGroupInfo><item><groupId>sg-0123456789abcdef0</groupId><groupName>send-contract</groupName><groupDescription>send contract</groupDescription><vpcId>vpc-0123456789abcdef0</vpcId></item></securityGroupInfo>"
+                }
+                "DescribeSecurityGroupRules" => {
+                    "<securityGroupRuleSet><item><securityGroupRuleId>sgr-0123456789abcdef0</securityGroupRuleId><groupId>sg-0123456789abcdef0</groupId><isEgress>false</isEgress><ipProtocol>tcp</ipProtocol></item><item><securityGroupRuleId>sgr-0123456789abcdef1</securityGroupRuleId><groupId>sg-0123456789abcdef0</groupId><isEgress>true</isEgress><ipProtocol>tcp</ipProtocol></item></securityGroupRuleSet>"
+                }
+                "DescribeEgressOnlyInternetGateways" => {
+                    "<egressOnlyInternetGatewaySet><item><egressOnlyInternetGatewayId>eigw-0123456789abcdef0</egressOnlyInternetGatewayId><attachmentSet><item><vpcId>vpc-0123456789abcdef0</vpcId><state>attached</state></item></attachmentSet></item></egressOnlyInternetGatewaySet>"
+                }
+                "DescribeAddresses" => {
+                    "<addressesSet><item><allocationId>eipalloc-0123456789abcdef0</allocationId><publicIp>198.51.100.10</publicIp><domain>vpc</domain></item></addressesSet>"
+                }
+                "DescribeFlowLogs" => {
+                    "<flowLogSet><item><flowLogId>fl-0123456789abcdef0</flowLogId><resourceId>vpc-0123456789abcdef0</resourceId><trafficType>ALL</trafficType><flowLogStatus>ACTIVE</flowLogStatus></item></flowLogSet>"
+                }
+                "DescribeNatGateways" => {
+                    "<natGatewaySet><item><natGatewayId>nat-0123456789abcdef0</natGatewayId><subnetId>subnet-0123456789abcdef0</subnetId><state>available</state><connectivityType>public</connectivityType></item></natGatewaySet>"
+                }
+                "DescribeTransitGateways" => {
+                    "<transitGatewaySet><item><transitGatewayId>tgw-0123456789abcdef0</transitGatewayId><state>available</state></item></transitGatewaySet>"
+                }
+                "DescribeTransitGatewayVpcAttachments" => {
+                    "<transitGatewayVpcAttachments><item><transitGatewayAttachmentId>tgw-attach-0123456789abcdef0</transitGatewayAttachmentId><transitGatewayId>tgw-0123456789abcdef0</transitGatewayId><vpcId>vpc-0123456789abcdef0</vpcId><subnetIds><item>subnet-0123456789abcdef0</item></subnetIds><state>available</state></item></transitGatewayVpcAttachments>"
+                }
+                "DescribeVpcEndpoints" => {
+                    "<vpcEndpointSet><item><vpcEndpointId>vpce-0123456789abcdef0</vpcEndpointId><vpcId>vpc-0123456789abcdef0</vpcId><vpcEndpointType>Gateway</vpcEndpointType><serviceName>com.amazonaws.us-east-1.s3</serviceName><routeTableIdSet><item>rtb-0123456789abcdef0</item></routeTableIdSet><subnetIdSet><item>subnet-0123456789abcdef0</item></subnetIdSet><groupSet><item><groupId>sg-0123456789abcdef0</groupId></item></groupSet><state>available</state></item></vpcEndpointSet>"
+                }
+                "DescribeVpcPeeringConnections" => {
+                    "<vpcPeeringConnectionSet><item><vpcPeeringConnectionId>pcx-0123456789abcdef0</vpcPeeringConnectionId><requesterVpcInfo><vpcId>vpc-0123456789abcdef0</vpcId></requesterVpcInfo><accepterVpcInfo><vpcId>vpc-0123456789abcdef1</vpcId></accepterVpcInfo></item></vpcPeeringConnectionSet>"
+                }
+                "DescribeVpnGateways" => {
+                    "<vpnGatewaySet><item><vpnGatewayId>vgw-0123456789abcdef0</vpnGatewayId><type>ipsec.1</type><state>available</state></item></vpnGatewaySet>"
                 }
                 _ => "",
             };
@@ -88,25 +139,108 @@ impl CaptureService {
             );
         }
         if request.uri.contains("route53") {
+            if request.method == "GET" {
+                let query = request
+                    .uri
+                    .split_once('?')
+                    .map(|(_, query)| query)
+                    .unwrap_or_default();
+                let parameter = |name: &str| {
+                    query
+                        .split('&')
+                        .find_map(|part| {
+                            let (key, value) = part.split_once('=')?;
+                            (key == name).then(|| {
+                                urlencoding::decode(value)
+                                    .expect("capture query")
+                                    .into_owned()
+                            })
+                        })
+                        .expect("record read cursor")
+                };
+                let name = parameter("name");
+                let record_type = parameter("type");
+                let value = if record_type == "AAAA" {
+                    "2001:db8::1"
+                } else {
+                    "198.51.100.10"
+                };
+                return MockResponse::xml(
+                    200,
+                    format!(
+                        r#"<ListResourceRecordSetsResponse xmlns="https://route53.amazonaws.com/doc/2013-04-01/"><ResourceRecordSets><ResourceRecordSet><Name>{name}</Name><Type>{record_type}</Type><TTL>600</TTL><ResourceRecords><ResourceRecord><Value>{value}</Value></ResourceRecord></ResourceRecords></ResourceRecordSet></ResourceRecordSets><IsTruncated>false</IsTruncated><MaxItems>100</MaxItems></ListResourceRecordSetsResponse>"#
+                    ),
+                );
+            }
             return MockResponse::xml(
                 200,
                 r#"<ChangeResourceRecordSetsResponse xmlns="https://route53.amazonaws.com/doc/2013-04-01/"><ChangeInfo><Id>/change/C1</Id><Status>PENDING</Status><SubmittedAt>2026-01-01T00:00:00Z</SubmittedAt></ChangeInfo></ChangeResourceRecordSetsResponse>"#,
             );
         }
         if request.uri.contains("iam.") {
+            let inner = if action == "GetRole" {
+                "<Role><Path>/</Path><RoleName>CarinaSendContract</RoleName><RoleId>AROASENDCONTRACT</RoleId><Arn>arn:aws:iam::123456789012:role/CarinaSendContract</Arn><CreateDate>2026-01-01T00:00:00Z</CreateDate><AssumeRolePolicyDocument>{\"Version\":\"2012-10-17\",\"Statement\":[]}</AssumeRolePolicyDocument></Role>"
+            } else {
+                ""
+            };
             return MockResponse::xml(
                 200,
                 format!(
-                    "<{action}Response xmlns=\"https://iam.amazonaws.com/doc/2010-05-08/\"><{action}Result/></{action}Response>"
+                    "<{action}Response xmlns=\"https://iam.amazonaws.com/doc/2010-05-08/\"><{action}Result>{inner}</{action}Result></{action}Response>"
                 ),
             );
         }
         if request.uri.contains("s3.") || request.uri.contains(".s3.") {
-            if request.method == "GET" && request.uri.contains("?versioning") {
-                return MockResponse::xml(
-                    200,
-                    r#"<VersioningConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Status>Enabled</Status></VersioningConfiguration>"#,
-                );
+            if request.method == "GET" {
+                let query = request
+                    .uri
+                    .split_once('?')
+                    .map(|(_, query)| query)
+                    .unwrap_or_default();
+                let body = match query
+                    .split('&')
+                    .next()
+                    .unwrap_or_default()
+                    .trim_end_matches('=')
+                {
+                    "versioning" => {
+                        "<VersioningConfiguration><Status>Enabled</Status></VersioningConfiguration>"
+                    }
+                    "object-lock" => {
+                        "<ObjectLockConfiguration><ObjectLockEnabled>Enabled</ObjectLockEnabled></ObjectLockConfiguration>"
+                    }
+                    "publicAccessBlock" => "<PublicAccessBlockConfiguration/>",
+                    "logging" => {
+                        "<BucketLoggingStatus><LoggingEnabled><TargetBucket>carina-log-bucket</TargetBucket><TargetPrefix>logs/</TargetPrefix></LoggingEnabled></BucketLoggingStatus>"
+                    }
+                    "ownershipControls" => {
+                        "<OwnershipControls><Rule><ObjectOwnership>BucketOwnerEnforced</ObjectOwnership></Rule></OwnershipControls>"
+                    }
+                    "encryption" => {
+                        "<ServerSideEncryptionConfiguration><Rule><ApplyServerSideEncryptionByDefault><SSEAlgorithm>AES256</SSEAlgorithm></ApplyServerSideEncryptionByDefault></Rule></ServerSideEncryptionConfiguration>"
+                    }
+                    "replication" => {
+                        "<ReplicationConfiguration><Role>arn:aws:iam::123456789012:role/replication</Role></ReplicationConfiguration>"
+                    }
+                    "lifecycle" => "<LifecycleConfiguration/>",
+                    "website" => {
+                        "<WebsiteConfiguration><IndexDocument><Suffix>index.html</Suffix></IndexDocument></WebsiteConfiguration>"
+                    }
+                    "cors" => "<CORSConfiguration/>",
+                    "notification" => "<NotificationConfiguration/>",
+                    "tagging" => "<Tagging><TagSet/></Tagging>",
+                    "acl" => {
+                        "<AccessControlPolicy><Owner><ID>123456789012</ID></Owner><AccessControlList/></AccessControlPolicy>"
+                    }
+                    "policy" => {
+                        return MockResponse::json(
+                            200,
+                            r#"{"Version":"2012-10-17","Statement":[]}"#,
+                        );
+                    }
+                    _ => "",
+                };
+                return MockResponse::xml(200, body);
             }
             return MockResponse::xml(200, "");
         }
@@ -114,6 +248,12 @@ impl CaptureService {
             return MockResponse::json(
                 200,
                 r#"{"CertificateArn":"arn:aws:acm:us-east-1:123456789012:certificate/00000000-0000-0000-0000-000000000000"}"#,
+            );
+        }
+        if target.ends_with("DescribeCertificate") {
+            return MockResponse::json(
+                200,
+                r#"{"Certificate":{"CertificateArn":"arn:aws:acm:us-east-1:123456789012:certificate/00000000-0000-0000-0000-000000000000","DomainName":"send-contract.example.com","Status":"ISSUED","KeyAlgorithm":"RSA_2048"}}"#,
             );
         }
         if target.ends_with("CreateOrganization") || target.ends_with("DescribeOrganization") {
@@ -128,10 +268,30 @@ impl CaptureService {
                 r#"{"CreateAccountStatus":{"Id":"car-create-request","State":"IN_PROGRESS"}}"#,
             );
         }
+        if target.ends_with("DescribeAccount") {
+            return MockResponse::json(
+                200,
+                r#"{"Account":{"Id":"123456789012","Arn":"arn:aws:organizations::123456789012:account/o-exampleorgid/123456789012","Name":"send-contract","Email":"send-contract@example.com","Status":"ACTIVE"}}"#,
+            );
+        }
+        if target.ends_with("DescribeLogGroups") {
+            let body: serde_json::Value =
+                serde_json::from_str(body).expect("log group read request");
+            return MockResponse::json(
+                200,
+                serde_json::json!({"logGroups": [{"logGroupName": body["logGroupNamePrefix"], "logGroupClass": "STANDARD"}]}).to_string(),
+            );
+        }
         if target.ends_with("CreateQueue") {
             return MockResponse::json(
                 200,
                 r#"{"QueueUrl":"https://sqs.us-east-1.amazonaws.com/123456789012/carina-send-contract.fifo"}"#,
+            );
+        }
+        if target.ends_with("GetQueueAttributes") {
+            return MockResponse::json(
+                200,
+                r#"{"Attributes":{"VisibilityTimeout":"30","MessageRetentionPeriod":"345600","DelaySeconds":"0","MaximumMessageSize":"1048576","ReceiveMessageWaitTimeSeconds":"0","QueueArn":"arn:aws:sqs:us-east-1:123456789012:carina-send-contract.fifo","CreatedTimestamp":"1767225600","LastModifiedTimestamp":"1767225600","FifoQueue":"true"}}"#,
             );
         }
         MockResponse::json(200, "{}")
@@ -178,7 +338,7 @@ impl AwsCreateAttempt for CaptureAttempt {
 
     fn pending(
         self,
-        _token: AwsCreateToken,
+        _token: AwsCreateOperation,
         _sent: Sent,
         _poll_after_secs: u32,
     ) -> Result<Self::Step, Self::Verdict> {
@@ -201,8 +361,8 @@ impl AwsIssuedCreate for CaptureIssued {
     fn partial(
         self,
         _attributes: HashMap<String, Value>,
-        _reason: String,
-        _missing_attributes: Vec<String>,
+        _reason: ProviderError,
+        _missing_attributes: crate::NonEmptyAttributeNames,
     ) -> Result<Self::Step, Self::Verdict> {
         Ok(())
     }
@@ -717,6 +877,7 @@ fn capture_identifier(resource_type: &str) -> &'static str {
         "iam.Role" => "CarinaSendContract",
         "logs.LogGroup" => "/carina/send-contract",
         "organizations.Account" => "123456789012",
+        "organizations.Organization" => "o-exampleorgid",
         "route53.RecordSet" => "Z0123456789ABCDEF|send-contract.example.com|A",
         "s3.Bucket"
         | "s3.BucketAcl"
@@ -739,6 +900,8 @@ fn capture_identifier(resource_type: &str) -> &'static str {
         "ec2.RouteTable" => "rtb-0123456789abcdef0",
         "ec2.Route" => "rtb-0123456789abcdef0|10.0.0.0/24",
         "ec2.SecurityGroup" => "sg-0123456789abcdef0",
+        "ec2.SecurityGroupIngress" => "sgr-0123456789abcdef0",
+        "ec2.SecurityGroupEgress" => "sgr-0123456789abcdef1",
         "ec2.Eip" => "eipalloc-0123456789abcdef0",
         "ec2.NatGateway" => "nat-0123456789abcdef0",
         "ec2.VpnGateway" => "vgw-0123456789abcdef0",
@@ -750,7 +913,7 @@ fn capture_identifier(resource_type: &str) -> &'static str {
         "ec2.EgressOnlyInternetGateway" => "eigw-0123456789abcdef0",
         "ec2.VpcGatewayAttachment" => "vpc-0123456789abcdef0|igw-0123456789abcdef0",
         "ec2.SubnetRouteTableAssociation" => "rtbassoc-0123456789abcdef0|subnet-0123456789abcdef0",
-        _ => "send-contract-identifier",
+        _ => panic!("missing capture identifier for {resource_type}"),
     }
 }
 
@@ -896,8 +1059,7 @@ async fn route53_update_uses_identifier_type_and_sends_mutable_attributes() {
         let result = provider
             .update_route53_record_set(desired.id.clone(), &identifier, desired, schema)
             .await;
-        // The capture transport supplies mutation responses; read-back is
-        // checked through its request rather than a modeled read response.
+        // Also check that read-back addresses the identifier's record type.
         assert!(result.is_ok(), "update must reach read-back: {result:?}");
         let requests = service.snapshot();
         let mutation = requests
@@ -929,6 +1091,19 @@ async fn route53_update_uses_identifier_type_and_sends_mutable_attributes() {
 
 #[tokio::test]
 async fn every_sent_attribute_reaches_captured_create_and_update_mutations() {
+    // Keep Tokio time live so accidental real sleeps fail within 10s, including
+    // short sleeps accumulated across the resource/attribute matrix.
+    tokio::time::timeout(
+        Duration::from_secs(10),
+        Box::pin(capture_create_and_update_mutations()),
+    )
+    .await
+    .expect(
+        "mutation capture exceeded 10s; capture reads must return the target resource immediately",
+    );
+}
+
+async fn capture_create_and_update_mutations() {
     let service = Arc::new(CaptureService::default());
     let mock = MockAws::builder()
         .with_service(Arc::clone(&service))
@@ -952,7 +1127,7 @@ async fn every_sent_attribute_reaches_captured_create_and_update_mutations() {
         for attribute in contract.create_attributes {
             service.clear();
             let resource = focused_resource(schema, contract, attribute);
-            let result = provider.create_step(&resource, CaptureAttempt).await;
+            let result = Box::pin(provider.create_step(&resource, CaptureAttempt)).await;
             let requests = service.snapshot();
             assert!(
                 !requests.is_empty(),
@@ -1011,9 +1186,9 @@ async fn every_sent_attribute_reaches_captured_create_and_update_mutations() {
                 capture_identifier(contract.resource_type),
             )
             .expect("capture identifier");
-            let result = provider
-                .update_with_patch(&resource.id, &identifier, &from, &patch)
-                .await;
+            let result =
+                Box::pin(provider.update_with_patch(&resource.id, &identifier, &from, &patch))
+                    .await;
             let requests = service.snapshot();
             assert!(
                 !requests.is_empty(),
@@ -1021,6 +1196,20 @@ async fn every_sent_attribute_reaches_captured_create_and_update_mutations() {
                 contract.resource_type,
                 target.map(|attribute| attribute.name),
                 resource.attributes,
+            );
+            let outcome = result.unwrap_or_else(|error| {
+                panic!(
+                    "{} capture update failed; target={:?}: {error:?}",
+                    contract.resource_type,
+                    target.map(|attribute| attribute.name),
+                )
+            });
+            assert!(
+                outcome.diagnostic().is_none(),
+                "{} capture read must complete immediately; target={:?}; diagnostic={:?}",
+                contract.resource_type,
+                target.map(|attribute| attribute.name),
+                outcome.diagnostic(),
             );
             if let Some(attribute) = target {
                 assert_sample_reached_mutation(

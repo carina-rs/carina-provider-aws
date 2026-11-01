@@ -13,6 +13,7 @@ pub fn s3_bucket_replication_configuration_config() -> AwsSchemaConfig {
         aws_type_name: "AWS::S3::BucketReplicationConfiguration",
         resource_type_name: "s3.BucketReplicationConfiguration",
         has_tags: false,
+        await_on_read_back: vec![],
         schema: ResourceSchema::new("s3.BucketReplicationConfiguration")
             .with_coexisting_replacement()
             .attribute(

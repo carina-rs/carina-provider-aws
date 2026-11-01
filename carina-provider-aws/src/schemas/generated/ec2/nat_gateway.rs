@@ -19,6 +19,7 @@ pub fn ec2_nat_gateway_config() -> AwsSchemaConfig {
         aws_type_name: "AWS::EC2::NatGateway",
         resource_type_name: "ec2.NatGateway",
         has_tags: true,
+        await_on_read_back: vec![],
         schema: ResourceSchema::new("ec2.NatGateway")
         .with_description("Describes a NAT gateway.")
         .with_conflicting_replacement()

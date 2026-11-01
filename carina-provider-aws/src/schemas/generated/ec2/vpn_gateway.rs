@@ -17,6 +17,7 @@ pub fn ec2_vpn_gateway_config() -> AwsSchemaConfig {
         aws_type_name: "AWS::EC2::VPNGateway",
         resource_type_name: "ec2.VpnGateway",
         has_tags: true,
+        await_on_read_back: vec![],
         schema: ResourceSchema::new("ec2.VpnGateway")
         .with_description("Describes a virtual private gateway.")
         .with_coexisting_replacement()

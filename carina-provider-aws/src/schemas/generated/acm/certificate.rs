@@ -35,14 +35,18 @@ const VALID_TYPE: &[&str] = &["CNAME"];
 
 const VALID_VALIDATION_METHOD: &[&str] = &["DNS", "EMAIL", "HTTP"];
 
+use crate::schemas::config::{ReadBackPredicate, ReadBackRequirement};
+
 /// Returns the schema config for acm.Certificate (Smithy: com.amazonaws.acm)
 pub fn acm_certificate_config() -> AwsSchemaConfig {
     AwsSchemaConfig {
         aws_type_name: "AWS::CertificateManager::Certificate",
         resource_type_name: "acm.Certificate",
         has_tags: true,
+        await_on_read_back: vec![ReadBackRequirement::new("domain_validation_options", ReadBackPredicate::AcmDnsDvo)],
         schema: ResourceSchema::new("acm.Certificate")
         .with_description("Contains metadata about an ACM certificate. This structure is returned in the response to a DescribeCertificate request.")
+        .with_operation_config(carina_provider_protocol::types::OperationConfig { delete_timeout_secs: None, delete_max_retries: None, create_timeout_secs: None, create_max_retries: None, update_timeout_secs: None, read_back: carina_provider_protocol::types::ReadBackBudget::from_secs(300) })
         .with_conflicting_replacement()
         .attribute(
             AttributeSchema::required("domain_name", AttributeType::string())

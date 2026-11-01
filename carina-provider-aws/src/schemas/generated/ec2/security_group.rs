@@ -15,6 +15,7 @@ pub fn ec2_security_group_config() -> AwsSchemaConfig {
         aws_type_name: "AWS::EC2::SecurityGroup",
         resource_type_name: "ec2.SecurityGroup",
         has_tags: true,
+        await_on_read_back: vec![],
         schema: ResourceSchema::new("ec2.SecurityGroup")
         .with_description("Describes a security group.")
         .with_unique_name_attribute("group_name")

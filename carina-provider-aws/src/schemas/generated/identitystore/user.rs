@@ -13,6 +13,7 @@ pub fn identitystore_user_config() -> AwsSchemaConfig {
         aws_type_name: "AWS::IdentityStore::User",
         resource_type_name: "identitystore.User",
         has_tags: false,
+        await_on_read_back: vec![],
         schema: ResourceSchema::new("identitystore.User")
             .as_data_source()
             .attribute(

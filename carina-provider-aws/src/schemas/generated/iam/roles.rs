@@ -13,6 +13,7 @@ pub fn iam_roles_config() -> AwsSchemaConfig {
         aws_type_name: "AWS::IAM::Roles",
         resource_type_name: "iam.Roles",
         has_tags: false,
+        await_on_read_back: vec![],
         schema: ResourceSchema::new("iam.Roles")
         .as_data_source()
         .attribute(

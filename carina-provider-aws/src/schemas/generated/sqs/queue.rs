@@ -15,6 +15,7 @@ pub fn sqs_queue_config() -> AwsSchemaConfig {
         aws_type_name: "AWS::SQS::Queue",
         resource_type_name: "sqs.Queue",
         has_tags: true,
+        await_on_read_back: vec![],
         schema: ResourceSchema::new("sqs.Queue")
         .with_description("")
         .with_conflicting_replacement()

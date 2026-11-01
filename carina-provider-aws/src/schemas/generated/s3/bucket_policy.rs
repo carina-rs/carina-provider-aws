@@ -13,6 +13,7 @@ pub fn s3_bucket_policy_config() -> AwsSchemaConfig {
         aws_type_name: "AWS::S3::BucketPolicy",
         resource_type_name: "s3.BucketPolicy",
         has_tags: false,
+        await_on_read_back: vec![],
         schema: ResourceSchema::new("s3.BucketPolicy")
         .with_coexisting_replacement()
         .attribute(

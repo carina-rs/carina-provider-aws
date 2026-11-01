@@ -1659,6 +1659,29 @@ mod tests {
     }
 
     #[test]
+    fn maybe_sent_other_without_kind_retries_only_when_resend_is_safe() {
+        let error = other_dispatch_err();
+        let classification = SendClassification::MaybeSent {
+            final_attempt: FinalAttempt::Sent,
+        };
+
+        // Read-back's transience policy must stay separate from mutation resends.
+        assert_eq!(Transience::of(&error), Transience::Permanent);
+        for (idempotency, expected) in [
+            (Idempotency::NotIdempotent, false),
+            (Idempotency::ReadOnly, true),
+            (Idempotency::Idempotent, true),
+            (Idempotency::IdempotencyToken, true),
+        ] {
+            assert_eq!(
+                provider_retry_allowed(classification, idempotency, &error),
+                expected,
+                "{idempotency:?}"
+            );
+        }
+    }
+
+    #[test]
     fn not_sent_retry_uses_typed_transience() {
         let error = other_dispatch_err();
         let permanent = SendClassification::NotSent(Transience::Permanent);

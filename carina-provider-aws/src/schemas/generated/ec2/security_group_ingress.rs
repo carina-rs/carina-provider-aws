@@ -15,6 +15,7 @@ pub fn ec2_security_group_ingress_config() -> AwsSchemaConfig {
         aws_type_name: "AWS::EC2::SecurityGroupIngress",
         resource_type_name: "ec2.SecurityGroupIngress",
         has_tags: false,
+        await_on_read_back: vec![],
         schema: ResourceSchema::new("ec2.SecurityGroupIngress")
         .with_description("Describes a security group rule.")
         .with_conflicting_replacement()

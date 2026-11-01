@@ -13,6 +13,7 @@ pub fn s3_bucket_object_lock_configuration_config() -> AwsSchemaConfig {
         aws_type_name: "AWS::S3::BucketObjectLockConfiguration",
         resource_type_name: "s3.BucketObjectLockConfiguration",
         has_tags: false,
+        await_on_read_back: vec![],
         schema: ResourceSchema::new("s3.BucketObjectLockConfiguration")
         .with_coexisting_replacement()
         .attribute(

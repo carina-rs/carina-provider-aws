@@ -13,6 +13,7 @@ pub fn s3_bucket_versioning_config() -> AwsSchemaConfig {
         aws_type_name: "AWS::S3::BucketVersioning",
         resource_type_name: "s3.BucketVersioning",
         has_tags: false,
+        await_on_read_back: vec![],
         schema: ResourceSchema::new("s3.BucketVersioning")
             .with_coexisting_replacement()
             .attribute(

@@ -17,6 +17,7 @@ pub fn ec2_vpc_config() -> AwsSchemaConfig {
         aws_type_name: "AWS::EC2::VPC",
         resource_type_name: "ec2.Vpc",
         has_tags: true,
+        await_on_read_back: vec![],
         schema: ResourceSchema::new("ec2.Vpc")
         .with_description("Describes a VPC.")
         .with_conflicting_replacement()

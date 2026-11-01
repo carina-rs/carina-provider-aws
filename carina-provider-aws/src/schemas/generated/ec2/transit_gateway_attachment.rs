@@ -15,6 +15,7 @@ pub fn ec2_transit_gateway_attachment_config() -> AwsSchemaConfig {
         aws_type_name: "AWS::EC2::TransitGatewayAttachment",
         resource_type_name: "ec2.TransitGatewayAttachment",
         has_tags: true,
+        await_on_read_back: vec![],
         schema: ResourceSchema::new("ec2.TransitGatewayAttachment")
         .with_description("Describes a VPC attachment.")
         .with_conflicting_replacement()

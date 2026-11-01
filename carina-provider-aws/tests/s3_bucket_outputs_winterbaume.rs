@@ -5,15 +5,16 @@
 
 use aws_sdk_s3::Client as S3Client;
 use carina_core::differ::{Diff, diff};
-use carina_core::provider::RawSavedAttrs;
 use carina_core::provider::{
     AppliedIdentifier, CreateFailure, CreateOutcome, CreateOutcomeKind, CreateRequest,
     NoopNormalizer, Provider, ProviderReadyDataSource, ReadRequest, UpdateOutcomeKind,
     UpdateRequest,
 };
+use carina_core::provider::{RawSavedAttrs, ReadBackEnd};
 use carina_core::resource::{ConcreteValue, DataSource, ResolvedResource, Resource, State, Value};
 use carina_core::schema::SchemaKind;
 use carina_provider_aws::{AwsNormalizer, AwsProvider, BoundedSdkConfig, test_existing_state};
+use carina_provider_protocol::types::{OperationConfig, ReadBackBudget};
 use indexmap::IndexMap;
 use std::collections::HashMap;
 use std::future::Future;
@@ -495,9 +496,19 @@ async fn bucket_namespace_is_sent_and_import_style_read_has_no_diff() {
     assert_no_diff(desired, current);
 }
 
-#[tokio::test]
+fn final_read_back_provider(provider: AwsProvider) -> AwsProvider {
+    provider.with_operation_config_for_test(
+        RESOURCE_TYPE,
+        OperationConfig {
+            read_back: ReadBackBudget::from_secs(1),
+            ..Default::default()
+        },
+    )
+}
+
+#[tokio::test(start_paused = true)]
 async fn create_bucket_read_back_not_found_is_partial_success_with_created_identifier() {
-    let provider = provider_with_not_found_read_back(None).await;
+    let provider = final_read_back_provider(provider_with_not_found_read_back(None).await);
     let bucket = "carina-bucket-create-read-back-not-found";
     let mut resource = Resource::with_provider("aws", RESOURCE_TYPE, "partial-create", None);
     resource.set_attr("bucket", string(bucket));
@@ -508,18 +519,20 @@ async fn create_bucket_read_back_not_found_is_partial_success_with_created_ident
         .await
         .expect("the create API succeeded, so a missing read-back must stay successful");
 
+    assert_eq!(outcome.read_back_end(), ReadBackEnd::HostDeadline);
     let CreateOutcomeKind::PartialSuccess { state, diagnostic } = outcome.into_kind() else {
         panic!("expected partial create success");
     };
     assert_eq!(state.identifier().as_str(), bucket);
-    assert!(diagnostic.reason().contains("post-create read-back"));
+    assert_eq!(state.attributes().get("bucket"), Some(&string(bucket)));
+    assert!(diagnostic.reason().contains("post-apply read-back"));
     assert!(!diagnostic.missing_attributes().is_empty());
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn update_bucket_read_back_not_found_is_partial_success_with_updated_identifier() {
     let bucket = "carina-bucket-update-read-back-not-found";
-    let provider = provider_with_not_found_read_back(Some(bucket)).await;
+    let provider = final_read_back_provider(provider_with_not_found_read_back(Some(bucket)).await);
     let resource: Resource = Resource::with_provider("aws", RESOURCE_TYPE, "partial-update", None);
     let id = resource.id;
     let from = test_existing_state(
@@ -543,17 +556,26 @@ async fn update_bucket_read_back_not_found_is_partial_success_with_updated_ident
         .await
         .expect("the update API succeeded, so a missing read-back must stay successful");
 
+    assert_eq!(outcome.read_back_end(), ReadBackEnd::HostDeadline);
     let UpdateOutcomeKind::PartialSuccess { state, diagnostic } = outcome.kind() else {
         panic!("expected partial update success, got {outcome:?}");
     };
     assert_eq!(state.identifier().as_str(), bucket);
-    assert!(diagnostic.reason().contains("post-update read-back"));
+    assert_eq!(state.attributes().get("bucket"), Some(&string(bucket)));
+    assert_eq!(
+        state.attributes().get("tags"),
+        Some(&Value::Concrete(ConcreteValue::Map(IndexMap::from([(
+            "purpose".to_string(),
+            string("partial-update-test")
+        )]))))
+    );
+    assert!(diagnostic.reason().contains("post-apply read-back"));
     assert!(!diagnostic.missing_attributes().is_empty());
 }
 
-#[tokio::test]
-async fn create_bucket_read_back_error_is_partial_success_with_created_identifier() {
-    let provider = provider_with_error_read_back(None).await;
+#[tokio::test(start_paused = true)]
+async fn create_bucket_permanent_read_back_error_finishes_partial_immediately() {
+    let provider = final_read_back_provider(provider_with_error_read_back(None).await);
     let bucket = "carina-bucket-create-read-back-error";
     let mut resource = Resource::with_provider("aws", RESOURCE_TYPE, "partial-create-error", None);
     resource.set_attr("bucket", string(bucket));
@@ -564,19 +586,21 @@ async fn create_bucket_read_back_error_is_partial_success_with_created_identifie
         .await
         .expect("the create API succeeded, so a failed read-back must stay successful");
 
+    assert_eq!(outcome.read_back_end(), ReadBackEnd::ProviderReported);
     let CreateOutcomeKind::PartialSuccess { state, diagnostic } = outcome.into_kind() else {
         panic!("expected partial create success");
     };
     assert_eq!(state.identifier().as_str(), bucket);
-    assert!(diagnostic.reason().contains("post-create read-back"));
+    assert_eq!(state.attributes().get("bucket"), Some(&string(bucket)));
+    assert!(diagnostic.reason().contains("post-apply read-back"));
     assert!(diagnostic.reason().contains("Failed to read bucket"));
     assert!(!diagnostic.missing_attributes().is_empty());
 }
 
-#[tokio::test]
-async fn update_bucket_read_back_error_is_partial_success_with_updated_identifier() {
+#[tokio::test(start_paused = true)]
+async fn update_bucket_permanent_read_back_error_finishes_partial_immediately() {
     let bucket = "carina-bucket-update-read-back-error";
-    let provider = provider_with_error_read_back(Some(bucket)).await;
+    let provider = final_read_back_provider(provider_with_error_read_back(Some(bucket)).await);
     let resource: Resource =
         Resource::with_provider("aws", RESOURCE_TYPE, "partial-update-error", None);
     let id = resource.id;
@@ -601,11 +625,20 @@ async fn update_bucket_read_back_error_is_partial_success_with_updated_identifie
         .await
         .expect("the update API succeeded, so a failed read-back must stay successful");
 
+    assert_eq!(outcome.read_back_end(), ReadBackEnd::ProviderReported);
     let UpdateOutcomeKind::PartialSuccess { state, diagnostic } = outcome.kind() else {
         panic!("expected partial update success, got {outcome:?}");
     };
     assert_eq!(state.identifier().as_str(), bucket);
-    assert!(diagnostic.reason().contains("post-update read-back"));
+    assert_eq!(state.attributes().get("bucket"), Some(&string(bucket)));
+    assert_eq!(
+        state.attributes().get("tags"),
+        Some(&Value::Concrete(ConcreteValue::Map(IndexMap::from([(
+            "purpose".to_string(),
+            string("partial-update-error-test")
+        )]))))
+    );
+    assert!(diagnostic.reason().contains("post-apply read-back"));
     assert!(diagnostic.reason().contains("Failed to read bucket"));
     assert!(!diagnostic.missing_attributes().is_empty());
 }

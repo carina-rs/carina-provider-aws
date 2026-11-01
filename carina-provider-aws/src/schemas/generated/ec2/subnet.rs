@@ -15,6 +15,7 @@ pub fn ec2_subnet_config() -> AwsSchemaConfig {
         aws_type_name: "AWS::EC2::Subnet",
         resource_type_name: "ec2.Subnet",
         has_tags: true,
+        await_on_read_back: vec![],
         schema: ResourceSchema::new("ec2.Subnet")
         .with_description("Describes a subnet.")
         .with_conflicting_replacement()

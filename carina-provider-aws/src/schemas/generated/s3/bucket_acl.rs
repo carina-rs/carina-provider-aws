@@ -20,6 +20,7 @@ pub fn s3_bucket_acl_config() -> AwsSchemaConfig {
         aws_type_name: "AWS::S3::BucketAcl",
         resource_type_name: "s3.BucketAcl",
         has_tags: false,
+        await_on_read_back: vec![],
         schema: ResourceSchema::new("s3.BucketAcl")
             .with_coexisting_replacement()
             .attribute(

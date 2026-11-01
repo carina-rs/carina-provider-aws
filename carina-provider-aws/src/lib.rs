@@ -12,6 +12,7 @@ pub(crate) mod helpers;
 mod normalizer;
 mod provider;
 pub mod provider_generated;
+mod read_back;
 mod read_model;
 mod read_models_generated;
 #[cfg(test)]
@@ -36,7 +37,10 @@ pub use provider::{
     AwsCreateAttempt, AwsCreatePoll, AwsCreateResume, AwsFailureSummary, AwsIssuedCreate,
     AwsPollAttempt, AwsResumeAttempt, AwsResumedCreate,
 };
-pub use provider::{AwsCreateToken, AwsDeleteToken, Ec2TaggedResourceKind};
+pub use provider::{
+    AwsCreateOperation, AwsCreateToken, AwsDeleteToken, AwsUpdateToken, Ec2TaggedResourceKind,
+};
+pub use read_back::{NonEmptyAttributeNames, ReadBackContinuation, ReadBackRequirements};
 #[doc(hidden)]
 #[cfg(all(not(target_arch = "wasm32"), debug_assertions))]
 pub use read_model::non_finite_applied_state_for_protocol_test;

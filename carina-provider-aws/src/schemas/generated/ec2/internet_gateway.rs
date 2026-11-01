@@ -15,6 +15,7 @@ pub fn ec2_internet_gateway_config() -> AwsSchemaConfig {
         aws_type_name: "AWS::EC2::InternetGateway",
         resource_type_name: "ec2.InternetGateway",
         has_tags: true,
+        await_on_read_back: vec![],
         schema: ResourceSchema::new("ec2.InternetGateway")
         .with_description("Describes an internet gateway.")
         .with_coexisting_replacement()
