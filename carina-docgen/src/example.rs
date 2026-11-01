@@ -243,10 +243,10 @@ fn ensure_semantically_equal(
         structural_bindings: authored_structural_bindings,
         // Evaluator-only parser bookkeeping is not authored DSL semantics.
         parser_binding_metadata: _,
-        warnings: authored_warnings,
-        deferred_module_ifs: authored_deferred_module_ifs,
         // Module-expansion lineage is not produced when parsing these standalone files.
         expansion_trace: _,
+        warnings: authored_warnings,
+        deferred_module_ifs: authored_deferred_module_ifs,
         // `..` stands only for crate-private `parsed_binding_uses`, `deferred_for_phase`, and
         // `template_placeholder`; new public fields must be added by name.
         ..
@@ -271,10 +271,10 @@ fn ensure_semantically_equal(
         structural_bindings: rendered_structural_bindings,
         // Evaluator-only parser bookkeeping is not authored DSL semantics.
         parser_binding_metadata: _,
-        warnings: rendered_warnings,
-        deferred_module_ifs: rendered_deferred_module_ifs,
         // Module-expansion lineage is not produced when parsing these standalone files.
         expansion_trace: _,
+        warnings: rendered_warnings,
+        deferred_module_ifs: rendered_deferred_module_ifs,
         // `..` stands only for crate-private `parsed_binding_uses`, `deferred_for_phase`, and
         // `template_placeholder`; new public fields must be added by name.
         ..
@@ -799,6 +799,10 @@ fn removals(masked: &[u8]) -> Result<Vec<Range<usize>>> {
     let mut line_start = 0;
     let mut nesting_depth = 0usize;
     let mut line_has_code = false;
+    // The earliest whitespace/comment byte that can be removed with a provider statement.
+    // This is separate from `line_has_code`, which protects preserved comment text from
+    // overlapping line-comment removals.
+    let mut provider_removal_start = Some(0);
 
     while cursor < masked.len() {
         match masked[cursor] {
@@ -806,6 +810,7 @@ fn removals(masked: &[u8]) -> Result<Vec<Range<usize>>> {
                 cursor += 1;
                 line_start = cursor;
                 line_has_code = false;
+                provider_removal_start = Some(cursor);
             }
             b' ' | b'\t' | b'\r' => cursor += 1,
             b'#' if nesting_depth == 0 && !line_has_code => {
@@ -814,6 +819,7 @@ fn removals(masked: &[u8]) -> Result<Vec<Range<usize>>> {
                 cursor = end;
                 line_start = cursor;
                 line_has_code = false;
+                provider_removal_start = Some(cursor);
             }
             b'/' if masked.get(cursor + 1) == Some(&b'/')
                 && nesting_depth == 0
@@ -824,6 +830,7 @@ fn removals(masked: &[u8]) -> Result<Vec<Range<usize>>> {
                 cursor = end;
                 line_start = cursor;
                 line_has_code = false;
+                provider_removal_start = Some(cursor);
             }
             b'#' => cursor = skip_line_comment(masked, cursor),
             b'/' if masked.get(cursor + 1) == Some(&b'/') => {
@@ -833,6 +840,9 @@ fn removals(masked: &[u8]) -> Result<Vec<Range<usize>>> {
                 let end = skip_block_comment(masked, cursor);
                 if update_line_start(masked, cursor, end, &mut line_start) {
                     line_has_code = true;
+                    if provider_removal_start.is_none() {
+                        provider_removal_start = Some(end);
+                    }
                 }
                 cursor = end;
             }
@@ -840,6 +850,7 @@ fn removals(masked: &[u8]) -> Result<Vec<Range<usize>>> {
                 let end = skip_single_quoted_string(masked, cursor);
                 update_line_start(masked, cursor, end, &mut line_start);
                 line_has_code = true;
+                provider_removal_start = None;
                 cursor = end;
             }
             b'"' => {
@@ -849,26 +860,31 @@ fn removals(masked: &[u8]) -> Result<Vec<Range<usize>>> {
                 }
                 update_line_start(masked, cursor, end, &mut line_start);
                 line_has_code = true;
+                provider_removal_start = None;
                 cursor = end;
             }
             b'<' if masked.get(cursor + 1) == Some(&b'<') => {
                 let Some(end) = heredoc_end(masked, cursor) else {
                     line_has_code = true;
+                    provider_removal_start = None;
                     cursor += 1;
                     continue;
                 };
                 update_line_start(masked, cursor, end, &mut line_start);
                 line_has_code = true;
+                provider_removal_start = None;
                 cursor = end;
             }
             b'{' | b'[' | b'(' => {
                 nesting_depth += 1;
                 line_has_code = true;
+                provider_removal_start = None;
                 cursor += 1;
             }
             b'}' | b']' | b')' => {
                 nesting_depth = nesting_depth.saturating_sub(1);
                 line_has_code = true;
+                provider_removal_start = None;
                 cursor += 1;
             }
             byte if byte.is_ascii_alphabetic() || byte == b'_' => {
@@ -880,22 +896,28 @@ fn removals(masked: &[u8]) -> Result<Vec<Range<usize>>> {
                 {
                     cursor += 1;
                 }
-                let is_provider = &masked[token_start..cursor] == b"provider"
-                    && nesting_depth == 0
-                    && !line_has_code
-                    && masked
-                        .get(cursor)
-                        .is_some_and(|byte| byte.is_ascii_whitespace());
-                if !is_provider {
-                    line_has_code = true;
-                    continue;
-                }
+                let removal_start = match provider_removal_start {
+                    Some(removal_start)
+                        if &masked[token_start..cursor] == b"provider"
+                            && nesting_depth == 0
+                            && masked
+                                .get(cursor)
+                                .is_some_and(|byte| byte.is_ascii_whitespace()) =>
+                    {
+                        removal_start
+                    }
+                    _ => {
+                        line_has_code = true;
+                        provider_removal_start = None;
+                        continue;
+                    }
+                };
 
                 let block_end = find_provider_block_end(masked, cursor).ok_or_else(|| {
                     anyhow::anyhow!("parsed provider block has no balanced closing brace")
                 })?;
                 let removal_end = provider_removal_end(masked, block_end);
-                removals.push(line_start..removal_end);
+                removals.push(removal_start..removal_end);
                 let ends_mid_line = removal_end == block_end && removal_end < masked.len();
                 if ends_mid_line {
                     line_start = removal_end;
@@ -904,9 +926,11 @@ fn removals(masked: &[u8]) -> Result<Vec<Range<usize>>> {
                 }
                 cursor = removal_end;
                 line_has_code = ends_mid_line;
+                provider_removal_start = Some(removal_end);
             }
             _ => {
                 line_has_code = true;
+                provider_removal_start = None;
                 cursor += 1;
             }
         }
@@ -1388,8 +1412,7 @@ mod tests {
         let example = load_fixture(source, ExampleKind::Resource)
             .expect("valid provider after a multiline block comment");
 
-        assert!(resource_text(&example).contains(" */"));
-        assert!(resource_text(&example).contains("aws.ec2.Vpc {}\n"));
+        assert_eq!(resource_text(&example), "aws.ec2.Vpc {}\n");
     }
 
     #[test]
@@ -1529,19 +1552,10 @@ mod tests {
     fn two_unnamed_providers_on_one_line_do_not_panic() {
         let source = "provider aws {} provider aws {}\naws.ec2.Vpc {}\n";
 
-        let error = check(
-            source,
-            Path::new("two-unnamed-providers.crn"),
-            "aws",
-            "ec2.Vpc",
-            ExampleKind::Resource,
-        )
-        .expect_err("a rendered unnamed provider block must fail closed");
+        let example = load_fixture(source, ExampleKind::Resource)
+            .expect("multiple unnamed provider blocks must be stripped");
 
-        assert_eq!(
-            error.to_string(),
-            "Rendered example from two-unnamed-providers.crn still contains an unnamed provider block"
-        );
+        assert_eq!(resource_text(&example), "aws.ec2.Vpc {}\n");
     }
 
     #[test]
