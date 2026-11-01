@@ -75,7 +75,7 @@ impl Provider for FixtureProvider {
         Box::pin(async move {
             if self.suspend_create {
                 let token = serde_json::json!({"phase":"read_back", "identifier":ARN, "resource_type":"acm.Certificate"});
-                return Err(attempt
+                let pending = attempt
                     .issued(
                         AppliedIdentifier::new(ARN).unwrap(),
                         Sent::AllRequestAttributes,
@@ -83,10 +83,22 @@ impl Provider for FixtureProvider {
                     .pending_read_back(
                         carina_core::provider::PendingToken::new(token.to_string()),
                         5,
-                    )
-                    .preserve(carina_core::provider::ProviderError::internal(
-                        "test persists a read-back continuation",
-                    )));
+                    );
+                assert_eq!(
+                    pending.phase(),
+                    carina_provider_protocol::PendingPhase::ReadBack
+                );
+                let carina_core::provider::Poll::Issued(issued) = pending.into_poll() else {
+                    panic!("read-back must have an identifier")
+                };
+                return Err(carina_provider_aws::AwsIssuedCreate::preserve(
+                    issued,
+                    serde_json::from_value(token).unwrap(),
+                    carina_core::provider::ProviderError::api_error_caused_by(
+                        "temporary read-back failure",
+                        std::io::Error::other("connection reset"),
+                    ),
+                ));
             }
             if id.resource_type.as_str() == "test.Dependent" {
                 let attrs = request.resource().as_resource().resolved_attributes();
@@ -523,6 +535,42 @@ async fn checked_create(resource: Resource) -> CreateRequest {
     executor::prepare_create_request(resource, &preparation)
         .await
         .unwrap()
+}
+
+#[tokio::test]
+async fn native_read_back_transient_failure_preserves_continuation() {
+    use carina_core::provider::CreateFailureKind;
+    use carina_plugin_sdk::PhasedToken;
+    use carina_provider_aws::AwsCreateToken;
+
+    let (mut provider, service) = fixture(&[false], 120).await;
+    provider.suspend_create = true;
+    let resource = certificate();
+    let request = checked_create(resource.clone()).await;
+    let (call, _cancellation) = executor::dispatch_create(&provider, &resource.id, request);
+    let CreateFailureKind::InFlight { pending, error } = call.await.unwrap_err().into_kind() else {
+        panic!("a transient poll failure must preserve read-back")
+    };
+    let token: AwsCreateToken =
+        serde_json::from_str(pending.token().expose_for_provider_call()).unwrap();
+    assert_eq!(
+        token.phase(),
+        carina_provider_protocol::PendingPhase::ReadBack
+    );
+    assert_eq!(pending.identifier().unwrap().as_str(), ARN);
+    assert!(
+        matches!(token, AwsCreateToken::ReadBack(continuation) if continuation.identifier().as_str() == ARN)
+    );
+    assert!(
+        error
+            .to_wire()
+            .cause
+            .as_deref()
+            .unwrap()
+            .contains("connection reset")
+    );
+    assert_eq!(service.requests.load(Ordering::Relaxed), 0);
+    assert_eq!(service.describes.load(Ordering::Relaxed), 0);
 }
 
 #[tokio::test]

@@ -21,7 +21,7 @@ use carina_core::schema::{
 use indexmap::IndexMap;
 use winterbaume_core::{MockAws, MockRequest, MockResponse, MockService};
 
-use crate::provider::{AwsCreateAttempt, AwsCreateToken, AwsIssuedCreate};
+use crate::provider::{AwsCreateAttempt, AwsCreateOperation, AwsCreateToken, AwsIssuedCreate};
 use crate::send_models_generated::{SendCaptureAttribute, SendCaptureContract};
 use crate::{AwsProvider, BoundedSdkConfig};
 
@@ -178,7 +178,7 @@ impl AwsCreateAttempt for CaptureAttempt {
 
     fn pending(
         self,
-        _token: AwsCreateToken,
+        _token: AwsCreateOperation,
         _sent: Sent,
         _poll_after_secs: u32,
     ) -> Result<Self::Step, Self::Verdict> {
@@ -205,14 +205,6 @@ impl AwsIssuedCreate for CaptureIssued {
         _missing_attributes: crate::NonEmptyAttributeNames,
     ) -> Result<Self::Step, Self::Verdict> {
         Ok(())
-    }
-
-    fn pending_read_back(
-        self,
-        continuation: crate::ReadBackContinuation,
-        poll_after_secs: u32,
-    ) -> Result<Self::Step, Self::Verdict> {
-        self.pending(AwsCreateToken::ReadBack(continuation), poll_after_secs)
     }
 
     fn failed(self, _observation: Observation, error: ProviderError) -> Self::Verdict {

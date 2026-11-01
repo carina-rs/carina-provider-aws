@@ -17,9 +17,10 @@ use carina_core::provider::{
     PatchOp, ProviderDirectiveSchema, ProviderError, ReadOutcome, Sent, UpdatePatch,
 };
 use carina_core::resource::{ConcreteValue, Directives, Resource, ResourceId, State, Value};
+use carina_plugin_sdk::PhasedToken;
 use carina_provider_aws::{
-    AwsCreateAttempt, AwsCreatePoll, AwsCreateResume, AwsCreateToken, AwsDeleteToken,
-    AwsIssuedCreate, AwsNormalizer, AwsPollAttempt, AwsProvider, AwsResumeAttempt,
+    AwsCreateAttempt, AwsCreateOperation, AwsCreatePoll, AwsCreateResume, AwsCreateToken,
+    AwsDeleteToken, AwsIssuedCreate, AwsNormalizer, AwsPollAttempt, AwsProvider, AwsResumeAttempt,
     AwsResumedCreate, BoundedSdkConfig, Ec2TaggedResourceKind,
 };
 use carina_provider_protocol::{OperationStep, PollFinality, PollRequest};
@@ -149,12 +150,12 @@ impl AwsCreateAttempt for TestCreateAttempt {
 
     fn pending(
         self,
-        token: AwsCreateToken,
+        token: AwsCreateOperation,
         _sent: Sent,
         poll_after_secs: u32,
     ) -> Result<Self::Step, Self::Verdict> {
         Ok(TestCreateStep::Pending {
-            token,
+            token: token.into(),
             identifier: None,
             poll_after_secs,
         })
@@ -170,9 +171,9 @@ impl AwsPollAttempt for TestPollAttempt {
         TestCreateVerdict::Untracked(error)
     }
 
-    fn preserve(self, token: AwsCreateToken, error: ProviderError) -> Self::Verdict {
+    fn preserve(self, token: AwsCreateOperation, error: ProviderError) -> Self::Verdict {
         TestCreateVerdict::InFlight {
-            token,
+            token: token.into(),
             identifier: None,
             error,
         }
@@ -188,11 +189,11 @@ impl AwsPollAttempt for TestPollAttempt {
 
     fn pending(
         self,
-        token: AwsCreateToken,
+        token: AwsCreateOperation,
         poll_after_secs: u32,
     ) -> Result<Self::Step, Self::Verdict> {
         Ok(TestCreateStep::Pending {
-            token,
+            token: token.into(),
             identifier: None,
             poll_after_secs,
         })
@@ -229,14 +230,6 @@ impl AwsIssuedCreate for TestIssuedCreate {
             reason: reason.to_string(),
             missing_attributes: missing_attributes.into(),
         })
-    }
-
-    fn pending_read_back(
-        self,
-        continuation: carina_provider_aws::ReadBackContinuation,
-        poll_after_secs: u32,
-    ) -> Result<Self::Step, Self::Verdict> {
-        self.pending(AwsCreateToken::ReadBack(continuation), poll_after_secs)
     }
 
     fn failed(self, observation: Observation, error: ProviderError) -> Self::Verdict {
@@ -334,9 +327,9 @@ impl AwsResumeAttempt for TestResumeAttempt {
         TestResumeVerdict::Untracked(error)
     }
 
-    fn preserve(self, token: AwsCreateToken, error: ProviderError) -> Self::Verdict {
+    fn preserve(self, token: AwsCreateOperation, error: ProviderError) -> Self::Verdict {
         TestResumeVerdict::InFlight {
-            token,
+            token: token.into(),
             identifier: None,
             error,
         }
@@ -348,11 +341,11 @@ impl AwsResumeAttempt for TestResumeAttempt {
 
     fn pending(
         self,
-        token: AwsCreateToken,
+        token: AwsCreateOperation,
         poll_after_secs: u32,
     ) -> Result<Self::Step, Self::Verdict> {
         Ok(TestResumeStep::Pending {
-            token,
+            token: token.into(),
             identifier: None,
             poll_after_secs,
         })
@@ -387,14 +380,6 @@ impl AwsResumedCreate for TestResumedCreate {
             reason: reason.to_string(),
             missing_attributes: missing_attributes.into(),
         })
-    }
-
-    fn pending_read_back(
-        self,
-        continuation: carina_provider_aws::ReadBackContinuation,
-        poll_after_secs: u32,
-    ) -> Result<Self::Step, Self::Verdict> {
-        self.pending(AwsCreateToken::ReadBack(continuation), poll_after_secs)
     }
 
     fn failed(self, _observation: Observation, error: ProviderError) -> Self::Verdict {
@@ -1281,9 +1266,9 @@ fn expect_create_pending(step: TestCreateStep) -> AwsCreateToken {
         } => {
             assert_eq!(
                 token,
-                AwsCreateToken::NatGateway {
+                AwsCreateToken::Operation(AwsCreateOperation::NatGateway {
                     nat_gateway_id: applied_identifier(NAT_GATEWAY_ID),
-                }
+                })
             );
             assert_eq!(identifier, Some(applied_identifier(NAT_GATEWAY_ID)));
             token
@@ -1314,27 +1299,40 @@ fn expect_delete_pending(step: OperationStep<(), ProviderError, AwsDeleteToken>)
     }
 }
 
-fn poll_attempt(resource: &Resource) -> AwsCreatePoll<TestPollAttempt, TestIssuedCreate> {
-    AwsCreatePoll::Unissued(TestPollAttempt {
-        id: resource.id.clone(),
-    })
+fn poll_attempt(
+    resource: &Resource,
+    token: AwsCreateToken,
+) -> AwsCreatePoll<TestPollAttempt, TestIssuedCreate> {
+    AwsCreatePoll::Unissued(
+        TestPollAttempt {
+            id: resource.id.clone(),
+        },
+        (token).into_operation().unwrap(),
+    )
 }
 
 fn issued_poll(
     resource: &Resource,
     sent: Sent,
+    token: AwsCreateToken,
 ) -> AwsCreatePoll<TestPollAttempt, TestIssuedCreate> {
-    AwsCreatePoll::Issued(TestIssuedCreate {
-        id: resource.id.clone(),
-        identifier: applied_identifier(NAT_GATEWAY_ID),
-        sent,
-    })
+    AwsCreatePoll::Issued(
+        TestIssuedCreate {
+            id: resource.id.clone(),
+            identifier: applied_identifier(NAT_GATEWAY_ID),
+            sent,
+        },
+        token,
+    )
 }
 
-fn issued_resume() -> AwsCreateResume<TestResumeAttempt, TestResumedCreate> {
-    AwsCreateResume::Issued(TestResumedCreate {
-        identifier: applied_identifier(NAT_GATEWAY_ID),
-    })
+fn issued_resume(token: AwsCreateToken) -> AwsCreateResume<TestResumeAttempt, TestResumedCreate> {
+    AwsCreateResume::Issued(
+        TestResumedCreate {
+            identifier: applied_identifier(NAT_GATEWAY_ID),
+        },
+        token,
+    )
 }
 
 fn applied_identifier(value: &str) -> AppliedIdentifier {
@@ -1405,12 +1403,12 @@ async fn create_vpc_post_send_failure_becomes_unissued_pending() {
     assert_eq!(identifier, None);
     assert!(matches!(
         token,
-        AwsCreateToken::TaggedEc2 {
+        AwsCreateToken::Operation(AwsCreateOperation::TaggedEc2 {
             kind: Ec2TaggedResourceKind::Vpc,
             attempts_remaining: 4,
             next_delay_secs: 5,
             ..
-        }
+        })
     ));
     assert_eq!(calls.load(Ordering::Relaxed), 1);
 }
@@ -1433,12 +1431,12 @@ async fn token_bearing_route_table_post_send_failure_enters_tagged_discovery() {
     assert!(matches!(
         step,
         TestCreateStep::Pending {
-            token: AwsCreateToken::TaggedEc2 {
+            token: AwsCreateToken::Operation(AwsCreateOperation::TaggedEc2 {
                 kind: Ec2TaggedResourceKind::RouteTable,
                 attempts_remaining: 4,
                 next_delay_secs: 5,
                 ..
-            },
+            }),
             identifier: None,
             poll_after_secs: 5,
         }
@@ -1507,8 +1505,7 @@ async fn request_certificate_poll_success_issues_arn_and_runs_normal_continuatio
     let step = provider
         .poll_create_step(
             &resource,
-            acm_request_token(unix_now(), 3),
-            poll_attempt(&resource),
+            poll_attempt(&resource, acm_request_token(unix_now(), 3)),
             PollRequest {
                 finality: PollFinality::Continue,
             },
@@ -1537,8 +1534,7 @@ async fn maybe_sent_request_certificate_poll_repends_with_a_bounded_attempt() {
     let step = provider
         .poll_create_step(
             &resource,
-            acm_request_token(first_used_at_unix_secs, 2),
-            poll_attempt(&resource),
+            poll_attempt(&resource, acm_request_token(first_used_at_unix_secs, 2)),
             PollRequest {
                 finality: PollFinality::Continue,
             },
@@ -1580,8 +1576,7 @@ async fn maybe_sent_request_certificate_poll_exhaustion_stays_in_flight() {
     let verdict = provider
         .poll_create_step(
             &resource,
-            token.clone(),
-            poll_attempt(&resource),
+            poll_attempt(&resource, token.clone()),
             PollRequest {
                 finality: PollFinality::Continue,
             },
@@ -1605,8 +1600,10 @@ async fn expired_request_certificate_poll_stays_in_flight_without_resending() {
     let verdict = provider
         .poll_create_step(
             &resource,
-            acm_request_token(unix_now().saturating_sub(45 * 60), 3),
-            poll_attempt(&resource),
+            poll_attempt(
+                &resource,
+                acm_request_token(unix_now().saturating_sub(45 * 60), 3),
+            ),
             PollRequest {
                 finality: PollFinality::Continue,
             },
@@ -1646,8 +1643,11 @@ async fn request_certificate_token_with_issued_poll_fails_without_resending() {
     let verdict = provider
         .poll_create_step(
             &resource,
-            acm_request_token(unix_now(), 3),
-            issued_poll(&resource, Sent::AllRequestAttributes),
+            issued_poll(
+                &resource,
+                Sent::AllRequestAttributes,
+                acm_request_token(unix_now(), 3),
+            ),
             PollRequest {
                 finality: PollFinality::Continue,
             },
@@ -1688,8 +1688,7 @@ async fn rejected_request_certificate_poll_preserves_the_continuation() {
     let verdict = provider
         .poll_create_step(
             &resource,
-            token.clone(),
-            poll_attempt(&resource),
+            poll_attempt(&resource, token.clone()),
             PollRequest {
                 finality: PollFinality::Continue,
             },
@@ -1716,8 +1715,10 @@ async fn request_certificate_resume_within_window_resends_the_same_token() {
     let step = provider
         .resume_create_step(
             &resource,
-            acm_request_token(unix_now(), 3),
-            AwsCreateResume::Unissued(TestResumeAttempt),
+            AwsCreateResume::Unissued(
+                TestResumeAttempt,
+                (acm_request_token(unix_now(), 3)).into_operation().unwrap(),
+            ),
             PollRequest {
                 finality: PollFinality::Continue,
             },
@@ -1744,8 +1745,7 @@ async fn expired_request_certificate_resume_stays_in_flight_without_resending() 
     let verdict = provider
         .resume_create_step(
             &resource,
-            token.clone(),
-            AwsCreateResume::Unissued(TestResumeAttempt),
+            AwsCreateResume::Unissued(TestResumeAttempt, (token.clone()).into_operation().unwrap()),
             PollRequest {
                 finality: PollFinality::Continue,
             },
@@ -1776,8 +1776,7 @@ async fn request_certificate_token_with_issued_resume_fails_without_resending() 
     let verdict = provider
         .resume_create_step(
             &resource,
-            acm_request_token(unix_now(), 3),
-            issued_resume(),
+            issued_resume(acm_request_token(unix_now(), 3)),
             PollRequest {
                 finality: PollFinality::Continue,
             },
@@ -1817,8 +1816,7 @@ async fn tagged_vpc_poll_with_one_match_hands_continuation_to_next_poll() {
     let step = provider
         .poll_create_step(
             &resource,
-            tagged_vpc_token(4, 5),
-            poll_attempt(&resource),
+            poll_attempt(&resource, tagged_vpc_token(4, 5)),
             PollRequest {
                 finality: PollFinality::Continue,
             },
@@ -1837,21 +1835,23 @@ async fn tagged_vpc_poll_with_one_match_hands_continuation_to_next_poll() {
     assert_eq!(identifier.as_str(), "vpc-00000553");
     assert!(matches!(
         &token,
-        AwsCreateToken::TaggedEc2Found {
+        AwsCreateToken::Operation(AwsCreateOperation::TaggedEc2Found {
             kind: Ec2TaggedResourceKind::Vpc,
             identifier: found,
-        } if found == &identifier
+        }) if found == &identifier
     ));
 
     let step = provider
         .poll_create_step::<TestPollAttempt>(
             &resource,
-            token,
-            AwsCreatePoll::Issued(TestIssuedCreate {
-                id: resource.id.clone(),
-                identifier,
-                sent: Sent::AllRequestAttributes,
-            }),
+            AwsCreatePoll::Issued(
+                TestIssuedCreate {
+                    id: resource.id.clone(),
+                    identifier,
+                    sent: Sent::AllRequestAttributes,
+                },
+                token,
+            ),
             PollRequest {
                 finality: PollFinality::Continue,
             },
@@ -1875,8 +1875,7 @@ async fn tagged_vpc_poll_with_no_match_uses_full_window_then_stays_in_flight() {
         let step = provider
             .poll_create_step(
                 &resource,
-                token,
-                poll_attempt(&resource),
+                poll_attempt(&resource, token),
                 PollRequest {
                     finality: PollFinality::Continue,
                 },
@@ -1895,11 +1894,11 @@ async fn tagged_vpc_poll_with_no_match_uses_full_window_then_stays_in_flight() {
         assert_eq!(poll_after_secs, expected_delay);
         assert!(matches!(
             next,
-            AwsCreateToken::TaggedEc2 {
+            AwsCreateToken::Operation(AwsCreateOperation::TaggedEc2 {
                 attempts_remaining,
                 next_delay_secs,
                 ..
-            } if attempts_remaining == remaining && next_delay_secs == expected_delay
+            }) if attempts_remaining == remaining && next_delay_secs == expected_delay
         ));
         token = next;
     }
@@ -1908,8 +1907,7 @@ async fn tagged_vpc_poll_with_no_match_uses_full_window_then_stays_in_flight() {
     let verdict = provider
         .poll_create_step(
             &resource,
-            token,
-            poll_attempt(&resource),
+            poll_attempt(&resource, token),
             PollRequest {
                 finality: PollFinality::Continue,
             },
@@ -1934,8 +1932,7 @@ async fn tagged_vpc_discovery_stops_after_the_bounded_page_count() {
     let step = provider
         .poll_create_step(
             &resource,
-            tagged_vpc_token(4, 5),
-            poll_attempt(&resource),
+            poll_attempt(&resource, tagged_vpc_token(4, 5)),
             PollRequest {
                 finality: PollFinality::Continue,
             },
@@ -1947,11 +1944,11 @@ async fn tagged_vpc_discovery_stops_after_the_bounded_page_count() {
     assert!(matches!(
         step,
         TestCreateStep::Pending {
-            token: AwsCreateToken::TaggedEc2 {
+            token: AwsCreateToken::Operation(AwsCreateOperation::TaggedEc2 {
                 attempts_remaining: 3,
                 next_delay_secs: 10,
                 ..
-            },
+            }),
             identifier: None,
             poll_after_secs: 10,
         }
@@ -1966,8 +1963,10 @@ async fn tagged_vpc_resume_with_no_match_at_exhaustion_stays_in_flight() {
     let verdict = provider
         .resume_create_step(
             &resource,
-            tagged_vpc_token(1, 60),
-            AwsCreateResume::Unissued(TestResumeAttempt),
+            AwsCreateResume::Unissued(
+                TestResumeAttempt,
+                (tagged_vpc_token(1, 60)).into_operation().unwrap(),
+            ),
             PollRequest {
                 finality: PollFinality::Continue,
             },
@@ -1992,8 +1991,7 @@ async fn tagged_vpc_discovery_error_consumes_final_attempt_and_keeps_cause() {
     let verdict = provider
         .poll_create_step(
             &resource,
-            tagged_vpc_token(1, 60),
-            poll_attempt(&resource),
+            poll_attempt(&resource, tagged_vpc_token(1, 60)),
             PollRequest {
                 finality: PollFinality::Continue,
             },
@@ -2034,8 +2032,7 @@ async fn tagged_vpc_exhaustion_keeps_the_original_send_failure_summary() {
     let verdict = provider
         .poll_create_step(
             &resource,
-            tagged_vpc_token_with_original_failure(),
-            poll_attempt(&resource),
+            poll_attempt(&resource, tagged_vpc_token_with_original_failure()),
             PollRequest {
                 finality: PollFinality::Continue,
             },
@@ -2071,8 +2068,7 @@ async fn partial_flow_log_discovery_keeps_polling_for_every_requested_resource_i
     let step = provider
         .poll_create_step(
             &resource,
-            tagged_flow_log_token(4, 5),
-            poll_attempt(&resource),
+            poll_attempt(&resource, tagged_flow_log_token(4, 5)),
             PollRequest {
                 finality: PollFinality::Continue,
             },
@@ -2083,12 +2079,12 @@ async fn partial_flow_log_discovery_keeps_polling_for_every_requested_resource_i
     assert!(matches!(
         step,
         TestCreateStep::Pending {
-            token: AwsCreateToken::TaggedEc2 {
+            token: AwsCreateToken::Operation(AwsCreateOperation::TaggedEc2 {
                 kind: Ec2TaggedResourceKind::FlowLog,
                 attempts_remaining: 3,
                 next_delay_secs: 10,
                 ..
-            },
+            }),
             identifier: None,
             poll_after_secs: 10,
         }
@@ -2103,8 +2099,7 @@ async fn tagged_vpc_poll_with_two_matches_stays_in_flight() {
     let verdict = provider
         .poll_create_step(
             &resource,
-            tagged_vpc_token(4, 5),
-            poll_attempt(&resource),
+            poll_attempt(&resource, tagged_vpc_token(4, 5)),
             PollRequest {
                 finality: PollFinality::Continue,
             },
@@ -2130,17 +2125,18 @@ async fn tagged_vpc_issued_poll_with_two_matches_preserves_identifier_and_token(
     let resource = vpc_resource();
     let token = tagged_vpc_token(4, 5);
     let identifier = applied_identifier("vpc-previously-issued");
-    let poll: AwsCreatePoll<TestPollAttempt, TestIssuedCreate> =
-        AwsCreatePoll::Issued(TestIssuedCreate {
+    let poll: AwsCreatePoll<TestPollAttempt, TestIssuedCreate> = AwsCreatePoll::Issued(
+        TestIssuedCreate {
             id: resource.id.clone(),
             identifier: identifier.clone(),
             sent: Sent::AllRequestAttributes,
-        });
+        },
+        token.clone(),
+    );
 
     let verdict = provider
         .poll_create_step(
             &resource,
-            token.clone(),
             poll,
             PollRequest {
                 finality: PollFinality::Continue,
@@ -2171,8 +2167,7 @@ async fn accepted_create_then_transient_waiter_failure_stays_in_flight_with_iden
     let step = provider
         .poll_create_step(
             &resource,
-            token.clone(),
-            issued_poll(&resource, Sent::only(["subnet_id"])),
+            issued_poll(&resource, Sent::only(["subnet_id"]), token.clone()),
             PollRequest {
                 finality: PollFinality::Continue,
             },
@@ -2212,8 +2207,7 @@ async fn accepted_create_then_post_create_failure_is_created_and_excludes_failed
     let verdict = provider
         .poll_create_step(
             &resource,
-            token,
-            issued_poll(&resource, Sent::only(["subnet_id"])),
+            issued_poll(&resource, Sent::only(["subnet_id"]), token),
             PollRequest {
                 finality: PollFinality::Continue,
             },
@@ -2293,8 +2287,7 @@ async fn post_create_failure_with_failed_read_back_is_created_with_read_failed_o
     let verdict = provider
         .poll_create_step(
             &resource,
-            token,
-            issued_poll(&resource, Sent::only(["subnet_id"])),
+            issued_poll(&resource, Sent::only(["subnet_id"]), token),
             PollRequest {
                 finality: PollFinality::Continue,
             },
@@ -2312,15 +2305,14 @@ async fn post_create_failure_with_failed_read_back_is_created_with_read_failed_o
 async fn resume_of_issued_create_still_creating_repends_with_same_identifier() {
     let (provider, _service) = provider_with_ec2(&["pending"]).await;
     let resource = nat_gateway_resource();
-    let token = AwsCreateToken::NatGateway {
+    let token = AwsCreateToken::Operation(AwsCreateOperation::NatGateway {
         nat_gateway_id: applied_identifier(NAT_GATEWAY_ID),
-    };
+    });
 
     let step = provider
         .resume_create_step(
             &resource,
-            token.clone(),
-            issued_resume(),
+            issued_resume(token.clone()),
             PollRequest {
                 finality: PollFinality::Continue,
             },
@@ -2344,15 +2336,14 @@ async fn resume_of_issued_create_still_creating_repends_with_same_identifier() {
 async fn resume_of_issued_create_found_completes() {
     let (provider, service) = provider_with_ec2(&["available", "available"]).await;
     let resource = nat_gateway_resource();
-    let token = AwsCreateToken::NatGateway {
+    let token = AwsCreateToken::Operation(AwsCreateOperation::NatGateway {
         nat_gateway_id: applied_identifier(NAT_GATEWAY_ID),
-    };
+    });
 
     let step = provider
         .resume_create_step(
             &resource,
-            token,
-            issued_resume(),
+            issued_resume(token),
             PollRequest {
                 finality: PollFinality::Continue,
             },
@@ -2370,16 +2361,14 @@ async fn resume_of_issued_create_found_completes() {
 async fn resume_transient_error_without_identifier_stays_in_flight() {
     let provider = provider_without_services().await;
     let resource = Resource::with_provider("aws", "organizations.Account", "resume", None);
-    let token = AwsCreateToken::OrganizationsAccount {
+    let token = AwsCreateToken::Operation(AwsCreateOperation::OrganizationsAccount {
         create_account_request_id: "car-test-request".to_string(),
-    };
-    let resume = AwsCreateResume::Unissued(TestResumeAttempt);
-
+    });
     let expected_token = token.clone();
+    let resume = AwsCreateResume::Unissued(TestResumeAttempt, token.into_operation().unwrap());
     let verdict = provider
         .resume_create_step(
             &resource,
-            token,
             resume,
             PollRequest {
                 finality: PollFinality::Continue,
@@ -2416,8 +2405,7 @@ async fn nat_gateway_create_steps_issue_once_poll_once_and_read_back() {
         provider
             .poll_create_step(
                 &resource,
-                token,
-                poll_attempt(&resource),
+                poll_attempt(&resource, token),
                 PollRequest {
                     finality: PollFinality::Continue,
                 },
@@ -2431,8 +2419,7 @@ async fn nat_gateway_create_steps_issue_once_poll_once_and_read_back() {
         provider
             .poll_create_step(
                 &resource,
-                token,
-                poll_attempt(&resource),
+                poll_attempt(&resource, token),
                 PollRequest {
                     finality: PollFinality::Continue,
                 },
@@ -2445,8 +2432,7 @@ async fn nat_gateway_create_steps_issue_once_poll_once_and_read_back() {
     let state = match provider
         .poll_create_step(
             &resource,
-            token,
-            poll_attempt(&resource),
+            poll_attempt(&resource, token),
             PollRequest {
                 finality: PollFinality::Continue,
             },
@@ -2490,8 +2476,7 @@ async fn create_read_back_permanent_error_finishes_partial_after_mutation_poll()
     let step = provider
         .poll_create_step(
             &resource,
-            token,
-            poll_attempt(&resource),
+            poll_attempt(&resource, token),
             PollRequest {
                 finality: PollFinality::Continue,
             },
@@ -2539,8 +2524,7 @@ async fn assert_create_read_back_recovers(first_read: &str) {
     let pending = provider
         .poll_create_step(
             &resource,
-            token,
-            poll_attempt(&resource),
+            poll_attempt(&resource, token),
             PollRequest {
                 finality: PollFinality::Continue,
             },
@@ -2558,8 +2542,7 @@ async fn assert_create_read_back_recovers(first_read: &str) {
     let result = provider
         .poll_create_step(
             &resource,
-            token,
-            issued_poll(&resource, Sent::AllRequestAttributes),
+            issued_poll(&resource, Sent::AllRequestAttributes, token),
             PollRequest {
                 finality: PollFinality::Continue,
             },
@@ -2606,8 +2589,7 @@ async fn resume_read_back_in_fresh_provider_reads_by_identifier() {
     let step = provider
         .poll_create_step(
             &resource,
-            token,
-            poll_attempt(&resource),
+            poll_attempt(&resource, token),
             PollRequest {
                 finality: PollFinality::Continue,
             },
@@ -2625,8 +2607,7 @@ async fn resume_read_back_in_fresh_provider_reads_by_identifier() {
     let step = provider
         .resume_create_step(
             &resource,
-            serde_json::from_str(&serialized).unwrap(),
-            issued_resume(),
+            issued_resume(serde_json::from_str(&serialized).unwrap()),
             PollRequest {
                 finality: PollFinality::Continue,
             },
@@ -2661,8 +2642,7 @@ async fn nat_gateway_failed_create_poll_returns_api_error() {
     let error = provider
         .poll_create_step(
             &resource,
-            token,
-            poll_attempt(&resource),
+            poll_attempt(&resource, token),
             PollRequest {
                 finality: PollFinality::Continue,
             },
@@ -2769,15 +2749,17 @@ async fn acm_dvo_arrives_on_second_poll() {
             expected_reads,
             "one fetch per step"
         );
-        let poll = AwsCreatePoll::<TestPollAttempt, TestIssuedCreate>::Issued(TestIssuedCreate {
-            id: resource.id.clone(),
-            identifier: applied_identifier(ACM_CERTIFICATE_ARN),
-            sent: Sent::AllRequestAttributes,
-        });
+        let poll = AwsCreatePoll::<TestPollAttempt, TestIssuedCreate>::Issued(
+            TestIssuedCreate {
+                id: resource.id.clone(),
+                identifier: applied_identifier(ACM_CERTIFICATE_ARN),
+                sent: Sent::AllRequestAttributes,
+            },
+            token,
+        );
         step = provider
             .poll_create_step(
                 &resource,
-                token,
                 poll,
                 PollRequest {
                     finality: PollFinality::Continue,
@@ -2830,15 +2812,17 @@ async fn read_back_final_attempt_returns_partial_with_exact_missing_attributes()
         let TestCreateStep::Pending { token, .. } = step else {
             panic!("expected read-back pending: {step:?}")
         };
-        let poll = AwsCreatePoll::<TestPollAttempt, TestIssuedCreate>::Issued(TestIssuedCreate {
-            id: resource.id.clone(),
-            identifier: applied_identifier(ACM_CERTIFICATE_ARN),
-            sent: Sent::AllRequestAttributes,
-        });
+        let poll = AwsCreatePoll::<TestPollAttempt, TestIssuedCreate>::Issued(
+            TestIssuedCreate {
+                id: resource.id.clone(),
+                identifier: applied_identifier(ACM_CERTIFICATE_ARN),
+                sent: Sent::AllRequestAttributes,
+            },
+            token,
+        );
         let step = provider
             .poll_create_step(
                 &resource,
-                token,
                 poll,
                 PollRequest {
                     finality: PollFinality::FinalAttempt,
@@ -2975,15 +2959,17 @@ async fn permanent_read_back_error_finishes_partial_on_continuing_poll() {
                 .await
                 .unwrap(),
         );
-        let poll = AwsCreatePoll::<TestPollAttempt, TestIssuedCreate>::Issued(TestIssuedCreate {
-            id: resource.id.clone(),
-            identifier: applied_identifier(ACM_CERTIFICATE_ARN),
-            sent: Sent::AllRequestAttributes,
-        });
+        let poll = AwsCreatePoll::<TestPollAttempt, TestIssuedCreate>::Issued(
+            TestIssuedCreate {
+                id: resource.id.clone(),
+                identifier: applied_identifier(ACM_CERTIFICATE_ARN),
+                sent: Sent::AllRequestAttributes,
+            },
+            token,
+        );
         let step = provider
             .poll_create_step(
                 &resource,
-                token,
                 poll,
                 PollRequest {
                     finality: PollFinality::Continue,
@@ -3016,14 +3002,15 @@ async fn permanent_read_back_error_finishes_partial_on_resume() {
             .await
             .unwrap(),
     );
-    let resumed =
-        AwsCreateResume::<TestResumeAttempt, TestResumedCreate>::Issued(TestResumedCreate {
+    let resumed = AwsCreateResume::<TestResumeAttempt, TestResumedCreate>::Issued(
+        TestResumedCreate {
             identifier: applied_identifier(ACM_CERTIFICATE_ARN),
-        });
+        },
+        token,
+    );
     let step = provider
         .resume_create_step(
             &resource,
-            token,
             resumed,
             PollRequest {
                 finality: PollFinality::Continue,
@@ -3155,16 +3142,17 @@ async fn transient_read_back_service_error_stays_pending_then_completes() {
                     .await
                     .unwrap(),
             );
-            let poll =
-                AwsCreatePoll::<TestPollAttempt, TestIssuedCreate>::Issued(TestIssuedCreate {
+            let poll = AwsCreatePoll::<TestPollAttempt, TestIssuedCreate>::Issued(
+                TestIssuedCreate {
                     id: resource.id.clone(),
                     identifier: applied_identifier(ACM_CERTIFICATE_ARN),
                     sent: Sent::AllRequestAttributes,
-                });
+                },
+                token,
+            );
             let step = provider
                 .poll_create_step(
                     &resource,
-                    token,
                     poll,
                     PollRequest {
                         finality: PollFinality::Continue,
@@ -3239,15 +3227,17 @@ async fn transient_read_back_dispatch_failure_stays_pending_then_completes() {
             .await
             .unwrap(),
     );
-    let poll = AwsCreatePoll::<TestPollAttempt, TestIssuedCreate>::Issued(TestIssuedCreate {
-        id: resource.id.clone(),
-        identifier: applied_identifier(ACM_CERTIFICATE_ARN),
-        sent: Sent::AllRequestAttributes,
-    });
+    let poll = AwsCreatePoll::<TestPollAttempt, TestIssuedCreate>::Issued(
+        TestIssuedCreate {
+            id: resource.id.clone(),
+            identifier: applied_identifier(ACM_CERTIFICATE_ARN),
+            sent: Sent::AllRequestAttributes,
+        },
+        token,
+    );
     let step = provider
         .poll_create_step(
             &resource,
-            token,
             poll,
             PollRequest {
                 finality: PollFinality::Continue,
@@ -3324,14 +3314,15 @@ async fn resume_read_back_final_attempt_is_partial_with_exact_missing_attributes
     let TestCreateStep::Pending { token, .. } = step else {
         panic!("expected pending")
     };
-    let resume =
-        AwsCreateResume::<TestResumeAttempt, TestResumedCreate>::Issued(TestResumedCreate {
+    let resume = AwsCreateResume::<TestResumeAttempt, TestResumedCreate>::Issued(
+        TestResumedCreate {
             identifier: applied_identifier(ACM_CERTIFICATE_ARN),
-        });
+        },
+        token,
+    );
     let step = provider
         .resume_create_step(
             &resource,
-            token,
             resume,
             PollRequest {
                 finality: PollFinality::FinalAttempt,
@@ -3442,8 +3433,7 @@ async fn read_back_final_attempt_from_operation_is_terminal() {
         let step = provider
             .poll_create_step(
                 &resource,
-                token,
-                poll_attempt(&resource),
+                poll_attempt(&resource, token),
                 PollRequest {
                     finality: PollFinality::FinalAttempt,
                 },
@@ -3546,15 +3536,17 @@ async fn read_back_rejects_resource_and_identifier_mismatch_before_reading() {
         };
         let mut json = serde_json::to_value(token).unwrap();
         json[field] = serde_json::json!("wrong-route");
-        let poll = AwsCreatePoll::<TestPollAttempt, TestIssuedCreate>::Issued(TestIssuedCreate {
-            id: resource.id.clone(),
-            identifier: applied_identifier(ACM_CERTIFICATE_ARN),
-            sent: Sent::AllRequestAttributes,
-        });
+        let poll = AwsCreatePoll::<TestPollAttempt, TestIssuedCreate>::Issued(
+            TestIssuedCreate {
+                id: resource.id.clone(),
+                identifier: applied_identifier(ACM_CERTIFICATE_ARN),
+                sent: Sent::AllRequestAttributes,
+            },
+            serde_json::from_value(json).unwrap(),
+        );
         let verdict = provider
             .poll_create_step(
                 &resource,
-                serde_json::from_value(json).unwrap(),
                 poll,
                 PollRequest {
                     finality: PollFinality::Continue,
@@ -3658,14 +3650,15 @@ async fn acm_failed_read_back_resume_stays_terminal() {
     else {
         panic!("expected read-back")
     };
-    let resumed =
-        AwsCreateResume::<TestResumeAttempt, TestResumedCreate>::Issued(TestResumedCreate {
+    let resumed = AwsCreateResume::<TestResumeAttempt, TestResumedCreate>::Issued(
+        TestResumedCreate {
             identifier: applied_identifier(ACM_CERTIFICATE_ARN),
-        });
+        },
+        token,
+    );
     let error = provider
         .resume_create_step(
             &resource,
-            token,
             resumed,
             PollRequest {
                 finality: PollFinality::FinalAttempt,
@@ -3708,16 +3701,17 @@ async fn acm_final_partial_after_poll_retains_request_and_arn() {
             else {
                 panic!("expected pending")
             };
-            let poll =
-                AwsCreatePoll::<TestPollAttempt, TestIssuedCreate>::Issued(TestIssuedCreate {
+            let poll = AwsCreatePoll::<TestPollAttempt, TestIssuedCreate>::Issued(
+                TestIssuedCreate {
                     id: resource.id.clone(),
                     identifier: applied_identifier(ACM_CERTIFICATE_ARN),
                     sent: Sent::AllRequestAttributes,
-                });
+                },
+                token,
+            );
             let TestCreateStep::Pending { token, .. } = provider
                 .poll_create_step(
                     &resource,
-                    token,
                     poll,
                     PollRequest {
                         finality: PollFinality::Continue,
@@ -3733,11 +3727,11 @@ async fn acm_final_partial_after_poll_retains_request_and_arn() {
                     TestResumedCreate {
                         identifier: applied_identifier(ACM_CERTIFICATE_ARN),
                     },
+                    token,
                 );
                 let TestResumeStep::Partial { attributes, .. } = provider
                     .resume_create_step(
                         &resource,
-                        token,
                         resumed,
                         PollRequest {
                             finality: PollFinality::FinalAttempt,
@@ -3750,16 +3744,17 @@ async fn acm_final_partial_after_poll_retains_request_and_arn() {
                 };
                 attributes
             } else {
-                let poll =
-                    AwsCreatePoll::<TestPollAttempt, TestIssuedCreate>::Issued(TestIssuedCreate {
+                let poll = AwsCreatePoll::<TestPollAttempt, TestIssuedCreate>::Issued(
+                    TestIssuedCreate {
                         id: resource.id.clone(),
                         identifier: applied_identifier(ACM_CERTIFICATE_ARN),
                         sent: Sent::AllRequestAttributes,
-                    });
+                    },
+                    token,
+                );
                 let TestCreateStep::Partial { state, .. } = provider
                     .poll_create_step(
                         &resource,
-                        token,
                         poll,
                         PollRequest {
                             finality: PollFinality::FinalAttempt,
@@ -3814,16 +3809,17 @@ async fn read_back_resume_rederives_current_requirements_and_missing_attributes(
     let token = serde_json::from_value(serialized).unwrap();
     let (fresh, service) = scripted_acm(&[AcmDescribeResult::Incomplete]).await;
     resource.set_attr("validation_method", string("DNS"));
-    let resumed =
-        AwsCreateResume::<TestResumeAttempt, TestResumedCreate>::Issued(TestResumedCreate {
+    let resumed = AwsCreateResume::<TestResumeAttempt, TestResumedCreate>::Issued(
+        TestResumedCreate {
             identifier: applied_identifier(ACM_CERTIFICATE_ARN),
-        });
+        },
+        token,
+    );
     let TestResumeStep::Partial {
         missing_attributes, ..
     } = fresh
         .resume_create_step(
             &resource,
-            token,
             resumed,
             PollRequest {
                 finality: PollFinality::FinalAttempt,

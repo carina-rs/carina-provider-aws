@@ -37,7 +37,9 @@ pub use provider::{
     AwsCreateAttempt, AwsCreatePoll, AwsCreateResume, AwsFailureSummary, AwsIssuedCreate,
     AwsPollAttempt, AwsResumeAttempt, AwsResumedCreate,
 };
-pub use provider::{AwsCreateToken, AwsDeleteToken, AwsUpdateToken, Ec2TaggedResourceKind};
+pub use provider::{
+    AwsCreateOperation, AwsCreateToken, AwsDeleteToken, AwsUpdateToken, Ec2TaggedResourceKind,
+};
 pub use read_back::{NonEmptyAttributeNames, ReadBackContinuation, ReadBackRequirements};
 #[doc(hidden)]
 #[cfg(all(not(target_arch = "wasm32"), debug_assertions))]

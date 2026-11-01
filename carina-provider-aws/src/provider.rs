@@ -15,6 +15,7 @@ use carina_core::provider::{
     ResumeFailure, ResumeOutcome, ResumedCreate, Sent, UpdateOutcome, UpdatePatch, UpdateRequest,
 };
 use carina_core::resource::{DataSource, Resource, ResourceId, State, Value};
+use carina_plugin_sdk::{Never, PhasedToken};
 use carina_provider_protocol::{
     CompletedOperation, DEFAULT_OPERATION_BUDGET, DEFAULT_READ_BACK_BUDGET, DriveError,
     DriveOutcome, OperationKind, OperationStep, PendingPhase, PollFinality, PollRequest,
@@ -179,6 +180,15 @@ impl std::fmt::Display for AwsFailureSummary {
 #[serde(tag = "phase", rename_all = "snake_case")]
 pub enum AwsCreateToken {
     ReadBack(ReadBackContinuation),
+    // Keep the operation variants' existing internally tagged JSON form.
+    #[serde(untagged)]
+    Operation(AwsCreateOperation),
+}
+
+/// Create continuation payloads that can be carried without an identifier.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "phase", rename_all = "snake_case")]
+pub enum AwsCreateOperation {
     AcmRequestCertificate {
         client_token: ClientToken,
         first_used_at_unix_secs: u64,
@@ -210,25 +220,49 @@ pub enum AwsCreateToken {
     },
 }
 
-impl AwsCreateToken {
-    pub fn phase(&self) -> PendingPhase {
+impl PhasedToken for AwsCreateToken {
+    type Operation = AwsCreateOperation;
+
+    fn from_operation(operation: AwsCreateOperation) -> Self {
+        Self::Operation(operation)
+    }
+
+    fn into_operation(self) -> Result<AwsCreateOperation, Self> {
         match self {
-            Self::ReadBack(_) => PendingPhase::ReadBack,
-            Self::AcmRequestCertificate { .. }
-            | Self::NatGateway { .. }
-            | Self::TransitGateway { .. }
-            | Self::TransitGatewayAttachment { .. }
-            | Self::OrganizationsAccount { .. }
-            | Self::TaggedEc2 { .. }
-            | Self::TaggedEc2Found { .. } => PendingPhase::Operation,
+            Self::Operation(operation) => Ok(operation),
+            Self::ReadBack(_) => Err(self),
         }
     }
 
+    fn operation(&self) -> Option<&AwsCreateOperation> {
+        match self {
+            Self::Operation(operation) => Some(operation),
+            Self::ReadBack(_) => None,
+        }
+    }
+}
+
+impl From<AwsCreateOperation> for AwsCreateToken {
+    fn from(operation: AwsCreateOperation) -> Self {
+        Self::from_operation(operation)
+    }
+}
+
+impl AwsCreateToken {
     /// Poll cadence that belongs to this exact continuation.
     pub fn poll_after_secs(&self) -> u32 {
         match self {
-            Self::ReadBack(_)
-            | Self::AcmRequestCertificate { .. }
+            Self::ReadBack(_) => POLL_AFTER_SECS,
+            Self::Operation(operation) => operation.poll_after_secs(),
+        }
+    }
+}
+
+impl AwsCreateOperation {
+    /// Poll cadence that belongs to this exact continuation.
+    pub fn poll_after_secs(&self) -> u32 {
+        match self {
+            Self::AcmRequestCertificate { .. }
             | Self::TaggedEc2Found { .. }
             | Self::NatGateway { .. }
             | Self::TransitGateway { .. }
@@ -246,6 +280,22 @@ impl AwsCreateToken {
 #[serde(tag = "phase", rename_all = "snake_case")]
 pub enum AwsUpdateToken {
     ReadBack(ReadBackContinuation),
+}
+
+impl PhasedToken for AwsUpdateToken {
+    type Operation = Never;
+
+    fn from_operation(operation: Self::Operation) -> Self {
+        match operation {}
+    }
+
+    fn into_operation(self) -> Result<Self::Operation, Self> {
+        Err(self)
+    }
+
+    fn operation(&self) -> Option<&Self::Operation> {
+        None
+    }
 }
 
 pub type AwsUpdateStep = OperationStep<UpdateOutcome, ProviderError, AwsUpdateToken>;
@@ -724,16 +774,16 @@ impl Ec2TaggedResourceKind {
 #[derive(Debug)]
 enum TaggedDiscovery {
     Retry {
-        token: AwsCreateToken,
+        token: AwsCreateOperation,
         poll_after_secs: u32,
     },
     Found(AppliedIdentifier),
     Exhausted {
-        token: AwsCreateToken,
+        token: AwsCreateOperation,
         error: ProviderError,
     },
     Ambiguous {
-        token: AwsCreateToken,
+        token: AwsCreateOperation,
         error: ProviderError,
     },
 }
@@ -741,7 +791,7 @@ enum TaggedDiscovery {
 #[derive(Debug)]
 enum AcmResendTransition {
     Issued(AppliedIdentifier),
-    Pending(AwsCreateToken),
+    Pending(AwsCreateOperation),
     InFlight(ProviderError),
 }
 
@@ -751,14 +801,14 @@ enum AcmResendTransition {
 #[derive(Debug)]
 enum InitialAcmRequestTransition {
     Issued(AppliedIdentifier, Sent),
-    Pending(AwsCreateToken, Sent),
+    Pending(AwsCreateOperation, Sent),
     Untracked(ProviderError),
 }
 
 #[derive(Debug)]
 enum TaggedEc2Continuation {
     Complete(CreateCompletion),
-    Pending(AwsCreateToken),
+    Pending(AwsCreateOperation),
 }
 
 /// Continuation phases for AWS delete operations that wait on cloud state.
@@ -819,11 +869,6 @@ pub trait AwsIssuedCreate: Sized {
         reason: ProviderError,
         missing_attributes: NonEmptyAttributeNames,
     ) -> Result<Self::Step, Self::Verdict>;
-    fn pending_read_back(
-        self,
-        continuation: ReadBackContinuation,
-        poll_after_secs: u32,
-    ) -> Result<Self::Step, Self::Verdict>;
     fn failed(self, observation: Observation, error: ProviderError) -> Self::Verdict;
     fn discarded(self, error: ProviderError) -> Self::Verdict;
     fn pending(
@@ -844,7 +889,7 @@ pub trait AwsCreateAttempt {
     fn issued(self, identifier: AppliedIdentifier, sent: Sent) -> Self::Issued;
     fn pending(
         self,
-        token: AwsCreateToken,
+        token: AwsCreateOperation,
         sent: Sent,
         poll_after_secs: u32,
     ) -> Result<Self::Step, Self::Verdict>;
@@ -857,19 +902,19 @@ pub trait AwsPollAttempt {
     type Issued: AwsIssuedCreate<Step = Self::Step, Verdict = Self::Verdict>;
 
     fn untracked(self, error: ProviderError) -> Self::Verdict;
-    fn preserve(self, token: AwsCreateToken, error: ProviderError) -> Self::Verdict;
+    fn preserve(self, token: AwsCreateOperation, error: ProviderError) -> Self::Verdict;
     fn issued(self, identifier: AppliedIdentifier) -> Self::Issued;
     fn pending(
         self,
-        token: AwsCreateToken,
+        token: AwsCreateOperation,
         poll_after_secs: u32,
     ) -> Result<Self::Step, Self::Verdict>;
 }
 
 #[doc(hidden)]
 pub enum AwsCreatePoll<U, I> {
-    Unissued(U),
-    Issued(I),
+    Unissued(U, AwsCreateOperation),
+    Issued(I, AwsCreateToken),
 }
 
 #[doc(hidden)]
@@ -884,11 +929,6 @@ pub trait AwsResumedCreate: Sized {
         attributes: HashMap<String, Value>,
         reason: ProviderError,
         missing_attributes: NonEmptyAttributeNames,
-    ) -> Result<Self::Step, Self::Verdict>;
-    fn pending_read_back(
-        self,
-        continuation: ReadBackContinuation,
-        poll_after_secs: u32,
     ) -> Result<Self::Step, Self::Verdict>;
     fn failed(self, observation: Observation, error: ProviderError) -> Self::Verdict;
     fn discarded(self, error: ProviderError) -> Self::Verdict;
@@ -907,17 +947,23 @@ pub trait AwsResumeAttempt {
     type Resumed: AwsResumedCreate<Step = Self::Step, Verdict = Self::Verdict>;
 
     fn untracked(self, error: ProviderError) -> Self::Verdict;
-    fn preserve(self, token: AwsCreateToken, error: ProviderError) -> Self::Verdict;
+    fn preserve(self, token: AwsCreateOperation, error: ProviderError) -> Self::Verdict;
     fn issued(self, identifier: AppliedIdentifier) -> Self::Resumed;
     fn pending(
         self,
-        token: AwsCreateToken,
+        token: AwsCreateOperation,
         poll_after_secs: u32,
     ) -> Result<Self::Step, Self::Verdict>;
 }
 
 #[doc(hidden)]
 pub enum AwsCreateResume<U, I> {
+    Unissued(U, AwsCreateOperation),
+    Issued(I, AwsCreateToken),
+}
+
+// Read-back has already been routed through an identifier-bearing handle.
+enum CreateHandle<U, I> {
     Unissued(U),
     Issued(I),
 }
@@ -967,12 +1013,12 @@ impl AwsCreateAttempt for CreateAttempt {
 
     fn pending(
         self,
-        token: AwsCreateToken,
+        token: AwsCreateOperation,
         sent: Sent,
         poll_after_secs: u32,
     ) -> Result<Self::Step, Self::Verdict> {
         Ok(CoreCreateStep::Pending(self.pending(
-            encode_create_token(&token),
+            encode_create_token(&token.into()),
             sent,
             poll_after_secs,
         )))
@@ -988,9 +1034,9 @@ impl AwsPollAttempt for PollAttempt {
         self.untracked(error)
     }
 
-    fn preserve(self, token: AwsCreateToken, error: ProviderError) -> Self::Verdict {
+    fn preserve(self, token: AwsCreateOperation, error: ProviderError) -> Self::Verdict {
         let poll_after_secs = token.poll_after_secs();
-        self.pending(encode_create_token(&token), poll_after_secs)
+        self.pending(encode_create_token(&token.into()), poll_after_secs)
             .preserve(error)
     }
 
@@ -1000,12 +1046,13 @@ impl AwsPollAttempt for PollAttempt {
 
     fn pending(
         self,
-        token: AwsCreateToken,
+        token: AwsCreateOperation,
         poll_after_secs: u32,
     ) -> Result<Self::Step, Self::Verdict> {
-        Ok(CoreCreateStep::Pending(
-            self.pending(encode_create_token(&token), poll_after_secs),
-        ))
+        Ok(CoreCreateStep::Pending(self.pending(
+            encode_create_token(&token.into()),
+            poll_after_secs,
+        )))
     }
 }
 
@@ -1037,17 +1084,6 @@ impl AwsIssuedCreate for IssuedCreate {
         Ok(CoreCreateStep::Done(self.partial(attributes, diagnostic)))
     }
 
-    fn pending_read_back(
-        self,
-        continuation: ReadBackContinuation,
-        poll_after_secs: u32,
-    ) -> Result<Self::Step, Self::Verdict> {
-        Ok(CoreCreateStep::Pending(self.pending_read_back(
-            encode_create_token(&AwsCreateToken::ReadBack(continuation)),
-            poll_after_secs,
-        )))
-    }
-
     fn failed(self, observation: Observation, error: ProviderError) -> Self::Verdict {
         self.failed(observation, error)
     }
@@ -1061,20 +1097,62 @@ impl AwsIssuedCreate for IssuedCreate {
         token: AwsCreateToken,
         poll_after_secs: u32,
     ) -> Result<Self::Step, Self::Verdict> {
-        Ok(CoreCreateStep::Pending(
-            self.pending(encode_create_token(&token), poll_after_secs),
-        ))
+        Ok(CoreCreateStep::Pending(native_pending_create(
+            self,
+            token,
+            poll_after_secs,
+        )))
     }
 
     fn preserve(self, token: AwsCreateToken, error: ProviderError) -> Self::Verdict {
         let poll_after_secs = token.poll_after_secs();
-        if token.phase() == PendingPhase::ReadBack {
-            self.pending_read_back(encode_create_token(&token), poll_after_secs)
-                .preserve(error)
-        } else {
-            self.pending(encode_create_token(&token), poll_after_secs)
-                .preserve(error)
-        }
+        native_pending_create(self, token, poll_after_secs).preserve(error)
+    }
+}
+
+fn read_back_without_identifier(id: &ResourceId) -> ProviderError {
+    ProviderError::invalid_input("read-back continuation requires an identifier")
+        .with_code("READ_BACK_WITHOUT_IDENTIFIER")
+        .for_resource(id.clone())
+}
+
+fn native_create_poll(
+    id: &ResourceId,
+    poll: Poll,
+    token: AwsCreateToken,
+) -> Result<AwsCreatePoll<PollAttempt, IssuedCreate>, CreateFailure> {
+    match poll {
+        Poll::Issued(issued) => Ok(AwsCreatePoll::Issued(issued, token)),
+        Poll::Unissued(attempt) => match token.into_operation() {
+            Ok(operation) => Ok(AwsCreatePoll::Unissued(attempt, operation)),
+            Err(_) => Err(attempt.untracked(read_back_without_identifier(id))),
+        },
+    }
+}
+
+fn native_create_resume(
+    id: &ResourceId,
+    resume: Resume,
+    token: AwsCreateToken,
+) -> Result<AwsCreateResume<ResumeAttempt, ResumedCreate>, ResumeFailure> {
+    match resume {
+        Resume::Issued(resumed) => Ok(AwsCreateResume::Issued(resumed, token)),
+        Resume::Unissued(attempt) => match token.into_operation() {
+            Ok(operation) => Ok(AwsCreateResume::Unissued(attempt, operation)),
+            Err(_) => Err(attempt.untracked(read_back_without_identifier(id))),
+        },
+    }
+}
+
+fn native_pending_create(
+    issued: IssuedCreate,
+    token: AwsCreateToken,
+    poll_after_secs: u32,
+) -> PendingCreate {
+    let encoded = encode_create_token(&token);
+    match token.phase() {
+        PendingPhase::Operation => issued.pending(encoded, poll_after_secs),
+        PendingPhase::ReadBack => issued.pending_read_back(encoded, poll_after_secs),
     }
 }
 
@@ -1087,8 +1165,9 @@ impl AwsResumeAttempt for ResumeAttempt {
         self.untracked(error)
     }
 
-    fn preserve(self, token: AwsCreateToken, error: ProviderError) -> Self::Verdict {
-        self.repend(encode_create_token(&token)).preserve(error)
+    fn preserve(self, token: AwsCreateOperation, error: ProviderError) -> Self::Verdict {
+        self.repend(encode_create_token(&token.into()))
+            .preserve(error)
     }
 
     fn issued(self, identifier: AppliedIdentifier) -> Self::Resumed {
@@ -1097,11 +1176,11 @@ impl AwsResumeAttempt for ResumeAttempt {
 
     fn pending(
         self,
-        token: AwsCreateToken,
+        token: AwsCreateOperation,
         _poll_after_secs: u32,
     ) -> Result<Self::Step, Self::Verdict> {
         Ok(CoreResumeStep::Pending(Box::new(
-            self.repend(encode_create_token(&token)),
+            self.repend(encode_create_token(&token.into())),
         )))
     }
 }
@@ -1132,16 +1211,6 @@ impl AwsResumedCreate for ResumedCreate {
             )));
         };
         Ok(CoreResumeStep::Done(self.partial(attributes, diagnostic)))
-    }
-
-    fn pending_read_back(
-        self,
-        continuation: ReadBackContinuation,
-        _poll_after_secs: u32,
-    ) -> Result<Self::Step, Self::Verdict> {
-        Ok(CoreResumeStep::Pending(Box::new(self.repend(
-            encode_create_token(&AwsCreateToken::ReadBack(continuation)),
-        ))))
     }
 
     fn failed(self, observation: Observation, error: ProviderError) -> Self::Verdict {
@@ -1303,7 +1372,7 @@ impl AwsProvider {
             client_token,
             first_used_at_unix_secs,
         } = fresh_client_token;
-        let token = |attempts_remaining| AwsCreateToken::AcmRequestCertificate {
+        let token = |attempts_remaining| AwsCreateOperation::AcmRequestCertificate {
             client_token: client_token.clone(),
             first_used_at_unix_secs,
             attempts_remaining,
@@ -1352,7 +1421,7 @@ impl AwsProvider {
             client_token,
             first_used_at_unix_secs,
         } = fresh_client_token;
-        let pending_token = AwsCreateToken::AcmRequestCertificate {
+        let pending_token = AwsCreateOperation::AcmRequestCertificate {
             client_token: client_token.clone(),
             first_used_at_unix_secs,
             attempts_remaining: attempts_after_request.get(),
@@ -1427,7 +1496,7 @@ impl AwsProvider {
             }
             Ok(CreateCompletion::ReadBackPending { continuation, .. }) => attempt
                 .issued(continuation.identifier().clone(), sent)
-                .pending_read_back(continuation, POLL_AFTER_SECS),
+                .pending(AwsCreateToken::ReadBack(continuation), POLL_AFTER_SECS),
             Ok(CreateCompletion::Partial {
                 identifier,
                 attributes,
@@ -1464,7 +1533,7 @@ impl AwsProvider {
     ) -> Result<I::Step, I::Verdict> {
         match (poll_request.finality, completion) {
             (PollFinality::Continue, CreateCompletion::ReadBackPending { continuation, .. }) => {
-                issued.pending_read_back(continuation, POLL_AFTER_SECS)
+                issued.pending(AwsCreateToken::ReadBack(continuation), POLL_AFTER_SECS)
             }
             (PollFinality::Continue | PollFinality::FinalAttempt, completion) => {
                 self.finish_issued_completion(issued, finish_final_read_back(completion))
@@ -1516,7 +1585,7 @@ impl AwsProvider {
         sent: Sent,
     ) -> Result<A::Step, A::Verdict> {
         attempt.pending(
-            AwsCreateToken::TaggedEc2 {
+            AwsCreateOperation::TaggedEc2 {
                 kind,
                 create_token: create_token.clone(),
                 attempts_remaining: TAGGED_EC2_DISCOVERY_ATTEMPTS,
@@ -1550,7 +1619,7 @@ impl AwsProvider {
             SendClassification::MaybeSent { .. } => {
                 let original_failure = AwsFailureSummary::from_send_failure(&error);
                 attempt.pending(
-                    AwsCreateToken::TaggedEc2 {
+                    AwsCreateOperation::TaggedEc2 {
                         kind,
                         create_token: create_token.clone(),
                         attempts_remaining: TAGGED_EC2_DISCOVERY_ATTEMPTS,
@@ -1810,7 +1879,7 @@ impl AwsProvider {
         let result = self
             .discover_tagged_ec2_resources(resource, kind, &create_token)
             .await;
-        let token = || AwsCreateToken::TaggedEc2 {
+        let token = || AwsCreateOperation::TaggedEc2 {
             kind,
             create_token: create_token.clone(),
             attempts_remaining,
@@ -1829,7 +1898,7 @@ impl AwsProvider {
             Ok(_) | Err(_) if attempts_remaining > 1 => {
                 let poll_after_secs = next_tagged_ec2_delay(next_delay_secs);
                 TaggedDiscovery::Retry {
-                    token: AwsCreateToken::TaggedEc2 {
+                    token: AwsCreateOperation::TaggedEc2 {
                         kind,
                         create_token,
                         attempts_remaining: attempts_remaining - 1,
@@ -1929,14 +1998,14 @@ impl AwsProvider {
         }
 
         let pending = match kind {
-            Ec2TaggedResourceKind::NatGateway => Some(AwsCreateToken::NatGateway {
+            Ec2TaggedResourceKind::NatGateway => Some(AwsCreateOperation::NatGateway {
                 nat_gateway_id: identifier.clone(),
             }),
-            Ec2TaggedResourceKind::TransitGateway => Some(AwsCreateToken::TransitGateway {
+            Ec2TaggedResourceKind::TransitGateway => Some(AwsCreateOperation::TransitGateway {
                 transit_gateway_id: identifier.clone(),
             }),
             Ec2TaggedResourceKind::TransitGatewayVpcAttachment => {
-                Some(AwsCreateToken::TransitGatewayAttachment {
+                Some(AwsCreateOperation::TransitGatewayAttachment {
                     attachment_id: identifier.clone(),
                 })
             }
@@ -1984,7 +2053,9 @@ impl AwsProvider {
             Ok(TaggedEc2Continuation::Complete(completion)) => {
                 self.finish_issued(issued, completion, poll_request)
             }
-            Ok(TaggedEc2Continuation::Pending(token)) => issued.pending(token, POLL_AFTER_SECS),
+            Ok(TaggedEc2Continuation::Pending(token)) => {
+                issued.pending(token.into(), POLL_AFTER_SECS)
+            }
             Err(error) => Err(self.failed_issued(&resource.id, issued, error).await),
         }
     }
@@ -2008,7 +2079,9 @@ impl AwsProvider {
             Ok(TaggedEc2Continuation::Complete(completion)) => {
                 self.finish_resumed_completion(resumed, completion, poll_request)
             }
-            Ok(TaggedEc2Continuation::Pending(token)) => resumed.pending(token, POLL_AFTER_SECS),
+            Ok(TaggedEc2Continuation::Pending(token)) => {
+                resumed.pending(token.into(), POLL_AFTER_SECS)
+            }
             Err(error) => Err(self.failed_resumed(&resource.id, resumed, error).await),
         }
     }
@@ -2064,7 +2137,7 @@ impl AwsProvider {
                     Err(error) => return Err(attempt.untracked(error)),
                 };
                 attempt.pending(
-                    AwsCreateToken::OrganizationsAccount {
+                    AwsCreateOperation::OrganizationsAccount {
                         create_account_request_id: request_id,
                     },
                     sent,
@@ -2268,41 +2341,34 @@ impl AwsProvider {
     pub async fn poll_create_step<U: AwsPollAttempt>(
         &self,
         resource: &Resource<impl Sized>,
-        token: AwsCreateToken,
         poll: AwsCreatePoll<U, U::Issued>,
         poll_request: PollRequest,
     ) -> Result<U::Step, U::Verdict> {
         let id = &resource.id;
-        match token {
-            AwsCreateToken::ReadBack(continuation) => {
-                let issued = match poll {
-                    AwsCreatePoll::Unissued(attempt) => {
-                        return Err(attempt.preserve(
-                            AwsCreateToken::ReadBack(continuation),
-                            ProviderError::internal(
-                                "read-back requires an issued create identifier",
-                            )
-                            .for_resource(id.clone()),
-                        ));
-                    }
-                    AwsCreatePoll::Issued(issued) => issued,
-                };
+        let (token, poll) = match poll {
+            AwsCreatePoll::Unissued(attempt, token) => (token, CreateHandle::Unissued(attempt)),
+            AwsCreatePoll::Issued(issued, AwsCreateToken::Operation(token)) => {
+                (token, CreateHandle::Issued(issued))
+            }
+            AwsCreatePoll::Issued(issued, AwsCreateToken::ReadBack(continuation)) => {
                 if let Err(error) = continuation.validate(id, issued.identifier()) {
                     return Err(issued.preserve(AwsCreateToken::ReadBack(continuation), error));
                 }
                 let completion = self
                     .read_back_by_identifier(resource, &continuation, ReadBackKind::Create)
                     .await;
-                self.finish_issued(issued, completion, poll_request)
+                return self.finish_issued(issued, completion, poll_request);
             }
-            AwsCreateToken::AcmRequestCertificate {
+        };
+        match token {
+            AwsCreateOperation::AcmRequestCertificate {
                 client_token,
                 first_used_at_unix_secs,
                 attempts_remaining,
             } => {
                 let attempt = match poll {
-                    AwsCreatePoll::Unissued(attempt) => attempt,
-                    AwsCreatePoll::Issued(issued) => {
+                    CreateHandle::Unissued(attempt) => attempt,
+                    CreateHandle::Issued(issued) => {
                         return Err(issued.failed(
                             Observation::ReadFailed(acm_request_certificate_issued_handle_error(
                                 id,
@@ -2311,7 +2377,7 @@ impl AwsProvider {
                         ));
                     }
                 };
-                let pending_token = AwsCreateToken::AcmRequestCertificate {
+                let pending_token = AwsCreateOperation::AcmRequestCertificate {
                     client_token: client_token.clone(),
                     first_used_at_unix_secs,
                     attempts_remaining,
@@ -2367,20 +2433,20 @@ impl AwsProvider {
                     }
                 }
             }
-            AwsCreateToken::NatGateway { nat_gateway_id } => {
-                let token = AwsCreateToken::NatGateway {
+            AwsCreateOperation::NatGateway { nat_gateway_id } => {
+                let token = AwsCreateOperation::NatGateway {
                     nat_gateway_id: nat_gateway_id.clone(),
                 };
                 let issued = match poll {
-                    AwsCreatePoll::Unissued(attempt) => attempt.issued(nat_gateway_id.clone()),
-                    AwsCreatePoll::Issued(issued) => issued,
+                    CreateHandle::Unissued(attempt) => attempt.issued(nat_gateway_id.clone()),
+                    CreateHandle::Issued(issued) => issued,
                 };
                 let status = match self
                     .poll_ec2_nat_gateway_create(id, nat_gateway_id.as_str())
                     .await
                 {
                     Ok(status) => status,
-                    Err(_error) => return issued.pending(token, POLL_AFTER_SECS),
+                    Err(_error) => return issued.pending(token.into(), POLL_AFTER_SECS),
                 };
                 match status {
                     CreatePoll::Ready(()) => {
@@ -2408,23 +2474,23 @@ impl AwsProvider {
                         ProviderError::api_error("NAT gateway creation failed")
                             .for_resource(id.clone()),
                     )),
-                    CreatePoll::Pending => issued.pending(token, POLL_AFTER_SECS),
+                    CreatePoll::Pending => issued.pending(token.into(), POLL_AFTER_SECS),
                 }
             }
-            AwsCreateToken::TransitGateway { transit_gateway_id } => {
-                let token = AwsCreateToken::TransitGateway {
+            AwsCreateOperation::TransitGateway { transit_gateway_id } => {
+                let token = AwsCreateOperation::TransitGateway {
                     transit_gateway_id: transit_gateway_id.clone(),
                 };
                 let issued = match poll {
-                    AwsCreatePoll::Unissued(attempt) => attempt.issued(transit_gateway_id.clone()),
-                    AwsCreatePoll::Issued(issued) => issued,
+                    CreateHandle::Unissued(attempt) => attempt.issued(transit_gateway_id.clone()),
+                    CreateHandle::Issued(issued) => issued,
                 };
                 let status = match self
                     .poll_ec2_transit_gateway_create(id, transit_gateway_id.as_str())
                     .await
                 {
                     Ok(status) => status,
-                    Err(_error) => return issued.pending(token, POLL_AFTER_SECS),
+                    Err(_error) => return issued.pending(token.into(), POLL_AFTER_SECS),
                 };
                 match status {
                     CreatePoll::Ready(()) => {
@@ -2441,23 +2507,23 @@ impl AwsProvider {
                         ProviderError::api_error("Transit gateway creation failed")
                             .for_resource(id.clone()),
                     )),
-                    CreatePoll::Pending => issued.pending(token, POLL_AFTER_SECS),
+                    CreatePoll::Pending => issued.pending(token.into(), POLL_AFTER_SECS),
                 }
             }
-            AwsCreateToken::TransitGatewayAttachment { attachment_id } => {
-                let token = AwsCreateToken::TransitGatewayAttachment {
+            AwsCreateOperation::TransitGatewayAttachment { attachment_id } => {
+                let token = AwsCreateOperation::TransitGatewayAttachment {
                     attachment_id: attachment_id.clone(),
                 };
                 let issued = match poll {
-                    AwsCreatePoll::Unissued(attempt) => attempt.issued(attachment_id.clone()),
-                    AwsCreatePoll::Issued(issued) => issued,
+                    CreateHandle::Unissued(attempt) => attempt.issued(attachment_id.clone()),
+                    CreateHandle::Issued(issued) => issued,
                 };
                 let status = match self
                     .poll_ec2_transit_gateway_attachment_create(id, attachment_id.as_str())
                     .await
                 {
                     Ok(status) => status,
-                    Err(_error) => return issued.pending(token, POLL_AFTER_SECS),
+                    Err(_error) => return issued.pending(token.into(), POLL_AFTER_SECS),
                 };
                 match status {
                     CreatePoll::Ready(()) => {
@@ -2476,13 +2542,13 @@ impl AwsProvider {
                         ProviderError::api_error("Transit gateway attachment creation failed")
                             .for_resource(id.clone()),
                     )),
-                    CreatePoll::Pending => issued.pending(token, POLL_AFTER_SECS),
+                    CreatePoll::Pending => issued.pending(token.into(), POLL_AFTER_SECS),
                 }
             }
-            AwsCreateToken::OrganizationsAccount {
+            AwsCreateOperation::OrganizationsAccount {
                 create_account_request_id,
             } => {
-                let token = AwsCreateToken::OrganizationsAccount {
+                let token = AwsCreateOperation::OrganizationsAccount {
                     create_account_request_id: create_account_request_id.clone(),
                 };
                 let status = match self
@@ -2492,10 +2558,12 @@ impl AwsProvider {
                     Ok(status) => status,
                     Err(_error) => {
                         return match poll {
-                            AwsCreatePoll::Unissued(attempt) => {
+                            CreateHandle::Unissued(attempt) => {
                                 attempt.pending(token, POLL_AFTER_SECS)
                             }
-                            AwsCreatePoll::Issued(issued) => issued.pending(token, POLL_AFTER_SECS),
+                            CreateHandle::Issued(issued) => {
+                                issued.pending(token.into(), POLL_AFTER_SECS)
+                            }
                         };
                     }
                 };
@@ -2509,18 +2577,18 @@ impl AwsProvider {
                             Ok(identifier) => identifier,
                             Err(error) => {
                                 return match poll {
-                                    AwsCreatePoll::Unissued(attempt) => {
+                                    CreateHandle::Unissued(attempt) => {
                                         Err(attempt.untracked(error))
                                     }
-                                    AwsCreatePoll::Issued(issued) => {
+                                    CreateHandle::Issued(issued) => {
                                         Err(self.failed_issued(id, issued, error).await)
                                     }
                                 };
                             }
                         };
                         let issued = match poll {
-                            AwsCreatePoll::Unissued(attempt) => attempt.issued(identifier),
-                            AwsCreatePoll::Issued(issued) => issued,
+                            CreateHandle::Unissued(attempt) => attempt.issued(identifier),
+                            CreateHandle::Issued(issued) => issued,
                         };
                         match self
                             .finish_organizations_account_create(
@@ -2539,29 +2607,31 @@ impl AwsProvider {
                         )
                         .for_resource(id.clone());
                         match poll {
-                            AwsCreatePoll::Unissued(attempt) => Err(attempt.untracked(error)),
-                            AwsCreatePoll::Issued(issued) => {
+                            CreateHandle::Unissued(attempt) => Err(attempt.untracked(error)),
+                            CreateHandle::Issued(issued) => {
                                 Err(self.failed_issued(id, issued, error).await)
                             }
                         }
                     }
                     CreatePoll::Failed => match poll {
-                        AwsCreatePoll::Unissued(attempt) => Err(attempt.untracked(
+                        CreateHandle::Unissued(attempt) => Err(attempt.untracked(
                             ProviderError::api_error("Account creation failed")
                                 .for_resource(id.clone()),
                         )),
-                        AwsCreatePoll::Issued(issued) => Err(issued.discarded(
+                        CreateHandle::Issued(issued) => Err(issued.discarded(
                             ProviderError::api_error("Account creation failed")
                                 .for_resource(id.clone()),
                         )),
                     },
                     CreatePoll::Pending => match poll {
-                        AwsCreatePoll::Unissued(attempt) => attempt.pending(token, POLL_AFTER_SECS),
-                        AwsCreatePoll::Issued(issued) => issued.pending(token, POLL_AFTER_SECS),
+                        CreateHandle::Unissued(attempt) => attempt.pending(token, POLL_AFTER_SECS),
+                        CreateHandle::Issued(issued) => {
+                            issued.pending(token.into(), POLL_AFTER_SECS)
+                        }
                     },
                 }
             }
-            AwsCreateToken::TaggedEc2 {
+            AwsCreateOperation::TaggedEc2 {
                 kind,
                 create_token,
                 attempts_remaining,
@@ -2583,30 +2653,32 @@ impl AwsProvider {
                         token,
                         poll_after_secs,
                     } => match poll {
-                        AwsCreatePoll::Unissued(attempt) => attempt.pending(token, poll_after_secs),
-                        AwsCreatePoll::Issued(issued) => issued.pending(token, poll_after_secs),
+                        CreateHandle::Unissued(attempt) => attempt.pending(token, poll_after_secs),
+                        CreateHandle::Issued(issued) => {
+                            issued.pending(token.into(), poll_after_secs)
+                        }
                     },
                     TaggedDiscovery::Exhausted { token, error }
                     | TaggedDiscovery::Ambiguous { token, error } => match poll {
-                        AwsCreatePoll::Unissued(attempt) => Err(attempt.preserve(token, error)),
-                        AwsCreatePoll::Issued(issued) => Err(issued.preserve(token, error)),
+                        CreateHandle::Unissued(attempt) => Err(attempt.preserve(token, error)),
+                        CreateHandle::Issued(issued) => Err(issued.preserve(token.into(), error)),
                     },
                     TaggedDiscovery::Found(identifier) => {
                         let issued = match poll {
-                            AwsCreatePoll::Unissued(attempt) => attempt.issued(identifier.clone()),
-                            AwsCreatePoll::Issued(issued) => issued,
+                            CreateHandle::Unissued(attempt) => attempt.issued(identifier.clone()),
+                            CreateHandle::Issued(issued) => issued,
                         };
                         issued.pending(
-                            AwsCreateToken::TaggedEc2Found { kind, identifier },
+                            AwsCreateOperation::TaggedEc2Found { kind, identifier }.into(),
                             POLL_AFTER_SECS,
                         )
                     }
                 }
             }
-            AwsCreateToken::TaggedEc2Found { kind, identifier } => {
+            AwsCreateOperation::TaggedEc2Found { kind, identifier } => {
                 let issued = match poll {
-                    AwsCreatePoll::Unissued(attempt) => attempt.issued(identifier.clone()),
-                    AwsCreatePoll::Issued(issued) => issued,
+                    CreateHandle::Unissued(attempt) => attempt.issued(identifier.clone()),
+                    CreateHandle::Issued(issued) => issued,
                 };
                 let create =
                     match TaggedEc2Create::decode_resumed(kind, resource, &self.schema_registry) {
@@ -2721,18 +2793,12 @@ impl AwsProvider {
                     Ok(token) => token,
                     Err(error) => return OperationStep::Verdict(pending.preserve(error)),
                 };
-                let poll = match pending.into_poll() {
-                    Poll::Unissued(attempt) => AwsCreatePoll::Unissued(attempt),
-                    Poll::Issued(issued) => AwsCreatePoll::Issued(issued),
+                let poll = match native_create_poll(&resource.id, pending.into_poll(), token) {
+                    Ok(poll) => poll,
+                    Err(error) => return OperationStep::Verdict(error),
                 };
                 native_create_step(
-                    Box::pin(self.poll_create_step(
-                        resource,
-                        token,
-                        poll,
-                        PollRequest { finality },
-                    ))
-                    .await,
+                    Box::pin(self.poll_create_step(resource, poll, PollRequest { finality })).await,
                 )
             },
             sleep,
@@ -2777,7 +2843,7 @@ impl AwsProvider {
     ) -> Result<R::Step, R::Verdict> {
         match (poll_request.finality, completion) {
             (PollFinality::Continue, CreateCompletion::ReadBackPending { continuation, .. }) => {
-                resumed.pending_read_back(continuation, POLL_AFTER_SECS)
+                resumed.pending(AwsCreateToken::ReadBack(continuation), POLL_AFTER_SECS)
             }
             (PollFinality::Continue | PollFinality::FinalAttempt, completion) => {
                 self.finish_resumed_terminal(resumed, finish_final_read_back(completion))
@@ -2824,46 +2890,39 @@ impl AwsProvider {
     pub async fn resume_create_step<U: AwsResumeAttempt>(
         &self,
         resource: &Resource<impl Sized>,
-        token: AwsCreateToken,
         resume: AwsCreateResume<U, U::Resumed>,
         poll_request: PollRequest,
     ) -> Result<U::Step, U::Verdict> {
         let id = &resource.id;
-        match token {
-            AwsCreateToken::ReadBack(continuation) => {
-                let resumed = match resume {
-                    AwsCreateResume::Unissued(attempt) => {
-                        return Err(attempt.preserve(
-                            AwsCreateToken::ReadBack(continuation),
-                            ProviderError::internal(
-                                "read-back requires an issued resume identifier",
-                            )
-                            .for_resource(id.clone()),
-                        ));
-                    }
-                    AwsCreateResume::Issued(resumed) => resumed,
-                };
+        let (token, resume) = match resume {
+            AwsCreateResume::Unissued(attempt, token) => (token, CreateHandle::Unissued(attempt)),
+            AwsCreateResume::Issued(resumed, AwsCreateToken::Operation(token)) => {
+                (token, CreateHandle::Issued(resumed))
+            }
+            AwsCreateResume::Issued(resumed, AwsCreateToken::ReadBack(continuation)) => {
                 if let Err(error) = continuation.validate(id, resumed.identifier()) {
                     return Err(resumed.preserve(AwsCreateToken::ReadBack(continuation), error));
                 }
                 let completion = self
                     .read_back_by_identifier(resource, &continuation, ReadBackKind::Create)
                     .await;
-                self.finish_resumed_completion(resumed, completion, poll_request)
+                return self.finish_resumed_completion(resumed, completion, poll_request);
             }
-            AwsCreateToken::AcmRequestCertificate {
+        };
+        match token {
+            AwsCreateOperation::AcmRequestCertificate {
                 client_token,
                 first_used_at_unix_secs,
                 attempts_remaining,
             } => {
-                let pending_token = AwsCreateToken::AcmRequestCertificate {
+                let pending_token = AwsCreateOperation::AcmRequestCertificate {
                     client_token: client_token.clone(),
                     first_used_at_unix_secs,
                     attempts_remaining,
                 };
                 let attempt = match resume {
-                    AwsCreateResume::Unissued(attempt) => attempt,
-                    AwsCreateResume::Issued(resumed) => {
+                    CreateHandle::Unissued(attempt) => attempt,
+                    CreateHandle::Issued(resumed) => {
                         return Err(resumed.failed(
                             Observation::ReadFailed(acm_request_certificate_issued_handle_error(
                                 id,
@@ -2924,20 +2983,20 @@ impl AwsProvider {
                     }
                 }
             }
-            AwsCreateToken::NatGateway { nat_gateway_id } => {
-                let token = AwsCreateToken::NatGateway {
+            AwsCreateOperation::NatGateway { nat_gateway_id } => {
+                let token = AwsCreateOperation::NatGateway {
                     nat_gateway_id: nat_gateway_id.clone(),
                 };
                 let resumed = match resume {
-                    AwsCreateResume::Unissued(attempt) => attempt.issued(nat_gateway_id.clone()),
-                    AwsCreateResume::Issued(resumed) => resumed,
+                    CreateHandle::Unissued(attempt) => attempt.issued(nat_gateway_id.clone()),
+                    CreateHandle::Issued(resumed) => resumed,
                 };
                 let status = match self
                     .poll_ec2_nat_gateway_create(id, nat_gateway_id.as_str())
                     .await
                 {
                     Ok(status) => status,
-                    Err(_error) => return resumed.pending(token, POLL_AFTER_SECS),
+                    Err(_error) => return resumed.pending(token.into(), POLL_AFTER_SECS),
                 };
                 match status {
                     CreatePoll::Ready(()) => {
@@ -2960,25 +3019,23 @@ impl AwsProvider {
                         ProviderError::api_error("NAT gateway creation failed")
                             .for_resource(id.clone()),
                     )),
-                    CreatePoll::Pending => resumed.pending(token, POLL_AFTER_SECS),
+                    CreatePoll::Pending => resumed.pending(token.into(), POLL_AFTER_SECS),
                 }
             }
-            AwsCreateToken::TransitGateway { transit_gateway_id } => {
-                let token = AwsCreateToken::TransitGateway {
+            AwsCreateOperation::TransitGateway { transit_gateway_id } => {
+                let token = AwsCreateOperation::TransitGateway {
                     transit_gateway_id: transit_gateway_id.clone(),
                 };
                 let resumed = match resume {
-                    AwsCreateResume::Unissued(attempt) => {
-                        attempt.issued(transit_gateway_id.clone())
-                    }
-                    AwsCreateResume::Issued(resumed) => resumed,
+                    CreateHandle::Unissued(attempt) => attempt.issued(transit_gateway_id.clone()),
+                    CreateHandle::Issued(resumed) => resumed,
                 };
                 let status = match self
                     .poll_ec2_transit_gateway_create(id, transit_gateway_id.as_str())
                     .await
                 {
                     Ok(status) => status,
-                    Err(_error) => return resumed.pending(token, POLL_AFTER_SECS),
+                    Err(_error) => return resumed.pending(token.into(), POLL_AFTER_SECS),
                 };
                 match status {
                     CreatePoll::Ready(()) => {
@@ -2990,23 +3047,23 @@ impl AwsProvider {
                         ProviderError::api_error("Transit gateway creation failed")
                             .for_resource(id.clone()),
                     )),
-                    CreatePoll::Pending => resumed.pending(token, POLL_AFTER_SECS),
+                    CreatePoll::Pending => resumed.pending(token.into(), POLL_AFTER_SECS),
                 }
             }
-            AwsCreateToken::TransitGatewayAttachment { attachment_id } => {
-                let token = AwsCreateToken::TransitGatewayAttachment {
+            AwsCreateOperation::TransitGatewayAttachment { attachment_id } => {
+                let token = AwsCreateOperation::TransitGatewayAttachment {
                     attachment_id: attachment_id.clone(),
                 };
                 let resumed = match resume {
-                    AwsCreateResume::Unissued(attempt) => attempt.issued(attachment_id.clone()),
-                    AwsCreateResume::Issued(resumed) => resumed,
+                    CreateHandle::Unissued(attempt) => attempt.issued(attachment_id.clone()),
+                    CreateHandle::Issued(resumed) => resumed,
                 };
                 let status = match self
                     .poll_ec2_transit_gateway_attachment_create(id, attachment_id.as_str())
                     .await
                 {
                     Ok(status) => status,
-                    Err(_error) => return resumed.pending(token, POLL_AFTER_SECS),
+                    Err(_error) => return resumed.pending(token.into(), POLL_AFTER_SECS),
                 };
                 match status {
                     CreatePoll::Ready(()) => {
@@ -3020,13 +3077,13 @@ impl AwsProvider {
                         ProviderError::api_error("Transit gateway attachment creation failed")
                             .for_resource(id.clone()),
                     )),
-                    CreatePoll::Pending => resumed.pending(token, POLL_AFTER_SECS),
+                    CreatePoll::Pending => resumed.pending(token.into(), POLL_AFTER_SECS),
                 }
             }
-            AwsCreateToken::OrganizationsAccount {
+            AwsCreateOperation::OrganizationsAccount {
                 create_account_request_id,
             } => {
-                let token = AwsCreateToken::OrganizationsAccount {
+                let token = AwsCreateOperation::OrganizationsAccount {
                     create_account_request_id: create_account_request_id.clone(),
                 };
                 let status = match self
@@ -3036,10 +3093,10 @@ impl AwsProvider {
                     Ok(status) => status,
                     Err(error) => {
                         return match resume {
-                            AwsCreateResume::Unissued(attempt) => {
-                                Err(attempt.preserve(token, error))
+                            CreateHandle::Unissued(attempt) => Err(attempt.preserve(token, error)),
+                            CreateHandle::Issued(resumed) => {
+                                Err(resumed.preserve(token.into(), error))
                             }
-                            AwsCreateResume::Issued(resumed) => Err(resumed.preserve(token, error)),
                         };
                     }
                 };
@@ -3053,18 +3110,18 @@ impl AwsProvider {
                             Ok(identifier) => identifier,
                             Err(error) => {
                                 return match resume {
-                                    AwsCreateResume::Unissued(attempt) => {
+                                    CreateHandle::Unissued(attempt) => {
                                         Err(attempt.untracked(error))
                                     }
-                                    AwsCreateResume::Issued(resumed) => {
+                                    CreateHandle::Issued(resumed) => {
                                         Err(self.failed_resumed(id, resumed, error).await)
                                     }
                                 };
                             }
                         };
                         let resumed = match resume {
-                            AwsCreateResume::Unissued(attempt) => attempt.issued(identifier),
-                            AwsCreateResume::Issued(resumed) => resumed,
+                            CreateHandle::Unissued(attempt) => attempt.issued(identifier),
+                            CreateHandle::Issued(resumed) => resumed,
                         };
                         match self
                             .finish_organizations_account_create(
@@ -3085,31 +3142,31 @@ impl AwsProvider {
                         )
                         .for_resource(id.clone());
                         match resume {
-                            AwsCreateResume::Unissued(attempt) => Err(attempt.untracked(error)),
-                            AwsCreateResume::Issued(resumed) => {
+                            CreateHandle::Unissued(attempt) => Err(attempt.untracked(error)),
+                            CreateHandle::Issued(resumed) => {
                                 Err(self.failed_resumed(id, resumed, error).await)
                             }
                         }
                     }
                     CreatePoll::Failed => match resume {
-                        AwsCreateResume::Unissued(attempt) => Err(attempt.untracked(
+                        CreateHandle::Unissued(attempt) => Err(attempt.untracked(
                             ProviderError::api_error("Account creation failed")
                                 .for_resource(id.clone()),
                         )),
-                        AwsCreateResume::Issued(resumed) => Err(resumed.discarded(
+                        CreateHandle::Issued(resumed) => Err(resumed.discarded(
                             ProviderError::api_error("Account creation failed")
                                 .for_resource(id.clone()),
                         )),
                     },
                     CreatePoll::Pending => match resume {
-                        AwsCreateResume::Unissued(attempt) => {
-                            attempt.pending(token, POLL_AFTER_SECS)
+                        CreateHandle::Unissued(attempt) => attempt.pending(token, POLL_AFTER_SECS),
+                        CreateHandle::Issued(resumed) => {
+                            resumed.pending(token.into(), POLL_AFTER_SECS)
                         }
-                        AwsCreateResume::Issued(resumed) => resumed.pending(token, POLL_AFTER_SECS),
                     },
                 }
             }
-            AwsCreateToken::TaggedEc2 {
+            AwsCreateOperation::TaggedEc2 {
                 kind,
                 create_token,
                 attempts_remaining,
@@ -3131,34 +3188,32 @@ impl AwsProvider {
                         token,
                         poll_after_secs,
                     } => match resume {
-                        AwsCreateResume::Unissued(attempt) => {
-                            attempt.pending(token, poll_after_secs)
+                        CreateHandle::Unissued(attempt) => attempt.pending(token, poll_after_secs),
+                        CreateHandle::Issued(resumed) => {
+                            resumed.pending(token.into(), poll_after_secs)
                         }
-                        AwsCreateResume::Issued(resumed) => resumed.pending(token, poll_after_secs),
                     },
                     TaggedDiscovery::Exhausted { token, error }
                     | TaggedDiscovery::Ambiguous { token, error } => match resume {
-                        AwsCreateResume::Unissued(attempt) => Err(attempt.preserve(token, error)),
-                        AwsCreateResume::Issued(resumed) => Err(resumed.preserve(token, error)),
+                        CreateHandle::Unissued(attempt) => Err(attempt.preserve(token, error)),
+                        CreateHandle::Issued(resumed) => Err(resumed.preserve(token.into(), error)),
                     },
                     TaggedDiscovery::Found(identifier) => {
                         let resumed = match resume {
-                            AwsCreateResume::Unissued(attempt) => {
-                                attempt.issued(identifier.clone())
-                            }
-                            AwsCreateResume::Issued(resumed) => resumed,
+                            CreateHandle::Unissued(attempt) => attempt.issued(identifier.clone()),
+                            CreateHandle::Issued(resumed) => resumed,
                         };
                         resumed.pending(
-                            AwsCreateToken::TaggedEc2Found { kind, identifier },
+                            AwsCreateOperation::TaggedEc2Found { kind, identifier }.into(),
                             POLL_AFTER_SECS,
                         )
                     }
                 }
             }
-            AwsCreateToken::TaggedEc2Found { kind, identifier } => {
+            AwsCreateOperation::TaggedEc2Found { kind, identifier } => {
                 let resumed = match resume {
-                    AwsCreateResume::Unissued(attempt) => attempt.issued(identifier.clone()),
-                    AwsCreateResume::Issued(resumed) => resumed,
+                    CreateHandle::Unissued(attempt) => attempt.issued(identifier.clone()),
+                    CreateHandle::Issued(resumed) => resumed,
                 };
                 self.finish_tagged_ec2_resumed(resource, kind, identifier, resumed, poll_request)
                     .await
@@ -3196,14 +3251,13 @@ impl AwsProvider {
                     Ok(token) => token,
                     Err(error) => return OperationStep::Verdict(resume.preserve(error)),
                 };
-                let resume = match resume {
-                    Resume::Unissued(attempt) => AwsCreateResume::Unissued(attempt),
-                    Resume::Issued(resumed) => AwsCreateResume::Issued(resumed),
+                let resume = match native_create_resume(&resource.id, resume, token) {
+                    Ok(resume) => resume,
+                    Err(error) => return OperationStep::Verdict(error),
                 };
                 native_resume_step(
                     self.resume_create_step(
                         resource,
-                        token,
                         resume,
                         PollRequest {
                             finality: PollFinality::Continue,
@@ -3213,18 +3267,14 @@ impl AwsProvider {
                 )
             },
             |pending: NativeResumePending, finality| async move {
-                let resume = match *pending.resume {
-                    Resume::Unissued(attempt) => AwsCreateResume::Unissued(attempt),
-                    Resume::Issued(resumed) => AwsCreateResume::Issued(resumed),
-                };
+                let resume =
+                    match native_create_resume(&resource.id, *pending.resume, pending.token) {
+                        Ok(resume) => resume,
+                        Err(error) => return OperationStep::Verdict(error),
+                    };
                 native_resume_step(
-                    self.resume_create_step(
-                        resource,
-                        pending.token,
-                        resume,
-                        PollRequest { finality },
-                    )
-                    .await,
+                    self.resume_create_step(resource, resume, PollRequest { finality })
+                        .await,
                 )
             },
             sleep,
@@ -4019,8 +4069,11 @@ mod pending_operation_tests {
             AcmPollVerdict::Untracked(error)
         }
 
-        fn preserve(self, token: AwsCreateToken, error: ProviderError) -> Self::Verdict {
-            AcmPollVerdict::Preserved { token, error }
+        fn preserve(self, token: AwsCreateOperation, error: ProviderError) -> Self::Verdict {
+            AcmPollVerdict::Preserved {
+                token: token.into(),
+                error,
+            }
         }
 
         fn issued(self, identifier: AppliedIdentifier) -> Self::Issued {
@@ -4029,10 +4082,10 @@ mod pending_operation_tests {
 
         fn pending(
             self,
-            token: AwsCreateToken,
+            token: AwsCreateOperation,
             _poll_after_secs: u32,
         ) -> Result<Self::Step, Self::Verdict> {
-            Ok(token)
+            Ok(token.into())
         }
     }
 
@@ -4058,14 +4111,6 @@ mod pending_operation_tests {
             _missing_attributes: NonEmptyAttributeNames,
         ) -> Result<Self::Step, Self::Verdict> {
             unreachable!("the ACM resend tests never complete an issued create")
-        }
-
-        fn pending_read_back(
-            self,
-            continuation: ReadBackContinuation,
-            poll_after_secs: u32,
-        ) -> Result<Self::Step, Self::Verdict> {
-            self.pending(AwsCreateToken::ReadBack(continuation), poll_after_secs)
         }
 
         fn failed(self, _observation: Observation, _error: ProviderError) -> Self::Verdict {
@@ -4259,11 +4304,11 @@ mod pending_operation_tests {
     }
 
     fn acm_resend_token() -> AwsCreateToken {
-        AwsCreateToken::AcmRequestCertificate {
+        AwsCreateToken::Operation(AwsCreateOperation::AcmRequestCertificate {
             client_token: ClientToken::new(),
             first_used_at_unix_secs: unix_timestamp_now().expect("current test time"),
             attempts_remaining: ACM_REQUEST_CERTIFICATE_POLL_ATTEMPTS.get(),
-        }
+        })
     }
 
     async fn initial_acm_maybe_sent_token(
@@ -4290,7 +4335,7 @@ mod pending_operation_tests {
             )
             .await
         {
-            InitialAcmRequestTransition::Pending(token, _) => token,
+            InitialAcmRequestTransition::Pending(token, _) => token.into(),
             transition => panic!("initial ACM request was not MaybeSent: {transition:?}"),
         }
     }
@@ -4310,11 +4355,11 @@ mod pending_operation_tests {
 
         fn pending(
             self,
-            token: AwsCreateToken,
+            token: AwsCreateOperation,
             _sent: Sent,
             _poll_after_secs: u32,
         ) -> Result<Self::Step, Self::Verdict> {
-            Ok(token)
+            Ok(token.into())
         }
     }
 
@@ -4340,14 +4385,6 @@ mod pending_operation_tests {
             _missing_attributes: NonEmptyAttributeNames,
         ) -> Result<Self::Step, Self::Verdict> {
             unreachable!("the pending-only test never completes partially")
-        }
-
-        fn pending_read_back(
-            self,
-            continuation: ReadBackContinuation,
-            poll_after_secs: u32,
-        ) -> Result<Self::Step, Self::Verdict> {
-            self.pending(AwsCreateToken::ReadBack(continuation), poll_after_secs)
         }
 
         fn failed(self, _observation: Observation, error: ProviderError) -> Self::Verdict {
@@ -4452,20 +4489,83 @@ mod pending_operation_tests {
     }
 
     #[test]
+    fn read_back_existing_token_json_is_unchanged() {
+        let read_back = serde_json::json!({
+            "phase": "read_back",
+            "identifier": "certificate-123",
+            "resource_type": "acm.Certificate"
+        });
+        for json in [
+            read_back.clone(),
+            serde_json::json!({
+                "phase": "acm_request_certificate",
+                "client_token": "abcdef0123456789abcdef0123456789",
+                "first_used_at_unix_secs": 123,
+                "attempts_remaining": 3
+            }),
+            serde_json::json!({"phase": "nat_gateway", "nat_gateway_id": "nat-123"}),
+            serde_json::json!({"phase": "transit_gateway", "transit_gateway_id": "tgw-123"}),
+            serde_json::json!({"phase": "transit_gateway_attachment", "attachment_id": "tgw-attach-123"}),
+            serde_json::json!({"phase": "organizations_account", "create_account_request_id": "car-123"}),
+            serde_json::json!({
+                "phase": "tagged_ec2", "kind": "vpc",
+                "create_token": "abcdef0123456789abcdef0123456789",
+                "attempts_remaining": 4, "next_delay_secs": 10
+            }),
+            serde_json::json!({
+                "phase": "tagged_ec2", "kind": "vpc",
+                "create_token": "abcdef0123456789abcdef0123456789",
+                "attempts_remaining": 4, "next_delay_secs": 10,
+                "original_failure": {
+                    "operation": "ec2.CreateVpc", "status": 429,
+                    "code": "RequestLimitExceeded", "request_id": "request-123"
+                }
+            }),
+            serde_json::json!({"phase": "tagged_ec2_found", "kind": "vpc", "identifier": "vpc-123"}),
+        ] {
+            let token: AwsCreateToken = serde_json::from_value(json.clone()).unwrap();
+            assert_eq!(serde_json::to_value(&token).unwrap(), json);
+            let expected_phase = if json["phase"] == "read_back" {
+                PendingPhase::ReadBack
+            } else {
+                PendingPhase::Operation
+            };
+            assert_eq!(token.phase(), expected_phase);
+            let operation = token.operation().cloned();
+            match token.clone().into_operation() {
+                Ok(payload) => {
+                    assert_eq!(operation.as_ref(), Some(&payload));
+                    assert_eq!(AwsCreateToken::from_operation(payload), token);
+                }
+                Err(read_back) => {
+                    assert_eq!(expected_phase, PendingPhase::ReadBack);
+                    assert!(operation.is_none());
+                    assert_eq!(read_back, token);
+                }
+            }
+        }
+        let update: AwsUpdateToken = serde_json::from_value(read_back.clone()).unwrap();
+        assert_eq!(serde_json::to_value(&update).unwrap(), read_back);
+        assert_eq!(update.phase(), PendingPhase::ReadBack);
+        assert!(update.operation().is_none());
+        assert_eq!(update.clone().into_operation().unwrap_err(), update);
+    }
+
+    #[test]
     fn pending_tokens_round_trip_without_resource_attributes() {
         let create_tokens = [
-            AwsCreateToken::NatGateway {
+            AwsCreateToken::Operation(AwsCreateOperation::NatGateway {
                 nat_gateway_id: identifier("nat-0123456789"),
-            },
-            AwsCreateToken::TransitGateway {
+            }),
+            AwsCreateToken::Operation(AwsCreateOperation::TransitGateway {
                 transit_gateway_id: identifier("tgw-0123456789"),
-            },
-            AwsCreateToken::TransitGatewayAttachment {
+            }),
+            AwsCreateToken::Operation(AwsCreateOperation::TransitGatewayAttachment {
                 attachment_id: identifier("tgw-attach-0123456789"),
-            },
-            AwsCreateToken::OrganizationsAccount {
+            }),
+            AwsCreateToken::Operation(AwsCreateOperation::OrganizationsAccount {
                 create_account_request_id: "car-0123456789".to_string(),
-            },
+            }),
         ];
         for token in create_tokens {
             let json = serde_json::to_string(&token).expect("create token should serialize");
@@ -4513,13 +4613,13 @@ mod pending_operation_tests {
 
     #[test]
     fn tagged_ec2_token_round_trips_with_kind_token_attempts_and_next_delay() {
-        let token = AwsCreateToken::TaggedEc2 {
+        let token = AwsCreateToken::Operation(AwsCreateOperation::TaggedEc2 {
             kind: Ec2TaggedResourceKind::Vpc,
             create_token: crate::aws_operation::ClientToken::new(),
             attempts_remaining: 8,
             next_delay_secs: 5,
             original_failure: None,
-        };
+        });
 
         let json = serde_json::to_string(&token).expect("tagged EC2 token should serialize");
         assert_eq!(
@@ -4555,22 +4655,22 @@ mod pending_operation_tests {
         assert_eq!(worst_case_secs, 875);
         assert!(worst_case_secs < DEFAULT_OPERATION_BUDGET.as_secs());
         assert_eq!(
-            AwsCreateToken::TaggedEc2 {
+            AwsCreateToken::Operation(AwsCreateOperation::TaggedEc2 {
                 kind: Ec2TaggedResourceKind::Vpc,
                 create_token: ClientToken::new(),
                 attempts_remaining: 4,
                 next_delay_secs: 60,
                 original_failure: None,
-            }
+            })
             .poll_after_secs(),
             60,
             "native resume must preserve the same backoff as host polling"
         );
 
-        let continuation = AwsCreateToken::TaggedEc2Found {
+        let continuation = AwsCreateToken::Operation(AwsCreateOperation::TaggedEc2Found {
             kind: Ec2TaggedResourceKind::Subnet,
             identifier: identifier("subnet-found"),
-        };
+        });
         let json = serde_json::to_string(&continuation).expect("continuation should serialize");
         assert_eq!(
             serde_json::from_str::<AwsCreateToken>(&json).expect("continuation should deserialize"),
@@ -4581,11 +4681,11 @@ mod pending_operation_tests {
 
     #[test]
     fn acm_request_token_round_trips_and_respects_the_safety_margin() {
-        let token = AwsCreateToken::AcmRequestCertificate {
+        let token = AwsCreateToken::Operation(AwsCreateOperation::AcmRequestCertificate {
             client_token: ClientToken::new(),
             first_used_at_unix_secs: 10_000,
             attempts_remaining: ACM_REQUEST_CERTIFICATE_POLL_ATTEMPTS.get(),
-        };
+        });
         let json = serde_json::to_string(&token).expect("ACM request token should serialize");
         assert_eq!(
             serde_json::from_str::<AwsCreateToken>(&json)
@@ -4621,8 +4721,10 @@ mod pending_operation_tests {
         let result = provider
             .poll_create_step(
                 &resource,
-                token.clone(),
-                AwsCreatePoll::Unissued(RecordingAcmPollAttempt),
+                AwsCreatePoll::Unissued(
+                    RecordingAcmPollAttempt,
+                    (token.clone()).into_operation().unwrap(),
+                ),
                 PollRequest {
                     finality: PollFinality::Continue,
                 },
@@ -4667,8 +4769,10 @@ mod pending_operation_tests {
         let result = provider
             .poll_create_step(
                 &resource,
-                token.clone(),
-                AwsCreatePoll::Unissued(RecordingAcmPollAttempt),
+                AwsCreatePoll::Unissued(
+                    RecordingAcmPollAttempt,
+                    (token.clone()).into_operation().unwrap(),
+                ),
                 PollRequest {
                     finality: PollFinality::Continue,
                 },
@@ -4715,8 +4819,10 @@ mod pending_operation_tests {
         let result = provider
             .poll_create_step(
                 &resource,
-                token.clone(),
-                AwsCreatePoll::Unissued(RecordingAcmPollAttempt),
+                AwsCreatePoll::Unissued(
+                    RecordingAcmPollAttempt,
+                    (token.clone()).into_operation().unwrap(),
+                ),
                 PollRequest {
                     finality: PollFinality::Continue,
                 },
@@ -4764,8 +4870,10 @@ mod pending_operation_tests {
         let result = provider
             .poll_create_step(
                 &resource,
-                token.clone(),
-                AwsCreatePoll::Unissued(RecordingAcmPollAttempt),
+                AwsCreatePoll::Unissued(
+                    RecordingAcmPollAttempt,
+                    (token.clone()).into_operation().unwrap(),
+                ),
                 PollRequest {
                     finality: PollFinality::Continue,
                 },
@@ -4813,8 +4921,10 @@ mod pending_operation_tests {
         let result = provider
             .poll_create_step(
                 &acm_certificate_resource(),
-                token.clone(),
-                AwsCreatePoll::Unissued(RecordingAcmPollAttempt),
+                AwsCreatePoll::Unissued(
+                    RecordingAcmPollAttempt,
+                    (token.clone()).into_operation().unwrap(),
+                ),
                 PollRequest {
                     finality: PollFinality::Continue,
                 },
@@ -4907,9 +5017,9 @@ mod pending_operation_tests {
             Duration::from_secs(30),
             DEFAULT_READ_BACK_BUDGET,
             ready(Ok(OperationStep::Pending {
-                pending: AwsCreateToken::NatGateway {
+                pending: AwsCreateToken::Operation(AwsCreateOperation::NatGateway {
                     nat_gateway_id: identifier("nat-123"),
-                },
+                }),
                 poll_after_secs: 5,
                 phase: PendingPhase::Operation,
             })),
@@ -4931,9 +5041,9 @@ mod pending_operation_tests {
             Duration::ZERO,
             DEFAULT_READ_BACK_BUDGET,
             ready(Ok(OperationStep::Pending {
-                pending: AwsCreateToken::NatGateway {
+                pending: AwsCreateToken::Operation(AwsCreateOperation::NatGateway {
                     nat_gateway_id: identifier("nat-123"),
-                },
+                }),
                 poll_after_secs: 5,
                 phase: PendingPhase::Operation,
             })),

@@ -11,7 +11,7 @@ mod guest {
 
     use super::acm_read_back::{ARN, AcmService};
     use carina_plugin_sdk::{
-        PollFinality, dispatch_create, dispatch_poll_create, dispatch_resume_create,
+        PendingPhase, PollFinality, dispatch_create, dispatch_poll_create, dispatch_resume_create,
     };
     use carina_provider_aws::BoundedSdkConfig;
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -60,6 +60,255 @@ mod guest {
         (provider, service, request)
     }
 
+    // Inject a transient step failure at the real guest preservation adapters.
+    // HTTP failures normally return Pending and would not exercise preserve.
+    struct PreservingGuest {
+        inner: AwsProcessProvider,
+        initial: bool,
+    }
+
+    fn transient_error() -> CoreProviderError {
+        CoreProviderError::api_error_caused_by(
+            "temporary read-back failure",
+            std::io::Error::other("connection reset"),
+        )
+    }
+
+    impl CarinaProvider for PreservingGuest {
+        type CreateToken = AwsCreateToken;
+        type UpdateToken = AwsUpdateToken;
+        type DeleteToken = AwsDeleteToken;
+
+        fn info(&self) -> proto::ProviderInfo {
+            self.inner.info()
+        }
+        fn schemas(&self) -> Vec<ValidatedResourceSchema> {
+            self.inner.schemas()
+        }
+        fn reference_forms(&self) -> ReferenceForms {
+            self.inner.reference_forms()
+        }
+        fn provider_config_attribute_types(&self) -> ValidatedConfigSchema {
+            self.inner.provider_config_attribute_types()
+        }
+        fn validate_config(&self, attrs: &BTreeMap<String, proto::Value>) -> Result<(), String> {
+            self.inner.validate_config(attrs)
+        }
+        fn initialize(
+            &mut self,
+            attrs: &BTreeMap<String, proto::Value>,
+        ) -> Result<proto::ReferenceScope, String> {
+            self.inner.initialize(attrs)
+        }
+        fn read(
+            &self,
+            id: &proto::ResourceId,
+            identifier: &proto::AppliedIdentifier,
+            _request: proto::ReadRequest,
+        ) -> Result<proto::ReadOutcome, proto::ProviderError> {
+            self.inner.read(id, identifier, _request)
+        }
+        fn read_data_source(
+            &self,
+            resource: &proto::Resource,
+        ) -> Result<proto::State, proto::ProviderError> {
+            self.inner.read_data_source(resource)
+        }
+        fn update(
+            &self,
+            id: &proto::ResourceId,
+            identifier: &proto::AppliedIdentifier,
+            request: proto::UpdateRequest,
+        ) -> Result<SdkUpdateOutcome<Self::UpdateToken>, proto::ProviderError> {
+            self.inner.update(id, identifier, request)
+        }
+        fn poll_update(
+            &self,
+            id: &proto::ResourceId,
+            identifier: &proto::AppliedIdentifier,
+            request: proto::UpdateRequest,
+            pending: Pending<Self::UpdateToken>,
+            poll_request: PollRequest,
+        ) -> Result<SdkUpdateOutcome<Self::UpdateToken>, proto::ProviderError> {
+            self.inner
+                .poll_update(id, identifier, request, pending, poll_request)
+        }
+        fn delete(
+            &self,
+            id: &proto::ResourceId,
+            identifier: &proto::AppliedIdentifier,
+            request: proto::DeleteRequest,
+        ) -> Result<SdkDeleteOutcome<Self::DeleteToken>, proto::ProviderError> {
+            self.inner.delete(id, identifier, request)
+        }
+        fn poll_delete(
+            &self,
+            id: &proto::ResourceId,
+            _identifier: &proto::AppliedIdentifier,
+            _request: proto::DeleteRequest,
+            pending: PendingDelete<Self::DeleteToken>,
+        ) -> Result<SdkDeleteOutcome<Self::DeleteToken>, proto::ProviderError> {
+            self.inner.poll_delete(id, _identifier, _request, pending)
+        }
+        fn required_permissions(
+            &self,
+            _id: &proto::ResourceId,
+            _op: carina_plugin_sdk::PlanOp,
+        ) -> Result<Vec<String>, proto::ProviderError> {
+            self.inner.required_permissions(_id, _op)
+        }
+        fn create(
+            &self,
+            id: &proto::ResourceId,
+            request: proto::CreateRequest,
+            attempt: SdkCreateAttempt,
+        ) -> Result<SdkCreateStep<AwsCreateToken>, SdkCreateVerdict<AwsCreateToken>> {
+            if self.initial {
+                let token = serde_json::from_value(serde_json::json!({
+                    "phase": "read_back", "identifier": ARN, "resource_type": "acm.Certificate"
+                }))
+                .unwrap();
+                return Err(GuestCreateAttempt(attempt)
+                    .issued(
+                        CoreAppliedIdentifier::new(ARN).unwrap(),
+                        CoreSent::only(["domain_name"]),
+                    )
+                    .preserve(token, transient_error()));
+            }
+            self.inner.create(id, request, attempt)
+        }
+
+        fn poll_create(
+            &self,
+            _id: &proto::ResourceId,
+            _request: proto::CreateRequest,
+            poll: SdkPoll<AwsCreateToken>,
+            _poll_request: PollRequest,
+        ) -> Result<SdkCreateStep<AwsCreateToken>, SdkPollVerdict<AwsCreateToken>> {
+            let SdkPoll::Issued(issued, token) = poll else {
+                panic!("read-back must have an identifier")
+            };
+            Err(GuestPolledIssuedCreate(issued).preserve(token, transient_error()))
+        }
+
+        fn resume_create(
+            &self,
+            _id: &proto::ResourceId,
+            _request: proto::CreateRequest,
+            resume: SdkResume<AwsCreateToken>,
+            _poll_request: PollRequest,
+        ) -> Result<SdkResumeStep<AwsCreateToken>, SdkResumeVerdict<AwsCreateToken>> {
+            let SdkResume::Issued(resumed, token) = resume else {
+                panic!("read-back must have an identifier")
+            };
+            Err(GuestResumedCreate(resumed).preserve(token, transient_error()))
+        }
+    }
+
+    #[test]
+    fn guest_read_back_transient_failure_preserves_continuation() {
+        for call in ["poll", "resume", "create"] {
+            let (inner, service, request) = fixture(&[false]);
+            let provider = PreservingGuest {
+                inner,
+                initial: call == "create",
+            };
+            let id = request.resource.id.clone();
+            let pending = if provider.initial {
+                let verdict = dispatch_create(&provider, &id, request).unwrap_err();
+                let proto::CreateVerdict::InFlight(in_flight) = *verdict else {
+                    panic!("a transient failure must preserve read-back: {verdict:?}")
+                };
+                assert!(
+                    in_flight
+                        .error
+                        .cause
+                        .as_deref()
+                        .unwrap()
+                        .contains("connection reset")
+                );
+                assert_eq!(in_flight.pending.sent, CoreSent::only(["domain_name"]));
+                in_flight.pending
+            } else {
+                let proto::CreateStep::Pending(pending) =
+                    dispatch_create(&provider, &id, request.clone()).unwrap()
+                else {
+                    panic!("expected read-back")
+                };
+                let token = pending.token.clone();
+                let sent = pending.sent.clone();
+                if call == "poll" {
+                    let verdict = dispatch_poll_create(
+                        &provider,
+                        &id,
+                        request,
+                        pending.progress,
+                        pending.sent,
+                        pending.token,
+                        PollRequest {
+                            finality: PollFinality::Continue,
+                        },
+                    )
+                    .unwrap_err();
+                    let proto::PollVerdict::InFlight(in_flight) = *verdict else {
+                        panic!("a transient poll failure must preserve read-back: {verdict:?}")
+                    };
+                    assert!(
+                        in_flight
+                            .error
+                            .cause
+                            .as_deref()
+                            .unwrap()
+                            .contains("connection reset")
+                    );
+                    assert_eq!(in_flight.pending.token, token);
+                    assert_eq!(in_flight.pending.sent, sent);
+                    in_flight.pending
+                } else {
+                    let verdict = dispatch_resume_create(
+                        &provider,
+                        &id,
+                        request,
+                        pending.progress,
+                        pending.token,
+                        PollRequest {
+                            finality: PollFinality::Continue,
+                        },
+                    )
+                    .unwrap_err();
+                    let proto::ResumeVerdict::InFlight(in_flight) = *verdict else {
+                        panic!("a transient resume failure must preserve read-back: {verdict:?}")
+                    };
+                    assert!(
+                        in_flight
+                            .error
+                            .cause
+                            .as_deref()
+                            .unwrap()
+                            .contains("connection reset")
+                    );
+                    assert_eq!(in_flight.pending.token, token);
+                    assert_eq!(in_flight.pending.progress.phase(), PendingPhase::ReadBack);
+                    assert_eq!(
+                        in_flight.pending.progress.identifier().unwrap().as_str(),
+                        ARN
+                    );
+                    assert_eq!(in_flight.pending.poll_after_secs, 5);
+                    assert_eq!(service.requests.load(Ordering::Relaxed), 1);
+                    continue;
+                }
+            };
+            assert_eq!(pending.progress.phase(), PendingPhase::ReadBack);
+            assert_eq!(pending.progress.identifier().unwrap().as_str(), ARN);
+            assert!(matches!(pending.token, AwsCreateToken::ReadBack(_)));
+            assert_eq!(pending.poll_after_secs, 5);
+            assert_eq!(
+                service.requests.load(Ordering::Relaxed),
+                usize::from(call != "create")
+            );
+        }
+    }
+
     #[test]
     fn guest_read_back_create_and_resume_keep_phase_and_finality() {
         for populated in [false, true] {
@@ -76,7 +325,7 @@ mod guest {
                 &provider,
                 &id,
                 request.clone(),
-                pending.progress.identifier().cloned(),
+                pending.progress,
                 pending.sent,
                 pending.token,
                 PollRequest {
@@ -91,7 +340,7 @@ mod guest {
                 &provider,
                 &id,
                 request,
-                pending.progress.identifier().cloned(),
+                pending.progress,
                 pending.token,
                 PollRequest {
                     finality: PollFinality::FinalAttempt,
@@ -131,7 +380,7 @@ mod guest {
             &provider,
             &id,
             request,
-            pending.progress.identifier().cloned(),
+            pending.progress,
             pending.sent,
             pending.token,
             PollRequest {
@@ -184,7 +433,7 @@ mod guest {
         else {
             panic!("expected read-back")
         };
-        assert_eq!(pending.phase, PendingPhase::ReadBack);
+        assert_eq!(pending.phase(), PendingPhase::ReadBack);
         let SdkUpdateOutcome::Pending(pending) = provider
             .poll_update(
                 &id,
@@ -199,7 +448,7 @@ mod guest {
         else {
             panic!("expected continuing read-back")
         };
-        assert_eq!(pending.phase, PendingPhase::ReadBack);
+        assert_eq!(pending.phase(), PendingPhase::ReadBack);
         let result = provider
             .poll_update(
                 &id,
@@ -230,7 +479,7 @@ mod guest {
                 &provider,
                 &id,
                 request.clone(),
-                pending.progress.identifier().cloned(),
+                pending.progress,
                 pending.sent,
                 pending.token,
                 PollRequest {
@@ -246,7 +495,7 @@ mod guest {
                     &provider,
                     &id,
                     request,
-                    pending.progress.identifier().cloned(),
+                    pending.progress,
                     pending.token,
                     PollRequest {
                         finality: PollFinality::FinalAttempt,
@@ -261,7 +510,7 @@ mod guest {
                     &provider,
                     &id,
                     request,
-                    pending.progress.identifier().cloned(),
+                    pending.progress,
                     pending.sent,
                     pending.token,
                     PollRequest {
