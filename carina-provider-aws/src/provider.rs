@@ -5,7 +5,7 @@ use std::future::Future;
 use std::num::NonZeroU8;
 use std::time::Duration;
 
-use carina_aws_types::SendOutcome;
+use carina_aws_types::SendClassification;
 use carina_core::effect::PlanOp;
 use carina_core::provider::{
     AppliedIdentifier, AppliedState, BoxFuture, CreateAttempt, CreateFailure, CreateOutcome,
@@ -1248,9 +1248,11 @@ impl AwsProvider {
             .await
         {
             Ok((sent, Ok(identifier))) => InitialAcmRequestTransition::Issued(identifier, sent),
-            Ok((sent, Err(error))) => match error.outcome() {
-                SendOutcome::MaybeSent => InitialAcmRequestTransition::Pending(pending_token, sent),
-                SendOutcome::NotSent | SendOutcome::Rejected => {
+            Ok((sent, Err(error))) => match error.classification() {
+                SendClassification::MaybeSent { .. } => {
+                    InitialAcmRequestTransition::Pending(pending_token, sent)
+                }
+                SendClassification::NotSent(_) | SendClassification::Rejected => {
                     drop(sent);
                     InitialAcmRequestTransition::Untracked(
                         crate::services::acm::certificate::request_certificate_error(
@@ -1400,24 +1402,27 @@ impl AwsProvider {
             + Sync
             + 'static,
     {
-        if error.outcome() == SendOutcome::MaybeSent {
-            let original_failure = AwsFailureSummary::from_send_failure(&error);
-            return attempt.pending(
-                AwsCreateToken::TaggedEc2 {
-                    kind,
-                    create_token: create_token.clone(),
-                    attempts_remaining: TAGGED_EC2_DISCOVERY_ATTEMPTS,
-                    next_delay_secs: TAGGED_EC2_INITIAL_DELAY_SECS,
-                    original_failure: Some(original_failure),
-                },
-                sent,
-                TAGGED_EC2_INITIAL_DELAY_SECS,
-            );
+        match error.classification() {
+            SendClassification::MaybeSent { .. } => {
+                let original_failure = AwsFailureSummary::from_send_failure(&error);
+                attempt.pending(
+                    AwsCreateToken::TaggedEc2 {
+                        kind,
+                        create_token: create_token.clone(),
+                        attempts_remaining: TAGGED_EC2_DISCOVERY_ATTEMPTS,
+                        next_delay_secs: TAGGED_EC2_INITIAL_DELAY_SECS,
+                        original_failure: Some(original_failure),
+                    },
+                    sent,
+                    TAGGED_EC2_INITIAL_DELAY_SECS,
+                )
+            }
+            SendClassification::NotSent(_) | SendClassification::Rejected => Err(attempt
+                .untracked(
+                    crate::error_helpers::api_error_with_meta(kind.create_error_context(), error)
+                        .for_resource(id.clone()),
+                )),
         }
-        Err(attempt.untracked(
-            crate::error_helpers::api_error_with_meta(kind.create_error_context(), error)
-                .for_resource(id.clone()),
-        ))
     }
 
     pub(crate) async fn finish_tagged_ec2_create<A, O, Failure, Identifier>(
@@ -3908,10 +3913,9 @@ mod pending_operation_tests {
             .headers_mut()
             .insert("x-amzn-requestid", "sticky-request-id");
         let failure = SendFailure::new(
-            carina_aws_types::SendClassification::for_test(
-                SendOutcome::MaybeSent,
-                carina_aws_types::FinalAttempt::Sent,
-            ),
+            carina_aws_types::SendClassification::MaybeSent {
+                final_attempt: carina_aws_types::FinalAttempt::Sent,
+            },
             SdkError::service_error(error, response),
         );
         let create_token = ClientToken::new();

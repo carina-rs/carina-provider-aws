@@ -46,9 +46,13 @@ pub enum Transience {
 
 /// Resend safety across the operation and transience of its final attempt.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct SendClassification {
-    operation_outcome: SendOutcome,
-    final_attempt: FinalAttempt,
+pub enum SendClassification {
+    /// No attempt could have reached AWS; the final attempt failed before transmit.
+    NotSent(Transience),
+    /// AWS proved the final request was not applied, and no earlier attempt was MaybeSent.
+    Rejected,
+    /// Some attempt may have reached AWS; the final attempt's verdict is retained.
+    MaybeSent { final_attempt: FinalAttempt },
 }
 
 impl SendClassification {
@@ -64,26 +68,16 @@ impl SendClassification {
     where
         E: std::error::Error + 'static,
     {
-        let verdict = operation_verdict(error);
-        let final_attempt = if verdict.final_attempt_outcome() == SendOutcome::NotSent {
-            FinalAttempt::NotSent(not_sent_transience(error))
-        } else {
-            FinalAttempt::Sent
-        };
-        Self {
-            operation_outcome: verdict.operation_outcome(),
-            final_attempt,
-        }
+        operation_verdict(error).classification()
     }
 
     /// Returns the resend-safety outcome aggregated across every SDK attempt.
-    pub fn operation_outcome(self) -> SendOutcome {
-        self.operation_outcome
-    }
-
-    /// Returns the typed transport verdict for the final SDK attempt.
-    pub fn final_attempt(self) -> FinalAttempt {
-        self.final_attempt
+    pub fn outcome(self) -> SendOutcome {
+        match self {
+            Self::NotSent(_) => SendOutcome::NotSent,
+            Self::Rejected => SendOutcome::Rejected,
+            Self::MaybeSent { .. } => SendOutcome::MaybeSent,
+        }
     }
 
     /// Returns whether resending cannot duplicate an already-applied effect.
@@ -91,49 +85,59 @@ impl SendClassification {
     /// This says only whether a resend is safe; deciding whether the final
     /// error is worth retrying remains the provider's responsibility.
     pub fn resend_is_safe(self, idempotency: Idempotency) -> bool {
-        self.operation_outcome.resend_is_safe(idempotency)
+        match self {
+            Self::NotSent(_) | Self::Rejected => true,
+            Self::MaybeSent { .. } => SendOutcome::MaybeSent.resend_is_safe(idempotency),
+        }
     }
 
     /// Records that an earlier provider-level attempt may have been sent.
     ///
     /// The final-attempt verdict remains unchanged so retry transience is
     /// still decided from the most recent attempt.
-    pub fn with_prior_maybe_sent(mut self) -> Self {
-        self.operation_outcome = SendOutcome::MaybeSent;
-        self
-    }
-
-    /// Constructs a classification for provider retry tests.
-    #[cfg(feature = "test-utils")]
-    pub fn for_test(operation_outcome: SendOutcome, final_attempt: FinalAttempt) -> Self {
-        Self {
-            operation_outcome,
-            final_attempt,
+    pub fn with_prior_maybe_sent(self) -> Self {
+        match self {
+            Self::NotSent(transience) => Self::MaybeSent {
+                final_attempt: FinalAttempt::NotSent(transience),
+            },
+            Self::Rejected => Self::MaybeSent {
+                final_attempt: FinalAttempt::Sent,
+            },
+            Self::MaybeSent { .. } => self,
         }
     }
 }
 
-/// The raw resend-guard verdict retained in the SDK error.
+/// The complete resend-guard classification retained in the SDK error.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct OperationVerdict {
-    operation_outcome: SendOutcome,
-    final_attempt_outcome: SendOutcome,
-}
+pub(crate) struct OperationVerdict(SendClassification);
 
 impl OperationVerdict {
-    pub(crate) fn new(operation_outcome: SendOutcome, final_attempt_outcome: SendOutcome) -> Self {
-        Self {
-            operation_outcome,
-            final_attempt_outcome,
-        }
+    pub(crate) fn new(classification: SendClassification) -> Self {
+        Self(classification)
     }
 
-    pub(crate) fn operation_outcome(self) -> SendOutcome {
-        self.operation_outcome
+    pub(crate) fn from_attempts(
+        any_maybe_sent: bool,
+        final_attempt: SendOutcome,
+        transience: Transience,
+    ) -> Self {
+        let classification = match final_attempt {
+            SendOutcome::NotSent => SendClassification::NotSent(transience),
+            SendOutcome::Rejected => SendClassification::Rejected,
+            SendOutcome::MaybeSent => SendClassification::MaybeSent {
+                final_attempt: FinalAttempt::Sent,
+            },
+        };
+        Self::new(if any_maybe_sent {
+            classification.with_prior_maybe_sent()
+        } else {
+            classification
+        })
     }
 
-    pub(crate) fn final_attempt_outcome(self) -> SendOutcome {
-        self.final_attempt_outcome
+    pub(crate) fn classification(self) -> SendClassification {
+        self.0
     }
 }
 
@@ -151,7 +155,11 @@ pub(crate) enum AttemptPhase {
 /// This is test-only. Production verdicts come only from [`ResendGuard`](super::ResendGuard).
 #[cfg(feature = "test-utils")]
 pub fn attach_single_attempt_verdict_for_test(response: &mut HttpResponse, outcome: SendOutcome) {
-    response.add_extension(OperationVerdict::new(outcome, outcome));
+    response.add_extension(OperationVerdict::from_attempts(
+        false,
+        outcome,
+        Transience::Permanent,
+    ));
 }
 
 /// An SDK failure annotated with the resend guard's all-attempts verdict.
@@ -176,7 +184,7 @@ impl fmt::Display for OperationSendFailure {
         write!(
             formatter,
             "AWS operation failed with {:?} send outcome",
-            self.verdict.operation_outcome()
+            self.verdict.classification().outcome()
         )
     }
 }
@@ -292,7 +300,9 @@ fn operation_verdict<E>(error: &SdkError<E, HttpResponse>) -> OperationVerdict
 where
     E: std::error::Error + 'static,
 {
-    let maybe_sent = OperationVerdict::new(SendOutcome::MaybeSent, SendOutcome::MaybeSent);
+    let maybe_sent = OperationVerdict::new(SendClassification::MaybeSent {
+        final_attempt: FinalAttempt::Sent,
+    });
     match error {
         // Response parsing proves transport was reached but not whether AWS
         // applied the request, so guard annotations never change this case.
@@ -303,7 +313,9 @@ where
             .copied()
             .unwrap_or(maybe_sent),
         SdkError::ConstructionFailure(_) => operation_verdict_at(std::error::Error::source(error))
-            .unwrap_or_else(|| OperationVerdict::new(SendOutcome::NotSent, SendOutcome::NotSent)),
+            .unwrap_or_else(|| {
+                OperationVerdict::new(SendClassification::NotSent(Transience::Permanent))
+            }),
         SdkError::TimeoutError(_) => {
             operation_verdict_at(std::error::Error::source(error)).unwrap_or(maybe_sent)
         }
@@ -320,14 +332,16 @@ where
 }
 
 /// Applies the pre-transport retry policy documented on [`FinalAttempt::NotSent`].
-fn not_sent_transience<E>(error: &SdkError<E, HttpResponse>) -> Transience {
-    match error {
-        SdkError::TimeoutError(_) => Transience::Transient,
-        SdkError::DispatchFailure(context) => context
+pub(crate) fn not_sent_transience<E>(
+    error: &aws_smithy_runtime_api::client::orchestrator::OrchestratorError<E>,
+) -> Transience {
+    if error.is_timeout_error() {
+        Transience::Transient
+    } else {
+        error
             .as_connector_error()
             .map(connector_transience)
-            .unwrap_or(Transience::Permanent),
-        _ => Transience::Permanent,
+            .unwrap_or(Transience::Permanent)
     }
 }
 
@@ -551,102 +565,12 @@ mod tests {
         outcome: SendOutcome,
     ) -> SdkError<MockServiceError, HttpResponse> {
         let mut response = http_response(status);
-        response.add_extension(OperationVerdict::new(outcome, outcome));
+        response.add_extension(OperationVerdict::from_attempts(
+            false,
+            outcome,
+            Transience::Permanent,
+        ));
         SdkError::service_error(MockServiceError::new(code, retryable), response)
-    }
-
-    #[test]
-    fn typed_classification_carries_final_attempt_transience() {
-        let construction: SdkError<MockServiceError, HttpResponse> =
-            SdkError::construction_failure("request construction failed");
-        let classification = SendClassification::of(&construction);
-        assert_eq!(classification.operation_outcome(), SendOutcome::NotSent);
-        assert_eq!(
-            classification.final_attempt(),
-            FinalAttempt::NotSent(Transience::Permanent)
-        );
-
-        let timeout_failure = OperationSendFailure::new(
-            OperationVerdict::new(SendOutcome::NotSent, SendOutcome::NotSent),
-            Box::new(io::Error::other("identity resolution timed out")),
-        );
-        let timeout: SdkError<MockServiceError, HttpResponse> =
-            SdkError::timeout_error(timeout_failure);
-        assert_eq!(
-            SendClassification::of(&timeout).final_attempt(),
-            FinalAttempt::NotSent(Transience::Transient)
-        );
-
-        let native_io_failure = OperationSendFailure::new(
-            OperationVerdict::new(SendOutcome::NotSent, SendOutcome::NotSent),
-            Box::new(io::Error::other("connection refused")),
-        );
-        let native_io: SdkError<MockServiceError, HttpResponse> =
-            SdkError::dispatch_failure(ConnectorError::io(Box::new(native_io_failure)));
-        assert_eq!(
-            SendClassification::of(&native_io).final_attempt(),
-            FinalAttempt::NotSent(Transience::Transient)
-        );
-
-        let other_failure = OperationSendFailure::new(
-            OperationVerdict::new(SendOutcome::NotSent, SendOutcome::NotSent),
-            Box::new(io::Error::other("credentials not loaded")),
-        );
-        let other: SdkError<MockServiceError, HttpResponse> =
-            SdkError::dispatch_failure(ConnectorError::other(Box::new(other_failure), None));
-        let user_failure = OperationSendFailure::new(
-            OperationVerdict::new(SendOutcome::NotSent, SendOutcome::NotSent),
-            Box::new(io::Error::other("invalid local request")),
-        );
-        let user: SdkError<MockServiceError, HttpResponse> =
-            SdkError::dispatch_failure(ConnectorError::user(Box::new(user_failure)));
-        for error in [&other, &user] {
-            assert_eq!(
-                SendClassification::of(error).final_attempt(),
-                FinalAttempt::NotSent(Transience::Permanent)
-            );
-        }
-
-        let wasi_pre_send_failure = OperationSendFailure::new(
-            OperationVerdict::new(SendOutcome::NotSent, SendOutcome::NotSent),
-            Box::new(transport_connector_error_for_test(SendPhase::NotSent)),
-        );
-        let wasi_pre_send: SdkError<MockServiceError, HttpResponse> =
-            SdkError::dispatch_failure(ConnectorError::io(Box::new(wasi_pre_send_failure)));
-        assert_eq!(
-            SendClassification::of(&wasi_pre_send).final_attempt(),
-            FinalAttempt::NotSent(Transience::Permanent)
-        );
-
-        for kind in [
-            ErrorKind::TransientError,
-            ErrorKind::ThrottlingError,
-            ErrorKind::ServerError,
-        ] {
-            let failure = OperationSendFailure::new(
-                OperationVerdict::new(SendOutcome::NotSent, SendOutcome::NotSent),
-                Box::new(io::Error::other("classified connector failure")),
-            );
-            let error: SdkError<MockServiceError, HttpResponse> =
-                SdkError::dispatch_failure(ConnectorError::other(Box::new(failure), Some(kind)));
-            assert_eq!(
-                SendClassification::of(&error).final_attempt(),
-                FinalAttempt::NotSent(Transience::Transient),
-                "{kind:?}"
-            );
-        }
-
-        let client_failure = OperationSendFailure::new(
-            OperationVerdict::new(SendOutcome::NotSent, SendOutcome::NotSent),
-            Box::new(io::Error::other("classified client failure")),
-        );
-        let client: SdkError<MockServiceError, HttpResponse> = SdkError::dispatch_failure(
-            ConnectorError::other(Box::new(client_failure), Some(ErrorKind::ClientError)),
-        );
-        assert_eq!(
-            SendClassification::of(&client).final_attempt(),
-            FinalAttempt::NotSent(Transience::Permanent)
-        );
     }
 
     #[test]
@@ -732,8 +656,8 @@ mod tests {
             SdkError::construction_failure("request construction failed");
 
         assert_eq!(
-            SendClassification::of(&error).operation_outcome(),
-            SendOutcome::NotSent
+            SendClassification::of(&error),
+            SendClassification::NotSent(Transience::Permanent)
         );
     }
 
@@ -743,8 +667,10 @@ mod tests {
             SdkError::timeout_error("request timed out");
 
         assert_eq!(
-            SendClassification::of(&error).operation_outcome(),
-            SendOutcome::MaybeSent
+            SendClassification::of(&error),
+            SendClassification::MaybeSent {
+                final_attempt: FinalAttempt::Sent
+            }
         );
     }
 
@@ -758,8 +684,10 @@ mod tests {
             SdkError::dispatch_failure(connector_error);
 
         assert_eq!(
-            SendClassification::of(&error).operation_outcome(),
-            SendOutcome::MaybeSent
+            SendClassification::of(&error),
+            SendClassification::MaybeSent {
+                final_attempt: FinalAttempt::Sent
+            }
         );
     }
 
@@ -770,23 +698,25 @@ mod tests {
             SdkError::dispatch_failure(connector_error);
 
         assert_eq!(
-            SendClassification::of(&error).operation_outcome(),
-            SendOutcome::MaybeSent
+            SendClassification::of(&error),
+            SendClassification::MaybeSent {
+                final_attempt: FinalAttempt::Sent
+            }
         );
     }
 
     #[test]
     fn guard_annotated_dispatch_failure_uses_operation_verdict() {
         let failure = OperationSendFailure::new(
-            OperationVerdict::new(SendOutcome::NotSent, SendOutcome::NotSent),
+            OperationVerdict::new(SendClassification::NotSent(Transience::Transient)),
             Box::new(io::Error::other("original connector failure")),
         );
         let error: SdkError<MockServiceError, HttpResponse> =
             SdkError::dispatch_failure(ConnectorError::io(Box::new(failure)));
 
         assert_eq!(
-            SendClassification::of(&error).operation_outcome(),
-            SendOutcome::NotSent
+            SendClassification::of(&error),
+            SendClassification::NotSent(Transience::Transient)
         );
     }
 
@@ -796,8 +726,10 @@ mod tests {
             SdkError::dispatch_failure(transport_connector_error_for_test(SendPhase::NotSent));
 
         assert_eq!(
-            SendClassification::of(&error).operation_outcome(),
-            SendOutcome::MaybeSent
+            SendClassification::of(&error),
+            SendClassification::MaybeSent {
+                final_attempt: FinalAttempt::Sent
+            }
         );
     }
 
@@ -813,8 +745,10 @@ mod tests {
             SdkError::dispatch_failure(connector_error);
 
         assert_eq!(
-            SendClassification::of(&error).operation_outcome(),
-            SendOutcome::MaybeSent
+            SendClassification::of(&error),
+            SendClassification::MaybeSent {
+                final_attempt: FinalAttempt::Sent
+            }
         );
     }
 
@@ -824,38 +758,41 @@ mod tests {
             SdkError::response_error("invalid response", http_response(502));
 
         assert_eq!(
-            SendClassification::of(&error).operation_outcome(),
-            SendOutcome::MaybeSent
+            SendClassification::of(&error),
+            SendClassification::MaybeSent {
+                final_attempt: FinalAttempt::Sent
+            }
         );
     }
 
     #[test]
     fn response_error_ignores_guard_verdict() {
         let mut response = http_response(400);
-        response.add_extension(OperationVerdict::new(
-            SendOutcome::Rejected,
-            SendOutcome::Rejected,
-        ));
+        response.add_extension(OperationVerdict::new(SendClassification::Rejected));
         let error: SdkError<MockServiceError, HttpResponse> =
             SdkError::response_error("invalid response body", response);
 
         assert_eq!(
-            SendClassification::of(&error).operation_outcome(),
-            SendOutcome::MaybeSent
+            SendClassification::of(&error),
+            SendClassification::MaybeSent {
+                final_attempt: FinalAttempt::Sent
+            }
         );
     }
 
     #[test]
     fn nested_guard_verdict_does_not_annotate_timeout() {
         let nested = NestedOperationFailure(OperationSendFailure::new(
-            OperationVerdict::new(SendOutcome::NotSent, SendOutcome::NotSent),
+            OperationVerdict::new(SendClassification::NotSent(Transience::Transient)),
             Box::new(io::Error::other("nested SDK call failed")),
         ));
         let error: SdkError<MockServiceError, HttpResponse> = SdkError::timeout_error(nested);
 
         assert_eq!(
-            SendClassification::of(&error).operation_outcome(),
-            SendOutcome::MaybeSent
+            SendClassification::of(&error),
+            SendClassification::MaybeSent {
+                final_attempt: FinalAttempt::Sent
+            }
         );
     }
 
@@ -864,10 +801,7 @@ mod tests {
         let error =
             service_error_with_outcome("ValidationException", None, 400, SendOutcome::Rejected);
 
-        assert_eq!(
-            SendClassification::of(&error).operation_outcome(),
-            SendOutcome::Rejected
-        );
+        assert_eq!(SendClassification::of(&error), SendClassification::Rejected);
     }
 
     #[test]
@@ -875,8 +809,10 @@ mod tests {
         let error = service_error("ValidationException", None, 400);
 
         assert_eq!(
-            SendClassification::of(&error).operation_outcome(),
-            SendOutcome::MaybeSent
+            SendClassification::of(&error),
+            SendClassification::MaybeSent {
+                final_attempt: FinalAttempt::Sent
+            }
         );
     }
 
@@ -935,46 +871,55 @@ mod tests {
 
     #[test]
     fn resend_safety_truth_table() {
+        let not_sent = SendClassification::NotSent(Transience::Permanent);
+        let maybe_sent = SendClassification::MaybeSent {
+            final_attempt: FinalAttempt::Sent,
+        };
+        let rejected = SendClassification::Rejected;
         let cases = [
-            (SendOutcome::NotSent, Idempotency::ReadOnly, true),
-            (SendOutcome::NotSent, Idempotency::Idempotent, true),
-            (SendOutcome::NotSent, Idempotency::IdempotencyToken, true),
-            (SendOutcome::NotSent, Idempotency::NotIdempotent, true),
-            (SendOutcome::MaybeSent, Idempotency::ReadOnly, true),
-            (SendOutcome::MaybeSent, Idempotency::Idempotent, true),
-            (SendOutcome::MaybeSent, Idempotency::IdempotencyToken, true),
-            (SendOutcome::MaybeSent, Idempotency::NotIdempotent, false),
-            (SendOutcome::Rejected, Idempotency::ReadOnly, true),
-            (SendOutcome::Rejected, Idempotency::Idempotent, true),
-            (SendOutcome::Rejected, Idempotency::IdempotencyToken, true),
-            (SendOutcome::Rejected, Idempotency::NotIdempotent, true),
+            (not_sent, Idempotency::ReadOnly, true),
+            (not_sent, Idempotency::Idempotent, true),
+            (not_sent, Idempotency::IdempotencyToken, true),
+            (not_sent, Idempotency::NotIdempotent, true),
+            (maybe_sent, Idempotency::ReadOnly, true),
+            (maybe_sent, Idempotency::Idempotent, true),
+            (maybe_sent, Idempotency::IdempotencyToken, true),
+            (maybe_sent, Idempotency::NotIdempotent, false),
+            (rejected, Idempotency::ReadOnly, true),
+            (rejected, Idempotency::Idempotent, true),
+            (rejected, Idempotency::IdempotencyToken, true),
+            (rejected, Idempotency::NotIdempotent, true),
         ];
 
-        for (outcome, idempotency, expected) in cases {
-            let classification = SendClassification {
-                operation_outcome: outcome,
-                final_attempt: FinalAttempt::Sent,
-            };
+        for (classification, idempotency, expected) in cases {
             assert_eq!(
                 classification.resend_is_safe(idempotency),
                 expected,
-                "unexpected resend safety for {outcome:?} and {idempotency:?}"
+                "unexpected resend safety for {classification:?} and {idempotency:?}"
             );
         }
     }
 
     #[test]
     fn prior_maybe_sent_attempt_preserves_the_final_attempt_verdict() {
-        let classification = SendClassification {
-            operation_outcome: SendOutcome::NotSent,
-            final_attempt: FinalAttempt::NotSent(Transience::Permanent),
+        for transience in [Transience::Transient, Transience::Permanent] {
+            let maybe_sent = SendClassification::MaybeSent {
+                final_attempt: FinalAttempt::NotSent(transience),
+            };
+            assert_eq!(
+                SendClassification::NotSent(transience).with_prior_maybe_sent(),
+                maybe_sent
+            );
+            assert_eq!(maybe_sent.with_prior_maybe_sent(), maybe_sent);
         }
-        .with_prior_maybe_sent();
 
-        assert_eq!(classification.operation_outcome(), SendOutcome::MaybeSent);
+        let maybe_sent = SendClassification::MaybeSent {
+            final_attempt: FinalAttempt::Sent,
+        };
         assert_eq!(
-            classification.final_attempt(),
-            FinalAttempt::NotSent(Transience::Permanent)
+            SendClassification::Rejected.with_prior_maybe_sent(),
+            maybe_sent
         );
+        assert_eq!(maybe_sent.with_prior_maybe_sent(), maybe_sent);
     }
 }

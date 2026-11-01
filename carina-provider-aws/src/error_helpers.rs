@@ -71,7 +71,7 @@ impl<E> SendFailure<E> {
     }
 
     pub(crate) fn outcome(&self) -> SendOutcome {
-        self.classification.operation_outcome()
+        self.classification.outcome()
     }
 
     pub(crate) fn into_parts(self) -> (SendClassification, AwsSdkError<E>) {
@@ -225,8 +225,9 @@ where
         + Sync
         + 'static,
 {
-    let (classification, error) = failure.into_send_failure().into_parts();
-    let outcome = classification.operation_outcome();
+    let failure = failure.into_send_failure();
+    let outcome = failure.outcome();
+    let (_, error) = failure.into_parts();
     api_error_with_meta_cause(context, outcome, error, |message, source| {
         AwsServiceErrorCause { message, source }
     })
@@ -250,7 +251,7 @@ where
         + Sync
         + 'static,
 {
-    let outcome = SendClassification::of(&err).operation_outcome();
+    let outcome = SendClassification::of(&err).outcome();
     api_error_with_meta_cause(context, outcome, err, |message, source| {
         AwsServiceErrorWithSubjectCause {
             subject,
@@ -280,8 +281,10 @@ where
     use aws_types::request_id::RequestId;
 
     let operation = E::NAME.to_string();
-    let append_outcome_unknown =
-        outcome == SendOutcome::MaybeSent && E::IDEMPOTENCY == Idempotency::NotIdempotent;
+    let append_outcome_unknown = match outcome {
+        SendOutcome::MaybeSent => E::IDEMPOTENCY == Idempotency::NotIdempotent,
+        SendOutcome::NotSent | SendOutcome::Rejected => false,
+    };
     let status = err
         .raw_response()
         .map(|response| response.status().as_u16());
@@ -581,10 +584,9 @@ mod tests {
             SdkBody::empty(),
         );
         let failure = SendFailure::new(
-            SendClassification::for_test(
-                SendOutcome::MaybeSent,
-                carina_aws_types::FinalAttempt::Sent,
-            ),
+            SendClassification::MaybeSent {
+                final_attempt: carina_aws_types::FinalAttempt::Sent,
+            },
             SdkError::service_error(service_error, raw),
         );
 

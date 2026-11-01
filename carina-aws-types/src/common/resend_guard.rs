@@ -16,7 +16,8 @@ use aws_smithy_types::config_bag::{ConfigBag, Storable, StoreReplace};
 use aws_smithy_types::retry::ErrorKind;
 
 use super::send_outcome::{
-    AttemptPhase, Idempotency, OperationSendFailure, OperationVerdict, SendOutcome,
+    AttemptPhase, Idempotency, OperationSendFailure, OperationVerdict, SendOutcome, Transience,
+    not_sent_transience,
 };
 
 impl Storable for AttemptPhase {
@@ -303,31 +304,25 @@ impl Intercept for ResendGuard {
         runtime_components: &RuntimeComponents,
         cfg: &mut ConfigBag,
     ) -> Result<(), BoxError> {
-        if context
-            .output_or_error()
-            .is_none_or(|result| result.is_ok())
-        {
+        let Some(Err(error)) = context.output_or_error() else {
             return Ok(());
-        }
-        if context
-            .output_or_error()
-            .and_then(Result::err)
-            .is_some_and(OrchestratorError::is_response_error)
-        {
+        };
+        if error.is_response_error() {
             return Ok(());
         }
 
         let final_phase = attempt_phase(cfg);
         let final_attempt =
             SendOutcome::classify_orchestrator(final_phase, context.inner(), runtime_components);
-        let operation_outcome = if cfg.load::<MaybeSentAttempt>().is_some()
-            || final_attempt == SendOutcome::MaybeSent
-        {
-            SendOutcome::MaybeSent
-        } else {
-            final_attempt
+        let transience = match final_attempt {
+            SendOutcome::NotSent => not_sent_transience(error),
+            SendOutcome::Rejected | SendOutcome::MaybeSent => Transience::Permanent,
         };
-        let verdict = OperationVerdict::new(operation_outcome, final_attempt);
+        let verdict = OperationVerdict::from_attempts(
+            cfg.load::<MaybeSentAttempt>().is_some(),
+            final_attempt,
+            transience,
+        );
 
         if let Some(response) = context.response_mut() {
             response.add_extension(verdict);
@@ -369,7 +364,7 @@ mod tests {
     use aws_smithy_types::retry::{ErrorKind, ProvideErrorKind};
 
     use super::{Idempotency, OperationVerdict, ResendGuard, SendOutcome};
-    use crate::common::send_outcome::{FinalAttempt, SendClassification};
+    use crate::common::send_outcome::{FinalAttempt, SendClassification, Transience};
 
     #[derive(Debug)]
     struct MockServiceError(ErrorMetadata);
@@ -459,7 +454,7 @@ mod tests {
             .map_service_error(|_| -> MockServiceError {
                 unreachable!("the test contexts never contain service errors")
             });
-        (SendClassification::of(&error).operation_outcome(), error)
+        (SendClassification::of(&error).outcome(), error)
     }
 
     fn error_chain_contains(error: &(dyn std::error::Error + 'static), expected: &str) -> bool {
@@ -474,7 +469,7 @@ mod tests {
     }
 
     fn run_pre_transmit_failure(
-        failure: &'static str,
+        failure: OrchestratorError<aws_smithy_runtime_api::client::interceptors::context::Error>,
     ) -> (
         SendOutcome,
         SdkError<MockServiceError, aws_smithy_runtime_api::client::orchestrator::HttpResponse>,
@@ -487,7 +482,7 @@ mod tests {
         guard
             .read_before_attempt(&(&context).into(), &runtime_components, &mut cfg)
             .expect("first attempt is allowed");
-        context.set_output_or_error(Err(OrchestratorError::other(io::Error::other(failure))));
+        context.set_output_or_error(Err(failure));
         guard
             .read_after_attempt(&(&context).into(), &runtime_components, &mut cfg)
             .expect("attempt finalization succeeds");
@@ -500,10 +495,51 @@ mod tests {
     #[test]
     fn pre_transmit_other_failure_is_typed_not_sent() {
         let failure = "credentials not loaded";
-        let (outcome, error) = run_pre_transmit_failure(failure);
+        let (outcome, error) =
+            run_pre_transmit_failure(OrchestratorError::other(io::Error::other(failure)));
 
         assert_eq!(outcome, SendOutcome::NotSent);
         assert!(error_chain_contains(&error, failure), "{error:?}");
+    }
+
+    #[test]
+    fn typed_classification_carries_final_attempt_transience() {
+        use carina_plugin_sdk::wasi_http::{SendPhase, transport_connector_error_for_test};
+
+        let source = || Box::new(io::Error::other("pre-transmit connector failure"));
+        let mut cases = vec![
+            (ConnectorError::timeout(source()), Transience::Transient),
+            (ConnectorError::io(source()), Transience::Transient),
+            (ConnectorError::other(source(), None), Transience::Permanent),
+            (ConnectorError::user(source()), Transience::Permanent),
+            (
+                transport_connector_error_for_test(SendPhase::NotSent),
+                Transience::Permanent,
+            ),
+            (
+                ConnectorError::other(source(), Some(ErrorKind::ClientError)),
+                Transience::Permanent,
+            ),
+        ];
+        for kind in [
+            ErrorKind::TransientError,
+            ErrorKind::ThrottlingError,
+            ErrorKind::ServerError,
+        ] {
+            cases.push((
+                ConnectorError::other(source(), Some(kind)),
+                Transience::Transient,
+            ));
+        }
+
+        for (connector, expected) in cases {
+            let (_, error) = run_pre_transmit_failure(OrchestratorError::connector(connector));
+            assert_eq!(
+                SendClassification::of(&error),
+                SendClassification::NotSent(expected),
+                "{error:?}"
+            );
+        }
     }
 
     #[test]
@@ -528,6 +564,10 @@ mod tests {
 
         assert!(matches!(error, SdkError::TimeoutError(_)), "{error:?}");
         assert_eq!(outcome, SendOutcome::NotSent);
+        assert_eq!(
+            SendClassification::of(&error),
+            SendClassification::NotSent(Transience::Transient)
+        );
         assert!(error_chain_contains(
             &error,
             "identity resolution timed out"
@@ -718,10 +758,11 @@ mod tests {
         let classification = SendClassification::of(&error);
 
         assert_eq!(outcome, SendOutcome::MaybeSent);
-        assert_eq!(classification.operation_outcome(), SendOutcome::MaybeSent);
         assert_eq!(
-            classification.final_attempt(),
-            FinalAttempt::NotSent(crate::common::send_outcome::Transience::Permanent)
+            classification,
+            SendClassification::MaybeSent {
+                final_attempt: FinalAttempt::NotSent(Transience::Permanent),
+            }
         );
     }
 

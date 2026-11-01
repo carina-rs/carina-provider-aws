@@ -987,7 +987,6 @@ mod tests {
     use aws_smithy_runtime_api::client::orchestrator::HttpResponse;
     use aws_smithy_types::body::SdkBody;
     use aws_smithy_types::error::ErrorMetadata;
-    use carina_aws_types::SendOutcome;
 
     fn acm_schema() -> ResourceSchema {
         crate::schemas::generated::acm::certificate::acm_certificate_config().schema
@@ -1023,10 +1022,9 @@ mod tests {
         let error = request_certificate_outcome_unknown_error(
             &id,
             SendFailure::new(
-                carina_aws_types::SendClassification::for_test(
-                    SendOutcome::MaybeSent,
-                    carina_aws_types::FinalAttempt::Sent,
-                ),
+                carina_aws_types::SendClassification::MaybeSent {
+                    final_attempt: carina_aws_types::FinalAttempt::Sent,
+                },
                 error,
             ),
         );
