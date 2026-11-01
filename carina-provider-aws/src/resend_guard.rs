@@ -277,7 +277,7 @@ mod tests {
 
         assert_eq!(error.outcome(), SendOutcome::NotSent);
         assert_eq!(
-            SendClassification::of(&error).final_attempt(),
+            error.classification().final_attempt(),
             FinalAttempt::NotSent(Transience::Permanent)
         );
         assert_eq!(credential_calls.load(Ordering::Relaxed), 1);
@@ -305,7 +305,7 @@ mod tests {
 
         assert_eq!(error.outcome(), SendOutcome::NotSent);
         assert_eq!(
-            SendClassification::of(&error).final_attempt(),
+            error.classification().final_attempt(),
             FinalAttempt::NotSent(Transience::Permanent)
         );
         assert_eq!(connector.requests().len(), 3);
@@ -681,7 +681,7 @@ mod tests {
 
         assert_eq!(connector.requests().len(), 3);
         assert_eq!(
-            SendClassification::of(&error).operation_outcome(),
+            error.classification().operation_outcome(),
             SendOutcome::MaybeSent
         );
         assert!(connector_error(&error).is_io());
@@ -843,7 +843,7 @@ mod tests {
             .expect_err("all three SDK attempts should fail");
         assert_eq!(connector.requests().len(), 3);
         assert_eq!(
-            SendClassification::of(&error).operation_outcome(),
+            error.classification().operation_outcome(),
             SendOutcome::MaybeSent
         );
         let aws_smithy_runtime_api::client::result::SdkError::ServiceError(context) = &*error
@@ -887,7 +887,7 @@ mod tests {
         assert_eq!(connector.requests().len(), 3);
         assert_eq!(connector.completed_delayed_timeouts(), 0);
         assert_eq!(
-            SendClassification::of(&error).operation_outcome(),
+            error.classification().operation_outcome(),
             SendOutcome::MaybeSent
         );
     }

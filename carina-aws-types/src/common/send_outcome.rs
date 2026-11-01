@@ -81,6 +81,23 @@ impl SendClassification {
         self.final_attempt
     }
 
+    /// Returns whether resending cannot duplicate an already-applied effect.
+    ///
+    /// This says only whether a resend is safe; deciding whether the final
+    /// error is worth retrying remains the provider's responsibility.
+    pub fn resend_is_safe(self, idempotency: Idempotency) -> bool {
+        self.operation_outcome.resend_is_safe(idempotency)
+    }
+
+    /// Records that an earlier provider-level attempt may have been sent.
+    ///
+    /// The final-attempt verdict remains unchanged so retry transience is
+    /// still decided from the most recent attempt.
+    pub fn with_prior_maybe_sent(mut self) -> Self {
+        self.operation_outcome = SendOutcome::MaybeSent;
+        self
+    }
+
     /// Constructs a classification for provider retry tests.
     #[cfg(feature = "test-utils")]
     pub fn for_test(operation_outcome: SendOutcome, final_attempt: FinalAttempt) -> Self {
@@ -254,11 +271,7 @@ impl SendOutcome {
         }
     }
 
-    /// Returns whether resending cannot duplicate an already-applied effect.
-    ///
-    /// This says only whether a resend is safe; deciding whether the error is
-    /// worth retrying remains the provider's responsibility.
-    pub fn resend_is_safe(self, idempotency: Idempotency) -> bool {
+    pub(crate) fn resend_is_safe(self, idempotency: Idempotency) -> bool {
         match self {
             Self::NotSent | Self::Rejected => true,
             Self::MaybeSent => match idempotency {
@@ -933,11 +946,30 @@ mod tests {
         ];
 
         for (outcome, idempotency, expected) in cases {
+            let classification = SendClassification {
+                operation_outcome: outcome,
+                final_attempt: FinalAttempt::Sent,
+            };
             assert_eq!(
-                outcome.resend_is_safe(idempotency),
+                classification.resend_is_safe(idempotency),
                 expected,
                 "unexpected resend safety for {outcome:?} and {idempotency:?}"
             );
         }
+    }
+
+    #[test]
+    fn prior_maybe_sent_attempt_preserves_the_final_attempt_verdict() {
+        let classification = SendClassification {
+            operation_outcome: SendOutcome::NotSent,
+            final_attempt: FinalAttempt::NotSent(Transience::Permanent),
+        }
+        .with_prior_maybe_sent();
+
+        assert_eq!(classification.operation_outcome(), SendOutcome::MaybeSent);
+        assert_eq!(
+            classification.final_attempt(),
+            FinalAttempt::NotSent(Transience::Permanent)
+        );
     }
 }

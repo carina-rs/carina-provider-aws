@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 use crate::AwsProvider;
 use crate::aws_operation::{ClientToken, DecidedOperationError, EC2_CREATE_TOKEN_TAG};
 use crate::error_helpers::{IntoSendFailure, SendFailure};
-use crate::helpers::{CreatePoll, DeletePoll, apply_patch_to_state};
+use crate::helpers::{CreatePoll, DeletePoll, apply_patch_to_state, provider_retry_allowed};
 
 pub(crate) const POLL_AFTER_SECS: u32 = 5;
 /// Four describe attempts after delays totaling 65 seconds. Each paginated
@@ -689,11 +689,10 @@ enum TaggedDiscovery {
 }
 
 #[derive(Debug)]
-enum AcmRequestTransition {
+enum AcmResendTransition {
     Issued(AppliedIdentifier),
     Pending(AwsCreateToken),
     InFlight(ProviderError),
-    Untracked(ProviderError),
 }
 
 /// The initial request always has at least one later attempt available, so a
@@ -1185,7 +1184,7 @@ impl AwsProvider {
         schema: &carina_core::schema::ResourceSchema,
         fresh_client_token: FreshAcmClientToken,
         attempts_remaining: u8,
-    ) -> AcmRequestTransition {
+    ) -> AcmResendTransition {
         let FreshAcmClientToken {
             client_token,
             first_used_at_unix_secs,
@@ -1204,27 +1203,36 @@ impl AwsProvider {
                 // core's typestate; this decode is solely the replay input.
                 drop(sent);
                 match result {
-                    Ok(identifier) => AcmRequestTransition::Issued(identifier),
-                    Err(error) => match error.outcome() {
-                SendOutcome::MaybeSent if attempts_remaining > 1 => {
-                    AcmRequestTransition::Pending(token(attempts_remaining - 1))
-                }
-                SendOutcome::MaybeSent => AcmRequestTransition::InFlight(
-                    crate::services::acm::certificate::request_certificate_outcome_unknown_error(
-                        &resource.id,
-                        error,
-                    ),
-                ),
-                SendOutcome::NotSent | SendOutcome::Rejected => AcmRequestTransition::Untracked(
-                    crate::services::acm::certificate::request_certificate_error(
-                        &resource.id,
-                        error,
-                    ),
-                ),
-                    },
+                    Ok(identifier) => AcmResendTransition::Issued(identifier),
+                    Err(error) => {
+                        let classification = error.classification();
+                        let outcome = classification.operation_outcome();
+                        let retryable = outcome == SendOutcome::MaybeSent
+                            || provider_retry_allowed(
+                                classification,
+                                aws_sdk_acm::operation::request_certificate::RequestCertificateError::IDEMPOTENCY,
+                                &error,
+                            );
+                        if retryable && attempts_remaining > 1 {
+                            AcmResendTransition::Pending(token(attempts_remaining - 1))
+                        } else {
+                            let error = if outcome == SendOutcome::MaybeSent {
+                                crate::services::acm::certificate::request_certificate_outcome_unknown_error(
+                                    &resource.id,
+                                    error,
+                                )
+                            } else {
+                                crate::services::acm::certificate::request_certificate_error(
+                                    &resource.id,
+                                    error,
+                                )
+                            };
+                            AcmResendTransition::InFlight(error)
+                        }
+                    }
                 }
             }
-            Err(error) => AcmRequestTransition::Untracked(error),
+            Err(error) => AcmResendTransition::InFlight(error),
         }
     }
 
@@ -2150,7 +2158,7 @@ impl AwsProvider {
                     None => {
                         let error = ProviderError::internal("missing ACM certificate schema")
                             .for_resource(id.clone());
-                        return Err(attempt.untracked(error));
+                        return Err(attempt.preserve(pending_token, error));
                     }
                 };
                 match self
@@ -2162,16 +2170,15 @@ impl AwsProvider {
                     )
                     .await
                 {
-                    AcmRequestTransition::Issued(identifier) => {
+                    AcmResendTransition::Issued(identifier) => {
                         let issued = attempt.issued(identifier.clone());
                         self.finish_acm_certificate_issued(resource, schema, identifier, issued)
                             .await
                     }
-                    AcmRequestTransition::Pending(token) => attempt.pending(token, POLL_AFTER_SECS),
-                    AcmRequestTransition::InFlight(error) => {
+                    AcmResendTransition::Pending(token) => attempt.pending(token, POLL_AFTER_SECS),
+                    AcmResendTransition::InFlight(error) => {
                         Err(attempt.preserve(pending_token, error))
                     }
-                    AcmRequestTransition::Untracked(error) => Err(attempt.untracked(error)),
                 }
             }
             AwsCreateToken::NatGateway { nat_gateway_id } => {
@@ -2573,7 +2580,7 @@ impl AwsProvider {
                     None => {
                         let error = ProviderError::internal("missing ACM certificate schema")
                             .for_resource(id.clone());
-                        return Err(attempt.untracked(error));
+                        return Err(attempt.preserve(pending_token, error));
                     }
                 };
                 match self
@@ -2585,16 +2592,15 @@ impl AwsProvider {
                     )
                     .await
                 {
-                    AcmRequestTransition::Issued(identifier) => {
+                    AcmResendTransition::Issued(identifier) => {
                         let resumed = attempt.issued(identifier.clone());
                         self.finish_acm_certificate_resumed(resource, schema, identifier, resumed)
                             .await
                     }
-                    AcmRequestTransition::Pending(token) => attempt.pending(token, POLL_AFTER_SECS),
-                    AcmRequestTransition::InFlight(error) => {
+                    AcmResendTransition::Pending(token) => attempt.pending(token, POLL_AFTER_SECS),
+                    AcmResendTransition::InFlight(error) => {
                         Err(attempt.preserve(pending_token, error))
                     }
-                    AcmRequestTransition::Untracked(error) => Err(attempt.untracked(error)),
                 }
             }
             AwsCreateToken::NatGateway { nat_gateway_id } => {
@@ -3482,9 +3488,19 @@ impl Provider for AwsProvider {
 #[cfg(test)]
 mod pending_operation_tests {
     use std::collections::HashMap;
+    use std::collections::VecDeque;
     use std::future::ready;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{Arc, Mutex};
     use std::time::Duration;
 
+    use aws_credential_types::provider::error::CredentialsError;
+    use aws_credential_types::provider::{ProvideCredentials, SharedCredentialsProvider};
+    use aws_smithy_runtime_api::client::http::{
+        HttpConnector, HttpConnectorFuture, SharedHttpConnector, http_client_fn,
+    };
+    use aws_smithy_runtime_api::client::orchestrator::{HttpRequest, HttpResponse};
+    use aws_smithy_types::body::SdkBody;
     use carina_provider_protocol::OperationStep;
 
     use super::*;
@@ -3496,6 +3512,270 @@ mod pending_operation_tests {
     struct PendingOnlyAttempt;
 
     struct UnusedIssued;
+
+    #[derive(Debug)]
+    enum AcmPollVerdict {
+        Preserved {
+            token: AwsCreateToken,
+            error: ProviderError,
+        },
+        Untracked(ProviderError),
+    }
+
+    struct RecordingAcmPollAttempt;
+
+    struct RecordingAcmIssued {
+        identifier: AppliedIdentifier,
+    }
+
+    impl AwsPollAttempt for RecordingAcmPollAttempt {
+        type Step = AwsCreateToken;
+        type Verdict = AcmPollVerdict;
+        type Issued = RecordingAcmIssued;
+
+        fn untracked(self, error: ProviderError) -> Self::Verdict {
+            AcmPollVerdict::Untracked(error)
+        }
+
+        fn preserve(self, token: AwsCreateToken, error: ProviderError) -> Self::Verdict {
+            AcmPollVerdict::Preserved { token, error }
+        }
+
+        fn issued(self, identifier: AppliedIdentifier) -> Self::Issued {
+            RecordingAcmIssued { identifier }
+        }
+
+        fn pending(
+            self,
+            token: AwsCreateToken,
+            _poll_after_secs: u32,
+        ) -> Result<Self::Step, Self::Verdict> {
+            Ok(token)
+        }
+    }
+
+    impl AwsIssuedCreate for RecordingAcmIssued {
+        type Step = AwsCreateToken;
+        type Verdict = AcmPollVerdict;
+
+        fn identifier(&self) -> &AppliedIdentifier {
+            &self.identifier
+        }
+
+        fn succeeded(
+            self,
+            _attributes: HashMap<String, Value>,
+        ) -> Result<Self::Step, Self::Verdict> {
+            unreachable!("the ACM resend tests never complete an issued create")
+        }
+
+        fn partial(
+            self,
+            _attributes: HashMap<String, Value>,
+            _reason: String,
+            _missing_attributes: Vec<String>,
+        ) -> Result<Self::Step, Self::Verdict> {
+            unreachable!("the ACM resend tests never complete an issued create")
+        }
+
+        fn failed(self, _observation: Observation, _error: ProviderError) -> Self::Verdict {
+            unreachable!("the ACM resend tests never issue a certificate")
+        }
+
+        fn discarded(self, _error: ProviderError) -> Self::Verdict {
+            unreachable!("the ACM resend tests never issue a certificate")
+        }
+
+        fn pending(
+            self,
+            _token: AwsCreateToken,
+            _poll_after_secs: u32,
+        ) -> Result<Self::Step, Self::Verdict> {
+            unreachable!("the ACM resend tests never issue a certificate")
+        }
+
+        fn preserve(self, _token: AwsCreateToken, _error: ProviderError) -> Self::Verdict {
+            unreachable!("the ACM resend tests never issue a certificate")
+        }
+    }
+
+    #[derive(Clone, Copy, Debug)]
+    enum AcmConnectorAction {
+        MaybeSent,
+        InvalidParameter,
+        Throttled,
+    }
+
+    #[derive(Clone, Debug)]
+    struct AcmTestConnector {
+        actions: Arc<Mutex<VecDeque<AcmConnectorAction>>>,
+        calls: Arc<AtomicUsize>,
+    }
+
+    impl AcmTestConnector {
+        fn new(actions: impl IntoIterator<Item = AcmConnectorAction>) -> Self {
+            Self {
+                actions: Arc::new(Mutex::new(actions.into_iter().collect())),
+                calls: Arc::new(AtomicUsize::new(0)),
+            }
+        }
+
+        fn calls(&self) -> usize {
+            self.calls.load(Ordering::Relaxed)
+        }
+    }
+
+    impl HttpConnector for AcmTestConnector {
+        fn call(&self, _request: HttpRequest) -> HttpConnectorFuture {
+            self.calls.fetch_add(1, Ordering::Relaxed);
+            let action = self
+                .actions
+                .lock()
+                .expect("ACM connector lock")
+                .pop_front()
+                .expect("ACM connector must not receive an unexpected request");
+            HttpConnectorFuture::new(async move {
+                match action {
+                    AcmConnectorAction::MaybeSent => Err(
+                        aws_smithy_runtime_api::client::result::ConnectorError::other(
+                            std::io::Error::other("test ACM send outcome is unknown").into(),
+                            None,
+                        ),
+                    ),
+                    AcmConnectorAction::InvalidParameter => {
+                        let mut response = HttpResponse::new(
+                            400.try_into().expect("valid status"),
+                            SdkBody::from(r#"{"message":"invalid certificate request"}"#),
+                        );
+                        response
+                            .headers_mut()
+                            .insert("content-type", "application/x-amz-json-1.1");
+                        response
+                            .headers_mut()
+                            .insert("x-amzn-errortype", "InvalidParameterException");
+                        Ok(response)
+                    }
+                    AcmConnectorAction::Throttled => {
+                        let mut response = HttpResponse::new(
+                            429.try_into().expect("valid status"),
+                            SdkBody::from(r#"{"message":"request throttled"}"#),
+                        );
+                        response
+                            .headers_mut()
+                            .insert("content-type", "application/x-amz-json-1.1");
+                        response
+                            .headers_mut()
+                            .insert("x-amzn-errortype", "ThrottlingException");
+                        Ok(response)
+                    }
+                }
+            })
+        }
+    }
+
+    #[derive(Clone, Debug)]
+    struct AcmCredentialsThenMissing {
+        calls: Arc<AtomicUsize>,
+    }
+
+    impl ProvideCredentials for AcmCredentialsThenMissing {
+        fn provide_credentials<'a>(
+            &'a self,
+        ) -> aws_credential_types::provider::future::ProvideCredentials<'a>
+        where
+            Self: 'a,
+        {
+            let call = self.calls.fetch_add(1, Ordering::Relaxed);
+            if call == 0 {
+                aws_credential_types::provider::future::ProvideCredentials::ready(Ok(
+                    aws_credential_types::Credentials::new(
+                        "test",
+                        "test",
+                        None,
+                        None,
+                        "acm-poll-test",
+                    ),
+                ))
+            } else {
+                aws_credential_types::provider::future::ProvideCredentials::ready(Err(
+                    CredentialsError::not_loaded(std::io::Error::other(
+                        "test ACM credentials unavailable",
+                    )),
+                ))
+            }
+        }
+    }
+
+    fn acm_test_provider(
+        connector: AcmTestConnector,
+        credentials_provider: SharedCredentialsProvider,
+    ) -> AwsProvider {
+        let selected = connector.clone();
+        let http_client = http_client_fn(move |_, _| SharedHttpConnector::new(selected.clone()));
+        let bounded = crate::BoundedSdkConfig::new(
+            aws_config::SdkConfig::builder()
+                .region(aws_config::Region::new("us-east-1"))
+                .endpoint_url("https://acm.example.test")
+                .credentials_provider(credentials_provider)
+                .http_client(http_client)
+                .sleep_impl(aws_smithy_async::rt::sleep::TokioSleep::new())
+                .identity_cache(aws_config::identity::IdentityCache::no_cache())
+                .build(),
+        );
+        AwsProvider::from_sdk_config("us-east-1".to_string(), Vec::new(), Vec::new(), &bounded)
+    }
+
+    fn acm_certificate_resource() -> Resource {
+        let mut resource = Resource::with_provider("aws", "acm.Certificate", "test-cert", None);
+        resource.set_attr(
+            "domain_name",
+            Value::Concrete(carina_core::resource::ConcreteValue::String(
+                "example.com".into(),
+            )),
+        );
+        resource.set_attr(
+            "validation_method",
+            Value::Concrete(carina_core::resource::ConcreteValue::String("DNS".into())),
+        );
+        resource
+    }
+
+    fn acm_resend_token() -> AwsCreateToken {
+        AwsCreateToken::AcmRequestCertificate {
+            client_token: ClientToken::new(),
+            first_used_at_unix_secs: unix_timestamp_now().expect("current test time"),
+            attempts_remaining: ACM_REQUEST_CERTIFICATE_POLL_ATTEMPTS.get(),
+        }
+    }
+
+    async fn initial_acm_maybe_sent_token(
+        provider: &AwsProvider,
+        resource: &Resource,
+    ) -> AwsCreateToken {
+        let first_used_at_unix_secs = unix_timestamp_now().expect("current test time");
+        let fresh_client_token = fresh_acm_client_token(
+            ClientToken::new(),
+            first_used_at_unix_secs,
+            first_used_at_unix_secs,
+        )
+        .expect("new ACM token must be fresh");
+        let schema = provider
+            .resource_schema("acm.Certificate")
+            .expect("ACM test schema");
+
+        match provider
+            .request_initial_acm_certificate_transition(
+                resource,
+                schema,
+                fresh_client_token,
+                ACM_REQUEST_CERTIFICATE_POLL_ATTEMPTS,
+            )
+            .await
+        {
+            InitialAcmRequestTransition::Pending(token, _) => token,
+            transition => panic!("initial ACM request was not MaybeSent: {transition:?}"),
+        }
+    }
 
     impl AwsCreateAttempt for PendingOnlyAttempt {
         type Step = AwsCreateToken;
@@ -3609,7 +3889,10 @@ mod pending_operation_tests {
             .headers_mut()
             .insert("x-amzn-requestid", "sticky-request-id");
         let failure = SendFailure::new(
-            SendOutcome::MaybeSent,
+            carina_aws_types::SendClassification::for_test(
+                SendOutcome::MaybeSent,
+                carina_aws_types::FinalAttempt::Sent,
+            ),
             SdkError::service_error(error, response),
         );
         let create_token = ClientToken::new();
@@ -3792,6 +4075,120 @@ mod pending_operation_tests {
         assert!(acm_client_token_can_be_resent(now - safe_window + 1, now));
         assert!(!acm_client_token_can_be_resent(now - safe_window, now));
         assert!(!acm_client_token_can_be_resent(now + 1, now));
+    }
+
+    #[tokio::test]
+    async fn acm_poll_resend_preserves_token_when_credentials_are_not_loaded() {
+        let connector = AcmTestConnector::new([AcmConnectorAction::MaybeSent]);
+        let credential_calls = Arc::new(AtomicUsize::new(0));
+        let provider = acm_test_provider(
+            connector.clone(),
+            SharedCredentialsProvider::new(AcmCredentialsThenMissing {
+                calls: Arc::clone(&credential_calls),
+            }),
+        );
+        let resource = acm_certificate_resource();
+        let token = initial_acm_maybe_sent_token(&provider, &resource).await;
+
+        let result = provider
+            .poll_create_step(
+                &resource,
+                token.clone(),
+                AwsCreatePoll::Unissued(RecordingAcmPollAttempt),
+            )
+            .await;
+
+        match result {
+            Err(AcmPollVerdict::Preserved {
+                token: preserved,
+                error,
+            }) => {
+                assert_eq!(preserved, token);
+                assert!(
+                    error.to_string().contains("credentials unavailable"),
+                    "{error}"
+                );
+            }
+            Err(AcmPollVerdict::Untracked(error)) => {
+                panic!("ACM continuation was discarded: {error}")
+            }
+            Ok(next) => panic!("permanent credential failure unexpectedly repended: {next:?}"),
+        }
+        assert_eq!(credential_calls.load(Ordering::Relaxed), 2);
+        assert_eq!(connector.calls(), 1);
+    }
+
+    #[tokio::test]
+    async fn acm_poll_resend_preserves_token_after_rejection() {
+        let connector = AcmTestConnector::new([
+            AcmConnectorAction::MaybeSent,
+            AcmConnectorAction::InvalidParameter,
+        ]);
+        let credentials =
+            aws_credential_types::Credentials::new("test", "test", None, None, "acm-poll-test");
+        let provider = acm_test_provider(
+            connector.clone(),
+            SharedCredentialsProvider::new(credentials),
+        );
+        let resource = acm_certificate_resource();
+        let token = initial_acm_maybe_sent_token(&provider, &resource).await;
+
+        let result = provider
+            .poll_create_step(
+                &resource,
+                token.clone(),
+                AwsCreatePoll::Unissued(RecordingAcmPollAttempt),
+            )
+            .await;
+
+        match result {
+            Err(AcmPollVerdict::Preserved {
+                token: preserved,
+                error: _,
+            }) => assert_eq!(preserved, token),
+            Err(AcmPollVerdict::Untracked(error)) => {
+                panic!("ACM continuation was discarded: {error}")
+            }
+            Ok(next) => panic!("non-retryable rejection unexpectedly repended: {next:?}"),
+        }
+        assert_eq!(connector.calls(), 2);
+    }
+
+    #[tokio::test]
+    async fn acm_poll_resend_repends_after_throttling_rejection() {
+        let token = acm_resend_token();
+        let connector = AcmTestConnector::new([
+            AcmConnectorAction::Throttled,
+            AcmConnectorAction::Throttled,
+            AcmConnectorAction::Throttled,
+        ]);
+        let credentials =
+            aws_credential_types::Credentials::new("test", "test", None, None, "acm-poll-test");
+        let provider = acm_test_provider(
+            connector.clone(),
+            SharedCredentialsProvider::new(credentials),
+        );
+
+        let result = provider
+            .poll_create_step(
+                &acm_certificate_resource(),
+                token,
+                AwsCreatePoll::Unissued(RecordingAcmPollAttempt),
+            )
+            .await;
+
+        let next = result.expect("retryable rejection should remain pending");
+        let AwsCreateToken::AcmRequestCertificate {
+            attempts_remaining, ..
+        } = next
+        else {
+            panic!("unexpected ACM continuation: {next:?}")
+        };
+        assert_eq!(
+            attempts_remaining,
+            ACM_REQUEST_CERTIFICATE_POLL_ATTEMPTS.get() - 1
+        );
+        assert_eq!(connector.calls(), 3);
     }
 
     fn vpc_page(ids: &[&str]) -> aws_sdk_ec2::operation::describe_vpcs::DescribeVpcsOutput {

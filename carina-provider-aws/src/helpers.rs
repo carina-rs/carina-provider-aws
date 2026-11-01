@@ -430,8 +430,8 @@ where
     DecidedSend::send(builder, (token, TokenSendPermit::new()))
         .await
         .map_err(|error| {
-            let outcome = SendClassification::of(&error).operation_outcome();
-            SendFailure::new(outcome, error)
+            let classification = SendClassification::of(&error);
+            SendFailure::new(classification, error)
         })
 }
 
@@ -470,12 +470,12 @@ where
                     sleep(Duration::from_secs(delay)).await;
                     continue;
                 }
-                let outcome = if maybe_sent {
-                    SendOutcome::MaybeSent
+                let classification = if maybe_sent {
+                    classification.with_prior_maybe_sent()
                 } else {
-                    outcome
+                    classification
                 };
-                return Err(SendFailure::new(outcome, error));
+                return Err(SendFailure::new(classification, error));
             }
         }
     }
@@ -499,9 +499,29 @@ where
 ///   the bucket name's control-plane state clears in ~60–90s.
 const S3_RETRYABLE_ERROR_CODES: &[&str] = &["RequestTimeout", "SlowDown", "OperationAborted"];
 
+/// AWS service-error codes classified as throttling by the SDK's
+/// `AwsErrorCodeClassifier` even when the generated error has no modeled
+/// retry kind.
+const AWS_THROTTLING_ERROR_CODES: &[&str] = &[
+    "Throttling",
+    "ThrottlingException",
+    "ThrottledException",
+    "RequestThrottledException",
+    "TooManyRequestsException",
+    "ProvisionedThroughputExceededException",
+    "TransactionInProgressException",
+    "RequestLimitExceeded",
+    "BandwidthLimitExceeded",
+    "LimitExceededException",
+    "RequestThrottled",
+    "SlowDown",
+    "PriorRequestNotComplete",
+    "EC2ThrottledException",
+];
+
 /// Decide whether a provider-level resend is both safe and worth retrying.
 /// Safety uses all attempts; transience uses only the final attempt.
-fn provider_retry_allowed<E, R>(
+pub(crate) fn provider_retry_allowed<E, R>(
     classification: SendClassification,
     idempotency: Idempotency,
     err: &SdkError<E, R>,
@@ -509,10 +529,7 @@ fn provider_retry_allowed<E, R>(
 where
     E: ProvideErrorKind + ProvideErrorMetadata,
 {
-    if !classification
-        .operation_outcome()
-        .resend_is_safe(idempotency)
-    {
+    if !classification.resend_is_safe(idempotency) {
         return false;
     }
 
@@ -532,14 +549,15 @@ where
             if inner.retryable_error_kind().is_some() {
                 return true;
             }
+            let code = ProvideErrorMetadata::code(inner);
+            if code.is_some_and(|code| AWS_THROTTLING_ERROR_CODES.contains(&code)) {
+                return true;
+            }
             // S3 carve-out: the SDK model flags no S3 error as
             // retryable, so consult the documented transient codes.
             // Disambiguate `code()` — both `ProvideErrorKind` and
             // `ProvideErrorMetadata` define a same-named accessor.
-            matches!(
-                ProvideErrorMetadata::code(inner),
-                Some(code) if S3_RETRYABLE_ERROR_CODES.contains(&code)
-            )
+            code.is_some_and(|code| S3_RETRYABLE_ERROR_CODES.contains(&code))
         }
         // `SdkError` is `#[non_exhaustive]`; future-added variants get
         // the conservative default (don't retry).
@@ -1268,7 +1286,7 @@ mod tests {
     // SDK-modeled retryability) and `ProvideErrorMetadata` (for the S3
     // `OperationAborted` carve-out).
     use aws_smithy_runtime_api::client::orchestrator::HttpResponse;
-    use aws_smithy_runtime_api::client::result::SdkError;
+    use aws_smithy_runtime_api::client::result::{ConnectorError, SdkError};
     use aws_smithy_types::body::SdkBody;
     use aws_smithy_types::error::ErrorMetadata;
     use aws_smithy_types::error::metadata::ProvideErrorMetadata;
@@ -1342,6 +1360,13 @@ mod tests {
         let mut response = http_response(status);
         attach_single_attempt_verdict_for_test(&mut response, outcome);
         SdkError::service_error(MockServiceError::new(code, retryable), response)
+    }
+
+    fn other_dispatch_err() -> SdkError<MockServiceError, HttpResponse> {
+        SdkError::dispatch_failure(ConnectorError::other(
+            std::io::Error::other("unclassified local failure").into(),
+            None,
+        ))
     }
 
     #[derive(Debug, Clone, Copy)]
@@ -1620,21 +1645,19 @@ mod tests {
     }
 
     #[test]
-    fn not_sent_construction_failure_does_not_retry() {
-        let construction: SdkError<MockServiceError, HttpResponse> =
-            SdkError::construction_failure("request serialization failed");
+    fn not_sent_other_without_kind_does_not_retry() {
+        let error = other_dispatch_err();
 
         assert!(!provider_retry_allowed(
             single_attempt_classification(SendOutcome::NotSent),
             Idempotency::ReadOnly,
-            &construction
+            &error
         ));
     }
 
     #[test]
     fn not_sent_retry_uses_typed_transience() {
-        let error: SdkError<MockServiceError, HttpResponse> =
-            SdkError::construction_failure("local failure");
+        let error = other_dispatch_err();
         let permanent = SendClassification::for_test(
             SendOutcome::NotSent,
             FinalAttempt::NotSent(Transience::Permanent),
@@ -1658,8 +1681,7 @@ mod tests {
 
     #[test]
     fn maybe_sent_operation_with_permanent_final_attempt_does_not_retry() {
-        let final_error: SdkError<MockServiceError, HttpResponse> =
-            SdkError::construction_failure("credentials not loaded");
+        let final_error = other_dispatch_err();
 
         assert!(!provider_retry_allowed(
             SendClassification::for_test(

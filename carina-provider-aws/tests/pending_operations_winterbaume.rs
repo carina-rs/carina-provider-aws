@@ -1530,20 +1530,17 @@ async fn request_certificate_token_with_issued_poll_fails_without_resending() {
 }
 
 #[tokio::test]
-async fn rejected_request_certificate_poll_is_untracked() {
+async fn rejected_request_certificate_poll_preserves_the_continuation() {
     let (provider, request_bodies) = provider_with_acm(AcmRequestResult::Rejected).await;
     let resource = acm_certificate_resource();
+    let token = acm_request_token(unix_now(), 3);
 
     let verdict = provider
-        .poll_create_step(
-            &resource,
-            acm_request_token(unix_now(), 3),
-            poll_attempt(&resource),
-        )
+        .poll_create_step(&resource, token.clone(), poll_attempt(&resource))
         .await
-        .expect_err("an explicit ACM rejection must be untracked");
+        .expect_err("an explicit ACM rejection must preserve the continuation");
 
-    assert!(matches!(verdict, TestCreateVerdict::Untracked(_)));
+    assert_eq!(verdict.in_flight(), (&token, None));
     assert_eq!(
         verdict.provider_error().to_wire().message,
         "RequestCertificate failed"
