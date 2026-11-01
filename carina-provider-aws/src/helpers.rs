@@ -4,14 +4,15 @@
 
 use std::time::Duration;
 
+use aws_credential_types::provider::error::CredentialsError;
 use aws_sdk_ec2::types::{ResourceType, Tag, TagSpecification};
-use aws_smithy_runtime_api::client::result::SdkError;
+use aws_smithy_runtime_api::client::result::{ConnectorError, SdkError};
 use aws_smithy_types::error::display::DisplayErrorContext;
 use aws_smithy_types::error::metadata::ProvideErrorMetadata;
-use aws_smithy_types::retry::ProvideErrorKind;
+use aws_smithy_types::retry::{ErrorKind, ProvideErrorKind};
 use tokio::time::sleep;
 
-use carina_aws_types::{Idempotency, SendOutcome};
+use carina_aws_types::{Idempotency, ProviderRetryClassification, SendOutcome};
 use carina_core::provider::{
     AppliedIdentifier, PatchOp, ProviderError, ProviderResult, UpdatePatch,
 };
@@ -453,10 +454,11 @@ where
         match DecidedSend::send(builder(), context()).await {
             Ok(result) => return Ok(result),
             Err(error) => {
-                let outcome = SendOutcome::classify(&error);
+                let classification = SendOutcome::classify_for_provider_retry(&error);
+                let outcome = classification.operation_outcome();
                 maybe_sent |= outcome == SendOutcome::MaybeSent;
                 if attempt < policy.max_attempts
-                    && provider_retry_allowed(outcome, B::IDEMPOTENCY, &error)
+                    && provider_retry_allowed(classification, B::IDEMPOTENCY, &error)
                 {
                     let delay = policy.delay_secs(attempt);
                     eprintln!(
@@ -499,28 +501,28 @@ where
 const S3_RETRYABLE_ERROR_CODES: &[&str] = &["RequestTimeout", "SlowDown", "OperationAborted"];
 
 /// Decide whether a provider-level resend is both safe and worth retrying.
+/// Safety uses all attempts; transience uses only the final attempt.
 fn provider_retry_allowed<E, R>(
-    outcome: SendOutcome,
+    classification: ProviderRetryClassification,
     idempotency: Idempotency,
     err: &SdkError<E, R>,
 ) -> bool
 where
     E: ProvideErrorKind + ProvideErrorMetadata,
 {
-    if !outcome.resend_is_safe(idempotency) {
+    if !classification
+        .operation_outcome()
+        .resend_is_safe(idempotency)
+    {
         return false;
     }
 
-    if outcome == SendOutcome::NotSent {
+    if classification.final_attempt_outcome() == SendOutcome::NotSent {
         return match err {
             SdkError::TimeoutError(_) => true,
-            SdkError::DispatchFailure(context) => {
-                context.as_connector_error().is_some_and(|error| {
-                    error.is_timeout()
-                        || error.is_io()
-                        || (error.is_other() && error.as_other().is_some())
-                })
-            }
+            SdkError::DispatchFailure(context) => context
+                .as_connector_error()
+                .is_some_and(not_sent_dispatch_is_transient),
             _ => false,
         };
     }
@@ -548,6 +550,30 @@ where
         // the conservative default (don't retry).
         _ => false,
     }
+}
+
+fn not_sent_dispatch_is_transient(error: &ConnectorError) -> bool {
+    if let Some(credentials_error) = credentials_error_in_source_chain(error) {
+        return matches!(credentials_error, CredentialsError::ProviderTimedOut(_));
+    }
+
+    error.is_timeout()
+        || error.is_io()
+        || matches!(
+            error.as_other(),
+            Some(ErrorKind::TransientError | ErrorKind::ThrottlingError | ErrorKind::ServerError)
+        )
+}
+
+fn credentials_error_in_source_chain(error: &ConnectorError) -> Option<&CredentialsError> {
+    let mut source = std::error::Error::source(error);
+    while let Some(error) = source {
+        if let Some(credentials_error) = error.downcast_ref::<CredentialsError>() {
+            return Some(credentials_error);
+        }
+        source = error.source();
+    }
+    None
 }
 
 /// Reconstruct a `Resource` from `from` state plus an `UpdatePatch`.
@@ -1351,6 +1377,7 @@ mod tests {
     enum MockFailure {
         Construction,
         Timeout,
+        Response,
         Service {
             code: &'static str,
             retryable: Option<ErrorKind>,
@@ -1398,6 +1425,14 @@ mod tests {
                     "request serialization failed",
                 )),
                 MockFailure::Timeout => Err(SdkError::timeout_error("hit deadline")),
+                MockFailure::Response => {
+                    let mut response = http_response(400);
+                    attach_single_attempt_verdict_for_test(&mut response, SendOutcome::Rejected);
+                    Err(SdkError::response_error(
+                        "response body could not be deserialized",
+                        response,
+                    ))
+                }
                 MockFailure::Service { code, retryable } => Err(service_err(code, retryable)),
             }
         }
@@ -1504,13 +1539,17 @@ mod tests {
         }
     }
 
+    fn single_attempt_classification(outcome: SendOutcome) -> ProviderRetryClassification {
+        ProviderRetryClassification::for_test(outcome, outcome)
+    }
+
     #[test]
     fn sdk_marked_transient_error_retries() {
         // Service returned a response the SDK flagged as transient
         // (e.g. RequestTimeout — the bug behind #260). Should retry.
         let err = service_err("RequestTimeout", Some(ErrorKind::TransientError));
         assert!(provider_retry_allowed(
-            SendOutcome::MaybeSent,
+            single_attempt_classification(SendOutcome::MaybeSent),
             Idempotency::ReadOnly,
             &err
         ));
@@ -1520,7 +1559,7 @@ mod tests {
     fn sdk_marked_throttling_retries() {
         let err = service_err("Throttling", Some(ErrorKind::ThrottlingError));
         assert!(provider_retry_allowed(
-            SendOutcome::Rejected,
+            single_attempt_classification(SendOutcome::Rejected),
             Idempotency::NotIdempotent,
             &err
         ));
@@ -1530,7 +1569,7 @@ mod tests {
     fn sdk_marked_server_error_retries() {
         let err = service_err("InternalError", Some(ErrorKind::ServerError));
         assert!(provider_retry_allowed(
-            SendOutcome::MaybeSent,
+            single_attempt_classification(SendOutcome::MaybeSent),
             Idempotency::ReadOnly,
             &err
         ));
@@ -1542,7 +1581,7 @@ mod tests {
         // immediately — they will never succeed on a second attempt.
         let err = service_err("ValidationException", None);
         assert!(!provider_retry_allowed(
-            SendOutcome::Rejected,
+            single_attempt_classification(SendOutcome::Rejected),
             Idempotency::NotIdempotent,
             &err
         ));
@@ -1556,7 +1595,7 @@ mod tests {
         // See carina-rs/carina-provider-aws#156.
         let err = service_err("OperationAborted", None);
         assert!(provider_retry_allowed(
-            SendOutcome::Rejected,
+            single_attempt_classification(SendOutcome::Rejected),
             Idempotency::NotIdempotent,
             &err
         ));
@@ -1573,7 +1612,7 @@ mod tests {
         // classify RequestTimeout as retryable.
         let err = service_err("RequestTimeout", None);
         assert!(provider_retry_allowed(
-            SendOutcome::MaybeSent,
+            single_attempt_classification(SendOutcome::MaybeSent),
             Idempotency::ReadOnly,
             &err
         ));
@@ -1586,7 +1625,7 @@ mod tests {
         // cover it.
         let err = service_err("SlowDown", None);
         assert!(provider_retry_allowed(
-            SendOutcome::Rejected,
+            single_attempt_classification(SendOutcome::Rejected),
             Idempotency::NotIdempotent,
             &err
         ));
@@ -1599,7 +1638,7 @@ mod tests {
         let timeout: SdkError<MockServiceError, HttpResponse> =
             SdkError::timeout_error("hit deadline");
         assert!(provider_retry_allowed(
-            SendOutcome::MaybeSent,
+            single_attempt_classification(SendOutcome::MaybeSent),
             Idempotency::ReadOnly,
             &timeout
         ));
@@ -1611,7 +1650,7 @@ mod tests {
             SdkError::construction_failure("request serialization failed");
 
         assert!(!provider_retry_allowed(
-            SendOutcome::NotSent,
+            single_attempt_classification(SendOutcome::NotSent),
             Idempotency::ReadOnly,
             &construction
         ));
@@ -1636,41 +1675,135 @@ mod tests {
                 std::io::Error::other("classified transient").into(),
                 Some(ErrorKind::TransientError),
             ));
+        let other_server: SdkError<MockServiceError, HttpResponse> =
+            SdkError::dispatch_failure(ConnectorError::other(
+                std::io::Error::other("classified server error").into(),
+                Some(ErrorKind::ServerError),
+            ));
+        let other_throttling: SdkError<MockServiceError, HttpResponse> =
+            SdkError::dispatch_failure(ConnectorError::other(
+                std::io::Error::other("classified throttling error").into(),
+                Some(ErrorKind::ThrottlingError),
+            ));
+        let other_client: SdkError<MockServiceError, HttpResponse> =
+            SdkError::dispatch_failure(ConnectorError::other(
+                std::io::Error::other("classified client error").into(),
+                Some(ErrorKind::ClientError),
+            ));
 
         assert!(!provider_retry_allowed(
-            SendOutcome::NotSent,
+            single_attempt_classification(SendOutcome::NotSent),
             Idempotency::NotIdempotent,
             &other_none
         ));
         assert!(!provider_retry_allowed(
-            SendOutcome::NotSent,
+            single_attempt_classification(SendOutcome::NotSent),
             Idempotency::NotIdempotent,
             &user
         ));
         assert!(provider_retry_allowed(
-            SendOutcome::NotSent,
+            single_attempt_classification(SendOutcome::NotSent),
             Idempotency::NotIdempotent,
             &io
         ));
         assert!(provider_retry_allowed(
-            SendOutcome::NotSent,
+            single_attempt_classification(SendOutcome::NotSent),
             Idempotency::NotIdempotent,
             &timeout
         ));
         assert!(provider_retry_allowed(
-            SendOutcome::NotSent,
+            single_attempt_classification(SendOutcome::NotSent),
             Idempotency::NotIdempotent,
             &other_transient
         ));
         assert!(provider_retry_allowed(
-            SendOutcome::MaybeSent,
+            single_attempt_classification(SendOutcome::NotSent),
+            Idempotency::NotIdempotent,
+            &other_server
+        ));
+        assert!(provider_retry_allowed(
+            single_attempt_classification(SendOutcome::NotSent),
+            Idempotency::NotIdempotent,
+            &other_throttling
+        ));
+        assert!(!provider_retry_allowed(
+            single_attempt_classification(SendOutcome::NotSent),
+            Idempotency::NotIdempotent,
+            &other_client
+        ));
+        assert!(provider_retry_allowed(
+            single_attempt_classification(SendOutcome::MaybeSent),
             Idempotency::IdempotencyToken,
             &other_none
         ));
         assert!(!provider_retry_allowed(
-            SendOutcome::MaybeSent,
+            single_attempt_classification(SendOutcome::MaybeSent),
             Idempotency::NotIdempotent,
             &other_none
+        ));
+    }
+
+    #[test]
+    fn not_sent_credentials_retry_only_provider_timeout() {
+        let provider_timed_out: SdkError<MockServiceError, HttpResponse> =
+            SdkError::dispatch_failure(ConnectorError::other(
+                Box::new(CredentialsError::provider_timed_out(Duration::from_secs(1))),
+                None,
+            ));
+        let not_loaded: SdkError<MockServiceError, HttpResponse> = SdkError::dispatch_failure(
+            ConnectorError::other(Box::new(CredentialsError::not_loaded_no_source()), None),
+        );
+        let invalid_configuration: SdkError<MockServiceError, HttpResponse> =
+            SdkError::dispatch_failure(ConnectorError::other(
+                Box::new(CredentialsError::invalid_configuration(
+                    std::io::Error::other("invalid credentials configuration"),
+                )),
+                None,
+            ));
+        let provider_error: SdkError<MockServiceError, HttpResponse> =
+            SdkError::dispatch_failure(ConnectorError::other(
+                Box::new(CredentialsError::provider_error(std::io::Error::other(
+                    "credential provider failed",
+                ))),
+                None,
+            ));
+        let unhandled: SdkError<MockServiceError, HttpResponse> =
+            SdkError::dispatch_failure(ConnectorError::other(
+                Box::new(CredentialsError::unhandled(std::io::Error::other(
+                    "unexpected credential failure",
+                ))),
+                None,
+            ));
+
+        assert!(provider_retry_allowed(
+            single_attempt_classification(SendOutcome::NotSent),
+            Idempotency::NotIdempotent,
+            &provider_timed_out
+        ));
+        assert!(!provider_retry_allowed(
+            single_attempt_classification(SendOutcome::NotSent),
+            Idempotency::NotIdempotent,
+            &not_loaded
+        ));
+        for error in [invalid_configuration, provider_error, unhandled] {
+            assert!(!provider_retry_allowed(
+                single_attempt_classification(SendOutcome::NotSent),
+                Idempotency::NotIdempotent,
+                &error
+            ));
+        }
+    }
+
+    #[test]
+    fn maybe_sent_operation_with_final_credentials_failure_does_not_retry() {
+        let final_error: SdkError<MockServiceError, HttpResponse> = SdkError::dispatch_failure(
+            ConnectorError::other(Box::new(CredentialsError::not_loaded_no_source()), None),
+        );
+
+        assert!(!provider_retry_allowed(
+            ProviderRetryClassification::for_test(SendOutcome::MaybeSent, SendOutcome::NotSent),
+            Idempotency::IdempotencyToken,
+            &final_error
         ));
     }
 
@@ -1713,6 +1846,19 @@ mod tests {
 
         assert_eq!(error.outcome(), SendOutcome::NotSent);
         assert_eq!(call.attempts(), 1);
+    }
+
+    #[tokio::test]
+    async fn provider_retry_does_not_resend_non_idempotent_response_error() {
+        let call = MockCall::new(MockFailure::Response);
+
+        let error = retry_aws_operation(test_policy(3), || MockCreateVpc(call.clone()))
+            .await
+            .expect_err("a 4xx response parsing failure must not be resent");
+
+        assert_eq!(call.attempts(), 1);
+        assert_eq!(error.outcome(), SendOutcome::MaybeSent);
+        assert!(matches!(&*error, SdkError::ResponseError(_)), "{error:?}");
     }
 
     #[tokio::test]

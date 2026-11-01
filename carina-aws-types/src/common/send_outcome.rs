@@ -22,6 +22,38 @@ pub enum SendOutcome {
     Rejected,
 }
 
+/// The two send outcomes needed by a provider-level retry decision.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ProviderRetryClassification {
+    operation_outcome: SendOutcome,
+    final_attempt_outcome: SendOutcome,
+}
+
+impl ProviderRetryClassification {
+    pub(crate) fn new(operation_outcome: SendOutcome, final_attempt_outcome: SendOutcome) -> Self {
+        Self {
+            operation_outcome,
+            final_attempt_outcome,
+        }
+    }
+
+    /// Returns the outcome aggregated across every SDK attempt.
+    pub fn operation_outcome(self) -> SendOutcome {
+        self.operation_outcome
+    }
+
+    /// Returns the outcome of the final SDK attempt.
+    pub fn final_attempt_outcome(self) -> SendOutcome {
+        self.final_attempt_outcome
+    }
+
+    /// Constructs a classification for a provider retry test.
+    #[cfg(feature = "test-utils")]
+    pub fn for_test(operation_outcome: SendOutcome, final_attempt_outcome: SendOutcome) -> Self {
+        Self::new(operation_outcome, final_attempt_outcome)
+    }
+}
+
 /// The furthest point one SDK attempt reached in the orchestrator.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum AttemptPhase {
@@ -31,42 +63,31 @@ pub(crate) enum AttemptPhase {
     TransmitReached,
 }
 
-/// The resend guard's internal verdict over every attempt of one SDK operation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct OperationSendOutcome(SendOutcome);
-
-impl OperationSendOutcome {
-    pub(crate) fn new(outcome: SendOutcome) -> Self {
-        Self(outcome)
-    }
-
-    pub(crate) fn outcome(self) -> SendOutcome {
-        self.0
-    }
-}
-
 /// Attaches a single-attempt resend-guard verdict to a mock response.
 ///
 /// This is test-only. Production verdicts come only from [`ResendGuard`](super::ResendGuard).
 #[cfg(feature = "test-utils")]
 pub fn attach_single_attempt_verdict_for_test(response: &mut HttpResponse, outcome: SendOutcome) {
-    response.add_extension(OperationSendOutcome::new(outcome));
+    response.add_extension(ProviderRetryClassification::new(outcome, outcome));
 }
 
 /// An SDK failure annotated with the resend guard's all-attempts verdict.
 #[derive(Debug)]
 pub(crate) struct OperationSendFailure {
-    outcome: OperationSendOutcome,
+    classification: ProviderRetryClassification,
     source: BoxError,
 }
 
 impl OperationSendFailure {
-    pub(crate) fn new(outcome: OperationSendOutcome, source: BoxError) -> Self {
-        Self { outcome, source }
+    pub(crate) fn new(classification: ProviderRetryClassification, source: BoxError) -> Self {
+        Self {
+            classification,
+            source,
+        }
     }
 
-    pub(crate) fn outcome(&self) -> OperationSendOutcome {
-        self.outcome
+    pub(crate) fn classification(&self) -> ProviderRetryClassification {
+        self.classification
     }
 }
 
@@ -75,7 +96,7 @@ impl fmt::Display for OperationSendFailure {
         write!(
             formatter,
             "AWS operation failed with {:?} send outcome",
-            self.outcome.outcome()
+            self.classification.operation_outcome()
         )
     }
 }
@@ -107,38 +128,55 @@ pub enum Idempotency {
 }
 
 impl SendOutcome {
-    /// Classifies whether an SDK error proves that the request was not applied.
+    /// Classifies resend safety across every attempt of an SDK operation.
     ///
-    /// Apart from construction failures, a conclusive result is accepted only
-    /// when [`ResendGuard`](super::ResendGuard) observed every SDK attempt and
-    /// attached its internal all-attempts verdict. A connector's per-attempt
-    /// send phase is deliberately ignored here.
+    /// Guard annotations are trusted only at the SDK positions where
+    /// [`ResendGuard`](super::ResendGuard) installs them. Response parsing
+    /// failures always remain [`SendOutcome::MaybeSent`] because receiving a
+    /// response does not prove whether AWS applied the request.
     pub fn classify<E>(error: &SdkError<E, HttpResponse>) -> SendOutcome
     where
         E: std::error::Error + ProvideErrorKind + ProvideErrorMetadata + 'static,
     {
+        Self::classify_for_provider_retry(error).operation_outcome()
+    }
+
+    /// Classifies all-attempt resend safety and final-attempt transience input.
+    ///
+    /// Provider retry coordinators must consume this pair as one value: resend
+    /// safety comes from [`ProviderRetryClassification::operation_outcome`],
+    /// while retry worthiness comes from the final attempt and the SDK error.
+    pub fn classify_for_provider_retry<E>(
+        error: &SdkError<E, HttpResponse>,
+    ) -> ProviderRetryClassification
+    where
+        E: std::error::Error + ProvideErrorKind + ProvideErrorMetadata + 'static,
+    {
+        let maybe_sent = ProviderRetryClassification::new(Self::MaybeSent, Self::MaybeSent);
         match error {
-            SdkError::ResponseError(context) => context
-                .raw()
-                .extension::<OperationSendOutcome>()
-                .map(|outcome| outcome.outcome())
-                .or_else(|| operation_outcome_in_source_chain(error))
-                .unwrap_or(Self::MaybeSent),
+            SdkError::ResponseError(_) => maybe_sent,
             SdkError::ServiceError(context) => context
                 .raw()
-                .extension::<OperationSendOutcome>()
-                .map(|outcome| outcome.outcome())
-                .or_else(|| operation_outcome_in_source_chain(error))
-                .unwrap_or(Self::MaybeSent),
+                .extension::<ProviderRetryClassification>()
+                .copied()
+                .unwrap_or(maybe_sent),
             SdkError::ConstructionFailure(_) => {
-                operation_outcome_in_source_chain(error).unwrap_or(Self::NotSent)
+                operation_classification_at(std::error::Error::source(error)).unwrap_or_else(|| {
+                    ProviderRetryClassification::new(Self::NotSent, Self::NotSent)
+                })
             }
-            SdkError::TimeoutError(_) | SdkError::DispatchFailure(_) => {
-                operation_outcome_in_source_chain(error).unwrap_or(Self::MaybeSent)
+            SdkError::TimeoutError(_) => {
+                operation_classification_at(std::error::Error::source(error)).unwrap_or(maybe_sent)
             }
+            SdkError::DispatchFailure(context) => context
+                .as_connector_error()
+                .and_then(std::error::Error::source)
+                .and_then(|source| source.downcast_ref::<OperationSendFailure>())
+                .map(OperationSendFailure::classification)
+                .unwrap_or(maybe_sent),
             // `SdkError` is non-exhaustive. Unknown future failures must fail
             // closed because they may represent a request that reached AWS.
-            _ => operation_outcome_in_source_chain(error).unwrap_or(Self::MaybeSent),
+            _ => maybe_sent,
         }
     }
 
@@ -224,17 +262,12 @@ impl SendOutcome {
     }
 }
 
-fn operation_outcome_in_source_chain(
-    error: &(dyn std::error::Error + 'static),
-) -> Option<SendOutcome> {
-    let mut current = Some(error);
-    while let Some(error) = current {
-        if let Some(failure) = error.downcast_ref::<OperationSendFailure>() {
-            return Some(failure.outcome().outcome());
-        }
-        current = error.source();
-    }
-    None
+fn operation_classification_at(
+    source: Option<&(dyn std::error::Error + 'static)>,
+) -> Option<ProviderRetryClassification> {
+    source
+        .and_then(|source| source.downcast_ref::<OperationSendFailure>())
+        .map(OperationSendFailure::classification)
 }
 
 #[cfg(test)]
@@ -251,7 +284,7 @@ mod tests {
     use carina_plugin_sdk::wasi_http::{SendPhase, transport_connector_error_for_test};
 
     use super::{
-        AttemptPhase, Idempotency, OperationSendFailure, OperationSendOutcome, SendOutcome,
+        AttemptPhase, Idempotency, OperationSendFailure, ProviderRetryClassification, SendOutcome,
     };
 
     #[derive(Debug)]
@@ -264,6 +297,21 @@ mod tests {
     }
 
     impl std::error::Error for WrappedConnectorError {
+        fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+            Some(&self.0)
+        }
+    }
+
+    #[derive(Debug)]
+    struct NestedOperationFailure(OperationSendFailure);
+
+    impl std::fmt::Display for NestedOperationFailure {
+        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            formatter.write_str("outer SDK call failed")
+        }
+    }
+
+    impl std::error::Error for NestedOperationFailure {
         fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
             Some(&self.0)
         }
@@ -333,7 +381,7 @@ mod tests {
         outcome: SendOutcome,
     ) -> SdkError<MockServiceError, HttpResponse> {
         let mut response = http_response(status);
-        response.add_extension(OperationSendOutcome::new(outcome));
+        response.add_extension(ProviderRetryClassification::new(outcome, outcome));
         SdkError::service_error(MockServiceError::new(code, retryable), response)
     }
 
@@ -377,7 +425,7 @@ mod tests {
     #[test]
     fn guard_annotated_dispatch_failure_uses_operation_verdict() {
         let failure = OperationSendFailure::new(
-            OperationSendOutcome::new(SendOutcome::NotSent),
+            ProviderRetryClassification::new(SendOutcome::NotSent, SendOutcome::NotSent),
             Box::new(io::Error::other("original connector failure")),
         );
         let error: SdkError<MockServiceError, HttpResponse> =
@@ -412,6 +460,30 @@ mod tests {
     fn response_error_may_have_been_sent() {
         let error: SdkError<MockServiceError, HttpResponse> =
             SdkError::response_error("invalid response", http_response(502));
+
+        assert_eq!(SendOutcome::classify(&error), SendOutcome::MaybeSent);
+    }
+
+    #[test]
+    fn response_error_ignores_guard_verdict() {
+        let mut response = http_response(400);
+        response.add_extension(ProviderRetryClassification::new(
+            SendOutcome::Rejected,
+            SendOutcome::Rejected,
+        ));
+        let error: SdkError<MockServiceError, HttpResponse> =
+            SdkError::response_error("invalid response body", response);
+
+        assert_eq!(SendOutcome::classify(&error), SendOutcome::MaybeSent);
+    }
+
+    #[test]
+    fn nested_guard_verdict_does_not_annotate_timeout() {
+        let nested = NestedOperationFailure(OperationSendFailure::new(
+            ProviderRetryClassification::new(SendOutcome::NotSent, SendOutcome::NotSent),
+            Box::new(io::Error::other("nested SDK call failed")),
+        ));
+        let error: SdkError<MockServiceError, HttpResponse> = SdkError::timeout_error(nested);
 
         assert_eq!(SendOutcome::classify(&error), SendOutcome::MaybeSent);
     }

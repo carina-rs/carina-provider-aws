@@ -16,7 +16,7 @@ use aws_smithy_types::config_bag::{ConfigBag, Storable, StoreReplace};
 use aws_smithy_types::retry::ErrorKind;
 
 use super::send_outcome::{
-    AttemptPhase, Idempotency, OperationSendFailure, OperationSendOutcome, SendOutcome,
+    AttemptPhase, Idempotency, OperationSendFailure, ProviderRetryClassification, SendOutcome,
 };
 
 impl Storable for AttemptPhase {
@@ -325,7 +325,7 @@ impl Intercept for ResendGuard {
         } else {
             final_attempt
         };
-        let verdict = OperationSendOutcome::new(operation_outcome);
+        let verdict = ProviderRetryClassification::new(operation_outcome, final_attempt);
 
         if let Some(response) = context.response_mut() {
             response.add_extension(verdict);
@@ -354,7 +354,6 @@ impl Intercept for ResendGuard {
 #[cfg(test)]
 mod tests {
     use std::io;
-    use std::sync::atomic::{AtomicUsize, Ordering};
 
     use aws_smithy_runtime_api::client::interceptors::Intercept;
     use aws_smithy_runtime_api::client::interceptors::context::{Input, InterceptorContext};
@@ -481,11 +480,9 @@ mod tests {
     ) -> (
         SendOutcome,
         SdkError<MockServiceError, aws_smithy_runtime_api::client::orchestrator::HttpResponse>,
-        usize,
     ) {
         let guard = ResendGuard::new(token_idempotent);
         let runtime_components = runtime_components();
-        let connector_calls = AtomicUsize::new(0);
         let mut context = before_transmit_context();
         let mut cfg = operation_config(1);
 
@@ -499,19 +496,18 @@ mod tests {
 
         let (outcome, error) =
             classify_final_context(&guard, &runtime_components, context, &mut cfg);
-        (outcome, error, connector_calls.load(Ordering::Relaxed))
+        (outcome, error)
     }
 
     #[test]
-    fn identity_signing_and_endpoint_failures_are_typed_not_sent_without_http_calls() {
+    fn identity_signing_and_endpoint_failures_are_typed_not_sent() {
         for failure in [
             "credentials not loaded",
             "request signing failed",
             "endpoint resolution failed",
         ] {
-            let (outcome, error, connector_calls) = run_pre_transmit_failure(failure);
+            let (outcome, error) = run_pre_transmit_failure(failure);
 
-            assert_eq!(connector_calls, 0, "{failure}");
             assert_eq!(outcome, SendOutcome::NotSent, "{failure}");
             assert!(error_chain_contains(&error, failure), "{error:?}");
         }
@@ -599,7 +595,6 @@ mod tests {
     fn other_connector_failure_after_transmit_stays_maybe_sent() {
         let guard = ResendGuard::new(token_idempotent);
         let runtime_components = runtime_components();
-        let connector_calls = AtomicUsize::new(0);
         let mut context = before_transmit_context();
         let mut cfg = operation_config(1);
 
@@ -609,7 +604,6 @@ mod tests {
         guard
             .read_before_transmit(&(&context).into(), &runtime_components, &mut cfg)
             .expect("transmit is allowed");
-        connector_calls.fetch_add(1, Ordering::Relaxed);
         context.set_output_or_error(Err(OrchestratorError::connector(ConnectorError::other(
             Box::new(io::Error::other("post-transmit connector failure")),
             None,
@@ -621,7 +615,6 @@ mod tests {
         let (outcome, error) =
             classify_final_context(&guard, &runtime_components, context, &mut cfg);
 
-        assert_eq!(connector_calls.load(Ordering::Relaxed), 1);
         assert_eq!(outcome, SendOutcome::MaybeSent);
         assert!(error_chain_contains(
             &error,
@@ -727,9 +720,13 @@ mod tests {
             .read_after_attempt(&(&second).into(), &runtime_components, &mut cfg)
             .expect("second attempt finalization succeeds");
 
-        let (outcome, _) = classify_final_context(&guard, &runtime_components, second, &mut cfg);
+        let (outcome, error) =
+            classify_final_context(&guard, &runtime_components, second, &mut cfg);
+        let classification = SendOutcome::classify_for_provider_retry(&error);
 
         assert_eq!(outcome, SendOutcome::MaybeSent);
+        assert_eq!(classification.operation_outcome(), SendOutcome::MaybeSent);
+        assert_eq!(classification.final_attempt_outcome(), SendOutcome::NotSent);
     }
 
     #[test]
