@@ -1058,7 +1058,6 @@ dependencies = [
  "carina-plugin-sdk",
  "carina-provider-aws",
  "carina-provider-protocol",
- "futures",
  "heck",
  "indexmap",
  "regex",

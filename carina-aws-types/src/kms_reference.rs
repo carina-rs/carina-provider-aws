@@ -26,13 +26,33 @@ pub trait DescribeKeyClient: Sync {
 /// Missing response metadata represents a transport, timeout or credentials failure.
 #[derive(Debug, Clone)]
 pub struct DescribeKeyFailure {
-    pub message: String,
-    pub code: Option<String>,
-    pub status: Option<u16>,
-    pub request_id: Option<String>,
+    message: String,
+    code: Option<String>,
+    status: Option<u16>,
+    request_id: Option<String>,
+}
+
+#[cfg(feature = "test-utils")]
+impl DescribeKeyFailure {
+    /// Construct a fake failure for tests. Production failures use [`describe_key_failure`].
+    pub fn for_test(
+        message: impl Into<String>,
+        code: Option<String>,
+        status: Option<u16>,
+        request_id: Option<String>,
+    ) -> Self {
+        Self {
+            message: message.into(),
+            code,
+            status,
+            request_id,
+        }
+    }
 }
 
 /// Preserve service metadata and the immediate transport cause's Display only.
+/// `ServiceError` keeps the AWS message, which can include the caller principal ARN
+/// or session name; these are identifiers, not secrets.
 /// Never format Debug or walk sources, which can expose credential-provider details.
 pub fn describe_key_failure<E>(failure: SdkError<E, HttpResponse>) -> DescribeKeyFailure
 where
@@ -110,12 +130,6 @@ fn partition(region: &str) -> Option<&'static str> {
     }
 }
 
-/// Canonicalize only the key ID of an already validated key ARN.
-fn canonical_key_arn(arn: &str) -> String {
-    let (prefix, key_id) = arn.rsplit_once('/').expect("validated KMS key ARN");
-    format!("{prefix}/{}", key_id.to_ascii_lowercase())
-}
-
 /// Pure resolution over an injected DescribeKey client. No payload or state is rewritten.
 pub async fn resolve_kms_key_reference(
     client: &impl DescribeKeyClient,
@@ -140,7 +154,7 @@ pub async fn resolve_kms_key_reference(
             crate::validate_kms_key_arn(raw).map_err(|reason| {
                 ReferenceError::InvalidReference(error(provider_name, reason, None))
             })?;
-            return Ok(ReferenceOutcome::Resolved(canonical_key_arn(raw)));
+            return Ok(ReferenceOutcome::Resolved(raw.to_owned()));
         }
     } else if partition(instance_region).is_none() {
         return Err(ReferenceError::InvalidReference(error(
@@ -151,7 +165,7 @@ pub async fn resolve_kms_key_reference(
     }
     match client.describe_key(region, raw).await {
         Ok(Some(arn)) if crate::validate_kms_key_arn(&arn).is_ok() => {
-            Ok(ReferenceOutcome::Resolved(canonical_key_arn(&arn)))
+            Ok(ReferenceOutcome::Resolved(arn))
         }
         Ok(_) => Err(ReferenceError::InvalidReference(error(
             provider_name,
@@ -394,34 +408,30 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn key_arn_canonicalizes_hex_without_a_call_or_changing_authored_value() {
+    async fn key_arn_preserves_authored_casing_without_a_call() {
         for key_id in [
             "1234ABCD-12AB-34CD-56EF-1234567890AB",
-            "mrk-0123456789ABCDEF0123456789ABCDEF",
+            "mrk-0123456789aBcDeF0123456789AbCdEf",
         ] {
             let raw = format!("arn:aws:kms:us-east-1:123456789012:key/{key_id}");
-            let authored = raw.clone();
             let fake = client(Ok(None));
             let result = resolve_kms_key_reference(&fake, "aws", "us-west-2", &raw).await;
-            assert!(matches!(result, Ok(ReferenceOutcome::Resolved(arn))
-                if arn == format!("arn:aws:kms:us-east-1:123456789012:key/{}", key_id.to_ascii_lowercase())));
-            assert_eq!(raw, authored);
+            assert!(matches!(result, Ok(ReferenceOutcome::Resolved(arn)) if arn == raw));
             assert!(fake.calls.lock().unwrap().is_empty());
         }
     }
 
     #[tokio::test]
-    async fn describe_key_canonicalizes_hex_and_preserves_raw_request() {
+    async fn describe_key_preserves_returned_casing_and_raw_request() {
         for key_id in [
             "1234ABCD-12AB-34CD-56EF-1234567890AB",
-            "mrk-0123456789ABCDEF0123456789ABCDEF",
+            "mrk-0123456789aBcDeF0123456789AbCdEf",
         ] {
             let returned = format!("arn:aws:kms:eu-west-1:999999999999:key/{key_id}");
             for raw in [key_id, "alias/MixedCase"] {
                 let fake = client(Ok(Some(returned.clone())));
                 let result = resolve_kms_key_reference(&fake, "awscc", "eu-west-1", raw).await;
-                assert!(matches!(result, Ok(ReferenceOutcome::Resolved(arn))
-                    if arn == format!("arn:aws:kms:eu-west-1:999999999999:key/{}", key_id.to_ascii_lowercase())));
+                assert!(matches!(result, Ok(ReferenceOutcome::Resolved(arn)) if arn == returned));
                 assert_eq!(
                     *fake.calls.lock().unwrap(),
                     [("eu-west-1".into(), raw.into())]

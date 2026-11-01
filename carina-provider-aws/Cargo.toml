@@ -42,7 +42,6 @@ aws-sdk-route53 = { version = "1", default-features = false, features = ["behavi
 aws-sdk-acm = { version = "1.125.0", default-features = false, features = ["behavior-version-latest"] }
 aws-sdk-sqs = { version = "1", default-features = false, features = ["behavior-version-latest"] }
 aws-sdk-kms = { version = "1.127.0", default-features = false, features = ["behavior-version-latest"] }
-futures = "0.3"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
