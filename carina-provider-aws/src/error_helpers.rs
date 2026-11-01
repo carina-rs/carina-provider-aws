@@ -29,7 +29,7 @@
 use carina_core::provider::ProviderError;
 use thiserror::Error;
 
-use carina_aws_types::{Idempotency, SendClassification, SendOutcome};
+use carina_aws_types::{Idempotency, SendClassification};
 
 use crate::aws_operation::DecidedOperationError;
 
@@ -68,10 +68,6 @@ impl<E> SendFailure<E> {
 
     pub(crate) fn classification(&self) -> SendClassification {
         self.classification
-    }
-
-    pub(crate) fn outcome(&self) -> SendOutcome {
-        self.classification.outcome()
     }
 
     pub(crate) fn into_parts(self) -> (SendClassification, AwsSdkError<E>) {
@@ -225,10 +221,8 @@ where
         + Sync
         + 'static,
 {
-    let failure = failure.into_send_failure();
-    let outcome = failure.outcome();
-    let (_, error) = failure.into_parts();
-    api_error_with_meta_cause(context, outcome, error, |message, source| {
+    let (classification, error) = failure.into_send_failure().into_parts();
+    api_error_with_meta_cause(context, classification, error, |message, source| {
         AwsServiceErrorCause { message, source }
     })
 }
@@ -251,8 +245,8 @@ where
         + Sync
         + 'static,
 {
-    let outcome = SendClassification::of(&err).outcome();
-    api_error_with_meta_cause(context, outcome, err, |message, source| {
+    let classification = SendClassification::of(&err);
+    api_error_with_meta_cause(context, classification, err, |message, source| {
         AwsServiceErrorWithSubjectCause {
             subject,
             message,
@@ -263,7 +257,7 @@ where
 
 fn api_error_with_meta_cause<E, Cause>(
     context: &'static str,
-    outcome: SendOutcome,
+    classification: SendClassification,
     err: AwsSdkError<E>,
     make_cause: impl FnOnce(AwsServiceMessage, AwsSdkError<E>) -> Cause,
 ) -> ProviderError
@@ -281,9 +275,9 @@ where
     use aws_types::request_id::RequestId;
 
     let operation = E::NAME.to_string();
-    let append_outcome_unknown = match outcome {
-        SendOutcome::MaybeSent => E::IDEMPOTENCY == Idempotency::NotIdempotent,
-        SendOutcome::NotSent | SendOutcome::Rejected => false,
+    let append_outcome_unknown = match classification {
+        SendClassification::MaybeSent { .. } => E::IDEMPOTENCY == Idempotency::NotIdempotent,
+        SendClassification::NotSent(_) | SendClassification::Rejected => false,
     };
     let status = err
         .raw_response()

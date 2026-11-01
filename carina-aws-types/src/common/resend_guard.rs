@@ -6,7 +6,7 @@ use aws_smithy_runtime_api::box_error::BoxError;
 use aws_smithy_runtime_api::client::interceptors::Intercept;
 use aws_smithy_runtime_api::client::interceptors::context::{
     BeforeSerializationInterceptorContextRef, BeforeTransmitInterceptorContextRef,
-    FinalizerInterceptorContextMut, FinalizerInterceptorContextRef,
+    FinalizerInterceptorContextMut, FinalizerInterceptorContextRef, InterceptorContext,
 };
 use aws_smithy_runtime_api::client::orchestrator::{Metadata, OrchestratorError};
 use aws_smithy_runtime_api::client::result::ConnectorError;
@@ -16,8 +16,8 @@ use aws_smithy_types::config_bag::{ConfigBag, Storable, StoreReplace};
 use aws_smithy_types::retry::ErrorKind;
 
 use super::send_outcome::{
-    AttemptPhase, Idempotency, OperationSendFailure, OperationVerdict, SendOutcome, Transience,
-    not_sent_transience,
+    AttemptOutcome, AttemptPhase, FinalAttempt, Idempotency, OperationSendFailure,
+    OperationVerdict, SendClassification, not_sent_transience,
 };
 
 impl Storable for AttemptPhase {
@@ -31,9 +31,30 @@ fn attempt_phase(cfg: &ConfigBag) -> AttemptPhase {
         .unwrap_or(AttemptPhase::TransmitReached)
 }
 
+/// Classifies one failed attempt, retaining transience only for NotSent.
+pub(super) fn classify_attempt(
+    phase: AttemptPhase,
+    context: &InterceptorContext,
+    runtime_components: &RuntimeComponents,
+) -> SendClassification {
+    match AttemptOutcome::classify_orchestrator(phase, context, runtime_components) {
+        AttemptOutcome::NotSent => {
+            let error = context
+                .output_or_error()
+                .and_then(Result::err)
+                .expect("only failed attempts are classified");
+            SendClassification::NotSent(not_sent_transience(error))
+        }
+        AttemptOutcome::Rejected => SendClassification::Rejected,
+        AttemptOutcome::MaybeSent => SendClassification::MaybeSent {
+            final_attempt: FinalAttempt::Sent,
+        },
+    }
+}
+
 #[derive(Debug, Clone)]
 struct PreviousAttempt {
-    outcome: SendOutcome,
+    outcome: AttemptOutcome,
     failure: String,
 }
 
@@ -191,15 +212,15 @@ impl Intercept for ResendGuard {
             // Attempt finalizers should always run; this fallback defensively
             // uses the transmit witness if that Smithy invariant is broken.
             let outcome = match previous_phase {
-                AttemptPhase::BeforeTransmit => SendOutcome::NotSent,
-                AttemptPhase::TransmitReached => SendOutcome::MaybeSent,
+                AttemptPhase::BeforeTransmit => AttemptOutcome::NotSent,
+                AttemptPhase::TransmitReached => AttemptOutcome::MaybeSent,
             };
             PreviousAttempt {
                 outcome,
                 failure: "failure details unavailable".to_string(),
             }
         });
-        if previous.outcome == SendOutcome::MaybeSent {
+        if previous.outcome == AttemptOutcome::MaybeSent {
             cfg.interceptor_state().store_put(MaybeSentAttempt);
         }
         cfg.interceptor_state().unset::<PreviousAttempt>();
@@ -279,10 +300,10 @@ impl Intercept for ResendGuard {
             }
             Some(Err(_)) | None => {
                 let phase = attempt_phase(cfg);
-                SendOutcome::classify_orchestrator(phase, context.inner(), runtime_components)
+                AttemptOutcome::classify_orchestrator(phase, context.inner(), runtime_components)
             }
         };
-        if outcome == SendOutcome::MaybeSent {
+        if outcome == AttemptOutcome::MaybeSent {
             cfg.interceptor_state().store_put(MaybeSentAttempt);
         }
         // The interceptor only lends us the SDK error, and `SdkError` is not
@@ -312,17 +333,13 @@ impl Intercept for ResendGuard {
         }
 
         let final_phase = attempt_phase(cfg);
-        let final_attempt =
-            SendOutcome::classify_orchestrator(final_phase, context.inner(), runtime_components);
-        let transience = match final_attempt {
-            SendOutcome::NotSent => not_sent_transience(error),
-            SendOutcome::Rejected | SendOutcome::MaybeSent => Transience::Permanent,
+        let classification = classify_attempt(final_phase, context.inner(), runtime_components);
+        let classification = if cfg.load::<MaybeSentAttempt>().is_some() {
+            classification.with_prior_maybe_sent()
+        } else {
+            classification
         };
-        let verdict = OperationVerdict::from_attempts(
-            cfg.load::<MaybeSentAttempt>().is_some(),
-            final_attempt,
-            transience,
-        );
+        let verdict = OperationVerdict::new(classification);
 
         if let Some(response) = context.response_mut() {
             response.add_extension(verdict);
@@ -363,7 +380,7 @@ mod tests {
     use aws_smithy_types::error::metadata::ProvideErrorMetadata;
     use aws_smithy_types::retry::{ErrorKind, ProvideErrorKind};
 
-    use super::{Idempotency, OperationVerdict, ResendGuard, SendOutcome};
+    use super::{Idempotency, OperationVerdict, ResendGuard};
     use crate::common::send_outcome::{FinalAttempt, SendClassification, Transience};
 
     #[derive(Debug)]
@@ -442,7 +459,7 @@ mod tests {
         mut context: InterceptorContext,
         cfg: &mut ConfigBag,
     ) -> (
-        SendOutcome,
+        SendClassification,
         SdkError<MockServiceError, aws_smithy_runtime_api::client::orchestrator::HttpResponse>,
     ) {
         guard
@@ -454,7 +471,7 @@ mod tests {
             .map_service_error(|_| -> MockServiceError {
                 unreachable!("the test contexts never contain service errors")
             });
-        (SendClassification::of(&error).outcome(), error)
+        (SendClassification::of(&error), error)
     }
 
     fn error_chain_contains(error: &(dyn std::error::Error + 'static), expected: &str) -> bool {
@@ -471,7 +488,7 @@ mod tests {
     fn run_pre_transmit_failure(
         failure: OrchestratorError<aws_smithy_runtime_api::client::interceptors::context::Error>,
     ) -> (
-        SendOutcome,
+        SendClassification,
         SdkError<MockServiceError, aws_smithy_runtime_api::client::orchestrator::HttpResponse>,
     ) {
         let guard = ResendGuard::new(token_idempotent);
@@ -498,7 +515,7 @@ mod tests {
         let (outcome, error) =
             run_pre_transmit_failure(OrchestratorError::other(io::Error::other(failure)));
 
-        assert_eq!(outcome, SendOutcome::NotSent);
+        assert_eq!(outcome, SendClassification::NotSent(Transience::Permanent));
         assert!(error_chain_contains(&error, failure), "{error:?}");
     }
 
@@ -553,7 +570,7 @@ mod tests {
             .read_before_attempt(&(&context).into(), &runtime_components, &mut cfg)
             .expect("first attempt is allowed");
         context.set_output_or_error(Err(OrchestratorError::timeout(Box::new(io::Error::other(
-            "identity resolution timed out",
+            "operation attempt timed out during identity resolution",
         )))));
         guard
             .read_after_attempt(&(&context).into(), &runtime_components, &mut cfg)
@@ -563,14 +580,14 @@ mod tests {
             classify_final_context(&guard, &runtime_components, context, &mut cfg);
 
         assert!(matches!(error, SdkError::TimeoutError(_)), "{error:?}");
-        assert_eq!(outcome, SendOutcome::NotSent);
+        assert_eq!(outcome, SendClassification::NotSent(Transience::Transient));
         assert_eq!(
             SendClassification::of(&error),
             SendClassification::NotSent(Transience::Transient)
         );
         assert!(error_chain_contains(
             &error,
-            "identity resolution timed out"
+            "operation attempt timed out during identity resolution"
         ));
     }
 
@@ -591,7 +608,7 @@ mod tests {
         let (outcome, error) =
             classify_final_context(&guard, &runtime_components, context, &mut cfg);
 
-        assert_eq!(outcome, SendOutcome::MaybeSent);
+        assert!(matches!(outcome, SendClassification::MaybeSent { .. }));
         assert!(error_chain_contains(
             &error,
             "failure without a transmit witness"
@@ -620,7 +637,7 @@ mod tests {
             matches!(error, SdkError::ConstructionFailure(_)),
             "{error:?}"
         );
-        assert_eq!(outcome, SendOutcome::NotSent);
+        assert_eq!(outcome, SendClassification::NotSent(Transience::Permanent));
         assert!(error_chain_contains(&error, "request serialization failed"));
     }
 
@@ -648,7 +665,7 @@ mod tests {
         let (outcome, error) =
             classify_final_context(&guard, &runtime_components, context, &mut cfg);
 
-        assert_eq!(outcome, SendOutcome::MaybeSent);
+        assert!(matches!(outcome, SendClassification::MaybeSent { .. }));
         assert!(error_chain_contains(
             &error,
             "post-transmit connector failure"
@@ -757,11 +774,57 @@ mod tests {
             classify_final_context(&guard, &runtime_components, second, &mut cfg);
         let classification = SendClassification::of(&error);
 
-        assert_eq!(outcome, SendOutcome::MaybeSent);
+        assert!(matches!(outcome, SendClassification::MaybeSent { .. }));
         assert_eq!(
             classification,
             SendClassification::MaybeSent {
                 final_attempt: FinalAttempt::NotSent(Transience::Permanent),
+            }
+        );
+    }
+
+    #[test]
+    fn maybe_sent_attempt_then_pre_transmit_timeout_keeps_transient_final_attempt() {
+        let guard = ResendGuard::new(token_idempotent);
+        let runtime_components = runtime_components();
+        let mut cfg = operation_config(1);
+        let mut first = before_transmit_context();
+
+        guard
+            .read_before_attempt(&(&first).into(), &runtime_components, &mut cfg)
+            .expect("first attempt is allowed");
+        guard
+            .read_before_transmit(&(&first).into(), &runtime_components, &mut cfg)
+            .expect("transmit is allowed");
+        first.set_output_or_error(Err(OrchestratorError::connector(ConnectorError::other(
+            Box::new(io::Error::other("post-transmit connector failure")),
+            None,
+        ))));
+        guard
+            .read_after_attempt(&(&first).into(), &runtime_components, &mut cfg)
+            .expect("first attempt finalization succeeds");
+
+        cfg.interceptor_state()
+            .store_put::<RequestAttempts>(2_u32.into());
+        let mut second = before_transmit_context();
+        guard
+            .read_before_attempt(&(&second).into(), &runtime_components, &mut cfg)
+            .expect("token operation can retry");
+        second.set_output_or_error(Err(OrchestratorError::timeout(Box::new(io::Error::other(
+            "operation attempt timed out before transmit",
+        )))));
+        guard
+            .read_after_attempt(&(&second).into(), &runtime_components, &mut cfg)
+            .expect("second attempt finalization succeeds");
+
+        let (classification, error) =
+            classify_final_context(&guard, &runtime_components, second, &mut cfg);
+
+        assert!(matches!(error, SdkError::TimeoutError(_)), "{error:?}");
+        assert_eq!(
+            classification,
+            SendClassification::MaybeSent {
+                final_attempt: FinalAttempt::NotSent(Transience::Transient),
             }
         );
     }
@@ -811,7 +874,7 @@ mod tests {
             classify_final_context(&guard, &runtime_components, second, &mut cfg);
 
         assert!(matches!(error, SdkError::ResponseError(_)), "{error:?}");
-        assert_eq!(outcome, SendOutcome::MaybeSent);
+        assert!(matches!(outcome, SendClassification::MaybeSent { .. }));
         assert!(
             error
                 .raw_response()
@@ -859,7 +922,7 @@ mod tests {
         let (outcome, error) =
             classify_final_context(&guard, &runtime_components, second, &mut cfg);
 
-        assert_eq!(outcome, SendOutcome::NotSent);
+        assert_eq!(outcome, SendClassification::NotSent(Transience::Permanent));
         assert!(error_chain_contains(&error, "second pre-transmit failure"));
     }
 

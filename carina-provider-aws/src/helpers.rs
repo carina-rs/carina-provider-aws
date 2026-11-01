@@ -1287,7 +1287,7 @@ mod tests {
     use aws_smithy_types::error::ErrorMetadata;
     use aws_smithy_types::error::metadata::ProvideErrorMetadata;
     use aws_smithy_types::retry::{ErrorKind, ProvideErrorKind};
-    use carina_aws_types::{SendOutcome, attach_single_attempt_verdict_for_test};
+    use carina_aws_types::attach_single_attempt_verdict_for_test;
 
     use crate::aws_operation::{
         AwsOperation, ClientToken, DecidedSend, NoToken, TokenBearing, TokenOperation, WithToken,
@@ -1344,17 +1344,21 @@ mod tests {
             "Throttling" | "RequestLimitExceeded" => 429,
             _ => 500,
         };
-        let outcome = match (code, retryable, status) {
+        let classification = match (code, retryable, status) {
             (_, Some(ErrorKind::ThrottlingError), _)
             | ("Throttling" | "RequestLimitExceeded" | "SlowDown" | "OperationAborted", _, _) => {
-                SendOutcome::Rejected
+                SendClassification::Rejected
             }
-            ("RequestTimeout" | "InternalError", _, _) => SendOutcome::MaybeSent,
-            (_, _, 400..=499) => SendOutcome::Rejected,
-            _ => SendOutcome::MaybeSent,
+            ("RequestTimeout" | "InternalError", _, _) => SendClassification::MaybeSent {
+                final_attempt: FinalAttempt::Sent,
+            },
+            (_, _, 400..=499) => SendClassification::Rejected,
+            _ => SendClassification::MaybeSent {
+                final_attempt: FinalAttempt::Sent,
+            },
         };
         let mut response = http_response(status);
-        attach_single_attempt_verdict_for_test(&mut response, outcome);
+        attach_single_attempt_verdict_for_test(&mut response, classification);
         SdkError::service_error(MockServiceError::new(code, retryable), response)
     }
 
@@ -1419,7 +1423,10 @@ mod tests {
                 MockFailure::Timeout => Err(SdkError::timeout_error("hit deadline")),
                 MockFailure::Response => {
                     let mut response = http_response(400);
-                    attach_single_attempt_verdict_for_test(&mut response, SendOutcome::Rejected);
+                    attach_single_attempt_verdict_for_test(
+                        &mut response,
+                        SendClassification::Rejected,
+                    );
                     Err(SdkError::response_error(
                         "response body could not be deserialized",
                         response,
@@ -1670,6 +1677,20 @@ mod tests {
     }
 
     #[test]
+    fn maybe_sent_operation_with_transient_final_attempt_retries() {
+        let final_error: SdkError<MockServiceError, HttpResponse> =
+            SdkError::timeout_error("operation attempt timed out before transmit");
+
+        assert!(provider_retry_allowed(
+            SendClassification::MaybeSent {
+                final_attempt: FinalAttempt::NotSent(Transience::Transient)
+            },
+            Idempotency::IdempotencyToken,
+            &final_error,
+        ));
+    }
+
+    #[test]
     fn maybe_sent_operation_with_permanent_final_attempt_does_not_retry() {
         let final_error = other_dispatch_err();
 
@@ -1719,7 +1740,10 @@ mod tests {
             .await
             .expect_err("deterministic construction failures must terminate immediately");
 
-        assert_eq!(error.outcome(), SendOutcome::NotSent);
+        assert_eq!(
+            error.classification(),
+            SendClassification::NotSent(Transience::Permanent)
+        );
         assert_eq!(call.attempts(), 1);
     }
 
@@ -1732,7 +1756,12 @@ mod tests {
             .expect_err("a 4xx response parsing failure must not be resent");
 
         assert_eq!(call.attempts(), 1);
-        assert_eq!(error.outcome(), SendOutcome::MaybeSent);
+        assert_eq!(
+            error.classification(),
+            SendClassification::MaybeSent {
+                final_attempt: FinalAttempt::Sent
+            }
+        );
         assert!(matches!(&*error, SdkError::ResponseError(_)), "{error:?}");
     }
 
@@ -1792,7 +1821,12 @@ mod tests {
         .expect_err("all provider attempts should fail");
 
         assert_eq!(call.attempts(), 3);
-        assert_eq!(error.outcome(), SendOutcome::MaybeSent);
+        assert_eq!(
+            error.classification(),
+            SendClassification::MaybeSent {
+                final_attempt: FinalAttempt::Sent
+            }
+        );
         assert_eq!(
             seen_tokens.lock().expect("token lock").as_slice(),
             [token.as_str(), token.as_str(), token.as_str()]
