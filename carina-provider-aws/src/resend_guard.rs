@@ -16,7 +16,7 @@ mod tests {
     use aws_smithy_runtime_api::client::result::ConnectorError;
     use aws_smithy_types::body::SdkBody;
     use aws_smithy_types::error::metadata::ProvideErrorMetadata;
-    use carina_aws_types::{FinalAttempt, SendClassification, SendOutcome, Transience};
+    use carina_aws_types::{SendClassification, Transience};
     use carina_plugin_sdk::wasi_http::{SendPhase, transport_connector_error_for_test};
 
     use crate::aws_operation::ClientToken;
@@ -246,10 +246,9 @@ mod tests {
             aws_smithy_runtime_api::client::result::SdkError::DispatchFailure(_)
         ));
         let classification = SendClassification::of(&error);
-        assert_eq!(classification.operation_outcome(), SendOutcome::NotSent);
         assert_eq!(
-            classification.final_attempt(),
-            FinalAttempt::NotSent(Transience::Permanent)
+            classification,
+            SendClassification::NotSent(Transience::Permanent)
         );
         let rendered = crate::helpers::sdk_error_message("GetCallerIdentity failed", &error);
         assert!(
@@ -275,10 +274,9 @@ mod tests {
         .await
         .expect_err("missing credentials must fail without provider-level retries");
 
-        assert_eq!(error.outcome(), SendOutcome::NotSent);
         assert_eq!(
-            error.classification().final_attempt(),
-            FinalAttempt::NotSent(Transience::Permanent)
+            error.classification(),
+            SendClassification::NotSent(Transience::Permanent)
         );
         assert_eq!(credential_calls.load(Ordering::Relaxed), 1);
         assert!(connector.requests().is_empty());
@@ -303,10 +301,9 @@ mod tests {
         .await
         .expect_err("a code-less wasi pre-send failure is permanent");
 
-        assert_eq!(error.outcome(), SendOutcome::NotSent);
         assert_eq!(
-            error.classification().final_attempt(),
-            FinalAttempt::NotSent(Transience::Permanent)
+            error.classification(),
+            SendClassification::NotSent(Transience::Permanent)
         );
         assert_eq!(connector.requests().len(), 3);
     }
@@ -356,8 +353,8 @@ mod tests {
             aws_smithy_runtime_api::client::result::SdkError::DispatchFailure(_)
         ));
         assert_eq!(
-            SendClassification::of(&error).operation_outcome(),
-            SendOutcome::NotSent
+            SendClassification::of(&error),
+            SendClassification::NotSent(Transience::Permanent)
         );
     }
 
@@ -381,10 +378,10 @@ mod tests {
             .expect_err("the resend guard must refuse the ambiguous retry");
 
         assert_eq!(connector.requests().len(), 1);
-        assert_eq!(
-            SendClassification::of(&error).operation_outcome(),
-            SendOutcome::MaybeSent
-        );
+        assert!(matches!(
+            SendClassification::of(&error),
+            SendClassification::MaybeSent { .. }
+        ));
     }
 
     #[tokio::test]
@@ -478,10 +475,10 @@ mod tests {
             .expect_err("generated non-idempotent operation must not retry a maybe-sent failure");
 
         assert_eq!(mutating_connector.requests().len(), 1);
-        assert_eq!(
-            SendClassification::of(&error).operation_outcome(),
-            SendOutcome::MaybeSent
-        );
+        assert!(matches!(
+            SendClassification::of(&error),
+            SendClassification::MaybeSent { .. }
+        ));
     }
 
     #[tokio::test(start_paused = true)]
@@ -501,10 +498,10 @@ mod tests {
             .expect_err("three maybe-sent failures should exhaust the retry budget");
 
         assert_eq!(connector.requests().len(), 3);
-        assert_eq!(
-            SendClassification::of(&error).operation_outcome(),
-            SendOutcome::MaybeSent
-        );
+        assert!(matches!(
+            SendClassification::of(&error),
+            SendClassification::MaybeSent { .. }
+        ));
     }
 
     #[tokio::test(start_paused = true)]
@@ -527,10 +524,10 @@ mod tests {
             .expect_err("idempotent operation should retain the current no-retry behavior");
 
         assert_eq!(idempotent_connector.requests().len(), 1);
-        assert_eq!(
-            SendClassification::of(&idempotent_error).operation_outcome(),
-            SendOutcome::MaybeSent
-        );
+        assert!(matches!(
+            SendClassification::of(&idempotent_error),
+            SendClassification::MaybeSent { .. }
+        ));
 
         let token_connector = ScriptedConnector::new([
             Action::Transport(SendPhase::MaybeSent),
@@ -550,10 +547,10 @@ mod tests {
             .expect_err("token operation should retain the current no-retry behavior");
 
         assert_eq!(token_connector.requests().len(), 1);
-        assert_eq!(
-            SendClassification::of(&token_error).operation_outcome(),
-            SendOutcome::MaybeSent
-        );
+        assert!(matches!(
+            SendClassification::of(&token_error),
+            SendClassification::MaybeSent { .. }
+        ));
     }
 
     #[tokio::test(start_paused = true)]
@@ -677,10 +674,10 @@ mod tests {
             .expect_err("all SDK attempts should fail");
 
         assert_eq!(connector.requests().len(), 3);
-        assert_eq!(
-            error.classification().operation_outcome(),
-            SendOutcome::MaybeSent
-        );
+        assert!(matches!(
+            error.classification(),
+            SendClassification::MaybeSent { .. }
+        ));
         assert!(connector_error(&error).is_io());
     }
 
@@ -702,10 +699,10 @@ mod tests {
             .expect_err("all SDK attempts should fail");
 
         assert_eq!(connector.requests().len(), 3);
-        assert_eq!(
-            SendClassification::of(&error).operation_outcome(),
-            SendOutcome::MaybeSent
-        );
+        assert!(matches!(
+            SendClassification::of(&error),
+            SendClassification::MaybeSent { .. }
+        ));
         assert!(connector_error(&error).is_io());
     }
 
@@ -729,10 +726,10 @@ mod tests {
             .expect_err("the second attempt should surface NoSuchBucketPolicy");
 
         assert_eq!(connector.requests().len(), 2);
-        assert_eq!(
-            SendClassification::of(&error).operation_outcome(),
-            SendOutcome::MaybeSent
-        );
+        assert!(matches!(
+            SendClassification::of(&error),
+            SendClassification::MaybeSent { .. }
+        ));
         let service_error = error.into_service_error();
         assert_eq!(
             ProvideErrorMetadata::code(&service_error),
@@ -759,8 +756,8 @@ mod tests {
 
         assert_eq!(connector.requests().len(), 3);
         assert_eq!(
-            SendClassification::of(&error).operation_outcome(),
-            SendOutcome::NotSent
+            SendClassification::of(&error),
+            SendClassification::NotSent(Transience::Permanent)
         );
         assert!(connector_error(&error).is_io());
     }
@@ -780,10 +777,10 @@ mod tests {
 
         assert_eq!(connector.requests().len(), 3);
         assert!(connector_error(&error).is_timeout());
-        assert_eq!(
-            SendClassification::of(&error).operation_outcome(),
-            SendOutcome::MaybeSent
-        );
+        assert!(matches!(
+            SendClassification::of(&error),
+            SendClassification::MaybeSent { .. }
+        ));
     }
 
     #[tokio::test]
@@ -803,10 +800,7 @@ mod tests {
             .expect_err("the service should reject the request");
 
         assert_eq!(connector.requests().len(), 1);
-        assert_eq!(
-            SendClassification::of(&error).operation_outcome(),
-            SendOutcome::Rejected
-        );
+        assert_eq!(SendClassification::of(&error), SendClassification::Rejected);
         let service_error = error.into_service_error();
         assert_eq!(
             ProvideErrorMetadata::code(&service_error),
@@ -839,10 +833,10 @@ mod tests {
             .await
             .expect_err("all three SDK attempts should fail");
         assert_eq!(connector.requests().len(), 3);
-        assert_eq!(
-            error.classification().operation_outcome(),
-            SendOutcome::MaybeSent
-        );
+        assert!(matches!(
+            error.classification(),
+            SendClassification::MaybeSent { .. }
+        ));
         let aws_smithy_runtime_api::client::result::SdkError::ServiceError(context) = &*error
         else {
             panic!("expected the modeled service error, got {error:?}");
@@ -883,10 +877,10 @@ mod tests {
 
         assert_eq!(connector.requests().len(), 3);
         assert_eq!(connector.completed_delayed_timeouts(), 0);
-        assert_eq!(
-            error.classification().operation_outcome(),
-            SendOutcome::MaybeSent
-        );
+        assert!(matches!(
+            error.classification(),
+            SendClassification::MaybeSent { .. }
+        ));
     }
 
     #[tokio::test]

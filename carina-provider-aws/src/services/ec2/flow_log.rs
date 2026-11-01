@@ -1,4 +1,4 @@
-use carina_aws_types::SendOutcome;
+use carina_aws_types::SendClassification;
 use carina_core::provider::{AppliedIdentifier, ReadOutcome, Sent};
 use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
@@ -72,8 +72,9 @@ impl FlowLogCreateRejection {
     ) -> Option<Self> {
         use aws_smithy_types::error::metadata::ProvideErrorMetadata;
 
-        if failure.outcome() != SendOutcome::Rejected {
-            return None;
+        match failure.classification() {
+            SendClassification::Rejected => {}
+            SendClassification::NotSent(_) | SendClassification::MaybeSent { .. } => return None,
         }
         let service_error = failure.as_service_error()?;
         Some(Self {
@@ -102,7 +103,10 @@ struct FlowLogMaybeSent;
 
 impl FlowLogMaybeSent {
     fn from_failure<E>(failure: &SendFailure<E>) -> Option<Self> {
-        (failure.outcome() == SendOutcome::MaybeSent).then_some(Self)
+        match failure.classification() {
+            SendClassification::MaybeSent { .. } => Some(Self),
+            SendClassification::NotSent(_) | SendClassification::Rejected => None,
+        }
     }
 }
 
@@ -611,10 +615,7 @@ mod tests {
         );
         let response = HttpResponse::new(400.try_into().expect("valid status"), SdkBody::empty());
         let failure = crate::error_helpers::SendFailure::new(
-            carina_aws_types::SendClassification::for_test(
-                SendOutcome::Rejected,
-                carina_aws_types::FinalAttempt::Sent,
-            ),
+            carina_aws_types::SendClassification::Rejected,
             SdkError::service_error(service_error, response),
         );
         let rejection = FlowLogCreateRejection::from_failure(&failure)
@@ -638,10 +639,9 @@ mod tests {
         );
         let response = HttpResponse::new(429.try_into().expect("valid status"), SdkBody::empty());
         let failure = crate::error_helpers::SendFailure::new(
-            carina_aws_types::SendClassification::for_test(
-                SendOutcome::MaybeSent,
-                carina_aws_types::FinalAttempt::Sent,
-            ),
+            carina_aws_types::SendClassification::MaybeSent {
+                final_attempt: carina_aws_types::FinalAttempt::Sent,
+            },
             SdkError::service_error(service_error, response),
         );
         let maybe_sent = FlowLogMaybeSent::from_failure(&failure)

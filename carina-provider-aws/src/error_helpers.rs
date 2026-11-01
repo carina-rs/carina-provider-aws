@@ -29,7 +29,7 @@
 use carina_core::provider::ProviderError;
 use thiserror::Error;
 
-use carina_aws_types::{Idempotency, SendClassification, SendOutcome};
+use carina_aws_types::{Idempotency, SendClassification};
 
 use crate::aws_operation::DecidedOperationError;
 
@@ -68,10 +68,6 @@ impl<E> SendFailure<E> {
 
     pub(crate) fn classification(&self) -> SendClassification {
         self.classification
-    }
-
-    pub(crate) fn outcome(&self) -> SendOutcome {
-        self.classification.operation_outcome()
     }
 
     pub(crate) fn into_parts(self) -> (SendClassification, AwsSdkError<E>) {
@@ -226,8 +222,7 @@ where
         + 'static,
 {
     let (classification, error) = failure.into_send_failure().into_parts();
-    let outcome = classification.operation_outcome();
-    api_error_with_meta_cause(context, outcome, error, |message, source| {
+    api_error_with_meta_cause(context, classification, error, |message, source| {
         AwsServiceErrorCause { message, source }
     })
 }
@@ -250,8 +245,8 @@ where
         + Sync
         + 'static,
 {
-    let outcome = SendClassification::of(&err).operation_outcome();
-    api_error_with_meta_cause(context, outcome, err, |message, source| {
+    let classification = SendClassification::of(&err);
+    api_error_with_meta_cause(context, classification, err, |message, source| {
         AwsServiceErrorWithSubjectCause {
             subject,
             message,
@@ -262,7 +257,7 @@ where
 
 fn api_error_with_meta_cause<E, Cause>(
     context: &'static str,
-    outcome: SendOutcome,
+    classification: SendClassification,
     err: AwsSdkError<E>,
     make_cause: impl FnOnce(AwsServiceMessage, AwsSdkError<E>) -> Cause,
 ) -> ProviderError
@@ -280,8 +275,10 @@ where
     use aws_types::request_id::RequestId;
 
     let operation = E::NAME.to_string();
-    let append_outcome_unknown =
-        outcome == SendOutcome::MaybeSent && E::IDEMPOTENCY == Idempotency::NotIdempotent;
+    let append_outcome_unknown = match classification {
+        SendClassification::MaybeSent { .. } => E::IDEMPOTENCY == Idempotency::NotIdempotent,
+        SendClassification::NotSent(_) | SendClassification::Rejected => false,
+    };
     let status = err
         .raw_response()
         .map(|response| response.status().as_u16());
@@ -581,10 +578,9 @@ mod tests {
             SdkBody::empty(),
         );
         let failure = SendFailure::new(
-            SendClassification::for_test(
-                SendOutcome::MaybeSent,
-                carina_aws_types::FinalAttempt::Sent,
-            ),
+            SendClassification::MaybeSent {
+                final_attempt: carina_aws_types::FinalAttempt::Sent,
+            },
             SdkError::service_error(service_error, raw),
         );
 
