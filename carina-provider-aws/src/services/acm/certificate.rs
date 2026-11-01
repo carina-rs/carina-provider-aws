@@ -1777,8 +1777,10 @@ mod tests {
         );
         let schema = crate::test_rootless_type(attr_type);
 
-        let canonical =
-            schema.canonicalize_state(Value::Concrete(ConcreteValue::String("DNS".into())));
+        let canonical = schema
+            .canonicalize_state(Value::Concrete(ConcreteValue::String("DNS".into())))
+            .into_present()
+            .expect("validation-method fixture must remain present");
         assert!(
             matches!(&canonical, Value::Concrete(ConcreteValue::CanonicalEnum(c))
                 if c.api_value() == "DNS"),

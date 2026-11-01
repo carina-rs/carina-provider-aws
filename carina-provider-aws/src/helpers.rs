@@ -636,7 +636,10 @@ mod tests {
             None,
         );
         let schema = crate::test_rootless_type(attr_type);
-        schema.canonicalize_state(Value::Concrete(ConcreteValue::String("DNS".into())))
+        schema
+            .canonicalize_state(Value::Concrete(ConcreteValue::String("DNS".into())))
+            .into_present()
+            .expect("validation-method fixture must remain present")
     }
 
     fn canonical_certificate_transparency_value() -> Value {
@@ -656,7 +659,10 @@ mod tests {
             None,
         );
         let schema = crate::test_rootless_type(attr_type);
-        schema.canonicalize_state(Value::Concrete(ConcreteValue::String("ENABLED".into())))
+        schema
+            .canonicalize_state(Value::Concrete(ConcreteValue::String("ENABLED".into())))
+            .into_present()
+            .expect("certificate-transparency fixture must remain present")
     }
 
     #[test]

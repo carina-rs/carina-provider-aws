@@ -172,8 +172,10 @@ mod tests {
             .provider_config_attribute_types()
             .rootless_type("region")
             .expect("region provider config type");
-        let region =
-            config.canonicalize_state(Value::Concrete(ConcreteValue::String("us-west-2".into())));
+        let region = config
+            .canonicalize_state(Value::Concrete(ConcreteValue::String("us-west-2".into())))
+            .into_present()
+            .expect("region fixture must remain present");
         assert!(matches!(
             &region,
             Value::Concrete(ConcreteValue::CanonicalEnum(value))
@@ -208,7 +210,9 @@ mod tests {
             .expect("availability zone type")
             .canonicalize_state(Value::Concrete(ConcreteValue::String(
                 "ap-northeast-1a".into(),
-            )));
+            )))
+            .into_present()
+            .expect("availability-zone fixture must remain present");
         assert!(matches!(
             &zone,
             Value::Concrete(ConcreteValue::CanonicalEnum(value))
