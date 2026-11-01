@@ -548,11 +548,7 @@ impl AwsProvider {
 /// the apply would just re-UPSERT the same DNS name.
 ///
 /// See aws#300, follow-up to aws#117.
-pub(crate) fn normalize_record_set_dns_names(input: &mut DesiredView<'_>) {
-    if !input.is_resource("aws", "route53.RecordSet") {
-        return;
-    }
-
+pub(crate) fn normalize_record_set_dns_names(input: &mut DesiredView<'_>) -> ProviderResult<()> {
     if let Some(DesiredValueMut::Known(DesiredScalar::String(name))) = input.attribute_mut("name")
         && let Some(stripped) = name.expose_plaintext().strip_suffix('.').map(str::to_owned)
     {
@@ -569,6 +565,7 @@ pub(crate) fn normalize_record_set_dns_names(input: &mut DesiredView<'_>) {
     {
         *dns_name = stripped.into();
     }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -579,7 +576,7 @@ mod tests {
     fn normalize(resource: &mut Resource) {
         let mut desired =
             carina_plugin_sdk::NativeDesiredNormalization::from_core(resource).unwrap();
-        normalize_record_set_dns_names(&mut desired.view());
+        normalize_record_set_dns_names(&mut desired.view()).unwrap();
         desired.finish().unwrap();
     }
 
@@ -705,41 +702,6 @@ mod tests {
             out.get("dns_name"),
             Some(&Value::Concrete(ConcreteValue::String(
                 "dualstack.elb.amazonaws.com".to_string().into()
-            )))
-        );
-    }
-
-    #[test]
-    fn ignores_non_route53_record_set_resources() {
-        let mut r = Resource::with_provider("aws", "s3.Bucket", "test", None);
-        r.set_attr(
-            "name".to_string(),
-            Value::Concrete(ConcreteValue::String(
-                "bucket.with.trailing.dot.".to_string().into(),
-            )),
-        );
-        normalize(&mut r);
-        assert_eq!(
-            r.get_attr("name"),
-            Some(&Value::Concrete(ConcreteValue::String(
-                "bucket.with.trailing.dot.".to_string().into()
-            )))
-        );
-    }
-
-    #[test]
-    fn ignores_non_aws_provider() {
-        let mut r = Resource::with_provider("awscc", "route53.RecordSet", "test", None);
-        r.set_attr(
-            "name".to_string(),
-            Value::Concrete(ConcreteValue::String("foo.example.com.".to_string().into())),
-        );
-        normalize(&mut r);
-        // unchanged: awscc has its own normalizer
-        assert_eq!(
-            r.get_attr("name"),
-            Some(&Value::Concrete(ConcreteValue::String(
-                "foo.example.com.".to_string().into()
             )))
         );
     }

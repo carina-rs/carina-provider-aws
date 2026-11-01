@@ -26,12 +26,11 @@ use crate::services::s3::bucket::is_s3_not_configured_error;
 /// Insert the provider's canonical V2 replication default into authored
 /// rules. The authored schema permits omission; normalization and read-back
 /// still converge on the same explicit `{ status = Disabled }` shape.
-pub(crate) fn normalize_delete_marker_replication(input: &mut DesiredView<'_>) {
-    if !input.is_resource("aws", "s3.BucketReplicationConfiguration") {
-        return;
-    }
+pub(crate) fn normalize_delete_marker_replication(
+    input: &mut DesiredView<'_>,
+) -> ProviderResult<()> {
     let Some(DesiredValueMut::List(rules)) = input.attribute_mut("rules") else {
-        return;
+        return Ok(());
     };
     for rule in rules.iter_mut() {
         let DesiredValueMut::Map(fields) = rule else {
@@ -45,6 +44,7 @@ pub(crate) fn normalize_delete_marker_replication(input: &mut DesiredView<'_>) {
         // Occupied means an authored known or deferred value is already set.
         let _ = fields.insert_absent("delete_marker_replication", DesiredValue::Map(default));
     }
+    Ok(())
 }
 
 impl AwsProvider {

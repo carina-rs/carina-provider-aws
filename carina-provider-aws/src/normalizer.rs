@@ -14,27 +14,28 @@ fn desired_normalizer(id: &ResourceId) -> Option<DesiredNormalizer> {
         return None;
     }
     match id.resource_type.as_str() {
-        "route53.RecordSet" => Some(|view| {
-            crate::services::route53::record_set::normalize_record_set_dns_names(view);
-            Ok(())
-        }),
-        "acm.Certificate" => Some(|view| {
-            crate::services::acm::certificate::normalize_acm_certificate_inputs(view);
-            Ok(())
-        }),
-        "s3.BucketReplicationConfiguration" => Some(|view| {
-            crate::services::s3::bucket_replication::normalize_delete_marker_replication(view);
-            Ok(())
-        }),
-        "ec2.Subnet" => Some(crate::services::ec2::subnet::normalize_subnet_ipv6_cidr_blocks),
-        "ec2.NatGateway" => Some(|view| {
-            crate::services::ec2::nat_gateway::validate_nat_gateway_inputs(&view.inputs())
-        }),
-        "sqs.Queue" => {
-            Some(|view| crate::services::sqs::queue::validate_sqs_queue_inputs(&view.inputs()))
+        "route53.RecordSet" => {
+            Some(crate::services::route53::record_set::normalize_record_set_dns_names)
         }
+        "acm.Certificate" => {
+            Some(crate::services::acm::certificate::normalize_acm_certificate_inputs)
+        }
+        "s3.BucketReplicationConfiguration" => {
+            Some(crate::services::s3::bucket_replication::normalize_delete_marker_replication)
+        }
+        "ec2.Subnet" => Some(crate::services::ec2::subnet::normalize_subnet_ipv6_cidr_blocks),
+        "ec2.NatGateway" => Some(validate_nat_gateway_view),
+        "sqs.Queue" => Some(validate_sqs_queue_view),
         _ => None,
     }
+}
+
+fn validate_nat_gateway_view(view: &mut DesiredView<'_>) -> ProviderResult<()> {
+    crate::services::ec2::nat_gateway::validate_nat_gateway_inputs(&view.inputs())
+}
+
+fn validate_sqs_queue_view(view: &mut DesiredView<'_>) -> ProviderResult<()> {
+    crate::services::sqs::queue::validate_sqs_queue_inputs(&view.inputs())
 }
 
 /// Provider-local desired-state normalization for native and WASM resources.
@@ -132,13 +133,18 @@ mod tests {
     async fn unhandled_resources_bypass_desired_projection() {
         use carina_core::resource::RawEnumIdentifier;
 
-        for (provider, resource_type) in [("aws", "s3.Bucket"), ("awscc", "acm.Certificate")] {
+        for (provider, resource_type) in [
+            ("aws", "s3.Bucket"),
+            ("awscc", "acm.Certificate"),
+            ("awscc", "route53.RecordSet"),
+        ] {
             let value = Value::Concrete(ConcreteValue::EnumIdentifier(RawEnumIdentifier::parse(
                 "raw",
             )));
             let mut resources = vec![
                 Resource::with_provider(provider, resource_type, "untouched", None)
                     .with_attribute("unrelated", value.clone())
+                    .with_attribute("name", string("unchanged.example.com."))
                     .into(),
             ];
 
@@ -148,6 +154,10 @@ mod tests {
                 .expect("an unhandled resource must not be projected or normalized");
 
             assert_eq!(resources[0].get_attr("unrelated"), Some(&value));
+            assert_eq!(
+                resources[0].get_attr("name"),
+                Some(&string("unchanged.example.com."))
+            );
         }
     }
 
@@ -378,10 +388,41 @@ mod tests {
     }
 
     #[test]
-    fn cross_field_checks_keep_secrets_opaque_during_normalization_and_crud_validation() {
+    fn cross_field_checks_keep_deferred_inputs_opaque_during_normalization_and_crud_validation() {
         use carina_plugin_sdk::DesiredInputs;
 
         for (resource_type, attributes) in [
+            (
+                "ec2.NatGateway",
+                vec![
+                    ("availability_mode", string("zonal")),
+                    ("subnet_id", secret(string("subnet-12345678"))),
+                ],
+            ),
+            (
+                "ec2.NatGateway",
+                vec![
+                    ("availability_mode", string("zonal")),
+                    ("subnet_id", reference("subnet_id")),
+                ],
+            ),
+            (
+                "sqs.Queue",
+                vec![
+                    ("fifo_queue", reference("fifo_queue")),
+                    ("deduplication_scope", string("messageGroup")),
+                ],
+            ),
+            (
+                "sqs.Queue",
+                vec![
+                    (
+                        "kms_data_key_reuse_period_seconds",
+                        Value::Concrete(ConcreteValue::Int(300)),
+                    ),
+                    ("kms_master_key_id", reference("key_id")),
+                ],
+            ),
             (
                 "ec2.NatGateway",
                 vec![("availability_mode", secret(string("regional")))],
@@ -441,6 +482,39 @@ mod tests {
             crate::services::sqs::queue::validate_sqs_queue_inputs(&inputs).unwrap();
             let normalized = normalize_mixed(resource);
             assert_eq!(normalized.attributes, original);
+        }
+    }
+
+    #[tokio::test]
+    async fn normalize_desired_rejects_decidable_cross_field_conflicts() {
+        for (resource_type, attributes, message) in [
+            (
+                "ec2.NatGateway",
+                vec![
+                    ("availability_mode", string("regional")),
+                    ("subnet_id", string("subnet-12345678")),
+                ],
+                "must be omitted when availability_mode = regional",
+            ),
+            (
+                "sqs.Queue",
+                vec![
+                    ("fifo_queue", Value::Concrete(ConcreteValue::Bool(false))),
+                    ("deduplication_scope", string("messageGroup")),
+                ],
+                "requires fifo_queue = true",
+            ),
+        ] {
+            let mut resource = Resource::with_provider("aws", resource_type, "conflict", None);
+            for (name, value) in attributes {
+                resource.set_attr(name, value);
+            }
+            let mut resources = vec![resource.into()];
+            let error = AwsNormalizer
+                .normalize_desired(&mut resources)
+                .await
+                .expect_err("decidable conflicts must fail native normalization");
+            assert!(error.to_string().contains(message), "{error:?}");
         }
     }
 

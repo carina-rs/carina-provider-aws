@@ -170,9 +170,6 @@ fn associated_ipv6_cidr(
 }
 
 pub(crate) fn normalize_subnet_ipv6_cidr_blocks(input: &mut DesiredView<'_>) -> ProviderResult<()> {
-    if !input.is_resource("aws", "ec2.Subnet") {
-        return Ok(());
-    }
     let id = input.id().clone();
     if let Some(DesiredValueMut::Known(DesiredScalar::String(value))) =
         input.attribute_mut("ipv6_cidr_block")

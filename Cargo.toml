@@ -3,6 +3,14 @@ members = [
     "carina-aws-types",
     "carina-docgen",
     "carina-provider-aws",
+    "carina-provider-aws-wasm-tests",
+    "carina-codegen-aws",
+    "carina-smithy",
+]
+default-members = [
+    "carina-aws-types",
+    "carina-docgen",
+    "carina-provider-aws",
     "carina-codegen-aws",
     "carina-smithy",
 ]

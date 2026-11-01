@@ -1311,17 +1311,14 @@ dependencies = [
  "aws-types",
  "carina-aws-types",
  "carina-core",
- "carina-plugin-host",
  "carina-plugin-sdk",
  "carina-provider-aws",
  "carina-provider-protocol",
- "carina-provider-resolver",
  "heck",
  "indexmap 2.14.0",
  "regex",
  "serde",
  "serde_json",
- "tempfile",
  "thiserror 2.0.18",
  "tokio",
  "urlencoding",
@@ -1330,6 +1327,18 @@ dependencies = [
  "winterbaume-core",
  "winterbaume-s3",
  "winterbaume-sts",
+]
+
+[[package]]
+name = "carina-provider-aws-wasm-tests"
+version = "0.7.4"
+dependencies = [
+ "carina-core",
+ "carina-plugin-host",
+ "carina-provider-resolver",
+ "indexmap 2.14.0",
+ "tempfile",
+ "tokio",
 ]
 
 [[package]]

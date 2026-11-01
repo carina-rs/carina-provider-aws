@@ -51,8 +51,7 @@ jobs:
       - name: Test desired normalization through the AWS WASM guest
         env:
           CARINA_AWS_WASM: ${{ github.workspace }}/target/wasm32-wasip2/release/carina-provider-aws.wasm
-          RAYON_NUM_THREADS: 4
-        run: cargo test -p carina-provider-aws --all-features --test desired_normalization_wasm -- --ignored --test-threads 4
+        run: cargo test -p carina-provider-aws-wasm-tests -- --ignored
       - name: Install pinned Carina CLI
         run: |
           rev=$(sed -n '/^name = "carina-core"$/,/^source/ { s/^source = ".*#\([0-9a-f]*\)"$/\1/p; }' Cargo.lock)

@@ -157,11 +157,9 @@ fn assume_role_attribute_type() -> carina_core::schema::AttributeType {
 mod tests {
     use super::*;
     use carina_core::resource::{ConcreteValue, Value};
-    use carina_core::utils::extract_region_from_attrs;
-    use indexmap::IndexMap;
 
     #[test]
-    fn extract_region_reads_provider_ready_canonical_enum() {
+    fn region_config_canonicalizes_api_spelling() {
         let factory = AwsProviderFactory;
         let config = factory
             .provider_config_attribute_types()
@@ -176,25 +174,6 @@ mod tests {
             Value::Concrete(ConcreteValue::CanonicalEnum(value))
                 if value.api_value() == "us-west-2"
         ));
-        let attributes = IndexMap::from([("region".to_string(), region)]);
-
-        assert_eq!(
-            extract_region_from_attrs(&attributes, "ap-northeast-1"),
-            "us-west-2"
-        );
-    }
-
-    #[test]
-    fn extract_region_keeps_string_literal() {
-        let attributes = IndexMap::from([(
-            "region".to_string(),
-            Value::Concrete(ConcreteValue::String("aws.Region.us_west_2".into())),
-        )]);
-
-        assert_eq!(
-            extract_region_from_attrs(&attributes, "ap-northeast-1"),
-            "aws.Region.us_west_2"
-        );
     }
 
     #[test]

@@ -1011,7 +1011,7 @@ fn main() {}
 mod tests {
 
     use super::*;
-    use carina_core::resource::{ConcreteValue, DeferredValue, Resource, Value};
+    use carina_core::resource::ConcreteValue;
     use carina_core::schema::{
         CompiledAttributeType, CustomValidator, RawShape, ResourceValidation,
         TypeIdentity as CoreTypeIdentity,
@@ -1181,120 +1181,6 @@ mod tests {
 
     fn non_finite_state() -> CoreAppliedState {
         carina_provider_aws::non_finite_applied_state_for_protocol_test()
-    }
-
-    // The SDK keeps DesiredResource's wire constructor crate-private, including
-    // with test-utils. Exercise the same shared function through its native owner.
-    fn normalize_desired_for_test(
-        provider: &AwsProcessProvider,
-        mut resources: Vec<Resource>,
-    ) -> Result<Vec<Resource>, CoreProviderError> {
-        for resource in &mut resources {
-            let mut desired = carina_plugin_sdk::NativeDesiredNormalization::from_core(resource)?;
-            provider
-                .normalizer
-                .normalize_desired_view(&mut desired.view())?;
-            desired.finish()?;
-        }
-        Ok(resources)
-    }
-
-    #[test]
-    fn normalize_desired_keeps_secret_subnet_opaque() {
-        let mut resource = Resource::with_provider("aws", "ec2.NatGateway", "secret-subnet", None);
-        resource.set_attr(
-            "availability_mode",
-            Value::Concrete(ConcreteValue::String("zonal".into())),
-        );
-        let subnet = Value::Deferred(DeferredValue::Secret(Box::new(Value::Concrete(
-            ConcreteValue::String("subnet-12345678".into()),
-        ))));
-        resource.set_attr("subnet_id", subnet.clone());
-
-        let provider = AwsProcessProvider::new();
-        let normalized = normalize_desired_for_test(&provider, vec![resource])
-            .expect("an opaque subnet must defer the subnet requirement");
-        assert_eq!(normalized[0].get_attr("subnet_id"), Some(&subnet));
-    }
-
-    #[test]
-    fn normalize_desired_defers_nat_gateway_check_for_resource_ref() {
-        let mut resource =
-            Resource::with_provider("aws", "ec2.NatGateway", "deferred-subnet", None);
-        resource.set_attr(
-            "availability_mode",
-            Value::Concrete(ConcreteValue::String("zonal".into())),
-        );
-        let subnet = Value::resource_ref("subnet", "subnet_id", vec![]).resolve_root_for_test();
-        resource.set_attr("subnet_id", subnet.clone());
-
-        let provider = AwsProcessProvider::new();
-        let normalized = normalize_desired_for_test(&provider, vec![resource])
-            .expect("an unresolved subnet reference must defer validation");
-        assert_eq!(normalized[0].get_attr("subnet_id"), Some(&subnet));
-    }
-
-    #[test]
-    fn normalize_desired_defers_sqs_checks_for_resource_refs() {
-        let mut fifo = Resource::with_provider("aws", "sqs.Queue", "deferred-fifo", None);
-        let fifo_ref =
-            Value::resource_ref("settings", "fifo_queue", vec![]).resolve_root_for_test();
-        fifo.set_attr("fifo_queue", fifo_ref.clone());
-        fifo.set_attr(
-            "deduplication_scope",
-            Value::Concrete(ConcreteValue::String("messageGroup".into())),
-        );
-        let mut kms = Resource::with_provider("aws", "sqs.Queue", "deferred-kms", None);
-        kms.set_attr(
-            "kms_data_key_reuse_period_seconds",
-            Value::Concrete(ConcreteValue::Int(300)),
-        );
-        let key_ref = Value::resource_ref("key", "key_id", vec![]).resolve_root_for_test();
-        kms.set_attr("kms_master_key_id", key_ref.clone());
-
-        let provider = AwsProcessProvider::new();
-        let normalized = normalize_desired_for_test(&provider, vec![fifo, kms])
-            .expect("unresolved SQS inputs must defer cross-field validation");
-        assert_eq!(normalized[0].get_attr("fifo_queue"), Some(&fifo_ref));
-        assert_eq!(normalized[1].get_attr("kms_master_key_id"), Some(&key_ref));
-    }
-
-    #[test]
-    fn normalize_desired_rejects_decidable_cross_field_conflicts() {
-        let provider = AwsProcessProvider::new();
-
-        let mut nat_gateway =
-            Resource::with_provider("aws", "ec2.NatGateway", "regional-with-subnet", None);
-        nat_gateway.set_attr(
-            "availability_mode",
-            Value::Concrete(ConcreteValue::String("regional".into())),
-        );
-        nat_gateway.set_attr(
-            "subnet_id",
-            Value::Concrete(ConcreteValue::String("subnet-12345678".into())),
-        );
-        let error = normalize_desired_for_test(&provider, vec![nat_gateway])
-            .expect_err("a regional NAT gateway with a subnet must be rejected at plan time");
-        assert!(
-            error
-                .to_string()
-                .contains("must be omitted when availability_mode = regional"),
-            "unexpected NAT gateway validation error: {error:?}"
-        );
-
-        let mut queue = Resource::with_provider("aws", "sqs.Queue", "standard-with-fifo", None);
-        queue.set_attr("fifo_queue", Value::Concrete(ConcreteValue::Bool(false)));
-        queue.set_attr(
-            "deduplication_scope",
-            Value::Concrete(ConcreteValue::String("messageGroup".into())),
-        );
-        let error = normalize_desired_for_test(&provider, vec![queue]).expect_err(
-            "a standard SQS queue with a FIFO-only attribute must be rejected at plan time",
-        );
-        assert!(
-            error.to_string().contains("requires fifo_queue = true"),
-            "unexpected SQS queue validation error: {error:?}"
-        );
     }
 
     fn assert_typed_conversion_error(error: CoreProviderError, message: &str) {

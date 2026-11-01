@@ -143,18 +143,14 @@ fn canonicalize_acm_subject_alternative_names(
 /// Canonicalize authored SANs to the same representation returned by ACM.
 /// ACM accepts the apex in the request and adds it to the response, so the
 /// provider models only additional names and removes the apex on both sides.
-pub(crate) fn normalize_acm_certificate_inputs(input: &mut DesiredView<'_>) {
-    if !input.is_resource("aws", "acm.Certificate") {
-        return;
-    }
-
+pub(crate) fn normalize_acm_certificate_inputs(input: &mut DesiredView<'_>) -> ProviderResult<()> {
     let primary_domain = match input.attribute("domain_name") {
         Some(DesiredValue::Known(value)) => value.as_str().map(str::to_owned),
         _ => None,
     };
     let Some(DesiredValueMut::List(names)) = input.attribute_mut("subject_alternative_names")
     else {
-        return;
+        return Ok(());
     };
     names.retain_known(|scalar| {
         let DesiredScalar::String(name) = scalar else {
@@ -168,6 +164,7 @@ pub(crate) fn normalize_acm_certificate_inputs(input: &mut DesiredView<'_>) {
             None => false,
         }
     });
+    Ok(())
 }
 
 #[cfg(test)]
@@ -930,7 +927,7 @@ mod tests {
 
         let mut desired =
             carina_plugin_sdk::NativeDesiredNormalization::from_core(&mut resource).unwrap();
-        normalize_acm_certificate_inputs(&mut desired.view());
+        normalize_acm_certificate_inputs(&mut desired.view()).unwrap();
         desired.finish().unwrap();
         assert_eq!(
             resource.get_attr("subject_alternative_names"),
