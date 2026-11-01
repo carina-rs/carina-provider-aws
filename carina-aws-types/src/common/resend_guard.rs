@@ -16,7 +16,7 @@ use aws_smithy_types::config_bag::{ConfigBag, Storable, StoreReplace};
 use aws_smithy_types::retry::ErrorKind;
 
 use super::send_outcome::{
-    AttemptPhase, Idempotency, OperationSendFailure, ProviderRetryClassification, SendOutcome,
+    AttemptPhase, Idempotency, OperationSendFailure, OperationVerdict, SendOutcome,
 };
 
 impl Storable for AttemptPhase {
@@ -111,7 +111,6 @@ impl ConnectorKind {
 enum OrchestratorKind {
     Connector(ConnectorKind),
     Timeout,
-    Response,
     Other,
 }
 
@@ -121,8 +120,6 @@ impl OrchestratorKind {
             Self::Connector(ConnectorKind::of(error))
         } else if error.is_timeout_error() {
             Self::Timeout
-        } else if error.is_response_error() {
-            Self::Response
         } else {
             Self::Other
         }
@@ -132,7 +129,6 @@ impl OrchestratorKind {
         match self {
             Self::Connector(kind) => OrchestratorError::connector(kind.with_source(source)),
             Self::Timeout => OrchestratorError::timeout(source),
-            Self::Response => OrchestratorError::response(source),
             Self::Other => OrchestratorError::other(source),
         }
     }
@@ -191,9 +187,8 @@ impl Intercept for ResendGuard {
             .map(self.lookup)
             .unwrap_or(Idempotency::NotIdempotent);
         let previous = cfg.load::<PreviousAttempt>().cloned().unwrap_or_else(|| {
-            // If attempt finalization was skipped by cancellation, the
-            // transmit witness still distinguishes a safe pre-transmit
-            // failure from an ambiguous in-flight request.
+            // Attempt finalizers should always run; this fallback defensively
+            // uses the transmit witness if that Smithy invariant is broken.
             let outcome = match previous_phase {
                 AttemptPhase::BeforeTransmit => SendOutcome::NotSent,
                 AttemptPhase::TransmitReached => SendOutcome::MaybeSent,
@@ -314,6 +309,13 @@ impl Intercept for ResendGuard {
         {
             return Ok(());
         }
+        if context
+            .output_or_error()
+            .and_then(Result::err)
+            .is_some_and(OrchestratorError::is_response_error)
+        {
+            return Ok(());
+        }
 
         let final_phase = attempt_phase(cfg);
         let final_attempt =
@@ -325,22 +327,17 @@ impl Intercept for ResendGuard {
         } else {
             final_attempt
         };
-        let verdict = ProviderRetryClassification::new(operation_outcome, final_attempt);
+        let verdict = OperationVerdict::new(operation_outcome, final_attempt);
 
         if let Some(response) = context.response_mut() {
             response.add_extension(verdict);
             return Ok(());
         }
 
-        let error_kind = context
-            .output_or_error()
-            .and_then(Result::err)
-            .map(OrchestratorKind::of)
-            .expect("failed operation has an orchestrator error");
-
         let Some(Err(error)) = context.output_or_error_mut() else {
             return Ok(());
         };
+        let error_kind = OrchestratorKind::of(error);
         let original = std::mem::replace(
             error,
             OrchestratorError::other(io::Error::other("replacing final operation failure")),
@@ -371,7 +368,8 @@ mod tests {
     use aws_smithy_types::error::metadata::ProvideErrorMetadata;
     use aws_smithy_types::retry::{ErrorKind, ProvideErrorKind};
 
-    use super::{Idempotency, ResendGuard, SendOutcome};
+    use super::{Idempotency, OperationVerdict, ResendGuard, SendOutcome};
+    use crate::common::send_outcome::{FinalAttempt, SendClassification};
 
     #[derive(Debug)]
     struct MockServiceError(ErrorMetadata);
@@ -461,7 +459,7 @@ mod tests {
             .map_service_error(|_| -> MockServiceError {
                 unreachable!("the test contexts never contain service errors")
             });
-        (SendOutcome::classify(&error), error)
+        (SendClassification::of(&error).operation_outcome(), error)
     }
 
     fn error_chain_contains(error: &(dyn std::error::Error + 'static), expected: &str) -> bool {
@@ -722,11 +720,14 @@ mod tests {
 
         let (outcome, error) =
             classify_final_context(&guard, &runtime_components, second, &mut cfg);
-        let classification = SendOutcome::classify_for_provider_retry(&error);
+        let classification = SendClassification::of(&error);
 
         assert_eq!(outcome, SendOutcome::MaybeSent);
         assert_eq!(classification.operation_outcome(), SendOutcome::MaybeSent);
-        assert_eq!(classification.final_attempt_outcome(), SendOutcome::NotSent);
+        assert_eq!(
+            classification.final_attempt(),
+            FinalAttempt::NotSent(crate::common::send_outcome::Transience::Permanent)
+        );
     }
 
     #[test]
@@ -775,6 +776,14 @@ mod tests {
 
         assert!(matches!(error, SdkError::ResponseError(_)), "{error:?}");
         assert_eq!(outcome, SendOutcome::MaybeSent);
+        assert!(
+            error
+                .raw_response()
+                .expect("response error retains the raw response")
+                .extension::<OperationVerdict>()
+                .is_none(),
+            "response errors must not carry a resend-guard verdict"
+        );
         assert!(error_chain_contains(
             &error,
             "response deserialization failed"
@@ -829,9 +838,8 @@ mod tests {
             .read_before_attempt(&(&context).into(), &runtime_components, &mut cfg)
             .expect("first attempt is allowed");
 
-        // A pre-transmit timeout can skip `read_after_attempt`. Starting the
-        // next attempt must still be safe because `read_before_transmit` was
-        // never reached for the previous one.
+        // Simulate Smithy's attempt-finalizer invariant being broken. The
+        // defensive fallback still knows transmit was never reached.
         cfg.interceptor_state()
             .store_put::<RequestAttempts>(2_u32.into());
 
@@ -854,8 +862,8 @@ mod tests {
             .read_before_transmit(&(&context).into(), &runtime_components, &mut cfg)
             .expect("transmit is allowed");
 
-        // Cancellation can skip `read_after_attempt`; the transmit witness
-        // must keep that missing record conservative.
+        // Simulate Smithy's attempt-finalizer invariant being broken. The
+        // transmit witness must keep that missing record conservative.
         cfg.interceptor_state()
             .store_put::<RequestAttempts>(2_u32.into());
 

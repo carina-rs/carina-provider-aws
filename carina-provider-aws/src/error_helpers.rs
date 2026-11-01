@@ -29,7 +29,7 @@
 use carina_core::provider::ProviderError;
 use thiserror::Error;
 
-use carina_aws_types::{Idempotency, SendOutcome};
+use carina_aws_types::{Idempotency, SendClassification, SendOutcome};
 
 use crate::aws_operation::DecidedOperationError;
 
@@ -107,7 +107,7 @@ where
     type Error = E;
 
     fn into_send_failure(self) -> SendFailure<E> {
-        let outcome = SendOutcome::classify(&self);
+        let outcome = SendClassification::of(&self).operation_outcome();
         SendFailure::new(outcome, self)
     }
 }
@@ -245,7 +245,7 @@ where
         + Sync
         + 'static,
 {
-    let outcome = SendOutcome::classify(&err);
+    let outcome = SendClassification::of(&err).operation_outcome();
     api_error_with_meta_cause(context, outcome, err, |message, source| {
         AwsServiceErrorWithSubjectCause {
             subject,
