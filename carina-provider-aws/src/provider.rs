@@ -3609,8 +3609,11 @@ impl AwsProvider {
             OperationKind::Update,
             self.operation_budget(id.resource_type.as_str(), OperationKind::Update),
             self.read_back_budget(id.resource_type.as_str()),
-            self.update_step(id, identifier, from, patch),
-            |token, poll_request| self.poll_update_step(&resource, identifier, token, poll_request),
+            // Box both service dispatch futures, as in native create, to bound stack use.
+            Box::pin(self.update_step(id, identifier, from, patch)),
+            |token, poll_request| {
+                Box::pin(self.poll_update_step(&resource, identifier, token, poll_request))
+            },
             sleep,
         )
         .await?;
