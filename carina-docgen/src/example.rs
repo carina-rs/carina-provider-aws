@@ -5,8 +5,10 @@ use std::path::Path;
 
 use anyhow::{Context, Result};
 use carina_core::parser::{
-    DeferredForBody, DeferredForTarget, ParsedDeferredForExpression, ParsedFile, ProviderConfig,
-    ProviderContext, parse_file,
+    ArgumentParameter, AttributeParameter, BackendConfig, DeferredForBody, DeferredForTarget,
+    FnParam, ModuleCall, ParseWarning, ParsedDeferredForExpression, ParsedFile, ProviderConfig,
+    ProviderContext, RequireBlock, UntilPredicateAst, UpstreamState, UseStatement, UserFunction,
+    UserFunctionBody, ValidationBlock, WaitBinding, parse_file,
 };
 use carina_core::resource::{
     DataSource, ModuleSource, ParserPlaceholder, Resource, ResourceId, ResourceIdentityState,
@@ -383,25 +385,42 @@ fn normalize_pending_identity(left: &ResourceId, right: &mut ResourceId) {
     }
 }
 
-fn same_uses(
-    left: &[carina_core::parser::UseStatement],
-    right: &[carina_core::parser::UseStatement],
-) -> bool {
-    left.len() == right.len()
-        && left
-            .iter()
-            .zip(right)
-            .all(|(left, right)| left.path == right.path && left.alias == right.alias)
-}
-
-fn same_module_calls(
-    left: &[carina_core::parser::ModuleCall],
-    right: &[carina_core::parser::ModuleCall],
-) -> bool {
+fn same_uses(left: &[UseStatement], right: &[UseStatement]) -> bool {
     left.len() == right.len()
         && left.iter().zip(right).all(|(left, right)| {
-            left.module_name == right.module_name
-                && left.binding_name == right.binding_name
+            let UseStatement {
+                path: left_path,
+                alias: left_alias,
+                // `..` covers crate-private `source` only.
+                ..
+            } = left;
+            let UseStatement {
+                path: right_path,
+                alias: right_alias,
+                // `..` covers crate-private `source` only.
+                ..
+            } = right;
+            left_path == right_path && left_alias == right_alias
+        })
+}
+
+fn same_module_calls(left: &[ModuleCall], right: &[ModuleCall]) -> bool {
+    left.len() == right.len()
+        && left.iter().zip(right).all(|(left, right)| {
+            let ModuleCall {
+                module_name: left_module_name,
+                binding_name: left_binding_name,
+                // `..` covers crate-private `arguments`, `source`, and `loop_origin` only.
+                ..
+            } = left;
+            let ModuleCall {
+                module_name: right_module_name,
+                binding_name: right_binding_name,
+                // `..` covers crate-private `arguments`, `source`, and `loop_origin` only.
+                ..
+            } = right;
+            left_module_name == right_module_name
+                && left_binding_name == right_binding_name
                 && left.arguments().count() == right.arguments().count()
                 && left
                     .arguments()
@@ -409,47 +428,92 @@ fn same_module_calls(
         })
 }
 
-fn same_arguments(
-    left: &[carina_core::parser::ArgumentParameter],
-    right: &[carina_core::parser::ArgumentParameter],
-) -> bool {
+fn same_arguments(left: &[ArgumentParameter], right: &[ArgumentParameter]) -> bool {
     left.len() == right.len()
         && left.iter().zip(right).all(|(left, right)| {
-            left.name == right.name
-                && left.static_type == right.static_type
-                && left.default == right.default
-                && left.description == right.description
-                && left.validations.len() == right.validations.len()
-                && left
-                    .validations
+            let ArgumentParameter {
+                name: left_name,
+                static_type: left_static_type,
+                default: left_default,
+                description: left_description,
+                validations: left_validations,
+            } = left;
+            let ArgumentParameter {
+                name: right_name,
+                static_type: right_static_type,
+                default: right_default,
+                description: right_description,
+                validations: right_validations,
+            } = right;
+            left_name == right_name
+                && left_static_type == right_static_type
+                && left_default == right_default
+                && left_description == right_description
+                && left_validations.len() == right_validations.len()
+                && left_validations
                     .iter()
-                    .zip(&right.validations)
+                    .zip(right_validations)
                     .all(|(left, right)| {
-                        left.condition == right.condition
-                            && left.error_message == right.error_message
+                        let ValidationBlock {
+                            condition: left_condition,
+                            error_message: left_error_message,
+                            // `..` covers crate-private `source` only.
+                            ..
+                        } = left;
+                        let ValidationBlock {
+                            condition: right_condition,
+                            error_message: right_error_message,
+                            // `..` covers crate-private `source` only.
+                            ..
+                        } = right;
+                        left_condition == right_condition
+                            && left_error_message == right_error_message
                     })
         })
 }
 
-fn same_attribute_params(
-    left: &[carina_core::parser::AttributeParameter],
-    right: &[carina_core::parser::AttributeParameter],
-) -> bool {
+fn same_attribute_params(left: &[AttributeParameter], right: &[AttributeParameter]) -> bool {
     left.len() == right.len()
         && left.iter().zip(right).all(|(left, right)| {
-            left.name == right.name
-                && left.static_type == right.static_type
-                && left.value == right.value
+            let AttributeParameter {
+                name: left_name,
+                static_type: left_static_type,
+                value: left_value,
+                // `..` covers crate-private `source` only.
+                ..
+            } = left;
+            let AttributeParameter {
+                name: right_name,
+                static_type: right_static_type,
+                value: right_value,
+                // `..` covers crate-private `source` only.
+                ..
+            } = right;
+            left_name == right_name
+                && left_static_type == right_static_type
+                && left_value == right_value
         })
 }
 
 fn same_backend(
-    left: Option<&carina_core::parser::BackendConfig<ParserPlaceholder>>,
-    right: Option<&carina_core::parser::BackendConfig<ParserPlaceholder>>,
+    left: Option<&BackendConfig<ParserPlaceholder>>,
+    right: Option<&BackendConfig<ParserPlaceholder>>,
 ) -> bool {
     match (left, right) {
         (Some(left), Some(right)) => {
-            left.backend_type == right.backend_type && left.attributes == right.attributes
+            let BackendConfig {
+                backend_type: left_backend_type,
+                attributes: left_attributes,
+                // Attribute spans are diagnostic source positions, not authored semantics.
+                attribute_spans: _,
+            } = left;
+            let BackendConfig {
+                backend_type: right_backend_type,
+                attributes: right_attributes,
+                // Attribute spans are diagnostic source positions, not authored semantics.
+                attribute_spans: _,
+            } = right;
+            left_backend_type == right_backend_type && left_attributes == right_attributes
         }
         (None, None) => true,
         _ => false,
@@ -457,77 +521,169 @@ fn same_backend(
 }
 
 fn same_user_functions(
-    left: &std::collections::HashMap<String, carina_core::parser::UserFunction>,
-    right: &std::collections::HashMap<String, carina_core::parser::UserFunction>,
+    left: &std::collections::HashMap<String, UserFunction>,
+    right: &std::collections::HashMap<String, UserFunction>,
 ) -> bool {
     left.len() == right.len()
         && left.iter().all(|(name, left)| {
             right.get(name).is_some_and(|right| {
-                left.name == right.name
-                    && left.return_type == right.return_type
-                    && left.params.len() == right.params.len()
-                    && left.params.iter().zip(&right.params).all(|(left, right)| {
-                        left.name == right.name
-                            && left.param_type == right.param_type
-                            && left.default == right.default
+                let UserFunction {
+                    name: left_name,
+                    params: left_params,
+                    return_type: left_return_type,
+                    local_lets: left_local_lets,
+                    body: left_body,
+                } = left;
+                let UserFunction {
+                    name: right_name,
+                    params: right_params,
+                    return_type: right_return_type,
+                    local_lets: right_local_lets,
+                    body: right_body,
+                } = right;
+                left_name == right_name
+                    && left_return_type == right_return_type
+                    && left_params.len() == right_params.len()
+                    && left_params.iter().zip(right_params).all(|(left, right)| {
+                        let FnParam {
+                            name: left_name,
+                            param_type: left_param_type,
+                            default: left_default,
+                        } = left;
+                        let FnParam {
+                            name: right_name,
+                            param_type: right_param_type,
+                            default: right_default,
+                        } = right;
+                        left_name == right_name
+                            && left_param_type == right_param_type
+                            && left_default == right_default
                     })
-                    && left.local_lets.len() == right.local_lets.len()
-                    && left.local_lets.iter().zip(&right.local_lets).all(
+                    && left_local_lets.len() == right_local_lets.len()
+                    // The tuple's third element is its diagnostic source line.
+                    && left_local_lets.iter().zip(right_local_lets).all(
                         |((left_name, left_value, _), (right_name, right_value, _))| {
                             left_name == right_name && left_value == right_value
                         },
                     )
-                    && left.body.value == right.body.value
+                    && {
+                        let UserFunctionBody {
+                            value: left_value,
+                            // Function body locations do not affect authored semantics.
+                            source_line: _,
+                            source_file: _,
+                        } = left_body;
+                        let UserFunctionBody {
+                            value: right_value,
+                            // Function body locations do not affect authored semantics.
+                            source_line: _,
+                            source_file: _,
+                        } = right_body;
+                        left_value == right_value
+                    }
             })
         })
 }
 
-fn same_upstream_states(
-    left: &[carina_core::parser::UpstreamState],
-    right: &[carina_core::parser::UpstreamState],
-) -> bool {
-    left.len() == right.len()
-        && left
-            .iter()
-            .zip(right)
-            .all(|(left, right)| left.binding == right.binding && left.source == right.source)
-}
-
-fn same_wait_bindings(
-    left: &[carina_core::parser::WaitBinding],
-    right: &[carina_core::parser::WaitBinding],
-) -> bool {
+fn same_upstream_states(left: &[UpstreamState], right: &[UpstreamState]) -> bool {
     left.len() == right.len()
         && left.iter().zip(right).all(|(left, right)| {
-            left.binding == right.binding
-                && left.target == right.target
-                && left.until_raw == right.until_raw
-                && left.until_predicate.lhs_segments == right.until_predicate.lhs_segments
-                && left.until_predicate.rhs == right.until_predicate.rhs
-                && left.timeout_secs == right.timeout_secs
-                && left.depends_on == right.depends_on
+            let UpstreamState {
+                binding: left_binding,
+                source: left_source,
+            } = left;
+            let UpstreamState {
+                binding: right_binding,
+                source: right_source,
+            } = right;
+            left_binding == right_binding && left_source == right_source
+        })
+}
+
+fn same_wait_bindings(left: &[WaitBinding], right: &[WaitBinding]) -> bool {
+    left.len() == right.len()
+        && left.iter().zip(right).all(|(left, right)| {
+            let WaitBinding {
+                binding: left_binding,
+                target: left_target,
+                until_raw: left_until_raw,
+                until_predicate: left_until_predicate,
+                timeout_secs: left_timeout_secs,
+                depends_on: left_depends_on,
+                // Wait declaration line numbers are diagnostic positions.
+                line: _,
+            } = left;
+            let WaitBinding {
+                binding: right_binding,
+                target: right_target,
+                until_raw: right_until_raw,
+                until_predicate: right_until_predicate,
+                timeout_secs: right_timeout_secs,
+                depends_on: right_depends_on,
+                // Wait declaration line numbers are diagnostic positions.
+                line: _,
+            } = right;
+            let UntilPredicateAst {
+                lhs_segments: left_lhs_segments,
+                rhs: left_rhs,
+            } = left_until_predicate;
+            let UntilPredicateAst {
+                lhs_segments: right_lhs_segments,
+                rhs: right_rhs,
+            } = right_until_predicate;
+            left_binding == right_binding
+                && left_target == right_target
+                && left_until_raw == right_until_raw
+                && left_lhs_segments == right_lhs_segments
+                && left_rhs == right_rhs
+                && left_timeout_secs == right_timeout_secs
+                && left_depends_on == right_depends_on
         })
 }
 
 fn same_requires(
-    left: &[carina_core::parser::RequireBlock<ParserPlaceholder>],
-    right: &[carina_core::parser::RequireBlock<ParserPlaceholder>],
+    left: &[RequireBlock<ParserPlaceholder>],
+    right: &[RequireBlock<ParserPlaceholder>],
 ) -> bool {
     left.len() == right.len()
         && left.iter().zip(right).all(|(left, right)| {
-            left.condition == right.condition && left.error_message == right.error_message
+            let RequireBlock {
+                condition: left_condition,
+                error_message: left_error_message,
+                // `..` covers crate-private `source` only.
+                ..
+            } = left;
+            let RequireBlock {
+                condition: right_condition,
+                error_message: right_error_message,
+                // `..` covers crate-private `source` only.
+                ..
+            } = right;
+            left_condition == right_condition && left_error_message == right_error_message
         })
 }
 
-fn same_warnings(
-    left: &[carina_core::parser::ParseWarning],
-    right: &[carina_core::parser::ParseWarning],
-) -> bool {
+fn same_warnings(left: &[ParseWarning], right: &[ParseWarning]) -> bool {
     left.len() == right.len()
-        && left
-            .iter()
-            .zip(right)
-            .all(|(left, right)| left.kind == right.kind && left.message == right.message)
+        && left.iter().zip(right).all(|(left, right)| {
+            let ParseWarning {
+                // Warning file, line, and span are diagnostic source positions.
+                file: _,
+                line: _,
+                kind: left_kind,
+                span: _,
+                message: left_message,
+            } = left;
+            let ParseWarning {
+                // Warning file, line, and span are diagnostic source positions.
+                file: _,
+                line: _,
+                kind: right_kind,
+                span: _,
+                message: right_message,
+            } = right;
+            left_kind == right_kind && left_message == right_message
+        })
 }
 
 fn same_deferred_for_expressions(
@@ -536,11 +692,37 @@ fn same_deferred_for_expressions(
 ) -> bool {
     left.len() == right.len()
         && left.iter().zip(right).all(|(left, right)| {
-            left.header == right.header
-                && same_deferred_for_targets(&left.target, &right.target)
-                && left.iterable == right.iterable
-                && left.binding == right.binding
-                && same_deferred_for_bodies(&left.body, &right.body)
+            let ParsedDeferredForExpression {
+                // File, line, and span are diagnostic source positions.
+                file: _,
+                line: _,
+                span: _,
+                header: left_header,
+                target: left_target,
+                iterable: left_iterable,
+                binding: left_binding,
+                body: left_body,
+                // `..` covers crate-private `iterable_state` only.
+                ..
+            } = left;
+            let ParsedDeferredForExpression {
+                // File, line, and span are diagnostic source positions.
+                file: _,
+                line: _,
+                span: _,
+                header: right_header,
+                target: right_target,
+                iterable: right_iterable,
+                binding: right_binding,
+                body: right_body,
+                // `..` covers crate-private `iterable_state` only.
+                ..
+            } = right;
+            left_header == right_header
+                && same_deferred_for_targets(left_target, right_target)
+                && left_iterable == right_iterable
+                && left_binding == right_binding
+                && same_deferred_for_bodies(left_body, right_body)
         })
 }
 
@@ -572,6 +754,14 @@ fn preprocess(source: &str) -> Result<String> {
     let mut filtered = String::with_capacity(source.len());
     let mut kept_from = 0;
     for removal in removals {
+        if removal.start < kept_from {
+            anyhow::bail!(
+                "internal error: removal range {}..{} starts before previous removal end {}",
+                removal.start,
+                removal.end,
+                kept_from
+            );
+        }
         filtered.push_str(&source[kept_from..removal.start]);
         kept_from = removal.end;
     }
@@ -696,9 +886,14 @@ fn removals(masked: &[u8]) -> Result<Vec<Range<usize>>> {
                 })?;
                 let removal_end = provider_removal_end(masked, block_end);
                 removals.push(line_start..removal_end);
-                update_line_start(masked, cursor, removal_end, &mut line_start);
+                let ends_mid_line = removal_end == block_end && removal_end < masked.len();
+                if ends_mid_line {
+                    line_start = removal_end;
+                } else {
+                    update_line_start(masked, cursor, removal_end, &mut line_start);
+                }
                 cursor = removal_end;
-                line_has_code = false;
+                line_has_code = ends_mid_line;
             }
             _ => {
                 line_has_code = true;
@@ -1302,6 +1497,33 @@ mod tests {
         .expect("valid provider comment");
 
         assert_eq!(resource_text(&example), "aws.ec2.Vpc {}\n");
+    }
+
+    #[test]
+    fn provider_followed_by_block_and_hash_comments_does_not_panic() {
+        let source = concat!(
+            "provider aws { region = aws.Region.ap_northeast_1 } /* note */ # trailing\n",
+            "aws.ec2.Vpc {}\n",
+        );
+
+        let outcome = std::panic::catch_unwind(|| load_fixture(source, ExampleKind::Resource));
+        match outcome {
+            Ok(Ok(example)) => assert!(resource_text(&example).contains("aws.ec2.Vpc {}\n")),
+            Ok(Err(_)) => {}
+            Err(_) => panic!("provider preprocessing must return a result instead of panicking"),
+        }
+    }
+
+    #[test]
+    fn two_unnamed_providers_on_one_line_do_not_panic() {
+        let source = "provider aws {} provider aws {}\naws.ec2.Vpc {}\n";
+
+        let outcome = std::panic::catch_unwind(|| load_fixture(source, ExampleKind::Resource));
+        match outcome {
+            Ok(Ok(example)) => assert!(resource_text(&example).contains("aws.ec2.Vpc {}\n")),
+            Ok(Err(_)) => {}
+            Err(_) => panic!("provider preprocessing must return a result instead of panicking"),
+        }
     }
 
     #[test]

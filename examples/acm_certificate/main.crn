@@ -30,7 +30,7 @@ let validation_record = aws.route53.RecordSet {
 }
 
 let cert_issued = wait cert {
-  until      = cert.status == 'ISSUED'
+  until      = cert.status == aws.acm.Certificate.Status.issued
   depends_on = [validation_record]
   timeout    = 75min
 }
