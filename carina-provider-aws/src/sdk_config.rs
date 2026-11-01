@@ -289,6 +289,7 @@ mod tests {
             "/src/resend_safety_generated.rs"
         ));
         let clippy = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../clippy.toml"));
+        let handwritten_wrappers = [("kms", crate::references::KmsClient::from_bounded_config)];
         let mut services = std::collections::BTreeSet::new();
         for line in manifest.lines() {
             let mut declaration = line.split('#').next().unwrap_or_default();
@@ -313,8 +314,9 @@ mod tests {
             let rust_service = service.replace('-', "_");
             assert!(
                 generated.contains(&format!("inner: aws_sdk_{rust_service}::Client,"))
-                    || (service == "kms"
-                        && include_str!("references.rs").contains("struct KmsClient")),
+                    || handwritten_wrappers
+                        .iter()
+                        .any(|(name, _)| *name == service),
                 "aws-sdk-{service} has no bounded wrapper; add resend decisions before adding the dependency"
             );
             for constructor in ["new", "from_conf"] {

@@ -8,7 +8,30 @@ use std::collections::HashSet;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Classification {
     Reference { arn_only: bool },
-    NotReference(&'static str),
+    NotReference(NotReference),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NotReference {
+    /// The path is deliberately absent from the final provider registry.
+    Absent,
+    Other(&'static str),
+}
+
+/// Shared path rules for Smithy classification and final-registry coverage.
+/// Map keys label entries; only their values are KMS-reference inputs.
+pub enum PathSegment<'a> {
+    Field(&'a str),
+    ListElement,
+    MapValue,
+}
+
+pub fn property_path(parent: &str, segment: PathSegment<'_>) -> String {
+    match segment {
+        PathSegment::Field(name) => format!("{parent}.{name}"),
+        PathSegment::ListElement => format!("{parent}[]"),
+        PathSegment::MapValue => format!("{parent}{{}}"),
+    }
 }
 
 #[derive(Debug)]
@@ -38,16 +61,15 @@ pub const CLASSIFICATIONS: &[Entry] = &[
     Entry {
         resource: "sqs.Queue",
         path: "kms_data_key_reuse_period_seconds",
-        classification: Classification::NotReference(
+        classification: Classification::NotReference(NotReference::Other(
             "Duration in seconds, represented as a string in the SQS Attributes map; emitted as Int",
-        ),
+        )),
     },
     Entry {
         resource: "s3.BucketReplicationConfiguration",
         path: "rules[].destination.encryption_configuration.replica_kms_key_id",
-        classification: Classification::NotReference(
-            "Omitted from the handwritten replication destination type; this is not an exposed provider input",
-        ),
+        // Omitted from the handwritten replication destination type.
+        classification: Classification::NotReference(NotReference::Absent),
     },
 ];
 
@@ -218,7 +240,7 @@ pub fn validate_smithy_type(
                         walk(
                             model,
                             resource,
-                            &format!("{path}.{}", name.to_snake_case()),
+                            &property_path(path, PathSegment::Field(&name.to_snake_case())),
                             name,
                             member,
                             "",
@@ -231,7 +253,7 @@ pub fn validate_smithy_type(
                         walk(
                             model,
                             resource,
-                            &format!("{path}.{}", name.to_snake_case()),
+                            &property_path(path, PathSegment::Field(&name.to_snake_case())),
                             name,
                             member,
                             "",
@@ -247,7 +269,7 @@ pub fn validate_smithy_type(
                     walk(
                         model,
                         resource,
-                        &format!("{path}[]"),
+                        &property_path(path, PathSegment::ListElement),
                         name,
                         &shape.member,
                         &description,
@@ -262,7 +284,7 @@ pub fn validate_smithy_type(
                     walk(
                         model,
                         resource,
-                        &format!("{path}{{}}"),
+                        &property_path(path, PathSegment::MapValue),
                         name,
                         &shape.value,
                         &description,
@@ -342,7 +364,8 @@ mod tests {
                 keys.insert((entry.resource, entry.path)),
                 "duplicate classification: {entry:?}"
             );
-            if let Classification::NotReference(reason) = entry.classification {
+            if let Classification::NotReference(NotReference::Other(reason)) = entry.classification
+            {
                 assert!(!reason.is_empty());
             }
         }
@@ -351,7 +374,7 @@ mod tests {
             Some(Classification::Reference { .. })
         ));
         assert!(
-            matches!(classify_string("sqs.Queue", "kms_data_key_reuse_period_seconds", "kms_data_key_reuse_period_seconds", None, None).unwrap(), Some(Classification::NotReference(reason)) if !reason.is_empty())
+            matches!(classify_string("sqs.Queue", "kms_data_key_reuse_period_seconds", "kms_data_key_reuse_period_seconds", None, None).unwrap(), Some(Classification::NotReference(NotReference::Other(reason))) if !reason.is_empty())
         );
         assert!(
             classify_string("sqs.Queue", "name", "name", None, None)
@@ -363,7 +386,7 @@ mod tests {
                 "s3.BucketReplicationConfiguration",
                 "rules[].destination.encryption_configuration.replica_kms_key_id"
             ),
-            Some(Classification::NotReference(_))
+            Some(Classification::NotReference(NotReference::Absent))
         ));
     }
 
@@ -430,5 +453,38 @@ mod tests {
                     .unwrap_err();
             assert!(error.to_string().contains(path), "{error}");
         }
+    }
+
+    #[test]
+    fn coverage_walks_map_values_and_ignores_entry_keys() {
+        let model = carina_smithy::parse(r#"{
+            "smithy":"2.0", "shapes": {
+                "test#Map":{"type":"map","key":{"target":"test#KmsString"},"value":{"target":"test#Values"}},
+                "test#Values":{"type":"list","member":{"target":"test#Value"}},
+                "test#Value":{"type":"structure","members":{"Name":{"target":"test#String"}}},
+                "test#KmsString":{"type":"string","traits":{"smithy.api#documentation":"KMS key ARN"}},
+                "test#String":{"type":"string"}
+            }
+        }"#).unwrap();
+        let member = ShapeRef {
+            target: "test#Map".into(),
+            traits: Default::default(),
+        };
+        validate_smithy_type(&model, "test.Resource", "settings", "Settings", &member).unwrap();
+
+        let model = carina_smithy::parse(r#"{
+            "smithy":"2.0", "shapes": {
+                "test#Map":{"type":"map","key":{"target":"smithy.api#String"},"value":{"target":"test#Values"}},
+                "test#Values":{"type":"list","member":{"target":"test#Value"}},
+                "test#Value":{"type":"structure","members":{"Name":{"target":"test#String"}}},
+                "test#String":{"type":"string","traits":{"smithy.api#documentation":"KMS key ARN"}}
+            }
+        }"#).unwrap();
+        let error = validate_smithy_type(&model, "test.Resource", "settings", "Settings", &member)
+            .unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "unclassified KMS string test.Resource.settings{}[].name"
+        );
     }
 }

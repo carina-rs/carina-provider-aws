@@ -63,10 +63,17 @@ mod tests {
     #[test]
     fn final_registry_classifies_every_kms_string_including_handwritten_structs() {
         use carina_codegen_aws::kms_references::{
-            CLASSIFICATIONS, Classification, classify_string,
+            CLASSIFICATIONS, Classification, NotReference, PathSegment, classify_string,
+            property_path,
         };
         use carina_core::schema::{CompiledAttributeType, CompiledResourceSchema};
         use std::collections::BTreeSet;
+
+        #[derive(Default)]
+        struct Coverage {
+            references: BTreeSet<(String, String)>,
+            paths: BTreeSet<(String, String)>,
+        }
 
         fn walk(
             schema: &CompiledResourceSchema,
@@ -74,10 +81,13 @@ mod tests {
             path: &str,
             name: &str,
             description: Option<&str>,
-            references: &mut BTreeSet<(String, String)>,
+            coverage: &mut Coverage,
             depth: usize,
         ) {
             assert!(depth < 64, "schema walk exceeded depth at {path}");
+            coverage
+                .paths
+                .insert((schema.resource_type().to_string(), path.to_string()));
             let mut check =
                 |pattern: Option<&str>, identity: Option<&carina_core::schema::TypeIdentity>| {
                     let classification =
@@ -92,10 +102,17 @@ mod tests {
                                 schema.resource_type(),
                                 path
                             );
-                            references
+                            coverage
+                                .references
                                 .insert((schema.resource_type().to_string(), path.to_string()));
                         }
-                        Some(Classification::NotReference(reason)) => {
+                        Some(Classification::NotReference(NotReference::Absent)) => {
+                            panic!(
+                                "absent classification exists in registry: {}.{path}",
+                                schema.resource_type()
+                            );
+                        }
+                        Some(Classification::NotReference(NotReference::Other(reason))) => {
                             assert!(!reason.is_empty());
                             assert!(identity.is_none());
                         }
@@ -110,34 +127,25 @@ mod tests {
                 Shape::Reference { identity, .. } => check(None, Some(identity)),
                 Shape::String { pattern, .. } => check(pattern, None),
                 Shape::Enum { base, .. } => {
-                    walk(schema, base, path, name, description, references, depth + 1)
+                    walk(schema, base, path, name, description, coverage, depth + 1)
                 }
                 Shape::List { element_type, .. } => walk(
                     schema,
                     element_type,
-                    &format!("{path}[]"),
+                    &property_path(path, PathSegment::ListElement),
                     name,
                     description,
-                    references,
+                    coverage,
                     depth + 1,
                 ),
-                Shape::Map { key, value } => {
-                    walk(
-                        schema,
-                        key,
-                        &format!("{path}.<key>"),
-                        name,
-                        None,
-                        references,
-                        depth + 1,
-                    );
+                Shape::Map { value, .. } => {
                     walk(
                         schema,
                         value,
-                        &format!("{path}{{}}"),
+                        &property_path(path, PathSegment::MapValue),
                         name,
                         description,
-                        references,
+                        coverage,
                         depth + 1,
                     );
                 }
@@ -151,10 +159,10 @@ mod tests {
                         walk(
                             schema,
                             field.field_type(),
-                            &format!("{path}.{}", field.name()),
+                            &property_path(path, PathSegment::Field(field.name())),
                             field.name(),
                             field.description(),
-                            references,
+                            coverage,
                             depth + 1,
                         );
                     }
@@ -173,7 +181,7 @@ mod tests {
                             path,
                             name,
                             description,
-                            references,
+                            coverage,
                             depth + 1,
                         );
                     }
@@ -183,7 +191,7 @@ mod tests {
         }
 
         let registry = super::schema_registry();
-        let mut references = BTreeSet::new();
+        let mut coverage = Coverage::default();
         for (_, _, _, schema) in registry.iter() {
             let schema = schema.as_schema();
             for (name, attribute) in schema.attributes() {
@@ -193,8 +201,20 @@ mod tests {
                     name,
                     name,
                     attribute.description(),
-                    &mut references,
+                    &mut coverage,
                     0,
+                );
+            }
+        }
+        for entry in CLASSIFICATIONS {
+            if entry.classification == Classification::NotReference(NotReference::Absent) {
+                assert!(
+                    !coverage
+                        .paths
+                        .contains(&(entry.resource.to_string(), entry.path.to_string())),
+                    "absent classification exists in registry: {}.{}",
+                    entry.resource,
+                    entry.path,
                 );
             }
         }
@@ -204,7 +224,7 @@ mod tests {
             .map(|entry| (entry.resource.to_string(), entry.path.to_string()))
             .collect();
         assert_eq!(
-            references, expected,
+            coverage.references, expected,
             "every classified reference must be present in the final registry"
         );
     }
