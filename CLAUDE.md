@@ -121,16 +121,6 @@ git worktree list                                                  # List worktr
 git worktree remove .worktrees/<branch-name>                       # Delete worktree (from the main worktree)
 ```
 
-### Submodule Initialization
-
-This repo uses a git submodule for `carina-plugin-wit/`. After `git pull` or creating a new worktree, initialize the submodule:
-
-```bash
-git submodule update --init --recursive
-```
-
-Without this, builds will fail because `wit_bindgen::generate!` cannot find the WIT files.
-
 ## Code Style
 
 - **Commit messages**: Write in English
