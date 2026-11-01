@@ -2,7 +2,7 @@ use carina_aws_types::SendClassification;
 use carina_core::provider::{AppliedIdentifier, ReadOutcome, Sent};
 use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
-use carina_core::schema::ResourceSchema;
+use carina_core::schema::CompiledResourceSchema;
 
 use crate::AwsProvider;
 use crate::aws_operation::ClientToken;
@@ -113,7 +113,7 @@ impl FlowLogMaybeSent {
 fn build_tag_field_specifications(
     id: &ResourceId,
     value: Option<&Value>,
-    schema: &ResourceSchema,
+    schema: &CompiledResourceSchema,
 ) -> ProviderResult<Option<Vec<aws_sdk_ec2::types::TagFieldSpecificationRequest>>> {
     let Some(value) = value else {
         return Ok(None);
@@ -285,11 +285,11 @@ impl AwsProvider {
     pub(crate) async fn create_ec2_flow_log<A: AwsCreateAttempt>(
         &self,
         resource: &Resource<impl Sized>,
-        schema: &ResourceSchema,
+        schema: &CompiledResourceSchema,
         client_token: &ClientToken,
         attempt: A,
     ) -> Result<A::Step, A::Verdict> {
-        let input = match Ec2FlowLogCreateInput::decode(resource) {
+        let input = match Ec2FlowLogCreateInput::decode(resource, schema) {
             Ok(input) => input,
             Err(error) => return Err(attempt.untracked(error)),
         };
@@ -519,7 +519,7 @@ impl AwsProvider {
         identifier: &AppliedIdentifier,
         from: &State,
         to: Resource,
-        _schema: &ResourceSchema,
+        _schema: &CompiledResourceSchema,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
         let input = Ec2FlowLogUpdateInput::decode(&to)?;
         let crate::send_models_generated::Ec2FlowLogUpdateParts { tags } = input.into_parts();

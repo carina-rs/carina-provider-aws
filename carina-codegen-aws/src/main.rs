@@ -4359,14 +4359,19 @@ fn emit_send_input(
     }
 
     code.push_str(&format!("impl {type_name} {{\n"));
-    code.push_str(
-        "    pub(crate) fn decode(\n\
-                 _resource: &Resource<impl Sized>,\n\
-             ) -> ProviderResult<Self> {\n",
-    );
-    code.push_str(&format!(
-        "        let _schema = &crate::schemas::generated::{service}::{resource_module}::{config_fn}().schema;\n"
-    ));
+    code.push_str("    pub(crate) fn decode(\n        _resource: &Resource<impl Sized>,\n");
+    let needs_schema = fields
+        .iter()
+        .any(|field| field.send_type == SendFieldType::Enum);
+    if needs_schema {
+        code.push_str("        _schema: &carina_core::schema::CompiledResourceSchema,\n");
+    }
+    code.push_str("    ) -> ProviderResult<Self> {\n");
+    if !needs_schema {
+        code.push_str(&format!(
+            "        let _schema = &crate::schemas::generated::{service}::{resource_module}::{config_fn}().schema;\n"
+        ));
+    }
     if fields.is_empty() {
         code.push_str("        Ok(Self)\n");
     } else {

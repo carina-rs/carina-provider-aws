@@ -1,7 +1,7 @@
 use carina_core::provider::{AppliedIdentifier, ReadOutcome};
 use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{Resource, ResourceId};
-use carina_core::schema::ResourceSchema;
+use carina_core::schema::CompiledResourceSchema;
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
@@ -52,9 +52,9 @@ impl AwsProvider {
     pub(crate) async fn create_organizations_organization(
         &self,
         resource: &Resource<impl Sized>,
-        _schema: &ResourceSchema,
+        _schema: &CompiledResourceSchema,
     ) -> ProviderResult<TypedCreateCompletion> {
-        let input = OrganizationsOrganizationCreateInput::decode(resource)?;
+        let input = OrganizationsOrganizationCreateInput::decode(resource, _schema)?;
         let sent = input.sent();
         let crate::send_models_generated::OrganizationsOrganizationCreateParts { feature_set } =
             input.into_parts();

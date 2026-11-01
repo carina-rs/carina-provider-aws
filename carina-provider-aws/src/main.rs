@@ -1039,7 +1039,7 @@ mod tests {
     use super::*;
     use carina_core::resource::{ConcreteValue, DeferredValue, Resource, Value};
     use carina_core::schema::{
-        AttributeType, CustomValidator, RawShape, ResourceValidation,
+        CompiledAttributeType, CustomValidator, RawShape, ResourceValidation,
         TypeIdentity as CoreTypeIdentity,
     };
     use carina_plugin_sdk::types::{TypeIdentity as WireTypeIdentity, ValidatorType};
@@ -1065,7 +1065,7 @@ mod tests {
         }
     }
 
-    fn scalar_kind(attribute_type: &AttributeType) -> CallbackScalar {
+    fn scalar_kind(attribute_type: &CompiledAttributeType) -> CallbackScalar {
         match attribute_type.raw_shape() {
             RawShape::String { .. } => CallbackScalar::String,
             RawShape::Int { .. } => CallbackScalar::Int,
@@ -1095,7 +1095,7 @@ mod tests {
     }
 
     fn collect_callbacks(
-        attribute_type: &AttributeType,
+        attribute_type: &CompiledAttributeType,
         bindings: &mut BTreeMap<CoreTypeIdentity, CallbackBinding>,
     ) {
         match attribute_type.raw_shape() {

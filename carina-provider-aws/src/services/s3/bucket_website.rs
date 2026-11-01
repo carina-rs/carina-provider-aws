@@ -4,7 +4,7 @@ use aws_sdk_s3::types::{
 use carina_core::provider::{AppliedIdentifier, ReadOutcome};
 use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
-use carina_core::schema::ResourceSchema;
+use carina_core::schema::CompiledResourceSchema;
 use indexmap::IndexMap;
 
 use crate::AwsProvider;
@@ -93,7 +93,7 @@ impl AwsProvider {
     pub(crate) async fn create_s3_bucket_website_configuration(
         &self,
         resource: &Resource<impl Sized>,
-        schema: &ResourceSchema,
+        schema: &CompiledResourceSchema,
     ) -> ProviderResult<TypedCreateCompletion> {
         let input = S3BucketWebsiteConfigurationCreateInput::decode(resource)?;
         let sent = input.sent();
@@ -136,7 +136,7 @@ impl AwsProvider {
         identifier: &AppliedIdentifier,
         _from: &State,
         to: Resource,
-        schema: &ResourceSchema,
+        schema: &CompiledResourceSchema,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
         let input = S3BucketWebsiteConfigurationUpdateInput::decode(&to)?;
         let crate::send_models_generated::S3BucketWebsiteConfigurationUpdateParts {
@@ -165,7 +165,7 @@ impl AwsProvider {
         error_document: Option<&Value>,
         index_document: Option<&Value>,
         redirect_all_requests_to: Option<&Value>,
-        schema: &ResourceSchema,
+        schema: &CompiledResourceSchema,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
         let applied_identifier = bucket;
         let bucket = bucket.as_str();
@@ -225,7 +225,7 @@ fn build_website_configuration(
     error_document: Option<&Value>,
     index_document: Option<&Value>,
     redirect_all_requests_to: Option<&Value>,
-    schema: &ResourceSchema,
+    schema: &CompiledResourceSchema,
 ) -> ProviderResult<WebsiteConfiguration> {
     let mut config_builder = WebsiteConfiguration::builder();
 
@@ -331,8 +331,8 @@ fn build_website_configuration(
 mod tests {
     use super::*;
 
-    fn schema() -> ResourceSchema {
-        crate::schemas::generated::s3::bucket_website_configuration::s3_bucket_website_configuration_config().schema
+    fn schema() -> &'static CompiledResourceSchema {
+        crate::test_resource_schema("s3.BucketWebsiteConfiguration")
     }
 
     fn resource_with(attr: &str, value: Value) -> Resource {
@@ -351,7 +351,7 @@ mod tests {
             None,
             resource.get_attr("index_document"),
             None,
-            &schema(),
+            schema(),
         )
         .expect_err("a present index_document must be a map");
     }
@@ -365,7 +365,7 @@ mod tests {
             resource.get_attr("error_document"),
             None,
             None,
-            &schema(),
+            schema(),
         )
         .expect_err("a present error_document must be a map");
     }
@@ -382,7 +382,7 @@ mod tests {
             None,
             None,
             resource.get_attr("redirect_all_requests_to"),
-            &schema(),
+            schema(),
         )
         .expect_err("a present redirect_all_requests_to must be a map");
     }

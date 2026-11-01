@@ -2,7 +2,7 @@ use aws_sdk_s3::types::{BucketCannedAcl, Grant, Permission, Type as GranteeType}
 use carina_core::provider::ProviderResult;
 use carina_core::provider::{AppliedIdentifier, ReadOutcome};
 use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
-use carina_core::schema::ResourceSchema;
+use carina_core::schema::CompiledResourceSchema;
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
@@ -146,9 +146,9 @@ impl AwsProvider {
     pub(crate) async fn create_s3_bucket_acl(
         &self,
         resource: &Resource<impl Sized>,
-        _schema: &ResourceSchema,
+        _schema: &CompiledResourceSchema,
     ) -> ProviderResult<TypedCreateCompletion> {
-        let input = S3BucketAclCreateInput::decode(resource)?;
+        let input = S3BucketAclCreateInput::decode(resource, _schema)?;
         let sent = input.sent();
         let crate::send_models_generated::S3BucketAclCreateParts { acl, bucket } =
             input.into_parts();
@@ -176,10 +176,10 @@ impl AwsProvider {
         identifier: &AppliedIdentifier,
         _from: &State,
         to: Resource,
-        _schema: &ResourceSchema,
+        _schema: &CompiledResourceSchema,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
         let crate::send_models_generated::S3BucketAclUpdateParts { acl } =
-            S3BucketAclUpdateInput::decode(&to)?.into_parts();
+            S3BucketAclUpdateInput::decode(&to, _schema)?.into_parts();
         let acl = acl.into_inner();
         self.put_s3_bucket_acl(&id, identifier, acl).await
     }

@@ -15,7 +15,8 @@ use carina_core::provider::{
 };
 use carina_core::resource::{ConcreteValue, Resource, State, Value};
 use carina_core::schema::{
-    AttributeType, ResourceSchema, SchemaKind, Shape, ShapeWalkBudget, ValidatedResourceSchema,
+    CompiledAttributeType, CompiledResourceSchema, SchemaKind, Shape, ShapeWalkBudget,
+    ValidatedResourceSchema,
 };
 use indexmap::IndexMap;
 use winterbaume_core::{MockAws, MockRequest, MockResponse, MockService};
@@ -301,8 +302,8 @@ fn sample_string(resource_type: &str, path: &[String]) -> String {
 
 fn sample_value(
     resource_type: &str,
-    schema: &ResourceSchema,
-    attribute_type: &AttributeType,
+    schema: &CompiledResourceSchema,
+    attribute_type: &CompiledAttributeType,
     path: &mut Vec<String>,
     budget: &mut ShapeWalkBudget,
 ) -> Value {
@@ -872,7 +873,7 @@ async fn route53_update_uses_identifier_type_and_sends_mutable_attributes() {
         vec![],
         &BoundedSdkConfig::for_test(mock.sdk_config(REGION).await),
     );
-    let config = crate::schemas::generated::route53::record_set::route53_record_set_config();
+    let schema = crate::test_resource_schema("route53.RecordSet");
 
     for desired_type in [None, Some("CNAME")] {
         service.clear();
@@ -893,7 +894,7 @@ async fn route53_update_uses_identifier_type_and_sends_mutable_attributes() {
         .expect("applied record identifier");
 
         let result = provider
-            .update_route53_record_set(desired.id.clone(), &identifier, desired, &config.schema)
+            .update_route53_record_set(desired.id.clone(), &identifier, desired, schema)
             .await;
         // The capture transport supplies mutation responses; read-back is
         // checked through its request rather than a modeled read response.

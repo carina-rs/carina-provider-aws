@@ -7,7 +7,7 @@ use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{
     ConcreteValue, Resource, ResourceId, State, Value, enum_attr_at_schema_path,
 };
-use carina_core::schema::ResourceSchema;
+use carina_core::schema::CompiledResourceSchema;
 use indexmap::IndexMap;
 
 use crate::AwsProvider;
@@ -68,7 +68,7 @@ impl AwsProvider {
     pub(crate) async fn create_s3_bucket_logging(
         &self,
         resource: &Resource<impl Sized>,
-        schema: &ResourceSchema,
+        schema: &CompiledResourceSchema,
     ) -> ProviderResult<TypedCreateCompletion> {
         let input = S3BucketLoggingCreateInput::decode(resource)?;
         let sent = input.sent();
@@ -111,7 +111,7 @@ impl AwsProvider {
         identifier: &AppliedIdentifier,
         _from: &State,
         to: Resource,
-        schema: &ResourceSchema,
+        schema: &CompiledResourceSchema,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
         let input = S3BucketLoggingUpdateInput::decode(&to)?;
         let crate::send_models_generated::S3BucketLoggingUpdateParts {
@@ -140,7 +140,7 @@ impl AwsProvider {
         target_bucket: String,
         target_object_key_format: Option<&Value>,
         target_prefix: Option<String>,
-        schema: &ResourceSchema,
+        schema: &CompiledResourceSchema,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
         let applied_identifier = bucket;
         let bucket = bucket.as_str();
@@ -202,7 +202,7 @@ impl AwsProvider {
 
 fn build_key_format(
     id: &ResourceId,
-    schema: &ResourceSchema,
+    schema: &CompiledResourceSchema,
     value: &Value,
 ) -> ProviderResult<TargetObjectKeyFormat> {
     let Value::Concrete(ConcreteValue::Map(map)) = value else {
@@ -281,8 +281,8 @@ mod tests {
         ResourceId::with_identity("s3.bucket_logging", "test")
     }
 
-    fn schema() -> ResourceSchema {
-        crate::schemas::generated::s3::bucket_logging::s3_bucket_logging_config().schema
+    fn schema() -> &'static CompiledResourceSchema {
+        crate::test_resource_schema("s3.BucketLogging")
     }
 
     #[test]
@@ -303,7 +303,7 @@ mod tests {
             .collect(),
         ));
 
-        build_key_format(&id(), &schema(), &value)
+        build_key_format(&id(), schema(), &value)
             .expect_err("a non-exact closed-enum leaf must be rejected");
     }
 
@@ -318,7 +318,7 @@ mod tests {
             .collect(),
         ));
 
-        build_key_format(&id(), &schema(), &value)
+        build_key_format(&id(), schema(), &value)
             .expect_err("a present partitioned_prefix must be a map");
     }
 
@@ -333,7 +333,7 @@ mod tests {
             .collect(),
         ));
 
-        let error = build_key_format(&id(), &schema(), &value)
+        let error = build_key_format(&id(), schema(), &value)
             .expect_err("a present simple_prefix must be a map");
         assert!(error.to_string().contains("simple_prefix must be a map"));
     }

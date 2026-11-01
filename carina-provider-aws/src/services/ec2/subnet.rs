@@ -1,7 +1,7 @@
 use carina_core::provider::{AppliedIdentifier, ReadOutcome};
 use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
-use carina_core::schema::ResourceSchema;
+use carina_core::schema::CompiledResourceSchema;
 
 use crate::AwsProvider;
 use crate::aws_operation::ClientToken;
@@ -41,7 +41,7 @@ struct ModifySubnetAttrs {
 #[cfg(test)]
 fn resolve_modify_subnet_enum_attrs(
     resource: &Resource<impl Sized>,
-    schema: &ResourceSchema,
+    schema: &CompiledResourceSchema,
 ) -> ProviderResult<ModifySubnetAttrs> {
     resolve_modify_subnet_attrs(
         &resource.id,
@@ -56,7 +56,7 @@ fn resolve_modify_subnet_enum_attrs(
 
 fn resolve_modify_subnet_attrs(
     id: &ResourceId,
-    schema: &ResourceSchema,
+    schema: &CompiledResourceSchema,
     assign_ipv6_address_on_creation: Option<bool>,
     enable_dns64: Option<bool>,
     enable_lni_at_device_index: Option<i64>,
@@ -255,11 +255,11 @@ impl AwsProvider {
     pub(crate) async fn create_ec2_subnet<A: AwsCreateAttempt>(
         &self,
         resource: &Resource<impl Sized>,
-        schema: &ResourceSchema,
+        schema: &CompiledResourceSchema,
         client_token: &ClientToken,
         attempt: A,
     ) -> Result<A::Step, A::Verdict> {
-        let input = match Ec2SubnetCreateInput::decode(resource) {
+        let input = match Ec2SubnetCreateInput::decode(resource, schema) {
             Ok(input) => input,
             Err(error) => return Err(attempt.untracked(error)),
         };
@@ -412,7 +412,7 @@ impl AwsProvider {
     pub(crate) async fn continue_ec2_subnet_create_with(
         &self,
         id: &ResourceId,
-        schema: &ResourceSchema,
+        schema: &CompiledResourceSchema,
         subnet_id: &str,
         assign_ipv6_address_on_creation: Option<bool>,
         enable_dns64: Option<bool>,
@@ -440,7 +440,7 @@ impl AwsProvider {
         identifier: &AppliedIdentifier,
         from: &State,
         to: Resource,
-        schema: &ResourceSchema,
+        schema: &CompiledResourceSchema,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
         let input = Ec2SubnetUpdateInput::decode(&to)?;
         let crate::send_models_generated::Ec2SubnetUpdateParts {
@@ -609,7 +609,7 @@ mod tests {
 
     #[test]
     fn invalid_hostname_type_is_rejected_during_pre_send_resolution() {
-        let schema = crate::schemas::generated::ec2::subnet::ec2_subnet_config().schema;
+        let schema = crate::test_resource_schema("ec2.Subnet");
         let mut resource = Resource::with_provider("aws", "ec2.Subnet", "test", None);
         let mut options = IndexMap::new();
         options.insert(
@@ -621,7 +621,7 @@ mod tests {
             Value::Concrete(ConcreteValue::Map(options)),
         );
 
-        resolve_modify_subnet_enum_attrs(&resource, &schema)
+        resolve_modify_subnet_enum_attrs(&resource, schema)
             .expect_err("invalid hostname_type must fail before any EC2 mutation");
     }
 
