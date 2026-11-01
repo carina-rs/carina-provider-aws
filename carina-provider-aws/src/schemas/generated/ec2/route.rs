@@ -13,6 +13,7 @@ pub fn ec2_route_config() -> AwsSchemaConfig {
         aws_type_name: "AWS::EC2::Route",
         resource_type_name: "ec2.Route",
         has_tags: false,
+        await_on_read_back: vec![],
         schema: ResourceSchema::new("ec2.Route")
         .with_description("Describes a route in a route table.")
         .with_coexisting_replacement()

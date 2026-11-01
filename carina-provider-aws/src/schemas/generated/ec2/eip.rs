@@ -17,6 +17,7 @@ pub fn ec2_eip_config() -> AwsSchemaConfig {
         aws_type_name: "AWS::EC2::EIP",
         resource_type_name: "ec2.Eip",
         has_tags: true,
+        await_on_read_back: vec![],
         schema: ResourceSchema::new("ec2.Eip")
         .with_description("Describes an Elastic IP address, or a carrier IP address.")
         .with_conflicting_replacement()

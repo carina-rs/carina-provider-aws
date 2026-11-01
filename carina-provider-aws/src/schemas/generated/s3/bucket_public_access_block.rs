@@ -13,6 +13,7 @@ pub fn s3_bucket_public_access_block_config() -> AwsSchemaConfig {
         aws_type_name: "AWS::S3::BucketPublicAccessBlock",
         resource_type_name: "s3.BucketPublicAccessBlock",
         has_tags: false,
+        await_on_read_back: vec![],
         schema: ResourceSchema::new("s3.BucketPublicAccessBlock")
         .with_coexisting_replacement()
         .attribute(

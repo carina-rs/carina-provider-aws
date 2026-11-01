@@ -13,6 +13,7 @@ pub fn s3_bucket_website_configuration_config() -> AwsSchemaConfig {
         aws_type_name: "AWS::S3::BucketWebsiteConfiguration",
         resource_type_name: "s3.BucketWebsiteConfiguration",
         has_tags: false,
+        await_on_read_back: vec![],
         schema: ResourceSchema::new("s3.BucketWebsiteConfiguration")
         .with_coexisting_replacement()
         .attribute(

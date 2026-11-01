@@ -16,8 +16,9 @@ use carina_core::provider::{
 };
 use carina_core::resource::{DataSource, Resource, ResourceId, State, Value};
 use carina_provider_protocol::{
-    DEFAULT_OPERATION_BUDGET, DEFAULT_READ_BACK_BUDGET, DriveError, DriveOutcome, OperationKind,
-    OperationStep, PendingPhase, drive_pending,
+    CompletedOperation, DEFAULT_OPERATION_BUDGET, DEFAULT_READ_BACK_BUDGET, DriveError,
+    DriveOutcome, OperationKind, OperationStep, PendingPhase, PollFinality, PollRequest,
+    drive_pending, drive_pending_infallible,
 };
 use serde::{Deserialize, Serialize};
 
@@ -25,6 +26,10 @@ use crate::AwsProvider;
 use crate::aws_operation::{ClientToken, DecidedOperationError, EC2_CREATE_TOKEN_TAG};
 use crate::error_helpers::{IntoSendFailure, SendFailure};
 use crate::helpers::{CreatePoll, DeletePoll, apply_patch_to_state, provider_retry_allowed};
+use crate::read_back::{
+    NonEmptyAttributeNames, ReadBackCompletion, ReadBackContinuation, ReadBackKind,
+    finish_final_read_back, invalid_read_back,
+};
 
 pub(crate) const POLL_AFTER_SECS: u32 = 5;
 /// Four describe attempts after delays totaling 65 seconds. Each paginated
@@ -173,6 +178,7 @@ impl std::fmt::Display for AwsFailureSummary {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "phase", rename_all = "snake_case")]
 pub enum AwsCreateToken {
+    ReadBack(ReadBackContinuation),
     AcmRequestCertificate {
         client_token: ClientToken,
         first_used_at_unix_secs: u64,
@@ -205,10 +211,24 @@ pub enum AwsCreateToken {
 }
 
 impl AwsCreateToken {
+    pub fn phase(&self) -> PendingPhase {
+        match self {
+            Self::ReadBack(_) => PendingPhase::ReadBack,
+            Self::AcmRequestCertificate { .. }
+            | Self::NatGateway { .. }
+            | Self::TransitGateway { .. }
+            | Self::TransitGatewayAttachment { .. }
+            | Self::OrganizationsAccount { .. }
+            | Self::TaggedEc2 { .. }
+            | Self::TaggedEc2Found { .. } => PendingPhase::Operation,
+        }
+    }
+
     /// Poll cadence that belongs to this exact continuation.
     pub fn poll_after_secs(&self) -> u32 {
         match self {
-            Self::AcmRequestCertificate { .. }
+            Self::ReadBack(_)
+            | Self::AcmRequestCertificate { .. }
             | Self::TaggedEc2Found { .. }
             | Self::NatGateway { .. }
             | Self::TransitGateway { .. }
@@ -220,6 +240,15 @@ impl AwsCreateToken {
         }
     }
 }
+
+/// Update continuations distinguish unsettled mutation work from read-back.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "phase", rename_all = "snake_case")]
+pub enum AwsUpdateToken {
+    ReadBack(ReadBackContinuation),
+}
+
+pub type AwsUpdateStep = OperationStep<UpdateOutcome, ProviderError, AwsUpdateToken>;
 
 /// EC2 resource kinds discoverable by the provider-managed create token tag.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -729,42 +758,36 @@ pub enum AwsDeleteToken {
 
 pub type AwsDeleteStep = OperationStep<(), ProviderError, AwsDeleteToken>;
 
-/// A completed AWS create before it is finished through the caller's v13
-/// typestate handle.
+/// A classified post-mutation read, finished through the caller's typestate handle.
 #[derive(Debug)]
 pub(crate) enum CreateCompletion {
-    Success(AppliedState),
     Partial {
         identifier: AppliedIdentifier,
         attributes: HashMap<String, Value>,
-        reason: String,
-        missing_attributes: Vec<String>,
+        reason: ProviderError,
+        missing_attributes: NonEmptyAttributeNames,
     },
+    ReadBackPending {
+        continuation: ReadBackContinuation,
+        attributes: HashMap<String, Value>,
+        reason: ProviderError,
+        missing_attributes: NonEmptyAttributeNames,
+    },
+    Failed {
+        identifier: AppliedIdentifier,
+        observation: Observation,
+        error: ProviderError,
+    },
+    Success(AppliedState),
 }
 
 pub(crate) type TypedCreateCompletion = (Sent, CreateCompletion);
 
-impl CreateCompletion {
-    pub(crate) fn partial(
-        state: AppliedState,
-        reason: String,
-        missing_attributes: Vec<String>,
-    ) -> Self {
-        let (_id, identifier, attributes) = state.into_parts();
-        Self::Partial {
-            identifier,
-            attributes,
-            reason,
-            missing_attributes,
-        }
-    }
-}
-
 /// Native providers drive pending steps themselves, while the WASM guest
 /// returns one step to the host. These adapters let both paths consume the
-/// same protocol-v13 typestate at the exact AWS classification boundary.
+/// same protocol-v15 typestate at the exact AWS classification boundary.
 #[doc(hidden)]
-pub trait AwsIssuedCreate {
+pub trait AwsIssuedCreate: Sized {
     type Step;
     type Verdict;
 
@@ -773,8 +796,13 @@ pub trait AwsIssuedCreate {
     fn partial(
         self,
         attributes: HashMap<String, Value>,
-        reason: String,
-        missing_attributes: Vec<String>,
+        reason: ProviderError,
+        missing_attributes: NonEmptyAttributeNames,
+    ) -> Result<Self::Step, Self::Verdict>;
+    fn pending_read_back(
+        self,
+        continuation: ReadBackContinuation,
+        poll_after_secs: u32,
     ) -> Result<Self::Step, Self::Verdict>;
     fn failed(self, observation: Observation, error: ProviderError) -> Self::Verdict;
     fn discarded(self, error: ProviderError) -> Self::Verdict;
@@ -825,12 +853,23 @@ pub enum AwsCreatePoll<U, I> {
 }
 
 #[doc(hidden)]
-pub trait AwsResumedCreate {
+pub trait AwsResumedCreate: Sized {
     type Step;
     type Verdict;
 
     fn identifier(&self) -> &AppliedIdentifier;
     fn completed(self, state: AppliedState) -> Result<Self::Step, Self::Verdict>;
+    fn partial(
+        self,
+        attributes: HashMap<String, Value>,
+        reason: ProviderError,
+        missing_attributes: NonEmptyAttributeNames,
+    ) -> Result<Self::Step, Self::Verdict>;
+    fn pending_read_back(
+        self,
+        continuation: ReadBackContinuation,
+        poll_after_secs: u32,
+    ) -> Result<Self::Step, Self::Verdict>;
     fn failed(self, observation: Observation, error: ProviderError) -> Self::Verdict;
     fn discarded(self, error: ProviderError) -> Self::Verdict;
     fn pending(
@@ -965,15 +1004,28 @@ impl AwsIssuedCreate for IssuedCreate {
     fn partial(
         self,
         attributes: HashMap<String, Value>,
-        reason: String,
-        missing_attributes: Vec<String>,
+        reason: ProviderError,
+        missing_attributes: NonEmptyAttributeNames,
     ) -> Result<Self::Step, Self::Verdict> {
-        Ok(
-            match PartialReadDiagnostic::new(reason, missing_attributes) {
-                Some(diagnostic) => CoreCreateStep::Done(self.partial(attributes, diagnostic)),
-                None => CoreCreateStep::Done(self.succeeded(attributes)),
-            },
-        )
+        let Some(diagnostic) =
+            PartialReadDiagnostic::new(reason.to_string(), missing_attributes.into())
+        else {
+            return Err(self.discarded(ProviderError::internal(
+                "read-back partial requires missing attributes",
+            )));
+        };
+        Ok(CoreCreateStep::Done(self.partial(attributes, diagnostic)))
+    }
+
+    fn pending_read_back(
+        self,
+        continuation: ReadBackContinuation,
+        poll_after_secs: u32,
+    ) -> Result<Self::Step, Self::Verdict> {
+        Ok(CoreCreateStep::Pending(self.pending_read_back(
+            encode_create_token(&AwsCreateToken::ReadBack(continuation)),
+            poll_after_secs,
+        )))
     }
 
     fn failed(self, observation: Observation, error: ProviderError) -> Self::Verdict {
@@ -996,8 +1048,13 @@ impl AwsIssuedCreate for IssuedCreate {
 
     fn preserve(self, token: AwsCreateToken, error: ProviderError) -> Self::Verdict {
         let poll_after_secs = token.poll_after_secs();
-        self.pending(encode_create_token(&token), poll_after_secs)
-            .preserve(error)
+        if token.phase() == PendingPhase::ReadBack {
+            self.pending_read_back(encode_create_token(&token), poll_after_secs)
+                .preserve(error)
+        } else {
+            self.pending(encode_create_token(&token), poll_after_secs)
+                .preserve(error)
+        }
     }
 }
 
@@ -1041,6 +1098,32 @@ impl AwsResumedCreate for ResumedCreate {
         Ok(CoreResumeStep::Done(self.completed(state)))
     }
 
+    fn partial(
+        self,
+        attributes: HashMap<String, Value>,
+        reason: ProviderError,
+        missing_attributes: NonEmptyAttributeNames,
+    ) -> Result<Self::Step, Self::Verdict> {
+        let Some(diagnostic) =
+            PartialReadDiagnostic::new(reason.to_string(), missing_attributes.into())
+        else {
+            return Err(self.discarded(ProviderError::internal(
+                "read-back partial requires missing attributes",
+            )));
+        };
+        Ok(CoreResumeStep::Done(self.partial(attributes, diagnostic)))
+    }
+
+    fn pending_read_back(
+        self,
+        continuation: ReadBackContinuation,
+        _poll_after_secs: u32,
+    ) -> Result<Self::Step, Self::Verdict> {
+        Ok(CoreResumeStep::Pending(Box::new(self.repend(
+            encode_create_token(&AwsCreateToken::ReadBack(continuation)),
+        ))))
+    }
+
     fn failed(self, observation: Observation, error: ProviderError) -> Self::Verdict {
         self.failed(observation, error)
     }
@@ -1080,30 +1163,29 @@ async fn drive_operation<T, Tok, Initial, Poll, PollFuture, Sleep, SleepFuture>(
     id: &ResourceId,
     kind: OperationKind,
     budget: Duration,
+    read_back_budget: Duration,
     initial: Initial,
     mut poll: Poll,
     sleep: Sleep,
-) -> ProviderResult<T>
+) -> ProviderResult<CompletedOperation<T>>
 where
     Tok: Clone,
     Initial: Future<Output = ProviderResult<OperationStep<T, ProviderError, Tok>>>,
-    Poll: FnMut(Tok) -> PollFuture,
+    Poll: FnMut(Tok, PollRequest) -> PollFuture,
     PollFuture: Future<Output = ProviderResult<OperationStep<T, ProviderError, Tok>>>,
     Sleep: FnMut(Duration) -> SleepFuture,
     SleepFuture: Future<Output = ()>,
 {
-    // Existing continuations stay in the operation phase, so the required
-    // read-back budget uses the protocol default and never becomes active.
     match drive_pending(
         budget,
-        DEFAULT_READ_BACK_BUDGET,
+        read_back_budget,
         initial,
-        |token, _finality| poll(token),
+        |token, finality| poll(token, PollRequest { finality }),
         sleep,
     )
     .await
     {
-        Ok(DriveOutcome::Done(value)) => Ok(value.into_output()),
+        Ok(DriveOutcome::Done(value)) => Ok(value),
         Ok(DriveOutcome::Verdict(error)) => Err(error),
         Ok(DriveOutcome::OverBudget {
             last_pending: _last_pending,
@@ -1127,27 +1209,47 @@ where
     }
 }
 
+fn native_create_step(
+    step: Result<CoreCreateStep, CreateFailure>,
+) -> OperationStep<CreateOutcome, CreateFailure, PendingCreate> {
+    match step {
+        Ok(CoreCreateStep::Done(done)) => OperationStep::Done(done),
+        Ok(CoreCreateStep::Pending(pending)) => OperationStep::Pending {
+            poll_after_secs: pending.poll_after_secs(),
+            phase: pending.phase(),
+            pending,
+        },
+        Err(error) => OperationStep::Verdict(error),
+    }
+}
+
+struct NativeResumePending {
+    resume: Box<Resume>,
+    token: AwsCreateToken,
+}
+
+fn native_resume_step(
+    step: Result<CoreResumeStep, ResumeFailure>,
+) -> OperationStep<ResumeOutcome, ResumeFailure, NativeResumePending> {
+    match step {
+        Ok(CoreResumeStep::Done(done)) => OperationStep::Done(done),
+        Ok(CoreResumeStep::Pending(resume)) => match decode_create_token(resume.token()) {
+            Ok(token) => OperationStep::Pending {
+                poll_after_secs: token.poll_after_secs(),
+                phase: token.phase(),
+                pending: NativeResumePending { resume, token },
+            },
+            Err(error) => OperationStep::Verdict(resume.preserve(error)),
+        },
+        Err(error) => OperationStep::Verdict(error),
+    }
+}
+
 impl AwsProvider {
     fn operation_budget(&self, resource_type: &str, kind: OperationKind) -> Duration {
         self.resource_schema(resource_type)
             .and_then(|schema| schema.operation_config())
             .map_or(DEFAULT_OPERATION_BUDGET, |config| config.budget(kind))
-    }
-
-    fn read_back_diagnostic(
-        &self,
-        id: &ResourceId,
-        reason: impl Into<String>,
-    ) -> (String, Vec<String>) {
-        let mut missing_attributes = self
-            .resource_schema(id.resource_type.as_str())
-            .map(|schema| schema.attributes().keys().cloned().collect::<Vec<_>>())
-            .unwrap_or_default();
-        missing_attributes.sort();
-        if missing_attributes.is_empty() {
-            missing_attributes.push("state".to_string());
-        }
-        (reason.into(), missing_attributes)
     }
 
     pub(crate) fn create_outcome_from_read(
@@ -1157,41 +1259,17 @@ impl AwsProvider {
         attributes: HashMap<String, Value>,
         outcome: ProviderResult<ReadOutcome>,
     ) -> CreateCompletion {
-        let reason = match outcome {
-            Ok(ReadOutcome::Found { state }) => {
-                return CreateCompletion::Success(state);
-            }
-            Ok(ReadOutcome::NotFound { .. }) => {
-                "post-create read-back did not find the created resource".to_string()
-            }
-            Err(error) => format!("post-create read-back failed: {error}"),
+        let requirements = match self.declared_read_back_requirements(id, &attributes) {
+            Ok(requirements) => requirements,
+            Err(error) => return invalid_read_back(id, identifier, error),
         };
-        let (reason, missing_attributes) = self.read_back_diagnostic(id, reason);
-        CreateCompletion::Partial {
-            identifier,
-            attributes,
-            reason,
-            missing_attributes,
-        }
+        self.classify_read_back(id, identifier, attributes, outcome, requirements)
     }
 
-    fn update_outcome_from_read(
-        &self,
-        id: &ResourceId,
-        identifier: AppliedIdentifier,
-        attributes: std::collections::HashMap<String, carina_core::resource::Value>,
-        outcome: ProviderResult<ReadOutcome>,
-    ) -> UpdateOutcome {
-        let reason = match outcome {
-            Ok(ReadOutcome::Found { state }) => return UpdateOutcome::success(state),
-            Ok(ReadOutcome::NotFound { .. }) => {
-                "post-update read-back did not find the updated resource".to_string()
-            }
-            Err(error) => format!("post-update read-back failed: {error}"),
-        };
-        let state = crate::read_model::partial_applied_state(id.clone(), identifier, attributes);
-        let (reason, missing_attributes) = self.read_back_diagnostic(id, reason);
-        UpdateOutcome::partial_success(state, reason, missing_attributes)
+    fn read_back_budget(&self, resource_type: &str) -> Duration {
+        self.resource_schema(resource_type)
+            .and_then(|schema| schema.operation_config())
+            .map_or(DEFAULT_READ_BACK_BUDGET, |config| config.read_back_budget())
     }
 
     async fn request_acm_certificate_transition(
@@ -1287,13 +1365,14 @@ impl AwsProvider {
         resource: &Resource<impl Sized>,
         schema: &carina_core::schema::ResourceSchema,
         identifier: AppliedIdentifier,
+        poll_request: PollRequest,
         issued: I,
     ) -> Result<I::Step, I::Verdict> {
         match self
             .continue_acm_certificate_create(resource, schema, identifier)
             .await
         {
-            Ok(completion) => self.finish_issued(issued, completion),
+            Ok(completion) => self.finish_issued(issued, completion, poll_request),
             Err(error) => Err(self.failed_issued(&resource.id, issued, error).await),
         }
     }
@@ -1303,13 +1382,14 @@ impl AwsProvider {
         resource: &Resource<impl Sized>,
         schema: &carina_core::schema::ResourceSchema,
         identifier: AppliedIdentifier,
+        poll_request: PollRequest,
         resumed: R,
     ) -> Result<R::Step, R::Verdict> {
         match self
             .continue_acm_certificate_create(resource, schema, identifier)
             .await
         {
-            Ok(completion) => self.finish_resumed_completion(&resource.id, resumed, completion),
+            Ok(completion) => self.finish_resumed_completion(resumed, completion, poll_request),
             Err(error) => Err(self.failed_resumed(&resource.id, resumed, error).await),
         }
     }
@@ -1325,6 +1405,9 @@ impl AwsProvider {
                 let (_id, identifier, attributes) = state.into_parts();
                 attempt.issued(identifier, sent).succeeded(attributes)
             }
+            Ok(CreateCompletion::ReadBackPending { continuation, .. }) => attempt
+                .issued(continuation.identifier().clone(), sent)
+                .pending_read_back(continuation, POLL_AFTER_SECS),
             Ok(CreateCompletion::Partial {
                 identifier,
                 attributes,
@@ -1333,6 +1416,11 @@ impl AwsProvider {
             }) => attempt
                 .issued(identifier, sent)
                 .partial(attributes, reason, missing_attributes),
+            Ok(CreateCompletion::Failed {
+                identifier,
+                observation,
+                error,
+            }) => Err(attempt.issued(identifier, sent).failed(observation, error)),
             Err(error) => Err(attempt.untracked(error)),
         }
     }
@@ -1352,17 +1440,37 @@ impl AwsProvider {
         &self,
         issued: I,
         completion: CreateCompletion,
+        poll_request: PollRequest,
+    ) -> Result<I::Step, I::Verdict> {
+        match (poll_request.finality, completion) {
+            (PollFinality::Continue, CreateCompletion::ReadBackPending { continuation, .. }) => {
+                issued.pending_read_back(continuation, POLL_AFTER_SECS)
+            }
+            (PollFinality::Continue | PollFinality::FinalAttempt, completion) => {
+                self.finish_issued_completion(issued, finish_final_read_back(completion))
+            }
+        }
+    }
+
+    /// The final-attempt branch can only reach this terminal-only consumer.
+    fn finish_issued_completion<I: AwsIssuedCreate>(
+        &self,
+        issued: I,
+        completion: ReadBackCompletion,
     ) -> Result<I::Step, I::Verdict> {
         match completion {
-            CreateCompletion::Success(state) => {
+            ReadBackCompletion::Failed { observation, error } => {
+                Err(issued.failed(observation, error))
+            }
+            ReadBackCompletion::Success(state) => {
                 let (_id, _identifier, attributes) = state.into_parts();
                 issued.succeeded(attributes)
             }
-            CreateCompletion::Partial {
-                identifier: _identifier,
+            ReadBackCompletion::Partial {
                 attributes,
                 reason,
                 missing_attributes,
+                ..
             } => issued.partial(attributes, reason, missing_attributes),
         }
     }
@@ -1492,8 +1600,16 @@ impl AwsProvider {
             Err(error) => return Err(attempt.untracked(error)),
         };
         let issued = attempt.issued(identifier.clone(), sent);
-        self.finish_tagged_ec2_issued(resource, create, identifier, issued)
-            .await
+        self.finish_tagged_ec2_issued(
+            resource,
+            create,
+            identifier,
+            issued,
+            PollRequest {
+                finality: PollFinality::Continue,
+            },
+        )
+        .await
     }
 
     fn tagged_ec2_discovery_call_error<E>(
@@ -1839,13 +1955,14 @@ impl AwsProvider {
         create: TaggedEc2Create,
         identifier: AppliedIdentifier,
         issued: I,
+        poll_request: PollRequest,
     ) -> Result<I::Step, I::Verdict> {
         match self
             .continue_tagged_ec2_create(resource, create, identifier)
             .await
         {
             Ok(TaggedEc2Continuation::Complete(completion)) => {
-                self.finish_issued(issued, completion)
+                self.finish_issued(issued, completion, poll_request)
             }
             Ok(TaggedEc2Continuation::Pending(token)) => issued.pending(token, POLL_AFTER_SECS),
             Err(error) => Err(self.failed_issued(&resource.id, issued, error).await),
@@ -1858,6 +1975,7 @@ impl AwsProvider {
         kind: Ec2TaggedResourceKind,
         identifier: AppliedIdentifier,
         resumed: R,
+        poll_request: PollRequest,
     ) -> Result<R::Step, R::Verdict> {
         let create = match TaggedEc2Create::decode_resumed(kind, resource) {
             Ok(create) => create,
@@ -1868,7 +1986,7 @@ impl AwsProvider {
             .await
         {
             Ok(TaggedEc2Continuation::Complete(completion)) => {
-                self.finish_resumed_completion(&resource.id, resumed, completion)
+                self.finish_resumed_completion(resumed, completion, poll_request)
             }
             Ok(TaggedEc2Continuation::Pending(token)) => resumed.pending(token, POLL_AFTER_SECS),
             Err(error) => Err(self.failed_resumed(&resource.id, resumed, error).await),
@@ -1966,8 +2084,16 @@ impl AwsProvider {
                 {
                     InitialAcmRequestTransition::Issued(identifier, sent) => {
                         let issued = attempt.issued(identifier.clone(), sent);
-                        self.finish_acm_certificate_issued(resource, schema, identifier, issued)
-                            .await
+                        self.finish_acm_certificate_issued(
+                            resource,
+                            schema,
+                            identifier,
+                            PollRequest {
+                                finality: PollFinality::Continue,
+                            },
+                            issued,
+                        )
+                        .await
                     }
                     InitialAcmRequestTransition::Pending(token, sent) => {
                         attempt.pending(token, sent, POLL_AFTER_SECS)
@@ -2124,9 +2250,31 @@ impl AwsProvider {
         resource: &Resource<impl Sized>,
         token: AwsCreateToken,
         poll: AwsCreatePoll<U, U::Issued>,
+        poll_request: PollRequest,
     ) -> Result<U::Step, U::Verdict> {
         let id = &resource.id;
         match token {
+            AwsCreateToken::ReadBack(continuation) => {
+                let issued = match poll {
+                    AwsCreatePoll::Unissued(attempt) => {
+                        return Err(attempt.preserve(
+                            AwsCreateToken::ReadBack(continuation),
+                            ProviderError::internal(
+                                "read-back requires an issued create identifier",
+                            )
+                            .for_resource(id.clone()),
+                        ));
+                    }
+                    AwsCreatePoll::Issued(issued) => issued,
+                };
+                if let Err(error) = continuation.validate(id, issued.identifier()) {
+                    return Err(issued.preserve(AwsCreateToken::ReadBack(continuation), error));
+                }
+                let completion = self
+                    .read_back_by_identifier(resource, &continuation, ReadBackKind::Create)
+                    .await;
+                self.finish_issued(issued, completion, poll_request)
+            }
             AwsCreateToken::AcmRequestCertificate {
                 client_token,
                 first_used_at_unix_secs,
@@ -2184,8 +2332,14 @@ impl AwsProvider {
                 {
                     AcmResendTransition::Issued(identifier) => {
                         let issued = attempt.issued(identifier.clone());
-                        self.finish_acm_certificate_issued(resource, schema, identifier, issued)
-                            .await
+                        self.finish_acm_certificate_issued(
+                            resource,
+                            schema,
+                            identifier,
+                            poll_request,
+                            issued,
+                        )
+                        .await
                     }
                     AcmResendTransition::Pending(token) => attempt.pending(token, POLL_AFTER_SECS),
                     AcmResendTransition::InFlight(error) => {
@@ -2228,7 +2382,7 @@ impl AwsProvider {
                             resource.resolved_attributes(),
                             outcome,
                         );
-                        self.finish_issued(issued, completion)
+                        self.finish_issued(issued, completion, poll_request)
                     }
                     CreatePoll::Failed => Err(issued.discarded(
                         ProviderError::api_error("NAT gateway creation failed")
@@ -2261,7 +2415,7 @@ impl AwsProvider {
                             resource.resolved_attributes(),
                             outcome,
                         );
-                        self.finish_issued(issued, completion)
+                        self.finish_issued(issued, completion, poll_request)
                     }
                     CreatePoll::Failed => Err(issued.discarded(
                         ProviderError::api_error("Transit gateway creation failed")
@@ -2296,7 +2450,7 @@ impl AwsProvider {
                             resource.resolved_attributes(),
                             outcome,
                         );
-                        self.finish_issued(issued, completion)
+                        self.finish_issued(issued, completion, poll_request)
                     }
                     CreatePoll::Failed => Err(issued.discarded(
                         ProviderError::api_error("Transit gateway attachment creation failed")
@@ -2355,7 +2509,7 @@ impl AwsProvider {
                             )
                             .await
                         {
-                            Ok(completion) => self.finish_issued(issued, completion),
+                            Ok(completion) => self.finish_issued(issued, completion, poll_request),
                             Err(error) => Err(self.failed_issued(id, issued, error).await),
                         }
                     }
@@ -2440,10 +2594,75 @@ impl AwsProvider {
                         return Err(self.failed_issued(&resource.id, issued, error).await);
                     }
                 };
-                self.finish_tagged_ec2_issued(resource, create, identifier, issued)
+                self.finish_tagged_ec2_issued(resource, create, identifier, issued, poll_request)
                     .await
             }
         }
+    }
+
+    #[cfg(any(test, feature = "test-utils"))]
+    #[doc(hidden)]
+    pub fn with_operation_config_for_test(
+        mut self,
+        resource_type: &str,
+        config: carina_provider_protocol::types::OperationConfig,
+    ) -> Self {
+        let schema = self
+            .resource_schema(resource_type)
+            .expect("known test resource")
+            .clone()
+            .with_operation_config(config);
+        self.schema_registry
+            .insert("aws", schema.validate().expect("valid budget override"));
+        self
+    }
+
+    #[cfg(feature = "test-utils")]
+    #[doc(hidden)]
+    pub async fn create_with_poll_sleep_for_test<Sleep, SleepFuture>(
+        &self,
+        resource: &Resource<impl Sized>,
+        attempt: CreateAttempt,
+        sleep: Sleep,
+    ) -> Result<CreateOutcome, CreateFailure>
+    where
+        Sleep: FnMut(Duration) -> SleepFuture,
+        SleepFuture: Future<Output = ()>,
+    {
+        self.drive_native_create_with_sleep(resource, attempt, sleep)
+            .await
+    }
+
+    #[cfg(feature = "test-utils")]
+    #[doc(hidden)]
+    pub async fn resume_with_poll_sleep_for_test<Sleep, SleepFuture>(
+        &self,
+        request: ResumeCreateRequest,
+        sleep: Sleep,
+    ) -> Result<ResumeOutcome, ResumeFailure>
+    where
+        Sleep: FnMut(Duration) -> SleepFuture,
+        SleepFuture: Future<Output = ()>,
+    {
+        self.drive_native_resume_with_sleep(request, sleep).await
+    }
+
+    #[cfg(feature = "test-utils")]
+    #[doc(hidden)]
+    pub async fn update_with_poll_sleep_for_test<Sleep, SleepFuture>(
+        &self,
+        id: &ResourceId,
+        identifier: &AppliedIdentifier,
+        from: &State,
+        patch: &UpdatePatch,
+        sleep: Sleep,
+    ) -> ProviderResult<UpdateOutcome>
+    where
+        Sleep: FnMut(Duration) -> SleepFuture,
+        SleepFuture: Future<Output = ()>,
+    {
+        self.update_with_patch_and_sleep(id, identifier, from, patch, sleep)
+            .await
     }
 
     async fn drive_native_create(
@@ -2451,37 +2670,63 @@ impl AwsProvider {
         resource: &Resource<impl Sized>,
         attempt: CreateAttempt,
     ) -> Result<CreateOutcome, CreateFailure> {
+        self.drive_native_create_with_sleep(resource, attempt, tokio::time::sleep)
+            .await
+    }
+
+    async fn drive_native_create_with_sleep<Sleep, SleepFuture>(
+        &self,
+        resource: &Resource<impl Sized>,
+        attempt: CreateAttempt,
+        sleep: Sleep,
+    ) -> Result<CreateOutcome, CreateFailure>
+    where
+        Sleep: FnMut(Duration) -> SleepFuture,
+        SleepFuture: Future<Output = ()>,
+    {
         let budget =
             self.operation_budget(resource.id.resource_type.as_str(), OperationKind::Create);
-        let started = std::time::Instant::now();
-        let mut step = self.create_step(resource, attempt).await?;
-        loop {
-            let pending = match step {
-                CoreCreateStep::Done(outcome) => return Ok(outcome),
-                CoreCreateStep::Pending(pending) => pending,
-            };
-            if started.elapsed() >= budget {
-                return Err(pending.preserve(
-                    ProviderError::timeout(format!(
-                        "create of {} did not finish within {budget:?}",
-                        resource.id.resource_type
+        let read_back_budget = self.read_back_budget(resource.id.resource_type.as_str());
+        let outcome = drive_pending_infallible(
+            budget,
+            read_back_budget,
+            async { native_create_step(Box::pin(self.create_step(resource, attempt)).await) },
+            |pending: PendingCreate, finality| async move {
+                let token = match decode_create_token(pending.token()) {
+                    Ok(token) => token,
+                    Err(error) => return OperationStep::Verdict(pending.preserve(error)),
+                };
+                let poll = match pending.into_poll() {
+                    Poll::Unissued(attempt) => AwsCreatePoll::Unissued(attempt),
+                    Poll::Issued(issued) => AwsCreatePoll::Issued(issued),
+                };
+                native_create_step(
+                    Box::pin(self.poll_create_step(
+                        resource,
+                        token,
+                        poll,
+                        PollRequest { finality },
                     ))
+                    .await,
+                )
+            },
+            sleep,
+        )
+        .await;
+        match outcome {
+            DriveOutcome::Done(done) => Ok(CreateOutcome::from_host_completion(done)),
+            DriveOutcome::Verdict(error) => Err(error),
+            DriveOutcome::OverBudget { last_pending } => Err(last_pending.preserve(
+                ProviderError::timeout(format!(
+                    "create of {} did not finish within {budget:?}",
+                    resource.id.resource_type
+                ))
+                .for_resource(resource.id.clone()),
+            )),
+            DriveOutcome::ProtocolViolation { last_pending } => Err(last_pending.preserve(
+                ProviderError::internal("AWS create returned an invalid pending phase")
                     .for_resource(resource.id.clone()),
-                ));
-            }
-            let remaining = budget.saturating_sub(started.elapsed());
-            let delay = Duration::from_secs(u64::from(pending.poll_after_secs().clamp(1, 300)))
-                .min(remaining);
-            tokio::time::sleep(delay).await;
-            let token = match decode_create_token(pending.token()) {
-                Ok(token) => token,
-                Err(error) => return Err(pending.preserve(error)),
-            };
-            let poll = match pending.into_poll() {
-                Poll::Unissued(attempt) => AwsCreatePoll::Unissued(attempt),
-                Poll::Issued(issued) => AwsCreatePoll::Issued(issued),
-            };
-            step = self.poll_create_step(resource, token, poll).await?;
+            )),
         }
     }
 
@@ -2501,42 +2746,53 @@ impl AwsProvider {
 
     fn finish_resumed_completion<R: AwsResumedCreate>(
         &self,
-        id: &ResourceId,
         resumed: R,
         completion: CreateCompletion,
+        poll_request: PollRequest,
+    ) -> Result<R::Step, R::Verdict> {
+        match (poll_request.finality, completion) {
+            (PollFinality::Continue, CreateCompletion::ReadBackPending { continuation, .. }) => {
+                resumed.pending_read_back(continuation, POLL_AFTER_SECS)
+            }
+            (PollFinality::Continue | PollFinality::FinalAttempt, completion) => {
+                self.finish_resumed_terminal(resumed, finish_final_read_back(completion))
+            }
+        }
+    }
+
+    fn finish_resumed_terminal<R: AwsResumedCreate>(
+        &self,
+        resumed: R,
+        completion: ReadBackCompletion,
     ) -> Result<R::Step, R::Verdict> {
         match completion {
-            CreateCompletion::Success(state) => resumed.completed(state),
-            CreateCompletion::Partial {
-                identifier: _identifier,
-                attributes: _attributes,
+            ReadBackCompletion::Success(state) => resumed.completed(state),
+            ReadBackCompletion::Partial {
+                attributes,
                 reason,
-                missing_attributes: _missing_attributes,
-            } => {
-                let observation_error =
-                    ProviderError::api_error(reason.clone()).for_resource(id.clone());
-                Err(resumed.failed(
-                    Observation::ReadFailed(observation_error),
-                    ProviderError::api_error(reason).for_resource(id.clone()),
-                ))
+                missing_attributes,
+                ..
+            } => resumed.partial(attributes, reason, missing_attributes),
+            ReadBackCompletion::Failed { observation, error } => {
+                Err(resumed.failed(observation, error))
             }
         }
     }
 
     async fn complete_resumed_read<R: AwsResumedCreate>(
         &self,
+        resource: &Resource<impl Sized>,
         resumed: R,
-        token: AwsCreateToken,
         outcome: ProviderResult<ReadOutcome>,
+        poll_request: PollRequest,
     ) -> Result<R::Step, R::Verdict> {
-        // EC2 describe APIs are eventually consistent after a create. Keep an
-        // absent resource and transient read failures pending during resume;
-        // discarding the persisted record could let the next apply issue a
-        // duplicate create.
-        match outcome {
-            Ok(ReadOutcome::Found { state }) => resumed.completed(state),
-            Ok(ReadOutcome::NotFound { id: _ }) | Err(_) => resumed.pending(token, POLL_AFTER_SECS),
-        }
+        let completion = self.create_outcome_from_read(
+            &resource.id,
+            resumed.identifier().clone(),
+            resource.resolved_attributes(),
+            outcome,
+        );
+        self.finish_resumed_completion(resumed, completion, poll_request)
     }
 
     /// Perform one step while resuming a create loaded from state.
@@ -2545,9 +2801,31 @@ impl AwsProvider {
         resource: &Resource<impl Sized>,
         token: AwsCreateToken,
         resume: AwsCreateResume<U, U::Resumed>,
+        poll_request: PollRequest,
     ) -> Result<U::Step, U::Verdict> {
         let id = &resource.id;
         match token {
+            AwsCreateToken::ReadBack(continuation) => {
+                let resumed = match resume {
+                    AwsCreateResume::Unissued(attempt) => {
+                        return Err(attempt.preserve(
+                            AwsCreateToken::ReadBack(continuation),
+                            ProviderError::internal(
+                                "read-back requires an issued resume identifier",
+                            )
+                            .for_resource(id.clone()),
+                        ));
+                    }
+                    AwsCreateResume::Issued(resumed) => resumed,
+                };
+                if let Err(error) = continuation.validate(id, resumed.identifier()) {
+                    return Err(resumed.preserve(AwsCreateToken::ReadBack(continuation), error));
+                }
+                let completion = self
+                    .read_back_by_identifier(resource, &continuation, ReadBackKind::Create)
+                    .await;
+                self.finish_resumed_completion(resumed, completion, poll_request)
+            }
             AwsCreateToken::AcmRequestCertificate {
                 client_token,
                 first_used_at_unix_secs,
@@ -2606,8 +2884,14 @@ impl AwsProvider {
                 {
                     AcmResendTransition::Issued(identifier) => {
                         let resumed = attempt.issued(identifier.clone());
-                        self.finish_acm_certificate_resumed(resource, schema, identifier, resumed)
-                            .await
+                        self.finish_acm_certificate_resumed(
+                            resource,
+                            schema,
+                            identifier,
+                            poll_request,
+                            resumed,
+                        )
+                        .await
                     }
                     AcmResendTransition::Pending(token) => attempt.pending(token, POLL_AFTER_SECS),
                     AcmResendTransition::InFlight(error) => {
@@ -2644,7 +2928,8 @@ impl AwsProvider {
                             return Err(self.failed_resumed(id, resumed, error).await);
                         }
                         let outcome = self.read_ec2_nat_gateway(id, &nat_gateway_id).await;
-                        self.complete_resumed_read(resumed, token, outcome).await
+                        self.complete_resumed_read(resource, resumed, outcome, poll_request)
+                            .await
                     }
                     CreatePoll::Failed => Err(resumed.discarded(
                         ProviderError::api_error("NAT gateway creation failed")
@@ -2673,7 +2958,8 @@ impl AwsProvider {
                 match status {
                     CreatePoll::Ready(()) => {
                         let outcome = self.read_ec2_transit_gateway(id, &transit_gateway_id).await;
-                        self.complete_resumed_read(resumed, token, outcome).await
+                        self.complete_resumed_read(resource, resumed, outcome, poll_request)
+                            .await
                     }
                     CreatePoll::Failed => Err(resumed.discarded(
                         ProviderError::api_error("Transit gateway creation failed")
@@ -2702,7 +2988,8 @@ impl AwsProvider {
                         let outcome = self
                             .read_ec2_transit_gateway_attachment(id, &attachment_id)
                             .await;
-                        self.complete_resumed_read(resumed, token, outcome).await
+                        self.complete_resumed_read(resource, resumed, outcome, poll_request)
+                            .await
                     }
                     CreatePoll::Failed => Err(resumed.discarded(
                         ProviderError::api_error("Transit gateway attachment creation failed")
@@ -2762,7 +3049,7 @@ impl AwsProvider {
                             .await
                         {
                             Ok(completion) => {
-                                self.finish_resumed_completion(id, resumed, completion)
+                                self.finish_resumed_completion(resumed, completion, poll_request)
                             }
                             Err(error) => Err(self.failed_resumed(id, resumed, error).await),
                         }
@@ -2848,7 +3135,7 @@ impl AwsProvider {
                     AwsCreateResume::Unissued(attempt) => attempt.issued(identifier.clone()),
                     AwsCreateResume::Issued(resumed) => resumed,
                 };
-                self.finish_tagged_ec2_resumed(resource, kind, identifier, resumed)
+                self.finish_tagged_ec2_resumed(resource, kind, identifier, resumed, poll_request)
                     .await
             }
         }
@@ -2858,47 +3145,80 @@ impl AwsProvider {
         &self,
         request: ResumeCreateRequest,
     ) -> Result<ResumeOutcome, ResumeFailure> {
+        self.drive_native_resume_with_sleep(request, tokio::time::sleep)
+            .await
+    }
+
+    async fn drive_native_resume_with_sleep<Sleep, SleepFuture>(
+        &self,
+        request: ResumeCreateRequest,
+        sleep: Sleep,
+    ) -> Result<ResumeOutcome, ResumeFailure>
+    where
+        Sleep: FnMut(Duration) -> SleepFuture,
+        SleepFuture: Future<Output = ()>,
+    {
         let budget =
             self.operation_budget(request.id().resource_type.as_str(), OperationKind::Create);
-        let started = std::time::Instant::now();
+        let read_back_budget = self.read_back_budget(request.id().resource_type.as_str());
         let (resume, create_request) = request.into_parts();
-        let resource = create_request.resource().as_resource().clone();
-        let token = match decode_create_token(resume.token()) {
-            Ok(token) => token,
-            Err(error) => return Err(resume.preserve(error)),
-        };
-        let resume = match resume {
-            Resume::Unissued(attempt) => AwsCreateResume::Unissued(attempt),
-            Resume::Issued(resumed) => AwsCreateResume::Issued(resumed),
-        };
-        let mut step = self.resume_create_step(&resource, token, resume).await?;
-        loop {
-            let next = match step {
-                CoreResumeStep::Done(outcome) => return Ok(outcome),
-                CoreResumeStep::Pending(resume) => *resume,
-            };
-            if started.elapsed() >= budget {
-                return Err(next.preserve(
-                    ProviderError::timeout(format!(
-                        "create of {} did not finish within {budget:?}",
-                        resource.id.resource_type
-                    ))
+        let resource = create_request.resource().as_resource();
+        let outcome = drive_pending_infallible(
+            budget,
+            read_back_budget,
+            async {
+                let token = match decode_create_token(resume.token()) {
+                    Ok(token) => token,
+                    Err(error) => return OperationStep::Verdict(resume.preserve(error)),
+                };
+                let resume = match resume {
+                    Resume::Unissued(attempt) => AwsCreateResume::Unissued(attempt),
+                    Resume::Issued(resumed) => AwsCreateResume::Issued(resumed),
+                };
+                native_resume_step(
+                    self.resume_create_step(
+                        resource,
+                        token,
+                        resume,
+                        PollRequest {
+                            finality: PollFinality::Continue,
+                        },
+                    )
+                    .await,
+                )
+            },
+            |pending: NativeResumePending, finality| async move {
+                let resume = match *pending.resume {
+                    Resume::Unissued(attempt) => AwsCreateResume::Unissued(attempt),
+                    Resume::Issued(resumed) => AwsCreateResume::Issued(resumed),
+                };
+                native_resume_step(
+                    self.resume_create_step(
+                        resource,
+                        pending.token,
+                        resume,
+                        PollRequest { finality },
+                    )
+                    .await,
+                )
+            },
+            sleep,
+        )
+        .await;
+        match outcome {
+            DriveOutcome::Done(done) => Ok(ResumeOutcome::from_host_completion(done)),
+            DriveOutcome::Verdict(error) => Err(error),
+            DriveOutcome::OverBudget { last_pending } => Err(last_pending.resume.preserve(
+                ProviderError::timeout(format!(
+                    "create of {} did not finish within {budget:?}",
+                    resource.id.resource_type
+                ))
+                .for_resource(resource.id.clone()),
+            )),
+            DriveOutcome::ProtocolViolation { last_pending } => Err(last_pending.resume.preserve(
+                ProviderError::internal("AWS resume returned an invalid pending phase")
                     .for_resource(resource.id.clone()),
-                ));
-            }
-            let token = match decode_create_token(next.token()) {
-                Ok(token) => token,
-                Err(error) => return Err(next.preserve(error)),
-            };
-            let remaining = budget.saturating_sub(started.elapsed());
-            let delay = Duration::from_secs(u64::from(token.poll_after_secs().clamp(1, 300)))
-                .min(remaining);
-            tokio::time::sleep(delay).await;
-            let resume = match next {
-                Resume::Unissued(attempt) => AwsCreateResume::Unissued(attempt),
-                Resume::Issued(resumed) => AwsCreateResume::Issued(resumed),
-            };
-            step = self.resume_create_step(&resource, token, resume).await?;
+            )),
         }
     }
 
@@ -2919,13 +3239,13 @@ impl AwsProvider {
     /// This is also the WASM guest bridge entry point. The bridge receives the
     /// protocol request's current state and patch separately, while native core
     /// calls reach the same body through [`Provider::update`].
-    pub async fn update_with_patch(
+    pub async fn update_step(
         &self,
         id: &ResourceId,
         identifier: &AppliedIdentifier,
         from: &State,
         patch: &UpdatePatch,
-    ) -> ProviderResult<UpdateOutcome> {
+    ) -> ProviderResult<AwsUpdateStep> {
         let id = id.clone();
         // The aws provider's per-resource `update_*` methods predate the
         // Level 3 patch contract and accept a full `to: Resource`.
@@ -3078,8 +3398,26 @@ impl AwsProvider {
                     .await
             }
             "acm.Certificate" => {
-                self.update_acm_certificate(id, identifier, from, to, schema)
-                    .await
+                self.update_acm_certificate(id.clone(), identifier, from, to, schema)
+                    .await?;
+                let requirements =
+                    self.declared_read_back_requirements(&id, &partial_attributes)?;
+                let completion = self
+                    .observe_read_back(
+                        &id,
+                        identifier.clone(),
+                        partial_attributes,
+                        requirements,
+                        ReadBackKind::Update,
+                    )
+                    .await;
+                return self.finish_update_read_back(
+                    &id,
+                    completion,
+                    PollRequest {
+                        finality: PollFinality::Continue,
+                    },
+                );
             }
             "sqs.Queue" => {
                 self.update_sqs_queue(id, identifier, from, to, schema)
@@ -3091,12 +3429,117 @@ impl AwsProvider {
             ))
             .for_resource(id.clone())),
         }?;
-        Ok(self.update_outcome_from_read(
+        let completion = self.create_outcome_from_read(
             &outcome_id,
             identifier.clone(),
             partial_attributes,
             read_back,
-        ))
+        );
+        self.finish_update_read_back(
+            &outcome_id,
+            completion,
+            PollRequest {
+                finality: PollFinality::Continue,
+            },
+        )
+    }
+
+    fn finish_update_read_back(
+        &self,
+        id: &ResourceId,
+        completion: CreateCompletion,
+        poll_request: PollRequest,
+    ) -> ProviderResult<AwsUpdateStep> {
+        match (poll_request.finality, completion) {
+            (PollFinality::Continue, CreateCompletion::ReadBackPending { continuation, .. }) => {
+                Ok(OperationStep::Pending {
+                    pending: AwsUpdateToken::ReadBack(continuation),
+                    poll_after_secs: POLL_AFTER_SECS,
+                    phase: PendingPhase::ReadBack,
+                })
+            }
+            (PollFinality::Continue | PollFinality::FinalAttempt, completion) => {
+                self.finish_update_completion(id, finish_final_read_back(completion))
+            }
+        }
+    }
+
+    fn finish_update_completion(
+        &self,
+        id: &ResourceId,
+        completion: ReadBackCompletion,
+    ) -> ProviderResult<AwsUpdateStep> {
+        match completion {
+            ReadBackCompletion::Success(state) => {
+                Ok(OperationStep::Done(UpdateOutcome::success(state)))
+            }
+            ReadBackCompletion::Partial {
+                identifier,
+                attributes,
+                reason,
+                missing_attributes,
+            } => Ok(OperationStep::Done(UpdateOutcome::partial_success(
+                crate::read_model::partial_applied_state(id.clone(), identifier, attributes),
+                reason.to_string(),
+                missing_attributes.into(),
+            ))),
+            ReadBackCompletion::Failed { error, .. } => Err(error),
+        }
+    }
+
+    pub async fn poll_update_step(
+        &self,
+        resource: &Resource<impl Sized>,
+        identifier: &AppliedIdentifier,
+        token: AwsUpdateToken,
+        poll_request: PollRequest,
+    ) -> ProviderResult<AwsUpdateStep> {
+        match token {
+            AwsUpdateToken::ReadBack(continuation) => {
+                continuation.validate(&resource.id, identifier)?;
+                let completion = self
+                    .read_back_by_identifier(resource, &continuation, ReadBackKind::Update)
+                    .await;
+                self.finish_update_read_back(&resource.id, completion, poll_request)
+            }
+        }
+    }
+
+    pub async fn update_with_patch(
+        &self,
+        id: &ResourceId,
+        identifier: &AppliedIdentifier,
+        from: &State,
+        patch: &UpdatePatch,
+    ) -> ProviderResult<UpdateOutcome> {
+        self.update_with_patch_and_sleep(id, identifier, from, patch, tokio::time::sleep)
+            .await
+    }
+
+    async fn update_with_patch_and_sleep<Sleep, SleepFuture>(
+        &self,
+        id: &ResourceId,
+        identifier: &AppliedIdentifier,
+        from: &State,
+        patch: &UpdatePatch,
+        sleep: Sleep,
+    ) -> ProviderResult<UpdateOutcome>
+    where
+        Sleep: FnMut(Duration) -> SleepFuture,
+        SleepFuture: Future<Output = ()>,
+    {
+        let resource = apply_patch_to_state(from, patch);
+        let completed = drive_operation(
+            id,
+            OperationKind::Update,
+            self.operation_budget(id.resource_type.as_str(), OperationKind::Update),
+            self.read_back_budget(id.resource_type.as_str()),
+            self.update_step(id, identifier, from, patch),
+            |token, poll_request| self.poll_update_step(&resource, identifier, token, poll_request),
+            sleep,
+        )
+        .await?;
+        Ok(UpdateOutcome::from_host_completion(completed))
     }
 
     /// Perform the initial, non-blocking delete step.
@@ -3488,11 +3931,13 @@ impl Provider for AwsProvider {
                 &id,
                 OperationKind::Delete,
                 budget,
+                self.read_back_budget(id.resource_type.as_str()),
                 self.delete_step(&id, &identifier, &request),
-                |token| self.poll_delete_step(&id, token),
+                |token, _poll_request| self.poll_delete_step(&id, token),
                 tokio::time::sleep,
             )
             .await
+            .map(CompletedOperation::into_output)
         })
     }
 }
@@ -3584,10 +4029,18 @@ mod pending_operation_tests {
         fn partial(
             self,
             _attributes: HashMap<String, Value>,
-            _reason: String,
-            _missing_attributes: Vec<String>,
+            _reason: ProviderError,
+            _missing_attributes: NonEmptyAttributeNames,
         ) -> Result<Self::Step, Self::Verdict> {
             unreachable!("the ACM resend tests never complete an issued create")
+        }
+
+        fn pending_read_back(
+            self,
+            continuation: ReadBackContinuation,
+            poll_after_secs: u32,
+        ) -> Result<Self::Step, Self::Verdict> {
+            self.pending(AwsCreateToken::ReadBack(continuation), poll_after_secs)
         }
 
         fn failed(self, _observation: Observation, _error: ProviderError) -> Self::Verdict {
@@ -3858,10 +4311,18 @@ mod pending_operation_tests {
         fn partial(
             self,
             _attributes: HashMap<String, Value>,
-            _reason: String,
-            _missing_attributes: Vec<String>,
+            _reason: ProviderError,
+            _missing_attributes: NonEmptyAttributeNames,
         ) -> Result<Self::Step, Self::Verdict> {
             unreachable!("the pending-only test never completes partially")
+        }
+
+        fn pending_read_back(
+            self,
+            continuation: ReadBackContinuation,
+            poll_after_secs: u32,
+        ) -> Result<Self::Step, Self::Verdict> {
+            self.pending(AwsCreateToken::ReadBack(continuation), poll_after_secs)
         }
 
         fn failed(self, _observation: Observation, error: ProviderError) -> Self::Verdict {
@@ -4134,6 +4595,9 @@ mod pending_operation_tests {
                 &resource,
                 token.clone(),
                 AwsCreatePoll::Unissued(RecordingAcmPollAttempt),
+                PollRequest {
+                    finality: PollFinality::Continue,
+                },
             )
             .await;
 
@@ -4177,6 +4641,9 @@ mod pending_operation_tests {
                 &resource,
                 token.clone(),
                 AwsCreatePoll::Unissued(RecordingAcmPollAttempt),
+                PollRequest {
+                    finality: PollFinality::Continue,
+                },
             )
             .await;
 
@@ -4222,6 +4689,9 @@ mod pending_operation_tests {
                 &resource,
                 token.clone(),
                 AwsCreatePoll::Unissued(RecordingAcmPollAttempt),
+                PollRequest {
+                    finality: PollFinality::Continue,
+                },
             )
             .await;
 
@@ -4268,6 +4738,9 @@ mod pending_operation_tests {
                 &resource,
                 token.clone(),
                 AwsCreatePoll::Unissued(RecordingAcmPollAttempt),
+                PollRequest {
+                    finality: PollFinality::Continue,
+                },
             )
             .await;
 
@@ -4314,6 +4787,9 @@ mod pending_operation_tests {
                 &acm_certificate_resource(),
                 token.clone(),
                 AwsCreatePoll::Unissued(RecordingAcmPollAttempt),
+                PollRequest {
+                    finality: PollFinality::Continue,
+                },
             )
             .await;
 
@@ -4401,6 +4877,7 @@ mod pending_operation_tests {
             &id,
             OperationKind::Create,
             Duration::from_secs(30),
+            DEFAULT_READ_BACK_BUDGET,
             ready(Ok(OperationStep::Pending {
                 pending: AwsCreateToken::NatGateway {
                     nat_gateway_id: identifier("nat-123"),
@@ -4408,22 +4885,23 @@ mod pending_operation_tests {
                 poll_after_secs: 5,
                 phase: PendingPhase::Operation,
             })),
-            |_| ready(Ok(OperationStep::Done(done.take().expect("one poll")))),
+            |_, _| ready(Ok(OperationStep::Done(done.take().expect("one poll")))),
             |_| ready(()),
         )
         .await
         .expect("pending create should settle");
 
-        assert_eq!(outcome, expected);
+        assert_eq!(outcome.into_output(), expected);
     }
 
     #[tokio::test]
     async fn native_create_driver_maps_over_budget_to_resource_timeout() {
         let id = ResourceId::with_provider_identity("aws", "ec2.NatGateway", "example", None);
-        let result: ProviderResult<()> = drive_operation(
+        let result: ProviderResult<CompletedOperation<()>> = drive_operation(
             &id,
             OperationKind::Create,
             Duration::ZERO,
+            DEFAULT_READ_BACK_BUDGET,
             ready(Ok(OperationStep::Pending {
                 pending: AwsCreateToken::NatGateway {
                     nat_gateway_id: identifier("nat-123"),
@@ -4431,7 +4909,7 @@ mod pending_operation_tests {
                 poll_after_secs: 5,
                 phase: PendingPhase::Operation,
             })),
-            |token| {
+            |token, _| {
                 ready(Ok(OperationStep::Pending {
                     pending: token,
                     poll_after_secs: 5,

@@ -21,6 +21,7 @@ pub fn s3_bucket_config() -> AwsSchemaConfig {
         aws_type_name: "AWS::S3::Bucket",
         resource_type_name: "s3.Bucket",
         has_tags: true,
+        await_on_read_back: vec![],
         schema: ResourceSchema::new("s3.Bucket")
         .with_conflicting_replacement()
         .attribute(

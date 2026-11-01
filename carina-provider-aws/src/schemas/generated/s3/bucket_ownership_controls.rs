@@ -13,6 +13,7 @@ pub fn s3_bucket_ownership_controls_config() -> AwsSchemaConfig {
         aws_type_name: "AWS::S3::BucketOwnershipControls",
         resource_type_name: "s3.BucketOwnershipControls",
         has_tags: false,
+        await_on_read_back: vec![],
         schema: ResourceSchema::new("s3.BucketOwnershipControls")
         .with_coexisting_replacement()
         .attribute(

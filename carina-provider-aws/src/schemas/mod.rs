@@ -61,6 +61,70 @@ mod tests {
     use crate::AwsNormalizer;
 
     #[test]
+    fn acm_read_back_budget_is_300_seconds_and_other_resources_use_default() {
+        let schemas = super::all_schemas();
+        let certificate = schemas
+            .iter()
+            .map(|schema| schema.as_schema())
+            .find(|schema| schema.resource_type() == "acm.Certificate")
+            .unwrap();
+        assert_eq!(
+            certificate
+                .operation_config()
+                .and_then(|config| config.read_back)
+                .unwrap()
+                .timeout_secs()
+                .get(),
+            300
+        );
+        for schema in schemas
+            .iter()
+            .map(|schema| schema.as_schema())
+            .filter(|schema| schema.resource_type() != "acm.Certificate")
+        {
+            assert!(
+                schema
+                    .operation_config()
+                    .and_then(|config| config.read_back)
+                    .is_none(),
+                "{} must use the default read-back budget",
+                schema.resource_type()
+            );
+        }
+        assert_eq!(
+            carina_provider_protocol::DEFAULT_READ_BACK_BUDGET.as_secs(),
+            120
+        );
+    }
+
+    #[test]
+    fn read_back_declarations_reference_schema_attributes() {
+        let configs = super::generated::configs();
+        let mut declared = Vec::new();
+        for config in configs {
+            for requirement in config.await_on_read_back {
+                assert!(
+                    config
+                        .schema
+                        .attributes()
+                        .contains_key(requirement.attribute()),
+                    "{}.{} is absent",
+                    config.resource_type_name,
+                    requirement.attribute()
+                );
+                declared.push((
+                    config.resource_type_name,
+                    requirement.attribute().to_string(),
+                ));
+            }
+        }
+        assert_eq!(
+            declared,
+            [("acm.Certificate", "domain_validation_options".to_string())]
+        );
+    }
+
+    #[test]
     fn configs_register_s3_bucket_under_both_kinds() {
         let configs = super::generated::configs();
         let managed = configs.iter().find(|c| {

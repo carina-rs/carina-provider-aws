@@ -63,6 +63,7 @@ wasi = "0.14"
 # `wasi:http` to a real endpoint). PoC seed for #355 (STS data source);
 # follow-ups will reuse the same dev-deps for other services.
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+carina-core = { workspace = true, features = ["test-utils"] }
 # Enable the test constructor for integration tests without exposing it in production.
 carina-provider-aws = { path = ".", features = ["test-utils"] }
 carina-aws-types = { path = "../carina-aws-types", features = ["test-utils"] }

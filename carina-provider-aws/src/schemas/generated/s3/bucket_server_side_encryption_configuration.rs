@@ -13,6 +13,7 @@ pub fn s3_bucket_server_side_encryption_configuration_config() -> AwsSchemaConfi
         aws_type_name: "AWS::S3::BucketServerSideEncryptionConfiguration",
         resource_type_name: "s3.BucketServerSideEncryptionConfiguration",
         has_tags: false,
+        await_on_read_back: vec![],
         schema: ResourceSchema::new("s3.BucketServerSideEncryptionConfiguration")
         .with_coexisting_replacement()
         .attribute(

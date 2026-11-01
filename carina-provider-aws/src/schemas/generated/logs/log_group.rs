@@ -17,6 +17,7 @@ pub fn logs_log_group_config() -> AwsSchemaConfig {
         aws_type_name: "AWS::Logs::LogGroup",
         resource_type_name: "logs.LogGroup",
         has_tags: true,
+        await_on_read_back: vec![],
         schema: ResourceSchema::new("logs.LogGroup")
         .with_description("Represents a log group.")
         .with_unique_name_attribute("log_group_name")

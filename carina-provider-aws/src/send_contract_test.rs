@@ -200,10 +200,18 @@ impl AwsIssuedCreate for CaptureIssued {
     fn partial(
         self,
         _attributes: HashMap<String, Value>,
-        _reason: String,
-        _missing_attributes: Vec<String>,
+        _reason: ProviderError,
+        _missing_attributes: crate::NonEmptyAttributeNames,
     ) -> Result<Self::Step, Self::Verdict> {
         Ok(())
+    }
+
+    fn pending_read_back(
+        self,
+        continuation: crate::ReadBackContinuation,
+        poll_after_secs: u32,
+    ) -> Result<Self::Step, Self::Verdict> {
+        self.pending(AwsCreateToken::ReadBack(continuation), poll_after_secs)
     }
 
     fn failed(self, _observation: Observation, error: ProviderError) -> Self::Verdict {

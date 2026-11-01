@@ -248,7 +248,13 @@ impl AwsProvider {
             resource.resolved_attributes(),
             outcome,
         );
-        self.finish_issued(issued, completion)
+        self.finish_issued(
+            issued,
+            completion,
+            carina_provider_protocol::PollRequest {
+                finality: carina_provider_protocol::PollFinality::Continue,
+            },
+        )
     }
 
     /// Update an S3 bucket

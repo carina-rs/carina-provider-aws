@@ -29,7 +29,7 @@
 use carina_core::provider::ProviderError;
 use thiserror::Error;
 
-use carina_aws_types::{Idempotency, SendClassification};
+use carina_aws_types::{Idempotency, SendClassification, Transience};
 
 use crate::aws_operation::DecidedOperationError;
 
@@ -285,7 +285,8 @@ where
     let code = err.code().map(str::to_owned);
     let aws_message = AwsServiceMessage::new(err.message().map(str::to_owned), &err);
     let request_id = err.request_id().map(str::to_owned);
-    let cause = make_cause(aws_message, err);
+    let transience = Transience::of(&err);
+    let cause = transience.caused_by(make_cause(aws_message, err));
 
     let not_found = code.as_deref().is_some_and(is_not_found_error_code) || status == Some(404);
     let mut pe = if append_outcome_unknown {

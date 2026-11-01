@@ -28,6 +28,7 @@ pub fn ec2_flow_log_config() -> AwsSchemaConfig {
         aws_type_name: "AWS::EC2::FlowLog",
         resource_type_name: "ec2.FlowLog",
         has_tags: true,
+        await_on_read_back: vec![],
         schema: ResourceSchema::new("ec2.FlowLog")
         .with_description("Describes a flow log.")
         .with_conflicting_replacement()

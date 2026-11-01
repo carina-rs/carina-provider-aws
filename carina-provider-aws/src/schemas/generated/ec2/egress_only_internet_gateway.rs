@@ -15,6 +15,7 @@ pub fn ec2_egress_only_internet_gateway_config() -> AwsSchemaConfig {
         aws_type_name: "AWS::EC2::EgressOnlyInternetGateway",
         resource_type_name: "ec2.EgressOnlyInternetGateway",
         has_tags: true,
+        await_on_read_back: vec![],
         schema: ResourceSchema::new("ec2.EgressOnlyInternetGateway")
             .with_description("Describes an egress-only internet gateway.")
             .with_coexisting_replacement()

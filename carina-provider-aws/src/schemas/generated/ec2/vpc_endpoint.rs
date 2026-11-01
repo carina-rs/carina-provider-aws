@@ -24,6 +24,7 @@ pub fn ec2_vpc_endpoint_config() -> AwsSchemaConfig {
         aws_type_name: "AWS::EC2::VPCEndpoint",
         resource_type_name: "ec2.VpcEndpoint",
         has_tags: true,
+        await_on_read_back: vec![],
         schema: ResourceSchema::new("ec2.VpcEndpoint")
         .with_description("Describes a VPC endpoint.")
         .with_conflicting_replacement()

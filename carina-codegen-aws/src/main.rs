@@ -1999,6 +1999,10 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
     } else {
         None
     };
+    let read_back = res.read_back_overrides();
+    read_back
+        .validate(attrs.iter().map(|attr| attr.snake_name.as_str()))
+        .map_err(anyhow::Error::msg)?;
     let ns = res.service_namespace;
     let is_data_source = res.create_op.is_empty();
     let namespace = format!("aws.{}", res.name);
@@ -2097,6 +2101,23 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
         code.push_str(helper);
     }
 
+    let requirements = read_back
+        .await_attributes
+        .iter()
+        .map(|requirement| {
+            let predicate = match requirement.predicate {
+                resource_defs::ReadBackPredicate::AcmDnsDvo => "ReadBackPredicate::AcmDnsDvo",
+            };
+            format!(
+                "ReadBackRequirement::new(\"{}\", {predicate})",
+                requirement.attribute
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    if !read_back.await_attributes.is_empty() {
+        code.push_str("use crate::schemas::config::{ReadBackPredicate, ReadBackRequirement};\n\n");
+    }
     // Generate config function
     code.push_str(&format!(
         "/// Returns the schema config for {} (Smithy: {})\n\
@@ -2105,6 +2126,7 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
          \x20       aws_type_name: \"{}\",\n\
          \x20       resource_type_name: \"{}\",\n\
          \x20       has_tags: {},\n\
+         \x20       await_on_read_back: vec![{}],\n\
          \x20       schema: ResourceSchema::new(\"{}\")\n",
         res.name,
         ns,
@@ -2112,6 +2134,7 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
         cf_type_name(res.name),
         res.name,
         res.has_tags,
+        requirements,
         res.name,
     ));
 
@@ -2131,6 +2154,10 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
     // Mark data sources
     if is_data_source {
         code.push_str("\x20       .as_data_source()\n");
+    }
+
+    if let Some(config) = read_back.operation_config_rust() {
+        code.push_str(&config);
     }
 
     emit_replacement_builder(&mut code, res.name, res.replacement, &attrs)?;
@@ -5451,6 +5478,20 @@ fn generate_markdown_resource(
         );
     }
 
+    let read_back = res.read_back_overrides();
+    if let Some(documentation) = read_back.budget_markdown() {
+        page.push_str(&documentation);
+    }
+    if !read_back.await_attributes.is_empty() {
+        let names = read_back
+            .await_attributes
+            .iter()
+            .map(|requirement| format!("`{}`", requirement.attribute))
+            .collect::<Vec<_>>()
+            .join(", ");
+        page.push_str(&format!("After create or update, the host polls for {names} when DNS validation is requested.\n\n"));
+    }
+
     write_markdown_example(&mut page, example)?;
 
     // Argument Reference (skip for data sources)
@@ -5787,6 +5828,7 @@ fn generate_data_source(
          \x20       aws_type_name: \"{}\",\n\
          \x20       resource_type_name: \"{}\",\n\
          \x20       has_tags: false,\n\
+         \x20       await_on_read_back: vec![],\n\
          \x20       schema: ResourceSchema::new(\"{}\")\n\
          \x20       .as_data_source()\n",
         ds.name.split('.').next_back().unwrap_or(ds.name),
@@ -7320,6 +7362,7 @@ mod tests {
         derived_attributes: Vec<resource_defs::DerivedAttribute>,
     ) -> ResourceDef {
         ResourceDef {
+            read_back: resource_defs::ReadBackOverrides::default(),
             name,
             replacement: ReplacementClass::Conflicting,
             service_namespace: "com.amazonaws.test",
@@ -7389,6 +7432,7 @@ mod tests {
 
     fn enum_fixture_resource() -> ResourceDef {
         ResourceDef {
+            read_back: resource_defs::ReadBackOverrides::default(),
             // Use a registered resource name because generate_resource also
             // emits the provider's closed CloudFormation type mapping.
             name: "iam.Role",
@@ -8652,6 +8696,7 @@ mod tests {
         source: resource_defs::DerivedSource,
     ) -> ResourceDef {
         ResourceDef {
+            read_back: resource_defs::ReadBackOverrides::default(),
             name: "ec2.FromStructFixture",
             // Synthetic fixture does not exercise replacement behavior.
             replacement: ReplacementClass::Conflicting,
@@ -10455,6 +10500,7 @@ mod tests {
         )
         .expect("parse email type fixture model");
         let resource = ResourceDef {
+            read_back: resource_defs::ReadBackOverrides::default(),
             // Use a registered resource name because generate_resource also
             // emits the provider's closed CloudFormation type mapping.
             name: "iam.Role",

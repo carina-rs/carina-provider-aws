@@ -2,6 +2,7 @@
 
 pub use carina_aws_types::*;
 
+pub use crate::read_back::{ReadBackPredicate, ReadBackRequirement};
 use carina_core::schema::ResourceSchema;
 
 /// Generated schema plus AWS-specific resource metadata.
@@ -12,6 +13,8 @@ pub struct AwsSchemaConfig {
     pub resource_type_name: &'static str,
     /// Whether this resource type uses tags.
     pub has_tags: bool,
+    /// Explicit completeness requirements for post-mutation reads.
+    pub await_on_read_back: Vec<ReadBackRequirement>,
     /// Resource schema draft; admission happens in [`crate::schemas::all_schemas`].
     pub schema: ResourceSchema,
 }

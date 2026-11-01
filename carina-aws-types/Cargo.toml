@@ -14,7 +14,6 @@ doctest = false
 test-utils = ["dep:carina-plugin-sdk", "carina-plugin-sdk/test-utils", "dep:wasi"]
 
 [dev-dependencies]
-aws-runtime = { version = "1" }
 aws-smithy-runtime-api = { version = "1.19", features = ["client", "test-util"] }
 carina-plugin-sdk = { workspace = true, features = ["test-utils"] }
 indexmap = "2"
@@ -22,6 +21,7 @@ tokio = { version = "1", features = ["macros", "rt"] }
 wasi = "0.14"
 
 [dependencies]
+aws-runtime = { version = "1" }
 aws-credential-types = { version = "1" }
 aws-smithy-runtime-api = { version = "1.19", features = ["client"] }
 aws-smithy-types = { version = "1" }

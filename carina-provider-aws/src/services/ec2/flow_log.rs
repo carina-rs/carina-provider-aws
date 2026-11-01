@@ -477,6 +477,9 @@ impl AwsProvider {
                         TaggedEc2Create::FlowLog,
                         identifier,
                         issued,
+                        carina_provider_protocol::PollRequest {
+                            finality: carina_provider_protocol::PollFinality::Continue,
+                        },
                     )
                     .await;
             }

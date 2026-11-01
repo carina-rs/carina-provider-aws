@@ -5,16 +5,16 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use carina_plugin_sdk::{
     CarinaProvider, CreateAttempt as SdkCreateAttempt, CreateStep as SdkCreateStep,
     CreateVerdict as SdkCreateVerdict, DeleteOutcome as SdkDeleteOutcome, DesiredAttribute,
-    DesiredResource, FoundRead, IssuedCreate as SdkIssuedCreate, Never, NormalizedResource,
-    Pending, PendingDelete, Poll as SdkPoll, PollAttempt as SdkPollAttempt, PollRequest,
+    DesiredResource, FoundRead, IssuedCreate as SdkIssuedCreate, NormalizedResource, Pending,
+    PendingDelete, Poll as SdkPoll, PollAttempt as SdkPollAttempt, PollRequest,
     PollVerdict as SdkPollVerdict, Resume as SdkResume, ResumeAttempt as SdkResumeAttempt,
     ResumeStep as SdkResumeStep, ResumeVerdict as SdkResumeVerdict,
     ResumedCreate as SdkResumedCreate, UpdateOutcome as SdkUpdateOutcome,
 };
 #[cfg(any(target_arch = "wasm32", test))]
-use carina_provider_protocol::OperationStep;
-#[cfg(any(target_arch = "wasm32", test))]
 use carina_provider_protocol::types as proto;
+#[cfg(any(target_arch = "wasm32", test))]
+use carina_provider_protocol::{OperationStep, PendingPhase};
 
 #[cfg(any(target_arch = "wasm32", test))]
 use carina_core::protocol_convert;
@@ -40,8 +40,19 @@ use carina_core::schema::{
 use carina_provider_aws::{
     AwsCreateAttempt, AwsCreatePoll, AwsCreateResume, AwsCreateToken, AwsDeleteToken,
     AwsIssuedCreate, AwsNormalizer, AwsPollAttempt, AwsProvider, AwsResumeAttempt,
-    AwsResumedCreate,
+    AwsResumedCreate, AwsUpdateToken, NonEmptyAttributeNames, ReadBackContinuation,
 };
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn read_back_preservation_failure(
+    error: CoreProviderError,
+) -> (
+    proto::Observation<proto::ReadOutcome, proto::ProviderError>,
+    proto::ProviderError,
+) {
+    let error = error.to_wire();
+    (proto::Observation::ReadFailed(error.clone()), error)
+}
 
 #[cfg(any(target_arch = "wasm32", test))]
 fn protocol_input_error(
@@ -143,6 +154,38 @@ fn update_outcome_to_proto(
     protocol_convert::try_update_outcome_to_protocol(outcome, state_after_patch).map_err(|error| {
         protocol_output_error("failed to encode update result", error).for_resource(id.clone())
     })
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn update_step_to_proto(
+    result: carina_core::provider::ProviderResult<
+        OperationStep<carina_core::provider::UpdateOutcome, CoreProviderError, AwsUpdateToken>,
+    >,
+    state_after_patch: proto::PersistedState,
+    id: &carina_core::resource::ResourceId,
+) -> Result<SdkUpdateOutcome<AwsUpdateToken>, CoreProviderError> {
+    match result {
+        Ok(OperationStep::Done(outcome)) => {
+            update_outcome_to_proto(&outcome, state_after_patch, id).map(SdkUpdateOutcome::Done)
+        }
+        Ok(OperationStep::Pending {
+            pending,
+            poll_after_secs,
+            phase: PendingPhase::ReadBack,
+        }) => Ok(SdkUpdateOutcome::Pending(Pending::read_back(
+            pending,
+            poll_after_secs,
+        ))),
+        Ok(OperationStep::Pending {
+            pending,
+            poll_after_secs,
+            phase: PendingPhase::Operation,
+        }) => Ok(SdkUpdateOutcome::Pending(Pending::operation(
+            pending,
+            poll_after_secs,
+        ))),
+        Ok(OperationStep::Verdict(error)) | Err(error) => Err(error),
+    }
 }
 
 #[cfg(any(target_arch = "wasm32", test))]
@@ -251,15 +294,15 @@ impl AwsIssuedCreate for GuestPolledIssuedCreate {
     fn partial(
         self,
         attributes: HashMap<String, CoreValue>,
-        reason: String,
-        missing_attributes: Vec<String>,
+        reason: CoreProviderError,
+        missing_attributes: NonEmptyAttributeNames,
     ) -> Result<Self::Step, Self::Verdict> {
         match partial_create_attributes_to_proto(&attributes) {
             Ok(attributes) => Ok(self.0.partial(
                 attributes,
                 proto::PartialReadDiagnostic {
-                    reason,
-                    missing_attributes,
+                    reason: reason.to_string(),
+                    missing_attributes: missing_attributes.into(),
                 },
             )),
             Err(error) => {
@@ -270,6 +313,16 @@ impl AwsIssuedCreate for GuestPolledIssuedCreate {
                     .into())
             }
         }
+    }
+
+    fn pending_read_back(
+        self,
+        continuation: ReadBackContinuation,
+        poll_after_secs: u32,
+    ) -> Result<Self::Step, Self::Verdict> {
+        Ok(self
+            .0
+            .pending_read_back(AwsCreateToken::ReadBack(continuation), poll_after_secs))
     }
 
     fn failed(self, observation: CoreObservation, error: CoreProviderError) -> Self::Verdict {
@@ -291,6 +344,13 @@ impl AwsIssuedCreate for GuestPolledIssuedCreate {
     }
 
     fn preserve(self, token: AwsCreateToken, error: CoreProviderError) -> Self::Verdict {
+        // The SDK's preserve helper constructs operation-phase progress. An
+        // invalid read-back capability is a terminal protocol failure; keep
+        // its issued identifier without regressing to operation progress.
+        if token.phase() == PendingPhase::ReadBack {
+            let (observation, error) = read_back_preservation_failure(error);
+            return self.0.failed(observation, error).into();
+        }
         let poll_after_secs = token.poll_after_secs();
         self.0
             .preserve(token, poll_after_secs, error.to_wire())
@@ -325,15 +385,15 @@ impl AwsIssuedCreate for GuestIssuedCreate {
     fn partial(
         self,
         attributes: HashMap<String, CoreValue>,
-        reason: String,
-        missing_attributes: Vec<String>,
+        reason: CoreProviderError,
+        missing_attributes: NonEmptyAttributeNames,
     ) -> Result<Self::Step, Self::Verdict> {
         match partial_create_attributes_to_proto(&attributes) {
             Ok(attributes) => Ok(self.0.partial(
                 attributes,
                 proto::PartialReadDiagnostic {
-                    reason,
-                    missing_attributes,
+                    reason: reason.to_string(),
+                    missing_attributes: missing_attributes.into(),
                 },
             )),
             Err(error) => {
@@ -343,6 +403,16 @@ impl AwsIssuedCreate for GuestIssuedCreate {
                     .failed(proto::Observation::ReadFailed(error.clone()), error))
             }
         }
+    }
+
+    fn pending_read_back(
+        self,
+        continuation: ReadBackContinuation,
+        poll_after_secs: u32,
+    ) -> Result<Self::Step, Self::Verdict> {
+        Ok(self
+            .0
+            .pending_read_back(AwsCreateToken::ReadBack(continuation), poll_after_secs))
     }
 
     fn failed(self, observation: CoreObservation, error: CoreProviderError) -> Self::Verdict {
@@ -363,6 +433,13 @@ impl AwsIssuedCreate for GuestIssuedCreate {
     }
 
     fn preserve(self, token: AwsCreateToken, error: CoreProviderError) -> Self::Verdict {
+        // The SDK's preserve helper constructs operation-phase progress. An
+        // invalid read-back capability is a terminal protocol failure; keep
+        // its issued identifier without regressing to operation progress.
+        if token.phase() == PendingPhase::ReadBack {
+            let (observation, error) = read_back_preservation_failure(error);
+            return self.0.failed(observation, error);
+        }
         let poll_after_secs = token.poll_after_secs();
         self.0.preserve(token, poll_after_secs, error.to_wire())
     }
@@ -417,6 +494,39 @@ impl AwsResumedCreate for GuestResumedCreate {
         }
     }
 
+    fn pending_read_back(
+        self,
+        continuation: ReadBackContinuation,
+        poll_after_secs: u32,
+    ) -> Result<Self::Step, Self::Verdict> {
+        Ok(self
+            .0
+            .pending_read_back(AwsCreateToken::ReadBack(continuation), poll_after_secs))
+    }
+
+    fn partial(
+        self,
+        attributes: HashMap<String, CoreValue>,
+        reason: CoreProviderError,
+        missing_attributes: NonEmptyAttributeNames,
+    ) -> Result<Self::Step, Self::Verdict> {
+        match partial_create_attributes_to_proto(&attributes) {
+            Ok(attributes) => Ok(self.0.partial(
+                attributes,
+                proto::PartialReadDiagnostic {
+                    reason: reason.to_string(),
+                    missing_attributes: missing_attributes.into(),
+                },
+            )),
+            Err(error) => {
+                let error = error.to_wire();
+                Err(self
+                    .0
+                    .failed(proto::Observation::ReadFailed(error.clone()), error))
+            }
+        }
+    }
+
     fn failed(self, observation: CoreObservation, error: CoreProviderError) -> Self::Verdict {
         self.0
             .failed(observation_to_proto(observation), error.to_wire())
@@ -435,6 +545,13 @@ impl AwsResumedCreate for GuestResumedCreate {
     }
 
     fn preserve(self, token: AwsCreateToken, error: CoreProviderError) -> Self::Verdict {
+        // The SDK's preserve helper constructs operation-phase progress. An
+        // invalid read-back capability is a terminal protocol failure; keep
+        // its issued identifier without regressing to operation progress.
+        if token.phase() == PendingPhase::ReadBack {
+            let (observation, error) = read_back_preservation_failure(error);
+            return self.0.failed(observation, error);
+        }
         let poll_after_secs = token.poll_after_secs();
         self.0.preserve(token, poll_after_secs, error.to_wire())
     }
@@ -514,7 +631,7 @@ impl AwsProcessProvider {
 #[cfg(any(target_arch = "wasm32", test))]
 impl CarinaProvider for AwsProcessProvider {
     type CreateToken = AwsCreateToken;
-    type UpdateToken = Never;
+    type UpdateToken = AwsUpdateToken;
     type DeleteToken = AwsDeleteToken;
 
     fn info(&self) -> proto::ProviderInfo {
@@ -698,7 +815,7 @@ impl CarinaProvider for AwsProcessProvider {
         _id: &proto::ResourceId,
         request: proto::CreateRequest,
         poll: SdkPoll<Self::CreateToken>,
-        _poll_request: PollRequest,
+        poll_request: PollRequest,
     ) -> Result<SdkCreateStep<Self::CreateToken>, SdkPollVerdict<Self::CreateToken>> {
         let core_resource = match protocol_resource_to_core(&request.resource) {
             Ok(resource) => resource,
@@ -758,6 +875,7 @@ impl CarinaProvider for AwsProcessProvider {
             core_resource.as_resource(),
             token,
             poll,
+            poll_request,
         ))
     }
 
@@ -766,7 +884,7 @@ impl CarinaProvider for AwsProcessProvider {
         _id: &proto::ResourceId,
         request: proto::CreateRequest,
         resume: SdkResume<Self::CreateToken>,
-        _poll_request: PollRequest,
+        poll_request: PollRequest,
     ) -> Result<SdkResumeStep<Self::CreateToken>, SdkResumeVerdict<Self::CreateToken>> {
         let core_resource = match protocol_resource_to_core(&request.resource) {
             Ok(resource) => resource,
@@ -826,6 +944,7 @@ impl CarinaProvider for AwsProcessProvider {
             core_resource.as_resource(),
             token,
             resume,
+            poll_request,
         ))
     }
 
@@ -851,29 +970,41 @@ impl CarinaProvider for AwsProcessProvider {
                         .for_resource(core_id.clone()),
                 )
             })?;
-        let result = self.runtime.block_on(self.provider().update_with_patch(
+        let result = self.runtime.block_on(self.provider().update_step(
             &core_id,
             identifier,
             &core_from,
             &core_patch,
         ));
-        match result {
-            Ok(outcome) => update_outcome_to_proto(&outcome, state_after_patch, &core_id)
-                .map(SdkUpdateOutcome::Done)
-                .map_err(Self::convert_error),
-            Err(e) => Err(Self::convert_error(e)),
-        }
+        update_step_to_proto(result, state_after_patch, &core_id).map_err(Self::convert_error)
     }
 
     fn poll_update(
         &self,
-        _id: &proto::ResourceId,
-        _identifier: &proto::AppliedIdentifier,
-        _request: proto::UpdateRequest,
+        id: &proto::ResourceId,
+        identifier: &proto::AppliedIdentifier,
+        request: proto::UpdateRequest,
         pending: Pending<Self::UpdateToken>,
-        _poll_request: PollRequest,
+        poll_request: PollRequest,
     ) -> Result<SdkUpdateOutcome<Self::UpdateToken>, proto::ProviderError> {
-        match pending.token {}
+        let core_id = protocol_convert::protocol_to_resource_id(id);
+        let state_after_patch = request.state_after_patch();
+        let state = protocol_convert::protocol_persisted_state_to_core(&state_after_patch)
+            .map_err(|error| {
+                Self::convert_error(
+                    protocol_input_error("failed to decode read-back update state", error)
+                        .for_resource(core_id.clone()),
+                )
+            })?;
+        let mut resource = CoreResource::from_id(core_id.clone());
+        resource.attributes = state.attributes.into_iter().collect();
+        let result = self.runtime.block_on(self.provider().poll_update_step(
+            &resource,
+            identifier,
+            pending.token,
+            poll_request,
+        ));
+        update_step_to_proto(result, state_after_patch, &core_id).map_err(Self::convert_error)
     }
 
     fn delete(
@@ -1036,6 +1167,23 @@ fn main() {}
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn preservation_observation_keeps_error_cause() {
+        let error = super::CoreProviderError::internal_caused_by(
+            "read-back continuation failed",
+            std::io::Error::other("decode cause"),
+        );
+        let (observation, error) = super::read_back_preservation_failure(error);
+        let super::proto::Observation::ReadFailed(observed) = observation else {
+            panic!("expected failed observation")
+        };
+        assert!(error.cause.as_deref().unwrap().contains("decode cause"));
+        assert_eq!(
+            observed.cause, error.cause,
+            "preservation must retain the source on both copies at the wire boundary"
+        );
+    }
     use super::*;
     use carina_core::resource::{ConcreteValue, DeferredValue, Resource, Value};
     use carina_core::schema::{

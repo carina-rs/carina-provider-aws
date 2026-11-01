@@ -18,6 +18,7 @@ pub fn route53_record_set_config() -> AwsSchemaConfig {
         aws_type_name: "AWS::Route53::RecordSet",
         resource_type_name: "route53.RecordSet",
         has_tags: false,
+        await_on_read_back: vec![],
         schema: ResourceSchema::new("route53.RecordSet")
         .with_description("Information about the resource record set to create or delete.")
         .with_conflicting_replacement()

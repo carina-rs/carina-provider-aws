@@ -17,6 +17,7 @@ pub fn sts_caller_identity_config() -> AwsSchemaConfig {
         aws_type_name: "AWS::STS::CallerIdentity",
         resource_type_name: "sts.CallerIdentity",
         has_tags: false,
+        await_on_read_back: vec![],
         schema: ResourceSchema::new("sts.CallerIdentity")
         .as_data_source()
         .attribute(
