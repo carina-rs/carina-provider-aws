@@ -14,25 +14,11 @@ fn read_back_declaration_rejects_nonexistent_attribute() {
 
 #[test]
 fn read_back_codegen_emits_dns_requirement_and_acm_budget() {
-    let binary = env!("CARGO_BIN_EXE_smithy-codegen");
-    let output = tempfile::tempdir().unwrap();
-    let models = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../carina-provider-aws/tests/fixtures/smithy");
-    let result = std::process::Command::new(binary)
-        .args([
-            "--model-dir",
-            models.to_str().unwrap(),
-            "--output-dir",
-            output.path().to_str().unwrap(),
-        ])
-        .output()
-        .unwrap();
-    assert!(
-        result.status.success(),
-        "{}",
-        String::from_utf8_lossy(&result.stderr)
-    );
-    let certificate = std::fs::read_to_string(output.path().join("acm/certificate.rs")).unwrap();
+    // CI's Codegen Check verifies these committed schemas match the generator.
+    // Read them directly so this test does not need the ignored Smithy model cache.
+    let generated = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../carina-provider-aws/src/schemas/generated");
+    let certificate = std::fs::read_to_string(generated.join("acm/certificate.rs")).unwrap();
     assert!(certificate.contains("await_on_read_back"));
     assert!(certificate.contains("AcmDnsDvo"));
     assert!(
@@ -57,7 +43,7 @@ fn read_back_codegen_emits_dns_requirement_and_acm_budget() {
             "OperationConfig must name {field}"
         );
     }
-    let vpc = std::fs::read_to_string(output.path().join("ec2/vpc.rs")).unwrap();
+    let vpc = std::fs::read_to_string(generated.join("ec2/vpc.rs")).unwrap();
     assert!(!vpc.contains(".with_operation_config"));
 }
 
