@@ -445,10 +445,22 @@ mod tests {
             &native[1],
             Err(carina_core::references::ReferenceError::InvalidReference(_))
         ));
+        let calls = calls.lock().unwrap();
         assert_eq!(
-            calls.lock().unwrap().len(),
-            3,
-            "key ARNs and unsupported identities must not issue calls"
+            calls
+                .iter()
+                .filter(|request| request.uri.contains("kms."))
+                .count(),
+            2,
+            "key ARNs and unsupported identities must not issue KMS calls"
+        );
+        assert_eq!(
+            calls
+                .iter()
+                .filter(|request| request.uri.contains("sts."))
+                .count(),
+            1,
+            "routing must reuse one STS AssumeRole session"
         );
     }
 

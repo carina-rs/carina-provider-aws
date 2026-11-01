@@ -41,8 +41,9 @@ Grant this permission to the routed provider instance's effective credentials,
 including its assumed role. The key policy must authorize the lookup;
 cross-account references also require the caller's IAM policy to allow it.
 Bare IDs and aliases use the configured provider region. Qualified ARNs keep
-their own region and account. An unreachable partition fails validation during
-resolution.
+their own region and account. Unsupported partitions are rejected by validation.
+A reference to a partition this instance cannot reach aborts planning as an
+invalid reference.
 
 This permission is independent of advisory `--check-iam`. A used access denial,
 transient failure, or invalid reference aborts planning. A missing desired key

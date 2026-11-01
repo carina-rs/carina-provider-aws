@@ -94,11 +94,23 @@ mod tests {
                         classify_string(schema.resource_type(), path, name, pattern, description)
                             .unwrap();
                     match classification {
-                        Some(Classification::Reference { .. }) => {
+                        Some(Classification::Reference { arn_only }) => {
                             assert_eq!(
                                 identity,
                                 Some(&AwsType::KmsKeyReference.identity()),
                                 "{}.{} must be a reference leaf",
+                                schema.resource_type(),
+                                path
+                            );
+                            let expected_pattern = if arn_only {
+                                carina_aws_types::KMS_KEY_ARN_PATTERN
+                            } else {
+                                carina_aws_types::KMS_KEY_REFERENCE_PATTERN
+                            };
+                            assert_eq!(
+                                pattern,
+                                Some(expected_pattern),
+                                "{}.{} must use the pattern for arn_only={arn_only}",
                                 schema.resource_type(),
                                 path
                             );
@@ -124,7 +136,9 @@ mod tests {
                     }
                 };
             match schema.shape_of(ty) {
-                Shape::Reference { identity, .. } => check(None, Some(identity)),
+                Shape::Reference {
+                    identity, pattern, ..
+                } => check(pattern, Some(identity)),
                 Shape::String { pattern, .. } => check(pattern, None),
                 Shape::Enum { base, .. } => {
                     walk(schema, base, path, name, description, coverage, depth + 1)

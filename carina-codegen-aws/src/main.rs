@@ -5561,7 +5561,7 @@ fn generate_markdown_resource(
             page.push_str(&format!("`{}` uses `KmsKeyReference` and accepts key ARNs only. Key ARNs need no lookup. See [KMS reference planning permissions](https://carina-rs.dev/guides/aws-credentials/#kms-reference-planning-permissions).\n\n", entry.path));
             continue;
         }
-        page.push_str(&format!("`{}` uses `KmsKeyReference`. Planning key IDs or aliases requires `kms:DescribeKey` for the provider's effective identity and authorization in the key policy. Key ARNs need no lookup. Resolving an AWS-managed alias can initialize its key during planning. See [KMS reference planning permissions](https://carina-rs.dev/guides/aws-credentials/#kms-reference-planning-permissions).\n\n", entry.path));
+        page.push_str(&format!("`{}` uses `KmsKeyReference`; during planning, key IDs, alias names, and alias ARNs may need `kms:DescribeKey` for the provider's effective identity and authorization in the key policy, only when the authored value differs from the value the service returns. Key ARNs never need a lookup; resolving an AWS-managed alias can initialize its key during planning (see [KMS reference planning permissions](https://carina-rs.dev/guides/aws-credentials/#kms-reference-planning-permissions)).\n\n", entry.path));
     }
 
     write_markdown_example(&mut page, example)?;
