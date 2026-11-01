@@ -468,7 +468,9 @@ fn sample_value(
     budget: &mut ShapeWalkBudget,
 ) -> Value {
     match schema.shape_of(attribute_type) {
-        Shape::String { .. } => string(sample_string(resource_type, path)),
+        Shape::String { .. } | Shape::Reference { .. } => {
+            string(sample_string(resource_type, path))
+        }
         Shape::Int { range, .. } => {
             let minimum = range.and_then(|(minimum, _)| minimum).unwrap_or(1);
             let maximum = range.and_then(|(_, maximum)| maximum).unwrap_or(i64::MAX);

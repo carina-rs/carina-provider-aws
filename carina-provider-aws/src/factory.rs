@@ -2,14 +2,11 @@
 
 use std::collections::BTreeMap;
 
-use indexmap::IndexMap;
-
 use carina_core::provider::{
     BoxFuture, CanonicalProviderConfigAttributes, InitializeOutcome, InitializeOutcomeMint,
     ProviderError, ProviderFactory, ProviderInitialization, ProviderNormalizer,
     ProviderReadyConfig, ProviderResult,
 };
-use carina_core::resource::Value;
 use carina_core::schema::{
     ValidatedConfigSchema, ValidatedProviderSchemaWitness, ValidatedResourceSchema,
 };
@@ -68,10 +65,6 @@ impl ProviderFactory for AwsProviderFactory {
         Ok(())
     }
 
-    fn extract_region(&self, attributes: &IndexMap<String, Value>) -> String {
-        carina_core::utils::extract_region_from_attrs(attributes, "ap-northeast-1")
-    }
-
     fn create_provider(
         &self,
         _binding: Option<&str>,
@@ -86,7 +79,7 @@ impl ProviderFactory for AwsProviderFactory {
         use crate::services::sts::account_guard::extract_string_list;
         use crate::services::sts::assume_role::extract_assume_role;
         let attributes = config.attributes();
-        let region = self.extract_region(attributes);
+        let region = carina_core::utils::extract_region_from_attrs(attributes, "ap-northeast-1");
         let allowed = extract_string_list(attributes.get("allowed_account_ids"));
         let forbidden = extract_string_list(attributes.get("forbidden_account_ids"));
         let assume_role = match extract_assume_role(attributes.get("assume_role")) {
@@ -163,7 +156,9 @@ fn assume_role_attribute_type() -> carina_core::schema::AttributeType {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use carina_core::resource::ConcreteValue;
+    use carina_core::resource::{ConcreteValue, Value};
+    use carina_core::utils::extract_region_from_attrs;
+    use indexmap::IndexMap;
 
     #[test]
     fn extract_region_reads_provider_ready_canonical_enum() {
@@ -183,18 +178,23 @@ mod tests {
         ));
         let attributes = IndexMap::from([("region".to_string(), region)]);
 
-        assert_eq!(factory.extract_region(&attributes), "us-west-2");
+        assert_eq!(
+            extract_region_from_attrs(&attributes, "ap-northeast-1"),
+            "us-west-2"
+        );
     }
 
     #[test]
     fn extract_region_keeps_string_literal() {
-        let factory = AwsProviderFactory;
         let attributes = IndexMap::from([(
             "region".to_string(),
             Value::Concrete(ConcreteValue::String("aws.Region.us_west_2".into())),
         )]);
 
-        assert_eq!(factory.extract_region(&attributes), "aws.Region.us_west_2");
+        assert_eq!(
+            extract_region_from_attrs(&attributes, "ap-northeast-1"),
+            "aws.Region.us_west_2"
+        );
     }
 
     #[test]

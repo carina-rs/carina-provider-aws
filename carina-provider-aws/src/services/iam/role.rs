@@ -1052,12 +1052,12 @@ mod tests {
             &carina_core::parser::ProviderContext::default(),
         )
         .expect("parse fixture");
+        let registry = crate::schemas::schema_registry();
         let resource = parsed.resources[0]
             .clone()
             .resolve_root_for_test()
-            .into_expanded()
-            .expect("fixture contains no loop placeholders");
-        let registry = crate::schemas::schema_registry();
+            .into_expanded(&registry)
+            .expect("fixture contains valid directives and no loop placeholders");
         let mut resources = vec![resource];
         carina_core::value::canonicalize_resources_with_schemas(&mut resources, &registry)
             .expect("host desired canonicalization");

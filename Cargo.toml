@@ -14,6 +14,6 @@ version = "0.7.4"
 # Every crate in this workspace must build against the same carina revision;
 # pin it once here so the crates cannot drift apart.
 [workspace.dependencies]
-carina-core = { git = "https://github.com/carina-rs/carina", rev = "bb1c40c4" }
-carina-plugin-sdk = { git = "https://github.com/carina-rs/carina", rev = "bb1c40c4" }
-carina-provider-protocol = { git = "https://github.com/carina-rs/carina", rev = "bb1c40c4" }
+carina-core = { git = "https://github.com/carina-rs/carina", rev = "9ca0993a" }
+carina-plugin-sdk = { git = "https://github.com/carina-rs/carina", rev = "9ca0993a" }
+carina-provider-protocol = { git = "https://github.com/carina-rs/carina", rev = "9ca0993a" }

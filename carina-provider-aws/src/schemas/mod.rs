@@ -864,22 +864,21 @@ mod tests {
             }
             Current::MissingIdentifier(state) => state.into_state(),
         };
-        let schema = registry
-            .get("aws", "route53.RecordSet", SchemaKind::Resource)
-            .expect("RecordSet resource schema");
         let router = crate::test_comparison_router();
         let comparison = router
             .comparison_for(&registry, &id)
             .expect("RecordSet comparison context");
         let saved_attrs = carina_core::provider::RawSavedAttrs::default().lift(&registry);
-        let result = diff(
-            &ResolvedResource::new(normalized.as_resource().clone()),
-            &current,
-            &saved_attrs,
-            None,
-            Some(schema.schema().as_schema()),
-            comparison.context(),
-        );
+        let desired = ResolvedResource::new(normalized.as_resource().clone());
+        let result = comparison
+            .context()
+            .with_references(
+                &carina_core::references::prepare_empty_for_tests(),
+                &desired.id,
+                |context| diff(&desired, &current, &saved_attrs, None, comparison, context),
+            )
+            .expect("reference-free comparison fixture")
+            .expect("fixture comparison should succeed");
         assert!(
             matches!(result, Diff::NoChange(_)),
             "{label}: read-back wire value must not cause a phantom diff: {result:?}"

@@ -9,12 +9,12 @@ use carina_core::resource::{
     ConcreteValue, Resource, ResourceId, State, Value, enum_attr_at_schema_path,
 };
 use carina_core::schema::CompiledResourceSchema;
+use carina_plugin_sdk::{DesiredMap, DesiredScalar, DesiredValue, DesiredValueMut, DesiredView};
 use indexmap::IndexMap;
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
 use crate::helpers::{RetryPolicy, enum_attr_error, retry_aws_operation, sdk_error_message};
-use crate::normalizer::DesiredNormalizationInput;
 use crate::provider::TypedCreateCompletion;
 use crate::read_model::found_managed_read;
 use crate::read_models_generated::S3BucketReplicationConfigurationReadModel;
@@ -26,26 +26,42 @@ use crate::services::s3::bucket::is_s3_not_configured_error;
 /// Insert the provider's canonical V2 replication default into authored
 /// rules. The authored schema permits omission; normalization and read-back
 /// still converge on the same explicit `{ status = Disabled }` shape.
-pub(crate) fn normalize_delete_marker_replication<S>(input: &mut DesiredNormalizationInput<'_, S>) {
+pub(crate) fn normalize_delete_marker_replication(
+    input: &mut DesiredView<'_>,
+) -> ProviderResult<()> {
     if !input.is_resource("aws", "s3.BucketReplicationConfiguration") {
-        return;
+        return Ok(());
     }
-    let Some(ConcreteValue::List(rules)) = input.known_attr_mut("rules") else {
-        return;
+    let id = input.id().clone();
+    let edit_error = |error| {
+        ProviderError::internal_caused_by(
+            "failed to insert delete-marker replication default",
+            error,
+        )
+        .for_resource(id.clone())
     };
-    for rule in rules {
-        let Value::Concrete(ConcreteValue::Map(fields)) = rule else {
+    let Some(DesiredValueMut::List(rules)) = input.attribute_mut("rules") else {
+        return Ok(());
+    };
+    for rule in rules.iter_mut() {
+        let DesiredValueMut::Map(fields) = rule else {
             continue;
         };
+        if fields.get("delete_marker_replication").is_some() {
+            continue;
+        }
+        let mut default = DesiredMap::new();
+        default
+            .insert_absent(
+                "status",
+                DesiredValue::Known(DesiredScalar::String("Disabled".into())),
+            )
+            .map_err(edit_error)?;
         fields
-            .entry("delete_marker_replication".to_string())
-            .or_insert_with(|| {
-                Value::Concrete(ConcreteValue::Map(indexmap::IndexMap::from([(
-                    "status".to_string(),
-                    Value::Concrete(ConcreteValue::String("Disabled".into())),
-                )])))
-            });
+            .insert_absent("delete_marker_replication", DesiredValue::Map(default))
+            .map_err(edit_error)?;
     }
+    Ok(())
 }
 
 impl AwsProvider {

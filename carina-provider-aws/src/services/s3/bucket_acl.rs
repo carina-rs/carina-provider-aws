@@ -379,26 +379,21 @@ mod tests {
         .with_identifier("example");
         let registry = crate::schemas::schema_registry();
         let saved = RawSavedAttrs::default().lift(&registry);
-        let schema = registry
-            .get(
-                "aws",
-                "s3.BucketAcl",
-                carina_core::schema::SchemaKind::Resource,
-            )
-            .expect("bucket ACL schema");
         let router = crate::test_comparison_router();
         let comparison = router
             .comparison_for(&registry, &desired.id)
             .expect("bucket ACL comparison context");
 
-        let result = diff(
-            &ResolvedResource::new(desired),
-            &current,
-            &saved,
-            None,
-            Some(schema.schema().as_schema()),
-            comparison.context(),
-        );
+        let desired = ResolvedResource::new(desired);
+        let result = comparison
+            .context()
+            .with_references(
+                &carina_core::references::prepare_empty_for_tests(),
+                &desired.id,
+                |context| diff(&desired, &current, &saved, None, comparison, context),
+            )
+            .expect("reference-free comparison fixture")
+            .expect("fixture comparison should succeed");
         assert!(matches!(result, Diff::Update { .. }), "{result:?}");
     }
 

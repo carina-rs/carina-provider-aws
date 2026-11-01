@@ -12,7 +12,6 @@ use carina_core::provider::{
 };
 use carina_core::provider::{RawSavedAttrs, ReadBackEnd};
 use carina_core::resource::{ConcreteValue, DataSource, ResolvedResource, Resource, State, Value};
-use carina_core::schema::SchemaKind;
 use carina_provider_aws::{AwsNormalizer, AwsProvider, BoundedSdkConfig, test_existing_state};
 use carina_provider_protocol::types::{OperationConfig, ReadBackBudget};
 use indexmap::IndexMap;
@@ -291,22 +290,21 @@ fn schema_registry() -> carina_core::schema::SchemaRegistry {
 
 fn assert_no_diff(desired: Resource, current: State) {
     let registry = schema_registry();
-    let schema = registry
-        .get("aws", RESOURCE_TYPE, SchemaKind::Resource)
-        .expect("S3 bucket schema");
     let router = carina_provider_aws::test_comparison_router();
     let comparison = router
         .comparison_for(&registry, &desired.id)
         .expect("S3 bucket comparison context");
     let saved = RawSavedAttrs::default().lift(&registry);
-    let result = diff(
-        &ResolvedResource::new(desired),
-        &current,
-        &saved,
-        None,
-        Some(schema.schema().as_schema()),
-        comparison.context(),
-    );
+    let desired = ResolvedResource::new(desired);
+    let result = comparison
+        .context()
+        .with_references(
+            &carina_core::references::prepare_empty_for_tests(),
+            &desired.id,
+            |context| diff(&desired, &current, &saved, None, comparison, context),
+        )
+        .expect("reference-free comparison fixture")
+        .expect("fixture comparison should succeed");
     assert!(matches!(result, Diff::NoChange(_)), "{result:?}");
 }
 

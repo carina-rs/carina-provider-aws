@@ -13,11 +13,11 @@ use carina_core::provider::{AppliedIdentifier, ReadOutcome};
 use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{ConcreteValue, Resource, ResourceId, Value};
 use carina_core::schema::CompiledResourceSchema;
+use carina_plugin_sdk::{DesiredScalar, DesiredValueMut, DesiredView};
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
 use crate::helpers::sdk_error_message;
-use crate::normalizer::DesiredNormalizationInput;
 use crate::provider::TypedCreateCompletion;
 use crate::read_model::found_managed_read;
 use crate::read_models_generated::Route53RecordSetReadModelSupplement;
@@ -548,19 +548,20 @@ impl AwsProvider {
 /// the apply would just re-UPSERT the same DNS name.
 ///
 /// See aws#300, follow-up to aws#117.
-pub(crate) fn normalize_record_set_dns_names<S>(input: &mut DesiredNormalizationInput<'_, S>) {
+pub(crate) fn normalize_record_set_dns_names(input: &mut DesiredView<'_>) {
     if !input.is_resource("aws", "route53.RecordSet") {
         return;
     }
 
-    if let Some(ConcreteValue::String(name)) = input.known_attr_mut("name")
+    if let Some(DesiredValueMut::Known(DesiredScalar::String(name))) = input.attribute_mut("name")
         && let Some(stripped) = name.expose_plaintext().strip_suffix('.').map(str::to_owned)
     {
         *name = stripped.into();
     }
 
-    if let Some(ConcreteValue::Map(alias)) = input.known_attr_mut("alias_target")
-        && let Some(Value::Concrete(ConcreteValue::String(dns_name))) = alias.get_mut("dns_name")
+    if let Some(DesiredValueMut::Map(alias)) = input.attribute_mut("alias_target")
+        && let Some(DesiredValueMut::Known(DesiredScalar::String(dns_name))) =
+            alias.get_mut("dns_name")
         && let Some(stripped) = dns_name
             .expose_plaintext()
             .strip_suffix('.')
@@ -576,8 +577,10 @@ mod tests {
     use carina_core::resource::Resource;
 
     fn normalize(resource: &mut Resource) {
-        let mut input = DesiredNormalizationInput::in_process(resource);
-        normalize_record_set_dns_names(&mut input);
+        let mut desired =
+            carina_plugin_sdk::NativeDesiredNormalization::from_core(resource).unwrap();
+        normalize_record_set_dns_names(&mut desired.view());
+        desired.finish().unwrap();
     }
 
     fn record_set(name: &str) -> Resource {

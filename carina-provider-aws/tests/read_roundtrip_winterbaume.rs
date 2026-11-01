@@ -188,26 +188,21 @@ fn request_target(request: &MockRequest) -> &str {
 
 fn assert_no_diff(desired: Resource, current: State) {
     let registry = schema_registry();
-    let schema = registry
-        .get(
-            "aws",
-            desired.id.resource_type.as_str(),
-            SchemaKind::Resource,
-        )
-        .expect("managed resource schema");
     let router = carina_provider_aws::test_comparison_router();
     let comparison = router
         .comparison_for(&registry, &desired.id)
         .expect("managed resource comparison context");
     let saved = carina_core::provider::RawSavedAttrs::default().lift(&registry);
-    let result = diff(
-        &ResolvedResource::new(desired),
-        &current,
-        &saved,
-        None,
-        Some(schema.schema().as_schema()),
-        comparison.context(),
-    );
+    let desired = ResolvedResource::new(desired);
+    let result = comparison
+        .context()
+        .with_references(
+            &carina_core::references::prepare_empty_for_tests(),
+            &desired.id,
+            |context| diff(&desired, &current, &saved, None, comparison, context),
+        )
+        .expect("reference-free comparison fixture")
+        .expect("fixture comparison should succeed");
     assert!(matches!(result, Diff::NoChange(_)), "{result:?}");
 }
 
@@ -254,16 +249,27 @@ async fn assert_no_diff_with_nested_write_only(
         &current.attributes,
         &sent_desired,
         Some(schema.schema().as_schema()),
-        comparison.context(),
+        &comparison.context().observation(),
     );
-    let result = diff(
-        &ResolvedResource::new(desired),
-        &current,
-        &saved,
-        Some(&explicit),
-        Some(schema.schema().as_schema()),
-        comparison.context(),
-    );
+    let desired = ResolvedResource::new(desired);
+    let result = comparison
+        .context()
+        .with_references(
+            &carina_core::references::prepare_empty_for_tests(),
+            &desired.id,
+            |context| {
+                diff(
+                    &desired,
+                    &current,
+                    &saved,
+                    Some(&explicit),
+                    comparison,
+                    context,
+                )
+            },
+        )
+        .expect("reference-free comparison fixture")
+        .expect("fixture comparison should succeed");
     assert!(matches!(result, Diff::NoChange(_)), "{result:?}");
 }
 
@@ -1397,6 +1403,7 @@ async fn account_name_change_plans_an_update_instead_of_replacement() {
         &saved,
         &HashMap::new(),
         &[],
+        &carina_core::references::prepare_empty_for_tests(),
     )
     .expect("plan Organizations account rename");
 
