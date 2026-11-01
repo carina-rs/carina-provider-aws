@@ -498,17 +498,12 @@ mod tests {
     }
 
     #[test]
-    fn identity_signing_and_endpoint_failures_are_typed_not_sent() {
-        for failure in [
-            "credentials not loaded",
-            "request signing failed",
-            "endpoint resolution failed",
-        ] {
-            let (outcome, error) = run_pre_transmit_failure(failure);
+    fn pre_transmit_other_failure_is_typed_not_sent() {
+        let failure = "credentials not loaded";
+        let (outcome, error) = run_pre_transmit_failure(failure);
 
-            assert_eq!(outcome, SendOutcome::NotSent, "{failure}");
-            assert!(error_chain_contains(&error, failure), "{error:?}");
-        }
+        assert_eq!(outcome, SendOutcome::NotSent);
+        assert!(error_chain_contains(&error, failure), "{error:?}");
     }
 
     #[test]

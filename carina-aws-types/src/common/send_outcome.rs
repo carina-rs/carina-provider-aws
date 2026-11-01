@@ -157,20 +157,17 @@ pub fn attach_single_attempt_verdict_for_test(response: &mut HttpResponse, outco
 /// An SDK failure annotated with the resend guard's all-attempts verdict.
 #[derive(Debug)]
 pub(crate) struct OperationSendFailure {
-    classification: OperationVerdict,
+    verdict: OperationVerdict,
     source: BoxError,
 }
 
 impl OperationSendFailure {
-    pub(crate) fn new(classification: OperationVerdict, source: BoxError) -> Self {
-        Self {
-            classification,
-            source,
-        }
+    pub(crate) fn new(verdict: OperationVerdict, source: BoxError) -> Self {
+        Self { verdict, source }
     }
 
-    pub(crate) fn classification(&self) -> OperationVerdict {
-        self.classification
+    pub(crate) fn verdict(&self) -> OperationVerdict {
+        self.verdict
     }
 }
 
@@ -179,7 +176,7 @@ impl fmt::Display for OperationSendFailure {
         write!(
             formatter,
             "AWS operation failed with {:?} send outcome",
-            self.classification.operation_outcome()
+            self.verdict.operation_outcome()
         )
     }
 }
@@ -213,10 +210,12 @@ pub enum Idempotency {
 impl SendOutcome {
     /// Classifies a type-erased failed SDK attempt from an interceptor hook.
     ///
-    /// The effective configured retry classification preserves modeled
-    /// throttling and timeout semantics even though the operation error is
-    /// type-erased at this layer. Unknown future classifier results fail
-    /// closed as [`SendOutcome::MaybeSent`].
+    /// [`AttemptPhase::BeforeTransmit`] short-circuits to [`SendOutcome::NotSent`].
+    ///
+    /// For attempts that reached transmit, the effective configured retry
+    /// classification preserves modeled throttling and timeout semantics even
+    /// though the operation error is type-erased at this layer. Unknown future
+    /// classifier results fail closed as [`SendOutcome::MaybeSent`].
     pub(crate) fn classify_orchestrator(
         phase: AttemptPhase,
         context: &InterceptorContext,
@@ -312,7 +311,7 @@ where
             .as_connector_error()
             .and_then(std::error::Error::source)
             .and_then(|source| source.downcast_ref::<OperationSendFailure>())
-            .map(OperationSendFailure::classification)
+            .map(OperationSendFailure::verdict)
             .unwrap_or(maybe_sent),
         // `SdkError` is non-exhaustive. Unknown future failures must fail
         // closed because they may represent a request that reached AWS.
@@ -320,9 +319,7 @@ where
     }
 }
 
-/// A pre-transmit SDK timeout is transient because the operation-attempt
-/// timeout bounds each attempt. The identity cache applies its own load timeout
-/// and reports a timed-out credential provider as permanent `Other(None)` instead.
+/// Applies the pre-transport retry policy documented on [`FinalAttempt::NotSent`].
 fn not_sent_transience<E>(error: &SdkError<E, HttpResponse>) -> Transience {
     match error {
         SdkError::TimeoutError(_) => Transience::Transient,
@@ -436,7 +433,7 @@ fn operation_verdict_at(
 ) -> Option<OperationVerdict> {
     source
         .and_then(|source| source.downcast_ref::<OperationSendFailure>())
-        .map(OperationSendFailure::classification)
+        .map(OperationSendFailure::verdict)
 }
 
 #[cfg(test)]

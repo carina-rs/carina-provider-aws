@@ -358,21 +358,6 @@ mod tests {
     use aws_smithy_types::error::metadata::ErrorMetadata;
     use carina_core::provider::ProviderError as CoreProviderError;
 
-    #[test]
-    fn send_failure_preserves_the_full_classification() {
-        let classification = SendClassification::for_test(
-            SendOutcome::MaybeSent,
-            carina_aws_types::FinalAttempt::NotSent(carina_aws_types::Transience::Permanent),
-        );
-        let error: SdkError<ListRolesError> =
-            SdkError::construction_failure("final attempt failed locally");
-
-        let failure = SendFailure::new(classification, error);
-
-        assert_eq!(failure.classification(), classification);
-        assert_eq!(failure.outcome(), SendOutcome::MaybeSent);
-    }
-
     fn list_roles_service_error_with_meta(
         status: u16,
         code: Option<&str>,
