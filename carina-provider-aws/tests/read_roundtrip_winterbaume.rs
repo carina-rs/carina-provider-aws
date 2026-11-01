@@ -9,7 +9,7 @@ use std::pin::Pin;
 use std::str;
 use std::sync::{Arc, Mutex};
 
-use carina_core::differ::{Diff, Orphans, PlanPriorStates, create_plan, diff};
+use carina_core::differ::{Diff, Orphans, PlanPriorStates, create_plan, diff_for_test as diff};
 use carina_core::effect::Effect;
 use carina_core::provider::{
     AppliedIdentifier, CreateFailure, CreateOutcome, CreateRequest, NestedWriteOnlyRecord,
@@ -207,7 +207,9 @@ fn assert_no_diff(desired: Resource, current: State) {
         None,
         Some(schema.schema().as_schema()),
         comparison.context(),
-    );
+        &carina_core::references::prepare_empty_for_tests(),
+    )
+    .expect("prepared test comparison");
     assert!(matches!(result, Diff::NoChange(_)), "{result:?}");
 }
 
@@ -254,7 +256,7 @@ async fn assert_no_diff_with_nested_write_only(
         &current.attributes,
         &sent_desired,
         Some(schema.schema().as_schema()),
-        comparison.context(),
+        &comparison.context().observation(),
     );
     let result = diff(
         &ResolvedResource::new(desired),
@@ -263,7 +265,9 @@ async fn assert_no_diff_with_nested_write_only(
         Some(&explicit),
         Some(schema.schema().as_schema()),
         comparison.context(),
-    );
+        &carina_core::references::prepare_empty_for_tests(),
+    )
+    .expect("prepared test comparison");
     assert!(matches!(result, Diff::NoChange(_)), "{result:?}");
 }
 
@@ -1397,6 +1401,7 @@ async fn account_name_change_plans_an_update_instead_of_replacement() {
         &saved,
         &HashMap::new(),
         &[],
+        &carina_core::references::prepare_empty_for_tests(),
     )
     .expect("plan Organizations account rename");
 

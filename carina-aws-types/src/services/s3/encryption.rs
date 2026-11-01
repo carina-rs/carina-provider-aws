@@ -21,7 +21,7 @@ fn s3_sse_by_default() -> AttributeType {
             StructField::required("sse_algorithm", s3_sse_algorithm())
                 .with_provider_name("SSEAlgorithm")
                 .build(),
-            StructField::optional("kms_master_key_id", AttributeType::string())
+            StructField::optional("kms_master_key_id", crate::kms_key_reference())
                 .with_provider_name("KMSMasterKeyID")
                 .build(),
         ],

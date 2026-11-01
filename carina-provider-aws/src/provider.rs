@@ -3839,6 +3839,53 @@ impl AwsProvider {
 }
 
 impl Provider for AwsProvider {
+    fn resolve_references<'a>(
+        &'a self,
+        requests: &'a [carina_core::references::ReferenceRequest],
+    ) -> BoxFuture<
+        'a,
+        ProviderResult<
+            Vec<
+                Result<
+                    carina_core::references::ReferenceOutcome,
+                    carina_core::references::ReferenceError,
+                >,
+            >,
+        >,
+    > {
+        Box::pin(async move {
+            use carina_core::references::{ReferenceError, ReferenceOutcome};
+            use carina_provider_protocol::types as wire;
+            let requests = requests
+                .iter()
+                .map(|request| wire::ReferenceRequest {
+                    ty: wire::TypeIdentity {
+                        provider: request.ty.provider.clone().unwrap_or_default(),
+                        segments: request.ty.segments.clone(),
+                        kind: request.ty.kind.clone(),
+                    },
+                    value: request.value.clone(),
+                })
+                .collect();
+            Ok(AwsProvider::resolve_references(self, requests)
+                .await
+                .into_iter()
+                .map(|result| match result {
+                    Ok(outcome) => ReferenceOutcome::from_guest(outcome),
+                    Err(wire::ReferenceError::AccessDenied(error)) => Err(
+                        ReferenceError::AccessDenied(ProviderError::from_wire(*error).into()),
+                    ),
+                    Err(wire::ReferenceError::Transient(error)) => Err(ReferenceError::Transient(
+                        ProviderError::from_wire(*error).into(),
+                    )),
+                    Err(wire::ReferenceError::InvalidReference(error)) => Err(
+                        ReferenceError::InvalidReference(ProviderError::from_wire(*error).into()),
+                    ),
+                })
+                .collect())
+        })
+    }
+
     fn name(&self) -> &str {
         "aws"
     }

@@ -16,6 +16,7 @@ use clap::{Parser, ValueEnum};
 use heck::{ToSnakeCase, ToUpperCamelCase};
 
 use carina_aws_types::{AwsType, dsl_enum_value};
+use carina_codegen_aws::kms_references::{reference_type_code, validate_smithy_type};
 use carina_codegen_aws::resource_defs::{self, ReplacementClass, ResourceDef};
 use carina_docgen::example::{self, DocExample, ExampleKind};
 use carina_docgen::{Heading, PageBuilder, TableCell};
@@ -1448,12 +1449,14 @@ fn collect_resource_attributes_unvalidated(
             SmithyModel::documentation(&member_ref.traits).map(|s| s.to_string())
         };
 
+        validate_smithy_type(model, res.name, &snake_name, name, member_ref)?;
         let (type_code, enum_info) = resolve_type(
             &mut TypeResolutionContext {
                 model,
                 resource_name: res.name,
                 namespace: &namespace,
                 struct_path: Vec::new(),
+                property_path: snake_name.clone(),
                 type_overrides: &type_overrides,
                 enum_alias_map: &enum_alias_map,
                 to_dsl_overrides: &to_dsl_overrides,
@@ -1514,7 +1517,10 @@ fn collect_resource_attributes_unvalidated(
             continue; // Same-named Smithy member was emitted with synthetic semantics above.
         }
         let snake_name = extra.name.to_snake_case();
-        let type_code = if let Some(&override_type) = type_overrides.get(extra.name) {
+        carina_codegen_aws::kms_references::validate_synthetic_type(model, res, extra)?;
+        let type_code = if let Some(code) = reference_type_code(res.name, &snake_name) {
+            code.to_string()
+        } else if let Some(&override_type) = type_overrides.get(extra.name) {
             override_type.to_string()
         } else if let Some(inferred) = infer_string_type(extra.name) {
             inferred
@@ -1558,12 +1564,14 @@ fn collect_resource_attributes_unvalidated(
         let snake_name = name.to_snake_case();
         let description = SmithyModel::documentation(&member_ref.traits).map(|s| s.to_string());
 
+        validate_smithy_type(model, res.name, &snake_name, name, member_ref)?;
         let (type_code, enum_info) = resolve_type(
             &mut TypeResolutionContext {
                 model,
                 resource_name: res.name,
                 namespace: &namespace,
                 struct_path: Vec::new(),
+                property_path: snake_name.clone(),
                 type_overrides: &type_overrides,
                 enum_alias_map: &enum_alias_map,
                 to_dsl_overrides: &to_dsl_overrides,
@@ -2036,7 +2044,9 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
         .map(|a| a.type_code.as_str())
         .collect::<Vec<_>>()
         .join(" ");
-    let needs_types = code_str.contains("types::");
+    let needs_types = code_str
+        .replace("carina_aws_types::", "")
+        .contains("types::");
     let needs_tags_type = res.has_tags;
     let needs_struct_field = code_str.contains("StructField::");
 
@@ -2345,6 +2355,8 @@ struct TypeResolutionContext<'a> {
     /// Containing Smithy struct type names between the resource and the
     /// field currently being resolved.
     struct_path: Vec<String>,
+    /// Full property path, including array markers, independent of Smithy type names.
+    property_path: String,
     type_overrides: &'a HashMap<&'a str, &'a str>,
     enum_alias_map: &'a HashMap<&'a str, Vec<(&'a str, &'a str)>>,
     to_dsl_overrides: &'a HashMap<&'a str, &'a str>,
@@ -2445,6 +2457,9 @@ fn resolve_type(
     target: &str,
     field_name: &str,
 ) -> (String, Option<EnumInfo>) {
+    if let Some(code) = reference_type_code(ctx.resource_name, &ctx.property_path) {
+        return (code.to_string(), None);
+    }
     // Check type overrides first
     if let Some(&override_type) = ctx.type_overrides.get(field_name) {
         return (override_type.to_string(), None);
@@ -2541,7 +2556,10 @@ fn resolve_type(
         Some(ShapeKind::List) => {
             // Get list member type
             if let Some(carina_smithy::Shape::List(list_shape)) = ctx.model.get_shape(target) {
+                let previous_path = ctx.property_path.clone();
+                ctx.property_path.push_str("[]");
                 let (item_type, _) = resolve_type(ctx, &list_shape.member.target, field_name);
+                ctx.property_path = previous_path;
                 (format!("AttributeType::list({})", item_type), None)
             } else {
                 (
@@ -2606,11 +2624,18 @@ fn generate_struct_type(
             .get(&(struct_name, field_name.as_str()))
             .copied();
 
-        let (field_type, enum_info) = if let Some(t) = override_type {
-            (t.to_string(), None)
-        } else {
-            resolve_type(ctx, &member_ref.target, field_name)
-        };
+        let previous_path = ctx.property_path.clone();
+        ctx.property_path = format!("{previous_path}.{snake_name}");
+        let (field_type, enum_info) =
+            if let Some(code) = reference_type_code(ctx.resource_name, &ctx.property_path) {
+                (code.to_string(), None)
+            } else if let Some(t) = override_type {
+                (t.to_string(), None)
+            } else {
+                resolve_type(ctx, &member_ref.target, field_name)
+            };
+
+        ctx.property_path = previous_path;
 
         // If enum detected, use shared schema enum type.
         let field_type = if let Some(ei) = enum_info {
@@ -5368,12 +5393,14 @@ fn generate_markdown_resource(
         } else {
             SmithyModel::documentation(&member_ref.traits).map(|s| s.to_string())
         };
+        validate_smithy_type(model, res.name, &snake_name, name, member_ref)?;
         let attr_type = discover_markdown_type(
             model,
             res.name,
             &member_ref.target,
             name,
             std::slice::from_ref(&snake_name),
+            &snake_name,
             &namespace,
             &type_overrides,
             &struct_field_type_overrides,
@@ -5401,7 +5428,10 @@ fn generate_markdown_resource(
             continue;
         }
         let snake_name = extra.name.to_snake_case();
-        let type_display = if let Some(&override_type) = type_overrides.get(extra.name) {
+        carina_codegen_aws::kms_references::validate_synthetic_type(model, res, extra)?;
+        let type_display = if let Some(code) = reference_type_code(res.name, &snake_name) {
+            type_code_to_display(code)
+        } else if let Some(&override_type) = type_overrides.get(extra.name) {
             type_code_to_display(override_type)
         } else if is_aws_resource_id_property(extra.name) {
             resource_id_display(extra.name)
@@ -5425,6 +5455,7 @@ fn generate_markdown_resource(
     for (name, member_ref) in &read_only_fields {
         let snake_name = name.to_snake_case();
         let description = SmithyModel::documentation(&member_ref.traits).map(|s| s.to_string());
+        validate_smithy_type(model, res.name, &snake_name, name, member_ref)?;
         let attr_type = if name == "Arn" {
             resource_identity_parts(res.name)
                 .and_then(|(service, resource)| shared_arn_constructor(service, resource))
@@ -5440,6 +5471,7 @@ fn generate_markdown_resource(
                 &member_ref.target,
                 name,
                 std::slice::from_ref(&snake_name),
+                &snake_name,
                 &namespace,
                 &type_overrides,
                 &struct_field_type_overrides,
@@ -5510,6 +5542,26 @@ fn generate_markdown_resource(
             .collect::<Vec<_>>()
             .join(", ");
         page.push_str(&format!("After create or update, the host polls for {names} when DNS validation is requested.\n\n"));
+    }
+
+    for entry in carina_codegen_aws::kms_references::CLASSIFICATIONS
+        .iter()
+        .filter(|entry| {
+            entry.resource == res.name
+                && matches!(
+                    entry.classification,
+                    carina_codegen_aws::kms_references::Classification::Reference { .. }
+                )
+        })
+    {
+        if matches!(
+            entry.classification,
+            carina_codegen_aws::kms_references::Classification::Reference { arn_only: true }
+        ) {
+            page.push_str(&format!("`{}` uses `KmsKeyReference` and accepts key ARNs only. Key ARNs need no lookup. See [KMS reference planning permissions](https://carina-rs.dev/guides/aws-credentials/#kms-reference-planning-permissions).\n\n", entry.path));
+            continue;
+        }
+        page.push_str(&format!("`{}` uses `KmsKeyReference`. Planning key IDs or aliases requires `kms:DescribeKey` for the provider's effective identity and authorization in the key policy. Key ARNs need no lookup. Resolving an AWS-managed alias can initialize its key during planning. See [KMS reference planning permissions](https://carina-rs.dev/guides/aws-credentials/#kms-reference-planning-permissions).\n\n", entry.path));
     }
 
     write_markdown_example(&mut page, example)?;
@@ -5756,6 +5808,7 @@ fn generate_data_source(
         required: bool,
         read_only: bool,
     }
+    carina_codegen_aws::kms_references::validate_data_source(ds)?;
     let mut ds_attrs: Vec<DsAttr> = Vec::new();
     for input in &ds.inputs {
         let type_str = if let Some(t) = input.type_override {
@@ -5901,6 +5954,7 @@ fn generate_markdown_data_source(
     _model: &SmithyModel,
     example: &DocExample,
 ) -> Result<String> {
+    carina_codegen_aws::kms_references::validate_data_source(ds)?;
     let example = example.text_for("aws", ds.name, ExampleKind::DataSource)?;
     struct MarkdownDataSourceOutput<'a> {
         name: &'a str,
@@ -6034,6 +6088,7 @@ fn discover_markdown_type(
     target: &str,
     field_name: &str,
     heading_path: &[String],
+    property_path: &str,
     enum_namespace: &str,
     type_overrides: &HashMap<&str, &str>,
     struct_field_type_overrides: &HashMap<(&str, &str), &str>,
@@ -6042,6 +6097,9 @@ fn discover_markdown_type(
     struct_defs: &mut BTreeMap<MarkdownStructKey, MarkdownStruct>,
     discovering_structs: &mut HashMap<String, MarkdownStructKey>,
 ) -> MarkdownType {
+    if let Some(code) = reference_type_code(resource_name, property_path) {
+        return MarkdownType::Plain(type_code_to_display(code));
+    }
     // Per-(parent_struct, member) override wins over per-member and Smithy
     // default. Distinguishes a member name shared across structs (aws#302).
     if let Some(parent) = parent_struct
@@ -6129,6 +6187,7 @@ fn discover_markdown_type(
                     &list_shape.member.target,
                     field_name,
                     heading_path,
+                    &format!("{property_path}[]"),
                     enum_namespace,
                     type_overrides,
                     struct_field_type_overrides,
@@ -6181,6 +6240,7 @@ fn discover_markdown_type(
                             &member_ref.target,
                             name,
                             &child_heading_path,
+                            &format!("{property_path}.{}", name.to_snake_case()),
                             &child_enum_namespace,
                             type_overrides,
                             struct_field_type_overrides,
@@ -6323,8 +6383,10 @@ fn type_code_to_display(type_code: &str) -> String {
         s if s.contains("iam_policy_document") => "PolicyDocument".to_string(),
         s if s.contains("cloudfront_hosted_zone_id") => "CloudFrontHostedZoneId".to_string(),
         s if s.contains("route53_hosted_zone_id") => "Route53HostedZoneId".to_string(),
-        s if s.contains("kms_key_arn") || s.contains("kms::key::arn") => "KmsKeyArn".to_string(),
-        s if s.contains("kms_key_id") || s.contains("kms::key::id") => "KmsKeyId".to_string(),
+        "super::kms_key_arn()" | "super::super::kms::key::arn()" => "KmsKeyArn".to_string(),
+        "carina_aws_types::kms_key_reference()" | "carina_aws_types::kms_key_arn_reference()" => {
+            "KmsKeyReference".to_string()
+        }
         s if s.contains("vpc_id") => "VpcId".to_string(),
         s if s.contains("subnet_id") => "SubnetId".to_string(),
         s if s.contains("security_group_rule_id") => "SecurityGroupRuleId".to_string(),
@@ -6446,11 +6508,6 @@ fn known_string_type_overrides() -> &'static HashMap<&'static str, &'static str>
         m.insert("PeerRoleArn", "super::super::iam::role::arn()");
         m.insert("PermissionsBoundary", "super::super::iam::policy::arn()");
         m.insert("ManagedPolicyArns", "super::super::iam::policy::arn()");
-        m.insert("KmsKeyId", "super::super::kms::key::id()");
-        m.insert("kmsKeyId", "super::super::kms::key::id()");
-        m.insert("KMSMasterKeyID", "super::super::kms::key::id()");
-        m.insert("ReplicaKmsKeyID", "super::super::kms::key::id()");
-        m.insert("KmsKeyArn", "super::super::kms::key::arn()");
         m.insert("SecurityGroupRuleId", "super::security_group_rule_id()");
         m.insert("Locale", "super::aws_region()");
         m.insert("BucketAccountId", "super::aws_account_id()");
@@ -6953,6 +7010,23 @@ mod tests {
 
     fn empty_test_model() -> SmithyModel {
         carina_smithy::parse(r#"{"smithy":"2.0","shapes":{}}"#).expect("parse empty test model")
+    }
+
+    #[test]
+    fn generation_rejects_unclassified_kms_candidate_before_type_overrides() {
+        let model = string_fixture_model(&[("KmsNewKey", false)], &[]);
+        let mut resource =
+            provider_fixture_resource("test.Resource", "Name", &["KmsNewKey"], vec![]);
+        resource
+            .type_overrides
+            .push(("KmsNewKey", "AttributeType::string()"));
+        let error = generate_resource(&resource, &model).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("unclassified KMS string test.Resource.kms_new_key"),
+            "{error:#}"
+        );
     }
 
     fn string_fixture_model(

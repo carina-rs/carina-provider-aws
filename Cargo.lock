@@ -358,6 +358,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "aws-sdk-kms"
+version = "1.127.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "53abc4249368713fb509c99dd4b762e91b58015f5132c57ca5a40c4c7909c693"
+dependencies = [
+ "arc-swap",
+ "aws-credential-types",
+ "aws-runtime",
+ "aws-smithy-async",
+ "aws-smithy-http",
+ "aws-smithy-json",
+ "aws-smithy-observability",
+ "aws-smithy-runtime",
+ "aws-smithy-runtime-api",
+ "aws-smithy-schema",
+ "aws-smithy-types",
+ "aws-types",
+ "bytes",
+ "fastrand",
+ "http 1.4.0",
+ "regex-lite",
+ "tracing",
+]
+
+[[package]]
 name = "aws-sdk-organizations"
 version = "1.136.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -882,8 +907,10 @@ dependencies = [
  "aws-smithy-types",
  "carina-core",
  "carina-plugin-sdk",
+ "carina-provider-protocol",
  "heck",
  "indexmap",
+ "regex",
  "tokio",
  "wasi 0.14.7+wasi-0.2.4",
 ]
@@ -905,7 +932,7 @@ dependencies = [
 [[package]]
 name = "carina-core"
 version = "0.9.0"
-source = "git+https://github.com/carina-rs/carina?rev=bb1c40c4#bb1c40c4d151d61bc580ad12a4ba54852d19930e"
+source = "git+https://github.com/carina-rs/carina?rev=e0bacfcf#e0bacfcf63c5d1cf0b1b6f22384263a159d3a0dc"
 dependencies = [
  "argon2",
  "carina-provider-protocol",
@@ -951,7 +978,7 @@ dependencies = [
 [[package]]
 name = "carina-plugin-bindings-aws"
 version = "0.9.0"
-source = "git+https://github.com/carina-rs/carina?rev=bb1c40c4#bb1c40c4d151d61bc580ad12a4ba54852d19930e"
+source = "git+https://github.com/carina-rs/carina?rev=e0bacfcf#e0bacfcf63c5d1cf0b1b6f22384263a159d3a0dc"
 dependencies = [
  "carina-plugin-bindings-aws-credentials",
  "wasi 0.14.7+wasi-0.2.4",
@@ -961,7 +988,7 @@ dependencies = [
 [[package]]
 name = "carina-plugin-bindings-aws-credentials"
 version = "0.9.0"
-source = "git+https://github.com/carina-rs/carina?rev=bb1c40c4#bb1c40c4d151d61bc580ad12a4ba54852d19930e"
+source = "git+https://github.com/carina-rs/carina?rev=e0bacfcf#e0bacfcf63c5d1cf0b1b6f22384263a159d3a0dc"
 dependencies = [
  "wit-bindgen 0.54.0",
 ]
@@ -969,7 +996,7 @@ dependencies = [
 [[package]]
 name = "carina-plugin-bindings-http"
 version = "0.9.0"
-source = "git+https://github.com/carina-rs/carina?rev=bb1c40c4#bb1c40c4d151d61bc580ad12a4ba54852d19930e"
+source = "git+https://github.com/carina-rs/carina?rev=e0bacfcf#e0bacfcf63c5d1cf0b1b6f22384263a159d3a0dc"
 dependencies = [
  "wasi 0.14.7+wasi-0.2.4",
  "wit-bindgen 0.54.0",
@@ -978,7 +1005,7 @@ dependencies = [
 [[package]]
 name = "carina-plugin-bindings-provider"
 version = "0.9.0"
-source = "git+https://github.com/carina-rs/carina?rev=bb1c40c4#bb1c40c4d151d61bc580ad12a4ba54852d19930e"
+source = "git+https://github.com/carina-rs/carina?rev=e0bacfcf#e0bacfcf63c5d1cf0b1b6f22384263a159d3a0dc"
 dependencies = [
  "wit-bindgen 0.54.0",
 ]
@@ -986,7 +1013,7 @@ dependencies = [
 [[package]]
 name = "carina-plugin-sdk"
 version = "0.9.0"
-source = "git+https://github.com/carina-rs/carina?rev=bb1c40c4#bb1c40c4d151d61bc580ad12a4ba54852d19930e"
+source = "git+https://github.com/carina-rs/carina?rev=e0bacfcf#e0bacfcf63c5d1cf0b1b6f22384263a159d3a0dc"
 dependencies = [
  "aws-smithy-runtime-api",
  "aws-smithy-types",
@@ -1014,6 +1041,7 @@ dependencies = [
  "aws-sdk-ec2",
  "aws-sdk-iam",
  "aws-sdk-identitystore",
+ "aws-sdk-kms",
  "aws-sdk-organizations",
  "aws-sdk-route53",
  "aws-sdk-s3",
@@ -1024,10 +1052,12 @@ dependencies = [
  "aws-smithy-types",
  "aws-types",
  "carina-aws-types",
+ "carina-codegen-aws",
  "carina-core",
  "carina-plugin-sdk",
  "carina-provider-aws",
  "carina-provider-protocol",
+ "futures",
  "heck",
  "indexmap",
  "regex",
@@ -1046,7 +1076,7 @@ dependencies = [
 [[package]]
 name = "carina-provider-protocol"
 version = "0.3.0"
-source = "git+https://github.com/carina-rs/carina?rev=bb1c40c4#bb1c40c4d151d61bc580ad12a4ba54852d19930e"
+source = "git+https://github.com/carina-rs/carina?rev=e0bacfcf#e0bacfcf63c5d1cf0b1b6f22384263a159d3a0dc"
 dependencies = [
  "psl",
  "serde",

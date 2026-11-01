@@ -30,6 +30,29 @@ AWS_PROFILE=development carina plan .
 The provider's service region comes from its `region` attribute, defaulting to
 `aws.Region.ap_northeast_1`; a profile's region does not change it.
 
+## KMS reference planning permissions
+
+When a KMS reference differs from the service's returned value, planning compares
+the resolved key ARNs. Key IDs, alias names, and alias ARNs require
+`kms:DescribeKey`; a key ARN needs no lookup. Validation and LSP diagnostics
+remain offline. Identical values and deferred values need no lookup.
+
+Grant this permission to the routed provider instance's effective credentials,
+including its assumed role. The key policy must authorize the lookup;
+cross-account references also require the caller's IAM policy to allow it.
+Bare IDs and aliases use the configured provider region. Qualified ARNs keep
+their own region and account. An unreachable partition fails validation during
+resolution.
+
+This permission is independent of advisory `--check-iam`. A used access denial,
+transient failure, or invalid reference aborts planning. A missing desired key
+also aborts planning; a missing current key produces a difference so an update
+can repair it. Resolving `alias/aws/<service>` calls `DescribeKey` directly and
+can initialize the service's AWS-managed key during planning.
+
+Resolved ARNs are comparison values only; payloads and state retain their raw
+values. See the [AWS credentials guide](https://carina-rs.dev/guides/aws-credentials/#kms-reference-planning-permissions).
+
 ## Configuration
 
 | Attribute | Type | Description |

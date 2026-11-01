@@ -48,7 +48,7 @@ mod tests {
     use std::collections::HashMap;
 
     use carina_aws_types::AwsType;
-    use carina_core::differ::{Diff, diff};
+    use carina_core::differ::{Diff, diff_for_test as diff};
     use carina_core::executor::normalized::apply_desired_normalization;
     use carina_core::provider::normalize_provider_states;
     use carina_core::resource::{ConcreteValue, Current, ResolvedResource, Resource, Value};
@@ -59,6 +59,155 @@ mod tests {
     use indexmap::IndexMap;
 
     use crate::AwsNormalizer;
+
+    #[test]
+    fn final_registry_classifies_every_kms_string_including_handwritten_structs() {
+        use carina_codegen_aws::kms_references::{
+            CLASSIFICATIONS, Classification, classify_string,
+        };
+        use carina_core::schema::{CompiledAttributeType, CompiledResourceSchema};
+        use std::collections::BTreeSet;
+
+        fn walk(
+            schema: &CompiledResourceSchema,
+            ty: &CompiledAttributeType,
+            path: &str,
+            name: &str,
+            description: Option<&str>,
+            references: &mut BTreeSet<(String, String)>,
+            depth: usize,
+        ) {
+            assert!(depth < 64, "schema walk exceeded depth at {path}");
+            let mut check =
+                |pattern: Option<&str>, identity: Option<&carina_core::schema::TypeIdentity>| {
+                    let classification =
+                        classify_string(schema.resource_type(), path, name, pattern, description)
+                            .unwrap();
+                    match classification {
+                        Some(Classification::Reference { .. }) => {
+                            assert_eq!(
+                                identity,
+                                Some(&AwsType::KmsKeyReference.identity()),
+                                "{}.{} must be a reference leaf",
+                                schema.resource_type(),
+                                path
+                            );
+                            references
+                                .insert((schema.resource_type().to_string(), path.to_string()));
+                        }
+                        Some(Classification::NotReference(reason)) => {
+                            assert!(!reason.is_empty());
+                            assert!(identity.is_none());
+                        }
+                        None => assert!(
+                            identity.is_none(),
+                            "unclassified reference {}.{path}",
+                            schema.resource_type()
+                        ),
+                    }
+                };
+            match schema.shape_of(ty) {
+                Shape::Reference { identity, .. } => check(None, Some(identity)),
+                Shape::String { pattern, .. } => check(pattern, None),
+                Shape::Enum { base, .. } => {
+                    walk(schema, base, path, name, description, references, depth + 1)
+                }
+                Shape::List { element_type, .. } => walk(
+                    schema,
+                    element_type,
+                    &format!("{path}[]"),
+                    name,
+                    description,
+                    references,
+                    depth + 1,
+                ),
+                Shape::Map { key, value } => {
+                    walk(
+                        schema,
+                        key,
+                        &format!("{path}.<key>"),
+                        name,
+                        None,
+                        references,
+                        depth + 1,
+                    );
+                    walk(
+                        schema,
+                        value,
+                        &format!("{path}{{}}"),
+                        name,
+                        description,
+                        references,
+                        depth + 1,
+                    );
+                }
+                Shape::Struct { .. } => {
+                    let mut budget = ShapeWalkBudget::new(64);
+                    for field in schema
+                        .struct_fields_with_budget(ty, &mut budget)
+                        .unwrap()
+                        .iter()
+                    {
+                        walk(
+                            schema,
+                            field.field_type(),
+                            &format!("{path}.{}", field.name()),
+                            field.name(),
+                            field.description(),
+                            references,
+                            depth + 1,
+                        );
+                    }
+                }
+                Shape::Union => {
+                    let mut budget = ShapeWalkBudget::new(64);
+                    for member in schema
+                        .union_members_with_budget(ty, &mut budget)
+                        .unwrap()
+                        .iter()
+                        .flatten()
+                    {
+                        walk(
+                            schema,
+                            member.as_attr(),
+                            path,
+                            name,
+                            description,
+                            references,
+                            depth + 1,
+                        );
+                    }
+                }
+                Shape::Bool | Shape::Int { .. } | Shape::Float { .. } | Shape::Duration => {}
+            }
+        }
+
+        let registry = super::schema_registry();
+        let mut references = BTreeSet::new();
+        for (_, _, _, schema) in registry.iter() {
+            let schema = schema.as_schema();
+            for (name, attribute) in schema.attributes() {
+                walk(
+                    schema,
+                    attribute.attr_type(),
+                    name,
+                    name,
+                    attribute.description(),
+                    &mut references,
+                    0,
+                );
+            }
+        }
+        let expected = CLASSIFICATIONS
+            .iter()
+            .filter(|entry| matches!(entry.classification, Classification::Reference { .. }))
+            .map(|entry| (entry.resource.to_string(), entry.path.to_string()))
+            .collect();
+        assert_eq!(
+            references, expected,
+            "every classified reference must be present in the final registry"
+        );
+    }
 
     #[test]
     fn acm_read_back_budget_is_300_seconds_and_other_resources_use_default() {
@@ -879,7 +1028,9 @@ mod tests {
             None,
             Some(schema.schema().as_schema()),
             comparison.context(),
-        );
+            &carina_core::references::prepare_empty_for_tests(),
+        )
+        .expect("prepared test comparison");
         assert!(
             matches!(result, Diff::NoChange(_)),
             "{label}: read-back wire value must not cause a phantom diff: {result:?}"

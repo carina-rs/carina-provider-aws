@@ -4,7 +4,7 @@
 #![cfg(not(target_arch = "wasm32"))]
 
 use aws_sdk_s3::Client as S3Client;
-use carina_core::differ::{Diff, diff};
+use carina_core::differ::{Diff, diff_for_test as diff};
 use carina_core::provider::{
     AppliedIdentifier, CreateFailure, CreateOutcome, CreateOutcomeKind, CreateRequest,
     NoopNormalizer, Provider, ProviderReadyDataSource, ReadRequest, UpdateOutcomeKind,
@@ -306,7 +306,9 @@ fn assert_no_diff(desired: Resource, current: State) {
         None,
         Some(schema.schema().as_schema()),
         comparison.context(),
-    );
+        &carina_core::references::prepare_empty_for_tests(),
+    )
+    .expect("prepared test comparison");
     assert!(matches!(result, Diff::NoChange(_)), "{result:?}");
 }
 

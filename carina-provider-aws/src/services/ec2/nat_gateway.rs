@@ -449,7 +449,7 @@ impl AwsProvider {
 #[cfg(test)]
 mod pending_tests {
     use super::*;
-    use carina_core::differ::{Diff, diff};
+    use carina_core::differ::{Diff, diff_for_test as diff};
     use carina_core::provider::RawSavedAttrs;
     use carina_core::resource::{ResolvedResource, Resource};
     use std::collections::HashMap;
@@ -587,7 +587,9 @@ mod pending_tests {
             None,
             Some(schema.schema().as_schema()),
             comparison.context(),
-        );
+            &carina_core::references::prepare_empty_for_tests(),
+        )
+        .expect("prepared test comparison");
         assert!(matches!(result, Diff::NoChange(_)), "{result:?}");
     }
 }

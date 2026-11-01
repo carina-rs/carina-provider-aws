@@ -70,3 +70,53 @@ fn arn_identity_is_provider_scoped() {
         Some("aws.kms.Key.Arn")
     );
 }
+
+#[test]
+fn reference_leaf_is_offline_and_accepts_all_key_identifier_forms() {
+    let t = carina_aws_types::kms_key_reference();
+    let carina_core::schema::RawShape::Reference { identity, .. } = t.raw_shape() else {
+        panic!("expected a reference leaf");
+    };
+    assert_eq!(identity.to_string(), "aws.kms.Key.Reference");
+    for value in [
+        "alias/aws/sqs",
+        "1234abcd-12ab-34cd-56ef-1234567890ab",
+        "mrk-0123456789abcdef0123456789abcdef",
+        "arn:aws:kms:us-east-1:123456789012:alias/example",
+        "arn:aws:kms:us-east-1:123456789012:key/mrk-0123456789abcdef0123456789abcdef",
+    ] {
+        assert_schema_accepts(t.clone(), value);
+    }
+    for value in ["alias/", "random", "arn:aws:kms::123:key/bad"] {
+        assert_schema_rejects(t.clone(), value);
+    }
+}
+
+#[test]
+fn key_arn_outputs_are_assignable_to_reference_inputs() {
+    use carina_core::schema::TypeInSchema;
+    let source = carina_aws_types::kms_key_arn();
+    for sink in [
+        carina_aws_types::kms_key_reference(),
+        carina_aws_types::kms_key_arn_reference(),
+    ] {
+        assert!(
+            TypeInSchema::schemaless(&source).is_assignable_to(TypeInSchema::schemaless(&sink))
+        );
+    }
+}
+
+#[test]
+fn logs_reference_preserves_arn_only_and_smithy_length_constraints() {
+    let t = carina_aws_types::kms_key_arn_reference();
+    let carina_core::schema::RawShape::Reference { length, .. } = t.raw_shape() else {
+        panic!("expected a reference leaf");
+    };
+    assert_eq!(length, Some((Some(0), Some(256))));
+    assert_schema_accepts(
+        t.clone(),
+        "arn:aws:kms:us-east-1:123456789012:key/1234abcd-12ab-34cd-56ef-1234567890ab",
+    );
+    assert_schema_rejects(t.clone(), "alias/example");
+    assert_schema_rejects(t, "arn:aws:kms:us-east-1:123456789012:alias/example");
+}

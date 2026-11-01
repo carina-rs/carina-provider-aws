@@ -28,7 +28,7 @@ pub fn logs_log_group_config() -> AwsSchemaConfig {
                 .build(),
         )
         .attribute(
-            AttributeSchema::optional("kms_key_id", super::super::kms::key::id())
+            AttributeSchema::optional("kms_key_id", carina_aws_types::kms_key_arn_reference())
                 .create_only()
                 .with_description("The Amazon Resource Name (ARN) of the KMS key to use when encrypting log data. For more information, see Amazon Resource Names.")
                 .with_provider_name("kmsKeyId")

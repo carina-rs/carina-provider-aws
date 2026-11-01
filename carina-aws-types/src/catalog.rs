@@ -12,8 +12,8 @@ use carina_core::schema::{AttributeType, DslTransform, TypeIdentity, legacy_vali
 use crate::{
     validate_arn, validate_availability_zone, validate_availability_zone_id,
     validate_aws_account_id, validate_aws_region, validate_aws_resource_id, validate_iam_arn,
-    validate_iam_role_id, validate_ipam_pool_id, validate_kms_key_id,
-    validate_prefixed_resource_id, validate_service_arn,
+    validate_iam_role_id, validate_ipam_pool_id, validate_kms_key_arn, validate_kms_key_id,
+    validate_prefixed_resource_id,
 };
 
 fn validated_string(
@@ -74,27 +74,6 @@ fn iam_arn(
         legacy_validator(move |value| {
             if let Value::Concrete(ConcreteValue::String(value)) = value {
                 validate_iam_arn(value.expose_plaintext(), resource_prefix)
-            } else {
-                Err("Expected string".to_string())
-            }
-        }),
-        None,
-    )
-}
-
-fn service_arn(
-    identity: TypeIdentity,
-    pattern: &'static str,
-    service: &'static str,
-    resource_prefix: Option<&'static str>,
-) -> AttributeType {
-    AttributeType::refined_string_with_validator(
-        identity,
-        Some(pattern.to_string()),
-        None,
-        legacy_validator(move |value| {
-            if let Value::Concrete(ConcreteValue::String(value)) = value {
-                validate_service_arn(value.expose_plaintext(), service, resource_prefix)
             } else {
                 Err("Expected string".to_string())
             }
@@ -565,17 +544,28 @@ define_aws_type_catalog! {
             validate_kms_key_id,
         ),
     },
+    /// Comparison-only KMS reference. Authored inputs remain strings.
+    KmsKeyReference => kms_key_reference {
+        segments: ["kms", "Key"],
+        kind: "Reference",
+        valid_sample: "alias/aws/sqs",
+        constructor: |identity| AttributeType::reference(
+            identity,
+            Some(crate::KMS_KEY_REFERENCE_PATTERN.to_string()),
+            Some((Some(1), Some(2048))),
+        ),
+    },
     /// KMS key ARN (aliases are intentionally excluded).
     KmsKeyArn => kms_key_arn {
         segments: ["kms", "Key"],
         kind: "Arn",
         valid_sample: "arn:aws:kms:ap-northeast-1:123456789012:key/12345678-1234-1234-1234-123456789abc",
         has_validator: true,
-        constructor: |identity| service_arn(
+        constructor: |identity| validated_string(
             identity,
-            "^arn:(aws|aws-cn|aws-us-gov):kms:[^:]*:[^:]*:key/.+$",
-            "kms",
-            Some("key/"),
+            crate::KMS_KEY_ARN_PATTERN,
+            None,
+            validate_kms_key_arn,
         ),
     },
     /// EC2 IPAM pool ID.
@@ -1015,13 +1005,14 @@ mod tests {
                 identity: Some(identity),
                 ..
             } => identity,
-            RawShape::Enum { identity, .. } => identity,
+            RawShape::Reference { identity, .. } | RawShape::Enum { identity, .. } => identity,
             shape => panic!("catalog constructor must carry a scalar identity, got {shape:?}"),
         }
     }
 
     fn attribute_type_validator(attribute_type: &AttributeType) -> Option<&CustomValidator> {
         match attribute_type.raw_shape() {
+            RawShape::Reference { .. } => None,
             RawShape::String { validate, .. }
             | RawShape::Int { validate, .. }
             | RawShape::Float { validate, .. }
@@ -1197,6 +1188,7 @@ IamRoleArn|aws|iam/Role|Arn|arn:aws:iam::123456789012:role/example-role|true
 IamPolicyArn|aws|iam/Policy|Arn|arn:aws:iam::123456789012:policy/example-policy|true
 IamOidcProviderArn|aws|iam/OidcProvider|Arn|arn:aws:iam::123456789012:oidc-provider/example.com|false
 KmsKeyId|aws|kms/Key|Id|12345678-1234-1234-1234-123456789abc|true
+KmsKeyReference|aws|kms/Key|Reference|alias/aws/sqs|false
 KmsKeyArn|aws|kms/Key|Arn|arn:aws:kms:ap-northeast-1:123456789012:key/12345678-1234-1234-1234-123456789abc|true
 IpamPoolId|aws|ec2/IpamPool|Id|ipam-pool-12345678|true
 Route53HostedZoneId|aws|route53/HostedZone|Id|Z2FDTNDATAQYW2|false

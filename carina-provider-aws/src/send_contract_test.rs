@@ -408,7 +408,6 @@ fn sample_string(resource_type: &str, path: &[String]) -> String {
         "allocation_id" | "allocation_ids" => ec2_id("eipalloc"),
         "arn"
         | "deliver_logs_permission_arn"
-        | "kms_key_id"
         | "log_destination"
         | "resource_configuration_arn"
         | "role"
@@ -442,6 +441,10 @@ fn sample_string(resource_type: &str, path: &[String]) -> String {
         "path" => "/".to_string(),
         "peer_owner_id" | "source_security_group_owner_id" => "123456789012".to_string(),
         "peer_vpc_id" | "vpc_id" => ec2_id("vpc"),
+        "kms_key_id" | "kms_master_key_id" => {
+            "arn:aws:kms:us-east-1:123456789012:key/1234abcd-12ab-34cd-56ef-1234567890ab"
+                .to_string()
+        }
         "private_ip_address" => format!("10.0.0.{}", 10 + hash % 200),
         "public_ipv4_pool" => "amazon".to_string(),
         "queue_name" => format!("carina-send-{suffix}.fifo"),
@@ -468,7 +471,9 @@ fn sample_value(
     budget: &mut ShapeWalkBudget,
 ) -> Value {
     match schema.shape_of(attribute_type) {
-        Shape::String { .. } => string(sample_string(resource_type, path)),
+        Shape::String { .. } | Shape::Reference { .. } => {
+            string(sample_string(resource_type, path))
+        }
         Shape::Int { range, .. } => {
             let minimum = range.and_then(|(minimum, _)| minimum).unwrap_or(1);
             let maximum = range.and_then(|(_, maximum)| maximum).unwrap_or(i64::MAX);
