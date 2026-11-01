@@ -1,0 +1,14 @@
+# AWS Organization
+#
+# Creates an organization with all AWS Organizations features enabled.
+
+provider aws {
+  region = aws.Region.ap_northeast_1
+}
+
+aws.organizations.Organization {
+  # Run this resource from a standalone AWS account that is not already in an
+  # organization. Enabling all features cannot be reverted to consolidated
+  # billing features.
+  feature_set = aws.organizations.Organization.FeatureSet.all
+}

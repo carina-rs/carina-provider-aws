@@ -1,0 +1,18 @@
+# Route 53 Record Set
+#
+# Creates a CNAME record in an existing hosted zone.
+
+provider aws {
+  region = aws.Region.ap_northeast_1
+}
+
+aws.route53.RecordSet {
+  # Replace with the ID of the existing Route 53 hosted zone to update.
+  hosted_zone_id   = 'Z0123456789EXAMPLE'
+  # Replace with the fully qualified record name to create in that zone.
+  name             = 'carina-example-record.example.com.'
+  type             = aws.route53.RecordSet.Type.cname
+  ttl              = 300
+  # Replace with the fully qualified DNS name that the CNAME should target.
+  resource_records = ['origin.example.com.']
+}

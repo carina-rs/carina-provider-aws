@@ -1,0 +1,59 @@
+# S3 Bucket Logging
+#
+# Delivers server access logs to a policy-protected destination bucket.
+
+provider aws {
+  region = aws.Region.ap_northeast_1
+}
+
+let caller = read aws.sts.CallerIdentity {}
+
+let source_bucket = aws.s3.Bucket {
+  bucket = 'carina-example-logging-source'
+
+  tags = {
+    Environment = 'example'
+  }
+}
+
+let log_bucket = aws.s3.Bucket {
+  bucket = 'carina-example-logging-destination'
+
+  tags = {
+    Environment = 'example'
+  }
+}
+
+let log_bucket_policy = aws.s3.BucketPolicy {
+  bucket = log_bucket.bucket
+
+  policy = {
+    version = aws.iam.PolicyDocument.Version.2012_10_17
+    statement {
+      sid    = 'AllowS3LogDelivery'
+      effect = aws.iam.PolicyDocument.Statement.Effect.allow
+
+      principal = {
+        service = 'logging.s3.amazonaws.com'
+      }
+
+      action   = 's3:PutObject'
+      resource = ["${log_bucket.arn}/access-logs/*"]
+
+      condition = {
+        arn_like      = {
+          'aws:SourceArn' = source_bucket.arn
+        }
+        string_equals = {
+          'aws:SourceAccount' = caller.account_id
+        }
+      }
+    }
+  }
+}
+
+aws.s3.BucketLogging {
+  bucket        = source_bucket.bucket
+  target_bucket = log_bucket_policy.bucket
+  target_prefix = 'access-logs/'
+}

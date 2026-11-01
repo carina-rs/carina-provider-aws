@@ -17,9 +17,8 @@ provider aws {
 let sso_admin_roles = read aws.iam.Roles {
   path_prefix = '/aws-reserved/sso.amazonaws.com/'
   name_regex  = '^AWSReservedSSO_AdministratorAccess_[0-9a-f]{16}$'
+  # Downstream resources consume the result via `sso_admin_roles.arns`
+  # and `sso_admin_roles.names`. For example, a cross-account
+  # `aws.s3.BucketPolicy` Principal can be built as
+  # `sso_admin_roles.arns[0]` once the regex narrows the match to one role.
 }
-
-# Downstream resources consume the result via `sso_admin_roles.arns`
-# and `sso_admin_roles.names`. For example, a cross-account
-# `aws.s3.BucketPolicy` Principal can be built as
-# `sso_admin_roles.arns[0]` once the regex narrows the match to one role.

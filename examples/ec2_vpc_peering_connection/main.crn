@@ -1,0 +1,36 @@
+# EC2 VPC Peering Connection
+#
+# Creates a peering connection between two VPCs.
+# The request must be accepted before it can carry traffic. EC2 does not
+# auto-accept same-account requests; an unaccepted request expires after 7 days.
+
+provider aws {
+  region = aws.Region.ap_northeast_1
+}
+
+let requester_vpc = aws.ec2.Vpc {
+  cidr_block = '10.0.0.0/16'
+
+  tags = {
+    Environment = 'example'
+  }
+}
+
+let accepter_vpc = aws.ec2.Vpc {
+  cidr_block = '10.1.0.0/16'
+
+  tags = {
+    Environment = 'example'
+  }
+}
+
+aws.ec2.VpcPeeringConnection {
+  # Accept the request before routing traffic. Same-account requests are not
+  # auto-accepted, and an unaccepted request expires after 7 days.
+  vpc_id      = requester_vpc.vpc_id
+  peer_vpc_id = accepter_vpc.vpc_id
+
+  tags = {
+    Environment = 'example'
+  }
+}

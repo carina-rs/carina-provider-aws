@@ -20,6 +20,8 @@ path = "tests/check_binary.rs"
 required-features = ["check-bin"]
 
 [dependencies]
+anyhow = "1.0"
+carina-core.workspace = true
 comrak = { version = "=0.54.0", default-features = false }
 finl_unicode = { version = "=1.4.0", default-features = false, features = ["categories"] }
 flate2 = { version = "1", optional = true }

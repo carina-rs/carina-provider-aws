@@ -1,0 +1,78 @@
+# EC2 NAT Gateway
+#
+# Creates a public NAT gateway in a subnet using an Elastic IP address.
+
+provider aws {
+  region = aws.Region.ap_northeast_1
+}
+
+let vpc = aws.ec2.Vpc {
+  cidr_block = '10.0.0.0/16'
+
+  tags = {
+    Environment = 'example'
+  }
+}
+
+let internet_gateway = aws.ec2.InternetGateway {
+  vpc_id = vpc.vpc_id
+
+  tags = {
+    Environment = 'example'
+  }
+}
+
+let subnet = aws.ec2.Subnet {
+  vpc_id            = vpc.vpc_id
+  cidr_block        = '10.0.1.0/24'
+  availability_zone = aws.AvailabilityZone.ZoneName.ap_northeast_1a
+
+  tags = {
+    Environment = 'example'
+  }
+}
+
+let public_route_table = aws.ec2.RouteTable {
+  vpc_id = vpc.vpc_id
+
+  tags = {
+    Environment = 'example'
+  }
+}
+
+let internet_route = aws.ec2.Route {
+  route_table_id         = public_route_table.route_table_id
+  destination_cidr_block = '0.0.0.0/0'
+  gateway_id             = internet_gateway.internet_gateway_id
+}
+
+let public_subnet_route_table_association = aws.ec2.SubnetRouteTableAssociation {
+  subnet_id      = subnet.subnet_id
+  route_table_id = public_route_table.route_table_id
+}
+
+let eip = aws.ec2.Eip {
+  domain = aws.ec2.Eip.Domain.vpc
+
+  tags = {
+    Environment = 'example'
+  }
+}
+
+aws.ec2.NatGateway {
+  allocation_id     = eip.allocation_id
+  subnet_id         = subnet.subnet_id
+  connectivity_type = aws.ec2.NatGateway.ConnectivityType.public
+
+  directives {
+    depends_on = [
+      internet_gateway,
+      internet_route,
+      public_subnet_route_table_association,
+    ]
+  }
+
+  tags = {
+    Environment = 'example'
+  }
+}

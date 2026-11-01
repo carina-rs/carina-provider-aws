@@ -1,0 +1,38 @@
+# EC2 Subnet Route Table Association
+#
+# Associates a subnet with a route table in the same VPC.
+
+provider aws {
+  region = aws.Region.ap_northeast_1
+}
+
+let vpc = aws.ec2.Vpc {
+  cidr_block = '10.0.0.0/16'
+
+  tags = {
+    Environment = 'example'
+  }
+}
+
+let subnet = aws.ec2.Subnet {
+  vpc_id            = vpc.vpc_id
+  cidr_block        = '10.0.1.0/24'
+  availability_zone = aws.AvailabilityZone.ZoneName.ap_northeast_1a
+
+  tags = {
+    Environment = 'example'
+  }
+}
+
+let route_table = aws.ec2.RouteTable {
+  vpc_id = vpc.vpc_id
+
+  tags = {
+    Environment = 'example'
+  }
+}
+
+aws.ec2.SubnetRouteTableAssociation {
+  subnet_id      = subnet.subnet_id
+  route_table_id = route_table.route_table_id
+}

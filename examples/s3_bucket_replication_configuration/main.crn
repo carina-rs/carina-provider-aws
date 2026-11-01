@@ -1,0 +1,90 @@
+# S3 Bucket Replication Configuration
+#
+# Configures replication from a versioned source bucket to a versioned destination.
+#
+# The provider's aws.iam.Role resource currently supports only the trust policy,
+# not an inline or attached permissions policy. After this role is created,
+# attach a policy granting the following permissions before uploading objects;
+# without that policy, this file applies but S3 cannot copy the objects:
+#
+# - s3:GetReplicationConfiguration and s3:ListBucket on
+#   arn:aws:s3:::carina-example-replication-source
+# - s3:GetObjectVersionForReplication, s3:GetObjectVersionAcl, and
+#   s3:GetObjectVersionTagging on
+#   arn:aws:s3:::carina-example-replication-source/*
+# - s3:ReplicateObject, s3:ReplicateDelete, and s3:ReplicateTags on
+#   arn:aws:s3:::carina-example-replication-destination/*
+
+provider aws {
+  region = aws.Region.ap_northeast_1
+}
+
+let source_bucket = aws.s3.Bucket {
+  bucket = 'carina-example-replication-source'
+
+  tags = {
+    Environment = 'example'
+  }
+}
+
+let source_versioning = aws.s3.BucketVersioning {
+  bucket = source_bucket.bucket
+  status = aws.s3.BucketVersioning.VersioningStatus.enabled
+}
+
+let destination_bucket = aws.s3.Bucket {
+  bucket = 'carina-example-replication-destination'
+
+  tags = {
+    Environment = 'example'
+  }
+}
+
+let destination_versioning = aws.s3.BucketVersioning {
+  bucket = destination_bucket.bucket
+  status = aws.s3.BucketVersioning.VersioningStatus.enabled
+}
+
+let replication_role = aws.iam.Role {
+  role_name = 'carina-example-s3-replication-role'
+
+  assume_role_policy_document = {
+    version = aws.iam.PolicyDocument.Version.2012_10_17
+    statement {
+      effect = aws.iam.PolicyDocument.Statement.Effect.allow
+
+      principal = {
+        service = 's3.amazonaws.com'
+      }
+
+      action = 'sts:AssumeRole'
+    }
+  }
+
+  tags = {
+    Environment = 'example'
+  }
+}
+
+aws.s3.BucketReplicationConfiguration {
+  bucket = source_versioning.bucket
+  # aws.iam.Role creates only this role's trust policy. Before uploading
+  # objects, attach a permissions policy to replication_role that grants:
+  # - s3:GetReplicationConfiguration and s3:ListBucket on source_bucket.arn
+  # - s3:GetObjectVersionForReplication, s3:GetObjectVersionAcl, and
+  #   s3:GetObjectVersionTagging on "${source_bucket.arn}/*"
+  # - s3:ReplicateObject, s3:ReplicateDelete, and s3:ReplicateTags on
+  #   "${destination_bucket.arn}/*"
+  # Without it, this configuration applies but S3 cannot copy objects.
+  role   = replication_role.arn
+
+  rules = [
+    {
+      id          = 'replicate-all'
+      status      = aws.s3.BucketReplicationConfiguration.ReplicationRule.Status.enabled
+      destination = {
+        bucket = "arn:aws:s3:::${destination_versioning.bucket}"
+      }
+    },
+  ]
+}
