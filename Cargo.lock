@@ -908,6 +908,7 @@ dependencies = [
  "carina-core",
  "carina-plugin-sdk",
  "carina-provider-protocol",
+ "futures",
  "heck",
  "indexmap",
  "regex",
