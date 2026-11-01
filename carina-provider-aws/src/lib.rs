@@ -197,9 +197,9 @@ impl AwsProvider {
     /// [`AwsProvider::verify_account_id`] is called.
     ///
     /// `assume_role`, when present, layers an
-    /// [`aws_config::sts::AssumeRoleProvider`] on top of the ambient
-    /// credential chain so all SDK calls go out under the assumed-role
-    /// session.
+    /// [`aws_config::sts::AssumeRoleProvider`] over the base credentials
+    /// (host-supplied on wasm32, the default chain natively) so all SDK
+    /// calls go out under the assumed-role session.
     pub async fn new_with_account_guard(
         region: &str,
         allowed_account_ids: Vec<String>,

@@ -24,6 +24,11 @@ set -euo pipefail
 command_name="${1:-}"
 printf '%s\n' "$*" >> "$STUB_COMMAND_LOG"
 case "$command_name" in
+    plan|apply|destroy)
+        printf '%s\n' "${AWS_PROFILE:-missing}" >> "$STUB_CREDS_LOG"
+        ;;
+esac
+case "$command_name" in
     init|validate|plan|apply|destroy)
         entry="${@: -1}"
         if [ -d "$entry" ]; then
@@ -53,7 +58,7 @@ if [ "$command_name" = "destroy" ]; then
         echo "stub destroy failure" >&2
         exit 23
     fi
-    printf '%s\n' "${STUB_ACCOUNT:-missing}" >> "$STUB_DESTROY_LOG"
+    printf '%s\n' "${AWS_PROFILE:-missing}" >> "$STUB_DESTROY_LOG"
     printf '%s\n' '{"schema_version":1,"state":"absent"}' > "$entry/.stub-state.json"
     exit 0
 fi
@@ -107,15 +112,7 @@ cat > "$STUB_BIN_DIR/aws" <<'STUB'
 #!/bin/bash
 set -euo pipefail
 
-if [ "${1:-}" = "configure" ] && [ "${2:-}" = "export-credentials" ] && \
-   [ "${3:-}" = "--profile" ] && [ -n "${4:-}" ] && \
-   [ "${5:-}" = "--format" ] && [ "${6:-}" = "env-no-export" ]; then
-    printf '%s\n' "$4" >> "$STUB_CREDS_LOG"
-    printf '%s\n' \
-        'AWS_ACCESS_KEY_ID=stub-access-key' \
-        'AWS_SECRET_ACCESS_KEY=stub-secret-key' \
-        'AWS_SESSION_TOKEN=stub-session-token' \
-        "STUB_ACCOUNT=$4"
+if [ "${1:-}" = "sts" ] && [ "${2:-}" = "get-caller-identity" ]; then
     exit 0
 fi
 
@@ -137,11 +134,11 @@ export _TEST_AWS_WASM="$TEST_TMP/carina-provider-aws.wasm"
 : > "$_TEST_AWS_WASM"
 
 # The cleanup implementation calls this hook. Keeping it in the test avoids
-# loading AWS credentials or invoking the AWS CLI.
+# invoking the AWS CLI.
 with_account_creds() {
     local account="$1"
     shift
-    STUB_ACCOUNT="$account" "$@"
+    AWS_PROFILE="$account" "$@"
 }
 
 source "$SHARED_DIR/_run_registry.sh"
@@ -388,7 +385,7 @@ esac
 [ "$(grep -c '^destroy ' "$STUB_COMMAND_LOG")" = "2" ] || \
     fail "multi-step runner did not run both destroy attempts"
 [ "$(sort -u "$STUB_CREDS_LOG")" = "carina-test-multi" ] || \
-    fail "multi-step runner did not consistently use stub credentials"
+    fail "multi-step runner did not consistently use the selected AWS_PROFILE"
 pass "real multi-step runner reuses and releases one registry entry"
 
 next_test
@@ -419,7 +416,7 @@ multi_step_failure_message=$(printf \
     "$multi_step_failure_entry")
 assert_contains "$multi_step_failure_output" "$multi_step_failure_message"
 [ "$(sort -u "$STUB_CREDS_LOG")" = "carina-test-multi-fail" ] || \
-    fail "failed multi-step runner did not consistently use stub credentials"
+    fail "failed multi-step runner did not consistently use the selected AWS_PROFILE"
 pass "early failure retains and prints the real multi-step runner registry entry"
 
 next_test
@@ -692,7 +689,7 @@ fi
 [ "$(cat "$STUB_DESTROY_LOG")" = $'carina-test-009\ncarina-test-009' ] || \
     fail "unfiltered runner cleanup used the wrong account: $(cat "$STUB_DESTROY_LOG")"
 [ "$(cat "$STUB_CREDS_LOG")" = $'carina-test-009\ncarina-test-009' ] || \
-    fail "unfiltered runner cleanup did not use stub credentials: $(cat "$STUB_CREDS_LOG")"
+    fail "unfiltered runner cleanup used the wrong AWS_PROFILE: $(cat "$STUB_CREDS_LOG")"
 pass "run-tests.sh cleanup without filters works under /bin/bash"
 
 next_test
@@ -711,7 +708,7 @@ fi
 [ "$(cat "$STUB_DESTROY_LOG")" = "carina-test-009" ] || \
     fail "filtered runner cleanup used the wrong account: $(cat "$STUB_DESTROY_LOG")"
 [ "$(cat "$STUB_CREDS_LOG")" = "carina-test-009" ] || \
-    fail "filtered runner cleanup did not use stub credentials: $(cat "$STUB_CREDS_LOG")"
+    fail "filtered runner cleanup used the wrong AWS_PROFILE: $(cat "$STUB_CREDS_LOG")"
 pass "run-tests.sh cleanup forwards a filter under /bin/bash"
 
 next_test
@@ -734,7 +731,7 @@ fi
 [ "$(cat "$STUB_DESTROY_LOG")" = "carina-test-006" ] || \
     fail "run-tests.sh destroy used an unselected account: $(cat "$STUB_DESTROY_LOG")"
 [ "$(cat "$STUB_CREDS_LOG")" = "carina-test-006" ] || \
-    fail "run-tests.sh destroy loaded credentials for an unselected account"
+    fail "run-tests.sh destroy used an unselected AWS_PROFILE"
 pass "run-tests.sh destroy is limited to its selected account"
 
 next_test

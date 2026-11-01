@@ -22,12 +22,11 @@
 #
 # AWS authentication:
 #   The runner selects credentials via AWS_PROFILE rather than wrapping in
-#   aws-vault. Each carina-test-00X profile shares a single sso-session
-#   (`carina`), so the AWS SDK can refresh the SSO access token on its own
-#   during long-running operations (see carina-rs/carina-provider-awscc#157).
+#   aws-vault. The Carina host resolves profile/SSO credentials and refreshes
+#   credentials through the AWS SDK chain during long-running operations.
 #
 #   Before the first run in a session, log in once:
-#     aws sso login --sso-session carina
+#     aws sso login --profile <profile>
 #
 # For validate, no AWS credentials are needed.
 # For plan/apply/destroy, the first selected account is used (default 000).
@@ -255,30 +254,17 @@ case "$COMMAND" in
         ;;
 esac
 
-# ── with_account_creds: resolve the profile's credentials into env vars ──
-# and exec the given command. Uses `aws configure export-credentials` so the
-# resulting AWS_ACCESS_KEY_ID / AWS_SESSION_TOKEN are fresh STS creds derived
-# from the sso-session; the SSO access token in ~/.aws/sso/cache is refreshed
-# automatically when it is close to expiring. Resolving creds before each
-# carina invocation means every test starts with a new STS session, so a
-# single long-running apply/destroy is not limited by the SSO access-token
-# lifetime (see carina-rs/carina-provider-awscc#157).
+# Select a profile for the Carina host or AWS CLI. Each resolves and refreshes
+# credentials through its own chain; no credential export is needed.
 #
 # Usage: with_account_creds <account> <cmd> [args...]
 with_account_creds() {
     local account="$1"
     shift
-    local creds
-    if ! creds=$(aws configure export-credentials --profile "$account" --format env-no-export 2>&1); then
-        echo "ERROR: aws configure export-credentials failed for $account: $creds" >&2
-        return 1
-    fi
     (
-        set -a
-        eval "$creds"
-        set +a
-        unset AWS_PROFILE
-        "$@"
+        # Inherited static keys must not override the selected account profile.
+        unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN AWS_SECURITY_TOKEN
+        AWS_PROFILE="$account" "$@"
     )
 }
 

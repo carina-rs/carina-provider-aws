@@ -876,6 +876,7 @@ dependencies = [
 name = "carina-aws-types"
 version = "0.4.0"
 dependencies = [
+ "aws-credential-types",
  "aws-runtime",
  "aws-smithy-runtime-api",
  "aws-smithy-types",
@@ -883,6 +884,7 @@ dependencies = [
  "carina-plugin-sdk",
  "heck",
  "indexmap",
+ "tokio",
  "wasi 0.14.7+wasi-0.2.4",
 ]
 
@@ -902,7 +904,7 @@ dependencies = [
 [[package]]
 name = "carina-core"
 version = "0.9.0"
-source = "git+https://github.com/carina-rs/carina?rev=c95e6825#c95e682505bf64b69e3ee9818077817c36211649"
+source = "git+https://github.com/carina-rs/carina?rev=43309a77#43309a77b1d093fc5d66dcaa85866aeb05eb21d0"
 dependencies = [
  "argon2",
  "carina-provider-protocol",
@@ -946,7 +948,7 @@ dependencies = [
 [[package]]
 name = "carina-plugin-sdk"
 version = "0.9.0"
-source = "git+https://github.com/carina-rs/carina?rev=c95e6825#c95e682505bf64b69e3ee9818077817c36211649"
+source = "git+https://github.com/carina-rs/carina?rev=43309a77#43309a77b1d093fc5d66dcaa85866aeb05eb21d0"
 dependencies = [
  "aws-smithy-runtime-api",
  "aws-smithy-types",
@@ -983,6 +985,7 @@ dependencies = [
  "carina-aws-types",
  "carina-core",
  "carina-plugin-sdk",
+ "carina-provider-aws",
  "carina-provider-protocol",
  "heck",
  "indexmap",
@@ -1003,7 +1006,7 @@ dependencies = [
 [[package]]
 name = "carina-provider-protocol"
 version = "0.3.0"
-source = "git+https://github.com/carina-rs/carina?rev=c95e6825#c95e682505bf64b69e3ee9818077817c36211649"
+source = "git+https://github.com/carina-rs/carina?rev=43309a77#43309a77b1d093fc5d66dcaa85866aeb05eb21d0"
 dependencies = [
  "psl",
  "serde",

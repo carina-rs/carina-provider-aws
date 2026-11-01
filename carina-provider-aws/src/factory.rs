@@ -137,8 +137,8 @@ impl ProviderFactory for AwsProviderFactory {
 /// Schema for the provider-level `assume_role` block. Mirrors the
 /// Terraform AWS provider's `assume_role` (MVP field set: `role_arn`,
 /// `session_name`, `external_id`, `duration`). When present, the
-/// provider chains an `sts:AssumeRole` call on top of the ambient
-/// credential chain (aws#342).
+/// provider chains an `sts:AssumeRole` call on top of the base credentials
+/// (host-supplied on wasm32, the default chain natively; aws#342).
 fn assume_role_attribute_type() -> carina_core::schema::AttributeType {
     use carina_core::schema::{AttributeType, StructField};
     AttributeType::struct_(
