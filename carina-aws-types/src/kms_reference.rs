@@ -119,16 +119,24 @@ fn error(
     Box::new(error)
 }
 
-/// Reject partitions without a supported, reachable endpoint in this instance.
-fn partition(region: &str) -> Option<&'static str> {
+/// Map the region to its partition for ARN reachability checks.
+fn partition(region: &str) -> &'static str {
     if region.starts_with("cn-") {
-        Some("aws-cn")
+        "aws-cn"
     } else if region.starts_with("us-gov-") {
-        Some("aws-us-gov")
-    } else if region.starts_with("us-iso") || region.starts_with("eu-iso") {
-        None
+        "aws-us-gov"
+    } else if region.starts_with("us-iso-") {
+        "aws-iso"
+    } else if region.starts_with("us-isob-") {
+        "aws-iso-b"
+    } else if region.starts_with("eu-isoe-") {
+        "aws-iso-e"
+    } else if region.starts_with("us-isof-") {
+        "aws-iso-f"
+    } else if region.starts_with("eusc-") {
+        "aws-eusc"
     } else {
-        Some("aws")
+        "aws"
     }
 }
 
@@ -151,7 +159,7 @@ pub async fn resolve_kms_key_reference(
     let mut region = instance_region;
     if raw.starts_with("arn:") {
         let parts: Vec<_> = raw.splitn(6, ':').collect();
-        if partition(instance_region) != Some(parts[1]) || partition(parts[3]) != Some(parts[1]) {
+        if partition(instance_region) != parts[1] || partition(parts[3]) != parts[1] {
             return Err(ReferenceError::InvalidReference(error(
                 provider_name,
                 "kms.DescribeKey",
@@ -173,14 +181,6 @@ pub async fn resolve_kms_key_reference(
             })?;
             return Ok(ReferenceOutcome::Resolved(raw.to_owned()));
         }
-    } else if partition(instance_region).is_none() {
-        return Err(ReferenceError::InvalidReference(error(
-            provider_name,
-            "kms.DescribeKey",
-            ProviderErrorKind::InvalidInput,
-            "KMS partition is unreachable from this provider instance",
-            None,
-        )));
     }
     match client.describe_key(region, raw).await {
         Ok(Some(arn)) if crate::validate_kms_key_arn(&arn).is_ok() => {
@@ -286,6 +286,16 @@ mod tests {
     const KEY_ID: &str = "1234abcd-12ab-34cd-56ef-1234567890ab";
     const KEY_ARN: &str =
         "arn:aws:kms:us-east-1:123456789012:key/1234abcd-12ab-34cd-56ef-1234567890ab";
+    const PARTITION_REGIONS: [(&str, &str, &str); 8] = [
+        ("aws", "us-west-2", "us-east-1"),
+        ("aws-cn", "cn-northwest-1", "cn-north-1"),
+        ("aws-us-gov", "us-gov-east-1", "us-gov-west-1"),
+        ("aws-iso", "us-iso-west-1", "us-iso-east-1"),
+        ("aws-iso-b", "us-isob-west-1", "us-isob-east-1"),
+        ("aws-iso-e", "eu-isoe-west-1", "eu-isoe-west-1"),
+        ("aws-iso-f", "us-isof-east-1", "us-isof-south-1"),
+        ("aws-eusc", "eusc-de-east-1", "eusc-de-east-1"),
+    ];
 
     #[test]
     fn sdk_failure_preserves_service_message_and_metadata_without_debug() {
@@ -503,11 +513,79 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn unreachable_partitions_and_malformed_inputs_never_call_kms() {
+    async fn same_partition_references_resolve_in_every_partition() {
+        for (partition, instance_region, arn_region) in PARTITION_REGIONS {
+            let key_arn = format!("arn:{partition}:kms:{arn_region}:123456789012:key/{KEY_ID}");
+            let fake = client(Ok(None));
+            let result = resolve_kms_key_reference(&fake, "aws", instance_region, &key_arn).await;
+            assert!(
+                matches!(result, Ok(ReferenceOutcome::Resolved(arn)) if arn == key_arn),
+                "{partition}: {key_arn}"
+            );
+            assert!(fake.calls.lock().unwrap().is_empty());
+
+            let alias_arn = format!("arn:{partition}:kms:{arn_region}:123456789012:alias/customer");
+            let fake = client(Ok(Some(key_arn.clone())));
+            let result = resolve_kms_key_reference(&fake, "aws", instance_region, &alias_arn).await;
+            assert!(
+                matches!(result, Ok(ReferenceOutcome::Resolved(arn)) if arn == key_arn),
+                "{partition}: {alias_arn}"
+            );
+            assert_eq!(
+                *fake.calls.lock().unwrap(),
+                [(arn_region.into(), alias_arn)]
+            );
+
+            let instance_key_arn =
+                format!("arn:{partition}:kms:{instance_region}:123456789012:key/{KEY_ID}");
+            for raw in [
+                KEY_ID,
+                "mrk-0123456789abcdef0123456789abcdef",
+                "alias/customer",
+                "alias/aws/sqs",
+            ] {
+                let fake = client(Ok(Some(instance_key_arn.clone())));
+                let result = resolve_kms_key_reference(&fake, "aws", instance_region, raw).await;
+                assert!(
+                    matches!(result, Ok(ReferenceOutcome::Resolved(arn)) if arn == instance_key_arn),
+                    "{partition}: {raw}"
+                );
+                assert_eq!(
+                    *fake.calls.lock().unwrap(),
+                    [(instance_region.into(), raw.into())]
+                );
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn cross_partition_references_are_invalid_without_a_call() {
+        for (instance_partition, instance_region, _) in PARTITION_REGIONS {
+            for (arn_partition, _, arn_region) in PARTITION_REGIONS {
+                if instance_partition == arn_partition {
+                    continue;
+                }
+                for resource in [format!("key/{KEY_ID}"), "alias/customer".into()] {
+                    let raw =
+                        format!("arn:{arn_partition}:kms:{arn_region}:123456789012:{resource}");
+                    assert!(crate::validate_kms_key_reference(&raw).is_ok(), "{raw}");
+                    let fake = client(Ok(Some(KEY_ARN.into())));
+                    assert!(
+                        matches!(
+                            resolve_kms_key_reference(&fake, "aws", instance_region, &raw).await,
+                            Err(ReferenceError::InvalidReference(_))
+                        ),
+                        "{instance_region}: {raw}"
+                    );
+                    assert!(fake.calls.lock().unwrap().is_empty());
+                }
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn malformed_inputs_never_call_kms() {
         for raw in [
-            "arn:aws-cn:kms:cn-north-1:123456789012:alias/a",
-            "arn:aws-us-gov:kms:us-gov-west-1:123456789012:key/1234abcd-12ab-34cd-56ef-1234567890ab",
-            "arn:aws-iso:kms:us-iso-east-1:123456789012:alias/a",
             "arn:aws:kms:cn-north-1:123456789012:alias/a",
             "alias/",
             "not-a-key",
