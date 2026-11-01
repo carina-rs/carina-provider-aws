@@ -611,7 +611,10 @@ mod tests {
         );
         let response = HttpResponse::new(400.try_into().expect("valid status"), SdkBody::empty());
         let failure = crate::error_helpers::SendFailure::new(
-            SendOutcome::Rejected,
+            carina_aws_types::SendClassification::for_test(
+                SendOutcome::Rejected,
+                carina_aws_types::FinalAttempt::Sent,
+            ),
             SdkError::service_error(service_error, response),
         );
         let rejection = FlowLogCreateRejection::from_failure(&failure)
@@ -635,7 +638,10 @@ mod tests {
         );
         let response = HttpResponse::new(429.try_into().expect("valid status"), SdkBody::empty());
         let failure = crate::error_helpers::SendFailure::new(
-            SendOutcome::MaybeSent,
+            carina_aws_types::SendClassification::for_test(
+                SendOutcome::MaybeSent,
+                carina_aws_types::FinalAttempt::Sent,
+            ),
             SdkError::service_error(service_error, response),
         );
         let maybe_sent = FlowLogMaybeSent::from_failure(&failure)

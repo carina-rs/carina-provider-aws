@@ -3,9 +3,12 @@
 #[cfg(test)]
 mod tests {
     use std::collections::VecDeque;
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex};
     use std::time::Duration;
 
+    use aws_credential_types::provider::error::CredentialsError;
+    use aws_credential_types::provider::{ProvideCredentials, SharedCredentialsProvider};
     use aws_smithy_runtime_api::client::http::{
         HttpConnector, HttpConnectorFuture, SharedHttpConnector, http_client_fn,
     };
@@ -13,11 +16,14 @@ mod tests {
     use aws_smithy_runtime_api::client::result::ConnectorError;
     use aws_smithy_types::body::SdkBody;
     use aws_smithy_types::error::metadata::ProvideErrorMetadata;
-    use carina_aws_types::SendOutcome;
+    use carina_aws_types::{FinalAttempt, SendClassification, SendOutcome, Transience};
     use carina_plugin_sdk::wasi_http::{SendPhase, transport_connector_error_for_test};
 
     use crate::aws_operation::ClientToken;
-    use crate::helpers::send_aws_operation_with_token;
+    use crate::helpers::{
+        RetryPolicy, retry_aws_operation, retry_aws_operation_with_token,
+        send_aws_operation_with_token,
+    };
     use crate::{AwsProvider, BoundedSdkConfig};
 
     #[derive(Debug)]
@@ -135,10 +141,54 @@ mod tests {
         }
     }
 
+    #[derive(Clone, Debug)]
+    struct NotLoadedCredentials {
+        calls: Arc<AtomicUsize>,
+    }
+
+    impl ProvideCredentials for NotLoadedCredentials {
+        fn provide_credentials<'a>(
+            &'a self,
+        ) -> aws_credential_types::provider::future::ProvideCredentials<'a>
+        where
+            Self: 'a,
+        {
+            self.calls.fetch_add(1, Ordering::Relaxed);
+            aws_credential_types::provider::future::ProvideCredentials::ready(Err(
+                CredentialsError::not_loaded(std::io::Error::other("test credentials unavailable")),
+            ))
+        }
+    }
+
     fn provider(connector: ScriptedConnector) -> AwsProvider {
+        provider_with_endpoint(connector, "https://example.test")
+    }
+
+    fn provider_with_endpoint(
+        connector: ScriptedConnector,
+        endpoint_url: &'static str,
+    ) -> AwsProvider {
         let selected = connector.clone();
         let http_client = http_client_fn(move |_, _| SharedHttpConnector::new(selected.clone()));
-        let bounded = BoundedSdkConfig::for_test_http_client(http_client, "https://example.test");
+        let bounded = BoundedSdkConfig::for_test_http_client(http_client, endpoint_url);
+        AwsProvider::from_sdk_config("us-east-1".to_string(), Vec::new(), Vec::new(), &bounded)
+    }
+
+    fn provider_with_credentials(
+        connector: ScriptedConnector,
+        credentials_provider: SharedCredentialsProvider,
+    ) -> AwsProvider {
+        let selected = connector.clone();
+        let http_client = http_client_fn(move |_, _| SharedHttpConnector::new(selected.clone()));
+        let bounded = BoundedSdkConfig::new(
+            aws_config::SdkConfig::builder()
+                .region(aws_config::Region::new("us-east-1"))
+                .endpoint_url("https://example.test")
+                .credentials_provider(credentials_provider)
+                .http_client(http_client)
+                .sleep_impl(aws_smithy_async::rt::sleep::TokioSleep::new())
+                .build(),
+        );
         AwsProvider::from_sdk_config("us-east-1".to_string(), Vec::new(), Vec::new(), &bounded)
     }
 
@@ -172,6 +222,146 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn credentials_not_loaded_is_prompt_not_sent_without_http_calls() {
+        let connector = ScriptedConnector::new(std::iter::empty::<Action>());
+        let credential_calls = Arc::new(AtomicUsize::new(0));
+        let provider = provider_with_credentials(
+            connector.clone(),
+            SharedCredentialsProvider::new(NotLoadedCredentials {
+                calls: Arc::clone(&credential_calls),
+            }),
+        );
+
+        let error = provider
+            .sts_client
+            .get_caller_identity()
+            .send()
+            .await
+            .expect_err("credential resolution must fail before transmission");
+
+        assert_eq!(credential_calls.load(Ordering::Relaxed), 1);
+        assert!(connector.requests().is_empty());
+        assert!(matches!(
+            &error,
+            aws_smithy_runtime_api::client::result::SdkError::DispatchFailure(_)
+        ));
+        let classification = SendClassification::of(&error);
+        assert_eq!(classification.operation_outcome(), SendOutcome::NotSent);
+        assert_eq!(
+            classification.final_attempt(),
+            FinalAttempt::NotSent(Transience::Permanent)
+        );
+        let rendered = crate::helpers::sdk_error_message("GetCallerIdentity failed", &error);
+        assert!(
+            rendered.contains("test credentials unavailable"),
+            "{rendered}"
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn provider_retry_does_not_retry_not_sent_other_without_kind() {
+        let connector = ScriptedConnector::new(std::iter::empty::<Action>());
+        let credential_calls = Arc::new(AtomicUsize::new(0));
+        let provider = provider_with_credentials(
+            connector.clone(),
+            SharedCredentialsProvider::new(NotLoadedCredentials {
+                calls: Arc::clone(&credential_calls),
+            }),
+        );
+
+        let error = retry_aws_operation(RetryPolicy::default(), || {
+            provider.sts_client.get_caller_identity()
+        })
+        .await
+        .expect_err("missing credentials must fail without provider-level retries");
+
+        assert_eq!(error.outcome(), SendOutcome::NotSent);
+        assert_eq!(
+            error.classification().final_attempt(),
+            FinalAttempt::NotSent(Transience::Permanent)
+        );
+        assert_eq!(credential_calls.load(Ordering::Relaxed), 1);
+        assert!(connector.requests().is_empty());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn provider_retry_does_not_retry_code_less_wasi_pre_send_failure() {
+        let connector = ScriptedConnector::new([
+            Action::Transport(SendPhase::NotSent),
+            Action::Transport(SendPhase::NotSent),
+            Action::Transport(SendPhase::NotSent),
+            Action::Response {
+                status: 200,
+                body: CREATE_VPC_OK,
+            },
+        ]);
+        let provider = provider(connector.clone());
+
+        let error = retry_aws_operation(RetryPolicy::default(), || {
+            provider.ec2_client.create_vpc().cidr_block("10.0.0.0/16")
+        })
+        .await
+        .expect_err("a code-less wasi pre-send failure is permanent");
+
+        assert_eq!(error.outcome(), SendOutcome::NotSent);
+        assert_eq!(
+            error.classification().final_attempt(),
+            FinalAttempt::NotSent(Transience::Permanent)
+        );
+        assert_eq!(connector.requests().len(), 3);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn provider_retry_retries_maybe_sent_without_an_sdk_retry_verdict() {
+        let connector = ScriptedConnector::new([
+            Action::Transport(SendPhase::MaybeSent),
+            Action::Response {
+                status: 200,
+                body: CREATE_NAT_GATEWAY_OK,
+            },
+        ]);
+        let provider = provider(connector.clone());
+        let token = ClientToken::new();
+
+        retry_aws_operation_with_token(&token, RetryPolicy::default(), || {
+            provider
+                .ec2_client
+                .create_nat_gateway()
+                .configure(|builder| builder.subnet_id("subnet-123"))
+        })
+        .await
+        .expect("post-transmit Other(None) should be retried with the same token");
+
+        let requests = connector.requests();
+        assert_eq!(requests.len(), 2);
+        assert!(requests[0].contains(token.as_str()));
+        assert!(requests[1].contains(token.as_str()));
+    }
+
+    #[tokio::test]
+    async fn invalid_endpoint_is_prompt_not_sent_without_http_calls() {
+        let connector = ScriptedConnector::new(std::iter::empty::<Action>());
+        let provider = provider_with_endpoint(connector.clone(), "https://bad endpoint");
+
+        let error = provider
+            .sts_client
+            .get_caller_identity()
+            .send()
+            .await
+            .expect_err("endpoint resolution must fail before transmission");
+
+        assert!(connector.requests().is_empty());
+        assert!(matches!(
+            &error,
+            aws_smithy_runtime_api::client::result::SdkError::DispatchFailure(_)
+        ));
+        assert_eq!(
+            SendClassification::of(&error).operation_outcome(),
+            SendOutcome::NotSent
+        );
+    }
+
+    #[tokio::test]
     async fn non_idempotent_create_vpc_is_not_resent_after_io_failure() {
         let connector = ScriptedConnector::new([
             Action::Io,
@@ -191,7 +381,10 @@ mod tests {
             .expect_err("the resend guard must refuse the ambiguous retry");
 
         assert_eq!(connector.requests().len(), 1);
-        assert_eq!(SendOutcome::classify(&error), SendOutcome::MaybeSent);
+        assert_eq!(
+            SendClassification::of(&error).operation_outcome(),
+            SendOutcome::MaybeSent
+        );
     }
 
     #[tokio::test]
@@ -285,7 +478,10 @@ mod tests {
             .expect_err("generated non-idempotent operation must not retry a maybe-sent failure");
 
         assert_eq!(mutating_connector.requests().len(), 1);
-        assert_eq!(SendOutcome::classify(&error), SendOutcome::MaybeSent);
+        assert_eq!(
+            SendClassification::of(&error).operation_outcome(),
+            SendOutcome::MaybeSent
+        );
     }
 
     #[tokio::test(start_paused = true)]
@@ -305,7 +501,10 @@ mod tests {
             .expect_err("three maybe-sent failures should exhaust the retry budget");
 
         assert_eq!(connector.requests().len(), 3);
-        assert_eq!(SendOutcome::classify(&error), SendOutcome::MaybeSent);
+        assert_eq!(
+            SendClassification::of(&error).operation_outcome(),
+            SendOutcome::MaybeSent
+        );
     }
 
     #[tokio::test(start_paused = true)]
@@ -329,7 +528,7 @@ mod tests {
 
         assert_eq!(idempotent_connector.requests().len(), 1);
         assert_eq!(
-            SendOutcome::classify(&idempotent_error),
+            SendClassification::of(&idempotent_error).operation_outcome(),
             SendOutcome::MaybeSent
         );
 
@@ -351,7 +550,10 @@ mod tests {
             .expect_err("token operation should retain the current no-retry behavior");
 
         assert_eq!(token_connector.requests().len(), 1);
-        assert_eq!(SendOutcome::classify(&token_error), SendOutcome::MaybeSent);
+        assert_eq!(
+            SendClassification::of(&token_error).operation_outcome(),
+            SendOutcome::MaybeSent
+        );
     }
 
     #[tokio::test(start_paused = true)]
@@ -475,7 +677,10 @@ mod tests {
             .expect_err("all SDK attempts should fail");
 
         assert_eq!(connector.requests().len(), 3);
-        assert_eq!(SendOutcome::classify(&error), SendOutcome::MaybeSent);
+        assert_eq!(
+            error.classification().operation_outcome(),
+            SendOutcome::MaybeSent
+        );
         assert!(connector_error(&error).is_io());
     }
 
@@ -497,7 +702,10 @@ mod tests {
             .expect_err("all SDK attempts should fail");
 
         assert_eq!(connector.requests().len(), 3);
-        assert_eq!(SendOutcome::classify(&error), SendOutcome::MaybeSent);
+        assert_eq!(
+            SendClassification::of(&error).operation_outcome(),
+            SendOutcome::MaybeSent
+        );
         assert!(connector_error(&error).is_io());
     }
 
@@ -521,7 +729,10 @@ mod tests {
             .expect_err("the second attempt should surface NoSuchBucketPolicy");
 
         assert_eq!(connector.requests().len(), 2);
-        assert_eq!(SendOutcome::classify(&error), SendOutcome::MaybeSent);
+        assert_eq!(
+            SendClassification::of(&error).operation_outcome(),
+            SendOutcome::MaybeSent
+        );
         let service_error = error.into_service_error();
         assert_eq!(
             ProvideErrorMetadata::code(&service_error),
@@ -547,7 +758,10 @@ mod tests {
             .expect_err("all SDK attempts should fail before sending");
 
         assert_eq!(connector.requests().len(), 3);
-        assert_eq!(SendOutcome::classify(&error), SendOutcome::NotSent);
+        assert_eq!(
+            SendClassification::of(&error).operation_outcome(),
+            SendOutcome::NotSent
+        );
         assert!(connector_error(&error).is_io());
     }
 
@@ -566,7 +780,10 @@ mod tests {
 
         assert_eq!(connector.requests().len(), 3);
         assert!(connector_error(&error).is_timeout());
-        assert_eq!(SendOutcome::classify(&error), SendOutcome::MaybeSent);
+        assert_eq!(
+            SendClassification::of(&error).operation_outcome(),
+            SendOutcome::MaybeSent
+        );
     }
 
     #[tokio::test]
@@ -586,7 +803,10 @@ mod tests {
             .expect_err("the service should reject the request");
 
         assert_eq!(connector.requests().len(), 1);
-        assert_eq!(SendOutcome::classify(&error), SendOutcome::Rejected);
+        assert_eq!(
+            SendClassification::of(&error).operation_outcome(),
+            SendOutcome::Rejected
+        );
         let service_error = error.into_service_error();
         assert_eq!(
             ProvideErrorMetadata::code(&service_error),
@@ -619,7 +839,10 @@ mod tests {
             .await
             .expect_err("all three SDK attempts should fail");
         assert_eq!(connector.requests().len(), 3);
-        assert_eq!(SendOutcome::classify(&error), SendOutcome::MaybeSent);
+        assert_eq!(
+            error.classification().operation_outcome(),
+            SendOutcome::MaybeSent
+        );
         let aws_smithy_runtime_api::client::result::SdkError::ServiceError(context) = &*error
         else {
             panic!("expected the modeled service error, got {error:?}");
@@ -660,7 +883,10 @@ mod tests {
 
         assert_eq!(connector.requests().len(), 3);
         assert_eq!(connector.completed_delayed_timeouts(), 0);
-        assert_eq!(SendOutcome::classify(&error), SendOutcome::MaybeSent);
+        assert_eq!(
+            error.classification().operation_outcome(),
+            SendOutcome::MaybeSent
+        );
     }
 
     #[tokio::test]

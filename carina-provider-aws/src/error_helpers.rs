@@ -29,7 +29,7 @@
 use carina_core::provider::ProviderError;
 use thiserror::Error;
 
-use carina_aws_types::{Idempotency, SendOutcome};
+use carina_aws_types::{Idempotency, SendClassification, SendOutcome};
 
 use crate::aws_operation::DecidedOperationError;
 
@@ -48,30 +48,34 @@ pub(crate) type AwsSdkError<E> = aws_smithy_runtime_api::client::result::SdkErro
     aws_smithy_runtime_api::client::orchestrator::HttpResponse,
 >;
 
-/// A failed send together with the outcome accumulated across every attempt.
+/// A failed send together with its complete send classification.
 ///
 /// The SDK error is boxed so retry wrapper results keep a small `Err` variant
 /// even when generated service errors make `SdkError` large.
 #[derive(Debug)]
 pub(crate) struct SendFailure<E> {
-    outcome: SendOutcome,
+    classification: SendClassification,
     error: Box<AwsSdkError<E>>,
 }
 
 impl<E> SendFailure<E> {
-    pub(crate) fn new(outcome: SendOutcome, error: AwsSdkError<E>) -> Self {
+    pub(crate) fn new(classification: SendClassification, error: AwsSdkError<E>) -> Self {
         Self {
-            outcome,
+            classification,
             error: Box::new(error),
         }
     }
 
-    pub(crate) fn outcome(&self) -> SendOutcome {
-        self.outcome
+    pub(crate) fn classification(&self) -> SendClassification {
+        self.classification
     }
 
-    pub(crate) fn into_parts(self) -> (SendOutcome, AwsSdkError<E>) {
-        (self.outcome, *self.error)
+    pub(crate) fn outcome(&self) -> SendOutcome {
+        self.classification.operation_outcome()
+    }
+
+    pub(crate) fn into_parts(self) -> (SendClassification, AwsSdkError<E>) {
+        (self.classification, *self.error)
     }
 }
 
@@ -100,13 +104,15 @@ impl<E> IntoSendFailure for SendFailure<E> {
 impl<E> IntoSendFailure for AwsSdkError<E>
 where
     E: aws_smithy_types::error::metadata::ProvideErrorMetadata
-        + aws_smithy_types::retry::ProvideErrorKind,
+        + aws_smithy_types::retry::ProvideErrorKind
+        + std::error::Error
+        + 'static,
 {
     type Error = E;
 
     fn into_send_failure(self) -> SendFailure<E> {
-        let outcome = SendOutcome::classify(&self);
-        SendFailure::new(outcome, self)
+        let classification = SendClassification::of(&self);
+        SendFailure::new(classification, self)
     }
 }
 
@@ -219,7 +225,8 @@ where
         + Sync
         + 'static,
 {
-    let (outcome, error) = failure.into_send_failure().into_parts();
+    let (classification, error) = failure.into_send_failure().into_parts();
+    let outcome = classification.operation_outcome();
     api_error_with_meta_cause(context, outcome, error, |message, source| {
         AwsServiceErrorCause { message, source }
     })
@@ -243,7 +250,7 @@ where
         + Sync
         + 'static,
 {
-    let outcome = SendOutcome::classify(&err);
+    let outcome = SendClassification::of(&err).operation_outcome();
     api_error_with_meta_cause(context, outcome, err, |message, source| {
         AwsServiceErrorWithSubjectCause {
             subject,
@@ -574,7 +581,10 @@ mod tests {
             SdkBody::empty(),
         );
         let failure = SendFailure::new(
-            SendOutcome::MaybeSent,
+            SendClassification::for_test(
+                SendOutcome::MaybeSent,
+                carina_aws_types::FinalAttempt::Sent,
+            ),
             SdkError::service_error(service_error, raw),
         );
 

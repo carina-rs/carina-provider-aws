@@ -1022,7 +1022,13 @@ mod tests {
 
         let error = request_certificate_outcome_unknown_error(
             &id,
-            SendFailure::new(SendOutcome::MaybeSent, error),
+            SendFailure::new(
+                carina_aws_types::SendClassification::for_test(
+                    SendOutcome::MaybeSent,
+                    carina_aws_types::FinalAttempt::Sent,
+                ),
+                error,
+            ),
         );
 
         assert_eq!(

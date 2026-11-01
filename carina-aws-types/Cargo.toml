@@ -11,13 +11,14 @@ description = "AWS type definitions for Carina infrastructure management tool"
 doctest = false
 
 [features]
-test-utils = ["dep:carina-plugin-sdk", "carina-plugin-sdk/test-utils"]
+test-utils = ["dep:carina-plugin-sdk", "carina-plugin-sdk/test-utils", "dep:wasi"]
 
 [dev-dependencies]
 aws-runtime = { version = "1" }
 aws-smithy-runtime-api = { version = "1.19", features = ["client", "test-util"] }
 carina-plugin-sdk = { workspace = true, features = ["test-utils"] }
 indexmap = "2"
+wasi = "0.14"
 
 [dependencies]
 aws-smithy-runtime-api = { version = "1.19", features = ["client"] }
@@ -27,6 +28,8 @@ heck = "0.5"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 carina-plugin-sdk = { workspace = true, optional = true }
+wasi = { version = "0.14", optional = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 carina-plugin-sdk = { workspace = true }
+wasi = "0.14"
