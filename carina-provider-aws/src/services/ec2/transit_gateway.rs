@@ -1,7 +1,7 @@
 use carina_core::provider::ProviderResult;
 use carina_core::provider::{AppliedIdentifier, ReadOutcome};
 use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
-use carina_core::schema::ResourceSchema;
+use carina_core::schema::CompiledResourceSchema;
 
 use aws_sdk_ec2::types::TransitGatewayState;
 
@@ -54,7 +54,7 @@ fn transit_gateway_delete_poll_state(state: Option<&TransitGatewayState>) -> Del
 fn build_create_transit_gateway_options(
     id: &ResourceId,
     options_value: Option<&Value>,
-    schema: &ResourceSchema,
+    schema: &CompiledResourceSchema,
 ) -> ProviderResult<Option<aws_sdk_ec2::types::TransitGatewayRequestOptions>> {
     use aws_sdk_ec2::types::{
         AutoAcceptSharedAttachmentsValue, DefaultRouteTableAssociationValue,
@@ -189,7 +189,7 @@ impl AwsProvider {
     pub(crate) async fn create_ec2_transit_gateway_start<A: AwsCreateAttempt>(
         &self,
         resource: &Resource<impl Sized>,
-        schema: &ResourceSchema,
+        schema: &CompiledResourceSchema,
         client_token: &ClientToken,
         attempt: A,
     ) -> Result<A::Step, A::Verdict> {
@@ -252,7 +252,7 @@ impl AwsProvider {
         identifier: &AppliedIdentifier,
         from: &State,
         to: Resource,
-        _schema: &ResourceSchema,
+        _schema: &CompiledResourceSchema,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
         let input = Ec2TransitGatewayUpdateInput::decode(&to)?;
         let crate::send_models_generated::Ec2TransitGatewayUpdateParts { description, tags } =
@@ -396,8 +396,8 @@ mod tests {
         );
     }
 
-    fn schema() -> ResourceSchema {
-        crate::schemas::generated::ec2::transit_gateway::ec2_transit_gateway_config().schema
+    fn schema() -> &'static CompiledResourceSchema {
+        crate::test_resource_schema("ec2.TransitGateway")
     }
 
     fn resource_with_options(options: IndexMap<String, Value>) -> Resource {
@@ -441,7 +441,7 @@ mod tests {
         let options = build_create_transit_gateway_options(
             &resource.id,
             resource.get_attr("options"),
-            &schema(),
+            schema(),
         )
         .expect("valid options")
         .expect("options");
@@ -457,7 +457,7 @@ mod tests {
         let options = build_create_transit_gateway_options(
             &resource.id,
             resource.get_attr("options"),
-            &schema(),
+            schema(),
         )
         .expect("valid options")
         .expect("options");
@@ -476,7 +476,7 @@ mod tests {
         let options = build_create_transit_gateway_options(
             &resource.id,
             resource.get_attr("options"),
-            &schema(),
+            schema(),
         )
         .expect("valid options")
         .expect("options");
@@ -495,7 +495,7 @@ mod tests {
         let options = build_create_transit_gateway_options(
             &resource.id,
             resource.get_attr("options"),
-            &schema(),
+            schema(),
         )
         .expect("valid options")
         .expect("options");
@@ -514,7 +514,7 @@ mod tests {
         let options = build_create_transit_gateway_options(
             &resource.id,
             resource.get_attr("options"),
-            &schema(),
+            schema(),
         )
         .expect("valid options")
         .expect("options");
@@ -533,7 +533,7 @@ mod tests {
         let options = build_create_transit_gateway_options(
             &resource.id,
             resource.get_attr("options"),
-            &schema(),
+            schema(),
         )
         .expect("valid options")
         .expect("options");
@@ -552,7 +552,7 @@ mod tests {
         let options = build_create_transit_gateway_options(
             &resource.id,
             resource.get_attr("options"),
-            &schema(),
+            schema(),
         )
         .expect("valid options")
         .expect("options");
@@ -575,7 +575,7 @@ mod tests {
         let options = build_create_transit_gateway_options(
             &resource.id,
             resource.get_attr("options"),
-            &schema(),
+            schema(),
         )
         .expect("valid options")
         .expect("options");
@@ -597,7 +597,7 @@ mod tests {
         let options = build_create_transit_gateway_options(
             &resource.id,
             resource.get_attr("options"),
-            &schema(),
+            schema(),
         )
         .expect("valid options")
         .expect("options");
@@ -619,7 +619,7 @@ mod tests {
             build_create_transit_gateway_options(
                 &resource.id,
                 resource.get_attr("options"),
-                &schema(),
+                schema(),
             )
             .expect("valid options")
             .is_none(),
@@ -675,7 +675,7 @@ mod tests {
             build_create_transit_gateway_options(
                 &resource.id,
                 resource.get_attr("options"),
-                &schema(),
+                schema(),
             )
             .expect("valid options")
             .is_none()

@@ -154,7 +154,19 @@ pub(crate) fn test_rootless_type(
     .expect("test attribute type must be present")
 }
 
-use carina_core::schema::{ResourceSchema, SchemaKind, SchemaRegistry};
+use carina_core::schema::{CompiledResourceSchema, SchemaKind, SchemaRegistry};
+
+#[cfg(test)]
+pub(crate) fn test_resource_schema(resource_type: &str) -> &'static CompiledResourceSchema {
+    static REGISTRY: std::sync::OnceLock<SchemaRegistry> = std::sync::OnceLock::new();
+    REGISTRY
+        .get_or_init(schemas::schema_registry)
+        .get("aws", resource_type, SchemaKind::Resource)
+        .expect("test resource schema must be registered")
+        .schema()
+        .as_schema()
+}
+
 use resend_safety_generated::{
     AccountClient, AcmClient, CloudWatchLogsClient, Ec2Client, IamClient, IdentityStoreClient,
     OrganizationsClient, Route53Client, S3Client, SqsClient, StsClient,
@@ -220,7 +232,7 @@ impl AwsProvider {
         crate::schemas::schema_registry()
     }
 
-    pub(crate) fn resource_schema(&self, resource_type: &str) -> Option<&ResourceSchema> {
+    pub(crate) fn resource_schema(&self, resource_type: &str) -> Option<&CompiledResourceSchema> {
         self.schema_registry
             .get("aws", resource_type, SchemaKind::Resource)
             .map(|schema| schema.schema().as_schema())

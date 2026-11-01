@@ -2,7 +2,7 @@
 
 use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{ConcreteValue, Resource, ResourceId, Value};
-use carina_core::schema::ResourceSchema;
+use carina_core::schema::CompiledResourceSchema;
 use indexmap::IndexMap;
 
 pub(crate) type StringList = Vec<String>;
@@ -166,7 +166,7 @@ pub(crate) fn required_tags(resource: &Resource<impl Sized>, name: &str) -> Prov
 
 pub(crate) fn optional_enum(
     resource: &Resource<impl Sized>,
-    schema: &ResourceSchema,
+    schema: &CompiledResourceSchema,
     name: &str,
 ) -> ProviderResult<Option<String>> {
     resource
@@ -177,7 +177,7 @@ pub(crate) fn optional_enum(
 
 pub(crate) fn required_enum(
     resource: &Resource<impl Sized>,
-    schema: &ResourceSchema,
+    schema: &CompiledResourceSchema,
     name: &str,
 ) -> ProviderResult<String> {
     optional_enum(resource, schema, name)?.ok_or_else(|| missing(resource, name))

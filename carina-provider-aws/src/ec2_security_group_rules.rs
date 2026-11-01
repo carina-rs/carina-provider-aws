@@ -319,6 +319,7 @@ mod tests {
 
         let error = match crate::send_models_generated::Ec2SecurityGroupIngressCreateInput::decode(
             &resource,
+            crate::test_resource_schema("ec2.SecurityGroupIngress"),
         ) {
             Ok(_) => panic!("invalid ip_protocol must not fall back to -1"),
             Err(error) => error,

@@ -13,7 +13,7 @@ use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{
     ConcreteValue, Resource, ResourceId, State, Value, enum_attr_at_schema_path,
 };
-use carina_core::schema::ResourceSchema;
+use carina_core::schema::CompiledResourceSchema;
 use indexmap::IndexMap;
 
 use crate::AwsProvider;
@@ -79,9 +79,9 @@ impl AwsProvider {
     pub(crate) async fn create_s3_bucket_object_lock_configuration(
         &self,
         resource: &Resource<impl Sized>,
-        schema: &ResourceSchema,
+        schema: &CompiledResourceSchema,
     ) -> ProviderResult<TypedCreateCompletion> {
-        let input = S3BucketObjectLockConfigurationCreateInput::decode(resource)?;
+        let input = S3BucketObjectLockConfigurationCreateInput::decode(resource, schema)?;
         let sent = input.sent();
         let crate::send_models_generated::S3BucketObjectLockConfigurationCreateParts {
             bucket,
@@ -177,9 +177,9 @@ impl AwsProvider {
         identifier: &AppliedIdentifier,
         _from: &State,
         to: Resource,
-        schema: &ResourceSchema,
+        schema: &CompiledResourceSchema,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
-        let input = S3BucketObjectLockConfigurationUpdateInput::decode(&to)?;
+        let input = S3BucketObjectLockConfigurationUpdateInput::decode(&to, schema)?;
         let crate::send_models_generated::S3BucketObjectLockConfigurationUpdateParts {
             object_lock_enabled,
             rule,
@@ -202,7 +202,7 @@ impl AwsProvider {
         bucket: &AppliedIdentifier,
         object_lock_enabled: String,
         rule: Option<&Value>,
-        schema: &ResourceSchema,
+        schema: &CompiledResourceSchema,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
         let applied_identifier = bucket;
         let bucket = bucket.as_str();
@@ -326,7 +326,7 @@ fn map_put_object_lock_configuration_result(
 
 fn build_rule(
     id: &ResourceId,
-    schema: &ResourceSchema,
+    schema: &CompiledResourceSchema,
     value: &Value,
 ) -> ProviderResult<ObjectLockRule> {
     let Value::Concrete(ConcreteValue::Map(rule)) = value else {
@@ -343,7 +343,7 @@ fn build_rule(
 
 fn build_default_retention(
     id: &ResourceId,
-    schema: &ResourceSchema,
+    schema: &CompiledResourceSchema,
     value: &Value,
 ) -> ProviderResult<DefaultRetention> {
     let Value::Concrete(ConcreteValue::Map(default_retention)) = value else {
@@ -512,7 +512,7 @@ mod tests {
 
     #[test]
     fn invalid_default_retention_mode_is_rejected() {
-        let schema = crate::schemas::generated::s3::bucket_object_lock_configuration::s3_bucket_object_lock_configuration_config().schema;
+        let schema = crate::test_resource_schema("s3.BucketObjectLockConfiguration");
         let value = Value::Concrete(ConcreteValue::Map(
             [(
                 "mode".to_string(),
@@ -522,7 +522,7 @@ mod tests {
             .collect(),
         ));
 
-        build_default_retention(&object_lock_id(), &schema, &value)
+        build_default_retention(&object_lock_id(), schema, &value)
             .expect_err("a non-exact closed-enum leaf must be rejected");
     }
 

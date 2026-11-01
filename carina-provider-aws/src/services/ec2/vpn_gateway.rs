@@ -1,7 +1,7 @@
 use carina_core::provider::ProviderResult;
 use carina_core::provider::{AppliedIdentifier, ReadOutcome};
 use carina_core::resource::{Resource, ResourceId, State};
-use carina_core::schema::ResourceSchema;
+use carina_core::schema::CompiledResourceSchema;
 
 use crate::AwsProvider;
 use crate::aws_operation::ClientToken;
@@ -64,11 +64,11 @@ impl AwsProvider {
     pub(crate) async fn create_ec2_vpn_gateway<A: AwsCreateAttempt>(
         &self,
         resource: &Resource<impl Sized>,
-        _schema: &ResourceSchema,
+        _schema: &CompiledResourceSchema,
         client_token: &ClientToken,
         attempt: A,
     ) -> Result<A::Step, A::Verdict> {
-        let input = match Ec2VpnGatewayCreateInput::decode(resource) {
+        let input = match Ec2VpnGatewayCreateInput::decode(resource, _schema) {
             Ok(input) => input,
             Err(error) => return Err(attempt.untracked(error)),
         };
@@ -126,7 +126,7 @@ impl AwsProvider {
         identifier: &AppliedIdentifier,
         from: &State,
         to: Resource,
-        _schema: &ResourceSchema,
+        _schema: &CompiledResourceSchema,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
         let input = Ec2VpnGatewayUpdateInput::decode(&to)?;
         let crate::send_models_generated::Ec2VpnGatewayUpdateParts { tags } = input.into_parts();

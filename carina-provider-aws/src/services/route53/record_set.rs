@@ -12,7 +12,7 @@ use aws_sdk_route53::types::{
 use carina_core::provider::{AppliedIdentifier, ReadOutcome};
 use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{ConcreteValue, Resource, ResourceId, Value};
-use carina_core::schema::ResourceSchema;
+use carina_core::schema::CompiledResourceSchema;
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
@@ -351,9 +351,9 @@ impl AwsProvider {
     pub(crate) async fn create_route53_record_set(
         &self,
         resource: &Resource<impl Sized>,
-        _schema: &ResourceSchema,
+        _schema: &CompiledResourceSchema,
     ) -> ProviderResult<TypedCreateCompletion> {
-        let input = Route53RecordSetCreateInput::decode(resource)?;
+        let input = Route53RecordSetCreateInput::decode(resource, _schema)?;
         let sent = input.sent();
         let crate::send_models_generated::Route53RecordSetCreateParts {
             alias_target,
@@ -412,7 +412,7 @@ impl AwsProvider {
         id: ResourceId,
         identifier: &AppliedIdentifier,
         to: Resource,
-        _schema: &ResourceSchema,
+        _schema: &CompiledResourceSchema,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
         let input = Route53RecordSetUpdateInput::decode(&to)?;
         let crate::send_models_generated::Route53RecordSetUpdateParts {
@@ -639,7 +639,11 @@ mod tests {
             Value::Concrete(ConcreteValue::String("Z123".to_string().into())),
         );
         r.set_attr("type".to_string(), canonical);
-        let input = Route53RecordSetCreateInput::decode(&r).expect("decode typed create input");
+        let input = Route53RecordSetCreateInput::decode(
+            &r,
+            crate::test_resource_schema("route53.RecordSet"),
+        )
+        .expect("decode typed create input");
         let crate::send_models_generated::Route53RecordSetCreateParts {
             alias_target,
             hosted_zone_id,

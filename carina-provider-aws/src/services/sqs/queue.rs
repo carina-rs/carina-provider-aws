@@ -14,7 +14,7 @@ use std::collections::HashMap;
 use carina_core::provider::{AppliedIdentifier, ReadOutcome};
 use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
-use carina_core::schema::ResourceSchema;
+use carina_core::schema::CompiledResourceSchema;
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
@@ -675,7 +675,7 @@ impl AwsProvider {
     pub(crate) async fn create_sqs_queue(
         &self,
         resource: &Resource<impl Sized>,
-        _schema: &ResourceSchema,
+        _schema: &CompiledResourceSchema,
     ) -> ProviderResult<TypedCreateCompletion> {
         validate_sqs_queue_inputs(&CrossFieldInputs::resolved(resource))?;
         let input = SqsQueueCreateInput::decode(resource)?;
@@ -831,7 +831,7 @@ impl AwsProvider {
         identifier: &AppliedIdentifier,
         from: &State,
         to: Resource,
-        _schema: &ResourceSchema,
+        _schema: &CompiledResourceSchema,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
         validate_sqs_queue_inputs(&CrossFieldInputs::resolved(&to))?;
         let input = SqsQueueUpdateInput::decode(&to)?;

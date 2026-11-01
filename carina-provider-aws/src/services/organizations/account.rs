@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use carina_core::provider::{AppliedIdentifier, ReadOutcome};
 use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
-use carina_core::schema::ResourceSchema;
+use carina_core::schema::CompiledResourceSchema;
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
@@ -108,9 +108,9 @@ impl AwsProvider {
     pub(crate) async fn create_organizations_account_start(
         &self,
         resource: &Resource<impl Sized>,
-        _schema: &ResourceSchema,
+        _schema: &CompiledResourceSchema,
     ) -> ProviderResult<(String, carina_core::provider::Sent)> {
-        let input = OrganizationsAccountCreateInput::decode(resource)?;
+        let input = OrganizationsAccountCreateInput::decode(resource, _schema)?;
         let sent = input.sent();
         let crate::send_models_generated::OrganizationsAccountCreateParts {
             account_name: name,
@@ -225,7 +225,7 @@ impl AwsProvider {
         identifier: &AppliedIdentifier,
         from: &State,
         to: Resource,
-        _schema: &ResourceSchema,
+        _schema: &CompiledResourceSchema,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
         let input = OrganizationsAccountUpdateInput::decode(&to)?;
         let crate::send_models_generated::OrganizationsAccountUpdateParts { account_name, tags } =
