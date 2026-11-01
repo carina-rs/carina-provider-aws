@@ -189,6 +189,16 @@ fn check_rendered(
             expected.parse_requirement()
         )
     })?;
+    if parsed
+        .providers
+        .iter()
+        .any(|provider| provider.binding.is_none())
+    {
+        anyhow::bail!(
+            "Rendered example from {} still contains an unnamed provider block",
+            path.display()
+        );
+    }
     if !expected.is_present(&parsed) {
         anyhow::bail!(
             "Example {} does not {} expected {}",
@@ -1506,24 +1516,32 @@ mod tests {
             "aws.ec2.Vpc {}\n",
         );
 
-        let outcome = std::panic::catch_unwind(|| load_fixture(source, ExampleKind::Resource));
-        match outcome {
-            Ok(Ok(example)) => assert!(resource_text(&example).contains("aws.ec2.Vpc {}\n")),
-            Ok(Err(_)) => {}
-            Err(_) => panic!("provider preprocessing must return a result instead of panicking"),
-        }
+        let example = load_fixture(source, ExampleKind::Resource)
+            .expect("provider comments after a mid-line removal must remain valid");
+
+        assert_eq!(
+            resource_text(&example),
+            " /* note */ # trailing\naws.ec2.Vpc {}\n"
+        );
     }
 
     #[test]
     fn two_unnamed_providers_on_one_line_do_not_panic() {
         let source = "provider aws {} provider aws {}\naws.ec2.Vpc {}\n";
 
-        let outcome = std::panic::catch_unwind(|| load_fixture(source, ExampleKind::Resource));
-        match outcome {
-            Ok(Ok(example)) => assert!(resource_text(&example).contains("aws.ec2.Vpc {}\n")),
-            Ok(Err(_)) => {}
-            Err(_) => panic!("provider preprocessing must return a result instead of panicking"),
-        }
+        let error = check(
+            source,
+            Path::new("two-unnamed-providers.crn"),
+            "aws",
+            "ec2.Vpc",
+            ExampleKind::Resource,
+        )
+        .expect_err("a rendered unnamed provider block must fail closed");
+
+        assert_eq!(
+            error.to_string(),
+            "Rendered example from two-unnamed-providers.crn still contains an unnamed provider block"
+        );
     }
 
     #[test]
