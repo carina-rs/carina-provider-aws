@@ -1,7 +1,7 @@
 use carina_core::provider::{AppliedIdentifier, ReadOutcome};
 use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
-use carina_core::schema::ResourceSchema;
+use carina_core::schema::CompiledResourceSchema;
 
 use aws_sdk_ec2::types::{AvailabilityZoneAddress, NatGatewayState};
 
@@ -278,14 +278,14 @@ impl AwsProvider {
     pub(crate) async fn create_ec2_nat_gateway_start<A: AwsCreateAttempt>(
         &self,
         resource: &Resource<impl Sized>,
-        _schema: &ResourceSchema,
+        _schema: &CompiledResourceSchema,
         client_token: &ClientToken,
         attempt: A,
     ) -> Result<A::Step, A::Verdict> {
         if let Err(error) = validate_nat_gateway_inputs(&CrossFieldInputs::resolved(resource)) {
             return Err(attempt.untracked(error));
         }
-        let input = match Ec2NatGatewayCreateInput::decode(resource) {
+        let input = match Ec2NatGatewayCreateInput::decode(resource, _schema) {
             Ok(input) => input,
             Err(error) => return Err(attempt.untracked(error)),
         };
@@ -383,7 +383,7 @@ impl AwsProvider {
         identifier: &AppliedIdentifier,
         from: &State,
         to: Resource,
-        _schema: &ResourceSchema,
+        _schema: &CompiledResourceSchema,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
         let input = Ec2NatGatewayUpdateInput::decode(&to)?;
         let crate::send_models_generated::Ec2NatGatewayUpdateParts { tags } = input.into_parts();

@@ -8,7 +8,7 @@ use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{
     ConcreteValue, Resource, ResourceId, State, Value, enum_attr_at_schema_path,
 };
-use carina_core::schema::ResourceSchema;
+use carina_core::schema::CompiledResourceSchema;
 use indexmap::IndexMap;
 
 use crate::AwsProvider;
@@ -96,7 +96,7 @@ impl AwsProvider {
     pub(crate) async fn create_s3_bucket_replication_configuration(
         &self,
         resource: &Resource<impl Sized>,
-        schema: &ResourceSchema,
+        schema: &CompiledResourceSchema,
     ) -> ProviderResult<TypedCreateCompletion> {
         let input = S3BucketReplicationConfigurationCreateInput::decode(resource)?;
         let sent = input.sent();
@@ -130,7 +130,7 @@ impl AwsProvider {
         identifier: &AppliedIdentifier,
         _from: &State,
         to: Resource,
-        schema: &ResourceSchema,
+        schema: &CompiledResourceSchema,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
         let input = S3BucketReplicationConfigurationUpdateInput::decode(&to)?;
         let crate::send_models_generated::S3BucketReplicationConfigurationUpdateParts {
@@ -149,7 +149,7 @@ impl AwsProvider {
         bucket: &AppliedIdentifier,
         role: String,
         rules: &Value,
-        schema: &ResourceSchema,
+        schema: &CompiledResourceSchema,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
         let applied_identifier = bucket;
         let bucket = bucket.as_str();
@@ -225,7 +225,7 @@ impl AwsProvider {
 
 fn build_rule(
     id: &ResourceId,
-    schema: &ResourceSchema,
+    schema: &CompiledResourceSchema,
     rule_value: &Value,
 ) -> ProviderResult<ReplicationRule> {
     let Value::Concrete(ConcreteValue::Map(map)) = rule_value else {
@@ -385,7 +385,7 @@ fn build_filter(id: &ResourceId, value: &Value) -> ProviderResult<ReplicationRul
 
 fn build_destination(
     id: &ResourceId,
-    schema: &ResourceSchema,
+    schema: &CompiledResourceSchema,
     value: &Value,
 ) -> ProviderResult<Destination> {
     let Value::Concrete(ConcreteValue::Map(map)) = value else {
@@ -544,8 +544,8 @@ mod tests {
         ResourceId::with_identity("s3.bucket_replication_configuration", "test")
     }
 
-    fn schema() -> ResourceSchema {
-        crate::schemas::generated::s3::bucket_replication_configuration::s3_bucket_replication_configuration_config().schema
+    fn schema() -> &'static CompiledResourceSchema {
+        crate::test_resource_schema("s3.BucketReplicationConfiguration")
     }
 
     fn str_val(s: &str) -> Value {
@@ -571,7 +571,7 @@ mod tests {
             ("destination", dest()),
         ]);
 
-        build_rule(&rid(), &schema(), &rule_value)
+        build_rule(&rid(), schema(), &rule_value)
             .expect_err("a non-exact closed-enum leaf must be rejected");
     }
 
@@ -586,7 +586,7 @@ mod tests {
             ),
         ]);
 
-        build_rule(&rid(), &schema(), &rule_value)
+        build_rule(&rid(), schema(), &rule_value)
             .expect_err("a non-exact nested closed-enum leaf must be rejected");
     }
 
@@ -601,7 +601,7 @@ mod tests {
             ),
         ]);
 
-        build_rule(&rid(), &schema(), &rule_value)
+        build_rule(&rid(), schema(), &rule_value)
             .expect_err("a present delete_marker_replication must be a map");
     }
 
@@ -615,7 +615,7 @@ mod tests {
             ("status", str_val("Enabled")),
             ("destination", dest()),
         ]);
-        let rule = build_rule(&rid(), &schema(), &rule_value).expect("build_rule should succeed");
+        let rule = build_rule(&rid(), schema(), &rule_value).expect("build_rule should succeed");
         assert!(
             rule.filter().is_some(),
             "a replication rule must always carry a Filter element"
@@ -630,7 +630,7 @@ mod tests {
             ("status", str_val("Enabled")),
             ("destination", dest()),
         ]);
-        let rule = build_rule(&rid(), &schema(), &rule_value).expect("build_rule should succeed");
+        let rule = build_rule(&rid(), schema(), &rule_value).expect("build_rule should succeed");
         let status = rule
             .delete_marker_replication()
             .and_then(|d| d.status())
@@ -648,7 +648,7 @@ mod tests {
                 map_val(vec![("status", str_val("Enabled"))]),
             ),
         ]);
-        let rule = build_rule(&rid(), &schema(), &rule_value).expect("build_rule should succeed");
+        let rule = build_rule(&rid(), schema(), &rule_value).expect("build_rule should succeed");
         let status = rule
             .delete_marker_replication()
             .and_then(|d| d.status())
@@ -663,7 +663,7 @@ mod tests {
             ("destination", dest()),
             ("filter", map_val(vec![("prefix", str_val("docs/"))])),
         ]);
-        let rule = build_rule(&rid(), &schema(), &rule_value).expect("build_rule should succeed");
+        let rule = build_rule(&rid(), schema(), &rule_value).expect("build_rule should succeed");
         assert_eq!(rule.filter().and_then(|f| f.prefix()), Some("docs/"));
     }
 
@@ -689,7 +689,7 @@ mod tests {
                 )]),
             ),
         ]);
-        let rule = build_rule(&rid(), &schema(), &rule_value).expect("build_rule should succeed");
+        let rule = build_rule(&rid(), schema(), &rule_value).expect("build_rule should succeed");
         let and = rule.filter().and_then(|f| f.and()).expect("and set");
         assert_eq!(and.prefix(), Some("data/"));
         assert_eq!(and.tags().len(), 1);
@@ -709,7 +709,7 @@ mod tests {
             ),
         ]);
 
-        let error = build_rule(&rid(), &schema(), &rule_value)
+        let error = build_rule(&rid(), schema(), &rule_value)
             .expect_err("present filter.and.tags must be a list");
         assert!(error.to_string().contains("filter.and.tags must be a list"));
     }
@@ -727,7 +727,7 @@ mod tests {
     fn disabled_delete_marker_is_preserved_on_read() {
         let built = build_rule(
             &rid(),
-            &schema(),
+            schema(),
             &map_val(vec![
                 ("status", str_val("Enabled")),
                 ("destination", dest()),
@@ -756,7 +756,7 @@ mod tests {
             ("status", str_val("Enabled")),
             ("destination", dest()),
         ]);
-        let rule = build_rule(&rid(), &schema(), &rule_value).expect("build_rule should succeed");
+        let rule = build_rule(&rid(), schema(), &rule_value).expect("build_rule should succeed");
         assert_eq!(
             rule.priority(),
             Some(0),
@@ -771,7 +771,7 @@ mod tests {
             ("destination", dest()),
             ("priority", Value::Concrete(ConcreteValue::Int(5))),
         ]);
-        let rule = build_rule(&rid(), &schema(), &rule_value).expect("build_rule should succeed");
+        let rule = build_rule(&rid(), schema(), &rule_value).expect("build_rule should succeed");
         assert_eq!(rule.priority(), Some(5));
     }
 
@@ -779,7 +779,7 @@ mod tests {
     fn zero_priority_is_preserved_on_read() {
         let built = build_rule(
             &rid(),
-            &schema(),
+            schema(),
             &map_val(vec![
                 ("status", str_val("Enabled")),
                 ("destination", dest()),
@@ -800,7 +800,7 @@ mod tests {
     fn nonzero_priority_round_trips() {
         let built = build_rule(
             &rid(),
-            &schema(),
+            schema(),
             &map_val(vec![
                 ("status", str_val("Enabled")),
                 ("destination", dest()),
@@ -822,7 +822,7 @@ mod tests {
     fn explicit_empty_and_default_rule_fields_round_trip() {
         let built = build_rule(
             &rid(),
-            &schema(),
+            schema(),
             &map_val(vec![
                 ("id", str_val("")),
                 ("status", str_val("Enabled")),

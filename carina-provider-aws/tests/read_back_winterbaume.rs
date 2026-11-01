@@ -26,6 +26,7 @@ use carina_core::provider::{
 };
 use carina_core::resource::{
     ConcreteValue, Current, ResolvedResource, Resource, ResourceId, State, Value,
+    absolute_binding_address_for_test,
 };
 use carina_core::schema::{AttributeSchema, AttributeType, ResourceSchema, SchemaRegistry};
 use carina_core::shutdown::ShutdownToken;
@@ -165,8 +166,8 @@ impl Provider for FixtureProvider {
 struct Observer(Mutex<Vec<String>>);
 impl ExecutionObserver for Observer {
     fn on_event(&self, event: &ExecutionEvent<'_>) {
-        if let ExecutionEvent::EffectFailed { error, .. } = event {
-            self.0.lock().unwrap().push((*error).to_string());
+        if let ExecutionEvent::EffectFailed { failure, .. } = event {
+            self.0.lock().unwrap().push(failure.to_string());
         }
     }
 }
@@ -207,7 +208,7 @@ fn string(value: &str) -> Value {
 }
 fn certificate() -> Resource {
     let mut resource = Resource::with_provider("aws", "acm.Certificate", "cert", None);
-    resource.binding = Some("cert".to_string());
+    resource.binding = Some(absolute_binding_address_for_test("cert"));
     resource.set_attr("domain_name", string("example.com"));
     resource.set_attr(
         "validation_method",
@@ -219,10 +220,12 @@ fn certificate() -> Resource {
 }
 fn dependent(name: &'static str, attribute: &str) -> Resource {
     let mut resource = Resource::with_provider("aws", "test.Dependent", name, None);
-    resource.binding = Some(name.to_string());
-    resource.dependency_bindings.insert("cert".to_string());
+    resource.binding = Some(absolute_binding_address_for_test(name));
+    resource
+        .dependency_bindings
+        .insert(absolute_binding_address_for_test("cert"));
     let reference = if attribute == "domain_name" {
-        Value::resource_ref("cert", attribute, vec![])
+        Value::resource_ref("cert", attribute, vec![]).resolve_root_for_test()
     } else {
         use carina_core::resource::{AccessPath, DeferredValue, PathSegment, Subscript};
         Value::Deferred(DeferredValue::ResourceRef {
@@ -240,7 +243,8 @@ fn dependent(name: &'static str, attribute: &str) -> Resource {
                         name: "name".to_string(),
                     },
                 ],
-            ),
+            )
+            .resolve_root_for_test(),
         })
     };
     resource.set_attr("value", reference);
@@ -315,7 +319,12 @@ async fn read_back_completion_reaches_same_apply_dependent() {
         &observer,
     )
     .await;
-    assert_eq!(result.failure_count, 0, "{:?}", observer.0.lock().unwrap());
+    assert_eq!(
+        result.failure_count(),
+        0,
+        "{:?}",
+        observer.0.lock().unwrap()
+    );
     assert_eq!(result.partial_count, 0);
     assert_eq!(result.success_count, 2);
     assert_eq!(
@@ -350,7 +359,12 @@ async fn exhausted_read_back_is_retried_by_next_apply() {
     .await;
     assert_eq!(result.partial_count, 1);
     assert_eq!(result.success_count, 1);
-    assert_eq!(result.failure_count, 1, "{:?}", observer.0.lock().unwrap());
+    assert_eq!(
+        result.failure_count(),
+        1,
+        "{:?}",
+        observer.0.lock().unwrap()
+    );
     let Applied::Complete { state, .. } = &result.applied_states[&id] else {
         panic!("partial create must retain applied state")
     };
@@ -393,7 +407,7 @@ async fn exhausted_read_back_is_retried_by_next_apply() {
     )
     .await;
     assert_eq!(next.success_count, 1);
-    assert_eq!(next.failure_count, 0);
+    assert_eq!(next.failure_count(), 0);
     assert_eq!(next.partial_count, 0);
     assert_eq!(
         provider.sinks.lock().unwrap()["missing"],
@@ -547,19 +561,18 @@ async fn native_resume_read_back_uses_schema_budget_without_replaying_create() {
 fn deferred_dvo_references_warn_for_email_and_budget_limited_dns() {
     use carina_core::parser::ParsedFile;
     use carina_core::resource::{
-        AccessPath, DeferredValue, ModuleSource, ParserPlaceholder, PathSegment, Subscript,
+        AccessPath, AuthoredResource, DeferredValue, PathSegment, Subscript,
     };
     use carina_core::validation::deferred_populate::validate_deferred_populate_refs;
-    type ParsedResource = Resource<ModuleSource, ParserPlaceholder>;
     for method in ["EMAIL", "DNS"] {
-        let mut cert: ParsedResource =
+        let mut cert: AuthoredResource =
             Resource::with_provider("aws", "acm.Certificate", "cert", None);
         cert.binding = Some("cert".into());
         cert.set_attr(
             "validation_method",
             Value::Concrete(ConcreteValue::String(method.into())),
         );
-        let mut record: ParsedResource =
+        let mut record: AuthoredResource =
             Resource::with_provider("aws", "route53.RecordSet", "record", None);
         record.binding = Some("record".into());
         record.set_attr(
@@ -589,7 +602,7 @@ fn deferred_dvo_references_warn_for_email_and_budget_limited_dns() {
             &carina_provider_aws::schemas::schema_registry(),
         );
         assert_eq!(diagnostics.len(), 1, "{method}: {diagnostics:?}");
-        assert_eq!(diagnostics[0].target_binding, "cert");
+        assert_eq!(diagnostics[0].target_binding.as_str(), "cert");
         assert!(diagnostics[0].unresolved_path.contains("resource_record"));
     }
 }

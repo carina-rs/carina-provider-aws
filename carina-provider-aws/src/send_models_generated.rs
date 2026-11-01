@@ -30,8 +30,10 @@ pub(crate) struct Ec2VpcCreateParts {
 }
 
 impl Ec2VpcCreateInput {
-    pub(crate) fn decode(_resource: &Resource<impl Sized>) -> ProviderResult<Self> {
-        let _schema = &crate::schemas::generated::ec2::vpc::ec2_vpc_config().schema;
+    pub(crate) fn decode(
+        _resource: &Resource<impl Sized>,
+        _schema: &carina_core::schema::CompiledResourceSchema,
+    ) -> ProviderResult<Self> {
         Ok(Self {
             cidr_block: crate::send_model::optional_string(_resource, "cidr_block")?,
             enable_dns_hostnames: crate::send_model::optional_bool(
@@ -195,8 +197,10 @@ pub(crate) struct Ec2SubnetCreateParts {
 }
 
 impl Ec2SubnetCreateInput {
-    pub(crate) fn decode(_resource: &Resource<impl Sized>) -> ProviderResult<Self> {
-        let _schema = &crate::schemas::generated::ec2::subnet::ec2_subnet_config().schema;
+    pub(crate) fn decode(
+        _resource: &Resource<impl Sized>,
+        _schema: &carina_core::schema::CompiledResourceSchema,
+    ) -> ProviderResult<Self> {
         Ok(Self {
             assign_ipv6_address_on_creation: crate::send_model::optional_bool(
                 _resource,
@@ -780,8 +784,10 @@ pub(crate) struct Ec2SecurityGroupIngressCreateParts {
 }
 
 impl Ec2SecurityGroupIngressCreateInput {
-    pub(crate) fn decode(_resource: &Resource<impl Sized>) -> ProviderResult<Self> {
-        let _schema = &crate::schemas::generated::ec2::security_group_ingress::ec2_security_group_ingress_config().schema;
+    pub(crate) fn decode(
+        _resource: &Resource<impl Sized>,
+        _schema: &carina_core::schema::CompiledResourceSchema,
+    ) -> ProviderResult<Self> {
         Ok(Self {
             cidr_ip: crate::send_model::optional_string(_resource, "cidr_ip")?,
             cidr_ipv6: crate::send_model::optional_string(_resource, "cidr_ipv6")?,
@@ -941,8 +947,10 @@ pub(crate) struct Ec2SecurityGroupEgressCreateParts {
 }
 
 impl Ec2SecurityGroupEgressCreateInput {
-    pub(crate) fn decode(_resource: &Resource<impl Sized>) -> ProviderResult<Self> {
-        let _schema = &crate::schemas::generated::ec2::security_group_egress::ec2_security_group_egress_config().schema;
+    pub(crate) fn decode(
+        _resource: &Resource<impl Sized>,
+        _schema: &carina_core::schema::CompiledResourceSchema,
+    ) -> ProviderResult<Self> {
         Ok(Self {
             cidr_ip: crate::send_model::optional_string(_resource, "cidr_ip")?,
             cidr_ipv6: crate::send_model::optional_string(_resource, "cidr_ipv6")?,
@@ -1154,8 +1162,10 @@ pub(crate) struct Ec2EipCreateParts {
 }
 
 impl Ec2EipCreateInput {
-    pub(crate) fn decode(_resource: &Resource<impl Sized>) -> ProviderResult<Self> {
-        let _schema = &crate::schemas::generated::ec2::eip::ec2_eip_config().schema;
+    pub(crate) fn decode(
+        _resource: &Resource<impl Sized>,
+        _schema: &carina_core::schema::CompiledResourceSchema,
+    ) -> ProviderResult<Self> {
         Ok(Self {
             address: crate::send_model::optional_string(_resource, "address")?,
             domain: crate::send_model::optional_enum(_resource, _schema, "domain")?,
@@ -1255,8 +1265,10 @@ pub(crate) struct Ec2FlowLogCreateParts {
 }
 
 impl Ec2FlowLogCreateInput {
-    pub(crate) fn decode(_resource: &Resource<impl Sized>) -> ProviderResult<Self> {
-        let _schema = &crate::schemas::generated::ec2::flow_log::ec2_flow_log_config().schema;
+    pub(crate) fn decode(
+        _resource: &Resource<impl Sized>,
+        _schema: &carina_core::schema::CompiledResourceSchema,
+    ) -> ProviderResult<Self> {
         Ok(Self {
             deliver_logs_permission_arn: crate::send_model::optional_string(
                 _resource,
@@ -1425,8 +1437,10 @@ pub(crate) struct Ec2NatGatewayCreateParts {
 }
 
 impl Ec2NatGatewayCreateInput {
-    pub(crate) fn decode(_resource: &Resource<impl Sized>) -> ProviderResult<Self> {
-        let _schema = &crate::schemas::generated::ec2::nat_gateway::ec2_nat_gateway_config().schema;
+    pub(crate) fn decode(
+        _resource: &Resource<impl Sized>,
+        _schema: &carina_core::schema::CompiledResourceSchema,
+    ) -> ProviderResult<Self> {
         Ok(Self {
             allocation_id: crate::send_model::optional_string(_resource, "allocation_id")?,
             availability_mode: crate::send_model::optional_enum(
@@ -1829,9 +1843,10 @@ pub(crate) struct Ec2VpcEndpointCreateParts {
 }
 
 impl Ec2VpcEndpointCreateInput {
-    pub(crate) fn decode(_resource: &Resource<impl Sized>) -> ProviderResult<Self> {
-        let _schema =
-            &crate::schemas::generated::ec2::vpc_endpoint::ec2_vpc_endpoint_config().schema;
+    pub(crate) fn decode(
+        _resource: &Resource<impl Sized>,
+        _schema: &carina_core::schema::CompiledResourceSchema,
+    ) -> ProviderResult<Self> {
         Ok(Self {
             policy_document: crate::send_model::optional_value(_resource, "policy_document")?,
             private_dns_enabled: crate::send_model::optional_bool(
@@ -2187,8 +2202,10 @@ pub(crate) struct Ec2VpnGatewayCreateParts {
 }
 
 impl Ec2VpnGatewayCreateInput {
-    pub(crate) fn decode(_resource: &Resource<impl Sized>) -> ProviderResult<Self> {
-        let _schema = &crate::schemas::generated::ec2::vpn_gateway::ec2_vpn_gateway_config().schema;
+    pub(crate) fn decode(
+        _resource: &Resource<impl Sized>,
+        _schema: &carina_core::schema::CompiledResourceSchema,
+    ) -> ProviderResult<Self> {
         Ok(Self {
             amazon_side_asn: crate::send_model::optional_int(_resource, "amazon_side_asn")?,
             availability_zone: crate::send_model::optional_enum(
@@ -2277,8 +2294,10 @@ pub(crate) struct S3BucketCreateParts {
 }
 
 impl S3BucketCreateInput {
-    pub(crate) fn decode(_resource: &Resource<impl Sized>) -> ProviderResult<Self> {
-        let _schema = &crate::schemas::generated::s3::bucket::s3_bucket_config().schema;
+    pub(crate) fn decode(
+        _resource: &Resource<impl Sized>,
+        _schema: &carina_core::schema::CompiledResourceSchema,
+    ) -> ProviderResult<Self> {
         Ok(Self {
             bucket: crate::send_model::required_string(_resource, "bucket")?,
             bucket_namespace: crate::send_model::optional_enum(
@@ -2416,9 +2435,10 @@ pub(crate) struct S3BucketVersioningCreateParts {
 }
 
 impl S3BucketVersioningCreateInput {
-    pub(crate) fn decode(_resource: &Resource<impl Sized>) -> ProviderResult<Self> {
-        let _schema =
-            &crate::schemas::generated::s3::bucket_versioning::s3_bucket_versioning_config().schema;
+    pub(crate) fn decode(
+        _resource: &Resource<impl Sized>,
+        _schema: &carina_core::schema::CompiledResourceSchema,
+    ) -> ProviderResult<Self> {
         Ok(Self {
             bucket: crate::send_model::required_string(_resource, "bucket")?,
             status: crate::send_model::required_enum(_resource, _schema, "status")?,
@@ -2451,9 +2471,10 @@ pub(crate) struct S3BucketVersioningUpdateParts {
 }
 
 impl S3BucketVersioningUpdateInput {
-    pub(crate) fn decode(_resource: &Resource<impl Sized>) -> ProviderResult<Self> {
-        let _schema =
-            &crate::schemas::generated::s3::bucket_versioning::s3_bucket_versioning_config().schema;
+    pub(crate) fn decode(
+        _resource: &Resource<impl Sized>,
+        _schema: &carina_core::schema::CompiledResourceSchema,
+    ) -> ProviderResult<Self> {
         Ok(Self {
             status: crate::send_model::required_enum(_resource, _schema, "status")?,
         })
@@ -2481,8 +2502,10 @@ pub(crate) struct S3BucketObjectLockConfigurationCreateParts {
 }
 
 impl S3BucketObjectLockConfigurationCreateInput {
-    pub(crate) fn decode(_resource: &Resource<impl Sized>) -> ProviderResult<Self> {
-        let _schema = &crate::schemas::generated::s3::bucket_object_lock_configuration::s3_bucket_object_lock_configuration_config().schema;
+    pub(crate) fn decode(
+        _resource: &Resource<impl Sized>,
+        _schema: &carina_core::schema::CompiledResourceSchema,
+    ) -> ProviderResult<Self> {
         Ok(Self {
             bucket: crate::send_model::required_string(_resource, "bucket")?,
             object_lock_enabled: crate::send_model::required_enum(
@@ -2539,8 +2562,10 @@ pub(crate) struct S3BucketObjectLockConfigurationUpdateParts {
 }
 
 impl S3BucketObjectLockConfigurationUpdateInput {
-    pub(crate) fn decode(_resource: &Resource<impl Sized>) -> ProviderResult<Self> {
-        let _schema = &crate::schemas::generated::s3::bucket_object_lock_configuration::s3_bucket_object_lock_configuration_config().schema;
+    pub(crate) fn decode(
+        _resource: &Resource<impl Sized>,
+        _schema: &carina_core::schema::CompiledResourceSchema,
+    ) -> ProviderResult<Self> {
         Ok(Self {
             object_lock_enabled: crate::send_model::required_enum(
                 _resource,
@@ -2581,8 +2606,10 @@ pub(crate) struct S3BucketAclCreateParts {
 }
 
 impl S3BucketAclCreateInput {
-    pub(crate) fn decode(_resource: &Resource<impl Sized>) -> ProviderResult<Self> {
-        let _schema = &crate::schemas::generated::s3::bucket_acl::s3_bucket_acl_config().schema;
+    pub(crate) fn decode(
+        _resource: &Resource<impl Sized>,
+        _schema: &carina_core::schema::CompiledResourceSchema,
+    ) -> ProviderResult<Self> {
         Ok(Self {
             acl: crate::send_model::required_enum(_resource, _schema, "acl")?,
             bucket: crate::send_model::required_string(_resource, "bucket")?,
@@ -2615,8 +2642,10 @@ pub(crate) struct S3BucketAclUpdateParts {
 }
 
 impl S3BucketAclUpdateInput {
-    pub(crate) fn decode(_resource: &Resource<impl Sized>) -> ProviderResult<Self> {
-        let _schema = &crate::schemas::generated::s3::bucket_acl::s3_bucket_acl_config().schema;
+    pub(crate) fn decode(
+        _resource: &Resource<impl Sized>,
+        _schema: &carina_core::schema::CompiledResourceSchema,
+    ) -> ProviderResult<Self> {
         Ok(Self {
             acl: crate::send_model::required_enum(_resource, _schema, "acl")?,
         })
@@ -2642,8 +2671,10 @@ pub(crate) struct S3BucketOwnershipControlsCreateParts {
 }
 
 impl S3BucketOwnershipControlsCreateInput {
-    pub(crate) fn decode(_resource: &Resource<impl Sized>) -> ProviderResult<Self> {
-        let _schema = &crate::schemas::generated::s3::bucket_ownership_controls::s3_bucket_ownership_controls_config().schema;
+    pub(crate) fn decode(
+        _resource: &Resource<impl Sized>,
+        _schema: &carina_core::schema::CompiledResourceSchema,
+    ) -> ProviderResult<Self> {
         Ok(Self {
             bucket: crate::send_model::required_string(_resource, "bucket")?,
             object_ownership: crate::send_model::required_enum(
@@ -2689,8 +2720,10 @@ pub(crate) struct S3BucketOwnershipControlsUpdateParts {
 }
 
 impl S3BucketOwnershipControlsUpdateInput {
-    pub(crate) fn decode(_resource: &Resource<impl Sized>) -> ProviderResult<Self> {
-        let _schema = &crate::schemas::generated::s3::bucket_ownership_controls::s3_bucket_ownership_controls_config().schema;
+    pub(crate) fn decode(
+        _resource: &Resource<impl Sized>,
+        _schema: &carina_core::schema::CompiledResourceSchema,
+    ) -> ProviderResult<Self> {
         Ok(Self {
             object_ownership: crate::send_model::required_enum(
                 _resource,
@@ -3563,8 +3596,10 @@ pub(crate) struct OrganizationsOrganizationCreateParts {
 }
 
 impl OrganizationsOrganizationCreateInput {
-    pub(crate) fn decode(_resource: &Resource<impl Sized>) -> ProviderResult<Self> {
-        let _schema = &crate::schemas::generated::organizations::organization::organizations_organization_config().schema;
+    pub(crate) fn decode(
+        _resource: &Resource<impl Sized>,
+        _schema: &carina_core::schema::CompiledResourceSchema,
+    ) -> ProviderResult<Self> {
         Ok(Self {
             feature_set: crate::send_model::optional_enum(_resource, _schema, "feature_set")?,
         })
@@ -3624,10 +3659,10 @@ pub(crate) struct OrganizationsAccountCreateParts {
 }
 
 impl OrganizationsAccountCreateInput {
-    pub(crate) fn decode(_resource: &Resource<impl Sized>) -> ProviderResult<Self> {
-        let _schema =
-            &crate::schemas::generated::organizations::account::organizations_account_config()
-                .schema;
+    pub(crate) fn decode(
+        _resource: &Resource<impl Sized>,
+        _schema: &carina_core::schema::CompiledResourceSchema,
+    ) -> ProviderResult<Self> {
         Ok(Self {
             account_name: crate::send_model::required_string(_resource, "account_name")?,
             email: crate::send_model::required_string(_resource, "email")?,
@@ -3738,9 +3773,10 @@ pub(crate) struct Route53RecordSetCreateParts {
 }
 
 impl Route53RecordSetCreateInput {
-    pub(crate) fn decode(_resource: &Resource<impl Sized>) -> ProviderResult<Self> {
-        let _schema =
-            &crate::schemas::generated::route53::record_set::route53_record_set_config().schema;
+    pub(crate) fn decode(
+        _resource: &Resource<impl Sized>,
+        _schema: &carina_core::schema::CompiledResourceSchema,
+    ) -> ProviderResult<Self> {
         Ok(Self {
             alias_target: crate::send_model::optional_value(_resource, "alias_target")?,
             hosted_zone_id: crate::send_model::required_string(_resource, "hosted_zone_id")?,
@@ -3805,14 +3841,12 @@ pub(crate) struct Route53RecordSetUpdateInput {
     alias_target: Option<Value>,
     resource_records: Option<crate::send_model::StringList>,
     ttl: Option<i64>,
-    r#type: String,
 }
 
 pub(crate) struct Route53RecordSetUpdateParts {
     pub(crate) alias_target: crate::send_model::Sent<Option<Value>>,
     pub(crate) resource_records: crate::send_model::Sent<Option<crate::send_model::StringList>>,
     pub(crate) ttl: crate::send_model::Sent<Option<i64>>,
-    pub(crate) r#type: crate::send_model::Sent<String>,
 }
 
 impl Route53RecordSetUpdateInput {
@@ -3826,7 +3860,6 @@ impl Route53RecordSetUpdateInput {
                 "resource_records",
             )?,
             ttl: crate::send_model::optional_int(_resource, "ttl")?,
-            r#type: crate::send_model::required_enum(_resource, _schema, "type")?,
         })
     }
 
@@ -3835,7 +3868,6 @@ impl Route53RecordSetUpdateInput {
             alias_target,
             resource_records,
             ttl,
-            r#type,
         } = self;
         Route53RecordSetUpdateParts {
             alias_target: crate::send_model::Sent::new(
@@ -3847,7 +3879,6 @@ impl Route53RecordSetUpdateInput {
                 resource_records,
             ),
             ttl: crate::send_model::Sent::new("route53.RecordSet.update.ttl", ttl),
-            r#type: crate::send_model::Sent::new("route53.RecordSet.update.type", r#type),
         }
     }
 }
@@ -3980,8 +4011,10 @@ pub(crate) struct LogsLogGroupCreateParts {
 }
 
 impl LogsLogGroupCreateInput {
-    pub(crate) fn decode(_resource: &Resource<impl Sized>) -> ProviderResult<Self> {
-        let _schema = &crate::schemas::generated::logs::log_group::logs_log_group_config().schema;
+    pub(crate) fn decode(
+        _resource: &Resource<impl Sized>,
+        _schema: &carina_core::schema::CompiledResourceSchema,
+    ) -> ProviderResult<Self> {
         Ok(Self {
             deletion_protection_enabled: crate::send_model::optional_bool(
                 _resource,
@@ -4116,8 +4149,10 @@ pub(crate) struct AcmCertificateCreateParts {
 }
 
 impl AcmCertificateCreateInput {
-    pub(crate) fn decode(_resource: &Resource<impl Sized>) -> ProviderResult<Self> {
-        let _schema = &crate::schemas::generated::acm::certificate::acm_certificate_config().schema;
+    pub(crate) fn decode(
+        _resource: &Resource<impl Sized>,
+        _schema: &carina_core::schema::CompiledResourceSchema,
+    ) -> ProviderResult<Self> {
         Ok(Self {
             domain_name: crate::send_model::required_string(_resource, "domain_name")?,
             key_algorithm: crate::send_model::optional_enum(_resource, _schema, "key_algorithm")?,
@@ -5946,11 +5981,6 @@ pub(crate) fn capture_contracts() -> &'static [SendCaptureContract] {
                 SendCaptureAttribute {
                     name: "ttl",
                     provider_name: "TTL",
-                    capture_names: &[],
-                },
-                SendCaptureAttribute {
-                    name: "type",
-                    provider_name: "Type",
                     capture_names: &[],
                 },
             ],

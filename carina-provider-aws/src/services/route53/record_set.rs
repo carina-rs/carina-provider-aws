@@ -12,7 +12,7 @@ use aws_sdk_route53::types::{
 use carina_core::provider::{AppliedIdentifier, ReadOutcome};
 use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{ConcreteValue, Resource, ResourceId, Value};
-use carina_core::schema::ResourceSchema;
+use carina_core::schema::CompiledResourceSchema;
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
@@ -351,9 +351,9 @@ impl AwsProvider {
     pub(crate) async fn create_route53_record_set(
         &self,
         resource: &Resource<impl Sized>,
-        _schema: &ResourceSchema,
+        _schema: &CompiledResourceSchema,
     ) -> ProviderResult<TypedCreateCompletion> {
-        let input = Route53RecordSetCreateInput::decode(resource)?;
+        let input = Route53RecordSetCreateInput::decode(resource, _schema)?;
         let sent = input.sent();
         let crate::send_models_generated::Route53RecordSetCreateParts {
             alias_target,
@@ -412,21 +412,18 @@ impl AwsProvider {
         id: ResourceId,
         identifier: &AppliedIdentifier,
         to: Resource,
-        _schema: &ResourceSchema,
+        _schema: &CompiledResourceSchema,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
         let input = Route53RecordSetUpdateInput::decode(&to)?;
         let crate::send_models_generated::Route53RecordSetUpdateParts {
             alias_target,
             resource_records,
             ttl,
-            r#type: record_type,
         } = input.into_parts();
         let alias_target = alias_target.into_inner();
         let resource_records = resource_records.into_inner();
         let ttl = ttl.into_inner();
-        let record_type = record_type.into_inner();
-        let Some((hosted_zone_id, name, _current_record_type)) =
-            parse_identifier(identifier.as_str())
+        let Some((hosted_zone_id, name, record_type)) = parse_identifier(identifier.as_str())
         else {
             return Err(ProviderError::invalid_input(format!(
                 "Invalid record set identifier: {}",
@@ -441,7 +438,7 @@ impl AwsProvider {
             name,
             resource_records.as_deref(),
             ttl,
-            &record_type,
+            record_type,
         )?;
         change_record_set(
             &self.route53_client,
@@ -452,7 +449,7 @@ impl AwsProvider {
         )
         .await?;
 
-        let identifier = make_identifier(hosted_zone_id, name, &record_type);
+        let identifier = make_identifier(hosted_zone_id, name, record_type);
         let identifier = crate::helpers::applied_identifier(
             &id,
             "route53.ChangeResourceRecordSets",
@@ -642,7 +639,11 @@ mod tests {
             Value::Concrete(ConcreteValue::String("Z123".to_string().into())),
         );
         r.set_attr("type".to_string(), canonical);
-        let input = Route53RecordSetCreateInput::decode(&r).expect("decode typed create input");
+        let input = Route53RecordSetCreateInput::decode(
+            &r,
+            crate::test_resource_schema("route53.RecordSet"),
+        )
+        .expect("decode typed create input");
         let crate::send_models_generated::Route53RecordSetCreateParts {
             alias_target,
             hosted_zone_id,

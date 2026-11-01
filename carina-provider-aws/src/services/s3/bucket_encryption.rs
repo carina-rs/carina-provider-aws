@@ -7,7 +7,7 @@ use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{
     ConcreteValue, Resource, ResourceId, State, Value, enum_attr_at_schema_path,
 };
-use carina_core::schema::ResourceSchema;
+use carina_core::schema::CompiledResourceSchema;
 use indexmap::IndexMap;
 
 use crate::AwsProvider;
@@ -70,7 +70,7 @@ impl AwsProvider {
     pub(crate) async fn create_s3_bucket_server_side_encryption_configuration(
         &self,
         resource: &Resource<impl Sized>,
-        schema: &ResourceSchema,
+        schema: &CompiledResourceSchema,
     ) -> ProviderResult<TypedCreateCompletion> {
         let input = S3BucketServerSideEncryptionConfigurationCreateInput::decode(resource)?;
         let sent = input.sent();
@@ -102,7 +102,7 @@ impl AwsProvider {
         identifier: &AppliedIdentifier,
         _from: &State,
         to: Resource,
-        schema: &ResourceSchema,
+        schema: &CompiledResourceSchema,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
         let crate::send_models_generated::S3BucketServerSideEncryptionConfigurationUpdateParts {
             rules,
@@ -117,7 +117,7 @@ impl AwsProvider {
         id: &ResourceId,
         bucket: &AppliedIdentifier,
         rules: &Value,
-        schema: &ResourceSchema,
+        schema: &CompiledResourceSchema,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
         let applied_identifier = bucket;
         let bucket = bucket.as_str();
@@ -192,7 +192,7 @@ impl AwsProvider {
 
 fn build_rule(
     id: &ResourceId,
-    schema: &ResourceSchema,
+    schema: &CompiledResourceSchema,
     rule_value: &Value,
 ) -> ProviderResult<ServerSideEncryptionRule> {
     let Value::Concrete(ConcreteValue::Map(rule_map)) = rule_value else {
@@ -216,7 +216,7 @@ fn build_rule(
 
 fn build_by_default(
     id: &ResourceId,
-    schema: &ResourceSchema,
+    schema: &CompiledResourceSchema,
     value: &Value,
 ) -> ProviderResult<ServerSideEncryptionByDefault> {
     let Value::Concrete(ConcreteValue::Map(map)) = value else {
@@ -287,7 +287,7 @@ mod tests {
     fn invalid_sse_algorithm_is_rejected() {
         let id =
             ResourceId::with_identity("s3.bucket_server_side_encryption_configuration", "test");
-        let schema = crate::schemas::generated::s3::bucket_server_side_encryption_configuration::s3_bucket_server_side_encryption_configuration_config().schema;
+        let schema = crate::test_resource_schema("s3.BucketServerSideEncryptionConfiguration");
         let value = Value::Concrete(ConcreteValue::Map(
             [(
                 "sse_algorithm".to_string(),
@@ -297,7 +297,7 @@ mod tests {
             .collect(),
         ));
 
-        build_by_default(&id, &schema, &value)
+        build_by_default(&id, schema, &value)
             .expect_err("a non-exact closed-enum leaf must be rejected");
     }
 }

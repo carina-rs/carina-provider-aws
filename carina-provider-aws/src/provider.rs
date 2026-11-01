@@ -351,10 +351,27 @@ impl TaggedEc2Create {
     fn decode_resumed(
         kind: Ec2TaggedResourceKind,
         resource: &Resource<impl Sized>,
+        registry: &carina_core::schema::SchemaRegistry,
     ) -> ProviderResult<Self> {
+        let schema = |resource_type: &str| {
+            registry
+                .get(
+                    "aws",
+                    resource_type,
+                    carina_core::schema::SchemaKind::Resource,
+                )
+                .map(|schema| schema.schema().as_schema())
+                .ok_or_else(|| {
+                    ProviderError::internal(format!("Unknown resource schema: {resource_type}"))
+                        .for_resource(resource.id.clone())
+                })
+        };
         match kind {
             Ec2TaggedResourceKind::Vpc => {
-                let input = crate::send_models_generated::Ec2VpcCreateInput::decode(resource)?;
+                let input = crate::send_models_generated::Ec2VpcCreateInput::decode(
+                    resource,
+                    schema("ec2.Vpc")?,
+                )?;
                 let crate::send_models_generated::Ec2VpcCreateParts {
                     cidr_block,
                     enable_dns_hostnames,
@@ -380,7 +397,10 @@ impl TaggedEc2Create {
                 })
             }
             Ec2TaggedResourceKind::Subnet => {
-                let input = crate::send_models_generated::Ec2SubnetCreateInput::decode(resource)?;
+                let input = crate::send_models_generated::Ec2SubnetCreateInput::decode(
+                    resource,
+                    schema("ec2.Subnet")?,
+                )?;
                 let crate::send_models_generated::Ec2SubnetCreateParts {
                     assign_ipv6_address_on_creation,
                     availability_zone,
@@ -1275,7 +1295,7 @@ impl AwsProvider {
     async fn request_acm_certificate_transition(
         &self,
         resource: &Resource<impl Sized>,
-        schema: &carina_core::schema::ResourceSchema,
+        schema: &carina_core::schema::CompiledResourceSchema,
         fresh_client_token: FreshAcmClientToken,
         attempts_remaining: u8,
     ) -> AcmResendTransition {
@@ -1324,7 +1344,7 @@ impl AwsProvider {
     async fn request_initial_acm_certificate_transition(
         &self,
         resource: &Resource<impl Sized>,
-        schema: &carina_core::schema::ResourceSchema,
+        schema: &carina_core::schema::CompiledResourceSchema,
         fresh_client_token: FreshAcmClientToken,
         attempts_after_request: NonZeroU8,
     ) -> InitialAcmRequestTransition {
@@ -1363,7 +1383,7 @@ impl AwsProvider {
     async fn finish_acm_certificate_issued<I: AwsIssuedCreate>(
         &self,
         resource: &Resource<impl Sized>,
-        schema: &carina_core::schema::ResourceSchema,
+        schema: &carina_core::schema::CompiledResourceSchema,
         identifier: AppliedIdentifier,
         poll_request: PollRequest,
         issued: I,
@@ -1380,7 +1400,7 @@ impl AwsProvider {
     async fn finish_acm_certificate_resumed<R: AwsResumedCreate>(
         &self,
         resource: &Resource<impl Sized>,
-        schema: &carina_core::schema::ResourceSchema,
+        schema: &carina_core::schema::CompiledResourceSchema,
         identifier: AppliedIdentifier,
         poll_request: PollRequest,
         resumed: R,
@@ -1977,7 +1997,7 @@ impl AwsProvider {
         resumed: R,
         poll_request: PollRequest,
     ) -> Result<R::Step, R::Verdict> {
-        let create = match TaggedEc2Create::decode_resumed(kind, resource) {
+        let create = match TaggedEc2Create::decode_resumed(kind, resource, &self.schema_registry) {
             Ok(create) => create,
             Err(error) => return Err(self.failed_resumed(&resource.id, resumed, error).await),
         };
@@ -2101,7 +2121,7 @@ impl AwsProvider {
                     InitialAcmRequestTransition::Untracked(error) => Err(attempt.untracked(error)),
                 }
             }
-            "s3.Bucket" => self.create_s3_bucket(resource, attempt).await,
+            "s3.Bucket" => self.create_s3_bucket(resource, schema, attempt).await,
             "s3.BucketPolicy" => {
                 self.finish_typed_create(attempt, self.create_s3_bucket_policy(resource).await)
             }
@@ -2588,12 +2608,13 @@ impl AwsProvider {
                     AwsCreatePoll::Unissued(attempt) => attempt.issued(identifier.clone()),
                     AwsCreatePoll::Issued(issued) => issued,
                 };
-                let create = match TaggedEc2Create::decode_resumed(kind, resource) {
-                    Ok(create) => create,
-                    Err(error) => {
-                        return Err(self.failed_issued(&resource.id, issued, error).await);
-                    }
-                };
+                let create =
+                    match TaggedEc2Create::decode_resumed(kind, resource, &self.schema_registry) {
+                        Ok(create) => create,
+                        Err(error) => {
+                            return Err(self.failed_issued(&resource.id, issued, error).await);
+                        }
+                    };
                 self.finish_tagged_ec2_issued(resource, create, identifier, issued, poll_request)
                     .await
             }
@@ -2607,10 +2628,14 @@ impl AwsProvider {
         resource_type: &str,
         config: carina_provider_protocol::types::OperationConfig,
     ) -> Self {
-        let schema = self
-            .resource_schema(resource_type)
+        let schema = crate::schemas::generated::configs()
+            .into_iter()
+            .find(|config| {
+                config.resource_type_name == resource_type
+                    && config.schema.kind() == carina_core::schema::SchemaKind::Resource
+            })
             .expect("known test resource")
-            .clone()
+            .schema
             .with_operation_config(config);
         self.schema_registry
             .insert("aws", schema.validate().expect("valid budget override"));
@@ -4355,9 +4380,12 @@ mod pending_operation_tests {
                 "ipam-pool-12345678".into(),
             )),
         );
-        let sent = crate::send_models_generated::Ec2VpcCreateInput::decode(&resource)
-            .expect("typed VPC input should decode")
-            .sent();
+        let sent = crate::send_models_generated::Ec2VpcCreateInput::decode(
+            &resource,
+            crate::test_resource_schema("ec2.Vpc"),
+        )
+        .expect("typed VPC input should decode")
+        .sent();
         let request_attributes = resource
             .attributes
             .keys()

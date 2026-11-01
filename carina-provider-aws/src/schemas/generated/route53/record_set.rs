@@ -38,6 +38,7 @@ pub fn route53_record_set_config() -> AwsSchemaConfig {
         .attribute(
             AttributeSchema::required("name", AttributeType::string())
                 .create_only()
+                .identity()
                 .with_description("For ChangeResourceRecordSets requests, the name of the record that you want to create, update, or delete. For ListResourceRecordSets responses, the na...")
                 .with_provider_name("Name")
                 .build(),
@@ -65,6 +66,7 @@ pub fn route53_record_set_config() -> AwsSchemaConfig {
     None,
     None,
 ))
+                .create_only()
                 .identity()
                 .with_description("The DNS record type. For information about different record types and how data is encoded for them, see Supported DNS Resource Record Types in the Ama...")
                 .with_provider_name("Type")
@@ -73,6 +75,7 @@ pub fn route53_record_set_config() -> AwsSchemaConfig {
         .attribute(
             AttributeSchema::required("hosted_zone_id", AttributeType::string())
                 .create_only()
+                .identity()
                 .with_description("The ID of the hosted zone that contains this record set.")
                 .with_provider_name("HostedZoneId")
                 .build(),

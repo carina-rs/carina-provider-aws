@@ -1187,7 +1187,7 @@ mod tests {
     use super::*;
     use carina_core::resource::{ConcreteValue, DeferredValue, Resource, Value};
     use carina_core::schema::{
-        AttributeType, CustomValidator, RawShape, ResourceValidation,
+        CompiledAttributeType, CustomValidator, RawShape, ResourceValidation,
         TypeIdentity as CoreTypeIdentity,
     };
     use carina_plugin_sdk::types::{TypeIdentity as WireTypeIdentity, ValidatorType};
@@ -1213,7 +1213,7 @@ mod tests {
         }
     }
 
-    fn scalar_kind(attribute_type: &AttributeType) -> CallbackScalar {
+    fn scalar_kind(attribute_type: &CompiledAttributeType) -> CallbackScalar {
         match attribute_type.raw_shape() {
             RawShape::String { .. } => CallbackScalar::String,
             RawShape::Int { .. } => CallbackScalar::Int,
@@ -1243,7 +1243,7 @@ mod tests {
     }
 
     fn collect_callbacks(
-        attribute_type: &AttributeType,
+        attribute_type: &CompiledAttributeType,
         bindings: &mut BTreeMap<CoreTypeIdentity, CallbackBinding>,
     ) {
         match attribute_type.raw_shape() {
@@ -1406,7 +1406,7 @@ mod tests {
         );
         resource.set_attr(
             "subnet_id",
-            Value::resource_ref("subnet", "subnet_id", vec![]),
+            Value::resource_ref("subnet", "subnet_id", vec![]).resolve_root_for_test(),
         );
 
         let hidden = resource
@@ -1432,7 +1432,7 @@ mod tests {
         let mut fifo = Resource::with_provider("aws", "sqs.Queue", "deferred-fifo", None);
         fifo.set_attr(
             "fifo_queue",
-            Value::resource_ref("settings", "fifo_queue", vec![]),
+            Value::resource_ref("settings", "fifo_queue", vec![]).resolve_root_for_test(),
         );
         fifo.set_attr(
             "deduplication_scope",
@@ -1454,7 +1454,7 @@ mod tests {
         );
         kms.set_attr(
             "kms_master_key_id",
-            Value::resource_ref("key", "key_id", vec![]),
+            Value::resource_ref("key", "key_id", vec![]).resolve_root_for_test(),
         );
         let hidden_key = kms
             .attributes

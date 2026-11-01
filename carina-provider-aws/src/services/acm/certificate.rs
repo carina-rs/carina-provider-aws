@@ -21,7 +21,7 @@ use indexmap::IndexMap;
 use carina_core::provider::{AppliedIdentifier, Observation, ReadOutcome};
 use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
-use carina_core::schema::ResourceSchema;
+use carina_core::schema::CompiledResourceSchema;
 
 use crate::AwsProvider;
 use crate::aws_operation::ClientToken;
@@ -174,15 +174,15 @@ pub(crate) fn normalize_acm_certificate_inputs<S>(input: &mut DesiredNormalizati
 #[cfg(test)]
 fn build_request_certificate(
     resource: &Resource<impl Sized>,
-    schema: &ResourceSchema,
+    schema: &CompiledResourceSchema,
 ) -> ProviderResult<RequestCertificateInput> {
-    let input = AcmCertificateCreateInput::decode(resource)?;
+    let input = AcmCertificateCreateInput::decode(resource, schema)?;
     build_request_certificate_input(resource, schema, input)
 }
 
 fn build_request_certificate_input(
     resource: &Resource<impl Sized>,
-    schema: &ResourceSchema,
+    schema: &CompiledResourceSchema,
     input: AcmCertificateCreateInput,
 ) -> ProviderResult<RequestCertificateInput> {
     let crate::send_models_generated::AcmCertificateCreateParts {
@@ -251,7 +251,7 @@ fn build_request_certificate_input(
 fn build_create_certificate_options(
     id: &ResourceId,
     value: Option<&Value>,
-    schema: &ResourceSchema,
+    schema: &CompiledResourceSchema,
 ) -> ProviderResult<Option<aws_sdk_acm::types::CertificateOptions>> {
     use aws_sdk_acm::types::CertificateExport;
 
@@ -489,14 +489,14 @@ impl AwsProvider {
     pub(crate) async fn request_acm_certificate(
         &self,
         resource: &Resource<impl Sized>,
-        schema: &ResourceSchema,
+        schema: &CompiledResourceSchema,
         client_token: &ClientToken,
     ) -> ProviderResult<(
         carina_core::provider::Sent,
         Result<AppliedIdentifier, SendFailure<RequestCertificateError>>,
     )> {
         let id = resource.id.clone();
-        let input = AcmCertificateCreateInput::decode(resource)?;
+        let input = AcmCertificateCreateInput::decode(resource, schema)?;
         let sent = input.sent();
         let request = build_request_certificate_input(resource, schema, input)?;
 
@@ -538,7 +538,7 @@ impl AwsProvider {
     pub(crate) async fn continue_acm_certificate_create(
         &self,
         resource: &Resource<impl Sized>,
-        _schema: &ResourceSchema,
+        _schema: &CompiledResourceSchema,
         arn: AppliedIdentifier,
     ) -> ProviderResult<CreateCompletion> {
         let attributes = resource.resolved_attributes();
@@ -705,7 +705,7 @@ impl AwsProvider {
         identifier: &AppliedIdentifier,
         from: &State,
         to: Resource,
-        _schema: &ResourceSchema,
+        _schema: &CompiledResourceSchema,
     ) -> ProviderResult<()> {
         let input = AcmCertificateUpdateInput::decode(&to)?;
         let crate::send_models_generated::AcmCertificateUpdateParts { tags } = input.into_parts();
@@ -813,8 +813,8 @@ mod tests {
     use aws_smithy_types::body::SdkBody;
     use aws_smithy_types::error::ErrorMetadata;
 
-    fn acm_schema() -> ResourceSchema {
-        crate::schemas::generated::acm::certificate::acm_certificate_config().schema
+    fn acm_schema() -> &'static CompiledResourceSchema {
+        crate::test_resource_schema("acm.Certificate")
     }
     use aws_sdk_acm::types::{
         CertificateDetail, CertificateExport, CertificateOptions, DomainValidation, RecordType,
@@ -1084,7 +1084,7 @@ mod tests {
         let request_options = build_create_certificate_options(
             &resource.id,
             resource.get_attr("options"),
-            &acm_schema(),
+            acm_schema(),
         )
         .expect("valid enum options")
         .expect("options");
@@ -1115,7 +1115,7 @@ mod tests {
         let request_options = build_create_certificate_options(
             &resource.id,
             resource.get_attr("options"),
-            &acm_schema(),
+            acm_schema(),
         )
         .expect("valid enum options")
         .expect("options");
@@ -1147,7 +1147,7 @@ mod tests {
         let request_options = build_create_certificate_options(
             &resource.id,
             resource.get_attr("options"),
-            &acm_schema(),
+            acm_schema(),
         )
         .expect("valid enum options")
         .expect("options");
@@ -1322,7 +1322,7 @@ mod tests {
         );
         resource.set_attr("validation_method".to_string(), canonical);
         let request =
-            build_request_certificate(&resource, &acm_schema()).expect("valid request enums");
+            build_request_certificate(&resource, acm_schema()).expect("valid request enums");
         assert_eq!(
             request.validation_method().cloned(),
             Some(ValidationMethod::Dns),
@@ -1348,7 +1348,7 @@ mod tests {
             Value::Concrete(ConcreteValue::String("DNS".to_string().into())),
         );
         let request =
-            build_request_certificate(&resource, &acm_schema()).expect("valid request enums");
+            build_request_certificate(&resource, acm_schema()).expect("valid request enums");
         assert_eq!(request.validation_method(), Some(&ValidationMethod::Dns));
     }
 
@@ -1363,7 +1363,7 @@ mod tests {
             "validation_method".to_string(),
             Value::Concrete(ConcreteValue::String("HTTP".into())),
         );
-        let request = build_request_certificate(&resource, &acm_schema())
+        let request = build_request_certificate(&resource, acm_schema())
             .expect("valid RequestCertificate input");
 
         assert_eq!(
@@ -1376,7 +1376,7 @@ mod tests {
     #[test]
     fn validation_method_dns_reaches_built_request() {
         let resource = dns_certificate_resource();
-        let request = build_request_certificate(&resource, &acm_schema())
+        let request = build_request_certificate(&resource, acm_schema())
             .expect("valid RequestCertificate input");
 
         assert_eq!(

@@ -3,7 +3,7 @@ use std::collections::HashMap;
 
 use carina_core::provider::{AppliedIdentifier, ProviderResult, ReadOutcome};
 use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
-use carina_core::schema::ResourceSchema;
+use carina_core::schema::CompiledResourceSchema;
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
@@ -89,10 +89,10 @@ impl AwsProvider {
     pub(crate) async fn create_logs_log_group<A: AwsCreateAttempt>(
         &self,
         resource: &Resource<impl Sized>,
-        _schema: &ResourceSchema,
+        _schema: &CompiledResourceSchema,
         attempt: A,
     ) -> Result<A::Step, A::Verdict> {
-        let input = match LogsLogGroupCreateInput::decode(resource) {
+        let input = match LogsLogGroupCreateInput::decode(resource, _schema) {
             Ok(input) => input,
             Err(error) => return Err(attempt.untracked(error)),
         };
@@ -196,7 +196,7 @@ impl AwsProvider {
         identifier: &AppliedIdentifier,
         from: &State,
         to: Resource,
-        _schema: &ResourceSchema,
+        _schema: &CompiledResourceSchema,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
         let input = LogsLogGroupUpdateInput::decode(&to)?;
         let crate::send_models_generated::LogsLogGroupUpdateParts {

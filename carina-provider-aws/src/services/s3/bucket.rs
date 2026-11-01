@@ -6,6 +6,7 @@ use indexmap::IndexMap;
 use carina_core::provider::{AppliedIdentifier, ProviderDirectives, ReadOutcome};
 use carina_core::provider::{BoxFuture, ProviderError, ProviderResult};
 use carina_core::resource::{ConcreteValue, DataSource, Resource, ResourceId, State, Value};
+use carina_core::schema::CompiledResourceSchema;
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
@@ -171,9 +172,10 @@ impl AwsProvider {
     pub(crate) async fn create_s3_bucket<A: AwsCreateAttempt>(
         &self,
         resource: &Resource<impl Sized>,
+        schema: &CompiledResourceSchema,
         attempt: A,
     ) -> Result<A::Step, A::Verdict> {
-        let input = match S3BucketCreateInput::decode(resource) {
+        let input = match S3BucketCreateInput::decode(resource, schema) {
             Ok(input) => input,
             Err(error) => return Err(attempt.untracked(error)),
         };

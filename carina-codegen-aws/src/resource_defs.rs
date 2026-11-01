@@ -308,8 +308,8 @@ pub struct ResourceDef {
     /// - `update_ops` lists the field → updatable (else create-only).
     /// - `read_only_overrides` lists the field → read-only.
     pub extra_attributes: Vec<ExtraField>,
-    /// Fields to mark as identity (contribute to anonymous resource identifier hashing).
-    /// Use for attributes that distinguish same-type resources sharing create-only values.
+    /// Create-only scalar or enum fields that define anonymous resource identity.
+    /// When declared, only these fields are hashed; other create-only values are excluded.
     pub identity_overrides: Vec<&'static str>,
     /// Fields whose value the AWS API populates *asynchronously after Create
     /// returns* — chained references to these from another resource will be
@@ -1839,7 +1839,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             extra_read_only: vec![],
             read_only_overrides: vec![],
             extra_attributes: vec![],
-            identity_overrides: vec![],
+            identity_overrides: vec!["TransitGatewayId", "VpcId"],
             deferred_populate_overrides: vec![],
             deferred_populate_struct_field_overrides: vec![],
             struct_field_type_overrides: vec![],
@@ -3401,7 +3401,7 @@ pub fn route53_resources() -> Vec<ResourceDef> {
                 "TrafficPolicyInstanceId",
                 "CidrRoutingConfig",
             ],
-            create_only_overrides: vec!["Name"],
+            create_only_overrides: vec!["Name", "Type"],
             enum_aliases: vec![],
             to_dsl_overrides: vec![],
             required_overrides: vec!["HostedZoneId", "Name", "Type"],
@@ -3412,7 +3412,7 @@ pub fn route53_resources() -> Vec<ResourceDef> {
                 read_source: None,
                 description: Some("The ID of the hosted zone that contains this record set."),
             }],
-            identity_overrides: vec!["Type"],
+            identity_overrides: vec!["HostedZoneId", "Name", "Type"],
             deferred_populate_overrides: vec![],
             deferred_populate_struct_field_overrides: vec![],
             // `AliasTarget.HostedZoneId` accepts both the
@@ -3505,7 +3505,7 @@ pub fn iam_resources() -> Vec<ResourceDef> {
         extra_read_only: vec!["Arn", "RoleId"],
         read_only_overrides: vec![],
         extra_attributes: vec![],
-        identity_overrides: vec![],
+        identity_overrides: vec!["RoleName"],
         deferred_populate_overrides: vec![],
         deferred_populate_struct_field_overrides: vec![],
         struct_field_type_overrides: vec![],
@@ -3567,7 +3567,7 @@ pub fn logs_resources() -> Vec<ResourceDef> {
                 "The number of days to retain the log events in the log group. If unset, events never expire. The provider applies changes via PutRetentionPolicy / DeleteRetentionPolicy.",
             ),
         }],
-        identity_overrides: vec![],
+        identity_overrides: vec!["LogGroupName"],
         deferred_populate_overrides: vec![],
         deferred_populate_struct_field_overrides: vec![],
         struct_field_type_overrides: vec![],
@@ -3830,7 +3830,7 @@ pub fn sqs_resources() -> Vec<ResourceDef> {
                 ),
             },
         ],
-        identity_overrides: vec![],
+        identity_overrides: vec!["QueueName"],
         deferred_populate_overrides: vec![],
         deferred_populate_struct_field_overrides: vec![],
         struct_field_type_overrides: vec![],

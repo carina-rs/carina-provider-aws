@@ -1,7 +1,7 @@
 use carina_core::provider::ProviderResult;
 use carina_core::provider::{AppliedIdentifier, ReadOutcome};
 use carina_core::resource::{Resource, ResourceId};
-use carina_core::schema::ResourceSchema;
+use carina_core::schema::CompiledResourceSchema;
 
 use crate::AwsProvider;
 use crate::ec2_security_group_rules::SecurityGroupRuleSendInput;
@@ -25,9 +25,9 @@ impl AwsProvider {
     pub(crate) async fn create_ec2_security_group_egress(
         &self,
         resource: &Resource<impl Sized>,
-        _schema: &ResourceSchema,
+        _schema: &CompiledResourceSchema,
     ) -> ProviderResult<TypedCreateCompletion> {
-        let input = Ec2SecurityGroupEgressCreateInput::decode(resource)?;
+        let input = Ec2SecurityGroupEgressCreateInput::decode(resource, _schema)?;
         let sent = input.sent();
         let crate::send_models_generated::Ec2SecurityGroupEgressCreateParts {
             cidr_ip,
@@ -78,7 +78,7 @@ impl AwsProvider {
         id: ResourceId,
         identifier: &AppliedIdentifier,
         to: Resource,
-        _schema: &ResourceSchema,
+        _schema: &CompiledResourceSchema,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
         let input = Ec2SecurityGroupEgressUpdateInput::decode(&to)?;
         let crate::send_models_generated::Ec2SecurityGroupEgressUpdateParts = input.into_parts();

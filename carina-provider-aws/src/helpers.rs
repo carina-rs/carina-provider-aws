@@ -16,7 +16,7 @@ use carina_core::provider::{
     AppliedIdentifier, PatchOp, ProviderError, ProviderResult, UpdatePatch,
 };
 use carina_core::resource::{ConcreteValue, EnumAttrError, Resource, ResourceId, State, Value};
-use carina_core::schema::ResourceSchema;
+use carina_core::schema::CompiledResourceSchema;
 
 use crate::aws_operation::{
     AwsOperation, ClientToken, DecidedSend, EC2_CREATE_TOKEN_TAG, NoToken, TokenBearing,
@@ -79,7 +79,7 @@ pub(crate) fn enum_attr_error(id: &ResourceId, error: EnumAttrError) -> Provider
 #[cfg(test)]
 pub fn require_enum_attr(
     resource: &Resource<impl Sized>,
-    schema: &ResourceSchema,
+    schema: &CompiledResourceSchema,
     attr_name: &str,
 ) -> ProviderResult<String> {
     optional_enum_attr(resource, schema, attr_name)?
@@ -94,7 +94,7 @@ pub fn require_enum_attr(
 #[cfg(test)]
 pub fn optional_enum_attr<'a>(
     resource: &'a Resource<impl Sized>,
-    schema: &'a ResourceSchema,
+    schema: &'a CompiledResourceSchema,
     attr_name: &str,
 ) -> ProviderResult<Option<&'a str>> {
     resource
@@ -131,7 +131,7 @@ pub(crate) fn optional_bool_attr(resource: &Resource<impl Sized>, attr_name: &st
 /// `m.get("dns_support")`).
 pub(crate) fn optional_enum_struct_field<'a>(
     resource: &'a Resource<impl Sized>,
-    schema: &'a ResourceSchema,
+    schema: &'a CompiledResourceSchema,
     struct_attr: &str,
     field_name: &str,
 ) -> ProviderResult<Option<&'a str>> {
@@ -591,8 +591,8 @@ mod tests {
         )
     }
 
-    fn acm_schema() -> ResourceSchema {
-        crate::schemas::generated::acm::certificate::acm_certificate_config().schema
+    fn acm_schema() -> &'static CompiledResourceSchema {
+        crate::test_resource_schema("acm.Certificate")
     }
 
     fn canonical_validation_method_value() -> Value {
@@ -732,7 +732,7 @@ mod tests {
         let schema = acm_schema();
         let resource = make_test_resource(vec![("validation_method", "DNS")]);
         assert_eq!(
-            require_enum_attr(&resource, &schema, "validation_method").unwrap(),
+            require_enum_attr(&resource, schema, "validation_method").unwrap(),
             "DNS"
         );
     }
@@ -743,7 +743,7 @@ mod tests {
         let resource =
             make_resource_with_value("validation_method", canonical_validation_method_value());
         assert_eq!(
-            require_enum_attr(&resource, &schema, "validation_method").unwrap(),
+            require_enum_attr(&resource, schema, "validation_method").unwrap(),
             "DNS"
         );
     }
@@ -752,7 +752,7 @@ mod tests {
     fn test_require_enum_attr_missing_is_err() {
         let schema = acm_schema();
         let resource = make_test_resource(vec![]);
-        assert!(require_enum_attr(&resource, &schema, "validation_method").is_err());
+        assert!(require_enum_attr(&resource, schema, "validation_method").is_err());
     }
 
     #[test]
@@ -760,7 +760,7 @@ mod tests {
         let schema = acm_schema();
         let resource =
             make_resource_with_value("validation_method", Value::Concrete(ConcreteValue::Int(1)));
-        assert!(require_enum_attr(&resource, &schema, "validation_method").is_err());
+        assert!(require_enum_attr(&resource, schema, "validation_method").is_err());
     }
 
     #[test]
@@ -768,7 +768,7 @@ mod tests {
         let schema = acm_schema();
         let resource = make_test_resource(vec![("validation_method", "DNS")]);
         assert_eq!(
-            optional_enum_attr(&resource, &schema, "validation_method").unwrap(),
+            optional_enum_attr(&resource, schema, "validation_method").unwrap(),
             Some("DNS")
         );
     }
@@ -779,7 +779,7 @@ mod tests {
         let resource =
             make_resource_with_value("validation_method", canonical_validation_method_value());
         assert_eq!(
-            optional_enum_attr(&resource, &schema, "validation_method").unwrap(),
+            optional_enum_attr(&resource, schema, "validation_method").unwrap(),
             Some("DNS")
         );
     }
@@ -789,7 +789,7 @@ mod tests {
         let schema = acm_schema();
         let resource = make_test_resource(vec![]);
         assert_eq!(
-            optional_enum_attr(&resource, &schema, "validation_method").unwrap(),
+            optional_enum_attr(&resource, schema, "validation_method").unwrap(),
             None
         );
     }
@@ -798,7 +798,7 @@ mod tests {
     fn test_optional_enum_attr_invalid_closed_enum_is_err() {
         let schema = acm_schema();
         let resource = make_test_resource(vec![("validation_method", "dns")]);
-        let error = optional_enum_attr(&resource, &schema, "validation_method")
+        let error = optional_enum_attr(&resource, schema, "validation_method")
             .expect_err("an invalid closed-enum member must not become None");
         let rendered = error.to_string();
         let reason = "does not exactly match a declared API value";
@@ -825,7 +825,7 @@ mod tests {
             "validation_method",
             Value::Concrete(ConcreteValue::Bool(true)),
         );
-        assert!(optional_enum_attr(&resource, &schema, "validation_method").is_err());
+        assert!(optional_enum_attr(&resource, schema, "validation_method").is_err());
     }
 
     #[test]
@@ -866,7 +866,7 @@ mod tests {
         assert_eq!(
             optional_enum_struct_field(
                 &resource,
-                &schema,
+                schema,
                 "options",
                 "certificate_transparency_logging_preference"
             )
@@ -885,7 +885,7 @@ mod tests {
         assert_eq!(
             optional_enum_struct_field(
                 &resource,
-                &schema,
+                schema,
                 "options",
                 "certificate_transparency_logging_preference"
             )
@@ -965,7 +965,7 @@ mod tests {
         assert_eq!(
             optional_enum_struct_field(
                 &resource,
-                &schema,
+                schema,
                 "options",
                 "certificate_transparency_logging_preference",
             )
@@ -1000,7 +1000,7 @@ mod tests {
         assert!(
             optional_enum_struct_field(
                 &resource,
-                &schema,
+                schema,
                 "options",
                 "certificate_transparency_logging_preference",
             )
@@ -1034,7 +1034,7 @@ mod tests {
         assert_eq!(
             optional_enum_struct_field(
                 &resource,
-                &schema,
+                schema,
                 "options",
                 "certificate_transparency_logging_preference",
             )
@@ -1093,7 +1093,7 @@ mod tests {
         assert!(
             optional_enum_struct_field(
                 &enum_resource,
-                &schema,
+                schema,
                 "options",
                 "certificate_transparency_logging_preference",
             )

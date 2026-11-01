@@ -3,7 +3,7 @@ use carina_core::provider::{ProviderError, ProviderResult};
 #[cfg(test)]
 use carina_core::resource::ConcreteValue;
 use carina_core::resource::{Resource, ResourceId, State, Value};
-use carina_core::schema::ResourceSchema;
+use carina_core::schema::CompiledResourceSchema;
 
 use aws_sdk_ec2::types::TransitGatewayAttachmentState;
 
@@ -76,7 +76,7 @@ fn transit_gateway_attachment_delete_poll_state(
 fn build_create_transit_gateway_attachment_options(
     id: &ResourceId,
     options_value: Option<&Value>,
-    schema: &ResourceSchema,
+    schema: &CompiledResourceSchema,
 ) -> ProviderResult<Option<aws_sdk_ec2::types::CreateTransitGatewayVpcAttachmentRequestOptions>> {
     use aws_sdk_ec2::types::{
         ApplianceModeSupportValue, DnsSupportValue, Ipv6SupportValue,
@@ -173,7 +173,7 @@ impl AwsProvider {
     pub(crate) async fn create_ec2_transit_gateway_attachment_start<A: AwsCreateAttempt>(
         &self,
         resource: &Resource<impl Sized>,
-        schema: &ResourceSchema,
+        schema: &CompiledResourceSchema,
         client_token: &ClientToken,
         attempt: A,
     ) -> Result<A::Step, A::Verdict> {
@@ -255,7 +255,7 @@ impl AwsProvider {
         identifier: &AppliedIdentifier,
         from: &State,
         to: Resource,
-        _schema: &ResourceSchema,
+        _schema: &CompiledResourceSchema,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
         let input = Ec2TransitGatewayAttachmentUpdateInput::decode(&to)?;
         let crate::send_models_generated::Ec2TransitGatewayAttachmentUpdateParts { tags } =
@@ -398,8 +398,8 @@ mod tests {
         );
     }
 
-    fn schema() -> ResourceSchema {
-        crate::schemas::generated::ec2::transit_gateway_attachment::ec2_transit_gateway_attachment_config().schema
+    fn schema() -> &'static CompiledResourceSchema {
+        crate::test_resource_schema("ec2.TransitGatewayAttachment")
     }
 
     fn resource_with_options(options: IndexMap<String, Value>) -> Resource {
@@ -429,7 +429,7 @@ mod tests {
         let options = build_create_transit_gateway_attachment_options(
             &resource.id,
             resource.get_attr("options"),
-            &schema(),
+            schema(),
         )
         .expect("valid options")
         .expect("options");
@@ -445,7 +445,7 @@ mod tests {
         let options = build_create_transit_gateway_attachment_options(
             &resource.id,
             resource.get_attr("options"),
-            &schema(),
+            schema(),
         )
         .expect("valid options")
         .expect("options");
@@ -458,7 +458,7 @@ mod tests {
         let options = build_create_transit_gateway_attachment_options(
             &resource.id,
             resource.get_attr("options"),
-            &schema(),
+            schema(),
         )
         .expect("valid options")
         .expect("options");
@@ -471,7 +471,7 @@ mod tests {
         let options = build_create_transit_gateway_attachment_options(
             &resource.id,
             resource.get_attr("options"),
-            &schema(),
+            schema(),
         )
         .expect("valid options")
         .expect("options");
@@ -532,7 +532,7 @@ mod tests {
             build_create_transit_gateway_attachment_options(
                 &resource.id,
                 resource.get_attr("options"),
-                &schema(),
+                schema(),
             )
             .expect("valid options")
             .is_none()

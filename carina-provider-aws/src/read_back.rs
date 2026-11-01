@@ -11,7 +11,7 @@ use carina_core::provider::{
     ReadRequest,
 };
 use carina_core::resource::{Resource, ResourceId, Value};
-use carina_core::schema::ResourceSchema;
+use carina_core::schema::CompiledResourceSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::AwsProvider;
@@ -39,7 +39,7 @@ impl ReadBackRequirement {
     fn applies(
         &self,
         resource: &Resource<impl Sized>,
-        schema: &ResourceSchema,
+        schema: &CompiledResourceSchema,
     ) -> ProviderResult<bool> {
         match self.predicate {
             ReadBackPredicate::AcmDnsDvo => resource
@@ -583,9 +583,9 @@ mod tests {
         let mut resource: carina_core::resource::Resource =
             carina_core::resource::Resource::with_provider("aws", "acm.Certificate", "test", None);
         resource.attributes = attributes.into_iter().collect();
-        let schema = crate::schemas::generated::acm::certificate::acm_certificate_config().schema;
+        let schema = crate::test_resource_schema("acm.Certificate");
         assert!(
-            requirement.applies(&resource, &schema).is_err(),
+            requirement.applies(&resource, schema).is_err(),
             "raw DSL aliases must follow schema enum validation"
         );
     }
