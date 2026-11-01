@@ -8,7 +8,8 @@ use carina_core::differ::{Diff, diff};
 use carina_core::provider::RawSavedAttrs;
 use carina_core::provider::{
     AppliedIdentifier, CreateFailure, CreateOutcome, CreateOutcomeKind, CreateRequest,
-    NoopNormalizer, Provider, ProviderReadyDataSource, ReadRequest, UpdateOutcome, UpdateRequest,
+    NoopNormalizer, Provider, ProviderReadyDataSource, ReadRequest, UpdateOutcomeKind,
+    UpdateRequest,
 };
 use carina_core::resource::{ConcreteValue, DataSource, ResolvedResource, Resource, State, Value};
 use carina_core::schema::SchemaKind;
@@ -542,7 +543,7 @@ async fn update_bucket_read_back_not_found_is_partial_success_with_updated_ident
         .await
         .expect("the update API succeeded, so a missing read-back must stay successful");
 
-    let UpdateOutcome::PartialSuccess { state, diagnostic } = outcome else {
+    let UpdateOutcomeKind::PartialSuccess { state, diagnostic } = outcome.kind() else {
         panic!("expected partial update success, got {outcome:?}");
     };
     assert_eq!(state.identifier().as_str(), bucket);
@@ -600,7 +601,7 @@ async fn update_bucket_read_back_error_is_partial_success_with_updated_identifie
         .await
         .expect("the update API succeeded, so a failed read-back must stay successful");
 
-    let UpdateOutcome::PartialSuccess { state, diagnostic } = outcome else {
+    let UpdateOutcomeKind::PartialSuccess { state, diagnostic } = outcome.kind() else {
         panic!("expected partial update success, got {outcome:?}");
     };
     assert_eq!(state.identifier().as_str(), bucket);

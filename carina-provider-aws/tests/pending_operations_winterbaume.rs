@@ -1168,8 +1168,10 @@ fn expect_delete_pending(step: OperationStep<(), ProviderError, AwsDeleteToken>)
         OperationStep::Pending {
             pending,
             poll_after_secs,
+            phase,
         } => {
             assert_eq!(poll_after_secs, 5);
+            assert_eq!(phase, carina_provider_protocol::PendingPhase::Operation);
             assert_eq!(
                 pending,
                 AwsDeleteToken::NatGateway {

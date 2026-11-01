@@ -16,7 +16,8 @@ use carina_core::provider::{
 };
 use carina_core::resource::{DataSource, Resource, ResourceId, State, Value};
 use carina_provider_protocol::{
-    DEFAULT_OPERATION_BUDGET, DriveError, DriveOutcome, OperationKind, OperationStep, drive_pending,
+    DEFAULT_OPERATION_BUDGET, DEFAULT_READ_BACK_BUDGET, DriveError, DriveOutcome, OperationKind,
+    OperationStep, PendingPhase, drive_pending,
 };
 use serde::{Deserialize, Serialize};
 
@@ -1067,6 +1068,7 @@ fn delete_pending(token: AwsDeleteToken) -> AwsDeleteStep {
     OperationStep::Pending {
         pending: token,
         poll_after_secs: POLL_AFTER_SECS,
+        phase: PendingPhase::Operation,
     }
 }
 
@@ -1079,7 +1081,7 @@ async fn drive_operation<T, Tok, Initial, Poll, PollFuture, Sleep, SleepFuture>(
     kind: OperationKind,
     budget: Duration,
     initial: Initial,
-    poll: Poll,
+    mut poll: Poll,
     sleep: Sleep,
 ) -> ProviderResult<T>
 where
@@ -1090,8 +1092,18 @@ where
     Sleep: FnMut(Duration) -> SleepFuture,
     SleepFuture: Future<Output = ()>,
 {
-    match drive_pending(budget, initial, poll, sleep).await {
-        Ok(DriveOutcome::Done(value)) => Ok(value),
+    // Existing continuations stay in the operation phase, so the required
+    // read-back budget uses the protocol default and never becomes active.
+    match drive_pending(
+        budget,
+        DEFAULT_READ_BACK_BUDGET,
+        initial,
+        |token, _finality| poll(token),
+        sleep,
+    )
+    .await
+    {
+        Ok(DriveOutcome::Done(value)) => Ok(value.into_output()),
         Ok(DriveOutcome::Verdict(error)) => Err(error),
         Ok(DriveOutcome::OverBudget {
             last_pending: _last_pending,
@@ -1107,6 +1119,10 @@ where
             ))
             .for_resource(id.clone()))
         }
+        Ok(DriveOutcome::ProtocolViolation { .. }) => Err(ProviderError::internal(
+            "AWS operation returned an invalid pending phase",
+        )
+        .for_resource(id.clone())),
         Err(DriveError::Initial(error)) | Err(DriveError::Poll { error, .. }) => Err(error),
     }
 }
@@ -1167,7 +1183,7 @@ impl AwsProvider {
         outcome: ProviderResult<ReadOutcome>,
     ) -> UpdateOutcome {
         let reason = match outcome {
-            Ok(ReadOutcome::Found { state }) => return UpdateOutcome::Success { state },
+            Ok(ReadOutcome::Found { state }) => return UpdateOutcome::success(state),
             Ok(ReadOutcome::NotFound { .. }) => {
                 "post-update read-back did not find the updated resource".to_string()
             }
@@ -4390,6 +4406,7 @@ mod pending_operation_tests {
                     nat_gateway_id: identifier("nat-123"),
                 },
                 poll_after_secs: 5,
+                phase: PendingPhase::Operation,
             })),
             |_| ready(Ok(OperationStep::Done(done.take().expect("one poll")))),
             |_| ready(()),
@@ -4412,11 +4429,13 @@ mod pending_operation_tests {
                     nat_gateway_id: identifier("nat-123"),
                 },
                 poll_after_secs: 5,
+                phase: PendingPhase::Operation,
             })),
             |token| {
                 ready(Ok(OperationStep::Pending {
                     pending: token,
                     poll_after_secs: 5,
+                    phase: PendingPhase::Operation,
                 }))
             },
             |_| ready(()),

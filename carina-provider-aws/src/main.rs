@@ -6,10 +6,10 @@ use carina_plugin_sdk::{
     CarinaProvider, CreateAttempt as SdkCreateAttempt, CreateStep as SdkCreateStep,
     CreateVerdict as SdkCreateVerdict, DeleteOutcome as SdkDeleteOutcome, DesiredAttribute,
     DesiredResource, FoundRead, IssuedCreate as SdkIssuedCreate, Never, NormalizedResource,
-    Pending, Poll as SdkPoll, PollAttempt as SdkPollAttempt, PollVerdict as SdkPollVerdict,
-    Resume as SdkResume, ResumeAttempt as SdkResumeAttempt, ResumeStep as SdkResumeStep,
-    ResumeVerdict as SdkResumeVerdict, ResumedCreate as SdkResumedCreate,
-    UpdateOutcome as SdkUpdateOutcome,
+    Pending, PendingDelete, Poll as SdkPoll, PollAttempt as SdkPollAttempt, PollRequest,
+    PollVerdict as SdkPollVerdict, Resume as SdkResume, ResumeAttempt as SdkResumeAttempt,
+    ResumeStep as SdkResumeStep, ResumeVerdict as SdkResumeVerdict,
+    ResumedCreate as SdkResumedCreate, UpdateOutcome as SdkUpdateOutcome,
 };
 #[cfg(any(target_arch = "wasm32", test))]
 use carina_provider_protocol::OperationStep;
@@ -698,6 +698,7 @@ impl CarinaProvider for AwsProcessProvider {
         _id: &proto::ResourceId,
         request: proto::CreateRequest,
         poll: SdkPoll<Self::CreateToken>,
+        _poll_request: PollRequest,
     ) -> Result<SdkCreateStep<Self::CreateToken>, SdkPollVerdict<Self::CreateToken>> {
         let core_resource = match protocol_resource_to_core(&request.resource) {
             Ok(resource) => resource,
@@ -765,6 +766,7 @@ impl CarinaProvider for AwsProcessProvider {
         _id: &proto::ResourceId,
         request: proto::CreateRequest,
         resume: SdkResume<Self::CreateToken>,
+        _poll_request: PollRequest,
     ) -> Result<SdkResumeStep<Self::CreateToken>, SdkResumeVerdict<Self::CreateToken>> {
         let core_resource = match protocol_resource_to_core(&request.resource) {
             Ok(resource) => resource,
@@ -869,6 +871,7 @@ impl CarinaProvider for AwsProcessProvider {
         _identifier: &proto::AppliedIdentifier,
         _request: proto::UpdateRequest,
         pending: Pending<Self::UpdateToken>,
+        _poll_request: PollRequest,
     ) -> Result<SdkUpdateOutcome<Self::UpdateToken>, proto::ProviderError> {
         match pending.token {}
     }
@@ -902,7 +905,8 @@ impl CarinaProvider for AwsProcessProvider {
             Ok(OperationStep::Pending {
                 pending,
                 poll_after_secs,
-            }) => Ok(SdkDeleteOutcome::Pending(Pending {
+                ..
+            }) => Ok(SdkDeleteOutcome::Pending(PendingDelete {
                 token: pending,
                 poll_after_secs,
             })),
@@ -916,7 +920,7 @@ impl CarinaProvider for AwsProcessProvider {
         id: &proto::ResourceId,
         _identifier: &proto::AppliedIdentifier,
         _request: proto::DeleteRequest,
-        pending: Pending<Self::DeleteToken>,
+        pending: PendingDelete<Self::DeleteToken>,
     ) -> Result<SdkDeleteOutcome<Self::DeleteToken>, proto::ProviderError> {
         let core_id = protocol_convert::protocol_to_resource_id(id);
         let result = self
@@ -927,7 +931,8 @@ impl CarinaProvider for AwsProcessProvider {
             Ok(OperationStep::Pending {
                 pending,
                 poll_after_secs,
-            }) => Ok(SdkDeleteOutcome::Pending(Pending {
+                ..
+            }) => Ok(SdkDeleteOutcome::Pending(PendingDelete {
                 token: pending,
                 poll_after_secs,
             })),
@@ -1412,7 +1417,7 @@ mod tests {
     fn non_finite_update_output_surfaces_as_a_provider_error() {
         let state = non_finite_state();
         let id = state.id().clone();
-        let outcome = carina_core::provider::UpdateOutcome::Success { state };
+        let outcome = carina_core::provider::UpdateOutcome::success(state);
         let state_after_patch = proto::PersistedState {
             id: protocol_convert::resource_id_to_protocol(&id),
             identifier: None,
