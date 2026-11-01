@@ -5,8 +5,8 @@ use std::io;
 use aws_smithy_runtime_api::box_error::BoxError;
 use aws_smithy_runtime_api::client::interceptors::Intercept;
 use aws_smithy_runtime_api::client::interceptors::context::{
-    BeforeTransmitInterceptorContextRef, FinalizerInterceptorContextMut,
-    FinalizerInterceptorContextRef,
+    BeforeSerializationInterceptorContextRef, BeforeTransmitInterceptorContextRef,
+    FinalizerInterceptorContextMut, FinalizerInterceptorContextRef,
 };
 use aws_smithy_runtime_api::client::orchestrator::{Metadata, OrchestratorError};
 use aws_smithy_runtime_api::client::result::ConnectorError;
@@ -16,8 +16,19 @@ use aws_smithy_types::config_bag::{ConfigBag, Storable, StoreReplace};
 use aws_smithy_types::retry::ErrorKind;
 
 use super::send_outcome::{
-    Idempotency, OperationDispatchFailure, OperationSendOutcome, SendOutcome,
+    AttemptPhase, Idempotency, OperationSendFailure, OperationSendOutcome, SendOutcome,
 };
+
+impl Storable for AttemptPhase {
+    type Storer = StoreReplace<Self>;
+}
+
+fn attempt_phase(cfg: &ConfigBag) -> AttemptPhase {
+    // A missing witness breaks the interceptor invariant, so assume the request may have been sent.
+    cfg.load::<AttemptPhase>()
+        .copied()
+        .unwrap_or(AttemptPhase::TransmitReached)
+}
 
 #[derive(Debug, Clone)]
 struct PreviousAttempt {
@@ -96,6 +107,37 @@ impl ConnectorKind {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+enum OrchestratorKind {
+    Connector(ConnectorKind),
+    Timeout,
+    Response,
+    Other,
+}
+
+impl OrchestratorKind {
+    fn of<E>(error: &OrchestratorError<E>) -> Self {
+        if let Some(error) = error.as_connector_error() {
+            Self::Connector(ConnectorKind::of(error))
+        } else if error.is_timeout_error() {
+            Self::Timeout
+        } else if error.is_response_error() {
+            Self::Response
+        } else {
+            Self::Other
+        }
+    }
+
+    fn with_source<E>(self, source: BoxError) -> OrchestratorError<E> {
+        match self {
+            Self::Connector(kind) => OrchestratorError::connector(kind.with_source(source)),
+            Self::Timeout => OrchestratorError::timeout(source),
+            Self::Response => OrchestratorError::response(source),
+            Self::Other => OrchestratorError::other(source),
+        }
+    }
+}
+
 /// Associates one service client's SDK metadata with generated resend policy.
 #[derive(Debug)]
 pub struct ResendGuard {
@@ -114,6 +156,16 @@ impl Intercept for ResendGuard {
         "carina.ResendGuard"
     }
 
+    fn read_before_execution(
+        &self,
+        _context: &BeforeSerializationInterceptorContextRef<'_>,
+        cfg: &mut ConfigBag,
+    ) -> Result<(), BoxError> {
+        cfg.interceptor_state()
+            .store_put(AttemptPhase::BeforeTransmit);
+        Ok(())
+    }
+
     fn read_before_attempt(
         &self,
         _context: &BeforeTransmitInterceptorContextRef<'_>,
@@ -124,6 +176,9 @@ impl Intercept for ResendGuard {
             .load::<RequestAttempts>()
             .map(RequestAttempts::attempts)
             .unwrap_or(1);
+        let previous_phase = attempt_phase(cfg);
+        cfg.interceptor_state()
+            .store_put(AttemptPhase::BeforeTransmit);
         if attempt < 2 {
             return Ok(());
         }
@@ -135,20 +190,22 @@ impl Intercept for ResendGuard {
             .as_deref()
             .map(self.lookup)
             .unwrap_or(Idempotency::NotIdempotent);
-        let previous = cfg.load::<PreviousAttempt>().cloned();
-        if previous
-            .as_ref()
-            .is_none_or(|previous| previous.outcome == SendOutcome::MaybeSent)
-        {
-            // The SDK's operation-attempt timeout wraps the attempt finalizers,
-            // so a timed-out attempt reaches this hook without running
-            // `read_after_attempt`. Absence is therefore ambiguous too.
+        let previous = cfg.load::<PreviousAttempt>().cloned().unwrap_or_else(|| {
+            // If attempt finalization was skipped by cancellation, the
+            // transmit witness still distinguishes a safe pre-transmit
+            // failure from an ambiguous in-flight request.
+            let outcome = match previous_phase {
+                AttemptPhase::BeforeTransmit => SendOutcome::NotSent,
+                AttemptPhase::TransmitReached => SendOutcome::MaybeSent,
+            };
+            PreviousAttempt {
+                outcome,
+                failure: "failure details unavailable".to_string(),
+            }
+        });
+        if previous.outcome == SendOutcome::MaybeSent {
             cfg.interceptor_state().store_put(MaybeSentAttempt);
         }
-        let previous = previous.unwrap_or_else(|| PreviousAttempt {
-            outcome: SendOutcome::MaybeSent,
-            failure: "failure details unavailable".to_string(),
-        });
         cfg.interceptor_state().unset::<PreviousAttempt>();
 
         if previous.outcome.resend_is_safe(idempotency) {
@@ -163,6 +220,17 @@ impl Intercept for ResendGuard {
         .into())
     }
 
+    fn read_before_transmit(
+        &self,
+        _context: &BeforeTransmitInterceptorContextRef<'_>,
+        _runtime_components: &RuntimeComponents,
+        cfg: &mut ConfigBag,
+    ) -> Result<(), BoxError> {
+        cfg.interceptor_state()
+            .store_put(AttemptPhase::TransmitReached);
+        Ok(())
+    }
+
     fn modify_before_attempt_completion(
         &self,
         context: &mut FinalizerInterceptorContextMut<'_>,
@@ -172,7 +240,7 @@ impl Intercept for ResendGuard {
         let is_read_only = cfg
             .load::<Metadata>()
             .is_some_and(|metadata| (self.lookup)(metadata.name()) == Idempotency::ReadOnly);
-        if !is_read_only {
+        if !is_read_only || attempt_phase(cfg) != AttemptPhase::TransmitReached {
             return Ok(());
         }
 
@@ -214,7 +282,8 @@ impl Intercept for ResendGuard {
                 return Ok(());
             }
             Some(Err(_)) | None => {
-                SendOutcome::classify_orchestrator(context.inner(), runtime_components)
+                let phase = attempt_phase(cfg);
+                SendOutcome::classify_orchestrator(phase, context.inner(), runtime_components)
             }
         };
         if outcome == SendOutcome::MaybeSent {
@@ -246,7 +315,9 @@ impl Intercept for ResendGuard {
             return Ok(());
         }
 
-        let final_attempt = SendOutcome::classify_orchestrator(context.inner(), runtime_components);
+        let final_phase = attempt_phase(cfg);
+        let final_attempt =
+            SendOutcome::classify_orchestrator(final_phase, context.inner(), runtime_components);
         let operation_outcome = if cfg.load::<MaybeSentAttempt>().is_some()
             || final_attempt == SendOutcome::MaybeSent
         {
@@ -261,27 +332,539 @@ impl Intercept for ResendGuard {
             return Ok(());
         }
 
-        let connector_kind = context
+        let error_kind = context
             .output_or_error()
             .and_then(Result::err)
-            .and_then(OrchestratorError::as_connector_error)
-            .map(ConnectorKind::of);
-        let Some(connector_kind) = connector_kind else {
-            // Construction, orchestrator timeout, and response errors retain
-            // their SDK variants and remain conservatively MaybeSent (except
-            // construction, which never started an attempt).
-            return Ok(());
-        };
+            .map(OrchestratorKind::of)
+            .expect("failed operation has an orchestrator error");
 
         let Some(Err(error)) = context.output_or_error_mut() else {
             return Ok(());
         };
         let original = std::mem::replace(
             error,
-            OrchestratorError::other(io::Error::other("replacing final connector failure")),
+            OrchestratorError::other(io::Error::other("replacing final operation failure")),
         );
-        let failure = OperationDispatchFailure::new(verdict, Box::new(original));
-        *error = OrchestratorError::connector(connector_kind.with_source(Box::new(failure)));
+        let failure = OperationSendFailure::new(verdict, Box::new(original));
+        *error = error_kind.with_source(Box::new(failure));
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use aws_smithy_runtime_api::client::interceptors::Intercept;
+    use aws_smithy_runtime_api::client::interceptors::context::{Input, InterceptorContext};
+    use aws_smithy_runtime_api::client::orchestrator::{
+        HttpRequest, HttpResponse, Metadata, OrchestratorError,
+    };
+    use aws_smithy_runtime_api::client::result::{ConnectorError, SdkError};
+    use aws_smithy_runtime_api::client::retries::RequestAttempts;
+    use aws_smithy_runtime_api::client::runtime_components::{
+        RuntimeComponents, RuntimeComponentsBuilder,
+    };
+    use aws_smithy_types::body::SdkBody;
+    use aws_smithy_types::config_bag::ConfigBag;
+    use aws_smithy_types::error::ErrorMetadata;
+    use aws_smithy_types::error::metadata::ProvideErrorMetadata;
+    use aws_smithy_types::retry::{ErrorKind, ProvideErrorKind};
+
+    use super::{Idempotency, ResendGuard, SendOutcome};
+
+    #[derive(Debug)]
+    struct MockServiceError(ErrorMetadata);
+
+    impl std::fmt::Display for MockServiceError {
+        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            formatter.write_str("mock service error")
+        }
+    }
+
+    impl std::error::Error for MockServiceError {}
+
+    impl ProvideErrorKind for MockServiceError {
+        fn retryable_error_kind(&self) -> Option<ErrorKind> {
+            None
+        }
+
+        fn code(&self) -> Option<&str> {
+            self.0.code()
+        }
+    }
+
+    impl ProvideErrorMetadata for MockServiceError {
+        fn meta(&self) -> &ErrorMetadata {
+            &self.0
+        }
+    }
+
+    fn not_idempotent(_operation: &str) -> Idempotency {
+        Idempotency::NotIdempotent
+    }
+
+    fn token_idempotent(_operation: &str) -> Idempotency {
+        Idempotency::IdempotencyToken
+    }
+
+    fn read_only(_operation: &str) -> Idempotency {
+        Idempotency::ReadOnly
+    }
+
+    fn before_transmit_context() -> InterceptorContext {
+        let mut context = InterceptorContext::new(Input::doesnt_matter());
+        context.enter_serialization_phase();
+        let _ = context.take_input();
+        context.set_request(HttpRequest::empty());
+        context.enter_before_transmit_phase();
+        context
+    }
+
+    fn runtime_components() -> RuntimeComponents {
+        RuntimeComponentsBuilder::for_tests()
+            .build()
+            .expect("test runtime components")
+    }
+
+    fn operation_config(attempt: u32) -> ConfigBag {
+        let mut cfg = ConfigBag::base();
+        cfg.interceptor_state()
+            .store_put(Metadata::new("CreateThing", "TestService"));
+        cfg.interceptor_state()
+            .store_put::<RequestAttempts>(attempt.into());
+        cfg
+    }
+
+    fn http_response(status: u16) -> HttpResponse {
+        HttpResponse::new(
+            status.try_into().expect("valid HTTP status"),
+            SdkBody::empty(),
+        )
+    }
+
+    fn classify_final_context(
+        guard: &ResendGuard,
+        runtime_components: &RuntimeComponents,
+        mut context: InterceptorContext,
+        cfg: &mut ConfigBag,
+    ) -> (
+        SendOutcome,
+        SdkError<MockServiceError, aws_smithy_runtime_api::client::orchestrator::HttpResponse>,
+    ) {
+        guard
+            .modify_before_completion(&mut (&mut context).into(), runtime_components, cfg)
+            .expect("operation finalization succeeds");
+        let error = context
+            .finalize()
+            .expect_err("the operation failed")
+            .map_service_error(|_| -> MockServiceError {
+                unreachable!("the test contexts never contain service errors")
+            });
+        (SendOutcome::classify(&error), error)
+    }
+
+    fn error_chain_contains(error: &(dyn std::error::Error + 'static), expected: &str) -> bool {
+        let mut current = Some(error);
+        while let Some(error) = current {
+            if error.to_string().contains(expected) {
+                return true;
+            }
+            current = error.source();
+        }
+        false
+    }
+
+    fn run_pre_transmit_failure(
+        failure: &'static str,
+    ) -> (
+        SendOutcome,
+        SdkError<MockServiceError, aws_smithy_runtime_api::client::orchestrator::HttpResponse>,
+        usize,
+    ) {
+        let guard = ResendGuard::new(token_idempotent);
+        let runtime_components = runtime_components();
+        let connector_calls = AtomicUsize::new(0);
+        let mut context = before_transmit_context();
+        let mut cfg = operation_config(1);
+
+        guard
+            .read_before_attempt(&(&context).into(), &runtime_components, &mut cfg)
+            .expect("first attempt is allowed");
+        context.set_output_or_error(Err(OrchestratorError::other(io::Error::other(failure))));
+        guard
+            .read_after_attempt(&(&context).into(), &runtime_components, &mut cfg)
+            .expect("attempt finalization succeeds");
+
+        let (outcome, error) =
+            classify_final_context(&guard, &runtime_components, context, &mut cfg);
+        (outcome, error, connector_calls.load(Ordering::Relaxed))
+    }
+
+    #[test]
+    fn identity_signing_and_endpoint_failures_are_typed_not_sent_without_http_calls() {
+        for failure in [
+            "credentials not loaded",
+            "request signing failed",
+            "endpoint resolution failed",
+        ] {
+            let (outcome, error, connector_calls) = run_pre_transmit_failure(failure);
+
+            assert_eq!(connector_calls, 0, "{failure}");
+            assert_eq!(outcome, SendOutcome::NotSent, "{failure}");
+            assert!(error_chain_contains(&error, failure), "{error:?}");
+        }
+    }
+
+    #[test]
+    fn pre_transmit_orchestrator_timeout_is_typed_not_sent() {
+        let guard = ResendGuard::new(token_idempotent);
+        let runtime_components = runtime_components();
+        let mut context = before_transmit_context();
+        let mut cfg = operation_config(1);
+
+        guard
+            .read_before_attempt(&(&context).into(), &runtime_components, &mut cfg)
+            .expect("first attempt is allowed");
+        context.set_output_or_error(Err(OrchestratorError::timeout(Box::new(io::Error::other(
+            "identity resolution timed out",
+        )))));
+        guard
+            .read_after_attempt(&(&context).into(), &runtime_components, &mut cfg)
+            .expect("attempt finalization succeeds");
+
+        let (outcome, error) =
+            classify_final_context(&guard, &runtime_components, context, &mut cfg);
+
+        assert!(matches!(error, SdkError::TimeoutError(_)), "{error:?}");
+        assert_eq!(outcome, SendOutcome::NotSent);
+        assert!(error_chain_contains(
+            &error,
+            "identity resolution timed out"
+        ));
+    }
+
+    #[test]
+    fn absent_attempt_phase_fails_closed_to_maybe_sent() {
+        let guard = ResendGuard::new(token_idempotent);
+        let runtime_components = runtime_components();
+        let mut context = before_transmit_context();
+        let mut cfg = operation_config(1);
+
+        context.set_output_or_error(Err(OrchestratorError::other(io::Error::other(
+            "failure without a transmit witness",
+        ))));
+        guard
+            .read_after_attempt(&(&context).into(), &runtime_components, &mut cfg)
+            .expect("missing phase is handled conservatively");
+
+        let (outcome, error) =
+            classify_final_context(&guard, &runtime_components, context, &mut cfg);
+
+        assert_eq!(outcome, SendOutcome::MaybeSent);
+        assert!(error_chain_contains(
+            &error,
+            "failure without a transmit witness"
+        ));
+    }
+
+    #[test]
+    fn serialization_failure_keeps_construction_variant_and_source() {
+        let guard = ResendGuard::new(token_idempotent);
+        let runtime_components = runtime_components();
+        let mut context = InterceptorContext::new(Input::doesnt_matter());
+        let mut cfg = operation_config(1);
+
+        guard
+            .read_before_execution(&(&context).into(), &mut cfg)
+            .expect("execution initialization succeeds");
+        context.enter_serialization_phase();
+        context.set_output_or_error(Err(OrchestratorError::other(io::Error::other(
+            "request serialization failed",
+        ))));
+
+        let (outcome, error) =
+            classify_final_context(&guard, &runtime_components, context, &mut cfg);
+
+        assert!(
+            matches!(error, SdkError::ConstructionFailure(_)),
+            "{error:?}"
+        );
+        assert_eq!(outcome, SendOutcome::NotSent);
+        assert!(error_chain_contains(&error, "request serialization failed"));
+    }
+
+    #[test]
+    fn other_connector_failure_after_transmit_stays_maybe_sent() {
+        let guard = ResendGuard::new(token_idempotent);
+        let runtime_components = runtime_components();
+        let connector_calls = AtomicUsize::new(0);
+        let mut context = before_transmit_context();
+        let mut cfg = operation_config(1);
+
+        guard
+            .read_before_attempt(&(&context).into(), &runtime_components, &mut cfg)
+            .expect("first attempt is allowed");
+        guard
+            .read_before_transmit(&(&context).into(), &runtime_components, &mut cfg)
+            .expect("transmit is allowed");
+        connector_calls.fetch_add(1, Ordering::Relaxed);
+        context.set_output_or_error(Err(OrchestratorError::connector(ConnectorError::other(
+            Box::new(io::Error::other("post-transmit connector failure")),
+            None,
+        ))));
+        guard
+            .read_after_attempt(&(&context).into(), &runtime_components, &mut cfg)
+            .expect("attempt finalization succeeds");
+
+        let (outcome, error) =
+            classify_final_context(&guard, &runtime_components, context, &mut cfg);
+
+        assert_eq!(connector_calls.load(Ordering::Relaxed), 1);
+        assert_eq!(outcome, SendOutcome::MaybeSent);
+        assert!(error_chain_contains(
+            &error,
+            "post-transmit connector failure"
+        ));
+    }
+
+    #[test]
+    fn pre_transmit_readonly_unclassified_connector_failure_is_not_rewritten() {
+        let guard = ResendGuard::new(read_only);
+        let runtime_components = runtime_components();
+        let mut context = before_transmit_context();
+        let mut cfg = operation_config(1);
+
+        guard
+            .read_before_attempt(&(&context).into(), &runtime_components, &mut cfg)
+            .expect("first attempt is allowed");
+        context.set_output_or_error(Err(OrchestratorError::connector(ConnectorError::other(
+            Box::new(io::Error::other("pre-transmit local failure")),
+            None,
+        ))));
+        guard
+            .modify_before_attempt_completion(
+                &mut (&mut context).into(),
+                &runtime_components,
+                &mut cfg,
+            )
+            .expect("attempt completion succeeds");
+
+        let connector = context
+            .output_or_error()
+            .and_then(Result::err)
+            .and_then(OrchestratorError::as_connector_error)
+            .expect("connector error remains typed");
+        assert!(connector.is_other());
+        assert!(connector.as_other().is_none());
+    }
+
+    #[test]
+    fn post_transmit_readonly_unclassified_connector_failure_is_rewritten() {
+        let guard = ResendGuard::new(read_only);
+        let runtime_components = runtime_components();
+        let mut context = before_transmit_context();
+        let mut cfg = operation_config(1);
+
+        guard
+            .read_before_attempt(&(&context).into(), &runtime_components, &mut cfg)
+            .expect("first attempt is allowed");
+        guard
+            .read_before_transmit(&(&context).into(), &runtime_components, &mut cfg)
+            .expect("transmit is allowed");
+        context.set_output_or_error(Err(OrchestratorError::connector(ConnectorError::other(
+            Box::new(io::Error::other("post-transmit local failure")),
+            None,
+        ))));
+        guard
+            .modify_before_attempt_completion(
+                &mut (&mut context).into(),
+                &runtime_components,
+                &mut cfg,
+            )
+            .expect("attempt completion succeeds");
+
+        let connector = context
+            .output_or_error()
+            .and_then(Result::err)
+            .and_then(OrchestratorError::as_connector_error)
+            .expect("connector error remains typed");
+        assert!(connector.is_io());
+    }
+
+    #[test]
+    fn maybe_sent_attempt_then_pre_transmit_failure_is_maybe_sent() {
+        let guard = ResendGuard::new(token_idempotent);
+        let runtime_components = runtime_components();
+        let mut cfg = operation_config(1);
+        let mut first = before_transmit_context();
+
+        guard
+            .read_before_attempt(&(&first).into(), &runtime_components, &mut cfg)
+            .expect("first attempt is allowed");
+        guard
+            .read_before_transmit(&(&first).into(), &runtime_components, &mut cfg)
+            .expect("transmit is allowed");
+        first.set_output_or_error(Err(OrchestratorError::connector(ConnectorError::other(
+            Box::new(io::Error::other("post-transmit connector failure")),
+            None,
+        ))));
+        guard
+            .read_after_attempt(&(&first).into(), &runtime_components, &mut cfg)
+            .expect("first attempt finalization succeeds");
+
+        cfg.interceptor_state()
+            .store_put::<RequestAttempts>(2_u32.into());
+        let mut second = before_transmit_context();
+        guard
+            .read_before_attempt(&(&second).into(), &runtime_components, &mut cfg)
+            .expect("token operation can retry");
+        second.set_output_or_error(Err(OrchestratorError::other(io::Error::other(
+            "credentials expired before retry",
+        ))));
+        guard
+            .read_after_attempt(&(&second).into(), &runtime_components, &mut cfg)
+            .expect("second attempt finalization succeeds");
+
+        let (outcome, _) = classify_final_context(&guard, &runtime_components, second, &mut cfg);
+
+        assert_eq!(outcome, SendOutcome::MaybeSent);
+    }
+
+    #[test]
+    fn maybe_sent_attempt_then_response_error_is_maybe_sent() {
+        let guard = ResendGuard::new(token_idempotent);
+        let runtime_components = runtime_components();
+        let mut cfg = operation_config(1);
+        let mut first = before_transmit_context();
+
+        guard
+            .read_before_attempt(&(&first).into(), &runtime_components, &mut cfg)
+            .expect("first attempt is allowed");
+        guard
+            .read_before_transmit(&(&first).into(), &runtime_components, &mut cfg)
+            .expect("transmit is allowed");
+        first.set_output_or_error(Err(OrchestratorError::connector(ConnectorError::other(
+            Box::new(io::Error::other("post-transmit connector failure")),
+            None,
+        ))));
+        guard
+            .read_after_attempt(&(&first).into(), &runtime_components, &mut cfg)
+            .expect("first attempt finalization succeeds");
+
+        cfg.interceptor_state()
+            .store_put::<RequestAttempts>(2_u32.into());
+        let mut second = before_transmit_context();
+        guard
+            .read_before_attempt(&(&second).into(), &runtime_components, &mut cfg)
+            .expect("token operation can retry");
+        guard
+            .read_before_transmit(&(&second).into(), &runtime_components, &mut cfg)
+            .expect("transmit is allowed");
+        second.enter_transmit_phase();
+        let _ = second.take_request();
+        second.set_response(http_response(400));
+        second.enter_before_deserialization_phase();
+        second.set_output_or_error(Err(OrchestratorError::response(Box::new(
+            io::Error::other("response deserialization failed"),
+        ))));
+        guard
+            .read_after_attempt(&(&second).into(), &runtime_components, &mut cfg)
+            .expect("second attempt finalization succeeds");
+
+        let (outcome, error) =
+            classify_final_context(&guard, &runtime_components, second, &mut cfg);
+
+        assert!(matches!(error, SdkError::ResponseError(_)), "{error:?}");
+        assert_eq!(outcome, SendOutcome::MaybeSent);
+        assert!(error_chain_contains(
+            &error,
+            "response deserialization failed"
+        ));
+    }
+
+    #[test]
+    fn all_attempts_pre_transmit_is_not_sent() {
+        let guard = ResendGuard::new(token_idempotent);
+        let runtime_components = runtime_components();
+        let mut cfg = operation_config(1);
+        let mut first = before_transmit_context();
+
+        guard
+            .read_before_attempt(&(&first).into(), &runtime_components, &mut cfg)
+            .expect("first attempt is allowed");
+        first.set_output_or_error(Err(OrchestratorError::other(io::Error::other(
+            "first pre-transmit failure",
+        ))));
+        guard
+            .read_after_attempt(&(&first).into(), &runtime_components, &mut cfg)
+            .expect("first attempt finalization succeeds");
+
+        cfg.interceptor_state()
+            .store_put::<RequestAttempts>(2_u32.into());
+        let mut second = before_transmit_context();
+        guard
+            .read_before_attempt(&(&second).into(), &runtime_components, &mut cfg)
+            .expect("pre-transmit failure is safe to retry");
+        second.set_output_or_error(Err(OrchestratorError::other(io::Error::other(
+            "second pre-transmit failure",
+        ))));
+        guard
+            .read_after_attempt(&(&second).into(), &runtime_components, &mut cfg)
+            .expect("second attempt finalization succeeds");
+
+        let (outcome, error) =
+            classify_final_context(&guard, &runtime_components, second, &mut cfg);
+
+        assert_eq!(outcome, SendOutcome::NotSent);
+        assert!(error_chain_contains(&error, "second pre-transmit failure"));
+    }
+
+    #[test]
+    fn non_idempotent_retry_is_allowed_when_previous_attempt_never_reached_transmit() {
+        let guard = ResendGuard::new(not_idempotent);
+        let runtime_components = runtime_components();
+        let context = before_transmit_context();
+        let mut cfg = operation_config(1);
+
+        guard
+            .read_before_attempt(&(&context).into(), &runtime_components, &mut cfg)
+            .expect("first attempt is allowed");
+
+        // A pre-transmit timeout can skip `read_after_attempt`. Starting the
+        // next attempt must still be safe because `read_before_transmit` was
+        // never reached for the previous one.
+        cfg.interceptor_state()
+            .store_put::<RequestAttempts>(2_u32.into());
+
+        guard
+            .read_before_attempt(&(&context).into(), &runtime_components, &mut cfg)
+            .expect("a proven pre-transmit failure is safe to resend");
+    }
+
+    #[test]
+    fn non_idempotent_retry_is_refused_when_transmit_was_reached_without_finalizer() {
+        let guard = ResendGuard::new(not_idempotent);
+        let runtime_components = runtime_components();
+        let context = before_transmit_context();
+        let mut cfg = operation_config(1);
+
+        guard
+            .read_before_attempt(&(&context).into(), &runtime_components, &mut cfg)
+            .expect("first attempt is allowed");
+        guard
+            .read_before_transmit(&(&context).into(), &runtime_components, &mut cfg)
+            .expect("transmit is allowed");
+
+        // Cancellation can skip `read_after_attempt`; the transmit witness
+        // must keep that missing record conservative.
+        cfg.interceptor_state()
+            .store_put::<RequestAttempts>(2_u32.into());
+
+        let error = guard
+            .read_before_attempt(&(&context).into(), &runtime_components, &mut cfg)
+            .expect_err("an in-flight non-idempotent attempt cannot be resent");
+        assert!(error.to_string().contains("may have reached AWS"));
     }
 }

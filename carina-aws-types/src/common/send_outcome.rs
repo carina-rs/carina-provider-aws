@@ -22,6 +22,15 @@ pub enum SendOutcome {
     Rejected,
 }
 
+/// The furthest point one SDK attempt reached in the orchestrator.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum AttemptPhase {
+    /// The attempt has not reached the hook immediately before transmission.
+    BeforeTransmit,
+    /// The attempt reached `read_before_transmit` and may have entered the connector.
+    TransmitReached,
+}
+
 /// The resend guard's internal verdict over every attempt of one SDK operation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct OperationSendOutcome(SendOutcome);
@@ -44,14 +53,14 @@ pub fn attach_single_attempt_verdict_for_test(response: &mut HttpResponse, outco
     response.add_extension(OperationSendOutcome::new(outcome));
 }
 
-/// A dispatch failure annotated with the resend guard's all-attempts verdict.
+/// An SDK failure annotated with the resend guard's all-attempts verdict.
 #[derive(Debug)]
-pub(crate) struct OperationDispatchFailure {
+pub(crate) struct OperationSendFailure {
     outcome: OperationSendOutcome,
     source: BoxError,
 }
 
-impl OperationDispatchFailure {
+impl OperationSendFailure {
     pub(crate) fn new(outcome: OperationSendOutcome, source: BoxError) -> Self {
         Self { outcome, source }
     }
@@ -61,17 +70,17 @@ impl OperationDispatchFailure {
     }
 }
 
-impl fmt::Display for OperationDispatchFailure {
+impl fmt::Display for OperationSendFailure {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             formatter,
-            "AWS operation dispatch failed with {:?} send outcome",
+            "AWS operation failed with {:?} send outcome",
             self.outcome.outcome()
         )
     }
 }
 
-impl std::error::Error for OperationDispatchFailure {
+impl std::error::Error for OperationSendFailure {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         Some(self.source.as_ref())
     }
@@ -106,25 +115,30 @@ impl SendOutcome {
     /// send phase is deliberately ignored here.
     pub fn classify<E>(error: &SdkError<E, HttpResponse>) -> SendOutcome
     where
-        E: ProvideErrorKind + ProvideErrorMetadata,
+        E: std::error::Error + ProvideErrorKind + ProvideErrorMetadata + 'static,
     {
         match error {
-            SdkError::ConstructionFailure(_) => Self::NotSent,
-            SdkError::TimeoutError(_) | SdkError::ResponseError(_) => Self::MaybeSent,
-            SdkError::DispatchFailure(context) => context
-                .as_connector_error()
-                .and_then(std::error::Error::source)
-                .and_then(|source| source.downcast_ref::<OperationDispatchFailure>())
-                .map(|failure| failure.outcome().outcome())
+            SdkError::ResponseError(context) => context
+                .raw()
+                .extension::<OperationSendOutcome>()
+                .map(|outcome| outcome.outcome())
+                .or_else(|| operation_outcome_in_source_chain(error))
                 .unwrap_or(Self::MaybeSent),
             SdkError::ServiceError(context) => context
                 .raw()
                 .extension::<OperationSendOutcome>()
                 .map(|outcome| outcome.outcome())
+                .or_else(|| operation_outcome_in_source_chain(error))
                 .unwrap_or(Self::MaybeSent),
+            SdkError::ConstructionFailure(_) => {
+                operation_outcome_in_source_chain(error).unwrap_or(Self::NotSent)
+            }
+            SdkError::TimeoutError(_) | SdkError::DispatchFailure(_) => {
+                operation_outcome_in_source_chain(error).unwrap_or(Self::MaybeSent)
+            }
             // `SdkError` is non-exhaustive. Unknown future failures must fail
             // closed because they may represent a request that reached AWS.
-            _ => Self::MaybeSent,
+            _ => operation_outcome_in_source_chain(error).unwrap_or(Self::MaybeSent),
         }
     }
 
@@ -135,9 +149,14 @@ impl SendOutcome {
     /// type-erased at this layer. Unknown future classifier results fail
     /// closed as [`SendOutcome::MaybeSent`].
     pub(crate) fn classify_orchestrator(
+        phase: AttemptPhase,
         context: &InterceptorContext,
         runtime_components: &RuntimeComponents,
     ) -> SendOutcome {
+        if phase == AttemptPhase::BeforeTransmit {
+            return Self::NotSent;
+        }
+
         #[cfg(any(target_arch = "wasm32", feature = "test-utils", test))]
         if let Some(send_phase) = context
             .output_or_error()
@@ -205,6 +224,19 @@ impl SendOutcome {
     }
 }
 
+fn operation_outcome_in_source_chain(
+    error: &(dyn std::error::Error + 'static),
+) -> Option<SendOutcome> {
+    let mut current = Some(error);
+    while let Some(error) = current {
+        if let Some(failure) = error.downcast_ref::<OperationSendFailure>() {
+            return Some(failure.outcome().outcome());
+        }
+        current = error.source();
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use std::io;
@@ -218,7 +250,9 @@ mod tests {
 
     use carina_plugin_sdk::wasi_http::{SendPhase, transport_connector_error_for_test};
 
-    use super::{Idempotency, OperationDispatchFailure, OperationSendOutcome, SendOutcome};
+    use super::{
+        AttemptPhase, Idempotency, OperationSendFailure, OperationSendOutcome, SendOutcome,
+    };
 
     #[derive(Debug)]
     struct WrappedConnectorError(ConnectorError);
@@ -342,7 +376,7 @@ mod tests {
 
     #[test]
     fn guard_annotated_dispatch_failure_uses_operation_verdict() {
-        let failure = OperationDispatchFailure::new(
+        let failure = OperationSendFailure::new(
             OperationSendOutcome::new(SendOutcome::NotSent),
             Box::new(io::Error::other("original connector failure")),
         );
@@ -439,9 +473,42 @@ mod tests {
             ))));
 
             assert_eq!(
-                SendOutcome::classify_orchestrator(&context, &runtime_components),
+                SendOutcome::classify_orchestrator(
+                    AttemptPhase::TransmitReached,
+                    &context,
+                    &runtime_components,
+                ),
                 expected,
                 "unexpected per-attempt outcome for {code}"
+            );
+        }
+    }
+
+    #[test]
+    fn orchestrator_pre_transmit_failures_are_not_sent() {
+        use aws_smithy_runtime_api::client::interceptors::context::{Input, InterceptorContext};
+        use aws_smithy_runtime_api::client::orchestrator::OrchestratorError;
+        use aws_smithy_runtime_api::client::runtime_components::RuntimeComponentsBuilder;
+
+        let runtime_components = RuntimeComponentsBuilder::for_tests()
+            .build()
+            .expect("test runtime components");
+        for failure in [
+            "credentials not loaded",
+            "request signing failed",
+            "endpoint resolution failed",
+        ] {
+            let mut context = InterceptorContext::new(Input::doesnt_matter());
+            context.set_output_or_error(Err(OrchestratorError::other(io::Error::other(failure))));
+
+            assert_eq!(
+                SendOutcome::classify_orchestrator(
+                    AttemptPhase::BeforeTransmit,
+                    &context,
+                    &runtime_components,
+                ),
+                SendOutcome::NotSent,
+                "{failure}"
             );
         }
     }

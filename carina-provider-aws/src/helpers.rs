@@ -11,7 +11,7 @@ use aws_smithy_types::error::metadata::ProvideErrorMetadata;
 use aws_smithy_types::retry::ProvideErrorKind;
 use tokio::time::sleep;
 
-use carina_aws_types::SendOutcome;
+use carina_aws_types::{Idempotency, SendOutcome};
 use carina_core::provider::{
     AppliedIdentifier, PatchOp, ProviderError, ProviderResult, UpdatePatch,
 };
@@ -425,7 +425,7 @@ where
     B: AwsOperation<Resend = WithToken> + TokenBearing,
     TokenOperation<B, C>: DecidedSend<(&'a ClientToken, TokenSendPermit)>
         + AwsOperation<Output = B::Output, Error = B::Error>,
-    B::Error: ProvideErrorKind + ProvideErrorMetadata,
+    B::Error: ProvideErrorKind + ProvideErrorMetadata + std::error::Error + 'static,
 {
     DecidedSend::send(builder, (token, TokenSendPermit::new()))
         .await
@@ -456,8 +456,7 @@ where
                 let outcome = SendOutcome::classify(&error);
                 maybe_sent |= outcome == SendOutcome::MaybeSent;
                 if attempt < policy.max_attempts
-                    && outcome.resend_is_safe(B::IDEMPOTENCY)
-                    && is_retryable_sdk_error(&error)
+                    && provider_retry_allowed(outcome, B::IDEMPOTENCY, &error)
                 {
                     let delay = policy.delay_secs(attempt);
                     eprintln!(
@@ -499,29 +498,38 @@ where
 ///   the bucket name's control-plane state clears in ~60–90s.
 const S3_RETRYABLE_ERROR_CODES: &[&str] = &["RequestTimeout", "SlowDown", "OperationAborted"];
 
-/// Classify an [`SdkError`] as transient (worth retrying) or terminal.
-///
-/// Service errors are classified in two steps:
-///
-/// 1. The SDK's own `retryable_error_kind()` — `Some(ErrorKind)` when the
-///    service model marks the error retryable (throttling, server
-///    errors). Note this is **always `None` for S3**: no S3 operation
-///    error carries an `@retryable` trait.
-/// 2. An explicit carve-out for [`S3_RETRYABLE_ERROR_CODES`] — S3 codes
-///    the AWS docs call transient but the SDK model does not flag.
-///
-/// Transport-layer failures are worth retrying, but this function does not
-/// decide whether resending is safe. The typed wrappers combine this result
-/// with [`SendOutcome`] and the generated operation idempotency.
-pub fn is_retryable_sdk_error<E, R>(err: &SdkError<E, R>) -> bool
+/// Decide whether a provider-level resend is both safe and worth retrying.
+fn provider_retry_allowed<E, R>(
+    outcome: SendOutcome,
+    idempotency: Idempotency,
+    err: &SdkError<E, R>,
+) -> bool
 where
     E: ProvideErrorKind + ProvideErrorMetadata,
 {
+    if !outcome.resend_is_safe(idempotency) {
+        return false;
+    }
+
+    if outcome == SendOutcome::NotSent {
+        return match err {
+            SdkError::TimeoutError(_) => true,
+            SdkError::DispatchFailure(context) => {
+                context.as_connector_error().is_some_and(|error| {
+                    error.is_timeout()
+                        || error.is_io()
+                        || (error.is_other() && error.as_other().is_some())
+                })
+            }
+            _ => false,
+        };
+    }
+
     match err {
-        SdkError::ConstructionFailure(_)
-        | SdkError::TimeoutError(_)
-        | SdkError::DispatchFailure(_)
-        | SdkError::ResponseError(_) => true,
+        SdkError::ConstructionFailure(_) => false,
+        SdkError::TimeoutError(_) | SdkError::DispatchFailure(_) | SdkError::ResponseError(_) => {
+            true
+        }
         SdkError::ServiceError(ctx) => {
             let inner = ctx.err();
             if inner.retryable_error_kind().is_some() {
@@ -1263,7 +1271,7 @@ mod tests {
     // SDK-modeled retryability) and `ProvideErrorMetadata` (for the S3
     // `OperationAborted` carve-out).
     use aws_smithy_runtime_api::client::orchestrator::HttpResponse;
-    use aws_smithy_runtime_api::client::result::SdkError;
+    use aws_smithy_runtime_api::client::result::{ConnectorError, SdkError};
     use aws_smithy_types::body::SdkBody;
     use aws_smithy_types::error::ErrorMetadata;
     use aws_smithy_types::error::metadata::ProvideErrorMetadata;
@@ -1341,6 +1349,7 @@ mod tests {
 
     #[derive(Debug, Clone, Copy)]
     enum MockFailure {
+        Construction,
         Timeout,
         Service {
             code: &'static str,
@@ -1385,6 +1394,9 @@ mod tests {
                 return Ok("success");
             };
             match failure {
+                MockFailure::Construction => Err(SdkError::construction_failure(
+                    "request serialization failed",
+                )),
                 MockFailure::Timeout => Err(SdkError::timeout_error("hit deadline")),
                 MockFailure::Service { code, retryable } => Err(service_err(code, retryable)),
             }
@@ -1497,19 +1509,31 @@ mod tests {
         // Service returned a response the SDK flagged as transient
         // (e.g. RequestTimeout — the bug behind #260). Should retry.
         let err = service_err("RequestTimeout", Some(ErrorKind::TransientError));
-        assert!(is_retryable_sdk_error(&err));
+        assert!(provider_retry_allowed(
+            SendOutcome::MaybeSent,
+            Idempotency::ReadOnly,
+            &err
+        ));
     }
 
     #[test]
     fn sdk_marked_throttling_retries() {
         let err = service_err("Throttling", Some(ErrorKind::ThrottlingError));
-        assert!(is_retryable_sdk_error(&err));
+        assert!(provider_retry_allowed(
+            SendOutcome::Rejected,
+            Idempotency::NotIdempotent,
+            &err
+        ));
     }
 
     #[test]
     fn sdk_marked_server_error_retries() {
         let err = service_err("InternalError", Some(ErrorKind::ServerError));
-        assert!(is_retryable_sdk_error(&err));
+        assert!(provider_retry_allowed(
+            SendOutcome::MaybeSent,
+            Idempotency::ReadOnly,
+            &err
+        ));
     }
 
     #[test]
@@ -1517,7 +1541,11 @@ mod tests {
         // Validation / permission / not-found errors must terminate
         // immediately — they will never succeed on a second attempt.
         let err = service_err("ValidationException", None);
-        assert!(!is_retryable_sdk_error(&err));
+        assert!(!provider_retry_allowed(
+            SendOutcome::Rejected,
+            Idempotency::NotIdempotent,
+            &err
+        ));
     }
 
     #[test]
@@ -1527,7 +1555,11 @@ mod tests {
         // to back off because the control plane clears in ~60–90s.
         // See carina-rs/carina-provider-aws#156.
         let err = service_err("OperationAborted", None);
-        assert!(is_retryable_sdk_error(&err));
+        assert!(provider_retry_allowed(
+            SendOutcome::Rejected,
+            Idempotency::NotIdempotent,
+            &err
+        ));
     }
 
     #[test]
@@ -1540,7 +1572,11 @@ mod tests {
         // SDK never produces). The documented-codes carve-out must still
         // classify RequestTimeout as retryable.
         let err = service_err("RequestTimeout", None);
-        assert!(is_retryable_sdk_error(&err));
+        assert!(provider_retry_allowed(
+            SendOutcome::MaybeSent,
+            Idempotency::ReadOnly,
+            &err
+        ));
     }
 
     #[test]
@@ -1549,7 +1585,11 @@ mod tests {
         // RequestTimeout — no `@retryable` trait, so the carve-out must
         // cover it.
         let err = service_err("SlowDown", None);
-        assert!(is_retryable_sdk_error(&err));
+        assert!(provider_retry_allowed(
+            SendOutcome::Rejected,
+            Idempotency::NotIdempotent,
+            &err
+        ));
     }
 
     #[test]
@@ -1558,7 +1598,80 @@ mod tests {
         // generated resend policy permits it.
         let timeout: SdkError<MockServiceError, HttpResponse> =
             SdkError::timeout_error("hit deadline");
-        assert!(is_retryable_sdk_error(&timeout));
+        assert!(provider_retry_allowed(
+            SendOutcome::MaybeSent,
+            Idempotency::ReadOnly,
+            &timeout
+        ));
+    }
+
+    #[test]
+    fn not_sent_construction_failure_does_not_retry() {
+        let construction: SdkError<MockServiceError, HttpResponse> =
+            SdkError::construction_failure("request serialization failed");
+
+        assert!(!provider_retry_allowed(
+            SendOutcome::NotSent,
+            Idempotency::ReadOnly,
+            &construction
+        ));
+    }
+
+    #[test]
+    fn not_sent_dispatch_retryability_uses_outer_connector_kind() {
+        let other_none: SdkError<MockServiceError, HttpResponse> = SdkError::dispatch_failure(
+            ConnectorError::other(std::io::Error::other("local failure").into(), None),
+        );
+        let user: SdkError<MockServiceError, HttpResponse> = SdkError::dispatch_failure(
+            ConnectorError::user(std::io::Error::other("bad request").into()),
+        );
+        let io: SdkError<MockServiceError, HttpResponse> = SdkError::dispatch_failure(
+            ConnectorError::io(std::io::Error::other("connect refused").into()),
+        );
+        let timeout: SdkError<MockServiceError, HttpResponse> = SdkError::dispatch_failure(
+            ConnectorError::timeout(std::io::Error::other("connect timeout").into()),
+        );
+        let other_transient: SdkError<MockServiceError, HttpResponse> =
+            SdkError::dispatch_failure(ConnectorError::other(
+                std::io::Error::other("classified transient").into(),
+                Some(ErrorKind::TransientError),
+            ));
+
+        assert!(!provider_retry_allowed(
+            SendOutcome::NotSent,
+            Idempotency::NotIdempotent,
+            &other_none
+        ));
+        assert!(!provider_retry_allowed(
+            SendOutcome::NotSent,
+            Idempotency::NotIdempotent,
+            &user
+        ));
+        assert!(provider_retry_allowed(
+            SendOutcome::NotSent,
+            Idempotency::NotIdempotent,
+            &io
+        ));
+        assert!(provider_retry_allowed(
+            SendOutcome::NotSent,
+            Idempotency::NotIdempotent,
+            &timeout
+        ));
+        assert!(provider_retry_allowed(
+            SendOutcome::NotSent,
+            Idempotency::NotIdempotent,
+            &other_transient
+        ));
+        assert!(provider_retry_allowed(
+            SendOutcome::MaybeSent,
+            Idempotency::IdempotencyToken,
+            &other_none
+        ));
+        assert!(!provider_retry_allowed(
+            SendOutcome::MaybeSent,
+            Idempotency::NotIdempotent,
+            &other_none
+        ));
     }
 
     /// Zero-delay policy so retry tests do not actually sleep.
@@ -1588,6 +1701,18 @@ mod tests {
 
         assert_eq!(result.expect("read-only resend succeeds"), "success");
         assert_eq!(call.attempts(), 2);
+    }
+
+    #[tokio::test]
+    async fn provider_retry_does_not_retry_construction_failure() {
+        let call = MockCall::new(MockFailure::Construction);
+
+        let error = retry_aws_operation(test_policy(3), || MockDescribeVpcs(call.clone()))
+            .await
+            .expect_err("deterministic construction failures must terminate immediately");
+
+        assert_eq!(error.outcome(), SendOutcome::NotSent);
+        assert_eq!(call.attempts(), 1);
     }
 
     #[tokio::test]

@@ -100,7 +100,9 @@ impl<E> IntoSendFailure for SendFailure<E> {
 impl<E> IntoSendFailure for AwsSdkError<E>
 where
     E: aws_smithy_types::error::metadata::ProvideErrorMetadata
-        + aws_smithy_types::retry::ProvideErrorKind,
+        + aws_smithy_types::retry::ProvideErrorKind
+        + std::error::Error
+        + 'static,
 {
     type Error = E;
 
