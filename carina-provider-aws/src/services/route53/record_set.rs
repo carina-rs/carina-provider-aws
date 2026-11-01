@@ -631,8 +631,10 @@ mod tests {
             None,
         );
         let schema = crate::test_rootless_type(attr_type);
-        let canonical =
-            schema.canonicalize_state(Value::Concrete(ConcreteValue::String("AAAA".into())));
+        let canonical = schema
+            .canonicalize_state(Value::Concrete(ConcreteValue::String("AAAA".into())))
+            .into_present()
+            .expect("record-type fixture must remain present");
 
         let mut r = record_set("registry.example.com");
         r.set_attr(
