@@ -702,30 +702,30 @@ fn same_deferred_for_expressions(
 ) -> bool {
     left.len() == right.len()
         && left.iter().zip(right).all(|(left, right)| {
+            let left_target = left.target();
+            let left_body = left.body();
             let ParsedDeferredForExpression {
                 // File, line, and span are diagnostic source positions.
                 file: _,
                 line: _,
                 span: _,
                 header: left_header,
-                target: left_target,
                 iterable: left_iterable,
                 binding: left_binding,
-                body: left_body,
-                // `..` covers crate-private `iterable_state` only.
+                // `..` covers the private target, body, and iterable state.
                 ..
             } = left;
+            let right_target = right.target();
+            let right_body = right.body();
             let ParsedDeferredForExpression {
                 // File, line, and span are diagnostic source positions.
                 file: _,
                 line: _,
                 span: _,
                 header: right_header,
-                target: right_target,
                 iterable: right_iterable,
                 binding: right_binding,
-                body: right_body,
-                // `..` covers crate-private `iterable_state` only.
+                // `..` covers the private target, body, and iterable state.
                 ..
             } = right;
             left_header == right_header
@@ -743,8 +743,8 @@ fn same_deferred_for_targets(left: &DeferredForTarget, right: &DeferredForTarget
 fn same_deferred_for_bodies(left: &DeferredForBody, right: &DeferredForBody) -> bool {
     match (left, right) {
         (DeferredForBody::Resource(left), DeferredForBody::Resource(right)) => same_resources(
-            std::slice::from_ref(left.as_ref()),
-            std::slice::from_ref(right.as_ref()),
+            std::slice::from_ref(left.as_resource()),
+            std::slice::from_ref(right.as_resource()),
         ),
         (DeferredForBody::Read(left), DeferredForBody::Read(right)) => same_data_sources(
             std::slice::from_ref(left.as_ref()),
@@ -1788,14 +1788,14 @@ mod tests {
             panic!("rendered fixture must contain one deferred for")
         };
         assert!(matches!(
-            authored_deferred.target,
+            authored_deferred.target(),
             DeferredForTarget::Unbound { .. }
         ));
         assert!(matches!(
-            rendered_deferred.target,
+            rendered_deferred.target(),
             DeferredForTarget::Unbound { .. }
         ));
-        assert_ne!(authored_deferred.target, rendered_deferred.target);
+        assert_ne!(authored_deferred.target(), rendered_deferred.target());
 
         let path = Path::new("unbound-template-mismatch.crn");
         let error = ensure_semantically_equal(&authored, &rendered, path)

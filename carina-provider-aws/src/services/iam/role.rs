@@ -848,7 +848,10 @@ mod tests {
             )])),
         );
         let schema = crate::test_rootless_type(carina_aws_types::iam_policy_document());
-        let canonical = schema.canonicalize_state(Value::Concrete(ConcreteValue::Map(policy)));
+        let canonical = schema
+            .canonicalize_state(Value::Concrete(ConcreteValue::Map(policy)))
+            .into_present()
+            .expect("policy fixture must remain present");
         assert!(
             matches!(canonical, Value::Concrete(ConcreteValue::Map(_))),
             "policy should canonicalize to a map"

@@ -156,14 +156,18 @@ pub(crate) fn validate_read_attributes(
     schema: &ValidatedResourceSchema,
     attributes: &mut HashMap<String, Value>,
 ) -> ProviderResult<()> {
-    for (name, value) in attributes {
-        let attribute = schema.effective_attribute(name).ok_or_else(|| {
+    let mut canonical = HashMap::with_capacity(attributes.len());
+    for (name, value) in std::mem::take(attributes) {
+        let attribute = schema.effective_attribute(&name).ok_or_else(|| {
             ProviderError::internal(format!(
                 "generated {resource_type} read model emitted unknown attribute {name}"
             ))
         })?;
-        *value = attribute.canonicalize_state(value.clone());
+        if let Some(value) = attribute.canonicalize_state(value).into_present() {
+            canonical.insert(name, value);
+        }
     }
+    *attributes = canonical;
     Ok(())
 }
 

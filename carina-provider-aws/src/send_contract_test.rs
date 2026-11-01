@@ -442,7 +442,13 @@ fn set_sample(resource: &mut Resource, schema: &ValidatedResourceSchema, name: &
         &mut path,
         &mut ShapeWalkBudget::new(64),
     );
-    resource.set_attr(name, attribute.canonicalize_state(value));
+    resource.set_attr(
+        name,
+        attribute
+            .canonicalize_state(value)
+            .into_present()
+            .expect("generated sample must remain present"),
+    );
 }
 
 fn set_bool(resource: &mut Resource, name: &str, value: bool) {
@@ -461,7 +467,13 @@ fn set_canonical_string(
             resource.id.resource_type
         )
     });
-    resource.set_attr(name, attribute.canonicalize_state(string(value)));
+    resource.set_attr(
+        name,
+        attribute
+            .canonicalize_state(string(value))
+            .into_present()
+            .expect("canonical string fixture must remain present"),
+    );
 }
 
 fn focused_resource(

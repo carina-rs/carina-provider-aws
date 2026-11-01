@@ -1127,7 +1127,10 @@ mod tests {
             Value::Concrete(ConcreteValue::String("allowAll".into())),
         );
         let schema = crate::test_rootless_type(carina_aws_types::sqs_redrive_allow_policy());
-        let canonical = schema.canonicalize_state(Value::Concrete(ConcreteValue::Map(map)));
+        let canonical = schema
+            .canonicalize_state(Value::Concrete(ConcreteValue::Map(map)))
+            .into_present()
+            .expect("redrive-allow-policy fixture must remain present");
 
         let json = redrive_allow_policy_to_json_string(&canonical).expect("redrive allow JSON");
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();

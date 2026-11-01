@@ -427,6 +427,8 @@ mod tests {
         );
         crate::test_rootless_type(attr_type)
             .canonicalize_state(Value::Concrete(ConcreteValue::String(api_value.into())))
+            .into_present()
+            .expect("DNS-support fixture must remain present")
     }
 
     fn one_enum_option(field: &str, value: Value) -> Resource {
