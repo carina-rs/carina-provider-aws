@@ -1543,7 +1543,7 @@ async fn rejected_request_certificate_poll_preserves_the_continuation() {
     assert_eq!(verdict.in_flight(), (&token, None));
     assert_eq!(
         verdict.provider_error().to_wire().message,
-        "RequestCertificate failed"
+        "acm.Certificate may have been created; check before re-applying"
     );
     assert_eq!(
         request_bodies.lock().expect("ACM request-body lock").len(),

@@ -312,7 +312,7 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
-    async fn provider_retry_retries_maybe_sent_other_without_kind_for_token_operation() {
+    async fn provider_retry_retries_maybe_sent_without_an_sdk_retry_verdict() {
         let connector = ScriptedConnector::new([
             Action::Transport(SendPhase::MaybeSent),
             Action::Response {
@@ -330,15 +330,12 @@ mod tests {
                 .configure(|builder| builder.subnet_id("subnet-123"))
         })
         .await
-        .expect("MaybeSent Other(None) remains retryable for a token operation");
+        .expect("post-transmit Other(None) should be retried with the same token");
 
         let requests = connector.requests();
         assert_eq!(requests.len(), 2);
-        assert!(
-            requests
-                .iter()
-                .all(|request| request.contains(token.as_str()))
-        );
+        assert!(requests[0].contains(token.as_str()));
+        assert!(requests[1].contains(token.as_str()));
     }
 
     #[tokio::test]

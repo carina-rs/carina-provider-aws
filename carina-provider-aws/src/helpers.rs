@@ -499,26 +499,6 @@ where
 ///   the bucket name's control-plane state clears in ~60–90s.
 const S3_RETRYABLE_ERROR_CODES: &[&str] = &["RequestTimeout", "SlowDown", "OperationAborted"];
 
-/// AWS service-error codes classified as throttling by the SDK's
-/// `AwsErrorCodeClassifier` even when the generated error has no modeled
-/// retry kind.
-const AWS_THROTTLING_ERROR_CODES: &[&str] = &[
-    "Throttling",
-    "ThrottlingException",
-    "ThrottledException",
-    "RequestThrottledException",
-    "TooManyRequestsException",
-    "ProvisionedThroughputExceededException",
-    "TransactionInProgressException",
-    "RequestLimitExceeded",
-    "BandwidthLimitExceeded",
-    "LimitExceededException",
-    "RequestThrottled",
-    "SlowDown",
-    "PriorRequestNotComplete",
-    "EC2ThrottledException",
-];
-
 /// Decide whether a provider-level resend is both safe and worth retrying.
 /// Safety uses all attempts; transience uses only the final attempt.
 pub(crate) fn provider_retry_allowed<E, R>(
@@ -549,15 +529,14 @@ where
             if inner.retryable_error_kind().is_some() {
                 return true;
             }
-            let code = ProvideErrorMetadata::code(inner);
-            if code.is_some_and(|code| AWS_THROTTLING_ERROR_CODES.contains(&code)) {
-                return true;
-            }
             // S3 carve-out: the SDK model flags no S3 error as
             // retryable, so consult the documented transient codes.
             // Disambiguate `code()` — both `ProvideErrorKind` and
             // `ProvideErrorMetadata` define a same-named accessor.
-            code.is_some_and(|code| S3_RETRYABLE_ERROR_CODES.contains(&code))
+            matches!(
+                ProvideErrorMetadata::code(inner),
+                Some(code) if S3_RETRYABLE_ERROR_CODES.contains(&code)
+            )
         }
         // `SdkError` is `#[non_exhaustive]`; future-added variants get
         // the conservative default (don't retry).

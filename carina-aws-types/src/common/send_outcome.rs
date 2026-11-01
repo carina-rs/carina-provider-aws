@@ -25,6 +25,11 @@ pub enum SendOutcome {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FinalAttempt {
     /// The final attempt did not reach transport.
+    ///
+    /// A pre-transmit [`SdkError::TimeoutError`] is intentionally transient:
+    /// the configured operation-attempt timeout bounds each attempt.
+    /// Identity-cache load timeouts instead surface as an unclassified
+    /// connector failure and are permanent here.
     NotSent(Transience),
     /// The final attempt reached transport or its phase is unknown.
     Sent,
@@ -315,6 +320,9 @@ where
     }
 }
 
+/// A pre-transmit SDK timeout is transient because the operation-attempt
+/// timeout bounds each attempt. The identity cache applies its own load timeout
+/// and reports a timed-out credential provider as permanent `Other(None)` instead.
 fn not_sent_transience<E>(error: &SdkError<E, HttpResponse>) -> Transience {
     match error {
         SdkError::TimeoutError(_) => Transience::Transient,

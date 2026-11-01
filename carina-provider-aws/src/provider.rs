@@ -1205,28 +1205,19 @@ impl AwsProvider {
                 match result {
                     Ok(identifier) => AcmResendTransition::Issued(identifier),
                     Err(error) => {
-                        let classification = error.classification();
-                        let outcome = classification.operation_outcome();
-                        let retryable = outcome == SendOutcome::MaybeSent
-                            || provider_retry_allowed(
-                                classification,
-                                aws_sdk_acm::operation::request_certificate::RequestCertificateError::IDEMPOTENCY,
-                                &error,
-                            );
+                        let classification = error.classification().with_prior_maybe_sent();
+                        let retryable = provider_retry_allowed(
+                            classification,
+                            aws_sdk_acm::operation::request_certificate::RequestCertificateError::IDEMPOTENCY,
+                            &error,
+                        );
                         if retryable && attempts_remaining > 1 {
                             AcmResendTransition::Pending(token(attempts_remaining - 1))
                         } else {
-                            let error = if outcome == SendOutcome::MaybeSent {
-                                crate::services::acm::certificate::request_certificate_outcome_unknown_error(
-                                    &resource.id,
-                                    error,
-                                )
-                            } else {
-                                crate::services::acm::certificate::request_certificate_error(
-                                    &resource.id,
-                                    error,
-                                )
-                            };
+                            let error = crate::services::acm::certificate::request_certificate_outcome_unknown_error(
+                                &resource.id,
+                                error,
+                            );
                             AcmResendTransition::InFlight(error)
                         }
                     }
@@ -3603,6 +3594,8 @@ mod pending_operation_tests {
     enum AcmConnectorAction {
         MaybeSent,
         InvalidParameter,
+        LimitExceeded,
+        ServerError,
         Throttled,
     }
 
@@ -3653,6 +3646,32 @@ mod pending_operation_tests {
                         response
                             .headers_mut()
                             .insert("x-amzn-errortype", "InvalidParameterException");
+                        Ok(response)
+                    }
+                    AcmConnectorAction::LimitExceeded => {
+                        let mut response = HttpResponse::new(
+                            400.try_into().expect("valid status"),
+                            SdkBody::from(r#"{"message":"certificate quota exceeded"}"#),
+                        );
+                        response
+                            .headers_mut()
+                            .insert("content-type", "application/x-amz-json-1.1");
+                        response
+                            .headers_mut()
+                            .insert("x-amzn-errortype", "LimitExceededException");
+                        Ok(response)
+                    }
+                    AcmConnectorAction::ServerError => {
+                        let mut response = HttpResponse::new(
+                            500.try_into().expect("valid status"),
+                            SdkBody::from(r#"{"message":"temporary ACM failure"}"#),
+                        );
+                        response
+                            .headers_mut()
+                            .insert("content-type", "application/x-amz-json-1.1");
+                        response
+                            .headers_mut()
+                            .insert("x-amzn-errortype", "InternalFailure");
                         Ok(response)
                     }
                     AcmConnectorAction::Throttled => {
@@ -4144,8 +4163,16 @@ mod pending_operation_tests {
         match result {
             Err(AcmPollVerdict::Preserved {
                 token: preserved,
-                error: _,
-            }) => assert_eq!(preserved, token),
+                error,
+            }) => {
+                assert_eq!(preserved, token);
+                assert!(
+                    error.to_string().contains(
+                        "acm.Certificate may have been created; check before re-applying"
+                    ),
+                    "{error}"
+                );
+            }
             Err(AcmPollVerdict::Untracked(error)) => {
                 panic!("ACM continuation was discarded: {error}")
             }
@@ -4155,7 +4182,100 @@ mod pending_operation_tests {
     }
 
     #[tokio::test]
-    async fn acm_poll_resend_repends_after_throttling_rejection() {
+    async fn acm_poll_resend_uses_final_non_retryable_verdict() {
+        let connector = AcmTestConnector::new([
+            AcmConnectorAction::MaybeSent,
+            AcmConnectorAction::ServerError,
+            AcmConnectorAction::InvalidParameter,
+        ]);
+        let credentials =
+            aws_credential_types::Credentials::new("test", "test", None, None, "acm-poll-test");
+        let provider = acm_test_provider(
+            connector.clone(),
+            SharedCredentialsProvider::new(credentials),
+        );
+        let resource = acm_certificate_resource();
+        let token = initial_acm_maybe_sent_token(&provider, &resource).await;
+
+        let result = provider
+            .poll_create_step(
+                &resource,
+                token.clone(),
+                AwsCreatePoll::Unissued(RecordingAcmPollAttempt),
+            )
+            .await;
+
+        match result {
+            Err(AcmPollVerdict::Preserved {
+                token: preserved,
+                error,
+            }) => {
+                assert_eq!(preserved, token);
+                assert!(
+                    error.to_string().contains(
+                        "acm.Certificate may have been created; check before re-applying"
+                    ),
+                    "{error}"
+                );
+            }
+            Err(AcmPollVerdict::Untracked(error)) => {
+                panic!("ACM continuation was discarded: {error}")
+            }
+            Ok(next) => panic!("non-retryable final attempt unexpectedly repended: {next:?}"),
+        }
+        assert_eq!(connector.calls(), 3);
+    }
+
+    #[tokio::test]
+    async fn acm_poll_resend_keeps_limit_exceeded_in_flight() {
+        let connector = AcmTestConnector::new([
+            AcmConnectorAction::MaybeSent,
+            AcmConnectorAction::LimitExceeded,
+            AcmConnectorAction::LimitExceeded,
+            AcmConnectorAction::LimitExceeded,
+        ]);
+        let credentials =
+            aws_credential_types::Credentials::new("test", "test", None, None, "acm-poll-test");
+        let provider = acm_test_provider(
+            connector.clone(),
+            SharedCredentialsProvider::new(credentials),
+        );
+        let resource = acm_certificate_resource();
+        let token = initial_acm_maybe_sent_token(&provider, &resource).await;
+
+        let result = provider
+            .poll_create_step(
+                &resource,
+                token.clone(),
+                AwsCreatePoll::Unissued(RecordingAcmPollAttempt),
+            )
+            .await;
+
+        match result {
+            Err(AcmPollVerdict::Preserved {
+                token: preserved,
+                error,
+            }) => {
+                assert_eq!(preserved, token);
+                assert!(
+                    error.to_string().contains(
+                        "acm.Certificate may have been created; check before re-applying"
+                    ),
+                    "{error}"
+                );
+            }
+            Err(AcmPollVerdict::Untracked(error)) => {
+                panic!("ACM continuation was discarded: {error}")
+            }
+            Ok(next) => panic!("quota failure unexpectedly repended: {next:?}"),
+        }
+        // The SDK exhausts its three internal attempts; the provider does not
+        // schedule another poll resend for this unmodeled quota error.
+        assert_eq!(connector.calls(), 4);
+    }
+
+    #[tokio::test]
+    async fn acm_poll_resend_keeps_unmodeled_throttling_in_flight() {
         let token = acm_resend_token();
         let connector = AcmTestConnector::new([
             AcmConnectorAction::Throttled,
@@ -4172,22 +4292,29 @@ mod pending_operation_tests {
         let result = provider
             .poll_create_step(
                 &acm_certificate_resource(),
-                token,
+                token.clone(),
                 AwsCreatePoll::Unissued(RecordingAcmPollAttempt),
             )
             .await;
 
-        let next = result.expect("retryable rejection should remain pending");
-        let AwsCreateToken::AcmRequestCertificate {
-            attempts_remaining, ..
-        } = next
-        else {
-            panic!("unexpected ACM continuation: {next:?}")
-        };
-        assert_eq!(
-            attempts_remaining,
-            ACM_REQUEST_CERTIFICATE_POLL_ATTEMPTS.get() - 1
-        );
+        match result {
+            Err(AcmPollVerdict::Preserved {
+                token: preserved,
+                error,
+            }) => {
+                assert_eq!(preserved, token);
+                assert!(
+                    error.to_string().contains(
+                        "acm.Certificate may have been created; check before re-applying"
+                    ),
+                    "{error}"
+                );
+            }
+            Err(AcmPollVerdict::Untracked(error)) => {
+                panic!("ACM continuation was discarded: {error}")
+            }
+            Ok(next) => panic!("unmodeled throttling unexpectedly repended: {next:?}"),
+        }
         assert_eq!(connector.calls(), 3);
     }
 
