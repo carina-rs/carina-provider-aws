@@ -1,0 +1,26 @@
+# EC2 VPC Gateway Attachment
+#
+# Attaches an internet gateway to a VPC.
+
+provider aws {
+  region = aws.Region.ap_northeast_1
+}
+
+let vpc = aws.ec2.Vpc {
+  cidr_block = '10.0.0.0/16'
+
+  tags = {
+    Environment = 'example'
+  }
+}
+
+let internet_gateway = aws.ec2.InternetGateway {
+  tags = {
+    Environment = 'example'
+  }
+}
+
+aws.ec2.VpcGatewayAttachment {
+  vpc_id              = vpc.vpc_id
+  internet_gateway_id = internet_gateway.internet_gateway_id
+}

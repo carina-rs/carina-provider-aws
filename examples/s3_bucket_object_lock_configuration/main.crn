@@ -1,0 +1,26 @@
+# S3 Bucket Object Lock Configuration
+#
+# Enables Object Lock on a versioned S3 bucket.
+
+provider aws {
+  region = aws.Region.ap_northeast_1
+}
+
+let bucket = aws.s3.Bucket {
+  bucket = 'carina-example-object-lock-bucket'
+
+  tags = {
+    Environment = 'example'
+  }
+}
+
+let versioning = aws.s3.BucketVersioning {
+  bucket = bucket.bucket
+  status = aws.s3.BucketVersioning.VersioningStatus.enabled
+}
+
+aws.s3.BucketObjectLockConfiguration {
+  bucket              = versioning.bucket
+  # Object Lock cannot be disabled after it is enabled for a bucket.
+  object_lock_enabled = aws.s3.BucketObjectLockConfiguration.ObjectLockEnabled.enabled
+}

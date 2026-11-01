@@ -1,0 +1,19 @@
+# EC2 Transit Gateway
+#
+# Creates a transit gateway with DNS support enabled.
+
+provider aws {
+  region = aws.Region.ap_northeast_1
+}
+
+aws.ec2.TransitGateway {
+  description = 'Example transit gateway'
+
+  options = {
+    dns_support = aws.ec2.TransitGateway.TransitGatewayRequestOptions.DnsSupport.enable
+  }
+
+  tags = {
+    Environment = 'example'
+  }
+}

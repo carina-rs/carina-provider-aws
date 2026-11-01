@@ -1,0 +1,43 @@
+# EC2 Transit Gateway Attachment
+#
+# Attaches a VPC subnet to a transit gateway.
+
+provider aws {
+  region = aws.Region.ap_northeast_1
+}
+
+let vpc = aws.ec2.Vpc {
+  cidr_block = '10.0.0.0/16'
+
+  tags = {
+    Environment = 'example'
+  }
+}
+
+let subnet = aws.ec2.Subnet {
+  vpc_id            = vpc.vpc_id
+  cidr_block        = '10.0.1.0/24'
+  availability_zone = aws.AvailabilityZone.ZoneName.ap_northeast_1a
+
+  tags = {
+    Environment = 'example'
+  }
+}
+
+let transit_gateway = aws.ec2.TransitGateway {
+  description = 'Example transit gateway'
+
+  tags = {
+    Environment = 'example'
+  }
+}
+
+aws.ec2.TransitGatewayAttachment {
+  subnet_ids         = [subnet.subnet_id]
+  transit_gateway_id = transit_gateway.transit_gateway_id
+  vpc_id             = vpc.vpc_id
+
+  tags = {
+    Environment = 'example'
+  }
+}

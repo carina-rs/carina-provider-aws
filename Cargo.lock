@@ -931,6 +931,8 @@ dependencies = [
 name = "carina-docgen"
 version = "0.7.4"
 dependencies = [
+ "anyhow",
+ "carina-core",
  "comrak",
  "finl_unicode",
  "flate2",

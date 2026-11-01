@@ -1,0 +1,32 @@
+# IAM Role
+#
+# Creates an IAM role that Amazon EC2 can assume.
+
+provider aws {
+  region = aws.Region.ap_northeast_1
+}
+
+aws.iam.Role {
+  role_name = 'carina-example-ec2-role'
+
+  assume_role_policy_document = {
+    version = aws.iam.PolicyDocument.Version.2012_10_17
+    statement {
+      effect = aws.iam.PolicyDocument.Statement.Effect.allow
+
+      principal = {
+        service = 'ec2.amazonaws.com'
+      }
+
+      action = 'sts:AssumeRole'
+    }
+  }
+
+  description          = 'Example role for EC2 workloads'
+  path                 = '/example/'
+  max_session_duration = 7200
+
+  tags = {
+    Environment = 'example'
+  }
+}

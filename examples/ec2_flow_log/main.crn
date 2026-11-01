@@ -1,0 +1,35 @@
+# EC2 Flow Log
+#
+# Sends VPC flow logs to an S3 bucket without requiring a delivery role.
+
+provider aws {
+  region = aws.Region.ap_northeast_1
+}
+
+let vpc = aws.ec2.Vpc {
+  cidr_block = '10.0.0.0/16'
+
+  tags = {
+    Environment = 'example'
+  }
+}
+
+let flow_log_bucket = aws.s3.Bucket {
+  bucket = 'carina-example-vpc-flow-logs'
+
+  tags = {
+    Environment = 'example'
+  }
+}
+
+aws.ec2.FlowLog {
+  resource_ids         = [vpc.vpc_id]
+  resource_type        = aws.ec2.FlowLog.ResourceType.vpc
+  traffic_type         = aws.ec2.FlowLog.TrafficType.all
+  log_destination_type = aws.ec2.FlowLog.LogDestinationType.s3
+  log_destination      = flow_log_bucket.arn
+
+  tags = {
+    Environment = 'example'
+  }
+}

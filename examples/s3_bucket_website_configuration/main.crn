@@ -1,0 +1,29 @@
+# S3 Bucket Website Configuration
+#
+# Configures index and error documents for static website hosting.
+
+provider aws {
+  region = aws.Region.ap_northeast_1
+}
+
+let bucket = aws.s3.Bucket {
+  bucket = 'carina-example-website-bucket'
+
+  tags = {
+    Environment = 'example'
+  }
+}
+
+aws.s3.BucketWebsiteConfiguration {
+  bucket = bucket.bucket
+
+  index_document = {
+    # Upload an index object for each served prefix, or replace this suffix.
+    suffix = 'index.html'
+  }
+
+  error_document = {
+    # Upload this error object, or replace the key with one that exists.
+    key = 'error.html'
+  }
+}

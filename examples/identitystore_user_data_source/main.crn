@@ -1,0 +1,14 @@
+# Identity Store User Data Source
+#
+# Looks up a user by name in an existing IAM Identity Center identity store.
+
+provider aws {
+  region = aws.Region.ap_northeast_1
+}
+
+let user = read aws.identitystore.User {
+  # Replace with the ID of an existing IAM Identity Center identity store.
+  identity_store_id = 'd-1234567890'
+  # Replace with the user name to look up in that identity store.
+  user_name         = 'example.user'
+}

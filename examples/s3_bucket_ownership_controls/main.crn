@@ -1,0 +1,20 @@
+# S3 Bucket Ownership Controls
+#
+# Enforces bucket-owner ownership for objects in an S3 bucket.
+
+provider aws {
+  region = aws.Region.ap_northeast_1
+}
+
+let bucket = aws.s3.Bucket {
+  bucket = 'carina-example-owned-bucket'
+
+  tags = {
+    Environment = 'example'
+  }
+}
+
+aws.s3.BucketOwnershipControls {
+  bucket           = bucket.bucket
+  object_ownership = aws.s3.BucketOwnershipControls.ObjectOwnership.bucket_owner_enforced
+}

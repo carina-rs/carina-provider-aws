@@ -1,0 +1,25 @@
+# EC2 Egress-Only Internet Gateway
+#
+# Creates an egress-only internet gateway for a VPC.
+
+provider aws {
+  region = aws.Region.ap_northeast_1
+}
+
+let vpc = aws.ec2.Vpc {
+  cidr_block = '10.0.0.0/16'
+
+  tags = {
+    Environment = 'example'
+  }
+}
+
+aws.ec2.EgressOnlyInternetGateway {
+  # The VPC needs an IPv6 CIDR and an IPv6 route to this gateway before it
+  # can carry traffic.
+  vpc_id = vpc.vpc_id
+
+  tags = {
+    Environment = 'example'
+  }
+}
