@@ -11,7 +11,8 @@ use carina_core::parser::{
     UserFunctionBody, ValidationBlock, WaitBinding, parse_file,
 };
 use carina_core::resource::{
-    DataSource, ModuleSource, ParserPlaceholder, Resource, ResourceId, ResourceIdentityState,
+    DataSource, ModuleSource, ParserPlaceholder, RelativeBindingName, Resource, ResourceId,
+    ResourceIdentityState,
 };
 
 /// The kind of declaration a documentation example must contain.
@@ -358,8 +359,8 @@ fn same_named_providers(
 }
 
 fn same_resources(
-    left: &[Resource<ModuleSource, ParserPlaceholder>],
-    right: &[Resource<ModuleSource, ParserPlaceholder>],
+    left: &[Resource<ModuleSource, ParserPlaceholder, RelativeBindingName>],
+    right: &[Resource<ModuleSource, ParserPlaceholder, RelativeBindingName>],
 ) -> bool {
     left.len() == right.len()
         && left.iter().zip(right).all(|(left, right)| {
@@ -370,8 +371,8 @@ fn same_resources(
 }
 
 fn same_data_sources(
-    left: &[DataSource<ModuleSource, ParserPlaceholder>],
-    right: &[DataSource<ModuleSource, ParserPlaceholder>],
+    left: &[DataSource<ModuleSource, ParserPlaceholder, RelativeBindingName>],
+    right: &[DataSource<ModuleSource, ParserPlaceholder, RelativeBindingName>],
 ) -> bool {
     left.len() == right.len()
         && left.iter().zip(right).all(|(left, right)| {
@@ -634,17 +635,20 @@ fn same_wait_bindings(left: &[WaitBinding], right: &[WaitBinding]) -> bool {
                 line: _,
             } = right;
             let UntilPredicateAst {
-                lhs_segments: left_lhs_segments,
+                root: left_root,
+                attribute_segments: left_attribute_segments,
                 rhs: left_rhs,
             } = left_until_predicate;
             let UntilPredicateAst {
-                lhs_segments: right_lhs_segments,
+                root: right_root,
+                attribute_segments: right_attribute_segments,
                 rhs: right_rhs,
             } = right_until_predicate;
             left_binding == right_binding
                 && left_target == right_target
                 && left_until_raw == right_until_raw
-                && left_lhs_segments == right_lhs_segments
+                && left_root == right_root
+                && left_attribute_segments == right_attribute_segments
                 && left_rhs == right_rhs
                 && left_timeout_secs == right_timeout_secs
                 && left_depends_on == right_depends_on
@@ -652,8 +656,8 @@ fn same_wait_bindings(left: &[WaitBinding], right: &[WaitBinding]) -> bool {
 }
 
 fn same_requires(
-    left: &[RequireBlock<ParserPlaceholder>],
-    right: &[RequireBlock<ParserPlaceholder>],
+    left: &[RequireBlock<ParserPlaceholder, RelativeBindingName>],
+    right: &[RequireBlock<ParserPlaceholder, RelativeBindingName>],
 ) -> bool {
     left.len() == right.len()
         && left.iter().zip(right).all(|(left, right)| {
@@ -705,27 +709,23 @@ fn same_deferred_for_expressions(
             let left_target = left.target();
             let left_body = left.body();
             let ParsedDeferredForExpression {
-                // File, line, and span are diagnostic source positions.
-                file: _,
-                line: _,
+                // The span and private location are diagnostic source positions.
                 span: _,
                 header: left_header,
                 iterable: left_iterable,
                 binding: left_binding,
-                // `..` covers the private target, body, and iterable state.
+                // `..` covers the private location, target, body, and iterable state.
                 ..
             } = left;
             let right_target = right.target();
             let right_body = right.body();
             let ParsedDeferredForExpression {
-                // File, line, and span are diagnostic source positions.
-                file: _,
-                line: _,
+                // The span and private location are diagnostic source positions.
                 span: _,
                 header: right_header,
                 iterable: right_iterable,
                 binding: right_binding,
-                // `..` covers the private target, body, and iterable state.
+                // `..` covers the private location, target, body, and iterable state.
                 ..
             } = right;
             left_header == right_header
@@ -736,7 +736,10 @@ fn same_deferred_for_expressions(
         })
 }
 
-fn same_deferred_for_targets(left: &DeferredForTarget, right: &DeferredForTarget) -> bool {
+fn same_deferred_for_targets(
+    left: &DeferredForTarget<RelativeBindingName>,
+    right: &DeferredForTarget<RelativeBindingName>,
+) -> bool {
     left == right
 }
 
@@ -1706,6 +1709,42 @@ mod tests {
             error.to_string(),
             "Rendered example from semantic-mismatch.crn changed parsed resources"
         );
+    }
+
+    #[test]
+    fn stripping_provider_preserves_waits_and_requirements() {
+        let rendered = concat!(
+            "arguments { enabled: Bool }\n",
+            "require enabled, \"enabled must be true\"\n",
+            "let vpc = aws.ec2.Vpc {}\n",
+            "let observed = read aws.ec2.Vpc { id = vpc.id }\n",
+            "let ready = wait vpc {\n",
+            "  until = vpc.state.ready == true\n",
+            "  timeout = 2min\n",
+            "  depends_on = [observed]\n",
+            "}\n",
+        );
+        let source = format!("# page heading\nprovider aws {{}}\n{rendered}");
+        let example = load_fixture(&source, ExampleKind::Resource)
+            .expect("source positions may change without changing bindings or predicates");
+
+        assert_eq!(resource_text(&example), rendered);
+    }
+
+    #[test]
+    fn stripping_provider_preserves_bound_deferred_for() {
+        let rendered = concat!(
+            "aws.ec2.Vpc {}\n",
+            "let orgs = upstream_state { source = \"../orgs\" }\n",
+            "let vpcs = for account_id in orgs.accounts {\n",
+            "  aws.ec2.Vpc { description = account_id }\n",
+            "}\n",
+        );
+        let source = format!("# page heading\nprovider aws {{}}\n{rendered}");
+        let example = load_fixture(&source, ExampleKind::Resource)
+            .expect("deferred loop locations may change without changing their semantics");
+
+        assert_eq!(resource_text(&example), rendered);
     }
 
     #[test]

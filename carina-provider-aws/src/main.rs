@@ -1258,7 +1258,7 @@ mod tests {
         );
         resource.set_attr(
             "subnet_id",
-            Value::resource_ref("subnet", "subnet_id", vec![]),
+            Value::resource_ref("subnet", "subnet_id", vec![]).resolve_root_for_test(),
         );
 
         let hidden = resource
@@ -1284,7 +1284,7 @@ mod tests {
         let mut fifo = Resource::with_provider("aws", "sqs.Queue", "deferred-fifo", None);
         fifo.set_attr(
             "fifo_queue",
-            Value::resource_ref("settings", "fifo_queue", vec![]),
+            Value::resource_ref("settings", "fifo_queue", vec![]).resolve_root_for_test(),
         );
         fifo.set_attr(
             "deduplication_scope",
@@ -1306,7 +1306,7 @@ mod tests {
         );
         kms.set_attr(
             "kms_master_key_id",
-            Value::resource_ref("key", "key_id", vec![]),
+            Value::resource_ref("key", "key_id", vec![]).resolve_root_for_test(),
         );
         let hidden_key = kms
             .attributes

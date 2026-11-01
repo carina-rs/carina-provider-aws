@@ -14,6 +14,7 @@ doctest = false
 test-utils = ["dep:carina-plugin-sdk", "carina-plugin-sdk/test-utils", "dep:wasi"]
 
 [dev-dependencies]
+carina-core = { workspace = true, features = ["test-support"] }
 aws-runtime = { version = "1" }
 aws-smithy-runtime-api = { version = "1.19", features = ["client", "test-util"] }
 carina-plugin-sdk = { workspace = true, features = ["test-utils"] }

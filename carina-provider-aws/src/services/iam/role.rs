@@ -1054,6 +1054,7 @@ mod tests {
         .expect("parse fixture");
         let resource = parsed.resources[0]
             .clone()
+            .resolve_root_for_test()
             .into_expanded()
             .expect("fixture contains no loop placeholders");
         let registry = crate::schemas::schema_registry();

@@ -419,14 +419,11 @@ impl AwsProvider {
             alias_target,
             resource_records,
             ttl,
-            r#type: record_type,
         } = input.into_parts();
         let alias_target = alias_target.into_inner();
         let resource_records = resource_records.into_inner();
         let ttl = ttl.into_inner();
-        let record_type = record_type.into_inner();
-        let Some((hosted_zone_id, name, _current_record_type)) =
-            parse_identifier(identifier.as_str())
+        let Some((hosted_zone_id, name, record_type)) = parse_identifier(identifier.as_str())
         else {
             return Err(ProviderError::invalid_input(format!(
                 "Invalid record set identifier: {}",
@@ -441,7 +438,7 @@ impl AwsProvider {
             name,
             resource_records.as_deref(),
             ttl,
-            &record_type,
+            record_type,
         )?;
         change_record_set(
             &self.route53_client,
@@ -452,7 +449,7 @@ impl AwsProvider {
         )
         .await?;
 
-        let identifier = make_identifier(hosted_zone_id, name, &record_type);
+        let identifier = make_identifier(hosted_zone_id, name, record_type);
         let identifier = crate::helpers::applied_identifier(
             &id,
             "route53.ChangeResourceRecordSets",

@@ -53,7 +53,7 @@ mod tests {
     use carina_core::provider::normalize_provider_states;
     use carina_core::resource::{ConcreteValue, Current, ResolvedResource, Resource, Value};
     use carina_core::schema::{
-        AttributeType, RawShape, ResourceSchema, SchemaKind, SchemaRegistry, Shape,
+        AttributeType, IdentityMode, RawShape, ResourceSchema, SchemaKind, SchemaRegistry, Shape,
         ShapeWalkBudget, TypeInSchema, UniqueNameSpec,
     };
     use indexmap::IndexMap;
@@ -581,6 +581,43 @@ mod tests {
 
         let sqs_queue = super::generated::sqs::queue::sqs_queue_config();
         assert_eq!(sqs_queue.schema.unique_name(), &UniqueNameSpec::Conflicting);
+    }
+
+    #[test]
+    fn declared_identity_uses_only_the_resource_key_attributes() {
+        let configs = super::generated::configs();
+        for (resource_type, expected) in [
+            ("route53.RecordSet", vec!["hosted_zone_id", "name", "type"]),
+            ("iam.Role", vec!["role_name"]),
+            ("logs.LogGroup", vec!["log_group_name"]),
+            ("sqs.Queue", vec!["queue_name"]),
+            (
+                "ec2.TransitGatewayAttachment",
+                vec!["transit_gateway_id", "vpc_id"],
+            ),
+        ] {
+            let config = configs
+                .iter()
+                .find(|config| config.resource_type_name == resource_type)
+                .unwrap_or_else(|| panic!("missing {resource_type} schema"));
+            let identity: Vec<_> = config
+                .schema
+                .attributes()
+                .values()
+                .filter(|attr| attr.identity_mode().is_identity())
+                .map(|attr| {
+                    assert!(attr.is_create_only(), "{resource_type}.{}", attr.name());
+                    assert_eq!(attr.identity_mode(), IdentityMode::Required);
+                    attr.name()
+                })
+                .collect();
+            assert_eq!(identity, expected, "{resource_type}");
+            config
+                .schema
+                .clone()
+                .validate()
+                .expect("declared identity must pass admission");
+        }
     }
 
     #[test]

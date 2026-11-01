@@ -67,6 +67,7 @@ pub fn ec2_transit_gateway_attachment_config() -> AwsSchemaConfig {
         .attribute(
             AttributeSchema::required("transit_gateway_id", super::transit_gateway_id())
                 .create_only()
+                .identity()
                 .with_description("The ID of the transit gateway.")
                 .with_provider_name("TransitGatewayId")
                 .build(),
@@ -74,6 +75,7 @@ pub fn ec2_transit_gateway_attachment_config() -> AwsSchemaConfig {
         .attribute(
             AttributeSchema::required("vpc_id", super::vpc_id())
                 .create_only()
+                .identity()
                 .with_description("The ID of the VPC.")
                 .with_provider_name("VpcId")
                 .build(),
