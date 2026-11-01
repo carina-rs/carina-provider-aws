@@ -26,7 +26,20 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --check
 ```
 
-### With AWS Credentials
+### AWS Authentication
+
+WASM providers use base credentials resolved by the Carina host's standard AWS
+credential chain. Named profiles and SSO work through the host; select a profile
+with `AWS_PROFILE`. The host supplies credentials and expiry through the typed
+`aws-credentials` import and refreshes them when needed. The provider uses these
+base credentials for any provider-level `assume_role` call.
+
+Carina never starts an interactive login. When an SSO session has expired, run
+`aws sso login --profile <profile>` and retry. Service regions remain explicit
+provider configuration, defaulting to `ap-northeast-1`.
+
+Native builds keep the AWS SDK's default credential chain. For native tests that
+require AWS credentials:
 
 ```bash
 aws-vault exec <profile> -- cargo test
@@ -37,7 +50,7 @@ aws-vault exec <profile> -- cargo test
 - **carina-provider-aws**: The AWS provider implementation. Builds as both a native binary and a WASM component.
 - **carina-codegen-aws**: Code generator that produces resource definitions from AWS Smithy models.
 - **carina-smithy**: Smithy 2.0 JSON AST parser used by the code generator.
-- **carina-aws-types**: AWS-specific type definitions. A local copy lives in this repo (the same crate is duplicated in `carina-provider-awscc`; it is not shared from the main carina repository).
+- **carina-aws-types**: Shared AWS-specific types and `HostCredentialsProvider`. This crate lives in this repo; `carina-provider-awscc` consumes it by pinning this repository.
 
 ## Dependencies on carina (main repo)
 

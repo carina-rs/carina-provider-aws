@@ -387,7 +387,7 @@ mod tests {
         let mock = MockAws::builder()
             .with_service(Arc::clone(&service))
             .build();
-        let config = crate::BoundedSdkConfig::new(mock.sdk_config("us-east-1").await);
+        let config = crate::BoundedSdkConfig::for_test(mock.sdk_config("us-east-1").await);
         let provider =
             AwsProvider::from_sdk_config("us-east-1".to_string(), Vec::new(), Vec::new(), &config);
         let id = ResourceId::with_provider_identity(

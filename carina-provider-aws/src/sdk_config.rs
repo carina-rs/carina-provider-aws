@@ -3,6 +3,7 @@
 use std::time::Duration;
 
 use aws_config::Region;
+use aws_credential_types::provider::SharedCredentialsProvider;
 use aws_smithy_types::retry::RetryConfig;
 use aws_smithy_types::timeout::TimeoutConfig;
 
@@ -18,7 +19,7 @@ pub struct BoundedSdkConfig(aws_config::SdkConfig);
 
 impl BoundedSdkConfig {
     /// Apply the provider's timeout and retry policy to an SDK configuration.
-    pub fn new(config: aws_config::SdkConfig) -> Self {
+    fn new(config: aws_config::SdkConfig) -> Self {
         Self(
             config
                 .into_builder()
@@ -26,6 +27,12 @@ impl BoundedSdkConfig {
                 .retry_config(retry_config())
                 .build(),
         )
+    }
+
+    /// Build a bounded configuration from an SDK configuration for tests.
+    #[cfg(any(test, feature = "test-utils"))]
+    pub fn for_test(config: aws_config::SdkConfig) -> Self {
+        Self::new(config)
     }
 
     /// Borrow the shared configuration for generated guarded-client constructors.
@@ -51,7 +58,7 @@ impl BoundedSdkConfig {
             None,
             "bounded-sdk-config-test",
         );
-        Self::new(
+        Self::for_test(
             aws_config::SdkConfig::builder()
                 .region(Region::new("us-east-1"))
                 .endpoint_url(endpoint_url)
@@ -76,6 +83,8 @@ impl BoundedSdkConfig {
         credentials_provider: Option<aws_credential_types::provider::SharedCredentialsProvider>,
     ) -> Self {
         // Give the loader the policy too so invalid AWS retry settings cannot panic first.
+        // This is the sole SDK loader; wasm32 always installs host credentials below.
+        #[allow(clippy::disallowed_methods)]
         let loader = aws_config::defaults(aws_config::BehaviorVersion::latest())
             .region(Region::new(region.to_string()))
             .timeout_config(timeout_config())
@@ -84,10 +93,13 @@ impl BoundedSdkConfig {
             Some(http_client) => loader.http_client(http_client),
             None => loader,
         };
-        let loader = match credentials_provider {
+        #[cfg(not(target_arch = "wasm32"))]
+        let loader = match base_credentials_provider(credentials_provider) {
             Some(credentials_provider) => loader.credentials_provider(credentials_provider),
             None => loader,
         };
+        #[cfg(target_arch = "wasm32")]
+        let loader = loader.credentials_provider(base_credentials_provider(credentials_provider));
         #[cfg(target_arch = "wasm32")]
         let loader = loader.http_client(carina_plugin_sdk::wasi_http::WasiHttpClient::new());
         let base = Self::new(loader.load().await);
@@ -116,6 +128,22 @@ impl BoundedSdkConfig {
         let shared = aws_credential_types::provider::SharedCredentialsProvider::new(provider);
         Self::new(self.0.into_builder().credentials_provider(shared).build())
     }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn base_credentials_provider(
+    override_provider: Option<SharedCredentialsProvider>,
+) -> SharedCredentialsProvider {
+    override_provider.unwrap_or_else(|| {
+        SharedCredentialsProvider::new(carina_aws_types::HostCredentialsProvider::default())
+    })
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn base_credentials_provider(
+    override_provider: Option<SharedCredentialsProvider>,
+) -> Option<SharedCredentialsProvider> {
+    override_provider
 }
 
 /// Sets read and per-attempt timeouts to the host's 30-second `wasi:http` per-request
@@ -201,7 +229,34 @@ mod tests {
 
     use crate::AwsProvider;
 
-    use super::{BoundedSdkConfig, assert_bounded_policy};
+    use super::{BoundedSdkConfig, assert_bounded_policy, base_credentials_provider};
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn native_base_keeps_default_credentials_chain() {
+        assert!(base_credentials_provider(None).is_none());
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[tokio::test]
+    async fn native_base_keeps_credentials_override() {
+        use aws_credential_types::provider::{ProvideCredentials, SharedCredentialsProvider};
+
+        let credentials = aws_credential_types::Credentials::new(
+            "override-access-key",
+            "override-secret",
+            Some("override-token".into()),
+            None,
+            "sdk-config-test",
+        );
+        let provider = base_credentials_provider(Some(SharedCredentialsProvider::new(credentials)))
+            .expect("the explicit credentials override must be retained");
+        let credentials = provider.provide_credentials().await.unwrap();
+
+        assert_eq!(credentials.access_key_id(), "override-access-key");
+        assert_eq!(credentials.secret_access_key(), "override-secret");
+        assert_eq!(credentials.session_token(), Some("override-token"));
+    }
 
     #[test]
     fn new_overrides_input_timeout_and_retry_config() {
@@ -210,7 +265,7 @@ mod tests {
             .retry_config(RetryConfig::standard().with_max_attempts(10))
             .build();
 
-        let bounded = BoundedSdkConfig::new(input);
+        let bounded = BoundedSdkConfig::for_test(input);
         assert_bounded_policy(bounded.0.timeout_config(), bounded.0.retry_config());
     }
 
@@ -274,7 +329,7 @@ mod tests {
     #[tokio::test]
     async fn every_provider_client_has_the_resend_guard() {
         let mock = winterbaume_core::MockAws::builder().build();
-        let config = BoundedSdkConfig::new(mock.sdk_config("us-east-1").await);
+        let config = BoundedSdkConfig::for_test(mock.sdk_config("us-east-1").await);
         let provider =
             AwsProvider::from_sdk_config("us-east-1".to_string(), Vec::new(), Vec::new(), &config);
         let AwsProvider {

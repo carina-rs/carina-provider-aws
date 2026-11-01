@@ -116,7 +116,7 @@ async fn provider_from_service(service: impl MockService + 'static) -> AwsProvid
         REGION.to_string(),
         vec![],
         vec![],
-        &BoundedSdkConfig::new(sdk_config),
+        &BoundedSdkConfig::for_test(sdk_config),
     )
 }
 
@@ -743,7 +743,7 @@ async fn provider_with_account_rename(
         REGION.to_string(),
         vec![],
         vec![],
-        &BoundedSdkConfig::new(sdk_config),
+        &BoundedSdkConfig::for_test(sdk_config),
     );
     (provider, state)
 }

@@ -2,12 +2,11 @@
 # Runs iam_roles acceptance tests.
 #
 # Custom-runner directories are skipped by acceptance-tests/run-tests.sh,
-# matching s3_bucket_data_source. Resolve credentials before invoking this
-# suite; the Carina WASM provider cannot use AWS_PROFILE/SSO directly.
+# matching s3_bucket_data_source. Carina resolves the selected profile and SSO
+# credentials in the host. If the session has expired, run
+# `aws sso login --profile <profile>`.
 # Examples:
-#   eval "$(aws configure export-credentials --profile carina-test-000 --format env)"
-#   ./run.sh [filter]
-#   with_account_creds "carina-test-000" ./run.sh [filter]
+#   AWS_PROFILE=carina-test-000 ./run.sh [filter]
 #
 # The custom path pre-creates the data-source target outside Carina to avoid
 # carina-rs/carina#3666, then runs init/apply/plan-verify/destroy.

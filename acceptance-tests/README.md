@@ -1,5 +1,12 @@
 # Acceptance Tests
 
+## Authentication
+
+Set `AWS_PROFILE` to select the account profile. Carina resolves profiles and SSO
+credentials in the host and refreshes credentials during a run. It never starts
+an interactive login; when the SSO session has expired, run
+`aws sso login --profile <profile>` before retrying.
+
 ## Persistent run registry and cleanup
 
 Stateful acceptance tests register each fixture under

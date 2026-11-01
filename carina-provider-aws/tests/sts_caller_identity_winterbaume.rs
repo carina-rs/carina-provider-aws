@@ -107,7 +107,7 @@ async fn required_permissions_returns_empty_vec() {
         TEST_REGION.to_string(),
         vec![],
         vec![],
-        &BoundedSdkConfig::new(sdk_config),
+        &BoundedSdkConfig::for_test(sdk_config),
     );
 
     let id = ResourceId::with_provider_identity("aws", "s3.Bucket", "example", None);
@@ -133,7 +133,7 @@ async fn sts_caller_identity_data_source_returns_account_arn_user_id_from_winter
         TEST_REGION.to_string(),
         vec![],
         vec![],
-        &BoundedSdkConfig::new(sdk_config),
+        &BoundedSdkConfig::for_test(sdk_config),
     );
 
     let ds = ready_data_source_for_test(DataSource::with_provider(
@@ -190,7 +190,7 @@ async fn bounded_config_limits_sdk_retries_to_three_attempts() {
         TEST_REGION.to_string(),
         vec![],
         vec![],
-        &BoundedSdkConfig::new(sdk_config),
+        &BoundedSdkConfig::for_test(sdk_config),
     );
     let data_source = ready_data_source_for_test(DataSource::with_provider(
         "aws",

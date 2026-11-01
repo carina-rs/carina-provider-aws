@@ -1,6 +1,6 @@
 //! Provider-level `assume_role` block: chain `sts:AssumeRole` on top of
-//! the ambient credential chain so cross-account workflows can be
-//! expressed in `.crn`.
+//! the base credentials (host-supplied on wasm32, the default chain natively)
+//! so cross-account workflows can be expressed in `.crn`.
 //!
 //! Mirrors the Terraform AWS provider's `assume_role` block. The MVP
 //! field set is `role_arn`, `session_name`, `external_id`, `duration`;

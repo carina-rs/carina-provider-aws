@@ -15,12 +15,10 @@
 # Filter (optional): substring to match test names (e.g. "ec2_vpc", "s3_bucket")
 #
 # AWS authentication:
-#   Set AWS_PROFILE to one of the carina-test-00X profiles. The script
-#   resolves fresh STS credentials from that profile before each AWS-facing
-#   carina invocation (via `aws configure export-credentials`), so long-running
-#   apply/destroy cycles are not bound to a single SSO access-token
-#   lifetime (see carina-rs/carina-provider-awscc#157). The first run
-#   in a session needs `aws sso login --sso-session carina`.
+#   Set AWS_PROFILE to one of the carina-test-00X profiles. The Carina host
+#   resolves and refreshes profile/SSO credentials during each run. It never
+#   starts an interactive login; if the session has expired, run
+#   `aws sso login --profile <profile>`.
 
 set -e
 
@@ -33,25 +31,17 @@ source "$SCRIPT_DIR/../shared/_helpers.sh"
 TOTAL_PASSED=0
 TOTAL_FAILED=0
 
-# ── with_account_creds: resolve credentials for $AWS_PROFILE into env vars ──
-# and exec the given command. See run-tests.sh for rationale.
+# Run with the selected profile, letting the host resolve and refresh credentials.
 with_account_creds() {
     local account="${AWS_PROFILE:-}"
     if [ -z "$account" ]; then
         echo "ERROR: AWS_PROFILE is not set; cannot resolve credentials" >&2
         return 1
     fi
-    local creds
-    if ! creds=$(aws configure export-credentials --profile "$account" --format env-no-export 2>&1); then
-        echo "ERROR: aws configure export-credentials failed for $account: $creds" >&2
-        return 1
-    fi
     (
-        set -a
-        eval "$creds"
-        set +a
-        unset AWS_PROFILE
-        "$@"
+        # Inherited static keys must not override the selected account profile.
+        unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN AWS_SECURITY_TOKEN
+        AWS_PROFILE="$account" "$@"
     )
 }
 

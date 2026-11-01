@@ -14,7 +14,7 @@ use crate::{AwsNormalizer, AwsProvider, BoundedSdkConfig};
 #[tokio::test]
 async fn provider_clients_have_bounded_sdk_policy() {
     let mock = winterbaume_core::MockAws::builder().build();
-    let config = BoundedSdkConfig::new(mock.sdk_config("us-east-1").await);
+    let config = BoundedSdkConfig::for_test(mock.sdk_config("us-east-1").await);
     let provider = AwsProvider::from_sdk_config("us-east-1".into(), vec![], vec![], &config);
 
     assert_bounded_policy(

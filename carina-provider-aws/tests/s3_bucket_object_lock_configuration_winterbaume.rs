@@ -36,7 +36,7 @@ fn provider_from_config(sdk_config: aws_types::SdkConfig) -> AwsProvider {
         TEST_REGION.to_string(),
         vec![],
         vec![],
-        &BoundedSdkConfig::new(sdk_config),
+        &BoundedSdkConfig::for_test(sdk_config),
     )
 }
 

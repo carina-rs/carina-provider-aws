@@ -55,6 +55,7 @@ aws.ec2.Vpc {
 EOF
 
 run_clean() {
+    # Disable the host's IMDS source so this case has no credentials on EC2 too.
     env -i \
         HOME="$TEST_HOME" \
         PATH="$CARINA_DIR:/usr/bin:/bin" \
@@ -95,7 +96,7 @@ if [ "$elapsed" -ge 60 ]; then
     echo "$output" >&2
     exit 1
 fi
-if ! grep -Eiq 'no credentials|CredentialsNotLoaded|credentials not loaded|credential provider was not enabled' <<< "$output"; then
+if ! grep -Eiq 'no credentials|credentials were not found|CredentialsNotLoaded|credentials not loaded|credential provider was not enabled' <<< "$output"; then
     echo "FAIL: carina apply did not report a credentials failure" >&2
     echo "$output" >&2
     exit 1

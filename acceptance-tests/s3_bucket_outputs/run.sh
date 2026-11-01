@@ -2,12 +2,11 @@
 # Runs s3_bucket_outputs acceptance tests.
 #
 # Usage:
-#   eval "$(aws configure export-credentials --profile <profile> --format env)"
-#   ./run.sh [filter]
+#   AWS_PROFILE=<profile> ./run.sh [filter]
 #
 # AWS authentication:
-#   Export AWS credentials before invoking this suite; the Carina WASM
-#   provider cannot use AWS_PROFILE/SSO directly.
+#   Carina resolves the selected profile and SSO credentials in the host.
+#   If the session has expired, run `aws sso login --profile <profile>`.
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

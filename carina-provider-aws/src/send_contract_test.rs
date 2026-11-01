@@ -870,7 +870,7 @@ async fn every_sent_attribute_reaches_captured_create_and_update_mutations() {
         REGION.to_string(),
         vec![],
         vec![],
-        &BoundedSdkConfig::new(mock.sdk_config(REGION).await),
+        &BoundedSdkConfig::for_test(mock.sdk_config(REGION).await),
     );
     let schemas = crate::schemas::all_schemas();
 
