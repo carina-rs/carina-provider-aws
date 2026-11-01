@@ -289,6 +289,7 @@ mod tests {
             "/src/resend_safety_generated.rs"
         ));
         let clippy = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../clippy.toml"));
+        // The function pointer makes the build fail if the handwritten wrapper disappears.
         let handwritten_wrappers = [("kms", crate::references::KmsClient::from_bounded_config)];
         let mut services = std::collections::BTreeSet::new();
         for line in manifest.lines() {

@@ -16,7 +16,9 @@ use clap::{Parser, ValueEnum};
 use heck::{ToSnakeCase, ToUpperCamelCase};
 
 use carina_aws_types::{AwsType, dsl_enum_value};
-use carina_codegen_aws::kms_references::{reference_type_code, validate_smithy_type};
+use carina_codegen_aws::kms_references::{
+    self, PathSegment, reference_type_code, validate_smithy_type,
+};
 use carina_codegen_aws::resource_defs::{self, ReplacementClass, ResourceDef};
 use carina_docgen::example::{self, DocExample, ExampleKind};
 use carina_docgen::{Heading, PageBuilder, TableCell};
@@ -2044,6 +2046,8 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
         .map(|a| a.type_code.as_str())
         .collect::<Vec<_>>()
         .join(" ");
+    // Only schema `types::` constructors need the import; fully qualified
+    // `carina_aws_types::` constructors do not.
     let needs_types = code_str
         .replace("carina_aws_types::", "")
         .contains("types::");
@@ -2557,7 +2561,8 @@ fn resolve_type(
             // Get list member type
             if let Some(carina_smithy::Shape::List(list_shape)) = ctx.model.get_shape(target) {
                 let previous_path = ctx.property_path.clone();
-                ctx.property_path.push_str("[]");
+                ctx.property_path =
+                    kms_references::property_path(&previous_path, PathSegment::ListElement);
                 let (item_type, _) = resolve_type(ctx, &list_shape.member.target, field_name);
                 ctx.property_path = previous_path;
                 (format!("AttributeType::list({})", item_type), None)
@@ -2568,10 +2573,21 @@ fn resolve_type(
                 )
             }
         }
-        Some(ShapeKind::Map) => (
-            format!("AttributeType::map({PLAIN_STRING_TYPE_CODE})"),
-            None,
-        ),
+        Some(ShapeKind::Map) => {
+            if let Some(Shape::Map(map_shape)) = ctx.model.get_shape(target) {
+                let previous_path = ctx.property_path.clone();
+                ctx.property_path =
+                    kms_references::property_path(&previous_path, PathSegment::MapValue);
+                let (value_type, _) = resolve_type(ctx, &map_shape.value.target, field_name);
+                ctx.property_path = previous_path;
+                (format!("AttributeType::map({value_type})"), None)
+            } else {
+                (
+                    format!("AttributeType::map({PLAIN_STRING_TYPE_CODE})"),
+                    None,
+                )
+            }
+        }
         Some(ShapeKind::Structure) => {
             // Check if it's a TagList-like structure
             let shape_name = SmithyModel::shape_name(target);
@@ -2625,7 +2641,8 @@ fn generate_struct_type(
             .copied();
 
         let previous_path = ctx.property_path.clone();
-        ctx.property_path = format!("{previous_path}.{snake_name}");
+        ctx.property_path =
+            kms_references::property_path(&previous_path, PathSegment::Field(&snake_name));
         let (field_type, enum_info) =
             if let Some(code) = reference_type_code(ctx.resource_name, &ctx.property_path) {
                 (code.to_string(), None)
@@ -5095,13 +5112,14 @@ enum MarkdownType {
         name: String,
     },
     List(Box<MarkdownType>),
+    Map(Box<MarkdownType>),
 }
 
 impl MarkdownType {
     fn contains_link(&self) -> bool {
         match self {
             Self::Enum { .. } | Self::Struct { .. } => true,
-            Self::List(item) => item.contains_link(),
+            Self::List(item) | Self::Map(item) => item.contains_link(),
             Self::Plain(_) => false,
         }
     }
@@ -5114,6 +5132,8 @@ impl MarkdownType {
                 .unwrap_or(value)
                 .to_string(),
             Self::List(item) => format!("List<{}>", item.plain_text()),
+            Self::Map(item) if item.plain_text() == "String" => "Map".to_string(),
+            Self::Map(item) => format!("Map<String, {}>", item.plain_text()),
             Self::Enum { type_name, .. } => format!("Enum ({type_name})"),
             Self::Struct { name, .. } => format!("Struct({name})"),
         }
@@ -5140,6 +5160,13 @@ impl MarkdownType {
                 page.push_str("\\>");
             }
             Self::List(item) => page.push_str(&format!("`List<{}>`", item.plain_text())),
+            Self::Map(item) if item.contains_link() => {
+                page.push_str("Map\\<String, ");
+                item.write_to(page);
+                page.push_str("\\>");
+            }
+            Self::Map(_) if self.plain_text() == "Map" => page.push_str("Map"),
+            Self::Map(_) => page.push_str(&format!("`{}`", self.plain_text())),
         }
     }
 
@@ -5166,6 +5193,13 @@ impl MarkdownType {
                 cell.push_text("\\>");
             }
             Self::List(item) => cell.push_code(format!("List<{}>", item.plain_text())),
+            Self::Map(item) if item.contains_link() => {
+                cell.push_text("Map\\<String, ");
+                item.write_to_table_cell(cell);
+                cell.push_text("\\>");
+            }
+            Self::Map(_) if self.plain_text() == "Map" => cell.push_text("Map"),
+            Self::Map(_) => cell.push_code(self.plain_text()),
         }
     }
 }
@@ -6187,7 +6221,7 @@ fn discover_markdown_type(
                     &list_shape.member.target,
                     field_name,
                     heading_path,
-                    &format!("{property_path}[]"),
+                    &kms_references::property_path(property_path, PathSegment::ListElement),
                     enum_namespace,
                     type_overrides,
                     struct_field_type_overrides,
@@ -6201,7 +6235,28 @@ fn discover_markdown_type(
                 MarkdownType::List(Box::new(MarkdownType::Plain("String".to_string())))
             }
         }
-        Some(ShapeKind::Map) => MarkdownType::Plain("Map".to_string()),
+        Some(ShapeKind::Map) => {
+            let value = if let Some(Shape::Map(map_shape)) = model.get_shape(target) {
+                discover_markdown_type(
+                    model,
+                    resource_name,
+                    &map_shape.value.target,
+                    field_name,
+                    heading_path,
+                    &kms_references::property_path(property_path, PathSegment::MapValue),
+                    enum_namespace,
+                    type_overrides,
+                    struct_field_type_overrides,
+                    parent_struct,
+                    all_enums,
+                    struct_defs,
+                    discovering_structs,
+                )
+            } else {
+                MarkdownType::Plain("String".to_string())
+            };
+            MarkdownType::Map(Box::new(value))
+        }
         Some(ShapeKind::Structure) => {
             let shape_name = SmithyModel::shape_name(target).to_string();
             if shape_name == "TagList" || shape_name == "Tag" {
@@ -6240,7 +6295,10 @@ fn discover_markdown_type(
                             &member_ref.target,
                             name,
                             &child_heading_path,
-                            &format!("{property_path}.{}", name.to_snake_case()),
+                            &kms_references::property_path(
+                                property_path,
+                                PathSegment::Field(&name.to_snake_case()),
+                            ),
                             &child_enum_namespace,
                             type_overrides,
                             struct_field_type_overrides,

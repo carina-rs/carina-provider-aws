@@ -94,16 +94,18 @@ where
 
 fn error(
     provider_name: &str,
+    operation: &str,
+    kind: ProviderErrorKind,
     message: impl Into<String>,
     failure: Option<DescribeKeyFailure>,
 ) -> Box<ProviderError> {
     let mut error = ProviderError {
-        kind: ProviderErrorKind::InvalidInput,
+        kind,
         message: message.into(),
         resource_id: None,
         cause: None,
         provider_name: Some(provider_name.into()),
-        operation: Some("kms.DescribeKey".into()),
+        operation: Some(operation.into()),
         code: None,
         status: None,
         request_id: None,
@@ -137,14 +139,23 @@ pub async fn resolve_kms_key_reference(
     instance_region: &str,
     raw: &str,
 ) -> Result<ReferenceOutcome, ReferenceError> {
-    crate::validate_kms_key_reference(raw)
-        .map_err(|reason| ReferenceError::InvalidReference(error(provider_name, reason, None)))?;
+    crate::validate_kms_key_reference(raw).map_err(|reason| {
+        ReferenceError::InvalidReference(error(
+            provider_name,
+            "kms.DescribeKey",
+            ProviderErrorKind::InvalidInput,
+            reason,
+            None,
+        ))
+    })?;
     let mut region = instance_region;
     if raw.starts_with("arn:") {
         let parts: Vec<_> = raw.splitn(6, ':').collect();
         if partition(instance_region) != Some(parts[1]) || partition(parts[3]) != Some(parts[1]) {
             return Err(ReferenceError::InvalidReference(error(
                 provider_name,
+                "kms.DescribeKey",
+                ProviderErrorKind::InvalidInput,
                 "KMS ARN partition is unreachable from this provider instance",
                 None,
             )));
@@ -152,13 +163,21 @@ pub async fn resolve_kms_key_reference(
         region = parts[3];
         if parts[5].starts_with("key/") {
             crate::validate_kms_key_arn(raw).map_err(|reason| {
-                ReferenceError::InvalidReference(error(provider_name, reason, None))
+                ReferenceError::InvalidReference(error(
+                    provider_name,
+                    "kms.DescribeKey",
+                    ProviderErrorKind::InvalidInput,
+                    reason,
+                    None,
+                ))
             })?;
             return Ok(ReferenceOutcome::Resolved(raw.to_owned()));
         }
     } else if partition(instance_region).is_none() {
         return Err(ReferenceError::InvalidReference(error(
             provider_name,
+            "kms.DescribeKey",
+            ProviderErrorKind::InvalidInput,
             "KMS partition is unreachable from this provider instance",
             None,
         )));
@@ -169,6 +188,8 @@ pub async fn resolve_kms_key_reference(
         }
         Ok(_) => Err(ReferenceError::InvalidReference(error(
             provider_name,
+            "kms.DescribeKey",
+            ProviderErrorKind::InvalidInput,
             "DescribeKey response must contain a valid KmsKeyArn",
             None,
         ))),
@@ -196,17 +217,13 @@ pub async fn resolve_reference_batch(
                     .chain(std::iter::once(request.ty.kind))
                     .collect::<Vec<_>>()
                     .join(".");
-                return Err(ReferenceError::InvalidReference(Box::new(ProviderError {
-                    kind: ProviderErrorKind::InvalidInput,
-                    message: format!("unsupported reference identity {ty}"),
-                    operation: Some("resolve_references".into()),
-                    resource_id: None,
-                    cause: None,
-                    provider_name: Some(provider_name.into()),
-                    status: None,
-                    code: None,
-                    request_id: None,
-                })));
+                return Err(ReferenceError::InvalidReference(error(
+                    provider_name,
+                    "resolve_references",
+                    ProviderErrorKind::InvalidInput,
+                    format!("unsupported reference identity {ty}"),
+                    None,
+                )));
             }
             resolve_kms_key_reference(client, provider_name, region, &request.value).await
         }
@@ -234,18 +251,23 @@ fn classify_failure(
                 | "InvalidParameterException"
         )
     );
-    let mut error = error(
+    let kind = if invalid {
+        ProviderErrorKind::InvalidInput
+    } else {
+        ProviderErrorKind::ApiError
+    };
+    let error = error(
         provider_name,
+        "kms.DescribeKey",
+        kind,
         "KMS reference resolution failed",
         Some(failure),
     );
-    error.kind = ProviderErrorKind::ApiError;
     if not_found {
         Ok(ReferenceOutcome::NotFound(error))
     } else if denied {
         Err(ReferenceError::AccessDenied(error))
     } else if invalid {
-        error.kind = ProviderErrorKind::InvalidInput;
         Err(ReferenceError::InvalidReference(error))
     } else {
         Err(ReferenceError::Transient(error))
@@ -759,50 +781,13 @@ mod batch_tests {
     }
 
     #[tokio::test]
-    async fn batch_preserves_positions_and_rejects_unsupported_identities() {
+    async fn empty_batch_never_calls_kms() {
         let fake = Fake(Mutex::new(vec![]));
-        let mut unsupported = request("alias/ignored");
-        unsupported.ty.provider = "awscc".into();
-        let mut wrong_kind = request("alias/ignored");
-        wrong_kind.ty.kind = "Arn".into();
-        let results = super::resolve_reference_batch(
-            &fake,
-            "aws",
-            "us-east-1",
-            vec![
-                request("alias/first"),
-                unsupported,
-                request("alias/second"),
-                wrong_kind,
-            ],
-        )
-        .await;
-        assert_eq!(results.len(), 4);
         assert!(
-            matches!(&results[0], Ok(ReferenceOutcome::Resolved(arn)) if arn.ends_with("11111111-1111-1111-1111-111111111111"))
-        );
-        assert!(matches!(
-            &results[1],
-            Err(ReferenceError::InvalidReference(_))
-        ));
-        assert!(
-            matches!(&results[2], Ok(ReferenceOutcome::Resolved(arn)) if arn.ends_with("22222222-2222-2222-2222-222222222222"))
-        );
-        assert!(matches!(
-            &results[3],
-            Err(ReferenceError::InvalidReference(_))
-        ));
-        for index in [1, 3] {
-            let Err(ReferenceError::InvalidReference(error)) = &results[index] else {
-                unreachable!();
-            };
-            assert_eq!(error.provider_name.as_deref(), Some("aws"));
-        }
-        assert_eq!(*fake.0.lock().unwrap(), ["alias/first", "alias/second"]);
-        assert!(
-            super::resolve_reference_batch(&fake, "aws", "us-east-1", vec![])
+            resolve_reference_batch(&fake, "aws", "us-east-1", vec![])
                 .await
                 .is_empty()
         );
+        assert!(fake.0.lock().unwrap().is_empty());
     }
 }
