@@ -570,11 +570,10 @@ mod tests {
         );
         assert!(
             rootless(t.clone())
-                .validate(&Value::resource_ref(
-                    "role".to_string(),
-                    "arn".to_string(),
-                    vec![]
-                ))
+                .validate(
+                    &Value::resource_ref("role".to_string(), "arn".to_string(), vec![])
+                        .resolve_root_for_test()
+                )
                 .is_ok()
         );
     }
@@ -624,11 +623,10 @@ mod tests {
         );
         assert!(
             rootless(t.clone())
-                .validate(&Value::resource_ref(
-                    "my_vpc".to_string(),
-                    "vpc_id".to_string(),
-                    vec![]
-                ))
+                .validate(
+                    &Value::resource_ref("my_vpc".to_string(), "vpc_id".to_string(), vec![])
+                        .resolve_root_for_test()
+                )
                 .is_ok()
         );
     }
@@ -907,11 +905,14 @@ mod tests {
         );
         assert!(
             rootless(t.clone())
-                .validate(&Value::resource_ref(
-                    "subnet".to_string(),
-                    "availability_zone_id".to_string(),
-                    vec![]
-                ))
+                .validate(
+                    &Value::resource_ref(
+                        "subnet".to_string(),
+                        "availability_zone_id".to_string(),
+                        vec![]
+                    )
+                    .resolve_root_for_test()
+                )
                 .is_ok()
         );
     }

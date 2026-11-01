@@ -1050,7 +1050,7 @@ mod tests {
     }
 
     fn plan_time_unknown() -> Value {
-        Value::resource_ref("upstream", "fifo_queue", vec![])
+        Value::resource_ref("upstream", "fifo_queue", vec![]).resolve_root_for_test()
     }
 
     #[test]
@@ -1073,7 +1073,7 @@ mod tests {
         resource.set_attr("fifo_queue", Value::Concrete(ConcreteValue::Bool(false)));
         resource.set_attr(
             "deduplication_scope",
-            Value::resource_ref("upstream", "deduplication_scope", vec![]),
+            Value::resource_ref("upstream", "deduplication_scope", vec![]).resolve_root_for_test(),
         );
 
         // Defensively check that a deferred value reaching the resolved view still defers.
