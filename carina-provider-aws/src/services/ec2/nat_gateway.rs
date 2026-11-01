@@ -441,7 +441,7 @@ impl AwsProvider {
 #[cfg(test)]
 mod pending_tests {
     use super::*;
-    use carina_core::differ::{Diff, diff};
+    use carina_core::differ::Diff;
     use carina_core::provider::RawSavedAttrs;
     use carina_core::resource::{ResolvedResource, Resource};
     use std::collections::HashMap;
@@ -568,15 +568,7 @@ mod pending_tests {
             .comparison_for(&registry, &desired.id)
             .expect("NAT gateway comparison context");
         let desired = ResolvedResource::new(desired);
-        let result = comparison
-            .context()
-            .with_references(
-                &carina_core::references::prepare_empty_for_tests(),
-                &desired.id,
-                |context| diff(&desired, &current, &saved, None, comparison, context),
-            )
-            .expect("reference-free comparison fixture")
-            .expect("fixture comparison should succeed");
+        let result = crate::test_diff(&desired, &current, &saved, None, comparison);
         assert!(matches!(result, Diff::NoChange(_)), "{result:?}");
     }
 }

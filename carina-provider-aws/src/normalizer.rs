@@ -3,8 +3,39 @@
 use carina_core::provider::{
     BoxFuture, ProviderNormalizer, ProviderResult, SavedAttrs, StateTransformMap, ready_noop,
 };
-use carina_core::resource::ProviderResource;
+use carina_core::resource::{ProviderResource, ResourceId};
 use carina_plugin_sdk::{DesiredView, NativeDesiredNormalization};
+
+type DesiredNormalizer = fn(&mut DesiredView<'_>) -> ProviderResult<()>;
+
+// This dispatch is also the admission check before projecting native resources.
+fn desired_normalizer(id: &ResourceId) -> Option<DesiredNormalizer> {
+    if id.provider != "aws" {
+        return None;
+    }
+    match id.resource_type.as_str() {
+        "route53.RecordSet" => Some(|view| {
+            crate::services::route53::record_set::normalize_record_set_dns_names(view);
+            Ok(())
+        }),
+        "acm.Certificate" => Some(|view| {
+            crate::services::acm::certificate::normalize_acm_certificate_inputs(view);
+            Ok(())
+        }),
+        "s3.BucketReplicationConfiguration" => Some(|view| {
+            crate::services::s3::bucket_replication::normalize_delete_marker_replication(view);
+            Ok(())
+        }),
+        "ec2.Subnet" => Some(crate::services::ec2::subnet::normalize_subnet_ipv6_cidr_blocks),
+        "ec2.NatGateway" => Some(|view| {
+            crate::services::ec2::nat_gateway::validate_nat_gateway_inputs(&view.inputs())
+        }),
+        "sqs.Queue" => {
+            Some(|view| crate::services::sqs::queue::validate_sqs_queue_inputs(&view.inputs()))
+        }
+        _ => None,
+    }
+}
 
 /// Provider-local desired-state normalization for native and WASM resources.
 pub struct AwsNormalizer;
@@ -13,14 +44,9 @@ impl AwsNormalizer {
     /// Apply the same leaf-wise normalizers and validators on either SDK route.
     #[doc(hidden)]
     pub fn normalize_desired_view(&self, view: &mut DesiredView<'_>) -> ProviderResult<()> {
-        crate::services::route53::record_set::normalize_record_set_dns_names(view);
-        crate::services::acm::certificate::normalize_acm_certificate_inputs(view);
-        crate::services::s3::bucket_replication::normalize_delete_marker_replication(view)?;
-        crate::services::ec2::subnet::normalize_subnet_ipv6_cidr_blocks(view)?;
-
-        let inputs = view.inputs();
-        crate::services::ec2::nat_gateway::validate_nat_gateway_inputs(&inputs)?;
-        crate::services::sqs::queue::validate_sqs_queue_inputs(&inputs)?;
+        if let Some(normalize) = desired_normalizer(view.id()) {
+            normalize(view)?;
+        }
         Ok(())
     }
 }
@@ -33,8 +59,11 @@ impl ProviderNormalizer for AwsNormalizer {
         // Bodies are pure; the trait is async for the core normalizer interface.
         Box::pin(async move {
             for resource in resources {
+                let Some(normalize) = desired_normalizer(&resource.id) else {
+                    continue;
+                };
                 let mut desired = NativeDesiredNormalization::from_core(resource)?;
-                self.normalize_desired_view(&mut desired.view())?;
+                normalize(&mut desired.view())?;
                 desired.finish()?;
             }
             Ok(())
@@ -97,6 +126,80 @@ mod tests {
             .finish()
             .expect("deferred leaves must survive exactly once");
         resource.into()
+    }
+
+    #[tokio::test]
+    async fn unhandled_resources_bypass_desired_projection() {
+        use carina_core::resource::RawEnumIdentifier;
+
+        for (provider, resource_type) in [("aws", "s3.Bucket"), ("awscc", "acm.Certificate")] {
+            let value = Value::Concrete(ConcreteValue::EnumIdentifier(RawEnumIdentifier::parse(
+                "raw",
+            )));
+            let mut resources = vec![
+                Resource::with_provider(provider, resource_type, "untouched", None)
+                    .with_attribute("unrelated", value.clone())
+                    .into(),
+            ];
+
+            AwsNormalizer
+                .normalize_desired(&mut resources)
+                .await
+                .expect("an unhandled resource must not be projected or normalized");
+
+            assert_eq!(resources[0].get_attr("unrelated"), Some(&value));
+        }
+    }
+
+    #[tokio::test]
+    #[ignore = "pending carina DesiredInputs scoping decision"]
+    async fn crud_inputs_do_not_reject_unrelated_values_admitted_by_core_preparation() {
+        use carina_core::executor::{
+            ModuleConstraintGate, ProviderPreparationContext, prepare_create_request,
+        };
+        use carina_core::parser::ProviderConfig;
+        use carina_core::provider::ProviderFactory;
+        use carina_plugin_sdk::DesiredInputs;
+
+        let configs = [ProviderConfig {
+            name: "aws".into(),
+            attributes: IndexMap::new(),
+            default_tags: IndexMap::from([(
+                "unrelated".into(),
+                Value::Concrete(ConcreteValue::Duration(std::time::Duration::from_secs(
+                    u64::MAX,
+                ))),
+            )]),
+            source: None,
+            version: None,
+            revision: None,
+            unresolved_attributes: IndexMap::new(),
+            binding: None,
+        }];
+        let bindings = carina_core::binding_index::ResolvedBindings::default();
+        let module_gate = ModuleConstraintGate::from_live_compositions(&[]);
+        let schemas = crate::schemas::schema_registry();
+        let factories: Vec<Box<dyn ProviderFactory>> = vec![Box::new(crate::AwsProviderFactory)];
+        let preparation = ProviderPreparationContext::new(
+            &bindings,
+            &module_gate,
+            &configs,
+            &AwsNormalizer,
+            &factories,
+            &schemas,
+        );
+        let resource = Resource::with_provider("aws", "sqs.Queue", "crud-projection", None)
+            .with_attribute("queue_name", string("crud-projection"));
+        let request = prepare_create_request(resource, &preparation)
+            .await
+            .expect("the actual core preparation gate admits the resource");
+
+        let inputs = DesiredInputs::from_core(request.resource().as_resource());
+        assert!(
+            inputs.is_ok(),
+            "CRUD validator projection rejected an unrelated default tag: {:?}",
+            inputs.err()
+        );
     }
 
     #[test]

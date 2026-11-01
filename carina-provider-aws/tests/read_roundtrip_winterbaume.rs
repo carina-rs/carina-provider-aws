@@ -9,7 +9,7 @@ use std::pin::Pin;
 use std::str;
 use std::sync::{Arc, Mutex};
 
-use carina_core::differ::{Diff, Orphans, PlanPriorStates, create_plan, diff};
+use carina_core::differ::{Diff, Orphans, PlanPriorStates, create_plan};
 use carina_core::effect::Effect;
 use carina_core::provider::{
     AppliedIdentifier, CreateFailure, CreateOutcome, CreateRequest, NestedWriteOnlyRecord,
@@ -194,15 +194,7 @@ fn assert_no_diff(desired: Resource, current: State) {
         .expect("managed resource comparison context");
     let saved = carina_core::provider::RawSavedAttrs::default().lift(&registry);
     let desired = ResolvedResource::new(desired);
-    let result = comparison
-        .context()
-        .with_references(
-            &carina_core::references::prepare_empty_for_tests(),
-            &desired.id,
-            |context| diff(&desired, &current, &saved, None, comparison, context),
-        )
-        .expect("reference-free comparison fixture")
-        .expect("fixture comparison should succeed");
+    let result = carina_provider_aws::test_diff(&desired, &current, &saved, None, comparison);
     assert!(matches!(result, Diff::NoChange(_)), "{result:?}");
 }
 
@@ -252,24 +244,8 @@ async fn assert_no_diff_with_nested_write_only(
         &comparison.context().observation(),
     );
     let desired = ResolvedResource::new(desired);
-    let result = comparison
-        .context()
-        .with_references(
-            &carina_core::references::prepare_empty_for_tests(),
-            &desired.id,
-            |context| {
-                diff(
-                    &desired,
-                    &current,
-                    &saved,
-                    Some(&explicit),
-                    comparison,
-                    context,
-                )
-            },
-        )
-        .expect("reference-free comparison fixture")
-        .expect("fixture comparison should succeed");
+    let result =
+        carina_provider_aws::test_diff(&desired, &current, &saved, Some(&explicit), comparison);
     assert!(matches!(result, Diff::NoChange(_)), "{result:?}");
 }
 

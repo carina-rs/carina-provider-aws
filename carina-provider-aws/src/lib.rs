@@ -144,6 +144,37 @@ pub fn test_comparison_router() -> carina_core::provider::ProviderRouter {
     router
 }
 
+/// Compare a provider test fixture that declares no comparison references.
+#[doc(hidden)]
+#[cfg(any(test, feature = "test-utils"))]
+#[track_caller]
+pub fn test_diff(
+    desired: &carina_core::resource::ResolvedResource,
+    current: &carina_core::resource::State,
+    saved: &carina_core::provider::LiftedSavedAttrs,
+    previous_explicit: Option<&carina_core::explicit::ExplicitFields>,
+    comparison: carina_core::provider::ResolvedComparison<'_>,
+) -> carina_core::differ::Diff {
+    comparison
+        .context()
+        .with_references(
+            &carina_core::references::prepare_empty_for_tests(),
+            &desired.id,
+            |context| {
+                carina_core::differ::diff(
+                    desired,
+                    current,
+                    saved,
+                    previous_explicit,
+                    comparison,
+                    context,
+                )
+            },
+        )
+        .expect("reference-free comparison fixture")
+        .expect("fixture comparison should succeed")
+}
+
 #[cfg(test)]
 pub(crate) fn test_rootless_type(
     attr: carina_core::schema::AttributeType,

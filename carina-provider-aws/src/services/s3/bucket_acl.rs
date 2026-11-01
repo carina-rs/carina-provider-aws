@@ -236,7 +236,7 @@ impl AwsProvider {
 mod tests {
     use super::*;
     use aws_sdk_s3::types::Grantee;
-    use carina_core::differ::{Diff, diff};
+    use carina_core::differ::Diff;
     use carina_core::provider::RawSavedAttrs;
     use carina_core::resource::{ResolvedResource, Resource};
     use std::collections::HashMap;
@@ -385,15 +385,7 @@ mod tests {
             .expect("bucket ACL comparison context");
 
         let desired = ResolvedResource::new(desired);
-        let result = comparison
-            .context()
-            .with_references(
-                &carina_core::references::prepare_empty_for_tests(),
-                &desired.id,
-                |context| diff(&desired, &current, &saved, None, comparison, context),
-            )
-            .expect("reference-free comparison fixture")
-            .expect("fixture comparison should succeed");
+        let result = crate::test_diff(&desired, &current, &saved, None, comparison);
         assert!(matches!(result, Diff::Update { .. }), "{result:?}");
     }
 

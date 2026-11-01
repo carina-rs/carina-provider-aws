@@ -48,7 +48,7 @@ mod tests {
     use std::collections::HashMap;
 
     use carina_aws_types::AwsType;
-    use carina_core::differ::{Diff, diff};
+    use carina_core::differ::Diff;
     use carina_core::executor::normalized::apply_desired_normalization;
     use carina_core::provider::normalize_provider_states;
     use carina_core::resource::{ConcreteValue, Current, ResolvedResource, Resource, Value};
@@ -870,15 +870,7 @@ mod tests {
             .expect("RecordSet comparison context");
         let saved_attrs = carina_core::provider::RawSavedAttrs::default().lift(&registry);
         let desired = ResolvedResource::new(normalized.as_resource().clone());
-        let result = comparison
-            .context()
-            .with_references(
-                &carina_core::references::prepare_empty_for_tests(),
-                &desired.id,
-                |context| diff(&desired, &current, &saved_attrs, None, comparison, context),
-            )
-            .expect("reference-free comparison fixture")
-            .expect("fixture comparison should succeed");
+        let result = crate::test_diff(&desired, &current, &saved_attrs, None, comparison);
         assert!(
             matches!(result, Diff::NoChange(_)),
             "{label}: read-back wire value must not cause a phantom diff: {result:?}"

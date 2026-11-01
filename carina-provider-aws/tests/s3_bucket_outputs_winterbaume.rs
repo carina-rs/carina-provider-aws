@@ -4,7 +4,7 @@
 #![cfg(not(target_arch = "wasm32"))]
 
 use aws_sdk_s3::Client as S3Client;
-use carina_core::differ::{Diff, diff};
+use carina_core::differ::Diff;
 use carina_core::provider::{
     AppliedIdentifier, CreateFailure, CreateOutcome, CreateOutcomeKind, CreateRequest,
     NoopNormalizer, Provider, ProviderReadyDataSource, ReadRequest, UpdateOutcomeKind,
@@ -296,15 +296,7 @@ fn assert_no_diff(desired: Resource, current: State) {
         .expect("S3 bucket comparison context");
     let saved = RawSavedAttrs::default().lift(&registry);
     let desired = ResolvedResource::new(desired);
-    let result = comparison
-        .context()
-        .with_references(
-            &carina_core::references::prepare_empty_for_tests(),
-            &desired.id,
-            |context| diff(&desired, &current, &saved, None, comparison, context),
-        )
-        .expect("reference-free comparison fixture")
-        .expect("fixture comparison should succeed");
+    let result = carina_provider_aws::test_diff(&desired, &current, &saved, None, comparison);
     assert!(matches!(result, Diff::NoChange(_)), "{result:?}");
 }
 

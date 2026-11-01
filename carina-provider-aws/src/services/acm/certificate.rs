@@ -105,8 +105,13 @@ fn normalize_acm_dns_name(name: &str) -> String {
     name.trim_end_matches('.').to_ascii_lowercase()
 }
 
-fn acm_dns_names_equal(left: &str, right: &str) -> bool {
-    normalize_acm_dns_name(left) == normalize_acm_dns_name(right)
+fn canonical_acm_san(name: &str, primary_domain: Option<&str>) -> Option<String> {
+    let canonical = normalize_acm_dns_name(name);
+    if primary_domain.is_some_and(|primary| canonical == normalize_acm_dns_name(primary)) {
+        None
+    } else {
+        Some(canonical)
+    }
 }
 
 fn canonicalize_acm_subject_alternative_names(
@@ -123,13 +128,8 @@ fn canonicalize_acm_subject_alternative_names(
                 .into_iter()
                 .filter_map(|name| match name {
                     Value::Concrete(ConcreteValue::String(name)) => {
-                        let name = normalize_acm_dns_name(name.expose_plaintext());
-                        if primary_domain.is_some_and(|primary| acm_dns_names_equal(&name, primary))
-                        {
-                            None
-                        } else {
-                            Some(Value::Concrete(ConcreteValue::String(name.into())))
-                        }
+                        canonical_acm_san(name.expose_plaintext(), primary_domain)
+                            .map(|name| Value::Concrete(ConcreteValue::String(name.into())))
                     }
                     other => Some(other),
                 })
@@ -149,7 +149,7 @@ pub(crate) fn normalize_acm_certificate_inputs(input: &mut DesiredView<'_>) {
     }
 
     let primary_domain = match input.attribute("domain_name") {
-        Some(DesiredValue::Known(value)) => value.as_str().map(normalize_acm_dns_name),
+        Some(DesiredValue::Known(value)) => value.as_str().map(str::to_owned),
         _ => None,
     };
     let Some(DesiredValueMut::List(names)) = input.attribute_mut("subject_alternative_names")
@@ -160,10 +160,13 @@ pub(crate) fn normalize_acm_certificate_inputs(input: &mut DesiredView<'_>) {
         let DesiredScalar::String(name) = scalar else {
             return true;
         };
-        let canonical = normalize_acm_dns_name(name.expose_plaintext());
-        let keep = primary_domain.as_deref() != Some(canonical.as_str());
-        *name = canonical.into();
-        keep
+        match canonical_acm_san(name.expose_plaintext(), primary_domain.as_deref()) {
+            Some(canonical) => {
+                *name = canonical.into();
+                true
+            }
+            None => false,
+        }
     });
 }
 
@@ -204,8 +207,7 @@ fn build_request_certificate_input(
         .map(|names| {
             names
                 .into_iter()
-                .map(|name| normalize_acm_dns_name(&name))
-                .filter(|name| !acm_dns_names_equal(name, &domain_name))
+                .filter_map(|name| canonical_acm_san(&name, Some(&domain_name)))
                 .collect::<Vec<_>>()
         })
         .filter(|values| !values.is_empty());

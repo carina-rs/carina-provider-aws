@@ -162,7 +162,7 @@ mod tests {
     use std::pin::Pin;
     use std::sync::{Arc, Mutex};
 
-    use carina_core::differ::{Diff, diff};
+    use carina_core::differ::Diff;
     use carina_core::provider::RawSavedAttrs;
     use carina_core::resource::{ResolvedResource, Resource};
     use winterbaume_core::{MockAws, MockRequest, MockResponse, MockService};
@@ -467,15 +467,7 @@ mod tests {
             .expect("VPC comparison context");
 
         let desired = ResolvedResource::new(desired);
-        let result = comparison
-            .context()
-            .with_references(
-                &carina_core::references::prepare_empty_for_tests(),
-                &desired.id,
-                |context| diff(&desired, &current, &saved, None, comparison, context),
-            )
-            .expect("reference-free comparison fixture")
-            .expect("fixture comparison should succeed");
+        let result = crate::test_diff(&desired, &current, &saved, None, comparison);
 
         assert!(matches!(result, Diff::NoChange(_)), "{result:?}");
     }

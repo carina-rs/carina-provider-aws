@@ -16,4 +16,6 @@ version = "0.7.4"
 [workspace.dependencies]
 carina-core = { git = "https://github.com/carina-rs/carina", rev = "9ca0993a" }
 carina-plugin-sdk = { git = "https://github.com/carina-rs/carina", rev = "9ca0993a" }
+carina-plugin-host = { git = "https://github.com/carina-rs/carina", rev = "9ca0993a" }
 carina-provider-protocol = { git = "https://github.com/carina-rs/carina", rev = "9ca0993a" }
+carina-provider-resolver = { git = "https://github.com/carina-rs/carina", rev = "9ca0993a" }
