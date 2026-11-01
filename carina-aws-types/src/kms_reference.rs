@@ -513,6 +513,32 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn arn_reference_validates_offline_and_resolves_alias_arn() {
+        use carina_core::resource::{ConcreteValue, Value};
+
+        let raw = "arn:aws:kms:eu-west-1:999999999999:alias/Team_1:customer-key";
+        let canonical =
+            "arn:aws:kms:eu-west-1:999999999999:key/mrk-0123456789abcdef0123456789abcdef";
+        let schema = crate::tests::rootless(crate::kms_key_or_alias_arn_reference());
+        for value in [raw, canonical] {
+            assert!(
+                schema
+                    .validate_collect(&Value::Concrete(ConcreteValue::String(value.into())))
+                    .is_empty(),
+                "{value}"
+            );
+        }
+
+        let fake = client(Ok(Some(canonical.into())));
+        let result = resolve_kms_key_reference(&fake, "awscc", "us-east-1", raw).await;
+        assert!(matches!(result, Ok(ReferenceOutcome::Resolved(arn)) if arn == canonical));
+        assert_eq!(
+            *fake.calls.lock().unwrap(),
+            [("eu-west-1".into(), raw.into())]
+        );
+    }
+
+    #[tokio::test]
     async fn same_partition_references_resolve_in_every_partition() {
         for (partition, instance_region, arn_region) in PARTITION_REGIONS {
             let key_arn = format!("arn:{partition}:kms:{arn_region}:123456789012:key/{KEY_ID}");

@@ -9,7 +9,17 @@ pub fn kms_key_arn_reference() -> carina_core::schema::AttributeType {
     )
 }
 
+/// Scheduler accepts key or alias ARNs, with the CloudFormation length bound.
+pub fn kms_key_or_alias_arn_reference() -> carina_core::schema::AttributeType {
+    carina_core::schema::AttributeType::reference(
+        crate::AwsType::KmsKeyReference.identity(),
+        Some(KMS_KEY_OR_ALIAS_ARN_PATTERN.to_string()),
+        Some((Some(1), Some(2048))),
+    )
+}
+
 pub const KMS_KEY_ARN_PATTERN: &str = r"^arn:(aws|aws-cn|aws-us-gov|aws-iso|aws-iso-b|aws-iso-e|aws-iso-f|aws-eusc):kms:[a-z]{2,4}(-[a-z0-9]+)+-[0-9]+:[0-9]{12}:key/([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}|mrk-[0-9a-fA-F]{32})$";
+pub const KMS_KEY_OR_ALIAS_ARN_PATTERN: &str = r"^arn:(aws|aws-cn|aws-us-gov|aws-iso|aws-iso-b|aws-iso-e|aws-iso-f|aws-eusc):kms:[a-z]{2,4}(-[a-z0-9]+)+-[0-9]+:[0-9]{12}:(key/([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}|mrk-[0-9a-fA-F]{32})|alias/[a-zA-Z0-9:/_-]+)$";
 pub const KMS_KEY_REFERENCE_PATTERN: &str = r"^((arn:(aws|aws-cn|aws-us-gov|aws-iso|aws-iso-b|aws-iso-e|aws-iso-f|aws-eusc):kms:[a-z]{2,4}(-[a-z0-9]+)+-[0-9]+:[0-9]{12}:(key/([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}|mrk-[0-9a-fA-F]{32})|alias/[a-zA-Z0-9:/_-]+))|(alias/[a-zA-Z0-9:/_-]+)|([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})|(mrk-[0-9a-fA-F]{32}))$";
 
 /// Validate the canonical, key-only output type used by both guests.
@@ -98,6 +108,7 @@ mod tests {
     #[test]
     fn patterns_accept_current_partitions_and_regions() {
         let key_pattern = regex::Regex::new(KMS_KEY_ARN_PATTERN).unwrap();
+        let arn_reference_pattern = regex::Regex::new(KMS_KEY_OR_ALIAS_ARN_PATTERN).unwrap();
         let reference_pattern = regex::Regex::new(KMS_KEY_REFERENCE_PATTERN).unwrap();
         for (partition, region) in [
             ("aws", "us-east-1"),
@@ -116,15 +127,62 @@ mod tests {
             for key_id in KEY_IDS {
                 let arn = format!("arn:{partition}:kms:{region}:123456789012:key/{key_id}");
                 assert!(key_pattern.is_match(&arn), "{arn}");
+                assert!(arn_reference_pattern.is_match(&arn), "{arn}");
                 assert!(reference_pattern.is_match(&arn), "{arn}");
                 assert!(validate_kms_key_arn(&arn).is_ok(), "{arn}");
                 assert!(validate_kms_key_reference(&arn).is_ok(), "{arn}");
             }
             let alias = format!("arn:{partition}:kms:{region}:123456789012:alias/customer");
             assert!(!key_pattern.is_match(&alias), "{alias}");
+            assert!(arn_reference_pattern.is_match(&alias), "{alias}");
             assert!(reference_pattern.is_match(&alias), "{alias}");
             assert!(validate_kms_key_reference(&alias).is_ok(), "{alias}");
         }
+    }
+
+    #[test]
+    fn arn_reference_preserves_identity_pattern_and_length_constraints() {
+        use carina_core::resource::{ConcreteValue, Value};
+        use carina_core::schema::{RawShape, TypeError};
+
+        let leaf = crate::kms_key_or_alias_arn_reference();
+        let RawShape::Reference {
+            identity,
+            pattern,
+            length,
+        } = leaf.raw_shape()
+        else {
+            panic!("expected a reference leaf");
+        };
+        assert_eq!(identity.to_string(), "aws.kms.Key.Reference");
+        assert_eq!(pattern, Some(crate::KMS_KEY_OR_ALIAS_ARN_PATTERN));
+        assert_eq!(length, Some((Some(1), Some(2048))));
+
+        let pattern = regex::Regex::new(KMS_KEY_OR_ALIAS_ARN_PATTERN).unwrap();
+        let schema = crate::tests::rootless(leaf);
+        let validate = |raw: &str| {
+            schema.validate_collect(&Value::Concrete(ConcreteValue::String(
+                raw.to_owned().into(),
+            )))
+        };
+        for raw in ["", "alias/x"].into_iter().chain(KEY_IDS) {
+            assert!(!pattern.is_match(raw), "{raw}");
+            assert!(
+                validate(raw)
+                    .iter()
+                    .any(|(_, error)| matches!(error, TypeError::PatternMismatch { .. })),
+                "{raw}"
+            );
+        }
+
+        let prefix = "arn:aws:kms:us-east-1:123456789012:alias/";
+        let max_length_alias = format!("{prefix}{}", "a".repeat(2048 - prefix.len()));
+        assert!(validate(&max_length_alias).is_empty());
+        assert!(
+            validate(&format!("{max_length_alias}a"))
+                .iter()
+                .any(|(_, error)| matches!(error, TypeError::LengthOutOfRange { .. }))
+        );
     }
 
     #[test]
@@ -140,6 +198,7 @@ mod tests {
     #[test]
     fn patterns_reject_malformed_arns() {
         let key_pattern = regex::Regex::new(KMS_KEY_ARN_PATTERN).unwrap();
+        let arn_reference_pattern = regex::Regex::new(KMS_KEY_OR_ALIAS_ARN_PATTERN).unwrap();
         let reference_pattern = regex::Regex::new(KMS_KEY_REFERENCE_PATTERN).unwrap();
         for (partition, region, account, resource) in [
             (
@@ -181,6 +240,7 @@ mod tests {
         ] {
             let arn = format!("arn:{partition}:kms:{region}:{account}:{resource}");
             assert!(!key_pattern.is_match(&arn), "{arn}");
+            assert!(!arn_reference_pattern.is_match(&arn), "{arn}");
             assert!(!reference_pattern.is_match(&arn), "{arn}");
             assert!(validate_kms_key_arn(&arn).is_err(), "{arn}");
             assert!(validate_kms_key_reference(&arn).is_err(), "{arn}");
