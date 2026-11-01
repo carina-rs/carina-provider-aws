@@ -483,15 +483,33 @@ where
     }
 }
 
+/// S3 service-error codes that the AWS docs classify as transient but
+/// the generated SDK does not flag as retryable.
+///
+/// The S3 Smithy model attaches no `@retryable` trait to any operation
+/// error, so every S3 operation's generated `retryable_error_kind()`
+/// returns `None` unconditionally (e.g. `DeleteBucketWebsiteError` only
+/// has an `Unhandled` variant). Without this carve-out, transient S3
+/// failures abort on the first occurrence instead of backing off.
+///
+/// - `RequestTimeout` (HTTP 400): "Your socket connection to the server
+///   was not read from or written to within the timeout period." The
+///   raw response is marked `retryable: true`; a retry of an idempotent
+///   operation is safe.
+/// - `SlowDown` (HTTP 503): S3 request-rate throttling — back off.
+/// - `OperationAborted` (HTTP 409): CreateBucket / DeleteBucket race;
+///   the bucket name's control-plane state clears in ~60–90s.
+const S3_RETRYABLE_ERROR_CODES: &[&str] = &["RequestTimeout", "SlowDown", "OperationAborted"];
+
 /// Decide whether a provider-level resend is both safe and worth retrying.
 /// Safety uses all attempts; transience uses only the final attempt.
-pub(crate) fn provider_retry_allowed<E>(
+pub(crate) fn provider_retry_allowed<E, R>(
     classification: SendClassification,
     idempotency: Idempotency,
-    err: &SdkError<E, aws_smithy_runtime_api::client::orchestrator::HttpResponse>,
+    err: &SdkError<E, R>,
 ) -> bool
 where
-    E: ProvideErrorKind + ProvideErrorMetadata + std::error::Error + 'static,
+    E: ProvideErrorKind + ProvideErrorMetadata,
 {
     if !classification.resend_is_safe(idempotency) {
         return false;
@@ -512,9 +530,29 @@ where
         } => {}
     }
 
-    // Mutation resend policy keeps its existing response-error behavior;
-    // post-mutation reads use Transience directly and never retry decoding.
-    matches!(err, SdkError::ResponseError(_)) || Transience::of(err) == Transience::Transient
+    match err {
+        SdkError::ConstructionFailure(_) => false,
+        SdkError::TimeoutError(_) | SdkError::DispatchFailure(_) | SdkError::ResponseError(_) => {
+            true
+        }
+        SdkError::ServiceError(ctx) => {
+            let inner = ctx.err();
+            if inner.retryable_error_kind().is_some() {
+                return true;
+            }
+            // S3 carve-out: the SDK model flags no S3 error as
+            // retryable, so consult the documented transient codes.
+            // Disambiguate `code()` — both `ProvideErrorKind` and
+            // `ProvideErrorMetadata` define a same-named accessor.
+            matches!(
+                ProvideErrorMetadata::code(inner),
+                Some(code) if S3_RETRYABLE_ERROR_CODES.contains(&code)
+            )
+        }
+        // `SdkError` is `#[non_exhaustive]`; future-added variants get
+        // the conservative default (don't retry).
+        _ => false,
+    }
 }
 
 /// Reconstruct a `Resource` from `from` state plus an `UpdatePatch`.
@@ -1618,6 +1656,29 @@ mod tests {
             Idempotency::ReadOnly,
             &error
         ));
+    }
+
+    #[test]
+    fn maybe_sent_other_without_kind_retries_only_when_resend_is_safe() {
+        let error = other_dispatch_err();
+        let classification = SendClassification::MaybeSent {
+            final_attempt: FinalAttempt::Sent,
+        };
+
+        // Read-back's transience policy must stay separate from mutation resends.
+        assert_eq!(Transience::of(&error), Transience::Permanent);
+        for (idempotency, expected) in [
+            (Idempotency::NotIdempotent, false),
+            (Idempotency::ReadOnly, true),
+            (Idempotency::Idempotent, true),
+            (Idempotency::IdempotencyToken, true),
+        ] {
+            assert_eq!(
+                provider_retry_allowed(classification, idempotency, &error),
+                expected,
+                "{idempotency:?}"
+            );
+        }
     }
 
     #[test]
