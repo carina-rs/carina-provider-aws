@@ -58,7 +58,8 @@ pub enum Transience {
 /// annotation carries guard provenance, which [`Self::of`] checks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SendClassification {
-    /// No attempt could have reached AWS; the final attempt failed before transmit.
+    /// No attempt could have applied the request: every earlier attempt was
+    /// NotSent or Rejected, and the final attempt failed before transmit.
     NotSent(Transience),
     /// AWS proved the final request was not applied, and no earlier attempt was MaybeSent.
     Rejected,
@@ -69,8 +70,9 @@ pub enum SendClassification {
 impl SendClassification {
     /// Classifies an SDK failure once for all downstream resend decisions.
     ///
-    /// [`Self::NotSent`] means no attempt reached AWS and carries the final
-    /// pre-transmit failure's transience. [`Self::Rejected`] means AWS proved
+    /// [`Self::NotSent`] means every earlier attempt was NotSent or Rejected
+    /// and the final attempt failed before transmit. It carries that final
+    /// failure's transience. [`Self::Rejected`] means AWS proved
     /// the request was not applied and no earlier attempt was uncertain.
     /// Only [`Self::MaybeSent`] carries a separate [`FinalAttempt`] verdict,
     /// because an earlier attempt may have reached AWS even when the last
@@ -903,12 +905,17 @@ mod tests {
             context.set_output_or_error(Err(OrchestratorError::operation(Error::erase(
                 MockServiceError::new(code, retryable),
             ))));
+            let error = context
+                .output_or_error()
+                .and_then(Result::err)
+                .expect("test context contains a service failure");
 
             assert_eq!(
                 crate::common::resend_guard::classify_attempt(
                     AttemptPhase::TransmitReached,
                     &context,
                     &runtime_components,
+                    error,
                 ),
                 expected,
                 "unexpected per-attempt outcome for {code}"

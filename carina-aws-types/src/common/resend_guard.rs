@@ -5,7 +5,7 @@ use std::io;
 use aws_smithy_runtime_api::box_error::BoxError;
 use aws_smithy_runtime_api::client::interceptors::Intercept;
 use aws_smithy_runtime_api::client::interceptors::context::{
-    BeforeSerializationInterceptorContextRef, BeforeTransmitInterceptorContextRef,
+    BeforeSerializationInterceptorContextRef, BeforeTransmitInterceptorContextRef, Error,
     FinalizerInterceptorContextMut, FinalizerInterceptorContextRef, InterceptorContext,
 };
 use aws_smithy_runtime_api::client::orchestrator::{Metadata, OrchestratorError};
@@ -36,15 +36,10 @@ pub(super) fn classify_attempt(
     phase: AttemptPhase,
     context: &InterceptorContext,
     runtime_components: &RuntimeComponents,
+    error: &OrchestratorError<Error>,
 ) -> SendClassification {
     match AttemptOutcome::classify_orchestrator(phase, context, runtime_components) {
-        AttemptOutcome::NotSent => {
-            let error = context
-                .output_or_error()
-                .and_then(Result::err)
-                .expect("only failed attempts are classified");
-            SendClassification::NotSent(not_sent_transience(error))
-        }
+        AttemptOutcome::NotSent => SendClassification::NotSent(not_sent_transience(error)),
         AttemptOutcome::Rejected => SendClassification::Rejected,
         AttemptOutcome::MaybeSent => SendClassification::MaybeSent {
             final_attempt: FinalAttempt::Sent,
@@ -333,7 +328,8 @@ impl Intercept for ResendGuard {
         }
 
         let final_phase = attempt_phase(cfg);
-        let classification = classify_attempt(final_phase, context.inner(), runtime_components);
+        let classification =
+            classify_attempt(final_phase, context.inner(), runtime_components, error);
         let classification = if cfg.load::<MaybeSentAttempt>().is_some() {
             classification.with_prior_maybe_sent()
         } else {

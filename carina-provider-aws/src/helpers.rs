@@ -1669,17 +1669,20 @@ mod tests {
             Idempotency::NotIdempotent,
             &error
         ));
+        // The SDK error shape alone rejects retries; typed transience must win.
+        let transient_error: SdkError<MockServiceError, HttpResponse> =
+            SdkError::construction_failure("request construction failed");
         assert!(provider_retry_allowed(
             transient,
             Idempotency::NotIdempotent,
-            &error
+            &transient_error
         ));
     }
 
     #[test]
     fn maybe_sent_operation_with_transient_final_attempt_retries() {
         let final_error: SdkError<MockServiceError, HttpResponse> =
-            SdkError::timeout_error("operation attempt timed out before transmit");
+            SdkError::construction_failure("request construction failed");
 
         assert!(provider_retry_allowed(
             SendClassification::MaybeSent {
