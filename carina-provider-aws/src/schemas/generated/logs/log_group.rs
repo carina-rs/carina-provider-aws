@@ -49,6 +49,7 @@ pub fn logs_log_group_config() -> AwsSchemaConfig {
         .attribute(
             AttributeSchema::required("log_group_name", AttributeType::string())
                 .create_only()
+                .identity()
                 .with_description("A name for the log group.")
                 .with_provider_name("logGroupName")
                 .build(),

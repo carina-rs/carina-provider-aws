@@ -3805,14 +3805,12 @@ pub(crate) struct Route53RecordSetUpdateInput {
     alias_target: Option<Value>,
     resource_records: Option<crate::send_model::StringList>,
     ttl: Option<i64>,
-    r#type: String,
 }
 
 pub(crate) struct Route53RecordSetUpdateParts {
     pub(crate) alias_target: crate::send_model::Sent<Option<Value>>,
     pub(crate) resource_records: crate::send_model::Sent<Option<crate::send_model::StringList>>,
     pub(crate) ttl: crate::send_model::Sent<Option<i64>>,
-    pub(crate) r#type: crate::send_model::Sent<String>,
 }
 
 impl Route53RecordSetUpdateInput {
@@ -3826,7 +3824,6 @@ impl Route53RecordSetUpdateInput {
                 "resource_records",
             )?,
             ttl: crate::send_model::optional_int(_resource, "ttl")?,
-            r#type: crate::send_model::required_enum(_resource, _schema, "type")?,
         })
     }
 
@@ -3835,7 +3832,6 @@ impl Route53RecordSetUpdateInput {
             alias_target,
             resource_records,
             ttl,
-            r#type,
         } = self;
         Route53RecordSetUpdateParts {
             alias_target: crate::send_model::Sent::new(
@@ -3847,7 +3843,6 @@ impl Route53RecordSetUpdateInput {
                 resource_records,
             ),
             ttl: crate::send_model::Sent::new("route53.RecordSet.update.ttl", ttl),
-            r#type: crate::send_model::Sent::new("route53.RecordSet.update.type", r#type),
         }
     }
 }
@@ -5946,11 +5941,6 @@ pub(crate) fn capture_contracts() -> &'static [SendCaptureContract] {
                 SendCaptureAttribute {
                     name: "ttl",
                     provider_name: "TTL",
-                    capture_names: &[],
-                },
-                SendCaptureAttribute {
-                    name: "type",
-                    provider_name: "Type",
                     capture_names: &[],
                 },
             ],

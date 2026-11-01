@@ -56,6 +56,7 @@ pub fn iam_role_config() -> AwsSchemaConfig {
         .attribute(
             AttributeSchema::required("role_name", AttributeType::string())
                 .create_only()
+                .identity()
                 .with_description("The name of the role to create. IAM user, group, role, and policy names must be unique within the account. Names are not distinguished by case. For ex...")
                 .with_provider_name("RoleName")
                 .build(),

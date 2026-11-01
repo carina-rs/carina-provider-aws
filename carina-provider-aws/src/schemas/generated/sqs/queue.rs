@@ -21,6 +21,7 @@ pub fn sqs_queue_config() -> AwsSchemaConfig {
         .attribute(
             AttributeSchema::required("queue_name", AttributeType::string())
                 .create_only()
+                .identity()
                 .with_description("The name of the new queue. The following limits apply to this name: A queue name can have up to 80 characters. Valid values: alphanumeric characters, ...")
                 .with_provider_name("QueueName")
                 .build(),

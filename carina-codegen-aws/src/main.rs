@@ -490,7 +490,9 @@ fn emit_replacement_builder(
             let attr = attrs
                 .iter()
                 .find(|attr| attr.provider_name.to_snake_case() == provider_name_snake);
-            let attr = if attrs.iter().any(|attr| attr.is_identity) {
+            let attr = if attrs.iter().any(|attr| {
+                attr.is_identity && attr.provider_name.to_snake_case() != provider_name_snake
+            }) {
                 Err("on a resource with a composite identity")
             } else {
                 match attr {
@@ -1138,7 +1140,11 @@ fn collect_resource_attributes_unvalidated(
     let read_only_overrides: HashSet<&str> = res.read_only_overrides.iter().copied().collect();
 
     // Build identity override set
-    let identity_overrides: HashSet<&str> = res.identity_overrides.iter().copied().collect();
+    let identity_overrides: HashSet<String> = res
+        .identity_overrides
+        .iter()
+        .map(|name| name.to_snake_case())
+        .collect();
 
     // Build deferred-populate override set (carina#3034). Names are
     // PascalCase, matched against `name` (Smithy member name) before
@@ -1465,7 +1471,7 @@ fn collect_resource_attributes_unvalidated(
 
         let is_plain_string = is_plain_smithy_string(model, &member_ref.target);
         let send_type = send_field_type(model, &member_ref.target, &type_code, enum_info.as_ref());
-        let is_identity = identity_overrides.contains(name.as_str());
+        let is_identity = identity_overrides.contains(&snake_name);
         let is_deferred_populate = deferred_populate_overrides.contains(name.as_str());
 
         attrs.push(AttrInfo {
@@ -1540,7 +1546,7 @@ fn collect_resource_attributes_unvalidated(
             send_reason: None,
             send_type,
             is_plain_string: false,
-            is_identity: identity_overrides.contains(extra.name),
+            is_identity: identity_overrides.contains(&extra.name.to_snake_case()),
             is_deferred_populate: deferred_populate_overrides.contains(extra.name),
             description: extra.description.map(|s| s.to_string()),
             enum_info: None,
@@ -1590,11 +1596,20 @@ fn collect_resource_attributes_unvalidated(
             send_reason: None,
             send_type,
             is_plain_string,
-            is_identity: false,
+            is_identity: identity_overrides.contains(&name.to_snake_case()),
             is_deferred_populate: deferred_populate_overrides.contains(name.as_str()),
             description,
             enum_info,
         });
+    }
+
+    for attr in &attrs {
+        anyhow::ensure!(
+            !attr.is_identity || attr.is_create_only,
+            "{} identity attribute {} must be create-only",
+            res.name,
+            attr.provider_name
+        );
     }
 
     // Also register top-level attribute enums (enum_info is set but may not have
@@ -2196,11 +2211,11 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
         if attr.is_create_only {
             attr_code.push_str("\n\x20               .create_only()");
         }
-        if attr.is_write_only {
-            attr_code.push_str("\n\x20               .write_only()");
-        }
         if attr.is_identity {
             attr_code.push_str("\n\x20               .identity()");
+        }
+        if attr.is_write_only {
+            attr_code.push_str("\n\x20               .write_only()");
         }
         if attr.is_deferred_populate {
             attr_code.push_str("\n\x20               .deferred_populate()");
@@ -7423,6 +7438,98 @@ mod tests {
     }
 
     #[test]
+    fn mutable_identity_fails_attribute_collection() {
+        for required in [false, true] {
+            for synthetic in [false, true] {
+                let model = if synthetic {
+                    string_fixture_model(&[], &[])
+                } else {
+                    string_fixture_model(&[("Description", required)], &[("Description", required)])
+                };
+                let mut resource =
+                    provider_fixture_resource("test.MutableIdentity", "", &["Description"], vec![]);
+                resource.identity_overrides = vec!["Description"];
+                resource.update_ops.push(resource_defs::UpdateOp {
+                    operation: "UpdateFixture",
+                    fields: resource_defs::FieldLayout::Flat(vec!["Description"]),
+                });
+                if synthetic {
+                    resource.extra_attributes.push(resource_defs::ExtraField {
+                        name: "Description",
+                        read_source: None,
+                        description: None,
+                    });
+                    if required {
+                        resource.required_overrides.push("Description");
+                    }
+                }
+
+                let error = collect_resource_attributes_unvalidated(&resource, &model, &[])
+                    .err()
+                    .expect("mutable identity must fail before rendering");
+                assert_eq!(
+                    error.to_string(),
+                    "test.MutableIdentity identity attribute Description must be create-only",
+                    "required={required}, synthetic={synthetic}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn read_only_identity_fails_attribute_collection() {
+        let model = string_fixture_model(&[], &[("Description", false)]);
+        let mut resource =
+            provider_fixture_resource("test.ReadOnlyIdentity", "", &["Description"], vec![]);
+        resource.extra_read_only = vec!["Description"];
+        resource.identity_overrides = vec!["Description"];
+
+        let error = collect_resource_attributes_unvalidated(&resource, &model, &[])
+            .err()
+            .expect("read-only identity must fail before rendering");
+        assert_eq!(
+            error.to_string(),
+            "test.ReadOnlyIdentity identity attribute Description must be create-only"
+        );
+    }
+
+    #[test]
+    fn identity_emission_follows_create_only_for_required_and_optional_attributes() {
+        for required in [false, true] {
+            let model =
+                string_fixture_model(&[("Description", required)], &[("Description", required)]);
+            let mut resource = provider_fixture_resource("iam.Role", "", &["Description"], vec![]);
+            resource.identity_overrides = vec!["Description"];
+
+            let generated =
+                generate_resource(&resource, &model).expect("generate create-only identity");
+            let constructor = if required { "required" } else { "optional" };
+            assert!(
+                generated.contains(&format!(
+                    "AttributeSchema::{constructor}(\"description\", AttributeType::string())\n                .create_only()\n                .identity()"
+                )),
+                "{generated}"
+            );
+        }
+    }
+
+    #[test]
+    fn identity_overrides_match_lower_camel_case_smithy_members() {
+        let model = string_fixture_model(&[("logGroupName", true)], &[("logGroupName", true)]);
+        let mut resource = provider_fixture_resource("iam.Role", "", &["logGroupName"], vec![]);
+        resource.identity_overrides = vec!["LogGroupName"];
+
+        let generated =
+            generate_resource(&resource, &model).expect("generate lower-camel identity");
+        assert!(
+            generated.contains(
+                "AttributeSchema::required(\"log_group_name\", AttributeType::string())\n                .create_only()\n                .identity()"
+            ),
+            "{generated}"
+        );
+    }
+
+    #[test]
     fn unclassified_read_attribute_fails_generation() {
         let model = string_fixture_model(
             &[("Description", false), ("Unobservable", false)],
@@ -8198,6 +8305,51 @@ mod tests {
             emitted(ReplacementClass::Conflicting, &[]).unwrap(),
             "\x20       .with_conflicting_replacement()\n"
         );
+    }
+
+    #[test]
+    fn unique_name_replacement_allows_only_its_own_identity() {
+        let mut attrs = vec![
+            test_attr(
+                "RoleName",
+                "role_name",
+                PLAIN_STRING_TYPE_CODE,
+                false,
+                true,
+                true,
+                None,
+            ),
+            test_attr(
+                "Path",
+                "path",
+                PLAIN_STRING_TYPE_CODE,
+                false,
+                true,
+                false,
+                None,
+            ),
+        ];
+        attrs[0].is_create_only = true;
+        attrs[1].is_create_only = true;
+        let mut code = String::new();
+        emit_replacement_builder(
+            &mut code,
+            "test.Resource",
+            ReplacementClass::UniqueName("roleName"),
+            &attrs,
+        )
+        .expect("the unique-name attribute may be the sole identity");
+        assert_eq!(code, "        .with_unique_name_attribute(\"role_name\")\n");
+
+        attrs[1].is_identity = true;
+        let error = emit_replacement_builder(
+            &mut String::new(),
+            "test.Resource",
+            ReplacementClass::UniqueName("RoleName"),
+            &attrs,
+        )
+        .expect_err("an additional identity must still be rejected");
+        assert!(error.to_string().contains("composite identity"), "{error}");
     }
 
     #[test]

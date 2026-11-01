@@ -861,6 +861,72 @@ fn assert_sample_reached_mutation(
 }
 
 #[tokio::test]
+async fn route53_update_uses_identifier_type_and_sends_mutable_attributes() {
+    let service = Arc::new(CaptureService::default());
+    let mock = MockAws::builder()
+        .with_service(Arc::clone(&service))
+        .build();
+    let provider = AwsProvider::from_sdk_config(
+        REGION.to_string(),
+        vec![],
+        vec![],
+        &BoundedSdkConfig::for_test(mock.sdk_config(REGION).await),
+    );
+    let config = crate::schemas::generated::route53::record_set::route53_record_set_config();
+
+    for desired_type in [None, Some("CNAME")] {
+        service.clear();
+        let mut desired = Resource::with_provider("aws", "route53.RecordSet", "test-record", None);
+        desired.set_attr("ttl", Value::Concrete(ConcreteValue::Int(600)));
+        desired.set_attr(
+            "resource_records",
+            Value::Concrete(ConcreteValue::List(vec![string("2001:db8::1")])),
+        );
+        if let Some(desired_type) = desired_type {
+            desired.set_attr("type", string(desired_type));
+        }
+        let identifier = crate::helpers::applied_identifier(
+            &desired.id,
+            "test.Route53Update",
+            "Z0123456789ABCDEF|record.example.com|AAAA".to_string(),
+        )
+        .expect("applied record identifier");
+
+        let result = provider
+            .update_route53_record_set(desired.id.clone(), &identifier, desired, &config.schema)
+            .await;
+        // The capture transport supplies mutation responses; read-back is
+        // checked through its request rather than a modeled read response.
+        assert!(result.is_ok(), "update must reach read-back: {result:?}");
+        let requests = service.snapshot();
+        let mutation = requests
+            .iter()
+            .find(|request| request.method == "POST")
+            .expect("record update must send a mutation");
+        assert!(mutation.uri.contains("/hostedzone/Z0123456789ABCDEF/rrset"));
+        let body = str::from_utf8(&mutation.body).expect("Route 53 XML request");
+        for expected in [
+            "<Action>UPSERT</Action>",
+            "<Name>record.example.com.</Name>",
+            "<Type>AAAA</Type>",
+            "<TTL>600</TTL>",
+            "<Value>2001:db8::1</Value>",
+        ] {
+            assert!(body.contains(expected), "missing {expected}: {body}");
+        }
+        assert!(
+            !body.contains("CNAME"),
+            "create-only type leaked into update"
+        );
+        let read = requests
+            .iter()
+            .find(|request| request.method == "GET")
+            .expect("record update must read back the existing record");
+        assert!(read.uri.contains("type=AAAA"), "{}", read.uri);
+    }
+}
+
+#[tokio::test]
 async fn every_sent_attribute_reaches_captured_create_and_update_mutations() {
     let service = Arc::new(CaptureService::default());
     let mock = MockAws::builder()
