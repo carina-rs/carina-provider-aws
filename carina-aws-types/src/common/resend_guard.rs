@@ -1,6 +1,7 @@
 //! SDK retry guard that aggregates every attempt into one operation verdict.
 
 use std::io;
+use std::time::SystemTime;
 
 use aws_smithy_runtime_api::box_error::BoxError;
 use aws_smithy_runtime_api::client::interceptors::Intercept;
@@ -13,7 +14,7 @@ use aws_smithy_runtime_api::client::result::ConnectorError;
 use aws_smithy_runtime_api::client::retries::RequestAttempts;
 use aws_smithy_runtime_api::client::runtime_components::RuntimeComponents;
 use aws_smithy_types::config_bag::{ConfigBag, Storable, StoreReplace};
-use aws_smithy_types::retry::ErrorKind;
+use aws_smithy_types::retry::{ErrorKind, RetryConfig};
 
 use super::send_outcome::{
     AttemptOutcome, AttemptPhase, FinalAttempt, Idempotency, OperationSendFailure,
@@ -51,9 +52,18 @@ pub(super) fn classify_attempt(
 struct PreviousAttempt {
     outcome: AttemptOutcome,
     failure: String,
+    retry_message: String,
+    finished_at: SystemTime,
 }
 
 impl Storable for PreviousAttempt {
+    type Storer = StoreReplace<Self>;
+}
+
+#[derive(Debug, Clone, Copy)]
+struct LastStartedAttempt(RequestAttempts);
+
+impl Storable for LastStartedAttempt {
     type Storer = StoreReplace<Self>;
 }
 
@@ -64,10 +74,9 @@ impl Storable for MaybeSentAttempt {
     type Storer = StoreReplace<Self>;
 }
 
-fn rendered_failure(
-    error: &(dyn std::error::Error + 'static),
-    response: Option<&aws_smithy_runtime_api::client::orchestrator::HttpResponse>,
-) -> String {
+fn error_message(error: &(dyn std::error::Error + 'static)) -> String {
+    // Match the Display/source-chain portion of DisplayErrorContext. Its Debug
+    // tail may contain requests or signing data, so it must not reach stderr.
     let mut rendered = error.to_string();
     let mut source = error.source();
     while let Some(error) = source {
@@ -75,6 +84,14 @@ fn rendered_failure(
         rendered.push_str(&error.to_string());
         source = error.source();
     }
+    rendered
+}
+
+fn rendered_failure(
+    error: &(dyn std::error::Error + 'static),
+    response: Option<&aws_smithy_runtime_api::client::orchestrator::HttpResponse>,
+) -> String {
+    let mut rendered = error_message(error);
     if let Some(response) = response {
         rendered.push_str(&format!("; status: {}", response.status().as_u16()));
         for header in [
@@ -91,6 +108,13 @@ fn rendered_failure(
         }
     }
     rendered
+}
+
+fn now(runtime_components: &RuntimeComponents) -> SystemTime {
+    runtime_components
+        .time_source()
+        .map(|time_source| time_source.now())
+        .unwrap_or_else(SystemTime::now)
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -155,12 +179,29 @@ impl OrchestratorKind {
 #[derive(Debug)]
 pub struct ResendGuard {
     lookup: fn(&str) -> Idempotency,
+    output: Box<dyn RetryOutput>,
+}
+
+trait RetryOutput: std::fmt::Debug + Send + Sync {
+    fn write_line(&self, line: &str);
+}
+
+#[derive(Debug)]
+struct Stderr;
+
+impl RetryOutput for Stderr {
+    fn write_line(&self, line: &str) {
+        eprintln!("{line}");
+    }
 }
 
 impl ResendGuard {
     /// Creates a guard using the service's generated idempotency lookup.
     pub fn new(lookup: fn(&str) -> Idempotency) -> Self {
-        Self { lookup }
+        Self {
+            lookup,
+            output: Box::new(Stderr),
+        }
     }
 }
 
@@ -176,19 +217,25 @@ impl Intercept for ResendGuard {
     ) -> Result<(), BoxError> {
         cfg.interceptor_state()
             .store_put(AttemptPhase::BeforeTransmit);
+        cfg.interceptor_state().unset::<LastStartedAttempt>();
         Ok(())
     }
 
     fn read_before_attempt(
         &self,
         _context: &BeforeTransmitInterceptorContextRef<'_>,
-        _runtime_components: &RuntimeComponents,
+        runtime_components: &RuntimeComponents,
         cfg: &mut ConfigBag,
     ) -> Result<(), BoxError> {
-        let attempt = cfg
+        let attempts = cfg
             .load::<RequestAttempts>()
-            .map(RequestAttempts::attempts)
-            .unwrap_or(1);
+            .copied()
+            .unwrap_or_else(|| RequestAttempts::new(1));
+        // The SDK advances RequestAttempts before sleeping. Retain its value
+        // here so a timeout during backoff doesn't count an unstarted attempt.
+        cfg.interceptor_state()
+            .store_put(LastStartedAttempt(attempts));
+        let attempt = attempts.attempts();
         let previous_phase = attempt_phase(cfg);
         cfg.interceptor_state()
             .store_put(AttemptPhase::BeforeTransmit);
@@ -213,12 +260,31 @@ impl Intercept for ResendGuard {
             PreviousAttempt {
                 outcome,
                 failure: "failure details unavailable".to_string(),
+                retry_message: "failure details unavailable".to_string(),
+                finished_at: now(runtime_components),
             }
         });
         if previous.outcome == AttemptOutcome::MaybeSent {
             cfg.interceptor_state().store_put(MaybeSentAttempt);
         }
         cfg.interceptor_state().unset::<PreviousAttempt>();
+
+        if let Some(metadata) = cfg.load::<Metadata>() {
+            let max = cfg
+                .load::<RetryConfig>()
+                .map(RetryConfig::max_attempts)
+                .unwrap_or_else(|| RetryConfig::standard().max_attempts());
+            let elapsed = now(runtime_components)
+                .duration_since(previous.finished_at)
+                .unwrap_or_default()
+                .as_secs_f64();
+            self.output.write_line(&format!(
+                "  Retrying {}.{} (SDK attempt {attempt}/{max} after {elapsed:.1}s): {}",
+                metadata.service(),
+                metadata.name(),
+                previous.retry_message,
+            ));
+        }
 
         if previous.outcome.resend_is_safe(idempotency) {
             return Ok(());
@@ -309,8 +375,18 @@ impl Intercept for ResendGuard {
             .and_then(Result::err)
             .map(|error| rendered_failure(error, context.response()))
             .unwrap_or_else(|| "failure details unavailable".to_string());
-        cfg.interceptor_state()
-            .store_put(PreviousAttempt { outcome, failure });
+        let retry_message = context
+            .output_or_error()
+            .and_then(Result::err)
+            .map(|error| error_message(error))
+            .unwrap_or_else(|| "failure details unavailable".to_string());
+        let finished_at = now(runtime_components);
+        cfg.interceptor_state().store_put(PreviousAttempt {
+            outcome,
+            failure,
+            retry_message,
+            finished_at,
+        });
         Ok(())
     }
 
@@ -354,12 +430,39 @@ impl Intercept for ResendGuard {
         *error = error_kind.with_source(Box::new(failure));
         Ok(())
     }
+
+    fn read_after_execution(
+        &self,
+        context: &FinalizerInterceptorContextRef<'_>,
+        _runtime_components: &RuntimeComponents,
+        cfg: &mut ConfigBag,
+    ) -> Result<(), BoxError> {
+        if !matches!(context.output_or_error(), Some(Err(_))) {
+            return Ok(());
+        }
+        if let (Some(attempt), Some(metadata)) =
+            (cfg.load::<LastStartedAttempt>(), cfg.load::<Metadata>())
+            && attempt.0.attempts() > 1
+        {
+            self.output.write_line(&format!(
+                "  Gave up {}.{} after {} SDK attempts",
+                metadata.service(),
+                metadata.name(),
+                attempt.0.attempts(),
+            ));
+        }
+        Ok(())
+    }
 }
+
+#[cfg(test)]
+mod retry_visibility_tests;
 
 #[cfg(test)]
 mod tests {
     use std::io;
 
+    use aws_smithy_async::time::StaticTimeSource;
     use aws_smithy_runtime_api::client::interceptors::Intercept;
     use aws_smithy_runtime_api::client::interceptors::context::{Input, InterceptorContext};
     use aws_smithy_runtime_api::client::orchestrator::{
@@ -429,6 +532,7 @@ mod tests {
 
     fn runtime_components() -> RuntimeComponents {
         RuntimeComponentsBuilder::for_tests()
+            .with_time_source(Some(StaticTimeSource::new(std::time::UNIX_EPOCH)))
             .build()
             .expect("test runtime components")
     }
