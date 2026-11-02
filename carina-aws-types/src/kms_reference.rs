@@ -233,6 +233,70 @@ pub async fn resolve_reference_batch(
     .await
 }
 
+/// Adapt core requests to the shared wire batch resolver and decode its results.
+/// Identities without a provider fail at their input position without a KMS call.
+pub async fn resolve_core_reference_batch(
+    client: &impl DescribeKeyClient,
+    provider_name: &str,
+    instance_region: &str,
+    requests: &[carina_core::references::ReferenceRequest],
+) -> Vec<Result<carina_core::references::ReferenceOutcome, carina_core::references::ReferenceError>>
+{
+    use carina_core::provider::ProviderError as CoreProviderError;
+    use carina_core::references::{ReferenceError as CoreError, ReferenceOutcome as CoreOutcome};
+    use carina_provider_protocol::types::TypeIdentity;
+
+    let wire_requests = requests
+        .iter()
+        .filter_map(|request| {
+            Some(ReferenceRequest {
+                ty: TypeIdentity {
+                    provider: request.ty.provider.clone()?,
+                    segments: request.ty.segments.clone(),
+                    kind: request.ty.kind.clone(),
+                },
+                value: request.value.clone(),
+            })
+        })
+        .collect();
+    let mut results =
+        resolve_reference_batch(client, provider_name, instance_region, wire_requests)
+            .await
+            .into_iter();
+    requests
+        .iter()
+        .map(|request| {
+            if request.ty.provider.is_none() {
+                return Err(CoreError::InvalidReference(
+                    CoreProviderError::from_wire(*error(
+                        provider_name,
+                        "resolve_references",
+                        ProviderErrorKind::InvalidInput,
+                        "reference identity has no provider",
+                        None,
+                    ))
+                    .into(),
+                ));
+            }
+            match results
+                .next()
+                .expect("wire reference batch preserves input length")
+            {
+                Ok(outcome) => CoreOutcome::from_guest(outcome),
+                Err(ReferenceError::AccessDenied(error)) => Err(CoreError::AccessDenied(
+                    CoreProviderError::from_wire(*error).into(),
+                )),
+                Err(ReferenceError::Transient(error)) => Err(CoreError::Transient(
+                    CoreProviderError::from_wire(*error).into(),
+                )),
+                Err(ReferenceError::InvalidReference(error)) => Err(CoreError::InvalidReference(
+                    CoreProviderError::from_wire(*error).into(),
+                )),
+            }
+        })
+        .collect()
+}
+
 fn classify_failure(
     provider_name: &str,
     failure: DescribeKeyFailure,
@@ -426,6 +490,190 @@ mod tests {
         Fake {
             calls: Mutex::new(vec![]),
             response,
+        }
+    }
+
+    fn core_request(value: &str) -> carina_core::references::ReferenceRequest {
+        carina_core::references::ReferenceRequest {
+            ty: crate::AwsType::KmsKeyReference.identity(),
+            value: value.into(),
+        }
+    }
+
+    fn canonical(value: &str) -> carina_core::references::CanonicalReference {
+        let Ok(carina_core::references::ReferenceOutcome::Resolved(value)) =
+            carina_core::references::ReferenceOutcome::from_guest(ReferenceOutcome::Resolved(
+                value.into(),
+            ))
+        else {
+            panic!("expected a canonical reference");
+        };
+        value
+    }
+
+    #[tokio::test]
+    async fn core_batch_rejects_missing_provider_without_a_call() {
+        use carina_core::references::ReferenceError as CoreError;
+
+        for provider_name in ["aws", "awscc"] {
+            let fake = client(Ok(Some(KEY_ARN.into())));
+            let mut request = core_request("alias/ignored");
+            request.ty.provider = None;
+            let results =
+                resolve_core_reference_batch(&fake, provider_name, "us-east-1", &[request]).await;
+            let [Err(CoreError::InvalidReference(error))] = results.as_slice() else {
+                panic!("an identity without a provider must be invalid");
+            };
+            let wire = error.to_wire();
+            assert_eq!(wire.kind, ProviderErrorKind::InvalidInput);
+            assert_eq!(wire.message, "reference identity has no provider");
+            assert_eq!(wire.provider_name.as_deref(), Some(provider_name));
+            assert_eq!(wire.operation.as_deref(), Some("resolve_references"));
+            assert!(wire.cause.is_none());
+            assert!(fake.calls.lock().unwrap().is_empty());
+        }
+    }
+
+    #[tokio::test]
+    async fn core_batch_keeps_positions_around_missing_providers() {
+        use carina_core::references::{
+            ReferenceError as CoreError, ReferenceOutcome as CoreOutcome,
+        };
+
+        let other_arn =
+            "arn:aws:kms:us-east-1:123456789012:key/22222222-2222-2222-2222-222222222222";
+        for missing_index in 0..3 {
+            let fake = client(Ok(Some(KEY_ARN.into())));
+            let mut missing = core_request("alias/ignored");
+            missing.ty.provider = None;
+            let mut requests = vec![core_request("alias/first"), core_request(other_arn)];
+            requests.insert(missing_index, missing);
+            let mut results =
+                resolve_core_reference_batch(&fake, "aws", "us-east-1", &requests).await;
+            assert_eq!(results.len(), requests.len());
+            assert!(matches!(
+                results.remove(missing_index),
+                Err(CoreError::InvalidReference(_))
+            ));
+            assert!(matches!(&results[0], Ok(CoreOutcome::Resolved(value))
+                if *value == canonical(KEY_ARN)));
+            assert!(matches!(&results[1], Ok(CoreOutcome::Resolved(value))
+                if *value == canonical(other_arn)));
+            assert_eq!(
+                *fake.calls.lock().unwrap(),
+                [("us-east-1".into(), "alias/first".into())]
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn core_batch_keeps_positions_around_unsupported_identity_components() {
+        use carina_core::references::{
+            ReferenceError as CoreError, ReferenceOutcome as CoreOutcome,
+        };
+
+        for provider_name in ["aws", "awscc"] {
+            let fake = client(Ok(Some(KEY_ARN.into())));
+            let mut wrong_segments = core_request("alias/wrong-segments");
+            wrong_segments.ty.segments = vec!["kms".into(), "Other".into()];
+            let mut wrong_kind = core_request("alias/wrong-kind");
+            wrong_kind.ty.kind = "Arn".into();
+            let requests = [wrong_segments, core_request("alias/customer"), wrong_kind];
+            let results =
+                resolve_core_reference_batch(&fake, provider_name, "us-east-1", &requests).await;
+
+            assert_eq!(results.len(), requests.len());
+            assert!(matches!(&results[1], Ok(CoreOutcome::Resolved(value))
+                if *value == canonical(KEY_ARN)));
+            for (index, identity) in [(0, "aws.kms.Other.Reference"), (2, "aws.kms.Key.Arn")] {
+                let Err(CoreError::InvalidReference(error)) = &results[index] else {
+                    panic!("unsupported identity must fail at its input position");
+                };
+                let wire = error.to_wire();
+                assert_eq!(wire.kind, ProviderErrorKind::InvalidInput);
+                assert_eq!(
+                    wire.message,
+                    format!("unsupported reference identity {identity}")
+                );
+                assert_eq!(wire.provider_name.as_deref(), Some(provider_name));
+                assert_eq!(wire.operation.as_deref(), Some("resolve_references"));
+            }
+            assert_eq!(
+                *fake.calls.lock().unwrap(),
+                [("us-east-1".into(), "alias/customer".into())]
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn core_batch_maps_wire_failures_and_preserves_their_sources_and_metadata() {
+        use carina_core::provider::ProviderError as CoreProviderError;
+        use carina_core::references::{
+            ReferenceError as CoreError, ReferenceOutcome as CoreOutcome,
+        };
+
+        for provider_name in ["aws", "awscc"] {
+            for (code, status, expected) in [
+                ("NotFoundException", 404, "not-found"),
+                ("AccessDeniedException", 403, "denied"),
+                ("ThrottlingException", 429, "transient"),
+                ("InvalidKeyIdException", 400, "invalid"),
+            ] {
+                let fake = client(Err(DescribeKeyFailure {
+                    message: "service error: safe AWS failure details".into(),
+                    code: Some(code.into()),
+                    status: Some(status),
+                    request_id: Some("request-123".into()),
+                }));
+                let results = resolve_core_reference_batch(
+                    &fake,
+                    provider_name,
+                    "us-east-1",
+                    &[core_request("alias/customer")],
+                )
+                .await;
+                assert_eq!(results.len(), 1);
+                let (actual, error) = match &results[0] {
+                    Ok(CoreOutcome::NotFound(error)) => ("not-found", error),
+                    Err(CoreError::AccessDenied(error)) => ("denied", error.as_ref()),
+                    Err(CoreError::Transient(error)) => ("transient", error.as_ref()),
+                    Err(CoreError::InvalidReference(error)) => ("invalid", error.as_ref()),
+                    other => panic!("unexpected {other:?}"),
+                };
+                assert_eq!(actual, expected);
+                if let Err(reference_error) = &results[0] {
+                    let source = reference_error
+                        .source()
+                        .unwrap()
+                        .downcast_ref::<std::sync::Arc<CoreProviderError>>()
+                        .unwrap();
+                    assert!(std::ptr::eq(source.as_ref(), error));
+                }
+                assert!(error.detail().cause().is_some());
+                let wire = error.to_wire();
+                assert_eq!(
+                    wire.kind,
+                    if expected == "invalid" {
+                        ProviderErrorKind::InvalidInput
+                    } else {
+                        ProviderErrorKind::ApiError
+                    }
+                );
+                assert_eq!(wire.message, "KMS reference resolution failed");
+                assert_eq!(
+                    wire.cause.as_deref(),
+                    Some("service error: safe AWS failure details")
+                );
+                assert_eq!(wire.provider_name.as_deref(), Some(provider_name));
+                assert_eq!(wire.operation.as_deref(), Some("kms.DescribeKey"));
+                assert_eq!(wire.code.as_deref(), Some(code));
+                assert_eq!(wire.status, Some(status));
+                assert_eq!(wire.request_id.as_deref(), Some("request-123"));
+                assert_eq!(
+                    *fake.calls.lock().unwrap(),
+                    [("us-east-1".into(), "alias/customer".into())]
+                );
+            }
         }
     }
 

@@ -3866,35 +3866,15 @@ impl Provider for AwsProvider {
         >,
     > {
         Box::pin(async move {
-            use carina_core::references::{ReferenceError, ReferenceOutcome};
-            use carina_provider_protocol::types as wire;
-            let requests = requests
-                .iter()
-                .map(|request| wire::ReferenceRequest {
-                    ty: wire::TypeIdentity {
-                        provider: request.ty.provider.clone().unwrap_or_default(),
-                        segments: request.ty.segments.clone(),
-                        kind: request.ty.kind.clone(),
-                    },
-                    value: request.value.clone(),
-                })
-                .collect();
-            Ok(AwsProvider::resolve_references(self, requests)
-                .await
-                .into_iter()
-                .map(|result| match result {
-                    Ok(outcome) => ReferenceOutcome::from_guest(outcome),
-                    Err(wire::ReferenceError::AccessDenied(error)) => Err(
-                        ReferenceError::AccessDenied(ProviderError::from_wire(*error).into()),
-                    ),
-                    Err(wire::ReferenceError::Transient(error)) => Err(ReferenceError::Transient(
-                        ProviderError::from_wire(*error).into(),
-                    )),
-                    Err(wire::ReferenceError::InvalidReference(error)) => Err(
-                        ReferenceError::InvalidReference(ProviderError::from_wire(*error).into()),
-                    ),
-                })
-                .collect())
+            Ok(
+                carina_aws_types::kms_reference::resolve_core_reference_batch(
+                    &self.kms_client,
+                    self.name(),
+                    &self.region,
+                    requests,
+                )
+                .await,
+            )
         })
     }
 
