@@ -408,7 +408,6 @@ fn sample_string(resource_type: &str, path: &[String]) -> String {
         "allocation_id" | "allocation_ids" => ec2_id("eipalloc"),
         "arn"
         | "deliver_logs_permission_arn"
-        | "kms_key_id"
         | "log_destination"
         | "resource_configuration_arn"
         | "role"
@@ -425,21 +424,31 @@ fn sample_string(resource_type: &str, path: &[String]) -> String {
             format!("2001:db8:{:x}::/64", hash as u16)
         }
         "description" => format!("send contract {suffix}"),
+        "dead_letter_target_arn" => {
+            format!("arn:aws:sqs:{REGION}:123456789012:send-contract-{suffix}.fifo")
+        }
         "dns_name" | "domain_name" | "host_name" | "name" => {
             format!("send-{suffix}.example.com")
         }
         "email" => format!("send-{suffix}@example.com"),
         "gateway_id" | "internet_gateway_id" => ec2_id("igw"),
-        "group_id" | "destination_security_group_id" | "source_security_group_id" => ec2_id("sg"),
+        "group_id"
+        | "security_group_ids"
+        | "destination_security_group_id"
+        | "source_security_group_id" => ec2_id("sg"),
         "group_name" => format!("send-contract-{suffix}"),
         "hosted_zone_id" => format!("Z{hash:016X}"),
         "ipv4_ipam_pool_id" | "ipv6_ipam_pool_id" => ec2_id("ipam-pool"),
+        "kms_key_id" | "kms_master_key_id" => {
+            format!("arn:aws:kms:{REGION}:123456789012:key/12345678-1234-1234-1234-0000{suffix}")
+        }
         "log_group_name" => format!("/carina/send-{suffix}"),
         "nat_gateway_id" => ec2_id("nat"),
         "outpost_arn" => {
             "arn:aws:outposts:us-east-1:123456789012:outpost/op-0123456789abcdef0".to_string()
         }
         "path" => "/".to_string(),
+        "destination_prefix_list_id" | "source_prefix_list_id" => ec2_id("pl"),
         "peer_owner_id" | "source_security_group_owner_id" => "123456789012".to_string(),
         "peer_vpc_id" | "vpc_id" => ec2_id("vpc"),
         "private_ip_address" => format!("10.0.0.{}", 10 + hash % 200),
@@ -623,11 +632,11 @@ fn set_bool(resource: &mut Resource, name: &str, value: bool) {
     resource.set_attr(name, Value::Concrete(ConcreteValue::Bool(value)));
 }
 
-fn set_canonical_string(
+fn set_canonical_value(
     resource: &mut Resource,
     schema: &ValidatedResourceSchema,
     name: &str,
-    value: &str,
+    value: Value,
 ) {
     let attribute = schema.effective_attribute(name).unwrap_or_else(|| {
         panic!(
@@ -638,9 +647,9 @@ fn set_canonical_string(
     resource.set_attr(
         name,
         attribute
-            .canonicalize_state(string(value))
+            .canonicalize_state(value)
             .into_present()
-            .expect("canonical string fixture must remain present"),
+            .expect("canonical fixture must remain present"),
     );
 }
 
@@ -713,7 +722,7 @@ fn focused_resource(
         }
         "ec2.NatGateway" => {
             if target.name == "availability_mode" {
-                set_canonical_string(&mut resource, schema, "availability_mode", "zonal");
+                set_canonical_value(&mut resource, schema, "availability_mode", string("zonal"));
             }
             set_sample(&mut resource, schema, "subnet_id");
         }
@@ -748,13 +757,15 @@ fn focused_resource(
             }
         }
         "acm.Certificate" => {
-            set_canonical_string(&mut resource, schema, "validation_method", "EMAIL");
+            set_canonical_value(&mut resource, schema, "validation_method", string("EMAIL"));
             if target.name == "options" {
                 // The generic struct sampler chooses one optional member. Pin
                 // this focused case to every CertificateOptions member so
                 // restoring ValidationMethod in #580 does not trade away CT
                 // logging or export capture coverage.
-                resource.set_attr(
+                set_canonical_value(
+                    &mut resource,
+                    schema,
                     "options",
                     Value::Concrete(ConcreteValue::Map(IndexMap::from([
                         (
@@ -1305,6 +1316,42 @@ async fn capture_create_and_update_mutations() {
     );
     let schemas = crate::schemas::all_schemas();
 
+    carina_core::validation::deferred_types::with_session_for_test_async(
+        &carina_core::parser::LoadedProviderContext::empty_for_test(),
+        async |type_checks| {
+            let bindings = carina_core::binding_index::ResolvedBindings::default();
+            let gate = carina_core::executor::ModuleConstraintGate::from_live_compositions(&[]);
+            let factories: Vec<Box<dyn carina_core::provider::ProviderFactory>> =
+                vec![Box::new(crate::AwsProviderFactory)];
+            // Reuse the provider's checked schemas across the matrix; compiling
+            // the full registry per attribute consumes the capture timeout.
+            let preparation = carina_core::executor::ProviderPreparationContext::new(
+                &bindings,
+                &gate,
+                &[],
+                &crate::AwsNormalizer,
+                &factories,
+                &provider.schema_registry,
+                type_checks,
+            );
+            capture_prepared_create_and_update_mutations(
+                &provider,
+                &service,
+                &schemas,
+                &preparation,
+            )
+            .await;
+        },
+    )
+    .await;
+}
+
+async fn capture_prepared_create_and_update_mutations(
+    provider: &AwsProvider,
+    service: &CaptureService,
+    schemas: &[ValidatedResourceSchema],
+    preparation: &carina_core::executor::ProviderPreparationContext<'_>,
+) {
     for contract in crate::send_models_generated::capture_contracts() {
         let schema = schemas
             .iter()
@@ -1316,15 +1363,16 @@ async fn capture_create_and_update_mutations() {
         for attribute in contract.create_attributes {
             service.clear();
             let resource = focused_resource(schema, contract, attribute);
-            let normalized = carina_core::executor::normalized::apply_desired_normalization(
-                resource.clone(),
-                &[],
-                &crate::AwsNormalizer,
-                &crate::schemas::schema_registry(),
-            )
-            .await
-            .expect("capture fixture must pass desired normalization");
-            let result = Box::pin(provider.create_step(&normalized, CaptureAttempt)).await;
+            let request =
+                carina_core::executor::prepare_create_request(resource.clone(), preparation)
+                    .await
+                    .unwrap_or_else(|error| {
+                        panic!(
+                            "{}.{} must pass real create preparation: {error:?}",
+                            contract.resource_type, attribute.name,
+                        )
+                    });
+            let result = Box::pin(provider.create_step(request.resource(), CaptureAttempt)).await;
             let requests = service.snapshot();
             assert!(
                 !requests.is_empty(),
