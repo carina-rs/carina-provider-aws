@@ -438,6 +438,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "aws-sdk-kms"
+version = "1.129.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5c5cdb29ad25d71c9ee54c408a672c98d90a24a0ea6eb063025483e0e894b411"
+dependencies = [
+ "arc-swap",
+ "aws-credential-types",
+ "aws-runtime",
+ "aws-smithy-async",
+ "aws-smithy-http",
+ "aws-smithy-json",
+ "aws-smithy-observability",
+ "aws-smithy-runtime",
+ "aws-smithy-runtime-api",
+ "aws-smithy-schema",
+ "aws-smithy-types",
+ "aws-types",
+ "bytes",
+ "fastrand",
+ "http 1.4.0",
+ "regex-lite",
+ "tracing",
+]
+
+[[package]]
 name = "aws-sdk-organizations"
 version = "1.136.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1139,8 +1164,11 @@ dependencies = [
  "aws-smithy-types",
  "carina-core",
  "carina-plugin-sdk",
+ "carina-provider-protocol",
+ "futures",
  "heck",
  "indexmap 2.14.0",
+ "regex",
  "tokio",
  "wasi 0.14.7+wasi-0.2.4",
 ]
@@ -1301,6 +1329,7 @@ dependencies = [
  "aws-sdk-ec2",
  "aws-sdk-iam",
  "aws-sdk-identitystore",
+ "aws-sdk-kms",
  "aws-sdk-organizations",
  "aws-sdk-route53",
  "aws-sdk-s3",
@@ -1311,6 +1340,7 @@ dependencies = [
  "aws-smithy-types",
  "aws-types",
  "carina-aws-types",
+ "carina-codegen-aws",
  "carina-core",
  "carina-plugin-sdk",
  "carina-provider-aws",

@@ -556,6 +556,16 @@ impl CarinaProvider for AwsProcessProvider {
         ReferenceForms::new()
     }
 
+    fn resolve_references(
+        &self,
+        requests: Vec<proto::ReferenceRequest>,
+    ) -> Result<Vec<Result<proto::ReferenceOutcome, proto::ReferenceError>>, proto::ProviderError>
+    {
+        Ok(self
+            .runtime
+            .block_on(self.provider().resolve_references(requests)))
+    }
+
     fn provider_config_attribute_types(&self) -> ValidatedConfigSchema {
         carina_provider_aws::AwsProviderFactory.provider_config_attribute_types()
     }

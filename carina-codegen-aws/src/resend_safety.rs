@@ -1414,6 +1414,13 @@ pub fn generate_clippy_config(overrides: &[Override]) -> String {
         }
     }
 
+    // KMS has a handwritten regional wrapper because it resolves references,
+    // rather than implementing a managed resource's send operations.
+    for constructor in ["new", "from_conf"] {
+        code.push_str(&format!(
+            "    {{ path = \"aws_sdk_kms::Client::{constructor}\", reason = \"use the bounded KMS wrapper in carina-provider-aws/src/references.rs\" }},\n"
+        ));
+    }
     code.push_str("]\n");
     code
 }

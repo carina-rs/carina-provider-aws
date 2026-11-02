@@ -16,6 +16,7 @@ pub mod provider_generated;
 mod read_back;
 mod read_model;
 mod read_models_generated;
+mod references;
 #[cfg(test)]
 mod resend_guard;
 mod resend_safety_generated;
@@ -222,6 +223,7 @@ pub struct AwsProvider {
     route53_client: Route53Client,
     acm_client: AcmClient,
     sqs_client: SqsClient,
+    kms_client: references::KmsClient,
     schema_registry: SchemaRegistry,
     region: String,
     /// Provider-level allow-list of AWS account IDs. Empty means "no

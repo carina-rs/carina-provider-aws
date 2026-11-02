@@ -8,6 +8,7 @@ mod catalog;
 mod common;
 #[cfg(any(target_arch = "wasm32", test))]
 mod host_credentials;
+pub mod kms_reference;
 mod read_back;
 mod services;
 

@@ -18,7 +18,7 @@ carina-core = { workspace = true, features = ["test-support"] }
 aws-smithy-runtime-api = { version = "1.19", features = ["client", "test-util"] }
 carina-plugin-sdk = { workspace = true, features = ["test-utils"] }
 indexmap = "2"
-tokio = { version = "1", features = ["macros", "rt"] }
+tokio = { version = "1", features = ["macros", "rt", "test-util", "time"] }
 wasi = "0.14"
 
 [dependencies]
@@ -27,7 +27,10 @@ aws-credential-types = { version = "1" }
 aws-smithy-runtime-api = { version = "1.19", features = ["client"] }
 aws-smithy-types = { version = "1" }
 carina-core = { workspace = true }
+carina-provider-protocol = { workspace = true }
+futures = "0.3"
 heck = "0.5"
+regex = "1"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 carina-plugin-sdk = { workspace = true, optional = true }

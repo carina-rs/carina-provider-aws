@@ -3544,10 +3544,7 @@ pub fn logs_resources() -> Vec<ResourceDef> {
         ],
         identifier: "LogGroupName",
         has_tags: true,
-        type_overrides: vec![
-            ("kmsKeyId", "super::super::kms::key::id()"),
-            ("Arn", "super::arn()"),
-        ],
+        type_overrides: vec![("Arn", "super::arn()")],
         exclude_fields: vec![
             "CreationTime",
             "StoredBytes",
@@ -3634,7 +3631,6 @@ pub fn sqs_resources() -> Vec<ResourceDef> {
         has_tags: true,
         type_overrides: vec![
             ("QueueArn", "super::arn()"),
-            ("KmsMasterKeyId", "super::super::kms::key::id()"),
             ("Policy", "super::iam_policy_document()"),
             ("RedrivePolicy", "super::sqs_redrive_policy()"),
             ("RedriveAllowPolicy", "super::sqs_redrive_allow_policy()"),

@@ -61,6 +61,193 @@ mod tests {
     use crate::AwsNormalizer;
 
     #[test]
+    fn final_registry_classifies_every_kms_string_including_handwritten_structs() {
+        use carina_codegen_aws::kms_references::{
+            CLASSIFICATIONS, Classification, NotReference, PathSegment, classify_string,
+            property_path,
+        };
+        use carina_core::schema::{CompiledAttributeType, CompiledResourceSchema};
+        use std::collections::BTreeSet;
+
+        #[derive(Default)]
+        struct Coverage {
+            references: BTreeSet<(String, String)>,
+            paths: BTreeSet<(String, String)>,
+        }
+
+        fn walk(
+            schema: &CompiledResourceSchema,
+            ty: &CompiledAttributeType,
+            path: &str,
+            name: &str,
+            description: Option<&str>,
+            coverage: &mut Coverage,
+            depth: usize,
+        ) {
+            assert!(depth < 64, "schema walk exceeded depth at {path}");
+            coverage
+                .paths
+                .insert((schema.resource_type().to_string(), path.to_string()));
+            let mut check =
+                |pattern: Option<&str>, identity: Option<&carina_core::schema::TypeIdentity>| {
+                    let classification =
+                        classify_string(schema.resource_type(), path, name, pattern, description)
+                            .unwrap();
+                    match classification {
+                        Some(Classification::Reference { arn_only }) => {
+                            assert_eq!(
+                                identity,
+                                Some(&AwsType::KmsKeyReference.identity()),
+                                "{}.{} must be a reference leaf",
+                                schema.resource_type(),
+                                path
+                            );
+                            let expected_pattern = if arn_only {
+                                carina_aws_types::KMS_KEY_ARN_PATTERN
+                            } else {
+                                carina_aws_types::KMS_KEY_REFERENCE_PATTERN
+                            };
+                            assert_eq!(
+                                pattern,
+                                Some(expected_pattern),
+                                "{}.{} must use the pattern for arn_only={arn_only}",
+                                schema.resource_type(),
+                                path
+                            );
+                            coverage
+                                .references
+                                .insert((schema.resource_type().to_string(), path.to_string()));
+                        }
+                        Some(Classification::NotReference(NotReference::Absent)) => {
+                            panic!(
+                                "absent classification exists in registry: {}.{path}",
+                                schema.resource_type()
+                            );
+                        }
+                        Some(Classification::NotReference(NotReference::Other(reason))) => {
+                            assert!(!reason.is_empty());
+                            assert!(identity.is_none());
+                        }
+                        None => assert!(
+                            identity.is_none(),
+                            "unclassified reference {}.{path}",
+                            schema.resource_type()
+                        ),
+                    }
+                };
+            match schema.shape_of(ty) {
+                Shape::Reference {
+                    identity, pattern, ..
+                } => check(pattern, Some(identity)),
+                Shape::String { pattern, .. } => check(pattern, None),
+                Shape::UnloadedSchemaType(unloaded) => panic!(
+                    "KMS coverage requires a loaded schema type for {}",
+                    unloaded.identity(),
+                ),
+                Shape::Enum { base, .. } => {
+                    walk(schema, base, path, name, description, coverage, depth + 1)
+                }
+                Shape::List { element_type, .. } => walk(
+                    schema,
+                    element_type,
+                    &property_path(path, PathSegment::ListElement),
+                    name,
+                    description,
+                    coverage,
+                    depth + 1,
+                ),
+                Shape::Map { value, .. } => {
+                    walk(
+                        schema,
+                        value,
+                        &property_path(path, PathSegment::MapValue),
+                        name,
+                        description,
+                        coverage,
+                        depth + 1,
+                    );
+                }
+                Shape::Struct { .. } => {
+                    let mut budget = ShapeWalkBudget::new(64);
+                    for field in schema
+                        .struct_fields_with_budget(ty, &mut budget)
+                        .unwrap()
+                        .iter()
+                    {
+                        walk(
+                            schema,
+                            field.field_type(),
+                            &property_path(path, PathSegment::Field(field.name())),
+                            field.name(),
+                            field.description(),
+                            coverage,
+                            depth + 1,
+                        );
+                    }
+                }
+                Shape::Union => {
+                    let mut budget = ShapeWalkBudget::new(64);
+                    for member in schema
+                        .union_members_with_budget(ty, &mut budget)
+                        .unwrap()
+                        .iter()
+                        .flatten()
+                    {
+                        walk(
+                            schema,
+                            member.as_attr(),
+                            path,
+                            name,
+                            description,
+                            coverage,
+                            depth + 1,
+                        );
+                    }
+                }
+                Shape::Bool | Shape::Int { .. } | Shape::Float { .. } | Shape::Duration => {}
+            }
+        }
+
+        let registry = super::schema_registry();
+        let mut coverage = Coverage::default();
+        for (_, _, _, schema) in registry.iter() {
+            let schema = schema.as_schema();
+            for (name, attribute) in schema.attributes() {
+                walk(
+                    schema,
+                    attribute.attr_type(),
+                    name,
+                    name,
+                    attribute.description(),
+                    &mut coverage,
+                    0,
+                );
+            }
+        }
+        for entry in CLASSIFICATIONS {
+            if entry.classification == Classification::NotReference(NotReference::Absent) {
+                assert!(
+                    !coverage
+                        .paths
+                        .contains(&(entry.resource.to_string(), entry.path.to_string())),
+                    "absent classification exists in registry: {}.{}",
+                    entry.resource,
+                    entry.path,
+                );
+            }
+        }
+        let expected = CLASSIFICATIONS
+            .iter()
+            .filter(|entry| matches!(entry.classification, Classification::Reference { .. }))
+            .map(|entry| (entry.resource.to_string(), entry.path.to_string()))
+            .collect();
+        assert_eq!(
+            coverage.references, expected,
+            "every classified reference must be present in the final registry"
+        );
+    }
+
+    #[test]
     fn acm_read_back_budget_is_300_seconds_and_other_resources_use_default() {
         let schemas = super::all_schemas();
         let certificate = schemas

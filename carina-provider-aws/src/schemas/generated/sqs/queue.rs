@@ -103,7 +103,7 @@ pub fn sqs_queue_config() -> AwsSchemaConfig {
                 .build(),
         )
         .attribute(
-            AttributeSchema::optional("kms_master_key_id", super::super::kms::key::id())
+            AttributeSchema::optional("kms_master_key_id", carina_aws_types::kms_key_reference())
                 .with_description("The ID of an AWS KMS customer master key (CMK) to use for server-side encryption (SSE-KMS). Use `alias/aws/sqs` for the AWS-managed key.")
                 .with_provider_name("KmsMasterKeyId")
                 .build(),
