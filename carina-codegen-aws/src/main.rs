@@ -16,7 +16,7 @@ use clap::{Parser, ValueEnum};
 use heck::{ToSnakeCase, ToUpperCamelCase};
 
 use carina_aws_types::{AwsType, dsl_enum_value};
-use carina_codegen_aws::description::{Description, emit_description};
+use carina_codegen_aws::description::Description;
 use carina_codegen_aws::kms_references::{
     self, PathSegment, reference_type_code, validate_smithy_type,
 };
@@ -2172,7 +2172,7 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
     if let Some(description) = description {
         code.push_str(&format!(
             "\x20       .with_description(\"{}\")\n",
-            emit_description(&description, Some(200))
+            description.rust_string_literal(Some(200))
         ));
     }
 
@@ -2270,13 +2270,13 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
             };
             attr_code.push_str(&format!(
                 "\n\x20               .with_description(\"{}{}\")",
-                emit_description(desc, Some(150)),
+                desc.rust_string_literal(Some(150)),
                 suffix
             ));
         } else if attr.is_read_only {
             attr_code.push_str(&format!(
                 "\n\x20               .with_description(\"{}\")",
-                emit_description(&Description::authored("(read-only)"), None)
+                Description::authored("(read-only)").rust_string_literal(None)
             ));
         }
 
@@ -2308,7 +2308,7 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
              \x20               .with_provider_name(\"Tags\")\n\
              \x20               .build(),\n\
              \x20       )\n",
-            emit_description(&Description::authored("The tags for the resource."), None)
+            Description::authored("The tags for the resource.").rust_string_literal(None)
         ));
     }
 
@@ -2719,7 +2719,7 @@ fn generate_struct_type(
         if let Some(desc) = SmithyModel::documentation(&member_ref.traits) {
             field_code.push_str(&format!(
                 ".with_description(\"{}\")",
-                emit_description(&Description::from_smithy_html(desc), Some(150))
+                Description::from_smithy_html(desc).rust_string_literal(Some(150))
             ));
         }
         field_code.push_str(&format!(".with_provider_name(\"{}\")", field_name));
@@ -5565,7 +5565,7 @@ fn generate_markdown_resource(
         && let Some(desc) = SmithyModel::documentation(traits)
     {
         let description = Description::from_smithy_html(desc);
-        page.push_str(&format!("{}\n\n", description.as_str()));
+        page.push_str(&format!("{}\n\n", description.markdown()));
     }
 
     if resource_defs::defaults_to_prevent_destroy(res.name) {
@@ -5627,7 +5627,7 @@ fn generate_markdown_resource(
         page.push_str("\n");
 
         if let Some(ref desc) = attr.description {
-            page.push_str(&format!("{}\n\n", desc.as_str()));
+            page.push_str(&format!("{}\n\n", desc.markdown()));
         }
     }
 
@@ -5636,7 +5636,10 @@ fn generate_markdown_resource(
         page.heading(Heading::code(3, "tags"))?;
         page.push_str("- **Type:** Map\n");
         page.push_str("- **Required:** No\n\n");
-        page.push_str("The tags for the resource.\n\n");
+        page.push_str(&format!(
+            "{}\n\n",
+            Description::authored("The tags for the resource.").markdown()
+        ));
     }
 
     // Enum Values section
@@ -5706,8 +5709,8 @@ fn generate_markdown_resource(
                         field
                             .description
                             .as_ref()
-                            .map(Description::as_str)
-                            .unwrap_or(""),
+                            .map(Description::markdown)
+                            .unwrap_or_default(),
                     ),
                 ]
             });
@@ -5720,10 +5723,11 @@ fn generate_markdown_resource(
     if !read_only_attrs.is_empty() {
         page.heading(Heading::plain(2, "Attribute Reference"))?;
         for attr in &read_only_attrs {
+            let description = attr.description.as_ref().map(Description::markdown);
             page.attribute_reference_entry(
                 &attr.snake_name,
                 attr.attr_type.table_cell(),
-                attr.description.as_ref().map(Description::as_str),
+                description.as_deref(),
             )?;
         }
     }
@@ -5983,7 +5987,7 @@ fn generate_data_source(
             constructor,
             attr.name,
             type_str,
-            emit_description(&attr.description, None),
+            attr.description.rust_string_literal(None),
             attr.provider_name,
         ));
     }
@@ -6050,8 +6054,9 @@ fn generate_markdown_data_source(
             let required = if input.required { "Yes" } else { "No" };
             page.push_str(&format!("- **Required:** {}\n\n", required));
             let description = Description::authored(input.description);
-            if !description.as_str().is_empty() {
-                page.push_str(&format!("{}\n\n", description.as_str()));
+            let markdown = description.markdown();
+            if !markdown.is_empty() {
+                page.push_str(&format!("{}\n\n", markdown));
             }
         }
     }
@@ -6059,10 +6064,11 @@ fn generate_markdown_data_source(
     // Output attributes section
     page.heading(Heading::plain(2, "Attributes"))?;
     for output in outputs {
+        let description = output.description.markdown();
         page.attribute_reference_entry(
             output.name,
             TableCell::text(output.type_display),
-            Some(output.description.as_str()),
+            Some(&description),
         )?;
     }
 
@@ -7089,6 +7095,54 @@ mod tests {
     }
 
     #[test]
+    fn description_smithy_placeholders_remain_visible_in_rendered_docs() {
+        let mut model = provider_fixture_model();
+        let mut resource =
+            provider_fixture_resource("iam.Role", "RoleName", &["RoleName", "Options"], vec![]);
+        resource.extra_read_only.push("Arn");
+        for (shape, member) in [
+            ("ReadFixture", None),
+            ("CreateFixtureRequest", Some("RoleName")),
+            ("ReadFixture", Some("Arn")),
+            ("Options", Some("AmazonSideAsn")),
+        ] {
+            let Some(Shape::Structure(structure)) =
+                model.shapes.get_mut(&format!("com.amazonaws.test#{shape}"))
+            else {
+                panic!("missing fixture structure {shape}");
+            };
+            let traits = match member {
+                Some(member) => &mut structure.members.get_mut(member).unwrap().traits,
+                None => &mut structure.traits,
+            };
+            traits.insert(
+                "smithy.api#documentation".to_string(),
+                "<p>&lt;bucket&gt; &amp; *literal*</p>".into(),
+            );
+        }
+        let markdown = generate_markdown_resource(
+            &resource,
+            &model,
+            &markdown_resource_example(resource.name),
+        )
+        .expect("generate docs");
+        assert_eq!(markdown.matches("&lt;bucket&gt;").count(), 4, "{markdown}");
+
+        let mut options = comrak::Options::default();
+        options.extension.table = true;
+        options.extension.strikethrough = true;
+        options.extension.autolink = true;
+        let html = comrak::markdown_to_html(&markdown, &options);
+        assert_eq!(
+            html.matches("&lt;bucket&gt; &amp; *literal*").count(),
+            4,
+            "{html}"
+        );
+        assert!(!html.contains("<em>literal</em>"), "{html}");
+        assert!(!html.contains("raw HTML omitted"), "{html}");
+    }
+
+    #[test]
     fn description_truncation_preserves_escape_sequences_at_all_emitter_boundaries() {
         for (last_character, escaped) in [('\\', r"\\"), ('"', r#"\""#)] {
             for tail in ["", "tail"] {
@@ -7135,12 +7189,10 @@ mod tests {
     #[test]
     fn description_smithy_html_decodes_entities_after_removing_tags() {
         assert_eq!(
-            emit_description(
-                &Description::from_smithy_html(
-                    "<p>Use <code>&lt;bucket&gt;</code> &amp; &quot;name&quot; &#39;value&#39;.</p>"
-                ),
-                None
-            ),
+            Description::from_smithy_html(
+                "<p>Use <code>&lt;bucket&gt;</code> &amp; &quot;name&quot; &#39;value&#39;.</p>"
+            )
+            .rust_string_literal(None),
             r#"Use <bucket> & \"name\" 'value'."#
         );
     }
@@ -7148,12 +7200,10 @@ mod tests {
     #[test]
     fn description_smithy_unbalanced_backtick_does_not_disable_tag_removal() {
         assert_eq!(
-            emit_description(
-                &Description::from_smithy_html(
-                    "<p>Unbalanced `backtick.</p><p>Keep <b>stripping</b> <code>tags</code>.</p>"
-                ),
-                None
-            ),
+            Description::from_smithy_html(
+                "<p>Unbalanced `backtick.</p><p>Keep <b>stripping</b> <code>tags</code>.</p>"
+            )
+            .rust_string_literal(None),
             "Unbalanced `backtick. Keep stripping tags."
         );
     }
@@ -7203,7 +7253,7 @@ mod tests {
             let description = Description::authored(AUTHORED);
             let schema = generate_data_source(&ds, &empty_test_model(), true).unwrap();
             assert!(
-                schema.contains(&emit_description(&description, None)),
+                schema.contains(&description.rust_string_literal(None)),
                 "{schema}"
             );
             let markdown = generate_markdown_data_source(
@@ -7212,7 +7262,10 @@ mod tests {
                 &markdown_data_source_example(ds.name),
             )
             .unwrap();
-            assert!(markdown.contains(description.as_str()), "{markdown}");
+            assert!(
+                markdown.contains(description.markdown().as_ref()),
+                "{markdown}"
+            );
         }
     }
 

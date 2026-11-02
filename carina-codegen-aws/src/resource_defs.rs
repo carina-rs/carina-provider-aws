@@ -6,7 +6,7 @@
 
 use std::sync::LazyLock;
 
-use crate::description::{Description, emit_description};
+use crate::description::Description;
 
 /// An additional writable field not present in the create operation input.
 /// Used to add fields from the read structure or synthetic fields.
@@ -1165,8 +1165,8 @@ fn nat_gateway_availability_zone_addresses_type() -> &'static str {
                 StructField::optional(\"availability_zone\", super::availability_zone()).with_description(\"{}\").with_provider_name(\"AvailabilityZone\").build()\
                 ],\
             ))",
-            emit_description(&allocation_ids, None),
-            emit_description(&availability_zone, None),
+            allocation_ids.rust_string_literal(None),
+            availability_zone.rust_string_literal(None),
         )
     });
     TYPE.as_str()

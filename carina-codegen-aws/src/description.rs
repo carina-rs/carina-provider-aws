@@ -1,9 +1,18 @@
-/// Plain text whose source has explicitly selected how markup is handled.
-///
-/// Keep the text private so consumers cannot accidentally emit raw Smithy HTML
-/// or strip placeholders from authored descriptions.
+use std::borrow::Cow;
+
+/// Description text whose origin determines how each output format escapes it.
+/// Keep both fields private so consumers must choose a format before emitting.
 #[derive(Debug, Clone)]
-pub struct Description(String);
+pub struct Description {
+    text: String,
+    origin: Origin,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum Origin {
+    SmithyPlainText,
+    AuthoredMarkdown,
+}
 
 impl Description {
     /// Convert Smithy documentation HTML to normalized plain text.
@@ -26,31 +35,60 @@ impl Description {
 
         // Decode only after stripping: &lt;code&gt; describes literal text,
         // not markup that should be removed in a second pass.
-        Self::authored(&html_escape::decode_html_entities(&text))
+        Self::with_origin(
+            &html_escape::decode_html_entities(&text),
+            Origin::SmithyPlainText,
+        )
     }
 
     /// Normalize authored text without interpreting tags or HTML entities.
     pub fn authored(text: &str) -> Self {
-        Self(text.split_whitespace().collect::<Vec<_>>().join(" "))
+        Self::with_origin(text, Origin::AuthoredMarkdown)
     }
 
-    pub fn as_str(&self) -> &str {
-        &self.0
+    fn with_origin(text: &str, origin: Origin) -> Self {
+        Self {
+            text: text.split_whitespace().collect::<Vec<_>>().join(" "),
+            origin,
+        }
     }
-}
 
-/// Emit the contents of a Rust string literal from a cleaned description.
-///
-/// An optional byte limit truncates plain text before escaping, so the limit
-/// cannot split an escape sequence. The ellipsis is outside that limit.
-pub fn emit_description(description: &Description, max_bytes: Option<usize>) -> String {
-    let text = description.as_str();
-    let end = text.floor_char_boundary(max_bytes.unwrap_or(text.len()).min(text.len()));
-    let mut truncated = text[..end].to_string();
-    if end < text.len() {
-        truncated.push_str("...");
+    /// Emit the contents of a Rust string literal from the cleaned text.
+    /// The optional byte limit applies before escaping; the ellipsis is extra.
+    pub fn rust_string_literal(&self, max_bytes: Option<usize>) -> String {
+        let text = &self.text;
+        let end = text.floor_char_boundary(max_bytes.unwrap_or(text.len()).min(text.len()));
+        let mut truncated = text[..end].to_string();
+        if end < text.len() {
+            truncated.push_str("...");
+        }
+        truncated.replace('\\', "\\\\").replace('"', "\\\"")
     }
-    truncated.replace('\\', "\\\\").replace('"', "\\\"")
+
+    /// Emit authored Markdown unchanged, or escape Smithy plain text.
+    /// HTML characters become entities; all other ASCII punctuation is escaped
+    /// to prevent Markdown formatting, autolinks, and table delimiters.
+    pub fn markdown(&self) -> Cow<'_, str> {
+        match self.origin {
+            Origin::AuthoredMarkdown => Cow::Borrowed(&self.text),
+            Origin::SmithyPlainText => {
+                let mut escaped = String::with_capacity(self.text.len());
+                for character in self.text.chars() {
+                    match character {
+                        '<' => escaped.push_str("&lt;"),
+                        '>' => escaped.push_str("&gt;"),
+                        '&' => escaped.push_str("&amp;"),
+                        punctuation if punctuation.is_ascii_punctuation() => {
+                            escaped.push('\\');
+                            escaped.push(punctuation);
+                        }
+                        _ => escaped.push(character),
+                    }
+                }
+                Cow::Owned(escaped)
+            }
+        }
+    }
 }
 
 /// Return the closing `>` byte offset and whether a tag separates text blocks.
@@ -96,7 +134,7 @@ mod tests {
             " \tUse `<bucket>.s3.amazonaws.com`, <p>literal</p>, &lt; and &amp;.\r\n Next.\u{a0}",
         );
         assert_eq!(
-            text.as_str(),
+            text.markdown(),
             "Use `<bucket>.s3.amazonaws.com`, <p>literal</p>, &lt; and &amp;. Next."
         );
     }
@@ -106,7 +144,10 @@ mod tests {
         let text = Description::from_smithy_html(
             "<p>&lt;code&gt;literal&lt;/code&gt; &amp; &quot;name&quot; &#39;x&#39; &#x1F980; &nbsp; &amp;lt;</p>",
         );
-        assert_eq!(text.as_str(), "<code>literal</code> & \"name\" 'x' 🦀 &lt;");
+        assert_eq!(
+            text.rust_string_literal(None),
+            r#"<code>literal</code> & \"name\" 'x' 🦀 &lt;"#
+        );
     }
 
     #[test]
@@ -128,7 +169,7 @@ mod tests {
             "ul",
         ] {
             let text = Description::from_smithy_html(&format!("<{tag}>content</{tag}>"));
-            assert_eq!(text.as_str(), "content", "{tag}");
+            assert_eq!(text.rust_string_literal(None), "content", "{tag}");
         }
     }
 
@@ -137,7 +178,7 @@ mod tests {
         let text = Description::from_smithy_html(
             "<p><a href=\"https://example.com/?q=>\">a</a><code/>.<code>word</code>s</p><p>Next.</p>",
         );
-        assert_eq!(text.as_str(), "a.words Next.");
+        assert_eq!(text.rust_string_literal(None), "a.words Next.");
     }
 
     #[test]
@@ -146,8 +187,35 @@ mod tests {
             "<p><account-id> <Code> <code_name> <Grantee type=\"Group\">x</Grantee> <key> < 5</p> tail <p",
         );
         assert_eq!(
-            text.as_str(),
-            "<account-id> <Code> <code_name> <Grantee type=\"Group\">x</Grantee> <key> < 5 tail <p"
+            text.rust_string_literal(None),
+            r#"<account-id> <Code> <code_name> <Grantee type=\"Group\">x</Grantee> <key> < 5 tail <p"#
+        );
+    }
+
+    #[test]
+    fn smithy_markdown_renders_punctuation_as_literal_text() {
+        let plain = r"1. <bucket> & **bold** _em_ `code` [link](#target) ![image](url) ~~strike~~ | \path https://example.com a@example.com";
+        let description = Description::from_smithy_html(&format!("<p>{plain}</p>"));
+        let mut options = comrak::Options::default();
+        options.extension.table = true;
+        options.extension.strikethrough = true;
+        options.extension.autolink = true;
+        let html = comrak::markdown_to_html(&description.markdown(), &options);
+        assert_eq!(
+            html,
+            format!("<p>{}</p>\n", html_escape::encode_text(plain))
+        );
+    }
+
+    #[test]
+    fn authored_markdown_keeps_formatting_and_backticked_placeholders() {
+        let description = Description::authored("**bold** `<bucket>.s3.amazonaws.com` &amp;");
+        let markdown = description.markdown();
+        assert_eq!(markdown, "**bold** `<bucket>.s3.amazonaws.com` &amp;");
+        let html = comrak::markdown_to_html(&markdown, &comrak::Options::default());
+        assert_eq!(
+            html,
+            "<p><strong>bold</strong> <code>&lt;bucket&gt;.s3.amazonaws.com</code> &amp;</p>\n"
         );
     }
 }
