@@ -1,7 +1,8 @@
 //! SDK retry guard that aggregates every attempt into one operation verdict.
 
-use std::io;
-use std::time::SystemTime;
+use std::sync::LazyLock;
+use std::time::Instant;
+use std::{fmt, io};
 
 use aws_smithy_runtime_api::box_error::BoxError;
 use aws_smithy_runtime_api::client::interceptors::Intercept;
@@ -15,6 +16,7 @@ use aws_smithy_runtime_api::client::retries::RequestAttempts;
 use aws_smithy_runtime_api::client::runtime_components::RuntimeComponents;
 use aws_smithy_types::config_bag::{ConfigBag, Storable, StoreReplace};
 use aws_smithy_types::retry::{ErrorKind, RetryConfig};
+use regex::Regex;
 
 use super::send_outcome::{
     AttemptOutcome, AttemptPhase, FinalAttempt, Idempotency, OperationSendFailure,
@@ -53,7 +55,7 @@ struct PreviousAttempt {
     outcome: AttemptOutcome,
     failure: String,
     retry_message: String,
-    finished_at: SystemTime,
+    finished_at: Instant,
 }
 
 impl Storable for PreviousAttempt {
@@ -77,11 +79,34 @@ impl Storable for MaybeSentAttempt {
 fn error_message(error: &(dyn std::error::Error + 'static)) -> String {
     // Match the Display/source-chain portion of DisplayErrorContext. Its Debug
     // tail may contain requests or signing data, so it must not reach stderr.
-    let mut rendered = error.to_string();
+    // Display and source messages can themselves contain signing data. Sanitize
+    // each separately so an Authorization value cannot swallow the next cause.
+    static URL_QUERY: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r#"(?i)(\b[a-z][a-z0-9+.-]*://[^\s?<>"']*)\?[^\s<>"']*"#)
+            .expect("valid URL query pattern")
+    });
+    static AUTHORIZATION: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r#"(?i)(\bauthorization\b["']?\s*:\s*)[^\r\n]*"#)
+            .expect("valid Authorization pattern")
+    });
+    static SIGNING_VALUE: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(
+            r#"(?i)(\b(?:x-amz-(?:signature|security-token|credential)|signature)\b["']?\s*[:=]\s*)(?:"[^"\r\n]*"|'[^'\r\n]*'|[^\s&,;]+)"#,
+        )
+        .expect("valid signing value pattern")
+    });
+    let redact = |message: &str| {
+        let message = URL_QUERY.replace_all(message, "${1}");
+        let message = AUTHORIZATION.replace_all(&message, "${1}[REDACTED]");
+        SIGNING_VALUE
+            .replace_all(&message, "${1}[REDACTED]")
+            .into_owned()
+    };
+    let mut rendered = redact(&error.to_string());
     let mut source = error.source();
     while let Some(error) = source {
         rendered.push_str(": ");
-        rendered.push_str(&error.to_string());
+        rendered.push_str(&redact(&error.to_string()));
         source = error.source();
     }
     rendered
@@ -108,13 +133,6 @@ fn rendered_failure(
         }
     }
     rendered
-}
-
-fn now(runtime_components: &RuntimeComponents) -> SystemTime {
-    runtime_components
-        .time_source()
-        .map(|time_source| time_source.now())
-        .unwrap_or_else(SystemTime::now)
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -176,22 +194,16 @@ impl OrchestratorKind {
 }
 
 /// Associates one service client's SDK metadata with generated resend policy.
-#[derive(Debug)]
 pub struct ResendGuard {
     lookup: fn(&str) -> Idempotency,
-    output: Box<dyn RetryOutput>,
+    output: Box<dyn Fn(&str) + Send + Sync>,
 }
 
-trait RetryOutput: std::fmt::Debug + Send + Sync {
-    fn write_line(&self, line: &str);
-}
-
-#[derive(Debug)]
-struct Stderr;
-
-impl RetryOutput for Stderr {
-    fn write_line(&self, line: &str) {
-        eprintln!("{line}");
+impl fmt::Debug for ResendGuard {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ResendGuard")
+            .field("lookup", &self.lookup)
+            .finish_non_exhaustive()
     }
 }
 
@@ -200,7 +212,7 @@ impl ResendGuard {
     pub fn new(lookup: fn(&str) -> Idempotency) -> Self {
         Self {
             lookup,
-            output: Box::new(Stderr),
+            output: Box::new(|line| eprintln!("{line}")),
         }
     }
 }
@@ -224,9 +236,10 @@ impl Intercept for ResendGuard {
     fn read_before_attempt(
         &self,
         _context: &BeforeTransmitInterceptorContextRef<'_>,
-        runtime_components: &RuntimeComponents,
+        _runtime_components: &RuntimeComponents,
         cfg: &mut ConfigBag,
     ) -> Result<(), BoxError> {
+        let started_at = Instant::now();
         let attempts = cfg
             .load::<RequestAttempts>()
             .copied()
@@ -261,7 +274,7 @@ impl Intercept for ResendGuard {
                 outcome,
                 failure: "failure details unavailable".to_string(),
                 retry_message: "failure details unavailable".to_string(),
-                finished_at: now(runtime_components),
+                finished_at: started_at,
             }
         });
         if previous.outcome == AttemptOutcome::MaybeSent {
@@ -274,11 +287,10 @@ impl Intercept for ResendGuard {
                 .load::<RetryConfig>()
                 .map(RetryConfig::max_attempts)
                 .unwrap_or_else(|| RetryConfig::standard().max_attempts());
-            let elapsed = now(runtime_components)
+            let elapsed = started_at
                 .duration_since(previous.finished_at)
-                .unwrap_or_default()
                 .as_secs_f64();
-            self.output.write_line(&format!(
+            (self.output)(&format!(
                 "  Retrying {}.{} (SDK attempt {attempt}/{max} after {elapsed:.1}s): {}",
                 metadata.service(),
                 metadata.name(),
@@ -380,7 +392,7 @@ impl Intercept for ResendGuard {
             .and_then(Result::err)
             .map(|error| error_message(error))
             .unwrap_or_else(|| "failure details unavailable".to_string());
-        let finished_at = now(runtime_components);
+        let finished_at = Instant::now();
         cfg.interceptor_state().store_put(PreviousAttempt {
             outcome,
             failure,
@@ -444,7 +456,7 @@ impl Intercept for ResendGuard {
             (cfg.load::<LastStartedAttempt>(), cfg.load::<Metadata>())
             && attempt.0.attempts() > 1
         {
-            self.output.write_line(&format!(
+            (self.output)(&format!(
                 "  Gave up {}.{} after {} SDK attempts",
                 metadata.service(),
                 metadata.name(),
