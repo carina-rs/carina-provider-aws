@@ -761,13 +761,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn arn_reference_validates_offline_and_resolves_alias_arn() {
+    async fn key_reference_validates_offline_and_resolves_alias_arn() {
         use carina_core::resource::{ConcreteValue, Value};
 
         let raw = "arn:aws:kms:eu-west-1:999999999999:alias/Team_1:customer-key";
         let canonical =
             "arn:aws:kms:eu-west-1:999999999999:key/mrk-0123456789abcdef0123456789abcdef";
-        let schema = crate::tests::rootless(crate::kms_key_or_alias_arn_reference());
+        let schema = crate::tests::rootless(crate::kms_key_reference());
         for value in [raw, canonical] {
             assert!(
                 schema
