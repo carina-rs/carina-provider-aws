@@ -503,13 +503,6 @@ mod tests {
                 resource.set_attr(name, value);
             }
             let original = resource.attributes.clone();
-            {
-                let desired = NativeDesiredNormalization::from_core(&mut resource)
-                    .expect("normalization input projection");
-                crate::services::ec2::nat_gateway::validate_nat_gateway_inputs(&desired.inputs())
-                    .unwrap();
-                crate::services::sqs::queue::validate_sqs_queue_inputs(&desired.inputs()).unwrap();
-            }
             let normalized = normalize_mixed(resource);
             assert_eq!(normalized.attributes, original);
         }

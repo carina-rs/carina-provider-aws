@@ -114,7 +114,7 @@ impl Provider for FixtureProvider {
                     .succeeded(attrs));
             }
             let outcome = Box::pin(self.aws.create_with_poll_sleep_for_test(
-                request.resource().as_resource(),
+                request.resource(),
                 attempt,
                 |duration| {
                     self.sleeps.lock().unwrap().push(duration);

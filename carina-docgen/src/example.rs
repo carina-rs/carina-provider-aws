@@ -543,7 +543,7 @@ fn same_user_functions(
                     params: left_params,
                     return_type: left_return_type,
                     return_type_span: _,
-                    annotation_source_file: _,
+                    annotation_source_file: left_annotation_source_file,
                     local_lets: left_local_lets,
                     body: left_body,
                 } = left;
@@ -552,12 +552,13 @@ fn same_user_functions(
                     params: right_params,
                     return_type: right_return_type,
                     return_type_span: _,
-                    annotation_source_file: _,
+                    annotation_source_file: right_annotation_source_file,
                     local_lets: right_local_lets,
                     body: right_body,
                 } = right;
                 left_name == right_name
                     && left_return_type == right_return_type
+                    && left_annotation_source_file == right_annotation_source_file
                     && left_params.len() == right_params.len()
                     && left_params.iter().zip(right_params).all(|(left, right)| {
                         let FnParam {
@@ -1177,6 +1178,33 @@ fn update_line_start(source: &[u8], start: usize, end: usize, line_start: &mut u
 mod tests {
     use super::*;
     use std::path::PathBuf;
+
+    #[test]
+    fn function_comparison_preserves_annotation_source_file() {
+        let function = UserFunction {
+            name: "example".into(),
+            params: vec![],
+            return_type: None,
+            return_type_span: None,
+            annotation_source_file: Some(PathBuf::from("authored/main.crn")),
+            local_lets: vec![],
+            body: UserFunctionBody {
+                value: carina_core::resource::Value::Concrete(
+                    carina_core::resource::ConcreteValue::Bool(true),
+                ),
+                source_line: 1,
+                source_file: None,
+            },
+        };
+        let authored = std::collections::HashMap::from([("example".into(), function)]);
+        let mut rendered = authored.clone();
+        rendered.get_mut("example").unwrap().body.source_line = 99;
+        assert!(same_user_functions(&authored, &rendered));
+        for source in [None, Some(PathBuf::from("other/main.crn"))] {
+            rendered.get_mut("example").unwrap().annotation_source_file = source;
+            assert!(!same_user_functions(&authored, &rendered));
+        }
+    }
 
     fn write_fixture(examples_dir: &Path, directory: &str, source: &str) -> PathBuf {
         let directory = examples_dir.join(directory);

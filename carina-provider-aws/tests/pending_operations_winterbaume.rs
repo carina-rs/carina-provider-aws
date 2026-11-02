@@ -1230,6 +1230,19 @@ fn schema_registry() -> carina_core::schema::SchemaRegistry {
     carina_provider_aws::schemas::schema_registry()
 }
 
+async fn normalized_create_for_test(
+    resource: &Resource,
+) -> carina_core::executor::normalized::NormalizedResource {
+    carina_core::executor::normalized::apply_desired_normalization(
+        resource.clone(),
+        &[],
+        &AwsNormalizer,
+        &schema_registry(),
+    )
+    .await
+    .expect("test create input should pass desired normalization")
+}
+
 async fn create_request_for_test(resource: Resource) -> CreateRequest {
     carina_core::validation::deferred_types::with_session_for_test_async(
         &carina_core::parser::LoadedProviderContext::empty_for_test(),
@@ -1374,7 +1387,7 @@ async fn rejected_create_is_untracked() {
 
     let verdict = provider
         .create_step(
-            &resource,
+            &normalized_create_for_test(&resource).await,
             TestCreateAttempt {
                 id: resource.id.clone(),
             },
@@ -1394,7 +1407,7 @@ async fn create_vpc_post_send_failure_becomes_unissued_pending() {
 
     let step = provider
         .create_step(
-            &resource,
+            &normalized_create_for_test(&resource).await,
             TestCreateAttempt {
                 id: resource.id.clone(),
             },
@@ -1428,7 +1441,7 @@ async fn token_bearing_route_table_post_send_failure_enters_tagged_discovery() {
 
     let step = provider
         .create_step(
-            &resource,
+            &normalized_create_for_test(&resource).await,
             TestCreateAttempt {
                 id: resource.id.clone(),
             },
@@ -1464,7 +1477,7 @@ async fn maybe_sent_request_certificate_becomes_secret_free_pending_with_same_to
 
     let step = provider
         .create_step(
-            &resource,
+            &normalized_create_for_test(&resource).await,
             TestCreateAttempt {
                 id: resource.id.clone(),
             },
@@ -2163,7 +2176,7 @@ async fn accepted_create_then_transient_waiter_failure_stays_in_flight_with_iden
     let token = expect_create_pending(
         provider
             .create_step(
-                &resource,
+                &normalized_create_for_test(&resource).await,
                 TestCreateAttempt {
                     id: resource.id.clone(),
                 },
@@ -2203,7 +2216,7 @@ async fn accepted_create_then_post_create_failure_is_created_and_excludes_failed
     let token = expect_create_pending(
         provider
             .create_step(
-                &resource,
+                &normalized_create_for_test(&resource).await,
                 TestCreateAttempt {
                     id: resource.id.clone(),
                 },
@@ -2252,7 +2265,7 @@ async fn partial_flow_log_create_excludes_resource_ids_from_sent_when_read_back_
 
     let verdict = provider
         .create_step(
-            &resource,
+            &normalized_create_for_test(&resource).await,
             TestCreateAttempt {
                 id: resource.id.clone(),
             },
@@ -2283,7 +2296,7 @@ async fn post_create_failure_with_failed_read_back_is_created_with_read_failed_o
     let token = expect_create_pending(
         provider
             .create_step(
-                &resource,
+                &normalized_create_for_test(&resource).await,
                 TestCreateAttempt {
                     id: resource.id.clone(),
                 },
@@ -2397,7 +2410,7 @@ async fn nat_gateway_create_steps_issue_once_poll_once_and_read_back() {
     let mut token = expect_create_pending(
         provider
             .create_step(
-                &resource,
+                &normalized_create_for_test(&resource).await,
                 TestCreateAttempt {
                     id: resource.id.clone(),
                 },
@@ -2473,7 +2486,7 @@ async fn create_read_back_permanent_error_finishes_partial_after_mutation_poll()
     let token = expect_create_pending(
         provider
             .create_step(
-                &resource,
+                &normalized_create_for_test(&resource).await,
                 TestCreateAttempt {
                     id: resource.id.clone(),
                 },
@@ -2521,7 +2534,7 @@ async fn assert_create_read_back_recovers(first_read: &str) {
     let token = expect_create_pending(
         provider
             .create_step(
-                &resource,
+                &normalized_create_for_test(&resource).await,
                 TestCreateAttempt {
                     id: resource.id.clone(),
                 },
@@ -2586,7 +2599,7 @@ async fn resume_read_back_in_fresh_provider_reads_by_identifier() {
     let token = expect_create_pending(
         provider
             .create_step(
-                &resource,
+                &normalized_create_for_test(&resource).await,
                 TestCreateAttempt {
                     id: resource.id.clone(),
                 },
@@ -2638,7 +2651,7 @@ async fn nat_gateway_failed_create_poll_returns_api_error() {
     let token = expect_create_pending(
         provider
             .create_step(
-                &resource,
+                &normalized_create_for_test(&resource).await,
                 TestCreateAttempt {
                     id: resource.id.clone(),
                 },
@@ -2737,7 +2750,7 @@ async fn acm_dvo_arrives_on_second_poll() {
     resource.set_attr("validation_method", string("DNS"));
     let mut step = provider
         .create_step(
-            &resource,
+            &normalized_create_for_test(&resource).await,
             TestCreateAttempt {
                 id: resource.id.clone(),
             },
@@ -2810,7 +2823,7 @@ async fn read_back_final_attempt_returns_partial_with_exact_missing_attributes()
         resource.set_attr("validation_method", string("DNS"));
         let step = provider
             .create_step(
-                &resource,
+                &normalized_create_for_test(&resource).await,
                 TestCreateAttempt {
                     id: resource.id.clone(),
                 },
@@ -2931,16 +2944,17 @@ async fn permanent_read_back_error_finishes_partial_on_initial_step() {
             let (provider, service) = scripted_acm(&[read]).await;
             let mut resource = acm_certificate_resource();
             resource.set_attr("validation_method", string(method));
+            let normalized = normalized_create_for_test(&resource).await;
             let step = provider
                 .create_step(
-                    &resource,
+                    &normalized,
                     TestCreateAttempt {
                         id: resource.id.clone(),
                     },
                 )
                 .await
                 .unwrap();
-            assert_permanent_read_back_partial(step, &resource, error);
+            assert_permanent_read_back_partial(step, normalized.as_resource(), error);
             assert_eq!(service.request_bodies.lock().unwrap().len(), 1);
         }
     }
@@ -2959,7 +2973,7 @@ async fn permanent_read_back_error_finishes_partial_on_continuing_poll() {
         let token = expect_read_back_pending(
             provider
                 .create_step(
-                    &resource,
+                    &normalized_create_for_test(&resource).await,
                     TestCreateAttempt {
                         id: resource.id.clone(),
                     },
@@ -3002,7 +3016,7 @@ async fn permanent_read_back_error_finishes_partial_on_resume() {
     let token = expect_read_back_pending(
         provider
             .create_step(
-                &resource,
+                &normalized_create_for_test(&resource).await,
                 TestCreateAttempt {
                     id: resource.id.clone(),
                 },
@@ -3142,7 +3156,7 @@ async fn transient_read_back_service_error_stays_pending_then_completes() {
             let token = expect_read_back_pending(
                 provider
                     .create_step(
-                        &resource,
+                        &normalized_create_for_test(&resource).await,
                         TestCreateAttempt {
                             id: resource.id.clone(),
                         },
@@ -3227,7 +3241,7 @@ async fn transient_read_back_dispatch_failure_stays_pending_then_completes() {
     let token = expect_read_back_pending(
         provider
             .create_step(
-                &resource,
+                &normalized_create_for_test(&resource).await,
                 TestCreateAttempt {
                     id: resource.id.clone(),
                 },
@@ -3265,7 +3279,7 @@ async fn acm_email_read_back_completes_without_dvo() {
     let resource = acm_certificate_resource();
     let step = provider
         .create_step(
-            &resource,
+            &normalized_create_for_test(&resource).await,
             TestCreateAttempt {
                 id: resource.id.clone(),
             },
@@ -3283,7 +3297,7 @@ async fn acm_failed_read_back_is_terminal_failure_without_exhausting_budget() {
     resource.set_attr("validation_method", string("DNS"));
     let error = provider
         .create_step(
-            &resource,
+            &normalized_create_for_test(&resource).await,
             TestCreateAttempt {
                 id: resource.id.clone(),
             },
@@ -3312,7 +3326,7 @@ async fn resume_read_back_final_attempt_is_partial_with_exact_missing_attributes
     resource.set_attr("validation_method", string("DNS"));
     let step = provider
         .create_step(
-            &resource,
+            &normalized_create_for_test(&resource).await,
             TestCreateAttempt {
                 id: resource.id.clone(),
             },
@@ -3430,7 +3444,7 @@ async fn read_back_final_attempt_from_operation_is_terminal() {
         let token = expect_create_pending(
             provider
                 .create_step(
-                    &resource,
+                    &normalized_create_for_test(&resource).await,
                     TestCreateAttempt {
                         id: resource.id.clone(),
                     },
@@ -3532,7 +3546,7 @@ async fn read_back_rejects_resource_and_identifier_mismatch_before_reading() {
         resource.set_attr("validation_method", string("DNS"));
         let step = provider
             .create_step(
-                &resource,
+                &normalized_create_for_test(&resource).await,
                 TestCreateAttempt {
                     id: resource.id.clone(),
                 },
@@ -3629,7 +3643,7 @@ async fn acm_http_read_back_completes_without_dvo() {
     resource.set_attr("validation_method", string("HTTP"));
     let step = provider
         .create_step(
-            &resource,
+            &normalized_create_for_test(&resource).await,
             TestCreateAttempt {
                 id: resource.id.clone(),
             },
@@ -3648,7 +3662,7 @@ async fn acm_failed_read_back_resume_stays_terminal() {
     resource.set_attr("validation_method", string("DNS"));
     let TestCreateStep::Pending { token, .. } = provider
         .create_step(
-            &resource,
+            &normalized_create_for_test(&resource).await,
             TestCreateAttempt {
                 id: resource.id.clone(),
             },
@@ -3699,7 +3713,7 @@ async fn acm_final_partial_after_poll_retains_request_and_arn() {
             resource.set_attr("validation_method", string("DNS"));
             let TestCreateStep::Pending { token, .. } = provider
                 .create_step(
-                    &resource,
+                    &normalized_create_for_test(&resource).await,
                     TestCreateAttempt {
                         id: resource.id.clone(),
                     },
@@ -3792,7 +3806,7 @@ async fn read_back_resume_rederives_current_requirements_and_missing_attributes(
     let mut resource = acm_certificate_resource();
     let TestCreateStep::Pending { token, .. } = first
         .create_step(
-            &resource,
+            &normalized_create_for_test(&resource).await,
             TestCreateAttempt {
                 id: resource.id.clone(),
             },

@@ -1031,8 +1031,95 @@ fn assert_sample_reached_mutation(
     );
 }
 
+async fn prepare_create_for_capture(
+    mut resource: Resource,
+    bindings: &carina_core::binding_index::ResolvedBindings,
+) -> Result<carina_core::provider::CreateRequest, carina_core::executor::ProviderPreparationError> {
+    carina_core::validation::deferred_types::with_session_for_test_async(
+        &carina_core::parser::LoadedProviderContext::empty_for_test(),
+        async |type_checks| {
+            carina_core::resolver::resolve_refs_with_state_and_remote(
+                std::slice::from_mut(&mut resource),
+                bindings,
+                type_checks,
+            )
+            .expect("capture fixture references should resolve");
+            let gate = carina_core::executor::ModuleConstraintGate::from_live_compositions(&[]);
+            let schemas = crate::schemas::schema_registry();
+            let factories: Vec<Box<dyn carina_core::provider::ProviderFactory>> =
+                vec![Box::new(crate::AwsProviderFactory)];
+            let preparation = carina_core::executor::ProviderPreparationContext::new(
+                bindings,
+                &gate,
+                &[],
+                &crate::AwsNormalizer,
+                &factories,
+                &schemas,
+                type_checks,
+            );
+            carina_core::executor::prepare_create_request(resource, &preparation).await
+        },
+    )
+    .await
+}
+
+#[tokio::test]
+async fn native_create_preparation_rejects_sqs_and_nat_cross_field_conflicts_before_send() {
+    let service = Arc::new(CaptureService::default());
+    let mock = MockAws::builder()
+        .with_service(Arc::clone(&service))
+        .build();
+    let provider = AwsProvider::from_sdk_config(
+        REGION.to_string(),
+        vec![],
+        vec![],
+        &BoundedSdkConfig::for_test(mock.sdk_config(REGION).await),
+    );
+    let bindings = carina_core::binding_index::ResolvedBindings::default();
+    for (resource, message) in [
+        (
+            Resource::with_provider("aws", "sqs.Queue", "invalid-create", None)
+                .with_attribute("queue_name", string("invalid-create"))
+                .with_attribute("fifo_queue", Value::Concrete(ConcreteValue::Bool(false)))
+                .with_attribute(
+                    "content_based_deduplication",
+                    Value::Concrete(ConcreteValue::Bool(true)),
+                ),
+            "content_based_deduplication requires fifo_queue = true",
+        ),
+        (
+            Resource::with_provider("aws", "ec2.NatGateway", "invalid-create", None),
+            "subnet_id is required when availability_mode = zonal",
+        ),
+    ] {
+        let id = resource.id.clone();
+        let error = match prepare_create_for_capture(resource, &bindings).await {
+            Err(carina_core::executor::ProviderPreparationError::Provider(error)) => error,
+            Err(error) => {
+                panic!("cross-field validation must reject during normalization: {error:?}")
+            }
+            Ok(request) => {
+                let (create, _cancellation) =
+                    carina_core::executor::dispatch_create(&provider, &id, request);
+                let _ = tokio::time::timeout(Duration::from_secs(1), create).await;
+                panic!("invalid native create passed preparation and reached the provider");
+            }
+        };
+        assert!(
+            service.snapshot().is_empty(),
+            "invalid create must not send any AWS request"
+        );
+        assert!(
+            matches!(&error, ProviderError::InvalidInput(_)),
+            "{error:?}"
+        );
+        assert!(error.to_string().contains(message), "{error:?}");
+    }
+}
+
 #[tokio::test]
 async fn sqs_update_rejects_fifo_conflicts_after_deferred_inputs_resolve_before_send() {
+    use carina_core::binding_index::{BindingValueSource, ResolvedBindings};
     use carina_core::provider::ProviderNormalizer;
     use carina_core::resource::DeferredValue;
 
@@ -1049,6 +1136,15 @@ async fn sqs_update_rejects_fifo_conflicts_after_deferred_inputs_resolve_before_
     let identifier =
         AppliedIdentifier::new("https://sqs.us-east-1.amazonaws.com/123456789012/resolved-queue")
             .unwrap();
+    let mut bindings = ResolvedBindings::default();
+    bindings.set(
+        "settings",
+        HashMap::from([(
+            "fifo_queue".into(),
+            Value::Concrete(ConcreteValue::Bool(false)),
+        )]),
+        BindingValueSource::Local,
+    );
 
     for fifo in [
         Value::resource_ref("settings", "fifo_queue", vec![]).resolve_root_for_test(),
@@ -1064,32 +1160,37 @@ async fn sqs_update_rejects_fifo_conflicts_after_deferred_inputs_resolve_before_
                 Value::Concrete(ConcreteValue::Bool(true)),
             );
         let id = desired.id.clone();
-        let mut resources = vec![desired.into()];
+        let mut resources = vec![desired.clone().into()];
         crate::AwsNormalizer
             .normalize_desired(&mut resources)
             .await
             .expect("plan-time validation must defer the opaque FIFO flag");
 
-        // Resolution yields the existing standard queue, so only deduplication
-        // changes in the patch. Validation must also inspect the retained flag.
+        // Prepare the queue's previous settings through real reference resolution
+        // and secret unwrapping. The update retains that resolved FIFO flag.
+        let mut previous = desired;
+        previous.set_attr(
+            "content_based_deduplication",
+            Value::Concrete(ConcreteValue::Bool(false)),
+        );
+        let request = prepare_create_for_capture(previous, &bindings)
+            .await
+            .expect("the previous queue settings must resolve and pass preparation");
         let from = crate::test_existing_state(
             id.clone(),
-            HashMap::from([
-                ("queue_name".into(), string("resolved-queue")),
-                (
-                    "fifo_queue".into(),
-                    Value::Concrete(ConcreteValue::Bool(false)),
-                ),
-                (
-                    "content_based_deduplication".into(),
-                    Value::Concrete(ConcreteValue::Bool(false)),
-                ),
-            ]),
+            request.resource().as_resource().resolved_attributes(),
+        );
+        assert_eq!(
+            from.attributes.get("fifo_queue"),
+            Some(&Value::Concrete(ConcreteValue::Bool(false)))
         );
         let patch = UpdatePatch {
             ops: vec![PatchOp::Replace {
                 key: "content_based_deduplication".into(),
-                value: Value::Concrete(ConcreteValue::Bool(true)),
+                value: resources[0]
+                    .get_attr("content_based_deduplication")
+                    .unwrap()
+                    .clone(),
             }],
         };
         service.clear();
@@ -1215,7 +1316,15 @@ async fn capture_create_and_update_mutations() {
         for attribute in contract.create_attributes {
             service.clear();
             let resource = focused_resource(schema, contract, attribute);
-            let result = Box::pin(provider.create_step(&resource, CaptureAttempt)).await;
+            let normalized = carina_core::executor::normalized::apply_desired_normalization(
+                resource.clone(),
+                &[],
+                &crate::AwsNormalizer,
+                &crate::schemas::schema_registry(),
+            )
+            .await
+            .expect("capture fixture must pass desired normalization");
+            let result = Box::pin(provider.create_step(&normalized, CaptureAttempt)).await;
             let requests = service.snapshot();
             assert!(
                 !requests.is_empty(),

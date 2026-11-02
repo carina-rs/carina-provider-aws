@@ -711,7 +711,7 @@ impl CarinaProvider for AwsProcessProvider {
         };
         self.runtime.block_on(
             self.provider()
-                .create_step(core_resource.as_resource(), GuestCreateAttempt(attempt)),
+                .create_step(&core_resource, GuestCreateAttempt(attempt)),
         )
     }
 
@@ -1110,11 +1110,12 @@ mod tests {
                     collect_callbacks(member, bindings);
                 }
             }
-            RawShape::UnloadedSchemaType(_)
-            | RawShape::Bool
-            | RawShape::Duration
-            | RawShape::Ref(_)
-            | RawShape::Reference { .. } => {}
+            RawShape::UnloadedSchemaType(unloaded) => panic!(
+                "callback collection requires a loaded schema type for {}",
+                unloaded.identity(),
+            ),
+            RawShape::Bool | RawShape::Duration | RawShape::Ref(_) | RawShape::Reference { .. } => {
+            }
         }
     }
 

@@ -3,6 +3,7 @@
 //! AWS Provider implementation
 
 mod aws_operation;
+mod create_resource;
 mod data_source_lookups;
 mod ec2_security_group_rules;
 mod ec2_tags;
@@ -30,6 +31,7 @@ mod tests;
 
 #[doc(hidden)]
 pub use aws_operation::ClientToken;
+pub use create_resource::AwsCreateResource;
 pub use factory::AwsProviderFactory;
 pub use normalizer::AwsNormalizer;
 #[doc(hidden)]
