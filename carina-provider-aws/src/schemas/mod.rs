@@ -48,7 +48,7 @@ mod tests {
     use std::collections::HashMap;
 
     use carina_aws_types::AwsType;
-    use carina_core::differ::{Diff, diff_for_test as diff};
+    use carina_core::differ::Diff;
     use carina_core::executor::normalized::apply_desired_normalization;
     use carina_core::provider::normalize_provider_states;
     use carina_core::resource::{ConcreteValue, Current, ResolvedResource, Resource, Value};
@@ -140,6 +140,10 @@ mod tests {
                     identity, pattern, ..
                 } => check(pattern, Some(identity)),
                 Shape::String { pattern, .. } => check(pattern, None),
+                Shape::UnloadedSchemaType(unloaded) => panic!(
+                    "KMS coverage requires a loaded schema type for {}",
+                    unloaded.identity(),
+                ),
                 Shape::Enum { base, .. } => {
                     walk(schema, base, path, name, description, coverage, depth + 1)
                 }
@@ -1047,24 +1051,18 @@ mod tests {
             }
             Current::MissingIdentifier(state) => state.into_state(),
         };
-        let schema = registry
-            .get("aws", "route53.RecordSet", SchemaKind::Resource)
-            .expect("RecordSet resource schema");
         let router = crate::test_comparison_router();
         let comparison = router
             .comparison_for(&registry, &id)
             .expect("RecordSet comparison context");
         let saved_attrs = carina_core::provider::RawSavedAttrs::default().lift(&registry);
-        let result = diff(
-            &ResolvedResource::new(normalized.as_resource().clone()),
-            &current,
-            &saved_attrs,
-            None,
-            Some(schema.schema().as_schema()),
-            comparison.context(),
-            &carina_core::references::prepare_empty_for_tests(),
-        )
-        .expect("prepared test comparison");
+        let desired = ResolvedResource::new(
+            normalized
+                .as_resource()
+                .clone()
+                .into_resolved_dependency_phase_for_test(),
+        );
+        let result = crate::test_diff(&desired, &current, &saved_attrs, None, comparison);
         assert!(
             matches!(result, Diff::NoChange(_)),
             "{label}: read-back wire value must not cause a phantom diff: {result:?}"

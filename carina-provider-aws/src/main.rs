@@ -1,15 +1,15 @@
 #[cfg(any(target_arch = "wasm32", test))]
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, HashMap};
 
 #[cfg(any(target_arch = "wasm32", test))]
 use carina_plugin_sdk::{
     CarinaProvider, CreateAttempt as SdkCreateAttempt, CreateStep as SdkCreateStep,
-    CreateVerdict as SdkCreateVerdict, DeleteOutcome as SdkDeleteOutcome, DesiredAttribute,
-    DesiredResource, FoundRead, IssuedCreate as SdkIssuedCreate, NormalizedResource, Pending,
-    PendingDelete, Poll as SdkPoll, PollAttempt as SdkPollAttempt, PollRequest,
-    PollVerdict as SdkPollVerdict, Resume as SdkResume, ResumeAttempt as SdkResumeAttempt,
-    ResumeStep as SdkResumeStep, ResumeVerdict as SdkResumeVerdict,
-    ResumedCreate as SdkResumedCreate, UpdateOutcome as SdkUpdateOutcome,
+    CreateVerdict as SdkCreateVerdict, DeleteOutcome as SdkDeleteOutcome, DesiredResource,
+    FoundRead, IssuedCreate as SdkIssuedCreate, NormalizedResource, Pending, PendingDelete,
+    Poll as SdkPoll, PollAttempt as SdkPollAttempt, PollRequest, PollVerdict as SdkPollVerdict,
+    Resume as SdkResume, ResumeAttempt as SdkResumeAttempt, ResumeStep as SdkResumeStep,
+    ResumeVerdict as SdkResumeVerdict, ResumedCreate as SdkResumedCreate,
+    UpdateOutcome as SdkUpdateOutcome,
 };
 #[cfg(any(target_arch = "wasm32", test))]
 use carina_provider_protocol::OperationStep;
@@ -28,8 +28,8 @@ use carina_core::provider::{
 };
 #[cfg(any(target_arch = "wasm32", test))]
 use carina_core::resource::{
-    DataSource as CoreDataSource, Directives as CoreDirectives,
-    ProviderResource as CoreProviderResource, Resource as CoreResource, Value as CoreValue,
+    DataSource as CoreDataSource, Directives as CoreDirectives, Resource as CoreResource,
+    Value as CoreValue,
 };
 #[cfg(any(target_arch = "wasm32", test))]
 use carina_core::schema::{
@@ -531,31 +531,6 @@ impl AwsProcessProvider {
     fn schema_registry() -> SchemaRegistry {
         carina_provider_aws::schemas::schema_registry()
     }
-
-    fn normalize_core_desired(
-        &self,
-        resources: &mut [CoreProviderResource],
-        deferred_by_resource: &[BTreeSet<String>],
-    ) -> Result<(), CoreProviderError> {
-        self.normalizer
-            .normalize_desired_with_host_deferred(resources, deferred_by_resource)?;
-
-        // The typed normalization view never exposes mutable access to a
-        // host-deferred name. Keep this as a protocol-boundary assertion so a
-        // future normalizer cannot accidentally return a withheld attribute.
-        for (resource, deferred) in resources.iter().zip(deferred_by_resource) {
-            if let Some(name) = deferred
-                .iter()
-                .find(|name| resource.attributes.contains_key(name.as_str()))
-            {
-                return Err(CoreProviderError::internal(format!(
-                    "desired normalizer materialized host-deferred attribute `{name}`"
-                ))
-                .for_resource(resource.id.clone()));
-            }
-        }
-        Ok(())
-    }
 }
 
 #[cfg(any(target_arch = "wasm32", test))]
@@ -746,7 +721,7 @@ impl CarinaProvider for AwsProcessProvider {
         };
         self.runtime.block_on(
             self.provider()
-                .create_step(core_resource.as_resource(), GuestCreateAttempt(attempt)),
+                .create_step(&core_resource, GuestCreateAttempt(attempt)),
         )
     }
 
@@ -1012,72 +987,13 @@ impl CarinaProvider for AwsProcessProvider {
         &self,
         resources: Vec<DesiredResource>,
     ) -> Result<Vec<NormalizedResource>, proto::ProviderError> {
-        let mut core_resources = Vec::with_capacity(resources.len());
-        let mut deferred_by_resource = Vec::with_capacity(resources.len());
-        for resource in &resources {
-            let core_id = protocol_convert::protocol_to_resource_id(resource.id());
-            let mut core = CoreResource::from_id(core_id.clone());
-            let mut deferred = BTreeSet::new();
-            for (name, attribute) in resource.attributes() {
-                match attribute {
-                    DesiredAttribute::Known(value) => {
-                        let value =
-                            protocol_convert::protocol_to_core_value(value).map_err(|error| {
-                                Self::convert_error(
-                                    protocol_input_error(
-                                        "failed to decode desired resource attribute",
-                                        error,
-                                    )
-                                    .for_resource(core_id.clone()),
-                                )
-                            })?;
-                        core.set_attr(name.to_string(), value);
-                    }
-                    DesiredAttribute::Deferred => {
-                        deferred.insert(name.to_string());
-                    }
-                    DesiredAttribute::Absent => unreachable!(
-                        "DesiredResource::attributes yields only known or deferred names"
-                    ),
-                }
-            }
-            core_resources.push(CoreProviderResource::from(core));
-            deferred_by_resource.push(deferred);
-        }
-        // Deferred names stay out of the core resource. The typed normalization
-        // input carries them separately so normalizers can neither observe a
-        // fabricated value nor obtain write access to a host-withheld attribute.
-        self.normalize_core_desired(&mut core_resources, &deferred_by_resource)
-            .map_err(Self::convert_error)?;
-        let mut normalized = Vec::with_capacity(core_resources.len());
-        for (mut desired, resource) in resources.into_iter().zip(core_resources) {
-            for (name, value) in &resource.attributes {
-                let value =
-                    protocol_convert::try_core_to_protocol_value(value).map_err(|error| {
-                        Self::convert_error(
-                            protocol_output_error("failed to encode normalized attribute", error)
-                                .for_resource(resource.id.clone()),
-                        )
-                    })?;
-                match desired.attribute_mut(name) {
-                    DesiredAttribute::Known(current) => *current = value,
-                    DesiredAttribute::Absent => desired
-                        .insert_absent(name.clone(), value)
-                        .map_err(|error| {
-                            Self::convert_error(
-                                CoreProviderError::internal_caused_by(
-                                    "failed to insert normalized attribute",
-                                    error,
-                                )
-                                .for_resource(resource.id.clone()),
-                            )
-                        })?,
-                    DesiredAttribute::Deferred => unreachable!(
-                        "typed normalization and the boundary assertion exclude deferred names"
-                    ),
-                }
-            }
-            normalized.push(desired.finish());
+        let mut normalized = Vec::with_capacity(resources.len());
+        for resource in resources {
+            let mut desired = resource.into_normalization()?;
+            self.normalizer
+                .normalize_desired_view(&mut desired.view())
+                .map_err(Self::convert_error)?;
+            normalized.push(desired.finish()?);
         }
         Ok(normalized)
     }
@@ -1105,7 +1021,7 @@ fn main() {}
 mod tests {
 
     use super::*;
-    use carina_core::resource::{ConcreteValue, DeferredValue, Resource, Value};
+    use carina_core::resource::ConcreteValue;
     use carina_core::schema::{
         CompiledAttributeType, CustomValidator, RawShape, ResourceValidation,
         TypeIdentity as CoreTypeIdentity,
@@ -1135,7 +1051,7 @@ mod tests {
 
     fn scalar_kind(attribute_type: &CompiledAttributeType) -> CallbackScalar {
         match attribute_type.raw_shape() {
-            RawShape::String { .. } => CallbackScalar::String,
+            RawShape::String { .. } | RawShape::Reference { .. } => CallbackScalar::String,
             RawShape::Int { .. } => CallbackScalar::Int,
             RawShape::Float { .. } => CallbackScalar::Float,
             RawShape::Enum { base, .. } => scalar_kind(base),
@@ -1204,7 +1120,11 @@ mod tests {
                     collect_callbacks(member, bindings);
                 }
             }
-            RawShape::Reference { .. } | RawShape::Bool | RawShape::Duration | RawShape::Ref(_) => {
+            RawShape::UnloadedSchemaType(unloaded) => panic!(
+                "callback collection requires a loaded schema type for {}",
+                unloaded.identity(),
+            ),
+            RawShape::Bool | RawShape::Duration | RawShape::Ref(_) | RawShape::Reference { .. } => {
             }
         }
     }
@@ -1275,164 +1195,6 @@ mod tests {
 
     fn non_finite_state() -> CoreAppliedState {
         carina_provider_aws::non_finite_applied_state_for_protocol_test()
-    }
-
-    fn normalize_desired_for_test(
-        provider: &AwsProcessProvider,
-        resources: Vec<Resource>,
-        deferred: &[&[&str]],
-    ) -> Result<Vec<CoreProviderResource>, CoreProviderError> {
-        let mut resources: Vec<_> = resources
-            .into_iter()
-            .map(CoreProviderResource::from)
-            .collect();
-        let deferred: Vec<_> = deferred
-            .iter()
-            .map(|names| names.iter().map(|name| (*name).to_string()).collect())
-            .collect();
-        provider.normalize_core_desired(&mut resources, &deferred)?;
-        Ok(resources)
-    }
-
-    #[test]
-    fn normalize_desired_treats_host_deferred_name_as_metadata_without_core_sentinel() {
-        let mut resource =
-            Resource::with_provider("aws", "ec2.NatGateway", "host-deferred-subnet", None);
-        resource.set_attr(
-            "availability_mode",
-            Value::Concrete(ConcreteValue::String("zonal".into())),
-        );
-        assert!(
-            !resource.attributes.contains_key("subnet_id"),
-            "a host-withheld value must not be fabricated inside the core resource"
-        );
-
-        let provider = AwsProcessProvider::new();
-        let normalized = normalize_desired_for_test(&provider, vec![resource], &[&["subnet_id"]])
-            .expect("deferred metadata must defer the subnet requirement");
-
-        assert!(
-            !normalized[0].attributes.contains_key("subnet_id"),
-            "normalization must not materialize the host-withheld attribute"
-        );
-    }
-
-    #[test]
-    fn normalize_desired_defers_nat_gateway_check_for_host_hidden_resource_ref() {
-        let mut resource =
-            Resource::with_provider("aws", "ec2.NatGateway", "deferred-subnet", None);
-        resource.set_attr(
-            "availability_mode",
-            Value::Concrete(ConcreteValue::String("zonal".into())),
-        );
-        resource.set_attr(
-            "subnet_id",
-            Value::resource_ref("subnet", "subnet_id", vec![]).resolve_root_for_test(),
-        );
-
-        let hidden = resource
-            .attributes
-            .shift_remove("subnet_id")
-            .expect("fixture must contain a real unresolved subnet reference");
-        assert!(matches!(
-            hidden,
-            Value::Deferred(DeferredValue::ResourceRef { .. })
-        ));
-
-        let provider = AwsProcessProvider::new();
-        let normalized = normalize_desired_for_test(&provider, vec![resource], &[&["subnet_id"]])
-            .expect("a host-hidden unresolved subnet reference must defer validation");
-        assert!(
-            !normalized[0].attributes.contains_key("subnet_id"),
-            "the provider must never write a deferred attribute"
-        );
-    }
-
-    #[test]
-    fn normalize_desired_defers_sqs_checks_for_host_hidden_resource_refs() {
-        let mut fifo = Resource::with_provider("aws", "sqs.Queue", "deferred-fifo", None);
-        fifo.set_attr(
-            "fifo_queue",
-            Value::resource_ref("settings", "fifo_queue", vec![]).resolve_root_for_test(),
-        );
-        fifo.set_attr(
-            "deduplication_scope",
-            Value::Concrete(ConcreteValue::String("messageGroup".into())),
-        );
-        let hidden_fifo = fifo
-            .attributes
-            .shift_remove("fifo_queue")
-            .expect("fixture must contain a real unresolved FIFO reference");
-        assert!(matches!(
-            hidden_fifo,
-            Value::Deferred(DeferredValue::ResourceRef { .. })
-        ));
-
-        let mut kms = Resource::with_provider("aws", "sqs.Queue", "deferred-kms", None);
-        kms.set_attr(
-            "kms_data_key_reuse_period_seconds",
-            Value::Concrete(ConcreteValue::Int(300)),
-        );
-        kms.set_attr(
-            "kms_master_key_id",
-            Value::resource_ref("key", "key_id", vec![]).resolve_root_for_test(),
-        );
-        let hidden_key = kms
-            .attributes
-            .shift_remove("kms_master_key_id")
-            .expect("fixture must contain a real unresolved KMS-key reference");
-        assert!(matches!(
-            hidden_key,
-            Value::Deferred(DeferredValue::ResourceRef { .. })
-        ));
-
-        let provider = AwsProcessProvider::new();
-        let normalized = normalize_desired_for_test(
-            &provider,
-            vec![fifo, kms],
-            &[&["fifo_queue"], &["kms_master_key_id"]],
-        )
-        .expect("host-hidden unresolved SQS inputs must defer cross-field validation");
-        assert!(!normalized[0].attributes.contains_key("fifo_queue"));
-        assert!(!normalized[1].attributes.contains_key("kms_master_key_id"));
-    }
-
-    #[test]
-    fn normalize_desired_rejects_decidable_cross_field_conflicts() {
-        let provider = AwsProcessProvider::new();
-
-        let mut nat_gateway =
-            Resource::with_provider("aws", "ec2.NatGateway", "regional-with-subnet", None);
-        nat_gateway.set_attr(
-            "availability_mode",
-            Value::Concrete(ConcreteValue::String("regional".into())),
-        );
-        nat_gateway.set_attr(
-            "subnet_id",
-            Value::Concrete(ConcreteValue::String("subnet-12345678".into())),
-        );
-        let error = normalize_desired_for_test(&provider, vec![nat_gateway], &[&[]])
-            .expect_err("a regional NAT gateway with a subnet must be rejected at plan time");
-        assert!(
-            error
-                .to_string()
-                .contains("must be omitted when availability_mode = regional"),
-            "unexpected NAT gateway validation error: {error:?}"
-        );
-
-        let mut queue = Resource::with_provider("aws", "sqs.Queue", "standard-with-fifo", None);
-        queue.set_attr("fifo_queue", Value::Concrete(ConcreteValue::Bool(false)));
-        queue.set_attr(
-            "deduplication_scope",
-            Value::Concrete(ConcreteValue::String("messageGroup".into())),
-        );
-        let error = normalize_desired_for_test(&provider, vec![queue], &[&[]]).expect_err(
-            "a standard SQS queue with a FIFO-only attribute must be rejected at plan time",
-        );
-        assert!(
-            error.to_string().contains("requires fifo_queue = true"),
-            "unexpected SQS queue validation error: {error:?}"
-        );
     }
 
     fn assert_typed_conversion_error(error: CoreProviderError, message: &str) {

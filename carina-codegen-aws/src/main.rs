@@ -3379,7 +3379,7 @@ fn generate_provider_code(
          \x20   AppliedIdentifier, BoxFuture, ProviderError, ProviderResult, ReadOutcome,\n\
          };\n\
          use carina_core::resource::{\n\
-         \x20   ConcreteValue, DataSource, Resource, ResourceId, State, Value,\n\
+         \x20   AbsoluteBindingAddress, ConcreteValue, DataSource, NoPlaceholder, Resource, ResourceId, State, Value,\n\
          };\n\
          use crate::AwsProvider;\n\
          use crate::error_helpers::api_error_with_meta;\n\n",
@@ -4253,7 +4253,7 @@ fn generate_provider_code(
         code.push_str(&format!(
             "\x20   fn read_{}_data_source(\n\
              \x20       &self,\n\
-             \x20       resource: &DataSource<impl Clone + Send + Sync + 'static>,\n\
+             \x20       resource: &DataSource<impl Clone + Send + Sync + 'static, NoPlaceholder, AbsoluteBindingAddress, impl Clone + Send + Sync + 'static>,\n\
              \x20   ) -> BoxFuture<'_, ProviderResult<State>>;\n\n",
             module,
         ));
@@ -4270,7 +4270,7 @@ fn generate_provider_code(
     code.push_str(
         "pub(crate) fn dispatch_read_data_source<'a>(\n\
          \x20   provider: &'a AwsProvider,\n\
-         \x20   resource: &'a DataSource<impl Clone + Send + Sync + 'static>,\n\
+         \x20   resource: &'a DataSource<impl Clone + Send + Sync + 'static, NoPlaceholder, AbsoluteBindingAddress, impl Clone + Send + Sync + 'static>,\n\
          ) -> BoxFuture<'a, ProviderResult<State>> {\n\
          \x20   match resource.id.resource_type.as_str() {\n",
     );
@@ -4428,7 +4428,7 @@ fn emit_send_input(
     }
 
     code.push_str(&format!("impl {type_name} {{\n"));
-    code.push_str("    pub(crate) fn decode(\n        _resource: &Resource<impl Sized>,\n");
+    code.push_str("    pub(crate) fn decode(\n        _resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,\n");
     let needs_schema = fields
         .iter()
         .any(|field| field.send_type == SendFieldType::Enum);
@@ -4522,7 +4522,7 @@ fn generate_send_models_code(
          //!   ./scripts/generate-provider.sh\n\n\
          use std::collections::BTreeSet;\n\n\
          use carina_core::provider::{ProviderResult, Sent as CreateSent};\n\
-         use carina_core::resource::{Resource, Value};\n\n",
+         use carina_core::resource::{AbsoluteBindingAddress, NoPlaceholder, Resource, Value};\n\n",
     );
     let mut capture_contracts = Vec::new();
 

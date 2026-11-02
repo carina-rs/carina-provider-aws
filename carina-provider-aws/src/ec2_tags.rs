@@ -162,7 +162,7 @@ mod tests {
     use std::pin::Pin;
     use std::sync::{Arc, Mutex};
 
-    use carina_core::differ::{Diff, diff_for_test as diff};
+    use carina_core::differ::Diff;
     use carina_core::provider::RawSavedAttrs;
     use carina_core::resource::{ResolvedResource, Resource};
     use winterbaume_core::{MockAws, MockRequest, MockResponse, MockService};
@@ -461,24 +461,13 @@ mod tests {
         .with_identifier("vpc-12345678");
         let registry = crate::schemas::schema_registry();
         let saved = RawSavedAttrs::default().lift(&registry);
-        let schema = registry
-            .get("aws", "ec2.Vpc", carina_core::schema::SchemaKind::Resource)
-            .expect("VPC schema");
         let router = crate::test_comparison_router();
         let comparison = router
             .comparison_for(&registry, &desired.id)
             .expect("VPC comparison context");
 
-        let result = diff(
-            &ResolvedResource::new(desired),
-            &current,
-            &saved,
-            None,
-            Some(schema.schema().as_schema()),
-            comparison.context(),
-            &carina_core::references::prepare_empty_for_tests(),
-        )
-        .expect("prepared test comparison");
+        let desired = ResolvedResource::new(desired.into_resolved_dependency_phase_for_test());
+        let result = crate::test_diff(&desired, &current, &saved, None, comparison);
 
         assert!(matches!(result, Diff::NoChange(_)), "{result:?}");
     }

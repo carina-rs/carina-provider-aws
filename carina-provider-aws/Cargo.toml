@@ -17,7 +17,7 @@ path = "src/main.rs"
 [features]
 default = ["native"]
 native = []
-test-utils = []
+test-utils = ["carina-core/test-utils"]
 
 [dependencies]
 carina-core = { workspace = true }

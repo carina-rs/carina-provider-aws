@@ -3,6 +3,7 @@
 //! AWS Provider implementation
 
 mod aws_operation;
+mod create_resource;
 mod data_source_lookups;
 mod ec2_security_group_rules;
 mod ec2_tags;
@@ -31,6 +32,7 @@ mod tests;
 
 #[doc(hidden)]
 pub use aws_operation::ClientToken;
+pub use create_resource::AwsCreateResource;
 pub use factory::AwsProviderFactory;
 pub use normalizer::AwsNormalizer;
 #[doc(hidden)]
@@ -143,6 +145,37 @@ pub fn test_comparison_router() -> carina_core::provider::ProviderRouter {
         carina_core::provider::InitializedProvider::unavailable(Box::new(ComparisonOnlyProvider)),
     );
     router
+}
+
+/// Compare a provider test fixture that declares no comparison references.
+#[doc(hidden)]
+#[cfg(any(test, feature = "test-utils"))]
+#[track_caller]
+pub fn test_diff(
+    desired: &carina_core::resource::ResolvedResource,
+    current: &carina_core::resource::State,
+    saved: &carina_core::provider::LiftedSavedAttrs,
+    previous_explicit: Option<&carina_core::explicit::ExplicitFields>,
+    comparison: carina_core::provider::ResolvedComparison<'_>,
+) -> carina_core::differ::Diff {
+    comparison
+        .context()
+        .with_references(
+            &carina_core::references::prepare_empty_for_tests(),
+            &desired.id,
+            |context| {
+                carina_core::differ::diff(
+                    desired,
+                    current,
+                    saved,
+                    previous_explicit,
+                    comparison,
+                    context,
+                )
+            },
+        )
+        .expect("reference-free comparison fixture")
+        .expect("fixture comparison should succeed")
 }
 
 #[cfg(test)]

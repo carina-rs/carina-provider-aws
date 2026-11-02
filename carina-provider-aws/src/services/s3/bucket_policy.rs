@@ -1,6 +1,8 @@
 use carina_core::provider::{AppliedIdentifier, ReadOutcome};
 use carina_core::provider::{ProviderError, ProviderResult};
-use carina_core::resource::{Resource, ResourceId, State, Value};
+use carina_core::resource::{
+    AbsoluteBindingAddress, NoPlaceholder, Resource, ResourceId, State, Value,
+};
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
@@ -66,7 +68,7 @@ impl AwsProvider {
     /// Create an S3 BucketPolicy via PutBucketPolicy.
     pub(crate) async fn create_s3_bucket_policy(
         &self,
-        resource: &Resource<impl Sized>,
+        resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
     ) -> ProviderResult<TypedCreateCompletion> {
         let input = S3BucketPolicyCreateInput::decode(resource)?;
         let sent = input.sent();

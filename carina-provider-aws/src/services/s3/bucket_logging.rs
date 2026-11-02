@@ -5,7 +5,8 @@ use aws_sdk_s3::types::{
 use carina_core::provider::{AppliedIdentifier, ReadOutcome};
 use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{
-    ConcreteValue, Resource, ResourceId, State, Value, enum_attr_at_schema_path,
+    AbsoluteBindingAddress, ConcreteValue, NoPlaceholder, Resource, ResourceId, State, Value,
+    enum_attr_at_schema_path,
 };
 use carina_core::schema::CompiledResourceSchema;
 use indexmap::IndexMap;
@@ -67,7 +68,7 @@ impl AwsProvider {
 
     pub(crate) async fn create_s3_bucket_logging(
         &self,
-        resource: &Resource<impl Sized>,
+        resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
         schema: &CompiledResourceSchema,
     ) -> ProviderResult<TypedCreateCompletion> {
         let input = S3BucketLoggingCreateInput::decode(resource)?;

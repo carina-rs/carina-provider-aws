@@ -1,176 +1,52 @@
 //! AWS Provider normalizer
 
-use std::collections::BTreeSet;
-
 use carina_core::provider::{
     BoxFuture, ProviderNormalizer, ProviderResult, SavedAttrs, StateTransformMap, ready_noop,
 };
-use carina_core::resource::{ConcreteValue, ProviderResource, Resource, ResourceId, Value};
+use carina_core::resource::{ProviderResource, ResourceId};
+use carina_plugin_sdk::{DesiredView, NativeDesiredNormalization};
 
-/// What a provider-side cross-field check can prove about one input.
-///
-/// Protocol v13 preserves deferred top-level attributes as explicit metadata
-/// at the WASM boundary. The typed normalization view consults that metadata
-/// without fabricating a core value, so a missing, non-deferred attribute is
-/// genuinely absent.
-pub(crate) enum CrossFieldValue<'a> {
-    Known(&'a ConcreteValue),
-    Absent,
-    Deferred,
-}
+type DesiredNormalizer = fn(&mut DesiredView<'_>) -> ProviderResult<()>;
 
-pub(crate) struct CrossFieldInputs<'a, S> {
-    resource: &'a Resource<S>,
-    host_deferred: Option<&'a BTreeSet<String>>,
-}
-
-impl<'a, S> CrossFieldInputs<'a, S> {
-    fn at_desired_normalization(
-        resource: &'a Resource<S>,
-        host_deferred: &'a BTreeSet<String>,
-    ) -> Self {
-        Self {
-            resource,
-            host_deferred: Some(host_deferred),
-        }
+// This dispatch is also the admission check before projecting native resources.
+fn desired_normalizer(id: &ResourceId) -> Option<DesiredNormalizer> {
+    if id.provider != "aws" {
+        return None;
     }
-
-    pub(crate) fn resolved(resource: &'a Resource<S>) -> Self {
-        Self {
-            resource,
-            host_deferred: None,
+    match id.resource_type.as_str() {
+        "route53.RecordSet" => {
+            Some(crate::services::route53::record_set::normalize_record_set_dns_names)
         }
-    }
-
-    pub(crate) fn is_resource(&self, provider: &str, resource_type: &str) -> bool {
-        self.resource.id.provider == provider && self.resource.id.resource_type == resource_type
-    }
-
-    pub(crate) fn id(&self) -> &ResourceId {
-        &self.resource.id
-    }
-
-    pub(crate) fn attr(&self, name: &str) -> CrossFieldValue<'_> {
-        if self
-            .host_deferred
-            .is_some_and(|deferred| deferred.contains(name))
-        {
-            return CrossFieldValue::Deferred;
+        "acm.Certificate" => {
+            Some(crate::services::acm::certificate::normalize_acm_certificate_inputs)
         }
-        match self.resource.get_attr(name) {
-            Some(Value::Concrete(value)) => CrossFieldValue::Known(value),
-            Some(Value::Deferred(_)) => CrossFieldValue::Deferred,
-            None => CrossFieldValue::Absent,
+        "s3.BucketReplicationConfiguration" => {
+            Some(crate::services::s3::bucket_replication::normalize_delete_marker_replication)
         }
+        "ec2.Subnet" => Some(crate::services::ec2::subnet::normalize_subnet_ipv6_cidr_blocks),
+        "ec2.NatGateway" => Some(validate_nat_gateway_view),
+        "sqs.Queue" => Some(validate_sqs_queue_view),
+        _ => None,
     }
 }
 
-/// One resource admitted to desired normalization.
-///
-/// Host-withheld attributes remain metadata rather than fabricated core
-/// values. Normalizers can mutate only attributes that are present and
-/// concrete, so neither a host-deferred name nor an in-process deferred value
-/// can be overwritten or used as a provider value.
-pub(crate) struct DesiredNormalizationInput<'a, S> {
-    resource: &'a mut Resource<S>,
-    host_deferred: Option<&'a BTreeSet<String>>,
+fn validate_nat_gateway_view(view: &mut DesiredView<'_>) -> ProviderResult<()> {
+    crate::services::ec2::nat_gateway::validate_nat_gateway_inputs(&view.inputs())
 }
 
-impl<'a, S> DesiredNormalizationInput<'a, S> {
-    pub(crate) fn in_process(resource: &'a mut Resource<S>) -> Self {
-        Self {
-            resource,
-            host_deferred: None,
-        }
-    }
-
-    fn from_host(resource: &'a mut Resource<S>, host_deferred: &'a BTreeSet<String>) -> Self {
-        Self {
-            resource,
-            host_deferred: Some(host_deferred),
-        }
-    }
-
-    pub(crate) fn is_resource(&self, provider: &str, resource_type: &str) -> bool {
-        self.resource.id.provider == provider && self.resource.id.resource_type == resource_type
-    }
-
-    pub(crate) fn id(&self) -> &ResourceId {
-        &self.resource.id
-    }
-
-    fn is_host_deferred(&self, name: &str) -> bool {
-        self.host_deferred
-            .is_some_and(|deferred| deferred.contains(name))
-    }
-
-    pub(crate) fn known_attr(&self, name: &str) -> Option<&ConcreteValue> {
-        if self.is_host_deferred(name) {
-            return None;
-        }
-        match self.resource.get_attr(name) {
-            Some(Value::Concrete(value)) => Some(value),
-            Some(Value::Deferred(_)) | None => None,
-        }
-    }
-
-    pub(crate) fn known_attr_mut(&mut self, name: &str) -> Option<&mut ConcreteValue> {
-        if self.is_host_deferred(name) {
-            return None;
-        }
-        match self.resource.get_attr_mut(name) {
-            Some(Value::Concrete(value)) => Some(value),
-            Some(Value::Deferred(_)) | None => None,
-        }
-    }
-
-    fn cross_field_inputs(&self) -> CrossFieldInputs<'_, S> {
-        match self.host_deferred {
-            Some(host_deferred) => {
-                CrossFieldInputs::at_desired_normalization(self.resource, host_deferred)
-            }
-            None => CrossFieldInputs::resolved(self.resource),
-        }
-    }
+fn validate_sqs_queue_view(view: &mut DesiredView<'_>) -> ProviderResult<()> {
+    crate::services::sqs::queue::validate_sqs_queue_inputs(&view.inputs())
 }
 
-fn normalize_desired_input<S>(input: &mut DesiredNormalizationInput<'_, S>) -> ProviderResult<()> {
-    crate::services::route53::record_set::normalize_record_set_dns_names(input);
-    crate::services::acm::certificate::normalize_acm_certificate_inputs(input);
-    crate::services::s3::bucket_replication::normalize_delete_marker_replication(input);
-    crate::services::ec2::subnet::normalize_subnet_ipv6_cidr_blocks(input)?;
-
-    let cross_fields = input.cross_field_inputs();
-    crate::services::ec2::nat_gateway::validate_nat_gateway_inputs(&cross_fields)?;
-    crate::services::sqs::queue::validate_sqs_queue_inputs(&cross_fields)?;
-    Ok(())
-}
-
-/// Schema extension for the AWS provider.
-///
-/// Handles provider-local desired-state normalization.
+/// Provider-local desired-state normalization for native and WASM resources.
 pub struct AwsNormalizer;
 
 impl AwsNormalizer {
-    /// Normalize a protocol-v13 desired projection whose deferred top-level
-    /// values remain owned by the host.
+    /// Apply the same leaf-wise normalizers and validators on either SDK route.
     #[doc(hidden)]
-    pub fn normalize_desired_with_host_deferred(
-        &self,
-        resources: &mut [ProviderResource],
-        deferred_by_resource: &[BTreeSet<String>],
-    ) -> ProviderResult<()> {
-        if resources.len() != deferred_by_resource.len() {
-            return Err(carina_core::provider::ProviderError::internal(format!(
-                "desired normalization received {} resources but {} deferred-name sets",
-                resources.len(),
-                deferred_by_resource.len()
-            )));
-        }
-
-        for (resource, host_deferred) in resources.iter_mut().zip(deferred_by_resource) {
-            let mut input = DesiredNormalizationInput::from_host(resource, host_deferred);
-            normalize_desired_input(&mut input)?;
+    pub fn normalize_desired_view(&self, view: &mut DesiredView<'_>) -> ProviderResult<()> {
+        if let Some(normalize) = desired_normalizer(view.id()) {
+            normalize(view)?;
         }
         Ok(())
     }
@@ -181,12 +57,15 @@ impl ProviderNormalizer for AwsNormalizer {
         &'a self,
         resources: &'a mut [ProviderResource],
     ) -> BoxFuture<'a, ProviderResult<()>> {
-        // Bodies are pure (dns-name strip — no I/O); the trait is async for
-        // compatibility with the core normalizer interface.
+        // Bodies are pure; the trait is async for the core normalizer interface.
         Box::pin(async move {
             for resource in resources {
-                let mut input = DesiredNormalizationInput::in_process(resource);
-                normalize_desired_input(&mut input)?;
+                let Some(normalize) = desired_normalizer(&resource.id) else {
+                    continue;
+                };
+                let mut desired = NativeDesiredNormalization::from_core(resource)?;
+                normalize(&mut desired.view())?;
+                desired.finish()?;
             }
             Ok(())
         })
@@ -214,50 +93,493 @@ mod tests {
     use std::collections::HashMap;
 
     use carina_core::provider::normalize_provider_states;
-    use carina_core::resource::{ConcreteValue, Resource, Value};
+    use carina_core::resource::{ConcreteValue, DeferredValue, Resource, Value};
     use indexmap::IndexMap;
 
-    #[test]
-    fn host_deferred_metadata_is_deferred_without_a_core_value_or_write_handle() {
-        let mut resource: Resource =
-            Resource::with_provider("aws", "ec2.NatGateway", "deferred-subnet", None);
-        let deferred = BTreeSet::from(["subnet_id".to_string()]);
-        assert!(!resource.attributes.contains_key("subnet_id"));
+    fn string(value: &str) -> Value {
+        Value::Concrete(ConcreteValue::String(value.into()))
+    }
 
-        {
-            let mut input = DesiredNormalizationInput::from_host(&mut resource, &deferred);
-            assert!(matches!(
-                input.cross_field_inputs().attr("subnet_id"),
-                CrossFieldValue::Deferred
-            ));
-            assert!(input.known_attr_mut("subnet_id").is_none());
+    fn secret(value: Value) -> Value {
+        Value::Deferred(DeferredValue::Secret(Box::new(value)))
+    }
+
+    fn reference(attribute: &str) -> Value {
+        Value::resource_ref("peer", attribute, vec![]).resolve_root_for_test()
+    }
+
+    fn map(fields: impl IntoIterator<Item = (&'static str, Value)>) -> Value {
+        Value::Concrete(ConcreteValue::Map(
+            fields
+                .into_iter()
+                .map(|(key, value)| (key.into(), value))
+                .collect(),
+        ))
+    }
+
+    fn normalize_mixed(mut resource: Resource) -> ProviderResource {
+        let mut desired = NativeDesiredNormalization::from_core(&mut resource)
+            .expect("mixed desired input should project into a structural view");
+        AwsNormalizer
+            .normalize_desired_view(&mut desired.view())
+            .expect("mixed desired normalization should succeed");
+        desired
+            .finish()
+            .expect("deferred leaves must survive exactly once");
+        resource.into()
+    }
+
+    #[tokio::test]
+    async fn unhandled_resources_bypass_desired_projection() {
+        use carina_core::resource::RawEnumIdentifier;
+
+        for (provider, resource_type) in [
+            ("aws", "s3.Bucket"),
+            ("awscc", "acm.Certificate"),
+            ("awscc", "route53.RecordSet"),
+        ] {
+            let value = Value::Concrete(ConcreteValue::EnumIdentifier(RawEnumIdentifier::parse(
+                "raw",
+            )));
+            let mut resources = vec![
+                Resource::with_provider(provider, resource_type, "untouched", None)
+                    .with_attribute("unrelated", value.clone())
+                    .with_attribute("name", string("unchanged.example.com."))
+                    .into(),
+            ];
+
+            AwsNormalizer
+                .normalize_desired(&mut resources)
+                .await
+                .expect("an unhandled resource must not be projected or normalized");
+
+            assert_eq!(resources[0].get_attr("unrelated"), Some(&value));
+            assert_eq!(
+                resources[0].get_attr("name"),
+                Some(&string("unchanged.example.com."))
+            );
         }
+    }
 
-        assert!(
-            !resource.attributes.contains_key("subnet_id"),
-            "host-deferred metadata must not fabricate a core value"
+    #[tokio::test]
+    async fn native_preparation_rejects_non_wire_default_tags() {
+        carina_core::validation::deferred_types::with_session_for_test_async(
+            &carina_core::parser::LoadedProviderContext::empty_for_test(),
+            async |type_checks| {
+                use carina_core::executor::{
+                    ModuleConstraintGate, ProviderPreparationContext, ProviderPreparationError,
+                    prepare_create_request,
+                };
+                use carina_core::parser::ProviderConfig;
+                use carina_core::protocol_convert::{
+                    ProtocolConvertError, WirePathSegment, try_core_to_protocol_value,
+                };
+                use carina_core::provider::ProviderFactory;
+                use carina_core::provider_wire::ProviderWireTarget;
+
+                let configs = [ProviderConfig {
+                    name: "aws".into(),
+                    attributes: IndexMap::new(),
+                    default_tags: IndexMap::from([(
+                        "unrelated".into(),
+                        Value::Concrete(ConcreteValue::Duration(std::time::Duration::from_secs(
+                            u64::MAX,
+                        ))),
+                    )]),
+                    source: None,
+                    version: None,
+                    revision: None,
+                    unresolved_attributes: IndexMap::new(),
+                    binding: None,
+                }];
+                let bindings = carina_core::binding_index::ResolvedBindings::default();
+                let module_gate = ModuleConstraintGate::from_live_compositions(&[]);
+                let schemas = crate::schemas::schema_registry();
+                let factories: Vec<Box<dyn ProviderFactory>> =
+                    vec![Box::new(crate::AwsProviderFactory)];
+                let preparation = ProviderPreparationContext::new(
+                    &bindings,
+                    &module_gate,
+                    &configs,
+                    &AwsNormalizer,
+                    &factories,
+                    &schemas,
+                    type_checks,
+                );
+                let resource = Resource::with_provider("aws", "sqs.Queue", "crud-projection", None)
+                    .with_attribute("queue_name", string("crud-projection"));
+                let id = resource.id.clone();
+                let error = prepare_create_request(resource, &preparation)
+                    .await
+                    .expect_err(
+                        "native preparation must reject the non-wire default tag before dispatch",
+                    );
+                let ProviderPreparationError::Wire(error) = error else {
+                    panic!("expected a typed provider wire failure: {error:?}");
+                };
+                assert_eq!(error.target(), &ProviderWireTarget::Resource(id));
+                assert_eq!(error.attribute(), "tags");
+                assert_eq!(error.path(), &[WirePathSegment::Key("unrelated".into())]);
+                assert!(matches!(
+                    error.conversion_error(),
+                    ProtocolConvertError::DurationOutOfRange
+                ));
+
+                // WASM CRUD encoding uses the same checked projection and conversion.
+                let wasm_error = try_core_to_protocol_value(&Value::Concrete(ConcreteValue::Map(
+                    configs[0].default_tags.clone(),
+                )))
+                .expect_err("the same default tags cannot be encoded for WASM either");
+                assert_eq!(error.path(), wasm_error.value_path());
+                let ProtocolConvertError::ValuePath { error: reason, .. } = wasm_error else {
+                    panic!("expected the WASM conversion error at the default-tag key");
+                };
+                assert!(matches!(*reason, ProtocolConvertError::DurationOutOfRange));
+            },
+        )
+        .await
+    }
+
+    #[test]
+    fn mixed_acm_sans_normalize_known_names_and_retain_secret_and_ref() {
+        let mut resource = Resource::with_provider("aws", "acm.Certificate", "mixed-sans", None);
+        let secret = secret(string("PRIVATE.EXAMPLE.COM."));
+        let reference = reference("domain_name");
+        resource.set_attr("domain_name", string("Example.COM."));
+        resource.set_attr(
+            "subject_alternative_names",
+            Value::Concrete(ConcreteValue::List(vec![
+                string("EXAMPLE.COM."),
+                secret.clone(),
+                string("WWW.EXAMPLE.COM.."),
+                reference.clone(),
+                string("API.EXAMPLE.COM."),
+            ])),
+        );
+
+        let normalized = normalize_mixed(resource);
+
+        assert_eq!(
+            normalized.get_attr("subject_alternative_names"),
+            Some(&Value::Concrete(ConcreteValue::List(vec![
+                secret,
+                string("www.example.com"),
+                reference,
+                string("api.example.com"),
+            ])))
         );
     }
 
     #[test]
-    fn host_deferred_rules_do_not_receive_replication_defaults() {
-        let resource: Resource = Resource::with_provider(
+    fn mixed_replication_rules_get_defaults_beside_secret_and_ref() {
+        let mut resource = Resource::with_provider(
             "aws",
             "s3.BucketReplicationConfiguration",
-            "deferred-rules",
+            "mixed-rules",
             None,
         );
-        let mut resources = vec![ProviderResource::from(resource)];
-        let deferred = vec![BTreeSet::from(["rules".to_string()])];
+        let rules = vec![
+            map([("id", secret(string("private-rule")))]),
+            map([("destination", map([("bucket", reference("bucket_arn"))]))]),
+            map([("id", string("known-rule"))]),
+            map([(
+                "delete_marker_replication",
+                map([("status", string("Enabled"))]),
+            )]),
+            map([(
+                "delete_marker_replication",
+                reference("delete_marker_replication"),
+            )]),
+            map([(
+                "delete_marker_replication",
+                secret(map([("status", string("Enabled"))])),
+            )]),
+            secret(map([("id", string("opaque-rule"))])),
+            reference("rule"),
+        ];
+        resource.set_attr("rules", Value::Concrete(ConcreteValue::List(rules.clone())));
 
-        AwsNormalizer
-            .normalize_desired_with_host_deferred(&mut resources, &deferred)
-            .expect("a host-deferred rules list must bypass nested defaulting");
+        let normalized = normalize_mixed(resource);
 
-        assert!(
-            !resources[0].attributes.contains_key("rules"),
-            "the delete-marker default must not materialize deferred rules"
+        let mut expected = rules;
+        for rule in &mut expected[..3] {
+            let Value::Concrete(ConcreteValue::Map(fields)) = rule else {
+                panic!("fixture must contain structural rule maps");
+            };
+            fields.insert(
+                "delete_marker_replication".into(),
+                map([("status", string("Disabled"))]),
+            );
+        }
+        assert_eq!(
+            normalized.get_attr("rules"),
+            Some(&Value::Concrete(ConcreteValue::List(expected)))
         );
+    }
+
+    #[test]
+    fn mixed_route53_alias_normalizes_dns_name_beside_secret_and_ref() {
+        let mut resource = Resource::with_provider("aws", "route53.RecordSet", "mixed-alias", None);
+        let zone = reference("hosted_zone_id");
+        let health = secret(Value::Concrete(ConcreteValue::Bool(false)));
+        resource.set_attr("name", string("www.example.com."));
+        resource.set_attr(
+            "alias_target",
+            map([
+                ("dns_name", string("lb.example.com.")),
+                ("hosted_zone_id", zone.clone()),
+                ("evaluate_target_health", health.clone()),
+            ]),
+        );
+
+        let normalized = normalize_mixed(resource);
+
+        assert_eq!(
+            normalized.get_attr("name"),
+            Some(&string("www.example.com"))
+        );
+        assert_eq!(
+            normalized.get_attr("alias_target"),
+            Some(&map([
+                ("dns_name", string("lb.example.com")),
+                ("hosted_zone_id", zone),
+                ("evaluate_target_health", health),
+            ]))
+        );
+    }
+
+    #[test]
+    fn deferred_acm_apex_does_not_hide_known_sans_or_guess_apex_removal() {
+        for domain in [secret(string("EXAMPLE.COM.")), reference("domain_name")] {
+            let mut resource =
+                Resource::with_provider("aws", "acm.Certificate", "opaque-apex", None);
+            resource.set_attr("domain_name", domain.clone());
+            resource.set_attr(
+                "subject_alternative_names",
+                Value::Concrete(ConcreteValue::List(vec![
+                    string("EXAMPLE.COM."),
+                    string("WWW.EXAMPLE.COM."),
+                ])),
+            );
+
+            let normalized = normalize_mixed(resource);
+
+            assert_eq!(normalized.get_attr("domain_name"), Some(&domain));
+            assert_eq!(
+                normalized.get_attr("subject_alternative_names"),
+                Some(&Value::Concrete(ConcreteValue::List(vec![
+                    string("example.com"),
+                    string("www.example.com"),
+                ])))
+            );
+        }
+    }
+
+    #[test]
+    fn unknown_san_survives_known_apex_removal() {
+        use carina_core::resource::{ApplyTimeUnknown, absolute_binding_address_for_test};
+
+        let mut resource = Resource::with_provider("aws", "acm.Certificate", "unknown-san", None);
+        let binding = absolute_binding_address_for_test("peer");
+        resource.set_attr("domain_name", string("example.com"));
+        resource.set_attr(
+            "subject_alternative_names",
+            Value::Concrete(ConcreteValue::List(vec![
+                string("EXAMPLE.COM."),
+                Value::Deferred(DeferredValue::Unknown(
+                    ApplyTimeUnknown::UpstreamAllExports {
+                        binding: binding.clone(),
+                    },
+                )),
+                string("WWW.EXAMPLE.COM."),
+            ])),
+        );
+
+        let normalized = normalize_mixed(resource);
+
+        let Some(Value::Concrete(ConcreteValue::List(names))) =
+            normalized.get_attr("subject_alternative_names")
+        else {
+            panic!("expected normalized SAN list");
+        };
+        let [
+            Value::Deferred(DeferredValue::Unknown(ApplyTimeUnknown::UpstreamAllExports {
+                binding: actual,
+            })),
+            known,
+        ] = names.as_slice()
+        else {
+            panic!("the unknown SAN must precede the canonical known SAN");
+        };
+        assert_eq!(actual, &binding);
+        assert_eq!(known, &string("www.example.com"));
+    }
+
+    #[test]
+    fn cross_field_checks_keep_deferred_inputs_opaque_during_normalization() {
+        for (resource_type, attributes) in [
+            (
+                "ec2.NatGateway",
+                vec![
+                    ("availability_mode", string("zonal")),
+                    ("subnet_id", secret(string("subnet-12345678"))),
+                ],
+            ),
+            (
+                "ec2.NatGateway",
+                vec![
+                    ("availability_mode", string("zonal")),
+                    ("subnet_id", reference("subnet_id")),
+                ],
+            ),
+            (
+                "sqs.Queue",
+                vec![
+                    ("fifo_queue", reference("fifo_queue")),
+                    ("deduplication_scope", string("messageGroup")),
+                ],
+            ),
+            (
+                "sqs.Queue",
+                vec![
+                    (
+                        "kms_data_key_reuse_period_seconds",
+                        Value::Concrete(ConcreteValue::Int(300)),
+                    ),
+                    ("kms_master_key_id", reference("key_id")),
+                ],
+            ),
+            (
+                "ec2.NatGateway",
+                vec![("availability_mode", secret(string("regional")))],
+            ),
+            (
+                "ec2.NatGateway",
+                vec![
+                    ("availability_mode", string("regional")),
+                    ("subnet_id", secret(string("subnet-12345678"))),
+                ],
+            ),
+            (
+                "sqs.Queue",
+                vec![
+                    (
+                        "fifo_queue",
+                        secret(Value::Concrete(ConcreteValue::Bool(true))),
+                    ),
+                    ("deduplication_scope", string("messageGroup")),
+                ],
+            ),
+            (
+                "sqs.Queue",
+                vec![
+                    (
+                        "kms_data_key_reuse_period_seconds",
+                        Value::Concrete(ConcreteValue::Int(300)),
+                    ),
+                    ("kms_master_key_id", secret(string("alias/private"))),
+                ],
+            ),
+            (
+                "sqs.Queue",
+                vec![(
+                    "kms_data_key_reuse_period_seconds",
+                    secret(Value::Concrete(ConcreteValue::Int(300))),
+                )],
+            ),
+            (
+                "sqs.Queue",
+                vec![
+                    ("fifo_queue", Value::Concrete(ConcreteValue::Bool(false))),
+                    (
+                        "content_based_deduplication",
+                        secret(Value::Concrete(ConcreteValue::Bool(true))),
+                    ),
+                ],
+            ),
+        ] {
+            let mut resource = Resource::with_provider("aws", resource_type, "opaque-check", None);
+            for (name, value) in attributes {
+                resource.set_attr(name, value);
+            }
+            let original = resource.attributes.clone();
+            let normalized = normalize_mixed(resource);
+            assert_eq!(normalized.attributes, original);
+        }
+    }
+
+    #[tokio::test]
+    async fn normalize_desired_rejects_decidable_cross_field_conflicts() {
+        for (resource_type, attributes, message) in [
+            (
+                "ec2.NatGateway",
+                vec![
+                    ("availability_mode", string("regional")),
+                    ("subnet_id", string("subnet-12345678")),
+                ],
+                "must be omitted when availability_mode = regional",
+            ),
+            (
+                "sqs.Queue",
+                vec![
+                    ("fifo_queue", Value::Concrete(ConcreteValue::Bool(false))),
+                    ("deduplication_scope", string("messageGroup")),
+                ],
+                "requires fifo_queue = true",
+            ),
+        ] {
+            let mut resource = Resource::with_provider("aws", resource_type, "conflict", None);
+            for (name, value) in attributes {
+                resource.set_attr(name, value);
+            }
+            let mut resources = vec![resource.into()];
+            let error = AwsNormalizer
+                .normalize_desired(&mut resources)
+                .await
+                .expect_err("decidable conflicts must fail native normalization");
+            assert!(error.to_string().contains(message), "{error:?}");
+        }
+    }
+
+    #[test]
+    fn opaque_top_level_inputs_are_preserved_without_normalization() {
+        for (resource_type, attribute, value) in [
+            (
+                "acm.Certificate",
+                "subject_alternative_names",
+                secret(Value::Concrete(ConcreteValue::List(vec![string(
+                    "EXAMPLE.COM.",
+                )]))),
+            ),
+            (
+                "s3.BucketReplicationConfiguration",
+                "rules",
+                secret(Value::Concrete(ConcreteValue::List(vec![map([(
+                    "id",
+                    string("private"),
+                )])]))),
+            ),
+            (
+                "route53.RecordSet",
+                "alias_target",
+                secret(map([("dns_name", string("PRIVATE."))])),
+            ),
+            (
+                "ec2.Subnet",
+                "ipv6_cidr_block",
+                secret(string("invalid private CIDR")),
+            ),
+            (
+                "ec2.Subnet",
+                "ipv6_cidr_block",
+                reference("ipv6_cidr_block"),
+            ),
+        ] {
+            let mut resource = Resource::with_provider("aws", resource_type, "opaque", None);
+            resource.set_attr(attribute, value.clone());
+            let normalized = normalize_mixed(resource);
+            assert_eq!(normalized.get_attr(attribute), Some(&value));
+        }
     }
 
     #[tokio::test]

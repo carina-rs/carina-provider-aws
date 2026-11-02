@@ -424,27 +424,33 @@ fn sample_string(resource_type: &str, path: &[String]) -> String {
             format!("2001:db8:{:x}::/64", hash as u16)
         }
         "description" => format!("send contract {suffix}"),
+        "dead_letter_target_arn" => {
+            format!("arn:aws:sqs:{REGION}:123456789012:send-contract-{suffix}.fifo")
+        }
         "dns_name" | "domain_name" | "host_name" | "name" => {
             format!("send-{suffix}.example.com")
         }
         "email" => format!("send-{suffix}@example.com"),
         "gateway_id" | "internet_gateway_id" => ec2_id("igw"),
-        "group_id" | "destination_security_group_id" | "source_security_group_id" => ec2_id("sg"),
+        "group_id"
+        | "security_group_ids"
+        | "destination_security_group_id"
+        | "source_security_group_id" => ec2_id("sg"),
         "group_name" => format!("send-contract-{suffix}"),
         "hosted_zone_id" => format!("Z{hash:016X}"),
         "ipv4_ipam_pool_id" | "ipv6_ipam_pool_id" => ec2_id("ipam-pool"),
+        "kms_key_id" | "kms_master_key_id" => {
+            format!("arn:aws:kms:{REGION}:123456789012:key/12345678-1234-1234-1234-0000{suffix}")
+        }
         "log_group_name" => format!("/carina/send-{suffix}"),
         "nat_gateway_id" => ec2_id("nat"),
         "outpost_arn" => {
             "arn:aws:outposts:us-east-1:123456789012:outpost/op-0123456789abcdef0".to_string()
         }
         "path" => "/".to_string(),
+        "destination_prefix_list_id" | "source_prefix_list_id" => ec2_id("pl"),
         "peer_owner_id" | "source_security_group_owner_id" => "123456789012".to_string(),
         "peer_vpc_id" | "vpc_id" => ec2_id("vpc"),
-        "kms_key_id" | "kms_master_key_id" => {
-            "arn:aws:kms:us-east-1:123456789012:key/1234abcd-12ab-34cd-56ef-1234567890ab"
-                .to_string()
-        }
         "private_ip_address" => format!("10.0.0.{}", 10 + hash % 200),
         "public_ipv4_pool" => "amazon".to_string(),
         "queue_name" => format!("carina-send-{suffix}.fifo"),
@@ -471,6 +477,11 @@ fn sample_value(
     budget: &mut ShapeWalkBudget,
 ) -> Value {
     match schema.shape_of(attribute_type) {
+        Shape::UnloadedSchemaType(unloaded) => panic!(
+            "send-contract samples need a loaded schema type for {} at {}",
+            unloaded.identity(),
+            path.join("."),
+        ),
         Shape::String { .. } | Shape::Reference { .. } => {
             string(sample_string(resource_type, path))
         }
@@ -621,11 +632,11 @@ fn set_bool(resource: &mut Resource, name: &str, value: bool) {
     resource.set_attr(name, Value::Concrete(ConcreteValue::Bool(value)));
 }
 
-fn set_canonical_string(
+fn set_canonical_value(
     resource: &mut Resource,
     schema: &ValidatedResourceSchema,
     name: &str,
-    value: &str,
+    value: Value,
 ) {
     let attribute = schema.effective_attribute(name).unwrap_or_else(|| {
         panic!(
@@ -636,9 +647,9 @@ fn set_canonical_string(
     resource.set_attr(
         name,
         attribute
-            .canonicalize_state(string(value))
+            .canonicalize_state(value)
             .into_present()
-            .expect("canonical string fixture must remain present"),
+            .expect("canonical fixture must remain present"),
     );
 }
 
@@ -711,7 +722,7 @@ fn focused_resource(
         }
         "ec2.NatGateway" => {
             if target.name == "availability_mode" {
-                set_canonical_string(&mut resource, schema, "availability_mode", "zonal");
+                set_canonical_value(&mut resource, schema, "availability_mode", string("zonal"));
             }
             set_sample(&mut resource, schema, "subnet_id");
         }
@@ -746,13 +757,15 @@ fn focused_resource(
             }
         }
         "acm.Certificate" => {
-            set_canonical_string(&mut resource, schema, "validation_method", "EMAIL");
+            set_canonical_value(&mut resource, schema, "validation_method", string("EMAIL"));
             if target.name == "options" {
                 // The generic struct sampler chooses one optional member. Pin
                 // this focused case to every CertificateOptions member so
                 // restoring ValidationMethod in #580 does not trade away CT
                 // logging or export capture coverage.
-                resource.set_attr(
+                set_canonical_value(
+                    &mut resource,
+                    schema,
                     "options",
                     Value::Concrete(ConcreteValue::Map(IndexMap::from([
                         (
@@ -1029,6 +1042,188 @@ fn assert_sample_reached_mutation(
     );
 }
 
+async fn prepare_create_for_capture(
+    mut resource: Resource,
+    bindings: &carina_core::binding_index::ResolvedBindings,
+) -> Result<carina_core::provider::CreateRequest, carina_core::executor::ProviderPreparationError> {
+    carina_core::validation::deferred_types::with_session_for_test_async(
+        &carina_core::parser::LoadedProviderContext::empty_for_test(),
+        async |type_checks| {
+            carina_core::resolver::resolve_refs_with_state_and_remote(
+                std::slice::from_mut(&mut resource),
+                bindings,
+                type_checks,
+            )
+            .expect("capture fixture references should resolve");
+            let gate = carina_core::executor::ModuleConstraintGate::from_live_compositions(&[]);
+            let schemas = crate::schemas::schema_registry();
+            let factories: Vec<Box<dyn carina_core::provider::ProviderFactory>> =
+                vec![Box::new(crate::AwsProviderFactory)];
+            let preparation = carina_core::executor::ProviderPreparationContext::new(
+                bindings,
+                &gate,
+                &[],
+                &crate::AwsNormalizer,
+                &factories,
+                &schemas,
+                type_checks,
+            );
+            carina_core::executor::prepare_create_request(resource, &preparation).await
+        },
+    )
+    .await
+}
+
+#[tokio::test]
+async fn native_create_preparation_rejects_sqs_and_nat_cross_field_conflicts_before_send() {
+    let service = Arc::new(CaptureService::default());
+    let mock = MockAws::builder()
+        .with_service(Arc::clone(&service))
+        .build();
+    let provider = AwsProvider::from_sdk_config(
+        REGION.to_string(),
+        vec![],
+        vec![],
+        &BoundedSdkConfig::for_test(mock.sdk_config(REGION).await),
+    );
+    let bindings = carina_core::binding_index::ResolvedBindings::default();
+    for (resource, message) in [
+        (
+            Resource::with_provider("aws", "sqs.Queue", "invalid-create", None)
+                .with_attribute("queue_name", string("invalid-create"))
+                .with_attribute("fifo_queue", Value::Concrete(ConcreteValue::Bool(false)))
+                .with_attribute(
+                    "content_based_deduplication",
+                    Value::Concrete(ConcreteValue::Bool(true)),
+                ),
+            "content_based_deduplication requires fifo_queue = true",
+        ),
+        (
+            Resource::with_provider("aws", "ec2.NatGateway", "invalid-create", None),
+            "subnet_id is required when availability_mode = zonal",
+        ),
+    ] {
+        let id = resource.id.clone();
+        let error = match prepare_create_for_capture(resource, &bindings).await {
+            Err(carina_core::executor::ProviderPreparationError::Provider(error)) => error,
+            Err(error) => {
+                panic!("cross-field validation must reject during normalization: {error:?}")
+            }
+            Ok(request) => {
+                let (create, _cancellation) =
+                    carina_core::executor::dispatch_create(&provider, &id, request);
+                let _ = tokio::time::timeout(Duration::from_secs(1), create).await;
+                panic!("invalid native create passed preparation and reached the provider");
+            }
+        };
+        assert!(
+            service.snapshot().is_empty(),
+            "invalid create must not send any AWS request"
+        );
+        assert!(
+            matches!(&error, ProviderError::InvalidInput(_)),
+            "{error:?}"
+        );
+        assert!(error.to_string().contains(message), "{error:?}");
+    }
+}
+
+#[tokio::test]
+async fn sqs_update_rejects_fifo_conflicts_after_deferred_inputs_resolve_before_send() {
+    use carina_core::binding_index::{BindingValueSource, ResolvedBindings};
+    use carina_core::provider::ProviderNormalizer;
+    use carina_core::resource::DeferredValue;
+
+    let service = Arc::new(CaptureService::default());
+    let mock = MockAws::builder()
+        .with_service(Arc::clone(&service))
+        .build();
+    let provider = AwsProvider::from_sdk_config(
+        REGION.to_string(),
+        vec![],
+        vec![],
+        &BoundedSdkConfig::for_test(mock.sdk_config(REGION).await),
+    );
+    let identifier =
+        AppliedIdentifier::new("https://sqs.us-east-1.amazonaws.com/123456789012/resolved-queue")
+            .unwrap();
+    let mut bindings = ResolvedBindings::default();
+    bindings.set(
+        "settings",
+        HashMap::from([(
+            "fifo_queue".into(),
+            Value::Concrete(ConcreteValue::Bool(false)),
+        )]),
+        BindingValueSource::Local,
+    );
+
+    for fifo in [
+        Value::resource_ref("settings", "fifo_queue", vec![]).resolve_root_for_test(),
+        Value::Deferred(DeferredValue::Secret(Box::new(Value::Concrete(
+            ConcreteValue::Bool(false),
+        )))),
+    ] {
+        let desired = Resource::with_provider("aws", "sqs.Queue", "resolved-queue", None)
+            .with_attribute("queue_name", string("resolved-queue"))
+            .with_attribute("fifo_queue", fifo)
+            .with_attribute(
+                "content_based_deduplication",
+                Value::Concrete(ConcreteValue::Bool(true)),
+            );
+        let id = desired.id.clone();
+        let mut resources = vec![desired.clone().into()];
+        crate::AwsNormalizer
+            .normalize_desired(&mut resources)
+            .await
+            .expect("plan-time validation must defer the opaque FIFO flag");
+
+        // Prepare the queue's previous settings through real reference resolution
+        // and secret unwrapping. The update retains that resolved FIFO flag.
+        let mut previous = desired;
+        previous.set_attr(
+            "content_based_deduplication",
+            Value::Concrete(ConcreteValue::Bool(false)),
+        );
+        let request = prepare_create_for_capture(previous, &bindings)
+            .await
+            .expect("the previous queue settings must resolve and pass preparation");
+        let from = crate::test_existing_state(
+            id.clone(),
+            request.resource().as_resource().resolved_attributes(),
+        );
+        assert_eq!(
+            from.attributes.get("fifo_queue"),
+            Some(&Value::Concrete(ConcreteValue::Bool(false)))
+        );
+        let patch = UpdatePatch {
+            ops: vec![PatchOp::Replace {
+                key: "content_based_deduplication".into(),
+                value: resources[0]
+                    .get_attr("content_based_deduplication")
+                    .unwrap()
+                    .clone(),
+            }],
+        };
+        service.clear();
+        let result = provider.update_step(&id, &identifier, &from, &patch).await;
+        assert!(
+            service.snapshot().is_empty(),
+            "resolved FIFO conflicts must fail before any AWS request"
+        );
+        let error = result.expect_err("the fully resolved update must be validated");
+        assert!(
+            matches!(&error, ProviderError::InvalidInput(_)),
+            "{error:?}"
+        );
+        assert!(
+            error
+                .to_string()
+                .contains("content_based_deduplication requires fifo_queue = true"),
+            "{error:?}"
+        );
+    }
+}
+
 #[tokio::test]
 async fn route53_update_uses_identifier_type_and_sends_mutable_attributes() {
     let service = Arc::new(CaptureService::default());
@@ -1121,6 +1316,42 @@ async fn capture_create_and_update_mutations() {
     );
     let schemas = crate::schemas::all_schemas();
 
+    carina_core::validation::deferred_types::with_session_for_test_async(
+        &carina_core::parser::LoadedProviderContext::empty_for_test(),
+        async |type_checks| {
+            let bindings = carina_core::binding_index::ResolvedBindings::default();
+            let gate = carina_core::executor::ModuleConstraintGate::from_live_compositions(&[]);
+            let factories: Vec<Box<dyn carina_core::provider::ProviderFactory>> =
+                vec![Box::new(crate::AwsProviderFactory)];
+            // Reuse the provider's checked schemas across the matrix; compiling
+            // the full registry per attribute consumes the capture timeout.
+            let preparation = carina_core::executor::ProviderPreparationContext::new(
+                &bindings,
+                &gate,
+                &[],
+                &crate::AwsNormalizer,
+                &factories,
+                &provider.schema_registry,
+                type_checks,
+            );
+            capture_prepared_create_and_update_mutations(
+                &provider,
+                &service,
+                &schemas,
+                &preparation,
+            )
+            .await;
+        },
+    )
+    .await;
+}
+
+async fn capture_prepared_create_and_update_mutations(
+    provider: &AwsProvider,
+    service: &CaptureService,
+    schemas: &[ValidatedResourceSchema],
+    preparation: &carina_core::executor::ProviderPreparationContext<'_>,
+) {
     for contract in crate::send_models_generated::capture_contracts() {
         let schema = schemas
             .iter()
@@ -1132,7 +1363,16 @@ async fn capture_create_and_update_mutations() {
         for attribute in contract.create_attributes {
             service.clear();
             let resource = focused_resource(schema, contract, attribute);
-            let result = Box::pin(provider.create_step(&resource, CaptureAttempt)).await;
+            let request =
+                carina_core::executor::prepare_create_request(resource.clone(), preparation)
+                    .await
+                    .unwrap_or_else(|error| {
+                        panic!(
+                            "{}.{} must pass real create preparation: {error:?}",
+                            contract.resource_type, attribute.name,
+                        )
+                    });
+            let result = Box::pin(provider.create_step(request.resource(), CaptureAttempt)).await;
             let requests = service.snapshot();
             assert!(
                 !requests.is_empty(),

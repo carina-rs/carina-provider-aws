@@ -7,7 +7,7 @@
 //! the lookup logic stay near its owning service.
 
 use carina_core::provider::{BoxFuture, ProviderResult};
-use carina_core::resource::{DataSource, State};
+use carina_core::resource::{AbsoluteBindingAddress, DataSource, NoPlaceholder, State};
 
 use crate::AwsProvider;
 use crate::provider_generated::DataSourceLookups;
@@ -15,28 +15,48 @@ use crate::provider_generated::DataSourceLookups;
 impl DataSourceLookups for AwsProvider {
     fn read_sts_caller_identity_data_source(
         &self,
-        resource: &DataSource<impl Clone + Send + Sync + 'static>,
+        resource: &DataSource<
+            impl Clone + Send + Sync + 'static,
+            NoPlaceholder,
+            AbsoluteBindingAddress,
+            impl Clone + Send + Sync + 'static,
+        >,
     ) -> BoxFuture<'_, ProviderResult<State>> {
         self.do_read_sts_caller_identity_data_source(resource)
     }
 
     fn read_identitystore_user_data_source(
         &self,
-        resource: &DataSource<impl Clone + Send + Sync + 'static>,
+        resource: &DataSource<
+            impl Clone + Send + Sync + 'static,
+            NoPlaceholder,
+            AbsoluteBindingAddress,
+            impl Clone + Send + Sync + 'static,
+        >,
     ) -> BoxFuture<'_, ProviderResult<State>> {
         self.do_read_identitystore_user_data_source(resource)
     }
 
     fn read_s3_bucket_data_source(
         &self,
-        resource: &DataSource<impl Clone + Send + Sync + 'static>,
+        resource: &DataSource<
+            impl Clone + Send + Sync + 'static,
+            NoPlaceholder,
+            AbsoluteBindingAddress,
+            impl Clone + Send + Sync + 'static,
+        >,
     ) -> BoxFuture<'_, ProviderResult<State>> {
         self.do_read_s3_bucket_data_source(resource)
     }
 
     fn read_iam_roles_data_source(
         &self,
-        resource: &DataSource<impl Clone + Send + Sync + 'static>,
+        resource: &DataSource<
+            impl Clone + Send + Sync + 'static,
+            NoPlaceholder,
+            AbsoluteBindingAddress,
+            impl Clone + Send + Sync + 'static,
+        >,
     ) -> BoxFuture<'_, ProviderResult<State>> {
         self.do_read_iam_roles_data_source(resource)
     }

@@ -6,15 +6,16 @@ use aws_sdk_s3::types::{
 use carina_core::provider::{AppliedIdentifier, ReadOutcome};
 use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{
-    ConcreteValue, Resource, ResourceId, State, Value, enum_attr_at_schema_path,
+    AbsoluteBindingAddress, ConcreteValue, NoPlaceholder, Resource, ResourceId, State, Value,
+    enum_attr_at_schema_path,
 };
 use carina_core::schema::CompiledResourceSchema;
+use carina_plugin_sdk::{DesiredMap, DesiredScalar, DesiredValue, DesiredValueMut, DesiredView};
 use indexmap::IndexMap;
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
 use crate::helpers::{RetryPolicy, enum_attr_error, retry_aws_operation, sdk_error_message};
-use crate::normalizer::DesiredNormalizationInput;
 use crate::provider::TypedCreateCompletion;
 use crate::read_model::found_managed_read;
 use crate::read_models_generated::S3BucketReplicationConfigurationReadModel;
@@ -26,26 +27,25 @@ use crate::services::s3::bucket::is_s3_not_configured_error;
 /// Insert the provider's canonical V2 replication default into authored
 /// rules. The authored schema permits omission; normalization and read-back
 /// still converge on the same explicit `{ status = Disabled }` shape.
-pub(crate) fn normalize_delete_marker_replication<S>(input: &mut DesiredNormalizationInput<'_, S>) {
-    if !input.is_resource("aws", "s3.BucketReplicationConfiguration") {
-        return;
-    }
-    let Some(ConcreteValue::List(rules)) = input.known_attr_mut("rules") else {
-        return;
+pub(crate) fn normalize_delete_marker_replication(
+    input: &mut DesiredView<'_>,
+) -> ProviderResult<()> {
+    let Some(DesiredValueMut::List(rules)) = input.attribute_mut("rules") else {
+        return Ok(());
     };
-    for rule in rules {
-        let Value::Concrete(ConcreteValue::Map(fields)) = rule else {
+    for rule in rules.iter_mut() {
+        let DesiredValueMut::Map(fields) = rule else {
             continue;
         };
-        fields
-            .entry("delete_marker_replication".to_string())
-            .or_insert_with(|| {
-                Value::Concrete(ConcreteValue::Map(indexmap::IndexMap::from([(
-                    "status".to_string(),
-                    Value::Concrete(ConcreteValue::String("Disabled".into())),
-                )])))
-            });
+        let mut default = DesiredMap::new();
+        let _ = default.insert_absent(
+            "status",
+            DesiredValue::Known(DesiredScalar::String("Disabled".into())),
+        );
+        // Occupied means an authored known or deferred value is already set.
+        let _ = fields.insert_absent("delete_marker_replication", DesiredValue::Map(default));
     }
+    Ok(())
 }
 
 impl AwsProvider {
@@ -95,7 +95,7 @@ impl AwsProvider {
 
     pub(crate) async fn create_s3_bucket_replication_configuration(
         &self,
-        resource: &Resource<impl Sized>,
+        resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
         schema: &CompiledResourceSchema,
     ) -> ProviderResult<TypedCreateCompletion> {
         let input = S3BucketReplicationConfigurationCreateInput::decode(resource)?;

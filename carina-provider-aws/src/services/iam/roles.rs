@@ -6,7 +6,9 @@
 
 use aws_sdk_iam::types::Role;
 use carina_core::provider::{BoxFuture, ProviderError, ProviderResult};
-use carina_core::resource::{ConcreteValue, DataSource, State, Value};
+use carina_core::resource::{
+    AbsoluteBindingAddress, ConcreteValue, DataSource, NoPlaceholder, State, Value,
+};
 use regex::Regex;
 
 use crate::AwsProvider;
@@ -21,7 +23,12 @@ impl AwsProvider {
     /// `name_regex` inputs.
     pub(crate) fn do_read_iam_roles_data_source(
         &self,
-        resource: &DataSource<impl Clone + Send + Sync + 'static>,
+        resource: &DataSource<
+            impl Clone + Send + Sync + 'static,
+            NoPlaceholder,
+            AbsoluteBindingAddress,
+            impl Clone + Send + Sync + 'static,
+        >,
     ) -> BoxFuture<'_, ProviderResult<State>> {
         let resource = resource.clone();
         Box::pin(async move {
@@ -69,7 +76,12 @@ async fn list_matching_roles(
     client: &IamClient,
     path_prefix: Option<&str>,
     name_filter: Option<&Regex>,
-    resource: &DataSource<impl Clone + Send + Sync + 'static>,
+    resource: &DataSource<
+        impl Clone + Send + Sync + 'static,
+        NoPlaceholder,
+        AbsoluteBindingAddress,
+        impl Clone + Send + Sync + 'static,
+    >,
 ) -> Result<Vec<(String, String)>, ProviderError> {
     let mut matches: Vec<(String, String)> = Vec::new();
     let mut marker: Option<String> = None;

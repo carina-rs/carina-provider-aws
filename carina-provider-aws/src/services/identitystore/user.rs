@@ -10,7 +10,9 @@ use aws_sdk_identitystore::operation::describe_user::DescribeUserError;
 use aws_sdk_identitystore::operation::get_user_id::GetUserIdError;
 use aws_sdk_identitystore::types::{AlternateIdentifier, UniqueAttribute};
 use carina_core::provider::{BoxFuture, ProviderError, ProviderResult};
-use carina_core::resource::{ConcreteValue, DataSource, State, Value};
+use carina_core::resource::{
+    AbsoluteBindingAddress, ConcreteValue, DataSource, NoPlaceholder, State, Value,
+};
 
 use crate::AwsProvider;
 use crate::error_helpers::{AwsSdkError, api_error_with_meta_and_subject};
@@ -82,7 +84,12 @@ impl AwsProvider {
     /// `data_source_lookups::DataSourceLookups`.
     pub(crate) fn do_read_identitystore_user_data_source(
         &self,
-        resource: &DataSource<impl Clone + Send + Sync + 'static>,
+        resource: &DataSource<
+            impl Clone + Send + Sync + 'static,
+            NoPlaceholder,
+            AbsoluteBindingAddress,
+            impl Clone + Send + Sync + 'static,
+        >,
     ) -> BoxFuture<'_, ProviderResult<State>> {
         let resource = resource.clone();
         Box::pin(async move {
@@ -123,7 +130,12 @@ impl AwsProvider {
 async fn resolve_user_id(
     client: &IdentityStoreClient,
     identity_store_id: &str,
-    resource: &DataSource<impl Clone + Send + Sync + 'static>,
+    resource: &DataSource<
+        impl Clone + Send + Sync + 'static,
+        NoPlaceholder,
+        AbsoluteBindingAddress,
+        impl Clone + Send + Sync + 'static,
+    >,
 ) -> Result<String, ProviderError> {
     if let Some(user_id) = resource.get_attr("user_id").and_then(value_as_str) {
         return Ok(user_id.to_string());

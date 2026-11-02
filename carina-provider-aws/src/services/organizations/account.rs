@@ -3,7 +3,9 @@ use std::collections::HashMap;
 
 use carina_core::provider::{AppliedIdentifier, ReadOutcome};
 use carina_core::provider::{ProviderError, ProviderResult};
-use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
+use carina_core::resource::{
+    AbsoluteBindingAddress, ConcreteValue, NoPlaceholder, Resource, ResourceId, State, Value,
+};
 use carina_core::schema::CompiledResourceSchema;
 
 use crate::AwsProvider;
@@ -107,7 +109,7 @@ impl AwsProvider {
     /// Create an Organizations account
     pub(crate) async fn create_organizations_account_start(
         &self,
-        resource: &Resource<impl Sized>,
+        resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
         _schema: &CompiledResourceSchema,
     ) -> ProviderResult<(String, carina_core::provider::Sent)> {
         let input = OrganizationsAccountCreateInput::decode(resource, _schema)?;
@@ -199,7 +201,7 @@ impl AwsProvider {
     /// Complete post-create handling after the account status becomes ready.
     pub(crate) async fn finish_organizations_account_create(
         &self,
-        resource: &Resource<impl Sized>,
+        resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
         account_id: &str,
     ) -> ProviderResult<CreateCompletion> {
         let identifier = crate::helpers::applied_identifier(

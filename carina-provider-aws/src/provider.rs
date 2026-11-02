@@ -11,10 +11,13 @@ use carina_core::provider::{
     AppliedIdentifier, AppliedState, BoxFuture, CreateAttempt, CreateFailure, CreateOutcome,
     CreateRequest, DeleteRequest, IssuedCreate, Observation, PartialReadDiagnostic, PendingCreate,
     PendingToken, Poll, PollAttempt, Provider, ProviderError, ProviderReadyDataSource,
-    ProviderResult, ReadOutcome, ReadRequest, Resume, ResumeAttempt, ResumeCreateRequest,
-    ResumeFailure, ResumeOutcome, ResumedCreate, Sent, UpdateOutcome, UpdatePatch, UpdateRequest,
+    ProviderReadyResource, ProviderResult, ReadOutcome, ReadRequest, Resume, ResumeAttempt,
+    ResumeCreateRequest, ResumeFailure, ResumeOutcome, ResumedCreate, Sent, UpdateOutcome,
+    UpdatePatch, UpdateRequest,
 };
-use carina_core::resource::{DataSource, Resource, ResourceId, State, Value};
+use carina_core::resource::{
+    AbsoluteBindingAddress, DataSource, NoPlaceholder, Resource, ResourceId, State, Value,
+};
 use carina_plugin_sdk::{Never, PhasedToken};
 use carina_provider_protocol::{
     CompletedOperation, DEFAULT_OPERATION_BUDGET, DEFAULT_READ_BACK_BUDGET, DriveError,
@@ -23,7 +26,6 @@ use carina_provider_protocol::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::AwsProvider;
 use crate::aws_operation::{ClientToken, DecidedOperationError, EC2_CREATE_TOKEN_TAG};
 use crate::error_helpers::{IntoSendFailure, SendFailure};
 use crate::helpers::{CreatePoll, DeletePoll, apply_patch_to_state, provider_retry_allowed};
@@ -31,6 +33,7 @@ use crate::read_back::{
     NonEmptyAttributeNames, ReadBackCompletion, ReadBackContinuation, ReadBackKind,
     finish_final_read_back, invalid_read_back,
 };
+use crate::{AwsCreateResource, AwsProvider};
 
 pub(crate) const POLL_AFTER_SECS: u32 = 5;
 /// Four describe attempts after delays totaling 65 seconds. Each paginated
@@ -400,7 +403,7 @@ impl TaggedEc2Create {
 
     fn decode_resumed(
         kind: Ec2TaggedResourceKind,
-        resource: &Resource<impl Sized>,
+        resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
         registry: &carina_core::schema::SchemaRegistry,
     ) -> ProviderResult<Self> {
         let schema = |resource_type: &str| {
@@ -1363,7 +1366,7 @@ impl AwsProvider {
 
     async fn request_acm_certificate_transition(
         &self,
-        resource: &Resource<impl Sized>,
+        resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
         schema: &carina_core::schema::CompiledResourceSchema,
         fresh_client_token: FreshAcmClientToken,
         attempts_remaining: u8,
@@ -1412,7 +1415,7 @@ impl AwsProvider {
 
     async fn request_initial_acm_certificate_transition(
         &self,
-        resource: &Resource<impl Sized>,
+        resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
         schema: &carina_core::schema::CompiledResourceSchema,
         fresh_client_token: FreshAcmClientToken,
         attempts_after_request: NonZeroU8,
@@ -1451,7 +1454,7 @@ impl AwsProvider {
 
     async fn finish_acm_certificate_issued<I: AwsIssuedCreate>(
         &self,
-        resource: &Resource<impl Sized>,
+        resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
         schema: &carina_core::schema::CompiledResourceSchema,
         identifier: AppliedIdentifier,
         poll_request: PollRequest,
@@ -1468,7 +1471,7 @@ impl AwsProvider {
 
     async fn finish_acm_certificate_resumed<R: AwsResumedCreate>(
         &self,
-        resource: &Resource<impl Sized>,
+        resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
         schema: &carina_core::schema::CompiledResourceSchema,
         identifier: AppliedIdentifier,
         poll_request: PollRequest,
@@ -1640,7 +1643,7 @@ impl AwsProvider {
 
     pub(crate) async fn finish_tagged_ec2_create<A, O, Failure, Identifier>(
         &self,
-        resource: &Resource<impl Sized>,
+        resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
         attempt: A,
         context: TaggedEc2CreateContext<'_>,
         result: Result<O, Failure>,
@@ -1721,7 +1724,7 @@ impl AwsProvider {
 
     async fn discover_tagged_ec2_resources(
         &self,
-        resource: &Resource<impl Sized>,
+        resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
         kind: Ec2TaggedResourceKind,
         create_token: &ClientToken,
     ) -> ProviderResult<Vec<AppliedIdentifier>> {
@@ -1868,7 +1871,7 @@ impl AwsProvider {
 
     async fn tagged_ec2_discovery(
         &self,
-        resource: &Resource<impl Sized>,
+        resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
         kind: Ec2TaggedResourceKind,
         create_token: ClientToken,
         attempts_remaining: u8,
@@ -1933,7 +1936,7 @@ impl AwsProvider {
 
     async fn continue_tagged_ec2_create(
         &self,
-        resource: &Resource<impl Sized>,
+        resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
         create: TaggedEc2Create,
         identifier: AppliedIdentifier,
     ) -> ProviderResult<TaggedEc2Continuation> {
@@ -2040,7 +2043,7 @@ impl AwsProvider {
 
     pub(crate) async fn finish_tagged_ec2_issued<I: AwsIssuedCreate>(
         &self,
-        resource: &Resource<impl Sized>,
+        resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
         create: TaggedEc2Create,
         identifier: AppliedIdentifier,
         issued: I,
@@ -2062,7 +2065,7 @@ impl AwsProvider {
 
     async fn finish_tagged_ec2_resumed<R: AwsResumedCreate>(
         &self,
-        resource: &Resource<impl Sized>,
+        resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
         kind: Ec2TaggedResourceKind,
         identifier: AppliedIdentifier,
         resumed: R,
@@ -2087,11 +2090,14 @@ impl AwsProvider {
     }
 
     /// Perform the initial, non-blocking create step.
+    ///
+    /// Both routes retain core's normalization witness until this boundary.
     pub async fn create_step<A: AwsCreateAttempt>(
         &self,
-        resource: &Resource<impl Sized>,
+        resource: &impl AwsCreateResource,
         attempt: A,
     ) -> Result<A::Step, A::Verdict> {
+        let resource = resource.as_resource();
         if let Err(error) =
             crate::ec2_tags::validate_ec2_user_tags(&resource.id, &resource.resolved_attributes())
         {
@@ -2340,7 +2346,7 @@ impl AwsProvider {
     /// Perform one describe step for a pending create operation.
     pub async fn poll_create_step<U: AwsPollAttempt>(
         &self,
-        resource: &Resource<impl Sized>,
+        resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
         poll: AwsCreatePoll<U, U::Issued>,
         poll_request: PollRequest,
     ) -> Result<U::Step, U::Verdict> {
@@ -2718,7 +2724,7 @@ impl AwsProvider {
     #[doc(hidden)]
     pub async fn create_with_poll_sleep_for_test<Sleep, SleepFuture>(
         &self,
-        resource: &Resource<impl Sized>,
+        resource: &ProviderReadyResource,
         attempt: CreateAttempt,
         sleep: Sleep,
     ) -> Result<CreateOutcome, CreateFailure>
@@ -2764,7 +2770,7 @@ impl AwsProvider {
 
     async fn drive_native_create(
         &self,
-        resource: &Resource<impl Sized>,
+        resource: &ProviderReadyResource,
         attempt: CreateAttempt,
     ) -> Result<CreateOutcome, CreateFailure> {
         self.drive_native_create_with_sleep(resource, attempt, tokio::time::sleep)
@@ -2773,7 +2779,7 @@ impl AwsProvider {
 
     async fn drive_native_create_with_sleep<Sleep, SleepFuture>(
         &self,
-        resource: &Resource<impl Sized>,
+        resource: &ProviderReadyResource,
         attempt: CreateAttempt,
         sleep: Sleep,
     ) -> Result<CreateOutcome, CreateFailure>
@@ -2781,9 +2787,10 @@ impl AwsProvider {
         Sleep: FnMut(Duration) -> SleepFuture,
         SleepFuture: Future<Output = ()>,
     {
+        let payload = resource.as_resource();
         let budget =
-            self.operation_budget(resource.id.resource_type.as_str(), OperationKind::Create);
-        let read_back_budget = self.read_back_budget(resource.id.resource_type.as_str());
+            self.operation_budget(payload.id.resource_type.as_str(), OperationKind::Create);
+        let read_back_budget = self.read_back_budget(payload.id.resource_type.as_str());
         let outcome = drive_pending_infallible(
             budget,
             read_back_budget,
@@ -2793,12 +2800,12 @@ impl AwsProvider {
                     Ok(token) => token,
                     Err(error) => return OperationStep::Verdict(pending.preserve(error)),
                 };
-                let poll = match native_create_poll(&resource.id, pending.into_poll(), token) {
+                let poll = match native_create_poll(&payload.id, pending.into_poll(), token) {
                     Ok(poll) => poll,
                     Err(error) => return OperationStep::Verdict(error),
                 };
                 native_create_step(
-                    Box::pin(self.poll_create_step(resource, poll, PollRequest { finality })).await,
+                    Box::pin(self.poll_create_step(payload, poll, PollRequest { finality })).await,
                 )
             },
             sleep,
@@ -2810,13 +2817,13 @@ impl AwsProvider {
             DriveOutcome::OverBudget { last_pending } => Err(last_pending.preserve(
                 ProviderError::timeout(format!(
                     "create of {} did not finish within {budget:?}",
-                    resource.id.resource_type
+                    payload.id.resource_type
                 ))
-                .for_resource(resource.id.clone()),
+                .for_resource(payload.id.clone()),
             )),
             DriveOutcome::ProtocolViolation { last_pending } => Err(last_pending.preserve(
                 ProviderError::internal("AWS create returned an invalid pending phase")
-                    .for_resource(resource.id.clone()),
+                    .for_resource(payload.id.clone()),
             )),
         }
     }
@@ -2872,7 +2879,7 @@ impl AwsProvider {
 
     async fn complete_resumed_read<R: AwsResumedCreate>(
         &self,
-        resource: &Resource<impl Sized>,
+        resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
         resumed: R,
         outcome: ProviderResult<ReadOutcome>,
         poll_request: PollRequest,
@@ -2889,7 +2896,7 @@ impl AwsProvider {
     /// Perform one step while resuming a create loaded from state.
     pub async fn resume_create_step<U: AwsResumeAttempt>(
         &self,
-        resource: &Resource<impl Sized>,
+        resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
         resume: AwsCreateResume<U, U::Resumed>,
         poll_request: PollRequest,
     ) -> Result<U::Step, U::Verdict> {
@@ -3304,7 +3311,12 @@ impl AwsProvider {
     /// shares this body with the core [`Provider`] implementation.
     pub async fn read_data_source_resource(
         &self,
-        resource: &DataSource<impl Clone + Send + Sync + 'static>,
+        resource: &DataSource<
+            impl Clone + Send + Sync + 'static,
+            NoPlaceholder,
+            AbsoluteBindingAddress,
+            impl Clone + Send + Sync + 'static,
+        >,
     ) -> ProviderResult<State> {
         crate::provider_generated::dispatch_read_data_source(self, resource).await
     }
@@ -3564,7 +3576,7 @@ impl AwsProvider {
 
     pub async fn poll_update_step(
         &self,
-        resource: &Resource<impl Sized>,
+        resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
         identifier: &AppliedIdentifier,
         token: AwsUpdateToken,
         poll_request: PollRequest,
@@ -4015,10 +4027,7 @@ impl Provider for AwsProvider {
         request: CreateRequest,
         attempt: CreateAttempt,
     ) -> BoxFuture<'_, Result<CreateOutcome, CreateFailure>> {
-        Box::pin(async move {
-            self.drive_native_create(request.resource().as_resource(), attempt)
-                .await
-        })
+        Box::pin(async move { self.drive_native_create(request.resource(), attempt).await })
     }
 
     fn resume_create(

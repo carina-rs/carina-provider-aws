@@ -5,7 +5,10 @@ use indexmap::IndexMap;
 
 use carina_core::provider::{AppliedIdentifier, ProviderDirectives, ReadOutcome};
 use carina_core::provider::{BoxFuture, ProviderError, ProviderResult};
-use carina_core::resource::{ConcreteValue, DataSource, Resource, ResourceId, State, Value};
+use carina_core::resource::{
+    AbsoluteBindingAddress, ConcreteValue, DataSource, NoPlaceholder, Resource, ResourceId, State,
+    Value,
+};
 use carina_core::schema::CompiledResourceSchema;
 
 use crate::AwsProvider;
@@ -171,7 +174,7 @@ impl AwsProvider {
     /// Create an S3 bucket
     pub(crate) async fn create_s3_bucket<A: AwsCreateAttempt>(
         &self,
-        resource: &Resource<impl Sized>,
+        resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
         schema: &CompiledResourceSchema,
         attempt: A,
     ) -> Result<A::Step, A::Verdict> {
@@ -499,7 +502,12 @@ impl AwsProvider {
     /// `data_source_lookups::DataSourceLookups`.
     pub(crate) fn do_read_s3_bucket_data_source(
         &self,
-        resource: &DataSource<impl Clone + Send + Sync + 'static>,
+        resource: &DataSource<
+            impl Clone + Send + Sync + 'static,
+            NoPlaceholder,
+            AbsoluteBindingAddress,
+            impl Clone + Send + Sync + 'static,
+        >,
     ) -> BoxFuture<'_, ProviderResult<State>> {
         let resource = resource.clone();
         Box::pin(async move {

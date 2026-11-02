@@ -2,7 +2,9 @@ use indexmap::IndexMap;
 use std::collections::HashMap;
 
 use carina_core::provider::{AppliedIdentifier, ProviderResult, ReadOutcome};
-use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
+use carina_core::resource::{
+    AbsoluteBindingAddress, ConcreteValue, NoPlaceholder, Resource, ResourceId, State, Value,
+};
 use carina_core::schema::CompiledResourceSchema;
 
 use crate::AwsProvider;
@@ -88,7 +90,7 @@ impl AwsProvider {
     /// Create a CloudWatch Logs Log Group
     pub(crate) async fn create_logs_log_group<A: AwsCreateAttempt>(
         &self,
-        resource: &Resource<impl Sized>,
+        resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
         _schema: &CompiledResourceSchema,
         attempt: A,
     ) -> Result<A::Step, A::Verdict> {

@@ -1,7 +1,9 @@
 use aws_sdk_s3::types::{BucketCannedAcl, Grant, Permission, Type as GranteeType};
 use carina_core::provider::ProviderResult;
 use carina_core::provider::{AppliedIdentifier, ReadOutcome};
-use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
+use carina_core::resource::{
+    AbsoluteBindingAddress, ConcreteValue, NoPlaceholder, Resource, ResourceId, State, Value,
+};
 use carina_core::schema::CompiledResourceSchema;
 
 use crate::AwsProvider;
@@ -145,7 +147,7 @@ impl AwsProvider {
 
     pub(crate) async fn create_s3_bucket_acl(
         &self,
-        resource: &Resource<impl Sized>,
+        resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
         _schema: &CompiledResourceSchema,
     ) -> ProviderResult<TypedCreateCompletion> {
         let input = S3BucketAclCreateInput::decode(resource, _schema)?;
@@ -236,7 +238,7 @@ impl AwsProvider {
 mod tests {
     use super::*;
     use aws_sdk_s3::types::Grantee;
-    use carina_core::differ::{Diff, diff_for_test as diff};
+    use carina_core::differ::Diff;
     use carina_core::provider::RawSavedAttrs;
     use carina_core::resource::{ResolvedResource, Resource};
     use std::collections::HashMap;
@@ -379,28 +381,13 @@ mod tests {
         .with_identifier("example");
         let registry = crate::schemas::schema_registry();
         let saved = RawSavedAttrs::default().lift(&registry);
-        let schema = registry
-            .get(
-                "aws",
-                "s3.BucketAcl",
-                carina_core::schema::SchemaKind::Resource,
-            )
-            .expect("bucket ACL schema");
         let router = crate::test_comparison_router();
         let comparison = router
             .comparison_for(&registry, &desired.id)
             .expect("bucket ACL comparison context");
 
-        let result = diff(
-            &ResolvedResource::new(desired),
-            &current,
-            &saved,
-            None,
-            Some(schema.schema().as_schema()),
-            comparison.context(),
-            &carina_core::references::prepare_empty_for_tests(),
-        )
-        .expect("prepared test comparison");
+        let desired = ResolvedResource::new(desired.into_resolved_dependency_phase_for_test());
+        let result = crate::test_diff(&desired, &current, &saved, None, comparison);
         assert!(matches!(result, Diff::Update { .. }), "{result:?}");
     }
 

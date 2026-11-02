@@ -11,13 +11,15 @@ use aws_sdk_route53::types::{
 
 use carina_core::provider::{AppliedIdentifier, ReadOutcome};
 use carina_core::provider::{ProviderError, ProviderResult};
-use carina_core::resource::{ConcreteValue, Resource, ResourceId, Value};
+use carina_core::resource::{
+    AbsoluteBindingAddress, ConcreteValue, NoPlaceholder, Resource, ResourceId, Value,
+};
 use carina_core::schema::CompiledResourceSchema;
+use carina_plugin_sdk::{DesiredScalar, DesiredValueMut, DesiredView};
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
 use crate::helpers::sdk_error_message;
-use crate::normalizer::DesiredNormalizationInput;
 use crate::provider::TypedCreateCompletion;
 use crate::read_model::found_managed_read;
 use crate::read_models_generated::Route53RecordSetReadModelSupplement;
@@ -350,7 +352,7 @@ impl AwsProvider {
 
     pub(crate) async fn create_route53_record_set(
         &self,
-        resource: &Resource<impl Sized>,
+        resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
         _schema: &CompiledResourceSchema,
     ) -> ProviderResult<TypedCreateCompletion> {
         let input = Route53RecordSetCreateInput::decode(resource, _schema)?;
@@ -548,19 +550,16 @@ impl AwsProvider {
 /// the apply would just re-UPSERT the same DNS name.
 ///
 /// See aws#300, follow-up to aws#117.
-pub(crate) fn normalize_record_set_dns_names<S>(input: &mut DesiredNormalizationInput<'_, S>) {
-    if !input.is_resource("aws", "route53.RecordSet") {
-        return;
-    }
-
-    if let Some(ConcreteValue::String(name)) = input.known_attr_mut("name")
+pub(crate) fn normalize_record_set_dns_names(input: &mut DesiredView<'_>) -> ProviderResult<()> {
+    if let Some(DesiredValueMut::Known(DesiredScalar::String(name))) = input.attribute_mut("name")
         && let Some(stripped) = name.expose_plaintext().strip_suffix('.').map(str::to_owned)
     {
         *name = stripped.into();
     }
 
-    if let Some(ConcreteValue::Map(alias)) = input.known_attr_mut("alias_target")
-        && let Some(Value::Concrete(ConcreteValue::String(dns_name))) = alias.get_mut("dns_name")
+    if let Some(DesiredValueMut::Map(alias)) = input.attribute_mut("alias_target")
+        && let Some(DesiredValueMut::Known(DesiredScalar::String(dns_name))) =
+            alias.get_mut("dns_name")
         && let Some(stripped) = dns_name
             .expose_plaintext()
             .strip_suffix('.')
@@ -568,6 +567,7 @@ pub(crate) fn normalize_record_set_dns_names<S>(input: &mut DesiredNormalization
     {
         *dns_name = stripped.into();
     }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -576,8 +576,10 @@ mod tests {
     use carina_core::resource::Resource;
 
     fn normalize(resource: &mut Resource) {
-        let mut input = DesiredNormalizationInput::in_process(resource);
-        normalize_record_set_dns_names(&mut input);
+        let mut desired =
+            carina_plugin_sdk::NativeDesiredNormalization::from_core(resource).unwrap();
+        normalize_record_set_dns_names(&mut desired.view()).unwrap();
+        desired.finish().unwrap();
     }
 
     fn record_set(name: &str) -> Resource {
@@ -702,41 +704,6 @@ mod tests {
             out.get("dns_name"),
             Some(&Value::Concrete(ConcreteValue::String(
                 "dualstack.elb.amazonaws.com".to_string().into()
-            )))
-        );
-    }
-
-    #[test]
-    fn ignores_non_route53_record_set_resources() {
-        let mut r = Resource::with_provider("aws", "s3.Bucket", "test", None);
-        r.set_attr(
-            "name".to_string(),
-            Value::Concrete(ConcreteValue::String(
-                "bucket.with.trailing.dot.".to_string().into(),
-            )),
-        );
-        normalize(&mut r);
-        assert_eq!(
-            r.get_attr("name"),
-            Some(&Value::Concrete(ConcreteValue::String(
-                "bucket.with.trailing.dot.".to_string().into()
-            )))
-        );
-    }
-
-    #[test]
-    fn ignores_non_aws_provider() {
-        let mut r = Resource::with_provider("awscc", "route53.RecordSet", "test", None);
-        r.set_attr(
-            "name".to_string(),
-            Value::Concrete(ConcreteValue::String("foo.example.com.".to_string().into())),
-        );
-        normalize(&mut r);
-        // unchanged: awscc has its own normalizer
-        assert_eq!(
-            r.get_attr("name"),
-            Some(&Value::Concrete(ConcreteValue::String(
-                "foo.example.com.".to_string().into()
             )))
         );
     }
