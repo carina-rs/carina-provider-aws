@@ -1475,6 +1475,7 @@ fn collect_resource_attributes_unvalidated(
                 resource_name: res.name,
                 namespace: &namespace,
                 struct_path: Vec::new(),
+                resolving_shapes: Vec::new(),
                 property_path: snake_name.clone(),
                 type_overrides: &type_overrides,
                 enum_alias_map: &enum_alias_map,
@@ -1591,6 +1592,7 @@ fn collect_resource_attributes_unvalidated(
                 resource_name: res.name,
                 namespace: &namespace,
                 struct_path: Vec::new(),
+                resolving_shapes: Vec::new(),
                 property_path: snake_name.clone(),
                 type_overrides: &type_overrides,
                 enum_alias_map: &enum_alias_map,
@@ -2381,6 +2383,9 @@ struct TypeResolutionContext<'a> {
     /// Containing Smithy struct type names between the resource and the
     /// field currently being resolved.
     struct_path: Vec<String>,
+    /// Full shape IDs on the active expansion path. Repeated sibling uses
+    /// are allowed; an ancestor repeat is a recursive schema.
+    resolving_shapes: Vec<String>,
     /// Full property path, including array markers, independent of Smithy type names.
     property_path: String,
     type_overrides: &'a HashMap<&'a str, &'a str>,
@@ -2701,6 +2706,31 @@ fn resolve_type(
         return Ok(("/* enum */".to_string(), Some(enum_info)));
     }
 
+    if let Some(start) = ctx
+        .resolving_shapes
+        .iter()
+        .position(|shape| shape == target)
+    {
+        let cycle = ctx.resolving_shapes[start..]
+            .iter()
+            .map(String::as_str)
+            .chain(std::iter::once(target))
+            .collect::<Vec<_>>()
+            .join(" -> ");
+        anyhow::bail!("Recursive Smithy shape cycle: {cycle}");
+    }
+    ctx.resolving_shapes.push(target.to_string());
+    let result = resolve_type_shape(ctx, target, field_name);
+    ctx.resolving_shapes.pop();
+    result
+}
+
+/// Expand a model shape after overrides, through the shared recursion guard.
+fn resolve_type_shape(
+    ctx: &mut TypeResolutionContext<'_>,
+    target: &str,
+    field_name: &str,
+) -> Result<(String, Option<EnumInfo>)> {
     let kind = ctx.model.shape_kind(target);
 
     Ok(match kind {
@@ -7065,6 +7095,7 @@ fn type_code_to_display(type_code: &str) -> String {
         s if s.contains("email") => "Email".to_string(),
         _ => snake_to_pascal_type(
             type_code
+                .trim_start_matches("carina_aws_types::")
                 .trim_start_matches("super::")
                 .trim_start_matches("types::")
                 .trim_end_matches("()"),
@@ -7713,6 +7744,42 @@ mod tests {
     }
 
     #[test]
+    fn smithy_union_recursive_schema_reports_the_shape_cycle() {
+        let (resource, _model) = union_fixture();
+        let model = carina_smithy::parse(include_str!("../tests/fixtures/recursive-unions.json"))
+            .expect("parse recursive fixture");
+        let error =
+            generate_resource(&resource, &model).expect_err("recursive schemas must fail codegen");
+        assert_eq!(
+            error.to_string(),
+            "Recursive Smithy shape cycle: com.amazonaws.test#Choice -> com.amazonaws.test#Node -> com.amazonaws.test#Choice"
+        );
+    }
+
+    #[test]
+    fn recursive_struct_schema_reports_its_direct_cycle() {
+        let (resource, _model) = union_fixture();
+        let mut model =
+            carina_smithy::parse(include_str!("../tests/fixtures/recursive-unions.json"))
+                .expect("parse recursive fixture");
+        let Some(Shape::Structure(root)) = model.shapes.get_mut("com.amazonaws.test#Fixture")
+        else {
+            panic!("fixture root")
+        };
+        root.members.remove("Choice");
+        let Some(Shape::Structure(node)) = model.shapes.get_mut("com.amazonaws.test#Node") else {
+            panic!("fixture node")
+        };
+        node.members.remove("Choice");
+        let error = generate_resource(&resource, &model)
+            .expect_err("self-recursive structs must fail codegen");
+        assert_eq!(
+            error.to_string(),
+            "Recursive Smithy shape cycle: com.amazonaws.test#Node -> com.amazonaws.test#Node"
+        );
+    }
+
+    #[test]
     fn smithy_union_recursive_structs_generate_docs_without_re_resolving_types() {
         let (resource, _model) = union_fixture();
         let model = carina_smithy::parse(include_str!("../tests/fixtures/recursive-unions.json"))
@@ -7794,8 +7861,7 @@ mod tests {
         carina_docgen::check_page(&markdown).expect("union docs must pass shared Markdown checks");
     }
 
-    #[test]
-    fn markdown_struct_field_groups_lifecycle_filter_uses_the_declared_type() {
+    fn lifecycle_markdown_fixture() -> String {
         let model = carina_smithy::parse(
             r##"{
                 "smithy": "2.0",
@@ -7816,12 +7882,30 @@ mod tests {
             .into_iter()
             .find(|resource| resource.name == "s3.BucketLifecycleConfiguration")
             .expect("lifecycle resource");
-        let markdown = generate_markdown_resource(
-            &resource,
-            &model,
-            &markdown_resource_example(resource.name),
-        )
-        .expect("generate lifecycle docs from hand-written type");
+        generate_markdown_resource(&resource, &model, &markdown_resource_example(resource.name))
+            .expect("generate lifecycle docs from hand-written type")
+    }
+
+    #[test]
+    fn markdown_lifecycle_dates_use_module_independent_labels() {
+        let markdown = lifecycle_markdown_fixture();
+        assert_eq!(
+            markdown
+                .matches("| `date` | S3LifecycleDate | No |")
+                .count(),
+            2,
+            "{markdown}"
+        );
+        assert!(!markdown.contains("CarinaAwsTypes"), "{markdown}");
+        assert_eq!(
+            type_code_to_display("carina_aws_types::s3_lifecycle_date()"),
+            type_code_to_display("super::s3_lifecycle_date()")
+        );
+    }
+
+    #[test]
+    fn markdown_struct_field_groups_lifecycle_filter_uses_the_declared_type() {
+        let markdown = lifecycle_markdown_fixture();
         let filter = markdown
             .split("### rules.filter\n")
             .nth(1)
