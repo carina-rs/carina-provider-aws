@@ -869,7 +869,12 @@ mod tests {
             .comparison_for(&registry, &id)
             .expect("RecordSet comparison context");
         let saved_attrs = carina_core::provider::RawSavedAttrs::default().lift(&registry);
-        let desired = ResolvedResource::new(normalized.as_resource().clone());
+        let desired = ResolvedResource::new(
+            normalized
+                .as_resource()
+                .clone()
+                .into_resolved_dependency_phase_for_test(),
+        );
         let result = crate::test_diff(&desired, &current, &saved_attrs, None, comparison);
         assert!(
             matches!(result, Diff::NoChange(_)),

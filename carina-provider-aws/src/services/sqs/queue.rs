@@ -13,9 +13,11 @@ use std::collections::HashMap;
 
 use carina_core::provider::{AppliedIdentifier, ReadOutcome};
 use carina_core::provider::{ProviderError, ProviderResult};
-use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
+use carina_core::resource::{
+    AbsoluteBindingAddress, ConcreteValue, NoPlaceholder, Resource, ResourceId, State, Value,
+};
 use carina_core::schema::CompiledResourceSchema;
-use carina_plugin_sdk::{DesiredInputs, DesiredScalar, DesiredValue};
+use carina_plugin_sdk::{DesiredInputs, DesiredScalar, DesiredValue, NativeDesiredNormalization};
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
@@ -674,10 +676,9 @@ impl AwsProvider {
     /// Create an SQS Queue and return its post-create state.
     pub(crate) async fn create_sqs_queue(
         &self,
-        resource: &Resource<impl Sized>,
+        resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
         _schema: &CompiledResourceSchema,
     ) -> ProviderResult<TypedCreateCompletion> {
-        validate_sqs_queue_inputs(&DesiredInputs::from_core(resource)?)?;
         let input = SqsQueueCreateInput::decode(resource)?;
         let sent = input.sent();
         let crate::send_models_generated::SqsQueueCreateParts {
@@ -830,10 +831,14 @@ impl AwsProvider {
         id: ResourceId,
         identifier: &AppliedIdentifier,
         from: &State,
-        to: Resource,
+        mut to: Resource,
         _schema: &CompiledResourceSchema,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
-        validate_sqs_queue_inputs(&DesiredInputs::from_core(&to)?)?;
+        // Recheck decisions that were deferred until apply-time resolution.
+        {
+            let desired = NativeDesiredNormalization::from_core(&mut to)?;
+            validate_sqs_queue_inputs(&desired.inputs())?;
+        }
         let input = SqsQueueUpdateInput::decode(&to)?;
         let crate::send_models_generated::SqsQueueUpdateParts {
             content_based_deduplication,
@@ -1062,8 +1067,9 @@ mod tests {
             Value::Concrete(ConcreteValue::String("messageGroup".into())),
         );
 
-        // The CRUD validation projection must keep unresolved values opaque.
-        validate_sqs_queue_inputs(&DesiredInputs::from_core(&resource).unwrap())
+        let desired = carina_plugin_sdk::NativeDesiredNormalization::from_core(&mut resource)
+            .expect("normalization keeps unresolved values opaque");
+        validate_sqs_queue_inputs(&desired.inputs())
             .expect("an unresolved fifo_queue value must not be treated as false");
     }
 
@@ -1076,8 +1082,9 @@ mod tests {
             Value::resource_ref("upstream", "deduplication_scope", vec![]).resolve_root_for_test(),
         );
 
-        // The CRUD validation projection must keep unresolved values opaque.
-        validate_sqs_queue_inputs(&DesiredInputs::from_core(&resource).unwrap())
+        let desired = carina_plugin_sdk::NativeDesiredNormalization::from_core(&mut resource)
+            .expect("normalization keeps unresolved values opaque");
+        validate_sqs_queue_inputs(&desired.inputs())
             .expect("a deferred FIFO-only value must wait for resolution");
     }
 
@@ -1090,8 +1097,9 @@ mod tests {
         );
         resource.set_attr("kms_master_key_id", plan_time_unknown());
 
-        // The CRUD validation projection must keep unresolved values opaque.
-        validate_sqs_queue_inputs(&DesiredInputs::from_core(&resource).unwrap())
+        let desired = carina_plugin_sdk::NativeDesiredNormalization::from_core(&mut resource)
+            .expect("normalization keeps unresolved values opaque");
+        validate_sqs_queue_inputs(&desired.inputs())
             .expect("an unresolved KMS key is present but not yet decidable");
     }
 
@@ -1100,8 +1108,9 @@ mod tests {
         let mut resource = queue_resource();
         resource.set_attr("kms_data_key_reuse_period_seconds", plan_time_unknown());
 
-        // The CRUD validation projection must keep unresolved values opaque.
-        validate_sqs_queue_inputs(&DesiredInputs::from_core(&resource).unwrap())
+        let desired = carina_plugin_sdk::NativeDesiredNormalization::from_core(&mut resource)
+            .expect("normalization keeps unresolved values opaque");
+        validate_sqs_queue_inputs(&desired.inputs())
             .expect("an unresolved reuse period must wait for resolution");
     }
 

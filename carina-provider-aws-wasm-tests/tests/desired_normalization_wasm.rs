@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use carina_core::parser::{ExpandedInferredFile, ProviderConfig, ProviderContext};
+use carina_core::parser::{ExpandedInferredFile, LoadedProviderContext, ProviderConfig};
 use carina_core::provider::{BoxFuture, ProviderError, ProviderFactory};
 use carina_core::resource::{ConcreteValue, DeferredValue, ProviderResource, Resource, Value};
 use carina_plugin_host::{
@@ -130,12 +130,18 @@ async fn wasm_guest_normalizes_mixed_leaves_restores_deferred_values_and_maps_er
         unresolved_attributes: IndexMap::new(),
         binding: None,
     }];
-    let configs = carina_core::parser::resolve_provider_attributes_with_remote(
-        &parsed,
-        &HashMap::new(),
-        &ProviderContext::default(),
+    let configs = carina_core::validation::deferred_types::with_session_for_test_async(
+        &LoadedProviderContext::empty_for_test(),
+        async |type_checks| {
+            carina_core::parser::resolve_provider_attributes_with_remote(
+                &parsed,
+                &HashMap::new(),
+                type_checks,
+            )
+            .expect("resolve local provider configuration")
+        },
     )
-    .expect("resolve local provider configuration");
+    .await;
     let resolved_config = configs.iter().next().expect("local provider configuration");
     let config = carina_core::executor::prepare_provider_ready_config(&factory, resolved_config)
         .expect("prepare provider configuration");

@@ -1,7 +1,9 @@
 //! Typed boundary for desired managed-resource values sent to AWS.
 
 use carina_core::provider::{ProviderError, ProviderResult};
-use carina_core::resource::{ConcreteValue, Resource, ResourceId, Value};
+use carina_core::resource::{
+    AbsoluteBindingAddress, ConcreteValue, NoPlaceholder, Resource, ResourceId, Value,
+};
 use carina_core::schema::CompiledResourceSchema;
 use indexmap::IndexMap;
 
@@ -63,7 +65,11 @@ impl<T> Drop for Sent<T> {
     }
 }
 
-fn invalid_shape(resource: &Resource<impl Sized>, name: &str, expected: &str) -> ProviderError {
+fn invalid_shape(
+    resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
+    name: &str,
+    expected: &str,
+) -> ProviderError {
     invalid_shape_for_id(&resource.id, name, expected)
 }
 
@@ -71,12 +77,15 @@ fn invalid_shape_for_id(id: &ResourceId, name: &str, expected: &str) -> Provider
     ProviderError::invalid_input(format!("{name} must be {expected}")).for_resource(id.clone())
 }
 
-fn missing(resource: &Resource<impl Sized>, name: &str) -> ProviderError {
+fn missing(
+    resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
+    name: &str,
+) -> ProviderError {
     ProviderError::invalid_input(format!("{name} is required")).for_resource(resource.id.clone())
 }
 
 pub(crate) fn optional_string(
-    resource: &Resource<impl Sized>,
+    resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
     name: &str,
 ) -> ProviderResult<Option<String>> {
     match resource.get_attr(name) {
@@ -89,14 +98,14 @@ pub(crate) fn optional_string(
 }
 
 pub(crate) fn required_string(
-    resource: &Resource<impl Sized>,
+    resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
     name: &str,
 ) -> ProviderResult<String> {
     optional_string(resource, name)?.ok_or_else(|| missing(resource, name))
 }
 
 pub(crate) fn optional_string_list(
-    resource: &Resource<impl Sized>,
+    resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
     name: &str,
 ) -> ProviderResult<Option<StringList>> {
     optional_string_list_value(&resource.id, name, resource.get_attr(name))
@@ -131,14 +140,14 @@ pub(crate) fn optional_string_list_value(
 
 #[allow(dead_code)]
 pub(crate) fn required_string_list(
-    resource: &Resource<impl Sized>,
+    resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
     name: &str,
 ) -> ProviderResult<StringList> {
     optional_string_list(resource, name)?.ok_or_else(|| missing(resource, name))
 }
 
 pub(crate) fn optional_tags(
-    resource: &Resource<impl Sized>,
+    resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
     name: &str,
 ) -> ProviderResult<Option<Tags>> {
     let Some(value) = resource.get_attr(name) else {
@@ -160,12 +169,15 @@ pub(crate) fn optional_tags(
 }
 
 #[allow(dead_code)]
-pub(crate) fn required_tags(resource: &Resource<impl Sized>, name: &str) -> ProviderResult<Tags> {
+pub(crate) fn required_tags(
+    resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
+    name: &str,
+) -> ProviderResult<Tags> {
     optional_tags(resource, name)?.ok_or_else(|| missing(resource, name))
 }
 
 pub(crate) fn optional_enum(
-    resource: &Resource<impl Sized>,
+    resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
     schema: &CompiledResourceSchema,
     name: &str,
 ) -> ProviderResult<Option<String>> {
@@ -176,7 +188,7 @@ pub(crate) fn optional_enum(
 }
 
 pub(crate) fn required_enum(
-    resource: &Resource<impl Sized>,
+    resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
     schema: &CompiledResourceSchema,
     name: &str,
 ) -> ProviderResult<String> {
@@ -184,7 +196,7 @@ pub(crate) fn required_enum(
 }
 
 pub(crate) fn optional_bool(
-    resource: &Resource<impl Sized>,
+    resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
     name: &str,
 ) -> ProviderResult<Option<bool>> {
     match resource.get_attr(name) {
@@ -195,12 +207,15 @@ pub(crate) fn optional_bool(
 }
 
 #[allow(dead_code)]
-pub(crate) fn required_bool(resource: &Resource<impl Sized>, name: &str) -> ProviderResult<bool> {
+pub(crate) fn required_bool(
+    resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
+    name: &str,
+) -> ProviderResult<bool> {
     optional_bool(resource, name)?.ok_or_else(|| missing(resource, name))
 }
 
 pub(crate) fn optional_int(
-    resource: &Resource<impl Sized>,
+    resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
     name: &str,
 ) -> ProviderResult<Option<i64>> {
     match resource.get_attr(name) {
@@ -211,13 +226,16 @@ pub(crate) fn optional_int(
 }
 
 #[allow(dead_code)]
-pub(crate) fn required_int(resource: &Resource<impl Sized>, name: &str) -> ProviderResult<i64> {
+pub(crate) fn required_int(
+    resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
+    name: &str,
+) -> ProviderResult<i64> {
     optional_int(resource, name)?.ok_or_else(|| missing(resource, name))
 }
 
 #[allow(dead_code)]
 pub(crate) fn optional_float(
-    resource: &Resource<impl Sized>,
+    resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
     name: &str,
 ) -> ProviderResult<Option<f64>> {
     match resource.get_attr(name) {
@@ -228,18 +246,24 @@ pub(crate) fn optional_float(
 }
 
 #[allow(dead_code)]
-pub(crate) fn required_float(resource: &Resource<impl Sized>, name: &str) -> ProviderResult<f64> {
+pub(crate) fn required_float(
+    resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
+    name: &str,
+) -> ProviderResult<f64> {
     optional_float(resource, name)?.ok_or_else(|| missing(resource, name))
 }
 
 pub(crate) fn optional_value(
-    resource: &Resource<impl Sized>,
+    resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
     name: &str,
 ) -> ProviderResult<Option<Value>> {
     Ok(resource.get_attr(name).cloned())
 }
 
-pub(crate) fn required_value(resource: &Resource<impl Sized>, name: &str) -> ProviderResult<Value> {
+pub(crate) fn required_value(
+    resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
+    name: &str,
+) -> ProviderResult<Value> {
     optional_value(resource, name)?.ok_or_else(|| missing(resource, name))
 }
 

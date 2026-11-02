@@ -15,7 +15,10 @@ use carina_aws_types::{FinalAttempt, Idempotency, SendClassification, Transience
 use carina_core::provider::{
     AppliedIdentifier, PatchOp, ProviderError, ProviderResult, UpdatePatch,
 };
-use carina_core::resource::{ConcreteValue, EnumAttrError, Resource, ResourceId, State, Value};
+use carina_core::resource::{
+    AbsoluteBindingAddress, ConcreteValue, EnumAttrError, NoPlaceholder, Resource, ResourceId,
+    State, Value,
+};
 use carina_core::schema::CompiledResourceSchema;
 
 use crate::aws_operation::{
@@ -55,7 +58,7 @@ pub fn value_as_str(v: &Value) -> Option<&str> {
 /// request.
 #[cfg(test)]
 pub(crate) fn optional_int_attr(
-    resource: &Resource<impl Sized>,
+    resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
     attr_name: &str,
 ) -> ProviderResult<Option<i64>> {
     match resource.get_attr(attr_name) {
@@ -78,7 +81,7 @@ pub(crate) fn enum_attr_error(id: &ResourceId, error: EnumAttrError) -> Provider
 /// when the attribute is absent or carries a non-enum-shaped value.
 #[cfg(test)]
 pub fn require_enum_attr(
-    resource: &Resource<impl Sized>,
+    resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
     schema: &CompiledResourceSchema,
     attr_name: &str,
 ) -> ProviderResult<String> {
@@ -93,7 +96,7 @@ pub fn require_enum_attr(
 /// Return the AWS API canonical spelling for an optional top-level enum.
 #[cfg(test)]
 pub fn optional_enum_attr<'a>(
-    resource: &'a Resource<impl Sized>,
+    resource: &'a Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
     schema: &'a CompiledResourceSchema,
     attr_name: &str,
 ) -> ProviderResult<Option<&'a str>> {
@@ -109,7 +112,10 @@ pub fn optional_enum_attr<'a>(
 /// [`value_as_str`]; closes the symmetric top-level helper set for
 /// Bool reads (carina-rs/carina-provider-aws#451).
 #[cfg(test)]
-pub(crate) fn optional_bool_attr(resource: &Resource<impl Sized>, attr_name: &str) -> Option<bool> {
+pub(crate) fn optional_bool_attr(
+    resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
+    attr_name: &str,
+) -> Option<bool> {
     match resource.get_attr(attr_name)? {
         Value::Concrete(ConcreteValue::Bool(b)) => Some(*b),
         _ => None,
@@ -130,7 +136,7 @@ pub(crate) fn optional_bool_attr(resource: &Resource<impl Sized>, attr_name: &st
 /// its parent struct (`resource.get_attr("options")` -> Map ->
 /// `m.get("dns_support")`).
 pub(crate) fn optional_enum_struct_field<'a>(
-    resource: &'a Resource<impl Sized>,
+    resource: &'a Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
     schema: &'a CompiledResourceSchema,
     struct_attr: &str,
     field_name: &str,
@@ -154,7 +160,7 @@ pub(crate) fn optional_enum_struct_field<'a>(
 /// there is nothing analogous to the three-variant enum coverage.
 /// carina-rs/carina-provider-aws#441 / #442.
 pub(crate) fn optional_int_struct_field(
-    resource: &Resource<impl Sized>,
+    resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
     struct_attr: &str,
     field_name: &str,
 ) -> Option<i64> {
@@ -178,7 +184,7 @@ pub(crate) fn optional_int_struct_field(
 /// [`optional_string_list_struct_field`] /
 /// [`optional_string_struct_field`]. carina-rs/carina-provider-aws#445.
 pub(crate) fn optional_bool_struct_field(
-    resource: &Resource<impl Sized>,
+    resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
     struct_attr: &str,
     field_name: &str,
 ) -> Option<bool> {
@@ -207,7 +213,7 @@ pub(crate) fn optional_bool_struct_field(
 /// when grepping for unused functions.
 #[allow(dead_code)]
 pub(crate) fn optional_string_struct_field<'a>(
-    resource: &'a Resource<impl Sized>,
+    resource: &'a Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
     struct_attr: &str,
     field_name: &str,
 ) -> Option<&'a str> {
@@ -237,7 +243,7 @@ pub(crate) fn optional_string_struct_field<'a>(
 /// indicates schema/value mismatch upstream.
 /// carina-rs/carina-provider-aws#441 / #442.
 pub(crate) fn optional_string_list_struct_field(
-    resource: &Resource<impl Sized>,
+    resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
     struct_attr: &str,
     field_name: &str,
 ) -> Option<Vec<String>> {

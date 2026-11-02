@@ -20,7 +20,9 @@ use indexmap::IndexMap;
 
 use carina_core::provider::{AppliedIdentifier, Observation, ReadOutcome};
 use carina_core::provider::{ProviderError, ProviderResult};
-use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
+use carina_core::resource::{
+    AbsoluteBindingAddress, ConcreteValue, NoPlaceholder, Resource, ResourceId, State, Value,
+};
 use carina_core::schema::CompiledResourceSchema;
 use carina_plugin_sdk::{DesiredScalar, DesiredValue, DesiredValueMut, DesiredView};
 
@@ -169,7 +171,7 @@ pub(crate) fn normalize_acm_certificate_inputs(input: &mut DesiredView<'_>) -> P
 
 #[cfg(test)]
 fn build_request_certificate(
-    resource: &Resource<impl Sized>,
+    resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
     schema: &CompiledResourceSchema,
 ) -> ProviderResult<RequestCertificateInput> {
     let input = AcmCertificateCreateInput::decode(resource, schema)?;
@@ -177,7 +179,7 @@ fn build_request_certificate(
 }
 
 fn build_request_certificate_input(
-    resource: &Resource<impl Sized>,
+    resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
     schema: &CompiledResourceSchema,
     input: AcmCertificateCreateInput,
 ) -> ProviderResult<RequestCertificateInput> {
@@ -483,7 +485,7 @@ impl AwsProvider {
     /// Issue one `RequestCertificate` call with the caller's stable token.
     pub(crate) async fn request_acm_certificate(
         &self,
-        resource: &Resource<impl Sized>,
+        resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
         schema: &CompiledResourceSchema,
         client_token: &ClientToken,
     ) -> ProviderResult<(
@@ -532,7 +534,7 @@ impl AwsProvider {
     /// Continue an issued ACM create through its normal read-back path.
     pub(crate) async fn continue_acm_certificate_create(
         &self,
-        resource: &Resource<impl Sized>,
+        resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
         _schema: &CompiledResourceSchema,
         arn: AppliedIdentifier,
     ) -> ProviderResult<CreateCompletion> {

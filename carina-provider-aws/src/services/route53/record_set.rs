@@ -11,7 +11,9 @@ use aws_sdk_route53::types::{
 
 use carina_core::provider::{AppliedIdentifier, ReadOutcome};
 use carina_core::provider::{ProviderError, ProviderResult};
-use carina_core::resource::{ConcreteValue, Resource, ResourceId, Value};
+use carina_core::resource::{
+    AbsoluteBindingAddress, ConcreteValue, NoPlaceholder, Resource, ResourceId, Value,
+};
 use carina_core::schema::CompiledResourceSchema;
 use carina_plugin_sdk::{DesiredScalar, DesiredValueMut, DesiredView};
 
@@ -350,7 +352,7 @@ impl AwsProvider {
 
     pub(crate) async fn create_route53_record_set(
         &self,
-        resource: &Resource<impl Sized>,
+        resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
         _schema: &CompiledResourceSchema,
     ) -> ProviderResult<TypedCreateCompletion> {
         let input = Route53RecordSetCreateInput::decode(resource, _schema)?;

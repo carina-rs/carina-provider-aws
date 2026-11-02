@@ -10,7 +10,7 @@ use carina_core::provider::{
     AppliedIdentifier, AppliedState, Observation, ProviderError, ProviderResult, ReadOutcome,
     ReadRequest,
 };
-use carina_core::resource::{Resource, ResourceId, Value};
+use carina_core::resource::{AbsoluteBindingAddress, NoPlaceholder, Resource, ResourceId, Value};
 use carina_core::schema::CompiledResourceSchema;
 use serde::{Deserialize, Serialize};
 
@@ -38,7 +38,7 @@ impl ReadBackRequirement {
 
     fn applies(
         &self,
-        resource: &Resource<impl Sized>,
+        resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
         schema: &CompiledResourceSchema,
     ) -> ProviderResult<bool> {
         match self.predicate {
@@ -311,7 +311,7 @@ impl AwsProvider {
 
     pub(crate) async fn read_back_by_identifier(
         &self,
-        resource: &Resource<impl Sized>,
+        resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
         continuation: &ReadBackContinuation,
         kind: ReadBackKind,
     ) -> CreateCompletion {

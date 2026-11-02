@@ -3,7 +3,9 @@ use std::collections::HashMap;
 
 use carina_core::provider::{AppliedIdentifier, ReadOutcome};
 use carina_core::provider::{ProviderError, ProviderResult};
-use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
+use carina_core::resource::{
+    AbsoluteBindingAddress, ConcreteValue, NoPlaceholder, Resource, ResourceId, State, Value,
+};
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
@@ -83,7 +85,7 @@ impl AwsProvider {
     /// Create an IAM Role
     pub(crate) async fn create_iam_role(
         &self,
-        resource: &Resource<impl Sized>,
+        resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
     ) -> ProviderResult<TypedCreateCompletion> {
         let input = IamRoleCreateInput::decode(resource)?;
         let sent = input.sent();
@@ -298,7 +300,7 @@ pub fn value_to_iam_policy_json(value: &Value) -> Result<String, String> {
 /// (block-syntax DSL form). Errors when the attribute is missing or has an
 /// unsupported type.
 pub fn resolve_iam_policy_attr(
-    resource: &Resource<impl Sized>,
+    resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
     attr_name: &str,
 ) -> ProviderResult<String> {
     let value = resource.get_attr(attr_name).ok_or_else(|| {

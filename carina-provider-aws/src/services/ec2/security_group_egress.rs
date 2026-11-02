@@ -1,6 +1,6 @@
 use carina_core::provider::ProviderResult;
 use carina_core::provider::{AppliedIdentifier, ReadOutcome};
-use carina_core::resource::{Resource, ResourceId};
+use carina_core::resource::{AbsoluteBindingAddress, NoPlaceholder, Resource, ResourceId};
 use carina_core::schema::CompiledResourceSchema;
 
 use crate::AwsProvider;
@@ -24,7 +24,7 @@ impl AwsProvider {
     /// Create an EC2 Security Group Egress Rule
     pub(crate) async fn create_ec2_security_group_egress(
         &self,
-        resource: &Resource<impl Sized>,
+        resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
         _schema: &CompiledResourceSchema,
     ) -> ProviderResult<TypedCreateCompletion> {
         let input = Ec2SecurityGroupEgressCreateInput::decode(resource, _schema)?;

@@ -1110,8 +1110,11 @@ mod tests {
                     collect_callbacks(member, bindings);
                 }
             }
-            RawShape::Bool | RawShape::Duration | RawShape::Ref(_) | RawShape::Reference { .. } => {
-            }
+            RawShape::UnloadedSchemaType(_)
+            | RawShape::Bool
+            | RawShape::Duration
+            | RawShape::Ref(_)
+            | RawShape::Reference { .. } => {}
         }
     }
 

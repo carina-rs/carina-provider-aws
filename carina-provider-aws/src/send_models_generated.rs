@@ -6,7 +6,7 @@
 use std::collections::BTreeSet;
 
 use carina_core::provider::{ProviderResult, Sent as CreateSent};
-use carina_core::resource::{Resource, Value};
+use carina_core::resource::{AbsoluteBindingAddress, NoPlaceholder, Resource, Value};
 
 /// Exhaustive typed create input for `ec2.Vpc`.
 pub(crate) struct Ec2VpcCreateInput {
@@ -31,7 +31,7 @@ pub(crate) struct Ec2VpcCreateParts {
 
 impl Ec2VpcCreateInput {
     pub(crate) fn decode(
-        _resource: &Resource<impl Sized>,
+        _resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
         _schema: &carina_core::schema::CompiledResourceSchema,
     ) -> ProviderResult<Self> {
         Ok(Self {
@@ -123,7 +123,9 @@ pub(crate) struct Ec2VpcUpdateParts {
 }
 
 impl Ec2VpcUpdateInput {
-    pub(crate) fn decode(_resource: &Resource<impl Sized>) -> ProviderResult<Self> {
+    pub(crate) fn decode(
+        _resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
+    ) -> ProviderResult<Self> {
         let _schema = &crate::schemas::generated::ec2::vpc::ec2_vpc_config().schema;
         Ok(Self {
             enable_dns_hostnames: crate::send_model::optional_bool(
@@ -198,7 +200,7 @@ pub(crate) struct Ec2SubnetCreateParts {
 
 impl Ec2SubnetCreateInput {
     pub(crate) fn decode(
-        _resource: &Resource<impl Sized>,
+        _resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
         _schema: &carina_core::schema::CompiledResourceSchema,
     ) -> ProviderResult<Self> {
         Ok(Self {
@@ -378,7 +380,9 @@ pub(crate) struct Ec2SubnetUpdateParts {
 }
 
 impl Ec2SubnetUpdateInput {
-    pub(crate) fn decode(_resource: &Resource<impl Sized>) -> ProviderResult<Self> {
+    pub(crate) fn decode(
+        _resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
+    ) -> ProviderResult<Self> {
         let _schema = &crate::schemas::generated::ec2::subnet::ec2_subnet_config().schema;
         Ok(Self {
             assign_ipv6_address_on_creation: crate::send_model::optional_bool(
@@ -449,7 +453,9 @@ pub(crate) struct Ec2InternetGatewayCreateParts {
 }
 
 impl Ec2InternetGatewayCreateInput {
-    pub(crate) fn decode(_resource: &Resource<impl Sized>) -> ProviderResult<Self> {
+    pub(crate) fn decode(
+        _resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
+    ) -> ProviderResult<Self> {
         let _schema =
             &crate::schemas::generated::ec2::internet_gateway::ec2_internet_gateway_config().schema;
         Ok(Self {
@@ -485,7 +491,9 @@ pub(crate) struct Ec2InternetGatewayUpdateParts {
 }
 
 impl Ec2InternetGatewayUpdateInput {
-    pub(crate) fn decode(_resource: &Resource<impl Sized>) -> ProviderResult<Self> {
+    pub(crate) fn decode(
+        _resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
+    ) -> ProviderResult<Self> {
         let _schema =
             &crate::schemas::generated::ec2::internet_gateway::ec2_internet_gateway_config().schema;
         Ok(Self {
@@ -513,7 +521,9 @@ pub(crate) struct Ec2RouteTableCreateParts {
 }
 
 impl Ec2RouteTableCreateInput {
-    pub(crate) fn decode(_resource: &Resource<impl Sized>) -> ProviderResult<Self> {
+    pub(crate) fn decode(
+        _resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
+    ) -> ProviderResult<Self> {
         let _schema = &crate::schemas::generated::ec2::route_table::ec2_route_table_config().schema;
         Ok(Self {
             tags: crate::send_model::optional_tags(_resource, "tags")?,
@@ -549,7 +559,9 @@ pub(crate) struct Ec2RouteTableUpdateParts {
 }
 
 impl Ec2RouteTableUpdateInput {
-    pub(crate) fn decode(_resource: &Resource<impl Sized>) -> ProviderResult<Self> {
+    pub(crate) fn decode(
+        _resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
+    ) -> ProviderResult<Self> {
         let _schema = &crate::schemas::generated::ec2::route_table::ec2_route_table_config().schema;
         Ok(Self {
             tags: crate::send_model::optional_tags(_resource, "tags")?,
@@ -580,7 +592,9 @@ pub(crate) struct Ec2RouteCreateParts {
 }
 
 impl Ec2RouteCreateInput {
-    pub(crate) fn decode(_resource: &Resource<impl Sized>) -> ProviderResult<Self> {
+    pub(crate) fn decode(
+        _resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
+    ) -> ProviderResult<Self> {
         let _schema = &crate::schemas::generated::ec2::route::ec2_route_config().schema;
         Ok(Self {
             destination_cidr_block: crate::send_model::optional_string(
@@ -645,7 +659,9 @@ pub(crate) struct Ec2RouteUpdateParts {
 }
 
 impl Ec2RouteUpdateInput {
-    pub(crate) fn decode(_resource: &Resource<impl Sized>) -> ProviderResult<Self> {
+    pub(crate) fn decode(
+        _resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
+    ) -> ProviderResult<Self> {
         let _schema = &crate::schemas::generated::ec2::route::ec2_route_config().schema;
         Ok(Self {
             gateway_id: crate::send_model::optional_string(_resource, "gateway_id")?,
@@ -684,7 +700,9 @@ pub(crate) struct Ec2SecurityGroupCreateParts {
 }
 
 impl Ec2SecurityGroupCreateInput {
-    pub(crate) fn decode(_resource: &Resource<impl Sized>) -> ProviderResult<Self> {
+    pub(crate) fn decode(
+        _resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
+    ) -> ProviderResult<Self> {
         let _schema =
             &crate::schemas::generated::ec2::security_group::ec2_security_group_config().schema;
         Ok(Self {
@@ -740,7 +758,9 @@ pub(crate) struct Ec2SecurityGroupUpdateParts {
 }
 
 impl Ec2SecurityGroupUpdateInput {
-    pub(crate) fn decode(_resource: &Resource<impl Sized>) -> ProviderResult<Self> {
+    pub(crate) fn decode(
+        _resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
+    ) -> ProviderResult<Self> {
         let _schema =
             &crate::schemas::generated::ec2::security_group::ec2_security_group_config().schema;
         Ok(Self {
@@ -785,7 +805,7 @@ pub(crate) struct Ec2SecurityGroupIngressCreateParts {
 
 impl Ec2SecurityGroupIngressCreateInput {
     pub(crate) fn decode(
-        _resource: &Resource<impl Sized>,
+        _resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
         _schema: &carina_core::schema::CompiledResourceSchema,
     ) -> ProviderResult<Self> {
         Ok(Self {
@@ -908,7 +928,9 @@ pub(crate) struct Ec2SecurityGroupIngressUpdateInput;
 pub(crate) struct Ec2SecurityGroupIngressUpdateParts;
 
 impl Ec2SecurityGroupIngressUpdateInput {
-    pub(crate) fn decode(_resource: &Resource<impl Sized>) -> ProviderResult<Self> {
+    pub(crate) fn decode(
+        _resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
+    ) -> ProviderResult<Self> {
         let _schema = &crate::schemas::generated::ec2::security_group_ingress::ec2_security_group_ingress_config().schema;
         Ok(Self)
     }
@@ -948,7 +970,7 @@ pub(crate) struct Ec2SecurityGroupEgressCreateParts {
 
 impl Ec2SecurityGroupEgressCreateInput {
     pub(crate) fn decode(
-        _resource: &Resource<impl Sized>,
+        _resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
         _schema: &carina_core::schema::CompiledResourceSchema,
     ) -> ProviderResult<Self> {
         Ok(Self {
@@ -1069,7 +1091,9 @@ pub(crate) struct Ec2SecurityGroupEgressUpdateInput;
 pub(crate) struct Ec2SecurityGroupEgressUpdateParts;
 
 impl Ec2SecurityGroupEgressUpdateInput {
-    pub(crate) fn decode(_resource: &Resource<impl Sized>) -> ProviderResult<Self> {
+    pub(crate) fn decode(
+        _resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
+    ) -> ProviderResult<Self> {
         let _schema = &crate::schemas::generated::ec2::security_group_egress::ec2_security_group_egress_config().schema;
         Ok(Self)
     }
@@ -1092,7 +1116,9 @@ pub(crate) struct Ec2EgressOnlyInternetGatewayCreateParts {
 }
 
 impl Ec2EgressOnlyInternetGatewayCreateInput {
-    pub(crate) fn decode(_resource: &Resource<impl Sized>) -> ProviderResult<Self> {
+    pub(crate) fn decode(
+        _resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
+    ) -> ProviderResult<Self> {
         let _schema = &crate::schemas::generated::ec2::egress_only_internet_gateway::ec2_egress_only_internet_gateway_config().schema;
         Ok(Self {
             tags: crate::send_model::optional_tags(_resource, "tags")?,
@@ -1131,7 +1157,9 @@ pub(crate) struct Ec2EgressOnlyInternetGatewayUpdateParts {
 }
 
 impl Ec2EgressOnlyInternetGatewayUpdateInput {
-    pub(crate) fn decode(_resource: &Resource<impl Sized>) -> ProviderResult<Self> {
+    pub(crate) fn decode(
+        _resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
+    ) -> ProviderResult<Self> {
         let _schema = &crate::schemas::generated::ec2::egress_only_internet_gateway::ec2_egress_only_internet_gateway_config().schema;
         Ok(Self {
             tags: crate::send_model::optional_tags(_resource, "tags")?,
@@ -1163,7 +1191,7 @@ pub(crate) struct Ec2EipCreateParts {
 
 impl Ec2EipCreateInput {
     pub(crate) fn decode(
-        _resource: &Resource<impl Sized>,
+        _resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
         _schema: &carina_core::schema::CompiledResourceSchema,
     ) -> ProviderResult<Self> {
         Ok(Self {
@@ -1220,7 +1248,9 @@ pub(crate) struct Ec2EipUpdateParts {
 }
 
 impl Ec2EipUpdateInput {
-    pub(crate) fn decode(_resource: &Resource<impl Sized>) -> ProviderResult<Self> {
+    pub(crate) fn decode(
+        _resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
+    ) -> ProviderResult<Self> {
         let _schema = &crate::schemas::generated::ec2::eip::ec2_eip_config().schema;
         Ok(Self {
             tags: crate::send_model::optional_tags(_resource, "tags")?,
@@ -1266,7 +1296,7 @@ pub(crate) struct Ec2FlowLogCreateParts {
 
 impl Ec2FlowLogCreateInput {
     pub(crate) fn decode(
-        _resource: &Resource<impl Sized>,
+        _resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
         _schema: &carina_core::schema::CompiledResourceSchema,
     ) -> ProviderResult<Self> {
         Ok(Self {
@@ -1398,7 +1428,9 @@ pub(crate) struct Ec2FlowLogUpdateParts {
 }
 
 impl Ec2FlowLogUpdateInput {
-    pub(crate) fn decode(_resource: &Resource<impl Sized>) -> ProviderResult<Self> {
+    pub(crate) fn decode(
+        _resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
+    ) -> ProviderResult<Self> {
         let _schema = &crate::schemas::generated::ec2::flow_log::ec2_flow_log_config().schema;
         Ok(Self {
             tags: crate::send_model::optional_tags(_resource, "tags")?,
@@ -1438,7 +1470,7 @@ pub(crate) struct Ec2NatGatewayCreateParts {
 
 impl Ec2NatGatewayCreateInput {
     pub(crate) fn decode(
-        _resource: &Resource<impl Sized>,
+        _resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
         _schema: &carina_core::schema::CompiledResourceSchema,
     ) -> ProviderResult<Self> {
         Ok(Self {
@@ -1545,7 +1577,9 @@ pub(crate) struct Ec2NatGatewayUpdateParts {
 }
 
 impl Ec2NatGatewayUpdateInput {
-    pub(crate) fn decode(_resource: &Resource<impl Sized>) -> ProviderResult<Self> {
+    pub(crate) fn decode(
+        _resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
+    ) -> ProviderResult<Self> {
         let _schema = &crate::schemas::generated::ec2::nat_gateway::ec2_nat_gateway_config().schema;
         Ok(Self {
             tags: crate::send_model::optional_tags(_resource, "tags")?,
@@ -1572,7 +1606,9 @@ pub(crate) struct Ec2SubnetRouteTableAssociationCreateParts {
 }
 
 impl Ec2SubnetRouteTableAssociationCreateInput {
-    pub(crate) fn decode(_resource: &Resource<impl Sized>) -> ProviderResult<Self> {
+    pub(crate) fn decode(
+        _resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
+    ) -> ProviderResult<Self> {
         let _schema = &crate::schemas::generated::ec2::subnet_route_table_association::ec2_subnet_route_table_association_config().schema;
         Ok(Self {
             route_table_id: crate::send_model::required_string(_resource, "route_table_id")?,
@@ -1611,7 +1647,9 @@ pub(crate) struct Ec2SubnetRouteTableAssociationUpdateInput;
 pub(crate) struct Ec2SubnetRouteTableAssociationUpdateParts;
 
 impl Ec2SubnetRouteTableAssociationUpdateInput {
-    pub(crate) fn decode(_resource: &Resource<impl Sized>) -> ProviderResult<Self> {
+    pub(crate) fn decode(
+        _resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
+    ) -> ProviderResult<Self> {
         let _schema = &crate::schemas::generated::ec2::subnet_route_table_association::ec2_subnet_route_table_association_config().schema;
         Ok(Self)
     }
@@ -1636,7 +1674,9 @@ pub(crate) struct Ec2TransitGatewayCreateParts {
 }
 
 impl Ec2TransitGatewayCreateInput {
-    pub(crate) fn decode(_resource: &Resource<impl Sized>) -> ProviderResult<Self> {
+    pub(crate) fn decode(
+        _resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
+    ) -> ProviderResult<Self> {
         let _schema =
             &crate::schemas::generated::ec2::transit_gateway::ec2_transit_gateway_config().schema;
         Ok(Self {
@@ -1689,7 +1729,9 @@ pub(crate) struct Ec2TransitGatewayUpdateParts {
 }
 
 impl Ec2TransitGatewayUpdateInput {
-    pub(crate) fn decode(_resource: &Resource<impl Sized>) -> ProviderResult<Self> {
+    pub(crate) fn decode(
+        _resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
+    ) -> ProviderResult<Self> {
         let _schema =
             &crate::schemas::generated::ec2::transit_gateway::ec2_transit_gateway_config().schema;
         Ok(Self {
@@ -1728,7 +1770,9 @@ pub(crate) struct Ec2TransitGatewayAttachmentCreateParts {
 }
 
 impl Ec2TransitGatewayAttachmentCreateInput {
-    pub(crate) fn decode(_resource: &Resource<impl Sized>) -> ProviderResult<Self> {
+    pub(crate) fn decode(
+        _resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
+    ) -> ProviderResult<Self> {
         let _schema = &crate::schemas::generated::ec2::transit_gateway_attachment::ec2_transit_gateway_attachment_config().schema;
         Ok(Self {
             options: crate::send_model::optional_value(_resource, "options")?,
@@ -1796,7 +1840,9 @@ pub(crate) struct Ec2TransitGatewayAttachmentUpdateParts {
 }
 
 impl Ec2TransitGatewayAttachmentUpdateInput {
-    pub(crate) fn decode(_resource: &Resource<impl Sized>) -> ProviderResult<Self> {
+    pub(crate) fn decode(
+        _resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
+    ) -> ProviderResult<Self> {
         let _schema = &crate::schemas::generated::ec2::transit_gateway_attachment::ec2_transit_gateway_attachment_config().schema;
         Ok(Self {
             tags: crate::send_model::optional_tags(_resource, "tags")?,
@@ -1844,7 +1890,7 @@ pub(crate) struct Ec2VpcEndpointCreateParts {
 
 impl Ec2VpcEndpointCreateInput {
     pub(crate) fn decode(
-        _resource: &Resource<impl Sized>,
+        _resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
         _schema: &carina_core::schema::CompiledResourceSchema,
     ) -> ProviderResult<Self> {
         Ok(Self {
@@ -1992,7 +2038,9 @@ pub(crate) struct Ec2VpcEndpointUpdateParts {
 }
 
 impl Ec2VpcEndpointUpdateInput {
-    pub(crate) fn decode(_resource: &Resource<impl Sized>) -> ProviderResult<Self> {
+    pub(crate) fn decode(
+        _resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
+    ) -> ProviderResult<Self> {
         let _schema =
             &crate::schemas::generated::ec2::vpc_endpoint::ec2_vpc_endpoint_config().schema;
         Ok(Self {
@@ -2039,7 +2087,9 @@ pub(crate) struct Ec2VpcGatewayAttachmentCreateParts {
 }
 
 impl Ec2VpcGatewayAttachmentCreateInput {
-    pub(crate) fn decode(_resource: &Resource<impl Sized>) -> ProviderResult<Self> {
+    pub(crate) fn decode(
+        _resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
+    ) -> ProviderResult<Self> {
         let _schema = &crate::schemas::generated::ec2::vpc_gateway_attachment::ec2_vpc_gateway_attachment_config().schema;
         Ok(Self {
             internet_gateway_id: crate::send_model::optional_string(
@@ -2089,7 +2139,9 @@ pub(crate) struct Ec2VpcGatewayAttachmentUpdateInput;
 pub(crate) struct Ec2VpcGatewayAttachmentUpdateParts;
 
 impl Ec2VpcGatewayAttachmentUpdateInput {
-    pub(crate) fn decode(_resource: &Resource<impl Sized>) -> ProviderResult<Self> {
+    pub(crate) fn decode(
+        _resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
+    ) -> ProviderResult<Self> {
         let _schema = &crate::schemas::generated::ec2::vpc_gateway_attachment::ec2_vpc_gateway_attachment_config().schema;
         Ok(Self)
     }
@@ -2116,7 +2168,9 @@ pub(crate) struct Ec2VpcPeeringConnectionCreateParts {
 }
 
 impl Ec2VpcPeeringConnectionCreateInput {
-    pub(crate) fn decode(_resource: &Resource<impl Sized>) -> ProviderResult<Self> {
+    pub(crate) fn decode(
+        _resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
+    ) -> ProviderResult<Self> {
         let _schema = &crate::schemas::generated::ec2::vpc_peering_connection::ec2_vpc_peering_connection_config().schema;
         Ok(Self {
             peer_owner_id: crate::send_model::optional_string(_resource, "peer_owner_id")?,
@@ -2171,7 +2225,9 @@ pub(crate) struct Ec2VpcPeeringConnectionUpdateParts {
 }
 
 impl Ec2VpcPeeringConnectionUpdateInput {
-    pub(crate) fn decode(_resource: &Resource<impl Sized>) -> ProviderResult<Self> {
+    pub(crate) fn decode(
+        _resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
+    ) -> ProviderResult<Self> {
         let _schema = &crate::schemas::generated::ec2::vpc_peering_connection::ec2_vpc_peering_connection_config().schema;
         Ok(Self {
             tags: crate::send_model::optional_tags(_resource, "tags")?,
@@ -2203,7 +2259,7 @@ pub(crate) struct Ec2VpnGatewayCreateParts {
 
 impl Ec2VpnGatewayCreateInput {
     pub(crate) fn decode(
-        _resource: &Resource<impl Sized>,
+        _resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
         _schema: &carina_core::schema::CompiledResourceSchema,
     ) -> ProviderResult<Self> {
         Ok(Self {
@@ -2265,7 +2321,9 @@ pub(crate) struct Ec2VpnGatewayUpdateParts {
 }
 
 impl Ec2VpnGatewayUpdateInput {
-    pub(crate) fn decode(_resource: &Resource<impl Sized>) -> ProviderResult<Self> {
+    pub(crate) fn decode(
+        _resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
+    ) -> ProviderResult<Self> {
         let _schema = &crate::schemas::generated::ec2::vpn_gateway::ec2_vpn_gateway_config().schema;
         Ok(Self {
             tags: crate::send_model::optional_tags(_resource, "tags")?,
@@ -2295,7 +2353,7 @@ pub(crate) struct S3BucketCreateParts {
 
 impl S3BucketCreateInput {
     pub(crate) fn decode(
-        _resource: &Resource<impl Sized>,
+        _resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
         _schema: &carina_core::schema::CompiledResourceSchema,
     ) -> ProviderResult<Self> {
         Ok(Self {
@@ -2345,7 +2403,9 @@ pub(crate) struct S3BucketUpdateParts {
 }
 
 impl S3BucketUpdateInput {
-    pub(crate) fn decode(_resource: &Resource<impl Sized>) -> ProviderResult<Self> {
+    pub(crate) fn decode(
+        _resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
+    ) -> ProviderResult<Self> {
         let _schema = &crate::schemas::generated::s3::bucket::s3_bucket_config().schema;
         Ok(Self {
             tags: crate::send_model::optional_tags(_resource, "tags")?,
@@ -2372,7 +2432,9 @@ pub(crate) struct S3BucketPolicyCreateParts {
 }
 
 impl S3BucketPolicyCreateInput {
-    pub(crate) fn decode(_resource: &Resource<impl Sized>) -> ProviderResult<Self> {
+    pub(crate) fn decode(
+        _resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
+    ) -> ProviderResult<Self> {
         let _schema =
             &crate::schemas::generated::s3::bucket_policy::s3_bucket_policy_config().schema;
         Ok(Self {
@@ -2407,7 +2469,9 @@ pub(crate) struct S3BucketPolicyUpdateParts {
 }
 
 impl S3BucketPolicyUpdateInput {
-    pub(crate) fn decode(_resource: &Resource<impl Sized>) -> ProviderResult<Self> {
+    pub(crate) fn decode(
+        _resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
+    ) -> ProviderResult<Self> {
         let _schema =
             &crate::schemas::generated::s3::bucket_policy::s3_bucket_policy_config().schema;
         Ok(Self {
@@ -2436,7 +2500,7 @@ pub(crate) struct S3BucketVersioningCreateParts {
 
 impl S3BucketVersioningCreateInput {
     pub(crate) fn decode(
-        _resource: &Resource<impl Sized>,
+        _resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
         _schema: &carina_core::schema::CompiledResourceSchema,
     ) -> ProviderResult<Self> {
         Ok(Self {
@@ -2472,7 +2536,7 @@ pub(crate) struct S3BucketVersioningUpdateParts {
 
 impl S3BucketVersioningUpdateInput {
     pub(crate) fn decode(
-        _resource: &Resource<impl Sized>,
+        _resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
         _schema: &carina_core::schema::CompiledResourceSchema,
     ) -> ProviderResult<Self> {
         Ok(Self {
@@ -2503,7 +2567,7 @@ pub(crate) struct S3BucketObjectLockConfigurationCreateParts {
 
 impl S3BucketObjectLockConfigurationCreateInput {
     pub(crate) fn decode(
-        _resource: &Resource<impl Sized>,
+        _resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
         _schema: &carina_core::schema::CompiledResourceSchema,
     ) -> ProviderResult<Self> {
         Ok(Self {
@@ -2563,7 +2627,7 @@ pub(crate) struct S3BucketObjectLockConfigurationUpdateParts {
 
 impl S3BucketObjectLockConfigurationUpdateInput {
     pub(crate) fn decode(
-        _resource: &Resource<impl Sized>,
+        _resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
         _schema: &carina_core::schema::CompiledResourceSchema,
     ) -> ProviderResult<Self> {
         Ok(Self {
@@ -2607,7 +2671,7 @@ pub(crate) struct S3BucketAclCreateParts {
 
 impl S3BucketAclCreateInput {
     pub(crate) fn decode(
-        _resource: &Resource<impl Sized>,
+        _resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
         _schema: &carina_core::schema::CompiledResourceSchema,
     ) -> ProviderResult<Self> {
         Ok(Self {
@@ -2643,7 +2707,7 @@ pub(crate) struct S3BucketAclUpdateParts {
 
 impl S3BucketAclUpdateInput {
     pub(crate) fn decode(
-        _resource: &Resource<impl Sized>,
+        _resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
         _schema: &carina_core::schema::CompiledResourceSchema,
     ) -> ProviderResult<Self> {
         Ok(Self {
@@ -2672,7 +2736,7 @@ pub(crate) struct S3BucketOwnershipControlsCreateParts {
 
 impl S3BucketOwnershipControlsCreateInput {
     pub(crate) fn decode(
-        _resource: &Resource<impl Sized>,
+        _resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
         _schema: &carina_core::schema::CompiledResourceSchema,
     ) -> ProviderResult<Self> {
         Ok(Self {
@@ -2721,7 +2785,7 @@ pub(crate) struct S3BucketOwnershipControlsUpdateParts {
 
 impl S3BucketOwnershipControlsUpdateInput {
     pub(crate) fn decode(
-        _resource: &Resource<impl Sized>,
+        _resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
         _schema: &carina_core::schema::CompiledResourceSchema,
     ) -> ProviderResult<Self> {
         Ok(Self {
@@ -2756,7 +2820,9 @@ pub(crate) struct S3BucketServerSideEncryptionConfigurationCreateParts {
 }
 
 impl S3BucketServerSideEncryptionConfigurationCreateInput {
-    pub(crate) fn decode(_resource: &Resource<impl Sized>) -> ProviderResult<Self> {
+    pub(crate) fn decode(
+        _resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
+    ) -> ProviderResult<Self> {
         let _schema = &crate::schemas::generated::s3::bucket_server_side_encryption_configuration::s3_bucket_server_side_encryption_configuration_config().schema;
         Ok(Self {
             bucket: crate::send_model::required_string(_resource, "bucket")?,
@@ -2796,7 +2862,9 @@ pub(crate) struct S3BucketServerSideEncryptionConfigurationUpdateParts {
 }
 
 impl S3BucketServerSideEncryptionConfigurationUpdateInput {
-    pub(crate) fn decode(_resource: &Resource<impl Sized>) -> ProviderResult<Self> {
+    pub(crate) fn decode(
+        _resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
+    ) -> ProviderResult<Self> {
         let _schema = &crate::schemas::generated::s3::bucket_server_side_encryption_configuration::s3_bucket_server_side_encryption_configuration_config().schema;
         Ok(Self {
             rules: crate::send_model::required_value(_resource, "rules")?,
@@ -2828,7 +2896,9 @@ pub(crate) struct S3BucketReplicationConfigurationCreateParts {
 }
 
 impl S3BucketReplicationConfigurationCreateInput {
-    pub(crate) fn decode(_resource: &Resource<impl Sized>) -> ProviderResult<Self> {
+    pub(crate) fn decode(
+        _resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
+    ) -> ProviderResult<Self> {
         let _schema = &crate::schemas::generated::s3::bucket_replication_configuration::s3_bucket_replication_configuration_config().schema;
         Ok(Self {
             bucket: crate::send_model::required_string(_resource, "bucket")?,
@@ -2880,7 +2950,9 @@ pub(crate) struct S3BucketReplicationConfigurationUpdateParts {
 }
 
 impl S3BucketReplicationConfigurationUpdateInput {
-    pub(crate) fn decode(_resource: &Resource<impl Sized>) -> ProviderResult<Self> {
+    pub(crate) fn decode(
+        _resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
+    ) -> ProviderResult<Self> {
         let _schema = &crate::schemas::generated::s3::bucket_replication_configuration::s3_bucket_replication_configuration_config().schema;
         Ok(Self {
             role: crate::send_model::required_string(_resource, "role")?,
@@ -2915,7 +2987,9 @@ pub(crate) struct S3BucketLifecycleConfigurationCreateParts {
 }
 
 impl S3BucketLifecycleConfigurationCreateInput {
-    pub(crate) fn decode(_resource: &Resource<impl Sized>) -> ProviderResult<Self> {
+    pub(crate) fn decode(
+        _resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
+    ) -> ProviderResult<Self> {
         let _schema = &crate::schemas::generated::s3::bucket_lifecycle_configuration::s3_bucket_lifecycle_configuration_config().schema;
         Ok(Self {
             bucket: crate::send_model::required_string(_resource, "bucket")?,
@@ -2955,7 +3029,9 @@ pub(crate) struct S3BucketLifecycleConfigurationUpdateParts {
 }
 
 impl S3BucketLifecycleConfigurationUpdateInput {
-    pub(crate) fn decode(_resource: &Resource<impl Sized>) -> ProviderResult<Self> {
+    pub(crate) fn decode(
+        _resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
+    ) -> ProviderResult<Self> {
         let _schema = &crate::schemas::generated::s3::bucket_lifecycle_configuration::s3_bucket_lifecycle_configuration_config().schema;
         Ok(Self {
             rules: crate::send_model::required_value(_resource, "rules")?,
@@ -2989,7 +3065,9 @@ pub(crate) struct S3BucketWebsiteConfigurationCreateParts {
 }
 
 impl S3BucketWebsiteConfigurationCreateInput {
-    pub(crate) fn decode(_resource: &Resource<impl Sized>) -> ProviderResult<Self> {
+    pub(crate) fn decode(
+        _resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
+    ) -> ProviderResult<Self> {
         let _schema = &crate::schemas::generated::s3::bucket_website_configuration::s3_bucket_website_configuration_config().schema;
         Ok(Self {
             bucket: crate::send_model::required_string(_resource, "bucket")?,
@@ -3059,7 +3137,9 @@ pub(crate) struct S3BucketWebsiteConfigurationUpdateParts {
 }
 
 impl S3BucketWebsiteConfigurationUpdateInput {
-    pub(crate) fn decode(_resource: &Resource<impl Sized>) -> ProviderResult<Self> {
+    pub(crate) fn decode(
+        _resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
+    ) -> ProviderResult<Self> {
         let _schema = &crate::schemas::generated::s3::bucket_website_configuration::s3_bucket_website_configuration_config().schema;
         Ok(Self {
             error_document: crate::send_model::optional_value(_resource, "error_document")?,
@@ -3106,7 +3186,9 @@ pub(crate) struct S3BucketCorsConfigurationCreateParts {
 }
 
 impl S3BucketCorsConfigurationCreateInput {
-    pub(crate) fn decode(_resource: &Resource<impl Sized>) -> ProviderResult<Self> {
+    pub(crate) fn decode(
+        _resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
+    ) -> ProviderResult<Self> {
         let _schema = &crate::schemas::generated::s3::bucket_cors_configuration::s3_bucket_cors_configuration_config().schema;
         Ok(Self {
             bucket: crate::send_model::required_string(_resource, "bucket")?,
@@ -3146,7 +3228,9 @@ pub(crate) struct S3BucketCorsConfigurationUpdateParts {
 }
 
 impl S3BucketCorsConfigurationUpdateInput {
-    pub(crate) fn decode(_resource: &Resource<impl Sized>) -> ProviderResult<Self> {
+    pub(crate) fn decode(
+        _resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
+    ) -> ProviderResult<Self> {
         let _schema = &crate::schemas::generated::s3::bucket_cors_configuration::s3_bucket_cors_configuration_config().schema;
         Ok(Self {
             cors_rules: crate::send_model::required_value(_resource, "cors_rules")?,
@@ -3182,7 +3266,9 @@ pub(crate) struct S3BucketNotificationConfigurationCreateParts {
 }
 
 impl S3BucketNotificationConfigurationCreateInput {
-    pub(crate) fn decode(_resource: &Resource<impl Sized>) -> ProviderResult<Self> {
+    pub(crate) fn decode(
+        _resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
+    ) -> ProviderResult<Self> {
         let _schema = &crate::schemas::generated::s3::bucket_notification_configuration::s3_bucket_notification_configuration_config().schema;
         Ok(Self {
             bucket: crate::send_model::required_string(_resource, "bucket")?,
@@ -3272,7 +3358,9 @@ pub(crate) struct S3BucketNotificationConfigurationUpdateParts {
 }
 
 impl S3BucketNotificationConfigurationUpdateInput {
-    pub(crate) fn decode(_resource: &Resource<impl Sized>) -> ProviderResult<Self> {
+    pub(crate) fn decode(
+        _resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
+    ) -> ProviderResult<Self> {
         let _schema = &crate::schemas::generated::s3::bucket_notification_configuration::s3_bucket_notification_configuration_config().schema;
         Ok(Self {
             event_bridge_configuration: crate::send_model::optional_value(
@@ -3338,7 +3426,9 @@ pub(crate) struct S3BucketLoggingCreateParts {
 }
 
 impl S3BucketLoggingCreateInput {
-    pub(crate) fn decode(_resource: &Resource<impl Sized>) -> ProviderResult<Self> {
+    pub(crate) fn decode(
+        _resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
+    ) -> ProviderResult<Self> {
         let _schema =
             &crate::schemas::generated::s3::bucket_logging::s3_bucket_logging_config().schema;
         Ok(Self {
@@ -3404,7 +3494,9 @@ pub(crate) struct S3BucketLoggingUpdateParts {
 }
 
 impl S3BucketLoggingUpdateInput {
-    pub(crate) fn decode(_resource: &Resource<impl Sized>) -> ProviderResult<Self> {
+    pub(crate) fn decode(
+        _resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
+    ) -> ProviderResult<Self> {
         let _schema =
             &crate::schemas::generated::s3::bucket_logging::s3_bucket_logging_config().schema;
         Ok(Self {
@@ -3458,7 +3550,9 @@ pub(crate) struct S3BucketPublicAccessBlockCreateParts {
 }
 
 impl S3BucketPublicAccessBlockCreateInput {
-    pub(crate) fn decode(_resource: &Resource<impl Sized>) -> ProviderResult<Self> {
+    pub(crate) fn decode(
+        _resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
+    ) -> ProviderResult<Self> {
         let _schema = &crate::schemas::generated::s3::bucket_public_access_block::s3_bucket_public_access_block_config().schema;
         Ok(Self {
             block_public_acls: crate::send_model::optional_bool(_resource, "block_public_acls")?,
@@ -3542,7 +3636,9 @@ pub(crate) struct S3BucketPublicAccessBlockUpdateParts {
 }
 
 impl S3BucketPublicAccessBlockUpdateInput {
-    pub(crate) fn decode(_resource: &Resource<impl Sized>) -> ProviderResult<Self> {
+    pub(crate) fn decode(
+        _resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
+    ) -> ProviderResult<Self> {
         let _schema = &crate::schemas::generated::s3::bucket_public_access_block::s3_bucket_public_access_block_config().schema;
         Ok(Self {
             block_public_acls: crate::send_model::optional_bool(_resource, "block_public_acls")?,
@@ -3597,7 +3693,7 @@ pub(crate) struct OrganizationsOrganizationCreateParts {
 
 impl OrganizationsOrganizationCreateInput {
     pub(crate) fn decode(
-        _resource: &Resource<impl Sized>,
+        _resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
         _schema: &carina_core::schema::CompiledResourceSchema,
     ) -> ProviderResult<Self> {
         Ok(Self {
@@ -3630,7 +3726,9 @@ pub(crate) struct OrganizationsOrganizationUpdateInput;
 pub(crate) struct OrganizationsOrganizationUpdateParts;
 
 impl OrganizationsOrganizationUpdateInput {
-    pub(crate) fn decode(_resource: &Resource<impl Sized>) -> ProviderResult<Self> {
+    pub(crate) fn decode(
+        _resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
+    ) -> ProviderResult<Self> {
         let _schema = &crate::schemas::generated::organizations::organization::organizations_organization_config().schema;
         Ok(Self)
     }
@@ -3660,7 +3758,7 @@ pub(crate) struct OrganizationsAccountCreateParts {
 
 impl OrganizationsAccountCreateInput {
     pub(crate) fn decode(
-        _resource: &Resource<impl Sized>,
+        _resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
         _schema: &carina_core::schema::CompiledResourceSchema,
     ) -> ProviderResult<Self> {
         Ok(Self {
@@ -3731,7 +3829,9 @@ pub(crate) struct OrganizationsAccountUpdateParts {
 }
 
 impl OrganizationsAccountUpdateInput {
-    pub(crate) fn decode(_resource: &Resource<impl Sized>) -> ProviderResult<Self> {
+    pub(crate) fn decode(
+        _resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
+    ) -> ProviderResult<Self> {
         let _schema =
             &crate::schemas::generated::organizations::account::organizations_account_config()
                 .schema;
@@ -3774,7 +3874,7 @@ pub(crate) struct Route53RecordSetCreateParts {
 
 impl Route53RecordSetCreateInput {
     pub(crate) fn decode(
-        _resource: &Resource<impl Sized>,
+        _resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
         _schema: &carina_core::schema::CompiledResourceSchema,
     ) -> ProviderResult<Self> {
         Ok(Self {
@@ -3850,7 +3950,9 @@ pub(crate) struct Route53RecordSetUpdateParts {
 }
 
 impl Route53RecordSetUpdateInput {
-    pub(crate) fn decode(_resource: &Resource<impl Sized>) -> ProviderResult<Self> {
+    pub(crate) fn decode(
+        _resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
+    ) -> ProviderResult<Self> {
         let _schema =
             &crate::schemas::generated::route53::record_set::route53_record_set_config().schema;
         Ok(Self {
@@ -3903,7 +4005,9 @@ pub(crate) struct IamRoleCreateParts {
 }
 
 impl IamRoleCreateInput {
-    pub(crate) fn decode(_resource: &Resource<impl Sized>) -> ProviderResult<Self> {
+    pub(crate) fn decode(
+        _resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
+    ) -> ProviderResult<Self> {
         let _schema = &crate::schemas::generated::iam::role::iam_role_config().schema;
         Ok(Self {
             assume_role_policy_document: crate::send_model::required_value(
@@ -3976,7 +4080,9 @@ pub(crate) struct IamRoleUpdateParts {
 }
 
 impl IamRoleUpdateInput {
-    pub(crate) fn decode(_resource: &Resource<impl Sized>) -> ProviderResult<Self> {
+    pub(crate) fn decode(
+        _resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
+    ) -> ProviderResult<Self> {
         let _schema = &crate::schemas::generated::iam::role::iam_role_config().schema;
         Ok(Self {
             tags: crate::send_model::optional_tags(_resource, "tags")?,
@@ -4012,7 +4118,7 @@ pub(crate) struct LogsLogGroupCreateParts {
 
 impl LogsLogGroupCreateInput {
     pub(crate) fn decode(
-        _resource: &Resource<impl Sized>,
+        _resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
         _schema: &carina_core::schema::CompiledResourceSchema,
     ) -> ProviderResult<Self> {
         Ok(Self {
@@ -4096,7 +4202,9 @@ pub(crate) struct LogsLogGroupUpdateParts {
 }
 
 impl LogsLogGroupUpdateInput {
-    pub(crate) fn decode(_resource: &Resource<impl Sized>) -> ProviderResult<Self> {
+    pub(crate) fn decode(
+        _resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
+    ) -> ProviderResult<Self> {
         let _schema = &crate::schemas::generated::logs::log_group::logs_log_group_config().schema;
         Ok(Self {
             deletion_protection_enabled: crate::send_model::optional_bool(
@@ -4150,7 +4258,7 @@ pub(crate) struct AcmCertificateCreateParts {
 
 impl AcmCertificateCreateInput {
     pub(crate) fn decode(
-        _resource: &Resource<impl Sized>,
+        _resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
         _schema: &carina_core::schema::CompiledResourceSchema,
     ) -> ProviderResult<Self> {
         Ok(Self {
@@ -4233,7 +4341,9 @@ pub(crate) struct AcmCertificateUpdateParts {
 }
 
 impl AcmCertificateUpdateInput {
-    pub(crate) fn decode(_resource: &Resource<impl Sized>) -> ProviderResult<Self> {
+    pub(crate) fn decode(
+        _resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
+    ) -> ProviderResult<Self> {
         let _schema = &crate::schemas::generated::acm::certificate::acm_certificate_config().schema;
         Ok(Self {
             tags: crate::send_model::optional_tags(_resource, "tags")?,
@@ -4290,7 +4400,9 @@ pub(crate) struct SqsQueueCreateParts {
 }
 
 impl SqsQueueCreateInput {
-    pub(crate) fn decode(_resource: &Resource<impl Sized>) -> ProviderResult<Self> {
+    pub(crate) fn decode(
+        _resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
+    ) -> ProviderResult<Self> {
         let _schema = &crate::schemas::generated::sqs::queue::sqs_queue_config().schema;
         Ok(Self {
             content_based_deduplication: crate::send_model::optional_bool(
@@ -4509,7 +4621,9 @@ pub(crate) struct SqsQueueUpdateParts {
 }
 
 impl SqsQueueUpdateInput {
-    pub(crate) fn decode(_resource: &Resource<impl Sized>) -> ProviderResult<Self> {
+    pub(crate) fn decode(
+        _resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
+    ) -> ProviderResult<Self> {
         let _schema = &crate::schemas::generated::sqs::queue::sqs_queue_config().schema;
         Ok(Self {
             content_based_deduplication: crate::send_model::optional_bool(

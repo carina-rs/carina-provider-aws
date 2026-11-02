@@ -468,6 +468,11 @@ fn sample_value(
     budget: &mut ShapeWalkBudget,
 ) -> Value {
     match schema.shape_of(attribute_type) {
+        Shape::UnloadedSchemaType(unloaded) => panic!(
+            "send-contract samples need a loaded schema type for {} at {}",
+            unloaded.identity(),
+            path.join("."),
+        ),
         Shape::String { .. } | Shape::Reference { .. } => {
             string(sample_string(resource_type, path))
         }
@@ -1024,6 +1029,87 @@ fn assert_sample_reached_mutation(
         attribute.name,
         markers,
     );
+}
+
+#[tokio::test]
+async fn sqs_update_rejects_fifo_conflicts_after_deferred_inputs_resolve_before_send() {
+    use carina_core::provider::ProviderNormalizer;
+    use carina_core::resource::DeferredValue;
+
+    let service = Arc::new(CaptureService::default());
+    let mock = MockAws::builder()
+        .with_service(Arc::clone(&service))
+        .build();
+    let provider = AwsProvider::from_sdk_config(
+        REGION.to_string(),
+        vec![],
+        vec![],
+        &BoundedSdkConfig::for_test(mock.sdk_config(REGION).await),
+    );
+    let identifier =
+        AppliedIdentifier::new("https://sqs.us-east-1.amazonaws.com/123456789012/resolved-queue")
+            .unwrap();
+
+    for fifo in [
+        Value::resource_ref("settings", "fifo_queue", vec![]).resolve_root_for_test(),
+        Value::Deferred(DeferredValue::Secret(Box::new(Value::Concrete(
+            ConcreteValue::Bool(false),
+        )))),
+    ] {
+        let desired = Resource::with_provider("aws", "sqs.Queue", "resolved-queue", None)
+            .with_attribute("queue_name", string("resolved-queue"))
+            .with_attribute("fifo_queue", fifo)
+            .with_attribute(
+                "content_based_deduplication",
+                Value::Concrete(ConcreteValue::Bool(true)),
+            );
+        let id = desired.id.clone();
+        let mut resources = vec![desired.into()];
+        crate::AwsNormalizer
+            .normalize_desired(&mut resources)
+            .await
+            .expect("plan-time validation must defer the opaque FIFO flag");
+
+        // Resolution yields the existing standard queue, so only deduplication
+        // changes in the patch. Validation must also inspect the retained flag.
+        let from = crate::test_existing_state(
+            id.clone(),
+            HashMap::from([
+                ("queue_name".into(), string("resolved-queue")),
+                (
+                    "fifo_queue".into(),
+                    Value::Concrete(ConcreteValue::Bool(false)),
+                ),
+                (
+                    "content_based_deduplication".into(),
+                    Value::Concrete(ConcreteValue::Bool(false)),
+                ),
+            ]),
+        );
+        let patch = UpdatePatch {
+            ops: vec![PatchOp::Replace {
+                key: "content_based_deduplication".into(),
+                value: Value::Concrete(ConcreteValue::Bool(true)),
+            }],
+        };
+        service.clear();
+        let result = provider.update_step(&id, &identifier, &from, &patch).await;
+        assert!(
+            service.snapshot().is_empty(),
+            "resolved FIFO conflicts must fail before any AWS request"
+        );
+        let error = result.expect_err("the fully resolved update must be validated");
+        assert!(
+            matches!(&error, ProviderError::InvalidInput(_)),
+            "{error:?}"
+        );
+        assert!(
+            error
+                .to_string()
+                .contains("content_based_deduplication requires fifo_queue = true"),
+            "{error:?}"
+        );
+    }
 }
 
 #[tokio::test]

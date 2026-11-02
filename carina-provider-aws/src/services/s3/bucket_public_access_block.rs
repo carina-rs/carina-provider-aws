@@ -1,7 +1,9 @@
 use aws_sdk_s3::types::PublicAccessBlockConfiguration;
 use carina_core::provider::ProviderResult;
 use carina_core::provider::{AppliedIdentifier, ReadOutcome};
-use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
+use carina_core::resource::{
+    AbsoluteBindingAddress, ConcreteValue, NoPlaceholder, Resource, ResourceId, State, Value,
+};
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
@@ -71,7 +73,7 @@ impl AwsProvider {
 
     pub(crate) async fn create_s3_bucket_public_access_block(
         &self,
-        resource: &Resource<impl Sized>,
+        resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
     ) -> ProviderResult<TypedCreateCompletion> {
         let input = S3BucketPublicAccessBlockCreateInput::decode(resource)?;
         let sent = input.sent();

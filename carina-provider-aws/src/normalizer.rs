@@ -162,54 +162,82 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "pending carina DesiredInputs scoping decision"]
-    async fn crud_inputs_do_not_reject_unrelated_values_admitted_by_core_preparation() {
-        use carina_core::executor::{
-            ModuleConstraintGate, ProviderPreparationContext, prepare_create_request,
-        };
-        use carina_core::parser::ProviderConfig;
-        use carina_core::provider::ProviderFactory;
-        use carina_plugin_sdk::DesiredInputs;
+    async fn native_preparation_rejects_non_wire_default_tags() {
+        carina_core::validation::deferred_types::with_session_for_test_async(
+            &carina_core::parser::LoadedProviderContext::empty_for_test(),
+            async |type_checks| {
+                use carina_core::executor::{
+                    ModuleConstraintGate, ProviderPreparationContext, ProviderPreparationError,
+                    prepare_create_request,
+                };
+                use carina_core::parser::ProviderConfig;
+                use carina_core::protocol_convert::{
+                    ProtocolConvertError, WirePathSegment, try_core_to_protocol_value,
+                };
+                use carina_core::provider::ProviderFactory;
+                use carina_core::provider_wire::ProviderWireTarget;
 
-        let configs = [ProviderConfig {
-            name: "aws".into(),
-            attributes: IndexMap::new(),
-            default_tags: IndexMap::from([(
-                "unrelated".into(),
-                Value::Concrete(ConcreteValue::Duration(std::time::Duration::from_secs(
-                    u64::MAX,
-                ))),
-            )]),
-            source: None,
-            version: None,
-            revision: None,
-            unresolved_attributes: IndexMap::new(),
-            binding: None,
-        }];
-        let bindings = carina_core::binding_index::ResolvedBindings::default();
-        let module_gate = ModuleConstraintGate::from_live_compositions(&[]);
-        let schemas = crate::schemas::schema_registry();
-        let factories: Vec<Box<dyn ProviderFactory>> = vec![Box::new(crate::AwsProviderFactory)];
-        let preparation = ProviderPreparationContext::new(
-            &bindings,
-            &module_gate,
-            &configs,
-            &AwsNormalizer,
-            &factories,
-            &schemas,
-        );
-        let resource = Resource::with_provider("aws", "sqs.Queue", "crud-projection", None)
-            .with_attribute("queue_name", string("crud-projection"));
-        let request = prepare_create_request(resource, &preparation)
-            .await
-            .expect("the actual core preparation gate admits the resource");
+                let configs = [ProviderConfig {
+                    name: "aws".into(),
+                    attributes: IndexMap::new(),
+                    default_tags: IndexMap::from([(
+                        "unrelated".into(),
+                        Value::Concrete(ConcreteValue::Duration(std::time::Duration::from_secs(
+                            u64::MAX,
+                        ))),
+                    )]),
+                    source: None,
+                    version: None,
+                    revision: None,
+                    unresolved_attributes: IndexMap::new(),
+                    binding: None,
+                }];
+                let bindings = carina_core::binding_index::ResolvedBindings::default();
+                let module_gate = ModuleConstraintGate::from_live_compositions(&[]);
+                let schemas = crate::schemas::schema_registry();
+                let factories: Vec<Box<dyn ProviderFactory>> =
+                    vec![Box::new(crate::AwsProviderFactory)];
+                let preparation = ProviderPreparationContext::new(
+                    &bindings,
+                    &module_gate,
+                    &configs,
+                    &AwsNormalizer,
+                    &factories,
+                    &schemas,
+                    type_checks,
+                );
+                let resource = Resource::with_provider("aws", "sqs.Queue", "crud-projection", None)
+                    .with_attribute("queue_name", string("crud-projection"));
+                let id = resource.id.clone();
+                let error = prepare_create_request(resource, &preparation)
+                    .await
+                    .expect_err(
+                        "native preparation must reject the non-wire default tag before dispatch",
+                    );
+                let ProviderPreparationError::Wire(error) = error else {
+                    panic!("expected a typed provider wire failure: {error:?}");
+                };
+                assert_eq!(error.target(), &ProviderWireTarget::Resource(id));
+                assert_eq!(error.attribute(), "tags");
+                assert_eq!(error.path(), &[WirePathSegment::Key("unrelated".into())]);
+                assert!(matches!(
+                    error.conversion_error(),
+                    ProtocolConvertError::DurationOutOfRange
+                ));
 
-        let inputs = DesiredInputs::from_core(request.resource().as_resource());
-        assert!(
-            inputs.is_ok(),
-            "CRUD validator projection rejected an unrelated default tag: {:?}",
-            inputs.err()
-        );
+                // WASM CRUD encoding uses the same checked projection and conversion.
+                let wasm_error = try_core_to_protocol_value(&Value::Concrete(ConcreteValue::Map(
+                    configs[0].default_tags.clone(),
+                )))
+                .expect_err("the same default tags cannot be encoded for WASM either");
+                assert_eq!(error.path(), wasm_error.value_path());
+                let ProtocolConvertError::ValuePath { error: reason, .. } = wasm_error else {
+                    panic!("expected the WASM conversion error at the default-tag key");
+                };
+                assert!(matches!(*reason, ProtocolConvertError::DurationOutOfRange));
+            },
+        )
+        .await
     }
 
     #[test]
@@ -388,9 +416,7 @@ mod tests {
     }
 
     #[test]
-    fn cross_field_checks_keep_deferred_inputs_opaque_during_normalization_and_crud_validation() {
-        use carina_plugin_sdk::DesiredInputs;
-
+    fn cross_field_checks_keep_deferred_inputs_opaque_during_normalization() {
         for (resource_type, attributes) in [
             (
                 "ec2.NatGateway",
@@ -477,9 +503,13 @@ mod tests {
                 resource.set_attr(name, value);
             }
             let original = resource.attributes.clone();
-            let inputs = DesiredInputs::from_core(&resource).expect("CRUD validation projection");
-            crate::services::ec2::nat_gateway::validate_nat_gateway_inputs(&inputs).unwrap();
-            crate::services::sqs::queue::validate_sqs_queue_inputs(&inputs).unwrap();
+            {
+                let desired = NativeDesiredNormalization::from_core(&mut resource)
+                    .expect("normalization input projection");
+                crate::services::ec2::nat_gateway::validate_nat_gateway_inputs(&desired.inputs())
+                    .unwrap();
+                crate::services::sqs::queue::validate_sqs_queue_inputs(&desired.inputs()).unwrap();
+            }
             let normalized = normalize_mixed(resource);
             assert_eq!(normalized.attributes, original);
         }

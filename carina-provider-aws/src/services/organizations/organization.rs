@@ -1,6 +1,6 @@
 use carina_core::provider::{AppliedIdentifier, ReadOutcome};
 use carina_core::provider::{ProviderError, ProviderResult};
-use carina_core::resource::{Resource, ResourceId};
+use carina_core::resource::{AbsoluteBindingAddress, NoPlaceholder, Resource, ResourceId};
 use carina_core::schema::CompiledResourceSchema;
 
 use crate::AwsProvider;
@@ -51,7 +51,7 @@ impl AwsProvider {
     /// Create an Organizations organization
     pub(crate) async fn create_organizations_organization(
         &self,
-        resource: &Resource<impl Sized>,
+        resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
         _schema: &CompiledResourceSchema,
     ) -> ProviderResult<TypedCreateCompletion> {
         let input = OrganizationsOrganizationCreateInput::decode(resource, _schema)?;

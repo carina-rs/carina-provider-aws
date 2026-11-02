@@ -466,7 +466,7 @@ mod tests {
             .comparison_for(&registry, &desired.id)
             .expect("VPC comparison context");
 
-        let desired = ResolvedResource::new(desired);
+        let desired = ResolvedResource::new(desired.into_resolved_dependency_phase_for_test());
         let result = crate::test_diff(&desired, &current, &saved, None, comparison);
 
         assert!(matches!(result, Diff::NoChange(_)), "{result:?}");

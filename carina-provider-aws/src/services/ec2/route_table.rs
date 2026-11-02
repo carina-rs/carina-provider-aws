@@ -1,6 +1,6 @@
 use carina_core::provider::ProviderResult;
 use carina_core::provider::{AppliedIdentifier, ReadOutcome};
-use carina_core::resource::{Resource, ResourceId};
+use carina_core::resource::{AbsoluteBindingAddress, NoPlaceholder, Resource, ResourceId};
 
 use crate::AwsProvider;
 use crate::aws_operation::ClientToken;
@@ -57,7 +57,7 @@ impl AwsProvider {
     /// Create an EC2 Route Table
     pub(crate) async fn create_ec2_route_table<A: AwsCreateAttempt>(
         &self,
-        resource: &Resource<impl Sized>,
+        resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
         client_token: &ClientToken,
         attempt: A,
     ) -> Result<A::Step, A::Verdict> {

@@ -193,7 +193,7 @@ fn assert_no_diff(desired: Resource, current: State) {
         .comparison_for(&registry, &desired.id)
         .expect("managed resource comparison context");
     let saved = carina_core::provider::RawSavedAttrs::default().lift(&registry);
-    let desired = ResolvedResource::new(desired);
+    let desired = ResolvedResource::new(desired.into_resolved_dependency_phase_for_test());
     let result = carina_provider_aws::test_diff(&desired, &current, &saved, None, comparison);
     assert!(matches!(result, Diff::NoChange(_)), "{result:?}");
 }
@@ -243,45 +243,61 @@ async fn assert_no_diff_with_nested_write_only(
         Some(schema.schema().as_schema()),
         &comparison.context().observation(),
     );
-    let desired = ResolvedResource::new(desired);
+    let desired = ResolvedResource::new(desired.into_resolved_dependency_phase_for_test());
     let result =
         carina_provider_aws::test_diff(&desired, &current, &saved, Some(&explicit), comparison);
     assert!(matches!(result, Diff::NoChange(_)), "{result:?}");
 }
 
 async fn create_request_for_test(resource: Resource) -> CreateRequest {
-    let bindings = carina_core::binding_index::ResolvedBindings::default();
-    let module_gate = carina_core::executor::ModuleConstraintGate::from_live_compositions(&[]);
-    let schemas = schema_registry();
-    let factories: Vec<Box<dyn ProviderFactory>> = vec![Box::new(AwsProviderFactory)];
-    let preparation = carina_core::executor::ProviderPreparationContext::new(
-        &bindings,
-        &module_gate,
-        &[],
-        &AwsNormalizer,
-        &factories,
-        &schemas,
-    );
-    carina_core::executor::prepare_create_request(resource, &preparation)
-        .await
-        .expect("test resource should pass checked create preparation")
+    carina_core::validation::deferred_types::with_session_for_test_async(
+        &carina_core::parser::LoadedProviderContext::empty_for_test(),
+        async |type_checks| {
+            let bindings = carina_core::binding_index::ResolvedBindings::default();
+            let module_gate =
+                carina_core::executor::ModuleConstraintGate::from_live_compositions(&[]);
+            let schemas = schema_registry();
+            let factories: Vec<Box<dyn ProviderFactory>> = vec![Box::new(AwsProviderFactory)];
+            let preparation = carina_core::executor::ProviderPreparationContext::new(
+                &bindings,
+                &module_gate,
+                &[],
+                &AwsNormalizer,
+                &factories,
+                &schemas,
+                type_checks,
+            );
+            carina_core::executor::prepare_create_request(resource, &preparation)
+                .await
+                .expect("test resource should pass checked create preparation")
+        },
+    )
+    .await
 }
 
 async fn create_request_without_schema_for_test(resource: Resource) -> CreateRequest {
-    let bindings = carina_core::binding_index::ResolvedBindings::default();
-    let module_gate = carina_core::executor::ModuleConstraintGate::from_live_compositions(&[]);
-    let schemas = SchemaRegistry::new();
-    let preparation = carina_core::executor::ProviderPreparationContext::new(
-        &bindings,
-        &module_gate,
-        &[],
-        &NoopNormalizer,
-        &[],
-        &schemas,
-    );
-    carina_core::executor::prepare_create_request(resource, &preparation)
-        .await
-        .expect("test resource should become a provider-ready create request")
+    carina_core::validation::deferred_types::with_session_for_test_async(
+        &carina_core::parser::LoadedProviderContext::empty_for_test(),
+        async |type_checks| {
+            let bindings = carina_core::binding_index::ResolvedBindings::default();
+            let module_gate =
+                carina_core::executor::ModuleConstraintGate::from_live_compositions(&[]);
+            let schemas = SchemaRegistry::new();
+            let preparation = carina_core::executor::ProviderPreparationContext::new(
+                &bindings,
+                &module_gate,
+                &[],
+                &NoopNormalizer,
+                &[],
+                &schemas,
+                type_checks,
+            );
+            carina_core::executor::prepare_create_request(resource, &preparation)
+                .await
+                .expect("test resource should become a provider-ready create request")
+        },
+    )
+    .await
 }
 
 async fn create_outcome_for_test(
@@ -332,21 +348,34 @@ async fn update_request_for_test(
     from: State,
     changed_attributes: &[String],
 ) -> UpdateRequest {
-    let bindings = carina_core::binding_index::ResolvedBindings::default();
-    let module_gate = carina_core::executor::ModuleConstraintGate::from_live_compositions(&[]);
-    let schemas = schema_registry();
-    let factories: Vec<Box<dyn ProviderFactory>> = vec![Box::new(AwsProviderFactory)];
-    let preparation = carina_core::executor::ProviderPreparationContext::new(
-        &bindings,
-        &module_gate,
-        &[],
-        &AwsNormalizer,
-        &factories,
-        &schemas,
-    );
-    carina_core::executor::prepare_update_request(resource, from, changed_attributes, &preparation)
-        .await
-        .expect("test resource should pass checked update preparation")
+    carina_core::validation::deferred_types::with_session_for_test_async(
+        &carina_core::parser::LoadedProviderContext::empty_for_test(),
+        async |type_checks| {
+            let bindings = carina_core::binding_index::ResolvedBindings::default();
+            let module_gate =
+                carina_core::executor::ModuleConstraintGate::from_live_compositions(&[]);
+            let schemas = schema_registry();
+            let factories: Vec<Box<dyn ProviderFactory>> = vec![Box::new(AwsProviderFactory)];
+            let preparation = carina_core::executor::ProviderPreparationContext::new(
+                &bindings,
+                &module_gate,
+                &[],
+                &AwsNormalizer,
+                &factories,
+                &schemas,
+                type_checks,
+            );
+            carina_core::executor::prepare_update_request(
+                resource,
+                from,
+                changed_attributes,
+                &preparation,
+            )
+            .await
+            .expect("test resource should pass checked update preparation")
+        },
+    )
+    .await
 }
 
 struct LogGroupService;
@@ -1365,7 +1394,9 @@ async fn account_name_change_plans_an_update_instead_of_replacement() {
         &schemas,
         std::slice::from_ref(&desired),
     );
-    let managed = [ResolvedResource::new(desired)];
+    let managed = [ResolvedResource::new(
+        desired.into_resolved_dependency_phase_for_test(),
+    )];
     let orphans = Orphans::new();
     let saved = RawSavedAttrs::default().lift(&schemas);
 

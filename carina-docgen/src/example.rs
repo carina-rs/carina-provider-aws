@@ -542,6 +542,8 @@ fn same_user_functions(
                     name: left_name,
                     params: left_params,
                     return_type: left_return_type,
+                    return_type_span: _,
+                    annotation_source_file: _,
                     local_lets: left_local_lets,
                     body: left_body,
                 } = left;
@@ -549,6 +551,8 @@ fn same_user_functions(
                     name: right_name,
                     params: right_params,
                     return_type: right_return_type,
+                    return_type_span: _,
+                    annotation_source_file: _,
                     local_lets: right_local_lets,
                     body: right_body,
                 } = right;
@@ -559,11 +563,13 @@ fn same_user_functions(
                         let FnParam {
                             name: left_name,
                             param_type: left_param_type,
+                            type_span: _,
                             default: left_default,
                         } = left;
                         let FnParam {
                             name: right_name,
                             param_type: right_param_type,
+                            type_span: _,
                             default: right_default,
                         } = right;
                         left_name == right_name

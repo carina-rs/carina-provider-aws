@@ -1,6 +1,6 @@
 use carina_core::provider::ProviderResult;
 use carina_core::provider::{AppliedIdentifier, ReadOutcome};
-use carina_core::resource::{Resource, ResourceId, State};
+use carina_core::resource::{AbsoluteBindingAddress, NoPlaceholder, Resource, ResourceId, State};
 use carina_core::schema::CompiledResourceSchema;
 
 use crate::AwsProvider;
@@ -63,7 +63,7 @@ impl AwsProvider {
     /// Create an EC2 VPN Gateway
     pub(crate) async fn create_ec2_vpn_gateway<A: AwsCreateAttempt>(
         &self,
-        resource: &Resource<impl Sized>,
+        resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
         _schema: &CompiledResourceSchema,
         client_token: &ClientToken,
         attempt: A,

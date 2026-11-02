@@ -1,6 +1,8 @@
 use carina_core::provider::{AppliedIdentifier, ReadOutcome};
 use carina_core::provider::{ProviderError, ProviderResult};
-use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
+use carina_core::resource::{
+    AbsoluteBindingAddress, ConcreteValue, NoPlaceholder, Resource, ResourceId, State, Value,
+};
 use carina_core::schema::CompiledResourceSchema;
 use carina_plugin_sdk::{DesiredInputs, DesiredValue};
 
@@ -267,16 +269,11 @@ impl AwsProvider {
     /// Create an EC2 NAT Gateway
     pub(crate) async fn create_ec2_nat_gateway_start<A: AwsCreateAttempt>(
         &self,
-        resource: &Resource<impl Sized>,
+        resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
         _schema: &CompiledResourceSchema,
         client_token: &ClientToken,
         attempt: A,
     ) -> Result<A::Step, A::Verdict> {
-        if let Err(error) = DesiredInputs::from_core(resource)
-            .and_then(|inputs| validate_nat_gateway_inputs(&inputs))
-        {
-            return Err(attempt.untracked(error));
-        }
         let input = match Ec2NatGatewayCreateInput::decode(resource, _schema) {
             Ok(input) => input,
             Err(error) => return Err(attempt.untracked(error)),
@@ -483,6 +480,11 @@ mod pending_tests {
         assert_eq!(nat_gateway_delete_poll_state(None), DeletePoll::Gone);
     }
 
+    fn validate(resource: &mut Resource) -> ProviderResult<()> {
+        let desired = carina_plugin_sdk::NativeDesiredNormalization::from_core(resource)?;
+        validate_nat_gateway_inputs(&desired.inputs())
+    }
+
     #[test]
     fn zonal_and_regional_modes_enforce_subnet_placement() {
         let mut zonal = Resource::with_provider("aws", "ec2.NatGateway", "zonal", None);
@@ -490,28 +492,24 @@ mod pending_tests {
             "availability_mode",
             Value::Concrete(ConcreteValue::String("zonal".into())),
         );
-        assert!(validate_nat_gateway_inputs(&DesiredInputs::from_core(&zonal).unwrap()).is_err());
+        assert!(validate(&mut zonal).is_err());
         zonal.set_attr(
             "subnet_id",
             Value::Concrete(ConcreteValue::String("subnet-12345678".into())),
         );
-        validate_nat_gateway_inputs(&DesiredInputs::from_core(&zonal).unwrap())
-            .expect("zonal mode accepts a subnet");
+        validate(&mut zonal).expect("zonal mode accepts a subnet");
 
         let mut regional = Resource::with_provider("aws", "ec2.NatGateway", "regional", None);
         regional.set_attr(
             "availability_mode",
             Value::Concrete(ConcreteValue::String("regional".into())),
         );
-        validate_nat_gateway_inputs(&DesiredInputs::from_core(&regional).unwrap())
-            .expect("regional mode omits subnet_id");
+        validate(&mut regional).expect("regional mode omits subnet_id");
         regional.set_attr(
             "subnet_id",
             Value::Concrete(ConcreteValue::String("subnet-12345678".into())),
         );
-        assert!(
-            validate_nat_gateway_inputs(&DesiredInputs::from_core(&regional).unwrap()).is_err()
-        );
+        assert!(validate(&mut regional).is_err());
     }
 
     #[test]
@@ -567,7 +565,7 @@ mod pending_tests {
         let comparison = router
             .comparison_for(&registry, &desired.id)
             .expect("NAT gateway comparison context");
-        let desired = ResolvedResource::new(desired);
+        let desired = ResolvedResource::new(desired.into_resolved_dependency_phase_for_test());
         let result = crate::test_diff(&desired, &current, &saved, None, comparison);
         assert!(matches!(result, Diff::NoChange(_)), "{result:?}");
     }

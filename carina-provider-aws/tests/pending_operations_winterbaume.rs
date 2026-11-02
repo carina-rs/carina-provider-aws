@@ -1231,20 +1231,28 @@ fn schema_registry() -> carina_core::schema::SchemaRegistry {
 }
 
 async fn create_request_for_test(resource: Resource) -> CreateRequest {
-    let bindings = carina_core::binding_index::ResolvedBindings::default();
-    let module_gate = carina_core::executor::ModuleConstraintGate::from_live_compositions(&[]);
-    let schemas = schema_registry();
-    let preparation = carina_core::executor::ProviderPreparationContext::new(
-        &bindings,
-        &module_gate,
-        &[],
-        &AwsNormalizer,
-        &[],
-        &schemas,
-    );
-    carina_core::executor::prepare_create_request(resource, &preparation)
-        .await
-        .expect("test NAT gateway should pass checked create preparation")
+    carina_core::validation::deferred_types::with_session_for_test_async(
+        &carina_core::parser::LoadedProviderContext::empty_for_test(),
+        async |type_checks| {
+            let bindings = carina_core::binding_index::ResolvedBindings::default();
+            let module_gate =
+                carina_core::executor::ModuleConstraintGate::from_live_compositions(&[]);
+            let schemas = schema_registry();
+            let preparation = carina_core::executor::ProviderPreparationContext::new(
+                &bindings,
+                &module_gate,
+                &[],
+                &AwsNormalizer,
+                &[],
+                &schemas,
+                type_checks,
+            );
+            carina_core::executor::prepare_create_request(resource, &preparation)
+                .await
+                .expect("test NAT gateway should pass checked create preparation")
+        },
+    )
+    .await
 }
 
 async fn create_state_for_test(

@@ -16,7 +16,153 @@ mod guest {
     use carina_provider_aws::BoundedSdkConfig;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex};
-    use winterbaume_core::MockAws;
+    use winterbaume_core::{MockAws, MockRequest, MockResponse, MockService};
+
+    #[derive(Default)]
+    struct RequestCounter {
+        requests: AtomicUsize,
+    }
+
+    impl MockService for RequestCounter {
+        fn service_name(&self) -> &str {
+            "validation-counter"
+        }
+
+        fn url_patterns(&self) -> Vec<&str> {
+            vec![r"^https://"]
+        }
+
+        fn handle(
+            &self,
+            _request: MockRequest,
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = MockResponse> + Send + '_>>
+        {
+            self.requests.fetch_add(1, Ordering::Relaxed);
+            Box::pin(std::future::ready(MockResponse::json(
+                400,
+                r#"{"__type":"InvalidParameterValue","message":"unexpected AWS request"}"#,
+            )))
+        }
+    }
+
+    fn validation_fixture() -> (AwsProcessProvider, Arc<RequestCounter>) {
+        let service = Arc::new(RequestCounter::default());
+        let mock = MockAws::builder()
+            .with_service(Arc::clone(&service))
+            .build();
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let config = BoundedSdkConfig::for_test(runtime.block_on(mock.sdk_config("us-east-1")));
+        let aws = AwsProvider::from_sdk_config("us-east-1".to_string(), vec![], vec![], &config);
+        (
+            AwsProcessProvider {
+                runtime,
+                provider: Some(aws),
+                normalizer: AwsNormalizer,
+            },
+            service,
+        )
+    }
+
+    #[test]
+    fn guest_create_runs_sqs_and_nat_cross_field_validators_before_send() {
+        let (provider, service) = validation_fixture();
+        for (resource_type, attributes, message) in [
+            (
+                "sqs.Queue",
+                BTreeMap::from([
+                    (
+                        "queue_name".into(),
+                        proto::Value::String("standard-queue".into()),
+                    ),
+                    ("fifo_queue".into(), proto::Value::Bool(false)),
+                    (
+                        "content_based_deduplication".into(),
+                        proto::Value::Bool(true),
+                    ),
+                ]),
+                "content_based_deduplication requires fifo_queue = true",
+            ),
+            (
+                "ec2.NatGateway",
+                BTreeMap::from([(
+                    "availability_mode".into(),
+                    proto::Value::String("zonal".into()),
+                )]),
+                "subnet_id is required when availability_mode = zonal",
+            ),
+        ] {
+            let id = proto::ResourceId {
+                provider: "aws".into(),
+                resource_type: resource_type.into(),
+                identity: "invalid-create".into(),
+            };
+            let request = proto::CreateRequest {
+                resource: proto::Resource {
+                    id: id.clone(),
+                    attributes,
+                    directives: Default::default(),
+                },
+            };
+            let verdict = dispatch_create(&provider, &id, request)
+                .expect_err("guest create must reject invalid resolved inputs");
+            assert_eq!(service.requests.load(Ordering::Relaxed), 0);
+            let proto::CreateVerdict::Untracked(error) = *verdict else {
+                panic!("validation must fail before tracking a create: {verdict:?}");
+            };
+            assert_eq!(error.kind, proto::ProviderErrorKind::InvalidInput);
+            assert_eq!(error.resource_id.as_ref(), Some(&id));
+            assert!(error.message.contains(message), "{error:?}");
+        }
+    }
+
+    #[test]
+    fn guest_update_rejects_resolved_sqs_fifo_conflicts_before_send() {
+        let (provider, service) = validation_fixture();
+        let id = proto::ResourceId {
+            provider: "aws".into(),
+            resource_type: "sqs.Queue".into(),
+            identity: "resolved-queue".into(),
+        };
+        let identifier = proto::AppliedIdentifier::new(
+            "https://sqs.us-east-1.amazonaws.com/123456789012/resolved-queue",
+        )
+        .unwrap();
+        let request = proto::UpdateRequest {
+            from: proto::PersistedState {
+                id: id.clone(),
+                identifier: Some(identifier.as_str().into()),
+                exists: true,
+                attributes: BTreeMap::from([
+                    (
+                        "queue_name".into(),
+                        proto::Value::String("resolved-queue".into()).into(),
+                    ),
+                    ("fifo_queue".into(), proto::Value::Bool(false).into()),
+                    (
+                        "content_based_deduplication".into(),
+                        proto::Value::Bool(false).into(),
+                    ),
+                ]),
+            },
+            patch: proto::UpdatePatch {
+                ops: vec![proto::PatchOp::Replace {
+                    key: "content_based_deduplication".into(),
+                    value: proto::Value::Bool(true),
+                }],
+            },
+        };
+        let result = provider.update(&id, &identifier, request);
+        assert_eq!(service.requests.load(Ordering::Relaxed), 0);
+        let error = result.expect_err("guest update must validate the reconstructed target");
+        assert_eq!(error.kind, proto::ProviderErrorKind::InvalidInput);
+        assert_eq!(error.resource_id.as_ref(), Some(&id));
+        assert!(
+            error
+                .message
+                .contains("content_based_deduplication requires fifo_queue = true"),
+            "{error:?}"
+        );
+    }
 
     fn fixture(populated: &[bool]) -> (AwsProcessProvider, Arc<AcmService>, proto::CreateRequest) {
         let service = Arc::new(AcmService {

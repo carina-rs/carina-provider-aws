@@ -83,19 +83,26 @@ impl MockService for AlwaysUnavailableStsService {
 }
 
 fn ready_data_source_for_test(resource: DataSource) -> ProviderReadyDataSource {
-    let bindings = carina_core::binding_index::ResolvedBindings::default();
-    let module_gate = carina_core::executor::ModuleConstraintGate::from_live_compositions(&[]);
-    let schemas = carina_provider_aws::schemas::schema_registry();
-    let preparation = carina_core::executor::ProviderPreparationContext::new(
-        &bindings,
-        &module_gate,
-        &[],
-        &AwsNormalizer,
-        &[],
-        &schemas,
-    );
-    carina_core::executor::prepare_provider_ready_data_source(resource, &preparation)
-        .expect("test data source should pass checked provider preparation")
+    carina_core::validation::deferred_types::with_session_for_test(
+        &carina_core::parser::LoadedProviderContext::empty_for_test(),
+        |type_checks| {
+            let bindings = carina_core::binding_index::ResolvedBindings::default();
+            let module_gate =
+                carina_core::executor::ModuleConstraintGate::from_live_compositions(&[]);
+            let schemas = carina_provider_aws::schemas::schema_registry();
+            let preparation = carina_core::executor::ProviderPreparationContext::new(
+                &bindings,
+                &module_gate,
+                &[],
+                &AwsNormalizer,
+                &[],
+                &schemas,
+                type_checks,
+            );
+            carina_core::executor::prepare_provider_ready_data_source(resource, &preparation)
+                .expect("test data source should pass checked provider preparation")
+        },
+    )
 }
 
 #[tokio::test]
