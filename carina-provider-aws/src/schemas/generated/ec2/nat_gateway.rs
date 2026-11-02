@@ -6,7 +6,7 @@
 
 use super::AwsSchemaConfig;
 use super::tags_type;
-use carina_core::schema::{AttributeSchema, AttributeType, ResourceSchema, StructField, types};
+use carina_core::schema::{AttributeSchema, AttributeType, ResourceSchema, types};
 use carina_provider_protocol::types::ValidatorType;
 
 const VALID_AVAILABILITY_MODE: &[&str] = &["regional", "zonal"];
@@ -44,7 +44,7 @@ pub fn ec2_nat_gateway_config() -> AwsSchemaConfig {
                 .build(),
         )
         .attribute(
-            AttributeSchema::optional("availability_zone_addresses", AttributeType::unordered_list(AttributeType::struct_("AvailabilityZoneAddress".to_string(),vec![StructField::optional("allocation_ids", AttributeType::unordered_list(super::allocation_id())).with_description("The allocation IDs of the Elastic IP addresses (EIPs) to be used for handling outbound NAT traffic in this specific Availability Zone.").with_provider_name("AllocationIds").build(),StructField::optional("availability_zone", super::availability_zone()).with_description("For regional NAT gateways only: The Availability Zone where this specific NAT gateway configuration will be active. Each AZ in a regional NAT gateway has its own configuration to handle outbound NAT traffic from that AZ.").with_provider_name("AvailabilityZone").build()],)))
+            AttributeSchema::optional("availability_zone_addresses", carina_aws_types::nat_gateway_availability_zone_addresses())
                 .create_only()
                 .with_description("For regional NAT gateways only: Specifies which Availability Zones you want the NAT gateway to support and the Elastic IP addresses (EIPs) to use in e...")
                 .with_provider_name("AvailabilityZoneAddresses")

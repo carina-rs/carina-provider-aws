@@ -24,13 +24,7 @@ pub fn s3_bucket_ownership_controls_config() -> AwsSchemaConfig {
                 .build(),
         )
         .attribute(
-            AttributeSchema::required("object_ownership", AttributeType::enum_(
-carina_core::schema::enum_identity("ObjectOwnership", Some("aws.s3.BucketOwnershipControls")),
-Some(vec!["BucketOwnerEnforced".to_string(), "BucketOwnerPreferred".to_string(), "ObjectWriter".to_string()]),
-vec![("BucketOwnerEnforced".to_string(), "bucket_owner_enforced".to_string()), ("BucketOwnerPreferred".to_string(), "bucket_owner_preferred".to_string()), ("ObjectWriter".to_string(), "object_writer".to_string())],
-None,
-None,
-))
+            AttributeSchema::required("object_ownership", carina_aws_types::s3_object_ownership())
                 .with_description("Object ownership setting: BucketOwnerEnforced, BucketOwnerPreferred, or ObjectWriter.")
                 .with_provider_name("ObjectOwnership")
                 .build(),

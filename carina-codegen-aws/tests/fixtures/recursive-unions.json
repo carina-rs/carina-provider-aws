@@ -1,0 +1,30 @@
+{
+  "smithy": "2.0",
+  "shapes": {
+    "com.amazonaws.test#CreateFixture": {
+      "type": "operation",
+      "input": { "target": "com.amazonaws.test#Fixture" }
+    },
+    "com.amazonaws.test#Fixture": {
+      "type": "structure",
+      "members": {
+        "Choice": { "target": "com.amazonaws.test#Choice" },
+        "Node": { "target": "com.amazonaws.test#Node" }
+      }
+    },
+    "com.amazonaws.test#Choice": {
+      "type": "union",
+      "members": {
+        "Node": { "target": "com.amazonaws.test#Node" },
+        "Text": { "target": "smithy.api#String" }
+      }
+    },
+    "com.amazonaws.test#Node": {
+      "type": "structure",
+      "members": {
+        "Choice": { "target": "com.amazonaws.test#Choice" },
+        "Next": { "target": "com.amazonaws.test#Node" }
+      }
+    }
+  }
+}

@@ -405,6 +405,7 @@ define_aws_type_catalog! {
     pub enum AwsType {
         identity_constructor: aws_identity,
         refinement_type: AwsType,
+        constructor_path_prefix: "carina_aws_types::",
         rows: {
     /// Generic AWS ARN.
     Arn => arn {

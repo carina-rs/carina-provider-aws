@@ -67,6 +67,37 @@ mod tests {
 
     // Custom type shape tests
 
+    #[test]
+    fn lifecycle_filter_declares_at_most_one_group_at_its_source() {
+        use carina_core::schema::{FieldGroupKind, RawShape};
+        let rules = bucket_lifecycle_rules();
+        let filter = field_type(list_inner(&rules), "filter");
+        let RawShape::Struct {
+            fields,
+            field_groups,
+            ..
+        } = filter.raw_shape()
+        else {
+            panic!("lifecycle filter must be a struct");
+        };
+        let [group] = field_groups else {
+            panic!("lifecycle filter must declare one field group");
+        };
+        assert_eq!(group.kind(), FieldGroupKind::AtMostOne);
+        assert_eq!(
+            group.fields(),
+            [
+                "prefix",
+                "tag",
+                "object_size_greater_than",
+                "object_size_less_than",
+                "and"
+            ]
+        );
+        assert_eq!(fields.len(), group.fields().len());
+        rootless(rules);
+    }
+
     fn field_type<'a>(attr: &'a AttributeType, field_name: &str) -> &'a AttributeType {
         let mut budget = carina_core::schema::ShapeWalkBudget::new(8);
         let Some(fields) = attr

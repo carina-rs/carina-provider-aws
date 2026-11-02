@@ -1179,6 +1179,7 @@ version = "0.8.0"
 dependencies = [
  "anyhow",
  "carina-aws-types",
+ "carina-core",
  "carina-docgen",
  "carina-provider-protocol",
  "carina-smithy",
