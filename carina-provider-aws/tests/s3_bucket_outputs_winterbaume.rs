@@ -194,6 +194,13 @@ async fn provider_with_namespace_recording_s3() -> (AwsProvider, Arc<NamespaceRe
 }
 
 async fn provider_with_staged_bucket(bucket: &str) -> (AwsProvider, Arc<RecordingS3Service>) {
+    provider_with_staged_bucket_in_region(bucket, BUCKET_REGION).await
+}
+
+async fn provider_with_staged_bucket_in_region(
+    bucket: &str,
+    bucket_region: &str,
+) -> (AwsProvider, Arc<RecordingS3Service>) {
     let s3_service = Arc::new(S3Service::new());
 
     // Winterbaume normally derives a created bucket's stored region from the
@@ -208,7 +215,7 @@ async fn provider_with_staged_bucket(bucket: &str) -> (AwsProvider, Arc<Recordin
                     bucket.to_string(),
                     BucketStateView {
                         name: bucket.to_string(),
-                        region: BUCKET_REGION.to_string(),
+                        region: bucket_region.to_string(),
                         ..Default::default()
                     },
                 )]),
@@ -740,4 +747,98 @@ async fn managed_and_data_source_reads_use_head_bucket_region_without_get_bucket
         0,
         "both read paths must use HeadBucket's x-amz-bucket-region"
     );
+}
+
+struct BucketPartitionCase {
+    region: &'static str,
+    arn: &'static str,
+    domain: &'static str,
+    regional_domain: &'static str,
+    hosted_zone_id: Option<&'static str>,
+}
+
+const PARTITION_BUCKET: &str = "carina-partition-bucket";
+const PARTITION_CASES: &[BucketPartitionCase] = &[
+    BucketPartitionCase {
+        region: "us-east-1",
+        arn: "arn:aws:s3:::carina-partition-bucket",
+        domain: "carina-partition-bucket.s3.amazonaws.com",
+        regional_domain: "carina-partition-bucket.s3.us-east-1.amazonaws.com",
+        hosted_zone_id: Some("Z3AQBSTGFYJSTF"),
+    },
+    BucketPartitionCase {
+        region: "cn-north-1",
+        arn: "arn:aws-cn:s3:::carina-partition-bucket",
+        domain: "carina-partition-bucket.s3.cn-north-1.amazonaws.com.cn",
+        regional_domain: "carina-partition-bucket.s3.cn-north-1.amazonaws.com.cn",
+        hosted_zone_id: None,
+    },
+    BucketPartitionCase {
+        region: "us-gov-west-1",
+        arn: "arn:aws-us-gov:s3:::carina-partition-bucket",
+        domain: "carina-partition-bucket.s3.amazonaws.com",
+        regional_domain: "carina-partition-bucket.s3.us-gov-west-1.amazonaws.com",
+        hosted_zone_id: Some("Z31GFT0UA1I2HV"),
+    },
+];
+
+fn assert_partition_bucket_outputs(state: &State<impl StateValueLeaf>, case: &BucketPartitionCase) {
+    let state = state.to_snapshot();
+    assert!(state.exists, "{}", case.region);
+    for (name, expected) in [
+        ("bucket", PARTITION_BUCKET),
+        ("arn", case.arn),
+        ("region", case.region),
+        ("bucket_domain_name", case.domain),
+        ("bucket_regional_domain_name", case.regional_domain),
+    ] {
+        assert_eq!(
+            state.attributes.get(name),
+            Some(&string(expected).to_snapshot()),
+            "{}: {name}",
+            case.region,
+        );
+    }
+    assert_eq!(
+        state.attributes.get("hosted_zone_id"),
+        case.hosted_zone_id
+            .map(|id| string(id).to_snapshot())
+            .as_ref(),
+        "{}: hosted_zone_id",
+        case.region,
+    );
+}
+
+#[tokio::test]
+async fn s3_bucket_partition_managed_outputs() {
+    for case in PARTITION_CASES {
+        let (provider, _) =
+            provider_with_staged_bucket_in_region(PARTITION_BUCKET, case.region).await;
+        let resource: Resource = Resource::with_provider("aws", RESOURCE_TYPE, "partition", None);
+        let state = provider
+            .read(
+                &resource.id,
+                &applied_identifier(PARTITION_BUCKET),
+                ReadRequest,
+            )
+            .await
+            .expect("read managed S3 bucket")
+            .into_state();
+        assert_partition_bucket_outputs(&state, case);
+    }
+}
+
+#[tokio::test]
+async fn s3_bucket_partition_data_source_outputs() {
+    for case in PARTITION_CASES {
+        let (provider, _) =
+            provider_with_staged_bucket_in_region(PARTITION_BUCKET, case.region).await;
+        let mut data_source = DataSource::with_provider("aws", RESOURCE_TYPE, "partition", None);
+        data_source.set_attr("bucket", string(PARTITION_BUCKET));
+        let state = provider
+            .read_data_source(&ready_data_source_for_test(data_source))
+            .await
+            .expect("read S3 bucket data source");
+        assert_partition_bucket_outputs(&state, case);
+    }
 }

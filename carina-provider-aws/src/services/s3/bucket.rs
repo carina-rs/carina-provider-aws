@@ -3,6 +3,7 @@ use std::collections::HashMap;
 
 use indexmap::IndexMap;
 
+use carina_aws_types::Partition;
 use carina_core::provider::{AppliedIdentifier, ProviderDirectives, ReadOutcome};
 use carina_core::provider::{BoxFuture, ProviderError, ProviderResult};
 use carina_core::resource::{
@@ -58,7 +59,7 @@ impl S3BucketReadOnlyOutputs {
 
         // A miss must omit the attribute rather than break resource management. This
         // remains the safety net for regions AWS adds after the table was fetched;
-        // isolated GovCloud and China partitions remain out of scope.
+        // China and other partitions with unverified website zone IDs are omitted.
         if let Some(hosted_zone_id) = self.hosted_zone_id {
             attributes.insert(
                 "hosted_zone_id".to_string(),
@@ -72,14 +73,28 @@ impl S3BucketReadOnlyOutputs {
 
 /// Compute every read-only output exposed by both views of `s3.Bucket`.
 fn s3_bucket_read_only_outputs(bucket: &str, region: &str) -> S3BucketReadOnlyOutputs {
-    // TODO: Partition and DNS-suffix context is not available here yet, so these
-    // derived values currently hard-code the commercial `aws` / `amazonaws.com`
-    // forms.
+    let partition = Partition::from_region(region);
+    let partition_id = partition.id();
+    let dns_suffix = partition.dns_suffix();
+    let bucket_regional_domain_name = format!("{bucket}.s3.{region}.{dns_suffix}");
+    let bucket_domain_name = match partition {
+        // China S3 origins require the regional domain, rather than an invented
+        // global s3.{dns_suffix} endpoint. AWS's China deployment guidance:
+        // https://aws.amazon.com/blogs/networking-and-content-delivery/programmatically-deploying-cloudfront-distributions-in-aws-china-regions/
+        Partition::AwsCn => bucket_regional_domain_name.clone(),
+        Partition::Aws
+        | Partition::AwsUsGov
+        | Partition::AwsIso
+        | Partition::AwsIsoB
+        | Partition::AwsIsoE
+        | Partition::AwsIsoF
+        | Partition::AwsEusc => format!("{bucket}.s3.{dns_suffix}"),
+    };
     S3BucketReadOnlyOutputs {
-        arn: format!("arn:aws:s3:::{bucket}"),
+        arn: format!("arn:{partition_id}:s3:::{bucket}"),
         region: region.to_string(),
-        bucket_domain_name: format!("{bucket}.s3.amazonaws.com"),
-        bucket_regional_domain_name: format!("{bucket}.s3.{region}.amazonaws.com"),
+        bucket_domain_name,
+        bucket_regional_domain_name,
         hosted_zone_id: s3_hosted_zone_id(region).ok().map(str::to_string),
     }
 }
@@ -590,16 +605,19 @@ impl AwsProvider {
 
 /// AWS region → S3 website-endpoint hosted zone ID.
 ///
-/// Source (fetched 2026-08-15):
+/// Source (fetched 2026-08-15; GovCloud verified 2026-11-03):
 /// https://docs.aws.amazon.com/general/latest/gr/s3.html
 /// "Amazon S3 website endpoints and HostedZone IDs" table.
-/// Limited to commercial regions; isolated partitions (GovCloud, China)
-/// are out of scope.
+/// Covers commercial and GovCloud regions. China is not covered because this
+/// source does not publish its website hosted zone IDs; unverified IDs are omitted.
+/// Other isolated partitions also remain unverified.
 const S3_HOSTED_ZONE_IDS: &[(&str, &str)] = &[
     ("us-east-1", "Z3AQBSTGFYJSTF"),
     ("us-east-2", "Z2O1EMRO9K5GLX"),
     ("us-west-1", "Z2F56UZL2M1ACD"),
     ("us-west-2", "Z3BJ6K6RIION7M"),
+    ("us-gov-east-1", "Z2NIFVYYW2VKV1"),
+    ("us-gov-west-1", "Z31GFT0UA1I2HV"),
     ("af-south-1", "Z2OSFR5PIJ8TYW"),
     ("ap-east-1", "ZNB98KWMFR0R6"),
     ("ap-east-2", "Z064739330DAH7WJVOO93"),
@@ -891,6 +909,18 @@ mod tests {
             "Z057606446ZNVQJJ8WOP"
         );
         assert_eq!(s3_hosted_zone_id("eu-south-1").unwrap(), "Z2OPA49AB41N7K");
+    }
+
+    #[test]
+    fn s3_hosted_zone_id_govcloud_regions() {
+        assert_eq!(
+            s3_hosted_zone_id("us-gov-east-1").unwrap(),
+            "Z2NIFVYYW2VKV1"
+        );
+        assert_eq!(
+            s3_hosted_zone_id("us-gov-west-1").unwrap(),
+            "Z31GFT0UA1I2HV"
+        );
     }
 
     #[test]
