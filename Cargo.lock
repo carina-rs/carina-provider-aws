@@ -1183,7 +1183,6 @@ dependencies = [
  "carina-provider-protocol",
  "carina-smithy",
  "clap",
- "comrak",
  "heck",
  "html-escape",
  "tempfile",

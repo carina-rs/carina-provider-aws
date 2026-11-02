@@ -7095,7 +7095,7 @@ mod tests {
     }
 
     #[test]
-    fn description_smithy_placeholders_remain_visible_in_rendered_docs() {
+    fn description_smithy_placeholders_are_escaped_in_generated_markdown() {
         let mut model = provider_fixture_model();
         let mut resource =
             provider_fixture_resource("iam.Role", "RoleName", &["RoleName", "Options"], vec![]);
@@ -7126,20 +7126,11 @@ mod tests {
             &markdown_resource_example(resource.name),
         )
         .expect("generate docs");
-        assert_eq!(markdown.matches("&lt;bucket&gt;").count(), 4, "{markdown}");
-
-        let mut options = comrak::Options::default();
-        options.extension.table = true;
-        options.extension.strikethrough = true;
-        options.extension.autolink = true;
-        let html = comrak::markdown_to_html(&markdown, &options);
         assert_eq!(
-            html.matches("&lt;bucket&gt; &amp; *literal*").count(),
+            markdown.matches("&lt;bucket&gt; &amp; *literal*").count(),
             4,
-            "{html}"
+            "{markdown}"
         );
-        assert!(!html.contains("<em>literal</em>"), "{html}");
-        assert!(!html.contains("raw HTML omitted"), "{html}");
     }
 
     #[test]

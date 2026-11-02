@@ -66,8 +66,7 @@ impl Description {
     }
 
     /// Emit authored Markdown unchanged, or escape Smithy plain text.
-    /// HTML characters become entities; all other ASCII punctuation is escaped
-    /// to prevent Markdown formatting, autolinks, and table delimiters.
+    /// Escape only HTML-sensitive characters, preserving Markdown punctuation.
     pub fn markdown(&self) -> Cow<'_, str> {
         match self.origin {
             Origin::AuthoredMarkdown => Cow::Borrowed(&self.text),
@@ -78,10 +77,6 @@ impl Description {
                         '<' => escaped.push_str("&lt;"),
                         '>' => escaped.push_str("&gt;"),
                         '&' => escaped.push_str("&amp;"),
-                        punctuation if punctuation.is_ascii_punctuation() => {
-                            escaped.push('\\');
-                            escaped.push(punctuation);
-                        }
                         _ => escaped.push(character),
                     }
                 }
@@ -193,17 +188,13 @@ mod tests {
     }
 
     #[test]
-    fn smithy_markdown_renders_punctuation_as_literal_text() {
-        let plain = r"1. <bucket> & **bold** _em_ `code` [link](#target) ![image](url) ~~strike~~ | \path https://example.com a@example.com";
-        let description = Description::from_smithy_html(&format!("<p>{plain}</p>"));
-        let mut options = comrak::Options::default();
-        options.extension.table = true;
-        options.extension.strikethrough = true;
-        options.extension.autolink = true;
-        let html = comrak::markdown_to_html(&description.markdown(), &options);
+    fn smithy_markdown_escapes_only_html_characters() {
+        let description = Description::from_smithy_html(
+            r"<p>roles. IAM, (\u0020) &lt;bucket&gt; &amp; **bold** _em_ `code` [link](target) ~~strike~~ https://example.com</p>",
+        );
         assert_eq!(
-            html,
-            format!("<p>{}</p>\n", html_escape::encode_text(plain))
+            description.markdown(),
+            r"roles. IAM, (\u0020) &lt;bucket&gt; &amp; **bold** _em_ `code` [link](target) ~~strike~~ https://example.com"
         );
     }
 
@@ -212,10 +203,5 @@ mod tests {
         let description = Description::authored("**bold** `<bucket>.s3.amazonaws.com` &amp;");
         let markdown = description.markdown();
         assert_eq!(markdown, "**bold** `<bucket>.s3.amazonaws.com` &amp;");
-        let html = comrak::markdown_to_html(&markdown, &comrak::Options::default());
-        assert_eq!(
-            html,
-            "<p><strong>bold</strong> <code>&lt;bucket&gt;.s3.amazonaws.com</code> &amp;</p>\n"
-        );
     }
 }

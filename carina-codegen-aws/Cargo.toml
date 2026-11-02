@@ -23,5 +23,4 @@ heck = "0.5"
 html-escape = "0.2"
 
 [dev-dependencies]
-comrak = { version = "=0.54.0", default-features = false }
 tempfile = "3"
