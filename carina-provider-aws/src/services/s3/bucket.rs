@@ -77,18 +77,19 @@ fn s3_bucket_read_only_outputs(bucket: &str, region: &str) -> S3BucketReadOnlyOu
     let partition_id = partition.id();
     let dns_suffix = partition.dns_suffix();
     let bucket_regional_domain_name = format!("{bucket}.s3.{region}.{dns_suffix}");
+    // Use the global domain only in the commercial partition. GovCloud's separate
+    // namespace and China's endpoint guidance require regional names:
+    // https://docs.aws.amazon.com/govcloud-us/latest/UserGuide/govcloud-s3.html
+    // https://aws.amazon.com/blogs/networking-and-content-delivery/programmatically-deploying-cloudfront-distributions-in-aws-china-regions/
     let bucket_domain_name = match partition {
-        // China S3 origins require the regional domain, rather than an invented
-        // global s3.{dns_suffix} endpoint. AWS's China deployment guidance:
-        // https://aws.amazon.com/blogs/networking-and-content-delivery/programmatically-deploying-cloudfront-distributions-in-aws-china-regions/
-        Partition::AwsCn => bucket_regional_domain_name.clone(),
-        Partition::Aws
+        Partition::Aws => format!("{bucket}.s3.{dns_suffix}"),
+        Partition::AwsCn
         | Partition::AwsUsGov
         | Partition::AwsIso
         | Partition::AwsIsoB
         | Partition::AwsIsoE
         | Partition::AwsIsoF
-        | Partition::AwsEusc => format!("{bucket}.s3.{dns_suffix}"),
+        | Partition::AwsEusc => bucket_regional_domain_name.clone(),
     };
     S3BucketReadOnlyOutputs {
         arn: format!("arn:{partition_id}:s3:::{bucket}"),
@@ -765,6 +766,48 @@ mod tests {
             concrete_string(&attributes, "hosted_zone_id"),
             "Z2M4EHUR26P7ZW"
         );
+    }
+
+    #[test]
+    fn s3_bucket_domains_are_regional_outside_commercial_partition() {
+        for (region, expected) in [
+            (
+                "cn-north-1",
+                "example-bucket.s3.cn-north-1.amazonaws.com.cn",
+            ),
+            (
+                "us-gov-east-1",
+                "example-bucket.s3.us-gov-east-1.amazonaws.com",
+            ),
+            (
+                "us-gov-west-1",
+                "example-bucket.s3.us-gov-west-1.amazonaws.com",
+            ),
+            (
+                "us-iso-east-1",
+                "example-bucket.s3.us-iso-east-1.c2s.ic.gov",
+            ),
+            (
+                "us-isob-east-1",
+                "example-bucket.s3.us-isob-east-1.sc2s.sgov.gov",
+            ),
+            (
+                "eu-isoe-west-1",
+                "example-bucket.s3.eu-isoe-west-1.cloud.adc-e.uk",
+            ),
+            (
+                "us-isof-south-1",
+                "example-bucket.s3.us-isof-south-1.csp.hci.ic.gov",
+            ),
+            (
+                "eusc-de-east-1",
+                "example-bucket.s3.eusc-de-east-1.amazonaws.eu",
+            ),
+        ] {
+            let outputs = s3_bucket_read_only_outputs("example-bucket", region);
+            assert_eq!(outputs.bucket_domain_name, expected, "{region}");
+            assert_eq!(outputs.bucket_regional_domain_name, expected, "{region}");
+        }
     }
 
     #[test]

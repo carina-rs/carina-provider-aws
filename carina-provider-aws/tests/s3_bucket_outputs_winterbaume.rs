@@ -193,10 +193,6 @@ async fn provider_with_namespace_recording_s3() -> (AwsProvider, Arc<NamespaceRe
     (provider_from_config(sdk_config), service)
 }
 
-async fn provider_with_staged_bucket(bucket: &str) -> (AwsProvider, Arc<RecordingS3Service>) {
-    provider_with_staged_bucket_in_region(bucket, BUCKET_REGION).await
-}
-
 async fn provider_with_staged_bucket_in_region(
     bucket: &str,
     bucket_region: &str,
@@ -717,7 +713,7 @@ async fn managed_and_data_source_reads_use_head_bucket_region_without_get_bucket
     );
 
     let bucket = "carina-bucket-head-region";
-    let (provider, service) = provider_with_staged_bucket(bucket).await;
+    let (provider, service) = provider_with_staged_bucket_in_region(bucket, BUCKET_REGION).await;
 
     let managed_resource: Resource = Resource::with_provider("aws", RESOURCE_TYPE, "managed", None);
     let managed_id = managed_resource.id;
@@ -776,7 +772,7 @@ const PARTITION_CASES: &[BucketPartitionCase] = &[
     BucketPartitionCase {
         region: "us-gov-west-1",
         arn: "arn:aws-us-gov:s3:::carina-partition-bucket",
-        domain: "carina-partition-bucket.s3.amazonaws.com",
+        domain: "carina-partition-bucket.s3.us-gov-west-1.amazonaws.com",
         regional_domain: "carina-partition-bucket.s3.us-gov-west-1.amazonaws.com",
         hosted_zone_id: Some("Z31GFT0UA1I2HV"),
     },
