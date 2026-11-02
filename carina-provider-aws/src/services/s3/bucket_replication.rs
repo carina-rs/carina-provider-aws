@@ -6,8 +6,8 @@ use aws_sdk_s3::types::{
 use carina_core::provider::{AppliedIdentifier, ReadOutcome};
 use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{
-    AbsoluteBindingAddress, ConcreteValue, NoPlaceholder, Resource, ResourceId, State, Value,
-    enum_attr_at_schema_path,
+    AbsoluteBindingAddress, ConcreteValue, NoPlaceholder, Resource, ResourceId, SnapshotState,
+    Value, enum_attr_at_schema_path,
 };
 use carina_core::schema::CompiledResourceSchema;
 use carina_plugin_sdk::{DesiredMap, DesiredScalar, DesiredValue, DesiredValueMut, DesiredView};
@@ -128,11 +128,11 @@ impl AwsProvider {
         &self,
         id: ResourceId,
         identifier: &AppliedIdentifier,
-        _from: &State,
-        to: Resource,
+        _from: &SnapshotState,
+        to: &crate::helpers::UpdateResource,
         schema: &CompiledResourceSchema,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
-        let input = S3BucketReplicationConfigurationUpdateInput::decode(&to)?;
+        let input = S3BucketReplicationConfigurationUpdateInput::decode(to)?;
         let crate::send_models_generated::S3BucketReplicationConfigurationUpdateParts {
             role,
             rules,

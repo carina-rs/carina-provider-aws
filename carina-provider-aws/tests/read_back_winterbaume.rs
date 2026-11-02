@@ -445,7 +445,22 @@ async fn exhausted_read_back_is_retried_by_next_apply() {
         .into_state();
     assert!(fresh.partial_read.is_none());
     let mut bindings = ResolvedBindings::default();
-    bindings.set("cert", fresh.attributes.clone(), BindingValueSource::Local);
+    bindings.set(
+        "cert",
+        fresh
+            .attributes
+            .iter()
+            .map(|(name, value)| {
+                (
+                    name.clone(),
+                    value
+                        .to_value_at(name)
+                        .expect("fresh read contains available values"),
+                )
+            })
+            .collect(),
+        BindingValueSource::Local,
+    );
     let next_observer = Observer::default();
     let next = execute(
         &provider,
@@ -454,7 +469,7 @@ async fn exhausted_read_back_is_retried_by_next_apply() {
             "domain_validation_options[0].resource_record.name",
         )],
         bindings,
-        HashMap::from([(id, Current::from_state(fresh))]),
+        HashMap::from([(id, Current::from_snapshot(fresh))]),
         &next_observer,
     )
     .await;
@@ -544,7 +559,7 @@ async fn native_update_read_back_uses_schema_budget_and_retains_host_deadline() 
             );
             let request = executor::prepare_update_request(
                 resource.clone(),
-                from,
+                from.to_snapshot(),
                 &["tags".to_string()],
                 &preparation,
             )

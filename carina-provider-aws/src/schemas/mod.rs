@@ -1030,14 +1030,14 @@ mod tests {
         )]);
         let mut current_states = HashMap::from([(
             id.clone(),
-            crate::read_model::test_existing_state(id.clone(), current_attributes),
+            crate::read_model::test_existing_state(id.clone(), current_attributes).to_snapshot(),
         )]);
         normalize_provider_states(&AwsNormalizer, &mut current_states)
             .await
             .expect("state normalization should succeed");
         let mut current_states = current_states
             .into_iter()
-            .map(|(id, state)| (id, Current::from_state(state)))
+            .map(|(id, state)| (id, Current::from_snapshot(state)))
             .collect();
         carina_core::value::canonicalize_states_with_schemas(&mut current_states, &registry);
         let current = match current_states.remove(&id).expect("current RecordSet state") {

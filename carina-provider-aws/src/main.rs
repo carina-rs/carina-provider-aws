@@ -40,7 +40,7 @@ use carina_core::schema::{
 use carina_provider_aws::{
     AwsCreateAttempt, AwsCreateOperation, AwsCreatePoll, AwsCreateResume, AwsCreateToken,
     AwsDeleteToken, AwsIssuedCreate, AwsNormalizer, AwsPollAttempt, AwsProvider, AwsResumeAttempt,
-    AwsResumedCreate, AwsUpdateToken, NonEmptyAttributeNames,
+    AwsResumedCreate, AwsUpdateToken, NonEmptyAttributeNames, UpdateResource,
 };
 
 #[cfg(any(target_arch = "wasm32", test))]
@@ -900,15 +900,21 @@ impl CarinaProvider for AwsProcessProvider {
     ) -> Result<SdkUpdateOutcome<Self::UpdateToken>, proto::ProviderError> {
         let core_id = protocol_convert::protocol_to_resource_id(id);
         let state_after_patch = request.state_after_patch();
-        let state = protocol_convert::protocol_persisted_state_to_core(&state_after_patch)
-            .map_err(|error| {
+        let state =
+            protocol_convert::protocol_persisted_state_to_core(&request.from).map_err(|error| {
                 Self::convert_error(
                     protocol_input_error("failed to decode read-back update state", error)
                         .for_resource(core_id.clone()),
                 )
             })?;
-        let mut resource = CoreResource::from_id(core_id.clone());
-        resource.attributes = state.attributes.into_iter().collect();
+        let patch =
+            protocol_convert::protocol_update_patch_to_core(&request.patch).map_err(|error| {
+                Self::convert_error(
+                    protocol_input_error("failed to decode read-back update patch", error)
+                        .for_resource(core_id.clone()),
+                )
+            })?;
+        let resource = UpdateResource::new(&state, &patch);
         let result = self.runtime.block_on(self.provider().poll_update_step(
             &resource,
             identifier,

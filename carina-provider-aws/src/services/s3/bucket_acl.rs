@@ -2,7 +2,8 @@ use aws_sdk_s3::types::{BucketCannedAcl, Grant, Permission, Type as GranteeType}
 use carina_core::provider::ProviderResult;
 use carina_core::provider::{AppliedIdentifier, ReadOutcome};
 use carina_core::resource::{
-    AbsoluteBindingAddress, ConcreteValue, NoPlaceholder, Resource, ResourceId, State, Value,
+    AbsoluteBindingAddress, ConcreteValue, NoPlaceholder, Resource, ResourceId, SnapshotState,
+    Value,
 };
 use carina_core::schema::CompiledResourceSchema;
 
@@ -176,12 +177,12 @@ impl AwsProvider {
         &self,
         id: ResourceId,
         identifier: &AppliedIdentifier,
-        _from: &State,
-        to: Resource,
+        _from: &SnapshotState,
+        to: &crate::helpers::UpdateResource,
         _schema: &CompiledResourceSchema,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
         let crate::send_models_generated::S3BucketAclUpdateParts { acl } =
-            S3BucketAclUpdateInput::decode(&to, _schema)?.into_parts();
+            S3BucketAclUpdateInput::decode(to, _schema)?.into_parts();
         let acl = acl.into_inner();
         self.put_s3_bucket_acl(&id, identifier, acl).await
     }

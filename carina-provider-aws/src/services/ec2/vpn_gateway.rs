@@ -1,6 +1,8 @@
 use carina_core::provider::ProviderResult;
 use carina_core::provider::{AppliedIdentifier, ReadOutcome};
-use carina_core::resource::{AbsoluteBindingAddress, NoPlaceholder, Resource, ResourceId, State};
+use carina_core::resource::{
+    AbsoluteBindingAddress, NoPlaceholder, Resource, ResourceId, SnapshotState,
+};
 use carina_core::schema::CompiledResourceSchema;
 
 use crate::AwsProvider;
@@ -124,11 +126,11 @@ impl AwsProvider {
         &self,
         id: ResourceId,
         identifier: &AppliedIdentifier,
-        from: &State,
-        to: Resource,
+        from: &SnapshotState,
+        to: &crate::helpers::UpdateResource,
         _schema: &CompiledResourceSchema,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
-        let input = Ec2VpnGatewayUpdateInput::decode(&to)?;
+        let input = Ec2VpnGatewayUpdateInput::decode(to)?;
         let crate::send_models_generated::Ec2VpnGatewayUpdateParts { tags } = input.into_parts();
         let tags = tags.into_inner();
         let tags = crate::send_model::optional_tags_value(tags);

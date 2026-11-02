@@ -104,7 +104,7 @@ fn scan_page_for_record<'a>(
     PageScan::KeepPaging
 }
 
-fn extract_string(value: &Value) -> Option<&str> {
+fn extract_string(value: &Value<impl carina_core::resource::ValueKind>) -> Option<&str> {
     if let Value::Concrete(ConcreteValue::String(s)) = value {
         Some(s.expose_plaintext())
     } else {
@@ -128,7 +128,7 @@ fn build_resource_records(
 }
 
 fn build_alias_target_from_map(
-    alias: &IndexMap<String, Value>,
+    alias: &IndexMap<String, Value<impl carina_core::resource::ValueKind>>,
     id: &ResourceId,
 ) -> ProviderResult<AliasTarget> {
     let dns_name = alias
@@ -413,10 +413,10 @@ impl AwsProvider {
         &self,
         id: ResourceId,
         identifier: &AppliedIdentifier,
-        to: Resource,
+        to: &crate::helpers::UpdateResource,
         _schema: &CompiledResourceSchema,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
-        let input = Route53RecordSetUpdateInput::decode(&to)?;
+        let input = Route53RecordSetUpdateInput::decode(to)?;
         let crate::send_models_generated::Route53RecordSetUpdateParts {
             alias_target,
             resource_records,

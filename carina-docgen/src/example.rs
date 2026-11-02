@@ -4,6 +4,7 @@ use std::ops::Range;
 use std::path::Path;
 
 use anyhow::{Context, Result};
+use carina_core::EnvironmentSnapshot;
 use carina_core::parser::{
     ArgumentParameter, AttributeParameter, BackendConfig, DeferredForBody, DeferredForTarget,
     FnParam, ModuleCall, ParseWarning, ParsedDeferredForExpression, ParsedFile, ProviderConfig,
@@ -150,7 +151,12 @@ pub fn check(
     kind: ExampleKind,
 ) -> Result<DocExample> {
     let expected = ExpectedDeclaration::new(provider_prefix, dsl_name, kind);
-    let authored = parse_file(source, path, &ProviderContext::default()).with_context(|| {
+    let authored = parse_file(
+        source,
+        path,
+        &ProviderContext::new(EnvironmentSnapshot::new([])),
+    )
+    .with_context(|| {
         format!(
             "Example {} must {}",
             path.display(),
@@ -183,7 +189,12 @@ fn check_rendered(
         );
     }
 
-    let parsed = parse_file(&rendered, path, &ProviderContext::default()).with_context(|| {
+    let parsed = parse_file(
+        &rendered,
+        path,
+        &ProviderContext::new(EnvironmentSnapshot::new([])),
+    )
+    .with_context(|| {
         format!(
             "Rendered example from {} must {}",
             path.display(),
@@ -1728,7 +1739,7 @@ mod tests {
         let authored = parse_file(
             "let x = \"original\"\naws.ec2.Vpc { description = x }\n",
             path,
-            &ProviderContext::default(),
+            &ProviderContext::new(EnvironmentSnapshot::new([])),
         )
         .expect("authored source parses");
         let error = check_rendered(
@@ -1792,7 +1803,7 @@ mod tests {
                 "}\n",
             ),
             path,
-            &ProviderContext::default(),
+            &ProviderContext::new(EnvironmentSnapshot::new([])),
         )
         .expect("deferred structural if parses");
         assert_eq!(parsed.deferred_module_ifs.len(), 1);
@@ -1810,8 +1821,12 @@ mod tests {
     #[test]
     fn deferred_structural_if_length_difference_is_a_semantic_mismatch() {
         let path = Path::new("deferred-structural-if-mismatch.crn");
-        let without_deferred_if =
-            parse_file("", path, &ProviderContext::default()).expect("empty file parses");
+        let without_deferred_if = parse_file(
+            "",
+            path,
+            &ProviderContext::new(EnvironmentSnapshot::new([])),
+        )
+        .expect("empty file parses");
         let with_deferred_if = parse_file(
             concat!(
                 "arguments { enabled: Bool }\n",
@@ -1820,7 +1835,7 @@ mod tests {
                 "}\n",
             ),
             path,
-            &ProviderContext::default(),
+            &ProviderContext::new(EnvironmentSnapshot::new([])),
         )
         .expect("deferred structural if parses");
 
@@ -1845,13 +1860,13 @@ mod tests {
         let authored = parse_file(
             source,
             Path::new("authored-deferred-for.crn"),
-            &ProviderContext::default(),
+            &ProviderContext::new(EnvironmentSnapshot::new([])),
         )
         .expect("authored deferred for parses");
         let rendered = parse_file(
             source,
             Path::new("rendered-deferred-for.crn"),
-            &ProviderContext::default(),
+            &ProviderContext::new(EnvironmentSnapshot::new([])),
         )
         .expect("rendered deferred for parses");
         let [authored_deferred] = authored.parsed_deferred_for_expressions() else {

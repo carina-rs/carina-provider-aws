@@ -16,7 +16,9 @@ use carina_core::provider::{
     AppliedIdentifier, AppliedState, CreateFailure, CreateRequest, DeleteRequest, Observation,
     PatchOp, ProviderDirectiveSchema, ProviderError, ReadOutcome, Sent, UpdatePatch,
 };
-use carina_core::resource::{ConcreteValue, Directives, Resource, ResourceId, State, Value};
+use carina_core::resource::{
+    ConcreteValue, Directives, Resource, ResourceId, SnapshotState, Value,
+};
 use carina_plugin_sdk::PhasedToken;
 use carina_provider_aws::{
     AwsCreateAttempt, AwsCreateOperation, AwsCreatePoll, AwsCreateResume, AwsCreateToken,
@@ -1272,7 +1274,7 @@ async fn create_state_for_test(
     provider: &AwsProvider,
     id: &ResourceId,
     request: CreateRequest,
-) -> Result<State, CreateFailure> {
+) -> Result<SnapshotState, CreateFailure> {
     let accepted = carina_core::executor::AcceptedRequest::from_create_request(&request);
     let (create, _cancellation) = carina_core::executor::dispatch_create(provider, id, request);
     create
@@ -3064,7 +3066,7 @@ async fn permanent_read_back_error_finishes_partial_on_resume() {
 
 #[tokio::test]
 async fn permanent_update_read_back_error_finishes_partial_on_initial_step_and_poll() {
-    for poll in [false, true] {
+    for (poll, secret) in [(false, false), (true, false), (false, true), (true, true)] {
         let reads = if poll {
             vec![
                 AcmDescribeResult::Incomplete,
@@ -3076,10 +3078,20 @@ async fn permanent_update_read_back_error_finishes_partial_on_initial_step_and_p
         let (provider, service) = scripted_acm(&reads).await;
         let mut resource = acm_certificate_resource();
         resource.set_attr("validation_method", string("DNS"));
-        let from = carina_provider_aws::test_existing_state(
+        let mut from = carina_provider_aws::test_existing_state(
             resource.id.clone(),
             resource.resolved_attributes(),
-        );
+        )
+        .to_snapshot();
+        if secret {
+            from.attributes.insert(
+                "domain_name".into(),
+                carina_core::value::redact_secrets_in_value(&Value::Deferred(
+                    carina_core::resource::DeferredValue::Secret(Box::new(string("example.com"))),
+                ))
+                .expect("persisted secret domain name"),
+            );
+        }
         let tags = Value::Concrete(ConcreteValue::Map(IndexMap::from([(
             "Env".to_string(),
             string("test"),
@@ -3102,7 +3114,7 @@ async fn permanent_update_read_back_error_finishes_partial_on_initial_step_and_p
             resource.set_attr("tags", tags.clone());
             provider
                 .poll_update_step(
-                    &resource,
+                    &carina_provider_aws::UpdateResource::new(&from, &patch),
                     &identifier,
                     pending,
                     PollRequest {
@@ -3130,10 +3142,11 @@ async fn permanent_update_read_back_error_finishes_partial_on_initial_step_and_p
             panic!("expected partial update")
         };
         assert_eq!(state.identifier(), &identifier);
-        assert_eq!(state.attributes().get("tags"), Some(&tags));
+        assert_eq!(state.attributes().get("tags"), Some(&tags.to_snapshot()));
         assert_eq!(
             state.attributes().get("domain_name"),
-            Some(&string("example.com"))
+            from.attributes.get("domain_name"),
+            "partial updates must retain unused historical snapshots, including secret hashes"
         );
         assert_eq!(
             service.describe_calls.load(Ordering::Relaxed),
@@ -3382,9 +3395,18 @@ async fn update_read_back_recovers_or_finishes_partial_without_replaying_mutatio
             let (provider, service) = scripted_acm(&[first, final_read]).await;
             let mut resource = acm_certificate_resource();
             resource.set_attr("validation_method", string("DNS"));
-            let from = carina_provider_aws::test_existing_state(
+            let mut from = carina_provider_aws::test_existing_state(
                 resource.id.clone(),
                 resource.resolved_attributes(),
+            )
+            .to_snapshot();
+            // A create-only secret is historical throughout mutation and polling.
+            from.attributes.insert(
+                "domain_name".into(),
+                carina_core::value::redact_secrets_in_value(&Value::Deferred(
+                    carina_core::resource::DeferredValue::Secret(Box::new(string("example.com"))),
+                ))
+                .expect("persisted secret domain name"),
             );
             let tags = Value::Concrete(ConcreteValue::Map(IndexMap::from([(
                 "Env".to_string(),
@@ -3408,7 +3430,7 @@ async fn update_read_back_recovers_or_finishes_partial_without_replaying_mutatio
             assert_eq!(service.update_calls.load(Ordering::Relaxed), 1);
             let step = provider
                 .poll_update_step(
-                    &resource,
+                    &carina_provider_aws::UpdateResource::new(&from, &patch),
                     &identifier,
                     pending,
                     PollRequest {
@@ -3523,7 +3545,7 @@ async fn update_read_back_continue_polls_only_reads() {
         assert_eq!(phase, carina_provider_protocol::PendingPhase::ReadBack);
         step = provider
             .poll_update_step(
-                &resource,
+                &carina_provider_aws::UpdateResource::new(&from.to_snapshot(), &patch),
                 &identifier,
                 pending,
                 PollRequest {
@@ -3611,7 +3633,7 @@ async fn failed_certificate_tag_update_succeeds_initial_and_poll() {
             OperationStep::Pending { pending, .. } => {
                 let OperationStep::Done(done) = provider
                     .poll_update_step(
-                        &resource,
+                        &carina_provider_aws::UpdateResource::new(&from.to_snapshot(), &patch),
                         &identifier,
                         pending,
                         PollRequest {
@@ -3892,7 +3914,7 @@ async fn acm_failed_update_read_back_resumes_without_reapplying_tags() {
     let (fresh, service) = scripted_acm(&[AcmDescribeResult::Failed]).await;
     let OperationStep::Done(done) = fresh
         .poll_update_step(
-            &resource,
+            &carina_provider_aws::UpdateResource::new(&from.to_snapshot(), &patch),
             &identifier,
             serde_json::from_str(&token).unwrap(),
             PollRequest {

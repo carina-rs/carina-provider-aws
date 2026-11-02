@@ -34,6 +34,8 @@ mod tests;
 pub use aws_operation::ClientToken;
 pub use create_resource::AwsCreateResource;
 pub use factory::AwsProviderFactory;
+#[doc(hidden)]
+pub use helpers::UpdateResource;
 pub use normalizer::AwsNormalizer;
 #[doc(hidden)]
 pub use provider::{
@@ -153,7 +155,7 @@ pub fn test_comparison_router() -> carina_core::provider::ProviderRouter {
 #[track_caller]
 pub fn test_diff(
     desired: &carina_core::resource::ResolvedResource,
-    current: &carina_core::resource::State,
+    current: &carina_core::resource::State<impl carina_core::resource::StateValueLeaf>,
     saved: &carina_core::provider::LiftedSavedAttrs,
     previous_explicit: Option<&carina_core::explicit::ExplicitFields>,
     comparison: carina_core::provider::ResolvedComparison<'_>,
@@ -166,7 +168,7 @@ pub fn test_diff(
             |context| {
                 carina_core::differ::diff(
                     desired,
-                    current,
+                    &current.to_snapshot(),
                     saved,
                     previous_explicit,
                     comparison,

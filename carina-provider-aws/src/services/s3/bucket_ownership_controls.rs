@@ -2,7 +2,8 @@ use aws_sdk_s3::types::{ObjectOwnership, OwnershipControls, OwnershipControlsRul
 use carina_core::provider::{AppliedIdentifier, ReadOutcome};
 use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{
-    AbsoluteBindingAddress, ConcreteValue, NoPlaceholder, Resource, ResourceId, State, Value,
+    AbsoluteBindingAddress, ConcreteValue, NoPlaceholder, Resource, ResourceId, SnapshotState,
+    Value,
 };
 use carina_core::schema::CompiledResourceSchema;
 
@@ -102,12 +103,12 @@ impl AwsProvider {
         &self,
         id: ResourceId,
         identifier: &AppliedIdentifier,
-        _from: &State,
-        to: Resource,
+        _from: &SnapshotState,
+        to: &crate::helpers::UpdateResource,
         _schema: &CompiledResourceSchema,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
         let crate::send_models_generated::S3BucketOwnershipControlsUpdateParts { object_ownership } =
-            S3BucketOwnershipControlsUpdateInput::decode(&to, _schema)?.into_parts();
+            S3BucketOwnershipControlsUpdateInput::decode(to, _schema)?.into_parts();
         let object_ownership = object_ownership.into_inner();
         self.put_s3_bucket_ownership_controls(&id, identifier, object_ownership)
             .await

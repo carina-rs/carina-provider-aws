@@ -118,9 +118,9 @@ impl AwsProvider {
         &self,
         id: ResourceId,
         identifier: &AppliedIdentifier,
-        to: Resource,
+        to: &crate::helpers::UpdateResource,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
-        let input = Ec2SubnetRouteTableAssociationUpdateInput::decode(&to)?;
+        let input = Ec2SubnetRouteTableAssociationUpdateInput::decode(to)?;
         let crate::send_models_generated::Ec2SubnetRouteTableAssociationUpdateParts =
             input.into_parts();
         Ok(self

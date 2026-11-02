@@ -124,9 +124,9 @@ impl AwsProvider {
         &self,
         id: ResourceId,
         identifier: &AppliedIdentifier,
-        to: Resource,
+        to: &crate::helpers::UpdateResource,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
-        let input = Ec2RouteUpdateInput::decode(&to)?;
+        let input = Ec2RouteUpdateInput::decode(to)?;
         let crate::send_models_generated::Ec2RouteUpdateParts {
             gateway_id,
             nat_gateway_id,

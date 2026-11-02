@@ -14,7 +14,8 @@ use std::collections::HashMap;
 use carina_core::provider::{AppliedIdentifier, ReadOutcome};
 use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{
-    AbsoluteBindingAddress, ConcreteValue, NoPlaceholder, Resource, ResourceId, State, Value,
+    AbsoluteBindingAddress, ConcreteValue, NoPlaceholder, Resource, ResourceId, SnapshotState,
+    SnapshotValue, Value,
 };
 use carina_core::schema::CompiledResourceSchema;
 use carina_plugin_sdk::{DesiredInputs, DesiredScalar, DesiredValue, NativeDesiredNormalization};
@@ -311,36 +312,73 @@ pub(crate) fn validate_sqs_queue_inputs(inputs: &DesiredInputs<'_>) -> ProviderR
         return Ok(());
     }
 
+    validate_sqs_queue_attributes(inputs.id(), |name| {
+        Ok(inputs.attribute(name).map(QueueValidationValue::from))
+    })
+}
+
+/// The distinctions cross-field validation needs, without owning input values.
+enum QueueValidationValue {
+    Bool(bool),
+    Scalar,
+    Other,
+}
+
+impl From<&DesiredValue> for QueueValidationValue {
+    fn from(value: &DesiredValue) -> Self {
+        match value {
+            DesiredValue::Known(DesiredScalar::Bool(value)) => Self::Bool(*value),
+            DesiredValue::Known(_) => Self::Scalar,
+            _ => Self::Other,
+        }
+    }
+}
+
+fn validate_sqs_queue_update_inputs(to: &crate::helpers::UpdateResource) -> ProviderResult<()> {
+    validate_sqs_queue_attributes(&to.id, |name| {
+        let mut resource = to.materialize(&[name])?;
+        let desired = NativeDesiredNormalization::from_core(&mut resource)?;
+        Ok(desired
+            .inputs()
+            .attribute(name)
+            .map(QueueValidationValue::from))
+    })
+}
+
+fn validate_sqs_queue_attributes(
+    id: &ResourceId,
+    mut attribute: impl FnMut(&str) -> ProviderResult<Option<QueueValidationValue>>,
+) -> ProviderResult<()> {
     if matches!(
-        inputs.attribute("kms_data_key_reuse_period_seconds"),
-        Some(DesiredValue::Known(_))
-    ) && inputs.attribute("kms_master_key_id").is_none()
+        attribute("kms_data_key_reuse_period_seconds")?,
+        Some(QueueValidationValue::Bool(_) | QueueValidationValue::Scalar)
+    ) && attribute("kms_master_key_id")?.is_none()
     {
         return Err(ProviderError::invalid_input(
             "sqs.Queue attribute kms_data_key_reuse_period_seconds requires kms_master_key_id",
         )
-        .for_resource(inputs.id().clone()));
+        .for_resource(id.clone()));
     }
 
     let fifo_is_definitively_standard = matches!(
-        inputs.attribute("fifo_queue"),
-        None | Some(DesiredValue::Known(DesiredScalar::Bool(false)))
+        attribute("fifo_queue")?,
+        None | Some(QueueValidationValue::Bool(false))
     );
     if fifo_is_definitively_standard {
         let content_dedup_enabled = matches!(
-            inputs.attribute("content_based_deduplication"),
-            Some(DesiredValue::Known(DesiredScalar::Bool(true)))
+            attribute("content_based_deduplication")?,
+            Some(QueueValidationValue::Bool(true))
         );
         let unsupported = if content_dedup_enabled {
             Some("content_based_deduplication")
         } else if matches!(
-            inputs.attribute("deduplication_scope"),
-            Some(DesiredValue::Known(_))
+            attribute("deduplication_scope")?,
+            Some(QueueValidationValue::Bool(_) | QueueValidationValue::Scalar)
         ) {
             Some("deduplication_scope")
         } else if matches!(
-            inputs.attribute("fifo_throughput_limit"),
-            Some(DesiredValue::Known(_))
+            attribute("fifo_throughput_limit")?,
+            Some(QueueValidationValue::Bool(_) | QueueValidationValue::Scalar)
         ) {
             Some("fifo_throughput_limit")
         } else {
@@ -350,7 +388,7 @@ pub(crate) fn validate_sqs_queue_inputs(inputs: &DesiredInputs<'_>) -> ProviderR
             return Err(ProviderError::invalid_input(format!(
                 "sqs.Queue attribute {attribute} requires fifo_queue = true"
             ))
-            .for_resource(inputs.id().clone()));
+            .for_resource(id.clone()));
         }
     }
 
@@ -830,16 +868,13 @@ impl AwsProvider {
         &self,
         id: ResourceId,
         identifier: &AppliedIdentifier,
-        from: &State,
-        mut to: Resource,
+        from: &SnapshotState,
+        to: &crate::helpers::UpdateResource,
         _schema: &CompiledResourceSchema,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
         // Recheck decisions that were deferred until apply-time resolution.
-        {
-            let desired = NativeDesiredNormalization::from_core(&mut to)?;
-            validate_sqs_queue_inputs(&desired.inputs())?;
-        }
-        let input = SqsQueueUpdateInput::decode(&to)?;
+        validate_sqs_queue_update_inputs(to)?;
+        let input = SqsQueueUpdateInput::decode(to)?;
         let crate::send_models_generated::SqsQueueUpdateParts {
             content_based_deduplication,
             delay_seconds,
@@ -915,7 +950,7 @@ impl AwsProvider {
             }
             let desired = desired.get(attr_name).and_then(Option::as_ref);
             let current = from.attributes.get(*attr_name);
-            if desired == current {
+            if desired.map(Value::to_snapshot).as_ref() == current {
                 continue;
             }
             if let Some(value) = desired
@@ -973,7 +1008,7 @@ impl AwsProvider {
         id: &ResourceId,
         queue_url: &str,
         desired: Option<&Value>,
-        current: Option<&HashMap<String, Value>>,
+        current: Option<&HashMap<String, SnapshotValue>>,
     ) -> ProviderResult<()> {
         let desired_tags = match desired {
             Some(Value::Concrete(ConcreteValue::Map(m))) => m.clone(),
@@ -1049,6 +1084,8 @@ fn tags_map(tags: Option<&Value>) -> Option<HashMap<String, String>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use carina_core::provider::UpdatePatch;
+    use carina_core::resource::DeferredValue;
 
     fn queue_resource() -> Resource {
         Resource::with_provider("aws", "sqs.Queue", "test", None)
@@ -1056,6 +1093,108 @@ mod tests {
 
     fn plan_time_unknown() -> Value {
         Value::resource_ref("upstream", "fifo_queue", vec![]).resolve_root_for_test()
+    }
+
+    fn secret_snapshot() -> SnapshotValue {
+        carina_core::value::redact_secrets_in_value(&Value::Deferred(DeferredValue::Secret(
+            Box::new(Value::Concrete(ConcreteValue::String("historical".into()))),
+        )))
+        .expect("secret fixture should redact")
+    }
+
+    #[test]
+    fn fifo_update_validation_leaves_skipped_inputs_historical() {
+        let mut from = crate::test_existing_state(
+            queue_resource().id,
+            HashMap::from([(
+                "fifo_queue".into(),
+                Value::Concrete(ConcreteValue::Bool(true)),
+            )]),
+        )
+        .to_snapshot();
+        for name in [
+            "kms_master_key_id",
+            "content_based_deduplication",
+            "deduplication_scope",
+            "fifo_throughput_limit",
+        ] {
+            from.attributes.insert(name.into(), secret_snapshot());
+        }
+        let to = crate::helpers::UpdateResource::new(&from, &UpdatePatch { ops: vec![] });
+
+        validate_sqs_queue_update_inputs(&to).expect("skipped validation must not consume secrets");
+        let materialized = to.materialized_attributes();
+        assert_eq!(materialized.len(), 1);
+        assert!(materialized.contains_key("fifo_queue"));
+    }
+
+    #[test]
+    fn update_validation_stops_at_the_first_fifo_conflict() {
+        for (name, value) in [
+            (
+                "content_based_deduplication",
+                Value::Concrete(ConcreteValue::Bool(true)),
+            ),
+            (
+                "deduplication_scope",
+                Value::Concrete(ConcreteValue::String("messageGroup".into())),
+            ),
+        ] {
+            let mut from = crate::test_existing_state(
+                queue_resource().id,
+                HashMap::from([
+                    (
+                        "fifo_queue".into(),
+                        Value::Concrete(ConcreteValue::Bool(false)),
+                    ),
+                    (name.into(), value),
+                ]),
+            )
+            .to_snapshot();
+            from.attributes
+                .entry("deduplication_scope".into())
+                .or_insert_with(secret_snapshot);
+            from.attributes
+                .insert("fifo_throughput_limit".into(), secret_snapshot());
+            let to = crate::helpers::UpdateResource::new(&from, &UpdatePatch { ops: vec![] });
+
+            let error = validate_sqs_queue_update_inputs(&to)
+                .expect_err("a standard queue must reject the first known FIFO-only input");
+            assert!(
+                error
+                    .to_string()
+                    .contains(&format!("{name} requires fifo_queue = true"))
+            );
+            assert!(error.detail().cause().is_none());
+            assert!(
+                !to.materialized_attributes()
+                    .contains_key("fifo_throughput_limit")
+            );
+        }
+    }
+
+    #[test]
+    fn update_validation_keeps_consumed_secret_errors_typed() {
+        let mut from = crate::test_existing_state(
+            queue_resource().id,
+            HashMap::from([(
+                "fifo_queue".into(),
+                Value::Concrete(ConcreteValue::Bool(false)),
+            )]),
+        )
+        .to_snapshot();
+        from.attributes
+            .insert("deduplication_scope".into(), secret_snapshot());
+        let to = crate::helpers::UpdateResource::new(&from, &UpdatePatch { ops: vec![] });
+
+        let error = validate_sqs_queue_update_inputs(&to)
+            .expect_err("validation of a standard queue consumes its deduplication scope");
+        let cause = error
+            .detail()
+            .cause()
+            .and_then(|cause| cause.downcast_ref::<carina_core::resource::UnavailableSecretError>())
+            .expect("consumed historical secrets must keep their typed error");
+        assert_eq!(cause.path(), "aws.sqs.Queue.test.deduplication_scope");
     }
 
     #[test]

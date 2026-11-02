@@ -2,6 +2,8 @@
 //!
 //! These reduce boilerplate across EC2 (and other) service implementations.
 
+use std::collections::HashMap;
+use std::sync::OnceLock;
 use std::time::Duration;
 
 use aws_sdk_ec2::types::{ResourceType, Tag, TagSpecification};
@@ -17,7 +19,7 @@ use carina_core::provider::{
 };
 use carina_core::resource::{
     AbsoluteBindingAddress, ConcreteValue, EnumAttrError, NoPlaceholder, Resource, ResourceId,
-    State, Value,
+    SnapshotState, SnapshotValue, Value,
 };
 use carina_core::schema::CompiledResourceSchema;
 
@@ -561,47 +563,124 @@ where
     }
 }
 
-/// Reconstruct a `Resource` from `from` state plus an `UpdatePatch`.
+/// A patched update view that materializes historical values only when read.
 ///
-/// The aws provider's existing per-resource `update_*` methods take
-/// `to: Resource` (a full desired state). The Level 3 `Provider::update`
-/// signature replaces `to` with `(from: State, patch: UpdatePatch)`, so
-/// this adapter rebuilds an equivalent desired `Resource` by applying
-/// each [`PatchOp`] on top of `from`'s attributes:
-///
-/// - `Add` / `Replace` set the attribute to the patch value.
-/// - `Reassert` sets an unchanged desired write-only value that core re-sends
-///   alongside a user change.
-/// - `Remove` deletes the attribute from the resulting resource.
-///
-/// This is a faithful translation: the result mirrors what the user's
-/// desired state would look like if it had been computed full-replace
-/// style. Per-resource update methods continue to write the same fields
-/// they always did.
-///
-/// The returned `Resource` carries `from`'s `ResourceId` and an empty
-/// `Directives` (directives are delete-only and are not consulted on
-/// update paths in this provider).
-pub fn apply_patch_to_state(from: &State, patch: &UpdatePatch) -> Resource {
-    let mut resource = Resource::from_id(from.id.clone());
-    resource.attributes = from
-        .attributes
-        .iter()
-        .map(|(k, v)| (k.clone(), v.clone()))
-        .collect();
-    for op in &patch.ops {
-        match op {
-            PatchOp::Add { key, value }
-            | PatchOp::Replace { key, value }
-            | PatchOp::Reassert { key, value } => {
-                resource.attributes.insert(key.clone(), value.clone());
-            }
-            PatchOp::Remove { key } => {
-                resource.attributes.shift_remove(key);
-            }
+/// Patch values are already live. Untouched snapshots, including hashes of
+/// create-only secrets, stay historical unless the update consumes them.
+#[derive(Debug)]
+pub struct UpdateResource {
+    pub(crate) id: ResourceId,
+    attributes: HashMap<String, UpdateAttribute>,
+}
+
+#[derive(Debug)]
+struct UpdateAttribute {
+    snapshot: SnapshotValue,
+    live: OnceLock<Value>,
+}
+
+impl UpdateAttribute {
+    fn live(value: Value) -> Self {
+        Self {
+            snapshot: value.to_snapshot(),
+            live: OnceLock::from(value),
         }
     }
-    resource
+}
+
+impl UpdateResource {
+    pub fn new(from: &SnapshotState, patch: &UpdatePatch) -> Self {
+        let mut attributes: HashMap<_, _> = from
+            .attributes
+            .iter()
+            .map(|(key, value)| {
+                (
+                    key.clone(),
+                    UpdateAttribute {
+                        snapshot: value.clone(),
+                        live: OnceLock::new(),
+                    },
+                )
+            })
+            .collect();
+        for op in &patch.ops {
+            match op {
+                PatchOp::Add { key, value }
+                | PatchOp::Replace { key, value }
+                | PatchOp::Reassert { key, value } => {
+                    attributes.insert(key.clone(), UpdateAttribute::live(value.clone()));
+                }
+                PatchOp::Remove { key } => {
+                    attributes.remove(key);
+                }
+            }
+        }
+        Self {
+            id: from.id.clone(),
+            attributes,
+        }
+    }
+
+    pub(crate) fn get_attr(&self, name: &str) -> ProviderResult<Option<&Value>> {
+        let Some(attribute) = self.attributes.get(name) else {
+            return Ok(None);
+        };
+        if let Some(value) = attribute.live.get() {
+            return Ok(Some(value));
+        }
+        let value = attribute
+            .snapshot
+            .to_value_at(format!("{}.{}", self.id, name))
+            .map_err(|error| {
+                ProviderError::invalid_input_caused_by(
+                    "update attribute contains an unavailable historical value",
+                    error,
+                )
+                .for_resource(self.id.clone())
+            })?;
+        Ok(Some(attribute.live.get_or_init(|| value)))
+    }
+
+    /// Values provided by the patch or explicitly consumed by the update.
+    pub(crate) fn materialized_attributes(&self) -> HashMap<String, Value> {
+        self.attributes
+            .iter()
+            .filter_map(|(key, attribute)| {
+                attribute
+                    .live
+                    .get()
+                    .map(|value| (key.clone(), value.clone()))
+            })
+            .collect()
+    }
+
+    /// Preserve historical inputs without making them live. Outputs belong to read-back.
+    pub(crate) fn snapshot_input_attributes(
+        &self,
+        schema: &CompiledResourceSchema,
+    ) -> HashMap<String, SnapshotValue> {
+        self.attributes
+            .iter()
+            .filter(|(key, _)| {
+                schema
+                    .attributes()
+                    .get(*key)
+                    .is_some_and(|attribute| !attribute.is_read_only())
+            })
+            .map(|(key, attribute)| (key.clone(), attribute.snapshot.clone()))
+            .collect()
+    }
+
+    /// Materialize the inputs read by an existing cross-field validator.
+    pub(crate) fn materialize(&self, names: &[&str]) -> ProviderResult<Resource> {
+        let mut resource = Resource::from_id(self.id.clone());
+        for name in names {
+            if let Some(value) = self.get_attr(name)? {
+                resource.set_attr(*name, value.clone());
+            }
+        }
+        Ok(resource)
+    }
 }
 
 #[cfg(test)]
@@ -683,7 +762,77 @@ mod tests {
     }
 
     #[test]
-    fn test_apply_patch_to_state_add_replace_reassert_remove() {
+    fn update_patch_materializes_only_accessed_historical_values() {
+        use carina_core::resource::DeferredValue;
+        use std::collections::HashMap;
+
+        let id = ResourceId::with_provider_identity("aws", "ec2.Vpc", "secret", None);
+        let cidr = Value::Concrete(ConcreteValue::String("10.0.0.0/16".into()));
+        let mut from = crate::read_model::test_existing_state(
+            id,
+            HashMap::from([("cidr_block".into(), cidr.clone())]),
+        )
+        .to_snapshot();
+        from.attributes.insert(
+            "token".into(),
+            carina_core::value::redact_secrets_in_value(&Value::Deferred(DeferredValue::Secret(
+                Box::new(Value::Concrete(ConcreteValue::String("old-secret".into()))),
+            )))
+            .expect("secret fixture should redact"),
+        );
+        let resource = UpdateResource::new(&from, &UpdatePatch { ops: vec![] });
+        assert!(resource.materialized_attributes().is_empty());
+        let error = resource
+            .get_attr("token")
+            .expect_err("a consumed historical secret requires plaintext");
+        assert!(matches!(&error, ProviderError::InvalidInput(_)));
+        assert!(error.to_string().contains("token"), "{error}");
+        let cause = error
+            .detail()
+            .cause()
+            .and_then(|cause| cause.downcast_ref::<carina_core::resource::UnavailableSecretError>())
+            .expect("the unavailable snapshot error must remain typed");
+        assert_eq!(cause.path(), "aws.ec2.Vpc.secret.token");
+        assert!(resource.materialized_attributes().is_empty());
+        assert_eq!(resource.get_attr("cidr_block").unwrap(), Some(&cidr));
+        assert_eq!(resource.materialized_attributes().len(), 1);
+
+        let replacement = Value::Concrete(ConcreteValue::String("new-secret".into()));
+        for op in [
+            PatchOp::Add {
+                key: "token".into(),
+                value: replacement.clone(),
+            },
+            PatchOp::Replace {
+                key: "token".into(),
+                value: replacement.clone(),
+            },
+            PatchOp::Reassert {
+                key: "token".into(),
+                value: replacement.clone(),
+            },
+        ] {
+            let resource = UpdateResource::new(&from, &UpdatePatch { ops: vec![op] });
+            assert_eq!(resource.materialized_attributes().len(), 1);
+            assert_eq!(
+                resource.materialized_attributes().get("token"),
+                Some(&replacement)
+            );
+            assert_eq!(resource.get_attr("token").unwrap(), Some(&replacement));
+        }
+        let resource = UpdateResource::new(
+            &from,
+            &UpdatePatch {
+                ops: vec![PatchOp::Remove {
+                    key: "token".into(),
+                }],
+            },
+        );
+        assert!(resource.get_attr("token").unwrap().is_none());
+    }
+
+    #[test]
+    fn update_resource_applies_add_replace_reassert_remove() {
         use carina_core::provider::{PatchOp, UpdatePatch};
         use std::collections::HashMap;
 
@@ -742,23 +891,23 @@ mod tests {
             ],
         };
 
-        let to = apply_patch_to_state(&from, &patch);
+        let to = UpdateResource::new(&from.to_snapshot(), &patch);
 
         assert!(
-            !to.attributes.contains_key("cidr_block"),
+            to.get_attr("cidr_block").unwrap().is_none(),
             "Remove op should drop the key"
         );
         assert_eq!(
-            to.attributes.get("instance_tenancy"),
+            to.get_attr("instance_tenancy").unwrap(),
             Some(&Value::Concrete(ConcreteValue::String("default".into()))),
             "Add op should insert the new value"
         );
         assert_eq!(
-            to.attributes.get("write_only_token"),
+            to.get_attr("write_only_token").unwrap(),
             Some(&Value::Concrete(ConcreteValue::String("secret".into()))),
             "Reassert op should insert the sent write-only value"
         );
-        match to.attributes.get("tags") {
+        match to.get_attr("tags").unwrap() {
             Some(Value::Concrete(ConcreteValue::Map(m))) => {
                 assert_eq!(
                     m.get("Name"),

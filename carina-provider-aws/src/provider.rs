@@ -16,7 +16,8 @@ use carina_core::provider::{
     UpdatePatch, UpdateRequest,
 };
 use carina_core::resource::{
-    AbsoluteBindingAddress, DataSource, NoPlaceholder, Resource, ResourceId, State, Value,
+    AbsoluteBindingAddress, DataSource, NoPlaceholder, Resource, ResourceId, SnapshotState, State,
+    StateValueLeaf, Value,
 };
 use carina_plugin_sdk::{Never, PhasedToken};
 use carina_provider_protocol::{
@@ -28,7 +29,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::aws_operation::{ClientToken, DecidedOperationError, EC2_CREATE_TOKEN_TAG};
 use crate::error_helpers::{IntoSendFailure, SendFailure};
-use crate::helpers::{CreatePoll, DeletePoll, apply_patch_to_state, provider_retry_allowed};
+use crate::helpers::{CreatePoll, DeletePoll, UpdateResource, provider_retry_allowed};
 use crate::read_back::{
     NonEmptyAttributeNames, ReadBackCompletion, ReadBackContinuation, ReadBackKind,
     finish_final_read_back, invalid_read_back,
@@ -1494,8 +1495,8 @@ impl AwsProvider {
     ) -> Result<A::Step, A::Verdict> {
         match result {
             Ok(CreateCompletion::Success(state)) => {
-                let (_id, identifier, attributes) = state.into_parts();
-                attempt.issued(identifier, sent).succeeded(attributes)
+                let issued = attempt.issued(state.identifier().clone(), sent);
+                self.finish_applied_state(issued, state)
             }
             Ok(CreateCompletion::ReadBackPending { continuation, .. }) => attempt
                 .issued(continuation.identifier().clone(), sent)
@@ -1554,16 +1555,26 @@ impl AwsProvider {
             ReadBackCompletion::Failed { observation, error } => {
                 Err(issued.failed(observation, error))
             }
-            ReadBackCompletion::Success(state) => {
-                let (_id, _identifier, attributes) = state.into_parts();
-                issued.succeeded(attributes)
-            }
+            ReadBackCompletion::Success(state) => self.finish_applied_state(issued, state),
             ReadBackCompletion::Partial {
                 attributes,
                 reason,
                 missing_attributes,
                 ..
             } => issued.partial(attributes, reason, missing_attributes),
+        }
+    }
+
+    fn finish_applied_state<I: AwsIssuedCreate>(
+        &self,
+        issued: I,
+        state: AppliedState,
+    ) -> Result<I::Step, I::Verdict> {
+        match crate::read_model::live_attributes(state.id(), state.attributes()) {
+            Ok(attributes) => issued.succeeded(attributes),
+            Err(error) => {
+                Err(issued.failed(Observation::Read(ReadOutcome::Found { state }), error))
+            }
         }
     }
 
@@ -2756,7 +2767,7 @@ impl AwsProvider {
         &self,
         id: &ResourceId,
         identifier: &AppliedIdentifier,
-        from: &State,
+        from: &State<impl StateValueLeaf>,
         patch: &UpdatePatch,
         sleep: Sleep,
     ) -> ProviderResult<UpdateOutcome>
@@ -3330,19 +3341,28 @@ impl AwsProvider {
         &self,
         id: &ResourceId,
         identifier: &AppliedIdentifier,
-        from: &State,
+        from: &State<impl StateValueLeaf>,
         patch: &UpdatePatch,
     ) -> ProviderResult<AwsUpdateStep> {
+        let from = from.to_snapshot();
+        let from = &from;
+        let to = UpdateResource::new(from, patch);
+        self.update_resource_step(id, identifier, from, &to).await
+    }
+
+    async fn update_resource_step(
+        &self,
+        id: &ResourceId,
+        identifier: &AppliedIdentifier,
+        from: &SnapshotState,
+        to: &UpdateResource,
+    ) -> ProviderResult<AwsUpdateStep> {
         let id = id.clone();
-        // The aws provider's per-resource `update_*` methods predate the
-        // Level 3 patch contract and accept a full `to: Resource`.
-        // Reconstruct that from `(from, patch)` here so each method's
-        // existing logic continues to work without per-resource churn.
-        // Future per-resource updates can consume `patch` directly for
-        // partial-update API paths once those are wired in.
-        let to = apply_patch_to_state(from, patch);
-        let partial_attributes = to.resolved_attributes();
-        crate::ec2_tags::validate_ec2_user_tags(&id, &partial_attributes)?;
+        if id.resource_type.as_str().starts_with("ec2.") {
+            to.get_attr("tags")?;
+            crate::ec2_tags::validate_ec2_user_tags(&id, &to.materialized_attributes())?;
+        }
+        let requirements = self.update_read_back_requirements(to)?;
         let outcome_id = id.clone();
         let schema = self
             .resource_schema(id.resource_type.as_str())
@@ -3444,7 +3464,7 @@ impl AwsProvider {
                     .await
             }
             "ec2.VpcGatewayAttachment" => {
-                self.update_ec2_vpc_gateway_attachment(id, identifier, &to)
+                self.update_ec2_vpc_gateway_attachment(id, identifier, to)
                     .await
             }
             "ec2.VpnGateway" => {
@@ -3487,8 +3507,7 @@ impl AwsProvider {
             "acm.Certificate" => {
                 self.update_acm_certificate(id.clone(), identifier, from, to, schema)
                     .await?;
-                let requirements =
-                    self.declared_read_back_requirements(&id, &partial_attributes)?;
+                let partial_attributes = to.materialized_attributes();
                 let completion = self
                     .observe_read_back(
                         &id,
@@ -3499,7 +3518,7 @@ impl AwsProvider {
                     )
                     .await;
                 return self.finish_update_read_back(
-                    &id,
+                    to,
                     completion,
                     PollRequest {
                         finality: PollFinality::Continue,
@@ -3519,11 +3538,11 @@ impl AwsProvider {
         let completion = self.create_outcome_from_read(
             &outcome_id,
             identifier.clone(),
-            partial_attributes,
+            to.materialized_attributes(),
             read_back,
         );
         self.finish_update_read_back(
-            &outcome_id,
+            to,
             completion,
             PollRequest {
                 finality: PollFinality::Continue,
@@ -3533,7 +3552,7 @@ impl AwsProvider {
 
     fn finish_update_read_back(
         &self,
-        id: &ResourceId,
+        resource: &UpdateResource,
         completion: CreateCompletion,
         poll_request: PollRequest,
     ) -> ProviderResult<AwsUpdateStep> {
@@ -3546,14 +3565,14 @@ impl AwsProvider {
                 })
             }
             (PollFinality::Continue | PollFinality::FinalAttempt, completion) => {
-                self.finish_update_completion(id, finish_final_read_back(completion))
+                self.finish_update_completion(resource, finish_final_read_back(completion))
             }
         }
     }
 
     fn finish_update_completion(
         &self,
-        id: &ResourceId,
+        resource: &UpdateResource,
         completion: ReadBackCompletion,
     ) -> ProviderResult<AwsUpdateStep> {
         match completion {
@@ -3565,18 +3584,39 @@ impl AwsProvider {
                 attributes,
                 reason,
                 missing_attributes,
-            } => Ok(OperationStep::Done(UpdateOutcome::partial_success(
-                crate::read_model::partial_applied_state(id.clone(), identifier, attributes),
-                reason.to_string(),
-                missing_attributes.into(),
-            ))),
+            } => {
+                let schema = self
+                    .resource_schema(resource.id.resource_type.as_str())
+                    .ok_or_else(|| {
+                        ProviderError::internal(format!(
+                            "Unknown resource schema: {}",
+                            resource.id.resource_type
+                        ))
+                        .for_resource(resource.id.clone())
+                    })?;
+                let mut snapshots = resource.snapshot_input_attributes(schema);
+                snapshots.extend(
+                    attributes
+                        .into_iter()
+                        .map(|(key, value)| (key, value.to_snapshot())),
+                );
+                Ok(OperationStep::Done(UpdateOutcome::partial_success(
+                    crate::read_model::partial_applied_state(
+                        resource.id.clone(),
+                        identifier,
+                        snapshots,
+                    ),
+                    reason.to_string(),
+                    missing_attributes.into(),
+                )))
+            }
             ReadBackCompletion::Failed { error, .. } => Err(error),
         }
     }
 
     pub async fn poll_update_step(
         &self,
-        resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
+        resource: &UpdateResource,
         identifier: &AppliedIdentifier,
         token: AwsUpdateToken,
         poll_request: PollRequest,
@@ -3584,10 +3624,17 @@ impl AwsProvider {
         match token {
             AwsUpdateToken::ReadBack(continuation) => {
                 continuation.validate(&resource.id, identifier)?;
+                let requirements = self.update_read_back_requirements(resource)?;
                 let completion = self
-                    .read_back_by_identifier(resource, &continuation, ReadBackKind::Update)
+                    .observe_read_back(
+                        &resource.id,
+                        identifier.clone(),
+                        resource.materialized_attributes(),
+                        requirements,
+                        ReadBackKind::Update,
+                    )
                     .await;
-                self.finish_update_read_back(&resource.id, completion, poll_request)
+                self.finish_update_read_back(resource, completion, poll_request)
             }
         }
     }
@@ -3596,7 +3643,7 @@ impl AwsProvider {
         &self,
         id: &ResourceId,
         identifier: &AppliedIdentifier,
-        from: &State,
+        from: &State<impl StateValueLeaf>,
         patch: &UpdatePatch,
     ) -> ProviderResult<UpdateOutcome> {
         self.update_with_patch_and_sleep(id, identifier, from, patch, tokio::time::sleep)
@@ -3607,7 +3654,7 @@ impl AwsProvider {
         &self,
         id: &ResourceId,
         identifier: &AppliedIdentifier,
-        from: &State,
+        from: &State<impl StateValueLeaf>,
         patch: &UpdatePatch,
         sleep: Sleep,
     ) -> ProviderResult<UpdateOutcome>
@@ -3615,14 +3662,16 @@ impl AwsProvider {
         Sleep: FnMut(Duration) -> SleepFuture,
         SleepFuture: Future<Output = ()>,
     {
-        let resource = apply_patch_to_state(from, patch);
+        let from = from.to_snapshot();
+        let from = &from;
+        let resource = UpdateResource::new(from, patch);
         let completed = drive_operation(
             id,
             OperationKind::Update,
             self.operation_budget(id.resource_type.as_str(), OperationKind::Update),
             self.read_back_budget(id.resource_type.as_str()),
             // Box both service dispatch futures, as in native create, to bound stack use.
-            Box::pin(self.update_step(id, identifier, from, patch)),
+            Box::pin(self.update_resource_step(id, identifier, from, &resource)),
             |token, poll_request| {
                 Box::pin(self.poll_update_step(&resource, identifier, token, poll_request))
             },
