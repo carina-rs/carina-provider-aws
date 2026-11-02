@@ -1,4 +1,4 @@
-use carina_core::schema::{AttributeType, StructField};
+use carina_core::schema::{AttributeType, FieldGroup, StructField};
 
 use crate::enum_with_dsl_aliases;
 
@@ -136,8 +136,9 @@ fn s3_lifecycle_filter_and() -> AttributeType {
 /// Filter selecting which objects a lifecycle rule applies to. When a
 /// rule needs no filter it still requires an empty `<Filter/>` element;
 /// the provider emits one automatically if this attribute is omitted.
+/// S3 accepts an empty filter or one condition; combine conditions in `and`.
 fn s3_lifecycle_rule_filter() -> AttributeType {
-    AttributeType::struct_(
+    AttributeType::struct_with_field_groups(
         "LifecycleRuleFilter".to_string(),
         vec![
             StructField::optional("prefix", AttributeType::string())
@@ -157,6 +158,16 @@ fn s3_lifecycle_rule_filter() -> AttributeType {
                 .with_provider_name("And")
                 .with_block_name("and")
                 .build(),
+        ],
+        vec![
+            FieldGroup::at_most_one([
+                "prefix",
+                "tag",
+                "object_size_greater_than",
+                "object_size_less_than",
+                "and",
+            ])
+            .expect("lifecycle filter field group must be valid"),
         ],
     )
 }

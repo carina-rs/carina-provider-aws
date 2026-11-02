@@ -60,6 +60,70 @@ mod tests {
 
     use crate::AwsNormalizer;
 
+    fn validate_lifecycle_filter(filter: &str) -> Result<(), String> {
+        let source = format!(
+            "aws.s3.BucketLifecycleConfiguration {{\n\
+             bucket = 'lifecycle-test'\n\
+             rules = [{{\n\
+               status = aws.s3.BucketLifecycleConfiguration.LifecycleRule.Status.enabled\n\
+               filter = {{{filter}}}\n\
+             }}]\n\
+             }}"
+        );
+        let snapshot = carina_core::provider::loaded_provider_snapshot_from_factories(
+            std::sync::Arc::new(vec![Box::new(crate::AwsProviderFactory)]),
+            SchemaRegistry::new(),
+            carina_core::EnvironmentSnapshot::empty(),
+        );
+        let context = snapshot.provider_context();
+        let parsed = carina_core::parser::parse_file(
+            &source,
+            std::path::Path::new("lifecycle-filter.crn"),
+            context,
+        )
+        .expect("parse lifecycle filter fixture");
+        carina_core::validation::validate_resources(
+            &parsed,
+            snapshot.schema_registry(),
+            &std::collections::HashSet::from(["aws".to_string()]),
+            context,
+        )
+    }
+
+    #[test]
+    fn lifecycle_filter_schema_validation_rejects_every_pair_of_conditions() {
+        let conditions = [
+            "prefix = 'logs/'",
+            "tag = { key = 'kind' value = 'logs' }",
+            "object_size_greater_than = 128",
+            "object_size_less_than = 1024",
+            "and = { prefix = 'logs/' object_size_greater_than = 128 }",
+        ];
+        for (index, first) in conditions.iter().enumerate() {
+            for second in &conditions[index + 1..] {
+                let filter = format!("{first}\n{second}");
+                let error = validate_lifecycle_filter(&filter)
+                    .expect_err("two lifecycle filter conditions must fail CLI schema validation");
+                assert!(error.contains("rules[0].filter"), "{filter}: {error}");
+                assert!(error.contains("at most one of"), "{filter}: {error}");
+            }
+        }
+    }
+
+    #[test]
+    fn lifecycle_filter_schema_validation_accepts_empty_and_each_single_condition() {
+        for filter in [
+            "",
+            "prefix = ''",
+            "tag = { key = 'kind' value = 'logs' }",
+            "object_size_greater_than = 128",
+            "object_size_less_than = 1024",
+            "and = { prefix = 'logs/' object_size_greater_than = 128 }",
+        ] {
+            validate_lifecycle_filter(filter).unwrap_or_else(|error| panic!("{filter}: {error}"));
+        }
+    }
+
     #[test]
     fn final_registry_classifies_every_kms_string_including_handwritten_structs() {
         use carina_codegen_aws::kms_references::{

@@ -4,7 +4,9 @@ mod lifecycle;
 mod notification;
 mod object_key_format;
 mod object_lock;
+mod ownership;
 mod replication;
+mod versioning;
 mod website;
 
 pub use cors::*;
@@ -13,5 +15,7 @@ pub use lifecycle::*;
 pub use notification::*;
 pub use object_key_format::*;
 pub use object_lock::*;
+pub use ownership::*;
 pub use replication::*;
+pub use versioning::*;
 pub use website::*;
