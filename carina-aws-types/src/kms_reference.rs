@@ -10,6 +10,8 @@ use carina_provider_protocol::types::{
 };
 use futures::{StreamExt, stream};
 
+use crate::Partition;
+
 const MAX_CONCURRENT_DESCRIBE_KEY: usize = 8;
 
 /// The initialized guest supplies a client using its effective credentials.
@@ -119,27 +121,6 @@ fn error(
     Box::new(error)
 }
 
-/// Map the region to its partition for ARN reachability checks.
-fn partition(region: &str) -> &'static str {
-    if region.starts_with("cn-") {
-        "aws-cn"
-    } else if region.starts_with("us-gov-") {
-        "aws-us-gov"
-    } else if region.starts_with("us-iso-") {
-        "aws-iso"
-    } else if region.starts_with("us-isob-") {
-        "aws-iso-b"
-    } else if region.starts_with("eu-isoe-") {
-        "aws-iso-e"
-    } else if region.starts_with("us-isof-") {
-        "aws-iso-f"
-    } else if region.starts_with("eusc-") {
-        "aws-eusc"
-    } else {
-        "aws"
-    }
-}
-
 /// Pure resolution over an injected DescribeKey client. No payload or state is rewritten.
 pub async fn resolve_kms_key_reference(
     client: &impl DescribeKeyClient,
@@ -159,7 +140,9 @@ pub async fn resolve_kms_key_reference(
     let mut region = instance_region;
     if raw.starts_with("arn:") {
         let parts: Vec<_> = raw.splitn(6, ':').collect();
-        if partition(instance_region) != parts[1] || partition(parts[3]) != parts[1] {
+        if Partition::from_region(instance_region).id() != parts[1]
+            || Partition::from_region(parts[3]).id() != parts[1]
+        {
             return Err(ReferenceError::InvalidReference(error(
                 provider_name,
                 "kms.DescribeKey",
