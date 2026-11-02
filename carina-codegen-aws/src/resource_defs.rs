@@ -4,6 +4,10 @@
 //! Each `DataSourceDef` describes a read-only data source with optional user-supplied lookup inputs.
 //! These definitions are consumed by the `smithy-codegen` binary.
 
+use std::sync::LazyLock;
+
+use crate::description::Description;
+
 /// An additional writable field not present in the create operation input.
 /// Used to add fields from the read structure or synthetic fields.
 pub struct ExtraField {
@@ -1145,6 +1149,29 @@ pub struct DataSourceListOutput {
     pub item_type: &'static str,
 }
 
+fn nat_gateway_availability_zone_addresses_type() -> &'static str {
+    static TYPE: LazyLock<String> = LazyLock::new(|| {
+        let allocation_ids = Description::authored(
+            "The allocation IDs of the Elastic IP addresses (EIPs) to be used for handling outbound NAT traffic in this specific Availability Zone.",
+        );
+        let availability_zone = Description::authored(
+            "For regional NAT gateways only: The Availability Zone where this specific NAT gateway configuration will be active. Each AZ in a regional NAT gateway has its own configuration to handle outbound NAT traffic from that AZ.",
+        );
+        format!(
+            "AttributeType::unordered_list(AttributeType::struct_(\
+                \"AvailabilityZoneAddress\".to_string(),\
+                vec![\
+                StructField::optional(\"allocation_ids\", AttributeType::unordered_list(super::allocation_id())).with_description(\"{}\").with_provider_name(\"AllocationIds\").build(),\
+                StructField::optional(\"availability_zone\", super::availability_zone()).with_description(\"{}\").with_provider_name(\"AvailabilityZone\").build()\
+                ],\
+            ))",
+            allocation_ids.rust_string_literal(None),
+            availability_zone.rust_string_literal(None),
+        )
+    });
+    TYPE.as_str()
+}
+
 /// Returns EC2 resource definitions.
 pub fn ec2_resources() -> Vec<ResourceDef> {
     vec![
@@ -1685,13 +1712,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             has_tags: true,
             type_overrides: vec![(
                 "AvailabilityZoneAddresses",
-                "AttributeType::unordered_list(AttributeType::struct_(\
-                    \"AvailabilityZoneAddress\".to_string(),\
-                    vec![\
-                    StructField::optional(\"allocation_ids\", AttributeType::unordered_list(super::allocation_id())).with_description(\"The allocation IDs of the Elastic IP addresses (EIPs) to be used for handling outbound NAT traffic in this specific Availability Zone.\").with_provider_name(\"AllocationIds\").build(),\
-                    StructField::optional(\"availability_zone\", super::availability_zone()).with_description(\"For regional NAT gateways only: The Availability Zone where this specific NAT gateway configuration will be active. Each AZ in a regional NAT gateway has its own configuration to handle outbound NAT traffic from that AZ.\").with_provider_name(\"AvailabilityZone\").build()\
-                    ],\
-                ))",
+                nat_gateway_availability_zone_addresses_type(),
             )],
             exclude_fields: vec![
                 "DryRun",
@@ -2299,13 +2320,13 @@ pub fn s3_resources() -> Vec<ResourceDef> {
                 ExtraField {
                     name: "BucketDomainName",
                     read_source: None,
-                    description: Some("Bucket domain name, in the form NAME.s3.amazonaws.com."),
+                    description: Some("Bucket domain name (`<bucket>.s3.amazonaws.com`)."),
                 },
                 ExtraField {
                     name: "BucketRegionalDomainName",
                     read_source: None,
                     description: Some(
-                        "Region-specific bucket domain name, in the form NAME.s3.REGION.amazonaws.com.",
+                        "Region-specific bucket domain name (`<bucket>.s3.<region>.amazonaws.com`).",
                     ),
                 },
                 ExtraField {
