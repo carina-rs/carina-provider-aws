@@ -2,7 +2,9 @@
 
 use carina_core::provider::{AppliedIdentifier, ReadOutcome};
 use carina_core::provider::{ProviderError, ProviderResult};
-use carina_core::resource::{ConcreteValue, Resource, ResourceId, Value};
+use carina_core::resource::{
+    AbsoluteBindingAddress, ConcreteValue, NoPlaceholder, Resource, ResourceId, Value,
+};
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
@@ -162,7 +164,7 @@ impl AwsProvider {
     /// Create an EC2 Security Group Rule (shared between ingress and egress)
     pub(crate) async fn create_ec2_security_group_rule(
         &self,
-        resource: &Resource<impl Sized>,
+        resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
         input: SecurityGroupRuleSendInput,
         is_ingress: bool,
     ) -> ProviderResult<CreateCompletion> {
@@ -184,7 +186,7 @@ impl AwsProvider {
 
     async fn create_ec2_security_group_rule_with_permission(
         &self,
-        resource: &Resource<impl Sized>,
+        resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
         sg_id: String,
         permission: aws_sdk_ec2::types::IpPermission,
         is_ingress: bool,

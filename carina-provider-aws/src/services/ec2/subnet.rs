@@ -1,7 +1,10 @@
 use carina_core::provider::{AppliedIdentifier, ReadOutcome};
 use carina_core::provider::{ProviderError, ProviderResult};
-use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
+use carina_core::resource::{
+    AbsoluteBindingAddress, ConcreteValue, NoPlaceholder, Resource, ResourceId, State, Value,
+};
 use carina_core::schema::CompiledResourceSchema;
+use carina_plugin_sdk::{DesiredScalar, DesiredValueMut, DesiredView};
 
 use crate::AwsProvider;
 use crate::aws_operation::ClientToken;
@@ -12,7 +15,6 @@ use crate::helpers::{
 };
 #[cfg(test)]
 use crate::helpers::{optional_bool_attr, optional_int_attr};
-use crate::normalizer::DesiredNormalizationInput;
 use crate::provider::{AwsCreateAttempt, TaggedEc2Create};
 use crate::read_model::{empty_map_value, found_managed_read};
 use crate::read_models_generated::Ec2SubnetReadModelSupplement;
@@ -40,7 +42,7 @@ struct ModifySubnetAttrs {
 
 #[cfg(test)]
 fn resolve_modify_subnet_enum_attrs(
-    resource: &Resource<impl Sized>,
+    resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
     schema: &CompiledResourceSchema,
 ) -> ProviderResult<ModifySubnetAttrs> {
     resolve_modify_subnet_attrs(
@@ -169,21 +171,15 @@ fn associated_ipv6_cidr(
         .and_then(|association| association.ipv6_cidr_block())
 }
 
-pub(crate) fn normalize_subnet_ipv6_cidr_blocks<S>(
-    input: &mut DesiredNormalizationInput<'_, S>,
-) -> ProviderResult<()> {
-    if !input.is_resource("aws", "ec2.Subnet") {
-        return Ok(());
-    }
-    let Some(ConcreteValue::String(value)) = input.known_attr("ipv6_cidr_block") else {
-        return Ok(());
-    };
-    let value = value.expose_plaintext().to_string();
+pub(crate) fn normalize_subnet_ipv6_cidr_blocks(input: &mut DesiredView<'_>) -> ProviderResult<()> {
     let id = input.id().clone();
-    let canonical = canonical_ipv6_cidr(&value).map_err(|error| {
-        ProviderError::invalid_input(format!("invalid ipv6_cidr_block: {error}")).for_resource(id)
-    })?;
-    if let Some(ConcreteValue::String(value)) = input.known_attr_mut("ipv6_cidr_block") {
+    if let Some(DesiredValueMut::Known(DesiredScalar::String(value))) =
+        input.attribute_mut("ipv6_cidr_block")
+    {
+        let canonical = canonical_ipv6_cidr(value.expose_plaintext()).map_err(|error| {
+            ProviderError::invalid_input(format!("invalid ipv6_cidr_block: {error}"))
+                .for_resource(id)
+        })?;
         *value = canonical.into();
     }
     Ok(())
@@ -254,7 +250,7 @@ impl AwsProvider {
     /// Create an EC2 Subnet
     pub(crate) async fn create_ec2_subnet<A: AwsCreateAttempt>(
         &self,
-        resource: &Resource<impl Sized>,
+        resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
         schema: &CompiledResourceSchema,
         client_token: &ClientToken,
         attempt: A,
@@ -672,8 +668,10 @@ mod tests {
                 "2001:0DB8:0000:0000:0000:0000:0000:0000/64".into(),
             )),
         );
-        let mut input = DesiredNormalizationInput::in_process(&mut resource);
-        normalize_subnet_ipv6_cidr_blocks(&mut input).unwrap();
+        let mut desired =
+            carina_plugin_sdk::NativeDesiredNormalization::from_core(&mut resource).unwrap();
+        normalize_subnet_ipv6_cidr_blocks(&mut desired.view()).unwrap();
+        desired.finish().unwrap();
         assert_eq!(
             resource.get_attr("ipv6_cidr_block"),
             Some(&Value::Concrete(ConcreteValue::String(

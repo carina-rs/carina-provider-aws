@@ -1,5 +1,7 @@
 use carina_core::provider::{BoxFuture, ProviderResult};
-use carina_core::resource::{ConcreteValue, DataSource, State, Value};
+use carina_core::resource::{
+    AbsoluteBindingAddress, ConcreteValue, DataSource, NoPlaceholder, State, Value,
+};
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
@@ -14,7 +16,12 @@ impl AwsProvider {
     /// `data_source_lookups::DataSourceLookups`.
     pub(crate) fn do_read_sts_caller_identity_data_source(
         &self,
-        resource: &DataSource<impl Clone + Send + Sync + 'static>,
+        resource: &DataSource<
+            impl Clone + Send + Sync + 'static,
+            NoPlaceholder,
+            AbsoluteBindingAddress,
+            impl Clone + Send + Sync + 'static,
+        >,
     ) -> BoxFuture<'_, ProviderResult<State>> {
         let id = resource.id.clone();
         Box::pin(async move {

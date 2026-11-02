@@ -25,7 +25,7 @@ use carina_core::provider::{
     UpdateRequest,
 };
 use carina_core::resource::{
-    ConcreteValue, Current, ResolvedResource, Resource, ResourceId, State, Value,
+    ConcreteValue, Current, ResolvedResourceId, Resource, ResourceId, State, Value,
     absolute_binding_address_for_test,
 };
 use carina_core::schema::{AttributeSchema, AttributeType, ResourceSchema, SchemaRegistry};
@@ -114,7 +114,7 @@ impl Provider for FixtureProvider {
                     .succeeded(attrs));
             }
             let outcome = Box::pin(self.aws.create_with_poll_sleep_for_test(
-                request.resource().as_resource(),
+                request.resource(),
                 attempt,
                 |duration| {
                     self.sleeps.lock().unwrap().push(duration);
@@ -234,7 +234,8 @@ fn dependent(name: &'static str, attribute: &str) -> Resource {
     let mut resource = Resource::with_provider("aws", "test.Dependent", name, None);
     resource.binding = Some(absolute_binding_address_for_test(name));
     resource
-        .dependency_bindings
+        .dependencies
+        .value_bindings
         .insert(absolute_binding_address_for_test("cert"));
     let reference = if attribute == "domain_name" {
         Value::resource_ref("cert", attribute, vec![]).resolve_root_for_test()
@@ -281,15 +282,53 @@ async fn execute(
     observer: &Observer,
 ) -> ExecutionResult {
     let mut plan = Plan::new();
-    for resource in resources {
-        plan.add(Effect::Create(ResolvedResource::new(resource)));
-    }
     let schemas = schemas();
+    // A refreshed certificate can be outside this plan while its dependents run.
+    let mut graph_resources = resources.clone();
+    let source = certificate();
+    if !graph_resources
+        .iter()
+        .any(|resource| resource.id == source.id)
+    {
+        graph_resources.push(source);
+    }
+    let graph =
+        carina_core::resolved_graph::ExpandedBindingIndex::for_test_resources(&graph_resources)
+            .expect("test resource bindings should form a valid graph");
+    let resource_origins = graph_resources
+        .iter()
+        .map(|resource| {
+            (
+                ResolvedResourceId::new(resource.id.clone()),
+                executor::UnresolvedResource::from_pre_resolve(resource.clone()),
+            )
+        })
+        .collect();
+    for resource in resources {
+        let resource = executor::normalized::apply_desired_normalization(
+            resource,
+            &[],
+            &AwsNormalizer,
+            &schemas,
+        )
+        .await
+        .expect("normalize fixture values before constructing the plan");
+        let resource = graph
+            .resolve_resource(resource.as_resource().clone(), &schemas)
+            .expect("resolve fixture dependencies before constructing the plan");
+        plan.add(Effect::Create(resource));
+    }
     let factories: Vec<Box<dyn carina_core::provider::ProviderFactory>> =
         vec![Box::new(AwsProviderFactory)];
     let input = LiveExecutionInput {
+        provider_context: carina_core::parser::ProviderContext::clone(
+            &carina_core::parser::LoadedProviderContext::empty_for_test(),
+        ),
         plan: &plan,
-        provider_check_inputs: ProviderCheckInputs::Authored,
+        provider_check_inputs: ProviderCheckInputs::PlanNormalized {
+            resource_origins: &resource_origins,
+            data_source_origins: &[],
+        },
         compositions: &[],
         bindings,
         managed_current: current,
@@ -407,6 +446,7 @@ async fn exhausted_read_back_is_retried_by_next_apply() {
     assert!(fresh.partial_read.is_none());
     let mut bindings = ResolvedBindings::default();
     bindings.set("cert", fresh.attributes.clone(), BindingValueSource::Local);
+    let next_observer = Observer::default();
     let next = execute(
         &provider,
         vec![dependent(
@@ -415,10 +455,15 @@ async fn exhausted_read_back_is_retried_by_next_apply() {
         )],
         bindings,
         HashMap::from([(id, Current::from_state(fresh))]),
-        &Observer::default(),
+        &next_observer,
     )
     .await;
-    assert_eq!(next.success_count, 1);
+    assert_eq!(
+        next.success_count,
+        1,
+        "{:?}",
+        next_observer.0.lock().unwrap()
+    );
     assert_eq!(next.failure_count(), 0);
     assert_eq!(next.partial_count, 0);
     assert_eq!(
@@ -468,73 +513,87 @@ async fn native_final_partial_retains_host_deadline() {
 
 #[tokio::test]
 async fn native_update_read_back_uses_schema_budget_and_retains_host_deadline() {
-    let (provider, service) = fixture(&[false, false], 1).await;
-    let mut resource = certificate();
-    let mut current = resource.resolved_attributes();
-    current.insert("validation_method".to_string(), string("DNS"));
-    let from = carina_provider_aws::test_existing_state(resource.id.clone(), current);
-    resource.set_attr(
-        "tags",
-        Value::Concrete(ConcreteValue::Map(indexmap::IndexMap::from([(
-            "Env".to_string(),
-            string("test"),
-        )]))),
-    );
-    let bindings = ResolvedBindings::default();
-    let module_gate = executor::ModuleConstraintGate::from_live_compositions(&[]);
-    let schemas = schemas();
-    let factories: Vec<Box<dyn carina_core::provider::ProviderFactory>> =
-        vec![Box::new(AwsProviderFactory)];
-    let preparation = executor::ProviderPreparationContext::new(
-        &bindings,
-        &module_gate,
-        &[],
-        &AwsNormalizer,
-        &factories,
-        &schemas,
-    );
-    let request = executor::prepare_update_request(
-        resource.clone(),
-        from,
-        &["tags".to_string()],
-        &preparation,
+    carina_core::validation::deferred_types::with_session_for_test_async(
+        &carina_core::parser::LoadedProviderContext::empty_for_test(),
+        async |type_checks| {
+            let (provider, service) = fixture(&[false, false], 1).await;
+            let mut resource = certificate();
+            let mut current = resource.resolved_attributes();
+            current.insert("validation_method".to_string(), string("DNS"));
+            let from = carina_provider_aws::test_existing_state(resource.id.clone(), current);
+            resource.set_attr(
+                "tags",
+                Value::Concrete(ConcreteValue::Map(indexmap::IndexMap::from([(
+                    "Env".to_string(),
+                    string("test"),
+                )]))),
+            );
+            let bindings = ResolvedBindings::default();
+            let module_gate = executor::ModuleConstraintGate::from_live_compositions(&[]);
+            let schemas = schemas();
+            let factories: Vec<Box<dyn carina_core::provider::ProviderFactory>> =
+                vec![Box::new(AwsProviderFactory)];
+            let preparation = executor::ProviderPreparationContext::new(
+                &bindings,
+                &module_gate,
+                &[],
+                &AwsNormalizer,
+                &factories,
+                &schemas,
+                type_checks,
+            );
+            let request = executor::prepare_update_request(
+                resource.clone(),
+                from,
+                &["tags".to_string()],
+                &preparation,
+            )
+            .await
+            .unwrap();
+            let outcome = provider
+                .update(&resource.id, &AppliedIdentifier::new(ARN).unwrap(), request)
+                .await
+                .unwrap();
+            assert_eq!(outcome.read_back_end(), ReadBackEnd::HostDeadline);
+            assert_eq!(
+                outcome.diagnostic().unwrap().missing_attributes(),
+                ["domain_validation_options"]
+            );
+            let sleeps = provider.sleeps.lock().unwrap();
+            assert_eq!(sleeps.len(), 1);
+            assert!(sleeps[0] <= Duration::from_secs(1));
+            assert_eq!(service.mutations.load(Ordering::Relaxed), 1);
+            assert_eq!(service.requests.load(Ordering::Relaxed), 0);
+            assert_eq!(service.describes.load(Ordering::Relaxed), 2);
+        },
     )
     .await
-    .unwrap();
-    let outcome = provider
-        .update(&resource.id, &AppliedIdentifier::new(ARN).unwrap(), request)
-        .await
-        .unwrap();
-    assert_eq!(outcome.read_back_end(), ReadBackEnd::HostDeadline);
-    assert_eq!(
-        outcome.diagnostic().unwrap().missing_attributes(),
-        ["domain_validation_options"]
-    );
-    let sleeps = provider.sleeps.lock().unwrap();
-    assert_eq!(sleeps.len(), 1);
-    assert!(sleeps[0] <= Duration::from_secs(1));
-    assert_eq!(service.mutations.load(Ordering::Relaxed), 1);
-    assert_eq!(service.requests.load(Ordering::Relaxed), 0);
-    assert_eq!(service.describes.load(Ordering::Relaxed), 2);
 }
 
 async fn checked_create(resource: Resource) -> CreateRequest {
-    let bindings = ResolvedBindings::default();
-    let module_gate = executor::ModuleConstraintGate::from_live_compositions(&[]);
-    let schemas = schemas();
-    let factories: Vec<Box<dyn carina_core::provider::ProviderFactory>> =
-        vec![Box::new(AwsProviderFactory)];
-    let preparation = executor::ProviderPreparationContext::new(
-        &bindings,
-        &module_gate,
-        &[],
-        &AwsNormalizer,
-        &factories,
-        &schemas,
-    );
-    executor::prepare_create_request(resource, &preparation)
-        .await
-        .unwrap()
+    carina_core::validation::deferred_types::with_session_for_test_async(
+        &carina_core::parser::LoadedProviderContext::empty_for_test(),
+        async |type_checks| {
+            let bindings = ResolvedBindings::default();
+            let module_gate = executor::ModuleConstraintGate::from_live_compositions(&[]);
+            let schemas = schemas();
+            let factories: Vec<Box<dyn carina_core::provider::ProviderFactory>> =
+                vec![Box::new(AwsProviderFactory)];
+            let preparation = executor::ProviderPreparationContext::new(
+                &bindings,
+                &module_gate,
+                &[],
+                &AwsNormalizer,
+                &factories,
+                &schemas,
+                type_checks,
+            );
+            executor::prepare_create_request(resource, &preparation)
+                .await
+                .unwrap()
+        },
+    )
+    .await
 }
 
 #[tokio::test]

@@ -13,12 +13,14 @@ use std::collections::HashMap;
 
 use carina_core::provider::{AppliedIdentifier, ReadOutcome};
 use carina_core::provider::{ProviderError, ProviderResult};
-use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
+use carina_core::resource::{
+    AbsoluteBindingAddress, ConcreteValue, NoPlaceholder, Resource, ResourceId, State, Value,
+};
 use carina_core::schema::CompiledResourceSchema;
+use carina_plugin_sdk::{DesiredInputs, DesiredScalar, DesiredValue, NativeDesiredNormalization};
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
-use crate::normalizer::{CrossFieldInputs, CrossFieldValue};
 use crate::provider::TypedCreateCompletion;
 use crate::read_model::found_managed_read;
 use crate::read_models_generated::SqsQueueReadModel;
@@ -304,15 +306,15 @@ fn required_queue_attribute(
 
 /// Reject cross-field combinations before they reach an AWS API that would
 /// reject or silently ignore them.
-pub(crate) fn validate_sqs_queue_inputs<S>(inputs: &CrossFieldInputs<'_, S>) -> ProviderResult<()> {
+pub(crate) fn validate_sqs_queue_inputs(inputs: &DesiredInputs<'_>) -> ProviderResult<()> {
     if !inputs.is_resource("aws", "sqs.Queue") {
         return Ok(());
     }
 
     if matches!(
-        inputs.attr("kms_data_key_reuse_period_seconds"),
-        CrossFieldValue::Known(_)
-    ) && matches!(inputs.attr("kms_master_key_id"), CrossFieldValue::Absent)
+        inputs.attribute("kms_data_key_reuse_period_seconds"),
+        Some(DesiredValue::Known(_))
+    ) && inputs.attribute("kms_master_key_id").is_none()
     {
         return Err(ProviderError::invalid_input(
             "sqs.Queue attribute kms_data_key_reuse_period_seconds requires kms_master_key_id",
@@ -321,24 +323,24 @@ pub(crate) fn validate_sqs_queue_inputs<S>(inputs: &CrossFieldInputs<'_, S>) -> 
     }
 
     let fifo_is_definitively_standard = matches!(
-        inputs.attr("fifo_queue"),
-        CrossFieldValue::Absent | CrossFieldValue::Known(ConcreteValue::Bool(false))
+        inputs.attribute("fifo_queue"),
+        None | Some(DesiredValue::Known(DesiredScalar::Bool(false)))
     );
     if fifo_is_definitively_standard {
         let content_dedup_enabled = matches!(
-            inputs.attr("content_based_deduplication"),
-            CrossFieldValue::Known(ConcreteValue::Bool(true))
+            inputs.attribute("content_based_deduplication"),
+            Some(DesiredValue::Known(DesiredScalar::Bool(true)))
         );
         let unsupported = if content_dedup_enabled {
             Some("content_based_deduplication")
         } else if matches!(
-            inputs.attr("deduplication_scope"),
-            CrossFieldValue::Known(_)
+            inputs.attribute("deduplication_scope"),
+            Some(DesiredValue::Known(_))
         ) {
             Some("deduplication_scope")
         } else if matches!(
-            inputs.attr("fifo_throughput_limit"),
-            CrossFieldValue::Known(_)
+            inputs.attribute("fifo_throughput_limit"),
+            Some(DesiredValue::Known(_))
         ) {
             Some("fifo_throughput_limit")
         } else {
@@ -674,10 +676,9 @@ impl AwsProvider {
     /// Create an SQS Queue and return its post-create state.
     pub(crate) async fn create_sqs_queue(
         &self,
-        resource: &Resource<impl Sized>,
+        resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
         _schema: &CompiledResourceSchema,
     ) -> ProviderResult<TypedCreateCompletion> {
-        validate_sqs_queue_inputs(&CrossFieldInputs::resolved(resource))?;
         let input = SqsQueueCreateInput::decode(resource)?;
         let sent = input.sent();
         let crate::send_models_generated::SqsQueueCreateParts {
@@ -830,10 +831,14 @@ impl AwsProvider {
         id: ResourceId,
         identifier: &AppliedIdentifier,
         from: &State,
-        to: Resource,
+        mut to: Resource,
         _schema: &CompiledResourceSchema,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
-        validate_sqs_queue_inputs(&CrossFieldInputs::resolved(&to))?;
+        // Recheck decisions that were deferred until apply-time resolution.
+        {
+            let desired = NativeDesiredNormalization::from_core(&mut to)?;
+            validate_sqs_queue_inputs(&desired.inputs())?;
+        }
         let input = SqsQueueUpdateInput::decode(&to)?;
         let crate::send_models_generated::SqsQueueUpdateParts {
             content_based_deduplication,
@@ -1062,8 +1067,9 @@ mod tests {
             Value::Concrete(ConcreteValue::String("messageGroup".into())),
         );
 
-        // Defensively check that a deferred value reaching the resolved view still defers.
-        validate_sqs_queue_inputs(&CrossFieldInputs::resolved(&resource))
+        let desired = carina_plugin_sdk::NativeDesiredNormalization::from_core(&mut resource)
+            .expect("normalization keeps unresolved values opaque");
+        validate_sqs_queue_inputs(&desired.inputs())
             .expect("an unresolved fifo_queue value must not be treated as false");
     }
 
@@ -1076,8 +1082,9 @@ mod tests {
             Value::resource_ref("upstream", "deduplication_scope", vec![]).resolve_root_for_test(),
         );
 
-        // Defensively check that a deferred value reaching the resolved view still defers.
-        validate_sqs_queue_inputs(&CrossFieldInputs::resolved(&resource))
+        let desired = carina_plugin_sdk::NativeDesiredNormalization::from_core(&mut resource)
+            .expect("normalization keeps unresolved values opaque");
+        validate_sqs_queue_inputs(&desired.inputs())
             .expect("a deferred FIFO-only value must wait for resolution");
     }
 
@@ -1090,8 +1097,9 @@ mod tests {
         );
         resource.set_attr("kms_master_key_id", plan_time_unknown());
 
-        // Defensively check that a deferred value reaching the resolved view still defers.
-        validate_sqs_queue_inputs(&CrossFieldInputs::resolved(&resource))
+        let desired = carina_plugin_sdk::NativeDesiredNormalization::from_core(&mut resource)
+            .expect("normalization keeps unresolved values opaque");
+        validate_sqs_queue_inputs(&desired.inputs())
             .expect("an unresolved KMS key is present but not yet decidable");
     }
 
@@ -1100,8 +1108,9 @@ mod tests {
         let mut resource = queue_resource();
         resource.set_attr("kms_data_key_reuse_period_seconds", plan_time_unknown());
 
-        // Defensively check that a deferred value reaching the resolved view still defers.
-        validate_sqs_queue_inputs(&CrossFieldInputs::resolved(&resource))
+        let desired = carina_plugin_sdk::NativeDesiredNormalization::from_core(&mut resource)
+            .expect("normalization keeps unresolved values opaque");
+        validate_sqs_queue_inputs(&desired.inputs())
             .expect("an unresolved reuse period must wait for resolution");
     }
 

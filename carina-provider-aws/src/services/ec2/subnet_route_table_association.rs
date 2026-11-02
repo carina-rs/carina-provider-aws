@@ -1,6 +1,6 @@
 use carina_core::provider::{AppliedIdentifier, ReadOutcome};
 use carina_core::provider::{ProviderError, ProviderResult};
-use carina_core::resource::{Resource, ResourceId};
+use carina_core::resource::{AbsoluteBindingAddress, NoPlaceholder, Resource, ResourceId};
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
@@ -63,7 +63,7 @@ impl AwsProvider {
     /// Create an EC2 Subnet Route Table Association
     pub(crate) async fn create_ec2_subnet_route_table_association(
         &self,
-        resource: &Resource<impl Sized>,
+        resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
     ) -> ProviderResult<TypedCreateCompletion> {
         let input = Ec2SubnetRouteTableAssociationCreateInput::decode(resource)?;
         let sent = input.sent();

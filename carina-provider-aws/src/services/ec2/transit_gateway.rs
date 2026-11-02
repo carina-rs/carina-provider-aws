@@ -1,6 +1,8 @@
 use carina_core::provider::ProviderResult;
 use carina_core::provider::{AppliedIdentifier, ReadOutcome};
-use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
+use carina_core::resource::{
+    AbsoluteBindingAddress, ConcreteValue, NoPlaceholder, Resource, ResourceId, State, Value,
+};
 use carina_core::schema::CompiledResourceSchema;
 
 use aws_sdk_ec2::types::TransitGatewayState;
@@ -188,7 +190,7 @@ impl AwsProvider {
     /// Create an EC2 Transit Gateway
     pub(crate) async fn create_ec2_transit_gateway_start<A: AwsCreateAttempt>(
         &self,
-        resource: &Resource<impl Sized>,
+        resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
         schema: &CompiledResourceSchema,
         client_token: &ClientToken,
         attempt: A,

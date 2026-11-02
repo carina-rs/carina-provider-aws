@@ -1,6 +1,8 @@
 use carina_core::provider::{AppliedIdentifier, ReadOutcome};
 use carina_core::provider::{ProviderError, ProviderResult};
-use carina_core::resource::{ConcreteValue, Resource, ResourceId, Value};
+use carina_core::resource::{
+    AbsoluteBindingAddress, ConcreteValue, NoPlaceholder, Resource, ResourceId, Value,
+};
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
@@ -62,7 +64,7 @@ impl AwsProvider {
     /// Create an EC2 Route
     pub(crate) async fn create_ec2_route(
         &self,
-        resource: &Resource<impl Sized>,
+        resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
     ) -> ProviderResult<TypedCreateCompletion> {
         let input = Ec2RouteCreateInput::decode(resource)?;
         let sent = input.sent();

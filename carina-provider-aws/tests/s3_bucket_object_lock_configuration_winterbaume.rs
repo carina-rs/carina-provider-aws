@@ -108,20 +108,28 @@ fn schema_registry() -> carina_core::schema::SchemaRegistry {
 }
 
 async fn create_request_for_test(resource: Resource) -> CreateRequest {
-    let bindings = carina_core::binding_index::ResolvedBindings::default();
-    let module_gate = carina_core::executor::ModuleConstraintGate::from_live_compositions(&[]);
-    let schemas = carina_core::schema::SchemaRegistry::new();
-    let preparation = carina_core::executor::ProviderPreparationContext::new(
-        &bindings,
-        &module_gate,
-        &[],
-        &NoopNormalizer,
-        &[],
-        &schemas,
-    );
-    carina_core::executor::prepare_create_request(resource, &preparation)
-        .await
-        .expect("test resource should pass checked create preparation")
+    carina_core::validation::deferred_types::with_session_for_test_async(
+        &carina_core::parser::LoadedProviderContext::empty_for_test(),
+        async |type_checks| {
+            let bindings = carina_core::binding_index::ResolvedBindings::default();
+            let module_gate =
+                carina_core::executor::ModuleConstraintGate::from_live_compositions(&[]);
+            let schemas = carina_core::schema::SchemaRegistry::new();
+            let preparation = carina_core::executor::ProviderPreparationContext::new(
+                &bindings,
+                &module_gate,
+                &[],
+                &NoopNormalizer,
+                &[],
+                &schemas,
+                type_checks,
+            );
+            carina_core::executor::prepare_create_request(resource, &preparation)
+                .await
+                .expect("test resource should pass checked create preparation")
+        },
+    )
+    .await
 }
 
 async fn create_outcome_for_test(
@@ -149,27 +157,40 @@ async fn update_request_for_test(
     from: State,
     changed_attributes: &[String],
 ) -> UpdateRequest {
-    let bindings = carina_core::binding_index::ResolvedBindings::default();
-    let module_gate = carina_core::executor::ModuleConstraintGate::from_live_compositions(&[]);
-    let schemas = schema_registry();
-    let factories: Vec<Box<dyn carina_core::provider::ProviderFactory>> =
-        vec![Box::new(carina_provider_aws::AwsProviderFactory)];
-    carina_core::value::canonicalize_normalized_resources_with_schemas(
-        std::slice::from_mut(&mut resource),
-        &schemas,
+    carina_core::validation::deferred_types::with_session_for_test_async(
+        &carina_core::parser::LoadedProviderContext::empty_for_test(),
+        async |type_checks| {
+            let bindings = carina_core::binding_index::ResolvedBindings::default();
+            let module_gate =
+                carina_core::executor::ModuleConstraintGate::from_live_compositions(&[]);
+            let schemas = schema_registry();
+            let factories: Vec<Box<dyn carina_core::provider::ProviderFactory>> =
+                vec![Box::new(carina_provider_aws::AwsProviderFactory)];
+            carina_core::value::canonicalize_normalized_resources_with_schemas(
+                std::slice::from_mut(&mut resource),
+                &schemas,
+            )
+            .expect("test provider/state values should canonicalize for update preparation");
+            let preparation = carina_core::executor::ProviderPreparationContext::new(
+                &bindings,
+                &module_gate,
+                &[],
+                &NoopNormalizer,
+                &factories,
+                &schemas,
+                type_checks,
+            );
+            carina_core::executor::prepare_update_request(
+                resource,
+                from,
+                changed_attributes,
+                &preparation,
+            )
+            .await
+            .expect("test resource should pass checked update preparation")
+        },
     )
-    .expect("test provider/state values should canonicalize for update preparation");
-    let preparation = carina_core::executor::ProviderPreparationContext::new(
-        &bindings,
-        &module_gate,
-        &[],
-        &NoopNormalizer,
-        &factories,
-        &schemas,
-    );
-    carina_core::executor::prepare_update_request(resource, from, changed_attributes, &preparation)
-        .await
-        .expect("test resource should pass checked update preparation")
+    .await
 }
 
 fn resource_from_state(state: &State) -> Resource {

@@ -1,6 +1,8 @@
 use carina_core::provider::{AppliedIdentifier, ReadOutcome};
 use carina_core::provider::{ProviderError, ProviderResult};
-use carina_core::resource::{ConcreteValue, Resource, ResourceId, Value};
+use carina_core::resource::{
+    AbsoluteBindingAddress, ConcreteValue, NoPlaceholder, Resource, ResourceId, Value,
+};
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
@@ -135,7 +137,7 @@ impl AwsProvider {
     /// Create an EC2 VPC Gateway Attachment
     pub(crate) async fn create_ec2_vpc_gateway_attachment(
         &self,
-        resource: &Resource<impl Sized>,
+        resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
     ) -> ProviderResult<TypedCreateCompletion> {
         let input = Ec2VpcGatewayAttachmentCreateInput::decode(resource)?;
         let sent = input.sent();
@@ -223,7 +225,7 @@ impl AwsProvider {
         &self,
         id: ResourceId,
         identifier: &AppliedIdentifier,
-        to: &Resource<impl Sized>,
+        to: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
         let input = Ec2VpcGatewayAttachmentUpdateInput::decode(to)?;
         let crate::send_models_generated::Ec2VpcGatewayAttachmentUpdateParts = input.into_parts();

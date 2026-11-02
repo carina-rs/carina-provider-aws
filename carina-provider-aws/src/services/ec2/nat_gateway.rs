@@ -1,7 +1,10 @@
 use carina_core::provider::{AppliedIdentifier, ReadOutcome};
 use carina_core::provider::{ProviderError, ProviderResult};
-use carina_core::resource::{ConcreteValue, Resource, ResourceId, State, Value};
+use carina_core::resource::{
+    AbsoluteBindingAddress, ConcreteValue, NoPlaceholder, Resource, ResourceId, State, Value,
+};
 use carina_core::schema::CompiledResourceSchema;
+use carina_plugin_sdk::{DesiredInputs, DesiredValue};
 
 use aws_sdk_ec2::types::{AvailabilityZoneAddress, NatGatewayState};
 
@@ -12,7 +15,6 @@ use crate::helpers::{
     CreatePoll, DeletePoll, RetryPolicy, build_tag_specification_with_create_token,
     retry_aws_operation_with_token,
 };
-use crate::normalizer::{CrossFieldInputs, CrossFieldValue};
 use crate::provider::{AwsCreateAttempt, TaggedEc2Create};
 use crate::read_model::{empty_map_value, found_managed_read};
 use crate::read_models_generated::Ec2NatGatewayReadModelSupplement;
@@ -164,37 +166,27 @@ fn availability_zone_addresses_to_value(
     ))
 }
 
-fn concrete_string(value: &ConcreteValue) -> Option<&str> {
-    match value {
-        ConcreteValue::String(value) => Some(value.expose_plaintext()),
-        ConcreteValue::CanonicalEnum(value) => Some(value.api_value()),
-        _ => None,
-    }
-}
-
 /// Validate the mode-dependent placement inputs while unresolved references
 /// are still allowed to defer the decision until apply-time resolution.
-pub(crate) fn validate_nat_gateway_inputs<S>(
-    inputs: &CrossFieldInputs<'_, S>,
-) -> ProviderResult<()> {
+pub(crate) fn validate_nat_gateway_inputs(inputs: &DesiredInputs<'_>) -> ProviderResult<()> {
     if !inputs.is_resource("aws", "ec2.NatGateway") {
         return Ok(());
     }
 
-    let mode = match inputs.attr("availability_mode") {
-        CrossFieldValue::Absent => Some("zonal"),
-        CrossFieldValue::Known(value) => concrete_string(value),
-        CrossFieldValue::Deferred => None,
+    let mode = match inputs.attribute("availability_mode") {
+        None => Some("zonal"),
+        Some(DesiredValue::Known(value)) => value.as_str(),
+        Some(_) => None,
     };
     let Some(mode) = mode else {
         return Ok(());
     };
-    let subnet = inputs.attr("subnet_id");
+    let subnet = inputs.attribute("subnet_id");
     match mode {
         "regional"
             if matches!(
                 subnet,
-                CrossFieldValue::Known(v) if concrete_string(v).is_some()
+                Some(DesiredValue::Known(value)) if value.as_str().is_some()
             ) =>
         {
             Err(ProviderError::invalid_input(
@@ -202,7 +194,7 @@ pub(crate) fn validate_nat_gateway_inputs<S>(
             )
             .for_resource(inputs.id().clone()))
         }
-        "zonal" if matches!(subnet, CrossFieldValue::Absent) => Err(ProviderError::invalid_input(
+        "zonal" if subnet.is_none() => Err(ProviderError::invalid_input(
             "ec2.NatGateway subnet_id is required when availability_mode = zonal",
         )
         .for_resource(inputs.id().clone())),
@@ -277,14 +269,11 @@ impl AwsProvider {
     /// Create an EC2 NAT Gateway
     pub(crate) async fn create_ec2_nat_gateway_start<A: AwsCreateAttempt>(
         &self,
-        resource: &Resource<impl Sized>,
+        resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
         _schema: &CompiledResourceSchema,
         client_token: &ClientToken,
         attempt: A,
     ) -> Result<A::Step, A::Verdict> {
-        if let Err(error) = validate_nat_gateway_inputs(&CrossFieldInputs::resolved(resource)) {
-            return Err(attempt.untracked(error));
-        }
         let input = match Ec2NatGatewayCreateInput::decode(resource, _schema) {
             Ok(input) => input,
             Err(error) => return Err(attempt.untracked(error)),
@@ -449,7 +438,7 @@ impl AwsProvider {
 #[cfg(test)]
 mod pending_tests {
     use super::*;
-    use carina_core::differ::{Diff, diff};
+    use carina_core::differ::Diff;
     use carina_core::provider::RawSavedAttrs;
     use carina_core::resource::{ResolvedResource, Resource};
     use std::collections::HashMap;
@@ -491,6 +480,11 @@ mod pending_tests {
         assert_eq!(nat_gateway_delete_poll_state(None), DeletePoll::Gone);
     }
 
+    fn validate(resource: &mut Resource) -> ProviderResult<()> {
+        let desired = carina_plugin_sdk::NativeDesiredNormalization::from_core(resource)?;
+        validate_nat_gateway_inputs(&desired.inputs())
+    }
+
     #[test]
     fn zonal_and_regional_modes_enforce_subnet_placement() {
         let mut zonal = Resource::with_provider("aws", "ec2.NatGateway", "zonal", None);
@@ -498,26 +492,24 @@ mod pending_tests {
             "availability_mode",
             Value::Concrete(ConcreteValue::String("zonal".into())),
         );
-        assert!(validate_nat_gateway_inputs(&CrossFieldInputs::resolved(&zonal)).is_err());
+        assert!(validate(&mut zonal).is_err());
         zonal.set_attr(
             "subnet_id",
             Value::Concrete(ConcreteValue::String("subnet-12345678".into())),
         );
-        validate_nat_gateway_inputs(&CrossFieldInputs::resolved(&zonal))
-            .expect("zonal mode accepts a subnet");
+        validate(&mut zonal).expect("zonal mode accepts a subnet");
 
         let mut regional = Resource::with_provider("aws", "ec2.NatGateway", "regional", None);
         regional.set_attr(
             "availability_mode",
             Value::Concrete(ConcreteValue::String("regional".into())),
         );
-        validate_nat_gateway_inputs(&CrossFieldInputs::resolved(&regional))
-            .expect("regional mode omits subnet_id");
+        validate(&mut regional).expect("regional mode omits subnet_id");
         regional.set_attr(
             "subnet_id",
             Value::Concrete(ConcreteValue::String("subnet-12345678".into())),
         );
-        assert!(validate_nat_gateway_inputs(&CrossFieldInputs::resolved(&regional)).is_err());
+        assert!(validate(&mut regional).is_err());
     }
 
     #[test]
@@ -569,25 +561,12 @@ mod pending_tests {
         .with_identifier("nat-12345678");
         let registry = crate::schemas::schema_registry();
         let saved = RawSavedAttrs::default().lift(&registry);
-        let schema = registry
-            .get(
-                "aws",
-                "ec2.NatGateway",
-                carina_core::schema::SchemaKind::Resource,
-            )
-            .expect("NAT gateway schema");
         let router = crate::test_comparison_router();
         let comparison = router
             .comparison_for(&registry, &desired.id)
             .expect("NAT gateway comparison context");
-        let result = diff(
-            &ResolvedResource::new(desired),
-            &current,
-            &saved,
-            None,
-            Some(schema.schema().as_schema()),
-            comparison.context(),
-        );
+        let desired = ResolvedResource::new(desired.into_resolved_dependency_phase_for_test());
+        let result = crate::test_diff(&desired, &current, &saved, None, comparison);
         assert!(matches!(result, Diff::NoChange(_)), "{result:?}");
     }
 }
