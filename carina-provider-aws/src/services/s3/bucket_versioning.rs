@@ -15,7 +15,8 @@ use aws_sdk_s3::types::{BucketVersioningStatus, VersioningConfiguration};
 use carina_core::provider::ProviderResult;
 use carina_core::provider::{AppliedIdentifier, ReadOutcome};
 use carina_core::resource::{
-    AbsoluteBindingAddress, ConcreteValue, NoPlaceholder, Resource, ResourceId, State, Value,
+    AbsoluteBindingAddress, ConcreteValue, NoPlaceholder, Resource, ResourceId, SnapshotState,
+    Value,
 };
 use carina_core::schema::CompiledResourceSchema;
 
@@ -94,12 +95,12 @@ impl AwsProvider {
         &self,
         id: ResourceId,
         identifier: &AppliedIdentifier,
-        _from: &State,
-        to: Resource,
+        _from: &SnapshotState,
+        to: &crate::helpers::UpdateResource,
         _schema: &CompiledResourceSchema,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
         let crate::send_models_generated::S3BucketVersioningUpdateParts { status } =
-            S3BucketVersioningUpdateInput::decode(&to, _schema)?.into_parts();
+            S3BucketVersioningUpdateInput::decode(to, _schema)?.into_parts();
         let status = status.into_inner();
         self.put_s3_bucket_versioning(&id, identifier, status).await
     }

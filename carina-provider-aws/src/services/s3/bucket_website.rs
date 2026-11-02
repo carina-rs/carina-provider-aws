@@ -4,7 +4,8 @@ use aws_sdk_s3::types::{
 use carina_core::provider::{AppliedIdentifier, ReadOutcome};
 use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{
-    AbsoluteBindingAddress, ConcreteValue, NoPlaceholder, Resource, ResourceId, State, Value,
+    AbsoluteBindingAddress, ConcreteValue, NoPlaceholder, Resource, ResourceId, SnapshotState,
+    Value,
 };
 use carina_core::schema::CompiledResourceSchema;
 use indexmap::IndexMap;
@@ -136,11 +137,11 @@ impl AwsProvider {
         &self,
         id: ResourceId,
         identifier: &AppliedIdentifier,
-        _from: &State,
-        to: Resource,
+        _from: &SnapshotState,
+        to: &crate::helpers::UpdateResource,
         schema: &CompiledResourceSchema,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
-        let input = S3BucketWebsiteConfigurationUpdateInput::decode(&to)?;
+        let input = S3BucketWebsiteConfigurationUpdateInput::decode(to)?;
         let crate::send_models_generated::S3BucketWebsiteConfigurationUpdateParts {
             error_document,
             index_document,

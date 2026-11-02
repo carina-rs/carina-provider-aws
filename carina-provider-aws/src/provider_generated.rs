@@ -9,8 +9,8 @@ use carina_core::provider::{
     AppliedIdentifier, BoxFuture, ProviderError, ProviderResult, ReadOutcome,
 };
 use carina_core::resource::{
-    AbsoluteBindingAddress, ConcreteValue, DataSource, NoPlaceholder, Resource, ResourceId, State,
-    Value,
+    AbsoluteBindingAddress, ConcreteValue, DataSource, NoPlaceholder, ResourceId, SnapshotState,
+    State, Value,
 };
 use indexmap::IndexMap;
 
@@ -2839,10 +2839,10 @@ impl AwsProvider {
         &self,
         id: ResourceId,
         identifier: &AppliedIdentifier,
-        from: &State,
-        to: Resource,
+        from: &SnapshotState,
+        to: &crate::helpers::UpdateResource,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
-        let input = crate::send_models_generated::Ec2InternetGatewayUpdateInput::decode(&to)?;
+        let input = crate::send_models_generated::Ec2InternetGatewayUpdateInput::decode(to)?;
         let crate::send_models_generated::Ec2InternetGatewayUpdateParts { tags } =
             input.into_parts();
         let tags = tags.into_inner();
@@ -2862,10 +2862,10 @@ impl AwsProvider {
         &self,
         id: ResourceId,
         identifier: &AppliedIdentifier,
-        from: &State,
-        to: Resource,
+        from: &SnapshotState,
+        to: &crate::helpers::UpdateResource,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
-        let input = crate::send_models_generated::Ec2RouteTableUpdateInput::decode(&to)?;
+        let input = crate::send_models_generated::Ec2RouteTableUpdateInput::decode(to)?;
         let crate::send_models_generated::Ec2RouteTableUpdateParts { tags } = input.into_parts();
         let tags = tags.into_inner();
         let tags = crate::send_model::optional_tags_value(tags);
@@ -2884,10 +2884,10 @@ impl AwsProvider {
         &self,
         id: ResourceId,
         identifier: &AppliedIdentifier,
-        from: &State,
-        to: Resource,
+        from: &SnapshotState,
+        to: &crate::helpers::UpdateResource,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
-        let input = crate::send_models_generated::Ec2SecurityGroupUpdateInput::decode(&to)?;
+        let input = crate::send_models_generated::Ec2SecurityGroupUpdateInput::decode(to)?;
         let crate::send_models_generated::Ec2SecurityGroupUpdateParts { tags } = input.into_parts();
         let tags = tags.into_inner();
         let tags = crate::send_model::optional_tags_value(tags);
@@ -2906,10 +2906,9 @@ impl AwsProvider {
         &self,
         id: ResourceId,
         identifier: &AppliedIdentifier,
-        to: Resource,
+        to: &crate::helpers::UpdateResource,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
-        let input =
-            crate::send_models_generated::OrganizationsOrganizationUpdateInput::decode(&to)?;
+        let input = crate::send_models_generated::OrganizationsOrganizationUpdateInput::decode(to)?;
         let crate::send_models_generated::OrganizationsOrganizationUpdateParts = input.into_parts();
         Ok(self.read_organizations_organization(&id, identifier).await)
     }

@@ -3379,7 +3379,7 @@ fn generate_provider_code(
          \x20   AppliedIdentifier, BoxFuture, ProviderError, ProviderResult, ReadOutcome,\n\
          };\n\
          use carina_core::resource::{\n\
-         \x20   AbsoluteBindingAddress, ConcreteValue, DataSource, NoPlaceholder, Resource, ResourceId, State, Value,\n\
+         \x20   AbsoluteBindingAddress, ConcreteValue, DataSource, NoPlaceholder, ResourceId, SnapshotState, State, Value,\n\
          };\n\
          use crate::AwsProvider;\n\
          use crate::error_helpers::api_error_with_meta;\n\n",
@@ -3573,10 +3573,10 @@ fn generate_provider_code(
                  \x20       &self,\n\
                  \x20       id: ResourceId,\n\
                  \x20       identifier: &AppliedIdentifier,\n\
-                 \x20       from: &State,\n\
-                 \x20       to: Resource,\n\
+                 \x20       from: &SnapshotState,\n\
+                 \x20       to: &crate::helpers::UpdateResource,\n\
                  \x20   ) -> ProviderResult<ProviderResult<ReadOutcome>> {{\n\
-                 \x20       let input = crate::send_models_generated::{}::decode(&to)?;\n\
+                 \x20       let input = crate::send_models_generated::{}::decode(to)?;\n\
                  \x20       let crate::send_models_generated::{} {{ tags }} = input.into_parts();\n\
                  \x20       let tags = tags.into_inner();\n\
                  \x20       let tags = crate::send_model::optional_tags_value(tags);\n\
@@ -3593,9 +3593,9 @@ fn generate_provider_code(
                  \x20       &self,\n\
                  \x20       id: ResourceId,\n\
                  \x20       identifier: &AppliedIdentifier,\n\
-                 \x20       to: Resource,\n\
+                 \x20       to: &crate::helpers::UpdateResource,\n\
                  \x20   ) -> ProviderResult<ProviderResult<ReadOutcome>> {{\n\
-                 \x20       let input = crate::send_models_generated::{}::decode(&to)?;\n\
+                 \x20       let input = crate::send_models_generated::{}::decode(to)?;\n\
                  \x20       let crate::send_models_generated::{} = input.into_parts();\n\
                  \x20       Ok(self.{}(&id, identifier).await)\n\
                  \x20   }}\n\n",
@@ -4428,7 +4428,12 @@ fn emit_send_input(
     }
 
     code.push_str(&format!("impl {type_name} {{\n"));
-    code.push_str("    pub(crate) fn decode(\n        _resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,\n");
+    code.push_str("    pub(crate) fn decode(\n");
+    if is_create {
+        code.push_str("        _resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,\n");
+    } else {
+        code.push_str("        _resource: &impl crate::send_model::SendResource,\n");
+    }
     let needs_schema = fields
         .iter()
         .any(|field| field.send_type == SendFieldType::Enum);

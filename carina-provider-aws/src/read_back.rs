@@ -207,6 +207,16 @@ pub(crate) fn invalid_read_back(
 }
 
 impl AwsProvider {
+    pub(crate) fn update_read_back_requirements(
+        &self,
+        resource: &crate::helpers::UpdateResource,
+    ) -> ProviderResult<ReadBackRequirements> {
+        for requirement in declarations(resource.id.resource_type.as_str()) {
+            resource.get_attr(requirement.predicate.input_attribute())?;
+        }
+        self.declared_read_back_requirements(&resource.id, &resource.materialized_attributes())
+    }
+
     pub(crate) fn declared_read_back_requirements(
         &self,
         id: &ResourceId,
@@ -262,7 +272,11 @@ impl AwsProvider {
                     "post-apply read-back is incomplete: {}",
                     missing.join(", ")
                 ));
-                let (_, _, attributes) = state.into_parts();
+                let attributes =
+                    match crate::read_model::live_attributes(state.id(), state.attributes()) {
+                        Ok(attributes) => attributes,
+                        Err(error) => return invalid_read_back(id, identifier, error),
+                    };
                 (attributes, missing, reason)
             }
             other => {

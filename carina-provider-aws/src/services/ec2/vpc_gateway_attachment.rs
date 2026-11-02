@@ -225,7 +225,7 @@ impl AwsProvider {
         &self,
         id: ResourceId,
         identifier: &AppliedIdentifier,
-        to: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
+        to: &crate::helpers::UpdateResource,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
         let input = Ec2VpcGatewayAttachmentUpdateInput::decode(to)?;
         let crate::send_models_generated::Ec2VpcGatewayAttachmentUpdateParts = input.into_parts();

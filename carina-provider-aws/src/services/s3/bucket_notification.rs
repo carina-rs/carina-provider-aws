@@ -6,7 +6,8 @@ use aws_sdk_s3::types::{
 use carina_core::provider::{AppliedIdentifier, ReadOutcome};
 use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{
-    AbsoluteBindingAddress, ConcreteValue, NoPlaceholder, Resource, ResourceId, State, Value,
+    AbsoluteBindingAddress, ConcreteValue, NoPlaceholder, Resource, ResourceId, SnapshotState,
+    Value,
 };
 use indexmap::IndexMap;
 
@@ -131,10 +132,10 @@ impl AwsProvider {
         &self,
         id: ResourceId,
         identifier: &AppliedIdentifier,
-        _from: &State,
-        to: Resource,
+        _from: &SnapshotState,
+        to: &crate::helpers::UpdateResource,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
-        let input = S3BucketNotificationConfigurationUpdateInput::decode(&to)?;
+        let input = S3BucketNotificationConfigurationUpdateInput::decode(to)?;
         let crate::send_models_generated::S3BucketNotificationConfigurationUpdateParts {
             event_bridge_configuration,
             lambda_function_configurations,

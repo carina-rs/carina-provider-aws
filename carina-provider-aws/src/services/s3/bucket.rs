@@ -6,8 +6,8 @@ use indexmap::IndexMap;
 use carina_core::provider::{AppliedIdentifier, ProviderDirectives, ReadOutcome};
 use carina_core::provider::{BoxFuture, ProviderError, ProviderResult};
 use carina_core::resource::{
-    AbsoluteBindingAddress, ConcreteValue, DataSource, NoPlaceholder, Resource, ResourceId, State,
-    Value,
+    AbsoluteBindingAddress, ConcreteValue, DataSource, NoPlaceholder, Resource, ResourceId,
+    SnapshotState, State, Value,
 };
 use carina_core::schema::CompiledResourceSchema;
 
@@ -267,12 +267,12 @@ impl AwsProvider {
         &self,
         id: ResourceId,
         identifier: &AppliedIdentifier,
-        from: &State,
-        to: Resource,
+        from: &SnapshotState,
+        to: &crate::helpers::UpdateResource,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
         let bucket_name = identifier.as_str();
 
-        let input = S3BucketUpdateInput::decode(&to)?;
+        let input = S3BucketUpdateInput::decode(to)?;
         let crate::send_models_generated::S3BucketUpdateParts { tags } = input.into_parts();
         let tags = tags.into_inner();
         let tags = crate::send_model::optional_tags_value(tags);

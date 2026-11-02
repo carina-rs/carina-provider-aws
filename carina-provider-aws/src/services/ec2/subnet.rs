@@ -1,7 +1,8 @@
 use carina_core::provider::{AppliedIdentifier, ReadOutcome};
 use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{
-    AbsoluteBindingAddress, ConcreteValue, NoPlaceholder, Resource, ResourceId, State, Value,
+    AbsoluteBindingAddress, ConcreteValue, NoPlaceholder, Resource, ResourceId, SnapshotState,
+    Value,
 };
 use carina_core::schema::CompiledResourceSchema;
 use carina_plugin_sdk::{DesiredScalar, DesiredValueMut, DesiredView};
@@ -434,11 +435,11 @@ impl AwsProvider {
         &self,
         id: ResourceId,
         identifier: &AppliedIdentifier,
-        from: &State,
-        to: Resource,
+        from: &SnapshotState,
+        to: &crate::helpers::UpdateResource,
         schema: &CompiledResourceSchema,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
-        let input = Ec2SubnetUpdateInput::decode(&to)?;
+        let input = Ec2SubnetUpdateInput::decode(to)?;
         let crate::send_models_generated::Ec2SubnetUpdateParts {
             assign_ipv6_address_on_creation,
             enable_dns64,

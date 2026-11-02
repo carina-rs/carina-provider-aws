@@ -1,7 +1,7 @@
 use carina_core::provider::{AppliedIdentifier, ReadOutcome};
 use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{
-    AbsoluteBindingAddress, NoPlaceholder, Resource, ResourceId, State, Value,
+    AbsoluteBindingAddress, NoPlaceholder, Resource, ResourceId, SnapshotState, Value,
 };
 
 use crate::AwsProvider;
@@ -97,11 +97,11 @@ impl AwsProvider {
         &self,
         id: ResourceId,
         identifier: &AppliedIdentifier,
-        _from: &State,
-        to: Resource,
+        _from: &SnapshotState,
+        to: &crate::helpers::UpdateResource,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
         let crate::send_models_generated::S3BucketPolicyUpdateParts { policy } =
-            S3BucketPolicyUpdateInput::decode(&to)?.into_parts();
+            S3BucketPolicyUpdateInput::decode(to)?.into_parts();
         let policy = policy.into_inner();
         self.put_s3_bucket_policy(&id, identifier, &policy).await
     }

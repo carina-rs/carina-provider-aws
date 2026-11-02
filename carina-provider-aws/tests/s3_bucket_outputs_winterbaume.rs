@@ -11,7 +11,10 @@ use carina_core::provider::{
     UpdateRequest,
 };
 use carina_core::provider::{RawSavedAttrs, ReadBackEnd};
-use carina_core::resource::{ConcreteValue, DataSource, ResolvedResource, Resource, State, Value};
+use carina_core::resource::{
+    ConcreteValue, DataSource, ResolvedResource, Resource, SnapshotState, State, StateValueLeaf,
+    Value,
+};
 use carina_provider_aws::{AwsNormalizer, AwsProvider, BoundedSdkConfig, test_existing_state};
 use carina_provider_protocol::types::{OperationConfig, ReadBackBudget};
 use indexmap::IndexMap;
@@ -288,7 +291,7 @@ fn schema_registry() -> carina_core::schema::SchemaRegistry {
     carina_provider_aws::schemas::schema_registry()
 }
 
-fn assert_no_diff(desired: Resource, current: State) {
+fn assert_no_diff(desired: Resource, current: State<impl StateValueLeaf>) {
     let registry = schema_registry();
     let router = carina_provider_aws::test_comparison_router();
     let comparison = router
@@ -363,7 +366,7 @@ async fn create_state_for_test(
     provider: &AwsProvider,
     id: &carina_core::resource::ResourceId,
     request: CreateRequest,
-) -> Result<State, CreateFailure> {
+) -> Result<SnapshotState, CreateFailure> {
     let accepted = carina_core::executor::AcceptedRequest::from_create_request(&request);
     create_outcome_for_test(provider, id, request)
         .await
@@ -372,7 +375,7 @@ async fn create_state_for_test(
 
 async fn update_request_for_test(
     resource: Resource,
-    from: State,
+    from: State<impl StateValueLeaf>,
     changed_attributes: &[String],
 ) -> UpdateRequest {
     carina_core::validation::deferred_types::with_session_for_test_async(
@@ -393,7 +396,7 @@ async fn update_request_for_test(
             );
             carina_core::executor::prepare_update_request(
                 resource,
-                from,
+                from.to_snapshot(),
                 changed_attributes,
                 &preparation,
             )
@@ -431,25 +434,37 @@ fn ready_data_source_for_test(resource: DataSource) -> ProviderReadyDataSource {
     )
 }
 
-fn assert_bucket_outputs(state: &State, bucket: &str, region: &str, hosted_zone_id: &str) {
+fn assert_bucket_outputs(
+    state: &State<impl StateValueLeaf>,
+    bucket: &str,
+    region: &str,
+    hosted_zone_id: &str,
+) {
+    let state = state.to_snapshot();
     assert!(state.exists);
-    assert_eq!(state.attributes.get("bucket"), Some(&string(bucket)));
+    assert_eq!(
+        state.attributes.get("bucket"),
+        Some(&string(bucket).to_snapshot())
+    );
     assert_eq!(
         state.attributes.get("arn"),
-        Some(&string(&format!("arn:aws:s3:::{bucket}")))
+        Some(&string(&format!("arn:aws:s3:::{bucket}")).to_snapshot())
     );
-    assert_eq!(state.attributes.get("region"), Some(&string(region)));
+    assert_eq!(
+        state.attributes.get("region"),
+        Some(&string(region).to_snapshot())
+    );
     assert_eq!(
         state.attributes.get("bucket_domain_name"),
-        Some(&string(&format!("{bucket}.s3.amazonaws.com")))
+        Some(&string(&format!("{bucket}.s3.amazonaws.com")).to_snapshot())
     );
     assert_eq!(
         state.attributes.get("bucket_regional_domain_name"),
-        Some(&string(&format!("{bucket}.s3.{region}.amazonaws.com")))
+        Some(&string(&format!("{bucket}.s3.{region}.amazonaws.com")).to_snapshot())
     );
     assert_eq!(
         state.attributes.get("hosted_zone_id"),
-        Some(&string(hosted_zone_id))
+        Some(&string(hosted_zone_id).to_snapshot())
     );
 }
 
@@ -488,7 +503,7 @@ async fn create_bucket_ignores_supplied_read_only_region_for_placement() {
     assert_bucket_outputs(&state, bucket, PROVIDER_REGION, "Z3AQBSTGFYJSTF");
     assert_ne!(
         state.attributes.get("region"),
-        Some(&string(supplied_read_only_region))
+        Some(&string(supplied_read_only_region).to_snapshot())
     );
 }
 
@@ -550,7 +565,10 @@ async fn create_bucket_read_back_not_found_is_partial_success_with_created_ident
         panic!("expected partial create success");
     };
     assert_eq!(state.identifier().as_str(), bucket);
-    assert_eq!(state.attributes().get("bucket"), Some(&string(bucket)));
+    assert_eq!(
+        state.attributes().get("bucket"),
+        Some(&string(bucket).to_snapshot())
+    );
     assert!(diagnostic.reason().contains("post-apply read-back"));
     assert!(!diagnostic.missing_attributes().is_empty());
 }
@@ -587,13 +605,19 @@ async fn update_bucket_read_back_not_found_is_partial_success_with_updated_ident
         panic!("expected partial update success, got {outcome:?}");
     };
     assert_eq!(state.identifier().as_str(), bucket);
-    assert_eq!(state.attributes().get("bucket"), Some(&string(bucket)));
+    assert_eq!(
+        state.attributes().get("bucket"),
+        Some(&string(bucket).to_snapshot())
+    );
     assert_eq!(
         state.attributes().get("tags"),
-        Some(&Value::Concrete(ConcreteValue::Map(IndexMap::from([(
-            "purpose".to_string(),
-            string("partial-update-test")
-        )]))))
+        Some(
+            &Value::Concrete(ConcreteValue::Map(IndexMap::from([(
+                "purpose".to_string(),
+                string("partial-update-test")
+            )])))
+            .to_snapshot()
+        )
     );
     assert!(diagnostic.reason().contains("post-apply read-back"));
     assert!(!diagnostic.missing_attributes().is_empty());
@@ -617,7 +641,10 @@ async fn create_bucket_permanent_read_back_error_finishes_partial_immediately() 
         panic!("expected partial create success");
     };
     assert_eq!(state.identifier().as_str(), bucket);
-    assert_eq!(state.attributes().get("bucket"), Some(&string(bucket)));
+    assert_eq!(
+        state.attributes().get("bucket"),
+        Some(&string(bucket).to_snapshot())
+    );
     assert!(diagnostic.reason().contains("post-apply read-back"));
     assert!(diagnostic.reason().contains("Failed to read bucket"));
     assert!(!diagnostic.missing_attributes().is_empty());
@@ -656,13 +683,19 @@ async fn update_bucket_permanent_read_back_error_finishes_partial_immediately() 
         panic!("expected partial update success, got {outcome:?}");
     };
     assert_eq!(state.identifier().as_str(), bucket);
-    assert_eq!(state.attributes().get("bucket"), Some(&string(bucket)));
+    assert_eq!(
+        state.attributes().get("bucket"),
+        Some(&string(bucket).to_snapshot())
+    );
     assert_eq!(
         state.attributes().get("tags"),
-        Some(&Value::Concrete(ConcreteValue::Map(IndexMap::from([(
-            "purpose".to_string(),
-            string("partial-update-error-test")
-        )]))))
+        Some(
+            &Value::Concrete(ConcreteValue::Map(IndexMap::from([(
+                "purpose".to_string(),
+                string("partial-update-error-test")
+            )])))
+            .to_snapshot()
+        )
     );
     assert!(diagnostic.reason().contains("post-apply read-back"));
     assert!(diagnostic.reason().contains("Failed to read bucket"));

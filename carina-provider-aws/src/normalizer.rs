@@ -693,7 +693,7 @@ mod tests {
         let id = resource.id;
         let mut states = HashMap::from([(
             id.clone(),
-            crate::read_model::test_existing_state(id, attributes),
+            crate::read_model::test_existing_state(id, attributes).to_snapshot(),
         )]);
 
         normalize_provider_states(&AwsNormalizer, &mut states)

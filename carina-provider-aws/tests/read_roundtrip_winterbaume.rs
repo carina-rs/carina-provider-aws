@@ -17,7 +17,8 @@ use carina_core::provider::{
     RawSavedAttrs, ReadRequest, UpdateRequest,
 };
 use carina_core::resource::{
-    ConcreteValue, Current, ResolvedResource, Resource, State, Value, into_plan_input_current_map,
+    ConcreteValue, Current, ResolvedResource, Resource, SnapshotState, State, StateValueLeaf,
+    Value, into_plan_input_current_map,
 };
 use carina_core::schema::{SchemaKind, SchemaRegistry};
 use carina_provider_aws::{
@@ -73,7 +74,7 @@ fn empty_map() -> Value {
     Value::Concrete(ConcreteValue::Map(IndexMap::new()))
 }
 
-fn assert_api_text(value: Option<&Value>, expected: &str) {
+fn assert_api_text(value: Option<&Value<impl carina_core::resource::ValueKind>>, expected: &str) {
     let actual = match value {
         Some(Value::Concrete(ConcreteValue::String(value))) => value.expose_plaintext(),
         Some(Value::Concrete(ConcreteValue::CanonicalEnum(value))) => value.api_value(),
@@ -186,7 +187,7 @@ fn request_target(request: &MockRequest) -> &str {
         .expect("AWS JSON request must carry x-amz-target")
 }
 
-fn assert_no_diff(desired: Resource, current: State) {
+fn assert_no_diff(desired: Resource, current: State<impl StateValueLeaf>) {
     let registry = schema_registry();
     let router = carina_provider_aws::test_comparison_router();
     let comparison = router
@@ -200,7 +201,7 @@ fn assert_no_diff(desired: Resource, current: State) {
 
 async fn assert_no_diff_with_nested_write_only(
     desired: Resource,
-    current: State,
+    current: State<impl StateValueLeaf>,
     sent_attributes: &[&str],
 ) {
     let registry = schema_registry();
@@ -215,6 +216,7 @@ async fn assert_no_diff_with_nested_write_only(
     let comparison = router
         .comparison_for(&registry, &desired.id)
         .expect("managed resource comparison context");
+    let current = current.to_snapshot();
     let mut nested_write_only = NestedWriteOnlyRecord::new();
     nested_write_only
         .record_sent(
@@ -241,7 +243,7 @@ async fn assert_no_diff_with_nested_write_only(
         &current.attributes,
         &sent_desired,
         Some(schema.schema().as_schema()),
-        &comparison.context().observation(),
+        &comparison.context().observation_for_test(),
     );
     let desired = ResolvedResource::new(desired.into_resolved_dependency_phase_for_test());
     let result =
@@ -313,7 +315,7 @@ async fn create_state_for_test(
     provider: &AwsProvider,
     id: &carina_core::resource::ResourceId,
     request: CreateRequest,
-) -> Result<State, CreateFailure> {
+) -> Result<SnapshotState, CreateFailure> {
     let accepted = carina_core::executor::AcceptedRequest::from_create_request(&request);
     create_outcome_for_test(provider, id, request)
         .await
@@ -333,7 +335,7 @@ async fn normalize_desired_for_test(mut resource: Resource) -> Resource {
     resource
 }
 
-async fn create_round_trip_state(provider: &AwsProvider, desired: &Resource) -> State {
+async fn create_round_trip_state(provider: &AwsProvider, desired: &Resource) -> SnapshotState {
     create_state_for_test(
         provider,
         &desired.id,
@@ -345,7 +347,7 @@ async fn create_round_trip_state(provider: &AwsProvider, desired: &Resource) -> 
 
 async fn update_request_for_test(
     resource: Resource,
-    from: State,
+    from: State<impl StateValueLeaf>,
     changed_attributes: &[String],
 ) -> UpdateRequest {
     carina_core::validation::deferred_types::with_session_for_test_async(
@@ -367,7 +369,7 @@ async fn update_request_for_test(
             );
             carina_core::executor::prepare_update_request(
                 resource,
-                from,
+                from.to_snapshot(),
                 changed_attributes,
                 &preparation,
             )
@@ -1209,9 +1211,12 @@ async fn log_group_false_deletion_protection_round_trips() {
 
     assert_eq!(
         current.attributes.get("deletion_protection_enabled"),
-        Some(&bool_value(false))
+        Some(&bool_value(false).to_snapshot())
     );
-    assert_eq!(current.attributes.get("tags"), Some(&empty_map()));
+    assert_eq!(
+        current.attributes.get("tags"),
+        Some(&empty_map().to_snapshot())
+    );
     assert_no_diff(desired, current);
 }
 
@@ -1263,7 +1268,7 @@ async fn unrelated_log_group_update_preserves_omitted_deletion_protection() {
 
     assert_eq!(
         state.attributes.get("deletion_protection_enabled"),
-        Some(&bool_value(true))
+        Some(&bool_value(true).to_snapshot())
     );
 }
 
@@ -1286,11 +1291,11 @@ async fn certificate_options_validation_method_create_read_diff_round_trip() {
 
     assert_eq!(
         current.attributes.get("subject_alternative_names"),
-        Some(&list(&["www.example.com"]))
+        Some(&list(&["www.example.com"]).to_snapshot())
     );
     assert_eq!(
         current.attributes.get("key_algorithm"),
-        Some(&string("POST_QUANTUM_2048")),
+        Some(&string("POST_QUANTUM_2048").to_snapshot()),
         "AWS values newer than the pinned closed enum must survive refresh"
     );
     let Some(Value::Concrete(ConcreteValue::Map(options))) = current.attributes.get("options")
@@ -1303,7 +1308,10 @@ async fn certificate_options_validation_method_create_read_diff_round_trip() {
     );
     assert_api_text(options.get("export"), "DISABLED");
     assert!(!options.contains_key("validation_method"));
-    assert_eq!(current.attributes.get("tags"), Some(&empty_map()));
+    assert_eq!(
+        current.attributes.get("tags"),
+        Some(&empty_map().to_snapshot())
+    );
     assert_no_diff_with_nested_write_only(desired, current, &["options"]).await;
 }
 
@@ -1340,11 +1348,11 @@ async fn account_write_only_create_inputs_and_import_read_round_trip() {
         .into_state();
     assert_eq!(
         imported.attributes.get("account_name"),
-        Some(&string("member"))
+        Some(&string("member").to_snapshot())
     );
     assert_eq!(
         imported.attributes.get("email"),
-        Some(&string("member@example.com"))
+        Some(&string("member@example.com").to_snapshot())
     );
     assert!(!imported.attributes.contains_key("role_name"));
     assert!(
@@ -1459,7 +1467,7 @@ async fn account_name_update_sends_put_account_name_and_read_converges() {
     );
     assert_eq!(
         updated.attributes.get("account_name"),
-        Some(&string("new-name"))
+        Some(&string("new-name").to_snapshot())
     );
     assert_no_diff(desired, updated);
 }
@@ -1681,7 +1689,7 @@ async fn subnet_ipam_and_associated_ipv6_cidr_round_trip() {
     let current = create_round_trip_state(&provider, &desired).await;
     assert_eq!(
         current.attributes.get("ipv6_cidr_block"),
-        Some(&string("2001:db8::/64"))
+        Some(&string("2001:db8::/64").to_snapshot())
     );
     assert_no_diff(desired, current);
 }
@@ -1697,7 +1705,7 @@ async fn eip_requested_address_round_trip() {
     let current = create_round_trip_state(&provider, &desired).await;
     assert_eq!(
         current.attributes.get("public_ip"),
-        Some(&string("198.51.100.42"))
+        Some(&string("198.51.100.42").to_snapshot())
     );
     assert_no_diff(desired, current);
 }
@@ -1745,7 +1753,7 @@ async fn regional_nat_private_address_and_az_addresses_round_trip() {
     assert!(!current.attributes.contains_key("subnet_id"));
     assert_eq!(
         current.attributes.get("private_ip_address"),
-        Some(&string("10.42.0.5"))
+        Some(&string("10.42.0.5").to_snapshot())
     );
     assert_no_diff(desired, current);
 }
@@ -1766,7 +1774,7 @@ async fn security_group_source_owner_round_trip() {
     let current = create_round_trip_state(&provider, &desired).await;
     assert_eq!(
         current.attributes.get("source_security_group_owner_id"),
-        Some(&string("123456789012"))
+        Some(&string("123456789012").to_snapshot())
     );
     assert_no_diff(desired, current);
 }
@@ -1802,7 +1810,7 @@ async fn flow_log_resource_type_round_trip() {
     assert_api_text(specification.get("resource_type"), "instance");
     assert_eq!(
         specification.get("tag_keys"),
-        Some(&list(&["Name", "Environment"]))
+        Some(&list(&["Name", "Environment"]).to_snapshot())
     );
     assert_no_diff(desired, current);
 }
@@ -1835,11 +1843,17 @@ async fn vpc_endpoint_new_create_attributes_round_trip() {
     let current = create_round_trip_state(&provider, &desired).await;
     assert_eq!(
         current.attributes.get("resource_configuration_arn"),
-        desired.get_attr("resource_configuration_arn")
+        desired
+            .get_attr("resource_configuration_arn")
+            .map(Value::to_snapshot)
+            .as_ref()
     );
     assert_eq!(
         current.attributes.get("service_network_arn"),
-        desired.get_attr("service_network_arn")
+        desired
+            .get_attr("service_network_arn")
+            .map(Value::to_snapshot)
+            .as_ref()
     );
     assert_api_text(current.attributes.get("service_region"), REGION);
     assert_no_diff(desired, current);
@@ -1862,13 +1876,16 @@ async fn standard_queue_false_fifo_flags_are_not_sent_and_round_trip() {
 
     assert_eq!(
         current.attributes.get("fifo_queue"),
-        Some(&bool_value(false))
+        Some(&bool_value(false).to_snapshot())
     );
     assert_eq!(
         current.attributes.get("content_based_deduplication"),
-        Some(&bool_value(false))
+        Some(&bool_value(false).to_snapshot())
     );
-    assert_eq!(current.attributes.get("tags"), Some(&empty_map()));
+    assert_eq!(
+        current.attributes.get("tags"),
+        Some(&empty_map().to_snapshot())
+    );
     assert!(
         !current
             .attributes
@@ -1905,19 +1922,19 @@ async fn fifo_queue_aws_defaults_round_trip_without_becoming_desired() {
 
     assert_eq!(
         current.attributes.get("fifo_queue"),
-        Some(&bool_value(true))
+        Some(&bool_value(true).to_snapshot())
     );
     assert_eq!(
         current.attributes.get("content_based_deduplication"),
-        Some(&bool_value(true))
+        Some(&bool_value(true).to_snapshot())
     );
     assert_eq!(
         current.attributes.get("deduplication_scope"),
-        Some(&string("queue"))
+        Some(&string("queue").to_snapshot())
     );
     assert_eq!(
         current.attributes.get("fifo_throughput_limit"),
-        Some(&string("perQueue"))
+        Some(&string("perQueue").to_snapshot())
     );
     assert_no_diff(desired, current);
 }
@@ -1950,7 +1967,10 @@ async fn redrive_numeric_string_count_round_trips_as_an_integer() {
 
     assert_eq!(
         current.attributes.get("redrive_policy"),
-        desired.get_attr("redrive_policy")
+        desired
+            .get_attr("redrive_policy")
+            .map(Value::to_snapshot)
+            .as_ref()
     );
     assert_no_diff(desired, current);
 }
@@ -1970,7 +1990,7 @@ async fn kms_alias_round_trips_without_arn_rewriting() {
 
     assert_eq!(
         current.attributes.get("kms_master_key_id"),
-        Some(&string("alias/aws/sqs"))
+        Some(&string("alias/aws/sqs").to_snapshot())
     );
     assert_no_diff(desired, current);
 }

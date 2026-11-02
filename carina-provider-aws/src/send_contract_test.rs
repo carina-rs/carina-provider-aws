@@ -1129,6 +1129,69 @@ async fn native_create_preparation_rejects_sqs_and_nat_cross_field_conflicts_bef
 }
 
 #[tokio::test]
+async fn sqs_tags_only_update_preserves_unconsumed_fifo_secret_hashes() {
+    use carina_core::resource::DeferredValue;
+
+    let service = Arc::new(CaptureService::default());
+    let mock = MockAws::builder()
+        .with_service(Arc::clone(&service))
+        .build();
+    let provider = AwsProvider::from_sdk_config(
+        REGION.to_string(),
+        vec![],
+        vec![],
+        &BoundedSdkConfig::for_test(mock.sdk_config(REGION).await),
+    );
+    let identifier = AppliedIdentifier::new(capture_identifier("sqs.Queue")).unwrap();
+    let resource = Resource::with_provider("aws", "sqs.Queue", "fifo-secrets", None)
+        .with_attribute("queue_name", string("fifo-secrets.fifo"))
+        .with_attribute("fifo_queue", Value::Concrete(ConcreteValue::Bool(true)))
+        .with_attribute("deduplication_scope", string("messageGroup"))
+        .with_attribute("fifo_throughput_limit", string("perMessageGroupId"));
+    let patch = UpdatePatch {
+        ops: vec![PatchOp::Add {
+            key: "tags".into(),
+            value: Value::Concrete(ConcreteValue::Map(IndexMap::from([(
+                "Environment".into(),
+                string("new"),
+            )]))),
+        }],
+    };
+
+    for attribute in ["deduplication_scope", "fifo_throughput_limit"] {
+        let mut from = existing_state_without(&resource, None).to_snapshot();
+        from.attributes.insert(
+            attribute.into(),
+            carina_core::value::redact_secrets_in_value(&Value::Deferred(DeferredValue::Secret(
+                Box::new(resource.get_attr(attribute).unwrap().clone()),
+            )))
+            .expect("FIFO create-only secret should persist as a hash"),
+        );
+
+        service.clear();
+        provider
+            .update_step(&resource.id, &identifier, &from, &patch)
+            .await
+            .unwrap_or_else(|error| {
+                panic!("tags-only update must not consume {attribute}: {error:?}")
+            });
+        let requests = service.snapshot();
+        let mutations = requests
+            .iter()
+            .filter(|request| is_mutating_request(request))
+            .collect::<Vec<_>>();
+        assert_eq!(mutations.len(), 1, "{requests:?}");
+        assert_eq!(
+            mutations[0]
+                .headers
+                .get("x-amz-target")
+                .and_then(|value| value.to_str().ok()),
+            Some("AmazonSQS.TagQueue")
+        );
+    }
+}
+
+#[tokio::test]
 async fn sqs_update_rejects_fifo_conflicts_after_deferred_inputs_resolve_before_send() {
     use carina_core::binding_index::{BindingValueSource, ResolvedBindings};
     use carina_core::provider::ProviderNormalizer;
@@ -1225,6 +1288,198 @@ async fn sqs_update_rejects_fifo_conflicts_after_deferred_inputs_resolve_before_
 }
 
 #[tokio::test]
+async fn acm_tag_update_does_not_restore_outputs_omitted_by_final_read_back() {
+    use carina_core::resource::DeferredValue;
+    use carina_provider_protocol::ReadBackEnd;
+    use carina_provider_protocol::types::{OperationConfig, ReadBackBudget};
+
+    let service = Arc::new(CaptureService::default());
+    let mock = MockAws::builder()
+        .with_service(Arc::clone(&service))
+        .build();
+    let provider = AwsProvider::from_sdk_config(
+        REGION.to_string(),
+        vec![],
+        vec![],
+        &BoundedSdkConfig::for_test(mock.sdk_config(REGION).await),
+    )
+    .with_operation_config_for_test(
+        "acm.Certificate",
+        OperationConfig {
+            read_back: ReadBackBudget::from_secs(1),
+            ..Default::default()
+        },
+    );
+    let resource: Resource = Resource::with_provider("aws", "acm.Certificate", "cached-dvo", None);
+    let id = resource.id;
+    let mut from = crate::test_existing_state(
+        id.clone(),
+        HashMap::from([
+            ("domain_name".into(), string("send-contract.example.com")),
+            ("validation_method".into(), string("DNS")),
+            (
+                "domain_validation_options".into(),
+                Value::Concrete(ConcreteValue::List(vec![Value::Concrete(
+                    ConcreteValue::Map(IndexMap::from([
+                        ("domain_name".into(), string("send-contract.example.com")),
+                        (
+                            "resource_record".into(),
+                            Value::Concrete(ConcreteValue::Map(IndexMap::from([
+                                ("name".into(), string("_old.send-contract.example.com.")),
+                                ("type".into(), string("CNAME")),
+                                ("value".into(), string("_old.acm-validations.aws.")),
+                            ]))),
+                        ),
+                    ])),
+                )])),
+            ),
+            ("failure_reason".into(), string("NO_AVAILABLE_CONTACTS")),
+        ]),
+    )
+    .to_snapshot();
+    let options_snapshot =
+        carina_core::value::redact_secrets_in_value(&Value::Deferred(DeferredValue::Secret(
+            Box::new(Value::Concrete(ConcreteValue::Map(IndexMap::from([(
+                "certificate_transparency_logging_preference".into(),
+                string("ENABLED"),
+            )])))),
+        )))
+        .expect("persisted create-only options");
+    from.attributes
+        .insert("options".into(), options_snapshot.clone());
+    let patch = UpdatePatch {
+        ops: vec![PatchOp::Add {
+            key: "tags".into(),
+            value: Value::Concrete(ConcreteValue::Map(IndexMap::from([(
+                "Environment".into(),
+                string("new"),
+            )]))),
+        }],
+    };
+    let identifier = AppliedIdentifier::new(capture_identifier("acm.Certificate")).unwrap();
+
+    let outcome =
+        provider
+            .update_with_poll_sleep_for_test(&id, &identifier, &from, &patch, |_| {
+                std::future::ready(())
+            })
+            .await
+            .expect("tag update should finish with a partial read-back");
+
+    assert_eq!(outcome.read_back_end(), ReadBackEnd::HostDeadline);
+    assert_eq!(
+        outcome.diagnostic().unwrap().missing_attributes(),
+        ["domain_validation_options"]
+    );
+    let state = outcome.into_state_for_writeback();
+    assert!(
+        !state.attributes.contains_key("domain_validation_options"),
+        "omitted DNS records must remain absent so cached planning can mark them unknown"
+    );
+    assert!(
+        !state.attributes.contains_key("failure_reason"),
+        "other outputs omitted by the final read must also stay absent"
+    );
+    assert!(state.attributes.contains_key("status"));
+    assert_eq!(state.attributes.get("options"), Some(&options_snapshot));
+    let requests = service.snapshot();
+    for (target, expected) in [
+        ("CertificateManager.AddTagsToCertificate", 1),
+        ("CertificateManager.DescribeCertificate", 2),
+    ] {
+        assert_eq!(
+            requests
+                .iter()
+                .filter(|request| {
+                    request
+                        .headers
+                        .get("x-amz-target")
+                        .and_then(|v| v.to_str().ok())
+                        == Some(target)
+                })
+                .count(),
+            expected,
+            "{target}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn organizations_account_tag_update_preserves_unused_secret_role_snapshot() {
+    use carina_core::resource::DeferredValue;
+
+    let service = Arc::new(CaptureService::default());
+    let mock = MockAws::builder()
+        .with_service(Arc::clone(&service))
+        .build();
+    let provider = AwsProvider::from_sdk_config(
+        REGION.to_string(),
+        vec![],
+        vec![],
+        &BoundedSdkConfig::for_test(mock.sdk_config(REGION).await),
+    );
+    let desired: Resource =
+        Resource::with_provider("aws", "organizations.Account", "secret-role", None);
+    let id = desired.id;
+    let mut from = crate::test_existing_state(
+        id.clone(),
+        HashMap::from([
+            ("account_name".into(), string("send-contract")),
+            ("email".into(), string("send-contract@example.com")),
+            (
+                "tags".into(),
+                Value::Concrete(ConcreteValue::Map(IndexMap::from([(
+                    "Environment".into(),
+                    string("old"),
+                )]))),
+            ),
+        ]),
+    )
+    .to_snapshot();
+    let role_snapshot = carina_core::value::redact_secrets_in_value(&Value::Deferred(
+        DeferredValue::Secret(Box::new(string("Role"))),
+    ))
+    .expect("persisted secret role name");
+    from.attributes
+        .insert("role_name".into(), role_snapshot.clone());
+    let patch = UpdatePatch {
+        // Create-only role_name has no Reassert, even when authored as secret("Role").
+        ops: vec![PatchOp::Replace {
+            key: "tags".into(),
+            value: Value::Concrete(ConcreteValue::Map(IndexMap::from([(
+                "Environment".into(),
+                string("new"),
+            )]))),
+        }],
+    };
+    let identifier = AppliedIdentifier::new("123456789012").expect("account identifier");
+
+    provider
+        .update_with_patch(&id, &identifier, &from, &patch)
+        .await
+        .expect("tag update must not require the create-only role name's plaintext");
+
+    let requests = service.snapshot();
+    let tag_request = requests
+        .iter()
+        .find(|request| {
+            request.headers["x-amz-target"]
+                .to_str()
+                .expect("AWS JSON target")
+                .ends_with(".TagResource")
+        })
+        .expect("tag update must reach AWS");
+    let body: serde_json::Value =
+        serde_json::from_slice(&tag_request.body).expect("tag request JSON");
+    assert_eq!(body["ResourceId"], "123456789012");
+    assert_eq!(
+        body["Tags"],
+        serde_json::json!([{"Key": "Environment", "Value": "new"}])
+    );
+    assert_eq!(from.attributes.get("role_name"), Some(&role_snapshot));
+}
+
+#[tokio::test]
 async fn route53_update_uses_identifier_type_and_sends_mutable_attributes() {
     let service = Arc::new(CaptureService::default());
     let mock = MockAws::builder()
@@ -1256,8 +1511,11 @@ async fn route53_update_uses_identifier_type_and_sends_mutable_attributes() {
         )
         .expect("applied record identifier");
 
+        let from = crate::test_existing_state(desired.id.clone(), desired.resolved_attributes())
+            .to_snapshot();
+        let update = crate::UpdateResource::new(&from, &UpdatePatch { ops: vec![] });
         let result = provider
-            .update_route53_record_set(desired.id.clone(), &identifier, desired, schema)
+            .update_route53_record_set(desired.id.clone(), &identifier, &update, schema)
             .await;
         // Also check that read-back addresses the identifier's record type.
         assert!(result.is_ok(), "update must reach read-back: {result:?}");

@@ -21,7 +21,8 @@ use indexmap::IndexMap;
 use carina_core::provider::{AppliedIdentifier, Observation, ReadOutcome};
 use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{
-    AbsoluteBindingAddress, ConcreteValue, NoPlaceholder, Resource, ResourceId, State, Value,
+    AbsoluteBindingAddress, ConcreteValue, NoPlaceholder, Resource, ResourceId, SnapshotState,
+    Value,
 };
 use carina_core::schema::CompiledResourceSchema;
 use carina_plugin_sdk::{DesiredScalar, DesiredValue, DesiredValueMut, DesiredView};
@@ -75,7 +76,7 @@ pub(crate) fn request_certificate_outcome_unknown_error(
 /// `AddTagsToCertificate` / `RemoveTagsFromCertificate` calls.
 fn compute_tag_diff(
     desired: &IndexMap<String, Value>,
-    current: &IndexMap<String, Value>,
+    current: &IndexMap<String, Value<impl carina_core::resource::ValueKind>>,
 ) -> (Vec<(String, String)>, Vec<String>) {
     let mut to_add = Vec::new();
     for (key, value) in desired {
@@ -700,11 +701,11 @@ impl AwsProvider {
         &self,
         id: ResourceId,
         identifier: &AppliedIdentifier,
-        from: &State,
-        to: Resource,
+        from: &SnapshotState,
+        to: &crate::helpers::UpdateResource,
         _schema: &CompiledResourceSchema,
     ) -> ProviderResult<()> {
-        let input = AcmCertificateUpdateInput::decode(&to)?;
+        let input = AcmCertificateUpdateInput::decode(to)?;
         let crate::send_models_generated::AcmCertificateUpdateParts { tags } = input.into_parts();
         let tags = tags.into_inner();
         let tags = crate::send_model::optional_tags_value(tags);
@@ -724,16 +725,17 @@ impl AwsProvider {
         id: &ResourceId,
         arn: &str,
         desired_tags: Option<&Value>,
-        from: &State,
+        from: &SnapshotState,
     ) -> ProviderResult<()> {
         let empty = IndexMap::new();
         let desired = match desired_tags {
             Some(Value::Concrete(ConcreteValue::Map(m))) => m,
             _ => &empty,
         };
+        let current_empty = IndexMap::new();
         let current = match from.attributes.get("tags") {
             Some(Value::Concrete(ConcreteValue::Map(m))) => m,
-            _ => &empty,
+            _ => &current_empty,
         };
         let (to_add, to_remove) = compute_tag_diff(desired, current);
 
@@ -1198,7 +1200,7 @@ mod tests {
     #[test]
     fn compute_tag_diff_initial_create_adds_all() {
         let desired = tag_map(&[("Env", "dev"), ("Project", "carina")]);
-        let current = IndexMap::new();
+        let current: IndexMap<String, Value> = IndexMap::new();
         let (to_add, to_remove) = compute_tag_diff(&desired, &current);
         assert_eq!(
             to_add,
@@ -1396,7 +1398,7 @@ mod tests {
             "Env".to_string(),
             Value::Concrete(ConcreteValue::String("dev".to_string().into())),
         );
-        let current = IndexMap::new();
+        let current: IndexMap<String, Value> = IndexMap::new();
         let (to_add, to_remove) = compute_tag_diff(&desired, &current);
         assert_eq!(to_add, vec![("Env".to_string(), "dev".to_string())]);
         assert!(to_remove.is_empty());

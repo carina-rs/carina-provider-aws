@@ -4,7 +4,8 @@ use std::collections::HashMap;
 use carina_core::provider::{AppliedIdentifier, ReadOutcome};
 use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{
-    AbsoluteBindingAddress, ConcreteValue, NoPlaceholder, Resource, ResourceId, State, Value,
+    AbsoluteBindingAddress, ConcreteValue, NoPlaceholder, Resource, ResourceId, SnapshotState,
+    SnapshotValue, Value,
 };
 use carina_core::schema::CompiledResourceSchema;
 
@@ -225,11 +226,11 @@ impl AwsProvider {
         &self,
         id: ResourceId,
         identifier: &AppliedIdentifier,
-        from: &State,
-        to: Resource,
+        from: &SnapshotState,
+        to: &crate::helpers::UpdateResource,
         _schema: &CompiledResourceSchema,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
-        let input = OrganizationsAccountUpdateInput::decode(&to)?;
+        let input = OrganizationsAccountUpdateInput::decode(to)?;
         let crate::send_models_generated::OrganizationsAccountUpdateParts { account_name, tags } =
             input.into_parts();
         let account_name = account_name.into_inner();
@@ -316,7 +317,7 @@ impl AwsProvider {
         id: &ResourceId,
         resource_id: &str,
         desired: Option<&Value>,
-        current: Option<&HashMap<String, Value>>,
+        current: Option<&HashMap<String, SnapshotValue>>,
     ) -> ProviderResult<()> {
         let desired_tags = match desired {
             Some(Value::Concrete(ConcreteValue::Map(m))) => m.clone(),

@@ -77,10 +77,10 @@ impl AwsProvider {
         &self,
         id: ResourceId,
         identifier: &AppliedIdentifier,
-        to: Resource,
+        to: &crate::helpers::UpdateResource,
         _schema: &CompiledResourceSchema,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
-        let input = Ec2SecurityGroupIngressUpdateInput::decode(&to)?;
+        let input = Ec2SecurityGroupIngressUpdateInput::decode(to)?;
         let crate::send_models_generated::Ec2SecurityGroupIngressUpdateParts = input.into_parts();
         Ok(self.read_ec2_security_group_ingress(&id, identifier).await)
     }

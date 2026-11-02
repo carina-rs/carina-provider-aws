@@ -8,8 +8,32 @@ use std::sync::OnceLock;
 use carina_core::provider::{
     AppliedIdentifier, AppliedState, ProviderError, ProviderResult, ReadOutcome,
 };
-use carina_core::resource::{ConcreteValue, ResourceId, State, Value};
+use carina_core::resource::{
+    ConcreteValue, ResourceId, SnapshotValue, State, StateValueLeaf, Value,
+};
 use carina_core::schema::{ResourceSchema, ValidatedResourceSchema};
+
+/// Require available values before crossing into the provider's live-value APIs.
+pub(crate) fn live_attributes(
+    id: &ResourceId,
+    attributes: &HashMap<String, SnapshotValue>,
+) -> ProviderResult<HashMap<String, Value>> {
+    attributes
+        .iter()
+        .map(|(name, value)| {
+            value
+                .to_value_at(format!("{id}.{name}"))
+                .map(|value| (name.clone(), value))
+                .map_err(|error| {
+                    ProviderError::invalid_input_caused_by(
+                        "historical value is unavailable to the AWS provider",
+                        error,
+                    )
+                    .for_resource(id.clone())
+                })
+        })
+        .collect()
+}
 
 pub(crate) mod sealed {
     pub trait Sealed {}
@@ -92,9 +116,12 @@ pub(crate) fn found_data_source_read(
 pub(crate) fn partial_applied_state(
     id: ResourceId,
     identifier: AppliedIdentifier,
-    attributes: HashMap<String, Value>,
+    attributes: HashMap<String, Value<impl StateValueLeaf>>,
 ) -> AppliedState {
-    AppliedState::from_identifier(id, identifier, attributes)
+    let attributes = State::existing(id.clone(), attributes)
+        .to_snapshot()
+        .attributes;
+    AppliedState::from_snapshot_parts(id, identifier, attributes)
 }
 
 #[doc(hidden)]

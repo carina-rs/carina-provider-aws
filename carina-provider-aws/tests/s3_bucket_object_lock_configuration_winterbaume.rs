@@ -13,7 +13,8 @@ use carina_core::provider::{
     Provider, ProviderDirectiveSchema, ProviderError, ReadRequest, UpdateRequest,
 };
 use carina_core::resource::{
-    ConcreteValue, Directives, Resource, ResourceIdentity, ResourceIdentityError, State, Value,
+    ConcreteValue, Directives, Resource, ResourceIdentity, ResourceIdentityError, SnapshotState,
+    Value,
 };
 use carina_provider_aws::{AwsProvider, BoundedSdkConfig};
 use indexmap::IndexMap;
@@ -96,7 +97,10 @@ fn int(value: i64) -> Value {
     Value::Concrete(ConcreteValue::Int(value))
 }
 
-fn assert_canonical_enum(value: Option<&Value>, expected: &str) {
+fn assert_canonical_enum(
+    value: Option<&Value<impl carina_core::resource::ValueKind>>,
+    expected: &str,
+) {
     let Some(Value::Concrete(ConcreteValue::CanonicalEnum(value))) = value else {
         panic!("expected canonical enum {expected}, got {value:?}");
     };
@@ -145,7 +149,7 @@ async fn create_state_for_test(
     provider: &AwsProvider,
     id: &carina_core::resource::ResourceId,
     request: CreateRequest,
-) -> Result<State, CreateFailure> {
+) -> Result<SnapshotState, CreateFailure> {
     let accepted = carina_core::executor::AcceptedRequest::from_create_request(&request);
     create_outcome_for_test(provider, id, request)
         .await
@@ -154,7 +158,7 @@ async fn create_state_for_test(
 
 async fn update_request_for_test(
     mut resource: Resource,
-    from: State,
+    from: SnapshotState,
     changed_attributes: &[String],
 ) -> UpdateRequest {
     carina_core::validation::deferred_types::with_session_for_test_async(
@@ -193,9 +197,20 @@ async fn update_request_for_test(
     .await
 }
 
-fn resource_from_state(state: &State) -> Resource {
+fn resource_from_state(state: &SnapshotState) -> Resource {
     let mut resource = Resource::from_id(state.id.clone());
-    resource.attributes = state.attributes.clone().into_iter().collect();
+    resource.attributes = state
+        .attributes
+        .iter()
+        .map(|(key, value)| {
+            (
+                key.clone(),
+                value
+                    .to_value_at(key)
+                    .expect("read fixture contains available values"),
+            )
+        })
+        .collect();
     resource
 }
 
@@ -225,7 +240,11 @@ fn object_lock_resource(bucket: &str, rule: Option<Value>) -> Resource {
     resource
 }
 
-async fn create_object_lock(provider: &AwsProvider, bucket: &str, rule: Option<Value>) -> State {
+async fn create_object_lock(
+    provider: &AwsProvider,
+    bucket: &str,
+    rule: Option<Value>,
+) -> SnapshotState {
     let resource = object_lock_resource(bucket, rule);
     let id = resource.id.clone();
     let request = create_request_for_test(resource).await;
@@ -234,13 +253,13 @@ async fn create_object_lock(provider: &AwsProvider, bucket: &str, rule: Option<V
         .expect("create Object Lock configuration")
 }
 
-fn assert_enabled_without_rule(state: &State) {
+fn assert_enabled_without_rule(state: &SnapshotState) {
     assert!(state.exists);
     assert_canonical_enum(state.attributes.get("object_lock_enabled"), "Enabled");
     assert!(!state.attributes.contains_key("rule"));
 }
 
-fn assert_retention(state: &State, mode: &str, period_name: &str, period: i64) {
+fn assert_retention(state: &SnapshotState, mode: &str, period_name: &str, period: i64) {
     let Some(Value::Concrete(ConcreteValue::Map(rule))) = state.attributes.get("rule") else {
         panic!("state should contain an object-lock rule: {state:?}");
     };
@@ -255,7 +274,10 @@ fn assert_retention(state: &State, mode: &str, period_name: &str, period: i64) {
     else {
         panic!("default_retention should contain retention_period: {default_retention:?}");
     };
-    assert_eq!(retention_period.get(period_name), Some(&int(period)));
+    assert_eq!(
+        retention_period.get(period_name),
+        Some(&int(period).to_snapshot())
+    );
 }
 
 #[tokio::test]

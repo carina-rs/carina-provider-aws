@@ -3,7 +3,7 @@ use carina_core::provider::{ProviderError, ProviderResult};
 #[cfg(test)]
 use carina_core::resource::ConcreteValue;
 use carina_core::resource::{
-    AbsoluteBindingAddress, NoPlaceholder, Resource, ResourceId, State, Value,
+    AbsoluteBindingAddress, NoPlaceholder, Resource, ResourceId, SnapshotState, Value,
 };
 use carina_core::schema::CompiledResourceSchema;
 
@@ -255,11 +255,11 @@ impl AwsProvider {
         &self,
         id: ResourceId,
         identifier: &AppliedIdentifier,
-        from: &State,
-        to: Resource,
+        from: &SnapshotState,
+        to: &crate::helpers::UpdateResource,
         _schema: &CompiledResourceSchema,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
-        let input = Ec2TransitGatewayAttachmentUpdateInput::decode(&to)?;
+        let input = Ec2TransitGatewayAttachmentUpdateInput::decode(to)?;
         let crate::send_models_generated::Ec2TransitGatewayAttachmentUpdateParts { tags } =
             input.into_parts();
         let tags = tags.into_inner();

@@ -4,7 +4,7 @@ use indexmap::IndexMap;
 use std::collections::HashMap;
 
 use carina_core::provider::{ProviderError, ProviderResult};
-use carina_core::resource::{ConcreteValue, ResourceId, Value};
+use carina_core::resource::{ConcreteValue, ResourceId, SnapshotValue, Value};
 
 use crate::AwsProvider;
 use crate::aws_operation::EC2_CREATE_TOKEN_TAG;
@@ -90,7 +90,7 @@ impl AwsProvider {
         resource_id: &ResourceId,
         ec2_resource_id: &str,
         tags: Option<&Value>,
-        from_attributes: Option<&HashMap<String, Value>>,
+        from_attributes: Option<&HashMap<String, SnapshotValue>>,
     ) -> ProviderResult<()> {
         if matches!(
             tags,
