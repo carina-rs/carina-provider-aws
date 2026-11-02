@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
 use anyhow::{Context, Result};
-use carina_core::schema::{AttributeType, FieldGroup, FieldGroupKind, RawShape, StructField};
+use carina_core::schema::{AttributeType, FieldGroup, FieldGroupKind, RawShape};
 use carina_smithy::{Shape, ShapeKind, SmithyModel};
 use clap::{Parser, ValueEnum};
 use heck::{ToSnakeCase, ToUpperCamelCase};
@@ -1469,7 +1469,7 @@ fn collect_resource_attributes_unvalidated(
         };
 
         validate_smithy_type(model, res.name, &snake_name, name, member_ref)?;
-        let (type_code, enum_info, _attribute_type) = resolve_type(
+        let (type_code, enum_info) = resolve_type(
             &mut TypeResolutionContext {
                 model,
                 resource_name: res.name,
@@ -1585,7 +1585,7 @@ fn collect_resource_attributes_unvalidated(
             SmithyModel::documentation(&member_ref.traits).map(Description::from_smithy_html);
 
         validate_smithy_type(model, res.name, &snake_name, name, member_ref)?;
-        let (type_code, enum_info, _attribute_type) = resolve_type(
+        let (type_code, enum_info) = resolve_type(
             &mut TypeResolutionContext {
                 model,
                 resource_name: res.name,
@@ -2641,39 +2641,46 @@ fn attribute_type_from_code(code: &str) -> Result<AttributeType> {
         .with_context(|| format!("No AttributeType constructor registered for {code}"))
 }
 
-fn resolved_enum_attribute_type(ctx: &TypeResolutionContext<'_>, info: &EnumInfo) -> AttributeType {
+fn enum_type_code(ctx: &TypeResolutionContext<'_>, field_name: &str, info: &EnumInfo) -> String {
     let namespace = enum_namespace(ctx);
-    let (namespace, name) =
-        effective_enum_identity(info.identity_override, &namespace, &info.type_name);
-    AttributeType::enum_(
-        carina_core::schema::enum_identity(&name, Some(&namespace)),
-        Some(info.values.clone()),
-        info.values
-            .iter()
-            .map(|value| (value.clone(), dsl_enum_value(value)))
-            .collect(),
-        None,
-        None,
+    let snake_name = field_name.to_snake_case();
+    let dsl_aliases_code = if let Some(code) = ctx.to_dsl_overrides.get(snake_name.as_str()) {
+        code.to_string()
+    } else {
+        build_dsl_aliases_code(&info.values, ctx.enum_alias_map.get(snake_name.as_str()))
+    };
+    let values = info
+        .values
+        .iter()
+        .map(|value| format!("\"{value}\".to_string()"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let identity = enum_identity_code(info, &namespace);
+    format!(
+        "AttributeType::enum_(\n\
+         \x20   {},\n\
+         \x20   Some(vec![{}]),\n\
+         \x20   {},\n\
+         \x20   None,\n\
+         \x20   None,\n\
+         )",
+        identity, values, dsl_aliases_code
     )
 }
 
-/// Resolve schema code, enum metadata, and the concrete AttributeType together.
+/// Resolve Smithy schema code and enum metadata.
 /// Also populates collectors for enums and ranged ints discovered during resolution.
 fn resolve_type(
     ctx: &mut TypeResolutionContext<'_>,
     target: &str,
     field_name: &str,
-) -> Result<(String, Option<EnumInfo>, AttributeType)> {
+) -> Result<(String, Option<EnumInfo>)> {
     if let Some(code) = reference_type_code(ctx.resource_name, &ctx.property_path) {
-        return Ok((code.to_string(), None, attribute_type_from_code(code)?));
+        return Ok((code.to_string(), None));
     }
     // Check type overrides first
     if let Some(&override_type) = ctx.type_overrides.get(field_name) {
-        return Ok((
-            override_type.to_string(),
-            None,
-            attribute_type_from_code(override_type)?,
-        ));
+        return Ok((override_type.to_string(), None));
     }
 
     // Check known enum overrides
@@ -2691,8 +2698,7 @@ fn resolve_type(
         ctx.all_enums
             .entry(field_name.to_string())
             .or_insert_with(|| enum_info.clone());
-        let attr_type = resolved_enum_attribute_type(ctx, &enum_info);
-        return Ok(("/* enum */".to_string(), Some(enum_info), attr_type));
+        return Ok(("/* enum */".to_string(), Some(enum_info)));
     }
 
     let kind = ctx.model.shape_kind(target);
@@ -2701,21 +2707,12 @@ fn resolve_type(
         Some(ShapeKind::String) => {
             // Check name-based type inference (handles CIDR, IP, AZ, ARN, resource IDs, etc.)
             if let Some(inferred) = infer_string_type(field_name) {
-                let attr_type = attribute_type_from_code(&inferred)?;
-                return Ok((inferred, None, attr_type));
+                return Ok((inferred, None));
             }
 
-            (
-                PLAIN_STRING_TYPE_CODE.to_string(),
-                None,
-                AttributeType::string(),
-            )
+            (PLAIN_STRING_TYPE_CODE.to_string(), None)
         }
-        Some(ShapeKind::Boolean) => (
-            "AttributeType::bool()".to_string(),
-            None,
-            AttributeType::bool(),
-        ),
+        Some(ShapeKind::Boolean) => ("AttributeType::bool()".to_string(), None),
         Some(ShapeKind::Integer) | Some(ShapeKind::Long) => {
             // Check for range traits on the target shape
             let range = get_int_range(ctx.model, target, field_name);
@@ -2740,21 +2737,14 @@ fn resolve_type(
                         range_expr
                     ),
                     None,
-                    AttributeType::refined_int(None, Some((r.min, r.max))),
                 )
             } else {
-                (
-                    "AttributeType::int()".to_string(),
-                    None,
-                    AttributeType::int(),
-                )
+                ("AttributeType::int()".to_string(), None)
             }
         }
-        Some(ShapeKind::Float) | Some(ShapeKind::Double) => (
-            "AttributeType::float()".to_string(),
-            None,
-            AttributeType::float(),
-        ),
+        Some(ShapeKind::Float) | Some(ShapeKind::Double) => {
+            ("AttributeType::float()".to_string(), None)
+        }
         Some(ShapeKind::Enum) => {
             // Get enum values from Smithy model
             if let Some(values) = ctx.model.enum_values(target) {
@@ -2776,39 +2766,29 @@ fn resolve_type(
                 ctx.all_enums
                     .entry(field_name.to_string())
                     .or_insert_with(|| enum_info.clone());
-                let attr_type = resolved_enum_attribute_type(ctx, &enum_info);
-                return Ok(("/* enum */".to_string(), Some(enum_info), attr_type));
+                return Ok(("/* enum */".to_string(), Some(enum_info)));
             }
-            (
-                PLAIN_STRING_TYPE_CODE.to_string(),
-                None,
-                AttributeType::string(),
-            )
+            (PLAIN_STRING_TYPE_CODE.to_string(), None)
         }
-        Some(ShapeKind::IntEnum) => (
-            "AttributeType::int()".to_string(),
-            None,
-            AttributeType::int(),
-        ),
+        Some(ShapeKind::IntEnum) => ("AttributeType::int()".to_string(), None),
         Some(ShapeKind::List) => {
             // Get list member type
             if let Some(carina_smithy::Shape::List(list_shape)) = ctx.model.get_shape(target) {
                 let previous_path = ctx.property_path.clone();
                 ctx.property_path =
                     kms_references::property_path(&previous_path, PathSegment::ListElement);
-                let (item_type, _enum_info, item_attr_type) =
+                let (item_type, enum_info) =
                     resolve_type(ctx, &list_shape.member.target, field_name)?;
                 ctx.property_path = previous_path;
-                (
-                    format!("AttributeType::list({})", item_type),
-                    None,
-                    AttributeType::list(item_attr_type),
-                )
+                let item_type = enum_info
+                    .as_ref()
+                    .map(|info| enum_type_code(ctx, field_name, info))
+                    .unwrap_or(item_type);
+                (format!("AttributeType::list({item_type})"), None)
             } else {
                 (
                     format!("AttributeType::list({PLAIN_STRING_TYPE_CODE})"),
                     None,
-                    AttributeType::list(AttributeType::string()),
                 )
             }
         }
@@ -2817,19 +2797,18 @@ fn resolve_type(
                 let previous_path = ctx.property_path.clone();
                 ctx.property_path =
                     kms_references::property_path(&previous_path, PathSegment::MapValue);
-                let (value_type, _enum_info, value_attr_type) =
+                let (value_type, enum_info) =
                     resolve_type(ctx, &map_shape.value.target, field_name)?;
                 ctx.property_path = previous_path;
-                (
-                    format!("AttributeType::map({value_type})"),
-                    None,
-                    AttributeType::map(value_attr_type),
-                )
+                let value_type = enum_info
+                    .as_ref()
+                    .map(|info| enum_type_code(ctx, field_name, info))
+                    .unwrap_or(value_type);
+                (format!("AttributeType::map({value_type})"), None)
             } else {
                 (
                     format!("AttributeType::map({PLAIN_STRING_TYPE_CODE})"),
                     None,
-                    AttributeType::map(AttributeType::string()),
                 )
             }
         }
@@ -2837,44 +2816,31 @@ fn resolve_type(
             // Check if it's a TagList-like structure
             let shape_name = SmithyModel::shape_name(target);
             if shape_name == "TagList" || shape_name == "Tag" {
-                return Ok((
-                    "tags_type()".to_string(),
-                    None,
-                    AttributeType::map(AttributeType::string()),
-                ));
+                return Ok(("tags_type()".to_string(), None));
             }
 
             // Unwrap EC2 AttributeBooleanValue wrapper → plain Bool
             if shape_name == "AttributeBooleanValue" {
-                return Ok((
-                    "AttributeType::bool()".to_string(),
-                    None,
-                    AttributeType::bool(),
-                ));
+                return Ok(("AttributeType::bool()".to_string(), None));
             }
 
             // Generate struct type for nested structures
             if let Some(structure) = ctx.model.get_structure(target) {
-                let (struct_code, attr_type) = generate_struct_type(
+                let struct_code = generate_struct_type(
                     ctx,
                     target,
                     StructRepresentation::from_structure(structure),
                 )?;
-                return Ok((struct_code, None, attr_type));
+                return Ok((struct_code, None));
             }
-            (
-                PLAIN_STRING_TYPE_CODE.to_string(),
-                None,
-                AttributeType::string(),
-            )
+            (PLAIN_STRING_TYPE_CODE.to_string(), None)
         }
         Some(ShapeKind::Union) => {
             let Some(Shape::Union(union)) = ctx.model.get_shape(target) else {
                 anyhow::bail!("Cannot find Smithy union {target}");
             };
             let representation = union_struct_representation(target, &union.members)?;
-            let (code, attr_type) = generate_struct_type(ctx, target, representation)?;
-            (code, None, attr_type)
+            (generate_struct_type(ctx, target, representation)?, None)
         }
         Some(
             ShapeKind::Blob
@@ -2887,14 +2853,9 @@ fn resolve_type(
         | None => {
             // Fallback: try name-based heuristics
             if let Some(inferred) = infer_string_type(field_name) {
-                let attr_type = attribute_type_from_code(&inferred)?;
-                (inferred, None, attr_type)
+                (inferred, None)
             } else {
-                (
-                    PLAIN_STRING_TYPE_CODE.to_string(),
-                    None,
-                    AttributeType::string(),
-                )
+                (PLAIN_STRING_TYPE_CODE.to_string(), None)
             }
         }
     })
@@ -2905,11 +2866,10 @@ fn generate_struct_type(
     ctx: &mut TypeResolutionContext<'_>,
     struct_shape_id: &str,
     structure: StructRepresentation<'_>,
-) -> Result<(String, AttributeType)> {
+) -> Result<String> {
     let struct_name = SmithyModel::shape_name(struct_shape_id);
     ctx.struct_path.push(struct_name.to_string());
     let mut fields: Vec<String> = Vec::new();
-    let mut typed_fields = Vec::new();
     for (field_name, member_ref) in structure.members {
         let snake_name = field_name.to_snake_case();
         let is_required = structure.required_fields.contains(field_name.as_str());
@@ -2926,11 +2886,11 @@ fn generate_struct_type(
         let previous_path = ctx.property_path.clone();
         ctx.property_path =
             kms_references::property_path(&previous_path, PathSegment::Field(&snake_name));
-        let (field_type, enum_info, attr_type) =
+        let (field_type, enum_info) =
             if let Some(code) = reference_type_code(ctx.resource_name, &ctx.property_path) {
-                (code.to_string(), None, attribute_type_from_code(code)?)
+                (code.to_string(), None)
             } else if let Some(t) = override_type {
-                (t.to_string(), None, attribute_type_from_code(t)?)
+                (t.to_string(), None)
             } else {
                 resolve_type(ctx, &member_ref.target, field_name)?
             };
@@ -2938,58 +2898,11 @@ fn generate_struct_type(
         ctx.property_path = previous_path;
 
         // If enum detected, use shared schema enum type.
-        let field_type = if let Some(ei) = enum_info {
-            let namespace = enum_namespace(ctx);
-            // Same D7 rule as the top-level enum attribute path: derive a
-            // snake_case DSL alias for every API value, layer in explicit
-            // aliases, and let `to_dsl_overrides` take precedence over both.
-            let dsl_aliases_code =
-                if let Some(override_code) = ctx.to_dsl_overrides.get(snake_name.as_str()) {
-                    override_code.to_string()
-                } else {
-                    let explicit = ctx.enum_alias_map.get(snake_name.as_str());
-                    build_dsl_aliases_code(&ei.values, explicit)
-                };
-            let values_str = ei
-                .values
-                .iter()
-                .map(|v| format!("\"{}\".to_string()", v))
-                .collect::<Vec<_>>()
-                .join(", ");
-            let identity_code = enum_identity_code(&ei, &namespace);
-            format!(
-                "AttributeType::enum_(\n\
-                 \x20   {},\n\
-                 \x20   Some(vec![{}]),\n\
-                 \x20   {},\n\
-                 \x20   None,\n\
-                 \x20   None,\n\
-                 )",
-                identity_code, values_str, dsl_aliases_code
-            )
-        } else {
-            field_type
-        };
+        let field_type = enum_info
+            .as_ref()
+            .map(|info| enum_type_code(ctx, field_name, info))
+            .unwrap_or(field_type);
 
-        let field_description = SmithyModel::documentation(&member_ref.traits)
-            .map(|description| {
-                Description::from_smithy_html(description)
-                    .markdown()
-                    .to_string()
-            })
-            .unwrap_or_default();
-        let typed_field = if is_required {
-            StructField::required(&snake_name, attr_type)
-                .with_provider_name(field_name)
-                .with_description(&field_description)
-                .build()
-        } else {
-            StructField::optional(&snake_name, attr_type)
-                .with_provider_name(field_name)
-                .with_description(&field_description)
-                .build()
-        };
-        typed_fields.push(typed_field);
         let constructor = mode_constructor(is_required, false);
         let mut field_code = format!(
             "StructField::{}(\"{}\", {})",
@@ -3028,11 +2941,7 @@ fn generate_struct_type(
 
     let fields_str = fields.join(",\n                    ");
     ctx.struct_path.pop();
-    let attr_type =
-        AttributeType::struct_with_field_groups(struct_name, typed_fields, structure.field_groups);
-    let RawShape::Struct { field_groups, .. } = attr_type.raw_shape() else {
-        unreachable!("constructed struct")
-    };
+    let field_groups = &structure.field_groups;
     let groups = if field_groups.is_empty() {
         String::new()
     } else {
@@ -3050,7 +2959,7 @@ fn generate_struct_type(
     } else {
         "struct_with_field_groups"
     };
-    let code = format!(
+    Ok(format!(
         "AttributeType::{}(\n\
          \x20                   \"{}\".to_string(),\n\
          \x20                   vec![\n\
@@ -3058,8 +2967,7 @@ fn generate_struct_type(
          \x20                   ],\n\
          {}\x20               )",
         constructor, struct_name, fields_str, groups
-    );
-    Ok((code, attr_type))
+    ))
 }
 
 /// Get integer range for a field from Smithy traits or known overrides.
@@ -5569,7 +5477,8 @@ struct MarkdownEnum {
 #[derive(Debug)]
 struct MarkdownStruct {
     fields: Vec<MarkdownStructField>,
-    attr_type: AttributeType,
+    // Captured from the shared union mapping or the hand-written type's raw shape.
+    field_groups: Vec<FieldGroup>,
 }
 
 #[derive(Debug)]
@@ -5588,13 +5497,7 @@ struct MarkdownAttrInfo {
     description: Option<Description>,
 }
 
-fn render_struct_field_groups(
-    page: &mut PageBuilder<MarkdownTarget>,
-    attr_type: &AttributeType,
-) -> Result<()> {
-    let RawShape::Struct { field_groups, .. } = attr_type.raw_shape() else {
-        anyhow::bail!("a struct field table requires a struct AttributeType");
-    };
+fn render_struct_field_groups(page: &mut PageBuilder<MarkdownTarget>, field_groups: &[FieldGroup]) {
     for group in field_groups {
         let (cardinality, verb) = match group.kind() {
             FieldGroupKind::ExactlyOne => ("Exactly one", "must"),
@@ -5609,42 +5512,6 @@ fn render_struct_field_groups(
             .join(", ");
         page.push_str(&format!("{cardinality} of {fields} {verb} be set.\n\n"));
     }
-    Ok(())
-}
-
-#[allow(clippy::too_many_arguments)]
-fn resolved_markdown_attribute_type(
-    model: &SmithyModel,
-    resource_name: &str,
-    target: &str,
-    field_name: &str,
-    property_path: &str,
-    namespace: &str,
-    type_overrides: &HashMap<&str, &str>,
-    struct_field_type_overrides: &HashMap<(&str, &str), &str>,
-) -> Result<AttributeType> {
-    let (_code, _enum_info, attr_type) = resolve_type(
-        &mut TypeResolutionContext {
-            model,
-            resource_name,
-            namespace,
-            struct_path: vec![],
-            property_path: property_path.to_string(),
-            type_overrides,
-            struct_field_type_overrides,
-            enum_alias_map: &HashMap::new(),
-            to_dsl_overrides: &HashMap::new(),
-            all_enums: &mut BTreeMap::new(),
-            all_ranged_ints: &mut BTreeMap::new(),
-            current_root_attr: None,
-            deferred_populate_struct_fields: &HashSet::new(),
-            nested_write_only_struct_fields: &HashSet::new(),
-            nested_write_only_emissions: &mut HashMap::new(),
-        },
-        target,
-        field_name,
-    )?;
-    Ok(attr_type)
 }
 
 fn declared_scalar_display_name(identity: &carina_core::schema::TypeIdentity) -> String {
@@ -5687,7 +5554,11 @@ fn discover_markdown_attribute_type(
     structs: &mut BTreeMap<MarkdownStructKey, MarkdownStruct>,
 ) -> Result<MarkdownType> {
     Ok(match attr_type.raw_shape() {
-        RawShape::Struct { name, fields, .. } => {
+        RawShape::Struct {
+            name,
+            fields,
+            field_groups,
+        } => {
             let namespace = format!("{namespace}.{name}");
             let key = MarkdownStructKey {
                 namespace: namespace.clone(),
@@ -5718,7 +5589,7 @@ fn discover_markdown_attribute_type(
                     key.clone(),
                     MarkdownStruct {
                         fields,
-                        attr_type: attr_type.clone(),
+                        field_groups: field_groups.to_vec(),
                     },
                 );
             }
@@ -6321,7 +6192,7 @@ fn write_markdown_type_definitions(
                 MarkdownTarget::Struct(key.clone()),
                 Heading::plain(3, heading_text),
             )?;
-            render_struct_field_groups(page, &struct_doc.attr_type)?;
+            render_struct_field_groups(page, &struct_doc.field_groups);
             let rows = struct_doc.fields.iter().map(|field| {
                 [
                     TableCell::code(&field.snake_name),
@@ -6664,14 +6535,7 @@ fn generate_markdown_data_source(
                             &mut all_enums,
                             &mut struct_defs,
                         )?;
-                        if item.contains_link() {
-                            MarkdownType::List(Box::new(item))
-                        } else {
-                            MarkdownType::Plain(format!(
-                                "List({})",
-                                type_code_to_display(output.item_type)
-                            ))
-                        }
+                        MarkdownType::List(Box::new(item))
                     },
                     description: Description::authored(output.description),
                 })
@@ -7044,16 +6908,7 @@ fn discover_markdown_type(
                     key.clone(),
                     MarkdownStruct {
                         fields,
-                        attr_type: resolved_markdown_attribute_type(
-                            model,
-                            resource_name,
-                            target,
-                            field_name,
-                            property_path,
-                            enum_namespace,
-                            type_overrides,
-                            struct_field_type_overrides,
-                        )?,
+                        field_groups: structure.field_groups,
                     },
                 );
             }
@@ -7709,6 +7564,7 @@ fn cf_type_name(resource_name: &str) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use carina_core::schema::StructField;
 
     fn markdown_resource_example(dsl_name: &str) -> DocExample {
         let source = format!("aws.{dsl_name} {{}}\n");
@@ -7773,7 +7629,7 @@ mod tests {
         assert_eq!(
             code.matches("AttributeType::struct_with_field_groups(")
                 .count(),
-            3,
+            4,
             "{code}"
         );
         assert_eq!(
@@ -7820,6 +7676,66 @@ mod tests {
             "{single}"
         );
         assert!(!single.contains("FieldGroup::"), "{single}");
+    }
+
+    #[test]
+    fn smithy_union_enum_collections_emit_complete_enum_expressions() {
+        let (resource, model) = union_fixture();
+        let generated =
+            generate_resource(&resource, &model).expect("generate enum collection union");
+        let compact: String = generated
+            .chars()
+            .filter(|character| !character.is_whitespace())
+            .collect();
+        for (field, name, wrapper) in [
+            ("enum_list", "EnumList", "list"),
+            ("enum_map", "EnumMap", "map"),
+        ] {
+            let enum_expression = format!(
+                concat!(
+                    "AttributeType::enum_(carina_core::schema::enum_identity(\"{}\",Some(\"aws.ec2.RouteTable.EnumCollections\")),",
+                    "Some(vec![\"FAST\".to_string()]),vec![(\"FAST\".to_string(),\"fast\".to_string())],None,None,)"
+                ),
+                name
+            );
+            let expected = format!(
+                "StructField::optional(\"{field}\",AttributeType::{wrapper}({enum_expression}))"
+            );
+            assert!(
+                compact.contains(&expected),
+                "missing complete {wrapper} enum expression: {generated}"
+            );
+        }
+        assert!(
+            !generated.contains("/* enum */"),
+            "unrendered enum in generated schema: {generated}"
+        );
+    }
+
+    #[test]
+    fn smithy_union_recursive_structs_generate_docs_without_re_resolving_types() {
+        let (resource, _model) = union_fixture();
+        let model = carina_smithy::parse(include_str!("../tests/fixtures/recursive-unions.json"))
+            .expect("parse recursive union and struct fixture");
+        let markdown = generate_markdown_resource(
+            &resource,
+            &model,
+            &markdown_resource_example(resource.name),
+        )
+        .expect("generate recursive docs");
+        assert_eq!(
+            markdown
+                .matches("Exactly one of `node`, `text` must be set.")
+                .count(),
+            2,
+            "{markdown}"
+        );
+        assert!(markdown.contains("| `next` | [Struct(Node)]"), "{markdown}");
+        assert!(
+            markdown.len() < 10_000,
+            "recursive schemas must produce finite documentation"
+        );
+        carina_docgen::check_page(&markdown).expect("recursive links must resolve");
     }
 
     #[test]
@@ -9990,8 +9906,8 @@ mod tests {
         assert!(md.contains("### `arns`"), "arns section: {md}");
         assert!(md.contains("### `names`"), "names section: {md}");
         assert!(
-            md.contains("List(") || md.contains("- **Type:** List"),
-            "List(...) type marker for aggregated outputs: {md}"
+            md.contains("- **Type:** `List<Arn>`") && md.contains("- **Type:** `List<String>`"),
+            "aggregated outputs must use MarkdownType's list renderer: {md}"
         );
     }
 

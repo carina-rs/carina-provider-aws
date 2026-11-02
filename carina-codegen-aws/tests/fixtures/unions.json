@@ -11,6 +11,7 @@
         "Choice": { "target": "com.amazonaws.test#Choice" },
         "ChoiceList": { "target": "com.amazonaws.test#ChoiceList" },
         "ChoiceMap": { "target": "com.amazonaws.test#ChoiceMap" },
+        "EnumCollections": { "target": "com.amazonaws.test#EnumCollections" },
         "SingleChoice": { "target": "com.amazonaws.test#SingleChoice" }
       }
     },
@@ -44,6 +45,22 @@
         "Count": { "target": "smithy.api#Integer" },
         "Mode": { "target": "com.amazonaws.test#Mode" }
       }
+    },
+    "com.amazonaws.test#EnumCollections": {
+      "type": "union",
+      "members": {
+        "EnumList": { "target": "com.amazonaws.test#EnumList" },
+        "EnumMap": { "target": "com.amazonaws.test#EnumMap" }
+      }
+    },
+    "com.amazonaws.test#EnumList": {
+      "type": "list",
+      "member": { "target": "com.amazonaws.test#Mode" }
+    },
+    "com.amazonaws.test#EnumMap": {
+      "type": "map",
+      "key": { "target": "smithy.api#String" },
+      "value": { "target": "com.amazonaws.test#Mode" }
     },
     "com.amazonaws.test#Mode": {
       "type": "enum",
