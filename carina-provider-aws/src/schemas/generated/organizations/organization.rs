@@ -44,7 +44,7 @@ pub fn organizations_organization_config() -> AwsSchemaConfig {
         )
         .attribute(
             AttributeSchema::provider_populated("id", AttributeType::string())
-                .with_description("The unique identifier (ID) of an organization. The regex pattern for an organization ID string requires \"o-\" followed by from 10 to 32 lowercase let... (read-only)")
+                .with_description("The unique identifier (ID) of an organization. The regex pattern for an organization ID string requires \"o-\" followed by from 10 to 32 lowercase lette... (read-only)")
                 .with_provider_name("Id")
                 .build(),
         )

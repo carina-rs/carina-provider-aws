@@ -39,6 +39,20 @@ impl Description {
     }
 }
 
+/// Emit the contents of a Rust string literal from a cleaned description.
+///
+/// An optional byte limit truncates plain text before escaping, so the limit
+/// cannot split an escape sequence. The ellipsis is outside that limit.
+pub fn emit_description(description: &Description, max_bytes: Option<usize>) -> String {
+    let text = description.as_str();
+    let end = text.floor_char_boundary(max_bytes.unwrap_or(text.len()).min(text.len()));
+    let mut truncated = text[..end].to_string();
+    if end < text.len() {
+        truncated.push_str("...");
+    }
+    truncated.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
 /// Return the closing `>` byte offset and whether a tag separates text blocks.
 fn html_tag_end(after_open: &str) -> Option<(usize, bool)> {
     let tag = after_open.strip_prefix('/').unwrap_or(after_open);

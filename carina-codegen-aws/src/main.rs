@@ -16,7 +16,7 @@ use clap::{Parser, ValueEnum};
 use heck::{ToSnakeCase, ToUpperCamelCase};
 
 use carina_aws_types::{AwsType, dsl_enum_value};
-use carina_codegen_aws::description::Description;
+use carina_codegen_aws::description::{Description, emit_description};
 use carina_codegen_aws::kms_references::{
     self, PathSegment, reference_type_code, validate_smithy_type,
 };
@@ -2170,11 +2170,9 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
     ));
 
     if let Some(description) = description {
-        let escaped = escape_description(&description);
-        let truncated = truncate_str(&escaped, 200);
         code.push_str(&format!(
             "\x20       .with_description(\"{}\")\n",
-            truncated
+            emit_description(&description, Some(200))
         ));
     }
 
@@ -2265,8 +2263,6 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
         }
 
         if let Some(ref desc) = attr.description {
-            let escaped = escape_description(desc);
-            let truncated = truncate_str(&escaped, 150);
             let suffix = if attr.is_read_only {
                 " (read-only)"
             } else {
@@ -2274,10 +2270,14 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
             };
             attr_code.push_str(&format!(
                 "\n\x20               .with_description(\"{}{}\")",
-                truncated, suffix
+                emit_description(desc, Some(150)),
+                suffix
             ));
         } else if attr.is_read_only {
-            attr_code.push_str("\n\x20               .with_description(\" (read-only)\")");
+            attr_code.push_str(&format!(
+                "\n\x20               .with_description(\"{}\")",
+                emit_description(&Description::authored("(read-only)"), None)
+            ));
         }
 
         attr_code.push_str(&format!(
@@ -2301,14 +2301,15 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
                 reason.replace('\n', " ")
             ));
         }
-        code.push_str(
+        code.push_str(&format!(
             "\x20       .attribute(\n\
              \x20           AttributeSchema::optional(\"tags\", tags_type())\n\
-             \x20               .with_description(\"The tags for the resource.\")\n\
+             \x20               .with_description(\"{}\")\n\
              \x20               .with_provider_name(\"Tags\")\n\
              \x20               .build(),\n\
              \x20       )\n",
-        );
+            emit_description(&Description::authored("The tags for the resource."), None)
+        ));
     }
 
     // Tags validator
@@ -2716,9 +2717,10 @@ fn generate_struct_type(
                 .or_default() += 1;
         }
         if let Some(desc) = SmithyModel::documentation(&member_ref.traits) {
-            let escaped = escape_description(&Description::from_smithy_html(desc));
-            let truncated = truncate_str(&escaped, 150);
-            field_code.push_str(&format!(".with_description(\"{}\")", truncated));
+            field_code.push_str(&format!(
+                ".with_description(\"{}\")",
+                emit_description(&Description::from_smithy_html(desc), Some(150))
+            ));
         }
         field_code.push_str(&format!(".with_provider_name(\"{}\")", field_name));
         field_code.push_str(".build()");
@@ -5981,7 +5983,7 @@ fn generate_data_source(
             constructor,
             attr.name,
             type_str,
-            escape_description(&attr.description),
+            emit_description(&attr.description, None),
             attr.provider_name,
         ));
     }
@@ -6978,25 +6980,6 @@ fn cf_type_name(resource_name: &str) -> &'static str {
     }
 }
 
-fn escape_description(desc: &Description) -> String {
-    desc.as_str().replace('\\', "\\\\").replace('"', "\\\"")
-}
-
-fn truncate_str(s: &str, max_len: usize) -> String {
-    if s.len() > max_len {
-        // Find a safe UTF-8 boundary at or before max_len
-        let boundary = s
-            .char_indices()
-            .take_while(|&(i, _)| i <= max_len)
-            .last()
-            .map(|(i, _)| i)
-            .unwrap_or(0);
-        format!("{}...", &s[..boundary])
-    } else {
-        s.to_string()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -7106,38 +7089,72 @@ mod tests {
     }
 
     #[test]
+    fn description_truncation_preserves_escape_sequences_at_all_emitter_boundaries() {
+        for (last_character, escaped) in [('\\', r"\\"), ('"', r#"\""#)] {
+            for tail in ["", "tail"] {
+                let mut model = provider_fixture_model();
+                let resource = provider_fixture_resource(
+                    "iam.Role",
+                    "RoleName",
+                    &["RoleName", "Options"],
+                    vec![],
+                );
+                let mut expected = Vec::new();
+                for (shape, member, prefix_character, limit) in [
+                    ("ReadFixture", None, "r", 200),
+                    ("CreateFixtureRequest", Some("RoleName"), "a", 150),
+                    ("Options", Some("AmazonSideAsn"), "f", 150),
+                ] {
+                    let Some(Shape::Structure(structure)) =
+                        model.shapes.get_mut(&format!("com.amazonaws.test#{shape}"))
+                    else {
+                        panic!("missing fixture structure {shape}");
+                    };
+                    let traits = match member {
+                        Some(member) => &mut structure.members.get_mut(member).unwrap().traits,
+                        None => &mut structure.traits,
+                    };
+                    let prefix = prefix_character.repeat(limit - 1);
+                    traits.insert(
+                        "smithy.api#documentation".to_string(),
+                        format!("{prefix}{last_character}{tail}").into(),
+                    );
+                    let ellipsis = if tail.is_empty() { "" } else { "..." };
+                    expected.push(format!(
+                        ".with_description(\"{prefix}{escaped}{ellipsis}\")"
+                    ));
+                }
+                let code = generate_resource(&resource, &model).expect("generate schema");
+                for description in expected {
+                    assert!(code.contains(&description), "missing {description}: {code}");
+                }
+            }
+        }
+    }
+
+    #[test]
     fn description_smithy_html_decodes_entities_after_removing_tags() {
         assert_eq!(
-            escape_description(&Description::from_smithy_html(
-                "<p>Use <code>&lt;bucket&gt;</code> &amp; &quot;name&quot; &#39;value&#39;.</p>"
-            )),
+            emit_description(
+                &Description::from_smithy_html(
+                    "<p>Use <code>&lt;bucket&gt;</code> &amp; &quot;name&quot; &#39;value&#39;.</p>"
+                ),
+                None
+            ),
             r#"Use <bucket> & \"name\" 'value'."#
-        );
-        assert_eq!(
-            escape_description(&Description::from_smithy_html(
-                "<p>&lt;code&gt;literal&lt;/code&gt;</p>"
-            )),
-            "<code>literal</code>"
         );
     }
 
     #[test]
     fn description_smithy_unbalanced_backtick_does_not_disable_tag_removal() {
         assert_eq!(
-            escape_description(&Description::from_smithy_html(
-                "<p>Unbalanced `backtick.</p><p>Keep <b>stripping</b> <code>tags</code>.</p>"
-            )),
+            emit_description(
+                &Description::from_smithy_html(
+                    "<p>Unbalanced `backtick.</p><p>Keep <b>stripping</b> <code>tags</code>.</p>"
+                ),
+                None
+            ),
             "Unbalanced `backtick. Keep stripping tags."
-        );
-    }
-
-    #[test]
-    fn description_smithy_preserves_non_html_sequences() {
-        assert_eq!(
-            escape_description(&Description::from_smithy_html(
-                "<p>Use <account-id>, <key>, and the <Code> XML element.</p>"
-            )),
-            "Use <account-id>, <key>, and the <Code> XML element."
         );
     }
 
@@ -7186,7 +7203,7 @@ mod tests {
             let description = Description::authored(AUTHORED);
             let schema = generate_data_source(&ds, &empty_test_model(), true).unwrap();
             assert!(
-                schema.contains(&escape_description(&description)),
+                schema.contains(&emit_description(&description, None)),
                 "{schema}"
             );
             let markdown = generate_markdown_data_source(
