@@ -185,6 +185,27 @@ where
         self.write_heading(heading).map(|_| ())
     }
 
+    /// Write one read-only attribute, including its optional description.
+    ///
+    /// The type uses inline table-cell parts so links retain typed targets and
+    /// resolve against the headings actually written on this page.
+    pub fn attribute_reference_entry(
+        &mut self,
+        name: &str,
+        attribute_type: TableCell<K>,
+        description: Option<&str>,
+    ) -> Result<(), DocgenError> {
+        self.heading(Heading::code(3, name))?;
+        self.push_str("- **Type:** ");
+        self.write_table_cell(attribute_type);
+        self.push_str("\n- **Read-only**\n\n");
+        if let Some(description) = description.filter(|text| !text.is_empty()) {
+            self.push_str(description);
+            self.push_str("\n\n");
+        }
+        Ok(())
+    }
+
     /// Write a keyed target heading and bind the key to its allocated slug.
     pub fn target_heading(&mut self, key: K, heading: Heading) -> Result<(), DocgenError> {
         if self.targets.contains_key(&key) {

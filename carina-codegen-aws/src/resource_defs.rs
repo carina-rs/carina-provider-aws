@@ -2299,13 +2299,13 @@ pub fn s3_resources() -> Vec<ResourceDef> {
                 ExtraField {
                     name: "BucketDomainName",
                     read_source: None,
-                    description: Some("Bucket domain name, in the form NAME.s3.amazonaws.com."),
+                    description: Some("Bucket domain name (`<bucket>.s3.amazonaws.com`)."),
                 },
                 ExtraField {
                     name: "BucketRegionalDomainName",
                     read_source: None,
                     description: Some(
-                        "Region-specific bucket domain name, in the form NAME.s3.REGION.amazonaws.com.",
+                        "Region-specific bucket domain name (`<bucket>.s3.<region>.amazonaws.com`).",
                     ),
                 },
                 ExtraField {

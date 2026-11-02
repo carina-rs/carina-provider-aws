@@ -23,6 +23,39 @@ fn violation_kinds(markdown: &str) -> Vec<PageViolationKind> {
 fn assert_std_error<T, E: std::error::Error>(_: &Result<T, E>) {}
 
 #[test]
+fn attribute_reference_entry_writes_description_and_resolves_type_links() {
+    let mut page: PageBuilder<Target> = PageBuilder::new();
+    page.heading(Heading::plain(1, "Page")).unwrap();
+    page.attribute_reference_entry(
+        "options",
+        TableCell::link(Target::Options, "Struct(Options)"),
+        Some("Uses `<bucket>.s3.amazonaws.com`."),
+    )
+    .unwrap();
+    page.attribute_reference_entry("id", TableCell::text("String"), None)
+        .unwrap();
+    page.attribute_reference_entry("empty", TableCell::text("String"), Some(""))
+        .unwrap();
+    page.target_heading(Target::Options, Heading::plain(3, "Options"))
+        .unwrap();
+
+    let markdown = page.finish().expect("valid attribute entries");
+    assert_eq!(
+        markdown,
+        concat!(
+            "# Page\n\n",
+            "### `options`\n\n",
+            "- **Type:** [Struct(Options)](#options-1)\n",
+            "- **Read-only**\n\n",
+            "Uses `<bucket>.s3.amazonaws.com`.\n\n",
+            "### `id`\n\n- **Type:** String\n- **Read-only**\n\n",
+            "### `empty`\n\n- **Type:** String\n- **Read-only**\n\n",
+            "### Options\n\n",
+        )
+    );
+}
+
+#[test]
 fn page_builder_methods_return_std_errors() {
     let mut page: PageBuilder<Target> = PageBuilder::new();
 

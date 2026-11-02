@@ -60,13 +60,13 @@ pub fn s3_bucket_config() -> AwsSchemaConfig {
         )
         .attribute(
             AttributeSchema::provider_populated("bucket_domain_name", AttributeType::string())
-                .with_description("Bucket domain name, in the form NAME.s3.amazonaws.com. (read-only)")
+                .with_description("Bucket domain name (`<bucket>.s3.amazonaws.com`). (read-only)")
                 .with_provider_name("BucketDomainName")
                 .build(),
         )
         .attribute(
             AttributeSchema::provider_populated("bucket_regional_domain_name", AttributeType::string())
-                .with_description("Region-specific bucket domain name, in the form NAME.s3.REGION.amazonaws.com. (read-only)")
+                .with_description("Region-specific bucket domain name (`<bucket>.s3.<region>.amazonaws.com`). (read-only)")
                 .with_provider_name("BucketRegionalDomainName")
                 .build(),
         )
