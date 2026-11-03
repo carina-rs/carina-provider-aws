@@ -170,6 +170,30 @@ fn s3_lifecycle_date_type(identity: TypeIdentity) -> AttributeType {
     )
 }
 
+fn organizations_account_email_type(identity: TypeIdentity) -> AttributeType {
+    AttributeType::refined_string_with_validator(
+        identity,
+        None,
+        Some((Some(6), Some(64))),
+        legacy_validator(|value| {
+            if let Value::Concrete(ConcreteValue::String(value)) = value {
+                let email = value.expose_plaintext();
+                if !(6..=64).contains(&email.chars().count()) {
+                    return Err(
+                        "Organizations account email must be between 6 and 64 characters"
+                            .to_string(),
+                    );
+                }
+                // This is the same public function used by core's Email type.
+                carina_core::schema::validate_email(email)
+            } else {
+                Err("Expected string".to_string())
+            }
+        }),
+        None,
+    )
+}
+
 const DNS_RECORD_TYPE_VALUES: &[&str] = &[
     "A", "AAAA", "CAA", "CNAME", "DS", "HTTPS", "MX", "NAPTR", "NS", "PTR", "SOA", "SPF", "SRV",
     "SSHFP", "SVCB", "TLSA", "TXT",
@@ -786,27 +810,47 @@ define_aws_type_catalog! {
             None,
         ),
     },
-    /// Organizations account ARN.
+    /// Organizations email: length 6..64 plus core's existing Email validator.
+    /// The cached organizations.json Email shape is shared by
+    /// CreateAccountRequest$Email, Account$Email, and Organization$MasterAccountEmail.
+    /// Length sources (including the read outputs):
+    /// https://docs.aws.amazon.com/organizations/latest/APIReference/API_CreateAccount.html#organizations-CreateAccount-request-Email
+    /// https://docs.aws.amazon.com/organizations/latest/APIReference/API_Account.html#organizations-Type-Account-Email
+    /// https://docs.aws.amazon.com/organizations/latest/APIReference/API_Organization.html#organizations-Type-Organization-MasterAccountEmail
+    /// Do not impose CreateAccount's stricter prose rules on existing account reads.
+    OrganizationsAccountEmail => organizations_account_email {
+        segments: ["organizations", "Account"],
+        kind: "Email",
+        valid_sample: "user@example.com",
+        has_validator: true,
+        constructor: organizations_account_email_type,
+    },
+    /// Organizations account ARN. Cached organizations.json AccountArn, used by
+    /// Account$Arn and Organization$MasterAccountArn. The model fixes partition
+    /// aws and an empty region. Spell out ECMA-262's ASCII \d for Rust's regex
+    /// dialect, remove redundant slash escapes, and anchor the entire value.
     OrganizationsAccountArn => organizations_account_arn {
         segments: ["organizations", "Account"],
         kind: "Arn",
-        valid_sample: "arn:aws:organizations::123456789012:account/o-example/123456789012",
+        valid_sample: "arn:aws:organizations::123456789012:account/o-exampleorgid/123456789012",
         has_validator: false,
         constructor: |identity| metadata_string(
             identity,
-            "^arn:(aws|aws-cn|aws-us-gov):organizations:.*$",
+            r"^arn:aws:organizations::[0-9]{12}:account/o-[a-z0-9]{10,32}/[0-9]{12}\z",
             None,
         ),
     },
-    /// Organizations organization ARN.
+    /// Organizations organization ARN. Cached organizations.json:
+    /// Organization$Arn -> OrganizationArn. Keep the model's aws partition;
+    /// use ASCII digits and a whole-value anchor as for AccountArn above.
     OrganizationsOrganizationArn => organizations_organization_arn {
         segments: ["organizations", "Organization"],
         kind: "Arn",
-        valid_sample: "arn:aws:organizations::123456789012:organization/o-example",
+        valid_sample: "arn:aws:organizations::123456789012:organization/o-exampleorgid",
         has_validator: false,
         constructor: |identity| metadata_string(
             identity,
-            "^arn:(aws|aws-cn|aws-us-gov):organizations:.*$",
+            r"^arn:aws:organizations::[0-9]{12}:organization/o-[a-z0-9]{10,32}\z",
             None,
         ),
     },
@@ -1262,6 +1306,7 @@ mod tests {
             AwsType::LogsLogGroupRetentionInDays,
             AwsType::IamRoleName,
             AwsType::IamPolicyName,
+            AwsType::OrganizationsAccountEmail,
             AwsType::IamRoleId,
             AwsType::IamRoleArn,
             AwsType::IamPolicyArn,
@@ -1296,7 +1341,7 @@ mod tests {
         ]);
         assert_eq!(
             expected.len(),
-            43,
+            44,
             "the shared catalog validator contract changed"
         );
 
@@ -1394,6 +1439,154 @@ mod tests {
     }
 
     #[test]
+    fn organizations_account_arn_matches_smithy_account_resource_and_aws_partition() {
+        let row = AwsType::OrganizationsAccountArn;
+        let attr = row.attribute_type();
+        let admitted = crate::tests::rootless(attr.clone());
+        for valid in [
+            "arn:aws:organizations::123456789012:account/o-0123456789/000000000000".to_string(),
+            format!(
+                "arn:aws:organizations::123456789012:account/o-{}/999999999999",
+                "a".repeat(32)
+            ),
+            row.valid_sample().to_string(),
+        ] {
+            let value = Value::Concrete(ConcreteValue::String(valid.clone().into()));
+            assert!(
+                admitted.validate_collect(&value).is_empty(),
+                "valid account ARN: {valid}"
+            );
+        }
+        for invalid in [
+            "arn:aws:organizations::123456789012:organization/o-0123456789",
+            "arn:aws:organizations::12345678901:account/o-0123456789/123456789012",
+            "arn:aws:organizations::123456789012:account/o-0123456789/1234567890123",
+            "arn:aws:organizations:us-east-1:123456789012:account/o-0123456789/123456789012",
+            "arn:aws:organizations::123456789012:account/o-example/123456789012",
+            "arn:aws:organizations::123456789012:account/o-ABCDEFGHIJ/123456789012",
+            "arn:aws-cn:organizations::123456789012:account/o-0123456789/123456789012",
+            "arn:aws-us-gov:organizations::123456789012:account/o-0123456789/123456789012",
+            "arn:aws:organizations::１２３４５６７８９０１２:account/o-0123456789/123456789012",
+            "arn:aws:organizations::123456789012:account/o-0123456789/123456789012/extra",
+            "arn:aws:organizations::123456789012:account/o-0123456789/123456789012\n",
+        ] {
+            let value = Value::Concrete(ConcreteValue::String(invalid.into()));
+            assert!(
+                !admitted.validate_collect(&value).is_empty(),
+                "invalid account ARN: {invalid:?}"
+            );
+        }
+        let RawShape::String { pattern, .. } = attr.raw_shape() else {
+            panic!("account ARN must be a String");
+        };
+        assert_eq!(
+            pattern,
+            Some(r"^arn:aws:organizations::[0-9]{12}:account/o-[a-z0-9]{10,32}/[0-9]{12}\z")
+        );
+    }
+
+    #[test]
+    fn organizations_organization_arn_matches_smithy_resource_and_id_bounds() {
+        let row = AwsType::OrganizationsOrganizationArn;
+        let attr = row.attribute_type();
+        let admitted = crate::tests::rootless(attr.clone());
+        for valid in [
+            "arn:aws:organizations::123456789012:organization/o-0123456789".to_string(),
+            format!(
+                "arn:aws:organizations::123456789012:organization/o-{}",
+                "a".repeat(32)
+            ),
+            row.valid_sample().to_string(),
+        ] {
+            let value = Value::Concrete(ConcreteValue::String(valid.clone().into()));
+            assert!(
+                admitted.validate_collect(&value).is_empty(),
+                "valid organization ARN: {valid}"
+            );
+        }
+        for invalid in [
+            "arn:aws:organizations::123456789012:account/o-0123456789/123456789012".to_string(),
+            "arn:aws:organizations::12345678901:organization/o-0123456789".to_string(),
+            "arn:aws:organizations::123456789012:organization/o-012345678".to_string(),
+            format!(
+                "arn:aws:organizations::123456789012:organization/o-{}",
+                "a".repeat(33)
+            ),
+            "arn:aws:organizations::123456789012:organization/o-ABCDEFGHIJ".to_string(),
+            "arn:aws-cn:organizations::123456789012:organization/o-0123456789".to_string(),
+            "arn:aws-us-gov:organizations::123456789012:organization/o-0123456789".to_string(),
+            "arn:aws:organizations::１２３４５６７８９０１２:organization/o-0123456789".to_string(),
+            "arn:aws:organizations::123456789012:organization/o-0123456789/extra".to_string(),
+            "arn:aws:organizations::123456789012:organization/o-0123456789\n".to_string(),
+        ] {
+            let value = Value::Concrete(ConcreteValue::String(invalid.clone().into()));
+            assert!(
+                !admitted.validate_collect(&value).is_empty(),
+                "invalid organization ARN: {invalid:?}"
+            );
+        }
+        let RawShape::String { pattern, .. } = attr.raw_shape() else {
+            panic!("organization ARN must be a String");
+        };
+        assert_eq!(
+            pattern,
+            Some(r"^arn:aws:organizations::[0-9]{12}:organization/o-[a-z0-9]{10,32}\z")
+        );
+    }
+
+    #[test]
+    fn organizations_account_email_catalog_exposes_identity_bounds_and_core_validation() {
+        let row = AwsType::OrganizationsAccountEmail;
+        assert!(row.has_validator());
+        let attribute_type = row.attribute_type();
+        let RawShape::String {
+            identity: Some(identity),
+            pattern,
+            length,
+            validate: Some(validator),
+            ..
+        } = attribute_type.raw_shape()
+        else {
+            panic!("Organizations Email must be a validated named String");
+        };
+        assert_eq!(identity, &row.identity());
+        assert!(
+            pattern.is_none(),
+            "email format belongs to core's validator"
+        );
+        assert_eq!(length, Some((Some(6), Some(64))));
+        let admitted = crate::tests::rootless(attribute_type.clone());
+        for valid in [
+            "ab@c.d".to_string(),
+            format!("{}@b.com", "a".repeat(58)),
+            format!("{}@b.com", "é".repeat(58)),
+            "user+carina-rs-registry-prod@example.com".to_string(),
+            "user+carina-rs-registry-dev@example.com".to_string(),
+        ] {
+            let value = Value::Concrete(ConcreteValue::String(valid.clone().into()));
+            assert!(admitted.validate_collect(&value).is_empty(), "{valid:?}");
+            // SDK custom-type dispatch invokes the callback directly, so it
+            // must enforce the length bounds as well as the format check.
+            assert!(validator(&value).is_ok(), "{valid:?}");
+        }
+        for invalid in ["a@b.c".to_string(), format!("{}@b.com", "a".repeat(59))] {
+            assert!(carina_core::schema::validate_email(&invalid).is_ok());
+            let value = Value::Concrete(ConcreteValue::String(invalid.clone().into()));
+            assert!(!admitted.validate_collect(&value).is_empty(), "{invalid:?}");
+            assert!(validator(&value).is_err(), "{invalid:?}");
+        }
+        for invalid in ["not-an-email", "a@@b.com", "user@b..com", "user @b.com"] {
+            let value = Value::Concrete(ConcreteValue::String(invalid.into()));
+            let expected = carina_core::schema::validate_email(invalid).unwrap_err();
+            let error = validator(&value).unwrap_err();
+            assert!(
+                error.to_string().contains(&expected),
+                "delegate to core: {error}"
+            );
+        }
+    }
+
+    #[test]
     fn catalog_metadata_snapshot() {
         const EXPECTED: &str = r#"Arn|aws||Arn|arn:aws:s3:::example-bucket|true
 ResourceId|aws||ResourceId|resource-12345678|true
@@ -1425,8 +1618,9 @@ S3Grantee|aws|s3|Grantee|id=canonical-user-id|false
 CloudFrontHostedZoneId|aws|cloudfront|HostedZoneId|Z2FDTNDATAQYW2|false
 S3BucketArn|aws|s3/Bucket|Arn|arn:aws:s3:::example-bucket|false
 StsCallerIdentityArn|aws|sts/CallerIdentity|Arn|arn:aws:sts::123456789012:assumed-role/example-role/example-session|false
-OrganizationsAccountArn|aws|organizations/Account|Arn|arn:aws:organizations::123456789012:account/o-example/123456789012|false
-OrganizationsOrganizationArn|aws|organizations/Organization|Arn|arn:aws:organizations::123456789012:organization/o-example|false
+OrganizationsAccountEmail|aws|organizations/Account|Email|user@example.com|true
+OrganizationsAccountArn|aws|organizations/Account|Arn|arn:aws:organizations::123456789012:account/o-exampleorgid/123456789012|false
+OrganizationsOrganizationArn|aws|organizations/Organization|Arn|arn:aws:organizations::123456789012:organization/o-exampleorgid|false
 VpcId|aws|ec2/Vpc|Id|vpc-12345678|true
 SubnetId|aws|ec2/Subnet|Id|subnet-12345678|true
 SecurityGroupId|aws|ec2/SecurityGroup|Id|sg-12345678|true

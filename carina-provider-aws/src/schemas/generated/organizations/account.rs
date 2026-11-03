@@ -6,7 +6,7 @@
 
 use super::AwsSchemaConfig;
 use super::tags_type;
-use carina_core::schema::{AttributeSchema, AttributeType, ResourceSchema, types};
+use carina_core::schema::{AttributeSchema, AttributeType, ResourceSchema};
 use carina_provider_protocol::types::ValidatorType;
 
 const VALID_IAM_USER_ACCESS_TO_BILLING: &[&str] = &["ALLOW", "DENY"];
@@ -31,13 +31,13 @@ pub fn organizations_account_config() -> AwsSchemaConfig {
         .default_prevent_destroy()
         .with_conflicting_replacement()
         .attribute(
-            AttributeSchema::required("account_name", AttributeType::string())
+            AttributeSchema::required("account_name", AttributeType::refined_string(None, Some("^[ -;=?-~]+\\z".to_string()), Some((Some(1), Some(50))), None))
                 .with_description("The friendly name of the member account.")
                 .with_provider_name("AccountName")
                 .build(),
         )
         .attribute(
-            AttributeSchema::required("email", types::email())
+            AttributeSchema::required("email", carina_aws_types::organizations_account_email())
                 .create_only()
                 .with_description("The email address of the owner to assign to the new member account. This email address must not already be associated with another Amazon Web Services...")
                 .with_provider_name("Email")
@@ -60,7 +60,7 @@ pub fn organizations_account_config() -> AwsSchemaConfig {
         )
         // Read contract: DescribeAccount does not return the create-time organization role name
         .attribute(
-            AttributeSchema::optional("role_name", AttributeType::string())
+            AttributeSchema::optional("role_name", carina_aws_types::iam_role_name())
                 .create_only()
                 .write_only()
                 .with_description("The name of an IAM role that Organizations automatically preconfigures in the new member account. This role trusts the management account, allowing us...")
@@ -74,7 +74,7 @@ pub fn organizations_account_config() -> AwsSchemaConfig {
                 .build(),
         )
         .attribute(
-            AttributeSchema::provider_populated("id", AttributeType::string())
+            AttributeSchema::provider_populated("id", carina_aws_types::aws_account_id())
                 .with_description("The unique identifier (ID) of the account. The regex pattern for an account ID string requires exactly 12 digits. (read-only)")
                 .with_provider_name("Id")
                 .build(),
