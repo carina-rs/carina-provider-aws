@@ -119,7 +119,10 @@ jobs:
       - name: Check shipped Markdown pages
         run: cargo run --locked -p carina-docgen --features check-bin --bin carina-docgen-check -- "$RUNNER_TEMP/carina-provider-aws-docs.tar.gz"
       - name: Validate docs bundle
-        run: python3 scripts/docs-bundle.py check "$RUNNER_TEMP/carina-provider-aws-docs.tar.gz"
+        run: |
+          # Keep this rev equal to the one in provider-release's build.yml, which matches the deployed registry.
+          cargo install --locked --git https://github.com/carina-rs/registry --rev cf66707c28f6feb31111a72f22e951d02a19dd61 carina-docs-bundle
+          carina-docs-bundle check "$RUNNER_TEMP/carina-provider-aws-docs.tar.gz" --namespace carina-rs --name aws
 
   wasm-build:
     name: WASM Build
