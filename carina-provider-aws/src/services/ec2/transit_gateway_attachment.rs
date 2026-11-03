@@ -181,7 +181,7 @@ impl AwsProvider {
     ) -> Result<A::Step, A::Verdict> {
         let input = match Ec2TransitGatewayAttachmentCreateInput::decode(resource) {
             Ok(input) => input,
-            Err(error) => return Err(attempt.untracked(error)),
+            Err(error) => return Err(attempt.not_created(error)),
         };
         let sent = input.sent();
         let crate::send_models_generated::Ec2TransitGatewayAttachmentCreateParts {
@@ -199,7 +199,7 @@ impl AwsProvider {
         let vpc_id = vpc_id.into_inner();
 
         if subnet_ids.is_empty() {
-            return Err(attempt.untracked(
+            return Err(attempt.not_created(
                 ProviderError::invalid_input("subnet_ids must not be empty")
                     .for_resource(resource.id.clone()),
             ));
@@ -221,7 +221,7 @@ impl AwsProvider {
             schema,
         ) {
             Ok(options) => options,
-            Err(error) => return Err(attempt.untracked(error)),
+            Err(error) => return Err(attempt.not_created(error)),
         };
         if let Some(options) = options {
             req = req.options(options);

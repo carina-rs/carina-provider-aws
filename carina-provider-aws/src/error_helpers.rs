@@ -415,7 +415,7 @@ mod tests {
 
         assert_eq!(detail.operation.as_deref(), Some("iam.ListRoles"));
         assert_eq!(detail.status, Some(403));
-        assert_eq!(detail.code.as_deref(), Some("AccessDenied"));
+        assert_eq!(detail.code(), Some("AccessDenied"));
         assert_eq!(detail.request_id.as_deref(), Some("test-request-id"));
         assert_eq!(detail.context(), "Failed to list IAM roles");
         assert!(detail.cause().is_some());
@@ -506,7 +506,7 @@ mod tests {
         assert_eq!(detail.context(), "Failed to list IAM roles");
         assert_eq!(detail.operation.as_deref(), Some("iam.ListRoles"));
         assert_eq!(detail.status, None);
-        assert_eq!(detail.code, None);
+        assert_eq!(detail.code(), None);
         assert_eq!(detail.request_id, None);
         // Cause is preserved so the renderer's fallback path surfaces
         // the transport-level diagnostic.
@@ -590,7 +590,7 @@ mod tests {
 
         assert!(rendered.contains(OUTCOME_UNKNOWN_NOTE), "{rendered}");
         assert_eq!(error.detail().status, Some(429));
-        assert_eq!(error.detail().code.as_deref(), Some("RequestLimitExceeded"));
+        assert_eq!(error.detail().code(), Some("RequestLimitExceeded"));
     }
 
     #[test]
@@ -624,7 +624,7 @@ mod tests {
 
         assert_eq!(detail.operation.as_deref(), Some("acm.DescribeCertificate"));
         assert_eq!(detail.status, Some(400));
-        assert_eq!(detail.code.as_deref(), Some("ResourceNotFoundException"));
+        assert_eq!(detail.code(), Some("ResourceNotFoundException"));
     }
 
     #[test]
@@ -645,7 +645,7 @@ mod tests {
 
         assert_eq!(detail.operation.as_deref(), Some("iam.GetRole"));
         assert_eq!(detail.status, Some(404));
-        assert_eq!(detail.code.as_deref(), Some("NoSuchEntity"));
+        assert_eq!(detail.code(), Some("NoSuchEntity"));
     }
 
     #[test]
@@ -669,7 +669,7 @@ mod tests {
             Some("ec2.DescribeSecurityGroups")
         );
         assert_eq!(detail.status, Some(400));
-        assert_eq!(detail.code.as_deref(), Some("InvalidGroup.NotFound"));
+        assert_eq!(detail.code(), Some("InvalidGroup.NotFound"));
     }
 
     #[test]
@@ -687,7 +687,7 @@ mod tests {
 
         assert_eq!(detail.operation.as_deref(), Some("iam.ListRoles"));
         assert_eq!(detail.status, Some(400));
-        assert_eq!(detail.code.as_deref(), Some("ValidationException"));
+        assert_eq!(detail.code(), Some("ValidationException"));
     }
 
     #[test]
@@ -708,6 +708,6 @@ mod tests {
 
         assert_eq!(detail.operation.as_deref(), Some("s3.HeadBucket"));
         assert_eq!(detail.status, Some(404));
-        assert_eq!(detail.code, None);
+        assert_eq!(detail.code(), None);
     }
 }

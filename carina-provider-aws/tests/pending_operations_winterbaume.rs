@@ -82,18 +82,18 @@ impl TestAppliedState {
 
 #[derive(Debug)]
 enum TestCreateVerdict {
-    Untracked(ProviderError),
+    NotCreated(ProviderError),
     InFlight {
         token: AwsCreateToken,
         identifier: Option<AppliedIdentifier>,
         error: ProviderError,
     },
-    Created(Box<TestCreatedVerdict>),
-    Discarded(ProviderError),
+    IdentifierReported(Box<TestIdentifierReportedVerdict>),
+    NoResource(ProviderError),
 }
 
 #[derive(Debug)]
-struct TestCreatedVerdict {
+struct TestIdentifierReportedVerdict {
     identifier: AppliedIdentifier,
     observation: Observation,
     sent: Sent,
@@ -103,9 +103,9 @@ struct TestCreatedVerdict {
 impl TestCreateVerdict {
     fn provider_error(&self) -> &ProviderError {
         match self {
-            Self::Untracked(error) | Self::Discarded(error) => error,
+            Self::NotCreated(error) | Self::NoResource(error) => error,
             Self::InFlight { error, .. } => error,
-            Self::Created(created) => &created.error,
+            Self::IdentifierReported(reported) => &reported.error,
         }
     }
 
@@ -138,8 +138,8 @@ impl AwsCreateAttempt for TestCreateAttempt {
     type Verdict = TestCreateVerdict;
     type Issued = TestIssuedCreate;
 
-    fn untracked(self, error: ProviderError) -> Self::Verdict {
-        TestCreateVerdict::Untracked(error)
+    fn not_created(self, error: ProviderError) -> Self::Verdict {
+        TestCreateVerdict::NotCreated(error)
     }
 
     fn issued(self, identifier: AppliedIdentifier, sent: Sent) -> Self::Issued {
@@ -169,8 +169,8 @@ impl AwsPollAttempt for TestPollAttempt {
     type Verdict = TestCreateVerdict;
     type Issued = TestIssuedCreate;
 
-    fn untracked(self, error: ProviderError) -> Self::Verdict {
-        TestCreateVerdict::Untracked(error)
+    fn not_created(self, error: ProviderError) -> Self::Verdict {
+        TestCreateVerdict::NotCreated(error)
     }
 
     fn preserve(self, token: AwsCreateOperation, error: ProviderError) -> Self::Verdict {
@@ -234,8 +234,8 @@ impl AwsIssuedCreate for TestIssuedCreate {
         })
     }
 
-    fn failed(self, observation: Observation, error: ProviderError) -> Self::Verdict {
-        TestCreateVerdict::Created(Box::new(TestCreatedVerdict {
+    fn identifier_reported(self, observation: Observation, error: ProviderError) -> Self::Verdict {
+        TestCreateVerdict::IdentifierReported(Box::new(TestIdentifierReportedVerdict {
             identifier: self.identifier,
             observation,
             sent: self.sent,
@@ -243,8 +243,8 @@ impl AwsIssuedCreate for TestIssuedCreate {
         }))
     }
 
-    fn discarded(self, error: ProviderError) -> Self::Verdict {
-        TestCreateVerdict::Discarded(error)
+    fn no_resource(self, error: ProviderError) -> Self::Verdict {
+        TestCreateVerdict::NoResource(error)
     }
 
     fn pending(
@@ -286,20 +286,22 @@ enum TestResumeStep {
 
 #[derive(Debug)]
 enum TestResumeVerdict {
-    Untracked(ProviderError),
+    NotCreated(ProviderError),
     InFlight {
         token: AwsCreateToken,
         identifier: Option<AppliedIdentifier>,
         error: ProviderError,
     },
-    Created(ProviderError),
-    Discarded(ProviderError),
+    IdentifierReported(ProviderError),
+    NoResource(ProviderError),
 }
 
 impl TestResumeVerdict {
     fn provider_error(&self) -> &ProviderError {
         match self {
-            Self::Untracked(error) | Self::Created(error) | Self::Discarded(error) => error,
+            Self::NotCreated(error) | Self::IdentifierReported(error) | Self::NoResource(error) => {
+                error
+            }
             Self::InFlight { error, .. } => error,
         }
     }
@@ -325,8 +327,8 @@ impl AwsResumeAttempt for TestResumeAttempt {
     type Verdict = TestResumeVerdict;
     type Resumed = TestResumedCreate;
 
-    fn untracked(self, error: ProviderError) -> Self::Verdict {
-        TestResumeVerdict::Untracked(error)
+    fn not_created(self, error: ProviderError) -> Self::Verdict {
+        TestResumeVerdict::NotCreated(error)
     }
 
     fn preserve(self, token: AwsCreateOperation, error: ProviderError) -> Self::Verdict {
@@ -384,12 +386,12 @@ impl AwsResumedCreate for TestResumedCreate {
         })
     }
 
-    fn failed(self, _observation: Observation, error: ProviderError) -> Self::Verdict {
-        TestResumeVerdict::Created(error)
+    fn identifier_reported(self, _observation: Observation, error: ProviderError) -> Self::Verdict {
+        TestResumeVerdict::IdentifierReported(error)
     }
 
-    fn discarded(self, error: ProviderError) -> Self::Verdict {
-        TestResumeVerdict::Discarded(error)
+    fn no_resource(self, error: ProviderError) -> Self::Verdict {
+        TestResumeVerdict::NoResource(error)
     }
 
     fn pending(
@@ -1383,7 +1385,7 @@ fn assert_nat_gateway_state_identifier(state: &impl TestStateIdentifier) {
 }
 
 #[tokio::test]
-async fn rejected_create_is_untracked() {
+async fn rejected_create_is_not_created() {
     let (provider, service) = provider_with_ec2_failures(&["pending"], true, false).await;
     let resource = nat_gateway_resource();
 
@@ -1397,7 +1399,7 @@ async fn rejected_create_is_untracked() {
         .await
         .expect_err("the scripted CreateNatGateway rejection must fail");
 
-    assert!(matches!(verdict, TestCreateVerdict::Untracked(_)));
+    assert!(matches!(verdict, TestCreateVerdict::NotCreated(_)));
     assert_eq!(service.create_nat_gateway_calls(), 1);
     assert_eq!(service.create_tags_calls(), 0);
 }
@@ -1639,14 +1641,14 @@ async fn expired_request_certificate_poll_stays_in_flight_without_resending() {
             error.to_wire().message,
             "acm.Certificate may have been created; check before re-applying"
         ),
-        TestCreateVerdict::Untracked(_) => {
-            panic!("expired poll was untracked")
+        TestCreateVerdict::NotCreated(_) => {
+            panic!("expired poll returned NotCreated")
         }
-        TestCreateVerdict::Created(_) => {
-            panic!("expired poll was classified as created")
+        TestCreateVerdict::IdentifierReported(_) => {
+            panic!("expired poll returned IdentifierReported")
         }
-        TestCreateVerdict::Discarded(_) => {
-            panic!("expired poll was discarded")
+        TestCreateVerdict::NoResource(_) => {
+            panic!("expired poll returned NoResource")
         }
     }
     assert!(
@@ -1679,18 +1681,18 @@ async fn request_certificate_token_with_issued_poll_fails_without_resending() {
         .expect_err("an ACM request token cannot have an issued poll handle");
 
     match &verdict {
-        TestCreateVerdict::Created(created) => assert_eq!(
-            created.error.to_wire().message,
+        TestCreateVerdict::IdentifierReported(reported) => assert_eq!(
+            reported.error.to_wire().message,
             "ACM request-certificate token cannot be paired with an issued create handle"
         ),
-        TestCreateVerdict::Untracked(_) => {
-            panic!("impossible issued poll was untracked")
+        TestCreateVerdict::NotCreated(_) => {
+            panic!("impossible issued poll returned NotCreated")
         }
         TestCreateVerdict::InFlight { .. } => {
             panic!("impossible issued poll stayed in flight")
         }
-        TestCreateVerdict::Discarded(_) => {
-            panic!("impossible issued poll was discarded")
+        TestCreateVerdict::NoResource(_) => {
+            panic!("impossible issued poll returned NoResource")
         }
     }
     assert!(
@@ -1808,18 +1810,18 @@ async fn request_certificate_token_with_issued_resume_fails_without_resending() 
         .expect_err("an ACM request token cannot have an issued resume handle");
 
     match &verdict {
-        TestResumeVerdict::Created(error) => assert_eq!(
+        TestResumeVerdict::IdentifierReported(error) => assert_eq!(
             error.to_wire().message,
             "ACM request-certificate token cannot be paired with an issued create handle"
         ),
-        TestResumeVerdict::Untracked(_) => {
-            panic!("impossible issued resume was untracked")
+        TestResumeVerdict::NotCreated(_) => {
+            panic!("impossible issued resume returned NotCreated")
         }
         TestResumeVerdict::InFlight { .. } => {
             panic!("impossible issued resume stayed in flight")
         }
-        TestResumeVerdict::Discarded(_) => {
-            panic!("impossible issued resume was discarded")
+        TestResumeVerdict::NoResource(_) => {
+            panic!("impossible issued resume returned NoResource")
         }
     }
     assert!(
@@ -2211,7 +2213,7 @@ async fn accepted_create_then_transient_waiter_failure_stays_in_flight_with_iden
 }
 
 #[tokio::test]
-async fn accepted_create_then_post_create_failure_is_created_and_excludes_failed_step_from_sent() {
+async fn post_create_failure_reports_identifier_and_excludes_failed_step_from_sent() {
     let (provider, service) =
         provider_with_ec2_failures(&["available", "available"], false, true).await;
     let resource = nat_gateway_resource();
@@ -2238,15 +2240,15 @@ async fn accepted_create_then_post_create_failure_is_created_and_excludes_failed
         .await
         .expect_err("the scripted CreateTags rejection must fail after issue");
 
-    let TestCreateVerdict::Created(created) = verdict else {
-        panic!("a post-create failure must be classified as created");
+    let TestCreateVerdict::IdentifierReported(reported) = verdict else {
+        panic!("a post-create failure must report the identifier");
     };
-    let TestCreatedVerdict {
+    let TestIdentifierReportedVerdict {
         identifier,
         observation,
         sent,
         error: _,
-    } = *created;
+    } = *reported;
     assert_eq!(identifier.as_str(), NAT_GATEWAY_ID);
     assert!(matches!(
         observation,
@@ -2273,25 +2275,25 @@ async fn partial_flow_log_create_excludes_resource_ids_from_sent_when_read_back_
             },
         )
         .await
-        .expect_err("one rejected resource ID must make the issued create a created verdict");
+        .expect_err("one rejected resource ID must retain the reported identifier");
 
-    let TestCreateVerdict::Created(created) = verdict else {
+    let TestCreateVerdict::IdentifierReported(reported) = verdict else {
         panic!("partial CreateFlowLogs must retain the IDs that AWS did create");
     };
-    assert_eq!(created.identifier.as_str(), FLOW_LOG_ID);
+    assert_eq!(reported.identifier.as_str(), FLOW_LOG_ID);
     assert!(matches!(
-        created.observation,
+        reported.observation,
         Observation::Read(ReadOutcome::NotFound { .. })
     ));
     assert_eq!(
-        created.sent,
+        reported.sent,
         Sent::only(["resource_type", "traffic_type"]),
         "the rejected resource_ids value must not be recorded as applied"
     );
 }
 
 #[tokio::test]
-async fn post_create_failure_with_failed_read_back_is_created_with_read_failed_observation() {
+async fn post_create_failure_reports_identifier_with_read_failed_observation() {
     let (provider, _service) =
         provider_with_ec2_failures(&["available", "read_error"], false, true).await;
     let resource = nat_gateway_resource();
@@ -2318,10 +2320,10 @@ async fn post_create_failure_with_failed_read_back_is_created_with_read_failed_o
         .await
         .expect_err("the scripted CreateTags rejection must fail after issue");
 
-    let TestCreateVerdict::Created(created) = verdict else {
-        panic!("a post-create failure must be classified as created");
+    let TestCreateVerdict::IdentifierReported(reported) = verdict else {
+        panic!("a post-create failure must report the identifier");
     };
-    assert!(matches!(created.observation, Observation::ReadFailed(_)));
+    assert!(matches!(reported.observation, Observation::ReadFailed(_)));
 }
 
 #[tokio::test]
@@ -3317,14 +3319,14 @@ async fn acm_failed_read_back_is_terminal_failure_without_exhausting_budget() {
         )
         .await
         .unwrap_err();
-    let TestCreateVerdict::Created(created) = error else {
+    let TestCreateVerdict::IdentifierReported(reported) = error else {
         panic!("FAILED preserves the certificate: {error:?}")
     };
-    assert_eq!(created.identifier.as_str(), ACM_CERTIFICATE_ARN);
-    assert!(created.error.to_string().contains("DOMAIN_NOT_ALLOWED"));
-    assert!(!created.error.to_string().contains("budget"));
+    assert_eq!(reported.identifier.as_str(), ACM_CERTIFICATE_ARN);
+    assert!(reported.error.to_string().contains("DOMAIN_NOT_ALLOWED"));
+    assert!(!reported.error.to_string().contains("budget"));
     assert!(matches!(
-        created.observation,
+        reported.observation,
         Observation::Read(ReadOutcome::Found { .. })
     ));
     assert_eq!(service.describe_calls.load(Ordering::Relaxed), 1);
@@ -3711,10 +3713,10 @@ async fn acm_failed_read_back_resume_stays_terminal() {
         .await
         .unwrap_err();
     assert!(
-        matches!(error, TestResumeVerdict::Created(_)),
+        matches!(error, TestResumeVerdict::IdentifierReported(_)),
         "FAILED create stays terminal: {error:?}"
     );
-    let TestResumeVerdict::Created(error) = error else {
+    let TestResumeVerdict::IdentifierReported(error) = error else {
         unreachable!()
     };
     assert!(error.to_string().contains("DOMAIN_NOT_ALLOWED"));

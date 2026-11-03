@@ -294,7 +294,7 @@ impl AwsProvider {
     ) -> Result<A::Step, A::Verdict> {
         let input = match Ec2FlowLogCreateInput::decode(resource, schema) {
             Ok(input) => input,
-            Err(error) => return Err(attempt.untracked(error)),
+            Err(error) => return Err(attempt.not_created(error)),
         };
         let sent = input.sent();
         let crate::send_models_generated::Ec2FlowLogCreateParts {
@@ -325,13 +325,13 @@ impl AwsProvider {
             schema,
         ) {
             Ok(specifications) => specifications,
-            Err(error) => return Err(attempt.untracked(error)),
+            Err(error) => return Err(attempt.not_created(error)),
         };
         let tags = tags.into_inner();
         let tags = crate::send_model::optional_tags_value(tags);
         let traffic_type = traffic_type.into_inner();
         if resource_ids.is_empty() {
-            return Err(attempt.untracked(
+            return Err(attempt.not_created(
                 ProviderError::invalid_input(
                     "resource_ids must be a non-empty list of resource identifiers",
                 )
@@ -446,7 +446,7 @@ impl AwsProvider {
                     identifier_text,
                 ) {
                     Ok(identifier) => identifier,
-                    Err(error) => return Err(attempt.untracked(error)),
+                    Err(error) => return Err(attempt.not_created(error)),
                 };
                 let issued_sent = if unsuccessful.is_some() {
                     match &sent {
@@ -493,7 +493,7 @@ impl AwsProvider {
                     request_token = request_token.rotate_after(&rejection);
                     continue;
                 }
-                return Err(attempt.untracked(
+                return Err(attempt.not_created(
                     ProviderError::api_error(format!(
                         "Failed to create flow log: {}",
                         rejection.message
@@ -510,7 +510,7 @@ impl AwsProvider {
             );
         }
 
-        Err(attempt.untracked(
+        Err(attempt.not_created(
             ProviderError::api_error(format!(
                 "Failed to create flow log after retries: {last_error}"
             ))

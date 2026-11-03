@@ -196,7 +196,7 @@ impl AwsProvider {
     ) -> Result<A::Step, A::Verdict> {
         let input = match S3BucketCreateInput::decode(resource, schema) {
             Ok(input) => input,
-            Err(error) => return Err(attempt.untracked(error)),
+            Err(error) => return Err(attempt.not_created(error)),
         };
         let sent = input.sent();
         let crate::send_models_generated::S3BucketCreateParts {
@@ -214,7 +214,7 @@ impl AwsProvider {
             bucket_name.clone(),
         ) {
             Ok(identifier) => identifier,
-            Err(error) => return Err(attempt.untracked(error)),
+            Err(error) => return Err(attempt.not_created(error)),
         };
 
         // Create bucket
@@ -247,7 +247,7 @@ impl AwsProvider {
         let rid = resource.id.clone();
         let result = retry_aws_operation(RetryPolicy::default(), || req.clone()).await;
         if let Err(error) = result {
-            return Err(attempt.untracked(
+            return Err(attempt.not_created(
                 api_error_with_meta("Failed to create bucket", error).for_resource(rid),
             ));
         }

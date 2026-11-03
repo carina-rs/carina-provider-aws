@@ -201,8 +201,8 @@ impl AwsCreateAttempt for GuestCreateAttempt {
     type Verdict = SdkCreateVerdict<AwsCreateToken>;
     type Issued = GuestIssuedCreate;
 
-    fn untracked(self, error: CoreProviderError) -> Self::Verdict {
-        self.0.untracked(error.to_wire())
+    fn not_created(self, error: CoreProviderError) -> Self::Verdict {
+        self.0.not_created(error.to_wire())
     }
 
     fn issued(self, identifier: CoreAppliedIdentifier, sent: CoreSent) -> Self::Issued {
@@ -225,8 +225,8 @@ impl AwsPollAttempt for GuestPollAttempt {
     type Verdict = SdkPollVerdict<AwsCreateToken>;
     type Issued = GuestPolledIssuedCreate;
 
-    fn untracked(self, error: CoreProviderError) -> Self::Verdict {
-        self.0.untracked(error.to_wire())
+    fn not_created(self, error: CoreProviderError) -> Self::Verdict {
+        self.0.not_created(error.to_wire())
     }
 
     fn preserve(self, token: AwsCreateOperation, error: CoreProviderError) -> Self::Verdict {
@@ -266,7 +266,7 @@ impl AwsIssuedCreate for GuestPolledIssuedCreate {
                 let error = error.to_wire();
                 Err(self
                     .0
-                    .failed(proto::Observation::ReadFailed(error.clone()), error)
+                    .identifier_reported(proto::Observation::ReadFailed(error.clone()), error)
                     .into())
             }
         }
@@ -290,20 +290,24 @@ impl AwsIssuedCreate for GuestPolledIssuedCreate {
                 let error = error.to_wire();
                 Err(self
                     .0
-                    .failed(proto::Observation::ReadFailed(error.clone()), error)
+                    .identifier_reported(proto::Observation::ReadFailed(error.clone()), error)
                     .into())
             }
         }
     }
 
-    fn failed(self, observation: CoreObservation, error: CoreProviderError) -> Self::Verdict {
+    fn identifier_reported(
+        self,
+        observation: CoreObservation,
+        error: CoreProviderError,
+    ) -> Self::Verdict {
         self.0
-            .failed(observation_to_proto(observation), error.to_wire())
+            .identifier_reported(observation_to_proto(observation), error.to_wire())
             .into()
     }
 
-    fn discarded(self, error: CoreProviderError) -> Self::Verdict {
-        self.0.discarded(error.to_wire()).into()
+    fn no_resource(self, error: CoreProviderError) -> Self::Verdict {
+        self.0.no_resource(error.to_wire()).into()
     }
 
     fn pending(
@@ -341,7 +345,7 @@ impl AwsIssuedCreate for GuestIssuedCreate {
                 let error = error.to_wire();
                 Err(self
                     .0
-                    .failed(proto::Observation::ReadFailed(error.clone()), error))
+                    .identifier_reported(proto::Observation::ReadFailed(error.clone()), error))
             }
         }
     }
@@ -364,18 +368,22 @@ impl AwsIssuedCreate for GuestIssuedCreate {
                 let error = error.to_wire();
                 Err(self
                     .0
-                    .failed(proto::Observation::ReadFailed(error.clone()), error))
+                    .identifier_reported(proto::Observation::ReadFailed(error.clone()), error))
             }
         }
     }
 
-    fn failed(self, observation: CoreObservation, error: CoreProviderError) -> Self::Verdict {
+    fn identifier_reported(
+        self,
+        observation: CoreObservation,
+        error: CoreProviderError,
+    ) -> Self::Verdict {
         self.0
-            .failed(observation_to_proto(observation), error.to_wire())
+            .identifier_reported(observation_to_proto(observation), error.to_wire())
     }
 
-    fn discarded(self, error: CoreProviderError) -> Self::Verdict {
-        self.0.discarded(error.to_wire())
+    fn no_resource(self, error: CoreProviderError) -> Self::Verdict {
+        self.0.no_resource(error.to_wire())
     }
 
     fn pending(
@@ -398,8 +406,8 @@ impl AwsResumeAttempt for GuestResumeAttempt {
     type Verdict = SdkResumeVerdict<AwsCreateToken>;
     type Resumed = GuestResumedCreate;
 
-    fn untracked(self, error: CoreProviderError) -> Self::Verdict {
-        self.0.untracked(error.to_wire())
+    fn not_created(self, error: CoreProviderError) -> Self::Verdict {
+        self.0.not_created(error.to_wire())
     }
 
     fn preserve(self, token: AwsCreateOperation, error: CoreProviderError) -> Self::Verdict {
@@ -436,7 +444,7 @@ impl AwsResumedCreate for GuestResumedCreate {
                 let error = error.to_wire();
                 Err(self
                     .0
-                    .failed(proto::Observation::ReadFailed(error.clone()), error))
+                    .identifier_reported(proto::Observation::ReadFailed(error.clone()), error))
             }
         }
     }
@@ -459,18 +467,22 @@ impl AwsResumedCreate for GuestResumedCreate {
                 let error = error.to_wire();
                 Err(self
                     .0
-                    .failed(proto::Observation::ReadFailed(error.clone()), error))
+                    .identifier_reported(proto::Observation::ReadFailed(error.clone()), error))
             }
         }
     }
 
-    fn failed(self, observation: CoreObservation, error: CoreProviderError) -> Self::Verdict {
+    fn identifier_reported(
+        self,
+        observation: CoreObservation,
+        error: CoreProviderError,
+    ) -> Self::Verdict {
         self.0
-            .failed(observation_to_proto(observation), error.to_wire())
+            .identifier_reported(observation_to_proto(observation), error.to_wire())
     }
 
-    fn discarded(self, error: CoreProviderError) -> Self::Verdict {
-        self.0.discarded(error.to_wire())
+    fn no_resource(self, error: CoreProviderError) -> Self::Verdict {
+        self.0.no_resource(error.to_wire())
     }
 
     fn pending(
@@ -633,7 +645,7 @@ impl CarinaProvider for AwsProcessProvider {
                 .into_iter()
                 .map(|c| proto::CompletionValue {
                     value: c.value,
-                    description: c.description,
+                    description: c.description.to_string(),
                 })
                 .collect(),
         )])
@@ -704,7 +716,7 @@ impl CarinaProvider for AwsProcessProvider {
                     .for_resource(protocol_convert::protocol_to_resource_id(
                         &request.resource.id,
                     ));
-                return Err(attempt.untracked(Self::convert_error(error)));
+                return Err(attempt.not_created(Self::convert_error(error)));
             }
         };
         let schemas = Self::schema_registry();
@@ -717,7 +729,7 @@ impl CarinaProvider for AwsProcessProvider {
             ),
         ) {
             Ok(resource) => resource,
-            Err(error) => return Err(attempt.untracked(Self::convert_error(error))),
+            Err(error) => return Err(attempt.not_created(Self::convert_error(error))),
         };
         self.runtime.block_on(
             self.provider()

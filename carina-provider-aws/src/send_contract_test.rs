@@ -328,7 +328,7 @@ impl AwsCreateAttempt for CaptureAttempt {
     type Verdict = ProviderError;
     type Issued = CaptureIssued;
 
-    fn untracked(self, error: ProviderError) -> Self::Verdict {
+    fn not_created(self, error: ProviderError) -> Self::Verdict {
         error
     }
 
@@ -367,11 +367,11 @@ impl AwsIssuedCreate for CaptureIssued {
         Ok(())
     }
 
-    fn failed(self, _observation: Observation, error: ProviderError) -> Self::Verdict {
+    fn identifier_reported(self, _observation: Observation, error: ProviderError) -> Self::Verdict {
         error
     }
 
-    fn discarded(self, error: ProviderError) -> Self::Verdict {
+    fn no_resource(self, error: ProviderError) -> Self::Verdict {
         error
     }
 

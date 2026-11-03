@@ -806,7 +806,7 @@ enum AcmResendTransition {
 enum InitialAcmRequestTransition {
     Issued(AppliedIdentifier, Sent),
     Pending(AwsCreateOperation, Sent),
-    Untracked(ProviderError),
+    NotCreated(ProviderError),
 }
 
 #[derive(Debug)]
@@ -859,7 +859,7 @@ pub(crate) type TypedCreateCompletion = (Sent, CreateCompletion);
 
 /// Native providers drive pending steps themselves, while the WASM guest
 /// returns one step to the host. These adapters let both paths consume the
-/// same protocol-v15 typestate at the exact AWS classification boundary.
+/// same protocol-v20 typestate at the exact AWS classification boundary.
 #[doc(hidden)]
 pub trait AwsIssuedCreate: Sized {
     type Step;
@@ -873,8 +873,8 @@ pub trait AwsIssuedCreate: Sized {
         reason: ProviderError,
         missing_attributes: NonEmptyAttributeNames,
     ) -> Result<Self::Step, Self::Verdict>;
-    fn failed(self, observation: Observation, error: ProviderError) -> Self::Verdict;
-    fn discarded(self, error: ProviderError) -> Self::Verdict;
+    fn identifier_reported(self, observation: Observation, error: ProviderError) -> Self::Verdict;
+    fn no_resource(self, error: ProviderError) -> Self::Verdict;
     fn pending(
         self,
         token: AwsCreateToken,
@@ -889,7 +889,7 @@ pub trait AwsCreateAttempt {
     type Verdict;
     type Issued: AwsIssuedCreate<Step = Self::Step, Verdict = Self::Verdict>;
 
-    fn untracked(self, error: ProviderError) -> Self::Verdict;
+    fn not_created(self, error: ProviderError) -> Self::Verdict;
     fn issued(self, identifier: AppliedIdentifier, sent: Sent) -> Self::Issued;
     fn pending(
         self,
@@ -905,7 +905,7 @@ pub trait AwsPollAttempt {
     type Verdict;
     type Issued: AwsIssuedCreate<Step = Self::Step, Verdict = Self::Verdict>;
 
-    fn untracked(self, error: ProviderError) -> Self::Verdict;
+    fn not_created(self, error: ProviderError) -> Self::Verdict;
     fn preserve(self, token: AwsCreateOperation, error: ProviderError) -> Self::Verdict;
     fn issued(self, identifier: AppliedIdentifier) -> Self::Issued;
     fn pending(
@@ -934,8 +934,8 @@ pub trait AwsResumedCreate: Sized {
         reason: ProviderError,
         missing_attributes: NonEmptyAttributeNames,
     ) -> Result<Self::Step, Self::Verdict>;
-    fn failed(self, observation: Observation, error: ProviderError) -> Self::Verdict;
-    fn discarded(self, error: ProviderError) -> Self::Verdict;
+    fn identifier_reported(self, observation: Observation, error: ProviderError) -> Self::Verdict;
+    fn no_resource(self, error: ProviderError) -> Self::Verdict;
     fn pending(
         self,
         token: AwsCreateToken,
@@ -950,7 +950,7 @@ pub trait AwsResumeAttempt {
     type Verdict;
     type Resumed: AwsResumedCreate<Step = Self::Step, Verdict = Self::Verdict>;
 
-    fn untracked(self, error: ProviderError) -> Self::Verdict;
+    fn not_created(self, error: ProviderError) -> Self::Verdict;
     fn preserve(self, token: AwsCreateOperation, error: ProviderError) -> Self::Verdict;
     fn issued(self, identifier: AppliedIdentifier) -> Self::Resumed;
     fn pending(
@@ -1007,8 +1007,8 @@ impl AwsCreateAttempt for CreateAttempt {
     type Verdict = CreateFailure;
     type Issued = IssuedCreate;
 
-    fn untracked(self, error: ProviderError) -> Self::Verdict {
-        self.untracked(error)
+    fn not_created(self, error: ProviderError) -> Self::Verdict {
+        self.not_created(error)
     }
 
     fn issued(self, identifier: AppliedIdentifier, sent: Sent) -> Self::Issued {
@@ -1034,8 +1034,8 @@ impl AwsPollAttempt for PollAttempt {
     type Verdict = CreateFailure;
     type Issued = IssuedCreate;
 
-    fn untracked(self, error: ProviderError) -> Self::Verdict {
-        self.untracked(error)
+    fn not_created(self, error: ProviderError) -> Self::Verdict {
+        self.not_created(error)
     }
 
     fn preserve(self, token: AwsCreateOperation, error: ProviderError) -> Self::Verdict {
@@ -1081,19 +1081,19 @@ impl AwsIssuedCreate for IssuedCreate {
         let Some(diagnostic) =
             PartialReadDiagnostic::new(reason.to_string(), missing_attributes.into())
         else {
-            return Err(self.discarded(ProviderError::internal(
+            return Err(self.no_resource(ProviderError::internal(
                 "read-back partial requires missing attributes",
             )));
         };
         Ok(CoreCreateStep::Done(self.partial(attributes, diagnostic)))
     }
 
-    fn failed(self, observation: Observation, error: ProviderError) -> Self::Verdict {
-        self.failed(observation, error)
+    fn identifier_reported(self, observation: Observation, error: ProviderError) -> Self::Verdict {
+        self.identifier_reported(observation, error)
     }
 
-    fn discarded(self, error: ProviderError) -> Self::Verdict {
-        self.discarded(error)
+    fn no_resource(self, error: ProviderError) -> Self::Verdict {
+        self.no_resource(error)
     }
 
     fn pending(
@@ -1129,7 +1129,7 @@ fn native_create_poll(
         Poll::Issued(issued) => Ok(AwsCreatePoll::Issued(issued, token)),
         Poll::Unissued(attempt) => match token.into_operation() {
             Ok(operation) => Ok(AwsCreatePoll::Unissued(attempt, operation)),
-            Err(_) => Err(attempt.untracked(read_back_without_identifier(id))),
+            Err(_) => Err(attempt.not_created(read_back_without_identifier(id))),
         },
     }
 }
@@ -1143,7 +1143,7 @@ fn native_create_resume(
         Resume::Issued(resumed) => Ok(AwsCreateResume::Issued(resumed, token)),
         Resume::Unissued(attempt) => match token.into_operation() {
             Ok(operation) => Ok(AwsCreateResume::Unissued(attempt, operation)),
-            Err(_) => Err(attempt.untracked(read_back_without_identifier(id))),
+            Err(_) => Err(attempt.not_created(read_back_without_identifier(id))),
         },
     }
 }
@@ -1165,8 +1165,8 @@ impl AwsResumeAttempt for ResumeAttempt {
     type Verdict = ResumeFailure;
     type Resumed = ResumedCreate;
 
-    fn untracked(self, error: ProviderError) -> Self::Verdict {
-        self.untracked(error)
+    fn not_created(self, error: ProviderError) -> Self::Verdict {
+        self.not_created(error)
     }
 
     fn preserve(self, token: AwsCreateOperation, error: ProviderError) -> Self::Verdict {
@@ -1210,19 +1210,19 @@ impl AwsResumedCreate for ResumedCreate {
         let Some(diagnostic) =
             PartialReadDiagnostic::new(reason.to_string(), missing_attributes.into())
         else {
-            return Err(self.discarded(ProviderError::internal(
+            return Err(self.no_resource(ProviderError::internal(
                 "read-back partial requires missing attributes",
             )));
         };
         Ok(CoreResumeStep::Done(self.partial(attributes, diagnostic)))
     }
 
-    fn failed(self, observation: Observation, error: ProviderError) -> Self::Verdict {
-        self.failed(observation, error)
+    fn identifier_reported(self, observation: Observation, error: ProviderError) -> Self::Verdict {
+        self.identifier_reported(observation, error)
     }
 
-    fn discarded(self, error: ProviderError) -> Self::Verdict {
-        self.discarded(error)
+    fn no_resource(self, error: ProviderError) -> Self::Verdict {
+        self.no_resource(error)
     }
 
     fn pending(
@@ -1441,7 +1441,7 @@ impl AwsProvider {
                 }
                 SendClassification::NotSent(_) | SendClassification::Rejected => {
                     drop(sent);
-                    InitialAcmRequestTransition::Untracked(
+                    InitialAcmRequestTransition::NotCreated(
                         crate::services::acm::certificate::request_certificate_error(
                             &resource.id,
                             error,
@@ -1449,7 +1449,7 @@ impl AwsProvider {
                     )
                 }
             },
-            Err(error) => InitialAcmRequestTransition::Untracked(error),
+            Err(error) => InitialAcmRequestTransition::NotCreated(error),
         }
     }
 
@@ -1513,8 +1513,10 @@ impl AwsProvider {
                 identifier,
                 observation,
                 error,
-            }) => Err(attempt.issued(identifier, sent).failed(observation, error)),
-            Err(error) => Err(attempt.untracked(error)),
+            }) => Err(attempt
+                .issued(identifier, sent)
+                .identifier_reported(observation, error)),
+            Err(error) => Err(attempt.not_created(error)),
         }
     }
 
@@ -1525,7 +1527,7 @@ impl AwsProvider {
     ) -> Result<A::Step, A::Verdict> {
         match result {
             Ok((sent, completion)) => self.finish_create(attempt, sent, Ok(completion)),
-            Err(error) => Err(attempt.untracked(error)),
+            Err(error) => Err(attempt.not_created(error)),
         }
     }
 
@@ -1553,7 +1555,7 @@ impl AwsProvider {
     ) -> Result<I::Step, I::Verdict> {
         match completion {
             ReadBackCompletion::Failed { observation, error } => {
-                Err(issued.failed(observation, error))
+                Err(issued.identifier_reported(observation, error))
             }
             ReadBackCompletion::Success(state) => self.finish_applied_state(issued, state),
             ReadBackCompletion::Partial {
@@ -1573,7 +1575,8 @@ impl AwsProvider {
         match crate::read_model::live_attributes(state.id(), state.attributes()) {
             Ok(attributes) => issued.succeeded(attributes),
             Err(error) => {
-                Err(issued.failed(Observation::Read(ReadOutcome::Found { state }), error))
+                Err(issued
+                    .identifier_reported(Observation::Read(ReadOutcome::Found { state }), error))
             }
         }
     }
@@ -1589,7 +1592,7 @@ impl AwsProvider {
             Ok(outcome) => Observation::Read(outcome),
             Err(read_error) => Observation::ReadFailed(read_error),
         };
-        issued.failed(observation, error)
+        issued.identifier_reported(observation, error)
     }
 
     pub(crate) fn pending_tagged_ec2<A: AwsCreateAttempt>(
@@ -1645,7 +1648,7 @@ impl AwsProvider {
                 )
             }
             SendClassification::NotSent(_) | SendClassification::Rejected => Err(attempt
-                .untracked(
+                .not_created(
                     crate::error_helpers::api_error_with_meta(kind.create_error_context(), error)
                         .for_resource(id.clone()),
                 )),
@@ -1700,7 +1703,7 @@ impl AwsProvider {
             &identifier,
         ) {
             Ok(identifier) => identifier,
-            Err(error) => return Err(attempt.untracked(error)),
+            Err(error) => return Err(attempt.not_created(error)),
         };
         let issued = attempt.issued(identifier.clone(), sent);
         self.finish_tagged_ec2_issued(
@@ -2112,13 +2115,13 @@ impl AwsProvider {
         if let Err(error) =
             crate::ec2_tags::validate_ec2_user_tags(&resource.id, &resource.resolved_attributes())
         {
-            return Err(attempt.untracked(error));
+            return Err(attempt.not_created(error));
         }
         let client_token = crate::aws_operation::ClientToken::new();
         let schema = match self.resource_schema(resource.id.resource_type.as_str()) {
             Some(schema) => schema,
             None => {
-                return Err(attempt.untracked(
+                return Err(attempt.not_created(
                     ProviderError::internal(format!(
                         "Unknown resource schema: {}",
                         resource.id.resource_type
@@ -2151,7 +2154,7 @@ impl AwsProvider {
                     .await
                 {
                     Ok(request_id) => request_id,
-                    Err(error) => return Err(attempt.untracked(error)),
+                    Err(error) => return Err(attempt.not_created(error)),
                 };
                 attempt.pending(
                     AwsCreateOperation::OrganizationsAccount {
@@ -2165,7 +2168,7 @@ impl AwsProvider {
                 let first_used_at_unix_secs = match unix_timestamp_now() {
                     Ok(timestamp) => timestamp,
                     Err(error) => {
-                        return Err(attempt.untracked(error.for_resource(resource.id.clone())));
+                        return Err(attempt.not_created(error.for_resource(resource.id.clone())));
                     }
                 };
                 let fresh_client_token = match fresh_acm_client_token(
@@ -2175,7 +2178,7 @@ impl AwsProvider {
                 ) {
                     Some(fresh_client_token) => fresh_client_token,
                     None => {
-                        return Err(attempt.untracked(
+                        return Err(attempt.not_created(
                             ProviderError::internal(
                                 "new ACM client token is outside its idempotency window",
                             )
@@ -2208,7 +2211,9 @@ impl AwsProvider {
                     InitialAcmRequestTransition::Pending(token, sent) => {
                         attempt.pending(token, sent, POLL_AFTER_SECS)
                     }
-                    InitialAcmRequestTransition::Untracked(error) => Err(attempt.untracked(error)),
+                    InitialAcmRequestTransition::NotCreated(error) => {
+                        Err(attempt.not_created(error))
+                    }
                 }
             }
             "s3.Bucket" => self.create_s3_bucket(resource, schema, attempt).await,
@@ -2347,7 +2352,7 @@ impl AwsProvider {
             "sqs.Queue" => {
                 self.finish_typed_create(attempt, self.create_sqs_queue(resource, schema).await)
             }
-            unknown => Err(attempt.untracked(
+            unknown => Err(attempt.not_created(
                 ProviderError::internal(format!("Unknown resource type: {unknown}"))
                     .for_resource(resource.id.clone()),
             )),
@@ -2386,7 +2391,7 @@ impl AwsProvider {
                 let attempt = match poll {
                     CreateHandle::Unissued(attempt) => attempt,
                     CreateHandle::Issued(issued) => {
-                        return Err(issued.failed(
+                        return Err(issued.identifier_reported(
                             Observation::ReadFailed(acm_request_certificate_issued_handle_error(
                                 id,
                             )),
@@ -2487,7 +2492,7 @@ impl AwsProvider {
                         );
                         self.finish_issued(issued, completion, poll_request)
                     }
-                    CreatePoll::Failed => Err(issued.discarded(
+                    CreatePoll::Failed => Err(issued.no_resource(
                         ProviderError::api_error("NAT gateway creation failed")
                             .for_resource(id.clone()),
                     )),
@@ -2520,7 +2525,7 @@ impl AwsProvider {
                         );
                         self.finish_issued(issued, completion, poll_request)
                     }
-                    CreatePoll::Failed => Err(issued.discarded(
+                    CreatePoll::Failed => Err(issued.no_resource(
                         ProviderError::api_error("Transit gateway creation failed")
                             .for_resource(id.clone()),
                     )),
@@ -2555,7 +2560,7 @@ impl AwsProvider {
                         );
                         self.finish_issued(issued, completion, poll_request)
                     }
-                    CreatePoll::Failed => Err(issued.discarded(
+                    CreatePoll::Failed => Err(issued.no_resource(
                         ProviderError::api_error("Transit gateway attachment creation failed")
                             .for_resource(id.clone()),
                     )),
@@ -2595,7 +2600,7 @@ impl AwsProvider {
                             Err(error) => {
                                 return match poll {
                                     CreateHandle::Unissued(attempt) => {
-                                        Err(attempt.untracked(error))
+                                        Err(attempt.not_created(error))
                                     }
                                     CreateHandle::Issued(issued) => {
                                         Err(self.failed_issued(id, issued, error).await)
@@ -2624,18 +2629,18 @@ impl AwsProvider {
                         )
                         .for_resource(id.clone());
                         match poll {
-                            CreateHandle::Unissued(attempt) => Err(attempt.untracked(error)),
+                            CreateHandle::Unissued(attempt) => Err(attempt.not_created(error)),
                             CreateHandle::Issued(issued) => {
                                 Err(self.failed_issued(id, issued, error).await)
                             }
                         }
                     }
                     CreatePoll::Failed => match poll {
-                        CreateHandle::Unissued(attempt) => Err(attempt.untracked(
+                        CreateHandle::Unissued(attempt) => Err(attempt.not_created(
                             ProviderError::api_error("Account creation failed")
                                 .for_resource(id.clone()),
                         )),
-                        CreateHandle::Issued(issued) => Err(issued.discarded(
+                        CreateHandle::Issued(issued) => Err(issued.no_resource(
                             ProviderError::api_error("Account creation failed")
                                 .for_resource(id.clone()),
                         )),
@@ -2850,7 +2855,7 @@ impl AwsProvider {
             Ok(outcome) => Observation::Read(outcome),
             Err(read_error) => Observation::ReadFailed(read_error),
         };
-        resumed.failed(observation, error)
+        resumed.identifier_reported(observation, error)
     }
 
     fn finish_resumed_completion<R: AwsResumedCreate>(
@@ -2883,7 +2888,7 @@ impl AwsProvider {
                 ..
             } => resumed.partial(attributes, reason, missing_attributes),
             ReadBackCompletion::Failed { observation, error } => {
-                Err(resumed.failed(observation, error))
+                Err(resumed.identifier_reported(observation, error))
             }
         }
     }
@@ -2941,7 +2946,7 @@ impl AwsProvider {
                 let attempt = match resume {
                     CreateHandle::Unissued(attempt) => attempt,
                     CreateHandle::Issued(resumed) => {
-                        return Err(resumed.failed(
+                        return Err(resumed.identifier_reported(
                             Observation::ReadFailed(acm_request_certificate_issued_handle_error(
                                 id,
                             )),
@@ -3033,7 +3038,7 @@ impl AwsProvider {
                         self.complete_resumed_read(resource, resumed, outcome, poll_request)
                             .await
                     }
-                    CreatePoll::Failed => Err(resumed.discarded(
+                    CreatePoll::Failed => Err(resumed.no_resource(
                         ProviderError::api_error("NAT gateway creation failed")
                             .for_resource(id.clone()),
                     )),
@@ -3061,7 +3066,7 @@ impl AwsProvider {
                         self.complete_resumed_read(resource, resumed, outcome, poll_request)
                             .await
                     }
-                    CreatePoll::Failed => Err(resumed.discarded(
+                    CreatePoll::Failed => Err(resumed.no_resource(
                         ProviderError::api_error("Transit gateway creation failed")
                             .for_resource(id.clone()),
                     )),
@@ -3091,7 +3096,7 @@ impl AwsProvider {
                         self.complete_resumed_read(resource, resumed, outcome, poll_request)
                             .await
                     }
-                    CreatePoll::Failed => Err(resumed.discarded(
+                    CreatePoll::Failed => Err(resumed.no_resource(
                         ProviderError::api_error("Transit gateway attachment creation failed")
                             .for_resource(id.clone()),
                     )),
@@ -3129,7 +3134,7 @@ impl AwsProvider {
                             Err(error) => {
                                 return match resume {
                                     CreateHandle::Unissued(attempt) => {
-                                        Err(attempt.untracked(error))
+                                        Err(attempt.not_created(error))
                                     }
                                     CreateHandle::Issued(resumed) => {
                                         Err(self.failed_resumed(id, resumed, error).await)
@@ -3160,18 +3165,18 @@ impl AwsProvider {
                         )
                         .for_resource(id.clone());
                         match resume {
-                            CreateHandle::Unissued(attempt) => Err(attempt.untracked(error)),
+                            CreateHandle::Unissued(attempt) => Err(attempt.not_created(error)),
                             CreateHandle::Issued(resumed) => {
                                 Err(self.failed_resumed(id, resumed, error).await)
                             }
                         }
                     }
                     CreatePoll::Failed => match resume {
-                        CreateHandle::Unissued(attempt) => Err(attempt.untracked(
+                        CreateHandle::Unissued(attempt) => Err(attempt.not_created(
                             ProviderError::api_error("Account creation failed")
                                 .for_resource(id.clone()),
                         )),
-                        CreateHandle::Issued(resumed) => Err(resumed.discarded(
+                        CreateHandle::Issued(resumed) => Err(resumed.no_resource(
                             ProviderError::api_error("Account creation failed")
                                 .for_resource(id.clone()),
                         )),
@@ -4139,7 +4144,7 @@ mod pending_operation_tests {
             token: AwsCreateToken,
             error: ProviderError,
         },
-        Untracked(ProviderError),
+        NotCreated(ProviderError),
     }
 
     struct RecordingAcmPollAttempt;
@@ -4153,8 +4158,8 @@ mod pending_operation_tests {
         type Verdict = AcmPollVerdict;
         type Issued = RecordingAcmIssued;
 
-        fn untracked(self, error: ProviderError) -> Self::Verdict {
-            AcmPollVerdict::Untracked(error)
+        fn not_created(self, error: ProviderError) -> Self::Verdict {
+            AcmPollVerdict::NotCreated(error)
         }
 
         fn preserve(self, token: AwsCreateOperation, error: ProviderError) -> Self::Verdict {
@@ -4201,11 +4206,15 @@ mod pending_operation_tests {
             unreachable!("the ACM resend tests never complete an issued create")
         }
 
-        fn failed(self, _observation: Observation, _error: ProviderError) -> Self::Verdict {
+        fn identifier_reported(
+            self,
+            _observation: Observation,
+            _error: ProviderError,
+        ) -> Self::Verdict {
             unreachable!("the ACM resend tests never issue a certificate")
         }
 
-        fn discarded(self, _error: ProviderError) -> Self::Verdict {
+        fn no_resource(self, _error: ProviderError) -> Self::Verdict {
             unreachable!("the ACM resend tests never issue a certificate")
         }
 
@@ -4433,7 +4442,7 @@ mod pending_operation_tests {
         type Verdict = ProviderError;
         type Issued = UnusedIssued;
 
-        fn untracked(self, error: ProviderError) -> Self::Verdict {
+        fn not_created(self, error: ProviderError) -> Self::Verdict {
             error
         }
 
@@ -4475,11 +4484,15 @@ mod pending_operation_tests {
             unreachable!("the pending-only test never completes partially")
         }
 
-        fn failed(self, _observation: Observation, error: ProviderError) -> Self::Verdict {
+        fn identifier_reported(
+            self,
+            _observation: Observation,
+            error: ProviderError,
+        ) -> Self::Verdict {
             error
         }
 
-        fn discarded(self, error: ProviderError) -> Self::Verdict {
+        fn no_resource(self, error: ProviderError) -> Self::Verdict {
             error
         }
 
@@ -4830,8 +4843,10 @@ mod pending_operation_tests {
                     "{error}"
                 );
             }
-            Err(AcmPollVerdict::Untracked(error)) => {
-                panic!("ACM continuation was discarded: {error}")
+            Err(AcmPollVerdict::NotCreated(error)) => {
+                panic!(
+                    "ACM poll returned NotCreated instead of preserving its continuation: {error}"
+                )
             }
             Ok(next) => panic!("permanent credential failure unexpectedly repended: {next:?}"),
         }
@@ -4880,8 +4895,10 @@ mod pending_operation_tests {
                     "{error}"
                 );
             }
-            Err(AcmPollVerdict::Untracked(error)) => {
-                panic!("ACM continuation was discarded: {error}")
+            Err(AcmPollVerdict::NotCreated(error)) => {
+                panic!(
+                    "ACM poll returned NotCreated instead of preserving its continuation: {error}"
+                )
             }
             Ok(next) => panic!("non-retryable rejection unexpectedly repended: {next:?}"),
         }
@@ -4930,8 +4947,10 @@ mod pending_operation_tests {
                     "{error}"
                 );
             }
-            Err(AcmPollVerdict::Untracked(error)) => {
-                panic!("ACM continuation was discarded: {error}")
+            Err(AcmPollVerdict::NotCreated(error)) => {
+                panic!(
+                    "ACM poll returned NotCreated instead of preserving its continuation: {error}"
+                )
             }
             Ok(next) => panic!("non-retryable final attempt unexpectedly repended: {next:?}"),
         }
@@ -4981,8 +5000,10 @@ mod pending_operation_tests {
                     "{error}"
                 );
             }
-            Err(AcmPollVerdict::Untracked(error)) => {
-                panic!("ACM continuation was discarded: {error}")
+            Err(AcmPollVerdict::NotCreated(error)) => {
+                panic!(
+                    "ACM poll returned NotCreated instead of preserving its continuation: {error}"
+                )
             }
             Ok(next) => panic!("quota failure unexpectedly repended: {next:?}"),
         }
@@ -5032,8 +5053,10 @@ mod pending_operation_tests {
                     "{error}"
                 );
             }
-            Err(AcmPollVerdict::Untracked(error)) => {
-                panic!("ACM continuation was discarded: {error}")
+            Err(AcmPollVerdict::NotCreated(error)) => {
+                panic!(
+                    "ACM poll returned NotCreated instead of preserving its continuation: {error}"
+                )
             }
             Ok(next) => panic!("unmodeled throttling unexpectedly repended: {next:?}"),
         }
