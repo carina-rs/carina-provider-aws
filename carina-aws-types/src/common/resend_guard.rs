@@ -10,11 +10,12 @@ use aws_smithy_runtime_api::client::interceptors::context::{
     BeforeSerializationInterceptorContextRef, BeforeTransmitInterceptorContextRef, Error,
     FinalizerInterceptorContextMut, FinalizerInterceptorContextRef, InterceptorContext,
 };
-use aws_smithy_runtime_api::client::orchestrator::{Metadata, OrchestratorError};
+use aws_smithy_runtime_api::client::orchestrator::{HttpResponse, Metadata, OrchestratorError};
 use aws_smithy_runtime_api::client::result::ConnectorError;
 use aws_smithy_runtime_api::client::retries::RequestAttempts;
 use aws_smithy_runtime_api::client::runtime_components::RuntimeComponents;
 use aws_smithy_types::config_bag::{ConfigBag, Storable, StoreReplace};
+use aws_smithy_types::error::ErrorMetadata;
 use aws_smithy_types::retry::{ErrorKind, RetryConfig};
 use regex::Regex;
 
@@ -54,7 +55,7 @@ pub(super) fn classify_attempt(
 struct PreviousAttempt {
     outcome: AttemptOutcome,
     failure: String,
-    retry_message: String,
+    retry_summary: String,
     finished_at: Instant,
 }
 
@@ -119,20 +120,75 @@ fn rendered_failure(
     let mut rendered = error_message(error);
     if let Some(response) = response {
         rendered.push_str(&format!("; status: {}", response.status().as_u16()));
-        for header in [
-            "x-amzn-requestid",
-            "x-amzn-request-id",
-            "x-amz-request-id",
-            "x-amz-id-2",
-        ] {
-            if let Some(request_id) = response.headers().get(header) {
-                rendered.push_str("; request_id: ");
-                rendered.push_str(request_id);
-                break;
-            }
+        if let Some(request_id) = request_id(response) {
+            rendered.push_str("; request_id: ");
+            rendered.push_str(request_id);
         }
     }
     rendered
+}
+
+fn request_id(response: &HttpResponse) -> Option<&str> {
+    [
+        "x-amzn-requestid",
+        "x-amzn-request-id",
+        "x-amz-request-id",
+        "x-amz-id-2",
+    ]
+    .into_iter()
+    .find_map(|header| response.headers().get(header))
+}
+
+fn find_source<'a, T: std::error::Error + 'static>(
+    error: &'a (dyn std::error::Error + 'static),
+) -> Option<&'a T> {
+    let mut current = Some(error);
+    while let Some(error) = current {
+        if let Some(typed) = error.downcast_ref::<T>() {
+            return Some(typed);
+        }
+        current = error.source();
+    }
+    None
+}
+
+/// Retry diagnostics use only typed fields, never error Display/Debug text.
+fn retry_summary(error: &OrchestratorError<Error>, response: Option<&HttpResponse>) -> String {
+    if (error.is_response_error() || error.is_operation_error())
+        && let Some(response) = response
+    {
+        let mut summary = format!("HTTP {}", response.status().as_u16());
+        // Type erasure doesn't retain ProvideErrorMetadata. Use metadata
+        // only when it is directly available or exposed as a typed cause;
+        // modeled errors that hide it get status and request ID only.
+        let metadata = error
+            .as_operation_error()
+            .and_then(|error| error.downcast_ref::<ErrorMetadata>())
+            .or_else(|| find_source::<ErrorMetadata>(error));
+        if let Some(code) = metadata.and_then(ErrorMetadata::code) {
+            summary.push(' ');
+            summary.push_str(code);
+        }
+        if let Some(request_id) = request_id(response)
+            .or_else(|| metadata.and_then(|metadata| metadata.extra("aws_request_id")))
+        {
+            summary.push_str("; request_id: ");
+            summary.push_str(request_id);
+        }
+        return summary;
+    }
+    match OrchestratorKind::of(error) {
+        OrchestratorKind::Connector(kind) => match kind {
+            ConnectorKind::Timeout => "connector timeout".to_string(),
+            ConnectorKind::Io => match find_source::<io::Error>(error) {
+                Some(error) => format!("connector io error ({:?})", error.kind()),
+                None => "connector io error".to_string(),
+            },
+            ConnectorKind::User | ConnectorKind::Other(..) => "connector error".to_string(),
+        },
+        OrchestratorKind::Timeout => "Timeout".to_string(),
+        OrchestratorKind::Other => "Other".to_string(),
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -273,7 +329,7 @@ impl Intercept for ResendGuard {
             PreviousAttempt {
                 outcome,
                 failure: "failure details unavailable".to_string(),
-                retry_message: "failure details unavailable".to_string(),
+                retry_summary: "Other".to_string(),
                 finished_at: started_at,
             }
         });
@@ -294,7 +350,7 @@ impl Intercept for ResendGuard {
                 "  Retrying {}.{} (SDK attempt {attempt}/{max} after {elapsed:.1}s): {}",
                 metadata.service(),
                 metadata.name(),
-                previous.retry_message,
+                previous.retry_summary,
             ));
         }
 
@@ -387,16 +443,16 @@ impl Intercept for ResendGuard {
             .and_then(Result::err)
             .map(|error| rendered_failure(error, context.response()))
             .unwrap_or_else(|| "failure details unavailable".to_string());
-        let retry_message = context
+        let retry_summary = context
             .output_or_error()
             .and_then(Result::err)
-            .map(|error| error_message(error))
-            .unwrap_or_else(|| "failure details unavailable".to_string());
+            .map(|error| retry_summary(error, context.response()))
+            .unwrap_or_else(|| "Other".to_string());
         let finished_at = Instant::now();
         cfg.interceptor_state().store_put(PreviousAttempt {
             outcome,
             failure,
-            retry_message,
+            retry_summary,
             finished_at,
         });
         Ok(())

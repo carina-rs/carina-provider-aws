@@ -18,7 +18,7 @@ use aws_smithy_runtime_api::client::http::{
 };
 use aws_smithy_runtime_api::client::interceptors::Intercept;
 use aws_smithy_runtime_api::client::interceptors::context::{
-    BeforeTransmitInterceptorContextRef, FinalizerInterceptorContextRef,
+    BeforeTransmitInterceptorContextRef, Error, FinalizerInterceptorContextRef,
 };
 use aws_smithy_runtime_api::client::orchestrator::{HttpRequest, HttpResponse, OrchestratorError};
 use aws_smithy_runtime_api::client::result::{ConnectorError, SdkError};
@@ -26,11 +26,12 @@ use aws_smithy_runtime_api::client::retries::RequestAttempts;
 use aws_smithy_runtime_api::client::runtime_components::RuntimeComponents;
 use aws_smithy_types::body::SdkBody;
 use aws_smithy_types::config_bag::ConfigBag;
-use aws_smithy_types::retry::RetryConfig;
+use aws_smithy_types::error::ErrorMetadata;
+use aws_smithy_types::retry::{ErrorKind, RetryConfig};
 use aws_smithy_types::timeout::TimeoutConfig;
 use regex::Regex;
 
-use super::{Idempotency, ResendGuard, error_message, rendered_failure};
+use super::{Idempotency, ResendGuard, error_message, rendered_failure, retry_summary};
 
 #[derive(Clone, Debug, Default)]
 struct CapturedOutput(Arc<Mutex<Vec<String>>>);
@@ -51,13 +52,14 @@ enum Reply {
     DelayedIo(Duration),
     User,
     Status(u16),
+    CodedStatus(u16, &'static str),
     Stall,
 }
 
 struct ConnectionReset {
     request: HttpRequest,
     message: String,
-    source: Option<std::io::Error>,
+    source: std::io::Error,
 }
 
 impl ConnectionReset {
@@ -65,8 +67,10 @@ impl ConnectionReset {
         Self {
             request,
             message: sensitive_message(secret, "display"),
-            source: (secret != RequestSecret::None)
-                .then(|| std::io::Error::other(sensitive_message(secret, "source"))),
+            source: std::io::Error::new(
+                std::io::ErrorKind::ConnectionReset,
+                sensitive_message(secret, "source"),
+            ),
         }
     }
 }
@@ -89,12 +93,12 @@ impl fmt::Display for ConnectionReset {
 
 impl std::error::Error for ConnectionReset {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        self.source.as_ref().map(|source| source as _)
+        Some(&self.source)
     }
 }
 
 #[derive(Debug)]
-struct ServiceFailure;
+struct ServiceFailure(Option<ErrorMetadata>);
 
 impl fmt::Display for ServiceFailure {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -102,7 +106,20 @@ impl fmt::Display for ServiceFailure {
     }
 }
 
-impl std::error::Error for ServiceFailure {}
+impl std::error::Error for ServiceFailure {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        self.0.as_ref().map(|metadata| metadata as _)
+    }
+}
+
+fn http_response(status: u16) -> HttpResponse {
+    let mut response =
+        HttpResponse::new(status.try_into().expect("valid status"), SdkBody::empty());
+    response
+        .headers_mut()
+        .insert("x-amzn-requestid", "test-request-id");
+    response
+}
 
 #[derive(Debug, Default)]
 struct Script {
@@ -147,14 +164,12 @@ impl HttpConnector for Connector {
                     ))))
                 }
                 Reply::User => Err(ConnectorError::user("invalid request".into())),
-                Reply::Status(status) => {
-                    let mut response = HttpResponse::new(
-                        status.try_into().expect("valid status"),
-                        SdkBody::empty(),
-                    );
-                    response
-                        .headers_mut()
-                        .insert("x-amzn-requestid", "response-id-must-not-be-logged");
+                Reply::Status(status) => Ok(http_response(status)),
+                Reply::CodedStatus(status, code) => {
+                    let mut response = http_response(status);
+                    response.add_extension(ErrorMetadata::builder().code(code)
+                        .message("Authorization=Bearer private-service-message; Credential=AKID/private-service-message")
+                        .build());
                     Ok(response)
                 }
                 Reply::Stall => std::future::pending().await,
@@ -220,7 +235,7 @@ const QUERY_TOKEN: &str = "query-session-token-must-stay-secret";
 const OTHER_QUERY_VALUE: &str = "unlisted-query-value-must-also-be-removed";
 
 fn sensitive_message(secret: RequestSecret, location: &str) -> String {
-    match secret {
+    let covered = match secret {
         RequestSecret::None => "connection reset".to_string(),
         RequestSecret::Authorization => format!(
             "connection reset; aUtHoRiZaTiOn: AWS4-HMAC-SHA256 Credential={AUTH_CREDENTIAL}-{location}, SignedHeaders=host, Signature={AUTH_SIGNATURE}-{location}"
@@ -231,7 +246,16 @@ fn sensitive_message(secret: RequestSecret, location: &str) -> String {
         RequestSecret::QuerySignature => format!(
             "connection reset for https://example.test/path?X-Amz-Signature={QUERY_SIGNATURE}-{location}&X-Amz-Credential={QUERY_CREDENTIAL}-{location}&X-Amz-Security-Token={QUERY_TOKEN}-{location}&other={OTHER_QUERY_VALUE}-{location}"
         ),
-    }
+    };
+    let value = match secret {
+        RequestSecret::None => return covered,
+        RequestSecret::Authorization => AUTH_SIGNATURE,
+        RequestSecret::SessionToken => SESSION_TOKEN,
+        RequestSecret::QuerySignature => QUERY_SIGNATURE,
+    };
+    format!(
+        "{covered}\nAuthorization=Bearer {value}-bypass-{location}\nCredential=AKID/{value}-bypass-{location}"
+    )
 }
 
 fn operation(
@@ -309,7 +333,9 @@ fn operation_with_timeouts(
             Ok(request)
         })
         .deserializer(|response| {
-            if response.status().is_success() { Ok(()) } else { Err(OrchestratorError::operation(ServiceFailure)) }
+            if response.status().is_success() { Ok(()) } else {
+                Err(OrchestratorError::operation(ServiceFailure(response.extension::<ErrorMetadata>().cloned())))
+            }
         })
         .build();
     (operation, output, script)
@@ -355,7 +381,7 @@ async fn retry_line_uses_sdk_counts_and_monotonic_wait() {
     assert_lines(
         &output.lines(),
         &[
-            "  Retrying test.DescribeThing (SDK attempt 2/4 after {secs}s): connector error: io error: connection reset",
+            "  Retrying test.DescribeThing (SDK attempt 2/4 after {secs}s): connector io error (ConnectionReset)",
         ],
         0.05..=0.6,
     );
@@ -371,8 +397,8 @@ async fn exhausted_retries_print_gave_up_after_three_attempts() {
     assert_lines(
         &lines,
         &[
-            "  Retrying test.DescribeThing (SDK attempt 2/3 after {secs}s): connector error: io error: connection reset",
-            "  Retrying test.DescribeThing (SDK attempt 3/3 after {secs}s): connector error: io error: connection reset",
+            "  Retrying test.DescribeThing (SDK attempt 2/3 after {secs}s): connector io error (ConnectionReset)",
+            "  Retrying test.DescribeThing (SDK attempt 3/3 after {secs}s): connector io error (ConnectionReset)",
             "  Gave up test.DescribeThing after 3 SDK attempts",
         ],
         0.05..=2.0,
@@ -422,15 +448,15 @@ async fn successful_retry_prints_only_retry_lines() {
     assert_lines(
         &output.lines(),
         &[
-            "  Retrying test.DescribeThing (SDK attempt 2/3 after {secs}s): connector error: io error: connection reset",
-            "  Retrying test.DescribeThing (SDK attempt 3/3 after {secs}s): connector error: io error: connection reset",
+            "  Retrying test.DescribeThing (SDK attempt 2/3 after {secs}s): connector io error (ConnectionReset)",
+            "  Retrying test.DescribeThing (SDK attempt 3/3 after {secs}s): connector io error (ConnectionReset)",
         ],
         0.05..=2.0,
     );
 }
 
 #[tokio::test]
-async fn service_failures_keep_their_type_and_print_message_only() {
+async fn service_failures_keep_their_type_and_print_status_and_request_id_only() {
     let (operation, output, _) = operation(
         [Reply::Status(503), Reply::Status(503), Reply::Status(503)],
         3,
@@ -444,11 +470,124 @@ async fn service_failures_keep_their_type_and_print_message_only() {
     assert_lines(
         &output.lines(),
         &[
-            "  Retrying test.DescribeThing (SDK attempt 2/3 after {secs}s): operation error: service unavailable",
-            "  Retrying test.DescribeThing (SDK attempt 3/3 after {secs}s): operation error: service unavailable",
+            "  Retrying test.DescribeThing (SDK attempt 2/3 after {secs}s): HTTP 503; request_id: test-request-id",
+            "  Retrying test.DescribeThing (SDK attempt 3/3 after {secs}s): HTTP 503; request_id: test-request-id",
             "  Gave up test.DescribeThing after 3 SDK attempts",
         ],
         0.05..=2.0,
+    );
+}
+
+#[tokio::test]
+async fn service_failures_report_typed_code_and_request_id_without_message() {
+    let (operation, output, _) = operation(
+        [Reply::CodedStatus(503, "SlowDown"), Reply::Status(200)],
+        3,
+        RequestSecret::None,
+    );
+    operation.invoke(()).await.expect("retry succeeds");
+    assert_lines(
+        &output.lines(),
+        &[
+            "  Retrying test.DescribeThing (SDK attempt 2/3 after {secs}s): HTTP 503 SlowDown; request_id: test-request-id",
+        ],
+        0.05..=2.0,
+    );
+}
+
+#[derive(Debug)]
+struct Unprintable;
+
+impl fmt::Display for Unprintable {
+    fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        panic!("retry summaries must not format error messages")
+    }
+}
+
+impl std::error::Error for Unprintable {}
+
+#[test]
+fn connector_and_orchestrator_summaries_never_format_errors() {
+    let cases: Vec<(OrchestratorError<Error>, &str)> = vec![
+        (
+            OrchestratorError::connector(ConnectorError::timeout(Box::new(Unprintable))),
+            "connector timeout",
+        ),
+        (
+            OrchestratorError::connector(ConnectorError::io(Box::new(Unprintable))),
+            "connector io error",
+        ),
+        (
+            OrchestratorError::connector(ConnectorError::io(Box::new(std::io::Error::new(
+                std::io::ErrorKind::ConnectionReset,
+                Unprintable,
+            )))),
+            "connector io error (ConnectionReset)",
+        ),
+        (
+            OrchestratorError::connector(ConnectorError::user(Box::new(Unprintable))),
+            "connector error",
+        ),
+        (
+            OrchestratorError::connector(ConnectorError::other(Box::new(Unprintable), None)),
+            "connector error",
+        ),
+        (
+            OrchestratorError::connector(ConnectorError::other(
+                Box::new(Unprintable),
+                Some(ErrorKind::TransientError),
+            )),
+            "connector error",
+        ),
+        (OrchestratorError::timeout(Box::new(Unprintable)), "Timeout"),
+        (OrchestratorError::other(Unprintable), "Other"),
+        (
+            OrchestratorError::operation(Error::erase(Unprintable)),
+            "Other",
+        ),
+    ];
+    for (error, expected) in cases {
+        assert_eq!(retry_summary(&error, None), expected);
+    }
+}
+
+#[test]
+fn http_summaries_only_use_typed_metadata_and_response_fields() {
+    let metadata = ErrorMetadata::builder()
+        .code("SlowDown")
+        .message("Authorization=Bearer SECRET; Credential=AKID/SECRET")
+        .build();
+    let error = OrchestratorError::operation(Error::erase(metadata.clone()));
+    let response = HttpResponse::new(503.try_into().expect("status"), SdkBody::empty());
+    assert_eq!(retry_summary(&error, Some(&response)), "HTTP 503 SlowDown");
+    let response = http_response(503);
+    assert_eq!(
+        retry_summary(&error, Some(&response)),
+        "HTTP 503 SlowDown; request_id: test-request-id"
+    );
+    let error = OrchestratorError::response(Box::new(metadata));
+    assert_eq!(
+        retry_summary(&error, Some(&response)),
+        "HTTP 503 SlowDown; request_id: test-request-id"
+    );
+    let error = OrchestratorError::response(Box::new(Unprintable));
+    assert_eq!(
+        retry_summary(&error, Some(&response)),
+        "HTTP 503; request_id: test-request-id"
+    );
+    let error = OrchestratorError::timeout(Box::new(Unprintable));
+    assert_eq!(retry_summary(&error, Some(&response)), "Timeout");
+    let error = OrchestratorError::other(Unprintable);
+    assert_eq!(retry_summary(&error, Some(&response)), "Other");
+    let metadata = ErrorMetadata::builder()
+        .code("SlowDown")
+        .custom("aws_request_id", "metadata-request-id")
+        .build();
+    let error = OrchestratorError::operation(Error::erase(metadata));
+    let response = HttpResponse::new(503.try_into().expect("status"), SdkBody::empty());
+    assert_eq!(
+        retry_summary(&error, Some(&response)),
+        "HTTP 503 SlowDown; request_id: metadata-request-id"
     );
 }
 
@@ -466,8 +605,8 @@ async fn each_retry_reports_the_previous_failure_and_early_final_failure_is_coun
     assert_lines(
         &output.lines(),
         &[
-            "  Retrying test.DescribeThing (SDK attempt 2/5 after {secs}s): connector error: io error: connection reset",
-            "  Retrying test.DescribeThing (SDK attempt 3/5 after {secs}s): operation error: service unavailable",
+            "  Retrying test.DescribeThing (SDK attempt 2/5 after {secs}s): connector io error (ConnectionReset)",
+            "  Retrying test.DescribeThing (SDK attempt 3/5 after {secs}s): HTTP 503; request_id: test-request-id",
             "  Gave up test.DescribeThing after 3 SDK attempts",
         ],
         0.05..=2.0,
@@ -477,7 +616,6 @@ async fn each_retry_reports_the_previous_failure_and_early_final_failure_is_coun
 async fn assert_secret_is_not_printed(secret: RequestSecret, expected_request_value: &str) {
     let (operation, output, script) = operation([Reply::Io, Reply::Io, Reply::Io], 3, secret);
     let error = operation.invoke(()).await.expect_err("retried then failed");
-    // Prove both payloads were present in the live SDK error's source chain.
     let mut source: Option<&(dyn std::error::Error + 'static)> = Some(&error);
     let mut raw_messages = Vec::new();
     while let Some(error) = source {
@@ -485,12 +623,18 @@ async fn assert_secret_is_not_printed(secret: RequestSecret, expected_request_va
         source = error.source();
     }
     for location in ["display", "source"] {
-        assert!(
-            raw_messages
-                .iter()
-                .any(|message| message.contains(&format!("{expected_request_value}-{location}"))),
-            "secret must actually occur in the {location} error"
-        );
+        for payload in [
+            format!("{expected_request_value}-{location}"),
+            format!("Authorization=Bearer {expected_request_value}-bypass-{location}"),
+            format!("Credential=AKID/{expected_request_value}-bypass-{location}"),
+        ] {
+            assert!(
+                raw_messages
+                    .iter()
+                    .any(|message| message.contains(&payload)),
+                "secret must actually occur in the {location} error"
+            );
+        }
     }
     let script = script.lock().expect("script lock");
     assert_eq!(script.requests.len(), 3);
@@ -500,42 +644,53 @@ async fn assert_secret_is_not_printed(secret: RequestSecret, expected_request_va
             "secret must actually reach the connector"
         );
     }
-    let mut lines = output.lines();
-    assert_eq!(lines.len(), 3, "two retries and one final failure line");
-    assert_eq!(
-        lines[2],
-        "  Gave up test.DescribeThing after 3 SDK attempts"
+    let lines = output.lines();
+    assert_lines(
+        &lines,
+        &[
+            "  Retrying test.DescribeThing (SDK attempt 2/3 after {secs}s): connector io error (ConnectionReset)",
+            "  Retrying test.DescribeThing (SDK attempt 3/3 after {secs}s): connector io error (ConnectionReset)",
+            "  Gave up test.DescribeThing after 3 SDK attempts",
+        ],
+        0.05..=2.0,
     );
-    lines.push(
-        script
-            .final_failure
-            .clone()
-            .expect("final rendered failure"),
-    );
+    let values = [
+        AUTH_SIGNATURE,
+        AUTH_CREDENTIAL,
+        SESSION_TOKEN,
+        QUERY_SIGNATURE,
+        QUERY_CREDENTIAL,
+        QUERY_TOKEN,
+        OTHER_QUERY_VALUE,
+    ];
     for line in &lines {
-        for forbidden in [
-            AUTH_SIGNATURE,
-            AUTH_CREDENTIAL,
-            SESSION_TOKEN,
-            QUERY_SIGNATURE,
-            QUERY_CREDENTIAL,
-            QUERY_TOKEN,
-            OTHER_QUERY_VALUE,
-            "response-id-must-not-be-logged",
-        ] {
+        for value in values {
+            assert!(!line.contains(value), "retry output leaked {value}");
+        }
+        assert!(!line.contains("Authorization="));
+        assert!(!line.contains("Credential="));
+        assert!(!line.contains("connection reset"));
+        assert!(!line.contains('?'));
+    }
+    // Final free-text rendering retains its existing best-effort redaction.
+    // Check only the covered payloads, not the newly introduced bypass forms.
+    let final_failure = script
+        .final_failure
+        .as_ref()
+        .expect("final rendered failure");
+    for location in ["display", "source"] {
+        for value in values {
             assert!(
-                !line.contains(forbidden),
-                "rendered output leaked {forbidden}"
+                !final_failure.contains(&format!("{value}-{location}")),
+                "final rendering leaked a covered {location} payload"
             );
         }
-        assert!(!line.contains('?'), "a URL query must not be rendered");
     }
     assert!(
-        lines
-            .last()
-            .expect("final failure")
-            .contains("connection reset")
+        !final_failure.contains('?'),
+        "URL queries must remain redacted"
     );
+    assert!(final_failure.contains("connection reset"));
 }
 
 #[tokio::test]
@@ -620,9 +775,7 @@ async fn sdk_attempt_timeout_is_retried_with_the_next_attempt_number() {
     assert_eq!(script.requests.len(), 2);
     assert_lines(
         &output.lines(),
-        &[
-            "  Retrying test.DescribeThing (SDK attempt 2/3 after {secs}s): timeout: operation attempt timeout (single attempt) occurred after 50ms",
-        ],
+        &["  Retrying test.DescribeThing (SDK attempt 2/3 after {secs}s): Timeout"],
         0.0..=2.0,
     );
 }
@@ -646,7 +799,7 @@ async fn operation_timeout_after_two_started_attempts_prints_one_gave_up() {
     assert_lines(
         &output.lines(),
         &[
-            "  Retrying test.DescribeThing (SDK attempt 2/5 after {secs}s): connector error: io error: connection reset",
+            "  Retrying test.DescribeThing (SDK attempt 2/5 after {secs}s): connector io error (ConnectionReset)",
             "  Gave up test.DescribeThing after 2 SDK attempts",
         ],
         0.0..=2.0,
@@ -678,7 +831,7 @@ async fn operation_timeout_during_backoff_does_not_count_a_phantom_third_attempt
     assert_lines(
         &output.lines(),
         &[
-            "  Retrying test.DescribeThing (SDK attempt 2/5 after {secs}s): connector error: io error: connection reset",
+            "  Retrying test.DescribeThing (SDK attempt 2/5 after {secs}s): connector io error (ConnectionReset)",
             "  Gave up test.DescribeThing after 2 SDK attempts",
         ],
         0.0..=2.0,
