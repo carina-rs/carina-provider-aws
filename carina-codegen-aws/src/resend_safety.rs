@@ -1227,15 +1227,16 @@ pub fn generate_provider_module(
         objects: Vec<crate::s3_delete::VersionedObjectId>,
     ) -> Result<
         carina_aws_types::sdk::s3::operation::delete_objects::DeleteObjectsOutput,
-        SdkError<carina_aws_types::sdk::s3::operation::delete_objects::DeleteObjectsError, HttpResponse>,
+        Box<SdkError<carina_aws_types::sdk::s3::operation::delete_objects::DeleteObjectsError, HttpResponse>>,
     > {{
         let delete = crate::s3_delete::versioned_delete(objects)
-            .map_err(SdkError::construction_failure)?;
+            .map_err(|error| Box::new(SdkError::construction_failure(error)))?;
         self.inner.inner().delete_objects()
             .bucket(bucket)
             .delete(delete)
             .send()
             .await
+            .map_err(Box::new)
     }}
 
 "#,

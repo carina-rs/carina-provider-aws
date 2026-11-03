@@ -407,7 +407,7 @@ impl AwsProvider {
                     .delete_objects(bucket_name, objects_to_delete)
                     .await
                     .map_err(|e| {
-                        api_error_with_meta("Failed to delete objects", e).for_resource(id.clone())
+                        api_error_with_meta("Failed to delete objects", *e).for_resource(id.clone())
                     })?;
             }
 

@@ -34,6 +34,10 @@ fn s3_delete_objects_requires_versioned_identifiers_and_hides_raw_builder() {
         signature.contains("objects: Vec<crate::s3_delete::VersionedObjectId>"),
         "DeleteObjects must require a version ID for every identifier: {signature}"
     );
+    assert!(
+        signature.contains("Box<SdkError<"),
+        "DeleteObjects must box its large SDK error: {signature}"
+    );
     assert!(!signature.contains("FluentBuilder"), "{signature}");
     assert!(!signature.contains("ObjectIdentifier"), "{signature}");
 }
