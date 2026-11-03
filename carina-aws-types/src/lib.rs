@@ -4,6 +4,7 @@
 //! and `carina-provider-awscc`. Provider-specific types (region with namespace,
 //! schema config structs) remain in their respective crates.
 
+#[cfg(feature = "sts")]
 mod assume_role;
 mod catalog;
 mod common;
@@ -21,6 +22,7 @@ pub mod __private {
     pub use carina_core::schema::{AttributeType, TypeIdentity};
 }
 
+#[cfg(feature = "sts")]
 pub use assume_role::{AssumeRoleFailure, GuardedAssumeRoleProvider};
 pub use catalog::*;
 pub use common::*;

@@ -1,84 +1,93 @@
 //! SDK types and service handles whose constructors always install the resend guard.
 //!
+//! Each service is enabled by its matching Cargo feature. No services are enabled
+//! by default. Features never change how a client is guarded.
+//!
 //! Only non-client SDK modules are re-exported. Handles have no `Deref`, raw
 //! client constructor, or conversion from a service configuration. Each forbidden
 //! operation below has a positive control that validates the rest of its snippet.
 //!
-//! A handle does not expose the raw client through `Deref`:
-//!
-//! ```compile_fail
-//! use carina_aws_types::sdk::s3::S3Client;
-//! fn require_deref<T: std::ops::Deref>() {}
-//! require_deref::<S3Client>();
-//! ```
-//!
-//! The same trait bound works for an allowed wrapper:
-//!
-//! ```
-//! use carina_aws_types::sdk::s3::S3Client;
-//! fn require_deref<T: std::ops::Deref>() {}
-//! require_deref::<Box<S3Client>>();
-//! ```
-//!
-//! The raw constructor cannot be named on the handle:
-//!
-//! ```compile_fail
-//! use carina_aws_types::sdk::s3::S3Client;
-//! let _ = S3Client::from_conf;
-//! ```
-//!
-//! Its guarded factory can be named, without constructing a runtime client:
-//!
-//! ```
-//! use carina_aws_types::sdk::s3::S3Client;
-//! let _ = S3Client::new;
-//! ```
-//!
-//! A borrowed client configuration cannot build another client:
-//!
-//! ```compile_fail
-//! use carina_aws_types::sdk::s3::S3Client;
-//! fn rebuild(client: &S3Client) {
-//!     let _ = client.inner().config().to_builder().build_client();
-//! }
-//! ```
-//!
-//! The same chain can build an allowed configuration value:
-//!
-//! ```
-//! use carina_aws_types::sdk::s3::S3Client;
-//! fn rebuild(client: &S3Client) {
-//!     let _ = client.inner().config().to_builder().build();
-//! }
-//! ```
-//!
-//! A configuration cannot be converted into an inferred client:
-//!
-//! ```compile_fail
-//! use carina_aws_types::sdk::s3::S3Client;
-//! fn same_type<T>(_: &T, value: T) -> T { value }
-//! fn rebuild(client: &S3Client) {
-//!     let mut config = client.inner().config().to_builder();
-//!     config.set_interceptors([]);
-//!     let existing = client.inner().clone();
-//!     let _ = same_type(&existing, config.build().into());
-//! }
-//! ```
-//!
-//! The same conversion is valid when the inferred type is a configuration:
-//!
-//! ```
-//! use carina_aws_types::sdk::s3::S3Client;
-//! fn same_type<T>(_: &T, value: T) -> T { value }
-//! fn rebuild(client: &S3Client) {
-//!     let mut config = client.inner().config().to_builder();
-//!     config.set_interceptors([]);
-//!     let existing = client.inner().config().clone();
-//!     let _ = same_type(&existing, config.build().into());
-//! }
-//! ```
+#![cfg_attr(
+    feature = "s3",
+    doc = r#"
+A handle does not expose the raw client through `Deref`:
+
+```compile_fail
+use carina_aws_types::sdk::s3::S3Client;
+fn require_deref<T: std::ops::Deref>() {}
+require_deref::<S3Client>();
+```
+
+The same trait bound works for an allowed wrapper:
+
+```
+use carina_aws_types::sdk::s3::S3Client;
+fn require_deref<T: std::ops::Deref>() {}
+require_deref::<Box<S3Client>>();
+```
+
+The raw constructor cannot be named on the handle:
+
+```compile_fail
+use carina_aws_types::sdk::s3::S3Client;
+let _ = S3Client::from_conf;
+```
+
+Its guarded factory can be named, without constructing a runtime client:
+
+```
+use carina_aws_types::sdk::s3::S3Client;
+let _ = S3Client::new;
+```
+
+A borrowed client configuration cannot build another client:
+
+```compile_fail
+use carina_aws_types::sdk::s3::S3Client;
+fn rebuild(client: &S3Client) {
+    let _ = client.inner().config().to_builder().build_client();
+}
+```
+
+The same chain can build an allowed configuration value:
+
+```
+use carina_aws_types::sdk::s3::S3Client;
+fn rebuild(client: &S3Client) {
+    let _ = client.inner().config().to_builder().build();
+}
+```
+
+A configuration cannot be converted into an inferred client:
+
+```compile_fail
+use carina_aws_types::sdk::s3::S3Client;
+fn same_type<T>(_: &T, value: T) -> T { value }
+fn rebuild(client: &S3Client) {
+    let mut config = client.inner().config().to_builder();
+    config.set_interceptors([]);
+    let existing = client.inner().clone();
+    let _ = same_type(&existing, config.build().into());
+}
+```
+
+The same conversion is valid when the inferred type is a configuration:
+
+```
+use carina_aws_types::sdk::s3::S3Client;
+fn same_type<T>(_: &T, value: T) -> T { value }
+fn rebuild(client: &S3Client) {
+    let mut config = client.inner().config().to_builder();
+    config.set_interceptors([]);
+    let existing = client.inner().config().clone();
+    let _ = same_type(&existing, config.build().into());
+}
+```
+"#
+)]
 
 // Keep every service's visibility and construction guarantees identical.
+#[allow(unused_macros, reason = "no service features may be enabled")]
 macro_rules! guarded_service {
     ($service:ident, $sdk:ident, $client:ident $(, $configure:path)?) => {
         #[doc = concat!(
@@ -128,10 +137,24 @@ macro_rules! guarded_service {
                     &self.inner
                 }
             }
+
+            #[cfg(test)]
+            #[test]
+            fn installs_permanent_resend_guard() {
+                use aws_smithy_runtime_api::client::interceptors::Intercept;
+
+                let config = super::tests::sdk_config();
+                let client = $client::new(&config, |_| crate::Idempotency::NotIdempotent);
+                let guard = client.inner().config().interceptors()
+                    .find(|interceptor| interceptor.name() == "carina.ResendGuard")
+                    .expect("every service handle must install ResendGuard");
+                assert!(format!("{guard:?}").contains("permanent: true"));
+            }
         }
     };
 }
 
+#[cfg(feature = "s3")]
 fn configure_s3(builder: aws_sdk_s3::config::Builder) -> aws_sdk_s3::config::Builder {
     // Express session auth creates an internal CreateSession client without our guard.
     // The rejecting provider also blocks that client if an operation flips the flag.
@@ -148,17 +171,31 @@ fn configure_s3(builder: aws_sdk_s3::config::Builder) -> aws_sdk_s3::config::Bui
         ))
 }
 
+#[cfg(feature = "account")]
 guarded_service!(account, aws_sdk_account, AccountClient);
+#[cfg(feature = "acm")]
 guarded_service!(acm, aws_sdk_acm, AcmClient);
+#[cfg(feature = "cloudcontrol")]
+guarded_service!(cloudcontrol, aws_sdk_cloudcontrol, CloudControlClient);
+#[cfg(feature = "cloudwatchlogs")]
 guarded_service!(cloudwatchlogs, aws_sdk_cloudwatchlogs, CloudWatchLogsClient);
+#[cfg(feature = "ec2")]
 guarded_service!(ec2, aws_sdk_ec2, Ec2Client);
+#[cfg(feature = "iam")]
 guarded_service!(iam, aws_sdk_iam, IamClient);
+#[cfg(feature = "identitystore")]
 guarded_service!(identitystore, aws_sdk_identitystore, IdentityStoreClient);
+#[cfg(feature = "kms")]
 guarded_service!(kms, aws_sdk_kms, KmsClient);
+#[cfg(feature = "organizations")]
 guarded_service!(organizations, aws_sdk_organizations, OrganizationsClient);
+#[cfg(feature = "route53")]
 guarded_service!(route53, aws_sdk_route53, Route53Client);
+#[cfg(feature = "s3")]
 guarded_service!(s3, aws_sdk_s3, S3Client, super::configure_s3);
+#[cfg(feature = "sqs")]
 guarded_service!(sqs, aws_sdk_sqs, SqsClient);
+#[cfg(feature = "sts")]
 guarded_service!(sts, aws_sdk_sts, StsClient);
 
 #[cfg(test)]

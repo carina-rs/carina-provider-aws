@@ -18,7 +18,10 @@ test-utils = ["carina-core/test-utils"]
 
 [dependencies]
 carina-core = { workspace = true }
-carina-aws-types = { path = "../carina-aws-types" }
+carina-aws-types = { path = "../carina-aws-types", default-features = false, features = [
+    "account", "acm", "cloudwatchlogs", "ec2", "iam", "identitystore",
+    "kms", "organizations", "route53", "s3", "sqs", "sts",
+] }
 carina-plugin-sdk = { workspace = true }
 carina-provider-protocol = { workspace = true }
 indexmap = "2"
@@ -52,7 +55,7 @@ carina-core = { workspace = true, features = ["test-support", "test-utils"] }
 carina-codegen-aws = { path = "../carina-codegen-aws" }
 # Enable the test constructor for integration tests without exposing it in production.
 carina-provider-aws = { path = ".", features = ["test-utils"] }
-carina-aws-types = { path = "../carina-aws-types", features = ["test-utils"] }
+carina-aws-types = { path = "../carina-aws-types", default-features = false, features = ["test-utils"] }
 carina-plugin-sdk = { workspace = true, features = ["test-utils"] }
 tokio = { version = "1", features = ["test-util"] }
 winterbaume-core = "0.2"

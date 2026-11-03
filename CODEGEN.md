@@ -220,6 +220,12 @@ all: the provider has no `aws-sdk-*` or `aws-config` dependency, and
 `carina-aws-types` exports only each SDK's non-client modules plus guarded
 handles whose sole constructor installs `ResendGuard`.
 
+Each facade service requires its same-named `carina-aws-types` feature; none are
+enabled by default. When adding a service, enable its feature in the provider's
+normal dependency. Tests inherit those features; the dev-dependency adds only
+`test-utils`. Codegen itself uses shared types without service features. Feature
+selection never provides an alternative client constructor.
+
 ### Step 6: Add Provider Dispatch
 
 Add dispatch entries to `carina-provider-aws/src/provider.rs` for read, create, update, and delete.

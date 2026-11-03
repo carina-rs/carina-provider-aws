@@ -15,7 +15,7 @@ path = "src/main.rs"
 [dependencies]
 carina-core = { workspace = true }
 carina-provider-protocol = { workspace = true }
-carina-aws-types = { path = "../carina-aws-types" }
+carina-aws-types = { path = "../carina-aws-types", default-features = false }
 carina-docgen = { path = "../carina-docgen" }
 carina-smithy = { path = "../carina-smithy" }
 anyhow = "1.0"
