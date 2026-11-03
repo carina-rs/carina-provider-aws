@@ -33,7 +33,8 @@ use carina_core::resource::{
 };
 #[cfg(any(target_arch = "wasm32", test))]
 use carina_core::schema::{
-    ReferenceForms, SchemaKind, SchemaRegistry, ValidatedConfigSchema, ValidatedResourceSchema,
+    AssignabilityEdge, ReferenceForms, SchemaKind, SchemaRegistry, ValidatedConfigSchema,
+    ValidatedResourceSchema,
 };
 
 #[cfg(any(target_arch = "wasm32", test))]
@@ -568,6 +569,10 @@ impl CarinaProvider for AwsProcessProvider {
         ReferenceForms::new()
     }
 
+    fn assignability_edges(&self) -> Vec<AssignabilityEdge> {
+        carina_provider_aws::schemas::assignability_edges()
+    }
+
     fn resolve_references(
         &self,
         requests: Vec<proto::ReferenceRequest>,
@@ -1046,6 +1051,27 @@ mod tests {
     };
     use carina_plugin_sdk::types::{TypeIdentity as WireTypeIdentity, ValidatorType};
     use carina_plugin_sdk::{ProviderSchemaCache, dispatch_custom_type_validation};
+
+    #[test]
+    fn native_and_wasm_guest_assignability_edges_match() {
+        let native = carina_provider_aws::AwsProviderFactory.schema_witness();
+        let guest = AwsProcessProvider::new();
+        assert_eq!(native.assignability_edges(), guest.assignability_edges());
+        assert!(native.assignability_edges().is_empty());
+
+        // export_provider!'s schemas export uses this same cache and serializer.
+        let cache = ProviderSchemaCache::from_provider(&guest).expect("guest schema cache");
+        let json = carina_plugin_sdk::provider_schema_to_json(cache.witness())
+            .expect("guest schema export");
+        let exported: proto::ProviderSchemaEnvelope =
+            serde_json::from_str(&json).expect("protocol 21 schema envelope");
+        let native_wire = protocol_convert::provider_schema_to_protocol(&native)
+            .expect("native schema projection");
+        assert_eq!(
+            exported.assignability_edges,
+            native_wire.assignability_edges
+        );
+    }
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     enum CallbackScalar {

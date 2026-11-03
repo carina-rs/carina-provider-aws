@@ -196,6 +196,16 @@ fn iam_role_name_is_nominal_and_path_accepts_string_references() {
         );
         if let Some(expected_error) = expected_error {
             let error = result.expect_err("plain String references must not satisfy Role.Name");
+            let error = match error {
+                carina_core::validation::ResourceRefTypeValidationError::Validation(message) => {
+                    message
+                }
+                carina_core::validation::ResourceRefTypeValidationError::AnalysisInvariant(
+                    error,
+                ) => {
+                    panic!("reference fixture must retain parser provenance: {error}")
+                }
+            };
             assert!(error.contains(expected_error), "{error}");
         } else {
             assert!(result.is_ok(), "{field} = {expression}: {result:?}");

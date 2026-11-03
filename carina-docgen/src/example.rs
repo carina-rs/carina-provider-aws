@@ -9,7 +9,7 @@ use carina_core::parser::{
     ArgumentParameter, AttributeParameter, BackendConfig, DeferredForBody, DeferredForTarget,
     FnParam, ModuleCall, ParseWarning, ParsedDeferredForExpression, ParsedFile, ProviderConfig,
     ProviderContext, RequireBlock, UntilPredicateAst, UpstreamState, UseStatement, UserFunction,
-    UserFunctionBody, ValidationBlock, WaitBinding, parse_file,
+    ValidationBlock, WaitBinding, parse_file,
 };
 use carina_core::resource::{
     DataSource, ModuleSource, ParserPlaceholder, RelativeBindingName, Resource, ResourceId,
@@ -549,29 +549,13 @@ fn same_user_functions(
     left.len() == right.len()
         && left.iter().all(|(name, left)| {
             right.get(name).is_some_and(|right| {
-                let UserFunction {
-                    name: left_name,
-                    params: left_params,
-                    return_type: left_return_type,
-                    return_type_span: _,
-                    annotation_source_file: left_annotation_source_file,
-                    local_lets: left_local_lets,
-                    body: left_body,
-                } = left;
-                let UserFunction {
-                    name: right_name,
-                    params: right_params,
-                    return_type: right_return_type,
-                    return_type_span: _,
-                    annotation_source_file: right_annotation_source_file,
-                    local_lets: right_local_lets,
-                    body: right_body,
-                } = right;
-                left_name == right_name
-                    && left_return_type == right_return_type
-                    && left_annotation_source_file == right_annotation_source_file
-                    && left_params.len() == right_params.len()
-                    && left_params.iter().zip(right_params).all(|(left, right)| {
+                // Parser-owned locations and annotation bookkeeping are private.
+                // Compare the public authored semantics, excluding diagnostic spans.
+                left.name == right.name
+                    && left.return_type == right.return_type
+                    && left.annotation_source_file == right.annotation_source_file
+                    && left.params.len() == right.params.len()
+                    && left.params.iter().zip(&right.params).all(|(left, right)| {
                         let FnParam {
                             name: left_name,
                             param_type: left_param_type,
@@ -588,28 +572,14 @@ fn same_user_functions(
                             && left_param_type == right_param_type
                             && left_default == right_default
                     })
-                    && left_local_lets.len() == right_local_lets.len()
+                    && left.local_lets.len() == right.local_lets.len()
                     // The tuple's third element is its diagnostic source line.
-                    && left_local_lets.iter().zip(right_local_lets).all(
+                    && left.local_lets.iter().zip(&right.local_lets).all(
                         |((left_name, left_value, _), (right_name, right_value, _))| {
                             left_name == right_name && left_value == right_value
                         },
                     )
-                    && {
-                        let UserFunctionBody {
-                            value: left_value,
-                            // Function body locations do not affect authored semantics.
-                            source_line: _,
-                            source_file: _,
-                        } = left_body;
-                        let UserFunctionBody {
-                            value: right_value,
-                            // Function body locations do not affect authored semantics.
-                            source_line: _,
-                            source_file: _,
-                        } = right_body;
-                        left_value == right_value
-                    }
+                    && left.body.value == right.body.value
             })
         })
 }
@@ -641,6 +611,7 @@ fn same_wait_bindings(left: &[WaitBinding], right: &[WaitBinding]) -> bool {
                 depends_on: left_depends_on,
                 // Wait declaration line numbers are diagnostic positions.
                 line: _,
+                declaration: left_declaration,
             } = left;
             let WaitBinding {
                 binding: right_binding,
@@ -651,6 +622,7 @@ fn same_wait_bindings(left: &[WaitBinding], right: &[WaitBinding]) -> bool {
                 depends_on: right_depends_on,
                 // Wait declaration line numbers are diagnostic positions.
                 line: _,
+                declaration: right_declaration,
             } = right;
             let UntilPredicateAst {
                 root: left_root,
@@ -670,6 +642,7 @@ fn same_wait_bindings(left: &[WaitBinding], right: &[WaitBinding]) -> bool {
                 && left_rhs == right_rhs
                 && left_timeout_secs == right_timeout_secs
                 && left_depends_on == right_depends_on
+                && left_declaration == right_declaration
         })
 }
 
@@ -1192,22 +1165,17 @@ mod tests {
 
     #[test]
     fn function_comparison_preserves_annotation_source_file() {
-        let function = UserFunction {
-            name: "example".into(),
-            params: vec![],
-            return_type: None,
-            return_type_span: None,
-            annotation_source_file: Some(PathBuf::from("authored/main.crn")),
-            local_lets: vec![],
-            body: UserFunctionBody {
-                value: carina_core::resource::Value::Concrete(
-                    carina_core::resource::ConcreteValue::Bool(true),
-                ),
-                source_line: 1,
-                source_file: None,
-            },
-        };
-        let authored = std::collections::HashMap::from([("example".into(), function)]);
+        let authored = parse_file(
+            "fn example() { true }",
+            Path::new("authored/main.crn"),
+            &ProviderContext::new(EnvironmentSnapshot::new([])),
+        )
+        .expect("function fixture parses")
+        .user_functions;
+        assert_eq!(
+            authored["example"].annotation_source_file.as_deref(),
+            Some(Path::new("authored/main.crn"))
+        );
         let mut rendered = authored.clone();
         rendered.get_mut("example").unwrap().body.source_line = 99;
         assert!(same_user_functions(&authored, &rendered));
