@@ -17,7 +17,7 @@ pub fn iam_roles_config() -> AwsSchemaConfig {
         schema: ResourceSchema::new("iam.Roles")
         .as_data_source()
         .attribute(
-            AttributeSchema::optional("path_prefix", AttributeType::string())
+            AttributeSchema::optional("path_prefix", AttributeType::refined_string(None, Some("^/[\\x21-\\x7F]*\\z".to_string()), Some((Some(1), Some(512))), None))
                 .with_description("Path prefix for filtering the results. If it is not included, it defaults to `/`, listing all roles.")
                 .with_provider_name("PathPrefix")
                 .build(),
@@ -35,7 +35,7 @@ pub fn iam_roles_config() -> AwsSchemaConfig {
                 .build(),
         )
         .attribute(
-            AttributeSchema::provider_populated("names", AttributeType::unordered_list(AttributeType::string()))
+            AttributeSchema::provider_populated("names", AttributeType::unordered_list(AttributeType::refined_string(None, Some("^[A-Za-z0-9_+=,.@-]+\\z".to_string()), Some((Some(1), Some(64))), None)))
                 .with_description("Set of names of the matched IAM roles.")
                 .with_provider_name("")
                 .build(),
